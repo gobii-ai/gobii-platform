@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.db import DatabaseError
 from django.test import TestCase, tag
 
 from api.agent.tools.agent_variables import clear_variables, get_agent_variable, set_agent_variable
@@ -18,6 +19,8 @@ from api.models import (
     PersistentAgent,
     PersistentAgentCompletion,
     PersistentAgentStep,
+    PersistentAgentSystemStep,
+    PersistentAgentToolCall,
     UserQuota,
 )
 
@@ -165,6 +168,129 @@ class TestParallelToolCallsExecution(TestCase):
 
         self.assertEqual(mock_execute_enabled.call_count, 2)
         self.assertGreaterEqual(max_active, 2)
+
+    @patch("api.agent.core.event_processing.execute_enabled_tool", return_value={"status": "ok", "auto_sleep_ok": True})
+    def test_parallel_preparation_batches_guards_limits_credits_and_pending_rows(
+        self,
+        mock_execute_enabled,
+    ):
+        from api.agent.core import event_processing as ep
+
+        actual_bulk_create = PersistentAgentToolCall.objects.bulk_create
+        rate_limit_batch = ep._ToolRateLimitBatch(
+            limits={},
+            recent_counts={},
+            checked_names={
+                "mcp_brightdata_search_engine",
+                "mcp_brightdata_scrape_as_markdown",
+                "read_file",
+            },
+        )
+        with patch(
+            "api.agent.core.event_processing._should_abort_processing",
+            return_value=False,
+        ) as mock_abort, patch(
+            "api.agent.core.event_processing._parallel_preparation_abort_requested",
+            return_value=False,
+        ), patch(
+            "api.agent.core.event_processing._build_tool_rate_limit_batch",
+            return_value=rate_limit_batch,
+        ) as mock_rate_limits, patch(
+            "api.agent.core.event_processing._ensure_credit_for_tool",
+            return_value={"cost": None, "credit": None},
+        ) as mock_credit, patch.object(
+            PersistentAgentToolCall.objects,
+            "bulk_create",
+            wraps=actual_bulk_create,
+        ) as mock_bulk_create:
+            self._run_single_iteration(
+                [
+                    _tool_call("mcp_brightdata_search_engine", '{"query": "openai"}'),
+                    _tool_call("mcp_brightdata_scrape_as_markdown", '{"url": "https://example.com"}'),
+                    _tool_call("read_file", '{"path": "/exports/a.txt"}'),
+                ]
+            )
+
+        preparation_contexts = [
+            call.kwargs.get("check_context")
+            for call in mock_abort.call_args_list
+        ]
+        self.assertEqual(preparation_contexts.count("parallel_tool_batch_start"), 1)
+        self.assertNotIn("tool_batch", preparation_contexts)
+        mock_rate_limits.assert_called_once()
+        self.assertEqual(mock_credit.call_count, 3)
+        self.assertTrue(
+            all(call.kwargs["use_existing_transaction"] for call in mock_credit.call_args_list)
+        )
+        mock_bulk_create.assert_called_once()
+        self.assertEqual(len(mock_bulk_create.call_args.args[0]), 3)
+        self.assertEqual(mock_execute_enabled.call_count, 3)
+        self.assertEqual(PersistentAgentToolCall.objects.filter(step__agent=self.agent).count(), 3)
+
+    @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
+    @patch("api.agent.core.event_processing.execute_enabled_tool", return_value={"status": "ok", "auto_sleep_ok": True})
+    def test_parallel_preparation_rolls_back_when_pending_rows_fail(
+        self,
+        mock_execute_enabled,
+        _mock_credit,
+    ):
+        with patch.object(
+            PersistentAgentToolCall.objects,
+            "bulk_create",
+            side_effect=DatabaseError("pending rows unavailable"),
+        ), patch(
+            "api.agent.core.event_processing._emit_tool_call_realtime",
+        ) as mock_realtime:
+            self._run_single_iteration(
+                [
+                    _tool_call("read_file", '{"path": "/exports/a.txt"}'),
+                    _tool_call("http_request", '{"method": "GET", "url": "https://api.example.com/data.json"}'),
+                ]
+            )
+
+        mock_execute_enabled.assert_not_called()
+        mock_realtime.assert_not_called()
+        self.assertFalse(PersistentAgentToolCall.objects.filter(step__agent=self.agent).exists())
+        self.assertFalse(
+            PersistentAgentStep.objects.filter(agent=self.agent, description="").exists()
+        )
+
+    def test_batch_rate_limit_counts_calls_admitted_in_same_batch(self):
+        from api.agent.core import event_processing as ep
+
+        tool_settings = SimpleNamespace(
+            hourly_limit_for_tool=lambda tool_name: 1 if tool_name == "read_file" else None
+        )
+        with patch(
+            "api.agent.core.event_processing.get_tool_settings_for_owner",
+            return_value=tool_settings,
+        ) as mock_settings:
+            rate_limit_batch = ep._build_tool_rate_limit_batch(
+                self.agent,
+                ["read_file", "read_file"],
+            )
+
+        mock_settings.assert_called_once_with(self.user)
+        self.assertTrue(
+            ep._enforce_tool_rate_limit(
+                self.agent,
+                "read_file",
+                rate_limit_batch=rate_limit_batch,
+            )
+        )
+        self.assertFalse(
+            ep._enforce_tool_rate_limit(
+                self.agent,
+                "read_file",
+                rate_limit_batch=rate_limit_batch,
+            )
+        )
+        self.assertTrue(
+            PersistentAgentSystemStep.objects.filter(
+                step__agent=self.agent,
+                code=PersistentAgentSystemStep.Code.RATE_LIMIT,
+            ).exists()
+        )
 
     @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
     @patch("api.agent.core.event_processing.execute_enabled_tool")

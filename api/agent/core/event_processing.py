@@ -14,7 +14,7 @@ import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import copy_context
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import timedelta
 from decimal import Decimal
 from typing import Callable, List, Tuple, Union, Optional, Dict, Any, Literal
@@ -30,6 +30,7 @@ from pottery.exceptions import ExtendUnlockedLock, TooManyExtensions
 from django.apps import apps
 from django.conf import settings as django_settings
 from django.db import DatabaseError, transaction, close_old_connections
+from django.db.models import Count
 from django.db.utils import OperationalError
 from django.utils import timezone as dj_timezone
 
@@ -1402,6 +1403,7 @@ def _create_pending_tool_call_step(
     attach_completion: Any,
     attach_prompt_archive: Any,
     parent_tool_call: Any = None,
+    deferred_tool_calls: Optional[list[Any]] = None,
 ) -> Optional["PersistentAgentStep"]:
     from api.models import PersistentAgentStep, PersistentAgentToolCall
 
@@ -1417,7 +1419,7 @@ def _create_pending_tool_call_step(
         attach_completion(step_kwargs)
         step = PersistentAgentStep.objects.create(**step_kwargs)
         attach_prompt_archive(step)
-        PersistentAgentToolCall.objects.create(
+        tool_call = PersistentAgentToolCall(
             step=step,
             parent_tool_call=parent_tool_call,
             tool_name=safe_tool_name,
@@ -1426,7 +1428,11 @@ def _create_pending_tool_call_step(
             execution_duration_ms=None,
             status="pending",
         )
-        _emit_tool_call_realtime(step, "pending")
+        if deferred_tool_calls is None:
+            tool_call.save()
+            _emit_tool_call_realtime(step, "pending")
+        else:
+            deferred_tool_calls.append(tool_call)
         return step
     except Exception as exc:
         log_tool_persistence_error(
@@ -1443,6 +1449,8 @@ def _create_pending_tool_call_step(
                 consumed_credit=consumed_credit,
             ),
         )
+        if deferred_tool_calls is not None:
+            raise _PendingToolPersistenceError from exc
         return None
 
 
@@ -1698,6 +1706,30 @@ class _PreparedToolBatch:
     all_calls_sleep: bool
     abort_after_execution: bool
     parallel_ineligible_reason: Optional[str]
+
+
+@dataclass
+class _ToolRateLimitBatch:
+    limits: dict[str, int]
+    recent_counts: dict[str, int]
+    checked_names: set[str] = field(default_factory=set)
+    admitted_counts: dict[str, int] = field(default_factory=dict)
+
+
+@dataclass
+class _BatchPreparationMetrics:
+    rate_limit_lookup_ms: int = 0
+    rate_limit_enforcement_ms: int = 0
+    credit_reservation_ms: int = 0
+    pending_persistence_ms: int = 0
+
+
+class _BatchPreparationCancelled(Exception):
+    pass
+
+
+class _PendingToolPersistenceError(Exception):
+    pass
 
 
 @dataclass
@@ -2192,6 +2224,45 @@ def _normalize_tool_name_for_execution(agent: PersistentAgent, tool_name: str) -
     return entry.full_name if entry else tool_name
 
 
+def _is_parallel_preparation_candidate(tool_calls: list[Any]) -> bool:
+    """Identify batches that can use transactional preparation without side effects."""
+    if len(tool_calls) <= 1:
+        return False
+
+    candidates: list[_PreparedToolExecution] = []
+    for idx, call in enumerate(tool_calls, start=1):
+        tool_name = _get_tool_call_name(call)
+        if not tool_name:
+            return False
+        try:
+            _raw_args, tool_params = _parse_tool_call_params(_get_tool_call_arguments(call))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return False
+        if not isinstance(tool_params, dict):
+            return False
+
+        tool_params = _normalize_tool_params(tool_name, tool_params)
+        rejection_reason = get_parallel_safe_tool_rejection_reason(tool_name, tool_params)
+        candidates.append(
+            _PreparedToolExecution(
+                idx=idx,
+                tool_name=tool_name,
+                tool_params=tool_params,
+                exec_params=tool_params,
+                pending_step=None,
+                credits_consumed=None,
+                consumed_credit=None,
+                call_id=None,
+                explicit_continue=None,
+                inferred_continue=False,
+                parallel_safe=rejection_reason is None,
+                parallel_ineligible_reason=rejection_reason,
+            )
+        )
+
+    return _parallel_batch_ineligible_reason(candidates) is None
+
+
 def _http_request_dedupe_signature(tool_params: Dict[str, Any]) -> Optional[str]:
     if not isinstance(tool_params, dict) or not isinstance(tool_params.get("url"), str):
         return None
@@ -2459,7 +2530,7 @@ def _execute_prepared_tool_call(
     )
 
 
-def _prepare_tool_batch(
+def _prepare_tool_batch_impl(
     agent: PersistentAgent,
     *,
     tool_calls: list[Any],
@@ -2473,6 +2544,10 @@ def _prepare_tool_batch(
     has_user_facing_message: bool,
     attach_completion: Any,
     attach_prompt_archive: Any,
+    check_abort_per_call: bool = True,
+    rate_limit_batch: Optional[_ToolRateLimitBatch] = None,
+    deferred_tool_calls: Optional[list[Any]] = None,
+    metrics: Optional[_BatchPreparationMetrics] = None,
 ) -> _PreparedToolBatch:
     prepared_calls: list[_PreparedToolExecution] = []
     followup_required = False
@@ -2488,7 +2563,7 @@ def _prepare_tool_batch(
 
     for idx, call in enumerate(tool_calls, start=1):
         with tracer.start_as_current_span("Prepare Tool") as tool_span:
-            if _should_abort_processing(
+            if check_abort_per_call and _should_abort_processing(
                 agent,
                 budget_ctx=budget_ctx,
                 heartbeat=heartbeat,
@@ -2497,7 +2572,7 @@ def _prepare_tool_batch(
             ):
                 abort_after_execution = True
                 break
-            if lock_extender:
+            if lock_extender and check_abort_per_call:
                 lock_extender.maybe_extend()
             tool_span.set_attribute("persistent_agent.id", str(agent.id))
             tool_name = _get_tool_call_name(call)
@@ -2526,7 +2601,7 @@ def _prepare_tool_batch(
                     logger.debug("Failed to persist correction step for missing tool name", exc_info=True)
                 followup_required = True
                 break
-            if heartbeat:
+            if heartbeat and check_abort_per_call:
                 heartbeat.touch("tool_call")
             tool_span.set_attribute("tool.name", tool_name)
             logger.info("Agent %s preparing tool %d/%d: %s", agent.id, idx, len(tool_calls), tool_name)
@@ -2783,14 +2858,6 @@ def _prepare_tool_batch(
                         )
                 explicit_continue = _coerce_optional_bool(tool_params.get("will_continue_work"))
 
-            tool_span.set_attribute("tool.params", json.dumps(tool_params))
-            logger.info(
-                "Agent %s: %s params=%s",
-                agent.id,
-                tool_name,
-                json.dumps(tool_params)[:ARG_LOG_MAX_CHARS],
-            )
-
             if should_skip_auto_substitution(tool_name):
                 exec_params = tool_params
             else:
@@ -2822,23 +2889,36 @@ def _prepare_tool_batch(
 
             parallel_ineligible_reason = get_parallel_safe_tool_rejection_reason(tool_name, tool_params)
 
-            if not _enforce_tool_rate_limit(
+            rate_limit_started_at = time.monotonic()
+            rate_limit_allowed = _enforce_tool_rate_limit(
                 agent,
                 tool_name,
                 span=tool_span,
                 attach_completion=attach_completion,
                 attach_prompt_archive=attach_prompt_archive,
-            ):
+                rate_limit_batch=rate_limit_batch,
+            )
+            if metrics is not None:
+                metrics.rate_limit_enforcement_ms += int(
+                    round((time.monotonic() - rate_limit_started_at) * 1000)
+                )
+            if not rate_limit_allowed:
                 followup_required = True
                 continue
 
+            credit_started_at = time.monotonic()
             credit_info = _ensure_credit_for_tool(
                 agent,
                 tool_name,
                 span=tool_span,
                 credit_snapshot=credit_snapshot,
                 eval_run_id=eval_run_id,
+                use_existing_transaction=deferred_tool_calls is not None,
             )
+            if metrics is not None:
+                metrics.credit_reservation_ms += int(
+                    round((time.monotonic() - credit_started_at) * 1000)
+                )
             if not credit_info:
                 abort_after_execution = True
                 break
@@ -2846,6 +2926,7 @@ def _prepare_tool_batch(
             consumed_credit = credit_info.get("credit")
 
             close_old_connections()
+            persistence_started_at = time.monotonic()
             pending_step = _create_pending_tool_call_step(
                 agent=agent,
                 tool_name=tool_name,
@@ -2854,7 +2935,12 @@ def _prepare_tool_batch(
                 consumed_credit=consumed_credit,
                 attach_completion=attach_completion,
                 attach_prompt_archive=attach_prompt_archive,
+                deferred_tool_calls=deferred_tool_calls,
             )
+            if metrics is not None:
+                metrics.pending_persistence_ms += int(
+                    round((time.monotonic() - persistence_started_at) * 1000)
+                )
 
             prepared_calls.append(
                 _PreparedToolExecution(
@@ -2882,6 +2968,152 @@ def _prepare_tool_batch(
         abort_after_execution=abort_after_execution,
         parallel_ineligible_reason=_parallel_batch_ineligible_reason(prepared_calls),
     )
+
+
+def _emit_deferred_pending_tool_calls(steps: tuple["PersistentAgentStep", ...]) -> None:
+    for step in steps:
+        _emit_tool_call_realtime(step, "pending")
+
+
+def _parallel_preparation_abort_requested(agent: PersistentAgent) -> bool:
+    return (
+        _get_processing_abort_reason(agent.id) is not None
+        or is_processing_stop_requested(agent.id)
+    )
+
+
+def _prepare_tool_batch(
+    agent: PersistentAgent,
+    *,
+    tool_calls: list[Any],
+    budget_ctx: Optional[BudgetContext],
+    eval_run_id: Optional[str],
+    heartbeat: Any,
+    lock_extender: Any,
+    credit_snapshot: Any,
+    allow_inferred_message_continue: bool,
+    has_non_sleep_calls: bool,
+    has_user_facing_message: bool,
+    attach_completion: Any,
+    attach_prompt_archive: Any,
+) -> _PreparedToolBatch:
+    common_kwargs = {
+        "tool_calls": tool_calls,
+        "budget_ctx": budget_ctx,
+        "eval_run_id": eval_run_id,
+        "heartbeat": heartbeat,
+        "lock_extender": lock_extender,
+        "credit_snapshot": credit_snapshot,
+        "allow_inferred_message_continue": allow_inferred_message_continue,
+        "has_non_sleep_calls": has_non_sleep_calls,
+        "has_user_facing_message": has_user_facing_message,
+        "attach_completion": attach_completion,
+        "attach_prompt_archive": attach_prompt_archive,
+    }
+    if not _is_parallel_preparation_candidate(tool_calls):
+        return _prepare_tool_batch_impl(agent, **common_kwargs)
+
+    started_at = time.monotonic()
+    metrics = _BatchPreparationMetrics()
+    with tracer.start_as_current_span("Prepare Parallel Tool Batch") as batch_span:
+        batch_span.set_attribute("persistent_agent.id", str(agent.id))
+        batch_span.set_attribute("tool_batch.size", len(tool_calls))
+        if _should_abort_processing(
+            agent,
+            budget_ctx=budget_ctx,
+            heartbeat=heartbeat,
+            span=batch_span,
+            check_context="parallel_tool_batch_start",
+        ):
+            return _PreparedToolBatch([], False, False, True, "preparation_aborted")
+        if lock_extender:
+            lock_extender.maybe_extend()
+        if heartbeat:
+            heartbeat.touch("tool_batch")
+
+        rate_limit_started_at = time.monotonic()
+        rate_limit_batch = _build_tool_rate_limit_batch(
+            agent,
+            [name for call in tool_calls if (name := _get_tool_call_name(call))],
+        )
+        metrics.rate_limit_lookup_ms = int(
+            round((time.monotonic() - rate_limit_started_at) * 1000)
+        )
+
+        deferred_tool_calls: list[PersistentAgentToolCall] = []
+        try:
+            with transaction.atomic():
+                prepared_batch = _prepare_tool_batch_impl(
+                    agent,
+                    **common_kwargs,
+                    check_abort_per_call=False,
+                    rate_limit_batch=rate_limit_batch,
+                    deferred_tool_calls=deferred_tool_calls,
+                    metrics=metrics,
+                )
+                if deferred_tool_calls:
+                    persistence_started_at = time.monotonic()
+                    PersistentAgentToolCall.objects.bulk_create(deferred_tool_calls)
+                    metrics.pending_persistence_ms += int(
+                        round((time.monotonic() - persistence_started_at) * 1000)
+                    )
+                if _parallel_preparation_abort_requested(agent):
+                    raise _BatchPreparationCancelled
+
+                pending_steps = tuple(
+                    prepared.pending_step
+                    for prepared in prepared_batch.prepared_calls
+                    if prepared.pending_step is not None
+                )
+                if pending_steps:
+                    transaction.on_commit(
+                        lambda steps=pending_steps: _emit_deferred_pending_tool_calls(steps)
+                    )
+        except _BatchPreparationCancelled:
+            _should_abort_processing(
+                agent,
+                budget_ctx=budget_ctx,
+                heartbeat=heartbeat,
+                span=batch_span,
+                check_context="parallel_tool_batch_precommit",
+            )
+            return _PreparedToolBatch([], False, False, True, "preparation_aborted")
+        except (DatabaseError, _PendingToolPersistenceError):
+            logger.exception(
+                "Agent %s: transactional parallel tool preparation failed; rolled back batch.",
+                agent.id,
+            )
+            batch_span.add_event("Parallel tool preparation rolled back")
+            return _PreparedToolBatch([], False, False, True, "preparation_failed")
+
+        total_ms = int(round((time.monotonic() - started_at) * 1000))
+        measured_ms = (
+            metrics.rate_limit_lookup_ms
+            + metrics.rate_limit_enforcement_ms
+            + metrics.credit_reservation_ms
+            + metrics.pending_persistence_ms
+        )
+        preflight_ms = max(0, total_ms - measured_ms)
+        batch_span.set_attribute("tool_batch.preflight_ms", preflight_ms)
+        batch_span.set_attribute(
+            "tool_batch.rate_limit_ms",
+            metrics.rate_limit_lookup_ms + metrics.rate_limit_enforcement_ms,
+        )
+        batch_span.set_attribute("tool_batch.credit_reservation_ms", metrics.credit_reservation_ms)
+        batch_span.set_attribute("tool_batch.pending_persistence_ms", metrics.pending_persistence_ms)
+        batch_span.set_attribute("tool_batch.total_prepare_ms", total_ms)
+        logger.info(
+            "Agent %s prepared parallel tool batch size=%d total_ms=%d preflight_ms=%d "
+            "rate_limit_ms=%d credit_ms=%d persistence_ms=%d",
+            agent.id,
+            len(tool_calls),
+            total_ms,
+            preflight_ms,
+            metrics.rate_limit_lookup_ms + metrics.rate_limit_enforcement_ms,
+            metrics.credit_reservation_ms,
+            metrics.pending_persistence_ms,
+        )
+        return prepared_batch
 
 
 def _execute_prepared_tool_batch(
@@ -4045,37 +4277,112 @@ def _resolve_tool_hourly_limit(agent: PersistentAgent, tool_name: str) -> Option
         return None
 
 
+def _build_tool_rate_limit_batch(
+    agent: PersistentAgent,
+    tool_names: list[str],
+) -> _ToolRateLimitBatch:
+    checked_names = set(tool_names)
+    owner = getattr(agent, "organization", None) or getattr(agent, "user", None)
+    if owner is None:
+        return _ToolRateLimitBatch(limits={}, recent_counts={}, checked_names=checked_names)
+
+    try:
+        tool_settings = get_tool_settings_for_owner(owner)
+    except DatabaseError:
+        logger.error(
+            "Failed to load batch tool rate limits for agent %s",
+            getattr(agent, "id", None),
+            exc_info=True,
+        )
+        return _ToolRateLimitBatch(limits={}, recent_counts={})
+
+    limits = {
+        tool_name: limit
+        for tool_name in dict.fromkeys(tool_names)
+        if tool_settings is not None
+        and (limit := tool_settings.hourly_limit_for_tool(tool_name)) is not None
+    }
+    if not limits:
+        return _ToolRateLimitBatch(limits={}, recent_counts={}, checked_names=checked_names)
+
+    cutoff = dj_timezone.now() - timedelta(hours=1)
+    try:
+        rows = (
+            PersistentAgentToolCall.objects.filter(
+                step__agent=agent,
+                tool_name__in=limits,
+                step__created_at__gte=cutoff,
+            )
+            .values("tool_name")
+            .annotate(recent_count=Count("step_id"))
+        )
+        recent_counts = {
+            row["tool_name"]: int(row["recent_count"])
+            for row in rows
+        }
+    except DatabaseError:
+        logger.error(
+            "Failed to evaluate batch tool rate limits for agent %s",
+            getattr(agent, "id", None),
+            exc_info=True,
+        )
+        return _ToolRateLimitBatch(limits={}, recent_counts={})
+
+    return _ToolRateLimitBatch(
+        limits=limits,
+        recent_counts=recent_counts,
+        checked_names=checked_names,
+    )
+
 def _enforce_tool_rate_limit(
     agent: PersistentAgent,
     tool_name: str,
     span=None,
     attach_completion=None,
     attach_prompt_archive=None,
+    rate_limit_batch: Optional[_ToolRateLimitBatch] = None,
 ) -> bool:
     """Enforce per-agent hourly rate limits; returns True if execution may proceed."""
-    limit = _resolve_tool_hourly_limit(agent, tool_name)
+    use_batch_snapshot = (
+        rate_limit_batch is not None
+        and tool_name in rate_limit_batch.checked_names
+    )
+    if not use_batch_snapshot:
+        limit = _resolve_tool_hourly_limit(agent, tool_name)
+    else:
+        limit = rate_limit_batch.limits.get(tool_name)
     if limit is None:
         return True
 
-    cutoff = dj_timezone.now() - timedelta(hours=1)
-    try:
+    if not use_batch_snapshot:
+        cutoff = dj_timezone.now() - timedelta(hours=1)
+        try:
+            recent_count = (
+                PersistentAgentToolCall.objects.filter(
+                    step__agent=agent,
+                    tool_name=tool_name,
+                    step__created_at__gte=cutoff,
+                ).count()
+            )
+        except DatabaseError:
+            logger.error(
+                "Failed to evaluate rate limit for agent %s tool %s",
+                getattr(agent, "id", None),
+                tool_name,
+                exc_info=True,
+            )
+            return True
+    else:
         recent_count = (
-            PersistentAgentToolCall.objects.filter(
-                step__agent=agent,
-                tool_name=tool_name,
-                step__created_at__gte=cutoff,
-            ).count()
+            rate_limit_batch.recent_counts.get(tool_name, 0)
+            + rate_limit_batch.admitted_counts.get(tool_name, 0)
         )
-    except DatabaseError:
-        logger.error(
-            "Failed to evaluate rate limit for agent %s tool %s",
-            getattr(agent, "id", None),
-            tool_name,
-            exc_info=True,
-        )
-        return True
 
     if recent_count < limit:
+        if use_batch_snapshot:
+            rate_limit_batch.admitted_counts[tool_name] = (
+                rate_limit_batch.admitted_counts.get(tool_name, 0) + 1
+            )
         return True
 
     limit_display = limit
@@ -4286,6 +4593,7 @@ def _ensure_credit_for_tool(
     span=None,
     credit_snapshot: Optional[Dict[str, Any]] = None,
     eval_run_id: Optional[str] = None,
+    use_existing_transaction: bool = False,
 ) -> dict[str, Any] | Literal[False]:
     """Ensure the agent's owner has a task credit and consume it just-in-time.
 
@@ -4567,9 +4875,16 @@ def _ensure_credit_for_tool(
         return False
 
     try:
-        with transaction.atomic():
-            consumed = TaskCreditService.check_and_consume_credit_for_owner(owner, amount=cost)
-            consumed_credit = consumed.get("credit") if consumed else None
+        if use_existing_transaction:
+            consumed = TaskCreditService.check_and_consume_credit_for_owner(
+                owner,
+                amount=cost,
+                use_existing_transaction=True,
+            )
+        else:
+            with transaction.atomic():
+                consumed = TaskCreditService.check_and_consume_credit_for_owner(owner, amount=cost)
+        consumed_credit = consumed.get("credit") if consumed else None
     except Exception as e:
         log_credit_failure(
             agent,
@@ -6143,17 +6458,13 @@ def _run_agent_loop(
                     for idx, call in enumerate(list(tool_calls) or [], start=1):
                         try:
                             fn_name = _get_tool_call_name(call)
-                            raw_args = _get_tool_call_arguments(call) or ""
                             call_id = getattr(call, "id", None) or (call.get("id") if isinstance(call, dict) else None)
-                            arg_preview = (raw_args or "")[:ARG_LOG_MAX_CHARS]
                             logger.info(
-                                "Agent %s: tool_call %d: id=%s name=%s args=%s%s",
+                                "Agent %s: tool_call %d: id=%s name=%s",
                                 agent.id,
                                 idx,
                                 call_id or "<none>",
                                 fn_name or "<unknown>",
-                                arg_preview,
-                                "…" if raw_args and len(raw_args) > len(arg_preview) else "",
                             )
                         except Exception:
                             logger.info("Agent %s: failed to log one tool_call entry", agent.id)

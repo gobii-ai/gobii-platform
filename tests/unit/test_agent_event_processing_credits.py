@@ -3,6 +3,8 @@ from datetime import datetime, timezone as dt_timezone
 from pathlib import Path
 
 from django.test import TestCase, tag, override_settings
+from django.db import DatabaseError, transaction
+from django.db.models import Sum
 from django.utils import timezone
 
 from api.models import (
@@ -278,6 +280,36 @@ class PersistentAgentCreditGateTests(TestCase):
                 code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
                 notes__icontains="credit_insufficient",
             ).exists()
+        )
+
+    def test_transactional_tool_credit_reservation_rolls_back_with_batch(self):
+        self._grant_credits(credits=2, used=0)
+        daily_state = {
+            "hard_limit": None,
+            "hard_limit_remaining": None,
+            "soft_target": None,
+            "soft_target_remaining": None,
+            "soft_target_exceeded": False,
+        }
+        credit_snapshot = {
+            "available": Decimal("2"),
+            "daily_state": daily_state,
+        }
+
+        with patch("config.settings.GOBII_PROPRIETARY_MODE", True), self.assertRaises(DatabaseError):
+            with transaction.atomic():
+                result = _ensure_credit_for_tool(
+                    self.agent,
+                    "read_file",
+                    credit_snapshot=credit_snapshot,
+                    use_existing_transaction=True,
+                )
+                self.assertTrue(result)
+                raise DatabaseError("pending persistence failed")
+
+        self.assertEqual(
+            TaskCredit.objects.filter(user=self.user).aggregate(total=Sum("credits_used"))["total"],
+            Decimal("0"),
         )
 
     def test_non_proprietary_mode_skips_gate(self):

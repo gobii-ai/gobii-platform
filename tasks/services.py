@@ -1,6 +1,8 @@
 # platform/tasks/services.py
-from django.contrib.auth.models import User
+from contextlib import nullcontext
 from decimal import Decimal
+
+from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db.models.aggregates import Sum
 from django.db.models.expressions import F
@@ -506,7 +508,12 @@ class TaskCreditService:
             return int(credits_to_grant)
 
     @staticmethod
-    def consume_credit(user, additional_task: bool = False, amount: Decimal | None = None):
+    def consume_credit(
+        user,
+        additional_task: bool = False,
+        amount: Decimal | None = None,
+        use_existing_transaction: bool = False,
+    ):
         """
         Consumes a task credit for a user. If the user has no available credits, a ValidationError is raised. Note: if
         additional_task is True, it will create a new TaskCredit with 1 credit used immediately, regardless of existing credits.
@@ -561,7 +568,8 @@ class TaskCreditService:
             last_credit = credit
         else:
             # Consume possibly fractional amount across one or more credit blocks
-            with transaction.atomic():
+            atomic_context = nullcontext() if use_existing_transaction else transaction.atomic()
+            with atomic_context:
                 remaining = Decimal(plan_amount)
                 while remaining > 0:
                     credit = (
@@ -597,7 +605,13 @@ class TaskCreditService:
         # Stripe metering handled by periodic rollup task; no per-task usage reporting
 
         # Handle notification of task credit usage when thresholds are crossed
-        TaskCreditService.handle_task_threshold(user)
+        if use_existing_transaction:
+            TaskCreditService.handle_task_threshold(
+                user,
+                use_existing_transaction=True,
+            )
+        else:
+            TaskCreditService.handle_task_threshold(user)
 
         # Failsafe: if no block recorded (unlikely), fetch the next usable block for reference
         if last_credit is None and not additional_task:
@@ -771,7 +785,12 @@ class TaskCreditService:
             return TaskCreditService.get_current_task_credit(owner)
 
     @staticmethod
-    def consume_credit_for_owner(owner, additional_task: bool = False, amount: Decimal | None = None):
+    def consume_credit_for_owner(
+        owner,
+        additional_task: bool = False,
+        amount: Decimal | None = None,
+        use_existing_transaction: bool = False,
+    ):
         """
         Consume a credit for either a User or an Organization.
         For organizations, additional_task credits are created with a 30-day expiry window for now.
@@ -797,7 +816,8 @@ class TaskCreditService:
                 return credit
             else:
                 # Fractional consumption for organizations across blocks
-                with transaction.atomic():
+                atomic_context = nullcontext() if use_existing_transaction else transaction.atomic()
+                with atomic_context:
                     remaining = Decimal(plan_amount)
                     last_credit = None
                     while remaining > 0:
@@ -831,7 +851,12 @@ class TaskCreditService:
                 return last_credit
         else:
             # Assume user
-            return TaskCreditService.consume_credit(owner, additional_task=additional_task, amount=plan_amount)
+            return TaskCreditService.consume_credit(
+                owner,
+                additional_task=additional_task,
+                amount=plan_amount,
+                use_existing_transaction=use_existing_transaction,
+            )
 
     @staticmethod
     def refund_consumed_credit_for_owner(owner, amount: Decimal | None, preferred_credit=None) -> dict:
@@ -913,13 +938,21 @@ class TaskCreditService:
 
     @staticmethod
     @tracer.start_as_current_span("TaskCreditService Check And Consume Credit For Owner")
-    def check_and_consume_credit_for_owner(owner, amount: Decimal | None = None) -> dict:
+    def check_and_consume_credit_for_owner(
+        owner,
+        amount: Decimal | None = None,
+        use_existing_transaction: bool = False,
+    ) -> dict:
         """Owner-aware wrapper mirroring check_and_consume_credit."""
         from django.core.exceptions import ValidationError
 
         if TaskCreditService._is_organization_owner(owner):
             try:
-                credit = TaskCreditService.consume_credit_for_owner(owner, amount=amount)
+                credit = TaskCreditService.consume_credit_for_owner(
+                    owner,
+                    amount=amount,
+                    use_existing_transaction=use_existing_transaction,
+                )
                 return {"success": True, "credit": credit, "error_message": None}
             except ValidationError:
                 if allow_and_has_extra_tasks_for_organization(owner):
@@ -928,6 +961,7 @@ class TaskCreditService:
                             owner,
                             additional_task=True,
                             amount=amount,
+                            use_existing_transaction=use_existing_transaction,
                         )
                         return {"success": True, "credit": credit, "error_message": None}
                     except ValidationError:
@@ -944,7 +978,11 @@ class TaskCreditService:
                     "error_message": error_message,
                 }
         else:
-            return TaskCreditService.check_and_consume_credit(owner, amount=amount)
+            return TaskCreditService.check_and_consume_credit(
+                owner,
+                amount=amount,
+                use_existing_transaction=use_existing_transaction,
+            )
 
     @staticmethod
     @tracer.start_as_current_span("TaskCreditService Get User Tasks Credits Available")
@@ -1244,7 +1282,7 @@ class TaskCreditService:
         return pct
 
     @staticmethod
-    def handle_task_threshold(user):
+    def handle_task_threshold(user, use_existing_transaction: bool = False):
         """
         Handles task usage thresholds for a user. This function updates the user's monthly task usage counter and checks
         if any thresholds have been crossed. If a threshold is crossed, it publishes an event to notify the system.
@@ -1252,7 +1290,8 @@ class TaskCreditService:
         now = timezone.now()
         period_ym = now.strftime("%Y%m")  # e.g. '202507'
 
-        with transaction.atomic():
+        atomic_context = nullcontext() if use_existing_transaction else transaction.atomic()
+        with atomic_context:
             entitled = TaskCreditService.get_tasks_entitled(user)
             used = TaskCreditService.get_user_total_tasks_used(user)
 
@@ -1292,7 +1331,11 @@ class TaskCreditService:
                         break  # stop at the *lowest* new threshold
 
     @staticmethod
-    def check_and_consume_credit(user, amount: Decimal | None = None) -> dict:
+    def check_and_consume_credit(
+        user,
+        amount: Decimal | None = None,
+        use_existing_transaction: bool = False,
+    ) -> dict:
         """
         Atomically attempts to consume a task credit for ``user``.
 
@@ -1327,7 +1370,11 @@ class TaskCreditService:
 
         # --- 1. Optimistic consume of regular credit (atomic) ---
         try:
-            credit = TaskCreditService.consume_credit(user, amount=amount)
+            credit = TaskCreditService.consume_credit(
+                user,
+                amount=amount,
+                use_existing_transaction=use_existing_transaction,
+            )
             if span is not None:
                 span.add_event("Consumed regular task credit")
             return {
@@ -1343,7 +1390,11 @@ class TaskCreditService:
         subscription = get_active_subscription(user)
         if subscription is not None and allow_and_has_extra_tasks(user):
             try:
-                credit = TaskCreditService.consume_credit(user, additional_task=True)
+                credit = TaskCreditService.consume_credit(
+                    user,
+                    additional_task=True,
+                    use_existing_transaction=use_existing_transaction,
+                )
                 if span is not None:
                     span.add_event("Consumed additional task credit")
                 return {
