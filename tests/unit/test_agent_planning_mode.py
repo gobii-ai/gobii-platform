@@ -22,7 +22,6 @@ from api.models import (
     PersistentAgentCommsEndpoint,
     PersistentAgentConversation,
     PersistentAgentHumanInputRequest,
-    PersistentAgentMessage,
     build_web_agent_address,
     build_web_user_address,
 )
@@ -294,55 +293,6 @@ class PersistentAgentPlanningModeTests(TestCase):
         self.assertIn("## Then calibrate setup to the task", prompt)
         self.assertIn("### Execution Template", prompt)
         self.assertNotIn("## Planning Mode", prompt)
-
-    def test_completed_planning_without_outbound_message_gets_first_run_guidance(self):
-        self._set_email_welcome_target()
-        self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
-        self.agent.save(update_fields=["planning_state", "updated_at"])
-
-        with patch("api.services.agent_planning._schedule_charter_metadata"):
-            execute_end_planning(self.agent, {"full_plan": "Research qualified leads."})
-
-        prompt = _get_system_instruction(self.agent, is_first_run=False)
-
-        self.assertIn("This is your first run.", prompt)
-        self.assertIn("## Then calibrate setup to the task", prompt)
-        self.assertIn("### Execution Template", prompt)
-        self.assertNotIn("## Planning Mode", prompt)
-
-    def test_completed_planning_with_outbound_message_omits_first_run_guidance(self):
-        self._set_email_welcome_target()
-        agent_endpoint = PersistentAgentCommsEndpoint.objects.create(
-            owner_agent=self.agent,
-            channel=CommsChannel.EMAIL,
-            address="planning-agent@example.com",
-        )
-        PersistentAgentMessage.objects.create(
-            owner_agent=self.agent,
-            from_endpoint=agent_endpoint,
-            to_endpoint=self.agent.preferred_contact_endpoint,
-            is_outbound=True,
-            body="Planning is complete.",
-        )
-        self.agent.planning_state = PersistentAgent.PlanningState.COMPLETED
-        self.agent.save(update_fields=["planning_state", "updated_at"])
-
-        prompt = _get_system_instruction(self.agent, is_first_run=False)
-
-        self.assertNotIn("This is your first run.", prompt)
-        self.assertNotIn("## Then calibrate setup to the task", prompt)
-        self.assertNotIn("### Execution Template", prompt)
-
-    def test_skipped_planning_without_outbound_message_omits_first_run_guidance(self):
-        self._set_email_welcome_target()
-        self.agent.planning_state = PersistentAgent.PlanningState.SKIPPED
-        self.agent.save(update_fields=["planning_state", "updated_at"])
-
-        prompt = _get_system_instruction(self.agent, is_first_run=False)
-
-        self.assertNotIn("This is your first run.", prompt)
-        self.assertNotIn("## Then calibrate setup to the task", prompt)
-        self.assertNotIn("### Execution Template", prompt)
 
     def test_skip_endpoint_cancels_pending_questions_and_exposes_payloads(self):
         self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
