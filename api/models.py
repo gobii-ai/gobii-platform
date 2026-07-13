@@ -34,6 +34,13 @@ from django.dispatch import receiver
 from agents.services import AgentService
 from config.plans import PLAN_CONFIG
 from config.settings import INITIAL_TASK_CREDIT_EXPIRATION_DAYS
+from config.stripe_fields import (
+    STRIPE_CONFIG_FIELDS,
+    STRIPE_LEGACY_ENTRY_NAMES,
+    StripeValueKind,
+    parse_nonnegative_integer,
+    parse_stored_string_list,
+)
 from constants.grant_types import GrantTypeChoices
 from constants.plans import PlanNames, PlanNamesChoices, PlanSlugsChoices, UserPlanNamesChoices, OrganizationPlanNamesChoices
 from api.services.prompt_settings import (
@@ -5383,6 +5390,43 @@ class UserPhoneNumber(models.Model):
     def __str__(self) -> str:
         return f"{self.user_id}:{self.phone_number}"
 
+
+def _stripe_config_property(name: str, value_kind: StripeValueKind) -> property:
+    def getter(instance):
+        value = instance.get_value(name)
+        if value_kind == StripeValueKind.NONNEGATIVE_INTEGER:
+            return parse_nonnegative_integer(value)
+        if value_kind == StripeValueKind.STRING_LIST:
+            return list(parse_stored_string_list(value))
+        return value
+
+    def setter(instance, value):
+        if value_kind == StripeValueKind.NONNEGATIVE_INTEGER:
+            if value is None:
+                instance.set_value(name, None)
+                return
+            try:
+                value = max(int(value), 0)
+            except (TypeError, ValueError):
+                value = 0
+            instance.set_value(name, str(value))
+        elif value_kind == StripeValueKind.STRING_LIST:
+            instance._set_list_value(name, value)
+        else:
+            instance.set_value(name, value)
+
+    return property(getter, setter)
+
+
+def _install_stripe_config_properties(model_class):
+    for spec in STRIPE_CONFIG_FIELDS:
+        setattr(model_class, spec.name, _stripe_config_property(spec.name, spec.value_kind))
+    for name in STRIPE_LEGACY_ENTRY_NAMES:
+        setattr(model_class, name, _stripe_config_property(name, StripeValueKind.STRING_LIST))
+    return model_class
+
+
+@_install_stripe_config_properties
 class StripeConfig(models.Model):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -5457,28 +5501,15 @@ class StripeConfig(models.Model):
 
     @staticmethod
     def _parse_list_value(raw: str | None) -> list[str]:
-        if not raw:
-            return []
-        value: list[str] = []
-        try:
-            parsed = json.loads(raw)
-            if isinstance(parsed, (list, tuple, set)):
-                value = list(parsed)
-        except (TypeError, ValueError, json.JSONDecodeError):
-            value = []
-        if not value:
-            value = [part.strip() for part in str(raw).split(",")]
-        return [item for item in (str(s).strip() for s in value if s) if item]
+        return list(parse_stored_string_list(raw))
 
     def _set_list_value(self, name: str, value: list[str] | tuple[str, ...] | str | None) -> None:
         if value is None:
             self.set_value(name, None)
             return
         if isinstance(value, (list, tuple, set)):
-            joined = ",".join(str(item).strip() for item in value if item)
-        else:
-            joined = str(value).strip()
-        self.set_value(name, joined or None)
+            value = ",".join(str(item).strip() for item in value if item)
+        self.set_value(name, str(value).strip() or None)
 
     @property
     def webhook_secret(self) -> str:
@@ -5486,432 +5517,6 @@ class StripeConfig(models.Model):
 
     def set_webhook_secret(self, value: str | None) -> None:
         self.set_value("webhook_secret", value, is_secret=True)
-
-    @property
-    def startup_price_id(self) -> str:
-        return self.get_value("startup_price_id")
-
-    @startup_price_id.setter
-    def startup_price_id(self, value: str | None) -> None:
-        self.set_value("startup_price_id", value)
-
-    @property
-    def startup_trial_days(self) -> int:
-        raw = self.get_value("startup_trial_days")
-        try:
-            return max(int(raw), 0)
-        except (TypeError, ValueError):
-            return 0
-
-    @startup_trial_days.setter
-    def startup_trial_days(self, value: int | str | None) -> None:
-        if value is None:
-            self.set_value("startup_trial_days", None)
-            return
-        try:
-            normalized = max(int(value), 0)
-        except (TypeError, ValueError):
-            normalized = 0
-        self.set_value("startup_trial_days", str(normalized))
-
-    @property
-    def startup_additional_task_price_id(self) -> str:
-        return self.get_value("startup_additional_task_price_id")
-
-    @startup_additional_task_price_id.setter
-    def startup_additional_task_price_id(self, value: str | None) -> None:
-        self.set_value("startup_additional_task_price_id", value)
-
-    @property
-    def startup_task_pack_product_id(self) -> str:
-        return self.get_value("startup_task_pack_product_id")
-
-    @startup_task_pack_product_id.setter
-    def startup_task_pack_product_id(self, value: str | None) -> None:
-        self.set_value("startup_task_pack_product_id", value)
-
-    @property
-    def startup_task_pack_price_ids(self) -> list[str]:
-        return self._parse_list_value(self.get_value("startup_task_pack_price_ids"))
-
-    @startup_task_pack_price_ids.setter
-    def startup_task_pack_price_ids(self, value: list[str] | tuple[str, ...] | str | None) -> None:
-        self._set_list_value("startup_task_pack_price_ids", value)
-
-    @property
-    def startup_contact_cap_product_id(self) -> str:
-        return self.get_value("startup_contact_cap_product_id")
-
-    @startup_contact_cap_product_id.setter
-    def startup_contact_cap_product_id(self, value: str | None) -> None:
-        self.set_value("startup_contact_cap_product_id", value)
-
-    @property
-    def startup_contact_cap_price_ids(self) -> list[str]:
-        return self._parse_list_value(self.get_value("startup_contact_cap_price_ids"))
-
-    @startup_contact_cap_price_ids.setter
-    def startup_contact_cap_price_ids(self, value: list[str] | tuple[str, ...] | str | None) -> None:
-        self._set_list_value("startup_contact_cap_price_ids", value)
-
-    @property
-    def startup_browser_task_limit_product_id(self) -> str:
-        return self.get_value("startup_browser_task_limit_product_id")
-
-    @startup_browser_task_limit_product_id.setter
-    def startup_browser_task_limit_product_id(self, value: str | None) -> None:
-        self.set_value("startup_browser_task_limit_product_id", value)
-
-    @property
-    def startup_browser_task_limit_price_ids(self) -> list[str]:
-        return self._parse_list_value(self.get_value("startup_browser_task_limit_price_ids"))
-
-    @startup_browser_task_limit_price_ids.setter
-    def startup_browser_task_limit_price_ids(self, value: list[str] | tuple[str, ...] | str | None) -> None:
-        self._set_list_value("startup_browser_task_limit_price_ids", value)
-
-    @property
-    def startup_advanced_captcha_resolution_product_id(self) -> str:
-        return self.get_value("startup_advanced_captcha_resolution_product_id")
-
-    @startup_advanced_captcha_resolution_product_id.setter
-    def startup_advanced_captcha_resolution_product_id(self, value: str | None) -> None:
-        self.set_value("startup_advanced_captcha_resolution_product_id", value)
-
-    @property
-    def startup_advanced_captcha_resolution_price_id(self) -> str:
-        return self.get_value("startup_advanced_captcha_resolution_price_id")
-
-    @startup_advanced_captcha_resolution_price_id.setter
-    def startup_advanced_captcha_resolution_price_id(self, value: str | None) -> None:
-        self.set_value("startup_advanced_captcha_resolution_price_id", value)
-
-    @property
-    def startup_advanced_captcha_resolution_price_ids(self) -> list[str]:
-        return self._parse_list_value(self.get_value("startup_advanced_captcha_resolution_price_ids"))
-
-    @startup_advanced_captcha_resolution_price_ids.setter
-    def startup_advanced_captcha_resolution_price_ids(
-        self, value: list[str] | tuple[str, ...] | str | None
-    ) -> None:
-        self._set_list_value("startup_advanced_captcha_resolution_price_ids", value)
-
-    @property
-    def startup_product_id(self) -> str:
-        return self.get_value("startup_product_id")
-
-    @startup_product_id.setter
-    def startup_product_id(self, value: str | None) -> None:
-        self.set_value("startup_product_id", value)
-
-    @property
-    def scale_price_id(self) -> str:
-        return self.get_value("scale_price_id")
-
-    @scale_price_id.setter
-    def scale_price_id(self, value: str | None) -> None:
-        self.set_value("scale_price_id", value)
-
-    @property
-    def scale_trial_days(self) -> int:
-        raw = self.get_value("scale_trial_days")
-        try:
-            return max(int(raw), 0)
-        except (TypeError, ValueError):
-            return 0
-
-    @scale_trial_days.setter
-    def scale_trial_days(self, value: int | str | None) -> None:
-        if value is None:
-            self.set_value("scale_trial_days", None)
-            return
-        try:
-            normalized = max(int(value), 0)
-        except (TypeError, ValueError):
-            normalized = 0
-        self.set_value("scale_trial_days", str(normalized))
-
-    @property
-    def scale_additional_task_price_id(self) -> str:
-        return self.get_value("scale_additional_task_price_id")
-
-    @scale_additional_task_price_id.setter
-    def scale_additional_task_price_id(self, value: str | None) -> None:
-        self.set_value("scale_additional_task_price_id", value)
-
-    @property
-    def scale_task_pack_product_id(self) -> str:
-        return self.get_value("scale_task_pack_product_id")
-
-    @scale_task_pack_product_id.setter
-    def scale_task_pack_product_id(self, value: str | None) -> None:
-        self.set_value("scale_task_pack_product_id", value)
-
-    @property
-    def scale_task_pack_price_ids(self) -> list[str]:
-        return self._parse_list_value(self.get_value("scale_task_pack_price_ids"))
-
-    @scale_task_pack_price_ids.setter
-    def scale_task_pack_price_ids(self, value: list[str] | tuple[str, ...] | str | None) -> None:
-        self._set_list_value("scale_task_pack_price_ids", value)
-
-    @property
-    def scale_contact_cap_product_id(self) -> str:
-        return self.get_value("scale_contact_cap_product_id")
-
-    @scale_contact_cap_product_id.setter
-    def scale_contact_cap_product_id(self, value: str | None) -> None:
-        self.set_value("scale_contact_cap_product_id", value)
-
-    @property
-    def scale_contact_cap_price_ids(self) -> list[str]:
-        return self._parse_list_value(self.get_value("scale_contact_cap_price_ids"))
-
-    @scale_contact_cap_price_ids.setter
-    def scale_contact_cap_price_ids(self, value: list[str] | tuple[str, ...] | str | None) -> None:
-        self._set_list_value("scale_contact_cap_price_ids", value)
-
-    @property
-    def scale_browser_task_limit_product_id(self) -> str:
-        return self.get_value("scale_browser_task_limit_product_id")
-
-    @scale_browser_task_limit_product_id.setter
-    def scale_browser_task_limit_product_id(self, value: str | None) -> None:
-        self.set_value("scale_browser_task_limit_product_id", value)
-
-    @property
-    def scale_browser_task_limit_price_ids(self) -> list[str]:
-        return self._parse_list_value(self.get_value("scale_browser_task_limit_price_ids"))
-
-    @scale_browser_task_limit_price_ids.setter
-    def scale_browser_task_limit_price_ids(self, value: list[str] | tuple[str, ...] | str | None) -> None:
-        self._set_list_value("scale_browser_task_limit_price_ids", value)
-
-    @property
-    def scale_advanced_captcha_resolution_product_id(self) -> str:
-        return self.get_value("scale_advanced_captcha_resolution_product_id")
-
-    @scale_advanced_captcha_resolution_product_id.setter
-    def scale_advanced_captcha_resolution_product_id(self, value: str | None) -> None:
-        self.set_value("scale_advanced_captcha_resolution_product_id", value)
-
-    @property
-    def scale_advanced_captcha_resolution_price_id(self) -> str:
-        return self.get_value("scale_advanced_captcha_resolution_price_id")
-
-    @scale_advanced_captcha_resolution_price_id.setter
-    def scale_advanced_captcha_resolution_price_id(self, value: str | None) -> None:
-        self.set_value("scale_advanced_captcha_resolution_price_id", value)
-
-    @property
-    def scale_advanced_captcha_resolution_price_ids(self) -> list[str]:
-        return self._parse_list_value(self.get_value("scale_advanced_captcha_resolution_price_ids"))
-
-    @scale_advanced_captcha_resolution_price_ids.setter
-    def scale_advanced_captcha_resolution_price_ids(self, value: list[str] | tuple[str, ...] | str | None) -> None:
-        self._set_list_value("scale_advanced_captcha_resolution_price_ids", value)
-
-    @property
-    def scale_product_id(self) -> str:
-        return self.get_value("scale_product_id")
-
-    @scale_product_id.setter
-    def scale_product_id(self, value: str | None) -> None:
-        self.set_value("scale_product_id", value)
-
-    @property
-    def org_team_product_id(self) -> str:
-        return self.get_value("org_team_product_id")
-
-    @org_team_product_id.setter
-    def org_team_product_id(self, value: str | None) -> None:
-        self.set_value("org_team_product_id", value)
-
-    @property
-    def org_team_price_id(self) -> str:
-        return self.get_value("org_team_price_id")
-
-    @org_team_price_id.setter
-    def org_team_price_id(self, value: str | None) -> None:
-        self.set_value("org_team_price_id", value)
-
-    @property
-    def org_team_additional_task_price_id(self) -> str:
-        return self.get_value("org_team_additional_task_price_id")
-
-    @org_team_additional_task_price_id.setter
-    def org_team_additional_task_price_id(self, value: str | None) -> None:
-        self.set_value("org_team_additional_task_price_id", value)
-
-    @property
-    def org_team_additional_task_product_id(self) -> str:
-        return self.get_value("org_team_additional_task_product_id")
-
-    @org_team_additional_task_product_id.setter
-    def org_team_additional_task_product_id(self, value: str | None) -> None:
-        self.set_value("org_team_additional_task_product_id", value)
-
-    @property
-    def org_team_task_pack_product_id(self) -> str:
-        return self.get_value("org_team_task_pack_product_id")
-
-    @org_team_task_pack_product_id.setter
-    def org_team_task_pack_product_id(self, value: str | None) -> None:
-        self.set_value("org_team_task_pack_product_id", value)
-
-    @property
-    def org_team_task_pack_price_ids(self) -> list[str]:
-        return self._parse_list_value(self.get_value("org_team_task_pack_price_ids"))
-
-    @org_team_task_pack_price_ids.setter
-    def org_team_task_pack_price_ids(self, value: list[str] | tuple[str, ...] | str | None) -> None:
-        self._set_list_value("org_team_task_pack_price_ids", value)
-
-    @property
-    def org_team_contact_cap_product_id(self) -> str:
-        return self.get_value("org_team_contact_cap_product_id")
-
-    @org_team_contact_cap_product_id.setter
-    def org_team_contact_cap_product_id(self, value: str | None) -> None:
-        self.set_value("org_team_contact_cap_product_id", value)
-
-    @property
-    def org_team_contact_cap_price_ids(self) -> list[str]:
-        return self._parse_list_value(self.get_value("org_team_contact_cap_price_ids"))
-
-    @org_team_contact_cap_price_ids.setter
-    def org_team_contact_cap_price_ids(self, value: list[str] | tuple[str, ...] | str | None) -> None:
-        self._set_list_value("org_team_contact_cap_price_ids", value)
-
-    @property
-    def org_team_browser_task_limit_product_id(self) -> str:
-        return self.get_value("org_team_browser_task_limit_product_id")
-
-    @org_team_browser_task_limit_product_id.setter
-    def org_team_browser_task_limit_product_id(self, value: str | None) -> None:
-        self.set_value("org_team_browser_task_limit_product_id", value)
-
-    @property
-    def org_team_browser_task_limit_price_ids(self) -> list[str]:
-        return self._parse_list_value(self.get_value("org_team_browser_task_limit_price_ids"))
-
-    @org_team_browser_task_limit_price_ids.setter
-    def org_team_browser_task_limit_price_ids(self, value: list[str] | tuple[str, ...] | str | None) -> None:
-        self._set_list_value("org_team_browser_task_limit_price_ids", value)
-
-    @property
-    def org_team_advanced_captcha_resolution_product_id(self) -> str:
-        return self.get_value("org_team_advanced_captcha_resolution_product_id")
-
-    @org_team_advanced_captcha_resolution_product_id.setter
-    def org_team_advanced_captcha_resolution_product_id(self, value: str | None) -> None:
-        self.set_value("org_team_advanced_captcha_resolution_product_id", value)
-
-    @property
-    def org_team_advanced_captcha_resolution_price_id(self) -> str:
-        return self.get_value("org_team_advanced_captcha_resolution_price_id")
-
-    @org_team_advanced_captcha_resolution_price_id.setter
-    def org_team_advanced_captcha_resolution_price_id(self, value: str | None) -> None:
-        self.set_value("org_team_advanced_captcha_resolution_price_id", value)
-
-    @property
-    def org_team_advanced_captcha_resolution_price_ids(self) -> list[str]:
-        return self._parse_list_value(self.get_value("org_team_advanced_captcha_resolution_price_ids"))
-
-    @org_team_advanced_captcha_resolution_price_ids.setter
-    def org_team_advanced_captcha_resolution_price_ids(
-        self, value: list[str] | tuple[str, ...] | str | None
-    ) -> None:
-        self._set_list_value("org_team_advanced_captcha_resolution_price_ids", value)
-
-    @property
-    def startup_dedicated_ip_product_id(self) -> str:
-        return self.get_value("startup_dedicated_ip_product_id")
-
-    @startup_dedicated_ip_product_id.setter
-    def startup_dedicated_ip_product_id(self, value: str | None) -> None:
-        self.set_value("startup_dedicated_ip_product_id", value)
-
-    @property
-    def startup_dedicated_ip_price_id(self) -> str:
-        return self.get_value("startup_dedicated_ip_price_id")
-
-    @startup_dedicated_ip_price_id.setter
-    def startup_dedicated_ip_price_id(self, value: str | None) -> None:
-        self.set_value("startup_dedicated_ip_price_id", value)
-
-    @property
-    def scale_dedicated_ip_product_id(self) -> str:
-        return self.get_value("scale_dedicated_ip_product_id")
-
-    @scale_dedicated_ip_product_id.setter
-    def scale_dedicated_ip_product_id(self, value: str | None) -> None:
-        self.set_value("scale_dedicated_ip_product_id", value)
-
-    @property
-    def scale_dedicated_ip_price_id(self) -> str:
-        return self.get_value("scale_dedicated_ip_price_id")
-
-    @scale_dedicated_ip_price_id.setter
-    def scale_dedicated_ip_price_id(self, value: str | None) -> None:
-        self.set_value("scale_dedicated_ip_price_id", value)
-
-    @property
-    def org_team_dedicated_ip_product_id(self) -> str:
-        return self.get_value("org_team_dedicated_ip_product_id")
-
-    @org_team_dedicated_ip_product_id.setter
-    def org_team_dedicated_ip_product_id(self, value: str | None) -> None:
-        self.set_value("org_team_dedicated_ip_product_id", value)
-
-    @property
-    def org_team_dedicated_ip_price_id(self) -> str:
-        return self.get_value("org_team_dedicated_ip_price_id")
-
-    @org_team_dedicated_ip_price_id.setter
-    def org_team_dedicated_ip_price_id(self, value: str | None) -> None:
-        self.set_value("org_team_dedicated_ip_price_id", value)
-
-    @property
-    def task_meter_id(self) -> str:
-        return self.get_value("task_meter_id")
-
-    @task_meter_id.setter
-    def task_meter_id(self, value: str | None) -> None:
-        self.set_value("task_meter_id", value)
-
-    @property
-    def task_meter_event_name(self) -> str:
-        return self.get_value("task_meter_event_name")
-
-    @task_meter_event_name.setter
-    def task_meter_event_name(self, value: str | None) -> None:
-        self.set_value("task_meter_event_name", value)
-
-    @property
-    def org_team_task_meter_id(self) -> str:
-        return self.get_value("org_team_task_meter_id")
-
-    @org_team_task_meter_id.setter
-    def org_team_task_meter_id(self, value: str | None) -> None:
-        self.set_value("org_team_task_meter_id", value)
-
-    @property
-    def org_team_task_meter_event_name(self) -> str:
-        return self.get_value("org_team_task_meter_event_name")
-
-    @org_team_task_meter_event_name.setter
-    def org_team_task_meter_event_name(self, value: str | None) -> None:
-        self.set_value("org_team_task_meter_event_name", value)
-
-    @property
-    def org_task_meter_id(self) -> str:
-        return self.get_value("org_task_meter_id")
-
-    @org_task_meter_id.setter
-    def org_task_meter_id(self, value: str | None) -> None:
-        self.set_value("org_task_meter_id", value)
 
 
 class StripeConfigEntry(models.Model):

@@ -10,8 +10,33 @@ from django.utils import timezone
 
 from constants.grant_types import GrantTypeChoices
 from constants.plans import PlanNamesChoices
+from config.stripe_fields import (
+    STRIPE_CONFIG_FIELDS,
+    StripeConfigFieldSpec,
+    StripeValueKind,
+    first_string,
+)
 from .models import AgentEmailAccount, CommsChannel, StripeConfig, TrialPromo, TrialPromoAllowedEmail, UserFlagDefinition
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
+
+
+def _validate_single_stripe_price_id(value: str) -> None:
+    if "," in value:
+        raise forms.ValidationError("Enter a single Stripe price ID (no commas).")
+
+
+def _stripe_config_form_field(spec: StripeConfigFieldSpec) -> forms.Field:
+    options = {
+        "label": spec.label,
+        "required": False,
+        "help_text": spec.help_text,
+    }
+    if spec.value_kind == StripeValueKind.NONNEGATIVE_INTEGER:
+        return forms.IntegerField(min_value=0, **options)
+    if spec.value_kind == StripeValueKind.SINGULAR_WITH_LEGACY_LIST:
+        options["validators"] = [_validate_single_stripe_price_id]
+    return forms.CharField(**options)
+
 
 class AgentEmailAccountForm(ModelForm):
     """Admin form for AgentEmailAccount with plaintext password inputs.
@@ -529,212 +554,10 @@ class StripeConfigForm(ModelForm):
         required=False,
         initial=False,
     )
-    startup_product_id = forms.CharField(
-        label="Startup product ID",
-        required=False,
-    )
-    startup_price_id = forms.CharField(
-        label="Startup base price ID",
-        required=False,
-    )
-    startup_trial_days = forms.IntegerField(
-        label="Startup trial days",
-        required=False,
-        min_value=0,
-        help_text="Number of trial days for Startup checkout (0 disables trials).",
-    )
-    startup_additional_task_price_id = forms.CharField(
-        label="Startup ad-hoc price ID",
-        required=False,
-    )
-
-    startup_task_pack_product_id = forms.CharField(
-        label="Startup task pack product ID",
-        required=False,
-    )
-    startup_task_pack_price_ids = forms.CharField(
-        label="Startup task pack price IDs",
-        required=False,
-        help_text="Comma-separated list of Stripe price IDs for task pack tiers.",
-    )
-
-    startup_contact_cap_product_id = forms.CharField(
-        label="Startup contact cap product ID",
-        required=False,
-    )
-    startup_contact_cap_price_ids = forms.CharField(
-        label="Startup contact cap price IDs",
-        required=False,
-        help_text="Comma-separated list of Stripe price IDs for contact pack tiers.",
-    )
-    startup_browser_task_limit_product_id = forms.CharField(
-        label="Startup browser task limit product ID",
-        required=False,
-    )
-    startup_browser_task_limit_price_ids = forms.CharField(
-        label="Startup browser task limit price IDs",
-        required=False,
-        help_text="Comma-separated list of Stripe price IDs for browser task limit tiers.",
-    )
-    startup_advanced_captcha_resolution_product_id = forms.CharField(
-        label="Startup advanced captcha resolution product ID",
-        required=False,
-    )
-    startup_advanced_captcha_resolution_price_id = forms.CharField(
-        label="Startup advanced captcha resolution price ID",
-        required=False,
-        help_text="Stripe price ID for advanced captcha resolution.",
-    )
-    scale_price_id = forms.CharField(
-        label="Scale base price ID",
-        required=False,
-    )
-    scale_trial_days = forms.IntegerField(
-        label="Scale trial days",
-        required=False,
-        min_value=0,
-        help_text="Number of trial days for Scale checkout (0 disables trials).",
-    )
-    scale_additional_task_price_id = forms.CharField(
-        label="Scale ad-hoc task price ID",
-        required=False,
-    )
-    scale_task_pack_product_id = forms.CharField(
-        label="Scale task pack product ID",
-        required=False,
-    )
-    scale_task_pack_price_ids = forms.CharField(
-        label="Scale task pack price IDs",
-        required=False,
-        help_text="Comma-separated list of Stripe price IDs for task pack tiers.",
-    )
-    scale_product_id = forms.CharField(
-        label="Scale product ID",
-        required=False,
-    )
-    scale_contact_cap_product_id = forms.CharField(
-        label="Scale contact cap product ID",
-        required=False,
-    )
-    scale_contact_cap_price_ids = forms.CharField(
-        label="Scale contact cap price IDs",
-        required=False,
-        help_text="Comma-separated list of Stripe price IDs for contact pack tiers.",
-    )
-    scale_browser_task_limit_product_id = forms.CharField(
-        label="Scale browser task limit product ID",
-        required=False,
-    )
-    scale_browser_task_limit_price_ids = forms.CharField(
-        label="Scale browser task limit price IDs",
-        required=False,
-        help_text="Comma-separated list of Stripe price IDs for browser task limit tiers.",
-    )
-    scale_advanced_captcha_resolution_product_id = forms.CharField(
-        label="Scale advanced captcha resolution product ID",
-        required=False,
-    )
-    scale_advanced_captcha_resolution_price_id = forms.CharField(
-        label="Scale advanced captcha resolution price ID",
-        required=False,
-        help_text="Stripe price ID for advanced captcha resolution.",
-    )
-    startup_dedicated_ip_product_id = forms.CharField(
-        label="Pro dedicated IP product ID",
-        required=False,
-    )
-    startup_dedicated_ip_price_id = forms.CharField(
-        label="Pro dedicated IP price ID",
-        required=False,
-    )
-    scale_dedicated_ip_product_id = forms.CharField(
-        label="Scale dedicated IP product ID",
-        required=False,
-    )
-    scale_dedicated_ip_price_id = forms.CharField(
-        label="Scale dedicated IP price ID",
-        required=False,
-    )
-    org_team_product_id = forms.CharField(
-        label="Org/Team product ID",
-        required=False,
-    )
-    org_team_price_id = forms.CharField(
-        label="Org/Team price ID",
-        required=False,
-    )
-    org_team_additional_task_product_id = forms.CharField(
-        label="Org/Team ad-hoc task product ID",
-        required=False,
-    )
-    org_team_additional_task_price_id = forms.CharField(
-        label="Org/Team ad-hoc task price ID",
-        required=False,
-    )
-    org_team_task_pack_product_id = forms.CharField(
-        label="Org/Team task pack product ID",
-        required=False,
-    )
-    org_team_task_pack_price_ids = forms.CharField(
-        label="Org/Team task pack price IDs",
-        required=False,
-        help_text="Comma-separated list of Stripe price IDs for task pack tiers.",
-    )
-    org_team_contact_cap_product_id = forms.CharField(
-        label="Org/Team contact cap product ID",
-        required=False,
-    )
-    org_team_contact_cap_price_ids = forms.CharField(
-        label="Org/Team contact cap price IDs",
-        required=False,
-        help_text="Comma-separated list of Stripe price IDs for contact pack tiers.",
-    )
-    org_team_browser_task_limit_product_id = forms.CharField(
-        label="Org/Team browser task limit product ID",
-        required=False,
-    )
-    org_team_browser_task_limit_price_ids = forms.CharField(
-        label="Org/Team browser task limit price IDs",
-        required=False,
-        help_text="Comma-separated list of Stripe price IDs for browser task limit tiers.",
-    )
-    org_team_advanced_captcha_resolution_product_id = forms.CharField(
-        label="Org/Team advanced captcha resolution product ID",
-        required=False,
-    )
-    org_team_advanced_captcha_resolution_price_id = forms.CharField(
-        label="Org/Team advanced captcha resolution price ID",
-        required=False,
-        help_text="Stripe price ID for advanced captcha resolution.",
-    )
-    org_team_dedicated_ip_product_id = forms.CharField(
-        label="Org/Team dedicated IP product ID",
-        required=False,
-    )
-    org_team_dedicated_ip_price_id = forms.CharField(
-        label="Org/Team dedicated IP price ID",
-        required=False,
-    )
-    task_meter_id = forms.CharField(
-        label="Task meter ID",
-        required=False,
-    )
-    task_meter_event_name = forms.CharField(
-        label="Task meter event name",
-        required=False,
-    )
-    org_task_meter_id = forms.CharField(
-        label="Organization task meter ID",
-        required=False,
-    )
-    org_team_task_meter_id = forms.CharField(
-        label="Org/Team task meter ID",
-        required=False,
-    )
-    org_team_task_meter_event_name = forms.CharField(
-        label="Org/Team task meter event name",
-        required=False,
-    )
+    # Assigning these in the class namespace lets Django's form metaclass collect them.
+    for _spec in STRIPE_CONFIG_FIELDS:
+        locals()[_spec.name] = _stripe_config_form_field(_spec)
+    del _spec
 
     class Meta:
         model = StripeConfig
@@ -746,213 +569,46 @@ class StripeConfigForm(ModelForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         instance: StripeConfig = self.instance
-        if instance and instance.pk:
-            def _first_value(values):
-                for value in values or []:
-                    text = str(value).strip()
-                    if text:
-                        return text
-                return ""
-
-            self.fields["startup_product_id"].initial = instance.startup_product_id
-            self.fields["startup_price_id"].initial = instance.startup_price_id
-            self.fields["startup_trial_days"].initial = instance.startup_trial_days
-            self.fields["startup_additional_task_price_id"].initial = instance.startup_additional_task_price_id
-
-            self.fields["startup_task_pack_product_id"].initial = instance.startup_task_pack_product_id
-            self.fields["startup_task_pack_price_ids"].initial = ",".join(instance.startup_task_pack_price_ids or [])
-
-
-            self.fields["startup_contact_cap_product_id"].initial = instance.startup_contact_cap_product_id
-            self.fields["startup_contact_cap_price_ids"].initial = ",".join(instance.startup_contact_cap_price_ids or [])
-            self.fields["startup_browser_task_limit_product_id"].initial = instance.startup_browser_task_limit_product_id
-            self.fields["startup_browser_task_limit_price_ids"].initial = ",".join(
-                instance.startup_browser_task_limit_price_ids or []
-            )
-            self.fields["startup_advanced_captcha_resolution_product_id"].initial = (
-                instance.startup_advanced_captcha_resolution_product_id
-            )
-            self.fields["startup_advanced_captcha_resolution_price_id"].initial = (
-                instance.startup_advanced_captcha_resolution_price_id
-                or _first_value(instance.startup_advanced_captcha_resolution_price_ids)
-            )
-
-            self.fields["scale_price_id"].initial = instance.scale_price_id
-            self.fields["scale_trial_days"].initial = instance.scale_trial_days
-            self.fields["scale_additional_task_price_id"].initial = instance.scale_additional_task_price_id
-            self.fields["scale_product_id"].initial = instance.scale_product_id
-
-            self.fields["scale_task_pack_product_id"].initial = instance.scale_task_pack_product_id
-            self.fields["scale_task_pack_price_ids"].initial = ",".join(instance.scale_task_pack_price_ids or [])
-
-            self.fields["scale_contact_cap_product_id"].initial = instance.scale_contact_cap_product_id
-            self.fields["scale_contact_cap_price_ids"].initial = ",".join(instance.scale_contact_cap_price_ids or [])
-            self.fields["scale_browser_task_limit_product_id"].initial = instance.scale_browser_task_limit_product_id
-            self.fields["scale_browser_task_limit_price_ids"].initial = ",".join(
-                instance.scale_browser_task_limit_price_ids or []
-            )
-            self.fields["scale_advanced_captcha_resolution_product_id"].initial = (
-                instance.scale_advanced_captcha_resolution_product_id
-            )
-            self.fields["scale_advanced_captcha_resolution_price_id"].initial = (
-                instance.scale_advanced_captcha_resolution_price_id
-                or _first_value(instance.scale_advanced_captcha_resolution_price_ids)
-            )
-
-            self.fields["startup_dedicated_ip_product_id"].initial = instance.startup_dedicated_ip_product_id
-            self.fields["startup_dedicated_ip_price_id"].initial = instance.startup_dedicated_ip_price_id
-            self.fields["scale_dedicated_ip_product_id"].initial = instance.scale_dedicated_ip_product_id
-            self.fields["scale_dedicated_ip_price_id"].initial = instance.scale_dedicated_ip_price_id
-
-
-            self.fields["org_team_product_id"].initial = instance.org_team_product_id
-            self.fields["org_team_price_id"].initial = instance.org_team_price_id
-            self.fields["org_team_additional_task_product_id"].initial = instance.org_team_additional_task_product_id
-            self.fields["org_team_additional_task_price_id"].initial = instance.org_team_additional_task_price_id
-
-            self.fields["org_team_task_pack_product_id"].initial = instance.org_team_task_pack_product_id
-            self.fields["org_team_task_pack_price_ids"].initial = ",".join(instance.org_team_task_pack_price_ids or [])
-
-            self.fields["org_team_contact_cap_product_id"].initial = instance.org_team_contact_cap_product_id
-            self.fields["org_team_contact_cap_price_ids"].initial = ",".join(instance.org_team_contact_cap_price_ids or [])
-            self.fields["org_team_browser_task_limit_product_id"].initial = (
-                instance.org_team_browser_task_limit_product_id
-            )
-            self.fields["org_team_browser_task_limit_price_ids"].initial = ",".join(
-                instance.org_team_browser_task_limit_price_ids or []
-            )
-            self.fields["org_team_advanced_captcha_resolution_product_id"].initial = (
-                instance.org_team_advanced_captcha_resolution_product_id
-            )
-            self.fields["org_team_advanced_captcha_resolution_price_id"].initial = (
-                instance.org_team_advanced_captcha_resolution_price_id
-                or _first_value(instance.org_team_advanced_captcha_resolution_price_ids)
-            )
-            self.fields["org_team_dedicated_ip_product_id"].initial = instance.org_team_dedicated_ip_product_id
-            self.fields["org_team_dedicated_ip_price_id"].initial = instance.org_team_dedicated_ip_price_id
-            self.fields["task_meter_id"].initial = instance.task_meter_id
-            self.fields["task_meter_event_name"].initial = instance.task_meter_event_name
-            self.fields["org_task_meter_id"].initial = instance.org_task_meter_id
-            self.fields["org_team_task_meter_id"].initial = instance.org_team_task_meter_id
-            self.fields["org_team_task_meter_event_name"].initial = instance.org_team_task_meter_event_name
-
-    def _clean_single_price_id(self, field_name: str) -> str:
-        value = (self.cleaned_data.get(field_name) or "").strip()
-        if "," in value:
-            raise forms.ValidationError("Enter a single Stripe price ID (no commas).")
-        return value
-
-    def clean_startup_advanced_captcha_resolution_price_id(self) -> str:
-        return self._clean_single_price_id("startup_advanced_captcha_resolution_price_id")
-
-    def clean_scale_advanced_captcha_resolution_price_id(self) -> str:
-        return self._clean_single_price_id("scale_advanced_captcha_resolution_price_id")
-
-    def clean_org_team_advanced_captcha_resolution_price_id(self) -> str:
-        return self._clean_single_price_id("org_team_advanced_captcha_resolution_price_id")
+        if not instance or not instance.pk:
+            return
+        for spec in STRIPE_CONFIG_FIELDS:
+            value = getattr(instance, spec.name)
+            if spec.value_kind == StripeValueKind.STRING_LIST:
+                value = ",".join(value or [])
+            elif spec.value_kind == StripeValueKind.SINGULAR_WITH_LEGACY_LIST and not value:
+                value = first_string(getattr(instance, spec.legacy_entry_name))
+            self.fields[spec.name].initial = value
 
     def clean_release_env(self):
         value = self.cleaned_data.get("release_env", "")
         return value.strip()
 
+    @staticmethod
+    def _entry_value(raw_value):
+        if raw_value is None:
+            return None
+        if isinstance(raw_value, str):
+            return raw_value.strip() or None
+        return str(raw_value)
+
     def save(self, commit: bool = True):
         instance: StripeConfig = super().save(commit=False)
-
         if instance.pk is None:
             if not commit:
                 raise ValueError("StripeConfigForm.save(commit=False) is not supported for new configs")
             instance.save()
 
-        secrets_to_process = [
-            ("webhook_secret", "clear_webhook_secret", instance.set_webhook_secret),
-        ]
-        for secret_field, clear_field, setter_method in secrets_to_process:
-            secret_value = self.cleaned_data.get(secret_field)
-            if self.cleaned_data.get(clear_field):
-                setter_method(None)
-            elif secret_value:
-                setter_method(secret_value.strip())
+        webhook_secret = self.cleaned_data.get("webhook_secret")
+        if self.cleaned_data.get("clear_webhook_secret"):
+            instance.set_webhook_secret(None)
+        elif webhook_secret:
+            instance.set_webhook_secret(webhook_secret.strip())
 
-        simple_fields = [
-            "startup_product_id",
-            "startup_price_id",
-            "startup_trial_days",
-            "startup_additional_task_price_id",
-
-            "startup_task_pack_product_id",
-            "startup_task_pack_price_ids",
-
-
-            "startup_contact_cap_product_id",
-            "startup_contact_cap_price_ids",
-            "startup_browser_task_limit_product_id",
-            "startup_browser_task_limit_price_ids",
-            "startup_advanced_captcha_resolution_product_id",
-            "startup_advanced_captcha_resolution_price_id",
-
-            "scale_product_id",
-            "scale_price_id",
-            "scale_trial_days",
-            "scale_additional_task_price_id",
-
-            "scale_task_pack_product_id",
-            "scale_task_pack_price_ids",
-
-            "scale_contact_cap_product_id",
-            "scale_contact_cap_price_ids",
-            "scale_browser_task_limit_product_id",
-            "scale_browser_task_limit_price_ids",
-            "scale_advanced_captcha_resolution_product_id",
-            "scale_advanced_captcha_resolution_price_id",
-            "startup_dedicated_ip_product_id",
-            "startup_dedicated_ip_price_id",
-            "scale_dedicated_ip_product_id",
-            "scale_dedicated_ip_price_id",
-            "org_team_product_id",
-            "org_team_price_id",
-
-            "org_team_additional_task_product_id",
-            "org_team_additional_task_price_id",
-            "org_team_task_pack_product_id",
-            "org_team_task_pack_price_ids",
-            "org_team_contact_cap_product_id",
-            "org_team_contact_cap_price_ids",
-            "org_team_browser_task_limit_product_id",
-            "org_team_browser_task_limit_price_ids",
-            "org_team_advanced_captcha_resolution_product_id",
-            "org_team_advanced_captcha_resolution_price_id",
-            "org_team_dedicated_ip_product_id",
-            "org_team_dedicated_ip_price_id",
-            "task_meter_id",
-            "task_meter_event_name",
-            "org_task_meter_id",
-            "org_team_task_meter_id",
-            "org_team_task_meter_event_name",
-        ]
-        for field_name in simple_fields:
-            raw_value = self.cleaned_data.get(field_name)
-            if raw_value is None:
-                cleaned_value = None
-            elif isinstance(raw_value, str):
-                cleaned_value = raw_value.strip() or None
-            else:
-                cleaned_value = str(raw_value)
-            instance.set_value(field_name, cleaned_value)
-
-        legacy_captcha_fields = [
-            ("startup_advanced_captcha_resolution_price_id", "startup_advanced_captcha_resolution_price_ids"),
-            ("scale_advanced_captcha_resolution_price_id", "scale_advanced_captcha_resolution_price_ids"),
-            ("org_team_advanced_captcha_resolution_price_id", "org_team_advanced_captcha_resolution_price_ids"),
-        ]
-        for field_name, legacy_field in legacy_captcha_fields:
-            raw_value = self.cleaned_data.get(field_name)
-            if raw_value is None:
-                cleaned_value = None
-            elif isinstance(raw_value, str):
-                cleaned_value = raw_value.strip() or None
-            else:
-                cleaned_value = str(raw_value)
-            instance._set_list_value(legacy_field, cleaned_value)
+        for spec in STRIPE_CONFIG_FIELDS:
+            value = self._entry_value(self.cleaned_data.get(spec.name))
+            instance.set_value(spec.name, value)
+            if spec.legacy_entry_name:
+                instance._set_list_value(spec.legacy_entry_name, value)
 
         if commit:
             instance.save()
