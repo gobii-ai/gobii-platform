@@ -537,7 +537,6 @@ def _normalize_error_result(result: dict) -> dict:
     return payload
 
 
-
 def _has_continuation_signal(text: str) -> bool:
     """Return True if text contains phrases indicating the agent wants to continue."""
     if not text:
@@ -3165,8 +3164,6 @@ def _finalize_tool_batch(
     )
 
 
-
-
 def _build_implied_send_tool_call(
     agent: PersistentAgent,
     message_text: str,
@@ -3479,10 +3476,6 @@ def _should_skip_processing_for_inactive_or_deleted_agent(
     except Exception:
         pass
     return True
-
-
-
-
 
 
 def _stream_completion_with_broadcast(

@@ -257,8 +257,6 @@ def max_allowed_tier_for_plan(
     return AgentLLMTier.STANDARD
 
 
-
-
 def get_user_quota_tier_override(owner: Any | None) -> AgentLLMTier | None:
     """Return a valid per-user tier override, or None when unset/invalid."""
 
@@ -293,7 +291,6 @@ def apply_user_quota_tier_override(owner: Any | None, max_allowed: AgentLLMTier)
 
     override_tier = get_user_quota_tier_override(owner)
     return override_tier if override_tier is not None else max_allowed
-
 
 
 def _clamp_tier(target: AgentLLMTier, max_allowed: AgentLLMTier) -> AgentLLMTier:
@@ -599,10 +596,6 @@ def get_agent_llm_tier(
     return override
 
 
-
-
-
-
 class LLMNotConfiguredError(RuntimeError):
     """Raised when no LLM providers/endpoints are available for use."""
 
@@ -744,8 +737,6 @@ def get_provider_config(provider: str) -> Tuple[str, dict]:
     _apply_required_temperature(model, params)
 
     return model, params
-
-
 
 
 def _infer_low_latency_preference(

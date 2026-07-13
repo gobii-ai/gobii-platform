@@ -241,10 +241,6 @@ def get_pipedream_app_visibility_for_agent(
     )
 
 
-
-
-
-
 def is_pipedream_tool_visible_to_agent(
     agent: PersistentAgent,
     tool_name: object,

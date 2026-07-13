@@ -111,6 +111,7 @@ class ApiKeyForm(forms.ModelForm):
         if not self.user and not self.organization:
             raise forms.ValidationError("Unable to determine API key owner. Refresh and try again.")
         return cleaned
+
     def clean_name(self):
         name = (self.cleaned_data.get("name") or "").strip()
 
@@ -186,7 +187,6 @@ class UserProfileForm(forms.ModelForm):
                 {UserPreference.KEY_USER_TIMEZONE: timezone_value},
             )
         return user
-
 
 
 class MCPServerConfigForm(forms.Form):
@@ -303,6 +303,7 @@ class MCPServerConfigForm(forms.Form):
         if cleaned['name'].lower() in reserved and self.allow_commands is False:
             raise forms.ValidationError("This MCP server identifier is reserved for Gobii-managed integrations.")
         return cleaned
+
     def clean_command_args(self):
         value = self.cleaned_data.get('command_args') or []
         if not isinstance(value, list):
