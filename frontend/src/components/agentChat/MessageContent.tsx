@@ -91,6 +91,9 @@ function wrapTablesForHorizontalScroll(value: string): string {
     }, 0)
     if (columnCount > 0 && columnCount <= 2) {
       table.classList.add('chat-html-table--compact')
+      if (columnCount === 2) {
+        table.classList.add('chat-html-table--2-cols')
+      }
     }
 
     const wrapper = document.createElement('div')
