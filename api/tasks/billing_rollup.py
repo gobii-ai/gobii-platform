@@ -50,8 +50,6 @@ def _period_bounds_for_owner(owner) -> tuple[tuple[datetime, datetime], tuple[dt
     return (start_dt, end_exclusive), (start_date, end_date)
 
 
-
-
 def _to_aware_dt(value, *, as_start: bool) -> datetime | None:
     """Try to coerce value to a timezone-aware datetime.
 

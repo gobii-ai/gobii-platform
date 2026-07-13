@@ -1067,8 +1067,6 @@ def _get_authorized_pending_requests_for_conversation(
     ]
 
 
-
-
 def _extract_numbered_batch_answers(text: str) -> list[tuple[int, str]]:
     numbered_answers: list[tuple[int, str]] = []
     current_number: int | None = None

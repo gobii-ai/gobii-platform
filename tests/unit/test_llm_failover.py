@@ -16,10 +16,8 @@ from api.agent.core.llm_config import (
     get_llm_config,
     get_llm_config_with_failover,
     get_summarization_llm_configs,
-    PROVIDER_CONFIG,
     LLMNotConfiguredError,
     invalidate_llm_bootstrap_cache,
-    get_provider_config,
     get_summarization_llm_config,
     get_agent_judge_llm_config,
 )
@@ -197,15 +195,6 @@ class TestLLMFailover(TestCase):
             if endpoint_key == fast_endpoint.key:
                 self.assertFalse(seen_non_low_latency)
 
-    def test_provider_config_structure(self):
-        """Provider config contains expected keys."""
-        required_providers = ["anthropic", "google", "openai", "openai_gpt5", "openrouter_glm", "fireworks_qwen3_235b_a22b"]
-        for provider in required_providers:
-            self.assertIn(provider, PROVIDER_CONFIG)
-            config = PROVIDER_CONFIG[provider]
-            self.assertIn("env_var", config)
-            self.assertIn("model", config)
-
     def test_failover_with_agent_id_logging(self):
         """Agent ID is properly passed through for logging."""
         seed_persistent_basic(include_openrouter=True)
@@ -229,23 +218,6 @@ class TestLLMFailover(TestCase):
                 openrouter_configs = [cfg for cfg in configs if cfg[0] == "openrouter_glm_45"]
                 self.assertTrue(openrouter_configs)
                 _, _, params = openrouter_configs[0]
-                self.assertEqual(
-                    params.get("extra_headers"),
-                    {"HTTP-Referer": referer, "X-Title": DEFAULT_ATTRIBUTION_TITLE},
-                )
-                self.assertNotIn("Meta Gobii", params["extra_headers"]["X-Title"])
-                self.assertNotIn("Skill Eval", params["extra_headers"]["X-Title"])
-
-    def test_get_provider_config_includes_openrouter_headers(self):
-        referer = "https://example.com/app"
-        leaky_title = "Gobii Meta Gobii Skill Eval"
-        with override_settings(
-            PUBLIC_SITE_URL=referer,
-            PUBLIC_BRAND_NAME=leaky_title,
-        ):
-            with mock.patch.dict(os.environ, {"OPENROUTER_API_KEY": "openrouter-key"}, clear=True):
-                model, params = get_provider_config("openrouter_glm")
-                self.assertEqual(model, "openrouter/z-ai/glm-4.5")
                 self.assertEqual(
                     params.get("extra_headers"),
                     {"HTTP-Referer": referer, "X-Title": DEFAULT_ATTRIBUTION_TITLE},
@@ -787,6 +759,9 @@ class TestLLMFailover(TestCase):
         self.assertEqual(provider, seeded["premium_endpoint"].key)
         self.assertEqual(model, seeded["premium_endpoint"].litellm_model)
         self.assertIn("temperature", params)
+        self.assertFalse(
+            {"routing_token_range", "routing_token_min", "routing_token_max"} & params.keys()
+        )
 
     def test_summarization_uses_profile_override_before_failover(self):
         clear_llm_db()

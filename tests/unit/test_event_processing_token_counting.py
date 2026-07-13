@@ -178,32 +178,31 @@ class TestEventProcessingTokenCounting(TestCase):
         self.assertEqual(route_mock.call_args_list[0].kwargs["token_count"], 12_345)
         self.assertEqual(render_mock.call_count, 1)
 
-    def test_model_change_within_routing_range_renders_again(self):
+    def test_same_routing_range_reuses_selected_model_without_rerouting(self):
         first_route = [
             (
                 "anthropic",
                 "anthropic/claude-sonnet-4-20250514",
-                {"allow_implied_send": True, "routing_token_range": "small"},
-            )
-        ]
-        second_route = [
-            (
-                "vertex_ai",
-                "vertex_ai/gemini-2.5-pro",
-                {"allow_implied_send": True, "routing_token_range": "small"},
+                {
+                    "allow_implied_send": True,
+                    "routing_token_range": "small",
+                    "routing_token_min": 0,
+                    "routing_token_max": 1_000_000,
+                },
             )
         ]
 
         with patch(
             "api.agent.core.prompt_context.get_llm_config_with_failover",
-            side_effect=[first_route, second_route, second_route],
-        ), patch(
+            return_value=first_route,
+        ) as route_mock, patch(
             "api.agent.core.prompt_context._render_prompt_context_once",
             wraps=prompt_context._render_prompt_context_once,
         ) as render_mock:
             build_prompt_context(self.test_agent)
 
-        self.assertEqual(render_mock.call_count, 2)
+        self.assertEqual(route_mock.call_count, 1)
+        self.assertEqual(render_mock.call_count, 1)
 
     def test_get_llm_config_with_failover_small_range(self):
         """Test that small token ranges use token-based tier selection (GPT-5 not available without key)."""

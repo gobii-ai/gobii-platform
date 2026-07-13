@@ -598,54 +598,45 @@ def _evict_surplus_tools(
     return evicted_names
 
 
-def _existing_skill_tool_entry(
+def _skill_tool_entry(
     agent: PersistentAgent,
-    row: PersistentAgentEnabledTool,
+    tool_name: str,
+    custom_entries: Dict[str, ToolCatalogEntry],
+    mcp_configs: Sequence[Any],
+    row: Optional[PersistentAgentEnabledTool] = None,
 ) -> Optional[ToolCatalogEntry]:
-    """Build metadata for an enabled tool without loading any remote catalog."""
-    registry_entry = BUILTIN_TOOL_REGISTRY.get(row.tool_full_name)
+    """Resolve locally available metadata without remote catalog discovery."""
+    registry_entry = BUILTIN_TOOL_REGISTRY.get(tool_name)
     if registry_entry:
-        return _build_builtin_catalog_entry(row.tool_full_name, registry_entry)
-
-    custom_entry = get_available_custom_tool_entries(agent).get(row.tool_full_name)
-    if custom_entry:
-        return custom_entry
-
-    if row.tool_server:
+        return _build_builtin_catalog_entry(tool_name, registry_entry)
+    if tool_name in custom_entries:
+        return custom_entries[tool_name]
+    if tool_name in EVAL_SYNTHETIC_TOOL_DEFINITIONS:
+        definition = get_eval_synthetic_tool_definition(agent, tool_name)
+        metadata = EVAL_SYNTHETIC_TOOL_DEFINITIONS[tool_name]
+        if definition:
+            return ToolCatalogEntry(
+                "eval", tool_name, metadata["description"], metadata["parameters"],
+                EVAL_SYNTHETIC_TOOL_SERVER, tool_name,
+                system_skill_key=str(metadata.get("system_skill_key") or ""),
+            )
+    if row and row.tool_server:
         return ToolCatalogEntry(
             provider="mcp" if row.tool_server not in {"builtin", "custom"} else row.tool_server,
-            full_name=row.tool_full_name,
+            full_name=tool_name,
             description="",
             parameters={},
             tool_server=row.tool_server,
-            tool_name=row.tool_name or row.tool_full_name,
+            tool_name=row.tool_name or tool_name,
             server_config_id=str(row.server_config_id) if row.server_config_id else None,
         )
-
-    return _infer_canonical_mcp_entry(agent, row.tool_full_name)
-
-
-def _is_mcp_tool_blacklisted(tool_name: str) -> bool:
-    return any(fnmatch.fnmatch(tool_name, pattern) for pattern in MCPToolManager.TOOL_BLACKLIST)
-
-
-def _infer_canonical_mcp_entry(
-    agent: PersistentAgent,
-    tool_name: str,
-) -> Optional[ToolCatalogEntry]:
     if not tool_name.startswith("mcp_"):
         return None
-
-    matching_configs = []
-    try:
-        for config in agent_accessible_server_configs(agent):
-            prefix = f"mcp_{config.name}_"
-            if tool_name.startswith(prefix):
-                matching_configs.append((len(prefix), config, tool_name[len(prefix):]))
-    except DatabaseError:
-        logger.debug("Failed to infer MCP server for skill tool %s", tool_name, exc_info=True)
-        return None
-
+    matching_configs = [
+        (len(prefix), config, tool_name[len(prefix):])
+        for config in mcp_configs
+        if tool_name.startswith(prefix := f"mcp_{config.name}_")
+    ]
     if not matching_configs:
         return None
     _prefix_length, config, raw_tool_name = max(matching_configs, key=lambda item: item[0])
@@ -663,42 +654,24 @@ def _infer_canonical_mcp_entry(
 def _resolve_missing_skill_tool(
     agent: PersistentAgent,
     tool_name: str,
+    local_entry: Optional[ToolCatalogEntry],
 ) -> Optional[ToolCatalogEntry]:
     """Resolve one missing requirement using only its local or inferred provider."""
-    registry_entry = BUILTIN_TOOL_REGISTRY.get(tool_name)
-    if registry_entry and _is_builtin_tool_available(tool_name, agent, include_hidden=True):
-        return _build_builtin_catalog_entry(tool_name, registry_entry)
-
-    custom_entry = get_available_custom_tool_entries(agent).get(tool_name)
-    if custom_entry:
-        return custom_entry
-
-    if tool_name in EVAL_SYNTHETIC_TOOL_DEFINITIONS:
-        tool_def = get_eval_synthetic_tool_definition(agent, tool_name)
-        if tool_def:
-            metadata = EVAL_SYNTHETIC_TOOL_DEFINITIONS[tool_name]
-            return ToolCatalogEntry(
-                provider="eval",
-                full_name=tool_name,
-                description=metadata["description"],
-                parameters=metadata["parameters"],
-                tool_server=EVAL_SYNTHETIC_TOOL_SERVER,
-                tool_name=tool_name,
-                system_skill_key=str(metadata.get("system_skill_key") or ""),
-            )
-
-    inferred_entry = _infer_canonical_mcp_entry(agent, tool_name)
+    if local_entry and local_entry.provider != "mcp":
+        if local_entry.provider == "builtin" and not _is_builtin_tool_available(
+            tool_name, agent, include_hidden=True
+        ):
+            return None
+        return local_entry
     app_slug = pipedream_app_slug_for_tool_name(tool_name)
-    if not inferred_entry and not app_slug:
+    if not local_entry and not app_slug:
         return None
 
     manager = _get_manager()
-    if manager.is_tool_blacklisted(tool_name):
-        return None
-    if inferred_entry:
+    if local_entry:
         discovered = manager.get_tools_for_agent(
             agent,
-            allowed_config_ids={inferred_entry.server_config_id},
+            allowed_config_ids={local_entry.server_config_id},
         )
     else:
         discovered = manager.get_tools_for_agent(
@@ -720,6 +693,10 @@ def _resolve_missing_skill_tool(
     return None
 
 
+def _is_mcp_tool_blacklisted(tool_name: str) -> bool:
+    return any(fnmatch.fnmatch(tool_name, pattern) for pattern in MCPToolManager.TOOL_BLACKLIST)
+
+
 def ensure_skill_tools_enabled(agent: PersistentAgent) -> Dict[str, Any]:
     """Ensure all tools required by latest persisted skills are enabled."""
     required = sorted(get_required_skill_tool_ids(agent))
@@ -739,18 +716,10 @@ def ensure_skill_tools_enabled(agent: PersistentAgent) -> Dict[str, Any]:
         }
 
     enabled: List[str] = []
-    already_enabled: List[str] = []
     invalid: List[str] = []
-    dynamic_required: List[str] = []
     static_tool_names = get_static_tool_names(agent)
-
-    for tool_name in required:
-        # Static tools are surfaced directly by get_agent_tools and do not need
-        # PersistentAgentEnabledTool rows.
-        if tool_name in static_tool_names:
-            already_enabled.append(tool_name)
-            continue
-        dynamic_required.append(tool_name)
+    already_enabled = [name for name in required if name in static_tool_names]
+    dynamic_required = [name for name in required if name not in static_tool_names]
 
     existing_rows = {
         row.tool_full_name: row
@@ -759,26 +728,35 @@ def ensure_skill_tools_enabled(agent: PersistentAgent) -> Dict[str, Any]:
             tool_full_name__in=dynamic_required,
         )
     }
+    custom_entries = get_available_custom_tool_entries(agent)
+    needs_mcp_configs = any(
+        name.startswith("mcp_") and name not in BUILTIN_TOOL_REGISTRY and not getattr(existing_rows.get(name), "tool_server", "")
+        for name in dynamic_required
+    )
+    try:
+        mcp_configs = list(agent_accessible_server_configs(agent)) if needs_mcp_configs else []
+    except DatabaseError:
+        logger.debug("Failed to load MCP servers for skill validation", exc_info=True)
+        mcp_configs = []
     tier_blacklist = get_agent_tool_blacklist(agent)
     for tool_name in dynamic_required:
-        if tool_name in tier_blacklist:
+        if tool_name in tier_blacklist or (
+            tool_name not in BUILTIN_TOOL_REGISTRY and _is_mcp_tool_blacklisted(tool_name)
+        ):
             invalid.append(tool_name)
             continue
 
         existing_row = existing_rows.get(tool_name)
+        local_entry = _skill_tool_entry(agent, tool_name, custom_entries, mcp_configs, existing_row)
         if existing_row:
-            entry = _existing_skill_tool_entry(agent, existing_row)
-            if entry and entry.provider == "mcp" and _is_mcp_tool_blacklisted(tool_name):
-                invalid.append(tool_name)
-                continue
-            metadata_updates = _apply_tool_metadata(existing_row, entry)
+            metadata_updates = _apply_tool_metadata(existing_row, local_entry)
             if metadata_updates:
                 existing_row.save(update_fields=metadata_updates)
-            _ensure_system_skill_enabled_for_tool(agent, entry)
+            _ensure_system_skill_enabled_for_tool(agent, local_entry)
             already_enabled.append(tool_name)
             continue
 
-        entry = _resolve_missing_skill_tool(agent, tool_name)
+        entry = _resolve_missing_skill_tool(agent, tool_name, local_entry)
         if not entry:
             invalid.append(tool_name)
             continue
@@ -1056,77 +1034,24 @@ def _auto_enable_tool_for_execution(agent: PersistentAgent, entry: ToolCatalogEn
 
 
 def enable_mcp_tool(agent: PersistentAgent, tool_name: str) -> Dict[str, Any]:
-    """Enable a single MCP tool for the agent (with LRU eviction if needed)."""
-    catalog = _build_available_tool_index(agent)
-    manager = _get_manager()
-    limit = get_enabled_tool_limit(agent)
-
     if is_tool_blacklisted_for_agent(agent, tool_name):
         return tool_blacklist_error(tool_name)
+    if _is_mcp_tool_blacklisted(tool_name):
+        return {"status": "error", "message": f"Tool '{tool_name}' is blacklisted"}
+    result = enable_tools(agent, [tool_name])
+    if result["invalid"]:
+        return {"status": "error", "message": f"Tool '{tool_name}' does not exist"}
 
-    if manager.is_tool_blacklisted(tool_name):
-        return {
-            "status": "error",
-            "message": f"Tool '{tool_name}' is blacklisted and cannot be enabled",
-        }
-
-    entry = catalog.get(tool_name)
-    if not entry or entry.provider != "mcp":
-        return {
-            "status": "error",
-            "message": f"Tool '{tool_name}' does not exist",
-        }
-
-    try:
-        row = PersistentAgentEnabledTool.objects.filter(
-            agent=agent,
-            tool_full_name=tool_name,
-        ).first()
-    except Exception:
-        logger.exception("Error checking existing enabled tool %s", tool_name)
-        row = None
-
-    if row:
+    if result["already_enabled"]:
+        row = PersistentAgentEnabledTool.objects.get(agent=agent, tool_full_name=tool_name)
         row.last_used_at = datetime.now(UTC)
         row.usage_count = (row.usage_count or 0) + 1
-        updates = ["last_used_at", "usage_count"]
-        updates.extend(_apply_tool_metadata(row, entry))
-        row.save(update_fields=list(dict.fromkeys(updates)))
-        _ensure_system_skill_enabled_for_tool(agent, entry)
-        return {
-            "status": "success",
-            "message": f"Tool '{tool_name}' is already enabled",
-            "enabled": tool_name,
-            "disabled": None,
-        }
-
-    try:
-        row = PersistentAgentEnabledTool.objects.create(
-            agent=agent,
-            tool_full_name=tool_name,
-        )
-    except Exception as exc:
-        logger.error("Failed to create enabled tool %s: %s", tool_name, exc)
-        return {"status": "error", "message": str(exc)}
-
-    metadata_updates = _apply_tool_metadata(row, entry)
-    if metadata_updates:
-        row.save(update_fields=list(dict.fromkeys(metadata_updates)))
-    _ensure_system_skill_enabled_for_tool(agent, entry)
-
-    evicted = _evict_surplus_tools(agent, exclude=[tool_name], limit=limit)
-    disabled_tool = evicted[0] if evicted else None
-
-    message = f"Successfully enabled tool '{tool_name}'"
-    if disabled_tool:
-        message += f" (disabled '{disabled_tool}' due to {limit} tool limit)"
-
-    return {
-        "status": "success",
-        "message": message,
-        "enabled": tool_name,
-        "disabled": disabled_tool,
-    }
+        row.save(update_fields=["last_used_at", "usage_count"])
+        message = f"Tool '{tool_name}' is already enabled"
+    else:
+        message = f"Successfully enabled tool '{tool_name}'"
+    disabled = result["evicted"][0] if result["evicted"] else None
+    return {"status": "success", "message": message, "enabled": tool_name, "disabled": disabled}
 
 
 def mark_tool_enabled_without_discovery(agent: PersistentAgent, tool_name: str) -> Dict[str, Any]:
@@ -1400,8 +1325,6 @@ def resolve_tool_entry(agent: PersistentAgent, tool_name: str) -> Optional[ToolC
             )
 
     return None
-
-
 
 
 def _should_execute_mcp_tool_isolated(entry: ToolCatalogEntry) -> bool:

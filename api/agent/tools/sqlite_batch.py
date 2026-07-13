@@ -89,8 +89,6 @@ def _coerce_int(value: Any, default: int) -> int:
         return default
 
 
-
-
 def _resolve_sqlite_batch_limits() -> _SqliteBatchLimits:
     wall_timeout = _coerce_float(
         _get_setting_value("SQLITE_BATCH_WALL_TIMEOUT_SECONDS"),

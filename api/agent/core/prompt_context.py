@@ -190,6 +190,21 @@ def _prompt_routing_range_from_failover_configs(
     return str(params.get("routing_token_range") or "") if isinstance(params, Mapping) else ""
 
 
+def _prompt_routing_range_contains(
+    failover_configs: Sequence[Tuple[str, str, Mapping[str, Any]]] | None,
+    token_count: int,
+) -> bool:
+    if not failover_configs:
+        return False
+    params = failover_configs[0][2]
+    try:
+        minimum = int(params["routing_token_min"])
+        maximum = params.get("routing_token_max")
+        return token_count >= minimum and (maximum is None or token_count < int(maximum))
+    except (KeyError, TypeError, ValueError):
+        return False
+
+
 @dataclass
 class PromptRenderResult:
     messages: List[dict]
@@ -199,14 +214,6 @@ class PromptRenderResult:
     token_budget: int
     system_tokens: int
     metadata: Dict[str, Any]
-
-    @property
-    def system_prompt(self) -> str:
-        return str(self.messages[0]["content"])
-
-    @property
-    def user_prompt(self) -> str:
-        return str(self.messages[1]["content"])
 
 SQLITE_FILES_SNAPSHOT_MAX_RECORDS = 5_000
 _SQLITE_RESULT_ID_RE = re.compile(r"""result_id\s*=\s*['"]([A-Za-z0-9_-]{4,64})['"]""")
@@ -1162,8 +1169,6 @@ def _get_dedicated_ip_count(owner) -> int:
         )
         return 0
 
-
-
 def _build_agent_capabilities_sections(agent: PersistentAgent) -> dict[str, str]:
     """Return structured capability text for plan/plan_info, settings, and email settings."""
 
@@ -1863,8 +1868,8 @@ def _archive_prompt_render(agent: PersistentAgent, result: PromptRenderResult) -
     span = trace.get_current_span()
     archive_key, raw_bytes, compressed_bytes, archive_id = _archive_rendered_prompt(
         agent=agent,
-        system_prompt=result.system_prompt,
-        user_prompt=result.user_prompt,
+        system_prompt=str(result.messages[0]["content"]),
+        user_prompt=str(result.messages[1]["content"]),
         tokens_before=result.tokens_before,
         tokens_after=result.tokens_after,
         tokens_saved=result.tokens_saved,
@@ -1913,6 +1918,61 @@ def _record_prompt_render(
     )
 
 
+def _stabilize_prompt_render(
+    agent: PersistentAgent,
+    *,
+    seed_tokens: int,
+    is_first_run: bool,
+    routing_profile: Any,
+    prefer_low_latency: Optional[bool],
+    preview: bool,
+    render_kwargs: dict[str, Any],
+) -> tuple[PromptRenderResult, Sequence[Tuple[str, str, Mapping[str, Any]]], int]:
+    configs = _safe_get_prompt_failover_configs(
+        agent,
+        token_count=seed_tokens,
+        is_first_run=is_first_run,
+        routing_profile=routing_profile,
+        prefer_low_latency=prefer_low_latency,
+    )
+    render_count = 0
+    for attempt in range(3):
+        result = _render_prompt_context_once(
+            agent,
+            prompt_failover_configs=configs,
+            skip_compaction=preview or attempt > 0,
+            **render_kwargs,
+        )
+        render_count += 1
+        if _prompt_routing_range_contains(configs, result.tokens_after):
+            return result, configs, render_count
+        resolved = _safe_get_prompt_failover_configs(
+            agent,
+            token_count=result.tokens_after,
+            is_first_run=is_first_run,
+            routing_profile=routing_profile,
+            prefer_low_latency=prefer_low_latency,
+        )
+        if _prompt_render_signature_from_failover_configs(resolved) == result.metadata["prompt_render_signature"]:
+            return result, resolved, render_count
+        configs = resolved
+
+    logger.warning(
+        "Prompt%s render config did not stabilize for agent %s after 3 attempts",
+        " preview" if preview else "",
+        agent.id,
+    )
+    if _prompt_render_signature_from_failover_configs(configs) != result.metadata["prompt_render_signature"]:
+        result = _render_prompt_context_once(
+            agent,
+            prompt_failover_configs=configs,
+            skip_compaction=True,
+            **render_kwargs,
+        )
+        render_count += 1
+    return result, configs, render_count
+
+
 @tracer.start_as_current_span("Build Prompt Context")
 def build_prompt_context(
     agent: PersistentAgent,
@@ -1955,24 +2015,17 @@ def build_prompt_context(
     """
     started_at = monotonic()
     seed_tokens = _latest_prompt_token_seed(agent) if routing_token_seed is None else max(routing_token_seed, 0)
-    prompt_failover_configs: Sequence[Tuple[str, str, Mapping[str, Any]]] | None = (
-        _safe_get_prompt_failover_configs(
-            agent,
-            token_count=seed_tokens,
-            is_first_run=is_first_run,
-            routing_profile=routing_profile,
-            prefer_low_latency=prefer_low_latency,
-        )
-    )
     if not system_directive_block:
         system_directive_block = _consume_system_prompt_messages(agent)
 
-    render_result = None
-    render_count = 0
-    max_render_attempts = 3
-    for attempt in range(max_render_attempts):
-        render_result = _render_prompt_context_once(
-            agent,
+    render_result, prompt_failover_configs, render_count = _stabilize_prompt_render(
+        agent,
+        seed_tokens=seed_tokens,
+        is_first_run=is_first_run,
+        routing_profile=routing_profile,
+        prefer_low_latency=prefer_low_latency,
+        preview=False,
+        render_kwargs=dict(
             current_iteration=current_iteration,
             max_iterations=max_iterations,
             reasoning_only_streak=reasoning_only_streak,
@@ -1980,52 +2033,9 @@ def build_prompt_context(
             daily_credit_state=daily_credit_state,
             continuation_notice=continuation_notice,
             routing_profile=routing_profile,
-            prompt_failover_configs=prompt_failover_configs,
             system_directive_block=system_directive_block,
-            skip_compaction=attempt > 0,
-        )
-        render_count += 1
-        resolved_failover_configs = _safe_get_prompt_failover_configs(
-            agent,
-            token_count=render_result.tokens_after,
-            is_first_run=is_first_run,
-            routing_profile=routing_profile,
-            prefer_low_latency=prefer_low_latency,
-        )
-        if (
-            _prompt_render_signature_from_failover_configs(resolved_failover_configs)
-            == render_result.metadata["prompt_render_signature"]
-        ):
-            prompt_failover_configs = resolved_failover_configs
-            break
-        prompt_failover_configs = resolved_failover_configs
-    else:
-        logger.warning(
-            "Prompt render config did not stabilize for agent %s after %d attempts; using latest resolved failover signature.",
-            agent.id,
-            max_render_attempts,
-        )
-        if render_result is not None and (
-            _prompt_render_signature_from_failover_configs(prompt_failover_configs)
-            != render_result.metadata["prompt_render_signature"]
-        ):
-            render_result = _render_prompt_context_once(
-                agent,
-                current_iteration=current_iteration,
-                max_iterations=max_iterations,
-                reasoning_only_streak=reasoning_only_streak,
-                is_first_run=is_first_run,
-                daily_credit_state=daily_credit_state,
-                continuation_notice=continuation_notice,
-                routing_profile=routing_profile,
-                prompt_failover_configs=prompt_failover_configs,
-                system_directive_block=system_directive_block,
-                skip_compaction=True,
-            )
-            render_count += 1
-
-    if render_result is None:
-        raise RuntimeError("Prompt rendering did not produce a result")
+        ),
+    )
     render_result.metadata["prompt_failover_configs"] = list(prompt_failover_configs or [])
     render_result.metadata["prompt_routing_range"] = _prompt_routing_range_from_failover_configs(
         prompt_failover_configs
@@ -2065,21 +2075,14 @@ def build_prompt_context_preview(
     archives, compaction snapshots, or consuming queued system directives.
     """
     seed_tokens = _latest_prompt_token_seed(agent) if routing_token_seed is None else max(routing_token_seed, 0)
-    prompt_failover_configs: Sequence[Tuple[str, str, Mapping[str, Any]]] | None = (
-        _safe_get_prompt_failover_configs(
-            agent,
-            token_count=seed_tokens,
-            is_first_run=is_first_run,
-            routing_profile=routing_profile,
-            prefer_low_latency=prefer_low_latency,
-        )
-    )
-
-    max_render_attempts = 3
-    render_result = None
-    for attempt in range(max_render_attempts):
-        render_result = _render_prompt_context_once(
-            agent,
+    render_result, prompt_failover_configs, _render_count = _stabilize_prompt_render(
+        agent,
+        seed_tokens=seed_tokens,
+        is_first_run=is_first_run,
+        routing_profile=routing_profile,
+        prefer_low_latency=prefer_low_latency,
+        preview=True,
+        render_kwargs=dict(
             current_iteration=current_iteration,
             max_iterations=max_iterations,
             reasoning_only_streak=reasoning_only_streak,
@@ -2087,48 +2090,8 @@ def build_prompt_context_preview(
             daily_credit_state=daily_credit_state,
             continuation_notice=continuation_notice,
             routing_profile=routing_profile,
-            prompt_failover_configs=prompt_failover_configs,
-            skip_compaction=True,
-        )
-        resolved_failover_configs = _safe_get_prompt_failover_configs(
-            agent,
-            token_count=render_result.tokens_after,
-            is_first_run=is_first_run,
-            routing_profile=routing_profile,
-            prefer_low_latency=prefer_low_latency,
-        )
-        if (
-            _prompt_render_signature_from_failover_configs(resolved_failover_configs)
-            == render_result.metadata["prompt_render_signature"]
-        ):
-            prompt_failover_configs = resolved_failover_configs
-            break
-        prompt_failover_configs = resolved_failover_configs
-    else:
-        logger.warning(
-            "Prompt preview render config did not stabilize for agent %s after %d attempts; using latest resolved failover signature.",
-            agent.id,
-            max_render_attempts,
-        )
-        if render_result is not None and (
-            _prompt_render_signature_from_failover_configs(prompt_failover_configs)
-            != render_result.metadata["prompt_render_signature"]
-        ):
-            render_result = _render_prompt_context_once(
-                agent,
-                current_iteration=current_iteration,
-                max_iterations=max_iterations,
-                reasoning_only_streak=reasoning_only_streak,
-                is_first_run=is_first_run,
-                daily_credit_state=daily_credit_state,
-                continuation_notice=continuation_notice,
-                routing_profile=routing_profile,
-                prompt_failover_configs=prompt_failover_configs,
-                skip_compaction=True,
-            )
-
-    if render_result is None:
-        raise RuntimeError("Prompt preview rendering did not produce a result")
+        ),
+    )
     render_result.metadata["prompt_failover_configs"] = list(prompt_failover_configs or [])
     render_result.metadata["prompt_routing_range"] = _prompt_routing_range_from_failover_configs(
         prompt_failover_configs
@@ -2318,8 +2281,6 @@ def _build_web_user_display_map(
         for endpoint_id, info in interacted_user_info_by_endpoint.items()
         if info.display_name
     }
-
-
 
 
 def _build_interacted_org_member_email_map(
@@ -3157,8 +3118,6 @@ def add_budget_awareness_sections(
         )
 
     return True
-
-
 
 
 def _get_implied_send_context(

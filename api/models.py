@@ -7259,22 +7259,6 @@ class PersistentAgent(models.Model):
             is_verified=True,
         ).exists()
 
-    def _legacy_owner_only(self, channel_val: str, address: str) -> bool:
-        addr_raw = (address or "").strip()
-        addr_lower = addr_raw.lower()
-        if channel_val == CommsChannel.EMAIL:
-            owner_email = (self.user.email or "").lower()
-            email_only = (parseaddr(addr_raw)[1] or addr_lower).lower()
-            return email_only == owner_email
-        if channel_val == CommsChannel.SMS:
-            from .models import UserPhoneNumber
-            return UserPhoneNumber.objects.filter(
-                user=self.user,
-                phone_number__iexact=(address or "").strip(),
-                is_verified=True,
-            ).exists()
-        return False
-
     def _is_in_manual_allowlist(self, channel_val: str, address: str, direction: str = "both") -> bool:
         addr = (address or "").strip()
         if channel_val == CommsChannel.EMAIL:

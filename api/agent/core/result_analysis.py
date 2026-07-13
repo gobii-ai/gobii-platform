@@ -765,8 +765,6 @@ def _try_parse_json_string(text: str) -> Optional[Any]:
     return parsed
 
 
-
-
 def _analyze_array_item_fields(items: List[Any], max_items: int = 5) -> Tuple[List[str], List[FieldTypeInfo], Optional[str], Optional[str]]:
     """Analyze fields from array items, handling heterogeneous items.
 

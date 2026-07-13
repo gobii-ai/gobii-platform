@@ -19,7 +19,8 @@ import fnmatch
 import contextlib
 import contextvars
 import sys
-from time import monotonic, sleep
+from time import monotonic
+from collections import OrderedDict
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
@@ -57,17 +58,15 @@ from ...services.mcp_servers import agent_accessible_server_configs
 from ...services.mcp_tool_discovery import schedule_mcp_tool_discovery
 from ...services.sandbox_compute import SandboxComputeService, SandboxComputeUnavailable, sandbox_compute_enabled, sandbox_compute_enabled_for_agent
 from ...services.mcp_tool_cache import (
-    acquire_mcp_catalog_discovery_lock,
     build_mcp_tool_cache_fingerprint,
     claim_mcp_catalog_refresh,
     get_cached_mcp_tool_definitions,
     invalidate_mcp_tool_cache,
-    release_mcp_catalog_discovery_lock,
+    mcp_catalog_discovery_locks,
     release_mcp_catalog_refresh,
     set_cached_mcp_tool_definitions,
 )
 from ...services.pipedream_apps import (
-    build_owner_key,
     get_effective_pipedream_app_slugs_for_agent,
     get_platform_pipedream_app_slugs,
     normalize_app_slugs,
@@ -236,9 +235,8 @@ class MCPToolInfo:
 
 @dataclass(frozen=True)
 class PipedreamToolCacheContext:
-    """Selected Pipedream apps; owner key remains for caller compatibility."""
+    """Pipedream apps whose shared catalog shards should be composed."""
 
-    owner_cache_key: str
     effective_app_slugs: List[str]
 
 
@@ -353,12 +351,13 @@ class MCPToolManager:
     # Buffer window before expiry where we will proactively refresh OAuth tokens
     OAUTH_REFRESH_SAFETY_MARGIN = timedelta(minutes=2)
     OAUTH_REFRESH_TIMEOUT_SECONDS = 15
-    
+    TOOL_CACHE_MAX_SLOTS = 128
+
     def __init__(self):
         self._clients: Dict[str, Client] = {}
         self._stdio_proxy_clients: Dict[str, Client] = {}
         self._server_cache: Dict[str, MCPServerRuntime] = {}
-        self._tools_cache: Dict[str, List[MCPToolInfo]] = {}
+        self._tools_cache: OrderedDict[str, List[MCPToolInfo]] = OrderedDict()
         self._tool_cache_fingerprints: Dict[str, str] = {}
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._initialized = False
@@ -373,7 +372,20 @@ class MCPToolManager:
         self._param_guards = MCPParamGuardRegistry.default()
         self._error_normalizers = MCPErrorNormalizerRegistry.default()
         self._result_adapters = MCPResultAdapterRegistry.default()
-        
+
+    def _cache_tools(self, slot_key: str, tools: List[MCPToolInfo], fingerprint: str) -> None:
+        self._tools_cache[slot_key] = tools
+        self._touch_tools_cache(slot_key)
+        self._tool_cache_fingerprints[slot_key] = fingerprint
+        while len(self._tools_cache) > self.TOOL_CACHE_MAX_SLOTS:
+            evicted, _tools = self._tools_cache.popitem(last=False)
+            self._tool_cache_fingerprints.pop(evicted, None)
+
+    def _touch_tools_cache(self, slot_key: str) -> None:
+        if not isinstance(self._tools_cache, OrderedDict):
+            self._tools_cache = OrderedDict(self._tools_cache)
+        self._tools_cache.move_to_end(slot_key)
+
     def _ensure_event_loop(self) -> asyncio.AbstractEventLoop:
         """Ensure we have an event loop for async operations."""
         if self._loop is None or self._loop.is_closed():
@@ -570,15 +582,8 @@ class MCPToolManager:
         self._last_refresh_marker = latest_seen or timezone.now()
 
     def _refresh_servers_by_name(self, server_names: set[str], *, scope: Optional[str] = None) -> bool:
-        """Refresh only the specified MCP servers without touching others.
-
-        When ``scope`` is provided, only servers matching both the name and scope
-        are refreshed to avoid mixing platform/user/org-scoped configs that share
-        a slug.
-        """
         if not server_names:
             return True
-
         try:
             configs = list(
                 MCPServerConfig.objects.filter(
@@ -587,43 +592,14 @@ class MCPToolManager:
                     **({"scope": scope} if scope else {}),
                 ).select_related("oauth_credential")
             )
-        except Exception:  # pragma: no cover - defensive DB access
+        except DatabaseError:
             logger.exception("Failed to refresh MCP servers for names: %s", sorted(server_names))
             return False
-
-        refreshed_ids: set[str] = set()
-        latest_seen: Optional[datetime] = None
-
-        for cfg in configs:
-            runtime = self._build_runtime_from_config(cfg)
-            refreshed_ids.add(runtime.config_id)
-
-            prior = self._server_cache.get(runtime.config_id)
-            prior_oauth_updated = getattr(prior, "oauth_updated_at", None) if prior else None
-            if prior and prior.updated_at == runtime.updated_at and prior_oauth_updated == runtime.oauth_updated_at:
-                continue
-
-            self._safe_register_runtime(runtime)
-            if cfg.updated_at and (latest_seen is None or cfg.updated_at > latest_seen):
-                latest_seen = cfg.updated_at
-
-        # Remove stale caches for the requested server names
-        for config_id, runtime in list(self._server_cache.items()):
-            if runtime.name.lower() not in server_names:
-                continue
-            if config_id in refreshed_ids:
-                continue
-            self._discard_client(config_id)
-            self._server_cache.pop(config_id, None)
-            self._tools_cache.pop(config_id, None)
-
-        # Consider the manager initialized for the refreshed subset
-        self._initialized = True
-        marker = latest_seen or timezone.now()
-        if self._last_refresh_marker is None or marker > self._last_refresh_marker:
-            self._last_refresh_marker = marker
-
-        return True
+        stale_ids = {
+            config_id for config_id, runtime in self._server_cache.items()
+            if runtime.name.lower() in server_names and (scope is None or runtime.scope == scope)
+        }
+        return self._apply_server_subset(configs, stale_ids, update_global_marker=True)
 
     def _refresh_servers_by_config_id(self, config_ids: set[str]) -> bool:
         """Refresh only the specified MCP server configs without touching others."""
@@ -631,40 +607,35 @@ class MCPToolManager:
             return True
 
         try:
-            configs = list(
-                MCPServerConfig.objects.filter(
-                    is_active=True,
-                    id__in=list(config_ids),
-                ).select_related("oauth_credential")
-            )
-        except Exception:  # pragma: no cover - defensive DB access
+            configs = list(MCPServerConfig.objects.filter(
+                is_active=True, id__in=list(config_ids)
+            ).select_related("oauth_credential"))
+        except DatabaseError:
             logger.exception("Failed to refresh MCP servers for ids: %s", sorted(config_ids))
             return False
+        return self._apply_server_subset(configs, config_ids, update_global_marker=False)
 
+    def _apply_server_subset(self, configs, stale_ids: set[str], *, update_global_marker: bool) -> bool:
         refreshed_ids: set[str] = set()
         latest_seen: Optional[datetime] = None
-
         for cfg in configs:
             runtime = self._build_runtime_from_config(cfg)
             refreshed_ids.add(runtime.config_id)
-
+            if cfg.updated_at and (latest_seen is None or cfg.updated_at > latest_seen):
+                latest_seen = cfg.updated_at
             prior = self._server_cache.get(runtime.config_id)
             prior_oauth_updated = getattr(prior, "oauth_updated_at", None) if prior else None
             if prior and prior.updated_at == runtime.updated_at and prior_oauth_updated == runtime.oauth_updated_at:
                 continue
-
             self._safe_register_runtime(runtime)
-            if cfg.updated_at and (latest_seen is None or cfg.updated_at > latest_seen):
-                latest_seen = cfg.updated_at
-
-        for config_id in config_ids - refreshed_ids:
+        for config_id in stale_ids - refreshed_ids:
             self._discard_client(config_id)
             self._server_cache.pop(config_id, None)
-
-        # This is a targeted refresh for prompt/tool execution paths. Do not
-        # mark the global catalog initialized or advance the global freshness
-        # marker, or later broad catalog callers may skip needed full refreshes.
-
+        if update_global_marker:
+            self._initialized = True
+            self._last_refresh_marker = max(
+                filter(None, (self._last_refresh_marker, latest_seen or timezone.now()))
+            )
         return True
 
     def _discard_client(self, config_id: str) -> None:
@@ -763,6 +734,7 @@ class MCPToolManager:
         uses_per_agent_client = self._runtime_uses_per_agent_client(runtime)
         needs_shared_client = require_client and not uses_per_agent_client
         if slot_key in self._tools_cache:
+            self._touch_tools_cache(slot_key)
             if pipedream_context is not None or sandbox_context is not None:
                 cache_fingerprint = self._build_tool_cache_fingerprint(runtime, pipedream_context, sandbox_context)
                 cached_fingerprint = self._tool_cache_fingerprints.get(slot_key)
@@ -932,10 +904,7 @@ class MCPToolManager:
         if runtime.name == self.PIPEDREAM_RUNTIME_NAME:
             if not normalized_apps:
                 return False
-            pipedream_context = PipedreamToolCacheContext(
-                owner_cache_key="",
-                effective_app_slugs=normalized_apps,
-            )
+            pipedream_context = PipedreamToolCacheContext(effective_app_slugs=normalized_apps)
 
         fingerprints = (
             [self._pipedream_app_cache_fingerprint(runtime, app_slug) for app_slug in normalized_apps]
@@ -1036,11 +1005,6 @@ class MCPToolManager:
         self._server_cache.pop(config_id, None)
         self._pd_agent_clients.clear()
         invalidate_mcp_tool_cache(config_id)
-
-    def invalidate_pipedream_owner_cache(self, owner_scope: str, owner_id: str) -> None:
-        # Pipedream definitions are shared by app set. Changing an owner's
-        # selection naturally resolves to a different composed cache slot.
-        return
 
     def prewarm_pipedream_owner_cache(
         self,
@@ -1400,12 +1364,7 @@ class MCPToolManager:
         return get_mcp_http_timeout_seconds() if is_http else get_mcp_stdio_timeout_seconds()
 
     def _pipedream_cache_context_for_agent(self, agent: PersistentAgent) -> PipedreamToolCacheContext:
-        if agent.organization_id:
-            owner_cache_key = build_owner_key(MCPServerConfig.Scope.ORGANIZATION, str(agent.organization_id))
-        else:
-            owner_cache_key = build_owner_key(MCPServerConfig.Scope.USER, str(agent.user_id))
         return PipedreamToolCacheContext(
-            owner_cache_key=owner_cache_key,
             effective_app_slugs=get_effective_pipedream_app_slugs_for_agent(agent),
         )
 
@@ -1419,7 +1378,6 @@ class MCPToolManager:
         platform_app_slugs = get_platform_pipedream_app_slugs()
         selected_app_slugs = normalize_app_slugs(app_slugs or [])
         return PipedreamToolCacheContext(
-            owner_cache_key=build_owner_key(owner_scope, owner_id),
             effective_app_slugs=normalize_app_slugs([*platform_app_slugs, *selected_app_slugs]),
         )
 
@@ -1513,11 +1471,9 @@ class MCPToolManager:
         server: MCPServerRuntime,
         app_slug: str,
     ) -> str:
-        context = PipedreamToolCacheContext(
-            owner_cache_key="",
-            effective_app_slugs=[app_slug],
+        return self._build_tool_cache_fingerprint(
+            server, PipedreamToolCacheContext(effective_app_slugs=[app_slug])
         )
-        return self._build_tool_cache_fingerprint(server, context)
 
     def _missing_pipedream_app_slugs(
         self,
@@ -1534,18 +1490,16 @@ class MCPToolManager:
         ]
 
     def _serialize_tools_for_cache(self, tools: List["MCPToolInfo"]) -> List[Dict[str, Any]]:
-        serialized: List[Dict[str, Any]] = []
-        for tool in tools:
-            serialized.append(
-                {
-                    "full_name": tool.full_name,
-                    "server_name": tool.server_name,
-                    "tool_name": tool.tool_name,
-                    "description": tool.description,
-                    "parameters": tool.parameters,
-                }
-            )
-        return serialized
+        return [
+            {
+                "full_name": tool.full_name,
+                "server_name": tool.server_name,
+                "tool_name": tool.tool_name,
+                "description": tool.description,
+                "parameters": tool.parameters,
+            }
+            for tool in tools
+        ]
 
     def _deserialize_tools_from_cache(
         self,
@@ -1590,22 +1544,23 @@ class MCPToolManager:
 
         app_slugs = normalize_app_slugs(pipedream_context.effective_app_slugs)
         tools_by_app: Dict[str, List[MCPToolInfo]] = {app_slug: [] for app_slug in app_slugs}
-        unassigned: List[MCPToolInfo] = []
+        unassigned = 0
         for tool in tools:
             app_slug = pipedream_app_slug_for_tool_name(tool.full_name)
             if app_slug in tools_by_app:
                 tools_by_app[app_slug].append(tool)
             else:
-                unassigned.append(tool)
-
-        # Unknown naming formats must remain discoverable. Duplicating these few
-        # definitions across requested shards is safer than silently dropping them.
+                unassigned += 1
+        if unassigned:
+            logger.warning(
+                "Skipped %d Pipedream tools that could not be assigned to a requested app shard",
+                unassigned,
+            )
         for app_slug in app_slugs:
-            app_tools = [*tools_by_app[app_slug], *unassigned]
             set_cached_mcp_tool_definitions(
                 server.config_id,
                 self._pipedream_app_cache_fingerprint(server, app_slug),
-                self._serialize_tools_for_cache(app_tools),
+                self._serialize_tools_for_cache(tools_by_app[app_slug]),
             )
 
     def _load_cached_tools(
@@ -1644,8 +1599,7 @@ class MCPToolManager:
         cached_tools = list({tool.full_name: tool for tool in cached_tools}.values())
 
         slot_key = self._tool_cache_slot_key(server, pipedream_context, sandbox_context)
-        self._tools_cache[slot_key] = cached_tools
-        self._tool_cache_fingerprints[slot_key] = cache_fingerprint
+        self._cache_tools(slot_key, cached_tools, cache_fingerprint)
         if sandbox_mode:
             client = self._clients.pop(server.config_id, None)
             if client:
@@ -1762,7 +1716,6 @@ class MCPToolManager:
             missing_app_slugs = self._missing_pipedream_app_slugs(server, pipedream_context)
             if missing_app_slugs:
                 pipedream_context = PipedreamToolCacheContext(
-                    owner_cache_key="",
                     effective_app_slugs=missing_app_slugs,
                 )
                 cache_fingerprint = self._build_tool_cache_fingerprint(server, pipedream_context)
@@ -1845,73 +1798,32 @@ class MCPToolManager:
             )
             return
 
-        deadline = monotonic() + self._get_timeout_for_runtime(server)
-        discovery_locks: Dict[str, str] = {}
-        while monotonic() < deadline:
-            if server.name == self.PIPEDREAM_RUNTIME_NAME and pipedream_context is not None:
-                unresolved_apps = (
-                    self._missing_pipedream_app_slugs(server, pipedream_context)
-                    if prefer_cache
-                    else normalize_app_slugs(pipedream_context.effective_app_slugs)
-                )
-                lock_targets = [
-                    (app_slug, self._pipedream_app_cache_fingerprint(server, app_slug))
-                    for app_slug in unresolved_apps
-                ]
-            else:
-                lock_targets = [("", cache_fingerprint)]
-
-            if not lock_targets:
-                self._compose_requested_pipedream_cache(
-                    server,
-                    requested_pipedream_context,
-                    pipedream_context,
-                    sandbox_context,
-                )
-                return
-
-            for _app_slug, fingerprint in lock_targets:
-                token = acquire_mcp_catalog_discovery_lock(server.config_id, fingerprint)
-                if token is None:
-                    break
-                discovery_locks[fingerprint] = token
-            else:
-                if server.name == self.PIPEDREAM_RUNTIME_NAME and pipedream_context is not None:
-                    pipedream_context = PipedreamToolCacheContext(
-                        owner_cache_key="",
-                        effective_app_slugs=[app_slug for app_slug, _fingerprint in lock_targets],
-                    )
-                    cache_fingerprint = self._build_tool_cache_fingerprint(server, pipedream_context)
-                break
-
-            for fingerprint, token in discovery_locks.items():
-                release_mcp_catalog_discovery_lock(server.config_id, fingerprint, token)
-            discovery_locks.clear()
-            if self._load_cached_tools(
-                server,
-                cache_fingerprint,
-                pipedream_context=pipedream_context,
-                sandbox_context=sandbox_context,
-            ):
-                self._compose_requested_pipedream_cache(
-                    server,
-                    requested_pipedream_context,
-                    pipedream_context,
-                    sandbox_context,
-                )
-                return
-            sleep(0.1)
-        else:
-            logger.warning(
-                "Timed out waiting for MCP catalog discovery: server=%s config=%s",
-                server.name,
-                server.config_id,
+        if server.name == self.PIPEDREAM_RUNTIME_NAME and pipedream_context is not None:
+            app_slugs = (
+                self._missing_pipedream_app_slugs(server, pipedream_context)
+                if prefer_cache
+                else normalize_app_slugs(pipedream_context.effective_app_slugs)
             )
-            return
+            if not app_slugs:
+                self._compose_requested_pipedream_cache(
+                    server, requested_pipedream_context, pipedream_context, sandbox_context
+                )
+                return
+            pipedream_context = PipedreamToolCacheContext(effective_app_slugs=app_slugs)
+            cache_fingerprint = self._build_tool_cache_fingerprint(server, pipedream_context)
+            lock_fingerprints = [
+                self._pipedream_app_cache_fingerprint(server, app_slug) for app_slug in app_slugs
+            ]
+        else:
+            lock_fingerprints = [cache_fingerprint]
 
-        try:
-            # Recheck after winning the lock because another worker may have
-            # published between our first read and the atomic claim.
+        timeout = self._get_timeout_for_runtime(server)
+        with mcp_catalog_discovery_locks(
+            server.config_id,
+            lock_fingerprints,
+            timeout=timeout,
+        ) as acquired:
+            # A lock winner may have published while this process waited.
             if prefer_cache and self._load_cached_tools(
                 server,
                 cache_fingerprint,
@@ -1925,6 +1837,13 @@ class MCPToolManager:
                     sandbox_context,
                 )
                 return
+            if not acquired:
+                logger.warning(
+                    "Timed out waiting for MCP catalog discovery: server=%s config=%s",
+                    server.name,
+                    server.config_id,
+                )
+                return
 
             http_proxy_url = discovery_proxy_url if server.url else None
             http_timeout_seconds = get_mcp_http_timeout_seconds() if server.url else None
@@ -1933,12 +1852,8 @@ class MCPToolManager:
                     self._fetch_server_tools(client, server, pipedream_context=pipedream_context)
                 )
             slot_key = self._tool_cache_slot_key(server, pipedream_context, sandbox_context)
-            self._tools_cache[slot_key] = tools
-            self._tool_cache_fingerprints[slot_key] = cache_fingerprint
+            self._cache_tools(slot_key, tools, cache_fingerprint)
             self._store_discovered_tools(server, tools, cache_fingerprint, pipedream_context)
-        finally:
-            for fingerprint, token in discovery_locks.items():
-                release_mcp_catalog_discovery_lock(server.config_id, fingerprint, token)
 
         self._compose_requested_pipedream_cache(
             server,
@@ -2148,7 +2063,6 @@ class MCPToolManager:
                 pipedream_context = self._pipedream_cache_context_for_agent(agent)
                 if pipedream_app_slugs is not None:
                     pipedream_context = PipedreamToolCacheContext(
-                        owner_cache_key=pipedream_context.owner_cache_key,
                         effective_app_slugs=normalize_app_slugs(pipedream_app_slugs),
                     )
             else:
@@ -3145,8 +3059,6 @@ def execute_mcp_tool_isolated(
     if not _mcp_manager._initialized:
         _mcp_manager.initialize()
     return _mcp_manager.execute_mcp_tool_isolated(agent, tool_name, params)
-
-
 
 
 def get_mcp_manager() -> MCPToolManager:

@@ -852,6 +852,26 @@ class AgentSkillToolEnablementTests(TestCase):
         self.assertEqual(result["already_enabled"], ["slack-send-message"])
         self.assertFalse(result["invalid"])
 
+    @patch(
+        "api.agent.tools.tool_manager.agent_accessible_server_configs",
+        side_effect=AssertionError("MCP config load"),
+    )
+    @patch("api.agent.tools.tool_manager._get_manager", side_effect=AssertionError("MCP discovery"))
+    def test_builtin_mcp_named_skill_tool_stays_local(self, _mock_manager, _mock_configs):
+        PersistentAgentSkill.objects.create(
+            agent=self.agent,
+            name="builtin-search",
+            description="Use built-in search",
+            version=1,
+            tools=["mcp_brightdata_search_engine"],
+            instructions="Search the web.",
+        )
+
+        result = ensure_skill_tools_enabled(self.agent)
+
+        self.assertEqual(result["enabled"], ["mcp_brightdata_search_engine"])
+        self.assertFalse(result["invalid"])
+
     @patch("api.agent.tools.tool_manager._build_available_tool_index", side_effect=AssertionError("broad catalog load"))
     @patch("api.agent.tools.tool_manager._get_manager")
     def test_missing_pipedream_tool_discovers_only_inferred_app(self, mock_get_manager, _mock_catalog):

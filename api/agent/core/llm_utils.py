@@ -26,6 +26,8 @@ _HINT_KEYS = (
     "low_latency",
     "pricing_model",
     "routing_token_range",
+    "routing_token_min",
+    "routing_token_max",
 )
 
 logger = logging.getLogger(__name__)
