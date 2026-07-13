@@ -60,7 +60,6 @@ class MCPOAuthRefreshTests(TestCase):
         result = ensure_mcp_oauth_credential(str(uuid.uuid4()))
 
         self.assertEqual(result.status, MCPOAuthStatus.TEMPORARILY_UNAVAILABLE)
-        self.assertEqual(result.cache_state, "database_unavailable")
         self.assertIsNone(result.credential)
 
     @patch("api.services.mcp_tool_discovery.schedule_mcp_tool_discovery")
@@ -79,9 +78,53 @@ class MCPOAuthRefreshTests(TestCase):
         second = ensure_mcp_oauth_credential(str(config.id))
 
         self.assertEqual(first.status, MCPOAuthStatus.USABLE)
-        self.assertEqual(first.cache_state, "refresh_failed_with_valid_token")
         self.assertEqual(second.status, MCPOAuthStatus.USABLE)
-        self.assertEqual(second.cache_state, "failure_bypassed_with_valid_token")
+        mock_post.assert_called_once()
+
+    @patch("api.services.mcp_tool_discovery.schedule_mcp_tool_discovery")
+    @patch("api.services.mcp_oauth.MCPServerOAuthCredential.objects.filter")
+    @patch("api.services.mcp_oauth.requests.post")
+    def test_persistence_failure_keeps_still_valid_original_token(
+        self,
+        mock_post,
+        mock_filter,
+        _mock_schedule,
+    ):
+        config, _credential = self._create_credential(
+            expires_at=timezone.now() + timedelta(minutes=1),
+        )
+        mock_post.return_value = self._success_response()
+        mock_filter.return_value.update.side_effect = DatabaseError("offline")
+
+        first = ensure_mcp_oauth_credential(str(config.id))
+        second = ensure_mcp_oauth_credential(str(config.id))
+
+        self.assertEqual(first.status, MCPOAuthStatus.USABLE)
+        self.assertEqual(first.credential.access_token, "old-access")
+        self.assertEqual(second.status, MCPOAuthStatus.USABLE)
+        mock_post.assert_called_once()
+
+    @patch("api.services.mcp_tool_discovery.schedule_mcp_tool_discovery")
+    @patch("api.services.mcp_oauth.MCPServerOAuthCredential.objects.filter")
+    @patch("api.services.mcp_oauth.requests.post")
+    def test_persistence_failure_rejects_expired_original_token(
+        self,
+        mock_post,
+        mock_filter,
+        _mock_schedule,
+    ):
+        config, _credential = self._create_credential(
+            expires_at=timezone.now() - timedelta(minutes=1),
+        )
+        mock_post.return_value = self._success_response()
+        mock_filter.return_value.update.side_effect = DatabaseError("offline")
+
+        first = ensure_mcp_oauth_credential(str(config.id))
+        second = ensure_mcp_oauth_credential(str(config.id))
+
+        self.assertEqual(first.status, MCPOAuthStatus.TEMPORARILY_UNAVAILABLE)
+        self.assertEqual(first.credential.access_token, "old-access")
+        self.assertEqual(second.status, MCPOAuthStatus.TEMPORARILY_UNAVAILABLE)
         mock_post.assert_called_once()
 
     @patch("api.services.mcp_tool_discovery.schedule_mcp_tool_discovery")
@@ -104,7 +147,6 @@ class MCPOAuthRefreshTests(TestCase):
 
         self.assertEqual(first.status, MCPOAuthStatus.RECONNECT_REQUIRED)
         self.assertEqual(second.status, MCPOAuthStatus.RECONNECT_REQUIRED)
-        self.assertEqual(second.cache_state, "failure_hit")
         mock_post.assert_called_once()
 
     @patch("api.services.mcp_tool_discovery.schedule_mcp_tool_discovery")
@@ -124,7 +166,7 @@ class MCPOAuthRefreshTests(TestCase):
         result = ensure_mcp_oauth_credential(str(config.id))
 
         self.assertEqual(result.status, MCPOAuthStatus.USABLE)
-        self.assertTrue(result.refreshed)
+        self.assertEqual(result.credential.access_token, "new-access")
         mock_post.assert_called_once()
 
     @patch("api.services.mcp_tool_discovery.schedule_mcp_tool_discovery")
@@ -156,7 +198,6 @@ class MCPOAuthRefreshTests(TestCase):
         result = ensure_mcp_oauth_credential(str(config.id))
 
         self.assertEqual(result.status, MCPOAuthStatus.USABLE)
-        self.assertEqual(result.cache_state, "waited_for_refresh")
         self.assertEqual(result.credential.access_token, "peer-access")
         mock_post.assert_not_called()
         lock.release.assert_not_called()
@@ -192,5 +233,5 @@ class MCPOAuthRefreshTests(TestCase):
         result = ensure_mcp_oauth_credential(str(config.id))
 
         self.assertEqual(result.status, MCPOAuthStatus.USABLE)
-        self.assertTrue(result.refreshed)
+        self.assertEqual(result.credential.access_token, "new-access")
         mock_post.assert_called_once()

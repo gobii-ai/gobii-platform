@@ -1152,7 +1152,6 @@ class MCPToolManagerTests(TestCase):
         unavailable = MCPOAuthResult(
             status=MCPOAuthStatus.TEMPORARILY_UNAVAILABLE,
             credential=None,
-            cache_state="database_unavailable",
         )
 
         with patch(
@@ -1188,8 +1187,6 @@ class MCPToolManagerTests(TestCase):
         unavailable = MCPOAuthResult(
             status=MCPOAuthStatus.TEMPORARILY_UNAVAILABLE,
             credential=None,
-            cache_state="database_unavailable",
-            message="Temporarily unavailable",
         )
 
         with patch(
