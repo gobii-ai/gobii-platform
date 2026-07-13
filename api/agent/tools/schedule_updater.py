@@ -9,7 +9,7 @@ from django.core.exceptions import ValidationError
 
 from ..core.schedule_parser import ScheduleParser
 from api.services.tool_settings import DEFAULT_MIN_CRON_SCHEDULE_MINUTES, get_tool_settings_for_owner
-from api.services.schedule_enforcement import cron_satisfies_min_interval, cron_interval_seconds
+from api.services.schedule_enforcement import cron_satisfies_min_interval
 
 logger = logging.getLogger(__name__)
 
@@ -67,9 +67,6 @@ def _min_interval_minutes_for_agent(agent) -> int | None:
         return DEFAULT_MIN_CRON_SCHEDULE_MINUTES
 
 
-def _cron_interval_seconds(schedule_obj: crontab, sample_runs: int = 5) -> float:
-    """Backward-compatible shim for code that calls this helper directly."""
-    return cron_interval_seconds(schedule_obj, sample_runs=sample_runs)
 
 
 def _cron_satisfies_min_interval(schedule_obj: crontab, min_interval_seconds: float) -> bool:

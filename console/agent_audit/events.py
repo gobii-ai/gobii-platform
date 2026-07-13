@@ -304,22 +304,3 @@ def fetch_audit_events(
                 next_cursor = None
 
     return truncated, has_more, next_cursor
-
-
-def fetch_audit_events_between(agent: PersistentAgent, *, start: datetime, end: datetime) -> list[dict]:
-    """Debug helper: return all events between [start, end)."""
-    prompt_map = _steps_with_prompt(agent, cursor=None, limit=MAX_LIMIT, start=start, end=end)
-
-    events: list[dict] = []
-    events.extend(_completion_events(agent, cursor=None, limit=MAX_LIMIT, prompt_map=prompt_map, start=start, end=end))
-    events.extend(_tool_call_events(agent, cursor=None, limit=MAX_LIMIT, start=start, end=end))
-    events.extend(_message_events(agent, cursor=None, limit=MAX_LIMIT, start=start, end=end))
-    events.extend(_step_events(agent, cursor=None, limit=MAX_LIMIT, start=start, end=end))
-    events.extend(_system_message_events(agent, cursor=None, limit=MAX_LIMIT, start=start, end=end))
-    events.extend(_error_events(agent, cursor=None, limit=MAX_LIMIT, start=start, end=end))
-
-    events.sort(key=lambda e: e.get("_sort_key") or (0, "", ""), reverse=True)
-    for ev in events:
-        ev.pop("_sort_key", None)
-        ev.pop("_cursor_id", None)
-    return events

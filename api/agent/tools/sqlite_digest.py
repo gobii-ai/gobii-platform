@@ -1007,7 +1007,3 @@ def digest(db_path: str) -> SQLiteDigest:
 
 def digest_connection(conn: sqlite3.Connection) -> SQLiteDigest:
     return _digestor.digest_connection(conn)
-
-
-def digest_to_prompt(db_path: str) -> str:
-    return _digestor.digest(db_path).to_prompt()

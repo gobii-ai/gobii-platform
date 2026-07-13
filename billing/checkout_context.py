@@ -122,27 +122,3 @@ def bind_setup_intent_checkout_context(
         context.save(update_fields=["stripe_setup_intent_id", "updated_at"])
 
     return _serialize_checkout_context(context)
-
-
-def get_checkout_context_for_setup_intent(setup_intent_id: str | None) -> dict[str, Any] | None:
-    if not setup_intent_id:
-        return None
-
-    StripeCheckoutContext = apps.get_model("api", "StripeCheckoutContext")
-    context = StripeCheckoutContext.objects.filter(stripe_setup_intent_id=setup_intent_id).first()
-    if context is None:
-        return None
-    return _serialize_checkout_context(context)
-
-
-def get_checkout_context_for_session(checkout_session_id: str | None) -> dict[str, Any] | None:
-    if not checkout_session_id:
-        return None
-
-    StripeCheckoutContext = apps.get_model("api", "StripeCheckoutContext")
-    context = StripeCheckoutContext.objects.filter(
-        stripe_checkout_session_id=checkout_session_id,
-    ).first()
-    if context is None:
-        return None
-    return _serialize_checkout_context(context)

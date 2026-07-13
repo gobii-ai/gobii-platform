@@ -80,8 +80,6 @@ def get_owner_trial_started_at(owner) -> datetime | None:
     return None
 
 
-def get_trial_started_at(user) -> datetime | None:
-    return get_owner_trial_started_at(user)
 
 
 def _subscription_has_trial_window(subscription) -> bool:

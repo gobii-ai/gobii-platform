@@ -89,13 +89,6 @@ def _coerce_int(value: Any, default: int) -> int:
         return default
 
 
-def _coerce_str(value: Any, default: str) -> str:
-    if value is None:
-        return default
-    try:
-        return str(value)
-    except Exception:
-        return default
 
 
 def _resolve_sqlite_batch_limits() -> _SqliteBatchLimits:

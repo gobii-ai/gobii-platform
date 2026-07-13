@@ -1158,9 +1158,6 @@ def _pod_path(namespace: str, pod_name: str) -> str:
     return f"/api/v1/namespaces/{namespace}/pods/{pod_name}"
 
 
-def _pod_proxy_path(namespace: str, pod_name: str, path: str) -> str:
-    suffix = path if path.startswith("/") else f"/{path}"
-    return f"/api/v1/namespaces/{namespace}/pods/{pod_name}/proxy{suffix}"
 
 
 def _pvc_collection_path(namespace: str) -> str:

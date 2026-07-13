@@ -812,20 +812,3 @@ PAGE_META = {
 # We want a way to check if an IP address is in the Google Cloud range and prevent that from being recorded. For some
 # reason, we are still accidentally the server IPs in Segment, so we need to filter them out to prevent skewing our
 # analytics. No IP would be preferred, over a Google IP, since we don't want to record the server IPs.
-def is_in_trusted_proxies(ip_str: str) -> bool:
-    """
-    Check if the given IP address is in the list of trusted proxies.
-
-    Args:
-        ip_str (str): The IP address to check.
-
-    Returns:
-        bool: True if the IP address is in the trusted proxies, False otherwise.
-    """
-    try:
-        ip = ipaddress.ip_address(ip_str)
-        return any(ip in proxy for proxy in TRUSTED_PROXIES)
-
-    except ValueError:
-        # Not a valid IPv4/IPv6 literal
-        return False

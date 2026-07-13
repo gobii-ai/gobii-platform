@@ -19,8 +19,6 @@ DAILY_LIMIT_ALLOWED_TOOL_NAMES_TEXT = (
 )
 
 
-def is_daily_limit_message_tool(tool_name: str | None) -> bool:
-    return bool(tool_name and tool_name in DAILY_LIMIT_MESSAGE_TOOL_NAMES)
 
 
 def is_daily_limit_allowed_tool(tool_name: str | None) -> bool:

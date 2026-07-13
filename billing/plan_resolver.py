@@ -100,17 +100,6 @@ def get_plan_version_by_product_id(product_id: str | None, *, kind: str | None =
     return match.plan_version if match else None
 
 
-def get_owner_plan_version(owner):
-    billing = _get_owner_billing(owner)
-    if not billing:
-        return None
-
-    plan_version = getattr(billing, "plan_version", None)
-    if plan_version:
-        return plan_version
-
-    legacy_code = getattr(billing, "subscription", None)
-    return get_plan_version_by_legacy_code(legacy_code)
 
 
 def _get_owner_billing(owner):

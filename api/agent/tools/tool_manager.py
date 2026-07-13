@@ -1256,19 +1256,6 @@ def resolve_tool_entry(agent: PersistentAgent, tool_name: str) -> Optional[ToolC
     return None
 
 
-def is_pipedream_mcp_tool(agent: PersistentAgent, tool_name: str) -> bool:
-    """Return True when the tool is provided by the Pipedream MCP server."""
-    row = (
-        PersistentAgentEnabledTool.objects
-        .filter(agent=agent, tool_full_name=tool_name)
-        .only("tool_server")
-        .first()
-    )
-    if row and row.tool_server:
-        return row.tool_server == PIPEDREAM_TOOL_SERVER_NAME
-
-    entry = resolve_tool_entry(agent, tool_name)
-    return bool(entry and _is_pipedream_entry(entry))
 
 
 def _should_execute_mcp_tool_isolated(entry: ToolCatalogEntry) -> bool:

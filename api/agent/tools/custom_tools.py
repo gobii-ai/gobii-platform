@@ -1316,7 +1316,3 @@ def format_custom_tools_state_for_prompt(agent: PersistentAgent, *, recent_limit
     if recent:
         summary += "\nRecent custom tools:\n" + recent
     return summary
-
-
-def get_custom_tools_prompt_summary(agent: PersistentAgent, *, recent_limit: int = 3) -> str:
-    return format_custom_tools_state_for_prompt(agent, recent_limit=recent_limit)

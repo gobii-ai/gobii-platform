@@ -2,7 +2,7 @@ import ipaddress
 import logging
 from dataclasses import dataclass
 from typing import Iterable, List
-from urllib.parse import urlencode, urlparse
+from urllib.parse import urlparse
 
 from django.conf import settings
 from django.contrib.sites.models import Site
@@ -372,12 +372,6 @@ def create_message_attachments(message, attachments: Iterable[ResolvedAttachment
         )
 
 
-def build_filespace_download_url(agent_id, node_id) -> str:
-    current_site = Site.objects.get_current()
-    base = f"https://{current_site.domain}"
-    path = reverse("console_agent_fs_download", kwargs={"agent_id": agent_id})
-    query = urlencode({"node_id": node_id})
-    return f"{base}{path}?{query}"
 
 
 def build_signed_filespace_download_url(agent_id, node_id) -> str:

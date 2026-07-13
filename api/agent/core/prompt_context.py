@@ -1133,10 +1133,6 @@ def _get_dedicated_ip_count(owner) -> int:
         )
         return 0
 
-def _build_agent_capabilities_block(agent: PersistentAgent) -> str:
-    """Deprecated: kept for backward compatibility; returns only plan_info text."""
-    sections = _build_agent_capabilities_sections(agent)
-    return sections.get("plan_info", "")
 
 
 def _build_agent_capabilities_sections(agent: PersistentAgent) -> dict[str, str]:
@@ -2238,13 +2234,6 @@ def _build_web_user_display_map(
     }
 
 
-def _get_interacted_org_member_email_map(
-    agent: PersistentAgent,
-    endpoints: Sequence[PersistentAgentCommsEndpoint],
-) -> dict[str, str | None]:
-    return _build_interacted_org_member_email_map(
-        _get_interacted_web_user_info_by_endpoint(agent, endpoints)
-    )
 
 
 def _build_interacted_org_member_email_map(
@@ -3084,17 +3073,6 @@ def add_budget_awareness_sections(
     return True
 
 
-def _get_implied_send_status(agent: PersistentAgent) -> tuple[bool, str | None]:
-    """
-    Check if implied send is active and return the target address if so.
-
-    Returns:
-        Tuple of (is_active, to_address). If inactive, to_address is None.
-    """
-    context = _get_implied_send_context(agent)
-    if context:
-        return True, context.get("to_address")
-    return False, None
 
 
 def _get_implied_send_context(

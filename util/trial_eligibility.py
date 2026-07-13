@@ -15,7 +15,6 @@ from constants.feature_flags import (
     USER_TRIAL_ELIGIBILITY_ENFORCEMENT,
     USER_TRIAL_ELIGIBILITY_ENFORCEMENT_ONE_PER_USER,
     USER_TRIAL_REVIEW_ALLOWS_TRIAL,
-    START_TRIAL_CAPI_TRIAL_ELIGIBILITY_ENFORCEMENT,
 )
 from util.waffle_flags import is_waffle_flag_active
 
@@ -87,15 +86,6 @@ def is_user_trial_allowed_by_policy(
     return True
 
 
-def is_start_trial_capi_trial_eligibility_enforcement_enabled(
-    request: HttpRequest | None = None,
-) -> bool:
-    """Default to disabled so StartTrial CAPI behavior only changes after rollout."""
-    return is_waffle_flag_active(
-        START_TRIAL_CAPI_TRIAL_ELIGIBILITY_ENFORCEMENT,
-        request,
-        default=False,
-    )
 
 
 def is_start_trial_capi_send_review_enabled(
@@ -118,18 +108,6 @@ def is_start_trial_capi_send_no_trial_enabled(
     )
 
 
-def is_start_trial_capi_decision_allowed(
-    decision: str,
-    *,
-    request: HttpRequest | None = None,
-) -> bool:
-    if decision == UserTrialEligibilityAutoStatusChoices.ELIGIBLE:
-        return True
-    if decision == UserTrialEligibilityAutoStatusChoices.REVIEW:
-        return is_start_trial_capi_send_review_enabled(request)
-    if decision == UserTrialEligibilityAutoStatusChoices.NO_TRIAL:
-        return is_start_trial_capi_send_no_trial_enabled(request)
-    return True
 
 
 def is_add_payment_info_capi_trial_eligibility_enforcement_enabled(

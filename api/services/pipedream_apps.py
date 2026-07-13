@@ -241,19 +241,8 @@ def get_pipedream_app_visibility_for_agent(
     )
 
 
-def is_pipedream_app_deprecated(app_slug: object) -> bool:
-    visibility = PipedreamAppVisibility(frozenset(get_deprecated_pipedream_app_slugs()))
-    return visibility.is_app_deprecated(app_slug)
 
 
-def is_pipedream_app_visible_to_agent(
-    agent: PersistentAgent,
-    app_slug: object,
-    *,
-    connected_app_slugs: set[str] | None = None,
-) -> bool:
-    visibility = get_pipedream_app_visibility_for_agent(agent, connected_app_slugs=connected_app_slugs)
-    return visibility.is_app_visible(app_slug)
 
 
 def is_pipedream_tool_visible_to_agent(

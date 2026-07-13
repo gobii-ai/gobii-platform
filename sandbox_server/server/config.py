@@ -152,9 +152,6 @@ def _workspace_layout() -> str:
     return (os.environ.get("SANDBOX_AGENT_WORKSPACE_LAYOUT", "").strip().lower() or "shared")
 
 
-def _runtime_cache_root() -> Path:
-    root = os.environ.get("SANDBOX_RUNTIME_CACHE_ROOT", "/runtime-cache").strip() or "/runtime-cache"
-    return Path(root)
 
 
 def _runtime_cache_paths(identity: str) -> Dict[str, Path]:

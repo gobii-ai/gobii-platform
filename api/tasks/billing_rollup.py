@@ -50,10 +50,6 @@ def _period_bounds_for_owner(owner) -> tuple[tuple[datetime, datetime], tuple[dt
     return (start_dt, end_exclusive), (start_date, end_date)
 
 
-def _period_bounds_for_user(user) -> tuple[datetime, datetime]:
-    """Return timezone-aware [start, end) datetimes for the user's current billing period."""
-    (start_dt, end_exclusive), _ = _period_bounds_for_owner(user)
-    return start_dt, end_exclusive
 
 
 def _to_aware_dt(value, *, as_start: bool) -> datetime | None:

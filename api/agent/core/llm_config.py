@@ -294,10 +294,6 @@ def apply_user_quota_tier_override(owner: Any | None, max_allowed: AgentLLMTier)
     override_tier = get_user_quota_tier_override(owner)
     return override_tier if override_tier is not None else max_allowed
 
-def apply_user_quota_tier_cap(owner: Any | None, max_allowed: AgentLLMTier) -> AgentLLMTier:
-    """Backwards-compatible alias for apply_user_quota_tier_override."""
-
-    return apply_user_quota_tier_override(owner, max_allowed)
 
 
 def _clamp_tier(target: AgentLLMTier, max_allowed: AgentLLMTier) -> AgentLLMTier:
@@ -603,17 +599,8 @@ def get_agent_llm_tier(
     return override
 
 
-def should_prioritize_premium(agent: Any, *, is_first_loop: bool | None = None) -> bool:
-    """Return True when the provided agent should prefer premium-or-better tiers."""
-
-    return get_agent_llm_tier(agent, is_first_loop=is_first_loop) != AgentLLMTier.STANDARD
 
 
-def should_prioritize_max(agent: Any, *, is_first_loop: bool | None = None) -> bool:
-    """Return True when the provided agent should route to the max tier."""
-
-    tier = get_agent_llm_tier(agent, is_first_loop=is_first_loop)
-    return TIER_ORDER[tier] >= TIER_ORDER[AgentLLMTier.MAX]
 
 
 class LLMNotConfiguredError(RuntimeError):
@@ -673,66 +660,6 @@ PROVIDER_CONFIG: Dict[str, Dict[str, str]] = {
 
 # Reference model for consistent token counting before a model is selected
 REFERENCE_TOKENIZER_MODEL = "openai/gpt-4o"
-
-
-# Token-based tier configurations
-TOKEN_BASED_TIER_CONFIGS = {
-    # 0-7500 tokens: GPT-5/Google split primary, then Google, then Anthropic/GLM-4.5 split
-    "small": {
-        "range": (0, 7500),
-        "tiers": [
-            [("openai_gpt5", 0.90), ("google", 0.10)],  # Tier 1: 90% GPT-5, 10% Google Gemini 2.5 Pro
-            [("google", 1.0)],  # Tier 2: 100% Google Gemini 2.5 Pro
-            [("anthropic", 0.5), ("openrouter_glm", 0.5)],  # Tier 3: 50/50 Anthropic/GLM-4.5 split
-        ]
-    },
-    # 7500-20000 tokens: 70% GLM-4.5, 10% Google Gemini 2.5 Pro, 10% GPT-5, 10% GPT-OSS-120B
-    "medium": {
-        "range": (7500, 20000),
-        "tiers": [
-            [("openrouter_glm", 0.70), ("google", 0.10), ("openai_gpt5", 0.10), ("fireworks_gpt_oss_120b", 0.10)],  # Tier 1: 70% GLM-4.5, 10% Google, 10% GPT-5, 10% GPT-OSS-120B
-            [("openrouter_glm", 0.34), ("openai_gpt5", 0.33), ("anthropic", 0.33)],  # Tier 2: Even split between GLM-4.5, GPT-5, and Anthropic
-            [("openai_gpt5", 1.0)],  # Tier 3: 100% GPT-5 (last resort)
-        ]
-    },
-    # 20000+ tokens: 70% GLM-4.5, 10% Google Gemini 2.5 Pro, 10% GPT-5, 10% GPT-OSS-120B
-    "large": {
-        "range": (20000, float('inf')),
-        "tiers": [
-            [("openrouter_glm", 0.70), ("google", 0.10), ("openai_gpt5", 0.10), ("fireworks_gpt_oss_120b", 0.10)],  # Tier 1: 70% GLM-4.5, 10% Google, 10% GPT-5, 10% GPT-OSS-120B
-            [("openai_gpt5", 1.0)],  # Tier 2: 100% GPT-5
-            [("anthropic", 1.0)],  # Tier 3: 100% Anthropic (Sonnet 4)
-            [("fireworks_qwen3_235b_a22b", 1.0)],  # Tier 4: 100% Fireworks Qwen3-235B (last resort)
-        ]
-    }
-}
-
-
-def get_tier_config_for_tokens(token_count: int) -> List[List[Tuple[str, float]]]:
-    """
-    Get the appropriate tier configuration based on token count.
-    
-    Args:
-        token_count: Estimated token count for the request
-        
-    Returns:
-        List of tiers with provider weights for the given token range
-    """
-    for config_name, config in TOKEN_BASED_TIER_CONFIGS.items():
-        min_tokens, max_tokens = config["range"]
-        if min_tokens <= token_count < max_tokens:
-            logger.debug(
-                "Selected %s tier config for %d tokens (range: %d-%s)",
-                config_name,
-                token_count,
-                min_tokens,
-                "∞" if max_tokens == float('inf') else str(max_tokens)
-            )
-            return config["tiers"]
-    
-    # This shouldn't happen since we cover 0 to infinity, but fallback to small tier
-    logger.warning("No tier config found for %d tokens, using small tier as fallback", token_count)
-    return TOKEN_BASED_TIER_CONFIGS["small"]["tiers"]
 
 
 def get_llm_config() -> Tuple[str, dict]:
@@ -819,27 +746,6 @@ def get_provider_config(provider: str) -> Tuple[str, dict]:
     return model, params
 
 
-def get_available_providers(provider_tiers: List[List[Tuple[str, float]]] = None) -> List[str]:
-    """
-    Get list of providers that have valid API keys available.
-    
-    Args:
-        provider_tiers: Optional provider tier configuration
-        
-    Returns:
-        List of provider names that have valid API keys
-    """
-    provider_tiers = provider_tiers or TOKEN_BASED_TIER_CONFIGS["small"]["tiers"]
-    
-    available = []
-    for tier in provider_tiers:
-        for provider, _ in tier:
-            if provider in PROVIDER_CONFIG:
-                env_var = PROVIDER_CONFIG[provider]["env_var"]
-                if os.getenv(env_var):
-                    available.append(provider)
-    
-    return available
 
 
 def _infer_low_latency_preference(

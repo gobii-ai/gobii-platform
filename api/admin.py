@@ -1975,16 +1975,6 @@ class UsageThresholdSentAdmin(admin.ModelAdmin):
         return False
 
 
-class TaskCreditInlineForUser(admin.TabularInline):
-    model = TaskCredit
-    extra = 0
-    fields = ("credits", "credits_used", "remaining_display", "plan", "granted_date", "expiration_date", "additional_task")
-    readonly_fields = ("remaining_display", "granted_date")
-    ordering = ("-granted_date",)
-
-    def remaining_display(self, obj):
-        return obj.remaining
-    remaining_display.short_description = "Remaining"
 
 class UserFlagsInlineForUser(admin.StackedInline):
     model = UserFlags

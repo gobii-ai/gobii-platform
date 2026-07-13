@@ -111,9 +111,6 @@ def is_billing_recovery_resumable_pause_reason(reason: str) -> bool:
     return is_billing_execution_pause_reason(str(reason or "").strip())
 
 
-def is_owner_customer_account_paused(owner) -> bool:
-    state = get_owner_execution_pause_state(owner)
-    return bool(state["paused"] and is_customer_account_pause_reason(state["reason"]))
 
 
 def get_owner_account_pause_state(owner) -> dict[str, Any]:
@@ -269,27 +266,6 @@ def resume_owner_execution(
     return True
 
 
-def resume_owner_execution_by_ref(
-    owner_type: str,
-    owner_id,
-    *,
-    source: str = "unknown",
-    enqueue_agent_resume: bool = True,
-) -> bool:
-    owner = resolve_owner_by_ref(owner_type, owner_id)
-    if owner is None:
-        logger.warning(
-            "Unable to resume execution for missing owner %s/%s",
-            owner_type,
-            owner_id,
-        )
-        return False
-
-    return resume_owner_execution(
-        owner,
-        source=source,
-        enqueue_agent_resume=enqueue_agent_resume,
-    )
 
 
 def get_customer_account_pause_from_subscription(subscription_payload: Any) -> dict[str, Any]:
