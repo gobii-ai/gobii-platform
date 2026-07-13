@@ -3,7 +3,7 @@ from typing import Any
 
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.http import HttpRequest, HttpResponseBadRequest, JsonResponse
+from django.http import HttpRequest, JsonResponse
 
 
 class ApiLoginRequiredMixin(LoginRequiredMixin):
@@ -29,8 +29,6 @@ def _json_error(message: str, *, status: int = 400, key: str = "error") -> JsonR
     return JsonResponse({key: message}, status=status)
 
 
-def _json_bad_request(message: str) -> HttpResponseBadRequest:
-    return HttpResponseBadRequest(message)
 
 
 def _permission_denied_response(exc: PermissionDenied) -> JsonResponse:

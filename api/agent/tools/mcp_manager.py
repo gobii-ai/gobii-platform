@@ -2879,9 +2879,6 @@ def execute_mcp_tool_isolated(
     return _mcp_manager.execute_mcp_tool_isolated(agent, tool_name, params)
 
 
-def execute_platform_mcp_tool(server_name: str, tool_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
-    """Execute a platform-scoped MCP tool without an agent context."""
-    return _mcp_manager.execute_platform_tool(server_name, tool_name, params)
 
 
 def get_mcp_manager() -> MCPToolManager:
@@ -2892,8 +2889,3 @@ def get_mcp_manager() -> MCPToolManager:
 def get_pipedream_access_token() -> Optional[str]:
     """Return the shared Pipedream API token, if configured."""
     return _mcp_manager.get_pipedream_access_token()
-
-
-def cleanup_mcp_tools():
-    """Clean up MCP tool resources."""
-    _mcp_manager.cleanup()

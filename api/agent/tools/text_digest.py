@@ -691,7 +691,3 @@ _digestor = Digestor()
 
 def digest(text: str) -> TextDigest:
     return _digestor.digest(text)
-
-
-def digest_to_prompt(text: str) -> str:
-    return _digestor.digest(text).to_prompt()

@@ -175,8 +175,6 @@ def _exclude_eval_persistent_steps(qs):
     return qs.exclude(agent__execution_environment=EVAL_ENVIRONMENT)
 
 
-def _exclude_eval_tool_calls(qs):
-    return qs.exclude(step__agent__execution_environment=EVAL_ENVIRONMENT)
 
 
 def _is_deleted_persistent_agent(persistent_agent) -> bool:

@@ -235,9 +235,6 @@ def get_daily_credit_settings_for_owner(owner) -> DailyCreditSettings:
     return get_daily_credit_settings_for_plan_version(plan_version_id, plan_name)
 
 
-def get_daily_credit_settings() -> DailyCreditSettings:
-    """Backward-compatible wrapper returning free-plan settings when no plan is provided."""
-    return get_daily_credit_settings_for_plan(None)
 
 
 def invalidate_daily_credit_settings_cache() -> None:

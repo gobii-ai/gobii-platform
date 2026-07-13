@@ -308,18 +308,6 @@ def get_burn_rate_snapshot_for_owner(
     )
 
 
-def get_burn_rate_snapshot_for_agent(
-    agent: PersistentAgent,
-    *,
-    window_minutes: int,
-    max_age_minutes: int | None = None,
-) -> BurnRateSnapshot | None:
-    return get_burn_rate_snapshot(
-        scope_type=BurnRateSnapshot.ScopeType.AGENT,
-        scope_id=str(agent.id),
-        window_minutes=window_minutes,
-        max_age_minutes=max_age_minutes,
-    )
 
 
 def serialize_burn_rate_snapshot(snapshot: BurnRateSnapshot | None) -> dict | None:

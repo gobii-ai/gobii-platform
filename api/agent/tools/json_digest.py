@@ -670,11 +670,3 @@ _digestor = JsonDigestor()
 
 def digest(data: Any, raw_json: Optional[str] = None) -> JsonDigest:
     return _digestor.digest(data, raw_json)
-
-
-def digest_string(json_string: str) -> JsonDigest:
-    return _digestor.digest_from_string(json_string)
-
-
-def digest_to_prompt(data: Any) -> str:
-    return _digestor.digest(data).to_prompt()

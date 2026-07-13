@@ -565,19 +565,6 @@ def _mcp_server_event_properties(
     }
 
 
-def _set_overage_detach_session(request, org_id: str, subscription_id: str, price_id: str) -> None:
-    """Record that the org's overage SKU was temporarily detached for seat updates."""
-    if not subscription_id or not price_id:
-        return
-
-    key = str(org_id)
-    detach_map = dict(request.session.get("org_overage_detach", {}))
-    detach_map[key] = {
-        "subscription_id": subscription_id,
-        "price_id": price_id,
-    }
-    request.session["org_overage_detach"] = detach_map
-    request.session.modified = True
 
 
 def _pop_overage_detach_session(request, org_id: str) -> dict | None:
@@ -652,39 +639,6 @@ def _reattach_overage_from_session(request, org_id: str) -> bool:
     return _reattach_org_overage_subscription(subscription_id, price_id)
 
 
-def _apply_subscribe_success_context(request, context: dict, plan_id: str | None = None) -> None:
-    """Populate context for subscription success notifications based on query params."""
-    if request.GET.get("subscribe_success") == "1":
-        context["subscribe_notification"] = True
-        price_str = request.GET.get("p", "0.0")
-        try:
-            context["sub_price"] = float(price_str)
-        except ValueError:
-            context["sub_price"] = 0.0
-
-        event_id = (request.GET.get("eid") or "").strip()
-        if event_id and len(event_id) <= 64:
-            context["subscribe_event_id"] = event_id
-        else:
-            context["subscribe_event_id"] = ""
-
-        # Prefer plan from URL params (set at checkout time) over current DB state
-        # to avoid race conditions with webhook processing
-        url_plan = (request.GET.get("plan") or "").strip()
-        if url_plan:
-            resolved_plan = url_plan
-        elif plan_id:
-            resolved_plan = plan_id
-        else:
-            plan_config = context.get("subscription_plan") or {}
-            resolved_plan = plan_config.get("id") if isinstance(plan_config, dict) else None
-
-        context["subscribe_plan"] = resolved_plan if isinstance(resolved_plan, str) else ""
-        return
-
-    context["subscribe_notification"] = False
-    context["subscribe_event_id"] = ""
-    context["subscribe_plan"] = ""
 
 
 class BillingPortalView(StripeFeatureRequiredMixin, LoginRequiredMixin, View):

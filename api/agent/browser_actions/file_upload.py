@@ -14,7 +14,6 @@ an UploadFileEvent with the prepared temp file to the file input element.
 """
 
 import asyncio
-import contextlib
 import logging
 import os
 import tempfile
@@ -93,21 +92,6 @@ def _agent_has_filespace_access(agent_id: str, filespace_id: str) -> bool:
         return False
 
 
-@contextlib.contextmanager
-def _temp_file_context(node_name: str):
-    """Context manager for creating and cleaning up temporary files."""
-    suffix = os.path.splitext(node_name)[1] if "." in node_name else ""
-    fd, temp_path = tempfile.mkstemp(prefix=FILE_UPLOAD_PREFIX, suffix=suffix)
-    os.close(fd)
-    
-    try:
-        yield temp_path
-    finally:
-        try:
-            if os.path.exists(temp_path):
-                os.remove(temp_path)
-        except Exception as e:
-            logger.warning("Failed to cleanup temp file %s: %s", temp_path, e)
 
 
 def _create_temp_file_from_node(node: AgentFsNode, span) -> str:

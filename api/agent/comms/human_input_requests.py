@@ -1067,20 +1067,6 @@ def _get_authorized_pending_requests_for_conversation(
     ]
 
 
-def _get_unambiguous_authorized_batch_for_message(
-    message: PersistentAgentMessage,
-) -> list[PersistentAgentHumanInputRequest]:
-    request_objects = _get_authorized_pending_requests_for_message(message)
-    if not request_objects:
-        return []
-
-    ordered_requests = _order_requests_for_batch(request_objects)
-    batch_members: dict[str, list[PersistentAgentHumanInputRequest]] = {}
-    for request_obj in ordered_requests:
-        batch_members.setdefault(_batch_key_for_request(request_obj), []).append(request_obj)
-    if len(batch_members) != 1:
-        return []
-    return next(iter(batch_members.values()))
 
 
 def _extract_numbered_batch_answers(text: str) -> list[tuple[int, str]]:

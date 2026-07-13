@@ -138,8 +138,6 @@ def get_browser_settings_for_plan_version(
     )
 
 
-def get_browser_settings_for_plan(plan_name: Optional[str]) -> BrowserPlanSettings:
-    return get_browser_settings_for_plan_version(None, plan_name)
 
 
 def get_browser_settings_for_owner(owner) -> BrowserPlanSettings:

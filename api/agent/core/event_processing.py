@@ -129,7 +129,7 @@ from api.services.agent_error_logging import log_agent_error, log_credit_failure
 from api.services.billing_snapshot import get_billing_snapshot_for_owner
 from api.services.owner_execution_pause import EXECUTION_PAUSE_MESSAGE, EXECUTION_PAUSE_NOTE, get_owner_execution_pause_state, resolve_agent_owner
 from api.services.signup_preview import can_bypass_task_credit_for_signup_preview, is_signup_preview_processing_paused
-from api.services.web_sessions import get_deliverable_web_sessions, has_deliverable_web_session
+from api.services.web_sessions import has_deliverable_web_session
 from config import settings
 from config.redis_client import get_redis_client
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
@@ -535,7 +535,6 @@ def _normalize_error_result(result: dict) -> dict:
     )
     _copy_native_http_error_context(result, payload)
     return payload
-
 
 
 def _has_continuation_signal(text: str) -> bool:
@@ -3165,13 +3164,6 @@ def _finalize_tool_batch(
     )
 
 
-def _get_latest_deliverable_web_session(agent: PersistentAgent):
-    for session in get_deliverable_web_sessions(agent):
-        if session.user_id is not None:
-            return session
-    return None
-
-
 def _build_implied_send_tool_call(
     agent: PersistentAgent,
     message_text: str,
@@ -3484,67 +3476,6 @@ def _should_skip_processing_for_inactive_or_deleted_agent(
     except Exception:
         pass
     return True
-
-
-def _estimate_message_tokens(messages: List[dict]) -> int:
-    """Estimate token count for a list of messages using simple heuristics."""
-    total_text = ""
-    for message in messages:
-        content = message.get("content", "")
-        if isinstance(content, str):
-            total_text += content + " "
-
-    # Rough estimation: ~4 characters per token (conservative estimate)
-    estimated_tokens = len(total_text) // 4
-    return max(estimated_tokens, 100)  # Minimum of 100 tokens
-
-
-def _estimate_agent_context_tokens(agent: PersistentAgent) -> int:
-    """Estimate token count for agent context using simple heuristics."""
-    total_length = 0
-    tool_result_overhead = 240
-
-    # Charter length
-    if agent.charter:
-        total_length += len(agent.charter)
-
-    # Rough estimates for other content
-    # History: estimate based on recent steps and comms
-    recent_steps = (
-        PersistentAgentStep.objects.filter(agent=agent)
-        .select_related("tool_call")
-        .only("description", "tool_call__tool_name")
-        .order_by('-created_at')[:10]
-    )
-    for step in recent_steps:
-        # Add description length
-        if step.description:
-            total_length += len(step.description)
-
-        # Account for tool result metadata (prompt stores metadata + small previews)
-        try:
-            if step.tool_call:
-                total_length += tool_result_overhead
-        except PersistentAgentToolCall.DoesNotExist:
-            pass
-
-    recent_comms = (
-        PersistentAgentMessage.objects.filter(owner_agent=agent)
-        .only("body")
-        .order_by('-timestamp')[:5]
-    )
-    for comm in recent_comms:
-        if comm.body:
-            total_length += len(comm.body)
-
-    # Add base overhead for system prompt and structure
-    total_length += 2000  # Base system prompt overhead
-
-    # Rough estimation: ~4 characters per token 
-    estimated_tokens = total_length // 4
-
-    # Apply reasonable bounds
-    return max(min(estimated_tokens, 50000), 1000)  # Between 1k and 50k tokens
 
 
 def _stream_completion_with_broadcast(

@@ -118,8 +118,6 @@ def _earliest_activity_date(agent: PersistentAgent, tzinfo: dt_timezone) -> date
     return min(candidates)
 
 
-def _start_of_day(dt_date: date, tzinfo: dt_timezone) -> datetime:
-    return datetime.combine(dt_date, time.min, tzinfo=tzinfo)
 
 
 def build_audit_timeline(agent: PersistentAgent, *, days: int | None = None, tzinfo: Optional[dt_timezone] = None) -> AuditTimeline:

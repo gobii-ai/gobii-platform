@@ -765,19 +765,6 @@ def _try_parse_json_string(text: str) -> Optional[Any]:
     return parsed
 
 
-def normalize_json_text(text: str) -> Optional[str]:
-    """Return a cleaned JSON payload if the text is JSON with known prefixes."""
-    if not text:
-        return None
-    candidate = _strip_json_prefixes(text).strip()
-    if not candidate:
-        return None
-    if candidate[0] not in "{[" or candidate[-1] not in "}]":
-        return None
-    parsed, _ = _parse_json_any(candidate)
-    if parsed is None:
-        return None
-    return json.dumps(parsed, ensure_ascii=False, separators=(",", ":"))
 
 
 def _analyze_array_item_fields(items: List[Any], max_items: int = 5) -> Tuple[List[str], List[FieldTypeInfo], Optional[str], Optional[str]]:

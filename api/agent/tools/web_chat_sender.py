@@ -140,15 +140,6 @@ def _latest_inbound_timestamp(agent: PersistentAgent):
     return latest_inbound
 
 
-def _has_outbound_since_latest_inbound(agent: PersistentAgent) -> bool:
-    latest_inbound_at = _latest_inbound_timestamp(agent)
-    if latest_inbound_at is None:
-        return False
-    return PersistentAgentMessage.objects.filter(
-        owner_agent=agent,
-        is_outbound=True,
-        timestamp__gt=latest_inbound_at,
-    ).exists()
 
 
 def _looks_like_routine_progress_message(body: str) -> bool:

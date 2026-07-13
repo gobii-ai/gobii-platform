@@ -188,19 +188,6 @@ class UserProfileForm(forms.ModelForm):
             )
         return user
 
-class StyledRadioSelect(forms.RadioSelect):
-    """Custom RadioSelect widget with Preline styling."""
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.attrs = {
-            'class': 'shrink-0 mt-0.5 border-gray-300 rounded-full text-indigo-600 focus:ring-indigo-500 checked:border-indigo-500 disabled:opacity-50 disabled:pointer-events-none'
-        }
-
-    def create_option(self, name, value, label, selected, index, subindex=None, attrs=None):
-        option = super().create_option(name, value, label, selected, index, subindex, attrs)
-
-        return option
-
 
 class MCPServerConfigForm(forms.Form):
     name = forms.SlugField(
@@ -702,64 +689,3 @@ class OrganizationInviteForm(forms.Form):
             raise forms.ValidationError('No seats available. Increase the seat count before inviting new members.')
 
         return cleaned
-
-
-class OrganizationSeatReductionForm(forms.Form):
-    future_seats = forms.IntegerField(
-        min_value=0,
-        widget=forms.NumberInput(
-            attrs={
-                "class": "w-28 px-3 py-2 border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500",
-                "min": "0",
-            }
-        ),
-        label="Seats next cycle",
-    )
-
-    def __init__(self, *args, org=None, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.org = org
-
-        billing = getattr(org, "billing", None)
-        if billing is not None:
-            purchased = getattr(billing, "purchased_seats", 0) or 0
-            self.fields["future_seats"].initial = purchased
-            self.fields["future_seats"].widget.attrs["max"] = str(max(purchased, 0))
-
-    def clean_future_seats(self):
-        seats = self.cleaned_data.get("future_seats")
-        if seats is None:
-            return seats
-
-        billing = getattr(self.org, "billing", None)
-        if billing is None or not getattr(billing, "stripe_subscription_id", None):
-            raise forms.ValidationError("This organization does not have an active subscription to update.")
-
-        current = getattr(billing, "purchased_seats", 0) or 0
-        if seats >= current:
-            raise forms.ValidationError("Enter a number smaller than your current seat total to schedule a reduction.")
-
-        reserved = billing.seats_reserved
-        if seats < reserved:
-            raise forms.ValidationError(
-                "Cannot schedule fewer seats than currently reserved. Remove members or invites first."
-            )
-
-        return seats
-
-class OrganizationSeatPurchaseForm(forms.Form):
-    seats = forms.IntegerField(
-        min_value=1,
-        initial=1,
-        widget=forms.NumberInput(
-            attrs={
-                "class": "w-24 px-3 py-2 border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500",
-                "min": "1",
-            }
-        ),
-        label="Seats",
-    )
-
-    def __init__(self, *args, org=None, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.org = org
