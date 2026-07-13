@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 import redis
 import requests
 from django.contrib.auth import get_user_model
+from django.db import DatabaseError
 from django.test import TestCase, tag
 from django.utils import timezone
 
@@ -53,6 +54,14 @@ class MCPOAuthRefreshTests(TestCase):
             "token_type": "Bearer",
         }
         return response
+
+    @patch("api.services.mcp_oauth._load_config", side_effect=DatabaseError("offline"))
+    def test_database_failure_is_temporarily_unavailable(self, _mock_load):
+        result = ensure_mcp_oauth_credential(str(uuid.uuid4()))
+
+        self.assertEqual(result.status, MCPOAuthStatus.TEMPORARILY_UNAVAILABLE)
+        self.assertEqual(result.cache_state, "database_unavailable")
+        self.assertIsNone(result.credential)
 
     @patch("api.services.mcp_tool_discovery.schedule_mcp_tool_discovery")
     @patch("api.services.mcp_oauth.requests.post")

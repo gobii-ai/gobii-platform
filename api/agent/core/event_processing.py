@@ -102,7 +102,7 @@ from ..tools.request_contact_permission import execute_request_contact_permissio
 from ..tools.request_human_input import execute_request_human_input
 from ..tools.search_tools import execute_search_tools
 from ..tools.static_tools import planning_mode_disallows_tool
-from ..tools.tool_manager import execute_enabled_tool, auto_enable_heuristic_tools, get_parallel_safe_tool_rejection_reason, resolve_tool_entry, should_skip_auto_substitution
+from ..tools.tool_manager import ToolCatalogEntry, execute_enabled_tool, auto_enable_heuristic_tools, get_parallel_safe_tool_rejection_reason, resolve_tool_entry, should_skip_auto_substitution
 from ...services.tool_blacklist import is_tool_blacklisted_for_agent, tool_blacklist_error
 from ..tools.web_chat_sender import execute_send_chat_message
 from ..tools.peer_dm import execute_send_agent_message
@@ -1403,7 +1403,6 @@ def _create_pending_tool_call_step(
     attach_completion: Any,
     attach_prompt_archive: Any,
     parent_tool_call: Any = None,
-    deferred_tool_calls: Optional[list[Any]] = None,
 ) -> Optional["PersistentAgentStep"]:
     from api.models import PersistentAgentStep, PersistentAgentToolCall
 
@@ -1419,7 +1418,7 @@ def _create_pending_tool_call_step(
         attach_completion(step_kwargs)
         step = PersistentAgentStep.objects.create(**step_kwargs)
         attach_prompt_archive(step)
-        tool_call = PersistentAgentToolCall(
+        PersistentAgentToolCall.objects.create(
             step=step,
             parent_tool_call=parent_tool_call,
             tool_name=safe_tool_name,
@@ -1428,11 +1427,7 @@ def _create_pending_tool_call_step(
             execution_duration_ms=None,
             status="pending",
         )
-        if deferred_tool_calls is None:
-            tool_call.save()
-            _emit_tool_call_realtime(step, "pending")
-        else:
-            deferred_tool_calls.append(tool_call)
+        _emit_tool_call_realtime(step, "pending")
         return step
     except Exception as exc:
         log_tool_persistence_error(
@@ -1449,8 +1444,6 @@ def _create_pending_tool_call_step(
                 consumed_credit=consumed_credit,
             ),
         )
-        if deferred_tool_calls is not None:
-            raise _PendingToolPersistenceError from exc
         return None
 
 
@@ -1688,6 +1681,7 @@ class _PreparedToolExecution:
     inferred_continue: bool
     parallel_safe: bool
     parallel_ineligible_reason: Optional[str]
+    resolved_entry: Optional[ToolCatalogEntry] = None
 
 
 @dataclass
@@ -1714,22 +1708,6 @@ class _ToolRateLimitBatch:
     recent_counts: dict[str, int]
     checked_names: set[str] = field(default_factory=set)
     admitted_counts: dict[str, int] = field(default_factory=dict)
-
-
-@dataclass
-class _BatchPreparationMetrics:
-    rate_limit_lookup_ms: int = 0
-    rate_limit_enforcement_ms: int = 0
-    credit_reservation_ms: int = 0
-    pending_persistence_ms: int = 0
-
-
-class _BatchPreparationCancelled(Exception):
-    pass
-
-
-class _PendingToolPersistenceError(Exception):
-    pass
 
 
 @dataclass
@@ -2219,48 +2197,16 @@ def _record_irrelevant_agent_config_mutation_skip(
     attach_prompt_archive(step)
 
 
-def _normalize_tool_name_for_execution(agent: PersistentAgent, tool_name: str) -> str:
-    entry = resolve_tool_entry(agent, tool_name) if isinstance(tool_name, str) and tool_name.startswith("mcp_") else None
-    return entry.full_name if entry else tool_name
-
-
-def _is_parallel_preparation_candidate(tool_calls: list[Any]) -> bool:
-    """Identify batches that can use transactional preparation without side effects."""
-    if len(tool_calls) <= 1:
-        return False
-
-    candidates: list[_PreparedToolExecution] = []
-    for idx, call in enumerate(tool_calls, start=1):
-        tool_name = _get_tool_call_name(call)
-        if not tool_name:
-            return False
-        try:
-            _raw_args, tool_params = _parse_tool_call_params(_get_tool_call_arguments(call))
-        except (TypeError, ValueError, json.JSONDecodeError):
-            return False
-        if not isinstance(tool_params, dict):
-            return False
-
-        tool_params = _normalize_tool_params(tool_name, tool_params)
-        rejection_reason = get_parallel_safe_tool_rejection_reason(tool_name, tool_params)
-        candidates.append(
-            _PreparedToolExecution(
-                idx=idx,
-                tool_name=tool_name,
-                tool_params=tool_params,
-                exec_params=tool_params,
-                pending_step=None,
-                credits_consumed=None,
-                consumed_credit=None,
-                call_id=None,
-                explicit_continue=None,
-                inferred_continue=False,
-                parallel_safe=rejection_reason is None,
-                parallel_ineligible_reason=rejection_reason,
-            )
-        )
-
-    return _parallel_batch_ineligible_reason(candidates) is None
+def _resolve_tool_for_execution(
+    agent: PersistentAgent,
+    tool_name: str,
+) -> tuple[str, Optional[ToolCatalogEntry]]:
+    entry = (
+        resolve_tool_entry(agent, tool_name)
+        if isinstance(tool_name, str) and tool_name.startswith("mcp_")
+        else None
+    )
+    return (entry.full_name, entry) if entry else (tool_name, None)
 
 
 def _http_request_dedupe_signature(tool_params: Dict[str, Any]) -> Optional[str]:
@@ -2399,6 +2345,7 @@ def _execute_tool_call_runtime(
     budget_ctx: Optional[BudgetContext],
     eval_run_id: Optional[str],
     parallel_safe: bool = False,
+    resolved_entry: Optional[ToolCatalogEntry] = None,
 ) -> tuple[Any, Optional[List[dict]]]:
     updated_tools: Optional[List[dict]] = None
     mock_config = getattr(budget_ctx, "mock_config", None) if budget_ctx else None
@@ -2418,6 +2365,7 @@ def _execute_tool_call_runtime(
             eval_run_id,
         )
         return mock_result, updated_tools
+    resolved_kwargs = {"resolved_entry": resolved_entry} if resolved_entry is not None else {}
     if parallel_safe:
         return execute_enabled_tool(
             agent,
@@ -2425,6 +2373,7 @@ def _execute_tool_call_runtime(
             exec_params,
             isolated_mcp=True,
             current_sqlite_db_path=get_sqlite_db_path(),
+            **resolved_kwargs,
         ), updated_tools
     resolve_executor = _DIRECT_TOOL_EXECUTORS.get(tool_name)
     if resolve_executor:
@@ -2439,6 +2388,7 @@ def _execute_tool_call_runtime(
         tool_name,
         exec_params,
         current_sqlite_db_path=get_sqlite_db_path(),
+        **resolved_kwargs,
     ), updated_tools
 
 
@@ -2504,6 +2454,7 @@ def _execute_prepared_tool_call(
                 budget_ctx=budget_ctx,
                 eval_run_id=eval_run_id,
                 parallel_safe=parallel_safe,
+                resolved_entry=prepared.resolved_entry,
             )
             if _tool_result_is_success(result) and not parallel_safe:
                 refresh_skills_for_tool(agent, prepared.tool_name)
@@ -2544,10 +2495,7 @@ def _prepare_tool_batch_impl(
     has_user_facing_message: bool,
     attach_completion: Any,
     attach_prompt_archive: Any,
-    check_abort_per_call: bool = True,
     rate_limit_batch: Optional[_ToolRateLimitBatch] = None,
-    deferred_tool_calls: Optional[list[Any]] = None,
-    metrics: Optional[_BatchPreparationMetrics] = None,
 ) -> _PreparedToolBatch:
     prepared_calls: list[_PreparedToolExecution] = []
     followup_required = False
@@ -2563,7 +2511,7 @@ def _prepare_tool_batch_impl(
 
     for idx, call in enumerate(tool_calls, start=1):
         with tracer.start_as_current_span("Prepare Tool") as tool_span:
-            if check_abort_per_call and _should_abort_processing(
+            if _should_abort_processing(
                 agent,
                 budget_ctx=budget_ctx,
                 heartbeat=heartbeat,
@@ -2572,7 +2520,7 @@ def _prepare_tool_batch_impl(
             ):
                 abort_after_execution = True
                 break
-            if lock_extender and check_abort_per_call:
+            if lock_extender:
                 lock_extender.maybe_extend()
             tool_span.set_attribute("persistent_agent.id", str(agent.id))
             tool_name = _get_tool_call_name(call)
@@ -2601,7 +2549,7 @@ def _prepare_tool_batch_impl(
                     logger.debug("Failed to persist correction step for missing tool name", exc_info=True)
                 followup_required = True
                 break
-            if heartbeat and check_abort_per_call:
+            if heartbeat:
                 heartbeat.touch("tool_call")
             tool_span.set_attribute("tool.name", tool_name)
             logger.info("Agent %s preparing tool %d/%d: %s", agent.id, idx, len(tool_calls), tool_name)
@@ -2803,7 +2751,8 @@ def _prepare_tool_batch_impl(
                         followup_required = True
                         break
                     continue
-            if (normalized_tool_name := _normalize_tool_name_for_execution(agent, tool_name)) != tool_name:
+            normalized_tool_name, resolved_entry = _resolve_tool_for_execution(agent, tool_name)
+            if normalized_tool_name != tool_name:
                 logger.info("Agent %s: normalized tool call %s -> %s", agent.id, tool_name, normalized_tool_name)
                 tool_name = normalized_tool_name
             tool_params = _normalize_tool_params(tool_name, tool_params)
@@ -2889,36 +2838,24 @@ def _prepare_tool_batch_impl(
 
             parallel_ineligible_reason = get_parallel_safe_tool_rejection_reason(tool_name, tool_params)
 
-            rate_limit_started_at = time.monotonic()
-            rate_limit_allowed = _enforce_tool_rate_limit(
+            if not _enforce_tool_rate_limit(
                 agent,
                 tool_name,
                 span=tool_span,
                 attach_completion=attach_completion,
                 attach_prompt_archive=attach_prompt_archive,
                 rate_limit_batch=rate_limit_batch,
-            )
-            if metrics is not None:
-                metrics.rate_limit_enforcement_ms += int(
-                    round((time.monotonic() - rate_limit_started_at) * 1000)
-                )
-            if not rate_limit_allowed:
+            ):
                 followup_required = True
                 continue
 
-            credit_started_at = time.monotonic()
             credit_info = _ensure_credit_for_tool(
                 agent,
                 tool_name,
                 span=tool_span,
                 credit_snapshot=credit_snapshot,
                 eval_run_id=eval_run_id,
-                use_existing_transaction=deferred_tool_calls is not None,
             )
-            if metrics is not None:
-                metrics.credit_reservation_ms += int(
-                    round((time.monotonic() - credit_started_at) * 1000)
-                )
             if not credit_info:
                 abort_after_execution = True
                 break
@@ -2926,7 +2863,6 @@ def _prepare_tool_batch_impl(
             consumed_credit = credit_info.get("credit")
 
             close_old_connections()
-            persistence_started_at = time.monotonic()
             pending_step = _create_pending_tool_call_step(
                 agent=agent,
                 tool_name=tool_name,
@@ -2935,12 +2871,7 @@ def _prepare_tool_batch_impl(
                 consumed_credit=consumed_credit,
                 attach_completion=attach_completion,
                 attach_prompt_archive=attach_prompt_archive,
-                deferred_tool_calls=deferred_tool_calls,
             )
-            if metrics is not None:
-                metrics.pending_persistence_ms += int(
-                    round((time.monotonic() - persistence_started_at) * 1000)
-                )
 
             prepared_calls.append(
                 _PreparedToolExecution(
@@ -2956,6 +2887,7 @@ def _prepare_tool_batch_impl(
                     inferred_continue=inferred_continue,
                     parallel_safe=parallel_ineligible_reason is None,
                     parallel_ineligible_reason=parallel_ineligible_reason,
+                    resolved_entry=resolved_entry,
                 )
             )
 
@@ -2967,18 +2899,6 @@ def _prepare_tool_batch_impl(
         ),
         abort_after_execution=abort_after_execution,
         parallel_ineligible_reason=_parallel_batch_ineligible_reason(prepared_calls),
-    )
-
-
-def _emit_deferred_pending_tool_calls(steps: tuple["PersistentAgentStep", ...]) -> None:
-    for step in steps:
-        _emit_tool_call_realtime(step, "pending")
-
-
-def _parallel_preparation_abort_requested(agent: PersistentAgent) -> bool:
-    return (
-        _get_processing_abort_reason(agent.id) is not None
-        or is_processing_stop_requested(agent.id)
     )
 
 
@@ -2997,123 +2917,27 @@ def _prepare_tool_batch(
     attach_completion: Any,
     attach_prompt_archive: Any,
 ) -> _PreparedToolBatch:
-    common_kwargs = {
-        "tool_calls": tool_calls,
-        "budget_ctx": budget_ctx,
-        "eval_run_id": eval_run_id,
-        "heartbeat": heartbeat,
-        "lock_extender": lock_extender,
-        "credit_snapshot": credit_snapshot,
-        "allow_inferred_message_continue": allow_inferred_message_continue,
-        "has_non_sleep_calls": has_non_sleep_calls,
-        "has_user_facing_message": has_user_facing_message,
-        "attach_completion": attach_completion,
-        "attach_prompt_archive": attach_prompt_archive,
-    }
-    if not _is_parallel_preparation_candidate(tool_calls):
-        return _prepare_tool_batch_impl(agent, **common_kwargs)
-
-    started_at = time.monotonic()
-    metrics = _BatchPreparationMetrics()
-    with tracer.start_as_current_span("Prepare Parallel Tool Batch") as batch_span:
-        batch_span.set_attribute("persistent_agent.id", str(agent.id))
-        batch_span.set_attribute("tool_batch.size", len(tool_calls))
-        if _should_abort_processing(
-            agent,
-            budget_ctx=budget_ctx,
-            heartbeat=heartbeat,
-            span=batch_span,
-            check_context="parallel_tool_batch_start",
-        ):
-            return _PreparedToolBatch([], False, False, True, "preparation_aborted")
-        if lock_extender:
-            lock_extender.maybe_extend()
-        if heartbeat:
-            heartbeat.touch("tool_batch")
-
-        rate_limit_started_at = time.monotonic()
+    rate_limit_batch = None
+    if len(tool_calls) > 1:
         rate_limit_batch = _build_tool_rate_limit_batch(
             agent,
             [name for call in tool_calls if (name := _get_tool_call_name(call))],
         )
-        metrics.rate_limit_lookup_ms = int(
-            round((time.monotonic() - rate_limit_started_at) * 1000)
-        )
-
-        deferred_tool_calls: list[PersistentAgentToolCall] = []
-        try:
-            with transaction.atomic():
-                prepared_batch = _prepare_tool_batch_impl(
-                    agent,
-                    **common_kwargs,
-                    check_abort_per_call=False,
-                    rate_limit_batch=rate_limit_batch,
-                    deferred_tool_calls=deferred_tool_calls,
-                    metrics=metrics,
-                )
-                if deferred_tool_calls:
-                    persistence_started_at = time.monotonic()
-                    PersistentAgentToolCall.objects.bulk_create(deferred_tool_calls)
-                    metrics.pending_persistence_ms += int(
-                        round((time.monotonic() - persistence_started_at) * 1000)
-                    )
-                if _parallel_preparation_abort_requested(agent):
-                    raise _BatchPreparationCancelled
-
-                pending_steps = tuple(
-                    prepared.pending_step
-                    for prepared in prepared_batch.prepared_calls
-                    if prepared.pending_step is not None
-                )
-                if pending_steps:
-                    transaction.on_commit(
-                        lambda steps=pending_steps: _emit_deferred_pending_tool_calls(steps)
-                    )
-        except _BatchPreparationCancelled:
-            _should_abort_processing(
-                agent,
-                budget_ctx=budget_ctx,
-                heartbeat=heartbeat,
-                span=batch_span,
-                check_context="parallel_tool_batch_precommit",
-            )
-            return _PreparedToolBatch([], False, False, True, "preparation_aborted")
-        except (DatabaseError, _PendingToolPersistenceError):
-            logger.exception(
-                "Agent %s: transactional parallel tool preparation failed; rolled back batch.",
-                agent.id,
-            )
-            batch_span.add_event("Parallel tool preparation rolled back")
-            return _PreparedToolBatch([], False, False, True, "preparation_failed")
-
-        total_ms = int(round((time.monotonic() - started_at) * 1000))
-        measured_ms = (
-            metrics.rate_limit_lookup_ms
-            + metrics.rate_limit_enforcement_ms
-            + metrics.credit_reservation_ms
-            + metrics.pending_persistence_ms
-        )
-        preflight_ms = max(0, total_ms - measured_ms)
-        batch_span.set_attribute("tool_batch.preflight_ms", preflight_ms)
-        batch_span.set_attribute(
-            "tool_batch.rate_limit_ms",
-            metrics.rate_limit_lookup_ms + metrics.rate_limit_enforcement_ms,
-        )
-        batch_span.set_attribute("tool_batch.credit_reservation_ms", metrics.credit_reservation_ms)
-        batch_span.set_attribute("tool_batch.pending_persistence_ms", metrics.pending_persistence_ms)
-        batch_span.set_attribute("tool_batch.total_prepare_ms", total_ms)
-        logger.info(
-            "Agent %s prepared parallel tool batch size=%d total_ms=%d preflight_ms=%d "
-            "rate_limit_ms=%d credit_ms=%d persistence_ms=%d",
-            agent.id,
-            len(tool_calls),
-            total_ms,
-            preflight_ms,
-            metrics.rate_limit_lookup_ms + metrics.rate_limit_enforcement_ms,
-            metrics.credit_reservation_ms,
-            metrics.pending_persistence_ms,
-        )
-        return prepared_batch
+    return _prepare_tool_batch_impl(
+        agent,
+        tool_calls=tool_calls,
+        budget_ctx=budget_ctx,
+        eval_run_id=eval_run_id,
+        heartbeat=heartbeat,
+        lock_extender=lock_extender,
+        credit_snapshot=credit_snapshot,
+        allow_inferred_message_continue=allow_inferred_message_continue,
+        has_non_sleep_calls=has_non_sleep_calls,
+        has_user_facing_message=has_user_facing_message,
+        attach_completion=attach_completion,
+        attach_prompt_archive=attach_prompt_archive,
+        rate_limit_batch=rate_limit_batch,
+    )
 
 
 def _execute_prepared_tool_batch(
@@ -4593,7 +4417,6 @@ def _ensure_credit_for_tool(
     span=None,
     credit_snapshot: Optional[Dict[str, Any]] = None,
     eval_run_id: Optional[str] = None,
-    use_existing_transaction: bool = False,
 ) -> dict[str, Any] | Literal[False]:
     """Ensure the agent's owner has a task credit and consume it just-in-time.
 
@@ -4875,15 +4698,8 @@ def _ensure_credit_for_tool(
         return False
 
     try:
-        if use_existing_transaction:
-            consumed = TaskCreditService.check_and_consume_credit_for_owner(
-                owner,
-                amount=cost,
-                use_existing_transaction=True,
-            )
-        else:
-            with transaction.atomic():
-                consumed = TaskCreditService.check_and_consume_credit_for_owner(owner, amount=cost)
+        with transaction.atomic():
+            consumed = TaskCreditService.check_and_consume_credit_for_owner(owner, amount=cost)
         consumed_credit = consumed.get("credit") if consumed else None
     except Exception as e:
         log_credit_failure(

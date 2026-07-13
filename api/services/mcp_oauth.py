@@ -82,15 +82,49 @@ def _write_failure(credential: MCPServerOAuthCredential, status: str) -> None:
 
 
 def _load_config(config_id: str) -> Optional[MCPServerConfig]:
+    return (
+        MCPServerConfig.objects.filter(id=config_id, is_active=True)
+        .select_related("oauth_credential")
+        .first()
+    )
+
+
+def _log_result(
+    config_id: str,
+    result: MCPOAuthResult,
+    *,
+    started_at: float,
+    lock_state: str = "none",
+) -> MCPOAuthResult:
+    logger.info(
+        "MCP OAuth preparation: config=%s status=%s cache=%s lock=%s refreshed=%s duration_ms=%d",
+        config_id,
+        result.status,
+        result.cache_state,
+        lock_state,
+        result.refreshed,
+        round((monotonic() - started_at) * 1000),
+    )
+    return result
+
+
+def _database_unavailable_result() -> MCPOAuthResult:
+    return MCPOAuthResult(
+        status=MCPOAuthStatus.TEMPORARILY_UNAVAILABLE,
+        credential=None,
+        cache_state="database_unavailable",
+        message="This MCP integration is temporarily unavailable.",
+    )
+
+
+def _load_config_result(
+    config_id: str,
+) -> tuple[Optional[MCPServerConfig], Optional[MCPOAuthResult]]:
     try:
-        return (
-            MCPServerConfig.objects.filter(id=config_id, is_active=True)
-            .select_related("oauth_credential")
-            .first()
-        )
+        return _load_config(config_id), None
     except DatabaseError:
         logger.exception("Failed to load MCP OAuth configuration %s", config_id)
-        return None
+        return None, _database_unavailable_result()
 
 
 def _credential_for_config(config: MCPServerConfig) -> Optional[MCPServerOAuthCredential]:
@@ -305,21 +339,23 @@ def _refresh_credential(
 def ensure_mcp_oauth_credential(config_id: str) -> MCPOAuthResult:
     """Return a usable credential, refreshing only this MCP server when required."""
     started_at = monotonic()
-    config = _load_config(config_id)
-    if config is None:
-        result = MCPOAuthResult(
-            status=MCPOAuthStatus.CONFIGURATION_ERROR,
-            credential=None,
-            message="This MCP integration is unavailable.",
-        )
-        logger.info(
-            "MCP OAuth preparation: config=%s status=%s cache=%s duration_ms=%d",
+    config, load_error = _load_config_result(config_id)
+    if load_error is not None:
+        return _log_result(
             config_id,
-            result.status,
-            result.cache_state,
-            round((monotonic() - started_at) * 1000),
+            load_error,
+            started_at=started_at,
         )
-        return result
+    if config is None:
+        return _log_result(
+            config_id,
+            MCPOAuthResult(
+                status=MCPOAuthStatus.CONFIGURATION_ERROR,
+                credential=None,
+                message="This MCP integration is unavailable.",
+            ),
+            started_at=started_at,
+        )
 
     credential = _credential_for_config(config)
     if config.auth_method != MCPServerConfig.AuthMethod.OAUTH2:
@@ -356,22 +392,22 @@ def ensure_mcp_oauth_credential(config_id: str) -> MCPOAuthResult:
         lock_state = "unavailable"
 
     if not acquired:
-        reloaded = _load_config(config_id)
+        reloaded, result = _load_config_result(config_id)
         reloaded_credential = _credential_for_config(reloaded) if reloaded else None
-        if reloaded_credential and not _needs_refresh(reloaded_credential):
+        if result is None and reloaded_credential and not _needs_refresh(reloaded_credential):
             result = MCPOAuthResult(
                 status=MCPOAuthStatus.USABLE,
                 credential=reloaded_credential,
                 refreshed=True,
                 cache_state="waited_for_refresh",
             )
-        elif reloaded_credential:
+        elif result is None and reloaded_credential:
             result = _cached_failure_result(reloaded_credential) or _failure_result(
                 reloaded_credential,
                 MCPOAuthStatus.TEMPORARILY_UNAVAILABLE,
                 cache_state="lock_timeout",
             )
-        else:
+        elif result is None:
             result = MCPOAuthResult(
                 status=MCPOAuthStatus.RECONNECT_REQUIRED,
                 credential=None,
@@ -380,21 +416,21 @@ def ensure_mcp_oauth_credential(config_id: str) -> MCPOAuthResult:
             )
     else:
         try:
-            reloaded = _load_config(config_id)
+            reloaded, result = _load_config_result(config_id)
             reloaded_credential = _credential_for_config(reloaded) if reloaded else None
-            if reloaded is None or reloaded_credential is None:
+            if result is None and (reloaded is None or reloaded_credential is None):
                 result = MCPOAuthResult(
                     status=MCPOAuthStatus.RECONNECT_REQUIRED,
                     credential=None,
                     message="This MCP integration must be reconnected before it can be used.",
                 )
-            elif not _needs_refresh(reloaded_credential):
+            elif result is None and not _needs_refresh(reloaded_credential):
                 result = MCPOAuthResult(
                     status=MCPOAuthStatus.USABLE,
                     credential=reloaded_credential,
                     cache_state="refreshed_by_peer",
                 )
-            else:
+            elif result is None:
                 result = _refresh_credential(reloaded, reloaded_credential)
                 if result.status != MCPOAuthStatus.USABLE:
                     _write_failure(reloaded_credential, result.status)
@@ -411,13 +447,9 @@ def ensure_mcp_oauth_credential(config_id: str) -> MCPOAuthResult:
                 except (redis.exceptions.RedisError, PotteryError):
                     logger.debug("Failed to release MCP OAuth lock for %s", config_id, exc_info=True)
 
-    logger.info(
-        "MCP OAuth preparation: config=%s status=%s cache=%s lock=%s refreshed=%s duration_ms=%d",
+    return _log_result(
         config_id,
-        result.status,
-        result.cache_state,
-        lock_state,
-        result.refreshed,
-        round((monotonic() - started_at) * 1000),
+        result,
+        started_at=started_at,
+        lock_state=lock_state,
     )
-    return result

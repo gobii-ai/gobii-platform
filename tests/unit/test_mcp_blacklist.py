@@ -136,9 +136,8 @@ class TestMCPToolBlacklist(TestCase):
         # Should return an error
         self.assertEqual(result["status"], "error")
         self.assertIn("blacklisted", result["message"].lower())
-    def test_enable_mcp_tool_blocks_blacklisted(self):
-        """Test that enable_mcp_tool blocks blacklisted tools."""
-        from api.agent.tools.tool_manager import enable_mcp_tool
+    def test_enable_tools_blocks_blacklisted_mcp_tool(self):
+        from api.agent.tools.tool_manager import enable_tools
         
         # Create a real agent
         from django.contrib.auth import get_user_model
@@ -150,8 +149,7 @@ class TestMCPToolBlacklist(TestCase):
         # Mock the manager initialization
         with patch.object(self.manager, '_initialized', True):
             # Try to enable a blacklisted tool
-            result = enable_mcp_tool(agent, "mcp_brightdata_scraping_browser_navigate")
-        
-        # Should return an error
-        self.assertEqual(result["status"], "error")
-        self.assertIn("blacklisted", result["message"].lower())
+            result = enable_tools(agent, ["mcp_brightdata_scraping_browser_navigate"])
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["invalid"], ["mcp_brightdata_scraping_browser_navigate"])

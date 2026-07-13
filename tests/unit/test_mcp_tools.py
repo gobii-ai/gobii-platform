@@ -4,7 +4,6 @@ import asyncio
 import atexit
 import json
 import os
-import time
 import uuid
 from datetime import datetime, timedelta, UTC
 from contextlib import nullcontext
@@ -52,7 +51,6 @@ from api.agent.tools.mcp_manager import (
     execute_mcp_tool,
 )
 from api.agent.tools.tool_manager import (
-    enable_mcp_tool,
     enable_tools,
     ensure_default_tools_enabled,
     get_enabled_tool_definitions,
@@ -70,6 +68,7 @@ from api.agent.tools.search_tools import (
 from api.agent.system_skills.registry import SystemSkillDefinition
 from api.agent.system_skills.image_generation import IMAGE_GENERATION_SYSTEM_SKILL_KEY
 from api.services.prompt_settings import invalidate_prompt_settings_cache
+from api.services.mcp_oauth import MCPOAuthResult, MCPOAuthStatus
 from api.services.tool_settings import invalidate_tool_settings_cache
 from tests.utils.llm_seed import seed_persistent_basic
 from util.analytics import AnalyticsEvent
@@ -725,19 +724,6 @@ class MCPToolManagerTests(TestCase):
         self.assertEqual(tools, [])
         self.assertEqual(observed_agents, [agent])
 
-    def test_refresh_servers_by_config_id_does_not_advance_global_marker_for_unchanged_runtime(self):
-        runtime = self.manager._build_runtime_from_config(self.server_config)
-        old_marker = timezone.now() - timedelta(days=1)
-        self.manager._initialized = True
-        self.manager._last_refresh_marker = old_marker
-        self.manager._server_cache = {runtime.config_id: runtime}
-
-        with patch.object(self.manager, "_safe_register_runtime") as mock_register:
-            self.assertTrue(self.manager._refresh_servers_by_config_id({runtime.config_id}))
-
-        mock_register.assert_not_called()
-        self.assertEqual(self.manager._last_refresh_marker, old_marker)
-
     def test_get_tools_for_agent_refreshes_config_ids_and_server_names_independently(self):
         config_id = str(uuid.uuid4())
         named_config_id = str(uuid.uuid4())
@@ -1143,6 +1129,79 @@ class MCPToolManagerTests(TestCase):
         self.assertIn("last_refresh_response", credential.metadata)
 
     @tag("batch_mcp_tools")
+    def test_runtime_oauth_uses_unexpired_token_during_database_failure(self):
+        runtime = MCPServerRuntime(
+            config_id=self.config_id,
+            name=self.server_name,
+            display_name="OAuth server",
+            description="",
+            command=None,
+            args=[],
+            url="https://example.com/mcp",
+            auth_method=MCPServerConfig.AuthMethod.OAUTH2,
+            env={},
+            headers={},
+            prefetch_apps=[],
+            scope=MCPServerConfig.Scope.PLATFORM,
+            organization_id=None,
+            user_id=None,
+            updated_at=timezone.now(),
+            oauth_access_token="still-valid",
+            oauth_expires_at=timezone.now() + timedelta(minutes=1),
+        )
+        unavailable = MCPOAuthResult(
+            status=MCPOAuthStatus.TEMPORARILY_UNAVAILABLE,
+            credential=None,
+            cache_state="database_unavailable",
+        )
+
+        with patch(
+            "api.agent.tools.mcp_manager.ensure_mcp_oauth_credential",
+            return_value=unavailable,
+        ):
+            prepared, error = self.manager._ensure_runtime_oauth(runtime)
+
+        self.assertIs(prepared, runtime)
+        self.assertIsNone(error)
+
+    @tag("batch_mcp_tools")
+    def test_runtime_oauth_rejects_expired_token_during_database_failure(self):
+        runtime = MCPServerRuntime(
+            config_id=self.config_id,
+            name=self.server_name,
+            display_name="OAuth server",
+            description="",
+            command=None,
+            args=[],
+            url="https://example.com/mcp",
+            auth_method=MCPServerConfig.AuthMethod.OAUTH2,
+            env={},
+            headers={},
+            prefetch_apps=[],
+            scope=MCPServerConfig.Scope.PLATFORM,
+            organization_id=None,
+            user_id=None,
+            updated_at=timezone.now(),
+            oauth_access_token="expired",
+            oauth_expires_at=timezone.now() - timedelta(minutes=1),
+        )
+        unavailable = MCPOAuthResult(
+            status=MCPOAuthStatus.TEMPORARILY_UNAVAILABLE,
+            credential=None,
+            cache_state="database_unavailable",
+            message="Temporarily unavailable",
+        )
+
+        with patch(
+            "api.agent.tools.mcp_manager.ensure_mcp_oauth_credential",
+            return_value=unavailable,
+        ):
+            _prepared, error = self.manager._ensure_runtime_oauth(runtime)
+
+        self.assertEqual(error["status"], "error")
+        self.assertTrue(error["retryable"])
+
+    @tag("batch_mcp_tools")
     @patch("api.services.mcp_oauth.requests.post")
     def test_build_runtime_skips_refresh_when_token_valid(self, mock_post):
         with patch("api.services.mcp_tool_discovery.schedule_mcp_tool_discovery"):
@@ -1432,21 +1491,6 @@ class MCPToolManagerTests(TestCase):
         self.assertEqual(mock_register.call_count, len(expected_ids))
         
     @patch('api.agent.tools.mcp_manager.MCPToolManager.initialize')
-    def test_get_all_available_tools(self, mock_init):
-        """Test getting all available tools from cache."""
-        tool1 = MCPToolInfo(self.config_id, "mcp_test_tool1", self.server_name, "tool1", "Test tool 1", {})
-        tool2 = MCPToolInfo(self.config_id, "mcp_test_tool2", self.server_name, "tool2", "Test tool 2", {})
-        self.manager._tools_cache = {self.config_id: [tool1, tool2]}
-        self.manager._initialized = True
-        
-        tools = self.manager.get_all_available_tools()
-        
-        self.assertEqual(len(tools), 2)
-        self.assertIn(tool1, tools)
-        self.assertIn(tool2, tools)
-        mock_init.assert_not_called()  # Should not call initialize since _initialized is True
-        
-    @patch('api.agent.tools.mcp_manager.MCPToolManager.initialize')
     def test_get_enabled_tools_definitions(self, mock_init):
         """Test getting OpenAI-format tool definitions."""
         User = get_user_model()
@@ -1466,14 +1510,12 @@ class MCPToolManagerTests(TestCase):
             "Test tool 1",
             {"type": "object", "properties": {}}
         )
-        # Enable via API to populate table
-        from api.agent.tools.tool_manager import enable_mcp_tool
         # Ensure global manager doesn't auto-initialize during enable
         from api.agent.tools import mcp_manager as mm
         mm._mcp_manager._initialized = True
         with patch('api.agent.tools.mcp_manager._mcp_manager.get_tools_for_agent') as mock_all:
             mock_all.return_value = [tool1]
-            enable_mcp_tool(agent, "mcp_test_tool1")
+            enable_tools(agent, ["mcp_test_tool1"])
         self.manager._tools_cache = {self.config_id: [tool1]}
         self.manager._initialized = True
         
@@ -1563,8 +1605,6 @@ class MCPToolManagerTests(TestCase):
             charter="Test",
             browser_use_agent=browser_agent,
         )
-        # Mark enabled in table
-        from api.agent.tools.tool_manager import enable_mcp_tool
         tool1 = MCPToolInfo(self.config_id, "mcp_test_tool1", self.server_name, "tool1", "Test tool 1", {})
         runtime = MCPServerRuntime(
             config_id=self.config_id,
@@ -1588,7 +1628,7 @@ class MCPToolManagerTests(TestCase):
         self.manager._initialized = True
         with patch('api.agent.tools.mcp_manager._mcp_manager.get_tools_for_agent') as mock_all:
             mock_all.return_value = [tool1]
-            enable_mcp_tool(agent, "mcp_test_tool1")
+            enable_tools(agent, ["mcp_test_tool1"])
 
         mock_client = MagicMock()
         self.manager._clients = {self.config_id: mock_client}
@@ -3872,48 +3912,6 @@ class MCPToolFunctionsTests(TestCase):
         self.assertNotIn("run_command", user_message)
         mock_enable_tools.assert_not_called()
         
-    @patch('api.agent.tools.mcp_manager._mcp_manager.get_tools_for_agent')
-    @patch('api.agent.tools.mcp_manager._mcp_manager.initialize')
-    def test_enable_mcp_tool_success(self, mock_init, mock_get_tools):
-        """Test successfully enabling an MCP tool."""
-        mock_get_tools.return_value = [
-            MCPToolInfo(self.config_id, "mcp_test_tool", self.server_name, "tool", "Test tool", {})
-        ]
-        
-        result = enable_mcp_tool(self.agent, "mcp_test_tool")
-        
-        self.assertEqual(result["status"], "success")
-        self.assertEqual(result["enabled"], "mcp_test_tool")
-        self.assertIsNone(result["disabled"])
-        
-        names = set(PersistentAgentEnabledTool.objects.filter(agent=self.agent).values_list("tool_full_name", flat=True))
-        self.assertIn("mcp_test_tool", names)
-        
-    @patch('api.agent.tools.mcp_manager._mcp_manager.get_tools_for_agent')
-    @patch('api.agent.tools.mcp_manager._mcp_manager.initialize')
-    def test_enable_mcp_tool_already_enabled(self, mock_init, mock_get_tools):
-        """Test enabling a tool that's already enabled."""
-        mock_get_tools.return_value = [
-            MCPToolInfo(self.config_id, "mcp_test_tool", self.server_name, "tool", "Test tool", {})
-        ]
-        
-        # Pre-enable and set an older last_used_at
-        enable_mcp_tool(self.agent, "mcp_test_tool")
-        row = PersistentAgentEnabledTool.objects.get(agent=self.agent, tool_full_name="mcp_test_tool")
-        from django.utils import timezone
-        row.last_used_at = timezone.now() - timezone.timedelta(seconds=100)
-        row.save(update_fields=["last_used_at"])
-        
-        result = enable_mcp_tool(self.agent, "mcp_test_tool")
-        
-        self.assertEqual(result["status"], "success")
-        self.assertIn("already enabled", result["message"])
-        
-        # Check usage timestamp was updated
-        row.refresh_from_db()
-        from django.utils import timezone
-        self.assertGreater(row.last_used_at, timezone.now() - timezone.timedelta(seconds=10))
-
     @tag("batch_mcp_tools")
     @patch("api.agent.tools.tool_manager._get_manager")
     def test_mark_tool_enabled_without_discovery_skips_discovery(self, mock_get_manager):
@@ -3948,48 +3946,6 @@ class MCPToolFunctionsTests(TestCase):
         )
         self.assertIn("mcp_new_tool", names)
         self.assertNotIn("mcp_old_tool", names)
-
-    @patch('api.agent.tools.mcp_manager._mcp_manager.get_tools_for_agent')
-    @patch('api.agent.tools.mcp_manager._mcp_manager.initialize')
-    def test_enable_mcp_tool_with_lru_eviction(self, mock_init, mock_get_tools):
-        """Test LRU eviction when enabling beyond limit."""
-        # Create 41 tools (one more than the new 40 limit)
-        tools = [
-            MCPToolInfo(self.config_id, f"mcp_test_tool{i}", self.server_name, f"tool{i}", f"Test tool {i}", {})
-            for i in range(41)
-        ]
-        mock_get_tools.return_value = tools
-        
-        # Enable 40 tools with different timestamps
-        for i in range(40):
-            enable_mcp_tool(self.agent, f"mcp_test_tool{i}")
-            row = PersistentAgentEnabledTool.objects.get(agent=self.agent, tool_full_name=f"mcp_test_tool{i}")
-            from django.utils import timezone
-            row.last_used_at = timezone.now() - timezone.timedelta(seconds=(40 - i))
-            row.save(update_fields=["last_used_at"])
-        
-        # Enable the 41st tool, should evict tool0 (oldest)
-        result = enable_mcp_tool(self.agent, "mcp_test_tool40")
-        
-        self.assertEqual(result["status"], "success")
-        self.assertEqual(result["enabled"], "mcp_test_tool40")
-        self.assertEqual(result["disabled"], "mcp_test_tool0")
-        
-        names = set(PersistentAgentEnabledTool.objects.filter(agent=self.agent).values_list("tool_full_name", flat=True))
-        self.assertNotIn("mcp_test_tool0", names)
-        self.assertIn("mcp_test_tool40", names)
-        self.assertEqual(len(names), 40)
-        
-    @patch('api.agent.tools.mcp_manager._mcp_manager.get_tools_for_agent')
-    @patch('api.agent.tools.mcp_manager._mcp_manager.initialize')
-    def test_enable_mcp_tool_nonexistent(self, mock_init, mock_get_tools):
-        """Test enabling a non-existent tool."""
-        mock_get_tools.return_value = []
-        
-        result = enable_mcp_tool(self.agent, "mcp_nonexistent")
-        
-        self.assertEqual(result["status"], "error")
-        self.assertIn("does not exist", result["message"])
 
     @patch('api.agent.tools.mcp_manager._mcp_manager.get_tools_for_agent', return_value=[])
     @patch('api.agent.tools.mcp_manager._mcp_manager.initialize')
@@ -4136,10 +4092,10 @@ class MCPToolFunctionsTests(TestCase):
             MCPToolInfo(self.config_id, "mcp_test_tool", self.server_name, "tool", "Test tool", {})
         ]
 
-        result = enable_mcp_tool(self.agent, "mcp_test_tool")
+        result = enable_tools(self.agent, ["mcp_test_tool"])
 
-        self.assertEqual(result["status"], "error")
-        self.assertIn("intelligence tier", result["message"])
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["invalid"], ["mcp_test_tool"])
         self.assertFalse(
             PersistentAgentEnabledTool.objects.filter(
                 agent=self.agent,
@@ -4315,7 +4271,16 @@ class MCPToolExecutorsTests(TestCase):
     @patch('api.agent.tools.mcp_manager._mcp_manager')
     def test_execute_mcp_tool(self, mock_manager):
         """Test executing an MCP tool."""
+        tool = MCPToolInfo(
+            str(uuid.uuid4()),
+            "mcp_test_tool",
+            "test-server",
+            "tool",
+            "Test tool",
+            {},
+        )
         mock_manager._initialized = True
+        mock_manager.prepare_tool_for_agent.return_value = tool
         mock_manager.execute_mcp_tool.return_value = {
             "status": "success",
             "result": "Tool executed"
@@ -4326,7 +4291,11 @@ class MCPToolExecutorsTests(TestCase):
         self.assertEqual(result["status"], "success")
         self.assertEqual(result["result"], "Tool executed")
         mock_manager.execute_mcp_tool.assert_called_once_with(
-            self.agent, "mcp_test_tool", {"param": "value"}, force_local=False
+            self.agent,
+            "mcp_test_tool",
+            {"param": "value"},
+            force_local=False,
+            tool_info=tool,
         )
 
 
@@ -4394,67 +4363,6 @@ class MCPToolIntegrationTests(TestCase):
             updated_at=config.updated_at,
         )
         
-    @patch('api.agent.tools.mcp_manager._mcp_manager.get_tools_for_agent')
-    @patch('api.agent.tools.mcp_manager._mcp_manager.initialize')
-    def test_lru_eviction_workflow(self, mock_init, mock_get_tools):
-        """Test complete LRU eviction workflow."""
-        # Create exactly 40 tools
-        tools = [
-            MCPToolInfo(f"cfg-bulk-{i}", f"mcp_test_tool{i}", self.server_name, f"tool{i}", f"Test tool {i}", {})
-            for i in range(41)
-        ]
-        mock_get_tools.return_value = tools
-        
-        # Enable 40 tools
-        for i in range(40):
-            result = enable_mcp_tool(self.agent, f"mcp_test_tool{i}")
-            self.assertEqual(result["status"], "success")
-            time.sleep(0.01)  # Small delay to ensure different timestamps
-            
-        self.assertEqual(
-            PersistentAgentEnabledTool.objects.filter(agent=self.agent).count(), 40
-        )
-        
-        # Use tool10 to make it more recent
-        row10 = PersistentAgentEnabledTool.objects.get(agent=self.agent, tool_full_name="mcp_test_tool10")
-        from django.utils import timezone
-        row10.last_used_at = timezone.now()
-        row10.save(update_fields=["last_used_at"])
-        
-        # Enable tool40, should evict tool0 (not tool10 since we just used it)
-        result = enable_mcp_tool(self.agent, "mcp_test_tool40")
-        
-        self.assertEqual(result["status"], "success")
-        self.assertEqual(result["disabled"], "mcp_test_tool0")
-        
-        enabled_now = set(
-            PersistentAgentEnabledTool.objects.filter(agent=self.agent).values_list("tool_full_name", flat=True)
-        )
-        self.assertIn("mcp_test_tool10", enabled_now)
-        self.assertNotIn("mcp_test_tool0", enabled_now)
-        self.assertIn("mcp_test_tool40", enabled_now)
-        
-    def test_tool_usage_tracking(self):
-        """Test that tool usage is properly tracked."""
-        with patch('api.agent.tools.mcp_manager._mcp_manager.initialize') as mock_init:
-            with patch('api.agent.tools.mcp_manager._mcp_manager.get_tools_for_agent') as mock_get_tools:
-                mock_get_tools.return_value = [
-                    MCPToolInfo(self.config_id, "mcp_test_tool", self.server_name, "tool", "Test", {})
-                ]
-                # Enable a tool (initial enable may not set last_used_at)
-                enable_mcp_tool(self.agent, "mcp_test_tool")
-                row = PersistentAgentEnabledTool.objects.get(agent=self.agent, tool_full_name="mcp_test_tool")
-                first_time = row.last_used_at  # may be None on initial enable
-
-                # Wait and re-enable (should set/update last_used_at)
-                time.sleep(0.1)
-                enable_mcp_tool(self.agent, "mcp_test_tool")
-                row.refresh_from_db()
-                second_time = row.last_used_at
-                self.assertIsNotNone(second_time)
-                if first_time is not None:
-                    self.assertGreater(second_time, first_time)
-
     @patch('api.agent.tools.tool_manager._get_manager')
     @patch('api.agent.tools.tool_manager.execute_mcp_tool')
     def test_execute_enabled_tool_auto_enables_mcp(self, mock_execute, mock_get_manager):
@@ -4477,7 +4385,12 @@ class MCPToolIntegrationTests(TestCase):
         result = execute_enabled_tool(self.agent, "mcp_test_tool", {"foo": "bar"})
 
         self.assertEqual(result["status"], "success")
-        mock_execute.assert_called_once_with(self.agent, "mcp_test_tool", {"foo": "bar"})
+        mock_execute.assert_called_once_with(
+            self.agent,
+            "mcp_test_tool",
+            {"foo": "bar"},
+            tool_info=mock_manager.prepare_tool_for_agent.return_value,
+        )
         self.assertTrue(
             PersistentAgentEnabledTool.objects.filter(
                 agent=self.agent, tool_full_name="mcp_test_tool"
@@ -4496,7 +4409,7 @@ class MCPToolIntegrationTests(TestCase):
         manager.initialize.assert_not_called()
 
     @tag("batch_agent_tools")
-    def test_mcp_execution_wrappers_prepare_only_requested_tool(self):
+    def test_mcp_execution_wrappers_reuse_prepared_tool_info(self):
         from api.agent.tools import mcp_manager
 
         agent = SimpleNamespace(id=uuid.uuid4())
@@ -4508,26 +4421,45 @@ class MCPToolIntegrationTests(TestCase):
             "Test",
             {},
         )
+        alias = "mcp_testtool"
         with patch.object(mcp_manager, "_mcp_manager") as manager:
             manager.prepare_tool_for_agent.return_value = tool
             manager.execute_mcp_tool.return_value = {"status": "success"}
             manager.execute_mcp_tool_isolated.return_value = {"status": "success"}
 
             self.assertEqual(
-                mcp_manager.execute_mcp_tool(agent, tool.full_name, {}),
+                mcp_manager.execute_mcp_tool(
+                    agent,
+                    alias,
+                    {},
+                    tool_info=tool,
+                ),
                 {"status": "success"},
             )
             self.assertEqual(
-                mcp_manager.execute_mcp_tool_isolated(agent, tool.full_name, {}),
+                mcp_manager.execute_mcp_tool_isolated(
+                    agent,
+                    alias,
+                    {},
+                    tool_info=tool,
+                ),
                 {"status": "success"},
             )
 
         manager.initialize.assert_not_called()
-        self.assertEqual(manager.prepare_tool_for_agent.call_count, 2)
-        manager.prepare_tool_for_agent.assert_called_with(
+        manager.prepare_tool_for_agent.assert_not_called()
+        manager.execute_mcp_tool.assert_called_once_with(
             agent,
             tool.full_name,
-            require_enabled=True,
+            {},
+            force_local=False,
+            tool_info=tool,
+        )
+        manager.execute_mcp_tool_isolated.assert_called_once_with(
+            agent,
+            tool.full_name,
+            {},
+            tool_info=tool,
         )
 
     @tag("batch_agent_tools")
@@ -4781,7 +4713,7 @@ class MCPToolIntegrationTests(TestCase):
             # Pre-fill 38 tools so a batch of 5 causes 3 evictions
             pre = [f"mcp_t{i}" for i in range(38)]
             for i, name in enumerate(pre):
-                enable_mcp_tool(agent, name)
+                mark_tool_enabled_without_discovery(agent, name)
                 # Stagger usage to influence eviction
                 row = PersistentAgentEnabledTool.objects.get(agent=agent, tool_full_name=name)
                 from django.utils import timezone
@@ -4824,7 +4756,7 @@ class MCPToolIntegrationTests(TestCase):
 
         pre_enabled = [f"mcp_conf_{i}" for i in range(4)]
         for name in pre_enabled:
-            enable_mcp_tool(self.agent, name)
+            mark_tool_enabled_without_discovery(self.agent, name)
 
         result = enable_tools(self.agent, [f"mcp_conf_{i}" for i in range(4, 7)])
 

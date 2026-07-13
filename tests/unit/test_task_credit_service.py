@@ -440,33 +440,6 @@ class TaskCreditServiceGetTasksEntitledTests(TestCase):
 
 
 @tag("batch_task_credits")
-class TaskCreditServiceCalculateUsedPctTests(TestCase):
-    @patch("tasks.services.TaskCreditService.get_tasks_entitled")
-    @patch("tasks.services.TaskCreditService.get_user_total_tasks_used")
-    def test_calculate_used_pct_normal_and_capped(self, mock_used, mock_entitled):
-        user = User.objects.create(username="user9")
-        mock_used.return_value = 5
-        mock_entitled.return_value = 10
-        self.assertEqual(TaskCreditService.calculate_used_pct(user), 50.0)
-
-    @patch("tasks.services.TaskCreditService.get_user_total_tasks_used")
-    @patch("tasks.services.TaskCreditService.get_tasks_entitled")
-    def test_calculate_used_pct_capped_at_100(self, mock_used, mock_entitled):
-        user = User.objects.create(username="user9")
-        mock_entitled.return_value = 20
-        mock_used.return_value = 20
-        self.assertEqual(TaskCreditService.calculate_used_pct(user), 100.0)
-
-    @patch("tasks.services.TaskCreditService.get_user_total_tasks_used")
-    @patch("tasks.services.TaskCreditService.get_tasks_entitled")
-    def test_calculate_used_pct_with_zero_entitled(self, mock_used, mock_entitled):
-        user = User.objects.create(username="user9")
-        mock_entitled.return_value = 0
-        mock_used.return_value = 5
-        self.assertEqual(TaskCreditService.calculate_used_pct(user), 0.0)
-
-
-@tag("batch_task_credits")
 class TaskCreditServiceGrantOrgSubscriptionCreditsTests(TestCase):
     def setUp(self):
         owner = User.objects.create(username="org_owner_seed")

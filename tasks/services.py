@@ -1,5 +1,4 @@
 # platform/tasks/services.py
-from contextlib import nullcontext
 from decimal import Decimal
 
 from django.contrib.auth.models import User
@@ -512,7 +511,6 @@ class TaskCreditService:
         user,
         additional_task: bool = False,
         amount: Decimal | None = None,
-        use_existing_transaction: bool = False,
     ):
         """
         Consumes a task credit for a user. If the user has no available credits, a ValidationError is raised. Note: if
@@ -568,8 +566,7 @@ class TaskCreditService:
             last_credit = credit
         else:
             # Consume possibly fractional amount across one or more credit blocks
-            atomic_context = nullcontext() if use_existing_transaction else transaction.atomic()
-            with atomic_context:
+            with transaction.atomic():
                 remaining = Decimal(plan_amount)
                 while remaining > 0:
                     credit = (
@@ -605,13 +602,7 @@ class TaskCreditService:
         # Stripe metering handled by periodic rollup task; no per-task usage reporting
 
         # Handle notification of task credit usage when thresholds are crossed
-        if use_existing_transaction:
-            TaskCreditService.handle_task_threshold(
-                user,
-                use_existing_transaction=True,
-            )
-        else:
-            TaskCreditService.handle_task_threshold(user)
+        TaskCreditService.handle_task_threshold(user)
 
         # Failsafe: if no block recorded (unlikely), fetch the next usable block for reference
         if last_credit is None and not additional_task:
@@ -705,35 +696,6 @@ class TaskCreditService:
             return tasks_granted
         return tasks_granted + addl_limit
 
-    # TODO: Ripe for caching
-    @staticmethod
-    @tracer.start_as_current_span("TaskCreditService Calculate Used Percentage")
-    def calculate_used_pct(user: User):
-        """
-        Calculates the percentage of entitled task credits used by a user.
-
-        Parameters:
-        ----------
-        user : User
-            The user whose task credit usage is to be calculated.
-
-        Returns:
-        -------
-        float
-            The percentage of task credits used, or 0 if no credits are available.
-        """
-        total_credits = TaskCreditService.get_tasks_entitled(user)
-        if total_credits == 0:
-            return 0.0
-
-        used_credits = TaskCreditService.get_user_total_tasks_used(user)
-        pct = (used_credits / total_credits) * 100
-
-        if pct > 100:
-            pct = 100.0
-
-        return pct
-
 
     @staticmethod
     def get_current_task_credit(user):
@@ -789,7 +751,6 @@ class TaskCreditService:
         owner,
         additional_task: bool = False,
         amount: Decimal | None = None,
-        use_existing_transaction: bool = False,
     ):
         """
         Consume a credit for either a User or an Organization.
@@ -816,8 +777,7 @@ class TaskCreditService:
                 return credit
             else:
                 # Fractional consumption for organizations across blocks
-                atomic_context = nullcontext() if use_existing_transaction else transaction.atomic()
-                with atomic_context:
+                with transaction.atomic():
                     remaining = Decimal(plan_amount)
                     last_credit = None
                     while remaining > 0:
@@ -855,7 +815,6 @@ class TaskCreditService:
                 owner,
                 additional_task=additional_task,
                 amount=plan_amount,
-                use_existing_transaction=use_existing_transaction,
             )
 
     @staticmethod
@@ -941,7 +900,6 @@ class TaskCreditService:
     def check_and_consume_credit_for_owner(
         owner,
         amount: Decimal | None = None,
-        use_existing_transaction: bool = False,
     ) -> dict:
         """Owner-aware wrapper mirroring check_and_consume_credit."""
         from django.core.exceptions import ValidationError
@@ -951,7 +909,6 @@ class TaskCreditService:
                 credit = TaskCreditService.consume_credit_for_owner(
                     owner,
                     amount=amount,
-                    use_existing_transaction=use_existing_transaction,
                 )
                 return {"success": True, "credit": credit, "error_message": None}
             except ValidationError:
@@ -961,7 +918,6 @@ class TaskCreditService:
                             owner,
                             additional_task=True,
                             amount=amount,
-                            use_existing_transaction=use_existing_transaction,
                         )
                         return {"success": True, "credit": credit, "error_message": None}
                     except ValidationError:
@@ -981,7 +937,6 @@ class TaskCreditService:
             return TaskCreditService.check_and_consume_credit(
                 owner,
                 amount=amount,
-                use_existing_transaction=use_existing_transaction,
             )
 
     @staticmethod
@@ -1172,64 +1127,6 @@ class TaskCreditService:
         return limit
 
     @staticmethod
-    @tracer.start_as_current_span("TaskCreditService Get User Additional Tasks Used Percentage")
-    def get_user_additional_tasks_used_pct(user: User, task_credits: list | None = None) -> float:
-        """
-        Gets the percentage of additional tasks used by a user.
-
-        This function calculates the percentage of additional tasks used based on the total additional tasks available
-        and the additional tasks used.
-
-        Parameters:
-            user (User): The user for whom the additional tasks used percentage is being calculated.
-            task_credits (list, optional): A list of TaskCredit objects. If not provided, it will fetch the task credits.
-                                           Provide to prevent multiple database queries if you already have the task credits.
-
-        Returns:
-            float: The percentage of additional tasks used by the user.
-        """
-        total_addl = get_user_extra_task_limit(user)
-
-        if total_addl == 0 or total_addl == TASKS_UNLIMITED:
-            return 0.0
-
-        total_used = TaskCreditService.get_user_additional_tasks_used(user, task_credits)
-
-        pct = (total_used / total_addl) * 100
-
-        if pct > 100:
-            pct = 100.0
-
-        return pct
-
-    @staticmethod
-    @tracer.start_as_current_span("TaskCreditService Get User Total Tasks Available")
-    def get_user_total_tasks_available(user: User, task_credits: list | None = None) -> int:
-        """
-        Gets the total number of tasks available for a user, including both regular and additional tasks. This the
-        entitled tasks available to the user, which includes the monthly task credits, promos, and any additional tasks
-        they may have enabled. Is addl_tasks is TASKS_UNLIMITED, then the user has unlimited tasks available.
-
-        Parameters:
-            user (User): The user for whom the total tasks available are being calculated.
-            task_credits (list, optional): A list of TaskCredit objects. If not provided, it will fetch the task credits.
-                                           Provide to prevent multiple database queries if you already have the task credits.
-
-        Returns:
-            int: The total number of tasks available for the user.
-        """
-        additional_tasks = TaskCreditService.get_user_additional_tasks_available(user, task_credits)
-
-        if additional_tasks == TASKS_UNLIMITED:
-            # If the user has unlimited additional tasks, return unlimited
-            return TASKS_UNLIMITED
-
-
-        total_tasks = TaskCreditService.get_tasks_entitled(user) - TaskCreditService.get_user_task_credits_used(user, task_credits)
-
-        return total_tasks
-
-    @staticmethod
     def get_user_total_tasks_used(user: User, task_credits: list | None = None) -> int:
         """
         Gets the total number of tasks used by a user, including both regular and additional tasks.
@@ -1250,39 +1147,7 @@ class TaskCreditService:
         return total_used
 
     @staticmethod
-    @tracer.start_as_current_span("TaskCreditService Get User Total Tasks Used Percentage")
-    def get_user_total_tasks_used_pct(user: User, task_credits: list | None = None) -> float:
-        """
-        Gets the percentage of total tasks used by a user, including both regular and additional tasks.
-
-        Parameters:
-            user (User): The user for whom the total tasks used percentage is being calculated.
-            task_credits (list, optional): A list of TaskCredit objects. If not provided, it will fetch the task credits.
-                                           Provide to prevent multiple database queries if you already have the task credits.
-
-        Returns:
-            float: The percentage of total tasks used by the user.
-        """
-        # Community Edition unlimited mode
-        if TaskCreditService._is_community_unlimited():
-            return 0.0
-
-        total_available = TaskCreditService.get_tasks_entitled(user)
-
-        if total_available == TASKS_UNLIMITED:
-            return 0.0
-
-        total_used = TaskCreditService.get_user_total_tasks_used(user, task_credits)
-
-        pct = (total_used / total_available) * 100
-
-        if pct > 100:
-            pct = 100.0
-
-        return pct
-
-    @staticmethod
-    def handle_task_threshold(user, use_existing_transaction: bool = False):
+    def handle_task_threshold(user):
         """
         Handles task usage thresholds for a user. This function updates the user's monthly task usage counter and checks
         if any thresholds have been crossed. If a threshold is crossed, it publishes an event to notify the system.
@@ -1290,8 +1155,7 @@ class TaskCreditService:
         now = timezone.now()
         period_ym = now.strftime("%Y%m")  # e.g. '202507'
 
-        atomic_context = nullcontext() if use_existing_transaction else transaction.atomic()
-        with atomic_context:
+        with transaction.atomic():
             entitled = TaskCreditService.get_tasks_entitled(user)
             used = TaskCreditService.get_user_total_tasks_used(user)
 
@@ -1334,7 +1198,6 @@ class TaskCreditService:
     def check_and_consume_credit(
         user,
         amount: Decimal | None = None,
-        use_existing_transaction: bool = False,
     ) -> dict:
         """
         Atomically attempts to consume a task credit for ``user``.
@@ -1373,7 +1236,6 @@ class TaskCreditService:
             credit = TaskCreditService.consume_credit(
                 user,
                 amount=amount,
-                use_existing_transaction=use_existing_transaction,
             )
             if span is not None:
                 span.add_event("Consumed regular task credit")
@@ -1393,7 +1255,6 @@ class TaskCreditService:
                 credit = TaskCreditService.consume_credit(
                     user,
                     additional_task=True,
-                    use_existing_transaction=use_existing_transaction,
                 )
                 if span is not None:
                     span.add_event("Consumed additional task credit")

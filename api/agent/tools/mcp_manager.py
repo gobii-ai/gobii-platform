@@ -583,40 +583,6 @@ class MCPToolManager:
         self._server_cache = new_cache
         self._last_refresh_marker = latest_seen or timezone.now()
 
-    def _refresh_servers_by_name(self, server_names: set[str], *, scope: Optional[str] = None) -> bool:
-        if not server_names:
-            return True
-        try:
-            configs = list(
-                MCPServerConfig.objects.filter(
-                    is_active=True,
-                    name__in=list(server_names),
-                    **({"scope": scope} if scope else {}),
-                ).select_related("oauth_credential")
-            )
-        except DatabaseError:
-            logger.exception("Failed to refresh MCP servers for names: %s", sorted(server_names))
-            return False
-        stale_ids = {
-            config_id for config_id, runtime in self._server_cache.items()
-            if runtime.name.lower() in server_names and (scope is None or runtime.scope == scope)
-        }
-        return self._apply_server_subset(configs, stale_ids, update_global_marker=True)
-
-    def _refresh_servers_by_config_id(self, config_ids: set[str]) -> bool:
-        """Refresh only the specified MCP server configs without touching others."""
-        if not config_ids:
-            return True
-
-        try:
-            configs = list(MCPServerConfig.objects.filter(
-                is_active=True, id__in=list(config_ids)
-            ).select_related("oauth_credential"))
-        except DatabaseError:
-            logger.exception("Failed to refresh MCP servers for ids: %s", sorted(config_ids))
-            return False
-        return self._apply_server_subset(configs, config_ids, update_global_marker=False)
-
     def _apply_server_subset(self, configs, stale_ids: set[str], *, update_global_marker: bool) -> bool:
         refreshed_ids: set[str] = set()
         latest_seen: Optional[datetime] = None
@@ -1144,6 +1110,17 @@ class MCPToolManager:
         result = ensure_mcp_oauth_credential(server.config_id)
         credential = result.credential
         if result.status != MCPOAuthStatus.USABLE or credential is None:
+            if (
+                result.status == MCPOAuthStatus.TEMPORARILY_UNAVAILABLE
+                and server.oauth_access_token
+                and server.oauth_expires_at is not None
+                and server.oauth_expires_at > timezone.now()
+            ):
+                logger.warning(
+                    "Using still-valid OAuth token for MCP server %s while refresh is unavailable",
+                    server.config_id,
+                )
+                return server, None
             message = result.message or "This MCP integration is unavailable."
             if result.status == MCPOAuthStatus.RECONNECT_REQUIRED:
                 return server, {
@@ -1897,16 +1874,6 @@ class MCPToolManager:
             )
         return tools
     
-    def get_all_available_tools(self) -> List[MCPToolInfo]:
-        """Get all available MCP tools from all servers."""
-        if not self._initialized:
-            self.initialize()
-            
-        all_tools = []
-        for server_tools in self._tools_cache.values():
-            all_tools.extend(server_tools)
-        return all_tools
-
     def get_tools_for_agent(
         self,
         agent: PersistentAgent,
@@ -2005,10 +1972,6 @@ class MCPToolManager:
                 if t.full_name == full_name:
                     return t
         return None
-
-    def has_tool(self, full_name: str) -> bool:
-        """Return True if a discovered MCP tool with this full name exists."""
-        return self.find_tool_by_name(full_name) is not None
 
     @staticmethod
     def _backfill_enabled_tool_metadata(
@@ -2385,103 +2348,6 @@ class MCPToolManager:
             use_success_sentinel=use_success_sentinel,
         )
 
-    def execute_platform_tool(self, server_name: str, tool_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute a platform-scoped MCP tool without an agent context."""
-        normalized_server = (server_name or "").strip().lower()
-        if not normalized_server or not tool_name:
-            return {"status": "error", "message": "Server name and tool name are required"}
-
-        allowed = {normalized_server}
-        needs_refresh = (not self._initialized) or self._needs_refresh()
-        current_names = {runtime.name.lower() for runtime in self._server_cache.values()}
-        if needs_refresh or normalized_server not in current_names:
-            if not self._refresh_servers_by_name(allowed, scope=MCPServerConfig.Scope.PLATFORM):
-                return {"status": "error", "message": f"MCP server '{server_name}' is not available"}
-
-        runtime = next(
-            (
-                rt
-                for rt in self._server_cache.values()
-                if rt.name.lower() == normalized_server and rt.scope == MCPServerConfig.Scope.PLATFORM
-            ),
-            None,
-        )
-        if not runtime:
-            return {"status": "error", "message": f"MCP server '{server_name}' is not available"}
-
-        if runtime.name == self.PIPEDREAM_RUNTIME_NAME:
-            return {"status": "error", "message": "Pipedream MCP requires an agent context"}
-
-        info = self._resolve_tool_info(tool_name)
-        if not info or info.server_name.lower() != normalized_server:
-            return {"status": "error", "message": f"MCP tool '{tool_name}' not found for server '{server_name}'"}
-
-        if self._is_tool_blacklisted(tool_name):
-            return {
-                "status": "error",
-                "message": f"Tool '{tool_name}' is blacklisted and cannot be executed",
-            }
-
-        param_error = self._param_guards.validate(runtime.name, info.tool_name, params, owner=None)
-        if param_error:
-            return param_error
-
-        if not self._ensure_runtime_registered(runtime, force_local=True, require_client=True):
-            return {"status": "error", "message": f"MCP server '{runtime.name}' is not available"}
-
-        try:
-            proxy_url = None
-            if runtime.url or self._is_stdio_runtime(runtime):
-                try:
-                    proxy_url = self._select_discovery_proxy_url(runtime)
-                except Exception as exc:
-                    return {"status": "error", "message": str(exc)}
-
-            if self._is_stdio_runtime(runtime) and proxy_url:
-                client = self._get_scoped_stdio_proxy_client(
-                    runtime,
-                    scope_key="platform",
-                    proxy_url=proxy_url,
-                )
-            else:
-                client = self._clients.get(info.config_id)
-            if not client:
-                return {"status": "error", "message": f"MCP server '{info.server_name}' not available"}
-
-            timeout_seconds = self._get_timeout_for_runtime(runtime)
-            http_timeout_seconds = timeout_seconds if runtime.url else None
-            with _use_mcp_http_timeout(http_timeout_seconds), _use_mcp_proxy(proxy_url):
-                result = self._run_coroutine_sync(
-                    self._execute_async(
-                        client,
-                        info.tool_name,
-                        params,
-                        timeout_seconds=timeout_seconds,
-                    )
-                )
-            with mcp_result_owner_context(None):
-                result = self._adapt_tool_result(runtime.name, info.tool_name, result)
-
-            response = self._finalize_mcp_result(
-                runtime.name,
-                info.tool_name,
-                result,
-                use_success_sentinel=False,
-            )
-            return self._handle_mcp_session_death_response(
-                runtime,
-                response,
-                evict_client=True,
-            )
-        except Exception as exc:
-            logger.error("Failed to execute platform MCP tool %s/%s: %s", server_name, tool_name, exc)
-            response = {"status": "error", "message": str(exc)}
-            return self._handle_mcp_session_death_response(
-                runtime,
-                response,
-                evict_client=True,
-            )
-
     def _dispatch_sandbox_mcp_request(
         self,
         *,
@@ -2537,6 +2403,7 @@ class MCPToolManager:
         params: Dict[str, Any],
         *,
         force_local: bool = False,
+        tool_info: Optional[MCPToolInfo] = None,
     ) -> Dict[str, Any]:
         """Execute an MCP tool if it's enabled for the agent."""
         # Check if tool is blacklisted
@@ -2564,7 +2431,7 @@ class MCPToolManager:
         except Exception:
             logger.exception("Failed to update usage for tool %s", tool_name)
         
-        info = self._resolve_tool_info(tool_name)
+        info = tool_info or self._resolve_tool_info(tool_name)
         if not info:
             return {"status": "error", "message": f"Unknown MCP tool: {tool_name}"}
 
@@ -2838,6 +2705,8 @@ class MCPToolManager:
         agent: PersistentAgent,
         tool_name: str,
         params: Dict[str, Any],
+        *,
+        tool_info: Optional[MCPToolInfo] = None,
     ) -> Dict[str, Any]:
         """Execute an MCP tool without shared loop/client state."""
         if self._is_tool_blacklisted(tool_name):
@@ -2863,7 +2732,7 @@ class MCPToolManager:
         except Exception:
             logger.exception("Failed to update isolated usage for tool %s", tool_name)
 
-        info = self._resolve_tool_info(tool_name)
+        info = tool_info or self._resolve_tool_info(tool_name)
         if not info:
             return {"status": "error", "message": f"Unknown MCP tool: {tool_name}"}
 
@@ -3008,10 +2877,6 @@ class MCPToolManager:
             )
 
         return None
-
-    def resolve_tool_info(self, tool_name: str) -> Optional[MCPToolInfo]:
-        """Public wrapper to resolve tool metadata."""
-        return self._resolve_tool_info(tool_name)
 
     def is_tool_blacklisted(self, tool_name: str) -> bool:
         """Expose blacklist checks for external managers."""
@@ -3165,22 +3030,46 @@ def execute_mcp_tool(
     params: Dict[str, Any],
     *,
     force_local: bool = False,
+    tool_info: Optional[MCPToolInfo] = None,
 ) -> Dict[str, Any]:
     """Execute any enabled MCP tool via the shared manager."""
-    if not _mcp_manager.prepare_tool_for_agent(agent, tool_name, require_enabled=True):
+    tool_info = tool_info or _mcp_manager.prepare_tool_for_agent(
+        agent,
+        tool_name,
+        require_enabled=True,
+    )
+    if tool_info is None:
         return {"status": "error", "message": f"Unknown MCP tool: {tool_name}"}
-    return _mcp_manager.execute_mcp_tool(agent, tool_name, params, force_local=force_local)
+    return _mcp_manager.execute_mcp_tool(
+        agent,
+        tool_info.full_name,
+        params,
+        force_local=force_local,
+        tool_info=tool_info,
+    )
 
 
 def execute_mcp_tool_isolated(
     agent: PersistentAgent,
     tool_name: str,
     params: Dict[str, Any],
+    *,
+    tool_info: Optional[MCPToolInfo] = None,
 ) -> Dict[str, Any]:
     """Execute any enabled MCP tool without shared runtime state."""
-    if not _mcp_manager.prepare_tool_for_agent(agent, tool_name, require_enabled=True):
+    tool_info = tool_info or _mcp_manager.prepare_tool_for_agent(
+        agent,
+        tool_name,
+        require_enabled=True,
+    )
+    if tool_info is None:
         return {"status": "error", "message": f"Unknown MCP tool: {tool_name}"}
-    return _mcp_manager.execute_mcp_tool_isolated(agent, tool_name, params)
+    return _mcp_manager.execute_mcp_tool_isolated(
+        agent,
+        tool_info.full_name,
+        params,
+        tool_info=tool_info,
+    )
 
 
 def get_mcp_manager() -> MCPToolManager:

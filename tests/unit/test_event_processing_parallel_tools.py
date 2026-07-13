@@ -8,7 +8,6 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
-from django.db import DatabaseError
 from django.test import TestCase, tag
 
 from api.agent.tools.agent_variables import clear_variables, get_agent_variable, set_agent_variable
@@ -145,7 +144,14 @@ class TestParallelToolCallsExecution(TestCase):
         max_active = 0
         lock = threading.Lock()
 
-        def side_effect(_agent, _tool_name, _params, isolated_mcp=False, current_sqlite_db_path=None):
+        def side_effect(
+            _agent,
+            _tool_name,
+            _params,
+            isolated_mcp=False,
+            current_sqlite_db_path=None,
+            resolved_entry=None,
+        ):
             nonlocal active, max_active
             self.assertTrue(isolated_mcp)
             self.assertIsNone(current_sqlite_db_path)
@@ -170,13 +176,12 @@ class TestParallelToolCallsExecution(TestCase):
         self.assertGreaterEqual(max_active, 2)
 
     @patch("api.agent.core.event_processing.execute_enabled_tool", return_value={"status": "ok", "auto_sleep_ok": True})
-    def test_parallel_preparation_batches_guards_limits_credits_and_pending_rows(
+    def test_parallel_preparation_batches_rate_limits_and_persists_pending_rows(
         self,
         mock_execute_enabled,
     ):
         from api.agent.core import event_processing as ep
 
-        actual_bulk_create = PersistentAgentToolCall.objects.bulk_create
         rate_limit_batch = ep._ToolRateLimitBatch(
             limits={},
             recent_counts={},
@@ -190,19 +195,12 @@ class TestParallelToolCallsExecution(TestCase):
             "api.agent.core.event_processing._should_abort_processing",
             return_value=False,
         ) as mock_abort, patch(
-            "api.agent.core.event_processing._parallel_preparation_abort_requested",
-            return_value=False,
-        ), patch(
             "api.agent.core.event_processing._build_tool_rate_limit_batch",
             return_value=rate_limit_batch,
         ) as mock_rate_limits, patch(
             "api.agent.core.event_processing._ensure_credit_for_tool",
             return_value={"cost": None, "credit": None},
-        ) as mock_credit, patch.object(
-            PersistentAgentToolCall.objects,
-            "bulk_create",
-            wraps=actual_bulk_create,
-        ) as mock_bulk_create:
+        ) as mock_credit:
             self._run_single_iteration(
                 [
                     _tool_call("mcp_brightdata_search_engine", '{"query": "openai"}'),
@@ -215,45 +213,11 @@ class TestParallelToolCallsExecution(TestCase):
             call.kwargs.get("check_context")
             for call in mock_abort.call_args_list
         ]
-        self.assertEqual(preparation_contexts.count("parallel_tool_batch_start"), 1)
-        self.assertNotIn("tool_batch", preparation_contexts)
+        self.assertEqual(preparation_contexts.count("tool_batch"), 3)
         mock_rate_limits.assert_called_once()
         self.assertEqual(mock_credit.call_count, 3)
-        self.assertTrue(
-            all(call.kwargs["use_existing_transaction"] for call in mock_credit.call_args_list)
-        )
-        mock_bulk_create.assert_called_once()
-        self.assertEqual(len(mock_bulk_create.call_args.args[0]), 3)
         self.assertEqual(mock_execute_enabled.call_count, 3)
         self.assertEqual(PersistentAgentToolCall.objects.filter(step__agent=self.agent).count(), 3)
-
-    @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
-    @patch("api.agent.core.event_processing.execute_enabled_tool", return_value={"status": "ok", "auto_sleep_ok": True})
-    def test_parallel_preparation_rolls_back_when_pending_rows_fail(
-        self,
-        mock_execute_enabled,
-        _mock_credit,
-    ):
-        with patch.object(
-            PersistentAgentToolCall.objects,
-            "bulk_create",
-            side_effect=DatabaseError("pending rows unavailable"),
-        ), patch(
-            "api.agent.core.event_processing._emit_tool_call_realtime",
-        ) as mock_realtime:
-            self._run_single_iteration(
-                [
-                    _tool_call("read_file", '{"path": "/exports/a.txt"}'),
-                    _tool_call("http_request", '{"method": "GET", "url": "https://api.example.com/data.json"}'),
-                ]
-            )
-
-        mock_execute_enabled.assert_not_called()
-        mock_realtime.assert_not_called()
-        self.assertFalse(PersistentAgentToolCall.objects.filter(step__agent=self.agent).exists())
-        self.assertFalse(
-            PersistentAgentStep.objects.filter(agent=self.agent, description="").exists()
-        )
 
     def test_batch_rate_limit_counts_calls_admitted_in_same_batch(self):
         from api.agent.core import event_processing as ep
@@ -299,7 +263,14 @@ class TestParallelToolCallsExecution(TestCase):
         max_active = 0
         lock = threading.Lock()
 
-        def side_effect(_agent, _tool_name, _params, isolated_mcp=False, current_sqlite_db_path=None):
+        def side_effect(
+            _agent,
+            _tool_name,
+            _params,
+            isolated_mcp=False,
+            current_sqlite_db_path=None,
+            resolved_entry=None,
+        ):
             nonlocal active, max_active
             self.assertTrue(isolated_mcp)
             self.assertIsNone(current_sqlite_db_path)
@@ -331,7 +302,14 @@ class TestParallelToolCallsExecution(TestCase):
         max_active = 0
         lock = threading.Lock()
 
-        def side_effect(_agent, _tool_name, _params, isolated_mcp=False, current_sqlite_db_path=None):
+        def side_effect(
+            _agent,
+            _tool_name,
+            _params,
+            isolated_mcp=False,
+            current_sqlite_db_path=None,
+            resolved_entry=None,
+        ):
             nonlocal active, max_active
             self.assertTrue(isolated_mcp)
             self.assertIsNone(current_sqlite_db_path)
@@ -529,7 +507,14 @@ class TestParallelToolCallsExecution(TestCase):
     ):
         captured_paths = []
 
-        def side_effect(_agent, tool_name, _params, isolated_mcp=False, current_sqlite_db_path=None):
+        def side_effect(
+            _agent,
+            tool_name,
+            _params,
+            isolated_mcp=False,
+            current_sqlite_db_path=None,
+            resolved_entry=None,
+        ):
             from api.agent.tools.sqlite_state import get_sqlite_db_path
 
             self.assertTrue(isolated_mcp)
