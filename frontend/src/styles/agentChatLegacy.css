@@ -2700,7 +2700,7 @@
     background: linear-gradient(135deg, rgba(255, 228, 230, 0.92), rgba(254, 205, 211, 0.72));
 }
 .hard-limit-callout :is(.hard-limit-callout-header, .hard-limit-callout-actions, .hard-limit-callout-button, .hard-limit-callout-upsell, .hard-limit-callout-upsell a),
-:is(.hard-limit-callout-icon, .hard-limit-callout-dismiss, .scheduled-resume-card__icon-wrap) {
+:is(.hard-limit-callout-icon, .hard-limit-callout-dismiss) {
     display: flex;
     align-items: center;
 }
@@ -2723,7 +2723,7 @@
     background: var(--callout-icon-bg);
     color: var(--callout-icon-color);
 }
-:is(.hard-limit-callout-icon, .hard-limit-callout-dismiss, .scheduled-resume-card__icon-wrap) {
+:is(.hard-limit-callout-icon, .hard-limit-callout-dismiss) {
     justify-content: center;
 }
 .hard-limit-callout-title {
@@ -2823,49 +2823,6 @@
     }
     .hard-limit-callout[data-billing-issue='no_org_seats'] .hard-limit-callout-actions {
         justify-content: flex-start;
-    }
-}
-.scheduled-resume-card {
-    grid-template-columns: auto 1fr auto;
-    gap: 1rem;
-    align-items: center;
-    padding: 1rem 1.25rem;
-    color: #1e1b4b;
-}
-.scheduled-resume-card__icon-wrap {
-    width: 2.25rem;
-    height: 2.25rem;
-    border-radius: 0.625rem;
-    background: rgba(255, 255, 255, 0.62);
-    color: #6366f1;
-}
-.scheduled-resume-card__content {
-    min-width: 0;
-}
-.scheduled-resume-card__title {
-    margin: 0;
-    color: #312e81;
-    font-size: 0.875rem;
-    font-weight: 600;
-}
-.scheduled-resume-card__time {
-    display: inline-flex;
-    margin-top: 0.2rem;
-    color: #6366f1;
-    font-size: 0.78rem;
-    font-weight: 500;
-}
-.scheduled-resume-card__pill {
-    font-size: 0.65rem;
-    text-transform: uppercase;
-}
-@media (max-width: 640px) {
-    .scheduled-resume-card {
-        grid-template-columns: auto 1fr;
-    }
-    .scheduled-resume-card__pill {
-        grid-column: 1 / -1;
-        justify-self: flex-start;
     }
 }
 .agent-chat-section-card.starter-prompts-card {

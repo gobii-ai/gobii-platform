@@ -1,10 +1,11 @@
 import { useMemo } from 'react'
 import type { ColumnDef } from '@tanstack/react-table'
-import { flexRender, getCoreRowModel, useReactTable } from '@tanstack/react-table'
+import { getCoreRowModel, useReactTable } from '@tanstack/react-table'
 import { Clock3, UserPlus, Users } from 'lucide-react'
 
 import type { CollaboratorTableRow } from './contactTypes'
-import { EmbeddedRemoveButton, EmbeddedStatusBadge, EmbeddedTableFrame, EmbeddedTableHeader, embeddedTableBodyClassName, embeddedTableHeadClassName } from './embeddedTablePrimitives'
+import { TanStackTableShell } from '../common/TanStackTableShell'
+import { EmbeddedRemoveButton, EmbeddedStatusBadge, EmbeddedTableFrame, EmbeddedTableHeader } from './embeddedTablePrimitives'
 
 type CollaboratorsTableProps = {
   rows: CollaboratorTableRow[]
@@ -110,44 +111,15 @@ export function CollaboratorsTable({
 
   return (
     <EmbeddedTableFrame>
-        <table className="min-w-full border-collapse">
-          <thead className={embeddedTableHeadClassName}>
-            {table.getHeaderGroups().map((headerGroup) => (
-              <tr key={headerGroup.id} className="border-b border-slate-200/15">
-                {headerGroup.headers.map((header) => (
-                  <th key={header.id} scope="col" className="px-4 py-3 text-left align-middle">
-                    {header.isPlaceholder ? null : flexRender(header.column.columnDef.header, header.getContext())}
-                  </th>
-                ))}
-              </tr>
-            ))}
-          </thead>
-          <tbody className={embeddedTableBodyClassName}>
-            {rows.length === 0 ? (
-              <tr>
-                <td colSpan={columns.length} className="px-4 py-10 text-center text-sm text-slate-300">
-                  No collaborators yet.
-                </td>
-              </tr>
-            ) : (
-              table.getRowModel().rows.map((row) => (
-                <tr
-                  key={row.id}
-                  className={[
-                    'border-b border-slate-200/10 last:border-b-0',
-                    row.original.pendingType === 'remove' || row.original.pendingType === 'cancel_invite' ? 'opacity-60' : '',
-                  ].join(' ')}
-                >
-                  {row.getVisibleCells().map((cell) => (
-                    <td key={cell.id} className="px-4 py-4 align-middle">
-                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                    </td>
-                  ))}
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+      <TanStackTableShell
+        table={table}
+        emptyState={{ content: 'No collaborators yet.' }}
+        getRowProps={(row) => ({
+          className: row.original.pendingType === 'remove' || row.original.pendingType === 'cancel_invite'
+            ? 'opacity-60'
+            : '',
+        })}
+      />
     </EmbeddedTableFrame>
   )
 }

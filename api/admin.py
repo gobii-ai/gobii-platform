@@ -9,6 +9,7 @@ from django.db import transaction
 from django.db.models import Count, Prefetch
 from django.db.models.expressions import OuterRef, Exists
 
+from config.stripe_fields import ORG_TEAM, SCALE, STARTUP, TASK_METERS, admin_fields
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from api.agent.tasks import process_agent_events_task
 from api.services.bulk_proactive_outreach import trigger_bulk_proactive_outreach
@@ -284,81 +285,10 @@ class StripeConfigAdmin(admin.ModelAdmin):
                 )
             },
         ),
-        (
-            "Startup (Pro)",
-            {
-                "fields": (
-                    "startup_price_id",
-                    "startup_trial_days",
-                    "startup_additional_task_price_id",
-                    "startup_task_pack_product_id",
-                    "startup_task_pack_price_ids",
-                    "startup_product_id",
-                    "startup_contact_cap_product_id",
-                    "startup_contact_cap_price_ids",
-                    "startup_browser_task_limit_product_id",
-                    "startup_browser_task_limit_price_ids",
-                    "startup_advanced_captcha_resolution_product_id",
-                    "startup_advanced_captcha_resolution_price_id",
-                    "startup_dedicated_ip_price_id",
-                    "startup_dedicated_ip_product_id",
-                )
-            },
-        ),
-        (
-            "Scale",
-            {
-                "fields": (
-                    "scale_product_id",
-                    "scale_price_id",
-                    "scale_trial_days",
-                    "scale_additional_task_price_id",
-                    "scale_task_pack_product_id",
-                    "scale_task_pack_price_ids",
-                    "scale_contact_cap_product_id",
-                    "scale_contact_cap_price_ids",
-                    "scale_browser_task_limit_product_id",
-                    "scale_browser_task_limit_price_ids",
-                    "scale_advanced_captcha_resolution_product_id",
-                    "scale_advanced_captcha_resolution_price_id",
-                    "scale_dedicated_ip_product_id",
-                    "scale_dedicated_ip_price_id",
-                )
-            },
-        ),
-        (
-            "Org Team",
-            {
-                "fields": (
-                    "org_team_price_id",
-                    "org_team_product_id",
-                    "org_team_dedicated_ip_price_id",
-                    "org_team_dedicated_ip_product_id",
-                    "org_team_additional_task_product_id",
-                    "org_team_additional_task_price_id",
-                    "org_team_task_pack_product_id",
-                    "org_team_task_pack_price_ids",
-                    "org_team_contact_cap_product_id",
-                    "org_team_contact_cap_price_ids",
-                    "org_team_browser_task_limit_product_id",
-                    "org_team_browser_task_limit_price_ids",
-                    "org_team_advanced_captcha_resolution_product_id",
-                    "org_team_advanced_captcha_resolution_price_id",
-                )
-            },
-        ),
-        (
-            "Task Meters",
-            {
-                "fields": (
-                    "task_meter_id",
-                    "task_meter_event_name",
-                    "org_team_task_meter_id",
-                    "org_team_task_meter_event_name",
-                    "org_task_meter_id",
-                )
-            },
-        ),
+        (STARTUP, {"fields": admin_fields(STARTUP)}),
+        (SCALE, {"fields": admin_fields(SCALE)}),
+        (ORG_TEAM, {"fields": admin_fields(ORG_TEAM)}),
+        (TASK_METERS, {"fields": admin_fields(TASK_METERS)}),
         (
             "Metadata",
             {

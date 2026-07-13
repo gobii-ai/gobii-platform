@@ -176,10 +176,6 @@ vi.mock('./TaskCreditsCalloutCard', () => ({
   TaskCreditsCalloutCard: () => null,
 }))
 
-vi.mock('./ScheduledResumeCard', () => ({
-  ScheduledResumeCard: () => null,
-}))
-
 vi.mock('./StarterPromptSuggestions', () => ({
   StarterPromptSuggestions: () => null,
 }))
