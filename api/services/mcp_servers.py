@@ -1,9 +1,10 @@
 """Helpers for resolving MCP server availability for agents."""
 
-from typing import Iterable, Iterable as IterableType, List, Dict, Any, Set
+from typing import Iterable, Iterable as IterableType, List, Dict, Any, Optional, Set
 
 from django.contrib.auth import get_user_model
 from django.db import transaction
+from django.db.models import Q
 
 from api.models import MCPServerConfig, PersistentAgent, PersistentAgentMCPServer, PersistentAgentEnabledTool
 from marketing_events.custom_events import ConfiguredCustomEvent, emit_configured_custom_capi_event
@@ -152,39 +153,44 @@ def set_server_assignments(server: MCPServerConfig, desired_agent_ids: IterableT
 
 
 
-def agent_accessible_server_configs(agent: PersistentAgent) -> List[MCPServerConfig]:
+def agent_accessible_server_configs(
+    agent: PersistentAgent,
+    *,
+    allowed_config_ids: Optional[Set[str]] = None,
+    allowed_server_names: Optional[Set[str]] = None,
+) -> List[MCPServerConfig]:
     """Collect all MCP server configs accessible to the agent."""
 
     assigned_ids = set(agent_enabled_server_ids(agent))
-    configs: list[MCPServerConfig] = []
-    seen: Set[str] = set()
+    access_filter = Q(scope=MCPServerConfig.Scope.PLATFORM)
+    if agent.organization_id and assigned_ids:
+        access_filter |= Q(
+            scope=MCPServerConfig.Scope.ORGANIZATION,
+            organization_id=agent.organization_id,
+            id__in=assigned_ids,
+        )
+    if agent.user_id and assigned_ids:
+        access_filter |= Q(
+            scope=MCPServerConfig.Scope.USER,
+            user_id=agent.user_id,
+            id__in=assigned_ids,
+        )
 
-    def _add(cfg: MCPServerConfig):
-        server_id = str(cfg.id)
-        if server_id in seen:
-            return
-        seen.add(server_id)
-        configs.append(cfg)
-
-    for cfg in platform_server_configs():
-        _add(cfg)
-
-    if agent.organization_id:
-        for cfg in organization_server_configs(agent.organization_id):
-            server_id = str(cfg.id)
-            if server_id not in assigned_ids:
-                continue
-            _add(cfg)
-
-    for cfg in personal_server_configs(agent.user_id):
-        server_id = str(cfg.id)
-        if server_id not in assigned_ids:
-            continue
-        _add(cfg)
-
+    queryset = MCPServerConfig.objects.filter(access_filter, is_active=True)
+    if allowed_config_ids is not None and allowed_server_names is not None:
+        queryset = queryset.filter(
+            Q(id__in=allowed_config_ids) | Q(name__in=allowed_server_names)
+        )
+    elif allowed_config_ids is not None:
+        queryset = queryset.filter(id__in=allowed_config_ids)
+    elif allowed_server_names is not None:
+        queryset = queryset.filter(name__in=allowed_server_names)
     return sorted(
-        configs,
-        key=lambda cfg: ((cfg.display_name or '').lower(), (cfg.name or '').lower()),
+        queryset,
+        key=lambda config: (
+            (config.display_name or "").lower(),
+            (config.name or "").lower(),
+        ),
     )
 
 

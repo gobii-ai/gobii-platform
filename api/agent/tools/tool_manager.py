@@ -460,11 +460,8 @@ def get_available_custom_tool_entries(
 
 
 def _get_manager() -> MCPToolManager:
-    """Ensure the global MCP manager is ready before use."""
-    manager = get_mcp_manager()
-    if not manager._initialized:
-        manager.initialize()
-    return manager
+    """Return the process manager without triggering global MCP discovery."""
+    return get_mcp_manager()
 
 
 def _normalize_tool_limit(
@@ -1280,49 +1277,60 @@ def resolve_tool_entry(agent: PersistentAgent, tool_name: str) -> Optional[ToolC
     if is_tool_blacklisted_for_agent(agent, tool_name):
         return None
 
-    catalog = _build_available_tool_index(agent, include_hidden_builtin=True)
+    local_catalog = get_available_builtin_tool_entries(agent, include_hidden=True)
+    local_catalog.update(get_available_custom_tool_entries(agent))
+    for eval_name, metadata in EVAL_SYNTHETIC_TOOL_DEFINITIONS.items():
+        definition = get_eval_synthetic_tool_definition(agent, eval_name)
+        if not definition:
+            continue
+        local_catalog[eval_name] = ToolCatalogEntry(
+            provider="eval",
+            full_name=eval_name,
+            description=metadata["description"],
+            parameters=metadata["parameters"],
+            tool_server=EVAL_SYNTHETIC_TOOL_SERVER,
+            tool_name=eval_name,
+            server_config_id=None,
+            system_skill_key=str(metadata.get("system_skill_key") or ""),
+        )
 
-    # Try exact match first
-    entry = catalog.get(tool_name)
+    entry = local_catalog.get(tool_name)
     if entry:
         return entry
 
-    # Try fuzzy matching for MCP tools
+    candidates = [tool_name]
     if tool_name.startswith("mcp_"):
-        normalized_name = _normalize_mcp_tool_name(tool_name, catalog)
-        if normalized_name:
-            if is_tool_blacklisted_for_agent(agent, normalized_name):
-                return None
-            logger.info(
-                "Normalized MCP tool name '%s' -> '%s'",
-                tool_name, normalized_name
-            )
-            return catalog.get(normalized_name)
-    if tool_name.startswith("mcp_"):
-        # Last resort: try MCP manager's resolve_tool_info which can discover tools
-        manager = _get_manager()
-        info = manager.resolve_tool_info(tool_name)
-        if info:
-            if is_tool_blacklisted_for_agent(agent, info.full_name):
-                return None
-            if (
-                info.server_name == PIPEDREAM_TOOL_SERVER_NAME
-                and not is_pipedream_tool_visible_to_agent(agent, info.tool_name)
-            ):
-                return None
-            logger.info(
-                "Resolved MCP tool '%s' via manager discovery (server=%s)",
-                tool_name, info.server_name
-            )
-            return ToolCatalogEntry(
-                provider="mcp",
-                full_name=info.full_name,
-                description=info.description,
-                parameters=info.parameters,
-                tool_server=info.server_name,
-                tool_name=info.tool_name,
-                server_config_id=info.config_id,
-            )
+        normalized = tool_name.replace("mcp_bright_data_", "mcp_brightdata_")
+        legacy_brightdata = normalized.replace(
+            "mcp_brightdata_linkedin_",
+            "mcp_brightdata_web_data_linkedin_",
+            1,
+        )
+        candidates.extend(name for name in (normalized, legacy_brightdata) if name not in candidates)
+
+    manager = _get_manager()
+    for candidate in candidates:
+        info = manager.prepare_tool_for_agent(agent, candidate, require_enabled=False)
+        if not info:
+            continue
+        if is_tool_blacklisted_for_agent(agent, info.full_name):
+            return None
+        if (
+            info.server_name == PIPEDREAM_TOOL_SERVER_NAME
+            and not is_pipedream_tool_visible_to_agent(agent, info.tool_name)
+        ):
+            return None
+        if candidate != tool_name:
+            logger.info("Normalized MCP tool name '%s' -> '%s'", tool_name, info.full_name)
+        return ToolCatalogEntry(
+            provider="mcp",
+            full_name=info.full_name,
+            description=info.description,
+            parameters=info.parameters,
+            tool_server=info.server_name,
+            tool_name=info.tool_name,
+            server_config_id=info.config_id,
+        )
 
     return None
 

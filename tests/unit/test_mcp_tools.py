@@ -797,11 +797,9 @@ class MCPToolManagerTests(TestCase):
             named_config_id: [tool_by_name],
         }
 
-        def refresh_by_config_id(_config_ids):
+        def apply_subset(_configs, _stale_ids, *, update_global_marker):
+            self.assertFalse(update_global_marker)
             self.manager._server_cache[config_id] = runtime_by_id
-            return True
-
-        def refresh_by_name(_server_names):
             self.manager._server_cache[named_config_id] = runtime_by_name
             return True
 
@@ -810,18 +808,14 @@ class MCPToolManagerTests(TestCase):
             SimpleNamespace(id=config_id, name=runtime_by_id.name),
             SimpleNamespace(id=named_config_id, name=runtime_by_name.name),
         ]
-        with patch.object(self.manager, "_needs_refresh", return_value=False), patch(
+        with patch(
             "api.agent.tools.mcp_manager.agent_accessible_server_configs",
             return_value=configs,
         ), patch.object(
             self.manager,
-            "_refresh_servers_by_config_id",
-            side_effect=refresh_by_config_id,
-        ) as mock_refresh_ids, patch.object(
-            self.manager,
-            "_refresh_servers_by_name",
-            side_effect=refresh_by_name,
-        ) as mock_refresh_names, patch.object(
+            "_apply_server_subset",
+            side_effect=apply_subset,
+        ) as mock_apply_subset, patch.object(
             self.manager,
             "_ensure_runtime_registered",
             return_value=True,
@@ -832,8 +826,11 @@ class MCPToolManagerTests(TestCase):
                 allowed_server_names={runtime_by_name.name},
             )
 
-        mock_refresh_ids.assert_called_once_with({config_id})
-        mock_refresh_names.assert_called_once_with({runtime_by_name.name})
+        mock_apply_subset.assert_called_once_with(
+            configs,
+            {config_id, named_config_id},
+            update_global_marker=False,
+        )
         self.assertEqual(
             {tool.full_name for tool in tools},
             {tool_by_id.full_name, tool_by_name.full_name},
@@ -1074,8 +1071,8 @@ class MCPToolManagerTests(TestCase):
         )
 
     @tag("batch_mcp_tools")
-    @patch("api.agent.tools.mcp_manager.requests.post")
-    def test_build_runtime_refreshes_expired_oauth_token(self, mock_post):
+    @patch("api.services.mcp_oauth.requests.post")
+    def test_runtime_oauth_preparation_refreshes_expired_token(self, mock_post):
         with patch("api.services.mcp_tool_discovery.schedule_mcp_tool_discovery"):
             config = MCPServerConfig.objects.create(
                 scope=MCPServerConfig.Scope.USER,
@@ -1116,6 +1113,12 @@ class MCPToolManagerTests(TestCase):
         with patch("api.services.mcp_tool_discovery.schedule_mcp_tool_discovery"):
             runtime = manager._build_runtime_from_config(config)
 
+        mock_post.assert_not_called()
+        with patch("api.services.mcp_tool_discovery.schedule_mcp_tool_discovery"), patch(
+            "api.models.invalidate_mcp_tool_cache"
+        ) as invalidate_catalog:
+            runtime, auth_error = manager._ensure_runtime_oauth(runtime)
+
         mock_post.assert_called_once_with(
             "https://notion.example.com/oauth/token",
             data={
@@ -1124,9 +1127,11 @@ class MCPToolManagerTests(TestCase):
                 "client_id": "client-123",
                 "client_secret": "secret-xyz",
             },
-            timeout=manager.OAUTH_REFRESH_TIMEOUT_SECONDS,
+            timeout=15,
         )
 
+        self.assertIsNone(auth_error)
+        invalidate_catalog.assert_not_called()
         self.assertEqual(runtime.oauth_access_token, "new-access")
         self.assertEqual(runtime.oauth_token_type, "Bearer")
         self.assertGreater(runtime.oauth_expires_at, timezone.now())
@@ -1138,7 +1143,7 @@ class MCPToolManagerTests(TestCase):
         self.assertIn("last_refresh_response", credential.metadata)
 
     @tag("batch_mcp_tools")
-    @patch("api.agent.tools.mcp_manager.requests.post")
+    @patch("api.services.mcp_oauth.requests.post")
     def test_build_runtime_skips_refresh_when_token_valid(self, mock_post):
         with patch("api.services.mcp_tool_discovery.schedule_mcp_tool_discovery"):
             user = get_user_model().objects.create_user(
@@ -1173,6 +1178,132 @@ class MCPToolManagerTests(TestCase):
         mock_post.assert_not_called()
         self.assertEqual(runtime.oauth_access_token, "valid-token")
         self.assertEqual(runtime.oauth_token_type, "Bearer")
+
+    @tag("batch_mcp_tools")
+    def test_cached_catalog_load_does_not_prepare_oauth(self):
+        runtime = MCPServerRuntime(
+            config_id=self.config_id,
+            name=self.server_name,
+            display_name="OAuth server",
+            description="",
+            command=None,
+            args=[],
+            url="https://example.com/mcp",
+            auth_method=MCPServerConfig.AuthMethod.OAUTH2,
+            env={},
+            headers={},
+            prefetch_apps=[],
+            scope=MCPServerConfig.Scope.PLATFORM,
+            organization_id=None,
+            user_id=None,
+            updated_at=timezone.now(),
+            oauth_access_token="expired-token",
+            oauth_expires_at=timezone.now() - timedelta(minutes=1),
+        )
+
+        with patch.object(self.manager, "_load_cached_tools", return_value=True), patch.object(
+            self.manager,
+            "_ensure_runtime_oauth",
+        ) as mock_prepare_oauth:
+            self.manager._register_server(runtime)
+
+        mock_prepare_oauth.assert_not_called()
+
+    @tag("batch_mcp_tools")
+    @patch("api.services.mcp_oauth.requests.post")
+    def test_targeted_config_load_ignores_unrelated_expired_oauth(self, mock_post):
+        user = get_user_model().objects.create_user(username=f"targeted-{uuid.uuid4().hex[:8]}")
+        agent = PersistentAgent.objects.create(
+            user=user,
+            name="Targeted agent",
+            charter="Test",
+            browser_use_agent=create_test_browser_agent(user),
+        )
+        with patch("api.services.mcp_tool_discovery.schedule_mcp_tool_discovery"):
+            unrelated = MCPServerConfig.objects.create(
+                scope=MCPServerConfig.Scope.PLATFORM,
+                name=f"unrelated-{uuid.uuid4().hex[:8]}",
+                display_name="Unrelated OAuth",
+                url="https://unrelated.example.com/mcp",
+                auth_method=MCPServerConfig.AuthMethod.OAUTH2,
+            )
+            credential = MCPServerOAuthCredential.objects.create(
+                server_config=unrelated,
+                expires_at=timezone.now() - timedelta(minutes=1),
+                metadata={"token_endpoint": "https://unrelated.example.com/oauth/token"},
+            )
+            credential.access_token = "expired"
+            credential.refresh_token = "refresh"
+            credential.save()
+
+        manager = MCPToolManager()
+        with patch.object(manager, "_build_runtime_from_config", wraps=manager._build_runtime_from_config) as build_runtime, patch.object(
+            manager,
+            "_register_server",
+        ), patch.object(manager, "initialize") as initialize:
+            manager.get_tools_for_agent(agent, allowed_config_ids={self.config_id})
+
+        initialize.assert_not_called()
+        self.assertEqual(build_runtime.call_count, 1)
+        self.assertEqual(build_runtime.call_args.args[0].id, self.server_config.id)
+        mock_post.assert_not_called()
+
+    @tag("batch_mcp_tools")
+    def test_targeted_preparation_does_not_reuse_same_named_tool_from_other_config(self):
+        user = get_user_model().objects.create_user(username=f"scoped-{uuid.uuid4().hex[:8]}")
+        agent = PersistentAgent.objects.create(
+            user=user,
+            name="Scoped agent",
+            charter="Test",
+            browser_use_agent=create_test_browser_agent(user),
+        )
+        other_config = MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.PLATFORM,
+            name=f"other-{uuid.uuid4().hex[:8]}",
+            display_name="Other",
+            command="other",
+        )
+        PersistentAgentEnabledTool.objects.create(
+            agent=agent,
+            tool_full_name="mcp_shared_lookup",
+            tool_server=self.server_name,
+            tool_name="lookup",
+            server_config=self.server_config,
+        )
+        wrong = MCPToolInfo(
+            str(other_config.id),
+            "mcp_shared_lookup",
+            other_config.name,
+            "lookup",
+            "Wrong",
+            {},
+        )
+        expected = MCPToolInfo(
+            self.config_id,
+            "mcp_shared_lookup",
+            self.server_name,
+            "lookup",
+            "Expected",
+            {},
+        )
+        self.manager._server_cache[str(other_config.id)] = self.manager._build_runtime_from_config(
+            other_config
+        )
+        self.manager._tools_cache[str(other_config.id)] = [wrong]
+
+        with patch.object(
+            self.manager,
+            "get_tools_for_agent",
+            return_value=[expected],
+        ) as get_tools:
+            result = self.manager.prepare_tool_for_agent(agent, expected.full_name)
+
+        self.assertIs(result, expected)
+        get_tools.assert_called_once_with(
+            agent,
+            allowed_config_ids={self.config_id},
+            pipedream_app_slugs=None,
+        )
         
     @patch('api.agent.tools.mcp_manager.asyncio.get_running_loop')
     def test_ensure_event_loop_reuses_existing(self, mock_get_loop):
@@ -1353,7 +1484,11 @@ class MCPToolManagerTests(TestCase):
         self.assertEqual(definitions[0]["function"]["name"], "mcp_test_tool1")
         self.assertEqual(definitions[0]["function"]["description"], "Test tool 1")
         mock_init.assert_not_called()
-        mock_get_tools.assert_called_once_with(agent, allowed_config_ids={self.config_id})
+        mock_get_tools.assert_called_once_with(
+            agent,
+            allowed_config_ids={self.config_id},
+            pipedream_app_slugs=None,
+        )
 
     @patch('api.agent.tools.mcp_manager.MCPToolManager.initialize')
     def test_get_enabled_tools_definitions_skips_static_tools_without_mcp_discovery(self, mock_init):
@@ -1375,6 +1510,45 @@ class MCPToolManagerTests(TestCase):
         self.assertEqual(definitions, [])
         mock_init.assert_not_called()
         mock_get_tools.assert_not_called()
+
+    @tag("batch_mcp_tools")
+    def test_get_enabled_tools_definitions_targets_and_backfills_legacy_pipedream_row(self):
+        user = get_user_model().objects.create_user(username=f"legacy-pd-{uuid.uuid4().hex[:8]}")
+        agent = PersistentAgent.objects.create(
+            user=user,
+            name="Legacy Pipedream agent",
+            charter="Test",
+            browser_use_agent=create_test_browser_agent(user),
+        )
+        row = PersistentAgentEnabledTool.objects.create(
+            agent=agent,
+            tool_full_name="notion-create-page",
+        )
+        tool = MCPToolInfo(
+            self.config_id,
+            row.tool_full_name,
+            "pipedream",
+            row.tool_full_name,
+            "Create page",
+            {"type": "object", "properties": {}},
+        )
+
+        with patch.object(
+            self.manager,
+            "get_tools_for_agent",
+            return_value=[tool],
+        ) as get_tools:
+            definitions = self.manager.get_enabled_tools_definitions(agent)
+
+        self.assertEqual(definitions[0]["function"]["name"], row.tool_full_name)
+        get_tools.assert_called_once_with(
+            agent,
+            allowed_server_names={"pipedream"},
+            pipedream_app_slugs={"notion"},
+        )
+        row.refresh_from_db()
+        self.assertEqual(row.tool_server, "pipedream")
+        self.assertEqual(row.server_config_id, self.server_config.id)
         
     @patch('api.agent.tools.mcp_manager.MCPToolManager._ensure_event_loop')
     @patch('api.agent.tools.mcp_manager.MCPToolManager._execute_async')
@@ -4289,6 +4463,7 @@ class MCPToolIntegrationTests(TestCase):
         mock_manager.get_tools_for_agent.return_value = [
             MCPToolInfo(self.config_id, "mcp_test_tool", self.server_name, "tool", "Test", {})
         ]
+        mock_manager.prepare_tool_for_agent.return_value = mock_manager.get_tools_for_agent.return_value[0]
         mock_manager.is_tool_blacklisted.return_value = False
         mock_get_manager.return_value = mock_manager
 
@@ -4310,6 +4485,52 @@ class MCPToolIntegrationTests(TestCase):
         )
 
     @tag("batch_agent_tools")
+    @patch("api.agent.tools.tool_manager.get_mcp_manager")
+    def test_get_manager_does_not_trigger_global_initialization(self, mock_get_manager):
+        from api.agent.tools import tool_manager
+
+        manager = MagicMock()
+        mock_get_manager.return_value = manager
+
+        self.assertIs(tool_manager._get_manager(), manager)
+        manager.initialize.assert_not_called()
+
+    @tag("batch_agent_tools")
+    def test_mcp_execution_wrappers_prepare_only_requested_tool(self):
+        from api.agent.tools import mcp_manager
+
+        agent = SimpleNamespace(id=uuid.uuid4())
+        tool = MCPToolInfo(
+            self.config_id,
+            "mcp_test_tool",
+            self.server_name,
+            "tool",
+            "Test",
+            {},
+        )
+        with patch.object(mcp_manager, "_mcp_manager") as manager:
+            manager.prepare_tool_for_agent.return_value = tool
+            manager.execute_mcp_tool.return_value = {"status": "success"}
+            manager.execute_mcp_tool_isolated.return_value = {"status": "success"}
+
+            self.assertEqual(
+                mcp_manager.execute_mcp_tool(agent, tool.full_name, {}),
+                {"status": "success"},
+            )
+            self.assertEqual(
+                mcp_manager.execute_mcp_tool_isolated(agent, tool.full_name, {}),
+                {"status": "success"},
+            )
+
+        manager.initialize.assert_not_called()
+        self.assertEqual(manager.prepare_tool_for_agent.call_count, 2)
+        manager.prepare_tool_for_agent.assert_called_with(
+            agent,
+            tool.full_name,
+            require_enabled=True,
+        )
+
+    @tag("batch_agent_tools")
     @patch('api.agent.tools.tool_manager._get_manager')
     @patch('api.agent.tools.tool_manager.execute_mcp_tool')
     def test_execute_enabled_tool_decodes_pipedream_unicode_escapes(self, mock_execute, mock_get_manager):
@@ -4324,6 +4545,7 @@ class MCPToolIntegrationTests(TestCase):
                 {},
             )
         ]
+        mock_manager.prepare_tool_for_agent.return_value = mock_manager.get_tools_for_agent.return_value[0]
         mock_manager.is_tool_blacklisted.return_value = False
         mock_get_manager.return_value = mock_manager
         mock_execute.return_value = {"status": "success", "result": "ok"}
@@ -4353,6 +4575,7 @@ class MCPToolIntegrationTests(TestCase):
     def test_execute_enabled_tool_leaves_pipedream_discord_send_params_unchanged(self, mock_execute, mock_get_manager):
         mock_manager = MagicMock()
         mock_manager.get_tools_for_agent.return_value = [self._discord_send_tool_info()]
+        mock_manager.prepare_tool_for_agent.return_value = mock_manager.get_tools_for_agent.return_value[0]
         mock_manager.is_tool_blacklisted.return_value = False
         mock_get_manager.return_value = mock_manager
         mock_execute.return_value = {"status": "complete", "result": "ok"}
@@ -4380,6 +4603,7 @@ class MCPToolIntegrationTests(TestCase):
     def test_execute_enabled_tool_preserves_discord_send_overrides(self, mock_execute, mock_get_manager):
         mock_manager = MagicMock()
         mock_manager.get_tools_for_agent.return_value = [self._discord_send_tool_info()]
+        mock_manager.prepare_tool_for_agent.return_value = mock_manager.get_tools_for_agent.return_value[0]
         mock_manager.is_tool_blacklisted.return_value = False
         mock_get_manager.return_value = mock_manager
         mock_execute.return_value = {"status": "complete", "result": "ok"}
