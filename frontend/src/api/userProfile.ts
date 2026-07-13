@@ -19,11 +19,6 @@ export type EmailVerificationState = {
   pendingEmail: string | null
 }
 
-export type EmailActionResponse = {
-  emailVerification: EmailVerificationState
-  message: string
-}
-
 export type UserProfilePayload = {
   profile: UserProfileFormState
   timezoneOptions: TimezoneOption[]
@@ -60,17 +55,10 @@ export function updateUserCustomInstructions(customInstructions: string): Promis
   })
 }
 
-export function changeUserEmail(email: string): Promise<EmailActionResponse> {
-  return jsonRequest<EmailActionResponse>('/console/api/user/email/', {
-    method: 'POST',
-    json: { email },
-    includeCsrf: true,
-  })
-}
-
-export function cancelUserEmailChange(): Promise<EmailActionResponse> {
-  return jsonRequest<EmailActionResponse>('/console/api/user/email/', {
-    method: 'DELETE',
+export function updateUserEmail(action: 'change' | 'resend' | 'cancel', email?: string) {
+  return jsonRequest<{ emailVerification: EmailVerificationState }>('/console/api/user/email/', {
+    method: action === 'change' ? 'POST' : action === 'resend' ? 'PUT' : 'DELETE',
+    json: action === 'change' ? { email } : undefined,
     includeCsrf: true,
   })
 }

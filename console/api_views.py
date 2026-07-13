@@ -17,7 +17,8 @@ from urllib.parse import urljoin, urlparse
 
 import httpx
 import zstandard as zstd
-from anymail.exceptions import AnymailAPIError
+from allauth.core.exceptions import ImmediateHttpResponse
+from anymail.exceptions import AnymailAPIError, AnymailError
 from celery.exceptions import CeleryError
 from dateutil.relativedelta import relativedelta
 from django.contrib.auth import get_user_model
@@ -150,13 +151,12 @@ from api.services.agent_owner_custom_instructions import (
 )
 from api.services.product_announcements import build_product_announcements_payload, mark_product_announcements_read
 from api.services.signup_preview import resume_signup_preview_agent_if_eligible, user_has_existing_personal_agent_for_signup_preview
-from api.services.user_email_change import (
+from api.services.email_verification import (
     EMAIL_CHANGE_REDIRECT_URL,
-    EmailChangeRateLimitError,
-    EmailChangeSendError,
     cancel_email_change,
     get_email_verification_target,
-    serialize_email_verification,
+    send_email_verification,
+    serialize_email_verification as _serialize_email_verification,
     start_email_change,
     validate_email_change,
 )
@@ -2087,10 +2087,6 @@ def _serialize_decimal(value: Decimal | int | float) -> str:
     return str(value)
 
 
-def _serialize_email_verification(user) -> dict[str, Any]:
-    return serialize_email_verification(user)
-
-
 def _serialize_staff_addon(entitlement: AddonEntitlement) -> dict[str, Any]:
     total_task_credits = entitlement.task_credits_delta * entitlement.quantity
     total_contacts = entitlement.contact_cap_delta * entitlement.quantity
@@ -3720,8 +3716,23 @@ class UserPhoneResendAPIView(ApiLoginRequiredMixin, View):
         return JsonResponse(serialize_phone_state(request.user))
 
 
+def _email_send_error_response(exc, user_id: int) -> JsonResponse:
+    if isinstance(exc, ImmediateHttpResponse):
+        if exc.response.status_code == 429:
+            return JsonResponse(
+                {"error": "Too many verification email requests. Please try again later."},
+                status=429,
+            )
+        raise exc
+    logger.exception("Failed to send email verification for user %s", user_id)
+    return JsonResponse(
+        {"error": "Failed to send verification email. Please try again later."},
+        status=500,
+    )
+
+
 class UserEmailAPIView(ApiLoginRequiredMixin, View):
-    http_method_names = ["post", "delete"]
+    http_method_names = ["post", "put", "delete"]
 
     def post(self, request: HttpRequest, *args: Any, **kwargs: Any):
         if isinstance(payload := _json_payload_or_bad_request(request), HttpResponseBadRequest):
@@ -3751,95 +3762,36 @@ class UserEmailAPIView(ApiLoginRequiredMixin, View):
             )
 
         try:
-            email_verification, message = start_email_change(request, email)
-        except EmailChangeRateLimitError:
-            return JsonResponse(
-                {"error": "Too many verification email requests. Please try again later."},
-                status=429,
-            )
-        except EmailChangeSendError:
-            logger.exception("Failed to start email change for user %s", request.user.id)
-            return JsonResponse(
-                {"error": "Failed to send verification email. Please try again later."},
-                status=500,
-            )
+            email_verification = start_email_change(request, email)
+        except (ImmediateHttpResponse, AnymailError, OSError, SMTPException) as exc:
+            return _email_send_error_response(exc, request.user.id)
         except IntegrityError:
             return JsonResponse(
                 {"errors": {"email": ["This email address is already associated with an account."]}},
                 status=400,
             )
 
-        return JsonResponse({"emailVerification": email_verification, "message": message})
+        return JsonResponse({"emailVerification": email_verification})
 
-    def delete(self, request: HttpRequest, *args: Any, **kwargs: Any):
-        email_verification, message = cancel_email_change(request.user)
-        return JsonResponse({"emailVerification": email_verification, "message": message})
-
-
-class UserEmailResendVerificationAPIView(ApiLoginRequiredMixin, View):
-    """Resend verification for a pending change or the current account email."""
-
-    http_method_names = ["post"]
-
-    def post(self, request: HttpRequest, *args: Any, **kwargs: Any):
-        from smtplib import SMTPException
-
-        from allauth.core.exceptions import ImmediateHttpResponse
-        from anymail.exceptions import AnymailError
-
-        from api.services.email_verification import send_email_verification
-
+    def put(self, request: HttpRequest, *args: Any, **kwargs: Any):
         email_address = get_email_verification_target(request.user)
         if not email_address:
             return JsonResponse({"error": "No email address found."}, status=400)
 
-        if email_address.verified:
-            return JsonResponse(
-                {
-                    "verified": True,
-                    "message": "Email already verified.",
-                    "emailVerification": _serialize_email_verification(request.user),
-                }
-            )
-
-        try:
-            sent = send_email_verification(
-                request,
-                email_address,
-                redirect_url=EMAIL_CHANGE_REDIRECT_URL,
-            )
-        except ImmediateHttpResponse as exc:
-            response = exc.response
-            if response.status_code == 429:
-                return JsonResponse(
-                    {"error": "Too many verification email requests. Please try again later."},
-                    status=429,
+        if not email_address.verified:
+            try:
+                send_email_verification(
+                    request,
+                    email_address,
+                    redirect_url=EMAIL_CHANGE_REDIRECT_URL,
                 )
-            raise
-        except (AnymailError, OSError, SMTPException):
-            logger.exception("Failed to send email verification for user %s", request.user.id)
-            return JsonResponse(
-                {"error": "Failed to send verification email. Please try again later."},
-                status=500,
-            )
+            except (ImmediateHttpResponse, AnymailError, OSError, SMTPException) as exc:
+                return _email_send_error_response(exc, request.user.id)
 
-        email_verification = _serialize_email_verification(request.user)
-        if not sent:
-            return JsonResponse(
-                {
-                    "verified": email_verification["isVerified"],
-                    "message": "A verification email was already sent recently. Please check your inbox or try again later.",
-                    "emailVerification": email_verification,
-                }
-            )
+        return JsonResponse({"emailVerification": _serialize_email_verification(request.user)})
 
-        return JsonResponse(
-            {
-                "verified": email_verification["isVerified"],
-                "message": "Verification email sent.",
-                "emailVerification": email_verification,
-            }
-        )
+    def delete(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        return JsonResponse({"emailVerification": cancel_email_change(request.user)})
 
 
 class AgentSmsEnableAPIView(ApiLoginRequiredMixin, View):

@@ -1,5 +1,4 @@
 import { jsonRequest } from './http'
-import type { EmailVerificationState } from './userProfile'
 
 export type PhoneState = {
   number: string
@@ -69,21 +68,6 @@ export function enableAgentSms(agentId: string): Promise<EnableSmsResponse> {
 
 export function disableAgentSms(agentId: string): Promise<EnableSmsResponse> {
   return jsonRequest<EnableSmsResponse>(`/console/api/agents/${agentId}/sms/disable/`, {
-    method: 'POST',
-    json: {},
-    includeCsrf: true,
-  })
-}
-
-export type ResendEmailVerificationResponse = {
-  verified: boolean
-  message: string
-  emailVerification?: EmailVerificationState
-  error?: string
-}
-
-export function resendEmailVerification(): Promise<ResendEmailVerificationResponse> {
-  return jsonRequest<ResendEmailVerificationResponse>('/console/api/user/email/resend-verification/', {
     method: 'POST',
     json: {},
     includeCsrf: true,

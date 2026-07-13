@@ -329,7 +329,7 @@ class ConsoleUserEmailApiTests(TestCase):
         response = self.client.delete(self.url)
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["message"], "Email change canceled.")
+        self.assertIsNone(response.json()["emailVerification"]["pendingEmail"])
         self.assertFalse(
             EmailAddress.objects.filter(user=self.user, email="cancel-me@example.com").exists()
         )
@@ -367,8 +367,13 @@ class ConsoleUserEmailApiTests(TestCase):
 
         self.assertEqual(EmailAddress.objects.filter(user=self.user).count(), 1)
 
-    @patch("api.services.user_email_change.send_email_verification", side_effect=OSError("smtp.internal.local"))
-    def test_send_failure_removes_new_pending_address(self, mock_send_email_verification):
+    @patch("api.services.email_verification.send_email_verification", side_effect=OSError("smtp.internal.local"))
+    def test_send_failure_restores_previous_pending_address(self, mock_send_email_verification):
+        EmailAddress.objects.create(
+            user=self.user,
+            email="previous-pending@example.com",
+            verified=False,
+        )
         with patch("console.api_views.logger.exception") as mock_logger_exception:
             response = self.client.post(
                 self.url,
@@ -383,6 +388,9 @@ class ConsoleUserEmailApiTests(TestCase):
         )
         self.assertFalse(
             EmailAddress.objects.filter(user=self.user, email="send-failure@example.com").exists()
+        )
+        self.assertTrue(
+            EmailAddress.objects.filter(user=self.user, email="previous-pending@example.com").exists()
         )
         mock_send_email_verification.assert_called_once()
         mock_logger_exception.assert_called_once()
@@ -547,7 +555,7 @@ class ConsoleUserEmailResendVerificationApiTests(TestCase):
             password="password123",
         )
         self.client.force_login(self.user)
-        self.url = reverse("console_user_email_resend_verification")
+        self.url = reverse("console_user_email")
 
     def test_resend_sends_verification_email_for_unverified_primary_address(self):
         EmailAddress.objects.create(
@@ -557,14 +565,12 @@ class ConsoleUserEmailResendVerificationApiTests(TestCase):
             primary=True,
         )
 
-        response = self.client.post(self.url)
+        response = self.client.put(self.url)
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
             response.json(),
             {
-                "verified": False,
-                "message": "Verification email sent.",
                 "emailVerification": {
                     "email": "resend-owner@example.com",
                     "isVerified": False,
@@ -576,7 +582,7 @@ class ConsoleUserEmailResendVerificationApiTests(TestCase):
         self.assertEqual(mail.outbox[0].to, [self.user.email])
         self.assertIn("/accounts/confirm-email/", mail.outbox[0].body)
 
-    @patch("api.services.email_verification.send_email_verification", return_value=False)
+    @patch("console.api_views.send_email_verification", return_value=False)
     def test_resend_reports_when_email_was_recently_sent(self, mock_send_email_verification):
         EmailAddress.objects.create(
             user=self.user,
@@ -585,14 +591,12 @@ class ConsoleUserEmailResendVerificationApiTests(TestCase):
             primary=True,
         )
 
-        response = self.client.post(self.url)
+        response = self.client.put(self.url)
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
             response.json(),
             {
-                "verified": False,
-                "message": "A verification email was already sent recently. Please check your inbox or try again later.",
                 "emailVerification": {
                     "email": "resend-owner@example.com",
                     "isVerified": False,
@@ -602,7 +606,7 @@ class ConsoleUserEmailResendVerificationApiTests(TestCase):
         )
         mock_send_email_verification.assert_called_once()
 
-    @patch("api.services.email_verification.send_email_verification", side_effect=OSError("smtp.internal.local"))
+    @patch("console.api_views.send_email_verification", side_effect=OSError("smtp.internal.local"))
     def test_resend_returns_generic_error_when_email_send_fails(self, mock_send_email_verification):
         EmailAddress.objects.create(
             user=self.user,
@@ -612,7 +616,7 @@ class ConsoleUserEmailResendVerificationApiTests(TestCase):
         )
 
         with patch("console.api_views.logger.exception") as mock_logger_exception:
-            response = self.client.post(self.url)
+            response = self.client.put(self.url)
 
         self.assertEqual(response.status_code, 500)
         self.assertEqual(
@@ -631,14 +635,12 @@ class ConsoleUserEmailResendVerificationApiTests(TestCase):
             primary=True,
         )
 
-        response = self.client.post(self.url)
+        response = self.client.put(self.url)
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
             response.json(),
             {
-                "verified": True,
-                "message": "Email already verified.",
                 "emailVerification": {
                     "email": "resend-owner@example.com",
                     "isVerified": True,
@@ -662,7 +664,7 @@ class ConsoleUserEmailResendVerificationApiTests(TestCase):
             primary=False,
         )
 
-        response = self.client.post(self.url)
+        response = self.client.put(self.url)
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(mail.outbox[0].to, ["pending-resend@example.com"])
