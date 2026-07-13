@@ -27,6 +27,11 @@ from tests.utils.llm_seed import seed_persistent_basic
 
 
 User = get_user_model()
+COUNTED_CANDIDATE_PROMPT = (
+    "Source 10 candidates for a backend engineering role. Candidates must currently live in Chicago, "
+    "must have 7+ years of backend experience, and must have recent Python experience. "
+    "These requirements are non-negotiable."
+)
 
 
 @tag("batch_mcp_tools")
@@ -93,6 +98,14 @@ class SystemSkillDiscoveryTests(TestCase):
 
     def test_matching_normalizes_case_punctuation_and_spacing(self):
         matches = matching_system_skill_definitions("CANDIDATE---SOURCING for a new role")
+
+        self.assertIn(
+            RECRUITMENT_SOURCING_SYSTEM_SKILL_KEY,
+            {definition.skill_key for definition in matches},
+        )
+
+    def test_matching_ignores_requested_count_between_action_and_candidates(self):
+        matches = matching_system_skill_definitions(COUNTED_CANDIDATE_PROMPT)
 
         self.assertIn(
             RECRUITMENT_SOURCING_SYSTEM_SKILL_KEY,
@@ -203,7 +216,7 @@ class SystemSkillDiscoveryTests(TestCase):
         )
 
     def test_prompt_hint_does_not_enable_skill(self):
-        self._inbound("Source candidates for a product management role.")
+        self._inbound(COUNTED_CANDIDATE_PROMPT)
         PersistentAgentEnabledTool.objects.create(
             agent=self.agent,
             tool_full_name="mcp_brightdata_search_engine",

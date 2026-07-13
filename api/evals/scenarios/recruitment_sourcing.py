@@ -159,8 +159,9 @@ RECRUITMENT_SOURCING_CASES = (
         slug=RECRUITMENT_SOURCING_SKILL_DISCOVERY,
         description="Discover Recruitment Sourcing before using already-enabled generic sourcing tools.",
         prompt=(
-            "Source candidates for a Senior Backend Engineer role in Chicago. Required: 7+ years of backend "
-            "engineering, recent Python experience, and current Chicago location. Return a small first batch."
+            "Source 10 candidates for a backend engineering role. Candidates must currently live in Chicago, "
+            "must have 7+ years of backend experience, and must have recent Python experience. "
+            "These requirements are non-negotiable."
         ),
         expected_tool_names=("search_tools",),
         mock_config={},

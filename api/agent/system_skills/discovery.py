@@ -16,6 +16,26 @@ from .service import get_available_system_skill_tool_names
 
 SYSTEM_SKILL_DISCOVERY_LIMIT = 2
 _NON_ALPHANUMERIC_RE = re.compile(r"[^a-z0-9]+")
+_COUNT_TOKENS = frozenset(
+    {
+        "a",
+        "an",
+        "one",
+        "two",
+        "three",
+        "four",
+        "five",
+        "six",
+        "seven",
+        "eight",
+        "nine",
+        "ten",
+        "dozen",
+        "dozens",
+        "few",
+        "several",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -31,11 +51,20 @@ def normalize_discovery_text(value: object) -> str:
     return _NON_ALPHANUMERIC_RE.sub(" ", str(value or "").casefold()).strip()
 
 
+def _without_count_tokens(normalized_text: str) -> str:
+    return " ".join(
+        token
+        for token in normalized_text.split()
+        if not token.isdigit() and token not in _COUNT_TOKENS
+    )
+
+
 def _contains_discovery_trigger(normalized_text: str, trigger: str) -> bool:
-    normalized_trigger = normalize_discovery_text(trigger)
-    if not normalized_text or not normalized_trigger:
+    comparable_text = _without_count_tokens(normalized_text)
+    comparable_trigger = _without_count_tokens(normalize_discovery_text(trigger))
+    if not comparable_text or not comparable_trigger:
         return False
-    return f" {normalized_trigger} " in f" {normalized_text} "
+    return f" {comparable_trigger} " in f" {comparable_text} "
 
 
 def matching_system_skill_definitions(text: object) -> list[SystemSkillDefinition]:
