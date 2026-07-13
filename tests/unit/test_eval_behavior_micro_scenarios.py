@@ -978,6 +978,7 @@ class BehaviorMicroHelperTests(TestCase):
                 },
             }
         ]
+        mock_manager.prepare_tool_for_agent.return_value = None
         mock_get_manager.return_value = mock_manager
 
         definitions = get_enabled_tool_definitions(self.agent)
