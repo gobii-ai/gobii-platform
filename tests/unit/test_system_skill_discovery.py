@@ -318,7 +318,7 @@ class SystemSkillDiscoveryTests(TestCase):
         self.assertNotIn("## Suggested Capability Discovery", system_prompt_with_hint)
         self.assertNotIn("## Suggested Capability Discovery", user_prompt_without_hint)
         self.assertIn("## Suggested Capability Discovery", user_prompt_with_hint)
-        self.assertIn("unless a capability-discovery hint says a system skill may apply", system_prompt_with_hint)
+        self.assertIn("discovery hint -> search_tools(exact query)", system_prompt_with_hint)
         self.assertFalse(
             PersistentAgentSystemSkillState.objects.filter(
                 agent=self.agent,
