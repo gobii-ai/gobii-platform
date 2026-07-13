@@ -85,6 +85,14 @@ function wrapTablesForHorizontalScroll(value: string): string {
   document.body.querySelectorAll('table').forEach((table) => {
     if (table.parentElement?.classList.contains('chat-html-table-scroll')) return
 
+    const columnCount = Array.from(table.rows).reduce((maxColumns, row) => {
+      const rowColumns = Array.from(row.cells).reduce((total, cell) => total + cell.colSpan, 0)
+      return Math.max(maxColumns, rowColumns)
+    }, 0)
+    if (columnCount > 0 && columnCount <= 2) {
+      table.classList.add('chat-html-table--compact')
+    }
+
     const wrapper = document.createElement('div')
     wrapper.className = 'chat-html-table-scroll'
     table.before(wrapper)
