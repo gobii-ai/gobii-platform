@@ -12,6 +12,9 @@ import {
 } from '../api/agentEmailSettings'
 import { revokeNativeIntegration, startNativeIntegrationConnect } from '../api/nativeIntegrations'
 import { safeErrorMessage } from '../api/safeErrorMessage'
+import { SettingsBanner } from '../components/agentSettings/SettingsBanner'
+import { EmbeddedAgentShellBackButton } from '../components/agentChat/EmbeddedAgentShellBackButton'
+import { SettingsSurface, SettingsSurfaceProvider, useSettingsSurfaceVariant, type SettingsSurfaceVariant } from '../components/common/SettingsSurface'
 import { storePendingNativeOAuth } from '../components/mcp/NativeIntegrationShared'
 import { readStoredConsoleContext } from '../util/consoleContextStorage'
 
@@ -20,6 +23,7 @@ type AgentEmailSettingsScreenProps = {
   emailSettingsUrl: string
   ensureAccountUrl: string
   testUrl: string
+  surfaceVariant?: SettingsSurfaceVariant
   onBack?: () => void
   onSaved?: (payload: { endpointAddress: string | null }) => void
 }
@@ -43,9 +47,12 @@ type CustomDraft = {
   pollIntervalSec: string
 }
 
-const inputClassName = 'mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100'
-const primaryButtonClassName = 'inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60'
-const secondaryButtonClassName = 'inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-800 hover:border-blue-300 hover:text-blue-700 disabled:opacity-60'
+const standaloneInputClassName = 'mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100'
+const embeddedInputClassName = 'mt-1 w-full rounded-lg border border-slate-200/20 bg-slate-950/45 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-blue-300/50 focus:outline-none focus:ring-2 focus:ring-blue-300/20'
+const standalonePrimaryButtonClassName = 'inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-700 disabled:opacity-60'
+const embeddedPrimaryButtonClassName = 'inline-flex items-center justify-center gap-2 rounded-lg border border-blue-300/30 bg-blue-600/90 px-4 py-2 text-sm font-semibold text-white transition-colors hover:border-blue-200/50 hover:bg-blue-500 disabled:opacity-60'
+const standaloneSecondaryButtonClassName = 'inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-800 transition-colors hover:border-blue-300 hover:text-blue-700 disabled:opacity-60'
+const embeddedSecondaryButtonClassName = 'inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200/25 bg-slate-900/35 px-4 py-2 text-sm font-semibold text-slate-100 transition-colors hover:border-slate-100/40 hover:bg-slate-900/55 disabled:opacity-60'
 
 function draftFromSettings(settings: AgentEmailSettingsPayload): CustomDraft {
   return {
@@ -98,13 +105,13 @@ function settingsRequest(
   }
 }
 
-function StatusLine({ enabled, error, label }: { enabled: boolean; error: string; label: string }) {
+function StatusLine({ enabled, error, label, embedded }: { enabled: boolean; error: string; label: string; embedded: boolean }) {
   return (
     <div className="flex items-start gap-2 text-sm">
-      <CheckCircle2 className={`mt-0.5 h-4 w-4 ${error ? 'text-amber-600' : enabled ? 'text-emerald-600' : 'text-slate-400'}`} />
+      <CheckCircle2 className={`mt-0.5 h-4 w-4 ${error ? (embedded ? 'text-amber-300' : 'text-amber-600') : enabled ? (embedded ? 'text-emerald-300' : 'text-emerald-600') : 'text-slate-400'}`} />
       <div>
-        <span className="font-medium text-slate-800">{label}: {enabled ? 'Enabled' : 'Disabled'}</span>
-        {error ? <p className="mt-1 text-amber-700">{error}</p> : null}
+        <span className={embedded ? 'font-medium text-slate-200' : 'font-medium text-slate-800'}>{label}: {enabled ? 'Enabled' : 'Disabled'}</span>
+        {error ? <p className={embedded ? 'mt-1 text-amber-200' : 'mt-1 text-amber-700'}>{error}</p> : null}
       </div>
     </div>
   )
@@ -114,9 +121,19 @@ export function AgentEmailSettingsScreen({
   agentId,
   emailSettingsUrl,
   testUrl,
+  surfaceVariant,
   onBack,
   onSaved,
 }: AgentEmailSettingsScreenProps) {
+  const inheritedSurfaceVariant = useSettingsSurfaceVariant()
+  const surface = surfaceVariant ?? inheritedSurfaceVariant
+  const embedded = surface === 'embedded'
+  const inputClassName = embedded ? embeddedInputClassName : standaloneInputClassName
+  const primaryButtonClassName = embedded ? embeddedPrimaryButtonClassName : standalonePrimaryButtonClassName
+  const secondaryButtonClassName = embedded ? embeddedSecondaryButtonClassName : standaloneSecondaryButtonClassName
+  const headingClassName = embedded ? 'font-semibold text-slate-100' : 'font-semibold text-slate-950'
+  const bodyClassName = embedded ? 'text-sm text-slate-400' : 'text-sm text-slate-600'
+  const labelClassName = embedded ? 'text-sm font-medium text-slate-200' : 'text-sm font-medium text-slate-800'
   const queryClient = useQueryClient()
   const queryKey = useMemo(() => ['agent-email-settings', agentId, emailSettingsUrl], [agentId, emailSettingsUrl])
   const [error, setError] = useState('')
@@ -226,45 +243,56 @@ export function AgentEmailSettingsScreen({
   const request = settingsRequest(settings, customDraft, defaultDisplayName)
 
   return (
-    <div className="mx-auto w-full max-w-3xl p-4 sm:p-6">
-      <div className="mb-6 flex items-start gap-3">
-        {onBack ? <button type="button" onClick={onBack} className="mt-0.5 rounded-lg p-2 text-slate-600 hover:bg-blue-50 hover:text-blue-700" aria-label="Back"><ArrowLeft className="h-5 w-5" /></button> : null}
-        <div>
-          <h1 className="text-xl font-semibold text-slate-950">Email</h1>
-          <p className="mt-1 text-sm text-slate-600">Choose how {settings.agent.name} sends and receives external email.</p>
+    <SettingsSurfaceProvider variant={surface}>
+      <div className={embedded ? 'space-y-6 pb-6' : 'mx-auto w-full max-w-3xl space-y-6 p-4 sm:p-6'}>
+      {embedded ? (
+        <SettingsBanner
+          variant="embedded"
+          leading={<EmbeddedAgentShellBackButton onClick={onBack} ariaLabel="Back to settings" />}
+          eyebrow="Email settings"
+          title="Email"
+          subtitle={`Choose how ${settings.agent.name} sends and receives external email.`}
+        />
+      ) : (
+        <div className="flex items-start gap-3">
+          {onBack ? <button type="button" onClick={onBack} className="mt-0.5 rounded-lg p-2 text-slate-600 hover:bg-blue-50 hover:text-blue-700" aria-label="Back"><ArrowLeft className="h-5 w-5" /></button> : null}
+          <div>
+            <h1 className="text-xl font-semibold text-slate-950">Email</h1>
+            <p className="mt-1 text-sm text-slate-600">Choose how {settings.agent.name} sends and receives external email.</p>
+          </div>
         </div>
-      </div>
+      )}
 
-      {error ? <div className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">{error}</div> : null}
-      {notice ? <div className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{notice}</div> : null}
+      {error ? <div className={embedded ? 'rounded-xl border border-rose-300/25 bg-rose-950/30 px-4 py-3 text-sm text-rose-100' : 'rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800'}>{error}</div> : null}
+      {notice ? <div className={embedded ? 'rounded-xl border border-emerald-300/25 bg-emerald-950/30 px-4 py-3 text-sm text-emerald-100' : 'rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800'}>{notice}</div> : null}
 
-      <section className="mb-8">
-        <div className="flex items-center gap-2"><Mail className="h-5 w-5 text-blue-600" /><h2 className="font-semibold text-slate-950">Gobii email address</h2></div>
-        <p className="mt-2 text-sm text-slate-600">This address always remains available for sending and receiving.</p>
+      <SettingsSurface variant={surface} as="section" padding="lg" shadowClassName={embedded ? 'shadow-none' : undefined}>
+        <div className="flex items-center gap-2"><Mail className={embedded ? 'h-5 w-5 text-blue-300' : 'h-5 w-5 text-blue-600'} /><h2 className={headingClassName}>Gobii email address</h2></div>
+        <p className={`mt-2 ${bodyClassName}`}>This address always remains available for sending and receiving.</p>
         <div className="mt-4 grid gap-4 sm:grid-cols-2">
-          <label className="text-sm font-medium text-slate-800">Address<input className={inputClassName} value={settings.defaultEndpoint.address} readOnly /></label>
-          <label className="text-sm font-medium text-slate-800">Display name<input className={inputClassName} value={defaultDisplayName} onChange={(event) => setDefaultDisplayName(event.target.value)} /></label>
+          <label className={labelClassName}>Address<input className={inputClassName} value={settings.defaultEndpoint.address} readOnly /></label>
+          <label className={labelClassName}>Display name<input className={inputClassName} value={defaultDisplayName} onChange={(event) => setDefaultDisplayName(event.target.value)} /></label>
         </div>
         <button type="button" className={`${secondaryButtonClassName} mt-3`} disabled={busy} onClick={() => void run(() => actionMutation.mutateAsync({ action: 'update_display_names', values: { defaultDisplayName, displayName: customDraft.displayName } }))}>Save display name</button>
-      </section>
+      </SettingsSurface>
 
       {settings.activeMode === 'none' ? (
-        <section>
-          <h2 className="font-semibold text-slate-950">Connect an external mailbox</h2>
-          <p className="mt-1 text-sm text-slate-600">No server settings are needed for Gmail or Outlook.</p>
+        <SettingsSurface variant={surface} as="section" padding="lg" shadowClassName={embedded ? 'shadow-none' : undefined}>
+          <h2 className={headingClassName}>Connect an external mailbox</h2>
+          <p className={`mt-1 ${bodyClassName}`}>No server settings are needed for Gmail or Outlook.</p>
           <div className="mt-4 flex flex-wrap gap-3">
             <button type="button" className={primaryButtonClassName} disabled={busy} onClick={() => connect('gmail')}><img src="/static/images/integrations/native/gmail.svg" alt="" className="h-5 w-5" />Connect Gmail</button>
             <button type="button" className={primaryButtonClassName} disabled={busy} onClick={() => connect('outlook')}><img src="/static/images/integrations/native/outlook.svg" alt="" className="h-5 w-5" />Connect Outlook</button>
             <button type="button" className={secondaryButtonClassName} disabled={busy} onClick={() => void run(() => actionMutation.mutateAsync({ action: 'enable_custom' }))}>Enable custom SMTP/IMAP</button>
           </div>
-          {settings.customConfigured ? <p className="mt-3 text-sm text-slate-600">Your previous custom SMTP/IMAP settings are saved and will reappear when enabled.</p> : null}
-        </section>
+          {settings.customConfigured ? <p className={`mt-3 ${bodyClassName}`}>Your previous custom SMTP/IMAP settings are saved and will reappear when enabled.</p> : null}
+        </SettingsSurface>
       ) : null}
 
       {settings.activeMode === 'oauth' ? (
-        <section>
+        <SettingsSurface variant={surface} as="section" padding="lg" shadowClassName={embedded ? 'shadow-none' : undefined}>
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div><h2 className="font-semibold text-slate-950">{providerLabel}</h2><p className="mt-1 text-sm text-slate-600">{settings.oauth.mailboxAddress}</p></div>
+            <div><h2 className={headingClassName}>{providerLabel}</h2><p className={`mt-1 ${bodyClassName}`}>{settings.oauth.mailboxAddress}</p></div>
             <button type="button" className={secondaryButtonClassName} disabled={busy} onClick={() => void run(async () => {
               if (settings.oauth.legacy) await actionMutation.mutateAsync({ action: 'disconnect_legacy_oauth' })
               else if (settings.oauth.revokeUrl) {
@@ -273,26 +301,26 @@ export function AgentEmailSettingsScreen({
               }
             })}><Unplug className="h-4 w-4" />Disconnect</button>
           </div>
-          <label className="mt-5 block text-sm font-medium text-slate-800">Display name<input className={inputClassName} value={customDraft.displayName} onChange={(event) => setCustomDraft({ ...customDraft, displayName: event.target.value })} /></label>
+          <label className={`mt-5 block ${labelClassName}`}>Display name<input className={inputClassName} value={customDraft.displayName} onChange={(event) => setCustomDraft({ ...customDraft, displayName: event.target.value })} /></label>
           <div className="mt-5 grid gap-4 sm:grid-cols-2">
-            <DirectionToggle label="Send email" checked={settings.account.isOutboundEnabled} disabled={busy} onChange={(checked) => void run(() => actionMutation.mutateAsync({ action: 'update_directions', values: { isOutboundEnabled: checked, isInboundEnabled: settings.account.isInboundEnabled } }))} />
-            <DirectionToggle label="Receive email" checked={settings.account.isInboundEnabled} disabled={busy} onChange={(checked) => void run(() => actionMutation.mutateAsync({ action: 'update_directions', values: { isOutboundEnabled: settings.account.isOutboundEnabled, isInboundEnabled: checked } }))} />
+            <DirectionToggle embedded={embedded} label="Send email" checked={settings.account.isOutboundEnabled} disabled={busy} onChange={(checked) => void run(() => actionMutation.mutateAsync({ action: 'update_directions', values: { isOutboundEnabled: checked, isInboundEnabled: settings.account.isInboundEnabled } }))} />
+            <DirectionToggle embedded={embedded} label="Receive email" checked={settings.account.isInboundEnabled} disabled={busy} onChange={(checked) => void run(() => actionMutation.mutateAsync({ action: 'update_directions', values: { isOutboundEnabled: settings.account.isOutboundEnabled, isInboundEnabled: checked } }))} />
           </div>
           <div className="mt-5 space-y-3">
-            <StatusLine label="Sending" enabled={settings.account.isOutboundEnabled} error={settings.account.smtpError} />
-            <StatusLine label="Receiving" enabled={settings.account.isInboundEnabled} error={settings.account.imapError} />
+            <StatusLine embedded={embedded} label="Sending" enabled={settings.account.isOutboundEnabled} error={settings.account.smtpError} />
+            <StatusLine embedded={embedded} label="Receiving" enabled={settings.account.isInboundEnabled} error={settings.account.imapError} />
           </div>
           <div className="mt-5 flex flex-wrap gap-3">
             <button type="button" className={secondaryButtonClassName} disabled={busy} onClick={() => void run(() => testMutation.mutateAsync({ payload: request, testOutbound: true, testInbound: false }))}><RefreshCw className="h-4 w-4" />Retry sending</button>
             <button type="button" className={secondaryButtonClassName} disabled={busy} onClick={() => void run(() => testMutation.mutateAsync({ payload: request, testOutbound: false, testInbound: true }))}><RefreshCw className="h-4 w-4" />Retry receiving</button>
             <button type="button" className={primaryButtonClassName} disabled={busy} onClick={() => void run(() => actionMutation.mutateAsync({ action: 'update_display_names', values: { defaultDisplayName, displayName: customDraft.displayName } }))}>Save display name</button>
           </div>
-        </section>
+        </SettingsSurface>
       ) : null}
 
       {settings.activeMode === 'custom' ? (
-        <section>
-          <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="font-semibold text-slate-950">Custom SMTP/IMAP</h2><p className="mt-1 text-sm text-slate-600">Use the server settings supplied by your email provider.</p></div><button type="button" className={secondaryButtonClassName} disabled={busy} onClick={() => void run(() => actionMutation.mutateAsync({ action: 'disable_custom' }))}>Disable</button></div>
+        <SettingsSurface variant={surface} as="section" padding="lg" shadowClassName={embedded ? 'shadow-none' : undefined}>
+          <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className={headingClassName}>Custom SMTP/IMAP</h2><p className={`mt-1 ${bodyClassName}`}>Use the server settings supplied by your email provider.</p></div><button type="button" className={secondaryButtonClassName} disabled={busy} onClick={() => void run(() => actionMutation.mutateAsync({ action: 'disable_custom' }))}>Disable</button></div>
           <div className="mt-5 grid gap-4 sm:grid-cols-2">
             <TextField label="Email address" value={customDraft.address} onChange={(address) => setCustomDraft({ ...customDraft, address })} />
             <TextField label="Display name" value={customDraft.displayName} onChange={(displayName) => setCustomDraft({ ...customDraft, displayName })} />
@@ -316,20 +344,28 @@ export function AgentEmailSettingsScreen({
             <DirectionToggle label="Receive email" checked={settings.account.isInboundEnabled} disabled={busy} onChange={(checked) => void run(() => actionMutation.mutateAsync({ action: 'update_directions', values: { isOutboundEnabled: settings.account.isOutboundEnabled, isInboundEnabled: checked } }))} />
           </div>
           <div className="mt-5 flex flex-wrap gap-3"><button type="button" className={secondaryButtonClassName} disabled={busy} onClick={() => void run(() => testMutation.mutateAsync({ payload: request, testOutbound: true, testInbound: true }))}><RefreshCw className="h-4 w-4" />Test sending and receiving</button><button type="button" className={primaryButtonClassName} disabled={busy} onClick={() => void run(() => saveMutation.mutateAsync(request))}>Save settings</button></div>
-        </section>
+        </SettingsSurface>
       ) : null}
-    </div>
+      </div>
+    </SettingsSurfaceProvider>
   )
 }
 
 function TextField({ label, value, onChange, type = 'text', placeholder = '' }: { label: string; value: string; onChange: (value: string) => void; type?: string; placeholder?: string }) {
-  return <label className="text-sm font-medium text-slate-800">{label}<input className={inputClassName} type={type} value={value} placeholder={placeholder} onChange={(event) => onChange(event.target.value)} /></label>
+  const embedded = useSettingsSurfaceVariant() === 'embedded'
+  return <label className={embedded ? 'text-sm font-medium text-slate-200' : 'text-sm font-medium text-slate-800'}>{label}<input className={embedded ? embeddedInputClassName : standaloneInputClassName} type={type} value={value} placeholder={placeholder} onChange={(event) => onChange(event.target.value)} /></label>
 }
 
 function SelectField({ label, value, options, onChange }: { label: string; value: string; options: Array<[string, string]>; onChange: (value: string) => void }) {
-  return <label className="text-sm font-medium text-slate-800">{label}<select className={inputClassName} value={value} onChange={(event) => onChange(event.target.value)}>{options.map(([optionValue, optionLabel]) => <option key={optionValue} value={optionValue}>{optionLabel}</option>)}</select></label>
+  const embedded = useSettingsSurfaceVariant() === 'embedded'
+  return <label className={embedded ? 'text-sm font-medium text-slate-200' : 'text-sm font-medium text-slate-800'}>{label}<select className={embedded ? embeddedInputClassName : standaloneInputClassName} value={value} onChange={(event) => onChange(event.target.value)}>{options.map(([optionValue, optionLabel]) => <option key={optionValue} value={optionValue}>{optionLabel}</option>)}</select></label>
 }
 
-function DirectionToggle({ label, checked, disabled, onChange }: { label: string; checked: boolean; disabled: boolean; onChange: (checked: boolean) => void }) {
-  return <label className="flex cursor-pointer items-center justify-between rounded-lg border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-800"><span>{label}</span><input type="checkbox" className="h-5 w-5 rounded border-slate-300 text-blue-600" checked={checked} disabled={disabled} onChange={(event) => onChange(event.target.checked)} /></label>
+function DirectionToggle({ label, checked, disabled, onChange, embedded: embeddedOverride }: { label: string; checked: boolean; disabled: boolean; onChange: (checked: boolean) => void; embedded?: boolean }) {
+  const inheritedEmbedded = useSettingsSurfaceVariant() === 'embedded'
+  const embedded = embeddedOverride ?? inheritedEmbedded
+  const className = embedded
+    ? 'flex cursor-pointer items-center justify-between rounded-lg border border-slate-200/20 bg-slate-950/30 px-4 py-3 text-sm font-semibold text-slate-200'
+    : 'flex cursor-pointer items-center justify-between rounded-lg border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-800'
+  return <label className={className}><span>{label}</span><input type="checkbox" className="h-5 w-5 rounded border-slate-300 text-blue-600" checked={checked} disabled={disabled} onChange={(event) => onChange(event.target.checked)} /></label>
 }
