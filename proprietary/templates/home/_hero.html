@@ -1,4 +1,17 @@
 <div class="mx-auto mb-8 max-w-5xl text-center">
+  <div class="relative mx-auto mb-4 h-24 w-56 sm:mb-5 sm:h-28 sm:w-64">
+    <div class="absolute left-1/2 top-1/2 h-16 w-36 -translate-x-1/2 -translate-y-1/2 rounded-full bg-violet-300/25 blur-2xl" aria-hidden="true"></div>
+    <div class="absolute right-7 top-5 h-3 w-3 rounded-full border border-violet-400/40 bg-white/40 sm:right-8 sm:top-6" aria-hidden="true"></div>
+    <div class="absolute right-2 top-11 h-2 w-2 rounded-full border border-fuchsia-400/35 bg-white/40 sm:right-3 sm:top-12" aria-hidden="true"></div>
+    <div class="absolute right-10 bottom-2 h-1.5 w-1.5 rounded-full bg-violet-400/35 sm:right-12 sm:bottom-3" aria-hidden="true"></div>
+    <div class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
+      <div class="gobii-hero-fish-cursor" data-gobii-fish-cursor>
+        <div class="gobii-hero-fish" style="width: clamp(96px, 9vw, 118px);" role="img" aria-label="Gobii AI mascot, an animated fish, swimming on the homepage">
+          {% include "home/_gobii_fish.svg" %}
+        </div>
+      </div>
+    </div>
+  </div>
   <h1 class="text-4xl font-light leading-[1.08] tracking-tight text-slate-950 sm:text-5xl">
     {% if landing_hero_text %}
       <span class="font-light">{{ landing_hero_text|safe }}</span>

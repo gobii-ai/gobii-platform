@@ -555,12 +555,14 @@ class HomePageTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertNotContains(response, "https://js.stripe.com/dahlia/stripe.js")
 
-    @override_settings(GOBII_PROPRIETARY_MODE=False)
-    def test_community_home_page_shows_fish(self):
-        response = self.client.get("/")
+    def test_home_page_shows_fish_in_both_modes(self):
+        for proprietary_mode in (False, True):
+            with self.subTest(proprietary_mode=proprietary_mode):
+                with override_settings(GOBII_PROPRIETARY_MODE=proprietary_mode):
+                    response = self.client.get("/")
 
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'data-gobii-fish-cursor')
+                self.assertEqual(response.status_code, 200)
+                self.assertContains(response, 'data-gobii-fish-cursor')
 
     @override_settings(PUBLIC_BRAND_NAME="Acme")
     def test_home_page_has_meta_description(self):
