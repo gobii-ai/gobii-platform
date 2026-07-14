@@ -211,22 +211,24 @@ export function WorkspaceAppsManager({
   const rows = useMemo<WorkspaceAppRow[]>(() => {
     const visibleApps = debouncedSearchTerm ? (searchQuery.data ?? []) : settings.effectiveApps
     const normalizedSearch = debouncedSearchTerm.toLowerCase()
-    const nativeRows = withDiscordNativeProvider(nativeIntegrationsQuery.data?.providers ?? [])
-      .filter((provider) => {
-        if (!normalizedSearch) {
-          return true
-        }
-        return [
-          provider.providerKey,
-          provider.displayName,
-          provider.description,
-        ].some((value) => value.toLowerCase().includes(normalizedSearch))
-      })
-      .map((provider) => ({
-        ...provider,
-        connected: provider.providerKey === DISCORD_NATIVE_PROVIDER_KEY ? discordConnected : provider.connected,
-        kind: provider.providerKey === DISCORD_NATIVE_PROVIDER_KEY ? 'discord' as const : 'native' as const,
-      }))
+    const nativeRows = nativeIntegrationsUrl
+      ? withDiscordNativeProvider(nativeIntegrationsQuery.data?.providers ?? [])
+        .filter((provider) => {
+          if (!normalizedSearch) {
+            return true
+          }
+          return [
+            provider.providerKey,
+            provider.displayName,
+            provider.description,
+          ].some((value) => value.toLowerCase().includes(normalizedSearch))
+        })
+        .map((provider) => ({
+          ...provider,
+          connected: provider.providerKey === DISCORD_NATIVE_PROVIDER_KEY ? discordConnected : provider.connected,
+          kind: provider.providerKey === DISCORD_NATIVE_PROVIDER_KEY ? 'discord' as const : 'native' as const,
+        }))
+      : []
     const pipedreamRows = visibleApps.map((app) => {
       const source: AgentPipedreamAppSource = platformSlugSet.has(app.slug)
         ? 'built_in'
@@ -243,6 +245,7 @@ export function WorkspaceAppsManager({
   }, [
     debouncedSearchTerm,
     discordConnected,
+    nativeIntegrationsUrl,
     nativeIntegrationsQuery.data?.providers,
     platformSlugSet,
     searchQuery.data,
