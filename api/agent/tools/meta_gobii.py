@@ -464,7 +464,8 @@ TOOL_DEFINITIONS: dict[str, dict[str, Any]] = {
         "description": (
             "Create or enable a peer-agent link between two accessible Gobiis so they can coordinate. "
             "Requires human approval via user_confirmed before changing graph wiring. "
-            "Use only for user-requested team/graph wiring."
+            "Use only for user-requested team/graph wiring. When the invoking Gobii is one endpoint, "
+            "the result identifies send_agent_message as the peer-DM tool for subsequent coordination."
         ),
         "parameters": _object(
             {
@@ -481,7 +482,20 @@ TOOL_DEFINITIONS: dict[str, dict[str, Any]] = {
             required=("agent_id", "peer_agent_id"),
         ),
         "output": _output_object(
-            {"status": {"type": "string"}, "link": _LINK_OUTPUT, "created": {"type": "boolean"}, **_confirmation_output_schema()},
+            {
+                "status": {"type": "string"},
+                "link": _LINK_OUTPUT,
+                "created": {"type": "boolean"},
+                "peer_messaging": _output_object(
+                    {
+                        "tool_name": {"type": "string"},
+                        "peer_agent_id": _UUID,
+                        "guidance": {"type": "string"},
+                    },
+                    required=("tool_name", "peer_agent_id", "guidance"),
+                ),
+                **_confirmation_output_schema(),
+            },
             required=("status",),
         ),
     },
@@ -508,8 +522,10 @@ TOOL_DEFINITIONS: dict[str, dict[str, Any]] = {
     },
     "meta_gobii_send_agent_message": {
         "description": (
-            "Send a briefing or task message to one accessible Gobii and optionally attach files already in that agent's filespace. "
-            "Requires human approval via user_confirmed before messaging or briefing another Gobii."
+            "Inject a control-plane briefing or task message into one accessible Gobii and optionally attach files already "
+            "in that agent's filespace. This is not a peer DM. If the invoking Gobii shares an enabled peer link with the "
+            "target, use send_agent_message instead. Requires human approval via user_confirmed before messaging or briefing "
+            "another Gobii."
         ),
         "parameters": _object(
             {
@@ -1207,7 +1223,23 @@ def _tool_link_agents(invoking_agent: PersistentAgent, params: dict[str, Any]) -
         link.window_hours = window_hours
         link.is_enabled = True
     link.save()
-    return {"status": "ok", "link": _serialize_peer_link(link), "created": created}
+    result = {"status": "ok", "link": _serialize_peer_link(link), "created": created}
+    if invoking_agent.id == agent.id:
+        counterpart = peer_agent
+    elif invoking_agent.id == peer_agent.id:
+        counterpart = agent
+    else:
+        counterpart = None
+    if counterpart is not None:
+        result["peer_messaging"] = {
+            "tool_name": "send_agent_message",
+            "peer_agent_id": str(counterpart.id),
+            "guidance": (
+                "Use send_agent_message for direct coordination with this linked peer. "
+                "Do not use meta_gobii_send_agent_message for peer DMs."
+            ),
+        }
+    return result
 
 
 def _tool_unlink_agents(invoking_agent: PersistentAgent, params: dict[str, Any]) -> dict[str, Any]:
