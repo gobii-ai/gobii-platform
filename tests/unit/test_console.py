@@ -1,5 +1,6 @@
 import json
 import unittest
+import uuid
 from decimal import Decimal
 from datetime import timedelta
 import shutil
@@ -2233,6 +2234,189 @@ class ConsoleViewsTest(TestCase):
         self.assertIsNone(persistent_agent.schedule)
         self.assertTrue(persistent_agent.is_deleted)
         self.assertIsNotNone(persistent_agent.deleted_at)
+
+    @tag("batch_console_agents")
+    def test_org_managers_can_delete_agents_created_by_another_member(self):
+        from api.models import (
+            BrowserUseAgent,
+            Organization,
+            OrganizationMembership,
+            PersistentAgent,
+        )
+
+        User = get_user_model()
+        creator = User.objects.create_user(
+            username="org-agent-creator@example.com",
+            email="org-agent-creator@example.com",
+            password="testpass123",
+        )
+        allowed_roles = (
+            OrganizationMembership.OrgRole.OWNER,
+            OrganizationMembership.OrgRole.ADMIN,
+            OrganizationMembership.OrgRole.SOLUTIONS_PARTNER,
+        )
+
+        for role in allowed_roles:
+            with self.subTest(role=role):
+                organization = Organization.objects.create(
+                    name=f"Delete Agent {role}",
+                    slug=f"delete-agent-{role}",
+                    created_by=creator,
+                )
+                organization.billing.purchased_seats = 2
+                organization.billing.save(update_fields=["purchased_seats"])
+                OrganizationMembership.objects.create(
+                    org=organization,
+                    user=creator,
+                    role=OrganizationMembership.OrgRole.MEMBER,
+                    status=OrganizationMembership.OrgStatus.ACTIVE,
+                )
+                OrganizationMembership.objects.create(
+                    org=organization,
+                    user=self.user,
+                    role=role,
+                    status=OrganizationMembership.OrgStatus.ACTIVE,
+                )
+                browser_agent = BrowserUseAgent.objects.create(
+                    user=creator,
+                    name=f"Delete Agent {role} Browser",
+                )
+                agent = PersistentAgent.objects.create(
+                    user=creator,
+                    organization=organization,
+                    name=f"Delete Agent {role}",
+                    charter="Test organization manager deletion",
+                    browser_use_agent=browser_agent,
+                )
+
+                response = self.client.delete(
+                    reverse("agent_delete", kwargs={"pk": agent.id}),
+                    HTTP_X_GOBII_CONTEXT_TYPE="organization",
+                    HTTP_X_GOBII_CONTEXT_ID=str(organization.id),
+                )
+
+                self.assertEqual(response.status_code, 200)
+                agent.refresh_from_db()
+                self.assertTrue(agent.is_deleted)
+                self.assertEqual(agent.life_state, PersistentAgent.LifeState.EXPIRED)
+
+    @tag("batch_console_agents")
+    def test_org_non_managers_cannot_delete_agent_created_by_another_member(self):
+        from api.models import (
+            BrowserUseAgent,
+            Organization,
+            OrganizationMembership,
+            PersistentAgent,
+        )
+
+        User = get_user_model()
+        creator = User.objects.create_user(
+            username="protected-org-agent-creator@example.com",
+            email="protected-org-agent-creator@example.com",
+            password="testpass123",
+        )
+        denied_roles = (
+            OrganizationMembership.OrgRole.BILLING,
+            OrganizationMembership.OrgRole.MEMBER,
+            OrganizationMembership.OrgRole.VIEWER,
+        )
+
+        for role in denied_roles:
+            with self.subTest(role=role):
+                organization = Organization.objects.create(
+                    name=f"Protected Delete Agent {role}",
+                    slug=f"protected-delete-agent-{role}",
+                    created_by=creator,
+                )
+                organization.billing.purchased_seats = 2
+                organization.billing.save(update_fields=["purchased_seats"])
+                OrganizationMembership.objects.create(
+                    org=organization,
+                    user=creator,
+                    role=OrganizationMembership.OrgRole.OWNER,
+                    status=OrganizationMembership.OrgStatus.ACTIVE,
+                )
+                OrganizationMembership.objects.create(
+                    org=organization,
+                    user=self.user,
+                    role=role,
+                    status=OrganizationMembership.OrgStatus.ACTIVE,
+                )
+                browser_agent = BrowserUseAgent.objects.create(
+                    user=creator,
+                    name=f"Protected Delete Agent {role} Browser",
+                )
+                agent = PersistentAgent.objects.create(
+                    user=creator,
+                    organization=organization,
+                    name=f"Protected Delete Agent {role}",
+                    charter="Test organization member deletion denial",
+                    browser_use_agent=browser_agent,
+                )
+
+                response = self.client.delete(
+                    reverse("agent_delete", kwargs={"pk": agent.id}),
+                    HTTP_X_GOBII_CONTEXT_TYPE="organization",
+                    HTTP_X_GOBII_CONTEXT_ID=str(organization.id),
+                )
+
+                self.assertEqual(response.status_code, 403)
+                agent.refresh_from_db()
+                self.assertFalse(agent.is_deleted)
+                self.assertEqual(agent.life_state, PersistentAgent.LifeState.ACTIVE)
+
+    @tag("batch_console_agents")
+    def test_org_agent_creator_can_delete_without_manager_role(self):
+        from api.models import (
+            BrowserUseAgent,
+            Organization,
+            OrganizationMembership,
+            PersistentAgent,
+        )
+
+        organization = Organization.objects.create(
+            name="Creator Delete Agent Org",
+            slug="creator-delete-agent-org",
+            created_by=self.user,
+        )
+        organization.billing.purchased_seats = 1
+        organization.billing.save(update_fields=["purchased_seats"])
+        OrganizationMembership.objects.create(
+            org=organization,
+            user=self.user,
+            role=OrganizationMembership.OrgRole.MEMBER,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        )
+        browser_agent = BrowserUseAgent.objects.create(
+            user=self.user,
+            name="Creator Delete Agent Browser",
+        )
+        agent = PersistentAgent.objects.create(
+            user=self.user,
+            organization=organization,
+            name="Creator Delete Agent",
+            charter="Test creator deletion",
+            browser_use_agent=browser_agent,
+        )
+
+        response = self.client.delete(
+            reverse("agent_delete", kwargs={"pk": agent.id}),
+            HTTP_X_GOBII_CONTEXT_TYPE="organization",
+            HTTP_X_GOBII_CONTEXT_ID=str(organization.id),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        agent.refresh_from_db()
+        self.assertTrue(agent.is_deleted)
+
+    @tag("batch_console_agents")
+    def test_delete_missing_agent_returns_not_found(self):
+        response = self.client.delete(
+            reverse("agent_delete", kwargs={"pk": uuid.uuid4()}),
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.content, b"Agent not found.")
 
     @tag("batch_console_agents")
     def test_delete_persistent_agent_handles_missing_browser_agent(self):
