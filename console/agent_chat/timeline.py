@@ -179,7 +179,10 @@ def _message_body_html(message: PersistentAgentMessage, channel: str | None, att
     payload = message.raw_payload if isinstance(message.raw_payload, dict) else {}
     subject = payload.get("subject")
     subject = subject if isinstance(subject, str) else ""
-    full_mailgun_html = normalize_explicit_email_html(payload.get("body-html"))
+    full_mailgun_html = (
+        normalize_explicit_email_html(payload.get("body-html"))
+        or normalize_explicit_email_html(payload.get("html"))
+    )
     is_mailgun_forward = bool(
         full_mailgun_html
         and is_forward_like(subject, message.body or "", [])

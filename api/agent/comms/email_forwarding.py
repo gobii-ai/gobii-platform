@@ -29,20 +29,33 @@ FORWARDED_HEADER_LINE_RE = re.compile(
 )
 
 
+def _find_header_block_line(lines: list[str]) -> int | None:
+    header_matches = []
+    for index, line in enumerate(lines):
+        match = FORWARDED_HEADER_LINE_RE.match(line)
+        if not match:
+            continue
+        header_type = match.group(1).lower()
+        if header_type == "sent":
+            header_type = "date"
+        header_matches.append((index, header_type))
+
+    left = 0
+    for right, (right_line, _) in enumerate(header_matches):
+        while right_line - header_matches[left][0] >= 8:
+            left += 1
+        unique_headers = {
+            header_type
+            for _, header_type in header_matches[left:right + 1]
+        }
+        if len(unique_headers) >= 3:
+            return header_matches[left][0]
+    return None
+
+
 def has_forwarded_header_block(text: str) -> bool:
     """Return whether text contains a clustered forwarded-email header block."""
-    if not text:
-        return False
-
-    lines = text.split("\n")
-    for index in range(len(lines)):
-        window = "\n".join(lines[index:index + 8])
-        unique_headers = {match.lower() for match in FORWARDED_HEADER_LINE_RE.findall(window)}
-        if "sent" in unique_headers:
-            unique_headers.add("date")
-        if len(unique_headers) >= 3:
-            return True
-    return False
+    return bool(text) and _find_header_block_line(text.split("\n")) is not None
 
 
 def is_forward_like(subject: str, body_text: str, attachments: list[dict]) -> bool:
@@ -75,19 +88,8 @@ def _find_header_block_start(text: str) -> int | None:
         line_starts.append(position)
         position += len(line) + 1
 
-    for index in range(len(lines)):
-        window_lines = lines[index:index + 8]
-        window = "\n".join(window_lines)
-        unique_headers = {match.lower() for match in FORWARDED_HEADER_LINE_RE.findall(window)}
-        if "sent" in unique_headers:
-            unique_headers.add("date")
-        if len(unique_headers) < 3:
-            continue
-        for offset, line in enumerate(window_lines):
-            if FORWARDED_HEADER_LINE_RE.match(line):
-                return line_starts[index + offset]
-        return line_starts[index]
-    return None
+    header_block_line = _find_header_block_line(lines)
+    return line_starts[header_block_line] if header_block_line is not None else None
 
 
 def extract_forward_sections(body_text: str) -> tuple[str, str]:

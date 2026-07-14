@@ -2077,53 +2077,59 @@ class AgentChatAPITests(TestCase):
 
     @tag("batch_agent_chat")
     def test_timeline_restores_full_html_for_legacy_mailgun_forward(self):
-        plain_body = (
-            "Please investigate.\n\n"
-            "Begin forwarded message:\n"
-            "From: Customer <customer@example.com>\n"
-            "Subject: Account issue\n\n"
-            "The original request needs attention."
-        )
-        email_sender = PersistentAgentCommsEndpoint.objects.create(
-            owner_agent=None,
-            channel=CommsChannel.EMAIL,
-            address="legacy-forward@example.com",
-            is_primary=False,
-        )
-        email_conversation = PersistentAgentConversation.objects.create(
-            owner_agent=self.agent,
-            channel=CommsChannel.EMAIL,
-            address=email_sender.address,
-        )
-        PersistentAgentMessage.objects.create(
-            is_outbound=False,
-            from_endpoint=email_sender,
-            conversation=email_conversation,
-            body=plain_body,
-            owner_agent=self.agent,
-            raw_payload={
-                "subject": "Fwd: Account issue",
-                "body-html": (
-                    "<p>Please investigate.</p>"
-                    "<blockquote><p>The original request needs attention.</p></blockquote>"
-                    "<script>alert('unsafe')</script>"
-                ),
-                "chat_body_html_v1": "<p>Please investigate.</p>",
-            },
-        )
+        for full_html_key in ("body-html", "html"):
+            with self.subTest(full_html_key=full_html_key):
+                plain_body = (
+                    "Please investigate.\n\n"
+                    "Begin forwarded message:\n"
+                    "From: Customer <customer@example.com>\n"
+                    "Subject: Account issue\n\n"
+                    f"The original request from {full_html_key} needs attention."
+                )
+                email_sender = PersistentAgentCommsEndpoint.objects.create(
+                    owner_agent=None,
+                    channel=CommsChannel.EMAIL,
+                    address=f"legacy-forward-{full_html_key}@example.com",
+                    is_primary=False,
+                )
+                email_conversation = PersistentAgentConversation.objects.create(
+                    owner_agent=self.agent,
+                    channel=CommsChannel.EMAIL,
+                    address=email_sender.address,
+                )
+                PersistentAgentMessage.objects.create(
+                    is_outbound=False,
+                    from_endpoint=email_sender,
+                    conversation=email_conversation,
+                    body=plain_body,
+                    owner_agent=self.agent,
+                    raw_payload={
+                        "subject": "Fwd: Account issue",
+                        full_html_key: (
+                            "<p>Please investigate.</p>"
+                            f"<blockquote><p>The original request from {full_html_key} "
+                            "needs attention.</p></blockquote>"
+                            "<script>alert('unsafe')</script>"
+                        ),
+                        "chat_body_html_v1": "<p>Please investigate.</p>",
+                    },
+                )
 
-        response = self.client.get(f"/console/api/agents/{self.agent.id}/timeline/")
+                response = self.client.get(f"/console/api/agents/{self.agent.id}/timeline/")
 
-        self.assertEqual(response.status_code, 200)
-        html_event = next(
-            event
-            for event in response.json().get("events", [])
-            if event.get("kind") == "message" and event["message"].get("bodyText") == plain_body
-        )
-        rendered_html = html_event["message"]["bodyHtml"]
-        self.assertIn("Please investigate.", rendered_html)
-        self.assertIn("The original request needs attention.", rendered_html)
-        self.assertNotIn("<script", rendered_html)
+                self.assertEqual(response.status_code, 200)
+                html_event = next(
+                    event
+                    for event in response.json().get("events", [])
+                    if event.get("kind") == "message" and event["message"].get("bodyText") == plain_body
+                )
+                rendered_html = html_event["message"]["bodyHtml"]
+                self.assertIn("Please investigate.", rendered_html)
+                self.assertIn(
+                    f"The original request from {full_html_key} needs attention.",
+                    rendered_html,
+                )
+                self.assertNotIn("<script", rendered_html)
 
     @tag("batch_agent_chat")
     def test_timeline_keeps_stripped_cache_for_mailgun_reply(self):
