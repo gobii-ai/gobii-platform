@@ -16,7 +16,8 @@ import {
 } from '../../api/discordNative'
 import { safeErrorMessage } from '../../api/safeErrorMessage'
 import type { AgentRosterEntry } from '../../types/agentRoster'
-import { PipedreamEmptyState, PipedreamErrorState, PipedreamLoadingState, PipedreamStatusBanner, type PipedreamStatusMessage } from './PipedreamAppsShared'
+import type { SettingsSurfaceVariant } from '../common/SettingsSurface'
+import { PipedreamEmptyState, PipedreamErrorState, PipedreamListFrame, PipedreamLoadingState, PipedreamStatusBanner, type PipedreamStatusMessage } from './PipedreamAppsShared'
 
 export type PendingDiscordAction = 'connect' | 'save' | null
 
@@ -136,6 +137,7 @@ export function DiscordConfigurationScreen({
   statusMessage,
   onBack,
   onSave,
+  surface = 'standalone',
 }: {
   agentId: string
   app: AgentDiscordApp
@@ -144,6 +146,7 @@ export function DiscordConfigurationScreen({
   statusMessage: PipedreamStatusMessage
   onBack: () => void
   onSave: (subscriptions: DiscordSubscriptionSelection[]) => void
+  surface?: SettingsSurfaceVariant
 }) {
   const initialSelections = useMemo(() => activeDiscordSelections(app), [app.subscriptions])
   const [selectedSubscriptions, setSelectedSubscriptions] = useState<Record<string, DiscordSubscriptionSelection>>(initialSelections)
@@ -158,6 +161,9 @@ export function DiscordConfigurationScreen({
   const selectedKeys = useMemo(() => Object.keys(selectedSubscriptions).sort(), [selectedSubscriptions])
   const hasChanges = selectedKeys.join('|') !== savedKeys
   const isPendingSave = pendingDiscordAction === 'save'
+  const saveButtonClassName = surface === 'embedded'
+    ? 'border border-sky-300/25 bg-sky-900/55 text-sky-50 hover:border-sky-200/40 hover:bg-sky-900/75'
+    : 'bg-blue-600 text-white hover:bg-blue-700'
 
   const toggleChannel = (channel: DiscordChannel) => {
     const key = discordSubscriptionKey(channel.guildId, channel.channelId)
@@ -181,10 +187,10 @@ export function DiscordConfigurationScreen({
   return (
     <div className="space-y-4 p-1">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <BackButton disabled={disabled} onClick={onBack} />
+        <BackButton disabled={disabled} onClick={onBack} surface={surface} />
         <button
           type="button"
-          className="inline-flex min-w-28 items-center justify-center gap-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:opacity-60"
+          className={`inline-flex min-w-28 items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-semibold transition disabled:opacity-60 ${saveButtonClassName}`}
           onClick={() => onSave(Object.values(selectedSubscriptions))}
           disabled={disabled || isPendingSave || !hasChanges}
         >
@@ -193,8 +199,8 @@ export function DiscordConfigurationScreen({
         </button>
       </div>
 
-      <DiscordSummaryCell app={app} />
-      <PipedreamStatusBanner statusMessage={statusMessage} />
+      <DiscordSummaryCell app={app} surface={surface} />
+      <PipedreamStatusBanner statusMessage={statusMessage} surface={surface} />
 
       {app.guilds.length > 0 ? (
         <div className="space-y-3">
@@ -207,11 +213,12 @@ export function DiscordConfigurationScreen({
               selectedSubscriptions={selectedSubscriptions}
               disabled={disabled}
               onToggleChannel={toggleChannel}
+              surface={surface}
             />
           ))}
         </div>
       ) : (
-        <PipedreamEmptyState label="No Discord servers are connected yet." />
+        <PipedreamEmptyState label="No Discord servers are connected yet." surface={surface} />
       )}
     </div>
   )
@@ -229,6 +236,7 @@ export function DiscordAgentConnectionsScreen({
   onBack,
   onConnect,
   onConfigure,
+  surface = 'standalone',
 }: {
   agents: AgentRosterEntry[]
   isLoading: boolean
@@ -241,6 +249,7 @@ export function DiscordAgentConnectionsScreen({
   onBack: () => void
   onConnect: (agent: AgentRosterEntry) => void
   onConfigure: (agent: AgentRosterEntry) => void
+  surface?: SettingsSurfaceVariant
 }) {
   const sortedAgents = useMemo(() => (
     [...agents].sort((a, b) => Number(!agentHasDiscordNative(a)) - Number(!agentHasDiscordNative(b)) || a.name.localeCompare(b.name))
@@ -248,69 +257,90 @@ export function DiscordAgentConnectionsScreen({
 
   return (
     <div className="space-y-4 p-1">
-      <BackButton disabled={isBusy} onClick={onBack} />
+      <BackButton disabled={isBusy} onClick={onBack} surface={surface} />
 
       <div className="flex items-center gap-3">
         <DiscordIconTile />
         <div className="min-w-0">
-          <p className="truncate text-sm font-semibold text-slate-900">Discord</p>
-          <p className="text-sm text-slate-600">{isFetching ? 'Refreshing connections…' : 'Configure Discord channels per agent.'}</p>
+          <p className={`truncate text-sm font-semibold ${surface === 'embedded' ? 'text-slate-100' : 'text-slate-900'}`}>Discord</p>
+          <p className={`text-sm ${surface === 'embedded' ? 'text-slate-400' : 'text-slate-600'}`}>{isFetching ? 'Refreshing connections…' : 'Configure Discord channels per agent.'}</p>
         </div>
       </div>
 
-      <PipedreamStatusBanner statusMessage={statusMessage} />
+      <PipedreamStatusBanner statusMessage={statusMessage} surface={surface} />
 
       {isError ? (
-        <PipedreamErrorState error={error} fallback="Unable to load agents." />
+        <PipedreamErrorState error={error} fallback="Unable to load agents." surface={surface} />
       ) : isLoading ? (
-        <PipedreamLoadingState label="Loading agents…" />
+        <PipedreamLoadingState label="Loading agents…" surface={surface} />
       ) : sortedAgents.length === 0 ? (
-        <PipedreamEmptyState label="No agents found." />
+        <PipedreamEmptyState label="No agents found." surface={surface} />
       ) : (
-        <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
-          <div className="divide-y divide-slate-200">
-            {sortedAgents.map((agent) => (
-              <DiscordAgentConnectionRow
-                key={agent.id}
-                agent={agent}
-                pendingDiscordAgentAction={pendingDiscordAgentAction}
-                disabled={isBusy}
-                onConnect={() => onConnect(agent)}
-                onConfigure={() => onConfigure(agent)}
-              />
-            ))}
-          </div>
-        </div>
+        <PipedreamListFrame isMobile={false} constrainHeight={false} surface={surface}>
+          {sortedAgents.map((agent) => (
+            <DiscordAgentConnectionRow
+              key={agent.id}
+              agent={agent}
+              pendingDiscordAgentAction={pendingDiscordAgentAction}
+              disabled={isBusy}
+              onConnect={() => onConnect(agent)}
+              onConfigure={() => onConfigure(agent)}
+              surface={surface}
+            />
+          ))}
+        </PipedreamListFrame>
       )}
     </div>
   )
 }
 
-export function DiscordSummaryCell({ app }: { app: AgentDiscordApp }) {
+export function DiscordSummaryCell({
+  app,
+  surface = 'standalone',
+}: {
+  app: AgentDiscordApp
+  surface?: SettingsSurfaceVariant
+}) {
   const detail = app.connected
     ? `${app.guildCount} ${app.guildCount === 1 ? 'server' : 'servers'} connected; ${app.activeSubscriptionCount} ${app.activeSubscriptionCount === 1 ? 'channel' : 'channels'} subscribed.`
     : app.description
+  const titleClassName = surface === 'embedded' ? 'text-slate-100' : 'text-slate-900'
+  const descriptionClassName = surface === 'embedded' ? 'text-slate-400' : 'text-slate-600'
+  const badgeClassName = surface === 'embedded'
+    ? 'border-emerald-300/25 bg-emerald-950/45 text-emerald-200'
+    : 'border-emerald-200 bg-emerald-50 text-emerald-700'
   return (
     <div className="flex min-w-0 items-center gap-3">
       <DiscordIconTile />
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-2">
-          <p className="truncate text-sm font-semibold text-slate-900">{app.displayName}</p>
-          <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-emerald-700">
+          <p className={`truncate text-sm font-semibold ${titleClassName}`}>{app.displayName}</p>
+          <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide ${badgeClassName}`}>
             Native
           </span>
         </div>
-        <p className="mt-1 line-clamp-2 text-sm text-slate-600">{detail}</p>
+        <p className={`mt-1 line-clamp-2 text-sm ${descriptionClassName}`}>{detail}</p>
       </div>
     </div>
   )
 }
 
-export function BackButton({ disabled, onClick }: { disabled: boolean; onClick: () => void }) {
+export function BackButton({
+  disabled,
+  onClick,
+  surface = 'standalone',
+}: {
+  disabled: boolean
+  onClick: () => void
+  surface?: SettingsSurfaceVariant
+}) {
+  const className = surface === 'embedded'
+    ? 'border-slate-200/20 bg-slate-950/20 text-slate-300 hover:border-slate-100/35 hover:bg-slate-900/40'
+    : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
   return (
     <button
       type="button"
-      className="inline-flex w-fit items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
+      className={`inline-flex w-fit items-center gap-2 rounded-md border px-3 py-2 text-sm font-semibold transition disabled:opacity-60 ${className}`}
       onClick={onClick}
       disabled={disabled}
     >
@@ -326,15 +356,34 @@ function DiscordAgentConnectionRow({
   disabled,
   onConnect,
   onConfigure,
+  surface = 'standalone',
 }: {
   agent: AgentRosterEntry
   pendingDiscordAgentAction: PendingDiscordAgentAction
   disabled: boolean
   onConnect: () => void
   onConfigure: () => void
+  surface?: SettingsSurfaceVariant
 }) {
   const enabled = agentHasDiscordNative(agent)
   const pendingKind = pendingDiscordAgentAction?.agentId === agent.id ? pendingDiscordAgentAction.kind : null
+  const fallbackAvatarClassName = surface === 'embedded'
+    ? 'border-slate-200/20 bg-slate-900 text-slate-200'
+    : 'border-slate-200 bg-white text-slate-700'
+  const titleClassName = surface === 'embedded' ? 'text-slate-100' : 'text-slate-900'
+  const descriptionClassName = surface === 'embedded' ? 'text-slate-400' : 'text-slate-600'
+  const enabledBadgeClassName = surface === 'embedded'
+    ? 'border-sky-300/25 bg-sky-950/45 text-sky-200'
+    : 'border-blue-200 bg-blue-50 text-blue-700'
+  const disabledBadgeClassName = surface === 'embedded'
+    ? 'border-slate-200/20 bg-slate-950/20 text-slate-400'
+    : 'border-slate-200 text-slate-500'
+  const configureClassName = surface === 'embedded'
+    ? 'border-sky-300/25 bg-sky-950/20 text-sky-100 hover:border-sky-200/40 hover:bg-sky-900/40'
+    : 'border-blue-200 bg-white text-blue-700 hover:bg-blue-50'
+  const connectClassName = surface === 'embedded'
+    ? 'border border-sky-300/25 bg-sky-900/55 text-sky-50 hover:border-sky-200/40 hover:bg-sky-900/75'
+    : 'bg-blue-600 text-white hover:bg-blue-700'
 
   return (
     <div className="grid gap-3 px-4 py-3 md:grid-cols-[minmax(0,1fr)_8rem_9rem] md:items-center">
@@ -347,25 +396,25 @@ function DiscordAgentConnectionRow({
             loading="lazy"
           />
         ) : (
-          <span className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 bg-white text-xs font-semibold uppercase text-slate-700">
+          <span className={`inline-flex h-9 w-9 items-center justify-center rounded-full border text-xs font-semibold uppercase ${fallbackAvatarClassName}`}>
             {agent.name.slice(0, 2)}
           </span>
         )}
         <div className="min-w-0">
-          <p className="truncate text-sm font-semibold text-slate-900">{agent.name}</p>
-          <p className="truncate text-sm text-slate-600">
+          <p className={`truncate text-sm font-semibold ${titleClassName}`}>{agent.name}</p>
+          <p className={`truncate text-sm ${descriptionClassName}`}>
             {enabled ? 'Discord is enabled for this agent.' : 'Connect Discord before selecting channels.'}
           </p>
         </div>
       </div>
       <div>
         {enabled ? (
-          <span className="inline-flex items-center gap-1.5 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700">
+          <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold ${enabledBadgeClassName}`}>
             <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
             Enabled
           </span>
         ) : (
-          <span className="inline-flex rounded-full border border-slate-200 px-2.5 py-1 text-xs font-semibold text-slate-500">
+          <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${disabledBadgeClassName}`}>
             Not enabled
           </span>
         )}
@@ -374,7 +423,7 @@ function DiscordAgentConnectionRow({
         {enabled ? (
           <button
             type="button"
-            className="inline-flex min-w-28 items-center justify-center gap-2 rounded-md border border-blue-200 bg-white px-3 py-2 text-sm font-semibold text-blue-700 transition hover:bg-blue-50 disabled:opacity-60"
+            className={`inline-flex min-w-28 items-center justify-center gap-2 rounded-md border px-3 py-2 text-sm font-semibold transition disabled:opacity-60 ${configureClassName}`}
             onClick={onConfigure}
             disabled={disabled}
           >
@@ -384,7 +433,7 @@ function DiscordAgentConnectionRow({
         ) : (
           <button
             type="button"
-            className="inline-flex min-w-28 items-center justify-center gap-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:opacity-60"
+            className={`inline-flex min-w-28 items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-semibold transition disabled:opacity-60 ${connectClassName}`}
             onClick={onConnect}
             disabled={disabled}
           >
@@ -404,6 +453,7 @@ function DiscordGuildChannelSection({
   selectedSubscriptions,
   disabled,
   onToggleChannel,
+  surface = 'standalone',
 }: {
   agentId: string
   guild: DiscordGuild
@@ -411,6 +461,7 @@ function DiscordGuildChannelSection({
   selectedSubscriptions: Record<string, DiscordSubscriptionSelection>
   disabled: boolean
   onToggleChannel: (channel: DiscordChannel) => void
+  surface?: SettingsSurfaceVariant
 }) {
   const channelsQuery = useQuery({
     queryKey: ['agent-discord-channels', agentId, guild.guildId],
@@ -432,27 +483,43 @@ function DiscordGuildChannelSection({
     channelsByKey.set(discordSubscriptionKey(channel.guildId, channel.channelId), channel)
   }
   const channels = Array.from(channelsByKey.values()).sort((a, b) => a.channelName.localeCompare(b.channelName))
+  const sectionClassName = surface === 'embedded'
+    ? 'border-slate-200/20 bg-slate-950/30'
+    : 'border-indigo-100 bg-white'
+  const titleClassName = surface === 'embedded' ? 'text-slate-100' : 'text-slate-900'
+  const descriptionClassName = 'text-slate-500'
+  const actionRequiredClassName = surface === 'embedded'
+    ? 'border-amber-300/25 bg-amber-950/35 text-amber-200'
+    : 'border-amber-200 bg-amber-50 text-amber-800'
+  const actionLinkClassName = surface === 'embedded' ? 'text-amber-100' : 'text-amber-900'
+  const errorClassName = surface === 'embedded'
+    ? 'border-rose-300/25 bg-rose-950/35 text-rose-200'
+    : 'border-red-200 bg-red-50 text-red-700'
+  const channelClassName = surface === 'embedded'
+    ? 'border-slate-200/20 bg-slate-950/25 text-slate-300 hover:border-sky-300/35 hover:text-slate-100'
+    : 'border-slate-200 bg-white text-slate-700 hover:border-indigo-200 hover:text-slate-950'
+  const emptyClassName = surface === 'embedded' ? 'text-slate-400' : 'text-slate-600'
 
   return (
-    <section className="rounded-lg border border-indigo-100 bg-white px-3 py-3" aria-label={`${guild.name} Discord channels`}>
+    <section className={`rounded-lg border px-3 py-3 ${sectionClassName}`} aria-label={`${guild.name} Discord channels`}>
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
-          <p className="truncate text-sm font-semibold text-slate-900">{guild.name}</p>
-          <p className="text-xs text-slate-500">Choose channels that should wake this agent.</p>
+          <p className={`truncate text-sm font-semibold ${titleClassName}`}>{guild.name}</p>
+          <p className={`text-xs ${descriptionClassName}`}>Choose channels that should wake this agent.</p>
         </div>
         {channelsQuery.isLoading ? <Loader2 className="h-4 w-4 animate-spin text-indigo-600" aria-hidden="true" /> : null}
       </div>
       {channelsQuery.data?.status === 'action_required' ? (
-        <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+        <div className={`mt-3 rounded-md border px-3 py-2 text-sm ${actionRequiredClassName}`}>
           <p>{channelsQuery.data.message || 'The Gobii Discord bot needs access to list channels in this server.'}</p>
           {channelsQuery.data.botInviteUrl ? (
-            <a href={channelsQuery.data.botInviteUrl} target="_blank" rel="noreferrer" className="mt-2 inline-flex font-semibold text-amber-900 underline">
+            <a href={channelsQuery.data.botInviteUrl} target="_blank" rel="noreferrer" className={`mt-2 inline-flex font-semibold underline ${actionLinkClassName}`}>
               Invite bot
             </a>
           ) : null}
         </div>
       ) : channelsQuery.isError ? (
-        <div className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+        <div className={`mt-3 rounded-md border px-3 py-2 text-sm ${errorClassName}`}>
           {safeErrorMessage(channelsQuery.error)}
         </div>
       ) : channels.length > 0 ? (
@@ -462,7 +529,7 @@ function DiscordGuildChannelSection({
             return (
               <label
                 key={key}
-                className="flex min-w-0 items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 transition hover:border-indigo-200 hover:text-slate-950"
+                className={`flex min-w-0 items-center gap-2 rounded-md border px-3 py-2 text-sm transition ${channelClassName}`}
               >
                 <input
                   type="checkbox"
@@ -478,7 +545,7 @@ function DiscordGuildChannelSection({
           })}
         </div>
       ) : channelsQuery.isLoading ? null : (
-        <p className="mt-3 text-sm text-slate-600">No text channels were found for this server.</p>
+        <p className={`mt-3 text-sm ${emptyClassName}`}>No text channels were found for this server.</p>
       )}
     </section>
   )
