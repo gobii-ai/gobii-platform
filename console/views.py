@@ -109,7 +109,13 @@ from util.urls import (
     build_immersive_contact_requests_url,
     load_daily_limit_action_payload,
 )
-from console.agent_chat.access import resolve_agent_for_request, resolve_manageable_agent_for_request, user_can_manage_agent, user_is_collaborator
+from console.agent_chat.access import (
+    resolve_agent_for_request,
+    resolve_manageable_agent_for_request,
+    user_can_manage_agent,
+    user_can_manage_agent_settings,
+    user_is_collaborator,
+)
 from config import settings
 from config.stripe_config import get_stripe_settings
 from config.plans import PLAN_CONFIG
@@ -1668,9 +1674,15 @@ class AgentDeleteView(LoginRequiredMixin, View):
         try:
             agent = PersistentAgent.objects.non_eval().alive().get(
                 pk=self.kwargs['pk'],
-                user=request.user,
             )
             _enforce_personal_agent_access_or_raise(request.user, agent)
+            if not user_can_manage_agent_settings(request.user, agent):
+                if not (
+                    user_can_manage_agent(request.user, agent)
+                    or user_is_collaborator(request.user, agent)
+                ):
+                    return HttpResponse("Agent not found.", status=404)
+                raise PermissionDenied("You do not have permission to delete this agent.")
 
             agent_name = agent.name
             agent_id = str(agent.pk)
@@ -1712,7 +1724,7 @@ class AgentDeleteView(LoginRequiredMixin, View):
             return response
             
         except PersistentAgent.DoesNotExist:
-            return HttpResponse("Agent not found or you don't have permission.", status=404)
+            return HttpResponse("Agent not found.", status=404)
         except PermissionDenied:
             raise
 
