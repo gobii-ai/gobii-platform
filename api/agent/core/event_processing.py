@@ -884,7 +884,8 @@ def _schedule_agent_follow_up(
     try:
         from ..tasks.process_events import process_agent_events_task  # noqa: WPS433 (runtime import)
 
-        process_agent_events_task.apply_async(args=[str(agent_id)], countdown=delay_seconds, queue=queue)
+        queue_option = {} if queue is None else {"queue": queue}
+        process_agent_events_task.apply_async(args=[str(agent_id)], countdown=delay_seconds, **queue_option)
         if span is not None:
             span.add_event(f"{reason} follow-up scheduled")
     except Exception:
@@ -6492,9 +6493,7 @@ def _run_agent_loop(
                     AgentBudgetManager.close_cycle(agent_id=budget_ctx.agent_id, budget_id=budget_ctx.budget_id)
             except RedisError:
                 budget_exhausted = False
-                logger.warning(
-                    "Budget cycle %s cleanup failed for agent %s", budget_ctx.budget_id, agent.id, exc_info=True
-                )
+                logger.warning("Agent %s budget %s cleanup failed", agent.id, budget_ctx.budget_id, exc_info=True)
             _schedule_agent_follow_up(
                 agent_id=agent.id,
                 delay_seconds=delay_seconds,

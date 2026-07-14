@@ -6171,7 +6171,6 @@ class EventProcessingMaxIterationsFollowUpTests(TestCase):
         mock_apply_async.assert_called_once_with(
             args=[str(self.agent.id)],
             countdown=expected_delay_seconds,
-            queue=None,
         )
         next_budget_id, _, _ = AgentBudgetManager.find_or_start_cycle(
             agent_id=budget_ctx.agent_id,
