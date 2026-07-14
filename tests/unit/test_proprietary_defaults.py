@@ -68,6 +68,11 @@ class ProprietaryDefaultHelperTests(SimpleTestCase):
                 "PUBLIC_SAASHUB_URL",
                 fallback="",
             )
+            alternativeto = settings_module._community_default(
+                "brand",
+                "PUBLIC_ALTERNATIVETO_URL",
+                fallback="",
+            )
 
         self.assertEqual(discord, "https://discord.gg/yyDB8GwxtE")
         self.assertEqual(x_url, "https://x.com/gobii_ai")
@@ -75,6 +80,7 @@ class ProprietaryDefaultHelperTests(SimpleTestCase):
         self.assertEqual(huggingface, "https://huggingface.co/gobii-ai")
         self.assertEqual(g2, "")
         self.assertEqual(saashub, "")
+        self.assertEqual(alternativeto, "")
 
     def test_returns_fallback_when_key_missing(self) -> None:
         defaults_map = {"brand": {}}

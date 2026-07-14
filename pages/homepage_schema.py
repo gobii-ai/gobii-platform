@@ -138,6 +138,9 @@ def build_homepage_structured_data(
         "image": _schema_absolute_url(static(HOMEPAGE_SOCIAL_IMAGE_PATH)),
         "featureList": HOMEPAGE_SOFTWARE_FEATURES,
     }
+    software_same_as = _optional_urls([settings.PUBLIC_ALTERNATIVETO_URL])
+    if software_same_as:
+        software["sameAs"] = software_same_as
 
     return {
         "@context": "https://schema.org",
