@@ -92,6 +92,42 @@ def _attach_inline_payload_to_related(
     related_part.attach(inline_part)
 
 
+def build_email_message(
+    *,
+    from_addr: str,
+    to_addrs: Sequence[str],
+    subject: str,
+    plaintext_body: str,
+    html_body: str,
+    attempt_id: str,
+    message_id: str | None = None,
+    in_reply_to: str | None = None,
+    references: str | None = None,
+    attachments: Sequence[EmailAttachmentPayload] | None = None,
+) -> EmailMessage:
+    """Build the RFC 2822 message shared by SMTP and provider API transports."""
+    recipient_list = list(to_addrs or [])
+    msg = EmailMessage()
+    msg["Subject"] = subject or ""
+    msg["From"] = from_addr
+    msg["To"] = ", ".join(recipient_list[:1]) if recipient_list else ""
+    if len(recipient_list) > 1:
+        msg["Cc"] = ", ".join(recipient_list[1:])
+    msg["Message-ID"] = message_id or make_msgid()
+    msg["X-Gobii-Message-ID"] = str(attempt_id)
+    if in_reply_to:
+        msg["In-Reply-To"] = in_reply_to
+    if references:
+        msg["References"] = references
+
+    msg.set_content(plaintext_body or "")
+    if html_body:
+        msg.add_alternative(html_body, subtype="html")
+    if attachments:
+        _attach_payloads(msg, attachments)
+    return msg
+
+
 class SmtpTransport:
     """Simple SMTP transport for per-agent SMTP accounts.
 
@@ -135,27 +171,18 @@ class SmtpTransport:
         recipient_list = list(to_addrs or [])
         envelope_sender = envelope_from_addr or parseaddr(from_addr)[1] or from_addr
 
-        # Build message
-        msg = EmailMessage()
-        msg["Subject"] = subject or ""
-        msg["From"] = from_addr
-        msg["To"] = ", ".join(recipient_list[:1]) if recipient_list else ""
-        # If there are more than 1 recipients, put the rest in Cc
-        if len(recipient_list) > 1:
-            msg["Cc"] = ", ".join(recipient_list[1:])
-        msg["Message-ID"] = message_id or make_msgid()
-        msg["X-Gobii-Message-ID"] = str(attempt_id)
-        if in_reply_to:
-            msg["In-Reply-To"] = in_reply_to
-        if references:
-            msg["References"] = references
-
-        # Text and HTML alternatives
-        msg.set_content(plaintext_body or "")
-        if html_body:
-            msg.add_alternative(html_body, subtype="html")
-        if attachments:
-            _attach_payloads(msg, attachments)
+        msg = build_email_message(
+            from_addr=from_addr,
+            to_addrs=recipient_list,
+            subject=subject,
+            plaintext_body=plaintext_body,
+            html_body=html_body,
+            attempt_id=attempt_id,
+            message_id=message_id,
+            in_reply_to=in_reply_to,
+            references=references,
+            attachments=attachments,
+        )
 
         # Connect and send
         if account.smtp_security == AgentEmailAccount.SmtpSecurity.SSL:

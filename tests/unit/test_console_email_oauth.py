@@ -80,6 +80,9 @@ class NativeAgentEmailIntegrationTests(TestCase):
         self.assertTrue(session.code_verifier)
         self.assertEqual(session.code_challenge_method, "S256")
         self.assertIn("code_challenge=", payload["authorization_url"])
+        self.assertIn("gmail.send", payload["authorization_url"])
+        self.assertIn("gmail.readonly", payload["authorization_url"])
+        self.assertNotIn("mail.google.com", payload["authorization_url"])
 
     def test_shared_oauth_start_requires_agent_and_manage_permission(self):
         url = reverse("console-native-integration-connect", args=["gmail"])

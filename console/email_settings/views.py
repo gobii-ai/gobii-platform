@@ -269,6 +269,20 @@ def _apply_email_account_settings(
 
 
 def _validate_agent_smtp_connection(account: AgentEmailAccount) -> tuple[bool, str]:
+    from api.agent.comms.gmail_api import GmailApiError, uses_gmail_api, validate_gmail_send_access
+
+    if uses_gmail_api(account):
+        try:
+            validate_gmail_send_access(account)
+            return True, ""
+        except GmailApiError as exc:
+            logger.warning(
+                "Gmail API send validation failed for agent email account %s: %s",
+                account.pk,
+                exc,
+            )
+            return False, str(exc)
+
     try:
         import smtplib
 
@@ -322,6 +336,20 @@ def _validate_agent_smtp_connection(account: AgentEmailAccount) -> tuple[bool, s
 
 
 def _validate_agent_imap_connection(account: AgentEmailAccount) -> tuple[bool, str]:
+    from api.agent.comms.gmail_api import GmailApiError, uses_gmail_api, validate_gmail_receive_access
+
+    if uses_gmail_api(account):
+        try:
+            validate_gmail_receive_access(account)
+            return True, ""
+        except GmailApiError as exc:
+            logger.warning(
+                "Gmail API receive validation failed for agent email account %s: %s",
+                account.pk,
+                exc,
+            )
+            return False, str(exc)
+
     try:
         import imaplib
 

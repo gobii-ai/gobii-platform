@@ -234,7 +234,12 @@ GMAIL_PROVIDER = NativeIntegrationProvider(
     auth_type="oauth2",
     authorization_endpoint="https://accounts.google.com/o/oauth2/v2/auth",
     token_endpoint="https://oauth2.googleapis.com/token",
-    scopes=("openid", "email", "https://mail.google.com/"),
+    scopes=(
+        "openid",
+        "email",
+        "https://www.googleapis.com/auth/gmail.send",
+        "https://www.googleapis.com/auth/gmail.readonly",
+    ),
     api_hosts=(),
     api_url_prefixes=(),
     icon="gmail",
