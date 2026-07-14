@@ -69,10 +69,13 @@ adapters = importlib.util.module_from_spec(spec)
 sys.modules.setdefault("forward_adapters", adapters)
 spec.loader.exec_module(adapters)
 
-_is_forward_like = adapters._is_forward_like
-_extract_forward_sections = adapters._extract_forward_sections
+from api.agent.comms.email_forwarding import (
+    extract_forward_sections as _extract_forward_sections,
+    has_forwarded_header_block as _has_forwarded_header_block,
+    is_forward_like as _is_forward_like,
+)
+
 _html_to_text = adapters._html_to_text
-_has_forwarded_header_block = adapters._has_forwarded_header_block
 
 
 @tag("batch_forward_detection")
