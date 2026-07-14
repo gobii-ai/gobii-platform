@@ -15,7 +15,7 @@ Managed LinkedIn Recruiter automation is available through sales.
 - [Gobii homepage]({{ base_url }}/): AI agents that work across the tools teams already use.
 - [Gobii for Teams]({{ base_url }}/teams/): Shared AI agent workspaces with pooled task credits, private templates, shared credentials, roles, seats, and team billing.
 - [Solutions]({{ base_url }}/solutions/): AI agent solution pages for teams.
-- [Developers]({{ base_url }}/solutions/engineering/): Gobii developer platform and API overview.
+- [API]({{ base_url }}/solutions/engineering/): Gobii API platform overview.
 - [Pricing]({{ base_url }}/pricing/): Self-serve pricing plans, including Pro and Scale.
 - [Documentation](https://docs.gobii.ai/): Documentation for Gobii agents and integrations.
 - [Full Context]({{ base_url }}/llms-full.txt): More detailed information for LLMs.

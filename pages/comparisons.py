@@ -35,10 +35,10 @@ COMPARISON_CATALOG = (
         "competitor_name": "n8n",
         "title": "n8n vs Gobii",
         "template_name": "comparisons/detail_n8n.html",
-        "seo_title": "n8n vs Gobii: Workflow Automation or AI Coworkers? | Gobii",
+        "seo_title": "n8n vs Gobii: Workflow Automation or AI Employees? | Gobii",
         "seo_description": (
             "Comparing n8n vs Gobii? See when to choose n8n's technical workflow "
-            "automation canvas and when to choose Gobii's persistent browser-native AI coworkers."
+            "automation canvas and when to choose Gobii's persistent browser-native AI employees."
         ),
         "summary": (
             "A professional comparison for teams deciding between technical workflow "
@@ -67,14 +67,14 @@ COMPARISON_CATALOG = (
         "competitor_name": "Zapier Agents",
         "title": "Zapier Agents vs Gobii",
         "template_name": "comparisons/detail_zapier_agents.html",
-        "seo_title": "Zapier Agents vs Gobii: AI Coworker Comparison | Gobii",
+        "seo_title": "Zapier Agents vs Gobii: AI Employee Comparison | Gobii",
         "seo_description": (
             "Comparing Zapier Agents vs Gobii? See when to choose Zapier's connected-app "
-            "AI agents and when to choose Gobii's always-on AI coworkers for recurring work."
+            "AI agents and when to choose Gobii's always-on AI employees for recurring work."
         ),
         "summary": (
             "A practical comparison for teams deciding between Zapier Agents for connected-app "
-            "automation and Gobii for always-on AI coworker workflows."
+            "automation and Gobii for always-on AI employee workflows."
         ),
         "status": COMPARISON_STATUS_PUBLISHED,
         "target_keywords": (
@@ -103,14 +103,14 @@ COMPARISON_CATALOG = (
         "competitor_name": "Lindy",
         "title": "Lindy vs Gobii",
         "template_name": "comparisons/detail_lindy.html",
-        "seo_title": "Lindy vs Gobii: AI Assistant or AI Coworker? | Gobii",
+        "seo_title": "Lindy vs Gobii: AI Assistant or AI Employee? | Gobii",
         "seo_description": (
             "Comparing Lindy vs Gobii? See when to choose Lindy's AI assistant for inbox "
-            "and meetings, and when to choose Gobii's browser-native AI coworkers."
+            "and meetings, and when to choose Gobii's browser-native AI employees."
         ),
         "summary": (
             "A source-aware comparison for teams deciding between Lindy's AI assistant "
-            "workflows and Gobii's persistent AI coworkers for browser-native operations."
+            "workflows and Gobii's persistent AI employees for browser-native operations."
         ),
         "status": COMPARISON_STATUS_PUBLISHED,
         "target_keywords": (

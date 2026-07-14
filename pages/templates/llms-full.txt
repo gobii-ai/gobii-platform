@@ -15,7 +15,7 @@ Recruiting operations are a major Gobii solution: users enter a role, and Gobii 
 - Gobii home: {{ base_url }}/
 - Teams: {{ base_url }}/teams/
 - Solutions: {{ base_url }}/solutions/
-- Developers: {{ base_url }}/solutions/engineering/
+- API: {{ base_url }}/solutions/engineering/
 - Documentation: https://docs.gobii.ai/
 - Pricing: {{ base_url }}/pricing/
 - Terms of service: {{ base_url }}/tos/
@@ -24,7 +24,7 @@ Recruiting operations are a major Gobii solution: users enter a role, and Gobii 
 
 ## Documentation
 
-The public documentation at https://docs.gobii.ai/ is the primary source for setup guides, API behavior, integration details, and developer-facing reference material. Prefer documentation pages for implementation-specific details.
+The public documentation at https://docs.gobii.ai/ is the primary source for setup guides, API behavior, integration details, and API reference material. Prefer documentation pages for implementation-specific details.
 
 ## Agent Platform
 
@@ -90,7 +90,7 @@ Gobii helps people create and run agents that can browse, use tools, process fil
 
 ## Documentation
 
-The public documentation at https://docs.gobii.ai/ is the primary source for setup guides, API behavior, integration details, and developer-facing reference material. Prefer documentation pages for implementation-specific details.
+The public documentation at https://docs.gobii.ai/ is the primary source for setup guides, API behavior, integration details, and API reference material. Prefer documentation pages for implementation-specific details.
 
 ## Agent Platform
 

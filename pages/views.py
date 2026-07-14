@@ -193,7 +193,7 @@ HOMEPAGE_INLINE_INTEGRATION_ICON_PATHS = {
     "slack": "images/integrations/pipedream/slack.svg",
     "trello": "images/integrations/pipedream/trello.svg",
 }
-HOMEPAGE_META_TITLE_SUFFIX = "AI Coworkers for Teams With Real Work to Do"
+HOMEPAGE_META_TITLE_SUFFIX = "AI Employees for Teams With Real Work to Do"
 _LANDING_UTM_TRACKER = UTMTrackingMiddleware(lambda request: None)
 
 
@@ -994,11 +994,11 @@ class HomePage(TemplateView):
         context["home_brand_name"] = home_brand_name
         context["home_meta_title"] = f"{home_brand_name} - {HOMEPAGE_META_TITLE_SUFFIX}"
         context["home_meta_description"] = (
-            f"{home_brand_name} agents are virtual coworkers with their own identity, "
+            f"{home_brand_name} agents are virtual employees with their own identity, "
             "memory, and tools. Email them, text them — they browse the web, collect "
             "data, and deliver reports 24/7."
         )
-        context["home_social_image_alt"] = f"{home_brand_name} AI coworker platform preview"
+        context["home_social_image_alt"] = f"{home_brand_name} AI employee platform preview"
         context["home_social_metadata_enabled"] = settings.GOBII_PROPRIETARY_MODE
         context["home_canonical_url"] = _public_site_absolute_url("/")
         context["home_social_image_url"] = _public_site_absolute_url(
@@ -3835,7 +3835,7 @@ class ComparisonDetailView(TemplateView):
                 "https://docs.gobii.ai/",
             ],
             "description": (
-                "Always-on AI coworker platform for recurring business work across "
+                "Always-on AI employee platform for recurring business work across "
                 "integrations, browsers, files, and communication channels."
             ),
         }
@@ -4482,16 +4482,16 @@ class SolutionView(TemplateView):
             ],
         },
         'engineering': {
-            'title': 'Engineering',
-            'tagline': 'Accelerate development workflows.',
-            'description': 'Automate code reviews, testing, and deployment pipelines to ship software faster.',
-            'seo_title': "AI Agents for Developers - Build on Gobii's Platform | Gobii",
+            'title': 'API',
+            'tagline': "Build production agents with Gobii's API.",
+            'description': 'Create, deploy, and manage always-on browser agents through API, webhooks, cloud browsers, and self-hosting.',
+            'seo_title': "AI Agent API - Build on Gobii's Platform | Gobii",
             'seo_description': "Build powerful AI agents with Gobii's API. Create, deploy, and control always-on agents programmatically. Self-hosted or cloud. Get started in minutes.",
-            'date_modified': '2026-06-05',
+            'date_modified': '2026-07-14',
             'social_image': 'images/solutions/engineering-hero.jpg',
-            'social_image_alt': 'Gobii developer platform for building AI browser agents',
+            'social_image_alt': 'Gobii API platform for building AI browser agents',
             'related_link': {
-                'intro': 'Want a developer workflow to inspect?',
+                'intro': 'Want an API workflow to inspect?',
                 'label': 'View the Standup Coordinator AI agent',
                 'route': 'pages:pretrained_worker_detail',
                 'kwargs': {'slug': 'team-standup-coordinator'},

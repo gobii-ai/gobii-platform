@@ -5,13 +5,13 @@
 <h1 align="center">Gobii</h1>
 
 <p align="center">
-  <strong>AI coworkers for teams with real work to do.</strong><br/>
+  <strong>AI employees for teams with real work to do.</strong><br/>
   This repository contains the open-source Gobii Platform for self-hosting and development.
 </p>
 
 <p align="center">
   <strong>Looking for the hosted product?</strong>
-  Start at <a href="https://gobii.ai/">Gobii AI coworkers</a>.
+  Start at <a href="https://gobii.ai/">Gobii AI employees</a>.
 </p>
 
 <p align="center">
@@ -30,10 +30,10 @@
   <a href="https://gobii.ai/pricing">Gobii Cloud</a>
 </p>
 
-Gobii is an AI coworker platform for running durable autonomous agents in production.
+Gobii is an AI employee platform for running durable autonomous agents in production.
 The hosted Gobii product is available at [gobii.ai](https://gobii.ai/); this repository contains the open-source platform for self-hosted deployments and development.
 Each agent can run continuously, wake from schedules and events, use real browsers, call external systems, and coordinate with other agents.
-Each agent can also be contacted like an AI coworker: assign it an identity, email or text it, and it keeps working 24/7.
+Each agent can also be contacted like an AI employee: assign it an identity, email or text it, and it keeps working 24/7.
 
 If you are optimizing for local-first personal assistant UX on a single device, there are excellent projects for that.
 Gobii is optimized for a different problem: reliable, secure, always-on agent operations for teams and businesses.
@@ -96,7 +96,7 @@ For Docker-based products, the standard pattern is to validate Docker and Compos
 - [Quick Install](#quick-install)
 - [Why Teams Choose Gobii](#why-teams-choose-gobii)
 - [Gobii vs OpenClaw (Production Lens)](#gobii-vs-openclaw-production-lens)
-- [AI Coworker Interaction Model](#ai-coworker-interaction-model)
+- [AI Employee Interaction Model](#ai-employee-interaction-model)
 - [How Gobii Works](#how-gobii-works)
 - [Always-On Runtime: Schedule + Event Triggers](#always-on-runtime-schedule--event-triggers)
 - [Production Browser Runtime](#production-browser-runtime)
@@ -107,7 +107,7 @@ For Docker-based products, the standard pattern is to validate Docker and Compos
 - [Operational Profiles](#operational-profiles)
 - [Production Use Cases](#production-use-cases)
 - [FAQ](#faq)
-- [Developer Workflow](#developer-workflow)
+- [API Workflow](#api-workflow)
 - [Docs and Deep Dives](#docs-and-deep-dives)
 - [Contributing](#contributing)
 - [License and Trademarks](#license-and-trademarks)
@@ -135,7 +135,7 @@ Gobii is optimized for a different target: cloud-native, secure, always-on agent
 | Webhook model | Inbound triggers plus outbound agent webhook actions in one lifecycle | Strong gateway ingress hooks and wake/agent webhook routes |
 | Channel strategy | Fewer core channels with deeper lifecycle integration | Wider channel surface with intentionally thinner per-channel depth |
 | Agent identity | Endpoint-addressable agent identities (email/SMS/web) | Workspace/session identity model |
-| Human interaction model | Contact each agent directly through its own endpoint like an AI coworker | Primarily session/workspace-oriented assistant interactions |
+| Human interaction model | Contact each agent directly through its own endpoint like an AI employee | Primarily session/workspace-oriented assistant interactions |
 | Agent coordination | Native agent-to-agent messaging | Orchestrator/subagent flows |
 | Memory substrate | SQLite-native operational state | Markdown-first memory with optional vector acceleration |
 | Browser runtime | Headed execution, persistent profiles, proxy-aware routing, distributed-worker friendly | Headed execution, persistent local profiles, strong local operator UX |
@@ -144,9 +144,9 @@ Gobii is optimized for a different target: cloud-native, secure, always-on agent
 
 If your priority is secure, governed, always-on production execution in cloud or hybrid environments, Gobii is purpose-built for that.
 
-## AI Coworker Interaction Model
+## AI Employee Interaction Model
 
-Gobii agents are designed to behave like AI coworkers, not disposable one-off tasks.
+Gobii agents are designed to behave like AI employees, not disposable one-off tasks.
 You can email or text them directly, they wake from those events, execute work, and reply with context-aware follow-through.
 
 ```mermaid
@@ -228,7 +228,7 @@ Gobii is based on browser-use and adds production runtime behavior around it.
 ## Identity, Channels, and Agent-to-Agent
 
 Gobii treats agents as operational entities, not just prompt sessions.
-When channels are enabled, each agent can be assigned identity endpoints and contacted directly like an AI coworker.
+When channels are enabled, each agent can be assigned identity endpoints and contacted directly like an AI employee.
 
 - Agents can own communication endpoints (email, SMS, web).
 - Managed deployments support first-party agent identities like `first.last@my.gobii.ai`.
@@ -322,7 +322,7 @@ Gobii can power individual workflows, but the architecture is tuned for team and
 
 Yes. Gobii supports headed browser workflows and persistent profile handling for realistic web task execution.
 
-### Can each agent be contacted directly like a coworker?
+### Can each agent be contacted directly like an employee?
 
 Yes. With channels configured, each agent can be assigned its own endpoint identity (email and/or SMS), so your team can interact with it directly and asynchronously.
 
@@ -334,7 +334,7 @@ Agents can wake from schedules and external events (email/SMS/webhooks/API), pro
 
 Gobii integrates encrypted-at-rest secrets, proxy-aware outbound controls, and sandbox compute support with Kubernetes/gVisor backend options for stronger isolation.
 
-## Developer Workflow
+## API Workflow
 
 Use [DEVELOPMENT.md](DEVELOPMENT.md) for the complete local setup and iteration flow.
 
@@ -355,7 +355,7 @@ uv run celery -A config worker -l info -Q agent_interactive --pool=threads --con
 ## Docs and Deep Dives
 
 - Getting started: [Introduction](https://docs.gobii.ai/getting-started/introduction)
-- Developer foundations: [Developer Basics](https://docs.gobii.ai/developers/developer-basics)
+- API foundations: [API Basics](https://docs.gobii.ai/developers/developer-basics)
 - Agent API: [Agents](https://docs.gobii.ai/developers/developer-agents)
 - Browser task execution: [Tasks](https://docs.gobii.ai/developers/developer-tasks)
 - Structured outputs: [Structured Data](https://docs.gobii.ai/developers/structured-data)

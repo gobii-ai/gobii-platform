@@ -143,9 +143,9 @@ class HomePageTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         soup = BeautifulSoup(response.content.decode("utf-8"), "html.parser")
-        title = "Acme - AI Coworkers for Teams With Real Work to Do"
+        title = "Acme - AI Employees for Teams With Real Work to Do"
         description = (
-            "Acme agents are virtual coworkers with their own identity, memory, and tools. "
+            "Acme agents are virtual employees with their own identity, memory, and tools. "
             "Email them, text them — they browse the web, collect data, and deliver reports 24/7."
         )
         image_url = "https://gobii.ai/static/images/gobii_og_image_1200x630.png"
@@ -170,7 +170,7 @@ class HomePageTests(TestCase):
         self.assertEqual(soup.find("meta", property="og:image:height")["content"], "630")
         self.assertEqual(
             soup.find("meta", property="og:image:alt")["content"],
-            "Acme AI coworker platform preview",
+            "Acme AI employee platform preview",
         )
         self.assertEqual(
             soup.find("meta", attrs={"name": "twitter:card"})["content"],
@@ -184,7 +184,7 @@ class HomePageTests(TestCase):
         self.assertEqual(soup.find("meta", attrs={"name": "twitter:image"})["content"], image_url)
         self.assertEqual(
             soup.find("meta", attrs={"name": "twitter:image:alt"})["content"],
-            "Acme AI coworker platform preview",
+            "Acme AI employee platform preview",
         )
 
     @override_settings(GOBII_PROPRIETARY_MODE=False)
@@ -368,7 +368,7 @@ class HomePageTests(TestCase):
 
         self.assertEqual(organization_schema["name"], "Acme")
         self.assertEqual(website_schema["name"], "Acme")
-        self.assertEqual(webpage_schema["name"], "Acme - AI Coworkers for Teams With Real Work to Do")
+        self.assertEqual(webpage_schema["name"], "Acme - AI Employees for Teams With Real Work to Do")
         self.assertEqual(software_schema["name"], "Acme")
         self.assertEqual(
             software_schema["description"],
@@ -569,7 +569,7 @@ class HomePageTests(TestCase):
         response = self.client.get("/")
         self.assertContains(
             response,
-            '<meta name="description" content="Acme agents are virtual coworkers with their own identity, memory, and tools. Email them, text them — they browse the web, collect data, and deliver reports 24/7.">',
+            '<meta name="description" content="Acme agents are virtual employees with their own identity, memory, and tools. Email them, text them — they browse the web, collect data, and deliver reports 24/7.">',
         )
 
     @override_settings(PUBLIC_BRAND_NAME="Acme", GOBII_PROPRIETARY_MODE=True)
@@ -577,7 +577,7 @@ class HomePageTests(TestCase):
         response = self.client.get("/")
         self.assertContains(
             response,
-            '<meta name="description" content="Acme agents are virtual coworkers with their own identity, memory, and tools. Email them, text them — they browse the web, collect data, and deliver reports 24/7.">',
+            '<meta name="description" content="Acme agents are virtual employees with their own identity, memory, and tools. Email them, text them — they browse the web, collect data, and deliver reports 24/7.">',
         )
 
     def test_home_page_does_not_render_signup_modal_shell_when_flag_is_off(self):
@@ -1093,7 +1093,7 @@ class HomePageTests(TestCase):
             normalized_page_text,
         )
         self.assertIn(
-            "Gobii is an AI agent platform that gives businesses always-on virtual coworkers "
+            "Gobii is an AI agent platform that gives businesses always-on virtual employees "
             "capable of browser automation, web research, data collection, and workflow execution.",
             normalized_page_text,
         )
@@ -2218,7 +2218,7 @@ class LlmsTxtTests(TestCase):
         self.assertContains(response, "## Recruiting Operations")
         self.assertContains(response, "Managed LinkedIn Recruiter automation is available through sales.")
         self.assertContains(response, "Solutions: http://testserver/solutions/")
-        self.assertContains(response, "Developers: http://testserver/solutions/engineering/")
+        self.assertContains(response, "API: http://testserver/solutions/engineering/")
         self.assertNotContains(response, "http://testserver/pretrained-workers/")
         self.assertNotContains(response, "http://testserver/library/")
 
@@ -3195,7 +3195,7 @@ class ComparisonPageTests(TestCase):
         self.assertEqual(
             structured_data["about"][0]["description"],
             (
-                "Always-on AI coworker platform for recurring business work across "
+                "Always-on AI employee platform for recurring business work across "
                 "integrations, browsers, files, and communication channels."
             ),
         )
@@ -3218,11 +3218,11 @@ class ComparisonPageTests(TestCase):
 
         content = soup.get_text(" ", strip=True)
         self.assertIn("n8n vs Gobii", content)
-        self.assertIn("n8n vs Gobii: workflow automation or AI coworkers?", content)
+        self.assertIn("n8n vs Gobii: workflow automation or AI employees?", content)
         self.assertIn("Choose n8n if", content)
         self.assertIn("Choose Gobii if", content)
         self.assertIn("n8n helps builders connect systems. Gobii helps teams delegate work.", content)
-        self.assertIn("n8n is a canvas. Gobii is a coworker runtime.", content)
+        self.assertIn("n8n is a canvas. Gobii is an AI employee runtime.", content)
         self.assertIn("Gobii vs n8n comparison", content)
         self.assertIn("n8n alternative", content)
         self.assertIn("Source note", content)
@@ -3296,7 +3296,7 @@ class ComparisonPageTests(TestCase):
         self.assertEqual(
             structured_data["about"][0]["description"],
             (
-                "Always-on AI coworker platform for recurring business work across "
+                "Always-on AI employee platform for recurring business work across "
                 "integrations, browsers, files, and communication channels."
             ),
         )
@@ -3333,10 +3333,10 @@ class ComparisonPageTests(TestCase):
 
         content = soup.get_text(" ", strip=True)
         self.assertIn("Zapier Agents vs Gobii", content)
-        self.assertIn("Zapier Agents vs Gobii: connected-app automation or always-on AI coworkers?", content)
+        self.assertIn("Zapier Agents vs Gobii: connected-app automation or always-on AI employees?", content)
         self.assertIn("Choose Zapier Agents if", content)
         self.assertIn("Choose Gobii if", content)
-        self.assertIn("Zapier Agents adds AI to app automation. Gobii gives recurring business work an always-on coworker runtime.", content)
+        self.assertIn("Zapier Agents adds AI to app automation. Gobii gives recurring business work an always-on AI employee runtime.", content)
         self.assertIn("Zapier Agents is strongest across connected apps. Gobii is strongest for delegated work that spans tools, web apps, and files.", content)
         self.assertIn("Gobii vs Zapier Agents comparison", content)
         self.assertIn("Zapier Agents alternative", content)
@@ -3422,7 +3422,7 @@ class ComparisonPageTests(TestCase):
         self.assertEqual(
             structured_data["about"][0]["description"],
             (
-                "Always-on AI coworker platform for recurring business work across "
+                "Always-on AI employee platform for recurring business work across "
                 "integrations, browsers, files, and communication channels."
             ),
         )
@@ -3454,7 +3454,7 @@ class ComparisonPageTests(TestCase):
 
         content = soup.get_text(" ", strip=True)
         self.assertIn("Lindy vs Gobii", content)
-        self.assertIn("Lindy vs Gobii: AI assistant or AI coworker?", content)
+        self.assertIn("Lindy vs Gobii: AI assistant or AI employee?", content)
         self.assertIn("Choose Lindy if", content)
         self.assertIn("Choose Gobii if", content)
         self.assertIn(
@@ -3462,7 +3462,7 @@ class ComparisonPageTests(TestCase):
             content,
         )
         self.assertIn(
-            "Lindy is a polished AI assistant. Gobii is a browser-native AI coworker platform.",
+            "Lindy is a polished AI assistant. Gobii is a browser-native AI employee platform.",
             content,
         )
         self.assertIn("Gobii vs Lindy comparison", content)
@@ -3693,7 +3693,7 @@ class RestoredPublicMarketingSurfaceTests(TestCase):
         self.assertIsNotNone(soup.find("a", {"href": reverse("pages:library")}))
         self.assertIn("Solutions", soup.get_text(" ", strip=True))
         self.assertIn("Discover", soup.get_text(" ", strip=True))
-        self.assertIn("Developers", soup.get_text(" ", strip=True))
+        self.assertIn("API", soup.get_text(" ", strip=True))
         self.assertEqual(
             soup.find("h1").get_text(" ", strip=True),
             "A steady stream of qualified candidates and sales leads",
@@ -3723,7 +3723,6 @@ class RestoredPublicMarketingSurfaceTests(TestCase):
         self.assertIsNotNone(soup.find("a", {"href": reverse("pages:library")}))
         self.assertNotIn("Solutions", soup.get_text(" ", strip=True))
         self.assertIn("Discover", soup.get_text(" ", strip=True))
-        self.assertNotIn("Developers", soup.get_text(" ", strip=True))
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_restored_solution_urls_render(self):
@@ -3747,6 +3746,37 @@ class RestoredPublicMarketingSurfaceTests(TestCase):
             with self.subTest(path=retired_path):
                 response = self.client.get(retired_path)
                 self.assertEqual(response.status_code, 404)
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_api_solution_search_copy_is_consistent(self):
+        response = self.client.get("/solutions/engineering/")
+
+        self.assertEqual(response.status_code, 200)
+        soup = BeautifulSoup(response.content, "html.parser")
+        page_text = soup.get_text(" ", strip=True)
+        expected_title = "AI Agent API - Build on Gobii's Platform | Gobii"
+        expected_description = (
+            "Build powerful AI agents with Gobii's API. Create, deploy, and control "
+            "always-on agents programmatically. Self-hosted or cloud. Get started in minutes."
+        )
+
+        self.assertEqual(soup.title.get_text(strip=True), expected_title)
+        self.assertEqual(
+            soup.find("meta", attrs={"name": "description"})["content"],
+            expected_description,
+        )
+        self.assertEqual(
+            soup.find("meta", property="og:title")["content"],
+            expected_title,
+        )
+        self.assertEqual(
+            soup.find("h1").get_text(" ", strip=True),
+            "Agentic AI API for automation",
+        )
+        self.assertIn("What you can build with the API", page_text)
+        self.assertIn("API resources", page_text)
+        self.assertNotIn("What developers build", page_text)
+        self.assertNotIn("Developer resources", page_text)
 
 
 @tag("batch_pages")
@@ -5946,7 +5976,7 @@ class MarketingMetaTests(TestCase):
         response = self.client.get("/careers/")
         self.assertContains(
             response,
-            "<meta name=\"description\" content=\"Join Gobii to build AI coworkers that browse, research, and automate the web for organizations worldwide.\">",
+            "<meta name=\"description\" content=\"Join Gobii to build AI employees that browse, research, and automate the web for organizations worldwide.\">",
         )
 
 

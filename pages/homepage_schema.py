@@ -3,12 +3,12 @@ from django.templatetags.static import static
 
 HOMEPAGE_SOCIAL_IMAGE_PATH = "images/gobii_og_image_1200x630.png"
 HOMEPAGE_SOFTWARE_DESCRIPTION_TEMPLATE = (
-    "{brand_name} is an AI agent platform that gives businesses always-on virtual coworkers "
+    "{brand_name} is an AI agent platform that gives businesses always-on virtual employees "
     "capable of browser automation, web research, data collection, and workflow execution."
 )
 HOMEPAGE_SOFTWARE_DESCRIPTION = HOMEPAGE_SOFTWARE_DESCRIPTION_TEMPLATE.format(brand_name="Gobii")
 HOMEPAGE_SOFTWARE_FEATURES = [
-    "Virtual coworkers, not chatbots",
+    "Virtual employees, not chatbots",
     "Every agent has its own computer",
     "A built-in database for every agent",
     "Real output, not just answers",

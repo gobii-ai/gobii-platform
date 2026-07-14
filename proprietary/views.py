@@ -82,7 +82,7 @@ BLOG_INDEX_TOPIC_SECTIONS = (
     {
         "name": "MCP and integrations",
         "description": (
-            "Connect Gobii to developer tools, SaaS apps, webhooks, Discord, email, and "
+            "Connect Gobii to API tools, SaaS apps, webhooks, Discord, email, and "
             "MCP-compatible workflows."
         ),
         "slugs": (

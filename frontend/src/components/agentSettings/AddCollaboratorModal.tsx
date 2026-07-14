@@ -38,7 +38,7 @@ export function AddCollaboratorModal({ onSubmit, onClose }: AddCollaboratorModal
     <ModalForm
       id="collaborator-form"
       title="Invite Collaborator"
-      subtitle="Invite a coworker to chat and exchange files with this agent."
+      subtitle="Invite an employee to chat and exchange files with this agent."
       onClose={onClose}
       onSubmit={handleSubmit}
       icon={UserPlus}
