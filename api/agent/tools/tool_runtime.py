@@ -8,7 +8,6 @@ from .charter_updater import execute_update_charter
 from .custom_tools import execute_create_custom_tool
 from .custom_tool_names import CREATE_CUSTOM_TOOL_NAME
 from .email_sender import execute_send_email
-from .meta_gobii_names import META_GOBII_TOOL_NAMES_THAT_REFRESH_TOOLS
 from .peer_dm import execute_send_agent_message
 from .planning import execute_end_planning
 from .request_contact_permission import execute_request_contact_permission
@@ -87,7 +86,4 @@ def execute_runtime_tool_call(
         updated_tools = _refresh_agent_tools(agent)
         return result, updated_tools
 
-    result = execute_enabled_tool(agent, tool_name, exec_params)
-    if tool_name in META_GOBII_TOOL_NAMES_THAT_REFRESH_TOOLS:
-        updated_tools = _refresh_agent_tools(agent)
-    return result, updated_tools
+    return execute_enabled_tool(agent, tool_name, exec_params), updated_tools

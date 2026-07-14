@@ -16,7 +16,6 @@ from api.agent.tools.meta_gobii_names import (
     META_GOBII_SYSTEM_SKILL_KEY,
     META_GOBII_TOOL_NAMES,
 )
-from api.agent.tools.tool_runtime import execute_runtime_tool_call
 from api.models import (
     AgentPeerLink,
     BrowserUseAgent,
@@ -89,8 +88,8 @@ class MetaGobiiSystemSkillTests(TestCase):
         self.assertIn("non-duplicated proposal", definition.prompt_instructions)
         self.assertIn("execute only that approved scope", definition.prompt_instructions)
         self.assertIn("avoid echoing full email addresses or phone numbers", definition.prompt_instructions)
-        self.assertIn("meta_gobii_send_agent_message is a control-plane message injector, not a peer DM", definition.prompt_instructions)
-        self.assertIn("use the newly available send_agent_message tool", definition.prompt_instructions)
+        self.assertIn("Use meta_gobii_send_agent_message only for control-plane", definition.prompt_instructions)
+        self.assertIn("use send_agent_message for questions, handoffs", definition.prompt_instructions)
 
         for query in [
             "help me create a team of Gobiis, link them, and brief them",
@@ -381,6 +380,20 @@ class MetaGobiiDirectToolTests(TestCase):
         mock_get_manager.return_value = _mock_mcp_manager()
         self.assertNotIn("send_agent_message", _tool_names(get_agent_tools(self.manager)))
 
+        blocked, updated_tools = _execute_tool_call_runtime(
+            self.manager,
+            tool_name="meta_gobii_link_agents",
+            exec_params={
+                "agent_id": str(self.manager.id),
+                "peer_agent_id": str(self.peer.id),
+            },
+            budget_ctx=None,
+            eval_run_id=None,
+        )
+
+        self.assertEqual(blocked["status"], "confirmation_required")
+        self.assertIsNone(updated_tools)
+
         linked, updated_tools = _execute_tool_call_runtime(
             self.manager,
             tool_name="meta_gobii_link_agents",
@@ -394,18 +407,18 @@ class MetaGobiiDirectToolTests(TestCase):
         )
 
         self.assertEqual(linked["status"], "ok")
-        self.assertEqual(linked["peer_messaging"]["tool_name"], "send_agent_message")
-        self.assertEqual(linked["peer_messaging"]["peer_agent_id"], str(self.peer.id))
         self.assertIsNotNone(updated_tools)
         self.assertIn("send_agent_message", _tool_names(updated_tools))
 
-        unlinked, updated_tools = execute_runtime_tool_call(
+        unlinked, updated_tools = _execute_tool_call_runtime(
             self.manager,
             tool_name="meta_gobii_unlink_agents",
             exec_params={
                 "peer_link_id": linked["link"]["id"],
                 "user_confirmed": True,
             },
+            budget_ctx=None,
+            eval_run_id=None,
         )
 
         self.assertEqual(unlinked["status"], "unlinked")

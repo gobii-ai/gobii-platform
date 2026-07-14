@@ -93,7 +93,6 @@ from ..tools.sqlite_agent_config import apply_sqlite_agent_config_updates, seed_
 from ..tools.sqlite_skills import apply_sqlite_skill_updates, refresh_skills_for_tool, seed_sqlite_skills
 from ..tools.custom_tools import execute_create_custom_tool
 from ..tools.custom_tool_names import CREATE_CUSTOM_TOOL_NAME
-from ..tools.meta_gobii_names import META_GOBII_TOOL_NAMES_THAT_REFRESH_TOOLS
 from ..tools.plan import build_plan_snapshot, build_redundant_research_plan_skip_result, execute_update_plan
 from ..tools.planning import execute_end_planning
 from ..tools.runtime_execution_context import tool_execution_context
@@ -2390,7 +2389,11 @@ def _execute_tool_call_runtime(
         current_sqlite_db_path=get_sqlite_db_path(),
         resolved_entry=resolved_entry,
     )
-    if tool_name in META_GOBII_TOOL_NAMES_THAT_REFRESH_TOOLS:
+    if (
+        tool_name in {"meta_gobii_link_agents", "meta_gobii_unlink_agents"}
+        and isinstance(result, dict)
+        and result.get("status") in {"ok", "unlinked"}
+    ):
         updated_tools = get_agent_tools(agent)
     return result, updated_tools
 
