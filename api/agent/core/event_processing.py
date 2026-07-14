@@ -27,6 +27,7 @@ from kombu.exceptions import OperationalError as KombuOperationalError
 from opentelemetry import baggage, trace
 from pottery import Redlock
 from pottery.exceptions import ExtendUnlockedLock, TooManyExtensions
+from redis.exceptions import RedisError
 from django.apps import apps
 from django.conf import settings as django_settings
 from django.db import DatabaseError, transaction, close_old_connections
@@ -883,13 +884,8 @@ def _schedule_agent_follow_up(
     try:
         from ..tasks.process_events import process_agent_events_task  # noqa: WPS433 (runtime import)
 
-        apply_async_kwargs = {
-            "args": [str(agent_id)],
-            "countdown": delay_seconds,
-        }
-        if queue is not None:
-            apply_async_kwargs["queue"] = queue
-        process_agent_events_task.apply_async(**apply_async_kwargs)
+        queue_option = {} if queue is None else {"queue": queue}
+        process_agent_events_task.apply_async(args=[str(agent_id)], countdown=delay_seconds, **queue_option)
         if span is not None:
             span.add_event(f"{reason} follow-up scheduled")
     except Exception:
@@ -6483,11 +6479,7 @@ def _run_agent_loop(
                 heartbeat.touch("max_iterations")
             try:
                 PersistentAgentStep.objects.create(
-                    agent=agent,
-                    description=(
-                        "Processing paused: max iterations reached. "
-                        "Will resume shortly."
-                    ),
+                    agent=agent, description="Processing paused: max iterations reached. Will resume shortly."
                 )
             except DatabaseError:
                 logger.debug(
@@ -6495,14 +6487,20 @@ def _run_agent_loop(
                     agent.id,
                     exc_info=True,
                 )
+            delay_seconds = max(0, int(max_iterations_followup_delay_seconds or 0))
             if max_iterations_followup_delay_seconds is None:
-                pending_settings = get_pending_drain_settings(settings)
-                delay_seconds = max(
-                    int(MAX_ITERATIONS_FOLLOWUP_DELAY_SECONDS),
-                    int(pending_settings.pending_drain_delay_seconds),
+                pending_delay = get_pending_drain_settings(settings).pending_drain_delay_seconds
+                delay_seconds = max(int(MAX_ITERATIONS_FOLLOWUP_DELAY_SECONDS), int(pending_delay))
+            try:
+                budget_exhausted = budget_ctx is not None and (
+                    AgentBudgetManager.get_steps_used(agent_id=budget_ctx.agent_id)
+                    >= budget_ctx.max_steps
                 )
-            else:
-                delay_seconds = max(0, int(max_iterations_followup_delay_seconds))
+                if budget_exhausted:
+                    AgentBudgetManager.close_cycle(agent_id=budget_ctx.agent_id, budget_id=budget_ctx.budget_id)
+            except RedisError:
+                budget_exhausted = False
+                logger.warning("Agent %s budget %s cleanup failed", agent.id, budget_ctx.budget_id, exc_info=True)
             _schedule_agent_follow_up(
                 agent_id=agent.id,
                 delay_seconds=delay_seconds,
@@ -6510,7 +6508,8 @@ def _run_agent_loop(
                 reason="Max iterations",
                 queue=max_iterations_followup_queue,
             )
-            _attempt_cycle_close_for_sleep(agent, budget_ctx)
+            if not budget_exhausted:
+                _attempt_cycle_close_for_sleep(agent, budget_ctx)
 
         return cumulative_token_usage
     finally:
