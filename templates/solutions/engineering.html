@@ -191,13 +191,14 @@
 
       <!-- Hero Content -->
       <div class="relative z-10 max-w-2xl ml-2 sm:ml-4 lg:ml-8 2xl:ml-0">
+        <p class="mb-5 text-sm font-semibold uppercase tracking-[0.18em] text-violet-800">AI Agent API</p>
         <h1 class="text-4xl sm:text-5xl lg:text-6xl tracking-tight font-light text-gray-900 leading-[1.1]">
-          Agentic AI API for
-          <span class="font-normal bg-gradient-to-r from-violet-800 to-purple-700 bg-clip-text text-transparent">automation</span>
+          Deploy and manage
+          <span class="font-normal bg-gradient-to-r from-violet-800 to-purple-700 bg-clip-text text-transparent">always-on AI employees</span>
         </h1>
 
         <p class="mt-6 text-lg text-gray-700 leading-relaxed max-w-xl">
-          The easiest way to deploy <a href="https://github.com/browser-use/browser-use" target="_blank" rel="noopener" class="text-gray-900 hover:text-violet-700 underline decoration-gray-300 hover:decoration-violet-500 transition-colors">browser-use</a> in the cloud. Create always-on agents via API, or self-host with our open-source codebase.
+          Gobii's Agent API gives each employee a charter, schedule, timeline, tools, channels, and persistent workspace. Create them once, keep them working, and manage their full lifecycle from your product.
         </p>
 
         <div class="mt-10 flex flex-col sm:flex-row gap-4">
@@ -213,25 +214,24 @@
               </svg>
             </button>
           </form>
-          <a href="https://docs.gobii.ai/developers/developer-basics" class="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-7 py-3.5 bg-white/70 backdrop-blur-sm hover:bg-white/90 text-gray-800 font-medium rounded-xl border border-white/60 hover:border-indigo-200 shadow-sm transition-all duration-200">
-            Read the docs
+          <a href="https://docs.gobii.ai/developers/developer-agents" class="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-7 py-3.5 bg-white/70 backdrop-blur-sm hover:bg-white/90 text-gray-800 font-medium rounded-xl border border-white/60 hover:border-indigo-200 shadow-sm transition-all duration-200">
+            Read the Agent API docs
           </a>
         </div>
-        {% include "solutions/_crawlable_related_link.html" %}
 
         <!-- Inline stats -->
         <div class="mt-16 flex flex-wrap gap-x-14 gap-y-5">
           <div>
             <div class="text-3xl font-light text-gray-900">REST</div>
-            <p class="text-sm text-gray-800 mt-1">Simple API</p>
-          </div>
-          <div>
-            <div class="text-3xl font-light text-gray-900">Flexible</div>
-            <p class="text-sm text-gray-800 mt-1">Self-host or cloud</p>
+            <p class="text-sm text-gray-800 mt-1">Full lifecycle API</p>
           </div>
           <div>
             <div class="text-3xl font-light text-gray-900">24/7</div>
-            <p class="text-sm text-gray-800 mt-1">Always-on agents</p>
+            <p class="text-sm text-gray-800 mt-1">Schedules + events</p>
+          </div>
+          <div>
+            <div class="text-3xl font-light text-gray-900">Open</div>
+            <p class="text-sm text-gray-800 mt-1">Gobii Cloud or self-hosted</p>
           </div>
         </div>
       </div>
@@ -244,10 +244,10 @@
   <div class="max-w-6xl mx-auto px-6">
     <div class="text-center pt-4 pb-16">
       <h2 class="text-3xl sm:text-4xl font-light text-gray-900 tracking-tight">
-        Get started in seconds
+        Create an AI employee in one request
       </h2>
       <p class="mt-4 text-lg text-gray-500 max-w-2xl mx-auto">
-        Deploy browser-use agents with a few lines of code.
+        Give it a responsibility and schedule. Gobii provisions the persistent agent and keeps its configuration available between runs.
       </p>
     </div>
 
@@ -264,19 +264,22 @@
         </div>
         <pre><code><span class="keyword">import</span> requests
 
-<span class="comment"># Create an always-on agent</span>
+<span class="variable">API_URL</span> = <span class="string">"https://gobii.ai/api/v1/agents/"</span>
+
+<span class="comment"># Deploy an always-on AI employee</span>
 response = requests.<span class="function">post</span>(
-    <span class="string">"https://api.gobii.ai/v1/persistent-agents/"</span>,
-    headers={<span class="string">"Authorization"</span>: <span class="string">f"Bearer </span><span class="variable">{API_KEY}</span><span class="string">"</span>},
+    <span class="variable">API_URL</span>,
+    headers={<span class="string">"X-Api-Key"</span>: <span class="variable">API_KEY</span>},
     json={
-        <span class="string">"name"</span>: <span class="string">"Data Collector"</span>,
-        <span class="string">"system_prompt"</span>: <span class="string">"You are a web research agent..."</span>,
-        <span class="string">"schedule"</span>: <span class="string">"every day at 9am"</span>
+        <span class="string">"name"</span>: <span class="string">"Market Monitor"</span>,
+        <span class="string">"charter"</span>: <span class="string">"Track competitor launches and brief the product team."</span>,
+        <span class="string">"schedule"</span>: <span class="string">"@daily"</span>,
     }
 )
 
+response.<span class="function">raise_for_status</span>()
 agent = response.<span class="function">json</span>()
-<span class="keyword">print</span>(<span class="string">f"Agent created: </span><span class="variable">{agent['id']}</span><span class="string">"</span>)</code></pre>
+<span class="keyword">print</span>(agent[<span class="string">"id"</span>], agent[<span class="string">"life_state"</span>])</code></pre>
       </div>
     </div>
 
@@ -295,76 +298,76 @@ agent = response.<span class="function">json</span>()
   <div class="relative max-w-7xl mx-auto px-6">
     <div class="text-center mb-16">
       <h2 class="text-3xl sm:text-4xl lg:text-5xl font-light text-white tracking-tight">
-        Everything you need to build
+        One API for the full employee lifecycle
       </h2>
       <p class="mt-4 text-lg text-slate-400 max-w-2xl mx-auto">
-        A complete platform with production-grade infrastructure, so you can focus on your product.
+        Deploy the agent, give it recurring responsibilities, connect its tools, inspect its work, and pause or update it without rebuilding your infrastructure.
       </p>
     </div>
 
     <!-- Bento Grid -->
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 lg:gap-5">
 
-      <!-- Cloud Browsers - Large -->
+      <!-- Agent lifecycle - Large -->
       <div class="lg:col-span-2 group relative bg-gradient-to-br from-slate-800/80 to-slate-800/40 backdrop-blur-sm rounded-3xl p-8 border border-slate-700/50 hover:border-violet-500/30 transition-all duration-300 overflow-hidden">
         <div class="absolute top-0 right-0 w-64 h-64 bg-violet-500/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2 group-hover:bg-violet-500/20 transition-all duration-500"></div>
         <div class="relative">
           <div class="flex items-start justify-between mb-6">
             <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center shadow-lg shadow-violet-500/25">
-              <i data-lucide="monitor" class="w-6 h-6 text-white"></i>
+              <i data-lucide="refresh-cw" class="w-6 h-6 text-white"></i>
             </div>
-            <span class="px-3 py-1 rounded-full bg-violet-500/10 text-violet-400 text-xs font-medium border border-violet-500/20">Fully Headed</span>
+            <span class="px-3 py-1 rounded-full bg-violet-500/10 text-violet-400 text-xs font-medium border border-violet-500/20">Long-lived by default</span>
           </div>
-          <h3 class="text-xl font-semibold text-white mb-3">Cloud Browsers</h3>
+          <h3 class="text-xl font-semibold text-white mb-3">Agent lifecycle</h3>
           <p class="text-slate-400 leading-relaxed mb-6">
-            Real Chrome browsers running in the cloud with full rendering, JavaScript execution, and visual output. Headed or headless modes available.
+            Create an AI employee with a charter, then retrieve, update, activate, deactivate, or delete it through stable REST resources. Configuration and state persist between interactions.
           </p>
           <div class="flex flex-wrap gap-2">
-            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Screenshots</span>
-            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">DOM Access</span>
-            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">File Downloads</span>
-            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Session Persistence</span>
+            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Create</span>
+            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Configure</span>
+            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Pause</span>
+            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Resume</span>
           </div>
         </div>
       </div>
 
-      <!-- Proxy & Anti-Bot -->
+      <!-- Schedules and events -->
       <div class="group relative bg-gradient-to-br from-slate-800/80 to-slate-800/40 backdrop-blur-sm rounded-3xl p-8 border border-slate-700/50 hover:border-indigo-500/30 transition-all duration-300 overflow-hidden">
         <div class="absolute bottom-0 left-0 w-48 h-48 bg-indigo-500/10 rounded-full blur-3xl translate-y-1/2 -translate-x-1/2 group-hover:bg-indigo-500/20 transition-all duration-500"></div>
         <div class="relative">
           <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-indigo-500 to-blue-600 flex items-center justify-center shadow-lg shadow-indigo-500/25 mb-6">
-            <i data-lucide="shield-check" class="w-6 h-6 text-white"></i>
+            <i data-lucide="clock-3" class="w-6 h-6 text-white"></i>
           </div>
-          <h3 class="text-xl font-semibold text-white mb-3">Proxy & Anti-Bot</h3>
+          <h3 class="text-xl font-semibold text-white mb-3">Schedules and events</h3>
           <p class="text-slate-400 leading-relaxed mb-6">
-            Managed rotating proxies with health monitoring. Bypass bot detection automatically.
+            Wake employees on cron-like schedules, inbound messages, or webhooks. Long-running responsibilities continue without an open browser tab or synchronous request.
           </p>
           <div class="flex flex-wrap gap-2">
-            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Auto-rotation</span>
-            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Health Checks</span>
+            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Cron schedules</span>
+            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Event triggers</span>
           </div>
         </div>
       </div>
 
-      <!-- MCP Servers -->
+      <!-- Tools and connected apps -->
       <div class="group relative bg-gradient-to-br from-slate-800/80 to-slate-800/40 backdrop-blur-sm rounded-3xl p-8 border border-slate-700/50 hover:border-purple-500/30 transition-all duration-300 overflow-hidden">
         <div class="absolute top-0 left-0 w-48 h-48 bg-purple-500/10 rounded-full blur-3xl -translate-y-1/2 -translate-x-1/2 group-hover:bg-purple-500/20 transition-all duration-500"></div>
         <div class="relative">
           <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-purple-500 to-fuchsia-600 flex items-center justify-center shadow-lg shadow-purple-500/25 mb-6">
             <i data-lucide="plug" class="w-6 h-6 text-white"></i>
           </div>
-          <h3 class="text-xl font-semibold text-white mb-3">MCP Servers</h3>
+          <h3 class="text-xl font-semibold text-white mb-3">Tools and connected apps</h3>
           <p class="text-slate-400 leading-relaxed mb-6">
-            Connect agents to external tools via Model Context Protocol. Platform, org, or user-scoped.
+            Equip each employee with MCP servers and connected app tools. Keep access scoped at the platform, organization, user, or individual-agent level.
           </p>
           <div class="flex flex-wrap gap-2">
-            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Extensible</span>
-            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Multi-scope</span>
+            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">MCP</span>
+            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Agent-scoped access</span>
           </div>
         </div>
       </div>
 
-      <!-- Embedded Database - Large -->
+      <!-- Persistent workspace - Large -->
       <div class="lg:col-span-2 group relative bg-gradient-to-br from-slate-800/80 to-slate-800/40 backdrop-blur-sm rounded-3xl p-8 border border-slate-700/50 hover:border-fuchsia-500/30 transition-all duration-300 overflow-hidden">
         <div class="absolute bottom-0 right-0 w-64 h-64 bg-fuchsia-500/10 rounded-full blur-3xl translate-y-1/2 translate-x-1/2 group-hover:bg-fuchsia-500/20 transition-all duration-500"></div>
         <div class="relative">
@@ -374,75 +377,75 @@ agent = response.<span class="function">json</span>()
             </div>
             <span class="px-3 py-1 rounded-full bg-fuchsia-500/10 text-fuchsia-400 text-xs font-medium border border-fuchsia-500/20">Per-Agent</span>
           </div>
-          <h3 class="text-xl font-semibold text-white mb-3">Embedded SQLite Database</h3>
+          <h3 class="text-xl font-semibold text-white mb-3">Persistent workspace</h3>
           <p class="text-slate-400 leading-relaxed mb-6">
-            Each agent gets its own SQLite database for structured data storage. Persisted automatically to cloud storage with compression. Query with full SQL.
+            Give every employee durable files, structured data, browser state, and working context. Their workspace survives across scheduled runs, messages, and tool calls.
           </p>
           <div class="flex flex-wrap gap-2">
-            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Full SQL</span>
-            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Auto-persist</span>
-            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Compressed Storage</span>
-            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Cross-session</span>
+            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Files</span>
+            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">SQLite</span>
+            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Browser state</span>
+            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Cross-session context</span>
           </div>
         </div>
       </div>
 
-      <!-- Webhooks -->
+      <!-- Messages and timelines -->
       <div class="group relative bg-gradient-to-br from-slate-800/80 to-slate-800/40 backdrop-blur-sm rounded-3xl p-8 border border-slate-700/50 hover:border-cyan-500/30 transition-all duration-300 overflow-hidden">
         <div class="absolute top-0 right-0 w-48 h-48 bg-cyan-500/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2 group-hover:bg-cyan-500/20 transition-all duration-500"></div>
         <div class="relative">
           <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-cyan-500 to-teal-600 flex items-center justify-center shadow-lg shadow-cyan-500/25 mb-6">
-            <i data-lucide="webhook" class="w-6 h-6 text-white"></i>
+            <i data-lucide="messages-square" class="w-6 h-6 text-white"></i>
           </div>
-          <h3 class="text-xl font-semibold text-white mb-3">Webhooks</h3>
+          <h3 class="text-xl font-semibold text-white mb-3">Messages and timelines</h3>
           <p class="text-slate-400 leading-relaxed mb-6">
-            Get notified when tasks complete. Push results directly to your endpoints.
+            Send work into an employee, fetch its event timeline, check processing state, and inspect recent browser tasks from your own application.
           </p>
           <div class="flex flex-wrap gap-2">
-            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Real-time</span>
-            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Retries</span>
+            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Messages</span>
+            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Activity timeline</span>
           </div>
         </div>
       </div>
 
-      <!-- Persistent Sessions -->
+      <!-- Browser automation -->
       <div class="group relative bg-gradient-to-br from-slate-800/80 to-slate-800/40 backdrop-blur-sm rounded-3xl p-8 border border-slate-700/50 hover:border-emerald-500/30 transition-all duration-300 overflow-hidden">
         <div class="absolute bottom-0 left-0 w-48 h-48 bg-emerald-500/10 rounded-full blur-3xl translate-y-1/2 -translate-x-1/2 group-hover:bg-emerald-500/20 transition-all duration-500"></div>
         <div class="relative">
           <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-emerald-500 to-green-600 flex items-center justify-center shadow-lg shadow-emerald-500/25 mb-6">
-            <i data-lucide="repeat" class="w-6 h-6 text-white"></i>
+            <i data-lucide="monitor" class="w-6 h-6 text-white"></i>
           </div>
-          <h3 class="text-xl font-semibold text-white mb-3">Persistent Sessions</h3>
+          <h3 class="text-xl font-semibold text-white mb-3">Browser automation</h3>
           <p class="text-slate-400 leading-relaxed mb-6">
-            Agents maintain state across runs. Cookies, auth tokens, and context preserved.
+            Employees can use real cloud browsers for multistep web work, preserve authenticated sessions, download files, and capture visual output.
           </p>
           <div class="flex flex-wrap gap-2">
-            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Cookies</span>
-            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Auth State</span>
+            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Real Chrome</span>
+            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Persistent sessions</span>
           </div>
         </div>
       </div>
 
-      <!-- Agent Filespace -->
+      <!-- Team controls -->
       <div class="group relative bg-gradient-to-br from-slate-800/80 to-slate-800/40 backdrop-blur-sm rounded-3xl p-8 border border-slate-700/50 hover:border-amber-500/30 transition-all duration-300 overflow-hidden">
         <div class="absolute top-0 left-0 w-48 h-48 bg-amber-500/10 rounded-full blur-3xl -translate-y-1/2 -translate-x-1/2 group-hover:bg-amber-500/20 transition-all duration-500"></div>
         <div class="relative">
           <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center shadow-lg shadow-amber-500/25 mb-6">
-            <i data-lucide="folder-tree" class="w-6 h-6 text-white"></i>
+            <i data-lucide="users" class="w-6 h-6 text-white"></i>
           </div>
-          <h3 class="text-xl font-semibold text-white mb-3">Agent Filespace</h3>
+          <h3 class="text-xl font-semibold text-white mb-3">Team controls</h3>
           <p class="text-slate-400 leading-relaxed mb-6">
-            Persistent file storage for each agent. Upload, download, and share files across sessions.
+            Create organization-owned employees with shared API keys, choose intelligence tiers, set daily credit limits, and keep ownership separate from individual users.
           </p>
           <div class="flex flex-wrap gap-2">
-            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Cloud Storage</span>
-            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Shareable</span>
+            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Organizations</span>
+            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Usage controls</span>
           </div>
         </div>
       </div>
 
-      <!-- browser-use -->
-      <a href="https://github.com/browser-use/browser-use" target="_blank" rel="noopener" class="lg:col-span-3 group relative bg-gradient-to-br from-slate-800/80 to-slate-800/40 backdrop-blur-sm rounded-3xl p-8 border border-slate-700/50 hover:border-slate-500/50 transition-all duration-300 overflow-hidden">
+      <!-- Open source deployment -->
+      <a href="https://github.com/gobii-ai/gobii-platform" target="_blank" rel="noopener" class="lg:col-span-3 group relative bg-gradient-to-br from-slate-800/80 to-slate-800/40 backdrop-blur-sm rounded-3xl p-8 border border-slate-700/50 hover:border-slate-500/50 transition-all duration-300 overflow-hidden">
         <div class="absolute top-0 right-0 w-64 h-64 bg-slate-500/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2 group-hover:bg-slate-400/15 transition-all duration-500"></div>
         <div class="relative flex flex-col md:flex-row md:items-center gap-6">
           <div class="flex-shrink-0">
@@ -452,16 +455,16 @@ agent = response.<span class="function">json</span>()
           </div>
           <div class="flex-grow">
             <div class="flex items-center gap-3 mb-2">
-              <h3 class="text-xl font-semibold text-white">browser-use</h3>
+              <h3 class="text-xl font-semibold text-white">Gobii Cloud or self-hosted</h3>
               <span class="px-2.5 py-0.5 rounded-full bg-slate-700/50 text-slate-300 text-xs font-medium border border-slate-600/50">Open Source</span>
             </div>
             <p class="text-slate-400 leading-relaxed">
-              The open-source standard for AI browser automation. Gobii is browser-use ready for production — deploy, scale, and manage agents without building infrastructure.
+              Use Gobii Cloud for the fastest path to production, or run the same open-source platform in your infrastructure. Gobii builds on browser-use and adds the durable runtime, communication, memory, tools, and controls needed for always-on employees.
             </p>
           </div>
           <div class="flex-shrink-0 flex flex-wrap md:flex-col gap-2">
-            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">LLM-powered</span>
-            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Production-ready</span>
+            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Managed cloud</span>
+            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Self-hosted</span>
           </div>
         </div>
       </a>
@@ -472,16 +475,13 @@ agent = response.<span class="function">json</span>()
 
 <!-- Use Cases Section -->
 <section id="use-cases" class="relative pt-0 pb-16 lg:pb-20 overflow-hidden scroll-mt-20">
-  <!-- Subtle gradient background -->
-  <div class="absolute inset-0 bg-gradient-to-b from-white via-slate-50/50 to-white pointer-events-none"></div>
-
   <div class="relative max-w-6xl mx-auto px-6">
     <div class="text-center pt-12 pb-16">
       <h2 class="text-3xl sm:text-4xl font-light text-gray-900 tracking-tight">
-        What you can build with the API
+        What teams deploy with the Agent API
       </h2>
       <p class="mt-4 text-lg text-gray-500">
-        From data pipelines to customer automation.
+        Long-lived employees for work that starts on a schedule, arrives as an event, or spans multiple systems.
       </p>
     </div>
 
@@ -492,9 +492,9 @@ agent = response.<span class="function">json</span>()
           <i data-lucide="database" class="w-6 h-6 text-indigo-600"></i>
         </div>
         <div>
-          <h3 class="text-lg font-medium text-gray-900 mb-2">Data Collection Pipelines</h3>
+          <h3 class="text-lg font-medium text-gray-900 mb-2">Research and monitoring employees</h3>
           <p class="text-gray-600 text-sm leading-relaxed">
-            Schedule agents to collect data from websites, APIs, and documents. Output to your database or warehouse with structured schemas.
+            Continuously watch markets, competitors, candidates, accounts, or public sources and deliver source-linked findings on a schedule.
           </p>
         </div>
       </div>
@@ -505,9 +505,9 @@ agent = response.<span class="function">json</span>()
           <i data-lucide="mail" class="w-6 h-6 text-violet-600"></i>
         </div>
         <div>
-          <h3 class="text-lg font-medium text-gray-900 mb-2">Customer Communication</h3>
+          <h3 class="text-lg font-medium text-gray-900 mb-2">Event-driven operations employees</h3>
           <p class="text-gray-600 text-sm leading-relaxed">
-            Build agents that respond to customer inquiries via email, SMS, or chat. Integrate with your existing support stack.
+            Trigger work from your product, inbound webhook, email, or SMS, then inspect the employee's response and activity timeline.
           </p>
         </div>
       </div>
@@ -518,9 +518,9 @@ agent = response.<span class="function">json</span>()
           <i data-lucide="refresh-cw" class="w-6 h-6 text-purple-600"></i>
         </div>
         <div>
-          <h3 class="text-lg font-medium text-gray-900 mb-2">Workflow Automation</h3>
+          <h3 class="text-lg font-medium text-gray-900 mb-2">Embedded agent experiences</h3>
           <p class="text-gray-600 text-sm leading-relaxed">
-            Automate repetitive browser tasks: form submissions, data entry, report generation, and multi-step web workflows.
+            Create and manage dedicated agents behind your own interface while Gobii handles schedules, state, tools, messages, and browser execution.
           </p>
         </div>
       </div>
@@ -531,9 +531,9 @@ agent = response.<span class="function">json</span>()
           <i data-lucide="eye" class="w-6 h-6 text-fuchsia-600"></i>
         </div>
         <div>
-          <h3 class="text-lg font-medium text-gray-900 mb-2">Monitoring & Alerts</h3>
+          <h3 class="text-lg font-medium text-gray-900 mb-2">Cross-tool workflow employees</h3>
           <p class="text-gray-600 text-sm leading-relaxed">
-            Deploy agents that monitor websites, track changes, and send alerts when specific conditions are met.
+            Give an employee connected apps, MCP tools, files, structured storage, and a browser so it can carry multistep work across systems.
           </p>
         </div>
       </div>
@@ -549,7 +549,7 @@ agent = response.<span class="function">json</span>()
         API resources
       </h2>
       <p class="mt-4 text-lg text-gray-500">
-        Everything you need to get started.
+        Start with the current Agent API or run the platform yourself.
       </p>
     </div>
 
@@ -578,13 +578,13 @@ agent = response.<span class="function">json</span>()
       </form>
 
       <!-- Docs -->
-      <a href="https://docs.gobii.ai/developers/developer-basics" class="group block p-8 rounded-2xl bg-gradient-to-br from-slate-50 to-gray-50 border border-slate-100 hover:border-slate-200 transition-all hover:shadow-lg hover:shadow-slate-100/50">
+      <a href="https://docs.gobii.ai/developers/developer-agents" class="group block p-8 rounded-2xl bg-white border border-slate-200 hover:border-violet-300 transition-all hover:shadow-lg hover:shadow-violet-100/50">
         <div class="w-12 h-12 rounded-xl bg-slate-100 flex items-center justify-center mb-5 group-hover:bg-slate-200 transition-colors">
           <i data-lucide="book-open" class="w-6 h-6 text-slate-600"></i>
         </div>
         <h3 class="text-lg font-medium text-gray-900 mb-2">Documentation</h3>
         <p class="text-gray-600 text-sm leading-relaxed mb-4">
-          API reference, guides, and tutorials to help you build with Gobii.
+          Current endpoints, resource fields, lifecycle actions, messaging, timelines, and examples.
         </p>
         <span class="inline-flex items-center text-sm font-medium text-slate-600 group-hover:text-slate-700">
           Read the docs
@@ -595,7 +595,7 @@ agent = response.<span class="function">json</span>()
       </a>
 
       <!-- GitHub -->
-      <a href="https://github.com/gobii-ai/gobii-platform" target="_blank" rel="noopener" class="group block p-8 rounded-2xl bg-gradient-to-br from-slate-50 to-gray-50 border border-slate-100 hover:border-slate-200 transition-all hover:shadow-lg hover:shadow-slate-100/50">
+      <a href="https://github.com/gobii-ai/gobii-platform" target="_blank" rel="noopener" class="group block p-8 rounded-2xl bg-white border border-slate-200 hover:border-violet-300 transition-all hover:shadow-lg hover:shadow-violet-100/50">
         <div class="w-12 h-12 rounded-xl bg-slate-100 flex items-center justify-center mb-5 group-hover:bg-slate-200 transition-colors">
           <i data-lucide="github" class="w-6 h-6 text-slate-700"></i>
         </div>
@@ -616,33 +616,28 @@ agent = response.<span class="function">json</span>()
 
 <!-- API Questions Section -->
 <section id="engineering-questions" class="relative pt-8 pb-16 lg:pt-10 lg:pb-20 overflow-hidden scroll-mt-20">
-  <div class="absolute inset-0 bg-gradient-to-b from-white via-slate-50/60 to-white pointer-events-none"></div>
-
   <div class="relative max-w-6xl mx-auto px-6 sm:px-8 lg:px-12">
     <div class="grid lg:grid-cols-[0.9fr_1.1fr] gap-10 lg:gap-16 items-start">
       <div class="lg:sticky lg:top-24">
-        <div class="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-indigo-50 text-indigo-700 text-xs font-semibold tracking-wide uppercase mb-6">
-          <i data-lucide="code-2" class="w-3.5 h-3.5"></i>
-          API-controlled agents
-        </div>
+        <p class="mb-5 text-xs font-semibold uppercase tracking-[0.18em] text-indigo-700">Built for ongoing work</p>
         <h2 class="text-3xl sm:text-4xl font-light text-gray-900 tracking-tight">
-          Browser automation, without building browser infrastructure
+          More than a one-off agent run
         </h2>
         <p class="mt-5 text-lg text-gray-600 leading-relaxed">
-          Gobii gives teams the API, cloud browsers, persistent sessions, files, databases, webhooks, and self-hosting path needed to run AI agents in production. Your team defines the workflow, reviews outputs, and chooses how much infrastructure to own.
+          The primary API resource is a long-lived AI employee with a charter, status, timeline, schedule, channels, files, tools, and operating controls. Browser automation is one capability inside that broader lifecycle.
         </p>
         <div class="mt-8 grid grid-cols-2 gap-3 text-sm">
           <div class="rounded-xl border border-slate-200 bg-white/80 px-4 py-3 text-slate-700">
             <span class="block text-xs font-semibold uppercase tracking-wide text-slate-400">Input</span>
-            API instructions
+            Charter + events
           </div>
           <div class="rounded-xl border border-slate-200 bg-white/80 px-4 py-3 text-slate-700">
             <span class="block text-xs font-semibold uppercase tracking-wide text-slate-400">Agent work</span>
-            Browse + execute
+            Reason + use tools
           </div>
           <div class="rounded-xl border border-slate-200 bg-white/80 px-4 py-3 text-slate-700">
             <span class="block text-xs font-semibold uppercase tracking-wide text-slate-400">Output</span>
-            Structured results
+            Timeline + deliverables
           </div>
           <div class="rounded-xl border border-slate-200 bg-white/80 px-4 py-3 text-slate-700">
             <span class="block text-xs font-semibold uppercase tracking-wide text-slate-400">Control</span>
@@ -652,102 +647,102 @@ agent = response.<span class="function">json</span>()
       </div>
 
       <div>
-        <div class="divide-y divide-slate-200 rounded-3xl border border-slate-200 bg-white shadow-xl shadow-slate-200/40 overflow-hidden">
-          <details class="group p-6 sm:p-7" open>
+        <div class="space-y-2">
+          <details class="group rounded-2xl bg-white p-6 ring-1 ring-slate-200 sm:p-7" open>
             <summary class="flex items-start justify-between gap-6 cursor-pointer list-none">
-              <span class="text-lg font-medium text-gray-900">What is Gobii's Agentic AI API?</span>
+              <span class="text-lg font-medium text-gray-900">What is an AI Agent API?</span>
               <i data-lucide="plus" class="mt-1 w-5 h-5 text-slate-400 group-open:rotate-45 transition-transform flex-shrink-0"></i>
             </summary>
             <p class="mt-4 text-gray-600 leading-relaxed">
-              Gobii's Agentic AI API lets teams create, run, and manage persistent AI agents that can browse websites, complete multi-step workflows, store state, and return structured outputs. Instead of building browser hosting, proxy handling, session persistence, file storage, scheduling, and webhook delivery from scratch, teams can call Gobii's API and deploy agents that keep working in the background. The platform is designed for browser-use style automation in production: real cloud browsers, persistent sessions, per-agent storage, structured data handling, and integration hooks. Teams can use Gobii's hosted cloud API for the fastest start or self-host the open-source platform when they need more control over infrastructure, data residency, or customization. This gives teams a consistent API for agents that need to read pages, use authenticated sessions, create files, update records, and report completion without turning every workflow into a custom automation project.
+              An AI Agent API lets a product create and control autonomous software workers programmatically. Gobii's Agent API is built around persistent agents: create an employee once, assign its charter and schedule, connect tools, send it messages, inspect its timeline and processing state, update its configuration, or pause it without deleting its work.
             </p>
           </details>
 
-          <details class="group p-6 sm:p-7">
+          <details class="group rounded-2xl bg-white p-6 ring-1 ring-slate-200 sm:p-7">
             <summary class="flex items-start justify-between gap-6 cursor-pointer list-none">
-              <span class="text-lg font-medium text-gray-900">What can teams build with the Gobii API?</span>
+              <span class="text-lg font-medium text-gray-900">How do I deploy an always-on AI employee?</span>
               <i data-lucide="plus" class="mt-1 w-5 h-5 text-slate-400 group-open:rotate-45 transition-transform flex-shrink-0"></i>
             </summary>
             <p class="mt-4 text-gray-600 leading-relaxed">
-              Teams can build AI agents for web research, data collection, monitoring, customer communication, workflow automation, form submission, reporting, and recurring browser tasks. Common examples include agents that collect data from websites and documents, monitor pages for changes, prepare reports, respond to customer requests, update spreadsheets, or push structured results into downstream systems. Gobii works best when the workflow involves several steps across web pages, files, APIs, or tools and would otherwise require manual browsing or custom automation infrastructure. Agents can run on a schedule, preserve context across sessions, use files or an embedded SQLite database, and notify other systems through webhooks when work is complete.
+              Send a POST request to <code class="rounded bg-violet-50 px-1.5 py-0.5 text-sm text-violet-800">/api/v1/agents/</code> with a name, charter, and optional cron-like schedule. Gobii returns the employee's ID and lifecycle state. You can then message it, read its timeline, check processing status, change its schedule or tools, and activate or deactivate it through that stable resource.
             </p>
           </details>
 
-          <details class="group p-6 sm:p-7">
+          <details class="group rounded-2xl bg-white p-6 ring-1 ring-slate-200 sm:p-7">
             <summary class="flex items-start justify-between gap-6 cursor-pointer list-none">
-              <span class="text-lg font-medium text-gray-900">How is Gobii different from browser-use alone?</span>
+              <span class="text-lg font-medium text-gray-900">What can I manage through the Agent API?</span>
               <i data-lucide="plus" class="mt-1 w-5 h-5 text-slate-400 group-open:rotate-45 transition-transform flex-shrink-0"></i>
             </summary>
             <p class="mt-4 text-gray-600 leading-relaxed">
-              browser-use is an open-source library for AI-powered browser automation. Gobii is the production platform around that kind of workflow. With browser-use alone, a team still needs to manage browser hosting, reliability, session state, proxies, storage, scheduling, credentials, scaling, monitoring, and result delivery. Gobii is browser-use ready and provides the infrastructure layer: cloud browsers, persistent agents, file storage, embedded SQLite, webhooks, managed proxies, and deployment options. In practical terms, browser-use helps define how an AI agent operates a browser; Gobii helps teams deploy, run, and manage those agents reliably.
+              The API covers creation, retrieval, updates, soft deletion, activation, deactivation, schedule validation, inbound messages, timelines, processing status, and recent browser tasks. Agent configuration can include a charter, schedule, contact policy, preferred intelligence tier, daily credit limit, templates, and enabled MCP servers. Organization API keys can manage organization-owned agents separately from personal agents.
             </p>
           </details>
 
-          <details class="group p-6 sm:p-7">
+          <details class="group rounded-2xl bg-white p-6 ring-1 ring-slate-200 sm:p-7">
             <summary class="flex items-start justify-between gap-6 cursor-pointer list-none">
-              <span class="text-lg font-medium text-gray-900">How is Gobii different from traditional Robotic Process Automation (RPA)?</span>
+              <span class="text-lg font-medium text-gray-900">How do schedules, messages, and webhooks keep employees always on?</span>
               <i data-lucide="plus" class="mt-1 w-5 h-5 text-slate-400 group-open:rotate-45 transition-transform flex-shrink-0"></i>
             </summary>
             <p class="mt-4 text-gray-600 leading-relaxed">
-              Gobii is different from traditional Robotic Process Automation (RPA) because it is built around AI agents that can work through open-ended browser workflows, not only fixed scripts or recorded click paths. RPA is useful when a process is stable and every screen, selector, and rule is known in advance. Gobii is better suited for workflows where the agent needs to interpret pages, collect information, compare options, adapt to changing websites, and return structured results. It is also more API-first than many no-code automation tools because teams can create agents through an API, connect tools with Model Context Protocol servers, use webhooks, and choose cloud-hosted or self-hosted deployment.
+              A schedule wakes an employee for recurring responsibilities, while inbound messages and webhooks let external systems trigger work when something changes. Gobii queues that work durably and preserves the employee's configuration and workspace between interactions. Your product can fetch the timeline or processing snapshot instead of holding a synchronous request open.
             </p>
           </details>
 
-          <details class="group p-6 sm:p-7">
+          <details class="group rounded-2xl bg-white p-6 ring-1 ring-slate-200 sm:p-7">
             <summary class="flex items-start justify-between gap-6 cursor-pointer list-none">
-              <span class="text-lg font-medium text-gray-900">What outputs can Gobii agents return through the API?</span>
+              <span class="text-lg font-medium text-gray-900">Can Gobii employees use browsers and other tools?</span>
               <i data-lucide="plus" class="mt-1 w-5 h-5 text-slate-400 group-open:rotate-45 transition-transform flex-shrink-0"></i>
             </summary>
             <p class="mt-4 text-gray-600 leading-relaxed">
-              Gobii agents can return structured data, files, screenshots, database records, webhook payloads, and workflow status updates depending on how the agent is configured. For data collection workflows, an agent might output normalized records, source URLs, extracted fields, notes, and confidence context. For monitoring workflows, it might send a webhook when a page changes or a condition is met. For workflow automation, it might update a file, write to its per-agent SQLite database, or hand results to another system. The important pattern is that Gobii agents are not limited to a chat transcript; they can produce reviewable, exportable outputs that teams can route into existing systems.
+              Yes. Browser automation is available for work across rendered websites and authenticated sessions, but it is not the whole platform. Employees can also use connected app tools, MCP servers, files, an embedded SQLite workspace, email, SMS, and webhooks. Their work can produce timeline events, structured data, files, screenshots, database records, and downstream webhook payloads.
             </p>
           </details>
 
-          <details class="group p-6 sm:p-7">
+          <details class="group rounded-2xl bg-white p-6 ring-1 ring-slate-200 sm:p-7">
             <summary class="flex items-start justify-between gap-6 cursor-pointer list-none">
               <span class="text-lg font-medium text-gray-900">When should teams use Gobii Cloud API versus self-hosting?</span>
               <i data-lucide="plus" class="mt-1 w-5 h-5 text-slate-400 group-open:rotate-45 transition-transform flex-shrink-0"></i>
             </summary>
             <p class="mt-4 text-gray-600 leading-relaxed">
-              Teams should use Gobii Cloud API when they want the fastest path to production browser agents without managing infrastructure. The cloud option is best for quickstarts, prototypes, scheduled agents, hosted browser sessions, and teams that want Gobii to handle scaling and operational overhead. Self-hosting is better when an organization needs deeper control over infrastructure, data residency, compliance requirements, network access, or internal customization. The tradeoff is operational responsibility: cloud reduces setup and maintenance, while self-hosting gives more control but requires the team to manage deployment, security, scaling, and updates.
+              Use Gobii Cloud when you want the fastest path to production without operating the agent runtime, scheduler, browsers, storage, and upgrades. Self-host the open-source platform when you need deeper infrastructure control, private network access, data residency, or customization. The API model stays centered on the same persistent agent resource in either environment.
             </p>
           </details>
 
-          <details class="group p-6 sm:p-7">
+          <details class="group rounded-2xl bg-white p-6 ring-1 ring-slate-200 sm:p-7">
             <summary class="flex items-start justify-between gap-6 cursor-pointer list-none">
               <span class="text-lg font-medium text-gray-900">What data and privacy controls matter for API agent workflows?</span>
               <i data-lucide="plus" class="mt-1 w-5 h-5 text-slate-400 group-open:rotate-45 transition-transform flex-shrink-0"></i>
             </summary>
             <p class="mt-4 text-gray-600 leading-relaxed">
-              API agent workflows should define what systems an agent may access, what credentials it can use, where outputs are stored, and who can review or export results. Teams should scope credentials narrowly, limit agents to approved domains and integrations, avoid unnecessary personal or sensitive data collection, and keep source links or logs that make outputs auditable. For higher-control environments, self-hosting can help with data residency, network boundaries, and internal security review. The safest pattern is to separate agent execution from human approval: let agents browse, collect, and organize work, then have people review important outputs before they trigger customer-facing, financial, or operational actions.
+              Scope each employee to the tools, credentials, contacts, and data it needs. Use organization ownership and agent-level tool configuration to separate access, set credit limits to bound usage, and inspect timelines or deliverables for important work. Keep human approval around customer-facing, financial, destructive, or otherwise sensitive actions.
             </p>
           </details>
         </div>
 
-        <div class="mt-8 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-lg shadow-slate-200/40">
-          <div class="grid md:grid-cols-4 divide-y md:divide-y-0 md:divide-x divide-slate-200">
-            <div class="p-5">
+        <div class="mt-8">
+          <div class="grid gap-4 md:grid-cols-4">
+            <div class="rounded-2xl bg-white p-5 ring-1 ring-slate-200">
               <div class="flex items-center gap-2 text-sm font-semibold text-slate-900">
                 <i data-lucide="terminal" class="w-4 h-4 text-indigo-600"></i>
                 API
               </div>
-              <p class="mt-2 text-sm leading-6 text-slate-600">Create persistent agents, pass instructions, schedule work, and manage runs.</p>
+              <p class="mt-2 text-sm leading-6 text-slate-600">Create employees, change configuration, schedule work, pause, resume, or delete.</p>
             </div>
-            <div class="p-5">
+            <div class="rounded-2xl bg-white p-5 ring-1 ring-slate-200">
               <div class="flex items-center gap-2 text-sm font-semibold text-slate-900">
                 <i data-lucide="monitor" class="w-4 h-4 text-violet-600"></i>
                 Browsers
               </div>
-              <p class="mt-2 text-sm leading-6 text-slate-600">Use cloud browsers, persistent sessions, proxies, files, and per-agent storage.</p>
+              <p class="mt-2 text-sm leading-6 text-slate-600">Use cloud browsers, connected apps, MCP servers, files, and structured storage.</p>
             </div>
-            <div class="p-5">
+            <div class="rounded-2xl bg-white p-5 ring-1 ring-slate-200">
               <div class="flex items-center gap-2 text-sm font-semibold text-slate-900">
                 <i data-lucide="webhook" class="w-4 h-4 text-cyan-600"></i>
-                Export
+                Observe
               </div>
-              <p class="mt-2 text-sm leading-6 text-slate-600">Return structured data, files, screenshots, database records, and webhook payloads.</p>
+              <p class="mt-2 text-sm leading-6 text-slate-600">Read timelines, processing state, browser tasks, messages, and deliverables.</p>
             </div>
-            <div class="p-5">
+            <div class="rounded-2xl bg-white p-5 ring-1 ring-slate-200">
               <div class="flex items-center gap-2 text-sm font-semibold text-slate-900">
                 <i data-lucide="shield-check" class="w-4 h-4 text-emerald-600"></i>
                 Review
@@ -774,17 +769,11 @@ agent = response.<span class="function">json</span>()
   <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[350px] h-[350px] bg-indigo-300/15 rounded-full blur-[100px] pointer-events-none"></div>
 
   <div class="relative max-w-4xl mx-auto px-6 text-center">
-    <!-- Decorative badge -->
-    <div class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/70 backdrop-blur-sm border border-violet-200/50 shadow-sm mb-8">
-      <span class="w-2 h-2 rounded-full bg-gradient-to-r from-violet-500 to-purple-500 animate-pulse"></span>
-      <span class="text-sm font-medium text-violet-700">Start building today</span>
-    </div>
-
     <h2 class="text-4xl sm:text-5xl font-light text-gray-900 tracking-tight">
-      Ready to deploy browser-use?
+      Deploy your first AI employee
     </h2>
     <p class="mt-5 text-xl text-gray-600 max-w-xl mx-auto leading-relaxed">
-      Get your API key and start running browser-use agents in minutes.
+      Start with Gobii Cloud, then manage the employee's schedule, tools, messages, and lifecycle through the Agent API.
     </p>
 
     <div class="mt-10 flex flex-col sm:flex-row gap-4 justify-center">
@@ -800,8 +789,8 @@ agent = response.<span class="function">json</span>()
           </svg>
         </button>
       </form>
-      <a href="https://docs.gobii.ai/developers/developer-basics" class="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-8 py-4 bg-white/80 backdrop-blur-sm hover:bg-white text-gray-700 font-medium rounded-xl border border-gray-200 hover:border-violet-200 shadow-sm hover:shadow transition-all duration-200">
-        Read the docs
+      <a href="https://docs.gobii.ai/developers/developer-agents" class="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-8 py-4 bg-white/80 backdrop-blur-sm hover:bg-white text-gray-700 font-medium rounded-xl border border-gray-200 hover:border-violet-200 shadow-sm hover:shadow transition-all duration-200">
+        Read the Agent API docs
       </a>
     </div>
 

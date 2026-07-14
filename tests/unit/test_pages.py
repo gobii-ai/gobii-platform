@@ -3771,10 +3771,10 @@ class RestoredPublicMarketingSurfaceTests(TestCase):
         self.assertEqual(response.status_code, 200)
         soup = BeautifulSoup(response.content, "html.parser")
         page_text = soup.get_text(" ", strip=True)
-        expected_title = "AI Agent API - Build on Gobii's Platform | Gobii"
+        expected_title = "AI Agent API for Always-On AI Employees | Gobii"
         expected_description = (
-            "Build powerful AI agents with Gobii's API. Create, deploy, and control "
-            "always-on agents programmatically. Self-hosted or cloud. Get started in minutes."
+            "Deploy and manage always-on AI employees with Gobii's Agent API. Create agents, "
+            "schedule work, connect tools, inspect activity, or self-host the platform."
         )
 
         self.assertEqual(soup.title.get_text(strip=True), expected_title)
@@ -3786,12 +3786,26 @@ class RestoredPublicMarketingSurfaceTests(TestCase):
             soup.find("meta", property="og:title")["content"],
             expected_title,
         )
+        page_schema = json.loads(soup.find("script", type="application/ld+json").string)
+        self.assertEqual(page_schema["mainEntity"]["name"], "Gobii Agent API")
+        self.assertEqual(page_schema["mainEntity"]["serviceType"], "AI agent API")
+        self.assertEqual(
+            page_schema["mainEntity"]["category"],
+            "AI agent deployment and lifecycle management",
+        )
         self.assertEqual(
             soup.find("h1").get_text(" ", strip=True),
-            "Agentic AI API for automation",
+            "Deploy and manage always-on AI employees",
         )
-        self.assertIn("What you can build with the API", page_text)
+        self.assertIn("One API for the full employee lifecycle", page_text)
+        self.assertIn("What teams deploy with the Agent API", page_text)
         self.assertIn("API resources", page_text)
+        self.assertIn("https://gobii.ai/api/v1/agents/", page_text)
+        self.assertIn('"X-Api-Key"', page_text)
+        self.assertIn('"charter"', page_text)
+        self.assertNotIn("https://api.gobii.ai/v1/persistent-agents/", page_text)
+        self.assertNotIn('"Authorization"', page_text)
+        self.assertNotIn('"system_prompt"', page_text)
         self.assertNotIn("What developers build", page_text)
         self.assertNotIn("Developer resources", page_text)
 
