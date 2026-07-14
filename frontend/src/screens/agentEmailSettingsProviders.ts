@@ -24,7 +24,12 @@ export const EMAIL_OAUTH_PROVIDER_CONFIG = defineProviderConfig({
     label: 'Gmail',
     authorizationEndpoint: 'https://accounts.google.com/o/oauth2/v2/auth',
     tokenEndpoint: 'https://oauth2.googleapis.com/token',
-    scope: 'https://mail.google.com/',
+    scope: [
+      'openid',
+      'email',
+      'https://www.googleapis.com/auth/gmail.send',
+      'https://www.googleapis.com/auth/gmail.readonly',
+    ].join(' '),
     authorizationParams: {
       access_type: 'offline',
       prompt: 'consent',
