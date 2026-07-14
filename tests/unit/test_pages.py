@@ -2326,6 +2326,23 @@ class SitemapTests(TestCase):
         self.assertNotIn("<loc>http://example.com/solutions/sales/ai-sales-employee/</loc>", content)
         self.assertNotIn("<loc>http://example.com/pretrained-workers/</loc>", content)
 
+        sitemap = BeautifulSoup(content, "xml")
+        solution_lastmods = {
+            url.loc.get_text(strip=True): url.lastmod.get_text(strip=True)
+            for url in sitemap.find_all("url")
+            if url.loc and url.lastmod and "/solutions/" in url.loc.get_text(strip=True)
+        }
+        self.assertEqual(
+            solution_lastmods,
+            {
+                "http://example.com/solutions/recruiting/": "2026-06-04",
+                "http://example.com/solutions/recruiting/candidate-sourcing/": "2026-06-07",
+                "http://example.com/solutions/sales/": "2026-06-05",
+                "http://example.com/solutions/sales/ai-sales-agent/": "2026-07-09",
+                "http://example.com/solutions/engineering/": "2026-07-14",
+            },
+        )
+
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_sitemap_deduplicates_library_category_slug_aliases(self):
         for code, category in (
@@ -3701,6 +3718,24 @@ class RestoredPublicMarketingSurfaceTests(TestCase):
         self.assertIn(
             "Your Gobii AI employee keeps searching, adapts to your feedback, and works inside the tools your team already uses.",
             soup.get_text(" ", strip=True),
+        )
+        candidate_sourcing_link = soup.find(
+            "a",
+            href=reverse("pages:solution_recruiting_candidate_sourcing"),
+        )
+        sales_agent_link = soup.find(
+            "a",
+            href=reverse("pages:solution_sales_ai_sales_agent"),
+        )
+        self.assertIsNotNone(candidate_sourcing_link)
+        self.assertIsNotNone(sales_agent_link)
+        self.assertIn(
+            "Explore AI candidate sourcing",
+            candidate_sourcing_link.get_text(" ", strip=True),
+        )
+        self.assertIn(
+            "Explore AI sales agents",
+            sales_agent_link.get_text(" ", strip=True),
         )
         for retired_slug in ("health-care", "defense"):
             self.assertIsNone(

@@ -4050,6 +4050,12 @@ class SolutionsSitemap(sitemaps.Sitemap):
     def location(self, slug):
         return SolutionView.reverse_solution(slug)
 
+    def lastmod(self, slug):
+        date_modified = SolutionView.SOLUTION_DATA[slug].get("date_modified")
+        if not date_modified:
+            return None
+        return datetime.strptime(date_modified, "%Y-%m-%d").date()
+
 
 class SupportView(TemplateView):
     pass
