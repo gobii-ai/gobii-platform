@@ -883,13 +883,9 @@ def _schedule_agent_follow_up(
     try:
         from ..tasks.process_events import process_agent_events_task  # noqa: WPS433 (runtime import)
 
-        apply_async_kwargs = {
-            "args": [str(agent_id)],
-            "countdown": delay_seconds,
-        }
-        if queue is not None:
-            apply_async_kwargs["queue"] = queue
-        process_agent_events_task.apply_async(**apply_async_kwargs)
+        process_agent_events_task.apply_async(
+            args=[str(agent_id)], countdown=delay_seconds, queue=queue
+        )
         if span is not None:
             span.add_event(f"{reason} follow-up scheduled")
     except Exception:
@@ -3299,31 +3295,6 @@ def _attempt_cycle_close_for_sleep(agent: PersistentAgent, budget_ctx: Optional[
         )
     except Exception:
         logger.debug("Failed to close budget cycle on sleep", exc_info=True)
-
-
-def _close_exhausted_cycle_before_follow_up(
-    agent: PersistentAgent,
-    budget_ctx: Optional[BudgetContext],
-) -> bool:
-    """Close a spent cycle before its top-level follow-up is queued."""
-
-    if budget_ctx is None:
-        return False
-
-    steps_used = AgentBudgetManager.get_steps_used(agent_id=budget_ctx.agent_id)
-    if steps_used < budget_ctx.max_steps:
-        return False
-
-    AgentBudgetManager.close_cycle(
-        agent_id=budget_ctx.agent_id,
-        budget_id=budget_ctx.budget_id,
-    )
-    logger.info(
-        "Agent %s exhausted budget cycle %s; closed it before scheduling follow-up.",
-        agent.id,
-        budget_ctx.budget_id,
-    )
-    return True
 
 
 def _runtime_exceeded(started_at: float, max_runtime_seconds: int) -> bool:
@@ -6501,11 +6472,7 @@ def _run_agent_loop(
                 heartbeat.touch("max_iterations")
             try:
                 PersistentAgentStep.objects.create(
-                    agent=agent,
-                    description=(
-                        "Processing paused: max iterations reached. "
-                        "Will resume shortly."
-                    ),
+                    agent=agent, description="Processing paused: max iterations reached. Will resume shortly."
                 )
             except DatabaseError:
                 logger.debug(
@@ -6521,10 +6488,12 @@ def _run_agent_loop(
                 )
             else:
                 delay_seconds = max(0, int(max_iterations_followup_delay_seconds))
-            exhausted_cycle_closed = _close_exhausted_cycle_before_follow_up(
-                agent,
-                budget_ctx,
+            budget_exhausted = budget_ctx is not None and (
+                AgentBudgetManager.get_steps_used(agent_id=budget_ctx.agent_id)
+                >= budget_ctx.max_steps
             )
+            if budget_exhausted:
+                AgentBudgetManager.close_cycle(agent_id=budget_ctx.agent_id, budget_id=budget_ctx.budget_id)
             _schedule_agent_follow_up(
                 agent_id=agent.id,
                 delay_seconds=delay_seconds,
@@ -6532,7 +6501,7 @@ def _run_agent_loop(
                 reason="Max iterations",
                 queue=max_iterations_followup_queue,
             )
-            if not exhausted_cycle_closed:
+            if not budget_exhausted:
                 _attempt_cycle_close_for_sleep(agent, budget_ctx)
 
         return cumulative_token_usage
