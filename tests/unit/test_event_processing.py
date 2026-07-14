@@ -42,10 +42,12 @@ from api.agent.core.event_processing import (
     process_agent_events,
 )
 from api.agent.core.llm_utils import EmptyLiteLLMResponseError
+from api.agent.core.budget import AgentBudgetManager, BudgetContext, set_current_context as set_budget_context
 from api.agent.core.processing_flags import (
     PendingDrainSettings,
     _human_inbound_generation_key,
     bump_human_inbound_generation,
+    clear_processing_queued_flag,
     clear_processing_stop_requested,
     get_consumed_human_inbound_generation,
     get_human_inbound_generation,
@@ -6044,6 +6046,147 @@ class EventProcessingMaxIterationsFollowUpTests(TestCase):
             charter="Test max iterations follow-up",
             browser_use_agent=self.browser_agent,
         )
+        self.addCleanup(set_budget_context, None)
+        self.addCleanup(clear_processing_queued_flag, self.agent.id)
+
+    def _start_budget_cycle(self, *, max_steps: int) -> BudgetContext:
+        budget_id, resolved_max_steps, max_depth = AgentBudgetManager.find_or_start_cycle(
+            agent_id=str(self.agent.id),
+            max_steps=max_steps,
+        )
+        branch_id = AgentBudgetManager.create_branch(
+            agent_id=str(self.agent.id),
+            budget_id=budget_id,
+            depth=0,
+        )
+        budget_ctx = BudgetContext(
+            agent_id=str(self.agent.id),
+            budget_id=budget_id,
+            branch_id=branch_id,
+            depth=0,
+            max_steps=resolved_max_steps,
+            max_depth=max_depth,
+        )
+        set_budget_context(budget_ctx)
+        self.addCleanup(
+            AgentBudgetManager.close_cycle,
+            agent_id=budget_ctx.agent_id,
+            budget_id=budget_ctx.budget_id,
+        )
+        return budget_ctx
+
+    def _run_single_iteration_to_cap(self) -> None:
+        enable_tools(self.agent, ["sqlite_batch"])
+
+        tool_call = MagicMock()
+        tool_call.function = MagicMock()
+        tool_call.function.name = "sqlite_batch"
+        tool_call.function.arguments = '{"sql": "SELECT 1", "will_continue_work": true}'
+
+        response_message = MagicMock()
+        response_message.tool_calls = [tool_call]
+        response_message.function_call = None
+        response_message.content = None
+        response_message.reasoning_content = None
+
+        response = MagicMock()
+        response.choices = [MagicMock(message=response_message)]
+        response.model_extra = {
+            "usage": MagicMock(
+                prompt_tokens=5,
+                completion_tokens=5,
+                total_tokens=10,
+                prompt_tokens_details=MagicMock(cached_tokens=0),
+            )
+        }
+        token_usage = {
+            "prompt_tokens": 5,
+            "completion_tokens": 5,
+            "total_tokens": 10,
+            "model": "mock-model",
+            "provider": "mock-provider",
+            "cached_tokens": 0,
+        }
+
+        with patch("api.agent.core.prompt_context.ensure_steps_compacted"), \
+             patch("api.agent.core.prompt_context.ensure_comms_compacted"), \
+             patch("api.agent.core.event_processing.handle_burn_rate_limit", return_value="none"), \
+             patch("api.agent.core.event_processing.build_prompt_context", return_value=([{"role": "system", "content": "sys"}], 1000, None)), \
+             patch("api.agent.core.event_processing.get_llm_config_with_failover", return_value=[("mock", "mock-model", {})]), \
+             patch("api.agent.core.event_processing._completion_with_failover", return_value=(response, token_usage)), \
+             patch("api.agent.core.event_processing.execute_enabled_tool", return_value={"status": "ok"}), \
+             patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None}):
+            _run_agent_loop(
+                self.agent,
+                is_first_run=False,
+                max_loop_iterations=1,
+                max_iterations_followup_delay_seconds=0,
+                max_iterations_followup_queue=AGENT_DEFAULT_PROCESSING_QUEUE,
+            )
+
+    @override_settings(CELERY_TASK_ALWAYS_EAGER=False)
+    @patch("api.agent.tasks.process_events.process_agent_events_task.apply_async")
+    def test_exhausted_cycle_closes_before_follow_up_enqueue(self, mock_apply_async):
+        budget_ctx = self._start_budget_cycle(max_steps=1)
+
+        def assert_cycle_closed_before_enqueue(*_args, **_kwargs):
+            self.assertEqual(
+                AgentBudgetManager.get_cycle_status(agent_id=budget_ctx.agent_id),
+                "closed",
+            )
+
+        mock_apply_async.side_effect = assert_cycle_closed_before_enqueue
+
+        self._run_single_iteration_to_cap()
+
+        mock_apply_async.assert_called_once_with(
+            args=[str(self.agent.id)],
+            countdown=0,
+            queue=AGENT_DEFAULT_PROCESSING_QUEUE,
+        )
+        self.assertEqual(
+            AgentBudgetManager.get_cycle_status(agent_id=budget_ctx.agent_id),
+            "closed",
+        )
+
+        next_budget_id, _, _ = AgentBudgetManager.find_or_start_cycle(
+            agent_id=budget_ctx.agent_id,
+            max_steps=1,
+        )
+        self.addCleanup(
+            AgentBudgetManager.close_cycle,
+            agent_id=budget_ctx.agent_id,
+            budget_id=next_budget_id,
+        )
+        self.assertNotEqual(next_budget_id, budget_ctx.budget_id)
+        self.assertEqual(AgentBudgetManager.get_steps_used(agent_id=budget_ctx.agent_id), 0)
+
+    @override_settings(CELERY_TASK_ALWAYS_EAGER=False)
+    @patch("api.agent.tasks.process_events.process_agent_events_task.apply_async")
+    def test_explicit_cap_preserves_cycle_with_remaining_budget(self, mock_apply_async):
+        budget_ctx = self._start_budget_cycle(max_steps=2)
+
+        def mark_follow_up_queued(*_args, **_kwargs):
+            set_processing_queued_flag(self.agent.id)
+
+        mock_apply_async.side_effect = mark_follow_up_queued
+
+        self._run_single_iteration_to_cap()
+
+        mock_apply_async.assert_called_once_with(
+            args=[str(self.agent.id)],
+            countdown=0,
+            queue=AGENT_DEFAULT_PROCESSING_QUEUE,
+        )
+        self.assertEqual(
+            AgentBudgetManager.get_cycle_status(agent_id=budget_ctx.agent_id),
+            "active",
+        )
+        self.assertEqual(AgentBudgetManager.get_steps_used(agent_id=budget_ctx.agent_id), 1)
+        active_budget_id, _, _ = AgentBudgetManager.find_or_start_cycle(
+            agent_id=budget_ctx.agent_id,
+        )
+        self.assertEqual(active_budget_id, budget_ctx.budget_id)
 
     @override_settings(CELERY_TASK_ALWAYS_EAGER=False)
     @patch("api.agent.tasks.process_events.process_agent_events_task.apply_async")

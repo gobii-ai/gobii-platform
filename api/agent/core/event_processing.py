@@ -3301,6 +3301,31 @@ def _attempt_cycle_close_for_sleep(agent: PersistentAgent, budget_ctx: Optional[
         logger.debug("Failed to close budget cycle on sleep", exc_info=True)
 
 
+def _close_exhausted_cycle_before_follow_up(
+    agent: PersistentAgent,
+    budget_ctx: Optional[BudgetContext],
+) -> bool:
+    """Close a spent cycle before its top-level follow-up is queued."""
+
+    if budget_ctx is None:
+        return False
+
+    steps_used = AgentBudgetManager.get_steps_used(agent_id=budget_ctx.agent_id)
+    if steps_used < budget_ctx.max_steps:
+        return False
+
+    AgentBudgetManager.close_cycle(
+        agent_id=budget_ctx.agent_id,
+        budget_id=budget_ctx.budget_id,
+    )
+    logger.info(
+        "Agent %s exhausted budget cycle %s; closed it before scheduling follow-up.",
+        agent.id,
+        budget_ctx.budget_id,
+    )
+    return True
+
+
 def _runtime_exceeded(started_at: float, max_runtime_seconds: int) -> bool:
     if max_runtime_seconds <= 0:
         return False
@@ -6496,6 +6521,10 @@ def _run_agent_loop(
                 )
             else:
                 delay_seconds = max(0, int(max_iterations_followup_delay_seconds))
+            exhausted_cycle_closed = _close_exhausted_cycle_before_follow_up(
+                agent,
+                budget_ctx,
+            )
             _schedule_agent_follow_up(
                 agent_id=agent.id,
                 delay_seconds=delay_seconds,
@@ -6503,7 +6532,8 @@ def _run_agent_loop(
                 reason="Max iterations",
                 queue=max_iterations_followup_queue,
             )
-            _attempt_cycle_close_for_sleep(agent, budget_ctx)
+            if not exhausted_cycle_closed:
+                _attempt_cycle_close_for_sleep(agent, budget_ctx)
 
         return cumulative_token_usage
     finally:
