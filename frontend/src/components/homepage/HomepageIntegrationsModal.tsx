@@ -123,7 +123,9 @@ export function HomepageIntegrationsModal({
     return Object.fromEntries(builtinApps.map((app) => [app.slug, app]))
   })
   const seededNativeProviders = useMemo(
-    () => nativeProviders.map(mapNativeIntegrationProvider),
+    () => nativeProviders
+      .filter((provider) => provider.connection_scope !== 'agent')
+      .map(mapNativeIntegrationProvider),
     [nativeProviders],
   )
 
@@ -167,7 +169,8 @@ export function HomepageIntegrationsModal({
   })
 
   const searchResults = searchQuery.data ?? []
-  const currentNativeProviders = nativeIntegrationsQuery.data?.providers ?? seededNativeProviders
+  const currentNativeProviders = (nativeIntegrationsQuery.data?.providers ?? seededNativeProviders)
+    .filter((provider) => provider.connectionScope !== 'agent')
   const visibleNativeProviders = useMemo(() => {
     const normalizedSearch = debouncedSearchTerm.toLowerCase()
     if (!normalizedSearch) {

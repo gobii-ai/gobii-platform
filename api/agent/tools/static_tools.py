@@ -94,7 +94,7 @@ def get_static_tool_definitions(agent: Optional[PersistentAgent]) -> List[dict]:
     static_tools: List[dict] = [
         _get_sleep_tool(),
         get_update_plan_tool(),
-        get_send_email_tool(),
+        get_send_email_tool(agent),
     ]
     if _agent_has_sms_endpoint(agent):
         static_tools.append(get_send_sms_tool())

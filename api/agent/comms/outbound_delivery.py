@@ -845,6 +845,9 @@ def deliver_agent_email(message: PersistentAgentMessage):
             message.latest_sent_at = now
             message.latest_error_message = ""
             message.save(update_fields=["raw_payload", "latest_status", "latest_sent_at", "latest_error_message"])
+            acct.smtp_last_ok_at = now
+            acct.smtp_error = ""
+            acct.save(update_fields=["smtp_last_ok_at", "smtp_error", "updated_at"])
 
             if span is not None and getattr(span, "is_recording", lambda: False)():
                 span.add_event(
@@ -883,6 +886,8 @@ def deliver_agent_email(message: PersistentAgentMessage):
                 to_address,
             )
             error_str = str(e)
+            acct.smtp_error = error_str
+            acct.save(update_fields=["smtp_error", "updated_at"])
             attempt.status = DeliveryStatus.FAILED
             attempt.error_message = error_str
             attempt.save(update_fields=["status", "error_message"])

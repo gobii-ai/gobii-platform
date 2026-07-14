@@ -10440,6 +10440,10 @@ class AgentEmailAccount(models.Model):
     # Health
     connection_last_ok_at = models.DateTimeField(null=True, blank=True)
     connection_error = models.TextField(blank=True)
+    smtp_last_ok_at = models.DateTimeField(null=True, blank=True)
+    smtp_error = models.TextField(blank=True)
+    imap_last_ok_at = models.DateTimeField(null=True, blank=True)
+    imap_error = models.TextField(blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -10581,7 +10585,7 @@ class AgentEmailOAuthCredential(EncryptedTextModelMixin, models.Model):
     id_token = encrypted_text_property("id_token_encrypted")
 
 
-class AgentEmailOAuthSession(EncryptedTextModelMixin, models.Model):
+class NativeIntegrationOAuthSession(EncryptedTextModelMixin, models.Model):
 
     encrypted_text_error_message = "Failed to decrypt email OAuth session payload"
     encrypted_text_reraise = True
@@ -10591,7 +10595,17 @@ class AgentEmailOAuthSession(EncryptedTextModelMixin, models.Model):
         AgentEmailAccount,
         on_delete=models.CASCADE,
         related_name="oauth_sessions",
+        null=True,
+        blank=True,
     )
+    agent = models.ForeignKey(
+        "PersistentAgent",
+        on_delete=models.CASCADE,
+        related_name="native_integration_oauth_sessions",
+        null=True,
+        blank=True,
+    )
+    provider_key = models.CharField(max_length=64, blank=True)
     initiated_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
@@ -10629,10 +10643,61 @@ class AgentEmailOAuthSession(EncryptedTextModelMixin, models.Model):
         ]
 
     def __str__(self) -> str:  # pragma: no cover - display helper
-        return f"AgentEmailOAuthSession<{self.account_id} state={self.state}>"
+        target = self.agent_id or self.account_id or self.organization_id or self.user_id
+        return f"NativeIntegrationOAuthSession<{self.provider_key}:{target} state={self.state}>"
 
     client_secret = encrypted_text_property("client_secret_encrypted")
     code_verifier = encrypted_text_property("code_verifier_encrypted")
+
+
+# Keep imports used by old migrations and short-lived legacy OAuth code working
+# while all new flows use the generalized model name.
+AgentEmailOAuthSession = NativeIntegrationOAuthSession
+
+
+class AgentEmailIntegration(models.Model):
+
+    class ActiveMode(models.TextChoices):
+        NONE = "none", "None"
+        CUSTOM = "custom", "Custom SMTP/IMAP"
+        OAUTH = "oauth", "OAuth"
+
+    agent = models.OneToOneField(
+        "PersistentAgent",
+        on_delete=models.CASCADE,
+        related_name="email_integration",
+    )
+    active_mode = models.CharField(
+        max_length=16,
+        choices=ActiveMode.choices,
+        default=ActiveMode.NONE,
+    )
+    custom_account = models.ForeignKey(
+        AgentEmailAccount,
+        on_delete=models.SET_NULL,
+        related_name="custom_email_integrations",
+        null=True,
+        blank=True,
+    )
+    oauth_account = models.ForeignKey(
+        AgentEmailAccount,
+        on_delete=models.SET_NULL,
+        related_name="oauth_email_integrations",
+        null=True,
+        blank=True,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def active_account(self) -> AgentEmailAccount | None:
+        if self.active_mode == self.ActiveMode.CUSTOM:
+            return self.custom_account
+        if self.active_mode == self.ActiveMode.OAUTH:
+            return self.oauth_account
+        return None
+
+    def __str__(self) -> str:
+        return f"AgentEmailIntegration<{self.agent_id}:{self.active_mode}>"
 
 
 class PersistentAgentSmsEndpoint(models.Model):

@@ -1489,12 +1489,6 @@ class MCPOAuthCallbackPageView(ConsoleViewMixin, TemplateView):
     template_name = "console/mcp_oauth_callback.html"
 
 
-class AgentEmailOAuthCallbackPageView(ConsoleViewMixin, TemplateView):
-    """Landing page shown after email OAuth redirects back to Gobii."""
-
-    template_name = "console/agent_email_oauth_callback.html"
-
-
 class NativeIntegrationOAuthCallbackPageView(ConsoleViewMixin, TemplateView):
     """Landing page shown after native integration OAuth redirects back to Gobii."""
 

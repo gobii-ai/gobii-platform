@@ -15,7 +15,9 @@ import {
   type PipedreamAppSettings,
   type PipedreamAppSummary,
 } from '../../api/mcp'
-import { fetchNativeIntegrations, type NativeIntegrationProvider } from '../../api/nativeIntegrations'
+import { fetchNativeIntegrationAgentConnections, fetchNativeIntegrations, startNativeIntegrationConnect, type NativeIntegrationAgentConnection, type NativeIntegrationProvider } from '../../api/nativeIntegrations'
+import { AgentEmailSettingsScreen } from '../../screens/AgentEmailSettingsScreen'
+import { readStoredConsoleContext } from '../../util/consoleContextStorage'
 import { useSettingsSurfaceVariant } from '../common/SettingsSurface'
 import { DISCORD_NATIVE_PROVIDER_KEY, withDiscordNativeProvider } from './DiscordNativeShared'
 import { IntegrationConnectionButton, IntegrationManageButton } from './IntegrationActionButtons'
@@ -41,6 +43,7 @@ import {
   NativeIntegrationGridRow,
   NativeIntegrationSummaryCell,
   openNativeOAuthPopup,
+  storePendingNativeOAuth,
   usesManualNativeIntegrationCredentials,
   useNativeIntegrationConnectMutation,
   useNativeIntegrationDisconnectMutation,
@@ -121,6 +124,8 @@ export function WorkspaceAppsManager({
   const [activeApp, setActiveApp] = useState<WorkspacePipedreamAppRow | null>(null)
   const [discordConnectionsOpen, setDiscordConnectionsOpen] = useState(false)
   const [activeDiscordAgentId, setActiveDiscordAgentId] = useState<string | null>(null)
+  const [activeEmailProvider, setActiveEmailProvider] = useState<NativeIntegrationProvider | null>(null)
+  const [activeEmailAgentId, setActiveEmailAgentId] = useState<string | null>(null)
   const [pendingAppAction, setPendingAppAction] = useState<PendingAppAction>(null)
   const [pendingNativeAction, setPendingNativeAction] = useState<PendingNativeAction>(null)
   const [pendingAgentAction, setPendingAgentAction] = useState<PendingAgentAction>(null)
@@ -193,6 +198,39 @@ export function WorkspaceAppsManager({
     queryKey: activeDiscordAppQueryKey,
     queryFn: () => fetchAgentDiscordApp(activeDiscordAgentId as string),
     enabled: Boolean(activeDiscordAgentId),
+  })
+  const emailConnectionsQuery = useQuery({
+    queryKey: ['native-email-agent-connections', activeEmailProvider?.providerKey],
+    queryFn: () => fetchNativeIntegrationAgentConnections(activeEmailProvider?.agentConnectionsUrl ?? ''),
+    enabled: Boolean(activeEmailProvider?.agentConnectionsUrl) && !activeEmailAgentId,
+  })
+
+  const emailConnectMutation = useMutation({
+    mutationFn: async ({ provider, agentId }: { provider: NativeIntegrationProvider; agentId: string }) => {
+      const popup = openNativeOAuthPopup(provider)
+      const result = await startNativeIntegrationConnect(provider.connectUrl, undefined, agentId)
+      storePendingNativeOAuth(result.state, {
+        providerKey: provider.providerKey,
+        agentId,
+        returnUrl: window.location.href,
+        popup: Boolean(popup),
+        state: result.state,
+        createdAt: Date.now(),
+        context: readStoredConsoleContext(),
+      })
+      if (popup) popup.location.href = result.authorizationUrl
+      else window.location.href = result.authorizationUrl
+    },
+    onMutate: ({ agentId }) => {
+      setPendingAgentAction({ agentId, kind: 'connect' })
+      setStatusMessage(null)
+    },
+    onError: (caught) => {
+      const message = resolvePipedreamAppsErrorMessage(caught, 'Unable to connect email.')
+      setStatusMessage({ text: message, tone: 'error' })
+      onError(message)
+    },
+    onSettled: () => setPendingAgentAction(null),
   })
 
   const platformSlugSet = useMemo(
@@ -396,7 +434,33 @@ export function WorkspaceAppsManager({
     || nativePickerMutation.isPending
     || discordDisconnectMutation.isPending
     || isDiscordAgentActionPending
-  const body = activeDiscordAgentId ? (
+    || emailConnectMutation.isPending
+  const body = activeEmailAgentId ? (
+    <AgentEmailSettingsScreen
+      agentId={activeEmailAgentId}
+      emailSettingsUrl={`/console/api/agents/${activeEmailAgentId}/email-settings/`}
+      ensureAccountUrl={`/console/api/agents/${activeEmailAgentId}/email-settings/ensure-account/`}
+      testUrl={`/console/api/agents/${activeEmailAgentId}/email-settings/test/`}
+      onBack={() => setActiveEmailAgentId(null)}
+      onSaved={() => {
+        void emailConnectionsQuery.refetch()
+        void nativeIntegrationsQuery.refetch()
+      }}
+    />
+  ) : activeEmailProvider ? (
+    <EmailAgentConnectionsScreen
+      provider={activeEmailProvider}
+      agents={emailConnectionsQuery.data ?? []}
+      isLoading={emailConnectionsQuery.isLoading}
+      isError={emailConnectionsQuery.isError}
+      error={emailConnectionsQuery.error}
+      pendingAgentAction={pendingAgentAction}
+      statusMessage={statusMessage}
+      onBack={() => setActiveEmailProvider(null)}
+      onConnect={(agent) => emailConnectMutation.mutate({ provider: activeEmailProvider, agentId: agent.agentId })}
+      onConfigure={(agent) => setActiveEmailAgentId(agent.agentId)}
+    />
+  ) : activeDiscordAgentId ? (
     activeDiscordAppQuery.isError ? (
       <div className="space-y-4 p-1">
         <BackButton
@@ -493,6 +557,10 @@ export function WorkspaceAppsManager({
         setDiscordConnectionsOpen(true)
         setStatusMessage(null)
       }}
+      onManageEmailConnections={(provider) => {
+        setActiveEmailProvider(provider)
+        setStatusMessage(null)
+      }}
       onRemove={(app) => removeMutation.mutate(app)}
       onNativeConnect={(provider) => {
         if (usesManualNativeIntegrationCredentials(provider)) {
@@ -524,6 +592,8 @@ export function WorkspaceAppsManager({
       || activeApp
       || discordConnectionsOpen
       || activeDiscordAgentId
+      || activeEmailProvider
+      || activeEmailAgentId
     ) {
       return
     }
@@ -534,6 +604,10 @@ export function WorkspaceAppsManager({
       return
     }
     setInitialNativeConnectHandled(true)
+    if (provider.connectionScope === 'agent') {
+      setActiveEmailProvider(provider)
+      return
+    }
     if (usesManualNativeIntegrationCredentials(provider)) {
       openCredentialModal(provider)
     } else {
@@ -542,6 +616,8 @@ export function WorkspaceAppsManager({
   }, [
     activeApp,
     activeDiscordAgentId,
+    activeEmailAgentId,
+    activeEmailProvider,
     discordConnectionsOpen,
     initialNativeConnect,
     initialNativeConnectHandled,
@@ -575,6 +651,7 @@ function AppListScreen({
   onSearchTermChange,
   onManageConnections,
   onManageDiscordConnections,
+  onManageEmailConnections,
   onRemove,
   onNativeConnect,
   onNativeDisconnect,
@@ -595,6 +672,7 @@ function AppListScreen({
   onSearchTermChange: (term: string) => void
   onManageConnections: (app: WorkspacePipedreamAppRow) => void
   onManageDiscordConnections: () => void
+  onManageEmailConnections: (provider: NativeIntegrationProvider) => void
   onRemove: (app: WorkspacePipedreamAppRow) => void
   onNativeConnect: (provider: NativeIntegrationProvider) => void
   onNativeDisconnect: (provider: NativeIntegrationProvider) => void
@@ -620,7 +698,12 @@ function AppListScreen({
       ) : (
         <PipedreamListFrame isMobile={isMobile} constrainHeight={false}>
           {apps.map((app) => app.kind === 'native' ? (
-            <NativeAppRowItem
+            app.connectionScope === 'agent' ? <WorkspaceEmailAppRowItem
+              key={`native-${app.providerKey}`}
+              provider={app}
+              disabled={isBusy}
+              onManageConnections={() => onManageEmailConnections(app)}
+            /> : <NativeAppRowItem
               key={`native-${app.providerKey}`}
               provider={app}
               pendingNativeAction={pendingNativeAction}
@@ -648,6 +731,78 @@ function AppListScreen({
               onRemove={() => onRemove(app)}
             />
           ))}
+        </PipedreamListFrame>
+      )}
+    </div>
+  )
+}
+
+function WorkspaceEmailAppRowItem({
+  provider,
+  disabled,
+  onManageConnections,
+}: {
+  provider: NativeIntegrationProvider
+  disabled: boolean
+  onManageConnections: () => void
+}) {
+  return (
+    <div className="grid gap-3 px-4 py-3 md:grid-cols-[minmax(0,1fr)_12rem_8rem] md:items-center">
+      <NativeIntegrationSummaryCell provider={provider} badge="connected" />
+      <div className="text-sm text-slate-600 md:text-right">
+        {provider.connectedAgentCount} connected
+      </div>
+      <div className="flex justify-start md:justify-end">
+        <IntegrationManageButton onClick={onManageConnections} disabled={disabled} />
+      </div>
+    </div>
+  )
+}
+
+function EmailAgentConnectionsScreen({
+  provider,
+  agents,
+  isLoading,
+  isError,
+  error,
+  pendingAgentAction,
+  statusMessage,
+  onBack,
+  onConnect,
+  onConfigure,
+}: {
+  provider: NativeIntegrationProvider
+  agents: NativeIntegrationAgentConnection[]
+  isLoading: boolean
+  isError: boolean
+  error: unknown
+  pendingAgentAction: PendingAgentAction
+  statusMessage: PipedreamStatusMessage
+  onBack: () => void
+  onConnect: (agent: NativeIntegrationAgentConnection) => void
+  onConfigure: (agent: NativeIntegrationAgentConnection) => void
+}) {
+  return (
+    <div className="space-y-4 p-1">
+      <BackButton onClick={onBack} disabled={false} />
+      <PipedreamStatusBanner statusMessage={statusMessage} />
+      <div><h2 className="font-semibold text-slate-950">Manage {provider.displayName} by agent</h2><p className="mt-1 text-sm text-slate-600">Each agent connects its own mailbox.</p></div>
+      {isError ? <PipedreamErrorState error={error} fallback="Unable to load agent email connections." /> : isLoading ? <PipedreamLoadingState label="Loading agents…" /> : (
+        <PipedreamListFrame isMobile={false} constrainHeight={false}>
+          {agents.map((agent) => {
+            const pending = pendingAgentAction?.agentId === agent.agentId
+            const otherProviderConnected = Boolean(agent.provider && agent.provider !== provider.providerKey)
+            const customConfigured = agent.activeMode === 'custom'
+            return (
+              <div key={agent.agentId} className="grid gap-3 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_10rem_8rem] sm:items-center">
+                <div><p className="font-semibold text-slate-900">{agent.agentName}</p><p className="text-sm text-slate-600">{agent.connected ? agent.mailboxAddress : agent.gobiiAddress}</p></div>
+                <div className="text-sm text-slate-600">{agent.connected ? `${agent.sendEnabled ? 'Send on' : 'Send off'} · ${agent.receiveEnabled ? 'Receive on' : 'Receive off'}` : otherProviderConnected ? `${agent.provider === 'gmail' ? 'Gmail' : agent.provider === 'outlook' ? 'Outlook' : 'Email OAuth'} connected` : customConfigured ? 'Custom email enabled' : 'Not connected'}</div>
+                <div className="flex justify-start sm:justify-end">
+                  {agent.connected || otherProviderConnected || customConfigured ? <IntegrationManageButton onClick={() => onConfigure(agent)} disabled={pending} /> : <IntegrationConnectionButton connected={false} pendingKind={pending ? 'connect' : null} disabled={pending} onConnect={() => onConnect(agent)} onDisconnect={() => undefined} />}
+                </div>
+              </div>
+            )
+          })}
         </PipedreamListFrame>
       )}
     </div>

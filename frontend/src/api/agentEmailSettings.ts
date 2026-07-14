@@ -21,11 +21,14 @@ export type AgentEmailSettingsPayload = {
   endpoint: {
     address: string
     exists: boolean
+    displayName: string
+    readOnly: boolean
   }
   defaultEndpoint: {
     address: string
     exists: boolean
     isInboundAliasActive: boolean
+    displayName: string
   }
   account: {
     id: string | null
@@ -50,17 +53,30 @@ export type AgentEmailSettingsPayload = {
     connectionMode: 'custom' | 'oauth2'
     connectionLastOkAt: string | null
     connectionError: string
+    smtpLastOkAt: string | null
+    smtpError: string
+    imapLastOkAt: string | null
+    imapError: string
   }
   oauth: {
     connected: boolean
     provider: string
+    legacy: boolean
+    mailboxAddress: string
     scope: string
     expiresAt: string | null
     callbackPath: string
-    startUrl: string
+    startUrl: string | null
     statusUrl: string | null
     revokeUrl: string | null
+    gmailConnectUrl: string
+    gmailRevokeUrl: string
+    outlookConnectUrl: string
+    outlookRevokeUrl: string
   }
+  activeMode: 'none' | 'custom' | 'oauth'
+  customConfigured: boolean
+  customEnabled: boolean
 }
 
 export type EmailSettingsSaveRequest = {
@@ -85,6 +101,8 @@ export type EmailSettingsSaveRequest = {
   isInboundEnabled: boolean
   imapIdleEnabled: boolean
   pollIntervalSec: number
+  displayName?: string
+  defaultDisplayName?: string
 }
 
 export type EmailSettingsTestRequest = EmailSettingsSaveRequest & {
@@ -134,6 +152,18 @@ export async function resetAgentEmailSettingsToDefault(
     method: 'POST',
     includeCsrf: true,
     json: { action: 'reset_to_default' },
+  })
+}
+
+export async function updateAgentEmailSettingsAction(
+  url: string,
+  action: string,
+  values: Record<string, unknown> = {},
+): Promise<{ ok: boolean; settings: AgentEmailSettingsPayload }> {
+  return jsonRequest(url, {
+    method: 'POST',
+    includeCsrf: true,
+    json: { action, ...values },
   })
 }
 

@@ -15,7 +15,7 @@ from django.db import transaction
 from ...models import PersistentAgent, PersistentAgentCommsEndpoint, PersistentAgentConversationParticipant, PersistentAgentMessage, CommsChannel, DeliveryStatus
 from ..comms.email_threading import get_message_channel, get_message_contact_address, normalize_email_address
 from ..comms.outbound_delivery import deliver_agent_email
-from ..comms.email_endpoint_routing import resolve_agent_email_sender_endpoint_for_message
+from ..comms.email_endpoint_routing import EmailSenderSelectionError, available_agent_email_senders, resolve_agent_email_sender_endpoint_for_message
 from ..comms.message_service import _ensure_participant, _get_or_create_conversation
 from .outbound_duplicate_guard import detect_recent_duplicate_message
 from util.integrations import postmark_status
@@ -153,8 +153,18 @@ def _resolve_reply_target(
     return target_message, None
 
 
-def get_send_email_tool() -> Dict[str, Any]:
+def get_send_email_tool(agent: PersistentAgent | None = None) -> Dict[str, Any]:
     """Return the send_email tool definition for the LLM."""
+    sender_description = "Optional exact sender address. Omit to use the enabled configured mailbox, otherwise the agent's Gobii address."
+    if agent is not None:
+        senders = available_agent_email_senders(agent)
+        addresses = [
+            endpoint.address
+            for endpoint in (senders["configured_endpoint"], senders["gobii_endpoint"])
+            if endpoint is not None
+        ]
+        if addresses:
+            sender_description = f"Optional exact sender address. Available values: {', '.join(addresses)}. Omit to prefer the enabled configured mailbox."
     return {
         "type": "function",
         "function": {
@@ -177,6 +187,7 @@ def get_send_email_tool() -> Dict[str, Any]:
                         "description": "Optional CC email addresses."
                     },
                     "subject": {"type": "string", "description": "Email subject."},
+                    "from": {"type": "string", "description": sender_description},
                     "reply_to_message_id": {
                         "type": "string",
                         "description": (
@@ -229,6 +240,7 @@ def execute_send_email(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
     will_continue = _should_continue_work(params)
     attachment_paths = params.get("attachments")
     reply_to_message_id = str(params.get("reply_to_message_id") or "").strip()
+    requested_from = str(params.get("from") or "").strip()
 
     if not all([to_address, subject, mobile_first_html]):
         return {"status": "error", "message": "Missing required parameters: to_address, subject, or mobile_first_html"}
@@ -311,13 +323,17 @@ def execute_send_email(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
         if duplicate:
             return duplicate.to_error_response()
 
-        from_endpoint = resolve_agent_email_sender_endpoint_for_message(
-            agent,
-            to_endpoint=to_endpoint,
-            cc_endpoints=cc_endpoint_objects,
-            has_bcc=False,
-            log_context="send_email_tool",
-        )
+        try:
+            from_endpoint = resolve_agent_email_sender_endpoint_for_message(
+                agent,
+                to_endpoint=to_endpoint,
+                cc_endpoints=cc_endpoint_objects,
+                has_bcc=False,
+                log_context="send_email_tool",
+                requested_from=requested_from,
+            )
+        except EmailSenderSelectionError as exc:
+            return {"status": "error", "message": str(exc)}
         if not from_endpoint:
             from_endpoint = _maybe_provision_simulated_from_endpoint(agent)
             if not from_endpoint:

@@ -234,7 +234,7 @@ class EmailSenderDbConnectionTests(TransactionTestCase):
         self.assertIsNone(message.to_endpoint_id)
         self.assertEqual(message.conversation.address, custom_primary.address)
 
-    def test_execute_send_email_self_send_with_cc_keeps_custom_sender(self):
+    def test_execute_send_email_self_send_with_cc_uses_gobii_sender_without_configured_account(self):
         self.from_ep.is_primary = False
         self.from_ep.save(update_fields=["is_primary"])
         custom_primary = PersistentAgentCommsEndpoint.objects.create(
@@ -270,7 +270,7 @@ class EmailSenderDbConnectionTests(TransactionTestCase):
 
         self.assertEqual(result.get("status"), "ok")
         message = PersistentAgentMessage.objects.get(id=result["message_id"])
-        self.assertEqual(message.from_endpoint_id, custom_primary.id)
+        self.assertEqual(message.from_endpoint_id, self.from_ep.id)
 
     def test_execute_send_email_rejects_attachment_claim_without_attachments(self):
 
