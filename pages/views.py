@@ -1547,7 +1547,7 @@ class PretrainedWorkerDetailView(ProprietaryPretrainedWorkerOnlyMixin, TemplateV
     def dispatch(self, request, *args, **kwargs):
         self.employee = PretrainedWorkerTemplateService.get_template_by_code(kwargs.get('slug'))
         if not self.employee:
-            raise Http404("This pretrained worker is no longer available.")
+            raise Http404("This pretrained employee is no longer available.")
         return super().dispatch(request, *args, **kwargs)
 
     def get_related_pretrained_workers(self):
@@ -1626,7 +1626,7 @@ class PretrainedWorkerDetailView(ProprietaryPretrainedWorkerOnlyMixin, TemplateV
                 {
                     "@type": "ListItem",
                     "position": 2,
-                    "name": "Pretrained Workers",
+                    "name": "Pretrained Employees",
                     "item": f"{home_url}#pretrained-workers",
                 },
                 {
@@ -1665,7 +1665,7 @@ class PretrainedWorkerDetailView(ProprietaryPretrainedWorkerOnlyMixin, TemplateV
 def _get_pretrained_worker_template_or_404(code: str | None):
     template = PretrainedWorkerTemplateService.get_template_by_code(code)
     if not template:
-        raise Http404("This pretrained worker is no longer available.")
+        raise Http404("This pretrained employee is no longer available.")
     return template
 
 
@@ -4358,7 +4358,7 @@ class SolutionView(TemplateView):
             'tagline': 'Automate candidate sourcing and screening.',
             'description': 'Find top talent faster with AI agents that work 24/7 to source, screen, and engage candidates.',
             'seo_title': 'AI Recruiting Agents - Automate Sourcing & Screening | Gobii',
-            'seo_description': "Deploy AI recruiting agents that work 24/7 to source candidates, screen resumes, and engage top talent. Hire faster with Gobii's always-on digital workers.",
+            'seo_description': "Deploy AI recruiting agents that work 24/7 to source candidates, screen resumes, and engage top talent. Hire faster with Gobii's always-on AI employees.",
             'date_modified': '2026-06-04',
             'social_image': 'images/solutions/recruiting-hero.jpg',
             'social_image_alt': 'Gobii AI recruiting agents for candidate sourcing and screening',
@@ -4398,7 +4398,7 @@ class SolutionView(TemplateView):
             'tagline': 'Supercharge your outbound outreach.',
             'description': 'Scale your prospecting and personalized messaging to fill your pipeline automatically.',
             'seo_title': 'AI Sales Agents - Automate Lead Gen & Outreach | Gobii',
-            'seo_description': "Deploy AI sales agents that work 24/7 to find prospects, research accounts, and fill your pipeline. Book more demos with Gobii's always-on digital workers.",
+            'seo_description': "Deploy AI sales agents that work 24/7 to find prospects, research accounts, and fill your pipeline. Book more demos with Gobii's always-on AI employees.",
             'date_modified': '2026-06-05',
             'social_image': 'images/solutions/sales-hero.jpg',
             'social_image_alt': 'Gobii AI sales agents for lead generation and account research',

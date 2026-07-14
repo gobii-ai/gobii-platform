@@ -468,7 +468,7 @@ TEMPLATE_DEFINITIONS: List[PretrainedWorkerTemplateDefinition] = [
         display_name="Real Estate Research Analyst",
         tagline="Finds properties, pulls comps, and tracks market trends",
         description=(
-            "An always-on pretrained worker that monitors real estate listings, researches comparable properties,"
+            "An always-on pretrained AI employee that monitors real estate listings, researches comparable properties,"
             " analyzes market data, and compiles reports on property values and investment opportunities."
         ),
         charter=(
@@ -502,7 +502,7 @@ TEMPLATE_DEFINITIONS: List[PretrainedWorkerTemplateDefinition] = [
         display_name="Project Manager",
         tagline="Tracks milestones, manages blockers, and keeps teams aligned",
         description=(
-            "An always-on pretrained worker that coordinates project activities, tracks progress against milestones,"
+            "An always-on pretrained AI employee that coordinates project activities, tracks progress against milestones,"
             " manages task dependencies, identifies blockers, and keeps stakeholders informed with status updates and reports."
         ),
         charter=(

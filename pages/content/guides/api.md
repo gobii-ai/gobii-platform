@@ -4,7 +4,7 @@ order: 5
 icon: guide
 ---
 
-**Gobii** is a platform for launching fully managed `browser-use` agents in the cloud. Our API makes the full power of the Gobii platform accessible to developers and power users who want to build on top of our browser automation capabilities.
+**Gobii** is a platform for deploying and managing always-on AI employees in the cloud. The Agent API lets teams create persistent agents, assign charters and schedules, connect tools, exchange messages, inspect activity, and manage each employee's lifecycle programmatically.
 
 ## Why use the Gobii API?
 
@@ -45,4 +45,4 @@ Ready to dive in? Continue to our [Quickstart guide](/docs/guides/quickstart/) t
 If you have any questions or need assistance, don't hesitate to:
 
 - Join our [Discord community](https://discord.gg/yyDB8GwxtE) for support and discussions
-- Explore our <a href="/api/schema/swagger-ui/" target="_blank">API Reference</a> 
+- Explore our <a href="/api/schema/swagger-ui/" target="_blank">API Reference</a>
