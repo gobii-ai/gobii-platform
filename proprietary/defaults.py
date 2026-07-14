@@ -18,6 +18,7 @@ DEFAULTS: Dict[str, Dict[str, str]] = {
         "PUBLIC_HUGGINGFACE_URL": "https://huggingface.co/gobii-ai",
         "PUBLIC_G2_URL": "https://www.g2.com/products/gobii/reviews",
         "PUBLIC_SAASHUB_URL": "https://www.saashub.com/gobii",
+        "PUBLIC_ALTERNATIVETO_URL": "https://alternativeto.net/software/gobii/",
         "PUBLIC_DISCORD_URL": "https://discord.gg/yyDB8GwxtE",
         "PUBLIC_X_URL": "https://x.com/gobii_ai",
         "PUBLIC_LINKEDIN_URL": "https://www.linkedin.com/company/gobii-ai",

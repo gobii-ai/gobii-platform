@@ -100,6 +100,7 @@ class HomePageTests(TestCase):
             "PUBLIC_HUGGINGFACE_URL": "https://huggingface.co/gobii-ai",
             "PUBLIC_G2_URL": "https://www.g2.com/products/gobii/reviews",
             "PUBLIC_SAASHUB_URL": "https://www.saashub.com/gobii",
+            "PUBLIC_ALTERNATIVETO_URL": "https://alternativeto.net/software/gobii/",
             "PUBLIC_DISCORD_URL": "https://discord.gg/yyDB8GwxtE",
             "PUBLIC_X_URL": "https://x.com/gobii_ai",
             "PUBLIC_LINKEDIN_URL": "https://www.linkedin.com/company/gobii-ai",
@@ -301,7 +302,17 @@ class HomePageTests(TestCase):
         self.assertEqual(software_schema["operatingSystem"], "Web")
         self.assertEqual(software_schema["description"], homepage_schema.HOMEPAGE_SOFTWARE_DESCRIPTION)
         self.assertEqual(software_schema["featureList"], homepage_schema.HOMEPAGE_SOFTWARE_FEATURES)
+        self.assertEqual(
+            software_schema["sameAs"],
+            ["https://alternativeto.net/software/gobii/"],
+        )
         self.assertNotIn("offers", software_schema)
+
+    def test_home_page_software_schema_omits_empty_alternativeto_url(self):
+        _, _, nodes = self._get_homepage_schema_nodes(PUBLIC_ALTERNATIVETO_URL="")
+        software_schema = nodes["https://gobii.ai/#software"]
+
+        self.assertNotIn("sameAs", software_schema)
 
     def test_home_page_schema_uses_configured_public_site_url(self):
         configured_site_url = "https://preview.gobii.test/"
