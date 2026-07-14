@@ -69,10 +69,13 @@ adapters = importlib.util.module_from_spec(spec)
 sys.modules.setdefault("forward_adapters", adapters)
 spec.loader.exec_module(adapters)
 
-_is_forward_like = adapters._is_forward_like
-_extract_forward_sections = adapters._extract_forward_sections
+from api.agent.comms.email_forwarding import (
+    extract_forward_sections as _extract_forward_sections,
+    has_forwarded_header_block as _has_forwarded_header_block,
+    is_forward_like as _is_forward_like,
+)
+
 _html_to_text = adapters._html_to_text
-_has_forwarded_header_block = adapters._has_forwarded_header_block
 
 
 @tag("batch_forward_detection")
@@ -297,6 +300,19 @@ class ForwardDetectionTests(unittest.TestCase):
         self.assertEqual(preamble, "")
         self.assertIn("From: sender@example.com", forwarded)
 
+    def test_extract_forward_sections_starts_at_clustered_header(self):
+        body = (
+            "From: unrelated@example.com\n"
+            "line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8\n"
+            "From: sender@example.com\n"
+            "Date: January 1, 2024\n"
+            "To: recipient@example.com\n"
+            "Original message content.\n"
+        )
+        preamble, forwarded = _extract_forward_sections(body)
+        self.assertIn("From: unrelated@example.com", preamble)
+        self.assertTrue(forwarded.startswith("From: sender@example.com"))
+
     def test_has_forwarded_header_block_true(self):
         """Direct test of _has_forwarded_header_block with valid block."""
         text = (
@@ -312,6 +328,13 @@ class ForwardDetectionTests(unittest.TestCase):
         text = (
             "From: person@example.com\n"
             "Subject: Test\n"
+        )
+        self.assertFalse(_has_forwarded_header_block(text))
+
+    def test_has_forwarded_header_block_treats_sent_as_date(self):
+        text = (
+            "From: person@example.com\n"
+            "Sent: Jan 1, 2024\n"
         )
         self.assertFalse(_has_forwarded_header_block(text))
 

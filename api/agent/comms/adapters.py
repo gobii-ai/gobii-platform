@@ -11,7 +11,7 @@ import json
 from django.http.request import QueryDict
 from opentelemetry import trace
 from dataclasses import dataclass
-from typing import Any, List, MutableMapping, Optional, Tuple
+from typing import Any, List, MutableMapping, Optional
 from django.http import HttpRequest
 from api.models import CommsChannel
 import  logging
@@ -19,145 +19,16 @@ import re
 
 from config.settings import EMAIL_STRIP_REPLIES
 from api.agent.comms.chat_email_display_cache import merge_chat_body_html_cache
+from api.agent.comms.email_forwarding import (
+    extract_forward_sections as _extract_forward_sections,
+    is_forward_like as _is_forward_like,
+)
 from api.services.system_settings import get_max_file_size
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer('gobii.utils')
 
 EMAIL_BODY_HTML_PAYLOAD_KEY = "body_html"
-
-
-# Optional quote prefix pattern - matches "> " or "> > " etc. at start of line
-# This handles forwarded content that's been quoted (e.g., when replying to a forward)
-# Also allows leading whitespace (e.g., from copy-paste or email client indentation)
-_QUOTE_PREFIX = r"\s*(?:>\s*)*"
-
-# Markers that definitively indicate a forward (not used in replies)
-FORWARD_ONLY_MARKERS = [
-    r"^" + _QUOTE_PREFIX + r"Begin forwarded message:",  # Apple Mail
-    r"^" + _QUOTE_PREFIX + r"-{2,}\s*Forwarded message\s*-{2,}$",  # Gmail
-]
-# Markers that are ambiguous - used by Outlook for both forwards AND replies
-AMBIGUOUS_QUOTE_MARKERS = [
-    r"^" + _QUOTE_PREFIX + r"-----Original Message-----$",
-    r"^" + _QUOTE_PREFIX + r"-{3,}\s*Original Message\s*-{3,}$",
-    r"^" + _QUOTE_PREFIX + r"_{10,}$",  # Outlook web underscore separators
-]
-FORWARD_ONLY_MARKERS_RE = re.compile("|".join(FORWARD_ONLY_MARKERS), re.IGNORECASE | re.MULTILINE)
-AMBIGUOUS_QUOTE_MARKERS_RE = re.compile("|".join(AMBIGUOUS_QUOTE_MARKERS), re.IGNORECASE | re.MULTILINE)
-SUBJECT_FWD_RE = re.compile(r"^\s*(fwd?|fw|wg|tr|rv)\s*:", re.IGNORECASE)
-SUBJECT_REPLY_RE = re.compile(r"^\s*re\s*:", re.IGNORECASE)
-# Pattern to match individual header lines in forwarded content (with optional quote prefix)
-FORWARDED_HEADER_LINE_RE = re.compile(
-    r"^" + _QUOTE_PREFIX + r"(From|Date|Sent|Subject|To):\s*.+",
-    re.IGNORECASE | re.MULTILINE,
-)
-
-
-def _has_forwarded_header_block(text: str) -> bool:
-    """Check if text contains a clustered block of email headers (indicating forwarded content).
-
-    This is more flexible than a strict regex - it looks for at least 3 of the typical
-    forwarded email headers (From, Date/Sent, Subject, To) within an 8-line window,
-    regardless of their order. Different email clients arrange these headers differently.
-    """
-    if not text:
-        return False
-    lines = text.split('\n')
-    for i in range(len(lines)):
-        window = '\n'.join(lines[i:i + 8])
-        matches = FORWARDED_HEADER_LINE_RE.findall(window)
-        # Normalize and dedupe (e.g., "From" and "from" count as one)
-        unique_headers = set(m.lower() for m in matches)
-        # "Sent" and "Date" are equivalent (different clients use different names)
-        if "sent" in unique_headers:
-            unique_headers.add("date")
-        if len(unique_headers) >= 3:
-            return True
-    return False
-
-
-def _is_forward_like(subject: str, body_text: str, attachments: list[dict]) -> bool:
-    # Embedded message/rfc822 attachment is a definitive forward
-    if any((a.get("ContentType", "") or "").lower() == "message/rfc822" for a in (attachments or [])):
-        return True
-    # Explicit forward subject prefix
-    if SUBJECT_FWD_RE.search(subject or ""):
-        return True
-    # Definitive forward-only markers (e.g., "Begin forwarded message:")
-    if FORWARD_ONLY_MARKERS_RE.search(body_text or ""):
-        return True
-
-    # For ambiguous markers and header blocks, skip if subject indicates a reply.
-    # Outlook uses "-----Original Message-----" and underscore separators for BOTH
-    # forwards and replies, so we can't rely on these alone.
-    is_reply = bool(SUBJECT_REPLY_RE.search(subject or ""))
-    if is_reply:
-        return False
-
-    # Ambiguous markers (only count as forward if not a reply)
-    if AMBIGUOUS_QUOTE_MARKERS_RE.search(body_text or ""):
-        return True
-    # Header block detection (only if not a reply)
-    if _has_forwarded_header_block(body_text):
-        return True
-    return False
-
-
-def _find_header_block_start(text: str) -> int | None:
-    """Find the start index of a forwarded header block in the text.
-
-    Returns the character index where the first header line of the block begins,
-    or None if no header block is found.
-    """
-    if not text:
-        return None
-    lines = text.split('\n')
-    line_starts = []
-    pos = 0
-    for line in lines:
-        line_starts.append(pos)
-        pos += len(line) + 1  # +1 for newline
-
-    for i in range(len(lines)):
-        window_lines = lines[i:i + 8]
-        window = '\n'.join(window_lines)
-        matches = FORWARDED_HEADER_LINE_RE.findall(window)
-        unique_headers = set(m.lower() for m in matches)
-        if "sent" in unique_headers:
-            unique_headers.add("date")
-        if len(unique_headers) >= 3:
-            # Find the first actual header line within this window
-            for j, line in enumerate(window_lines):
-                if FORWARDED_HEADER_LINE_RE.match(line):
-                    return line_starts[i + j]
-            # Fallback (shouldn't happen if we found matches)
-            return line_starts[i]
-    return None
-
-
-def _extract_forward_sections(body_text: str) -> Tuple[str, str]:
-    """
-    Returns (preamble, forwarded_block). If no marker found, returns (body_text, "").
-    """
-    if not body_text:
-        return "", ""
-    starts = []
-    # Check both forward-only and ambiguous markers for extraction
-    # (by the time we call this, we've already determined it's a forward)
-    m1 = FORWARD_ONLY_MARKERS_RE.search(body_text)
-    if m1:
-        starts.append(m1.start())
-    m2 = AMBIGUOUS_QUOTE_MARKERS_RE.search(body_text)
-    if m2:
-        starts.append(m2.start())
-    header_start = _find_header_block_start(body_text)
-    if header_start is not None:
-        starts.append(header_start)
-    if not starts:
-        return body_text.strip(), ""
-    idx = min(starts)
-    return body_text[:idx].strip(), body_text[idx:].strip()
 
 
 def _html_to_text(html: str) -> str:
@@ -443,12 +314,13 @@ class MailgunEmailAdapter(EmailAdapter):
         # Get the full unstripped body for forward detection and extraction
         # Mailgun's stripped-text removes quoted content, which we need for forwards
         body_plain_raw = _first_value(payload_dict.get("body-plain")) or ""
-        html_body = (
-            _first_value(payload_dict.get("stripped-html"))
-            or _first_value(payload_dict.get("body-html"))
+        stripped_html_body = _first_value(payload_dict.get("stripped-html")) or ""
+        full_html_body = (
+            _first_value(payload_dict.get("body-html"))
             or _first_value(payload_dict.get("html"))
             or ""
         )
+        html_body = stripped_html_body or full_html_body
 
         # For non-forwards, prefer stripped content; for forwards, we'll use body-plain
         stripped_text = _first_value(payload_dict.get("stripped-text")) or ""
@@ -493,7 +365,7 @@ class MailgunEmailAdapter(EmailAdapter):
 
         if is_forward:
             # For forwards, use body-plain to preserve the quoted/forwarded content
-            forward_text = body_plain_raw or _html_to_text(html_body) or working_text
+            forward_text = body_plain_raw or _html_to_text(full_html_body or html_body) or working_text
             preamble, forwarded = _extract_forward_sections(forward_text)
             if forwarded and preamble:
                 body = f"{preamble}\n\n{forwarded}"
@@ -537,12 +409,13 @@ class MailgunEmailAdapter(EmailAdapter):
             or ""
         ).strip()
 
+        chat_html_body = full_html_body if is_forward and full_html_body else html_body
         normalized_payload = _normalize_inbound_email_raw_payload(payload_dict)
-        if body or html_body:
+        if body or chat_html_body:
             normalized_payload = merge_chat_body_html_cache(
                 normalized_payload,
                 body,
-                explicit_html=html_body,
+                explicit_html=chat_html_body,
             )
 
         return ParsedMessage(

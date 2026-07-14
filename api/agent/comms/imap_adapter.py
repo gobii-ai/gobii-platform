@@ -16,9 +16,10 @@ from typing import Any, MutableMapping, Optional, Tuple, List
 from django.core.files.base import ContentFile
 
 from api.models import CommsChannel
-from .adapters import EMAIL_BODY_HTML_PAYLOAD_KEY, ParsedMessage, _html_to_text, _is_forward_like, _extract_forward_sections
+from .adapters import EMAIL_BODY_HTML_PAYLOAD_KEY, ParsedMessage, _html_to_text
 from .attachment_filters import is_signature_image_attachment
 from .chat_email_display_cache import merge_chat_body_html_cache
+from .email_forwarding import extract_forward_sections, is_forward_like
 from .rejected_attachments import build_rejected_attachment_metadata
 from config.settings import EMAIL_STRIP_REPLIES
 from api.services.system_settings import get_max_file_size
@@ -240,10 +241,10 @@ class ImapEmailAdapter:
         # Strip forwards/replies if configured
         body_html_preserved = extracted_body.body_html
         if EMAIL_STRIP_REPLIES:
-            is_forward = _is_forward_like(subject or "", body_text or "", [])
+            is_forward = is_forward_like(subject or "", body_text or "", [])
             if is_forward:
                 body_html_preserved = None
-                pre, fwd = _extract_forward_sections(body_text)
+                pre, fwd = extract_forward_sections(body_text)
                 if fwd and pre:
                     body_text = f"{pre}\n\n{fwd}"
                 elif fwd:

@@ -364,6 +364,72 @@ class MailgunEmailWebhookTest(TestCase):
 
     @tag("batch_email")
     @patch("api.webhooks.ingest_inbound_message")
+    def test_mailgun_forward_caches_full_html(self, mock_ingest):
+        request = self._create_mailgun_request(
+            from_email=self.owner.email,
+            to_email=self.agent_endpoint.address,
+            subject="Fwd: Account issue",
+            body=(
+                "Please investigate.\n\n"
+                "Begin forwarded message:\n"
+                "From: Customer <customer@example.com>\n"
+                "Subject: Account issue\n\n"
+                "The original request needs attention."
+            ),
+        )
+        request.POST = request.POST.copy()
+        request.POST["stripped-text"] = "Please investigate."
+        request.POST["stripped-html"] = "<p>Please investigate.</p>"
+        request.POST["body-html"] = (
+            "<p>Please investigate.</p>"
+            "<blockquote><p>Begin forwarded message:</p>"
+            "<p>The original request needs attention.</p></blockquote>"
+        )
+
+        response: HttpResponse = email_webhook_mailgun(request)
+
+        self.assertEqual(response.status_code, 200)
+        parsed = mock_ingest.call_args[0][1]
+        self.assertIn("The original request needs attention.", parsed.body)
+        cached_html = parsed.raw_payload[CHAT_BODY_HTML_CACHE_KEY]
+        self.assertIn("Begin forwarded message:", cached_html)
+        self.assertIn("The original request needs attention.", cached_html)
+
+    @tag("batch_email")
+    @patch("api.webhooks.ingest_inbound_message")
+    def test_mailgun_reply_caches_stripped_html(self, mock_ingest):
+        request = self._create_mailgun_request(
+            from_email=self.owner.email,
+            to_email=self.agent_endpoint.address,
+            subject="Re: Account issue",
+            body=(
+                "I can help.\n\n"
+                "-----Original Message-----\n"
+                "From: Customer <customer@example.com>\n"
+                "Sent: Monday, July 13, 2026\n"
+                "To: Owner <owner@example.com>\n"
+                "Subject: Account issue\n\n"
+                "Hidden reply history."
+            ),
+        )
+        request.POST = request.POST.copy()
+        request.POST["stripped-text"] = "I can help."
+        request.POST["stripped-html"] = "<p>I can help.</p>"
+        request.POST["body-html"] = (
+            "<p>I can help.</p>"
+            "<blockquote><p>Hidden reply history.</p></blockquote>"
+        )
+
+        response: HttpResponse = email_webhook_mailgun(request)
+
+        self.assertEqual(response.status_code, 200)
+        parsed = mock_ingest.call_args[0][1]
+        cached_html = parsed.raw_payload[CHAT_BODY_HTML_CACHE_KEY]
+        self.assertIn("I can help.", cached_html)
+        self.assertNotIn("Hidden reply history.", cached_html)
+
+    @tag("batch_email")
+    @patch("api.webhooks.ingest_inbound_message")
     @patch("api.webhooks.logger.info")
     def test_mailgun_email_from_non_owner_is_discarded(self, mock_logger, mock_ingest):
         request = self._create_mailgun_request(

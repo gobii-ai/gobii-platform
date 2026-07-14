@@ -25,6 +25,7 @@ from api.agent.core.processing_flags import (
 )
 from api.agent.core.schedule_parser import ScheduleParser
 from api.agent.comms.chat_email_display_cache import get_cached_chat_body_html, normalize_explicit_email_html, render_chat_email_body_html, sanitize_chat_email_html
+from api.agent.comms.email_forwarding import is_forward_like
 from api.agent.comms.human_input_requests import serialize_human_input_tool_result
 from api.agent.comms.adapters import EMAIL_BODY_HTML_PAYLOAD_KEY
 from api.agent.comms.cid_references import CID_SRC_REFERENCE_RE
@@ -176,8 +177,23 @@ def _message_body_html(message: PersistentAgentMessage, channel: str | None, att
     if not channel or channel.lower() != "email":
         return ""
     payload = message.raw_payload if isinstance(message.raw_payload, dict) else {}
-    explicit_html = normalize_explicit_email_html(payload.get(EMAIL_BODY_HTML_PAYLOAD_KEY))
-    cached_html = get_cached_chat_body_html(payload)
+    subject = payload.get("subject")
+    subject = subject if isinstance(subject, str) else ""
+    full_mailgun_html = (
+        normalize_explicit_email_html(payload.get("body-html"))
+        or normalize_explicit_email_html(payload.get("html"))
+    )
+    is_mailgun_forward = bool(
+        full_mailgun_html
+        and is_forward_like(subject, message.body or "", [])
+    )
+    explicit_html = (
+        full_mailgun_html
+        if is_mailgun_forward
+        else normalize_explicit_email_html(payload.get(EMAIL_BODY_HTML_PAYLOAD_KEY))
+    )
+    # Older Mailgun forwards cached stripped HTML even though the full HTML remains in the payload.
+    cached_html = None if is_mailgun_forward else get_cached_chat_body_html(payload)
     return _render_email_body_html(
         message.body or "",
         attachments,
