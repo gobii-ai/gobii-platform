@@ -3722,6 +3722,12 @@ class RestoredPublicMarketingSurfaceTests(TestCase):
                 page_text = BeautifulSoup(response.content, "html.parser").get_text(" ", strip=True)
                 self.assertNotRegex(page_text, r"(?i)\b(?:worker|coworker)s?\b")
 
+        with override_settings(GOBII_PROPRIETARY_MODE=False):
+            response = self.client.get("/docs/guides/api/")
+            self.assertEqual(response.status_code, 200)
+            page_text = BeautifulSoup(response.content, "html.parser").get_text(" ", strip=True)
+            self.assertNotRegex(page_text, r"(?i)\b(?:worker|coworker)s?\b")
+
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_home_header_restores_solution_and_developer_navigation(self):
         response = self.client.get("/")
