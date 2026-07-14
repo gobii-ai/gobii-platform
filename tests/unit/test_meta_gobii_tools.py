@@ -6,6 +6,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings, tag
 from django.utils import timezone
 
+from api.agent.core.event_processing import _execute_tool_call_runtime
 from api.agent.core.prompt_context import get_agent_tools
 from api.agent.system_skills import get_system_skill_definition, shortlist_system_skills
 from api.agent.system_skills.service import enable_system_skills
@@ -87,6 +88,8 @@ class MetaGobiiSystemSkillTests(TestCase):
         self.assertIn("non-duplicated proposal", definition.prompt_instructions)
         self.assertIn("execute only that approved scope", definition.prompt_instructions)
         self.assertIn("avoid echoing full email addresses or phone numbers", definition.prompt_instructions)
+        self.assertIn("Use meta_gobii_send_agent_message only for control-plane", definition.prompt_instructions)
+        self.assertIn("use send_agent_message for questions, handoffs", definition.prompt_instructions)
 
         for query in [
             "help me create a team of Gobiis, link them, and brief them",
@@ -371,6 +374,56 @@ class MetaGobiiDirectToolTests(TestCase):
             },
         )
         self.assertEqual(denied["status"], "error")
+
+    @patch("api.agent.tools.tool_manager.get_mcp_manager")
+    def test_linking_invoking_agent_refreshes_peer_dm_tool_in_current_run(self, mock_get_manager):
+        mock_get_manager.return_value = _mock_mcp_manager()
+        self.assertNotIn("send_agent_message", _tool_names(get_agent_tools(self.manager)))
+
+        blocked, updated_tools = _execute_tool_call_runtime(
+            self.manager,
+            tool_name="meta_gobii_link_agents",
+            exec_params={
+                "agent_id": str(self.manager.id),
+                "peer_agent_id": str(self.peer.id),
+            },
+            budget_ctx=None,
+            eval_run_id=None,
+        )
+
+        self.assertEqual(blocked["status"], "confirmation_required")
+        self.assertIsNone(updated_tools)
+
+        linked, updated_tools = _execute_tool_call_runtime(
+            self.manager,
+            tool_name="meta_gobii_link_agents",
+            exec_params={
+                "agent_id": str(self.manager.id),
+                "peer_agent_id": str(self.peer.id),
+                "user_confirmed": True,
+            },
+            budget_ctx=None,
+            eval_run_id=None,
+        )
+
+        self.assertEqual(linked["status"], "ok")
+        self.assertIsNotNone(updated_tools)
+        self.assertIn("send_agent_message", _tool_names(updated_tools))
+
+        unlinked, updated_tools = _execute_tool_call_runtime(
+            self.manager,
+            tool_name="meta_gobii_unlink_agents",
+            exec_params={
+                "peer_link_id": linked["link"]["id"],
+                "user_confirmed": True,
+            },
+            budget_ctx=None,
+            eval_run_id=None,
+        )
+
+        self.assertEqual(unlinked["status"], "unlinked")
+        self.assertIsNotNone(updated_tools)
+        self.assertNotIn("send_agent_message", _tool_names(updated_tools))
 
     @patch("api.agent.tasks.process_agent_events_task.delay")
     def test_send_agent_message_requires_confirmation_then_injects_internal_web_message(self, mock_delay):

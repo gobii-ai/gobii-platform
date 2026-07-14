@@ -2382,13 +2382,20 @@ def _execute_tool_call_runtime(
         result = resolve_refreshing_executor()(agent, exec_params)
         updated_tools = get_agent_tools(agent)
         return result, updated_tools
-    return execute_enabled_tool(
+    result = execute_enabled_tool(
         agent,
         tool_name,
         exec_params,
         current_sqlite_db_path=get_sqlite_db_path(),
         resolved_entry=resolved_entry,
-    ), updated_tools
+    )
+    if (
+        tool_name in {"meta_gobii_link_agents", "meta_gobii_unlink_agents"}
+        and isinstance(result, dict)
+        and result.get("status") in {"ok", "unlinked"}
+    ):
+        updated_tools = get_agent_tools(agent)
+    return result, updated_tools
 
 
 def _tool_result_is_success(result: Any) -> bool:

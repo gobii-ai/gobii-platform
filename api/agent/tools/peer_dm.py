@@ -130,14 +130,6 @@ def execute_send_agent_message(agent: PersistentAgent, params: Dict[str, Any]) -
         if status in RETRYABLE_PEER_MESSAGE_STATUSES:
             response["retryable"] = True
         return response
-    except Exception as exc:  # pragma: no cover - defensive logging
-        logger.exception(
-            "Unexpected peer DM failure sender=%s target=%s", agent.id, peer_agent.id
-        )
-        return {
-            "status": "error",
-            "message": "Peer messaging failed unexpectedly.",
-        }
 
     payload: Dict[str, Any] = {
         "status": result.status,

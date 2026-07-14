@@ -508,8 +508,10 @@ TOOL_DEFINITIONS: dict[str, dict[str, Any]] = {
     },
     "meta_gobii_send_agent_message": {
         "description": (
-            "Send a briefing or task message to one accessible Gobii and optionally attach files already in that agent's filespace. "
-            "Requires human approval via user_confirmed before messaging or briefing another Gobii."
+            "Inject a control-plane briefing or task message into one accessible Gobii and optionally attach files already "
+            "in that agent's filespace. This is not a peer DM. If the invoking Gobii shares an enabled peer link with the "
+            "target, use send_agent_message instead. Requires human approval via user_confirmed before messaging or briefing "
+            "another Gobii."
         ),
         "parameters": _object(
             {
