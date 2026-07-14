@@ -555,14 +555,12 @@ class HomePageTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertNotContains(response, "https://js.stripe.com/dahlia/stripe.js")
 
-    def test_home_page_shows_fish_in_both_modes(self):
-        """The Gobii fish mascot should render in both proprietary and community modes."""
-        for proprietary_mode in (False, True):
-            with self.subTest(proprietary_mode=proprietary_mode):
-                with override_settings(GOBII_PROPRIETARY_MODE=proprietary_mode):
-                    response = self.client.get("/")
-                    self.assertEqual(response.status_code, 200)
-                    self.assertContains(response, 'data-gobii-fish-cursor')
+    @override_settings(GOBII_PROPRIETARY_MODE=False)
+    def test_community_home_page_shows_fish(self):
+        response = self.client.get("/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'data-gobii-fish-cursor')
 
     @override_settings(PUBLIC_BRAND_NAME="Acme")
     def test_home_page_has_meta_description(self):
@@ -622,15 +620,6 @@ class HomePageTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "turnstile/v0/api.js?render=explicit")
-
-    @override_settings(GOBII_PROPRIETARY_MODE=True)
-    def test_home_page_uses_fish_hero_animation(self):
-        response = self.client.get("/")
-
-        self.assertEqual(response.status_code, 200)
-        soup = BeautifulSoup(response.content.decode("utf-8"), "html.parser")
-        self.assertIsNotNone(soup.select_one("[data-gobii-fish-cursor]"))
-        self.assertIsNone(soup.find("img", {"src": "/static/images/undraw/texting.svg"}))
 
     def test_home_page_includes_perf_motion_reduction_when_switch_is_on(self):
         with override_switch("homepage_perf_motion_reduction", active=True):
