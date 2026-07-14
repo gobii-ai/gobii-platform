@@ -440,11 +440,13 @@ export function useNativeIntegrationPickerMutation({
 export function NativeIntegrationSummaryCell({
   provider,
   descriptionClassName,
+  showNativeBadge = true,
   showConnectedBadge = false,
   surface = 'standalone',
 }: {
   provider: NativeIntegrationProvider
   descriptionClassName?: string
+  showNativeBadge?: boolean
   showConnectedBadge?: boolean
   surface?: SettingsSurfaceVariant
 }) {
@@ -456,20 +458,22 @@ export function NativeIntegrationSummaryCell({
     ? 'border-emerald-300/25 bg-emerald-950/45 text-emerald-200'
     : 'border-emerald-200 bg-emerald-50 text-emerald-700'
   const connectedBadgeClassName = surface === 'embedded'
-    ? 'border-sky-300/25 bg-sky-950/45 text-sky-200'
-    : 'border-blue-200 bg-blue-50 text-blue-700'
+    ? 'border-emerald-300/25 bg-emerald-950/45 text-emerald-200'
+    : 'border-emerald-200 bg-emerald-50 text-emerald-700'
   return (
     <div className="flex min-w-0 items-center gap-3">
       <NativeProviderIconTile provider={provider} />
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-2">
           <p className={`truncate text-sm font-semibold ${titleClassName}`}>{provider.displayName}</p>
-          <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide ${nativeBadgeClassName}`}>
-            Native
-          </span>
+          {showNativeBadge ? (
+            <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide ${nativeBadgeClassName}`}>
+              Native
+            </span>
+          ) : null}
           {showConnectedBadge && provider.connected ? (
-            <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide ${connectedBadgeClassName}`}>
-              <CheckCircle2 className="h-3 w-3" aria-hidden="true" />
+            <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold ${connectedBadgeClassName}`}>
+              <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
               Connected
             </span>
           ) : null}
@@ -669,6 +673,9 @@ export function NativeIntegrationGridRow({
   onDisconnect,
   onPicker,
   gridClassName = 'grid gap-3 sm:grid-cols-[minmax(0,1fr)_7rem_8rem_8rem] sm:items-start',
+  showStatusColumn = true,
+  showNativeBadge = true,
+  showConnectedBadge = false,
   surface = 'standalone',
 }: {
   provider: NativeIntegrationProvider
@@ -678,16 +685,26 @@ export function NativeIntegrationGridRow({
   onDisconnect: () => void
   onPicker: () => void
   gridClassName?: string
+  showStatusColumn?: boolean
+  showNativeBadge?: boolean
+  showConnectedBadge?: boolean
   surface?: SettingsSurfaceVariant
 }) {
   const pickerEnabled = provider.connected && supportsNativeIntegrationPicker(provider)
   return (
     <div className="px-4 py-3">
       <div className={gridClassName}>
-        <NativeIntegrationSummaryCell provider={provider} surface={surface} />
-        <div>
-          <NativeIntegrationStatusBadge connected={provider.connected} surface={surface} />
-        </div>
+        <NativeIntegrationSummaryCell
+          provider={provider}
+          showNativeBadge={showNativeBadge}
+          showConnectedBadge={showConnectedBadge}
+          surface={surface}
+        />
+        {showStatusColumn ? (
+          <div>
+            <NativeIntegrationStatusBadge connected={provider.connected} surface={surface} />
+          </div>
+        ) : null}
         <div className="flex justify-start md:justify-end">
           {pickerEnabled ? (
             <NativeIntegrationPickerButton pendingKind={pendingKind} disabled={disabled} onClick={onPicker} surface={surface} />

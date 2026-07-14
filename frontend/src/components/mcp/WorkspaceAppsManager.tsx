@@ -684,7 +684,12 @@ function WorkspaceDiscordAppRowItem({
 
   return (
     <div className="grid gap-3 px-4 py-3 md:grid-cols-[minmax(0,1fr)_12rem_8rem] md:items-center">
-      <NativeIntegrationSummaryCell provider={provider} surface={surface} />
+      <NativeIntegrationSummaryCell
+        provider={provider}
+        showNativeBadge={false}
+        showConnectedBadge
+        surface={surface}
+      />
       <div className="flex justify-start md:justify-end">
         <button
           type="button"
@@ -745,7 +750,10 @@ function NativeAppRowItem({
       onConnect={onConnect}
       onDisconnect={onDisconnect}
       onPicker={onPicker}
-      gridClassName="grid gap-3 sm:grid-cols-[minmax(0,1fr)_8rem_8rem_8rem] sm:items-start"
+      gridClassName="grid gap-3 sm:grid-cols-[minmax(0,1fr)_8rem_8rem] sm:items-start"
+      showStatusColumn={false}
+      showNativeBadge={false}
+      showConnectedBadge
       surface={surface}
     />
   )
