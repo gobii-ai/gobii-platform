@@ -1677,6 +1677,11 @@ class AgentDeleteView(LoginRequiredMixin, View):
             )
             _enforce_personal_agent_access_or_raise(request.user, agent)
             if not user_can_manage_agent_settings(request.user, agent):
+                if not (
+                    user_can_manage_agent(request.user, agent)
+                    or user_is_collaborator(request.user, agent)
+                ):
+                    return HttpResponse("Agent not found.", status=404)
                 raise PermissionDenied("You do not have permission to delete this agent.")
 
             agent_name = agent.name

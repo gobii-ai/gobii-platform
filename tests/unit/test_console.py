@@ -2419,6 +2419,68 @@ class ConsoleViewsTest(TestCase):
         self.assertEqual(response.content, b"Agent not found.")
 
     @tag("batch_console_agents")
+    def test_delete_agent_outside_user_visibility_returns_not_found(self):
+        from api.models import (
+            BrowserUseAgent,
+            Organization,
+            OrganizationMembership,
+            PersistentAgent,
+        )
+
+        User = get_user_model()
+        other_user = User.objects.create_user(
+            username="other-user-private@example.com",
+            email="other-user-private@example.com",
+            password="testpass123",
+        )
+        personal_browser_agent = BrowserUseAgent.objects.create(
+            user=other_user,
+            name="Other User Private Browser",
+        )
+        personal_agent = PersistentAgent.objects.create(
+            user=other_user,
+            name="Other User Private Agent",
+            charter="Private agent",
+            browser_use_agent=personal_browser_agent,
+        )
+
+        organization = Organization.objects.create(
+            name="Other User Private Org",
+            slug="other-user-private-org",
+            created_by=other_user,
+        )
+        organization.billing.purchased_seats = 1
+        organization.billing.save(update_fields=["purchased_seats"])
+        OrganizationMembership.objects.create(
+            org=organization,
+            user=other_user,
+            role=OrganizationMembership.OrgRole.OWNER,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        )
+        org_browser_agent = BrowserUseAgent.objects.create(
+            user=other_user,
+            name="Other Org Private Browser",
+        )
+        org_agent = PersistentAgent.objects.create(
+            user=other_user,
+            organization=organization,
+            name="Other Org Private Agent",
+            charter="Private organization agent",
+            browser_use_agent=org_browser_agent,
+        )
+
+        for agent in (personal_agent, org_agent):
+            with self.subTest(agent=agent.name):
+                response = self.client.delete(
+                    reverse("agent_delete", kwargs={"pk": agent.id}),
+                )
+
+                self.assertEqual(response.status_code, 404)
+                self.assertEqual(response.content, b"Agent not found.")
+                agent.refresh_from_db()
+                self.assertFalse(agent.is_deleted)
+
+    @tag("batch_console_agents")
     def test_delete_persistent_agent_handles_missing_browser_agent(self):
         """Deletion should succeed even if BrowserUseAgent queries fail."""
         from api.models import PersistentAgent, BrowserUseAgent
