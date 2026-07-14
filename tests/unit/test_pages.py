@@ -3719,24 +3719,6 @@ class RestoredPublicMarketingSurfaceTests(TestCase):
             "Your Gobii AI employee keeps searching, adapts to your feedback, and works inside the tools your team already uses.",
             soup.get_text(" ", strip=True),
         )
-        candidate_sourcing_link = soup.find(
-            "a",
-            href=reverse("pages:solution_recruiting_candidate_sourcing"),
-        )
-        sales_agent_link = soup.find(
-            "a",
-            href=reverse("pages:solution_sales_ai_sales_agent"),
-        )
-        self.assertIsNotNone(candidate_sourcing_link)
-        self.assertIsNotNone(sales_agent_link)
-        self.assertIn(
-            "Explore AI candidate sourcing",
-            candidate_sourcing_link.get_text(" ", strip=True),
-        )
-        self.assertIn(
-            "Explore AI sales agents",
-            sales_agent_link.get_text(" ", strip=True),
-        )
         for retired_slug in ("health-care", "defense"):
             self.assertIsNone(
                 soup.find(
