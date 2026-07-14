@@ -1,9 +1,10 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { Loader2, Plug, Search, Sparkles, Trash2, Unplug } from 'lucide-react'
+import { Loader2, Search, Sparkles, Trash2 } from 'lucide-react'
 
 import { HttpError } from '../../api/http'
 import type { PipedreamAppAgentConnection, PipedreamAppSummary } from '../../api/mcp'
 import { ImmersiveDialog } from '../common/ImmersiveDialog'
+import { useSettingsSurfaceVariant } from '../common/SettingsSurface'
 export { useIsMobile } from '../../hooks/useIsMobile'
 
 export type PipedreamStatusMessage = {
@@ -17,6 +18,7 @@ type PipedreamAppIconProps = {
 }
 
 export function PipedreamAppIcon({ app, size = 'md' }: PipedreamAppIconProps) {
+  const surface = useSettingsSurfaceVariant()
   const sizeClass = size === 'sm' ? 'h-6 w-6 rounded-lg text-[10px]' : 'h-9 w-9 rounded-lg text-xs'
 
   if (app.iconUrl) {
@@ -30,8 +32,12 @@ export function PipedreamAppIcon({ app, size = 'md' }: PipedreamAppIconProps) {
     )
   }
 
+  const fallbackClassName = surface === 'embedded'
+    ? 'border-slate-200/20 bg-slate-900 text-slate-200'
+    : 'border-slate-200 bg-white text-slate-700'
+
   return (
-    <span className={`inline-flex items-center justify-center border border-slate-200 bg-slate-50 font-semibold uppercase text-slate-700 ${sizeClass}`}>
+    <span className={`inline-flex items-center justify-center border font-semibold uppercase ${fallbackClassName} ${sizeClass}`}>
       {app.name.slice(0, 2)}
     </span>
   )
@@ -95,12 +101,25 @@ export function PipedreamModalShell({
   )
 }
 
-export function PipedreamStatusBanner({ statusMessage }: { statusMessage: PipedreamStatusMessage }) {
+export function PipedreamStatusBanner({
+  statusMessage,
+}: {
+  statusMessage: PipedreamStatusMessage
+}) {
+  const surface = useSettingsSurfaceVariant()
   if (!statusMessage) {
     return null
   }
+  const isError = statusMessage.tone === 'error'
+  const className = surface === 'embedded'
+    ? isError
+      ? 'border-rose-300/25 bg-rose-950/35 text-rose-200'
+      : 'border-emerald-300/25 bg-emerald-950/35 text-emerald-200'
+    : isError
+      ? 'border-red-200 bg-red-50 text-red-700'
+      : 'border-emerald-200 bg-emerald-50 text-emerald-700'
   return (
-    <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+    <div className={`rounded-lg border px-4 py-3 text-sm ${className}`}>
       {statusMessage.text}
     </div>
   )
@@ -117,14 +136,19 @@ export function PipedreamSearchInput({
   isFetching: boolean
   disabled: boolean
 }) {
+  const surface = useSettingsSurfaceVariant()
+  const inputClassName = surface === 'embedded'
+    ? 'border-slate-200/20 bg-slate-950/45 text-slate-100 placeholder:text-slate-500 focus:border-sky-300/50 focus:ring-sky-300/30'
+    : 'border-slate-300 bg-white text-slate-800 shadow-sm focus:border-blue-500 focus:ring-blue-500'
+  const labelClassName = surface === 'embedded' ? 'text-slate-400' : 'text-slate-500'
   return (
-    <label className="relative block text-sm text-slate-500">
+    <label className={`relative block text-sm ${labelClassName}`}>
       <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center">
         {isFetching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" aria-hidden="true" />}
       </span>
       <input
         type="search"
-        className="w-full rounded-lg border border-slate-300 bg-white py-3 pl-10 pr-3 text-sm text-slate-800 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-blue-500"
+        className={`w-full rounded-lg border py-3 pl-10 pr-3 text-sm focus:outline-none focus:ring-1 ${inputClassName}`}
         placeholder="Search apps"
         value={value}
         onChange={(event) => onChange(event.target.value)}
@@ -136,14 +160,21 @@ export function PipedreamSearchInput({
 
 export function PipedreamListFrame({
   isMobile,
+  constrainHeight = true,
   children,
 }: {
   isMobile: boolean
+  constrainHeight?: boolean
   children: ReactNode
 }) {
+  const surface = useSettingsSurfaceVariant()
+  const frameClassName = surface === 'embedded'
+    ? 'border-slate-200/20 bg-slate-900'
+    : 'border-slate-200 bg-white'
+  const dividerClassName = surface === 'embedded' ? 'divide-slate-200/10' : 'divide-slate-200'
   return (
-    <div className={`overflow-hidden rounded-lg border border-slate-200 bg-white ${isMobile ? '' : 'max-h-[28rem] overflow-y-auto'}`}>
-      <div className="divide-y divide-slate-200">
+    <div className={`overflow-hidden rounded-lg border ${frameClassName} ${!isMobile && constrainHeight ? 'max-h-[28rem] overflow-y-auto' : ''}`}>
+      <div className={`divide-y ${dividerClassName}`}>
         {children}
       </div>
     </div>
@@ -151,8 +182,12 @@ export function PipedreamListFrame({
 }
 
 export function PipedreamLoadingState({ label }: { label: string }) {
+  const surface = useSettingsSurfaceVariant()
+  const className = surface === 'embedded'
+    ? 'border-slate-200/20 bg-slate-950/30 text-slate-400'
+    : 'border-slate-200 bg-white text-slate-600'
   return (
-    <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-5 text-sm text-slate-600">
+    <div className={`flex items-center gap-2 rounded-lg border px-4 py-5 text-sm ${className}`}>
       <Loader2 className="h-4 w-4 animate-spin" />
       {label}
     </div>
@@ -160,8 +195,12 @@ export function PipedreamLoadingState({ label }: { label: string }) {
 }
 
 export function PipedreamEmptyState({ label }: { label: string }) {
+  const surface = useSettingsSurfaceVariant()
+  const className = surface === 'embedded'
+    ? 'border-slate-200/20 bg-slate-950/30 text-slate-400'
+    : 'border-slate-200 bg-white text-slate-600'
   return (
-    <div className="rounded-lg border border-slate-200 bg-white px-4 py-5 text-sm text-slate-600">
+    <div className={`rounded-lg border px-4 py-5 text-sm ${className}`}>
       {label}
     </div>
   )
@@ -174,8 +213,12 @@ export function PipedreamErrorState({
   error: unknown
   fallback: string
 }) {
+  const surface = useSettingsSurfaceVariant()
+  const className = surface === 'embedded'
+    ? 'border-rose-300/25 bg-rose-950/35 text-rose-200'
+    : 'border-red-200 bg-red-50 text-red-700'
   return (
-    <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+    <div className={`rounded-lg border px-4 py-3 text-sm ${className}`}>
       {resolvePipedreamAppsErrorMessage(error, fallback)}
     </div>
   )
@@ -186,62 +229,17 @@ export function PipedreamAppSummaryCell({
 }: {
   app: PipedreamAppSummary
 }) {
+  const surface = useSettingsSurfaceVariant()
+  const titleClassName = surface === 'embedded' ? 'text-slate-100' : 'text-slate-900'
+  const descriptionClassName = surface === 'embedded' ? 'text-slate-400' : 'text-slate-600'
   return (
     <div className="flex min-w-0 items-center gap-3">
       <PipedreamAppIcon app={app} />
       <div className="min-w-0">
-        <p className="truncate text-sm font-semibold text-slate-900">{app.name}</p>
-        {app.description ? <p className="mt-1 line-clamp-2 text-sm text-slate-600">{app.description}</p> : null}
+        <p className={`truncate text-sm font-semibold ${titleClassName}`}>{app.name}</p>
+        {app.description ? <p className={`mt-1 line-clamp-2 text-sm ${descriptionClassName}`}>{app.description}</p> : null}
       </div>
     </div>
-  )
-}
-
-export function PipedreamConnectionButton({
-  connected,
-  pendingKind,
-  disabled,
-  onConnect,
-  onDisconnect,
-}: {
-  connected: boolean
-  pendingKind: 'connect' | 'disconnect' | null
-  disabled: boolean
-  onConnect: () => void
-  onDisconnect: () => void
-}) {
-  if (connected) {
-    return (
-      <button
-        type="button"
-        className="inline-flex min-w-28 items-center justify-center gap-2 rounded-md border border-red-200 bg-white px-3 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-50 disabled:opacity-60"
-        onClick={onDisconnect}
-        disabled={disabled}
-      >
-        {pendingKind === 'disconnect' ? (
-          <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-        ) : (
-          <Unplug className="h-4 w-4" aria-hidden="true" />
-        )}
-        Disconnect
-      </button>
-    )
-  }
-
-  return (
-    <button
-      type="button"
-      className="inline-flex min-w-28 items-center justify-center gap-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:opacity-60"
-      onClick={onConnect}
-      disabled={disabled}
-    >
-      {pendingKind === 'connect' ? (
-        <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-      ) : (
-        <Plug className="h-4 w-4" aria-hidden="true" />
-      )}
-      Connect
-    </button>
   )
 }
 
@@ -256,10 +254,14 @@ export function PipedreamRemoveButton({
   title: string
   onClick: () => void
 }) {
+  const surface = useSettingsSurfaceVariant()
+  const className = surface === 'embedded'
+    ? 'border-slate-200/20 bg-slate-950/20 text-slate-300 hover:border-slate-100/35 hover:bg-slate-900/40'
+    : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
   return (
     <button
       type="button"
-      className="inline-flex min-w-24 items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-45"
+      className={`inline-flex min-w-24 items-center justify-center gap-2 rounded-md border px-3 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-45 ${className}`}
       onClick={onClick}
       disabled={disabled}
       title={title}
@@ -274,7 +276,12 @@ export function PipedreamRemoveButton({
   )
 }
 
-export function AgentConnectionAvatar({ agent }: { agent: PipedreamAppAgentConnection }) {
+export function AgentConnectionAvatar({
+  agent,
+}: {
+  agent: PipedreamAppAgentConnection
+}) {
+  const surface = useSettingsSurfaceVariant()
   if (agent.avatarUrl) {
     return (
       <img
@@ -286,8 +293,11 @@ export function AgentConnectionAvatar({ agent }: { agent: PipedreamAppAgentConne
     )
   }
 
+  const className = surface === 'embedded'
+    ? 'border-slate-200/20 bg-slate-900 text-slate-200'
+    : 'border-slate-200 bg-white text-slate-700'
   return (
-    <span className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 bg-white text-xs font-semibold uppercase text-slate-700">
+    <span className={`inline-flex h-9 w-9 items-center justify-center rounded-full border text-xs font-semibold uppercase ${className}`}>
       {agent.name.slice(0, 2)}
     </span>
   )

@@ -573,7 +573,7 @@ function HomepageNativeProviderRow({
           <NativeIntegrationSummaryCell
             provider={provider}
             descriptionClassName="mt-1 text-sm text-slate-600"
-            showConnectedBadge
+            badge="native-connected"
           />
         </div>
         <div className="ml-auto flex shrink-0 flex-wrap justify-end gap-2">
