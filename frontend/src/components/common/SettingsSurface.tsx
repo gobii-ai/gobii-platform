@@ -1,8 +1,28 @@
-import type { ComponentPropsWithoutRef, ElementType, ReactNode } from 'react'
+import { createContext, useContext, type ComponentPropsWithoutRef, type ElementType, type ReactNode } from 'react'
 
 export type SettingsSurfaceVariant = 'embedded' | 'standalone'
 export type SettingsSurfacePadding = 'none' | 'sm' | 'md' | 'lg'
 export type SettingsSurfaceOverflow = 'visible' | 'hidden'
+
+const SettingsSurfaceVariantContext = createContext<SettingsSurfaceVariant>('standalone')
+
+export function SettingsSurfaceProvider({
+  variant,
+  children,
+}: {
+  variant: SettingsSurfaceVariant
+  children: ReactNode
+}) {
+  return (
+    <SettingsSurfaceVariantContext.Provider value={variant}>
+      {children}
+    </SettingsSurfaceVariantContext.Provider>
+  )
+}
+
+export function useSettingsSurfaceVariant(): SettingsSurfaceVariant {
+  return useContext(SettingsSurfaceVariantContext)
+}
 
 export const sharedSettingsGlassFrameClassName = 'settings-card-surface overflow-hidden rounded-2xl border'
 export const embeddedSettingsSurfaceClassName = 'settings-card-surface--embedded border-slate-200/20 text-slate-100'

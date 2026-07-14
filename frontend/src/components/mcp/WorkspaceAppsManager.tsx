@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Loader2, Unplug, Users } from 'lucide-react'
 
 import { agentDiscordAppQueryKey, fetchAgentDiscordApp } from '../../api/discordNative'
 import { fetchAgentRoster } from '../../api/agents'
 import {
   disconnectAgentPipedreamApp,
   fetchPipedreamAppAgentConnections,
+  fetchPipedreamAppSettings,
   searchPipedreamApps,
   startAgentPipedreamAppConnect,
   updatePipedreamAppSettings,
@@ -16,13 +16,13 @@ import {
   type PipedreamAppSummary,
 } from '../../api/mcp'
 import { fetchNativeIntegrations, type NativeIntegrationProvider } from '../../api/nativeIntegrations'
-import type { SettingsSurfaceVariant } from '../common/SettingsSurface'
+import { useSettingsSurfaceVariant } from '../common/SettingsSurface'
 import { DISCORD_NATIVE_PROVIDER_KEY, withDiscordNativeProvider } from './DiscordNativeShared'
+import { IntegrationConnectionButton, IntegrationManageButton } from './IntegrationActionButtons'
 import {
   AgentConnectionAvatar,
   PipedreamAppIcon,
   PipedreamAppSummaryCell,
-  PipedreamConnectionButton,
   PipedreamEmptyState,
   PipedreamErrorState,
   PipedreamListFrame,
@@ -64,9 +64,7 @@ type WorkspaceAppsManagerProps = {
   nativeIntegrationsUrl?: string | null
   initialNativeProviderKey?: string | null
   initialNativeConnect?: boolean
-  initialSettings: PipedreamAppSettings
   onError: (message: string) => void
-  surface?: SettingsSurfaceVariant
 }
 
 type WorkspacePipedreamAppRow = PipedreamAppSummary & {
@@ -93,22 +91,33 @@ type PendingAgentAction = {
   kind: 'connect' | 'disconnect'
 } | null
 
+const EMPTY_SETTINGS: PipedreamAppSettings = {
+  ownerScope: '',
+  ownerLabel: '',
+  platformApps: [],
+  selectedApps: [],
+  effectiveApps: [],
+}
+
 export function WorkspaceAppsManager({
   settingsUrl,
   searchUrl,
   nativeIntegrationsUrl = null,
   initialNativeProviderKey = null,
   initialNativeConnect = false,
-  initialSettings,
   onError,
-  surface = 'standalone',
 }: WorkspaceAppsManagerProps) {
   const queryClient = useQueryClient()
   const settingsQueryKey = useMemo(() => ['pipedream-app-settings', settingsUrl] as const, [settingsUrl])
+  const settingsQuery = useQuery({
+    queryKey: settingsQueryKey,
+    queryFn: () => fetchPipedreamAppSettings(settingsUrl as string),
+    enabled: Boolean(settingsUrl && searchUrl),
+  })
+  const settings = settingsQuery.data ?? EMPTY_SETTINGS
   const isMobile = useIsMobile()
   const [searchTerm, setSearchTerm] = useState('')
   const debouncedSearchTerm = useDebouncedValue(searchTerm)
-  const [settings, setSettings] = useState(initialSettings)
   const [activeApp, setActiveApp] = useState<WorkspacePipedreamAppRow | null>(null)
   const [discordConnectionsOpen, setDiscordConnectionsOpen] = useState(false)
   const [activeDiscordAgentId, setActiveDiscordAgentId] = useState<string | null>(null)
@@ -139,10 +148,6 @@ export function WorkspaceAppsManager({
     onStart: () => setStatusMessage(null),
     onError: handleDiscordError,
   })
-
-  useEffect(() => {
-    setSettings(initialSettings)
-  }, [initialSettings])
 
   useEffect(() => {
     setActiveApp(null)
@@ -260,7 +265,6 @@ export function WorkspaceAppsManager({
       setStatusMessage(null)
     },
     onSuccess: (updatedSettings) => {
-      setSettings(updatedSettings)
       queryClient.setQueryData(settingsQueryKey, updatedSettings)
     },
     onError: (error) => {
@@ -280,7 +284,7 @@ export function WorkspaceAppsManager({
     },
     onSuccess: (result, { app }) => {
       window.open(result.connectUrl, '_blank', 'noopener,noreferrer')
-      setSettings((current) => {
+      queryClient.setQueryData<PipedreamAppSettings>(settingsQueryKey, (current = EMPTY_SETTINGS) => {
         if (current.selectedApps.some((selectedApp) => selectedApp.slug === result.app.slug)) {
           return current
         }
@@ -393,26 +397,24 @@ export function WorkspaceAppsManager({
     activeDiscordAppQuery.isError ? (
       <div className="space-y-4 p-1">
         <BackButton
-          surface={surface}
           onClick={() => {
             setActiveDiscordAgentId(null)
             setStatusMessage(null)
           }}
           disabled={isBusy}
         />
-        <PipedreamErrorState error={activeDiscordAppQuery.error} fallback="Unable to load Discord configuration." surface={surface} />
+        <PipedreamErrorState error={activeDiscordAppQuery.error} fallback="Unable to load Discord configuration." />
       </div>
     ) : activeDiscordAppQuery.isLoading || !activeDiscordAppQuery.data ? (
       <div className="space-y-4 p-1">
         <BackButton
-          surface={surface}
           onClick={() => {
             setActiveDiscordAgentId(null)
             setStatusMessage(null)
           }}
           disabled={isBusy}
         />
-        <PipedreamLoadingState label="Loading Discord configuration…" surface={surface} />
+        <PipedreamLoadingState label="Loading Discord configuration…" />
       </div>
     ) : (
       <DiscordConfigurationScreen
@@ -426,7 +428,6 @@ export function WorkspaceAppsManager({
           setStatusMessage(null)
         }}
         onSave={(subscriptions) => saveDiscordAgentSubscriptions(activeDiscordAgentId, subscriptions)}
-        surface={surface}
       />
     )
   ) : discordConnectionsOpen ? (
@@ -448,7 +449,6 @@ export function WorkspaceAppsManager({
         setActiveDiscordAgentId(agent.id)
         setStatusMessage(null)
       }}
-      surface={surface}
     />
   ) : activeApp ? (
     <AppConnectionsScreen
@@ -467,16 +467,15 @@ export function WorkspaceAppsManager({
       }}
       onConnect={(agent) => connectMutation.mutate({ agent, app: activeApp })}
       onDisconnect={(agent) => disconnectMutation.mutate({ agent, app: activeApp })}
-      surface={surface}
     />
   ) : (
     <AppListScreen
       apps={rows}
       searchTerm={searchTerm}
-      isLoading={searchQuery.isLoading || nativeIntegrationsQuery.isLoading || agentRosterQuery.isLoading}
+      isLoading={settingsQuery.isLoading || searchQuery.isLoading || nativeIntegrationsQuery.isLoading || agentRosterQuery.isLoading}
       isFetching={searchQuery.isFetching || nativeIntegrationsQuery.isFetching || agentRosterQuery.isFetching}
-      isError={searchQuery.isError || nativeIntegrationsQuery.isError || agentRosterQuery.isError}
-      error={searchQuery.error ?? nativeIntegrationsQuery.error ?? agentRosterQuery.error}
+      isError={settingsQuery.isError || searchQuery.isError || nativeIntegrationsQuery.isError || agentRosterQuery.isError}
+      error={settingsQuery.error ?? searchQuery.error ?? nativeIntegrationsQuery.error ?? agentRosterQuery.error}
       isBusy={isBusy}
       isMobile={isMobile}
       pendingAppAction={pendingAppAction}
@@ -510,7 +509,6 @@ export function WorkspaceAppsManager({
         }
       }}
       onNativePicker={(provider) => nativePickerMutation.mutate(provider)}
-      surface={surface}
     />
   )
 
@@ -579,7 +577,6 @@ function AppListScreen({
   onNativeDisconnect,
   onDiscordDisconnect,
   onNativePicker,
-  surface,
 }: {
   apps: WorkspaceAppRow[]
   searchTerm: string
@@ -600,27 +597,25 @@ function AppListScreen({
   onNativeDisconnect: (provider: NativeIntegrationProvider) => void
   onDiscordDisconnect: (provider: NativeIntegrationProvider) => void
   onNativePicker: (provider: NativeIntegrationProvider) => void
-  surface: SettingsSurfaceVariant
 }) {
   return (
     <div className="space-y-4 p-1">
-      <PipedreamStatusBanner statusMessage={statusMessage} surface={surface} />
+      <PipedreamStatusBanner statusMessage={statusMessage} />
       <PipedreamSearchInput
         value={searchTerm}
         onChange={onSearchTermChange}
         isFetching={isFetching}
         disabled={isBusy}
-        surface={surface}
       />
 
       {isError ? (
-        <PipedreamErrorState error={error} fallback="Unable to load apps." surface={surface} />
+        <PipedreamErrorState error={error} fallback="Unable to load apps." />
       ) : isLoading ? (
-        <PipedreamLoadingState label="Loading apps…" surface={surface} />
+        <PipedreamLoadingState label="Loading apps…" />
       ) : apps.length === 0 ? (
-        <PipedreamEmptyState label="No apps matched your search." surface={surface} />
+        <PipedreamEmptyState label="No apps matched your search." />
       ) : (
-        <PipedreamListFrame isMobile={isMobile} constrainHeight={false} surface={surface}>
+        <PipedreamListFrame isMobile={isMobile} constrainHeight={false}>
           {apps.map((app) => app.kind === 'native' ? (
             <NativeAppRowItem
               key={`native-${app.providerKey}`}
@@ -630,7 +625,6 @@ function AppListScreen({
               onConnect={() => onNativeConnect(app)}
               onDisconnect={() => onNativeDisconnect(app)}
               onPicker={() => onNativePicker(app)}
-              surface={surface}
             />
           ) : app.kind === 'discord' ? (
             <WorkspaceDiscordAppRowItem
@@ -640,7 +634,6 @@ function AppListScreen({
               disabled={isBusy}
               onManageConnections={onManageDiscordConnections}
               onDisconnect={() => onDiscordDisconnect(app)}
-              surface={surface}
             />
           ) : (
             <PipedreamAppRowItem
@@ -650,7 +643,6 @@ function AppListScreen({
               disabled={isBusy}
               onManageConnections={() => onManageConnections(app)}
               onRemove={() => onRemove(app)}
-              surface={surface}
             />
           ))}
         </PipedreamListFrame>
@@ -665,57 +657,32 @@ function WorkspaceDiscordAppRowItem({
   disabled,
   onManageConnections,
   onDisconnect,
-  surface,
 }: {
   provider: NativeIntegrationProvider
   pendingNativeAction: PendingNativeAction
   disabled: boolean
   onManageConnections: () => void
   onDisconnect: () => void
-  surface: SettingsSurfaceVariant
 }) {
   const isPendingDisconnect = pendingNativeAction?.providerKey === provider.providerKey && pendingNativeAction.kind === 'disconnect'
-  const manageClassName = surface === 'embedded'
-    ? 'border border-sky-300/25 bg-sky-900/55 text-sky-50 hover:border-sky-200/40 hover:bg-sky-900/75'
-    : 'bg-blue-600 text-white hover:bg-blue-700'
-  const disconnectClassName = surface === 'embedded'
-    ? 'border-rose-300/25 bg-rose-950/20 text-rose-200 hover:border-rose-200/40 hover:bg-rose-900/35'
-    : 'border-red-200 bg-white text-red-700 hover:bg-red-50'
 
   return (
     <div className="grid gap-3 px-4 py-3 md:grid-cols-[minmax(0,1fr)_12rem_8rem] md:items-center">
       <NativeIntegrationSummaryCell
         provider={provider}
-        showNativeBadge={false}
-        showConnectedBadge
-        surface={surface}
+        badge="connected"
       />
       <div className="flex justify-start md:justify-end">
-        <button
-          type="button"
-          className={`inline-flex min-w-28 items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-semibold transition disabled:opacity-60 ${manageClassName}`}
-          onClick={onManageConnections}
-          disabled={disabled}
-        >
-          <Users className="h-4 w-4" aria-hidden="true" />
-          Manage
-        </button>
+        <IntegrationManageButton onClick={onManageConnections} disabled={disabled} />
       </div>
       <div className="flex justify-start md:justify-end">
         {provider.connected ? (
-          <button
-            type="button"
-            className={`inline-flex min-w-28 items-center justify-center gap-2 rounded-md border px-3 py-2 text-sm font-semibold transition disabled:opacity-60 ${disconnectClassName}`}
-            onClick={onDisconnect}
+          <IntegrationConnectionButton
+            connected
+            pendingKind={isPendingDisconnect ? 'disconnect' : null}
             disabled={disabled}
-          >
-            {isPendingDisconnect ? (
-              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-            ) : (
-              <Unplug className="h-4 w-4" aria-hidden="true" />
-            )}
-            Disconnect
-          </button>
+            onDisconnect={onDisconnect}
+          />
         ) : null}
       </div>
     </div>
@@ -729,7 +696,6 @@ function NativeAppRowItem({
   onConnect,
   onDisconnect,
   onPicker,
-  surface,
 }: {
   provider: NativeIntegrationProvider
   pendingNativeAction: PendingNativeAction
@@ -737,7 +703,6 @@ function NativeAppRowItem({
   onConnect: () => void
   onDisconnect: () => void
   onPicker: () => void
-  surface: SettingsSurfaceVariant
 }) {
   const isPending = pendingNativeAction?.providerKey === provider.providerKey
   const pendingKind = isPending ? pendingNativeAction?.kind : null
@@ -750,11 +715,7 @@ function NativeAppRowItem({
       onConnect={onConnect}
       onDisconnect={onDisconnect}
       onPicker={onPicker}
-      gridClassName="grid gap-3 sm:grid-cols-[minmax(0,1fr)_8rem_8rem] sm:items-start"
-      showStatusColumn={false}
-      showNativeBadge={false}
-      showConnectedBadge
-      surface={surface}
+      variant="workspace"
     />
   )
 }
@@ -765,14 +726,12 @@ function PipedreamAppRowItem({
   disabled,
   onManageConnections,
   onRemove,
-  surface,
 }: {
   app: WorkspacePipedreamAppRow
   pendingAppAction: PendingAppAction
   disabled: boolean
   onManageConnections: () => void
   onRemove: () => void
-  surface: SettingsSurfaceVariant
 }) {
   const isPendingRemove = pendingAppAction?.slug === app.slug && pendingAppAction.kind === 'remove'
   const removeDisabled = disabled || app.source !== 'added'
@@ -781,23 +740,11 @@ function PipedreamAppRowItem({
     : app.source === 'available'
       ? 'Add this app before removing it'
       : 'Remove app'
-  const manageClassName = surface === 'embedded'
-    ? 'border border-sky-300/25 bg-sky-900/55 text-sky-50 hover:border-sky-200/40 hover:bg-sky-900/75'
-    : 'bg-blue-600 text-white hover:bg-blue-700'
-
   return (
     <div className="grid gap-3 px-4 py-3 md:grid-cols-[minmax(0,1fr)_12rem_8rem] md:items-center">
-      <PipedreamAppSummaryCell app={app} surface={surface} />
+      <PipedreamAppSummaryCell app={app} />
       <div className="flex justify-start md:justify-end">
-        <button
-          type="button"
-          className={`inline-flex min-w-28 items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-semibold transition disabled:opacity-60 ${manageClassName}`}
-          onClick={onManageConnections}
-          disabled={disabled}
-        >
-          <Users className="h-4 w-4" aria-hidden="true" />
-          Manage
-        </button>
+        <IntegrationManageButton onClick={onManageConnections} disabled={disabled} />
       </div>
       <div className="flex justify-start md:justify-end">
         <PipedreamRemoveButton
@@ -805,7 +752,6 @@ function PipedreamAppRowItem({
           disabled={removeDisabled}
           title={removeTitle}
           onClick={onRemove}
-          surface={surface}
         />
       </div>
     </div>
@@ -825,7 +771,6 @@ function AppConnectionsScreen({
   onBack,
   onConnect,
   onDisconnect,
-  surface,
 }: {
   app: WorkspacePipedreamAppRow
   agents: PipedreamAppAgentConnection[]
@@ -839,32 +784,32 @@ function AppConnectionsScreen({
   onBack: () => void
   onConnect: (agent: PipedreamAppAgentConnection) => void
   onDisconnect: (agent: PipedreamAppAgentConnection) => void
-  surface: SettingsSurfaceVariant
 }) {
+  const surface = useSettingsSurfaceVariant()
   const titleClassName = surface === 'embedded' ? 'text-slate-100' : 'text-slate-900'
   const descriptionClassName = surface === 'embedded' ? 'text-slate-400' : 'text-slate-600'
   return (
     <div className="space-y-4 p-1">
-      <BackButton onClick={onBack} disabled={isBusy} surface={surface} />
+      <BackButton onClick={onBack} disabled={isBusy} />
 
       <div className="flex items-center gap-3">
-        <PipedreamAppIcon app={app} surface={surface} />
+        <PipedreamAppIcon app={app} />
         <div className="min-w-0">
           <p className={`truncate text-sm font-semibold ${titleClassName}`}>{app.name}</p>
           <p className={`text-sm ${descriptionClassName}`}>{isFetching ? 'Refreshing connections…' : 'Connected agents are shown first.'}</p>
         </div>
       </div>
 
-      <PipedreamStatusBanner statusMessage={statusMessage} surface={surface} />
+      <PipedreamStatusBanner statusMessage={statusMessage} />
 
       {isError ? (
-        <PipedreamErrorState error={error} fallback="Unable to load agent connections." surface={surface} />
+        <PipedreamErrorState error={error} fallback="Unable to load agent connections." />
       ) : isLoading ? (
-        <PipedreamLoadingState label="Loading agents…" surface={surface} />
+        <PipedreamLoadingState label="Loading agents…" />
       ) : agents.length === 0 ? (
-        <PipedreamEmptyState label="No agents found." surface={surface} />
+        <PipedreamEmptyState label="No agents found." />
       ) : (
-        <PipedreamListFrame isMobile={false} constrainHeight={false} surface={surface}>
+        <PipedreamListFrame isMobile={false} constrainHeight={false}>
           {agents.map((agent) => (
             <AgentConnectionRow
               key={agent.agentId}
@@ -873,7 +818,6 @@ function AppConnectionsScreen({
               disabled={isBusy}
               onConnect={() => onConnect(agent)}
               onDisconnect={() => onDisconnect(agent)}
-              surface={surface}
             />
           ))}
         </PipedreamListFrame>
@@ -888,34 +832,32 @@ function AgentConnectionRow({
   disabled,
   onConnect,
   onDisconnect,
-  surface,
 }: {
   agent: PipedreamAppAgentConnection
   pendingAgentAction: PendingAgentAction
   disabled: boolean
   onConnect: () => void
   onDisconnect: () => void
-  surface: SettingsSurfaceVariant
 }) {
+  const surface = useSettingsSurfaceVariant()
   const isPending = pendingAgentAction?.agentId === agent.agentId
   const pendingKind = isPending ? pendingAgentAction?.kind : null
 
   return (
     <div className="grid gap-3 px-4 py-3 md:grid-cols-[minmax(0,1fr)_8rem] md:items-center">
       <div className="flex min-w-0 items-center gap-3">
-        <AgentConnectionAvatar agent={agent} surface={surface} />
+        <AgentConnectionAvatar agent={agent} />
         <div className="min-w-0">
           <p className={`truncate text-sm font-semibold ${surface === 'embedded' ? 'text-slate-100' : 'text-slate-900'}`}>{agent.name}</p>
         </div>
       </div>
       <div className="flex justify-start md:justify-end">
-        <PipedreamConnectionButton
+        <IntegrationConnectionButton
           connected={agent.connected}
           pendingKind={pendingKind}
           disabled={disabled}
           onConnect={onConnect}
           onDisconnect={onDisconnect}
-          surface={surface}
         />
       </div>
     </div>

@@ -16,7 +16,7 @@ import {
 } from '../../api/discordNative'
 import { safeErrorMessage } from '../../api/safeErrorMessage'
 import type { AgentRosterEntry } from '../../types/agentRoster'
-import type { SettingsSurfaceVariant } from '../common/SettingsSurface'
+import { useSettingsSurfaceVariant } from '../common/SettingsSurface'
 import { PipedreamEmptyState, PipedreamErrorState, PipedreamListFrame, PipedreamLoadingState, PipedreamStatusBanner, type PipedreamStatusMessage } from './PipedreamAppsShared'
 
 export type PendingDiscordAction = 'connect' | 'save' | null
@@ -137,7 +137,6 @@ export function DiscordConfigurationScreen({
   statusMessage,
   onBack,
   onSave,
-  surface = 'standalone',
 }: {
   agentId: string
   app: AgentDiscordApp
@@ -146,8 +145,8 @@ export function DiscordConfigurationScreen({
   statusMessage: PipedreamStatusMessage
   onBack: () => void
   onSave: (subscriptions: DiscordSubscriptionSelection[]) => void
-  surface?: SettingsSurfaceVariant
 }) {
+  const surface = useSettingsSurfaceVariant()
   const initialSelections = useMemo(() => activeDiscordSelections(app), [app.subscriptions])
   const [selectedSubscriptions, setSelectedSubscriptions] = useState<Record<string, DiscordSubscriptionSelection>>(initialSelections)
   const savedKeys = useMemo(() => Object.keys(initialSelections).sort().join('|'), [initialSelections])
@@ -187,7 +186,7 @@ export function DiscordConfigurationScreen({
   return (
     <div className="space-y-4 p-1">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <BackButton disabled={disabled} onClick={onBack} surface={surface} />
+        <BackButton disabled={disabled} onClick={onBack} />
         <button
           type="button"
           className={`inline-flex min-w-28 items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-semibold transition disabled:opacity-60 ${saveButtonClassName}`}
@@ -199,8 +198,8 @@ export function DiscordConfigurationScreen({
         </button>
       </div>
 
-      <DiscordSummaryCell app={app} surface={surface} />
-      <PipedreamStatusBanner statusMessage={statusMessage} surface={surface} />
+      <DiscordSummaryCell app={app} />
+      <PipedreamStatusBanner statusMessage={statusMessage} />
 
       {app.guilds.length > 0 ? (
         <div className="space-y-3">
@@ -213,12 +212,11 @@ export function DiscordConfigurationScreen({
               selectedSubscriptions={selectedSubscriptions}
               disabled={disabled}
               onToggleChannel={toggleChannel}
-              surface={surface}
             />
           ))}
         </div>
       ) : (
-        <PipedreamEmptyState label="No Discord servers are connected yet." surface={surface} />
+        <PipedreamEmptyState label="No Discord servers are connected yet." />
       )}
     </div>
   )
@@ -236,7 +234,6 @@ export function DiscordAgentConnectionsScreen({
   onBack,
   onConnect,
   onConfigure,
-  surface = 'standalone',
 }: {
   agents: AgentRosterEntry[]
   isLoading: boolean
@@ -249,15 +246,15 @@ export function DiscordAgentConnectionsScreen({
   onBack: () => void
   onConnect: (agent: AgentRosterEntry) => void
   onConfigure: (agent: AgentRosterEntry) => void
-  surface?: SettingsSurfaceVariant
 }) {
+  const surface = useSettingsSurfaceVariant()
   const sortedAgents = useMemo(() => (
     [...agents].sort((a, b) => Number(!agentHasDiscordNative(a)) - Number(!agentHasDiscordNative(b)) || a.name.localeCompare(b.name))
   ), [agents])
 
   return (
     <div className="space-y-4 p-1">
-      <BackButton disabled={isBusy} onClick={onBack} surface={surface} />
+      <BackButton disabled={isBusy} onClick={onBack} />
 
       <div className="flex items-center gap-3">
         <DiscordIconTile />
@@ -267,16 +264,16 @@ export function DiscordAgentConnectionsScreen({
         </div>
       </div>
 
-      <PipedreamStatusBanner statusMessage={statusMessage} surface={surface} />
+      <PipedreamStatusBanner statusMessage={statusMessage} />
 
       {isError ? (
-        <PipedreamErrorState error={error} fallback="Unable to load agents." surface={surface} />
+        <PipedreamErrorState error={error} fallback="Unable to load agents." />
       ) : isLoading ? (
-        <PipedreamLoadingState label="Loading agents…" surface={surface} />
+        <PipedreamLoadingState label="Loading agents…" />
       ) : sortedAgents.length === 0 ? (
-        <PipedreamEmptyState label="No agents found." surface={surface} />
+        <PipedreamEmptyState label="No agents found." />
       ) : (
-        <PipedreamListFrame isMobile={false} constrainHeight={false} surface={surface}>
+        <PipedreamListFrame isMobile={false} constrainHeight={false}>
           {sortedAgents.map((agent) => (
             <DiscordAgentConnectionRow
               key={agent.id}
@@ -285,7 +282,6 @@ export function DiscordAgentConnectionsScreen({
               disabled={isBusy}
               onConnect={() => onConnect(agent)}
               onConfigure={() => onConfigure(agent)}
-              surface={surface}
             />
           ))}
         </PipedreamListFrame>
@@ -296,11 +292,10 @@ export function DiscordAgentConnectionsScreen({
 
 export function DiscordSummaryCell({
   app,
-  surface = 'standalone',
 }: {
   app: AgentDiscordApp
-  surface?: SettingsSurfaceVariant
 }) {
+  const surface = useSettingsSurfaceVariant()
   const detail = app.connected
     ? `${app.guildCount} ${app.guildCount === 1 ? 'server' : 'servers'} connected; ${app.activeSubscriptionCount} ${app.activeSubscriptionCount === 1 ? 'channel' : 'channels'} subscribed.`
     : app.description
@@ -328,12 +323,11 @@ export function DiscordSummaryCell({
 export function BackButton({
   disabled,
   onClick,
-  surface = 'standalone',
 }: {
   disabled: boolean
   onClick: () => void
-  surface?: SettingsSurfaceVariant
 }) {
+  const surface = useSettingsSurfaceVariant()
   const className = surface === 'embedded'
     ? 'border-slate-200/20 bg-slate-950/20 text-slate-300 hover:border-slate-100/35 hover:bg-slate-900/40'
     : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
@@ -356,15 +350,14 @@ function DiscordAgentConnectionRow({
   disabled,
   onConnect,
   onConfigure,
-  surface = 'standalone',
 }: {
   agent: AgentRosterEntry
   pendingDiscordAgentAction: PendingDiscordAgentAction
   disabled: boolean
   onConnect: () => void
   onConfigure: () => void
-  surface?: SettingsSurfaceVariant
 }) {
+  const surface = useSettingsSurfaceVariant()
   const enabled = agentHasDiscordNative(agent)
   const pendingKind = pendingDiscordAgentAction?.agentId === agent.id ? pendingDiscordAgentAction.kind : null
   const fallbackAvatarClassName = surface === 'embedded'
@@ -453,7 +446,6 @@ function DiscordGuildChannelSection({
   selectedSubscriptions,
   disabled,
   onToggleChannel,
-  surface = 'standalone',
 }: {
   agentId: string
   guild: DiscordGuild
@@ -461,8 +453,8 @@ function DiscordGuildChannelSection({
   selectedSubscriptions: Record<string, DiscordSubscriptionSelection>
   disabled: boolean
   onToggleChannel: (channel: DiscordChannel) => void
-  surface?: SettingsSurfaceVariant
 }) {
+  const surface = useSettingsSurfaceVariant()
   const channelsQuery = useQuery({
     queryKey: ['agent-discord-channels', agentId, guild.guildId],
     queryFn: () => fetchAgentDiscordGuildChannels(agentId, guild.guildId),

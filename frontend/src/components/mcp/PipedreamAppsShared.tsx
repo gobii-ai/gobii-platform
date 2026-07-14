@@ -1,10 +1,10 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { Loader2, Plug, Search, Sparkles, Trash2, Unplug } from 'lucide-react'
+import { Loader2, Search, Sparkles, Trash2 } from 'lucide-react'
 
 import { HttpError } from '../../api/http'
 import type { PipedreamAppAgentConnection, PipedreamAppSummary } from '../../api/mcp'
 import { ImmersiveDialog } from '../common/ImmersiveDialog'
-import type { SettingsSurfaceVariant } from '../common/SettingsSurface'
+import { useSettingsSurfaceVariant } from '../common/SettingsSurface'
 export { useIsMobile } from '../../hooks/useIsMobile'
 
 export type PipedreamStatusMessage = {
@@ -15,10 +15,10 @@ export type PipedreamStatusMessage = {
 type PipedreamAppIconProps = {
   app: PipedreamAppSummary
   size?: 'sm' | 'md'
-  surface?: SettingsSurfaceVariant
 }
 
-export function PipedreamAppIcon({ app, size = 'md', surface = 'standalone' }: PipedreamAppIconProps) {
+export function PipedreamAppIcon({ app, size = 'md' }: PipedreamAppIconProps) {
+  const surface = useSettingsSurfaceVariant()
   const sizeClass = size === 'sm' ? 'h-6 w-6 rounded-lg text-[10px]' : 'h-9 w-9 rounded-lg text-xs'
 
   if (app.iconUrl) {
@@ -103,11 +103,10 @@ export function PipedreamModalShell({
 
 export function PipedreamStatusBanner({
   statusMessage,
-  surface = 'standalone',
 }: {
   statusMessage: PipedreamStatusMessage
-  surface?: SettingsSurfaceVariant
 }) {
+  const surface = useSettingsSurfaceVariant()
   if (!statusMessage) {
     return null
   }
@@ -131,14 +130,13 @@ export function PipedreamSearchInput({
   onChange,
   isFetching,
   disabled,
-  surface = 'standalone',
 }: {
   value: string
   onChange: (value: string) => void
   isFetching: boolean
   disabled: boolean
-  surface?: SettingsSurfaceVariant
 }) {
+  const surface = useSettingsSurfaceVariant()
   const inputClassName = surface === 'embedded'
     ? 'border-slate-200/20 bg-slate-950/45 text-slate-100 placeholder:text-slate-500 focus:border-sky-300/50 focus:ring-sky-300/30'
     : 'border-slate-300 bg-white text-slate-800 shadow-sm focus:border-blue-500 focus:ring-blue-500'
@@ -163,14 +161,13 @@ export function PipedreamSearchInput({
 export function PipedreamListFrame({
   isMobile,
   constrainHeight = true,
-  surface = 'standalone',
   children,
 }: {
   isMobile: boolean
   constrainHeight?: boolean
-  surface?: SettingsSurfaceVariant
   children: ReactNode
 }) {
+  const surface = useSettingsSurfaceVariant()
   const frameClassName = surface === 'embedded'
     ? 'border-slate-200/20 bg-slate-900'
     : 'border-slate-200 bg-white'
@@ -184,7 +181,8 @@ export function PipedreamListFrame({
   )
 }
 
-export function PipedreamLoadingState({ label, surface = 'standalone' }: { label: string; surface?: SettingsSurfaceVariant }) {
+export function PipedreamLoadingState({ label }: { label: string }) {
+  const surface = useSettingsSurfaceVariant()
   const className = surface === 'embedded'
     ? 'border-slate-200/20 bg-slate-950/30 text-slate-400'
     : 'border-slate-200 bg-white text-slate-600'
@@ -196,7 +194,8 @@ export function PipedreamLoadingState({ label, surface = 'standalone' }: { label
   )
 }
 
-export function PipedreamEmptyState({ label, surface = 'standalone' }: { label: string; surface?: SettingsSurfaceVariant }) {
+export function PipedreamEmptyState({ label }: { label: string }) {
+  const surface = useSettingsSurfaceVariant()
   const className = surface === 'embedded'
     ? 'border-slate-200/20 bg-slate-950/30 text-slate-400'
     : 'border-slate-200 bg-white text-slate-600'
@@ -210,12 +209,11 @@ export function PipedreamEmptyState({ label, surface = 'standalone' }: { label: 
 export function PipedreamErrorState({
   error,
   fallback,
-  surface = 'standalone',
 }: {
   error: unknown
   fallback: string
-  surface?: SettingsSurfaceVariant
 }) {
+  const surface = useSettingsSurfaceVariant()
   const className = surface === 'embedded'
     ? 'border-rose-300/25 bg-rose-950/35 text-rose-200'
     : 'border-red-200 bg-red-50 text-red-700'
@@ -228,16 +226,15 @@ export function PipedreamErrorState({
 
 export function PipedreamAppSummaryCell({
   app,
-  surface = 'standalone',
 }: {
   app: PipedreamAppSummary
-  surface?: SettingsSurfaceVariant
 }) {
+  const surface = useSettingsSurfaceVariant()
   const titleClassName = surface === 'embedded' ? 'text-slate-100' : 'text-slate-900'
   const descriptionClassName = surface === 'embedded' ? 'text-slate-400' : 'text-slate-600'
   return (
     <div className="flex min-w-0 items-center gap-3">
-      <PipedreamAppIcon app={app} surface={surface} />
+      <PipedreamAppIcon app={app} />
       <div className="min-w-0">
         <p className={`truncate text-sm font-semibold ${titleClassName}`}>{app.name}</p>
         {app.description ? <p className={`mt-1 line-clamp-2 text-sm ${descriptionClassName}`}>{app.description}</p> : null}
@@ -246,75 +243,18 @@ export function PipedreamAppSummaryCell({
   )
 }
 
-export function PipedreamConnectionButton({
-  connected,
-  pendingKind,
-  disabled,
-  onConnect,
-  onDisconnect,
-  surface = 'standalone',
-}: {
-  connected: boolean
-  pendingKind: 'connect' | 'disconnect' | null
-  disabled: boolean
-  onConnect: () => void
-  onDisconnect: () => void
-  surface?: SettingsSurfaceVariant
-}) {
-  if (connected) {
-    const disconnectClassName = surface === 'embedded'
-      ? 'border-rose-300/25 bg-rose-950/20 text-rose-200 hover:border-rose-200/40 hover:bg-rose-900/35'
-      : 'border-red-200 bg-white text-red-700 hover:bg-red-50'
-    return (
-      <button
-        type="button"
-        className={`inline-flex min-w-28 items-center justify-center gap-2 rounded-md border px-3 py-2 text-sm font-semibold transition disabled:opacity-60 ${disconnectClassName}`}
-        onClick={onDisconnect}
-        disabled={disabled}
-      >
-        {pendingKind === 'disconnect' ? (
-          <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-        ) : (
-          <Unplug className="h-4 w-4" aria-hidden="true" />
-        )}
-        Disconnect
-      </button>
-    )
-  }
-
-  const connectClassName = surface === 'embedded'
-    ? 'border border-sky-300/25 bg-sky-900/55 text-sky-50 hover:border-sky-200/40 hover:bg-sky-900/75'
-    : 'bg-blue-600 text-white hover:bg-blue-700'
-  return (
-    <button
-      type="button"
-      className={`inline-flex min-w-28 items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-semibold transition disabled:opacity-60 ${connectClassName}`}
-      onClick={onConnect}
-      disabled={disabled}
-    >
-      {pendingKind === 'connect' ? (
-        <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-      ) : (
-        <Plug className="h-4 w-4" aria-hidden="true" />
-      )}
-      Connect
-    </button>
-  )
-}
-
 export function PipedreamRemoveButton({
   isPending,
   disabled,
   title,
   onClick,
-  surface = 'standalone',
 }: {
   isPending: boolean
   disabled: boolean
   title: string
   onClick: () => void
-  surface?: SettingsSurfaceVariant
 }) {
+  const surface = useSettingsSurfaceVariant()
   const className = surface === 'embedded'
     ? 'border-slate-200/20 bg-slate-950/20 text-slate-300 hover:border-slate-100/35 hover:bg-slate-900/40'
     : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
@@ -338,11 +278,10 @@ export function PipedreamRemoveButton({
 
 export function AgentConnectionAvatar({
   agent,
-  surface = 'standalone',
 }: {
   agent: PipedreamAppAgentConnection
-  surface?: SettingsSurfaceVariant
 }) {
+  const surface = useSettingsSurfaceVariant()
   if (agent.avatarUrl) {
     return (
       <img

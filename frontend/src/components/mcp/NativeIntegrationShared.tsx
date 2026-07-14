@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { CheckCircle2, ChevronDown, ChevronRight, FileText, FolderOpen, Loader2, Plug, Table2, Unplug } from 'lucide-react'
+import { CheckCircle2, ChevronDown, ChevronRight, FileText, FolderOpen, Loader2, Plug, Table2 } from 'lucide-react'
 
 import type {
   NativeIntegrationAccessibleFile,
@@ -16,7 +16,8 @@ import {
 } from '../../api/nativeIntegrations'
 import { safeErrorMessage } from '../../api/safeErrorMessage'
 import { readStoredConsoleContext } from '../../util/consoleContextStorage'
-import type { SettingsSurfaceVariant } from '../common/SettingsSurface'
+import { useSettingsSurfaceVariant } from '../common/SettingsSurface'
+import { IntegrationConnectionButton } from './IntegrationActionButtons'
 
 type GoogleDocsView = {
   setMimeTypes: (mimeTypes: string) => GoogleDocsView
@@ -440,24 +441,18 @@ export function useNativeIntegrationPickerMutation({
 export function NativeIntegrationSummaryCell({
   provider,
   descriptionClassName,
-  showNativeBadge = true,
-  showConnectedBadge = false,
-  surface = 'standalone',
+  badge = 'native',
 }: {
   provider: NativeIntegrationProvider
   descriptionClassName?: string
-  showNativeBadge?: boolean
-  showConnectedBadge?: boolean
-  surface?: SettingsSurfaceVariant
+  badge?: 'native' | 'connected' | 'native-connected' | 'none'
 }) {
+  const surface = useSettingsSurfaceVariant()
   const resolvedDescriptionClassName = descriptionClassName ?? (
     surface === 'embedded' ? 'mt-1 line-clamp-2 text-sm text-slate-400' : 'mt-1 line-clamp-2 text-sm text-slate-600'
   )
   const titleClassName = surface === 'embedded' ? 'text-slate-100' : 'text-slate-900'
-  const nativeBadgeClassName = surface === 'embedded'
-    ? 'border-emerald-300/25 bg-emerald-950/45 text-emerald-200'
-    : 'border-emerald-200 bg-emerald-50 text-emerald-700'
-  const connectedBadgeClassName = surface === 'embedded'
+  const badgeClassName = surface === 'embedded'
     ? 'border-emerald-300/25 bg-emerald-950/45 text-emerald-200'
     : 'border-emerald-200 bg-emerald-50 text-emerald-700'
   return (
@@ -466,13 +461,13 @@ export function NativeIntegrationSummaryCell({
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-2">
           <p className={`truncate text-sm font-semibold ${titleClassName}`}>{provider.displayName}</p>
-          {showNativeBadge ? (
-            <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide ${nativeBadgeClassName}`}>
+          {badge === 'native' || badge === 'native-connected' ? (
+            <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide ${badgeClassName}`}>
               Native
             </span>
           ) : null}
-          {showConnectedBadge && provider.connected ? (
-            <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold ${connectedBadgeClassName}`}>
+          {(badge === 'connected' || badge === 'native-connected') && provider.connected ? (
+            <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold ${badgeClassName}`}>
               <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
               Connected
             </span>
@@ -486,11 +481,10 @@ export function NativeIntegrationSummaryCell({
 
 export function NativeIntegrationStatusBadge({
   connected,
-  surface = 'standalone',
 }: {
   connected: boolean
-  surface?: SettingsSurfaceVariant
 }) {
+  const surface = useSettingsSurfaceVariant()
   if (connected) {
     const connectedClassName = surface === 'embedded'
       ? 'border-emerald-300/25 bg-emerald-950/45 text-emerald-200'
@@ -517,14 +511,13 @@ export function NativeIntegrationPickerButton({
   disabled,
   onClick,
   minWidth = true,
-  surface = 'standalone',
 }: {
   pendingKind: NativePendingKind
   disabled: boolean
   onClick: () => void
   minWidth?: boolean
-  surface?: SettingsSurfaceVariant
 }) {
+  const surface = useSettingsSurfaceVariant()
   const className = surface === 'embedded'
     ? 'border-sky-300/25 bg-sky-950/20 text-sky-100 hover:border-sky-200/40 hover:bg-sky-900/40'
     : 'border-blue-200 bg-white text-blue-700 hover:bg-blue-50'
@@ -548,76 +541,6 @@ export function NativeIntegrationPickerButton({
   )
 }
 
-export function NativeIntegrationConnectionButton({
-  connected,
-  pendingKind,
-  disabled,
-  onConnect,
-  onDisconnect,
-  disconnectTone = 'danger',
-  minWidth = true,
-  surface = 'standalone',
-}: {
-  connected: boolean
-  pendingKind: NativePendingKind
-  disabled: boolean
-  onConnect: () => void
-  onDisconnect: () => void
-  disconnectTone?: 'danger' | 'neutral'
-  minWidth?: boolean
-  surface?: SettingsSurfaceVariant
-}) {
-  if (connected) {
-    const connectedClassName = surface === 'embedded'
-      ? disconnectTone === 'danger'
-        ? 'border-rose-300/25 bg-rose-950/20 text-rose-200 hover:border-rose-200/40 hover:bg-rose-900/35'
-        : 'border-slate-200/20 bg-slate-950/20 text-slate-300 hover:border-slate-100/35 hover:bg-slate-900/40'
-      : disconnectTone === 'danger'
-        ? 'border-red-200 bg-white text-red-700 hover:bg-red-50'
-        : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
-    return (
-      <button
-        type="button"
-        className={[
-          `inline-flex items-center justify-center gap-2 rounded-md border px-3 py-2 text-sm font-semibold transition disabled:opacity-60 ${connectedClassName}`,
-          minWidth ? 'min-w-28' : '',
-        ].filter(Boolean).join(' ')}
-        onClick={onDisconnect}
-        disabled={disabled}
-      >
-        {pendingKind === 'disconnect' ? (
-          <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-        ) : (
-          <Unplug className="h-4 w-4" aria-hidden="true" />
-        )}
-        Disconnect
-      </button>
-    )
-  }
-
-  const connectClassName = surface === 'embedded'
-    ? 'border border-sky-300/25 bg-sky-900/55 text-sky-50 hover:border-sky-200/40 hover:bg-sky-900/75'
-    : 'bg-blue-600 text-white hover:bg-blue-700'
-  return (
-    <button
-      type="button"
-      className={[
-        `inline-flex items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-semibold transition disabled:opacity-60 ${connectClassName}`,
-        minWidth ? 'min-w-28' : '',
-      ].filter(Boolean).join(' ')}
-      onClick={onConnect}
-      disabled={disabled}
-    >
-      {pendingKind === 'connect' ? (
-        <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-      ) : (
-        <Plug className="h-4 w-4" aria-hidden="true" />
-      )}
-      Connect
-    </button>
-  )
-}
-
 export function NativeIntegrationActionButtons({
   provider,
   pendingKind,
@@ -627,7 +550,6 @@ export function NativeIntegrationActionButtons({
   onPicker,
   disconnectTone,
   minWidth = true,
-  surface = 'standalone',
 }: {
   provider: NativeIntegrationProvider
   pendingKind: NativePendingKind
@@ -637,7 +559,6 @@ export function NativeIntegrationActionButtons({
   onPicker: () => void
   disconnectTone?: 'danger' | 'neutral'
   minWidth?: boolean
-  surface?: SettingsSurfaceVariant
 }) {
   const pickerEnabled = provider.connected && supportsNativeIntegrationPicker(provider)
   return (
@@ -648,10 +569,9 @@ export function NativeIntegrationActionButtons({
           disabled={disabled}
           onClick={onPicker}
           minWidth={minWidth}
-          surface={surface}
         />
       ) : null}
-      <NativeIntegrationConnectionButton
+      <IntegrationConnectionButton
         connected={provider.connected}
         pendingKind={pendingKind}
         disabled={disabled}
@@ -659,7 +579,6 @@ export function NativeIntegrationActionButtons({
         onDisconnect={onDisconnect}
         disconnectTone={disconnectTone}
         minWidth={minWidth}
-        surface={surface}
       />
     </>
   )
@@ -672,11 +591,7 @@ export function NativeIntegrationGridRow({
   onConnect,
   onDisconnect,
   onPicker,
-  gridClassName = 'grid gap-3 sm:grid-cols-[minmax(0,1fr)_7rem_8rem_8rem] sm:items-start',
-  showStatusColumn = true,
-  showNativeBadge = true,
-  showConnectedBadge = false,
-  surface = 'standalone',
+  variant = 'agent',
 }: {
   provider: NativeIntegrationProvider
   pendingKind: NativePendingKind
@@ -684,55 +599,48 @@ export function NativeIntegrationGridRow({
   onConnect: () => void
   onDisconnect: () => void
   onPicker: () => void
-  gridClassName?: string
-  showStatusColumn?: boolean
-  showNativeBadge?: boolean
-  showConnectedBadge?: boolean
-  surface?: SettingsSurfaceVariant
+  variant?: 'agent' | 'workspace'
 }) {
   const pickerEnabled = provider.connected && supportsNativeIntegrationPicker(provider)
+  const workspace = variant === 'workspace'
   return (
     <div className="px-4 py-3">
-      <div className={gridClassName}>
+      <div className={`grid gap-3 sm:items-start ${workspace ? 'sm:grid-cols-[minmax(0,1fr)_8rem_8rem]' : 'sm:grid-cols-[minmax(0,1fr)_7rem_8rem_8rem]'}`}>
         <NativeIntegrationSummaryCell
           provider={provider}
-          showNativeBadge={showNativeBadge}
-          showConnectedBadge={showConnectedBadge}
-          surface={surface}
+          badge={workspace ? 'connected' : 'native'}
         />
-        {showStatusColumn ? (
+        {!workspace ? (
           <div>
-            <NativeIntegrationStatusBadge connected={provider.connected} surface={surface} />
+            <NativeIntegrationStatusBadge connected={provider.connected} />
           </div>
         ) : null}
         <div className="flex justify-start md:justify-end">
           {pickerEnabled ? (
-            <NativeIntegrationPickerButton pendingKind={pendingKind} disabled={disabled} onClick={onPicker} surface={surface} />
+            <NativeIntegrationPickerButton pendingKind={pendingKind} disabled={disabled} onClick={onPicker} />
           ) : null}
         </div>
         <div className="flex justify-start md:justify-end">
-          <NativeIntegrationConnectionButton
+          <IntegrationConnectionButton
             connected={provider.connected}
             pendingKind={pendingKind}
             disabled={disabled}
             onConnect={onConnect}
             onDisconnect={onDisconnect}
-            surface={surface}
           />
         </div>
       </div>
-      <NativeIntegrationFilesDisclosure provider={provider} surface={surface} />
+      <NativeIntegrationFilesDisclosure provider={provider} />
     </div>
   )
 }
 
 export function NativeIntegrationFilesDisclosure({
   provider,
-  surface = 'standalone',
 }: {
   provider: NativeIntegrationProvider
-  surface?: SettingsSurfaceVariant
 }) {
+  const surface = useSettingsSurfaceVariant()
   const [expanded, setExpanded] = useState(false)
   const fileListEnabled = supportsNativeIntegrationFileList(provider)
   const filesQuery = useQuery({
@@ -786,7 +694,7 @@ export function NativeIntegrationFilesDisclosure({
           ) : files.length > 0 ? (
             <ul className="space-y-1">
               {files.map((file) => (
-                <NativeIntegrationFileItem key={file.externalId} file={file} surface={surface} />
+                <NativeIntegrationFileItem key={file.externalId} file={file} />
               ))}
             </ul>
           ) : (
@@ -802,11 +710,10 @@ export function NativeIntegrationFilesDisclosure({
 
 function NativeIntegrationFileItem({
   file,
-  surface = 'standalone',
 }: {
   file: NativeIntegrationAccessibleFile
-  surface?: SettingsSurfaceVariant
 }) {
+  const surface = useSettingsSurfaceVariant()
   const textClassName = surface === 'embedded' ? 'text-slate-300 hover:text-slate-100' : 'text-slate-700 hover:text-slate-950'
   const icon = file.mimeType === GOOGLE_SHEETS_MIME_TYPE
     ? <Table2 className="h-4 w-4 text-emerald-700" aria-hidden="true" />

@@ -7,7 +7,6 @@ import { disconnectAgentPipedreamApp, fetchAgentPipedreamApps, removeAgentPipedr
 import { fetchNativeIntegrations, type NativeIntegrationProvider } from '../../api/nativeIntegrations'
 import {
   PipedreamAppSummaryCell,
-  PipedreamConnectionButton,
   PipedreamEmptyState,
   PipedreamErrorState,
   PipedreamListFrame,
@@ -22,6 +21,7 @@ import {
   useWindowFocusRefetch,
   type PipedreamStatusMessage,
 } from './PipedreamAppsShared'
+import { IntegrationConnectionButton } from './IntegrationActionButtons'
 import {
   confirmNativeIntegrationDisconnect,
   NativeIntegrationGridRow,
@@ -459,7 +459,7 @@ function AgentPipedreamAppRowItem({
         )}
       </div>
       <div className="flex justify-start md:justify-end">
-        <PipedreamConnectionButton
+        <IntegrationConnectionButton
           connected={app.connected}
           pendingKind={pendingKind === 'connect' || pendingKind === 'disconnect' ? pendingKind : null}
           disabled={disabled}
