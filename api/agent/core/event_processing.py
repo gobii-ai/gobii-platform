@@ -27,6 +27,7 @@ from kombu.exceptions import OperationalError as KombuOperationalError
 from opentelemetry import baggage, trace
 from pottery import Redlock
 from pottery.exceptions import ExtendUnlockedLock, TooManyExtensions
+from redis.exceptions import RedisError
 from django.apps import apps
 from django.conf import settings as django_settings
 from django.db import DatabaseError, transaction, close_old_connections
@@ -883,9 +884,7 @@ def _schedule_agent_follow_up(
     try:
         from ..tasks.process_events import process_agent_events_task  # noqa: WPS433 (runtime import)
 
-        process_agent_events_task.apply_async(
-            args=[str(agent_id)], countdown=delay_seconds, queue=queue
-        )
+        process_agent_events_task.apply_async(args=[str(agent_id)], countdown=delay_seconds, queue=queue)
         if span is not None:
             span.add_event(f"{reason} follow-up scheduled")
     except Exception:
@@ -6480,20 +6479,22 @@ def _run_agent_loop(
                     agent.id,
                     exc_info=True,
                 )
+            delay_seconds = max(0, int(max_iterations_followup_delay_seconds or 0))
             if max_iterations_followup_delay_seconds is None:
-                pending_settings = get_pending_drain_settings(settings)
-                delay_seconds = max(
-                    int(MAX_ITERATIONS_FOLLOWUP_DELAY_SECONDS),
-                    int(pending_settings.pending_drain_delay_seconds),
+                pending_delay = get_pending_drain_settings(settings).pending_drain_delay_seconds
+                delay_seconds = max(int(MAX_ITERATIONS_FOLLOWUP_DELAY_SECONDS), int(pending_delay))
+            try:
+                budget_exhausted = budget_ctx is not None and (
+                    AgentBudgetManager.get_steps_used(agent_id=budget_ctx.agent_id)
+                    >= budget_ctx.max_steps
                 )
-            else:
-                delay_seconds = max(0, int(max_iterations_followup_delay_seconds))
-            budget_exhausted = budget_ctx is not None and (
-                AgentBudgetManager.get_steps_used(agent_id=budget_ctx.agent_id)
-                >= budget_ctx.max_steps
-            )
-            if budget_exhausted:
-                AgentBudgetManager.close_cycle(agent_id=budget_ctx.agent_id, budget_id=budget_ctx.budget_id)
+                if budget_exhausted:
+                    AgentBudgetManager.close_cycle(agent_id=budget_ctx.agent_id, budget_id=budget_ctx.budget_id)
+            except RedisError:
+                budget_exhausted = False
+                logger.warning(
+                    "Budget cycle %s cleanup failed for agent %s", budget_ctx.budget_id, agent.id, exc_info=True
+                )
             _schedule_agent_follow_up(
                 agent_id=agent.id,
                 delay_seconds=delay_seconds,

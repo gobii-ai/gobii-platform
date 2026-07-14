@@ -18,6 +18,7 @@ from unittest.mock import patch, MagicMock, ANY
 
 import zstandard as zstd
 from allauth.account.models import EmailAddress
+from redis.exceptions import RedisError
 
 from api.agent.core.event_processing import (
     OrchestratorPromptStale,
@@ -6183,6 +6184,30 @@ class EventProcessingMaxIterationsFollowUpTests(TestCase):
         )
         self.assertNotEqual(next_budget_id, budget_ctx.budget_id)
         self.assertEqual(AgentBudgetManager.get_steps_used(agent_id=budget_ctx.agent_id), 0)
+
+    @override_settings(CELERY_TASK_ALWAYS_EAGER=False)
+    @patch("api.agent.tasks.process_events.process_agent_events_task.apply_async")
+    def test_run_agent_loop_queues_follow_up_when_cycle_close_fails(
+        self,
+        mock_apply_async,
+    ):
+        self._start_budget_cycle(max_steps=1)
+
+        with patch.object(
+            AgentBudgetManager,
+            "close_cycle",
+            side_effect=RedisError("Redis unavailable"),
+        ):
+            self._run_single_iteration_to_cap(
+                followup_delay_seconds=0,
+                followup_queue=AGENT_DEFAULT_PROCESSING_QUEUE,
+            )
+
+        mock_apply_async.assert_called_once_with(
+            args=[str(self.agent.id)],
+            countdown=0,
+            queue=AGENT_DEFAULT_PROCESSING_QUEUE,
+        )
 
     @override_settings(CELERY_TASK_ALWAYS_EAGER=False)
     @patch("api.agent.tasks.process_events.process_agent_events_task.apply_async")
