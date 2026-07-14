@@ -29,6 +29,15 @@ from opentelemetry import trace
 from api.models import AgentEmailAccount, CommsChannel
 from api.agent.comms.imap_adapter import ImapEmailAdapter, ImapParsedContext
 from api.agent.comms.email_oauth import build_xoauth2_string, resolve_oauth_identity_and_token
+from api.agent.comms.gmail_api import (
+    GmailApiError,
+    ensure_gmail_history_checkpoint,
+    get_gmail_raw_message,
+    list_gmail_history,
+    reset_gmail_history_checkpoint,
+    set_gmail_history_id,
+    uses_gmail_api,
+)
 from api.agent.comms.message_service import ingest_inbound_message
 from config.redis_client import get_redis_client
 from pottery import Redlock
@@ -410,7 +419,138 @@ def _agent_env_matches(acct: AgentEmailAccount) -> bool:
     return bool(owner_agent and owner_agent.execution_environment == settings.GOBII_RELEASE_ENV)
 
 
+def _update_gmail_poll_success(acct: AgentEmailAccount, now) -> None:
+    acct.last_polled_at = now
+    acct.connection_last_ok_at = now
+    acct.connection_error = ""
+    acct.imap_last_ok_at = now
+    acct.imap_error = ""
+    acct.backoff_until = None
+    acct.save(update_fields=[
+        "last_polled_at", "connection_last_ok_at", "connection_error",
+        "imap_last_ok_at", "imap_error", "backoff_until",
+    ])
+
+
+def _ingest_gmail_message(acct: AgentEmailAccount, message_id: str) -> bool:
+    try:
+        endpoint = acct.endpoint
+        agent = getattr(endpoint, "owner_agent", None)
+        raw = get_gmail_raw_message(acct, message_id)
+        parsed = ImapEmailAdapter.parse_bytes(
+            raw,
+            recipient_address=endpoint.address,
+            ctx=ImapParsedContext(uid=f"gmail:{message_id}", folder="INBOX"),
+        )
+        if agent is not None and not agent.is_sender_whitelisted(CommsChannel.EMAIL, parsed.sender):
+            logger.info(
+                "Gmail message from %s is not whitelisted for agent %s; skipping",
+                parsed.sender,
+                getattr(agent, "id", None),
+            )
+            return True
+        ingest_inbound_message(CommsChannel.EMAIL, parsed)
+        return True
+    except (GmailApiError, ValueError, RuntimeError) as exc:
+        logger.error(
+            "Error ingesting Gmail message %s for %s: %s",
+            message_id,
+            acct.endpoint.address,
+            exc,
+            exc_info=True,
+        )
+        return False
+
+
+def _gmail_message_ids(history: object) -> list[str]:
+    if not isinstance(history, dict):
+        return []
+    result: list[str] = []
+    for addition in history.get("messagesAdded") or []:
+        if not isinstance(addition, dict):
+            continue
+        message = addition.get("message")
+        if not isinstance(message, dict):
+            continue
+        message_id = str(message.get("id") or "").strip()
+        if message_id and message_id not in result:
+            result.append(message_id)
+    return result
+
+
+def _poll_gmail_api_account(acct: AgentEmailAccount) -> None:
+    query_start_history_id = ensure_gmail_history_checkpoint(acct)
+    page_token = ""
+    processed = 0
+    seen_message_ids: set[str] = set()
+
+    while True:
+        try:
+            payload = list_gmail_history(
+                acct,
+                start_history_id=query_start_history_id,
+                page_token=page_token,
+            )
+        except GmailApiError as exc:
+            if exc.status_code != 404:
+                raise
+            # Gmail history IDs eventually expire. Baseline at the current
+            # mailbox state, matching the existing first-run IMAP behavior.
+            reset_gmail_history_checkpoint(acct)
+            logger.warning(
+                "Gmail history checkpoint expired for %s; reset to current mailbox state",
+                acct.endpoint.address,
+            )
+            _update_gmail_poll_success(acct, timezone.now())
+            return
+
+        histories = payload.get("history") or []
+        if not isinstance(histories, list):
+            raise GmailApiError("Gmail API returned invalid mailbox history.")
+
+        for history in histories:
+            history_message_ids = [
+                message_id
+                for message_id in _gmail_message_ids(history)
+                if message_id not in seen_message_ids
+            ]
+            for message_id in history_message_ids:
+                if not _ingest_gmail_message(acct, message_id):
+                    raise GmailApiError(f"Gmail message {message_id} could not be ingested.")
+                seen_message_ids.add(message_id)
+                processed += 1
+
+            history_id = str(history.get("id") or "").strip() if isinstance(history, dict) else ""
+            if history_id:
+                set_gmail_history_id(acct, history_id)
+            if processed >= MAX_MESSAGES_PER_ACCOUNT:
+                _update_gmail_poll_success(acct, timezone.now())
+                return
+
+        page_token = str(payload.get("nextPageToken") or "").strip()
+        if not page_token:
+            latest_history_id = str(payload.get("historyId") or "").strip()
+            if latest_history_id:
+                set_gmail_history_id(acct, latest_history_id)
+            _update_gmail_poll_success(acct, timezone.now())
+            return
+
+
 def _poll_account_locked(acct: AgentEmailAccount) -> None:
+    if uses_gmail_api(acct):
+        try:
+            with tracer.start_as_current_span("email.gmail_api.poll"):
+                _poll_gmail_api_account(acct)
+        except (GmailApiError, ValueError, RuntimeError) as exc:
+            logger.error(
+                "Gmail API poll error for %s: %s",
+                getattr(acct.endpoint, "address", None),
+                exc,
+                exc_info=True,
+            )
+            _update_error_backoff(acct, exc)
+        return
+
     now = timezone.now()
     client: imaplib.IMAP4 | None = None
     try:

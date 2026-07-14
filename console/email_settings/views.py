@@ -704,7 +704,6 @@ class AgentEmailSettingsAPIView(ApiLoginRequiredMixin, View):
             }
         )
 
-
 class AgentEmailSettingsEnsureAccountAPIView(ApiLoginRequiredMixin, View):
     http_method_names = ["post"]
 

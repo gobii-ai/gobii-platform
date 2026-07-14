@@ -303,6 +303,11 @@ def connect_agent_email_oauth(
         "account_type": identity.get("account_type", ""),
         "mailbox_address": mailbox,
         "sasl_mechanism": "XOAUTH2",
+        "transport": (
+            "gmail_api"
+            if provider == "gmail" and "https://mail.google.com/" not in credential.scope.split()
+            else "smtp_imap"
+        ),
     }
     credential.save()
 
