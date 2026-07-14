@@ -320,16 +320,16 @@ class LibraryView(TemplateView):
             if selected_category
             else "Official AI Agent Templates | Gobii"
             if official_only
-            else "AI Agent Templates & Workers | Gobii"
+            else "AI Employee & Agent Templates | Gobii"
         )
         page_description = (
             f"Explore official Gobii {selected_category} AI agent templates maintained by Gobii for trusted workflows."
             if selected_category and official_only
-            else f"Explore Gobii's {selected_category} AI agent templates and workers. Start from a shared template and customize it for your workflow."
+            else f"Explore Gobii's {selected_category} AI employee and agent templates. Start from a shared template and customize it for your workflow."
             if selected_category
             else "Explore official Gobii AI agent templates maintained by Gobii for common workflows."
             if official_only
-            else "Explore Gobii's library of AI agents and workers for sales, research, recruiting, operations, spreadsheets, email, and more. Start from a template or build your own."
+            else "Explore Gobii's library of AI employee and agent templates for sales, research, recruiting, operations, spreadsheets, email, and more. Start from a template or build your own."
         )
         context["page_name"] = "Agent Discovery"
         context["library_initial_category"] = selected_category

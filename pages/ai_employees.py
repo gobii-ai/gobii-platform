@@ -28,7 +28,7 @@ AI_EMPLOYEES_CLUSTER_LINKS = (
         "status": "planned",
     },
     {
-        "anchor": "AI workers",
+        "anchor": "AI employees",
         "url": "/blog/ai-workers/",
         "status": "planned",
     },

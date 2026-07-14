@@ -2607,7 +2607,7 @@ function CollaboratorManager({ state, rows, projectedTotalCount, error, busy, on
     <div className="space-y-5">
       <div className="space-y-1">
         <p className="text-xs text-slate-600">
-          Invite coworkers to chat and exchange files. Collaborators can upload and download files only.
+          Invite employees to chat and exchange files. Collaborators can upload and download files only.
         </p>
         <p className="text-xs text-slate-600">Contact slots used: {state.totalCount} / {totalLimit}</p>
       </div>

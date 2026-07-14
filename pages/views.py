@@ -193,7 +193,7 @@ HOMEPAGE_INLINE_INTEGRATION_ICON_PATHS = {
     "slack": "images/integrations/pipedream/slack.svg",
     "trello": "images/integrations/pipedream/trello.svg",
 }
-HOMEPAGE_META_TITLE_SUFFIX = "AI Coworkers for Teams With Real Work to Do"
+HOMEPAGE_META_TITLE_SUFFIX = "AI Employees for Teams With Real Work to Do"
 _LANDING_UTM_TRACKER = UTMTrackingMiddleware(lambda request: None)
 
 
@@ -994,11 +994,11 @@ class HomePage(TemplateView):
         context["home_brand_name"] = home_brand_name
         context["home_meta_title"] = f"{home_brand_name} - {HOMEPAGE_META_TITLE_SUFFIX}"
         context["home_meta_description"] = (
-            f"{home_brand_name} agents are virtual coworkers with their own identity, "
+            f"{home_brand_name} agents are virtual employees with their own identity, "
             "memory, and tools. Email them, text them — they browse the web, collect "
             "data, and deliver reports 24/7."
         )
-        context["home_social_image_alt"] = f"{home_brand_name} AI coworker platform preview"
+        context["home_social_image_alt"] = f"{home_brand_name} AI employee platform preview"
         context["home_social_metadata_enabled"] = settings.GOBII_PROPRIETARY_MODE
         context["home_canonical_url"] = _public_site_absolute_url("/")
         context["home_social_image_url"] = _public_site_absolute_url(
@@ -1547,7 +1547,7 @@ class PretrainedWorkerDetailView(ProprietaryPretrainedWorkerOnlyMixin, TemplateV
     def dispatch(self, request, *args, **kwargs):
         self.employee = PretrainedWorkerTemplateService.get_template_by_code(kwargs.get('slug'))
         if not self.employee:
-            raise Http404("This pretrained worker is no longer available.")
+            raise Http404("This pretrained employee is no longer available.")
         return super().dispatch(request, *args, **kwargs)
 
     def get_related_pretrained_workers(self):
@@ -1626,7 +1626,7 @@ class PretrainedWorkerDetailView(ProprietaryPretrainedWorkerOnlyMixin, TemplateV
                 {
                     "@type": "ListItem",
                     "position": 2,
-                    "name": "Pretrained Workers",
+                    "name": "Pretrained Employees",
                     "item": f"{home_url}#pretrained-workers",
                 },
                 {
@@ -1665,7 +1665,7 @@ class PretrainedWorkerDetailView(ProprietaryPretrainedWorkerOnlyMixin, TemplateV
 def _get_pretrained_worker_template_or_404(code: str | None):
     template = PretrainedWorkerTemplateService.get_template_by_code(code)
     if not template:
-        raise Http404("This pretrained worker is no longer available.")
+        raise Http404("This pretrained employee is no longer available.")
     return template
 
 
@@ -3835,7 +3835,7 @@ class ComparisonDetailView(TemplateView):
                 "https://docs.gobii.ai/",
             ],
             "description": (
-                "Always-on AI coworker platform for recurring business work across "
+                "Always-on AI employee platform for recurring business work across "
                 "integrations, browsers, files, and communication channels."
             ),
         }
@@ -4049,6 +4049,12 @@ class SolutionsSitemap(sitemaps.Sitemap):
 
     def location(self, slug):
         return SolutionView.reverse_solution(slug)
+
+    def lastmod(self, slug):
+        date_modified = SolutionView.SOLUTION_DATA[slug].get("date_modified")
+        if not date_modified:
+            return None
+        return datetime.strptime(date_modified, "%Y-%m-%d").date()
 
 
 class SupportView(TemplateView):
@@ -4334,8 +4340,6 @@ class SolutionView(TemplateView):
         'recruiting/candidate-sourcing': 'solutions/recruiting_candidate_sourcing.html',
         'sales': 'solutions/sales.html',
         'sales/ai-sales-agent': 'solutions/sales_ai_sales_agent.html',
-        'health-care': 'solutions/health-care.html',
-        'defense': 'solutions/defense.html',
         'engineering': 'solutions/engineering.html',
     }
 
@@ -4354,7 +4358,7 @@ class SolutionView(TemplateView):
             'tagline': 'Automate candidate sourcing and screening.',
             'description': 'Find top talent faster with AI agents that work 24/7 to source, screen, and engage candidates.',
             'seo_title': 'AI Recruiting Agents - Automate Sourcing & Screening | Gobii',
-            'seo_description': "Deploy AI recruiting agents that work 24/7 to source candidates, screen resumes, and engage top talent. Hire faster with Gobii's always-on digital workers.",
+            'seo_description': "Deploy AI recruiting agents that work 24/7 to source candidates, screen resumes, and engage top talent. Hire faster with Gobii's always-on AI employees.",
             'date_modified': '2026-06-04',
             'social_image': 'images/solutions/recruiting-hero.jpg',
             'social_image_alt': 'Gobii AI recruiting agents for candidate sourcing and screening',
@@ -4394,7 +4398,7 @@ class SolutionView(TemplateView):
             'tagline': 'Supercharge your outbound outreach.',
             'description': 'Scale your prospecting and personalized messaging to fill your pipeline automatically.',
             'seo_title': 'AI Sales Agents - Automate Lead Gen & Outreach | Gobii',
-            'seo_description': "Deploy AI sales agents that work 24/7 to find prospects, research accounts, and fill your pipeline. Book more demos with Gobii's always-on digital workers.",
+            'seo_description': "Deploy AI sales agents that work 24/7 to find prospects, research accounts, and fill your pipeline. Book more demos with Gobii's always-on AI employees.",
             'date_modified': '2026-06-05',
             'social_image': 'images/solutions/sales-hero.jpg',
             'social_image_alt': 'Gobii AI sales agents for lead generation and account research',
@@ -4483,47 +4487,21 @@ class SolutionView(TemplateView):
                 },
             ],
         },
-        'health-care': {
-            'title': 'Health Care',
-            'tagline': 'Streamline patient intake and administrative tasks.',
-            'description': 'Secure, HIPAA-compliant automation for modern healthcare providers and payers.',
-            'seo_title': 'AI Healthcare Agents - Automate Admin & Patient Workflows | Gobii',
-            'seo_description': 'Open source AI agents designed to support HIPAA compliance. Self-host in your environment, fully audit the code, and automate patient intake, scheduling, and admin tasks.',
-            'social_image': 'images/solutions/healthcare-hero.jpg',
-            'social_image_alt': 'Gobii healthcare AI agents for patient intake and administrative workflows',
-            'related_link': {
-                'intro': 'Want a compliance workflow to inspect?',
-                'label': 'View the Compliance Sentinel AI agent',
-                'route': 'pages:pretrained_worker_detail',
-                'kwargs': {'slug': 'compliance-audit-sentinel'},
-            },
-        },
-        'defense': {
-            'title': 'Defense',
-            'tagline': 'Secure, on-premise AI intelligence.',
-            'description': 'Mission-critical automation for national security with strict data governance.',
-            'seo_title': 'AI Agents for Defense - Open Source, Airgapped, Fully Auditable | Gobii',
-            'seo_description': 'Open source AI agents designed for defense environments. Self-host in airgapped networks, audit every line of code, and deploy through trusted integration partners.',
-            'social_image': 'images/solutions/defense-hero.jpg',
-            'social_image_alt': 'Gobii open source AI agents for secure defense environments',
-            'related_link': {
-                'intro': 'Want a risk monitoring workflow to inspect?',
-                'label': 'View the Public Safety Scout AI agent',
-                'route': 'pages:pretrained_worker_detail',
-                'kwargs': {'slug': 'public-safety-scout'},
-            },
-        },
         'engineering': {
-            'title': 'Engineering',
-            'tagline': 'Accelerate development workflows.',
-            'description': 'Automate code reviews, testing, and deployment pipelines to ship software faster.',
-            'seo_title': "AI Agents for Developers - Build on Gobii's Platform | Gobii",
-            'seo_description': "Build powerful AI agents with Gobii's API. Create, deploy, and control always-on agents programmatically. Self-hosted or cloud. Get started in minutes.",
-            'date_modified': '2026-06-05',
+            'title': 'API',
+            'tagline': "Deploy and manage always-on AI employees with Gobii's API.",
+            'description': 'Create long-lived agents, schedule recurring work, connect tools, inspect activity, and manage the full agent lifecycle through one API.',
+            'seo_title': 'AI Agent API for Always-On AI Employees | Gobii',
+            'seo_description': "Deploy and manage always-on AI employees with Gobii's Agent API. Create agents, schedule work, connect tools, inspect activity, or self-host the platform.",
+            'date_modified': '2026-07-14',
             'social_image': 'images/solutions/engineering-hero.jpg',
-            'social_image_alt': 'Gobii developer platform for building AI browser agents',
+            'social_image_alt': 'Gobii Agent API for deploying and managing always-on AI employees',
+            'service_name': 'Gobii Agent API',
+            'service_type': 'AI agent API',
+            'service_category': 'AI agent deployment and lifecycle management',
+            'service_offer_route': 'proprietary:pricing',
             'related_link': {
-                'intro': 'Want a developer workflow to inspect?',
+                'intro': 'Want an API workflow to inspect?',
                 'label': 'View the Standup Coordinator AI agent',
                 'route': 'pages:pretrained_worker_detail',
                 'kwargs': {'slug': 'team-standup-coordinator'},
@@ -4679,6 +4657,4 @@ class SolutionView(TemplateView):
                 default=False,
             ),
         })
-        if slug in {"health-care", "defense"}:
-            context["marketing_contact_form"] = MarketingContactForm()
         return context
