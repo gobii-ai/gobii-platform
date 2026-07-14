@@ -61,10 +61,27 @@ def backfill_email_integrations(apps, schema_editor):
             integration.save(update_fields=updates)
 
 
+def remove_unrepresentable_oauth_sessions(apps, schema_editor):
+    """Remove sessions that cannot be represented by the pre-0422 schema.
+
+    Native email OAuth starts before an AgentEmailAccount exists, so these
+    short-lived authorization sessions intentionally have no account.  The old
+    AgentEmailOAuthSession model required one; delete only those incomplete
+    sessions before restoring its NOT NULL constraint during a rollback.
+    """
+    NativeIntegrationOAuthSession = apps.get_model(
+        "api", "NativeIntegrationOAuthSession"
+    )
+    NativeIntegrationOAuthSession.objects.using(schema_editor.connection.alias).filter(
+        account_id__isnull=True
+    ).delete()
+
+
 class Migration(migrations.Migration):
 
     dependencies = [
         ("api", "0421_migrate_brightdata_base_tools_to_builtin"),
+        ("contenttypes", "0002_remove_content_type_name"),
     ]
 
     operations = [
@@ -131,5 +148,8 @@ class Migration(migrations.Migration):
                 ("oauth_account", models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name="oauth_email_integrations", to="api.agentemailaccount")),
             ],
         ),
-        migrations.RunPython(backfill_email_integrations, migrations.RunPython.noop),
+        migrations.RunPython(
+            backfill_email_integrations,
+            remove_unrepresentable_oauth_sessions,
+        ),
     ]

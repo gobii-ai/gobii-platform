@@ -1,8 +1,12 @@
+import importlib
 import json
 from datetime import timedelta
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+from django.apps import apps
 from django.contrib.auth import get_user_model
+from django.db import connections
 from django.test import TestCase, override_settings, tag
 from django.urls import reverse
 from django.utils import timezone
@@ -95,6 +99,46 @@ class NativeAgentEmailIntegrationTests(TestCase):
             content_type="application/json",
         )
         self.assertEqual(response.status_code, 403)
+
+    def test_migration_reverse_removes_only_accountless_oauth_sessions(self):
+        endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address="legacy-session@example.com",
+        )
+        account = AgentEmailAccount.objects.create(endpoint=endpoint)
+        expires_at = timezone.now() + timedelta(minutes=10)
+        accountless = NativeIntegrationOAuthSession.objects.create(
+            agent=self.agent,
+            provider_key="gmail",
+            initiated_by=self.user,
+            user=self.user,
+            state="accountless-migration-session",
+            expires_at=expires_at,
+        )
+        account_backed = NativeIntegrationOAuthSession.objects.create(
+            account=account,
+            provider_key="gmail",
+            initiated_by=self.user,
+            user=self.user,
+            state="account-backed-migration-session",
+            expires_at=expires_at,
+        )
+        migration = importlib.import_module(
+            "api.migrations.0422_native_email_integrations"
+        )
+
+        migration.remove_unrepresentable_oauth_sessions(
+            apps,
+            SimpleNamespace(connection=connections["default"]),
+        )
+
+        self.assertFalse(
+            NativeIntegrationOAuthSession.objects.filter(pk=accountless.pk).exists()
+        )
+        self.assertTrue(
+            NativeIntegrationOAuthSession.objects.filter(pk=account_backed.pk).exists()
+        )
 
     def test_native_provider_payload_and_agent_connections_are_agent_scoped(self):
         response = self.client.get(reverse("console-native-integration-list"))
