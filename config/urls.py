@@ -94,12 +94,10 @@ from console.api_views import (
     MCPOAuthSessionVerifierView,
     MCPOAuthStartView,
     MCPOAuthStatusView,
-    AgentEmailOAuthCallbackView,
-    AgentEmailOAuthRevokeView,
-    AgentEmailOAuthSessionVerifierView,
-    AgentEmailOAuthStartView,
-    AgentEmailOAuthStatusView,
     StaffAgentDeveloperExportAPIView,
+    StaffAgentAuditAPIView,
+    StaffAgentAuditExportAPIView,
+    StaffAgentAuditTimelineAPIView,
     StaffAgentJudgeSuggestionDecisionAPIView,
     StaffAgentProcessEventsAPIView,
     StaffAgentRunJudgeAPIView,
@@ -143,6 +141,7 @@ from console.user_pets_api import UserPetDetailAPIView, UserPetListAPIView, User
 from console.secrets_api_views import GlobalSecretListAPIView, GlobalSecretDetailAPIView, AgentSecretListAPIView, AgentSecretDetailAPIView, AgentSecretPromoteAPIView
 from console.native_integrations_api import (
     NativeIntegrationCallbackAPIView,
+    NativeIntegrationAgentConnectionsAPIView,
     NativeIntegrationAgentEventAPIView,
     NativeIntegrationConnectAPIView,
     NativeIntegrationFilesAPIView,
@@ -184,7 +183,6 @@ from console.views import (
     ConsoleLLMConfigView,
     PlatformMCPServerManagementView,
     MCPOAuthCallbackPageView,
-    AgentEmailOAuthCallbackPageView,
     NativeIntegrationOAuthCallbackPageView,
     AgentAvatarProxyView,
     AgentAvatarThumbnailProxyView,
@@ -321,7 +319,11 @@ urlpatterns = [
         RedirectView.as_view(pattern_name="app-email-oauth-callback-view", permanent=False, query_string=True),
         name="console-email-oauth-callback-view",
     ),
-    path("app/email/oauth/callback/", AgentEmailOAuthCallbackPageView.as_view(), name="app-email-oauth-callback-view"),
+    path(
+        "app/email/oauth/callback/",
+        RedirectView.as_view(pattern_name="console-native-integration-oauth-callback-view", permanent=False, query_string=True),
+        name="app-email-oauth-callback-view",
+    ),
     path(
         "integrations/oauth/callback/",
         NativeIntegrationOAuthCallbackPageView.as_view(),
@@ -576,12 +578,11 @@ urlpatterns = [
         NativeIntegrationRevokeAPIView.as_view(),
         name="console-native-integration-revoke",
     ),
-    # Public launch contract used by the email settings OAuth popup.
-    path("console/api/email/oauth/start/", AgentEmailOAuthStartView.as_view(), name="console-email-oauth-start"),
-    path("console/api/email/oauth/session/<uuid:session_id>/verifier/", AgentEmailOAuthSessionVerifierView.as_view(), name="console-email-oauth-session-verifier"),
-    path("console/api/email/oauth/callback/", AgentEmailOAuthCallbackView.as_view(), name="console-email-oauth-callback"),
-    path("console/api/email/oauth/status/<uuid:account_id>/", AgentEmailOAuthStatusView.as_view(), name="console-email-oauth-status"),
-    path("console/api/email/oauth/revoke/<uuid:account_id>/", AgentEmailOAuthRevokeView.as_view(), name="console-email-oauth-revoke"),
+    path(
+        "console/api/native-integrations/<slug:provider_key>/agent-connections/",
+        NativeIntegrationAgentConnectionsAPIView.as_view(),
+        name="console-native-integration-agent-connections",
+    ),
     # Global + agent secrets API
     path("console/api/secrets/", GlobalSecretListAPIView.as_view(), name="console-global-secret-list"),
     path("console/api/secrets/<uuid:secret_id>/", GlobalSecretDetailAPIView.as_view(), name="console-global-secret-detail"),

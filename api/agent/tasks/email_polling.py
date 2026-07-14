@@ -158,8 +158,11 @@ def _update_success(acct: AgentEmailAccount, now, last_uid: str, uidvalidity: Op
     acct.last_polled_at = now
     acct.connection_last_ok_at = now
     acct.connection_error = ""
+    acct.imap_last_ok_at = now
+    acct.imap_error = ""
     acct.save(update_fields=[
-        "last_seen_uid", "last_polled_at", "connection_last_ok_at", "connection_error"
+        "last_seen_uid", "last_polled_at", "connection_last_ok_at", "connection_error",
+        "imap_last_ok_at", "imap_error",
     ])
 
 
@@ -177,9 +180,10 @@ def _update_error_backoff(acct: AgentEmailAccount, err: Exception) -> None:
         next_delay = base
 
     acct.connection_error = str(err)
+    acct.imap_error = str(err)
     acct.backoff_until = now + timedelta(seconds=next_delay)
     acct.last_polled_at = now
-    acct.save(update_fields=["connection_error", "backoff_until", "last_polled_at"])
+    acct.save(update_fields=["connection_error", "imap_error", "backoff_until", "last_polled_at"])
 
 
 def _connect_imap(acct: AgentEmailAccount) -> imaplib.IMAP4:
@@ -461,7 +465,12 @@ def _poll_account_locked(acct: AgentEmailAccount) -> None:
                 acct.last_polled_at = now
                 acct.connection_last_ok_at = now
                 acct.connection_error = ""
-                acct.save(update_fields=["last_polled_at", "connection_last_ok_at", "connection_error"])
+                acct.imap_last_ok_at = now
+                acct.imap_error = ""
+                acct.save(update_fields=[
+                    "last_polled_at", "connection_last_ok_at", "connection_error",
+                    "imap_last_ok_at", "imap_error",
+                ])
                 return
 
             # Process in batches
