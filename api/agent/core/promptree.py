@@ -218,6 +218,7 @@ class Prompt:
         self._tokens_after_fitting = sum(n.tokens for n in leaves)
         self._last = leaves
 
+        # Fitting stores wrapper tags in each leaf; only group tags remain to assemble.
         output = self._assemble(self.root)
         self._tokens_after_fitting = self._tok(output)
         return output

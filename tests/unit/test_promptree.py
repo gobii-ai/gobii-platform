@@ -278,6 +278,8 @@ class PromptRenderingTests(TestCase):
 
         self.assertFalse(prompt.used_fast_path())
         self.assertIn("BYTES TRUNCATED", result)
+        self.assertEqual(result.count("<large>"), 1)
+        self.assertEqual(result.count("</large>"), 1)
 
 
 @tag("batch_promptree")

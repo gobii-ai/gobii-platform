@@ -2865,16 +2865,20 @@ class AgentChatAPITests(TestCase):
     @patch("tasks.services.TaskCreditService.calculate_available_tasks_for_owner", return_value=0)
     def test_console_message_skip_processing_prevents_prioritized_dispatch(self, _mock_available):
         self.client.force_login(self.user)
+        attachment = SimpleUploadedFile("deferred.txt", b"deferred", content_type="text/plain")
 
-        with patch("api.agent.tasks.enqueue_interactive_process_agent_events") as enqueue:
+        with (
+            patch("api.agent.comms.message_service.import_message_attachments_to_filespace") as import_attachments,
+            patch("api.agent.tasks.enqueue_interactive_process_agent_events") as enqueue,
+        ):
             with self.captureOnCommitCallbacks(execute=True):
                 response = self.client.post(
                     f"/console/api/agents/{self.agent.id}/messages/",
-                    data=json.dumps({"body": "No credits"}),
-                    content_type="application/json",
+                    data={"body": "No credits", "attachments": attachment},
                 )
 
         self.assertEqual(response.status_code, 201)
+        import_attachments.assert_called_once()
         enqueue.assert_not_called()
 
     @tag("batch_agent_chat")

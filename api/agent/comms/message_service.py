@@ -77,7 +77,6 @@ class _ProcessingDispatch:
     owner_id: UUID
     channel: str
     trigger_processing: bool
-    prioritized: bool = False
     message_id: str | None = None
     has_attachments: bool = False
     filespace_import_mode: str = "sync"
@@ -102,25 +101,17 @@ class _ProcessingDispatch:
             })
 
             is_interactive = self.channel == CommsChannel.WEB
-            inbound_generation = None
-            if self.prioritized:
-                if not self.trigger_processing:
-                    return
-                if is_interactive:
-                    inbound_generation = bump_human_inbound_generation(self.owner_id)
-                if self.should_skip_processing:
-                    return
-
             if self.has_attachments and self.message_id:
                 self._dispatch_attachment_import()
 
             if not self.trigger_processing:
                 return
-            if not self.prioritized:
-                if is_interactive:
-                    inbound_generation = bump_human_inbound_generation(self.owner_id)
-                if self.should_skip_processing:
-                    return
+
+            inbound_generation = None
+            if is_interactive:
+                inbound_generation = bump_human_inbound_generation(self.owner_id)
+            if self.should_skip_processing:
+                return
 
             from api.agent.tasks import enqueue_interactive_process_agent_events, process_agent_events_task
 
@@ -531,7 +522,6 @@ def ingest_inbound_message(
                 owner_id=agent_id,
                 channel=channel_val,
                 trigger_processing=trigger_processing,
-                prioritized=prioritize_processing_dispatch,
             )
         if processing_dispatch and prioritize_processing_dispatch:
             # Register before message creation so realtime post-save callbacks cannot
