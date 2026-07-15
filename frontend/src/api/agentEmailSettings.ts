@@ -80,8 +80,8 @@ export type AgentEmailSettingsPayload = {
 }
 
 export type EmailSettingsSaveRequest = {
+  expectedActiveMode: AgentEmailSettingsPayload['activeMode']
   endpointAddress: string
-  previousEndpointAddress?: string
   connectionMode: 'custom' | 'oauth2'
   oauthProvider?: string
   smtpHost: string
@@ -116,22 +116,10 @@ export type EmailSettingsTestResponse = {
     smtp: { ok: boolean; error: string } | null
     imap: { ok: boolean; error: string } | null
   }
-  settings: AgentEmailSettingsPayload
 }
 
 export async function fetchAgentEmailSettings(url: string): Promise<AgentEmailSettingsPayload> {
   return jsonFetch<AgentEmailSettingsPayload>(url)
-}
-
-export async function ensureAgentEmailAccount(
-  url: string,
-  payload: { endpointAddress: string },
-): Promise<{ ok: boolean; settings: AgentEmailSettingsPayload }> {
-  return jsonRequest<{ ok: boolean; settings: AgentEmailSettingsPayload }>(url, {
-    method: 'POST',
-    includeCsrf: true,
-    json: payload,
-  })
 }
 
 export async function saveAgentEmailSettings(
@@ -142,16 +130,6 @@ export async function saveAgentEmailSettings(
     method: 'POST',
     includeCsrf: true,
     json: payload,
-  })
-}
-
-export async function resetAgentEmailSettingsToDefault(
-  url: string,
-): Promise<{ ok: boolean; settings: AgentEmailSettingsPayload }> {
-  return jsonRequest<{ ok: boolean; settings: AgentEmailSettingsPayload }>(url, {
-    method: 'POST',
-    includeCsrf: true,
-    json: { action: 'reset_to_default' },
   })
 }
 
@@ -175,38 +153,5 @@ export async function testAgentEmailSettings(
     method: 'POST',
     includeCsrf: true,
     json: payload,
-  })
-}
-
-export async function startEmailOAuth(
-  startUrl: string,
-  payload: Record<string, unknown>,
-): Promise<{
-  session_id: string
-  state: string
-  expires_at: string
-  has_existing_credentials: boolean
-  client_id: string
-}> {
-  return jsonRequest(startUrl, {
-    method: 'POST',
-    includeCsrf: true,
-    json: payload,
-  })
-}
-
-export async function fetchEmailOAuthStatus(statusUrl: string): Promise<{
-  connected: boolean
-  expires_at?: string | null
-  scope?: string
-  provider?: string
-}> {
-  return jsonFetch(statusUrl)
-}
-
-export async function revokeEmailOAuth(revokeUrl: string): Promise<{ revoked: boolean; detail?: string }> {
-  return jsonRequest(revokeUrl, {
-    method: 'POST',
-    includeCsrf: true,
   })
 }

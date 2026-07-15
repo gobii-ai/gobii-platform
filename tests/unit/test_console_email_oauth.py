@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 
 from django.apps import apps
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
 from django.db import connections
 from django.test import TestCase, override_settings, tag
 from django.urls import reverse
@@ -64,6 +65,32 @@ class NativeAgentEmailIntegrationTests(TestCase):
     def setUp(self):
         self.client.force_login(self.user)
 
+    def _settings_payload(self, mode, account=None, **overrides):
+        payload = {
+            "expectedActiveMode": mode,
+            "endpointAddress": account.endpoint.address if account else "",
+            "connectionMode": "custom",
+            "smtpHost": account.smtp_host if account else "",
+            "smtpPort": account.smtp_port if account else None,
+            "smtpSecurity": account.smtp_security if account else "starttls",
+            "smtpAuth": account.smtp_auth if account else "login",
+            "smtpUsername": account.smtp_username if account else "",
+            "imapHost": account.imap_host if account else "",
+            "imapPort": account.imap_port if account else None,
+            "imapSecurity": account.imap_security if account else "ssl",
+            "imapAuth": account.imap_auth if account else "login",
+            "imapUsername": account.imap_username if account else "",
+            "imapFolder": account.imap_folder if account else "INBOX",
+            "isOutboundEnabled": account.is_outbound_enabled if account else False,
+            "isInboundEnabled": account.is_inbound_enabled if account else False,
+            "imapIdleEnabled": account.imap_idle_enabled if account else True,
+            "pollIntervalSec": account.poll_interval_sec if account else 120,
+            "displayName": "",
+            "defaultDisplayName": "",
+        }
+        payload.update(overrides)
+        return payload
+
     def _start(self, provider="gmail"):
         response = self.client.post(
             reverse("console-native-integration-connect", args=[provider]),
@@ -84,6 +111,7 @@ class NativeAgentEmailIntegrationTests(TestCase):
         self.assertTrue(session.code_verifier)
         self.assertEqual(session.code_challenge_method, "S256")
         self.assertIn("code_challenge=", payload["authorization_url"])
+        self.assertIn("profile", payload["authorization_url"])
         self.assertIn("gmail.send", payload["authorization_url"])
         self.assertIn("gmail.readonly", payload["authorization_url"])
         self.assertNotIn("mail.google.com", payload["authorization_url"])
@@ -125,7 +153,7 @@ class NativeAgentEmailIntegrationTests(TestCase):
             expires_at=expires_at,
         )
         migration = importlib.import_module(
-            "api.migrations.0422_native_email_integrations"
+            "api.migrations.0423_native_email_integrations"
         )
 
         migration.remove_unrepresentable_oauth_sessions(
@@ -213,6 +241,10 @@ class NativeAgentEmailIntegrationTests(TestCase):
         self.assertEqual(credential.refresh_token, "refresh-one")
         self.assertTrue(integration.oauth_account.is_outbound_enabled)
         self.assertTrue(integration.oauth_account.is_inbound_enabled)
+        self.assertEqual(
+            PersistentAgentEmailEndpoint.objects.get(endpoint=integration.oauth_account.endpoint).display_name,
+            "Mailbox Name",
+        )
 
         second = self._start()
         mock_token.return_value = {"access_token": "access-two", "expires_in": 3600}
@@ -224,6 +256,44 @@ class NativeAgentEmailIntegrationTests(TestCase):
         self.assertEqual(callback.status_code, 200, callback.content)
         credential.refresh_from_db()
         self.assertEqual(credential.refresh_token, "refresh-one")
+
+    @patch("api.services.agent_email_integrations.httpx.get")
+    def test_gmail_identity_uses_google_profile_name(self, mock_get):
+        response = MagicMock()
+        response.json.return_value = {
+            "email": "person@gmail.com",
+            "email_verified": True,
+            "name": "Google Profile Name",
+        }
+        mock_get.return_value = response
+        identity = resolve_email_oauth_identity(
+            "gmail",
+            {"access_token": "access"},
+            "gmail-client",
+        )
+        self.assertEqual(identity["display_name"], "Google Profile Name")
+
+    def test_oauth_display_name_falls_back_to_agent_name(self):
+        account = connect_agent_email_oauth(
+            agent=self.agent,
+            provider_key="gmail",
+            identity={"address": "fallback@gmail.com", "display_name": "", "account_type": "gmail"},
+            token_payload={"access_token": "access", "refresh_token": "refresh"},
+            client_id="gmail-client",
+            client_secret="gmail-secret",
+            user=self.user,
+            organization=None,
+            token_endpoint="https://oauth2.googleapis.com/token",
+            requested_scope="openid profile email",
+        )
+        email_meta = PersistentAgentEmailEndpoint.objects.get(endpoint=account.endpoint)
+        self.assertEqual(email_meta.display_name, self.agent.name)
+
+        email_meta.display_name = ""
+        email_meta.save(update_fields=["display_name"])
+        response = self.client.get(reverse("console_agent_email_settings", args=[self.agent.pk]))
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()["endpoint"]["displayName"], self.agent.name)
 
     def test_outlook_consumer_and_microsoft365_presets(self):
         consumer = connect_agent_email_oauth(
@@ -414,20 +484,412 @@ class NativeAgentEmailIntegrationTests(TestCase):
             address="configured@example.com",
             is_primary=False,
         )
-        custom_account = AgentEmailAccount.objects.create(endpoint=custom_endpoint)
-        AgentEmailIntegration.objects.create(agent=self.agent, custom_account=custom_account)
+        custom_account = AgentEmailAccount.objects.create(
+            endpoint=custom_endpoint,
+            connection_mode=AgentEmailAccount.ConnectionMode.CUSTOM,
+        )
+        AgentEmailIntegration.objects.create(
+            agent=self.agent,
+            active_mode=AgentEmailIntegration.ActiveMode.CUSTOM,
+            custom_account=custom_account,
+        )
         response = self.client.post(
             reverse("console_agent_email_settings", args=[self.agent.pk]),
-            data=json.dumps({
-                "action": "update_display_names",
-                "defaultDisplayName": "Gobii Sender",
-                "displayName": "Configured Sender",
-            }),
+            data=json.dumps(self._settings_payload(
+                AgentEmailIntegration.ActiveMode.CUSTOM,
+                custom_account,
+                defaultDisplayName="Gobii Sender",
+                displayName="Configured Sender",
+            )),
             content_type="application/json",
         )
         self.assertEqual(response.status_code, 200, response.content)
         self.assertEqual(PersistentAgentEmailEndpoint.objects.get(endpoint=default_endpoint).display_name, "Gobii Sender")
         self.assertEqual(PersistentAgentEmailEndpoint.objects.get(endpoint=custom_endpoint).display_name, "Configured Sender")
+
+    def test_none_mode_save_updates_only_gobii_display_name(self):
+        default_endpoint = ensure_default_agent_email_endpoint(self.agent, is_primary=True)
+        response = self.client.post(
+            reverse("console_agent_email_settings", args=[self.agent.pk]),
+            data=json.dumps(self._settings_payload(
+                AgentEmailIntegration.ActiveMode.NONE,
+                defaultDisplayName="Gobii Only",
+                displayName="Ignored external name",
+            )),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(
+            PersistentAgentEmailEndpoint.objects.get(endpoint=default_endpoint).display_name,
+            "Gobii Only",
+        )
+        self.assertEqual(AgentEmailAccount.objects.count(), 0)
+
+    def test_oauth_save_stages_display_names_and_directions(self):
+        default_endpoint = ensure_default_agent_email_endpoint(self.agent, is_primary=True)
+        account = connect_agent_email_oauth(
+            agent=self.agent,
+            provider_key="gmail",
+            identity={"address": "staged@gmail.com", "display_name": "Before", "account_type": "gmail"},
+            token_payload={"access_token": "access", "refresh_token": "refresh"},
+            client_id="gmail-client",
+            client_secret="gmail-secret",
+            user=self.user,
+            organization=None,
+            token_endpoint="https://oauth2.googleapis.com/token",
+            requested_scope="https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/gmail.readonly",
+        )
+        response = self.client.post(
+            reverse("console_agent_email_settings", args=[self.agent.pk]),
+            data=json.dumps(self._settings_payload(
+                AgentEmailIntegration.ActiveMode.OAUTH,
+                account,
+                defaultDisplayName="Gobii OAuth Sender",
+                displayName="Connected Sender",
+                isOutboundEnabled=False,
+                isInboundEnabled=True,
+            )),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        account.refresh_from_db()
+        self.assertFalse(account.is_outbound_enabled)
+        self.assertTrue(account.is_inbound_enabled)
+        self.assertEqual(
+            PersistentAgentEmailEndpoint.objects.get(endpoint=default_endpoint).display_name,
+            "Gobii OAuth Sender",
+        )
+        self.assertEqual(
+            PersistentAgentEmailEndpoint.objects.get(endpoint=account.endpoint).display_name,
+            "Connected Sender",
+        )
+
+    def test_legacy_oauth_remains_editable_and_disconnectable(self):
+        endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address="legacy-oauth@example.com",
+            is_primary=True,
+        )
+        account = AgentEmailAccount.objects.create(
+            endpoint=endpoint,
+            connection_mode=AgentEmailAccount.ConnectionMode.OAUTH2,
+            smtp_auth=AgentEmailAccount.AuthMode.OAUTH2,
+            imap_auth=AgentEmailAccount.ImapAuthMode.OAUTH2,
+            is_outbound_enabled=True,
+            is_inbound_enabled=True,
+        )
+        AgentEmailOAuthCredential.objects.create(
+            account=account,
+            user=self.user,
+            provider="legacy-provider",
+        )
+        AgentEmailIntegration.objects.create(
+            agent=self.agent,
+            active_mode=AgentEmailIntegration.ActiveMode.OAUTH,
+            oauth_account=account,
+        )
+        response = self.client.post(
+            reverse("console_agent_email_settings", args=[self.agent.pk]),
+            data=json.dumps(self._settings_payload(
+                AgentEmailIntegration.ActiveMode.OAUTH,
+                account,
+                displayName="Legacy Sender",
+                isInboundEnabled=False,
+            )),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        account.refresh_from_db()
+        self.assertFalse(account.is_inbound_enabled)
+        self.assertEqual(PersistentAgentEmailEndpoint.objects.get(endpoint=endpoint).display_name, "Legacy Sender")
+
+        response = self.client.post(
+            reverse("console_agent_email_settings", args=[self.agent.pk]),
+            data=json.dumps({"action": "disconnect_legacy_oauth"}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(
+            AgentEmailIntegration.objects.get(agent=self.agent).active_mode,
+            AgentEmailIntegration.ActiveMode.NONE,
+        )
+
+    @patch("console.email_settings.views._validate_agent_imap_connection", return_value=(True, ""))
+    @patch("console.email_settings.views._validate_agent_smtp_connection", return_value=(True, ""))
+    def test_custom_save_creates_complete_profile_after_validation(self, mock_smtp, mock_imap):
+        AgentEmailIntegration.objects.create(
+            agent=self.agent,
+            active_mode=AgentEmailIntegration.ActiveMode.CUSTOM,
+        )
+        response = self.client.post(
+            reverse("console_agent_email_settings", args=[self.agent.pk]),
+            data=json.dumps(self._settings_payload(
+                AgentEmailIntegration.ActiveMode.CUSTOM,
+                endpointAddress="custom-save@example.com",
+                smtpHost="smtp.example.com",
+                smtpPort=587,
+                smtpSecurity="starttls",
+                smtpAuth="login",
+                smtpUsername="smtp-user",
+                smtpPassword="smtp-secret",
+                imapHost="imap.example.com",
+                imapPort=993,
+                imapSecurity="ssl",
+                imapAuth="login",
+                imapUsername="imap-user",
+                imapPassword="imap-secret",
+                imapFolder="Archive",
+                isOutboundEnabled=True,
+                isInboundEnabled=True,
+                displayName="Custom Sender",
+                defaultDisplayName="Gobii Sender",
+            )),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        integration = AgentEmailIntegration.objects.get(agent=self.agent)
+        account = integration.custom_account
+        self.assertEqual(account.endpoint.address, "custom-save@example.com")
+        self.assertEqual(account.smtp_host, "smtp.example.com")
+        self.assertEqual(account.imap_folder, "Archive")
+        self.assertEqual(account.get_smtp_password(), "smtp-secret")
+        self.assertEqual(account.get_imap_password(), "imap-secret")
+        self.assertTrue(account.is_outbound_enabled)
+        self.assertTrue(account.is_inbound_enabled)
+        mock_smtp.assert_called_once()
+        mock_imap.assert_called_once()
+
+    @patch("console.email_settings.views._validate_agent_imap_connection")
+    @patch("console.email_settings.views._validate_agent_smtp_connection")
+    def test_display_only_custom_save_preserves_passwords_without_reconnecting(self, mock_smtp, mock_imap):
+        now = timezone.now()
+        endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address="healthy@example.com",
+            is_primary=True,
+        )
+        account = AgentEmailAccount.objects.create(
+            endpoint=endpoint,
+            connection_mode=AgentEmailAccount.ConnectionMode.CUSTOM,
+            smtp_host="smtp.example.com",
+            smtp_port=587,
+            smtp_username="smtp-user",
+            imap_host="imap.example.com",
+            imap_port=993,
+            imap_username="imap-user",
+            is_outbound_enabled=True,
+            is_inbound_enabled=True,
+            smtp_last_ok_at=now,
+            imap_last_ok_at=now,
+        )
+        account.set_smtp_password("saved-smtp")
+        account.set_imap_password("saved-imap")
+        account.save()
+        AgentEmailIntegration.objects.create(
+            agent=self.agent,
+            active_mode=AgentEmailIntegration.ActiveMode.CUSTOM,
+            custom_account=account,
+        )
+        response = self.client.post(
+            reverse("console_agent_email_settings", args=[self.agent.pk]),
+            data=json.dumps(self._settings_payload(
+                AgentEmailIntegration.ActiveMode.CUSTOM,
+                account,
+                displayName="New display name",
+            )),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        account.refresh_from_db()
+        self.assertEqual(account.get_smtp_password(), "saved-smtp")
+        self.assertEqual(account.get_imap_password(), "saved-imap")
+        mock_smtp.assert_not_called()
+        mock_imap.assert_not_called()
+
+    @patch("console.email_settings.views._validate_agent_smtp_connection", return_value=(True, ""))
+    def test_newly_enabled_custom_direction_is_validated(self, mock_smtp):
+        endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address="enable-send@example.com",
+            is_primary=True,
+        )
+        account = AgentEmailAccount.objects.create(
+            endpoint=endpoint,
+            connection_mode=AgentEmailAccount.ConnectionMode.CUSTOM,
+            smtp_host="smtp.example.com",
+            smtp_port=587,
+            smtp_username="smtp-user",
+            is_outbound_enabled=False,
+        )
+        account.set_smtp_password("saved-password")
+        account.save()
+        AgentEmailIntegration.objects.create(
+            agent=self.agent,
+            active_mode=AgentEmailIntegration.ActiveMode.CUSTOM,
+            custom_account=account,
+        )
+        response = self.client.post(
+            reverse("console_agent_email_settings", args=[self.agent.pk]),
+            data=json.dumps(self._settings_payload(
+                AgentEmailIntegration.ActiveMode.CUSTOM,
+                account,
+                isOutboundEnabled=True,
+            )),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        account.refresh_from_db()
+        self.assertTrue(account.is_outbound_enabled)
+        mock_smtp.assert_called_once()
+
+    @patch("console.email_settings.views._validate_agent_smtp_connection", return_value=(False, "SMTP unavailable"))
+    def test_custom_validation_failure_rolls_back_all_changes(self, _mock_smtp):
+        default_endpoint = ensure_default_agent_email_endpoint(self.agent, is_primary=False)
+        PersistentAgentEmailEndpoint.objects.update_or_create(
+            endpoint=default_endpoint,
+            defaults={"display_name": "Old Gobii"},
+        )
+        endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address="rollback@example.com",
+            is_primary=True,
+        )
+        PersistentAgentEmailEndpoint.objects.create(endpoint=endpoint, display_name="Old custom")
+        account = AgentEmailAccount.objects.create(
+            endpoint=endpoint,
+            connection_mode=AgentEmailAccount.ConnectionMode.CUSTOM,
+            smtp_host="smtp.old.example",
+            smtp_port=587,
+            smtp_username="user",
+            is_outbound_enabled=True,
+            smtp_last_ok_at=timezone.now(),
+        )
+        AgentEmailIntegration.objects.create(
+            agent=self.agent,
+            active_mode=AgentEmailIntegration.ActiveMode.CUSTOM,
+            custom_account=account,
+        )
+        response = self.client.post(
+            reverse("console_agent_email_settings", args=[self.agent.pk]),
+            data=json.dumps(self._settings_payload(
+                AgentEmailIntegration.ActiveMode.CUSTOM,
+                account,
+                smtpHost="smtp.new.example",
+                defaultDisplayName="New Gobii",
+                displayName="New custom",
+            )),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400, response.content)
+        account.refresh_from_db()
+        self.assertEqual(account.smtp_host, "smtp.old.example")
+        self.assertEqual(PersistentAgentEmailEndpoint.objects.get(endpoint=default_endpoint).display_name, "Old Gobii")
+        self.assertEqual(PersistentAgentEmailEndpoint.objects.get(endpoint=endpoint).display_name, "Old custom")
+
+    @patch("console.email_settings.views.AgentEmailAccount.full_clean")
+    def test_custom_persistence_failure_rolls_back_endpoint_and_account_updates(self, mock_full_clean):
+        default_endpoint = ensure_default_agent_email_endpoint(self.agent, is_primary=False)
+        PersistentAgentEmailEndpoint.objects.update_or_create(
+            endpoint=default_endpoint,
+            defaults={"display_name": "Old Gobii"},
+        )
+        endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address="atomic@example.com",
+            is_primary=True,
+        )
+        account = AgentEmailAccount.objects.create(
+            endpoint=endpoint,
+            connection_mode=AgentEmailAccount.ConnectionMode.CUSTOM,
+            smtp_host="smtp.old.example",
+            smtp_port=587,
+            smtp_username="user",
+            is_outbound_enabled=False,
+        )
+        AgentEmailIntegration.objects.create(
+            agent=self.agent,
+            active_mode=AgentEmailIntegration.ActiveMode.CUSTOM,
+            custom_account=account,
+        )
+        mock_full_clean.side_effect = ValidationError({"smtp_host": ["Invalid host"]})
+        response = self.client.post(
+            reverse("console_agent_email_settings", args=[self.agent.pk]),
+            data=json.dumps(self._settings_payload(
+                AgentEmailIntegration.ActiveMode.CUSTOM,
+                account,
+                smtpHost="smtp.new.example",
+                defaultDisplayName="New Gobii",
+            )),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400, response.content)
+        account.refresh_from_db()
+        self.assertEqual(account.smtp_host, "smtp.old.example")
+        self.assertEqual(PersistentAgentEmailEndpoint.objects.get(endpoint=default_endpoint).display_name, "Old Gobii")
+
+    def test_stale_mode_save_is_rejected_without_writes(self):
+        default_endpoint = ensure_default_agent_email_endpoint(self.agent, is_primary=True)
+        PersistentAgentEmailEndpoint.objects.update_or_create(
+            endpoint=default_endpoint,
+            defaults={"display_name": "Before"},
+        )
+        AgentEmailIntegration.objects.create(
+            agent=self.agent,
+            active_mode=AgentEmailIntegration.ActiveMode.CUSTOM,
+        )
+        response = self.client.post(
+            reverse("console_agent_email_settings", args=[self.agent.pk]),
+            data=json.dumps(self._settings_payload(
+                AgentEmailIntegration.ActiveMode.NONE,
+                defaultDisplayName="After",
+            )),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 409, response.content)
+        self.assertIn("Reload", response.json()["error"])
+        self.assertEqual(PersistentAgentEmailEndpoint.objects.get(endpoint=default_endpoint).display_name, "Before")
+
+    @patch("console.email_settings.views._validate_agent_imap_connection", return_value=(True, ""))
+    @patch("console.email_settings.views._validate_agent_smtp_connection", return_value=(True, ""))
+    def test_custom_draft_test_performs_no_database_writes(self, _mock_smtp, _mock_imap):
+        integration = AgentEmailIntegration.objects.create(
+            agent=self.agent,
+            active_mode=AgentEmailIntegration.ActiveMode.CUSTOM,
+        )
+        endpoint_count = PersistentAgentCommsEndpoint.objects.count()
+        account_count = AgentEmailAccount.objects.count()
+        response = self.client.post(
+            reverse("console_agent_email_settings_test", args=[self.agent.pk]),
+            data=json.dumps({
+                **self._settings_payload(
+                    AgentEmailIntegration.ActiveMode.CUSTOM,
+                    endpointAddress="draft-only@example.com",
+                    smtpHost="smtp.example.com",
+                    smtpPort=587,
+                    smtpUsername="smtp-user",
+                    smtpPassword="smtp-secret",
+                    imapHost="imap.example.com",
+                    imapPort=993,
+                    imapUsername="imap-user",
+                    imapPassword="imap-secret",
+                ),
+                "testOutbound": True,
+                "testInbound": True,
+            }),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertTrue(response.json()["ok"])
+        self.assertNotIn("settings", response.json())
+        integration.refresh_from_db()
+        self.assertIsNone(integration.custom_account_id)
+        self.assertEqual(PersistentAgentCommsEndpoint.objects.count(), endpoint_count)
+        self.assertEqual(AgentEmailAccount.objects.count(), account_count)
 
     def test_legacy_browser_callback_redirects_to_native_callback(self):
         response = self.client.get(reverse("app-email-oauth-callback-view"), {"code": "abc", "state": "xyz"})

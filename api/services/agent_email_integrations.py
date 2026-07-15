@@ -246,7 +246,11 @@ def connect_agent_email_oauth(
     agent.comms_endpoints.filter(channel=CommsChannel.EMAIL).exclude(pk=endpoint.pk).update(is_primary=False)
 
     email_meta, _ = PersistentAgentEmailEndpoint.objects.get_or_create(endpoint=endpoint)
-    display_name = str(identity.get("display_name") or "").strip()
+    display_name = (
+        str(identity.get("display_name") or "").strip()
+        or str(agent.name or "").strip()
+        or mailbox.partition("@")[0]
+    )
     if display_name and not email_meta.display_name:
         email_meta.display_name = display_name
         email_meta.save(update_fields=["display_name"])

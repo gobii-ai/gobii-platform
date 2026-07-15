@@ -78,7 +78,6 @@ export function EmbeddedAgentEmailSettingsPanel({
       <AgentEmailSettingsScreen
         agentId={agentId}
         emailSettingsUrl={`/console/api/agents/${agentId}/email-settings/`}
-        ensureAccountUrl={`/console/api/agents/${agentId}/email-settings/ensure-account/`}
         testUrl={`/console/api/agents/${agentId}/email-settings/test/`}
         surfaceVariant="embedded"
         onBack={onBack}
