@@ -1,4 +1,5 @@
 import ast
+import copy
 import logging
 import re
 from typing import Any
@@ -13,7 +14,8 @@ from django.utils import timezone
 from django.views import View
 
 from api.encryption import SecretsEncryption
-from api.models import AgentEmailAccount, AgentEmailOAuthCredential, CommsChannel, PersistentAgent, PersistentAgentCommsEndpoint
+from api.models import AgentEmailAccount, AgentEmailIntegration, AgentEmailOAuthCredential, CommsChannel, PersistentAgent, PersistentAgentCommsEndpoint, PersistentAgentEmailEndpoint
+from api.services.agent_email_integrations import canonical_email_provider, disconnect_agent_email_oauth, get_or_create_agent_email_integration, oauth_credential_for_account
 from api.services.agent_email_aliases import get_default_agent_email_domain, get_default_agent_email_endpoint, is_default_agent_email_address
 from api.services.persistent_agents import ensure_default_agent_email_endpoint
 from console.api_helpers import ApiLoginRequiredMixin, _coerce_bool, _parse_json_body
@@ -30,6 +32,21 @@ EMAIL_ENDPOINT_REQUIRED_ERROR = "Please provide a valid email address."
 EMAIL_ENDPOINT_CONFLICT_ERROR = "That email address is already assigned to another agent."
 AGENT_EMAIL_ACCOUNT_COPY_EXCLUDED_FIELDS = {"endpoint", "created_at", "updated_at"}
 AGENT_EMAIL_ACCOUNT_PASSWORD_INPUT_FIELDS = {"smtp_password", "imap_password"}
+SMTP_CONNECTION_FIELDS = (
+    "smtp_host",
+    "smtp_port",
+    "smtp_security",
+    "smtp_auth",
+    "smtp_username",
+)
+IMAP_CONNECTION_FIELDS = (
+    "imap_host",
+    "imap_port",
+    "imap_security",
+    "imap_auth",
+    "imap_username",
+    "imap_folder",
+)
 AGENT_EMAIL_ACCOUNT_COPY_FIELDS = tuple(
     field.name
     for field in AgentEmailAccount._meta.concrete_fields
@@ -201,8 +218,13 @@ def _ensure_agent_email_endpoint_and_account(
         if settings.ENABLE_DEFAULT_AGENT_EMAIL:
             ensure_default_agent_email_endpoint(agent, is_primary=False)
 
-        current_endpoint = _get_agent_email_endpoint(agent)
-        existing_account = getattr(current_endpoint, "agentemailaccount", None) if current_endpoint else None
+        integration = get_or_create_agent_email_integration(agent)
+        if integration.custom_account_id:
+            current_endpoint = integration.custom_account.endpoint
+            existing_account = integration.custom_account
+        else:
+            current_endpoint = _get_agent_email_endpoint(agent)
+            existing_account = getattr(current_endpoint, "agentemailaccount", None) if current_endpoint else None
 
         endpoint = _resolve_or_create_agent_email_endpoint(
             agent,
@@ -263,6 +285,20 @@ def _apply_email_account_settings(
 
 
 def _validate_agent_smtp_connection(account: AgentEmailAccount) -> tuple[bool, str]:
+    from api.agent.comms.gmail_api import GmailApiError, uses_gmail_api, validate_gmail_send_access
+
+    if uses_gmail_api(account):
+        try:
+            validate_gmail_send_access(account)
+            return True, ""
+        except GmailApiError as exc:
+            logger.warning(
+                "Gmail API send validation failed for agent email account %s: %s",
+                account.pk,
+                exc,
+            )
+            return False, str(exc)
+
     try:
         import smtplib
 
@@ -316,6 +352,20 @@ def _validate_agent_smtp_connection(account: AgentEmailAccount) -> tuple[bool, s
 
 
 def _validate_agent_imap_connection(account: AgentEmailAccount) -> tuple[bool, str]:
+    from api.agent.comms.gmail_api import GmailApiError, uses_gmail_api, validate_gmail_receive_access
+
+    if uses_gmail_api(account):
+        try:
+            validate_gmail_receive_access(account)
+            return True, ""
+        except GmailApiError as exc:
+            logger.warning(
+                "Gmail API receive validation failed for agent email account %s: %s",
+                account.pk,
+                exc,
+            )
+            return False, str(exc)
+
     try:
         import imaplib
 
@@ -502,18 +552,35 @@ def _is_first_time_custom_email_setup(
     )
 
 
+def _endpoint_display_name(endpoint: PersistentAgentCommsEndpoint | None) -> str:
+    if endpoint is None:
+        return ""
+    try:
+        return endpoint.email_meta.display_name
+    except PersistentAgentEmailEndpoint.DoesNotExist:
+        return ""
+
+
 def _serialize_agent_email_settings(
     request: HttpRequest,
     agent: PersistentAgent,
     endpoint: PersistentAgentCommsEndpoint | None,
     account: AgentEmailAccount | None,
 ) -> dict[str, Any]:
-    credential = None
-    if account:
-        try:
-            credential = account.oauth_credential
-        except AgentEmailOAuthCredential.DoesNotExist:
-            credential = None
+    integration = get_or_create_agent_email_integration(agent)
+    if integration.active_mode == AgentEmailIntegration.ActiveMode.OAUTH:
+        account = integration.oauth_account
+    elif integration.active_mode == AgentEmailIntegration.ActiveMode.CUSTOM:
+        account = integration.custom_account
+        if account is None:
+            endpoint = None
+    else:
+        account = None
+    endpoint = account.endpoint if account else endpoint
+    credential = oauth_credential_for_account(integration.oauth_account)
+    configured_display_name = _endpoint_display_name(endpoint)
+    if account and not configured_display_name:
+        configured_display_name = (agent.name or "").strip() or endpoint.address.partition("@")[0]
 
     is_first_time_custom_setup = _is_first_time_custom_email_setup(account, credential)
 
@@ -524,12 +591,15 @@ def _serialize_agent_email_settings(
     endpoint_payload = {
         "address": endpoint.address if endpoint else "",
         "exists": endpoint is not None,
+        "displayName": configured_display_name,
+        "readOnly": integration.active_mode == AgentEmailIntegration.ActiveMode.OAUTH,
     }
     default_endpoint = get_default_agent_email_endpoint(agent)
     default_endpoint_payload = {
         "address": default_endpoint.address if default_endpoint else "",
         "exists": default_endpoint is not None,
         "isInboundAliasActive": default_endpoint is not None,
+        "displayName": _endpoint_display_name(default_endpoint),
     }
     account_payload = {
         "id": str(account.pk) if account else None,
@@ -554,17 +624,32 @@ def _serialize_agent_email_settings(
         "connectionMode": account.connection_mode if account else AgentEmailAccount.ConnectionMode.CUSTOM,
         "connectionLastOkAt": account.connection_last_ok_at.isoformat() if account and account.connection_last_ok_at else None,
         "connectionError": account.connection_error if account else "",
+        "smtpLastOkAt": account.smtp_last_ok_at.isoformat() if account and account.smtp_last_ok_at else None,
+        "smtpError": account.smtp_error if account else "",
+        "imapLastOkAt": account.imap_last_ok_at.isoformat() if account and account.imap_last_ok_at else None,
+        "imapError": account.imap_error if account else "",
     }
 
+    oauth_provider = canonical_email_provider(credential.provider) if credential else ""
     oauth_payload = {
         "connected": credential is not None,
-        "provider": credential.provider if credential else "",
+        "provider": oauth_provider,
+        "legacy": bool(credential and oauth_provider not in {"gmail", "outlook"}),
         "scope": credential.scope if credential else "",
         "expiresAt": credential.expires_at.isoformat() if credential and credential.expires_at else None,
-        "callbackPath": reverse("app-email-oauth-callback-view"),
-        "startUrl": reverse("console-email-oauth-start"),
-        "statusUrl": reverse("console-email-oauth-status", args=[account.pk]) if account else None,
-        "revokeUrl": reverse("console-email-oauth-revoke", args=[account.pk]) if account else None,
+        "mailboxAddress": integration.oauth_account.endpoint.address if integration.oauth_account else "",
+        "callbackPath": reverse("console-native-integration-oauth-callback-view"),
+        "startUrl": reverse("console-native-integration-connect", args=[oauth_provider]) if oauth_provider in {"gmail", "outlook"} else None,
+        "statusUrl": None,
+        "revokeUrl": (
+            reverse("console-native-integration-revoke", args=[oauth_provider])
+            if oauth_provider in {"gmail", "outlook"}
+            else request.path if credential else None
+        ),
+        "gmailConnectUrl": reverse("console-native-integration-connect", args=["gmail"]),
+        "gmailRevokeUrl": reverse("console-native-integration-revoke", args=["gmail"]),
+        "outlookConnectUrl": reverse("console-native-integration-connect", args=["outlook"]),
+        "outlookRevokeUrl": reverse("console-native-integration-revoke", args=["outlook"]),
     }
 
     return {
@@ -580,6 +665,9 @@ def _serialize_agent_email_settings(
         "defaultEndpoint": default_endpoint_payload,
         "account": account_payload,
         "oauth": oauth_payload,
+        "activeMode": integration.active_mode,
+        "customConfigured": integration.custom_account_id is not None,
+        "customEnabled": integration.active_mode == AgentEmailIntegration.ActiveMode.CUSTOM,
     }
 
 
@@ -652,59 +740,317 @@ def _build_email_form_error_payload(form: AgentEmailAccountConsoleForm) -> dict[
     return error_payload
 
 
-def _reset_agent_email_settings_to_default(agent: PersistentAgent) -> PersistentAgentCommsEndpoint:
-    with transaction.atomic():
-        default_endpoint = ensure_default_agent_email_endpoint(agent, is_primary=True)
-        if default_endpoint is None:
-            raise ValidationError(
-                {"default_endpoint": ["Default agent email is not enabled for this workspace."]}
-            )
+def _expected_email_mode(payload: dict[str, Any]) -> str:
+    expected_mode = str(
+        _email_settings_payload_value(payload, "expectedActiveMode", "expected_active_mode", "") or ""
+    ).strip().lower()
+    valid_modes = {choice for choice, _label in AgentEmailIntegration.ActiveMode.choices}
+    if expected_mode not in valid_modes:
+        raise ValidationError({"expected_active_mode": ["Email connection mode is required."]})
+    return expected_mode
 
-        try:
-            default_account = default_endpoint.agentemailaccount
-        except AgentEmailAccount.DoesNotExist:
-            default_account = None
-        if default_account is not None:
-            default_account.delete()
 
-        other_agent_email_endpoints = (
-            agent.comms_endpoints
-            .filter(channel=CommsChannel.EMAIL)
-            .exclude(id=default_endpoint.id)
+def _email_mode_changed_response() -> JsonResponse:
+    return JsonResponse(
+        {"error": "The email connection changed in another window. Reload the page and try again."},
+        status=409,
+    )
+
+
+def _display_name_value(payload: dict[str, Any], camel_key: str, snake_key: str) -> str:
+    value = str(_email_settings_payload_value(payload, camel_key, snake_key, "") or "").strip()
+    if len(value) > 256:
+        raise ValidationError({snake_key: ["Display name must be 256 characters or fewer."]})
+    return value
+
+
+def _save_endpoint_display_name(endpoint: PersistentAgentCommsEndpoint | None, display_name: str) -> None:
+    if endpoint is None:
+        return
+    email_meta, _ = PersistentAgentEmailEndpoint.objects.get_or_create(endpoint=endpoint)
+    if email_meta.display_name == display_name:
+        return
+    email_meta.display_name = display_name
+    email_meta.save(update_fields=["display_name"])
+
+
+def _build_custom_email_draft(
+    agent: PersistentAgent,
+    integration: AgentEmailIntegration,
+    payload: dict[str, Any],
+) -> tuple[PersistentAgentCommsEndpoint, AgentEmailAccount, AgentEmailAccount | None, dict[str, Any]]:
+    endpoint_address = str(
+        _email_settings_payload_value(payload, "endpointAddress", "endpoint_address", "") or ""
+    ).strip()
+    normalized_address = _validate_and_normalize_email_endpoint_address(endpoint_address)
+    conflicting_endpoint = (
+        PersistentAgentCommsEndpoint.objects
+        .filter(
+            channel=CommsChannel.EMAIL,
+            address__iexact=normalized_address,
+            owner_agent__isnull=False,
         )
-        for endpoint in other_agent_email_endpoints:
+        .exclude(owner_agent=agent)
+        .first()
+    )
+    if conflicting_endpoint is not None:
+        raise ValidationError({"endpoint_address": [EMAIL_ENDPOINT_CONFLICT_ERROR]})
+
+    saved_account = integration.custom_account
+    if saved_account is not None:
+        endpoint = copy.copy(saved_account.endpoint)
+        endpoint.address = normalized_address
+        account = copy.copy(saved_account)
+        account.endpoint = endpoint
+    else:
+        endpoint = PersistentAgentCommsEndpoint(
+            owner_agent=agent,
+            channel=CommsChannel.EMAIL,
+            address=normalized_address,
+            is_primary=True,
+        )
+        account = AgentEmailAccount(
+            endpoint=endpoint,
+            connection_mode=AgentEmailAccount.ConnectionMode.CUSTOM,
+            imap_idle_enabled=True,
+        )
+
+    form_input = _build_email_settings_form_input(payload)
+    form_input["connection_mode"] = AgentEmailAccount.ConnectionMode.CUSTOM
+    form = AgentEmailAccountConsoleForm(form_input)
+    if not form.is_valid():
+        raise ValidationError(_build_email_form_error_payload(form))
+    _apply_email_account_settings(
+        account,
+        endpoint,
+        form.cleaned_data,
+        previous_endpoint_address=saved_account.endpoint.address if saved_account else "",
+    )
+    return endpoint, account, saved_account, form.cleaned_data
+
+
+def _custom_direction_needs_validation(
+    draft_account: AgentEmailAccount,
+    saved_account: AgentEmailAccount | None,
+    *,
+    direction: str,
+    endpoint_address_changed: bool,
+    password_changed: bool,
+) -> bool:
+    enabled_field = "is_outbound_enabled" if direction == "smtp" else "is_inbound_enabled"
+    success_field = "smtp_last_ok_at" if direction == "smtp" else "imap_last_ok_at"
+    connection_fields = SMTP_CONNECTION_FIELDS if direction == "smtp" else IMAP_CONNECTION_FIELDS
+    if not getattr(draft_account, enabled_field):
+        return False
+    if saved_account is None or endpoint_address_changed or password_changed:
+        return True
+    if not getattr(saved_account, enabled_field) or not getattr(saved_account, success_field):
+        return True
+    return any(
+        getattr(draft_account, field) != getattr(saved_account, field)
+        for field in connection_fields
+    )
+
+
+def _validate_custom_email_draft(
+    draft_account: AgentEmailAccount,
+    saved_account: AgentEmailAccount | None,
+    payload: dict[str, Any],
+    *,
+    force_outbound: bool = False,
+    force_inbound: bool = False,
+) -> tuple[dict[str, Any], dict[str, list[str]]]:
+    endpoint_address_changed = bool(
+        saved_account
+        and draft_account.endpoint.address.casefold() != saved_account.endpoint.address.casefold()
+    )
+    validate_outbound = force_outbound or _custom_direction_needs_validation(
+        draft_account,
+        saved_account,
+        direction="smtp",
+        endpoint_address_changed=endpoint_address_changed,
+        password_changed=bool(_email_settings_payload_value(payload, "smtpPassword", "smtp_password", "")),
+    )
+    validate_inbound = force_inbound or _custom_direction_needs_validation(
+        draft_account,
+        saved_account,
+        direction="imap",
+        endpoint_address_changed=endpoint_address_changed,
+        password_changed=bool(_email_settings_payload_value(payload, "imapPassword", "imap_password", "")),
+    )
+    results: dict[str, Any] = {"smtp": None, "imap": None}
+    errors: dict[str, list[str]] = {}
+    now = timezone.now()
+
+    if validate_outbound:
+        smtp_ok, smtp_error = _validate_agent_smtp_connection(draft_account)
+        results["smtp"] = {"ok": smtp_ok, "error": smtp_error}
+        draft_account.smtp_error = smtp_error
+        if smtp_ok:
+            draft_account.smtp_last_ok_at = now
+        else:
+            errors["smtp"] = [smtp_error]
+    elif not draft_account.is_outbound_enabled:
+        draft_account.smtp_error = ""
+
+    if validate_inbound:
+        imap_ok, imap_error = _validate_agent_imap_connection(draft_account)
+        results["imap"] = {"ok": imap_ok, "error": imap_error}
+        draft_account.imap_error = imap_error
+        if imap_ok:
+            draft_account.imap_last_ok_at = now
+        else:
+            errors["imap"] = [imap_error]
+    elif not draft_account.is_inbound_enabled:
+        draft_account.imap_error = ""
+
+    if not errors:
+        successful_checks = [
+            value
+            for value in (draft_account.smtp_last_ok_at, draft_account.imap_last_ok_at)
+            if value is not None
+        ]
+        if successful_checks:
+            draft_account.connection_last_ok_at = max(successful_checks)
+        draft_account.connection_error = ""
+    else:
+        draft_account.connection_error = "; ".join(messages[0] for messages in errors.values())
+    return results, errors
+
+
+def _save_agent_email_settings(
+    request: HttpRequest,
+    agent: PersistentAgent,
+    integration: AgentEmailIntegration,
+    payload: dict[str, Any],
+) -> JsonResponse:
+    try:
+        expected_mode = _expected_email_mode(payload)
+        default_display_name = _display_name_value(payload, "defaultDisplayName", "default_display_name")
+        configured_display_name = _display_name_value(payload, "displayName", "display_name")
+    except ValidationError as exc:
+        return JsonResponse({"errors": exc.message_dict}, status=400)
+    if integration.active_mode != expected_mode:
+        return _email_mode_changed_response()
+
+    draft_account = None
+    cleaned_data = None
+    if expected_mode == AgentEmailIntegration.ActiveMode.CUSTOM:
+        try:
+            _draft_endpoint, draft_account, saved_account, cleaned_data = _build_custom_email_draft(
+                agent,
+                integration,
+                payload,
+            )
+            _results, validation_errors = _validate_custom_email_draft(
+                draft_account,
+                saved_account,
+                payload,
+            )
+        except ValidationError as exc:
+            return JsonResponse({"errors": exc.message_dict}, status=400)
+        if validation_errors:
+            return JsonResponse({"errors": validation_errors}, status=400)
+    created = False
+    with transaction.atomic():
+        locked_integration = (
+            AgentEmailIntegration.objects
+            .select_for_update()
+            .select_related("custom_account__endpoint", "oauth_account__endpoint")
+            .get(pk=integration.pk)
+        )
+        if locked_integration.active_mode != expected_mode:
+            return _email_mode_changed_response()
+        if (
+            expected_mode == AgentEmailIntegration.ActiveMode.OAUTH
+            and locked_integration.oauth_account is None
+        ):
+            return _email_mode_changed_response()
+
+        default_endpoint = ensure_default_agent_email_endpoint(
+            agent,
+            is_primary=expected_mode == AgentEmailIntegration.ActiveMode.NONE,
+        )
+        _save_endpoint_display_name(default_endpoint, default_display_name)
+
+        endpoint = default_endpoint
+        account = None
+        if expected_mode == AgentEmailIntegration.ActiveMode.OAUTH:
+            account = locked_integration.oauth_account
+            account.is_outbound_enabled = _coerce_bool(
+                _email_settings_payload_value(
+                    payload,
+                    "isOutboundEnabled",
+                    "is_outbound_enabled",
+                    account.is_outbound_enabled,
+                )
+            )
+            account.is_inbound_enabled = _coerce_bool(
+                _email_settings_payload_value(
+                    payload,
+                    "isInboundEnabled",
+                    "is_inbound_enabled",
+                    account.is_inbound_enabled,
+                )
+            )
+            if not account.is_outbound_enabled:
+                account.smtp_error = ""
+            if not account.is_inbound_enabled:
+                account.imap_error = ""
+            account.save(update_fields=[
+                "is_outbound_enabled",
+                "is_inbound_enabled",
+                "smtp_error",
+                "imap_error",
+                "updated_at",
+            ])
+            endpoint = account.endpoint
+            _save_endpoint_display_name(endpoint, configured_display_name)
+        elif expected_mode == AgentEmailIntegration.ActiveMode.CUSTOM:
+            endpoint_address = str(
+                _email_settings_payload_value(payload, "endpointAddress", "endpoint_address", "") or ""
+            ).strip()
             try:
-                endpoint_account = endpoint.agentemailaccount
-            except AgentEmailAccount.DoesNotExist:
-                endpoint_account = None
-            if endpoint_account is not None:
-                endpoint_account.delete()
+                endpoint, account, created = _ensure_agent_email_endpoint_and_account(agent, endpoint_address)
+                _apply_email_account_settings(
+                    account,
+                    endpoint,
+                    cleaned_data or {},
+                    previous_endpoint_address=locked_integration.custom_account.endpoint.address
+                    if locked_integration.custom_account_id else "",
+                )
+                for field in (
+                    "connection_last_ok_at",
+                    "connection_error",
+                    "smtp_last_ok_at",
+                    "smtp_error",
+                    "imap_last_ok_at",
+                    "imap_error",
+                ):
+                    setattr(account, field, getattr(draft_account, field))
+                account.full_clean()
+                account.save()
+            except ValidationError as exc:
+                transaction.set_rollback(True)
+                return JsonResponse({"errors": exc.message_dict}, status=400)
+            _save_endpoint_display_name(endpoint, configured_display_name)
+            locked_integration.custom_account = account
+            locked_integration.save(update_fields=["custom_account", "updated_at"])
 
-            endpoint_updates: list[str] = []
-            if endpoint.is_primary:
-                endpoint.is_primary = False
-                endpoint_updates.append("is_primary")
-            if endpoint.owner_agent_id is not None:
-                endpoint.owner_agent = None
-                endpoint_updates.append("owner_agent")
-            if endpoint_updates:
-                endpoint.save(update_fields=endpoint_updates)
+    if expected_mode == AgentEmailIntegration.ActiveMode.CUSTOM:
+        Analytics.track_event(
+            user_id=request.user.id,
+            event=AnalyticsEvent.EMAIL_ACCOUNT_CREATED if created else AnalyticsEvent.EMAIL_ACCOUNT_UPDATED,
+            source=AnalyticsSource.WEB,
+            properties={"agent_id": str(agent.pk), "endpoint": endpoint.address},
+        )
 
-        default_updates: list[str] = []
-        if default_endpoint.owner_agent_id != agent.id:
-            default_endpoint.owner_agent = agent
-            default_updates.append("owner_agent")
-        if not default_endpoint.is_primary:
-            default_endpoint.is_primary = True
-            default_updates.append("is_primary")
-        if default_updates:
-            default_endpoint.save(update_fields=default_updates)
-
-        agent.comms_endpoints.filter(channel=CommsChannel.EMAIL, is_primary=True).exclude(
-            id=default_endpoint.id
-        ).update(is_primary=False)
-
-        return default_endpoint
+    return JsonResponse(
+        {
+            "ok": True,
+            "settings": _serialize_agent_email_settings(request, agent, endpoint, account),
+        }
+    )
 
 
 class AgentEmailSettingsAPIView(ApiLoginRequiredMixin, View):
@@ -712,6 +1058,11 @@ class AgentEmailSettingsAPIView(ApiLoginRequiredMixin, View):
 
     def get(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
         agent = _resolve_owned_agent_for_email_settings(request, agent_id)
+        integration = get_or_create_agent_email_integration(agent)
+        ensure_default_agent_email_endpoint(
+            agent,
+            is_primary=integration.active_mode == AgentEmailIntegration.ActiveMode.NONE,
+        )
         endpoint = _get_agent_email_endpoint(agent)
         account = getattr(endpoint, "agentemailaccount", None) if endpoint else None
         return JsonResponse(_serialize_agent_email_settings(request, agent, endpoint, account))
@@ -723,98 +1074,32 @@ class AgentEmailSettingsAPIView(ApiLoginRequiredMixin, View):
         except ValueError as exc:
             return HttpResponseBadRequest(str(exc))
         action = str(_email_settings_payload_value(payload, "action", "action", "") or "").strip().lower()
-        if action in {"reset_to_default", "resettodefault"}:
-            try:
-                endpoint = _reset_agent_email_settings_to_default(agent)
-            except ValidationError as exc:
-                return JsonResponse({"errors": exc.message_dict}, status=400)
-            return JsonResponse(
-                {
-                    "ok": True,
-                    "settings": _serialize_agent_email_settings(request, agent, endpoint, None),
-                }
-            )
-
-        current_endpoint = _get_agent_email_endpoint(agent)
-        current_endpoint_address = current_endpoint.address if current_endpoint else ""
-        payload_previous_endpoint_address = (
-            _email_settings_payload_value(payload, "previousEndpointAddress", "previous_endpoint_address", "") or ""
-        ).strip()
-        previous_endpoint_address = payload_previous_endpoint_address or current_endpoint_address
-        endpoint_address = (_email_settings_payload_value(payload, "endpointAddress", "endpoint_address", "") or "").strip()
-        if not endpoint_address:
-            endpoint_address = current_endpoint_address
-        if not endpoint_address:
-            return JsonResponse({"error": "Agent email address is required."}, status=400)
-
-        try:
-            endpoint, account, created = _ensure_agent_email_endpoint_and_account(agent, endpoint_address)
-        except ValidationError as exc:
-            return JsonResponse({"errors": exc.message_dict}, status=400)
-
-        form_input = _build_email_settings_form_input(payload)
-        form = AgentEmailAccountConsoleForm(form_input)
-        if not form.is_valid():
-            return JsonResponse({"errors": _build_email_form_error_payload(form)}, status=400)
-
-        provider = str(_email_settings_payload_value(payload, "oauthProvider", "oauth_provider", "") or "").strip().lower()
-        _apply_email_account_settings(
-            account,
-            endpoint,
-            form.cleaned_data,
-            provider=provider,
-            previous_endpoint_address=previous_endpoint_address,
-        )
-
-        try:
-            account.full_clean()
-            account.save()
-        except ValidationError as exc:
-            return JsonResponse({"errors": exc.message_dict}, status=400)
-
-        try:
-            Analytics.track_event(
-                user_id=request.user.id,
-                event=AnalyticsEvent.EMAIL_ACCOUNT_CREATED if created else AnalyticsEvent.EMAIL_ACCOUNT_UPDATED,
-                source=AnalyticsSource.WEB,
-                properties={"agent_id": str(agent.pk), "endpoint": endpoint.address},
-            )
-        except Exception:
-            pass
-
-        return JsonResponse(
-            {
-                "ok": True,
-                "settings": _serialize_agent_email_settings(request, agent, endpoint, account),
-            }
-        )
-
-
-class AgentEmailSettingsEnsureAccountAPIView(ApiLoginRequiredMixin, View):
-    http_method_names = ["post"]
-
-    def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
-        agent = _resolve_owned_agent_for_email_settings(request, agent_id)
-        try:
-            payload = _parse_json_body(request)
-        except ValueError as exc:
-            return HttpResponseBadRequest(str(exc))
-
-        endpoint_address = (_email_settings_payload_value(payload, "endpointAddress", "endpoint_address", "") or "").strip()
-        if not endpoint_address:
-            return JsonResponse({"error": "Agent email address is required."}, status=400)
-
-        try:
-            endpoint, account, _created = _ensure_agent_email_endpoint_and_account(agent, endpoint_address)
-        except ValidationError as exc:
-            return JsonResponse({"errors": exc.message_dict}, status=400)
-
-        return JsonResponse(
-            {
-                "ok": True,
-                "settings": _serialize_agent_email_settings(request, agent, endpoint, account),
-            }
-        )
+        integration = get_or_create_agent_email_integration(agent)
+        if action in {"disconnect_legacy_oauth", "disconnectlegacyoauth"}:
+            credential = oauth_credential_for_account(integration.oauth_account)
+            if credential is None or canonical_email_provider(credential.provider) in {"gmail", "outlook"}:
+                return JsonResponse({"error": "No legacy email OAuth connection is active."}, status=400)
+            disconnected = disconnect_agent_email_oauth(agent, credential.provider)
+            return JsonResponse({"ok": disconnected, "settings": _serialize_agent_email_settings(request, agent, None, integration.custom_account)})
+        if action in {"enable_custom", "enablecustom"}:
+            if integration.active_mode == AgentEmailIntegration.ActiveMode.OAUTH:
+                return JsonResponse({"error": "Disconnect the connected email provider before enabling custom SMTP/IMAP."}, status=400)
+            integration.active_mode = AgentEmailIntegration.ActiveMode.CUSTOM
+            integration.save(update_fields=["active_mode", "updated_at"])
+            return JsonResponse({"ok": True, "settings": _serialize_agent_email_settings(request, agent, None, integration.custom_account)})
+        if action in {"disable_custom", "disablecustom", "reset_to_default", "resettodefault"}:
+            if integration.custom_account:
+                AgentEmailAccount.objects.filter(pk=integration.custom_account_id).update(
+                    is_outbound_enabled=False,
+                    is_inbound_enabled=False,
+                )
+            integration.active_mode = AgentEmailIntegration.ActiveMode.NONE
+            integration.save(update_fields=["active_mode", "updated_at"])
+            default_endpoint = ensure_default_agent_email_endpoint(agent, is_primary=True)
+            return JsonResponse({"ok": True, "settings": _serialize_agent_email_settings(request, agent, default_endpoint, integration.custom_account)})
+        if action:
+            return JsonResponse({"error": "Unknown email settings action."}, status=400)
+        return _save_agent_email_settings(request, agent, integration, payload)
 
 
 class AgentEmailSettingsTestAPIView(ApiLoginRequiredMixin, View):
@@ -827,73 +1112,46 @@ class AgentEmailSettingsTestAPIView(ApiLoginRequiredMixin, View):
         except ValueError as exc:
             return HttpResponseBadRequest(str(exc))
 
-        current_endpoint = _get_agent_email_endpoint(agent)
-        current_endpoint_address = current_endpoint.address if current_endpoint else ""
-        payload_previous_endpoint_address = (
-            _email_settings_payload_value(payload, "previousEndpointAddress", "previous_endpoint_address", "") or ""
-        ).strip()
-        previous_endpoint_address = payload_previous_endpoint_address or current_endpoint_address
-        endpoint_address = (_email_settings_payload_value(payload, "endpointAddress", "endpoint_address", "") or "").strip()
-        if not endpoint_address:
-            endpoint_address = current_endpoint_address
-        if not endpoint_address:
-            return JsonResponse({"error": "Agent email address is required."}, status=400)
-
         test_outbound = _coerce_bool(_email_settings_payload_value(payload, "testOutbound", "test_outbound", False))
         test_inbound = _coerce_bool(_email_settings_payload_value(payload, "testInbound", "test_inbound", False))
         if not test_outbound and not test_inbound:
             return JsonResponse({"error": "Select at least one connection test to run."}, status=400)
 
+        integration = (
+            AgentEmailIntegration.objects
+            .select_related("custom_account__endpoint")
+            .filter(agent=agent)
+            .first()
+        )
+        if integration is None or integration.active_mode != AgentEmailIntegration.ActiveMode.CUSTOM:
+            return JsonResponse({"error": "Enable custom SMTP/IMAP before testing these settings."}, status=400)
         try:
-            endpoint, account, _created = _ensure_agent_email_endpoint_and_account(agent, endpoint_address)
+            expected_mode = _expected_email_mode(payload)
+            if expected_mode != integration.active_mode:
+                return _email_mode_changed_response()
+            test_payload = {
+                **payload,
+                "isOutboundEnabled": test_outbound,
+                "isInboundEnabled": test_inbound,
+            }
+            _endpoint, test_account, saved_account, _cleaned_data = _build_custom_email_draft(
+                agent,
+                integration,
+                test_payload,
+            )
+            results, validation_errors = _validate_custom_email_draft(
+                test_account,
+                saved_account,
+                test_payload,
+                force_outbound=test_outbound,
+                force_inbound=test_inbound,
+            )
         except ValidationError as exc:
             return JsonResponse({"errors": exc.message_dict}, status=400)
 
-        form_input = _build_email_settings_form_input(payload)
-        form_input["is_outbound_enabled"] = test_outbound
-        form_input["is_inbound_enabled"] = test_inbound
-        form = AgentEmailAccountConsoleForm(form_input)
-        if not form.is_valid():
-            return JsonResponse({"errors": _build_email_form_error_payload(form)}, status=400)
-
-        provider = str(_email_settings_payload_value(payload, "oauthProvider", "oauth_provider", "") or "").strip().lower()
-        test_account = AgentEmailAccount.objects.get(pk=account.pk)
-        _apply_email_account_settings(
-            test_account,
-            endpoint,
-            form.cleaned_data,
-            provider=provider,
-            previous_endpoint_address=previous_endpoint_address,
-        )
-
-        smtp_result: dict[str, Any] | None = None
-        imap_result: dict[str, Any] | None = None
-        errors: list[str] = []
-
-        if test_outbound:
-            smtp_ok, smtp_error = _validate_agent_smtp_connection(test_account)
-            smtp_result = {"ok": smtp_ok, "error": smtp_error}
-            if not smtp_ok:
-                errors.append(f"SMTP test failed: {smtp_error}")
-
-        if test_inbound:
-            imap_ok, imap_error = _validate_agent_imap_connection(test_account)
-            imap_result = {"ok": imap_ok, "error": imap_error}
-            if not imap_ok:
-                errors.append(f"IMAP test failed: {imap_error}")
-
-        if (smtp_result and smtp_result["ok"]) or (imap_result and imap_result["ok"]):
-            account.connection_last_ok_at = timezone.now()
-        account.connection_error = "; ".join(errors)
-        account.save(update_fields=["connection_last_ok_at", "connection_error", "updated_at"])
-
         return JsonResponse(
             {
-                "ok": not errors,
-                "results": {
-                    "smtp": smtp_result,
-                    "imap": imap_result,
-                },
-                "settings": _serialize_agent_email_settings(request, agent, endpoint, account),
+                "ok": not validation_errors,
+                "results": results,
             }
         )

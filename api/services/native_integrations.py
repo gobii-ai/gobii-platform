@@ -120,6 +120,7 @@ class NativeIntegrationProvider:
     api_url_prefixes: tuple[str, ...]
     icon: str
     authorization_params: dict[str, str]
+    connection_scope: str = "workspace"
 
     @property
     def secret_key(self) -> str:
@@ -224,6 +225,53 @@ GOOGLE_DRIVE_PROVIDER = NativeIntegrationProvider(
         "include_granted_scopes": "false",
         "prompt": "consent",
     },
+)
+
+GMAIL_PROVIDER = NativeIntegrationProvider(
+    key="gmail",
+    display_name="Gmail",
+    description="Connect Gmail for an agent to send and receive email.",
+    auth_type="oauth2",
+    authorization_endpoint="https://accounts.google.com/o/oauth2/v2/auth",
+    token_endpoint="https://oauth2.googleapis.com/token",
+    scopes=(
+        "openid",
+        "profile",
+        "email",
+        "https://www.googleapis.com/auth/gmail.send",
+        "https://www.googleapis.com/auth/gmail.readonly",
+    ),
+    api_hosts=(),
+    api_url_prefixes=(),
+    icon="gmail",
+    authorization_params={
+        "access_type": "offline",
+        "include_granted_scopes": "false",
+        "prompt": "consent",
+    },
+    connection_scope="agent",
+)
+
+OUTLOOK_PROVIDER = NativeIntegrationProvider(
+    key="outlook",
+    display_name="Outlook",
+    description="Connect Microsoft 365 or Outlook.com for an agent to send and receive email.",
+    auth_type="oauth2",
+    authorization_endpoint="https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
+    token_endpoint="https://login.microsoftonline.com/common/oauth2/v2.0/token",
+    scopes=(
+        "openid",
+        "profile",
+        "email",
+        "offline_access",
+        "https://outlook.office.com/IMAP.AccessAsUser.All",
+        "https://outlook.office.com/SMTP.Send",
+    ),
+    api_hosts=(),
+    api_url_prefixes=(),
+    icon="outlook",
+    authorization_params={"prompt": "select_account"},
+    connection_scope="agent",
 )
 
 APOLLO_PROVIDER = NativeIntegrationProvider(
@@ -390,6 +438,8 @@ NATIVE_INTEGRATION_CREDENTIAL_FIELDS: dict[str, tuple[NativeIntegrationCredentia
 
 NATIVE_INTEGRATION_PROVIDERS = {
     GOOGLE_DRIVE_PROVIDER.key: GOOGLE_DRIVE_PROVIDER,
+    GMAIL_PROVIDER.key: GMAIL_PROVIDER,
+    OUTLOOK_PROVIDER.key: OUTLOOK_PROVIDER,
     APOLLO_PROVIDER.key: APOLLO_PROVIDER,
     HUBSPOT_PROVIDER.key: HUBSPOT_PROVIDER,
     META_ADS_PROVIDER.key: META_ADS_PROVIDER,
@@ -662,6 +712,10 @@ def native_integration_client_credentials(provider: NativeIntegrationProvider) -
         return settings.APOLLO_CLIENT_ID, settings.APOLLO_CLIENT_SECRET
     if provider.key == HUBSPOT_PROVIDER.key:
         return settings.HUBSPOT_CLIENT_ID, settings.HUBSPOT_CLIENT_SECRET
+    if provider.key == GMAIL_PROVIDER.key:
+        return settings.GMAIL_CLIENT_ID, settings.GMAIL_CLIENT_SECRET
+    if provider.key == OUTLOOK_PROVIDER.key:
+        return settings.MICROSOFT_CLIENT_ID, settings.MICROSOFT_CLIENT_SECRET
     return "", ""
 
 

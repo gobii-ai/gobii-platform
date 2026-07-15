@@ -3,6 +3,7 @@ from datetime import timedelta
 from typing import Optional
 
 import requests
+from django.conf import settings
 from django.utils import timezone
 
 from api.models import AgentEmailAccount, AgentEmailOAuthCredential
@@ -82,11 +83,21 @@ def _maybe_refresh_email_oauth_credential(
         "refresh_token": refresh_token,
     }
 
+    provider = str(credential.provider or "").strip().lower()
     client_id = (credential.client_id or metadata.get("client_id") or "").strip()
+    client_secret = (credential.client_secret or metadata.get("client_secret") or "").strip()
+    # Credentials created by the retired email OAuth flow could omit the OAuth
+    # application's client details. Only those incomplete legacy records use
+    # the old deployment settings; new Gmail connections always store GMAIL_*.
+    if provider in {"gmail", "google"} and not client_id:
+        client_id = settings.GOOGLE_CLIENT_ID
+        client_secret = client_secret or settings.GOOGLE_CLIENT_SECRET
+    elif provider in {"microsoft", "outlook", "o365", "office365"} and not client_id:
+        client_id = settings.MICROSOFT_CLIENT_ID
+        client_secret = client_secret or settings.MICROSOFT_CLIENT_SECRET
     if client_id:
         request_data["client_id"] = client_id
 
-    client_secret = (credential.client_secret or metadata.get("client_secret") or "").strip()
     if client_secret:
         request_data["client_secret"] = client_secret
 

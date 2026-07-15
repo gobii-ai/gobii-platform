@@ -21,11 +21,14 @@ export type AgentEmailSettingsPayload = {
   endpoint: {
     address: string
     exists: boolean
+    displayName: string
+    readOnly: boolean
   }
   defaultEndpoint: {
     address: string
     exists: boolean
     isInboundAliasActive: boolean
+    displayName: string
   }
   account: {
     id: string | null
@@ -50,22 +53,35 @@ export type AgentEmailSettingsPayload = {
     connectionMode: 'custom' | 'oauth2'
     connectionLastOkAt: string | null
     connectionError: string
+    smtpLastOkAt: string | null
+    smtpError: string
+    imapLastOkAt: string | null
+    imapError: string
   }
   oauth: {
     connected: boolean
     provider: string
+    legacy: boolean
+    mailboxAddress: string
     scope: string
     expiresAt: string | null
     callbackPath: string
-    startUrl: string
+    startUrl: string | null
     statusUrl: string | null
     revokeUrl: string | null
+    gmailConnectUrl: string
+    gmailRevokeUrl: string
+    outlookConnectUrl: string
+    outlookRevokeUrl: string
   }
+  activeMode: 'none' | 'custom' | 'oauth'
+  customConfigured: boolean
+  customEnabled: boolean
 }
 
 export type EmailSettingsSaveRequest = {
+  expectedActiveMode: AgentEmailSettingsPayload['activeMode']
   endpointAddress: string
-  previousEndpointAddress?: string
   connectionMode: 'custom' | 'oauth2'
   oauthProvider?: string
   smtpHost: string
@@ -85,6 +101,8 @@ export type EmailSettingsSaveRequest = {
   isInboundEnabled: boolean
   imapIdleEnabled: boolean
   pollIntervalSec: number
+  displayName?: string
+  defaultDisplayName?: string
 }
 
 export type EmailSettingsTestRequest = EmailSettingsSaveRequest & {
@@ -98,22 +116,10 @@ export type EmailSettingsTestResponse = {
     smtp: { ok: boolean; error: string } | null
     imap: { ok: boolean; error: string } | null
   }
-  settings: AgentEmailSettingsPayload
 }
 
 export async function fetchAgentEmailSettings(url: string): Promise<AgentEmailSettingsPayload> {
   return jsonFetch<AgentEmailSettingsPayload>(url)
-}
-
-export async function ensureAgentEmailAccount(
-  url: string,
-  payload: { endpointAddress: string },
-): Promise<{ ok: boolean; settings: AgentEmailSettingsPayload }> {
-  return jsonRequest<{ ok: boolean; settings: AgentEmailSettingsPayload }>(url, {
-    method: 'POST',
-    includeCsrf: true,
-    json: payload,
-  })
 }
 
 export async function saveAgentEmailSettings(
@@ -127,13 +133,15 @@ export async function saveAgentEmailSettings(
   })
 }
 
-export async function resetAgentEmailSettingsToDefault(
+export async function updateAgentEmailSettingsAction(
   url: string,
+  action: string,
+  values: Record<string, unknown> = {},
 ): Promise<{ ok: boolean; settings: AgentEmailSettingsPayload }> {
-  return jsonRequest<{ ok: boolean; settings: AgentEmailSettingsPayload }>(url, {
+  return jsonRequest(url, {
     method: 'POST',
     includeCsrf: true,
-    json: { action: 'reset_to_default' },
+    json: { action, ...values },
   })
 }
 
@@ -145,38 +153,5 @@ export async function testAgentEmailSettings(
     method: 'POST',
     includeCsrf: true,
     json: payload,
-  })
-}
-
-export async function startEmailOAuth(
-  startUrl: string,
-  payload: Record<string, unknown>,
-): Promise<{
-  session_id: string
-  state: string
-  expires_at: string
-  has_existing_credentials: boolean
-  client_id: string
-}> {
-  return jsonRequest(startUrl, {
-    method: 'POST',
-    includeCsrf: true,
-    json: payload,
-  })
-}
-
-export async function fetchEmailOAuthStatus(statusUrl: string): Promise<{
-  connected: boolean
-  expires_at?: string | null
-  scope?: string
-  provider?: string
-}> {
-  return jsonFetch(statusUrl)
-}
-
-export async function revokeEmailOAuth(revokeUrl: string): Promise<{ revoked: boolean; detail?: string }> {
-  return jsonRequest(revokeUrl, {
-    method: 'POST',
-    includeCsrf: true,
   })
 }

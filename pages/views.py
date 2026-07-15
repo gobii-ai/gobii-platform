@@ -224,6 +224,7 @@ def _homepage_native_integration_providers() -> list[dict[str, object]]:
             "revoke_url": reverse("console-native-integration-revoke", args=[provider.key]),
         }
         for provider in list_native_integration_providers()
+        if provider.connection_scope == "workspace"
     ]
 
 

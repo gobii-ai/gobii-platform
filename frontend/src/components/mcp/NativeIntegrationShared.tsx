@@ -75,6 +75,16 @@ let googlePickerApiPromise: Promise<void> | null = null
 const DEFAULT_NATIVE_PROVIDER_TILE_CLASS_NAME = 'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700'
 
 const NATIVE_PROVIDER_ICONS: Record<string, { className: string; framedClassName: string; src: string; tileClassName?: string }> = {
+  gmail: {
+    className: 'h-5 w-5 object-contain',
+    framedClassName: 'h-6 w-6 object-contain',
+    src: '/static/images/integrations/native/gmail.svg',
+  },
+  outlook: {
+    className: 'h-5 w-5 object-contain',
+    framedClassName: 'h-6 w-6 object-contain',
+    src: '/static/images/integrations/native/outlook.svg',
+  },
   apollo: {
     className: 'h-4 w-4 object-contain',
     framedClassName: 'h-7 w-7 object-contain',
@@ -335,7 +345,7 @@ export function useNativeIntegrationConnectMutation({
   setPendingAction,
   setStatusMessage,
   onError,
-  startConnect = (provider) => startNativeIntegrationConnect(provider.connectUrl),
+  startConnect,
   agentId = null,
   closedMessage,
 }: NativeIntegrationActionFeedback & {
@@ -345,7 +355,11 @@ export function useNativeIntegrationConnectMutation({
 }) {
   return useMutation({
     mutationFn: ({ provider }: { provider: NativeIntegrationProvider; popup: Window | null }) =>
-      startConnect(provider),
+      (startConnect ?? ((target) => startNativeIntegrationConnect(
+        target.connectUrl,
+        undefined,
+        target.connectionScope === 'agent' ? agentId ?? undefined : undefined,
+      )))(provider),
     onMutate: ({ provider }) => {
       setPendingAction({ providerKey: provider.providerKey, kind: 'connect' })
       setStatusMessage(null)
@@ -375,16 +389,24 @@ export function useNativeIntegrationDisconnectMutation({
   setPendingAction,
   setStatusMessage,
   onError,
-  disconnect = (provider) => revokeNativeIntegration(provider.revokeUrl).then(() => provider),
+  disconnect,
+  agentId = null,
   extraInvalidateQueryKeys = [],
 }: NativeIntegrationActionFeedback & {
   nativeQueryKey: readonly unknown[]
   disconnect?: (provider: NativeIntegrationProvider) => Promise<unknown>
+  agentId?: string | null
   extraInvalidateQueryKeys?: readonly unknown[][]
 }) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (provider: NativeIntegrationProvider) => disconnect(provider),
+    mutationFn: (provider: NativeIntegrationProvider) => (
+      disconnect ?? ((target) => revokeNativeIntegration(
+        target.revokeUrl,
+        undefined,
+        target.connectionScope === 'agent' ? agentId ?? undefined : undefined,
+      ).then(() => target))
+    )(provider),
     onMutate: (provider) => {
       setPendingAction({ providerKey: provider.providerKey, kind: 'disconnect' })
       setStatusMessage(null)

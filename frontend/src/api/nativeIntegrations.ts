@@ -16,6 +16,9 @@ export type NativeIntegrationProviderDTO = {
   picker_token_url: string
   agent_event_url: string
   revoke_url: string
+  connection_scope?: 'workspace' | 'agent'
+  connected_agent_count?: number
+  agent_connections_url?: string
   credential_fields?: NativeIntegrationCredentialFieldDTO[]
   present_credential_fields?: string[]
   missing_credential_fields?: string[]
@@ -94,6 +97,9 @@ export type NativeIntegrationProvider = {
   pickerTokenUrl: string
   agentEventUrl: string
   revokeUrl: string
+  connectionScope?: 'workspace' | 'agent'
+  connectedAgentCount?: number
+  agentConnectionsUrl?: string
   credentialFields: NativeIntegrationCredentialField[]
   presentCredentialFields: string[]
   missingCredentialFields: string[]
@@ -172,6 +178,9 @@ export const mapNativeIntegrationProvider = (provider: NativeIntegrationProvider
   pickerTokenUrl: provider.picker_token_url,
   agentEventUrl: provider.agent_event_url,
   revokeUrl: provider.revoke_url,
+  connectionScope: provider.connection_scope === 'agent' ? 'agent' : 'workspace',
+  connectedAgentCount: Number(provider.connected_agent_count ?? 0),
+  agentConnectionsUrl: provider.agent_connections_url ?? '',
   credentialFields: (provider.credential_fields ?? []).map((field) => ({
     key: field.key,
     name: field.name,
@@ -208,12 +217,13 @@ export async function fetchNativeIntegrations(listUrl: string): Promise<NativeIn
 export async function startNativeIntegrationConnect(
   connectUrl: string,
   csrfToken?: string,
+  agentId?: string,
 ): Promise<NativeIntegrationConnectResponse> {
   const payload = await jsonRequest<NativeIntegrationConnectResponseDTO>(connectUrl, {
     method: 'POST',
     includeCsrf: true,
     csrfToken,
-    json: {},
+    json: agentId ? { agent_id: agentId } : {},
   })
   return {
     providerKey: payload.provider_key,
@@ -264,13 +274,50 @@ export async function fetchNativeIntegrationFiles(filesUrl: string): Promise<Nat
   }
 }
 
-export async function revokeNativeIntegration(revokeUrl: string, csrfToken?: string): Promise<{ revoked: boolean }> {
+export async function revokeNativeIntegration(revokeUrl: string, csrfToken?: string, agentId?: string): Promise<{ revoked: boolean }> {
   return jsonRequest<{ revoked: boolean }>(revokeUrl, {
     method: 'POST',
     includeCsrf: true,
     csrfToken,
-    json: {},
+    json: agentId ? { agent_id: agentId } : {},
   })
+}
+
+export type NativeIntegrationAgentConnection = {
+  agentId: string
+  agentName: string
+  provider: string
+  mailboxAddress: string
+  connected: boolean
+  activeMode: 'none' | 'custom' | 'oauth'
+  sendEnabled: boolean
+  receiveEnabled: boolean
+  smtpLastOkAt: string | null
+  smtpError: string
+  imapLastOkAt: string | null
+  imapError: string
+  gobiiAddress: string
+  settingsUrl: string
+}
+
+export async function fetchNativeIntegrationAgentConnections(url: string): Promise<NativeIntegrationAgentConnection[]> {
+  const payload = await jsonFetch<{ agents?: Array<Record<string, unknown>> }>(url)
+  return (payload.agents ?? []).map((agent) => ({
+    agentId: String(agent.agent_id ?? ''),
+    agentName: String(agent.agent_name ?? ''),
+    provider: String(agent.provider ?? ''),
+    mailboxAddress: String(agent.mailbox_address ?? ''),
+    connected: Boolean(agent.connected),
+    activeMode: (agent.active_mode === 'custom' || agent.active_mode === 'oauth') ? agent.active_mode : 'none',
+    sendEnabled: Boolean(agent.send_enabled),
+    receiveEnabled: Boolean(agent.receive_enabled),
+    smtpLastOkAt: typeof agent.smtp_last_ok_at === 'string' ? agent.smtp_last_ok_at : null,
+    smtpError: String(agent.smtp_error ?? ''),
+    imapLastOkAt: typeof agent.imap_last_ok_at === 'string' ? agent.imap_last_ok_at : null,
+    imapError: String(agent.imap_error ?? ''),
+    gobiiAddress: String(agent.gobii_address ?? ''),
+    settingsUrl: String(agent.settings_url ?? ''),
+  }))
 }
 
 export async function recordNativeIntegrationAgentEvent({

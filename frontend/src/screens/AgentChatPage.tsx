@@ -21,6 +21,7 @@ import {
 } from '../api/agentChat'
 import type { AgentSpawnIntent, TemplateRecommendation } from '../api/agentSpawnIntent'
 import type { ConsoleContext } from '../api/context'
+import { fetchAgentEmailSettings } from '../api/agentEmailSettings'
 import { fetchUsageBurnRate, fetchUsageSummary } from '../components/usage/api'
 import { AgentChatLayout, type AgentChatLayoutSidebarConfig } from '../components/agentChat/AgentChatLayout'
 import { EmbeddedAgentContactRequestsPanel } from '../components/agentChat/EmbeddedAgentContactRequestsPanel'
@@ -131,6 +132,8 @@ const APOLLO_NATIVE_TAB_KEY = 'apolloNative'
 const HUBSPOT_NATIVE_TAB_KEY = 'hubspotNative'
 const DISCORD_NATIVE_TAB_KEY = 'discordNative'
 const META_ADS_TAB_KEY = 'metaAds'
+const GMAIL_TAB_KEY = 'gmailEmail'
+const OUTLOOK_TAB_KEY = 'outlookEmail'
 
 function withTemplateLaunchNonce(path: string): string {
   if (typeof window === 'undefined') {
@@ -1550,6 +1553,16 @@ export function AgentChatPage({
     () => rosterAgents.find((agent) => agent.id === activeAgentId) ?? null,
     [activeAgentId, rosterAgents],
   )
+  const activeEmailIntegrationQuery = useQuery({
+    queryKey: ['agent-email-settings', activeAgentId],
+    queryFn: () => fetchAgentEmailSettings(`/console/api/agents/${activeAgentId}/email-settings/`),
+    enabled: Boolean(activeAgentId),
+    refetchOnWindowFocus: true,
+  })
+  const gmailEmailTabEnabled = activeEmailIntegrationQuery.data?.activeMode === 'oauth'
+    && activeEmailIntegrationQuery.data.oauth.provider === 'gmail'
+  const outlookEmailTabEnabled = activeEmailIntegrationQuery.data?.activeMode === 'oauth'
+    && activeEmailIntegrationQuery.data.oauth.provider === 'outlook'
   const rosterGoogleSheetsDriveTabEnabled = Boolean(
     activeRosterMeta?.enabledSystemSkills?.includes(GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY),
   )
@@ -3997,6 +4010,8 @@ export function AgentChatPage({
         [HUBSPOT_NATIVE_TAB_KEY]: hubspotNativeTabEnabled,
         [DISCORD_NATIVE_TAB_KEY]: discordNativeTabEnabled,
         [META_ADS_TAB_KEY]: metaAdsTabEnabled,
+        [GMAIL_TAB_KEY]: gmailEmailTabEnabled,
+        [OUTLOOK_TAB_KEY]: outlookEmailTabEnabled,
       },
     }))
   }, [
@@ -4008,10 +4023,12 @@ export function AgentChatPage({
     dispatch,
     effectiveContext?.type,
     googleSheetsDriveTabEnabled,
+    gmailEmailTabEnabled,
     hubspotNativeTabEnabled,
     isCollaboratorOnly,
     isNewAgent,
     metaAdsTabEnabled,
+    outlookEmailTabEnabled,
     resolvedMiniDescription,
     resolvedAgentEmail,
     resolvedAgentName,

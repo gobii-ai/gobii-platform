@@ -29,6 +29,7 @@ import { DiscordInsightPanel } from './insights/DiscordInsightPanel'
 import { GoogleDriveInsightPanel } from './insights/GoogleDriveInsightPanel'
 import { HubSpotInsightPanel } from './insights/HubSpotInsightPanel'
 import { MetaAdsInsightPanel } from './insights/MetaAdsInsightPanel'
+import { GmailInsightPanel, OutlookInsightPanel } from './insights/EmailIntegrationInsightPanel'
 import { AgentIntelligenceSelector } from './AgentIntelligenceSelector'
 import { PendingActionComposerPanel } from './PendingActionComposerPanel'
 import { HUMAN_INPUT_OTHER_OPTION_KEY } from './HumanInputComposerPanel'
@@ -83,6 +84,8 @@ const APOLLO_NATIVE_TAB_KEY = 'apolloNative'
 const HUBSPOT_NATIVE_TAB_KEY = 'hubspotNative'
 const DISCORD_NATIVE_TAB_KEY = 'discordNative'
 const META_ADS_TAB_KEY = 'metaAds'
+const GMAIL_TAB_KEY = 'gmailEmail'
+const OUTLOOK_TAB_KEY = 'outlookEmail'
 const MINUTE_MS = 60 * 1000
 const HOUR_MS = 60 * MINUTE_MS
 const DAY_MS = 24 * HOUR_MS
@@ -267,7 +270,7 @@ type HumanInputComposerBatchResponse = {
   responses: HumanInputComposerResponse[]
 }
 
-type NativeWorkingTabKind = 'google_drive' | 'apollo' | 'hubspot' | 'discord' | 'meta_ads'
+type NativeWorkingTabKind = 'google_drive' | 'apollo' | 'hubspot' | 'discord' | 'meta_ads' | 'gmail' | 'outlook'
 type PendingWorkingTabKind = 'questions' | 'credentials' | 'contacts' | 'agents'
 type PendingWorkingPanelTab = {
   id: `pending:${PendingWorkingTabKind}`
@@ -307,6 +310,20 @@ const PENDING_WORKING_TAB_CONFIG = {
 } as const
 
 const NATIVE_WORKING_TAB_CONFIG = {
+  gmail: {
+    label: 'Gmail',
+    title: 'Gmail',
+    ariaLabel: 'View Gmail connection',
+    panel: GmailInsightPanel,
+    icon: <img src="/static/images/integrations/native/gmail.svg" alt="" className="composer-insight-tab-image" />,
+  },
+  outlook: {
+    label: 'Outlook',
+    title: 'Outlook',
+    ariaLabel: 'View Outlook connection',
+    panel: OutlookInsightPanel,
+    icon: <img src="/static/images/integrations/native/outlook.svg" alt="" className="composer-insight-tab-image" />,
+  },
   google_drive: {
     label: 'Drive',
     title: 'Google Drive',
@@ -638,6 +655,8 @@ export const AgentComposer = memo(function AgentComposer({
   const hubspotNativeTabEnabled = Boolean(storeEnabledIntegrationTabs[HUBSPOT_NATIVE_TAB_KEY])
   const discordNativeTabEnabled = Boolean(storeEnabledIntegrationTabs[DISCORD_NATIVE_TAB_KEY])
   const metaAdsTabEnabled = Boolean(storeEnabledIntegrationTabs[META_ADS_TAB_KEY])
+  const gmailTabEnabled = Boolean(storeEnabledIntegrationTabs[GMAIL_TAB_KEY])
+  const outlookTabEnabled = Boolean(storeEnabledIntegrationTabs[OUTLOOK_TAB_KEY])
   const insights = useMemo(() => {
     const hydratedInsights = baseInsights.map((insight) => {
       if (insight.insightType !== 'agent_setup') {
@@ -832,6 +851,8 @@ export const AgentComposer = memo(function AgentComposer({
   const hubspotTabAvailable = Boolean(hubspotNativeTabEnabled && canManageAgent)
   const discordTabAvailable = Boolean(discordNativeTabEnabled && canManageAgent)
   const metaAdsTabAvailable = Boolean(metaAdsTabEnabled && canManageAgent)
+  const gmailTabAvailable = Boolean(gmailTabEnabled && canManageAgent)
+  const outlookTabAvailable = Boolean(outlookTabEnabled && canManageAgent)
   const nativeTabAvailability = useMemo(
     () => [
       { kind: 'google_drive', available: googleDriveTabAvailable },
@@ -839,8 +860,10 @@ export const AgentComposer = memo(function AgentComposer({
       { kind: 'hubspot', available: hubspotTabAvailable },
       { kind: 'discord', available: discordTabAvailable },
       { kind: 'meta_ads', available: metaAdsTabAvailable },
+      { kind: 'gmail', available: gmailTabAvailable },
+      { kind: 'outlook', available: outlookTabAvailable },
     ] as const,
-    [apolloTabAvailable, discordTabAvailable, googleDriveTabAvailable, hubspotTabAvailable, metaAdsTabAvailable],
+    [apolloTabAvailable, discordTabAvailable, gmailTabAvailable, googleDriveTabAvailable, hubspotTabAvailable, metaAdsTabAvailable, outlookTabAvailable],
   )
   const pendingActionTabs = useMemo<PendingWorkingPanelTab[]>(() => {
     const actionsByTabKind = new Map<PendingWorkingTabKind, PendingActionRequest[]>()

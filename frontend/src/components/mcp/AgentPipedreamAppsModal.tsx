@@ -5,6 +5,8 @@ import { CheckCircle2, Loader2, Plug, Settings } from 'lucide-react'
 import { agentDiscordAppQueryKey, fetchAgentDiscordApp, type AgentDiscordApp } from '../../api/discordNative'
 import { disconnectAgentPipedreamApp, fetchAgentPipedreamApps, removeAgentPipedreamApp, startAgentPipedreamAppConnect, type AgentPipedreamAppRow } from '../../api/mcp'
 import { fetchNativeIntegrations, type NativeIntegrationProvider } from '../../api/nativeIntegrations'
+import { fetchAgentEmailSettings } from '../../api/agentEmailSettings'
+import { AgentEmailSettingsScreen } from '../../screens/AgentEmailSettingsScreen'
 import {
   PipedreamAppSummaryCell,
   PipedreamEmptyState,
@@ -25,6 +27,8 @@ import { IntegrationConnectionButton } from './IntegrationActionButtons'
 import {
   confirmNativeIntegrationDisconnect,
   NativeIntegrationGridRow,
+  NativeIntegrationStatusBadge,
+  NativeIntegrationSummaryCell,
   openNativeOAuthPopup,
   usesManualNativeIntegrationCredentials,
   useNativeIntegrationConnectMutation,
@@ -70,6 +74,7 @@ export function AgentPipedreamAppsModal({
   const [pendingAction, setPendingAction] = useState<PendingAction>(null)
   const [pendingNativeAction, setPendingNativeAction] = useState<PendingNativeAction>(null)
   const [discordConfigureOpen, setDiscordConfigureOpen] = useState(false)
+  const [emailConfigureOpen, setEmailConfigureOpen] = useState(false)
   const [statusMessage, setStatusMessage] = useState<PipedreamStatusMessage>(null)
   const setNativeStatusMessage = useCallback((message: string | null) => {
     setStatusMessage(message ? { text: message, tone: 'error' } : null)
@@ -103,6 +108,11 @@ export function AgentPipedreamAppsModal({
   const nativeIntegrationsQuery = useQuery({
     queryKey: nativeQueryKey,
     queryFn: () => fetchNativeIntegrations(nativeIntegrationsUrl as string),
+    enabled: Boolean(nativeIntegrationsUrl),
+  })
+  const emailSettingsQuery = useQuery({
+    queryKey: ['agent-email-settings', agentId],
+    queryFn: () => fetchAgentEmailSettings(`/console/api/agents/${agentId}/email-settings/`),
     enabled: Boolean(nativeIntegrationsUrl),
   })
   const discordAppQuery = useQuery({
@@ -161,6 +171,7 @@ export function AgentPipedreamAppsModal({
   const nativeConnectMutation = useNativeIntegrationConnectMutation({
     setPendingAction: setPendingNativeAction,
     setStatusMessage: setNativeStatusMessage,
+    agentId,
   })
 
   const {
@@ -188,6 +199,7 @@ export function AgentPipedreamAppsModal({
     nativeQueryKey,
     setPendingAction: setPendingNativeAction,
     setStatusMessage: setNativeStatusMessage,
+    agentId,
   })
 
   const nativePickerMutation = useNativeIntegrationPickerMutation({
@@ -196,7 +208,18 @@ export function AgentPipedreamAppsModal({
   })
 
   const normalizedSearch = debouncedSearchTerm.toLowerCase()
+  const connectedEmailProvider = emailSettingsQuery.data?.activeMode === 'oauth'
+    ? emailSettingsQuery.data.oauth.provider
+    : ''
   const nativeRows = (nativeIntegrationsQuery.data?.providers ?? [])
+    .filter((provider) => emailSettingsQuery.data?.activeMode !== 'custom'
+      || !['gmail', 'outlook'].includes(provider.providerKey))
+    .filter((provider) => !connectedEmailProvider
+      || !['gmail', 'outlook'].includes(provider.providerKey)
+      || provider.providerKey === connectedEmailProvider)
+    .map((provider) => ['gmail', 'outlook'].includes(provider.providerKey)
+      ? { ...provider, connected: provider.providerKey === connectedEmailProvider }
+      : provider)
     .filter((provider) => !normalizedSearch || [
       provider.providerKey,
       provider.displayName,
@@ -227,7 +250,18 @@ export function AgentPipedreamAppsModal({
   const activeDiscordApp = discordConfigureOpen ? (discordAppQuery.data ?? discordRow) : null
   const pendingDiscordAction = pendingDiscordAgentAction?.agentId === agentId ? pendingDiscordAgentAction.kind : null
 
-  const body = activeDiscordApp ? (
+  const body = emailConfigureOpen ? (
+    <AgentEmailSettingsScreen
+      agentId={agentId}
+      emailSettingsUrl={`/console/api/agents/${agentId}/email-settings/`}
+      testUrl={`/console/api/agents/${agentId}/email-settings/test/`}
+      onBack={() => setEmailConfigureOpen(false)}
+      onSaved={() => {
+        void emailSettingsQuery.refetch()
+        void nativeIntegrationsQuery.refetch()
+      }}
+    />
+  ) : activeDiscordApp ? (
     <DiscordConfigurationScreen
       agentId={agentId}
       app={activeDiscordApp}
@@ -246,20 +280,27 @@ export function AgentPipedreamAppsModal({
         <PipedreamSearchInput
           value={searchTerm}
           onChange={setSearchTerm}
-          isFetching={appsQuery.isFetching || nativeIntegrationsQuery.isFetching || discordAppQuery.isFetching}
+          isFetching={appsQuery.isFetching || nativeIntegrationsQuery.isFetching || discordAppQuery.isFetching || emailSettingsQuery.isFetching}
           disabled={isBusy}
         />
 
-        {(enablePipedreamApps && appsQuery.isError) || nativeIntegrationsQuery.isError || discordAppQuery.isError ? (
-          <PipedreamErrorState error={appsQuery.error ?? nativeIntegrationsQuery.error ?? discordAppQuery.error} fallback="Unable to load apps." />
-        ) : (enablePipedreamApps && appsQuery.isLoading) || nativeIntegrationsQuery.isLoading || discordAppQuery.isLoading ? (
+        {(enablePipedreamApps && appsQuery.isError) || nativeIntegrationsQuery.isError || discordAppQuery.isError || emailSettingsQuery.isError ? (
+          <PipedreamErrorState error={appsQuery.error ?? nativeIntegrationsQuery.error ?? discordAppQuery.error ?? emailSettingsQuery.error} fallback="Unable to load apps." />
+        ) : (enablePipedreamApps && appsQuery.isLoading) || nativeIntegrationsQuery.isLoading || discordAppQuery.isLoading || emailSettingsQuery.isLoading ? (
           <PipedreamLoadingState label="Loading apps…" />
         ) : apps.length === 0 ? (
           <PipedreamEmptyState label="No apps matched your search." />
         ) : (
           <PipedreamListFrame isMobile={isMobile}>
             {apps.map((app) => app.kind === 'native' ? (
-              <AgentNativeAppRowItem
+              ['gmail', 'outlook'].includes(app.providerKey) ? <AgentEmailNativeAppRowItem
+                key={`native-${app.providerKey}`}
+                provider={app}
+                pendingNativeAction={pendingNativeAction}
+                disabled={isBusy}
+                onConnect={() => nativeConnectMutation.mutate({ provider: app, popup: openNativeOAuthPopup(app) })}
+                onConfigure={() => setEmailConfigureOpen(true)}
+              /> : <AgentNativeAppRowItem
                 key={`native-${app.providerKey}`}
                 provider={app}
                 pendingNativeAction={pendingNativeAction}
@@ -309,8 +350,8 @@ export function AgentPipedreamAppsModal({
   return (
     <>
       <PipedreamModalShell
-        title={activeDiscordApp ? 'Configure Discord' : 'Apps'}
-        subtitle={activeDiscordApp ? 'Choose the Discord server channels this agent should watch.' : 'Search, connect, and disconnect apps for this agent.'}
+        title={emailConfigureOpen ? 'Configure Email' : activeDiscordApp ? 'Configure Discord' : 'Apps'}
+        subtitle={emailConfigureOpen ? 'Choose how this agent sends and receives email.' : activeDiscordApp ? 'Choose the Discord server channels this agent should watch.' : 'Search, connect, and disconnect apps for this agent.'}
         ariaLabel="Manage agent apps"
         onClose={onClose}
       >
@@ -348,6 +389,39 @@ function AgentNativeAppRowItem({
       onDisconnect={onDisconnect}
       onPicker={onPicker}
     />
+  )
+}
+
+function AgentEmailNativeAppRowItem({
+  provider,
+  pendingNativeAction,
+  disabled,
+  onConnect,
+  onConfigure,
+}: {
+  provider: NativeIntegrationProvider
+  pendingNativeAction: PendingNativeAction
+  disabled: boolean
+  onConnect: () => void
+  onConfigure: () => void
+}) {
+  const pendingKind = pendingNativeAction?.providerKey === provider.providerKey
+    ? pendingNativeAction.kind
+    : null
+  return (
+    <div className="px-4 py-3">
+      <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_7rem_8rem] sm:items-start">
+        <NativeIntegrationSummaryCell provider={provider} badge="native" />
+        <NativeIntegrationStatusBadge connected={provider.connected} />
+        <div className="flex justify-start sm:justify-end">
+          {provider.connected ? (
+            <button type="button" className="inline-flex min-w-28 items-center justify-center gap-2 rounded-md border border-blue-200 bg-white px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50 disabled:opacity-60" disabled={disabled} onClick={onConfigure}><Settings className="h-4 w-4" />Configure</button>
+          ) : (
+            <IntegrationConnectionButton connected={false} pendingKind={pendingKind} disabled={disabled} onConnect={onConnect} onDisconnect={onConfigure} />
+          )}
+        </div>
+      </div>
+    </div>
   )
 }
 
