@@ -1,18 +1,20 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useState } from 'react'
 import { Copy, Loader2 } from 'lucide-react'
 
 import { fetchPromptArchive } from '../../api/agentAudit'
 import type { PromptArchive } from '../../types/agentAudit'
-import { AuditJsonValue } from '../agentAudit/AuditJsonValue'
+import { isRecord } from '../../util/objectUtils'
+import { tryParseJson } from './toolDetails/normalize'
+import { JsonBlock, OutputBlock, Section } from './toolDetails/shared'
+import { stringify } from './toolDetails/utils'
 import type { ToolDetailProps } from './tooling/types'
 
-function DetailSection({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <section className="space-y-2">
-      <h4 className="text-[11px] font-semibold uppercase tracking-wide text-slate-600">{title}</h4>
-      {children}
-    </section>
-  )
+function RawValue({ value }: { value: unknown }) {
+  const parsed = typeof value === 'string' ? tryParseJson(value) : value
+  if (Array.isArray(parsed) || isRecord(parsed)) {
+    return <JsonBlock value={parsed} />
+  }
+  return <OutputBlock content={stringify(value)} />
 }
 
 function CopyablePrompt({ label, value }: { label: string; value: string }) {
@@ -54,30 +56,35 @@ function metric(label: string, value: string | number | null | undefined) {
 }
 
 export function RawDeveloperToolDetail({ entry }: ToolDetailProps) {
+  const tool = entry.sourceEntry?.developerEvent?.kind === 'tool_call'
+    ? entry.sourceEntry.developerEvent
+    : null
   return (
     <div className="space-y-4 text-sm text-slate-700">
       <div className="grid gap-2 sm:grid-cols-2">
         {metric('Raw tool name', entry.toolName)}
-        {metric('Duration', entry.sourceEntry?.developerExecutionDurationMs != null
-          ? `${entry.sourceEntry.developerExecutionDurationMs} ms`
+        {metric('Duration', tool?.execution_duration_ms != null
+          ? `${tool.execution_duration_ms} ms`
           : null)}
       </div>
       {entry.rawParameters !== null && entry.rawParameters !== undefined ? (
-        <DetailSection title="Raw parameters">
-          <AuditJsonValue value={entry.rawParameters} />
-        </DetailSection>
+        <Section title="Raw parameters">
+          <RawValue value={entry.rawParameters} />
+        </Section>
       ) : null}
       {entry.result !== null && entry.result !== undefined ? (
-        <DetailSection title="Raw result">
-          <AuditJsonValue value={entry.result} />
-        </DetailSection>
+        <Section title="Raw result">
+          <RawValue value={entry.result} />
+        </Section>
       ) : null}
     </div>
   )
 }
 
 export function DeveloperStepDetail({ entry }: ToolDetailProps) {
-  const step = entry.sourceEntry?.developerStep
+  const step = entry.sourceEntry?.developerEvent?.kind === 'step'
+    ? entry.sourceEntry.developerEvent
+    : null
   if (!step) return <p className="text-sm text-slate-600">Step details are unavailable.</p>
 
   return (
@@ -88,25 +95,23 @@ export function DeveloperStepDetail({ entry }: ToolDetailProps) {
         {metric('Completion ID', step.completion_id)}
       </div>
       {step.description ? (
-        <DetailSection title="Description">
-          <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-indigo-100 bg-white px-3 py-3 text-xs text-slate-800">
-            {step.description}
-          </pre>
-        </DetailSection>
+        <Section title="Description">
+          <OutputBlock content={step.description} />
+        </Section>
       ) : null}
       {step.system_notes ? (
-        <DetailSection title="System notes">
-          <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-amber-200 bg-white px-3 py-3 text-xs text-slate-800">
-            {step.system_notes}
-          </pre>
-        </DetailSection>
+        <Section title="System notes">
+          <OutputBlock content={step.system_notes} />
+        </Section>
       ) : null}
     </div>
   )
 }
 
 export function DeveloperCompletionDetail({ entry }: ToolDetailProps) {
-  const completion = entry.sourceEntry?.developerCompletion
+  const completion = entry.sourceEntry?.developerEvent?.kind === 'completion'
+    ? entry.sourceEntry.developerEvent
+    : null
   const archiveId = completion?.prompt_archive?.id ?? null
   const [promptArchive, setPromptArchive] = useState<PromptArchive | null>(null)
   const [promptLoading, setPromptLoading] = useState(Boolean(archiveId))
@@ -154,21 +159,19 @@ export function DeveloperCompletionDetail({ entry }: ToolDetailProps) {
       </div>
 
       {completion.llm_tool_names?.length ? (
-        <DetailSection title="Tools passed to the LLM">
-          <AuditJsonValue value={completion.llm_tool_names} />
-        </DetailSection>
+        <Section title="Tools passed to the LLM">
+          <JsonBlock value={completion.llm_tool_names} />
+        </Section>
       ) : null}
 
       {completion.thinking?.trim() ? (
-        <DetailSection title="Thinking">
-          <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-amber-50 px-3 py-3 text-xs text-slate-800">
-            {completion.thinking}
-          </pre>
-        </DetailSection>
+        <Section title="Thinking">
+          <OutputBlock content={completion.thinking} />
+        </Section>
       ) : null}
 
       {archiveId ? (
-        <DetailSection title="Prompt archive">
+        <Section title="Prompt archive">
           {promptLoading ? (
             <div className="inline-flex items-center gap-2 text-xs text-slate-600">
               <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
@@ -181,7 +184,7 @@ export function DeveloperCompletionDetail({ entry }: ToolDetailProps) {
           {!promptLoading && !promptError && !systemPrompt && !userPrompt ? (
             <p className="text-xs text-slate-600">No system or user prompt was archived.</p>
           ) : null}
-        </DetailSection>
+        </Section>
       ) : null}
     </div>
   )

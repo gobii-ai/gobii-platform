@@ -11,7 +11,7 @@ export type ActivityEntryPresentation = {
 }
 
 export function deriveActivityEntryPresentation(entry: ToolEntryDisplay): ActivityEntryPresentation {
-  if (entry.sourceEntry?.developerRaw) {
+  if (entry.sourceEntry?.developerEvent) {
     return {
       label: entry.label,
       caption: entry.caption && entry.caption !== entry.label ? entry.caption : null,

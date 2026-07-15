@@ -1,54 +1,9 @@
-import { AlertTriangle, StepForward } from 'lucide-react'
+import { AlertTriangle } from 'lucide-react'
 
-import type { AuditErrorEvent, AuditStepEvent } from '../../types/agentAudit'
+import type { AuditErrorEvent } from '../../types/agentAudit'
+import { JsonBlock } from '../agentChat/toolDetails/shared'
 import { EventHeader } from './EventHeader'
-import { AuditJsonValue } from './AuditJsonValue'
 import { IconCircle } from './eventPrimitives'
-
-export function StepRow({
-  step,
-  collapsed = false,
-  onToggle,
-}: {
-  step: AuditStepEvent
-  collapsed?: boolean
-  onToggle?: () => void
-}) {
-  return (
-    <div className="rounded-lg border border-slate-200/80 bg-white px-3 py-2 shadow-[0_1px_2px_rgba(15,23,42,0.06)]">
-      <EventHeader
-        left={
-          <>
-            <IconCircle icon={StepForward} bgClass="bg-slate-100" textClass="text-slate-700" />
-            <div>
-              <div className="text-sm font-semibold text-slate-900">Step</div>
-              <div className="text-xs text-slate-600">{step.timestamp ? new Date(step.timestamp).toLocaleString() : '—'}</div>
-            </div>
-          </>
-        }
-        right={
-          step.is_system ? (
-            <span className="rounded-full bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-700">
-              {step.system_code || 'System'}
-            </span>
-          ) : (
-            <span className="rounded-full bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-700">Step</span>
-          )
-        }
-        collapsed={collapsed}
-        onToggle={onToggle}
-      />
-      {!collapsed ? (
-        <>
-          {step.description ? <div className="mt-2 whitespace-pre-wrap break-words text-sm text-slate-800">{step.description}</div> : null}
-          {step.is_system && step.system_notes ? (
-            <div className="mt-2 rounded-md bg-slate-50 px-2 py-1 text-[12px] text-slate-700">{step.system_notes}</div>
-          ) : null}
-        </>
-      ) : null}
-    </div>
-  )
-}
 
 export function ErrorRow({
   error,
@@ -89,7 +44,7 @@ export function ErrorRow({
           {hasContext ? (
             <div className="space-y-1">
               <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-600">Context</div>
-              <AuditJsonValue value={error.context} />
+              <JsonBlock value={error.context} />
             </div>
           ) : null}
           {error.traceback ? (

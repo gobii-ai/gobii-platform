@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Plus, Zap } from 'lucide-react'
-import type { ConsoleContext, StaffViewContext } from '../api/context'
+import type { ConsoleContext } from '../api/context'
 import { jsonFetch } from '../api/http'
 import { SubscriptionUpgradeModal } from '../components/common/SubscriptionUpgradeModal'
 import type { SelectionShellPage } from '../components/agentChat/SelectionShellPageSwitcher'
@@ -22,6 +22,7 @@ import { track } from '../util/analytics'
 import { APP_NAVIGATE_EVENT } from '../util/appNavigation'
 import { appendReturnTo } from '../util/returnTo'
 import { setScheduleDisplayTimeZone } from '../util/schedule'
+import { parseStaffViewContext } from '../util/staffViewContext'
 import '../styles/immersiveApp.css'
 
 const APP_BASE = '/app'
@@ -409,16 +410,6 @@ function parseBooleanFlag(value: string | null): boolean {
     return false
   }
   return ['1', 'true', 'yes', 'on'].includes(value.toLowerCase())
-}
-
-function parseStaffViewContext(search: string): StaffViewContext | null {
-  const params = new URLSearchParams(search)
-  const type = params.get('staff_context_type')
-  const id = params.get('staff_context_id')?.trim()
-  if ((type !== 'personal' && type !== 'organization') || !id) {
-    return null
-  }
-  return { type, id }
 }
 
 function hasUpgradeModalRequest(search: string): boolean {

@@ -2,7 +2,6 @@ import type { SignupPreviewState } from './agentRoster'
 import type {
   AuditCompletionEvent,
   AuditErrorEvent,
-  AuditMessageEvent,
   AuditStepEvent,
   AuditSystemMessageEvent,
   AuditToolCallEvent,
@@ -81,10 +80,7 @@ export type ToolCallEntry = {
   chartImageUrl?: string | null
   createImageUrl?: string | null
   createVideoUrl?: string | null
-  developerRaw?: boolean
-  developerExecutionDurationMs?: number | null
-  developerCompletion?: AuditCompletionEvent
-  developerStep?: AuditStepEvent
+  developerEvent?: AuditCompletionEvent | AuditToolCallEvent | AuditStepEvent
 }
 
 export type ToolClusterEvent = {
@@ -327,14 +323,12 @@ type DeveloperEvent<T, Kind extends string> = Omit<T, 'kind'> & {
 
 export type DeveloperCompletionEvent = DeveloperEvent<AuditCompletionEvent, 'developer_completion'>
 export type DeveloperToolCallEvent = DeveloperEvent<AuditToolCallEvent, 'developer_tool_call'>
-export type DeveloperMessageEvent = DeveloperEvent<AuditMessageEvent, 'developer_message'>
 export type DeveloperStepEvent = DeveloperEvent<AuditStepEvent, 'developer_step'>
 export type DeveloperSystemMessageEvent = DeveloperEvent<AuditSystemMessageEvent, 'developer_system_message'>
 export type DeveloperErrorEvent = DeveloperEvent<AuditErrorEvent, 'developer_error'>
 export type DeveloperTimelineEvent =
   | DeveloperCompletionEvent
   | DeveloperToolCallEvent
-  | DeveloperMessageEvent
   | DeveloperStepEvent
   | DeveloperSystemMessageEvent
   | DeveloperErrorEvent

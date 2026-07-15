@@ -73,7 +73,15 @@ describe('transformToolCluster Google API display', () => {
       toolName: 'search_web',
       parameters: { q: 'raw query' },
       result: { items: [{ id: 1 }] },
-      developerRaw: true,
+      developerEvent: {
+        kind: 'tool_call',
+        id: 'tool-call-1',
+        timestamp: '2026-01-01T00:00:00Z',
+        completion_id: null,
+        tool_name: 'search_web',
+        parameters: { q: 'raw query' },
+        result: { items: [{ id: 1 }] },
+      },
     }
 
     const transformed = transformToolCluster(cluster)
@@ -92,8 +100,7 @@ describe('transformToolCluster Google API display', () => {
     cluster.entries[0] = {
       ...cluster.entries[0],
       toolName: '__developer_step__',
-      developerRaw: true,
-      developerStep: {
+      developerEvent: {
         kind: 'step',
         id: 'step-1',
         timestamp: '2026-07-07T12:21:33Z',

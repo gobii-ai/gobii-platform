@@ -2,101 +2,16 @@ import { useCallback, useState, type FormEvent } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 
 import { updateSystemMessage } from '../../api/agentAudit'
-import type {
-  DeveloperTimelineEvent,
-  DeveloperSystemMessageEvent,
-  ToolClusterEvent,
-} from '../../types/agentChat'
-import type {
-  AuditErrorEvent,
-  AuditSystemMessageEvent,
-  AuditToolCallEvent,
-} from '../../types/agentAudit'
+import type { DeveloperSystemMessageEvent, DeveloperTimelineEvent } from '../../types/agentChat'
+import type { AuditErrorEvent, AuditSystemMessageEvent } from '../../types/agentAudit'
 import { ErrorRow } from '../agentAudit/EventRows'
 import { SystemMessageCard } from '../agentAudit/SystemMessageCard'
 import { ModalForm } from '../common/ModalForm'
-import { ToolClusterCard } from './ToolClusterCard'
+import { asAuditEvent } from './developerTimelineDisplay'
 
 type DeveloperTimelineEventCardProps = {
   agentId: string
   event: DeveloperTimelineEvent
-}
-
-function asAuditEvent<T extends { kind: string }, K extends string>(event: T, kind: K): Omit<T, 'kind' | 'cursor'> & { kind: K } {
-  const { cursor: _cursor, kind: _kind, ...payload } = event as T & { cursor: string }
-  return { ...payload, kind } as Omit<T, 'kind' | 'cursor'> & { kind: K }
-}
-
-function buildDeveloperToolCluster(event: DeveloperTimelineEvent): ToolClusterEvent | null {
-  if (event.kind === 'developer_completion') {
-    const completion = asAuditEvent(event, 'completion')
-    return {
-      kind: 'steps',
-      cursor: event.cursor,
-      entryCount: 1,
-      collapsible: false,
-      collapseThreshold: Number.POSITIVE_INFINITY,
-      earliestTimestamp: completion.timestamp,
-      latestTimestamp: completion.timestamp,
-      entries: [{
-        id: `completion:${completion.id}`,
-        cursor: event.cursor,
-        meta: { label: 'Completion' },
-        toolName: '__developer_completion__',
-        timestamp: completion.timestamp,
-        status: 'complete',
-        developerRaw: true,
-        developerCompletion: completion,
-      }],
-    }
-  }
-  if (event.kind === 'developer_tool_call') {
-    const tool = asAuditEvent(event, 'tool_call') as AuditToolCallEvent
-    return {
-      kind: 'steps',
-      cursor: event.cursor,
-      entryCount: 1,
-      collapsible: false,
-      collapseThreshold: Number.POSITIVE_INFINITY,
-      earliestTimestamp: tool.timestamp,
-      latestTimestamp: tool.timestamp,
-      entries: [{
-        id: tool.id,
-        cursor: event.cursor,
-        meta: { label: tool.tool_name || 'Tool call' },
-        toolName: tool.tool_name || 'tool',
-        timestamp: tool.timestamp,
-        parameters: tool.parameters,
-        result: tool.result,
-        status: 'complete',
-        developerRaw: true,
-        developerExecutionDurationMs: tool.execution_duration_ms,
-      }],
-    }
-  }
-  if (event.kind === 'developer_step') {
-    const step = asAuditEvent(event, 'step')
-    return {
-      kind: 'steps',
-      cursor: event.cursor,
-      entryCount: 1,
-      collapsible: false,
-      collapseThreshold: Number.POSITIVE_INFINITY,
-      earliestTimestamp: step.timestamp,
-      latestTimestamp: step.timestamp,
-      entries: [{
-        id: step.id,
-        cursor: event.cursor,
-        meta: { label: step.is_system ? step.system_code || 'System step' : 'Step' },
-        toolName: '__developer_step__',
-        timestamp: step.timestamp,
-        status: 'complete',
-        developerRaw: true,
-        developerStep: step,
-      }],
-    }
-  }
-  return null
 }
 
 export function DeveloperTimelineEventCard({ agentId, event }: DeveloperTimelineEventCardProps) {
@@ -129,13 +44,10 @@ export function DeveloperTimelineEventCard({ agentId, event }: DeveloperTimeline
     }
   }, [agentId, editingBody, editingMessage, queryClient])
 
-  const developerCluster = buildDeveloperToolCluster(event)
   let card = null
-  if (developerCluster) {
-    card = <ToolClusterCard cluster={developerCluster} />
-  } else if (event.kind === 'developer_error') {
+  if (event.kind === 'developer_error') {
     card = <ErrorRow error={asAuditEvent(event, 'error') as AuditErrorEvent} />
-  } else {
+  } else if (event.kind === 'developer_system_message') {
     card = (
       <SystemMessageCard
         message={asAuditEvent(event, 'system_message') as AuditSystemMessageEvent}

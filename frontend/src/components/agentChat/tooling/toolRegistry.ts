@@ -341,9 +341,9 @@ function buildSqliteEntries(clusterCursor: string, entry: ToolCallEntry, options
 
 function buildToolEntries(clusterCursor: string, entry: ToolCallEntry, options: ToolDisplayOptions = {}): ToolEntryDisplay[] {
   const toolName = entry.toolName ?? entry.meta?.label ?? 'tool'
-  if (entry.developerRaw) {
-    const completion = entry.developerCompletion
-    const step = entry.developerStep
+  if (entry.developerEvent) {
+    const completion = entry.developerEvent.kind === 'completion' ? entry.developerEvent : null
+    const step = entry.developerEvent.kind === 'step' ? entry.developerEvent : null
     const parameters = isPlainObject(entry.parameters) ? (entry.parameters as Record<string, unknown>) : null
     return [{
       id: entry.id,

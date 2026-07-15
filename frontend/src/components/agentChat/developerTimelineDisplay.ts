@@ -1,58 +1,68 @@
 import type {
-  AgentMessage,
-  DeveloperMessageEvent,
+  DeveloperCompletionEvent,
+  DeveloperStepEvent,
   DeveloperToolCallEvent,
   TimelineEvent,
   ToolCallEntry,
   ToolClusterEvent,
 } from '../../types/agentChat'
+import type { AuditCompletionEvent, AuditStepEvent, AuditToolCallEvent } from '../../types/agentAudit'
 
-export function developerMessageToAgentMessage(event: DeveloperMessageEvent): AgentMessage {
-  return {
-    id: event.id,
-    cursor: event.cursor,
-    bodyHtml: event.body_html ?? undefined,
-    bodyText: event.body_text ?? undefined,
-    isOutbound: event.is_outbound,
-    channel: event.channel ?? undefined,
-    timestamp: event.timestamp,
-    attachments: event.attachments.map((attachment) => ({
-      id: attachment.id,
-      filename: attachment.filename,
-      url: attachment.url,
-      downloadUrl: attachment.download_url,
-      filespacePath: attachment.filespace_path,
-      filespaceNodeId: attachment.filespace_node_id,
-      fileSizeLabel: attachment.file_size_label,
-    })),
-    isPeer: Boolean(event.peer_agent || event.peer_link_id),
-    peerAgent: event.peer_agent,
-    peerLinkId: event.peer_link_id,
-    selfAgentName: event.self_agent_name,
-  }
+type DeveloperActivityEvent = DeveloperCompletionEvent | DeveloperToolCallEvent | DeveloperStepEvent
+type AuditActivityEvent = AuditCompletionEvent | AuditToolCallEvent | AuditStepEvent
+
+export function asAuditEvent<T extends { kind: string }, K extends string>(
+  event: T,
+  kind: K,
+): Omit<T, 'kind' | 'cursor'> & { kind: K } {
+  const { cursor: _cursor, kind: _kind, ...payload } = event as T & { cursor: string }
+  return { ...payload, kind } as Omit<T, 'kind' | 'cursor'> & { kind: K }
 }
 
-function developerToolEntry(event: DeveloperToolCallEvent): ToolCallEntry {
+function developerActivityEntry(event: DeveloperActivityEvent): ToolCallEntry {
+  let developerEvent: AuditActivityEvent
+  let toolName: string
+  let label: string
+
+  if (event.kind === 'developer_completion') {
+    developerEvent = asAuditEvent(event, 'completion')
+    toolName = '__developer_completion__'
+    label = 'Completion'
+  } else if (event.kind === 'developer_step') {
+    developerEvent = asAuditEvent(event, 'step')
+    toolName = '__developer_step__'
+    label = developerEvent.is_system ? developerEvent.system_code || 'System step' : 'Step'
+  } else {
+    developerEvent = asAuditEvent(event, 'tool_call')
+    toolName = developerEvent.tool_name || 'tool'
+    label = developerEvent.tool_name || 'Tool call'
+  }
+
   return {
-    id: event.id,
+    id: event.kind === 'developer_completion' ? `completion:${event.id}` : event.id,
     cursor: event.cursor,
-    meta: { label: event.tool_name || 'Tool call' },
-    toolName: event.tool_name || 'tool',
+    meta: { label },
+    toolName,
     timestamp: event.timestamp,
-    parameters: event.parameters,
-    result: event.result,
+    parameters: developerEvent.kind === 'tool_call' ? developerEvent.parameters : undefined,
+    result: developerEvent.kind === 'tool_call' ? developerEvent.result : undefined,
     status: 'complete',
-    developerRaw: true,
-    developerExecutionDurationMs: event.execution_duration_ms,
+    developerEvent,
   }
 }
 
-export function groupDeveloperToolCalls(events: TimelineEvent[]): TimelineEvent[] {
+function isDeveloperActivity(event: TimelineEvent): event is DeveloperActivityEvent {
+  return event.kind === 'developer_completion'
+    || event.kind === 'developer_tool_call'
+    || event.kind === 'developer_step'
+}
+
+export function groupDeveloperActivityEvents(events: TimelineEvent[]): TimelineEvent[] {
   const grouped: TimelineEvent[] = []
   let activeCluster: ToolClusterEvent | null = null
 
   for (const event of events) {
-    if (event.kind !== 'developer_tool_call') {
+    if (!isDeveloperActivity(event)) {
       activeCluster = null
       grouped.push(event)
       continue
@@ -72,7 +82,7 @@ export function groupDeveloperToolCalls(events: TimelineEvent[]): TimelineEvent[
       grouped.push(activeCluster)
     }
 
-    activeCluster.entries.push(developerToolEntry(event))
+    activeCluster.entries.push(developerActivityEntry(event))
     activeCluster.entryCount = activeCluster.entries.length
     activeCluster.latestTimestamp = event.timestamp
   }

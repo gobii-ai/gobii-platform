@@ -438,7 +438,7 @@ class StaffAgentAuditAPITests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn(str(self.agent.id), {item["id"] for item in response.json()["agents"]})
 
-    def test_developer_timeline_exposes_raw_tool_payload_and_stable_older_cursor(self):
+    def test_developer_timeline_exposes_raw_tool_payload_and_stable_cursors(self):
         completion = PersistentAgentCompletion.objects.create(
             agent=self.agent,
             completion_type=PersistentAgentCompletion.CompletionType.ORCHESTRATOR,
@@ -480,9 +480,23 @@ class StaffAgentAuditAPITests(TestCase):
             },
         )
         self.assertEqual(older.status_code, 200)
+        older_payload = older.json()
         initial_cursors = {event["cursor"] for event in initial_payload["events"]}
-        self.assertTrue(initial_cursors.isdisjoint({event["cursor"] for event in older.json()["events"]}))
-        all_events = initial_payload["events"] + older.json()["events"]
+        older_cursors = {event["cursor"] for event in older_payload["events"]}
+        self.assertTrue(initial_cursors.isdisjoint(older_cursors))
+        newer = self.client.get(
+            f"/console/api/agents/{self.agent.id}/timeline/",
+            {
+                "developer": "1",
+                "direction": "newer",
+                "cursor": older_payload["events"][-1]["cursor"],
+                "limit": 10,
+            },
+        )
+        self.assertEqual(newer.status_code, 200)
+        self.assertEqual({event["cursor"] for event in newer.json()["events"]}, initial_cursors)
+
+        all_events = initial_payload["events"] + older_payload["events"]
         tool_event = next(event for event in all_events if event["kind"] == "developer_tool_call")
         self.assertEqual(tool_event["tool_name"], "raw_test_tool")
         self.assertEqual(tool_event["parameters"], {"nested": {"value": 7}})
@@ -501,11 +515,11 @@ class StaffAgentAuditAPITests(TestCase):
         event = next(
             event
             for event in response.json()["events"]
-            if event["kind"] == "developer_message" and event["id"] == str(message.id)
+            if event["kind"] == "message" and event["message"]["id"] == str(message.id)
         )
-        self.assertIn("<strong>there</strong>", event["body_html"])
-        self.assertNotIn("&lt;strong&gt;", event["body_html"])
-        self.assertEqual(event["body_text"], message.body)
+        self.assertIn("<strong>there</strong>", event["message"]["bodyHtml"])
+        self.assertNotIn("&lt;strong&gt;", event["message"]["bodyHtml"])
+        self.assertEqual(event["message"]["bodyText"], message.body)
 
     def test_developer_timeline_rejects_mismatched_staff_context(self):
         response = self.client.get(

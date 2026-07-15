@@ -13,7 +13,6 @@ import { useAppSelector } from '../../store/hooks'
 import { selectImmersiveShellViewer } from '../../store/immersiveShellSlice'
 import { selectActiveChatAgentId } from '../../store/chatSlice'
 import { DeveloperTimelineEventCard } from './DeveloperTimelineEventCard'
-import { developerMessageToAgentMessage } from './developerTimelineDisplay'
 
 type TimelineEventItemProps = {
   event: SimplifiedTimelineItem
@@ -56,22 +55,6 @@ export const TimelineEventItem = memo(function TimelineEventItem({
     }
     return event.displayEntries ?? flattenTimelineEventsToEntries(event.events)
   }, [event, timeZone])
-
-  if (event.kind === 'developer_message') {
-    return (
-      <MessageEventCard
-        eventCursor={event.cursor}
-        message={developerMessageToAgentMessage(event)}
-        agentFirstName={agentFirstName}
-        agentAvatarUrl={agentAvatarUrl}
-        viewerUserId={viewerUserId ?? null}
-        viewerEmail={viewerEmail ?? null}
-        onMessageLinkClick={onMessageLinkClick}
-        onMessageCopied={onMessageCopied}
-        onReportMessage={onReportMessage}
-      />
-    )
-  }
 
   if (event.kind.startsWith('developer_')) {
     return (

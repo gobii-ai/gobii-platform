@@ -949,7 +949,7 @@ const ACTIVE_LABEL_MAP: Record<string, string> = {
 }
 
 function deriveActivityDescriptor(entry: ToolEntryDisplay): ActivityDescriptor {
-  if (entry.sourceEntry?.developerRaw) {
+  if (entry.sourceEntry?.developerEvent) {
     return {
       kind: 'tool',
       label: entry.label,

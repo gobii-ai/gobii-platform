@@ -5,9 +5,7 @@ from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncJsonWebsocketConsumer
 from django.core.exceptions import PermissionDenied
 
-from api.models import PersistentAgent
-from console.agent_chat.access import agent_belongs_to_console_context, resolve_agent
-from console.context_helpers import resolve_staff_console_context
+from console.agent_chat.access import resolve_agent, resolve_staff_agent
 from console.agent_chat.realtime import user_profile_group_name, user_stream_group_name
 
 
@@ -374,11 +372,12 @@ class AgentChatSessionConsumer(AsyncJsonWebsocketConsumer):
         staff_context_override=None,
     ):
         if staff_context_override:
-            context_info = resolve_staff_console_context(user, staff_context_override)
-            agent = PersistentAgent.objects.non_eval().alive().filter(id=agent_id).first()
-            if agent is None or not agent_belongs_to_console_context(agent, context_info.current_context):
-                raise PermissionDenied("Agent does not belong to the staff context")
-            return agent
+            return resolve_staff_agent(
+                user,
+                agent_id,
+                staff_context_override,
+                include_historical=False,
+            )
         return resolve_agent(
             user,
             session,

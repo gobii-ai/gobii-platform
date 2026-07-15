@@ -6,7 +6,7 @@ from channels.generic.websocket import AsyncJsonWebsocketConsumer
 from django.core.exceptions import PermissionDenied
 from django.db import DatabaseError
 
-from api.models import PersistentAgent
+from console.agent_chat.access import resolve_staff_agent
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +22,7 @@ class StaffAgentDeveloperConsumer(AsyncJsonWebsocketConsumer):
         if not (user.is_staff or user.is_superuser):
             await self.close(code=4403)
             return
+        self.user = user
 
         agent_id = self.scope.get("url_route", {}).get("kwargs", {}).get("agent_id")
         if not agent_id:
@@ -75,16 +76,7 @@ class StaffAgentDeveloperConsumer(AsyncJsonWebsocketConsumer):
         staff_context_type: str | None,
         staff_context_id: str | None,
     ) -> None:
-        agent = PersistentAgent.objects.filter(id=agent_id).first()
-        if agent is None:
-            raise PermissionDenied("Agent does not exist")
-        if not staff_context_type:
-            return
-        if staff_context_type == "organization":
-            matches = str(agent.organization_id) == str(staff_context_id)
-        elif staff_context_type == "personal":
-            matches = agent.organization_id is None and str(agent.user_id) == str(staff_context_id)
-        else:
-            matches = False
-        if not matches:
-            raise PermissionDenied("Agent does not belong to the staff context")
+        override = None
+        if staff_context_type and staff_context_id:
+            override = {"type": staff_context_type, "id": staff_context_id}
+        resolve_staff_agent(self.user, agent_id, override)

@@ -178,7 +178,7 @@ from console.agent_chat.access import (
     user_can_manage_agent,
     user_can_manage_agent_settings,
     user_has_natural_agent_chat_access,
-    agent_belongs_to_console_context,
+    resolve_staff_agent,
     user_is_collaborator,
 )
 from console.agent_chat.pending_actions import (
@@ -2605,44 +2605,6 @@ class StaffUserEmailTriggerAPIView(SystemAdminAPIView):
         )
 
 
-class StaffAgentSearchAPIView(SystemAdminAPIView):
-    """Search persistent agents by name or id for staff tools."""
-
-    http_method_names = ["get"]
-
-    def get(self, request: HttpRequest, *args: Any, **kwargs: Any):
-        query = (request.GET.get("q") or "").strip()
-        limit_raw = request.GET.get("limit") or "8"
-        try:
-            limit = int(limit_raw)
-        except ValueError:
-            return HttpResponseBadRequest("limit must be an integer")
-        limit = max(1, min(limit, 25))
-        if not query:
-            return JsonResponse({"agents": []})
-
-        filters = Q(name__icontains=query)
-        try:
-            filters |= Q(id=uuid.UUID(query))
-        except (TypeError, ValueError):
-            pass
-
-        queryset = PersistentAgent.objects.all()
-        eligible_for = (request.GET.get("eligible_for") or "").strip()
-        if eligible_for == "llm_performance":
-            queryset = queryset.non_eval().alive()
-        elif eligible_for:
-            return HttpResponseBadRequest("eligible_for must be llm_performance")
-
-        matches = (
-            queryset.filter(filters)
-            .only("id", "name")
-            .order_by("name")[:limit]
-        )
-        payload = [{"id": str(agent.id), "name": agent.name or ""} for agent in matches]
-        return JsonResponse({"agents": payload})
-
-
 class StaffAgentDeveloperExportAPIView(SystemAdminAPIView):
     """Build and return a downloadable debugging export for Developer Mode."""
 
@@ -3903,12 +3865,11 @@ class AgentTimelineAPIView(LoginRequiredMixin, View):
         if developer_mode:
             if not (request.user.is_staff or request.user.is_superuser):
                 return JsonResponse({"error": "forbidden"}, status=403)
-            agent = get_object_or_404(PersistentAgent, id=agent_id)
             staff_override = get_staff_context_override(request)
-            if staff_override:
-                staff_context_info = resolve_staff_console_context(request.user, staff_override)
-                if not agent_belongs_to_console_context(agent, staff_context_info.current_context):
-                    return JsonResponse({"error": "agent_not_in_staff_context"}, status=404)
+            try:
+                agent = resolve_staff_agent(request.user, agent_id, staff_override)
+            except PermissionDenied:
+                raise Http404("Agent not found.")
         else:
             agent = resolve_agent_for_request(
                 request,

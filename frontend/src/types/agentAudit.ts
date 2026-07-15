@@ -1,10 +1,3 @@
-export type TokenTotals = {
-  prompt_tokens: number
-  completion_tokens: number
-  total_tokens: number
-  cached_tokens: number
-}
-
 export type PromptArchiveMeta = {
   id: string
   rendered_at: string | null
@@ -60,28 +53,6 @@ export type AuditErrorEvent = {
   completion_id: string | null
 }
 
-export type AuditMessageEvent = {
-  kind: 'message'
-  id: string
-  timestamp: string | null
-  is_outbound: boolean
-  channel: string | null
-  body_html: string | null
-  body_text: string | null
-  attachments: {
-    id: string
-    filename: string
-    url: string
-    download_url?: string | null
-    filespace_path?: string | null
-    filespace_node_id?: string | null
-    file_size_label?: string | null
-  }[]
-  peer_agent?: { id: string; name?: string | null } | null
-  peer_link_id?: string | null
-  self_agent_name?: string | null
-}
-
 export type AuditStepEvent = {
   kind: 'step'
   id: string
@@ -105,14 +76,6 @@ export type AuditSystemMessageEvent = {
     email?: string | null
     name?: string | null
   } | null
-}
-
-export type AuditEvent = AuditCompletionEvent | AuditToolCallEvent | AuditMessageEvent | AuditStepEvent | AuditRunStartedEvent | AuditSystemMessageEvent | AuditErrorEvent
-export type AuditRunStartedEvent = {
-  kind: 'run_started'
-  run_id: string
-  timestamp: string | null
-  sequence: number | null
 }
 
 export type PromptArchive = {

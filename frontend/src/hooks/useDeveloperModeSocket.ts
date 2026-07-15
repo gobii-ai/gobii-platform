@@ -4,7 +4,6 @@ import { useQueryClient } from '@tanstack/react-query'
 import type { StaffViewContext } from '../api/context'
 import { refreshTimelineLatestInCache } from './useTimelineCacheInjector'
 
-const MAX_RETRIES = 5
 const PING_INTERVAL_MS = 20_000
 const PONG_TIMEOUT_MS = 8_000
 const CONNECT_TIMEOUT_MS = 10_000
@@ -103,7 +102,7 @@ export function useDeveloperModeSocket(agentId: string | null, enabled: boolean,
       socket.onclose = () => {
         clearHeartbeat()
         socketRef.current = null
-        if (disposed || retryRef.current >= MAX_RETRIES) return
+        if (disposed) return
         const delay = Math.min(1000 * 2 ** retryRef.current, 8000)
         retryRef.current += 1
         scheduleConnect(delay)

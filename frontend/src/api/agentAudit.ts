@@ -1,4 +1,4 @@
-import type { AuditEvent, PromptArchive } from '../types/agentAudit'
+import type { AuditSystemMessageEvent, PromptArchive } from '../types/agentAudit'
 import { jsonFetch, jsonRequest } from './http'
 
 export type ManualJudgeSuggestion = {
@@ -47,7 +47,7 @@ export async function decideAgentJudgeSuggestion(decisionApiUrl: string, decisio
 export async function createSystemMessage(
   agentId: string,
   payload: { body: string },
-): Promise<AuditEvent> {
+): Promise<AuditSystemMessageEvent> {
   const url = `/console/api/staff/agents/${agentId}/system-messages/`
   return jsonRequest(url, { method: 'POST', includeCsrf: true, json: payload })
 }
@@ -56,7 +56,7 @@ export async function updateSystemMessage(
   agentId: string,
   messageId: string,
   payload: { body?: string },
-): Promise<AuditEvent> {
+): Promise<AuditSystemMessageEvent> {
   const url = `/console/api/staff/agents/${agentId}/system-messages/${messageId}/`
   return jsonRequest(url, { method: 'PATCH', includeCsrf: true, json: payload })
 }

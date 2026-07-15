@@ -1,4 +1,5 @@
 import { clearStoredConsoleContext, readStoredConsoleContext } from '../util/consoleContextStorage'
+import { parseStaffViewContext } from '../util/staffViewContext'
 
 export class HttpError extends Error {
   public readonly status: number
@@ -52,12 +53,10 @@ function applyConsoleContextHeaders(headers: Headers): boolean {
 
 function applyStaffViewContextHeaders(headers: Headers): void {
   if (typeof window === 'undefined') return
-  const params = new URLSearchParams(window.location.search)
-  const type = params.get('staff_context_type')
-  const id = params.get('staff_context_id')?.trim()
-  if ((type !== 'personal' && type !== 'organization') || !id) return
-  if (!headers.has('X-Gobii-Staff-Context-Type')) headers.set('X-Gobii-Staff-Context-Type', type)
-  if (!headers.has('X-Gobii-Staff-Context-Id')) headers.set('X-Gobii-Staff-Context-Id', id)
+  const context = parseStaffViewContext(window.location.search)
+  if (!context) return
+  if (!headers.has('X-Gobii-Staff-Context-Type')) headers.set('X-Gobii-Staff-Context-Type', context.type)
+  if (!headers.has('X-Gobii-Staff-Context-Id')) headers.set('X-Gobii-Staff-Context-Id', context.id)
 }
 
 function normalizePathname(pathname: string): string {

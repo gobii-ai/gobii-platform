@@ -25,7 +25,7 @@ import type { ConsoleContext, StaffViewContext } from '../api/context'
 import { fetchUsageBurnRate, fetchUsageSummary } from '../components/usage/api'
 import { AgentChatLayout, type AgentChatLayoutSidebarConfig } from '../components/agentChat/AgentChatLayout'
 import { DeveloperModeControls } from '../components/agentChat/DeveloperModeControls'
-import { groupDeveloperToolCalls } from '../components/agentChat/developerTimelineDisplay'
+import { groupDeveloperActivityEvents } from '../components/agentChat/developerTimelineDisplay'
 import { EmbeddedAgentContactRequestsPanel } from '../components/agentChat/EmbeddedAgentContactRequestsPanel'
 import { EmbeddedAgentEmailSettingsPanel } from '../components/agentChat/EmbeddedAgentEmailSettingsPanel'
 import { EmbeddedAgentFilesPanel } from '../components/agentChat/EmbeddedAgentFilesPanel'
@@ -1184,7 +1184,7 @@ export function AgentChatPage({
   )
   const displayEvents = useMemo(
     () => developerModeEnabled
-      ? groupDeveloperToolCalls(timelineEvents)
+      ? groupDeveloperActivityEvents(timelineEvents)
       : collapseDetailedStatusRuns(timelineEvents, statusExpansionTargets, { keepTrailingActivityExpanded }),
     [developerModeEnabled, keepTrailingActivityExpanded, timelineEvents, statusExpansionTargets, viewerTimeZone],
   )
@@ -4166,7 +4166,7 @@ export function AgentChatPage({
         showDeveloperMode={isSystemAdmin}
         onDeveloperModeChange={onDeveloperModeChange}
         developerControls={developerModeEnabled && activeAgentId ? (
-          <DeveloperModeControls agentId={activeAgentId} processingActive={timelineProcessingActive} />
+          <DeveloperModeControls key={activeAgentId} agentId={activeAgentId} processingActive={timelineProcessingActive} />
         ) : null}
         dailyCredits={dailyCreditsInfo}
         dailyCreditsStatus={dailyCreditsStatus}

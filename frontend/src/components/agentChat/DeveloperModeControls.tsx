@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Brain, Check, ChevronDown, Download, Loader2, RefreshCcw, Settings } from 'lucide-react'
-import { Button, Dialog, DialogTrigger, ListBox, ListBoxItem, Popover, type Selection } from 'react-aria-components'
+import { Button, Menu, MenuItem, MenuTrigger, Popover, type Key } from 'react-aria-components'
 
 import {
   decideAgentJudgeSuggestion,
@@ -88,9 +88,7 @@ export function DeveloperModeControls({ agentId, processingActive }: DeveloperMo
     }
   }
 
-  const selectExportRange = (keys: Selection) => {
-    if (keys === 'all') return
-    const [key] = Array.from(keys)
+  const selectExportRange = (key: Key) => {
     if (typeof key !== 'string' || !EXPORT_RANGES.some((range) => range.key === key)) return
     setExportRange(key as typeof exportRange)
     setExportMenuOpen(false)
@@ -112,7 +110,7 @@ export function DeveloperModeControls({ agentId, processingActive }: DeveloperMo
           Django admin
         </AgentChatButton>
         <div className="developer-export-control">
-          <DialogTrigger isOpen={exportMenuOpen} onOpenChange={setExportMenuOpen}>
+          <MenuTrigger isOpen={exportMenuOpen} onOpenChange={setExportMenuOpen}>
             <Button
               className="agent-chat-button banner-action banner-action--pill developer-export-trigger"
               aria-label={`Export range (${selectedExportRange.label})`}
@@ -121,34 +119,26 @@ export function DeveloperModeControls({ agentId, processingActive }: DeveloperMo
               <ChevronDown className="developer-export-chevron" aria-hidden />
             </Button>
             <Popover className="developer-export-popover" placement="bottom end" offset={6}>
-              <Dialog className="developer-export-menu">
-                <ListBox
-                  aria-label="Developer export range"
-                  selectionMode="single"
-                  selectionBehavior="replace"
-                  selectedKeys={new Set([exportRange]) as unknown as Selection}
-                  onSelectionChange={selectExportRange}
-                  className="developer-export-list"
-                >
-                  {EXPORT_RANGES.map((range) => (
-                    <ListBoxItem
-                      key={range.key}
-                      id={range.key}
-                      textValue={range.label}
-                      className="agent-chat-menu-item developer-export-option"
-                    >
-                      {({ isSelected }) => (
-                        <>
-                          <span>{range.label}</span>
-                          {isSelected ? <Check className="developer-export-check" aria-hidden /> : null}
-                        </>
-                      )}
-                    </ListBoxItem>
-                  ))}
-                </ListBox>
-              </Dialog>
+              <Menu
+                aria-label="Developer export range"
+                onAction={selectExportRange}
+                className="developer-export-menu"
+              >
+                {EXPORT_RANGES.map((range) => (
+                  <MenuItem
+                    key={range.key}
+                    id={range.key}
+                    textValue={range.label}
+                    className="agent-chat-menu-item developer-export-option"
+                    data-selected={range.key === exportRange ? 'true' : 'false'}
+                  >
+                    <span>{range.label}</span>
+                    {range.key === exportRange ? <Check className="developer-export-check" aria-hidden /> : null}
+                  </MenuItem>
+                ))}
+              </Menu>
             </Popover>
-          </DialogTrigger>
+          </MenuTrigger>
           <AgentChatButton
             as="a"
             className="banner-action banner-action--square developer-export-download"
