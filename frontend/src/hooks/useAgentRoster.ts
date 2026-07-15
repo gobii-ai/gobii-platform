@@ -1,13 +1,15 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 
 import { fetchAgentRoster } from '../api/agents'
-import type { ConsoleContext } from '../api/context'
+import type { ConsoleContext, StaffViewContext } from '../api/context'
 
 type UseAgentRosterOptions = {
   enabled?: boolean
   context?: ConsoleContext | null
   contextKey?: string
   refetchIntervalMs?: number | false
+  forAgentId?: string
+  staffContext?: StaffViewContext | null
 }
 
 export function useAgentRoster(options?: UseAgentRosterOptions) {
@@ -18,7 +20,11 @@ export function useAgentRoster(options?: UseAgentRosterOptions) {
 
   return useQuery({
     queryKey: ['agent-roster', contextKey] as const,
-    queryFn: () => fetchAgentRoster({ context: context ?? undefined }),
+    queryFn: () => fetchAgentRoster({
+      context: context ?? undefined,
+      forAgentId: options?.forAgentId,
+      staffContext: options?.staffContext,
+    }),
     placeholderData: keepPreviousData,
     staleTime: 60_000,
     refetchOnWindowFocus: false,

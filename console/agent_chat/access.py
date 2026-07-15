@@ -67,7 +67,7 @@ def user_can_manage_agent(
     *,
     allow_delinquent_personal_chat: bool = False,
 ) -> bool:
-    if user.is_staff:
+    if user.is_staff or user.is_superuser:
         return True
     if agent.user_id == user.id:
         if _is_blocked_personal_owner(
@@ -92,7 +92,7 @@ def user_can_manage_agent_settings(
     *,
     allow_delinquent_personal_chat: bool = False,
 ) -> bool:
-    if user.is_staff:
+    if user.is_staff or user.is_superuser:
         return True
     if agent.user_id == user.id:
         return not _is_blocked_personal_owner(
@@ -111,6 +111,26 @@ def user_can_manage_agent_settings(
 
 def user_is_collaborator(user, agent: PersistentAgent) -> bool:
     return AgentCollaborator.objects.filter(agent=agent, user=user).exists()
+
+
+def user_has_natural_agent_chat_access(user, agent: PersistentAgent) -> bool:
+    """Return access held by the user independently of the staff override."""
+    if agent.organization_id:
+        if OrganizationMembership.objects.filter(
+            user=user,
+            org_id=agent.organization_id,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        ).exists():
+            return True
+    elif agent.user_id == user.id:
+        return True
+    return user_is_collaborator(user, agent)
+
+
+def agent_belongs_to_console_context(agent: PersistentAgent, context: ConsoleContext) -> bool:
+    if context.type == "organization":
+        return str(agent.organization_id) == str(context.id)
+    return agent.organization_id is None and str(agent.user_id) == str(context.id)
 
 
 def resolve_agent(

@@ -1,16 +1,18 @@
 import logging
+from urllib.parse import parse_qs
 
 from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncJsonWebsocketConsumer
 from django.core.exceptions import PermissionDenied
+from django.db import DatabaseError
 
 from api.models import PersistentAgent
 
 logger = logging.getLogger(__name__)
 
 
-class StaffAgentAuditConsumer(AsyncJsonWebsocketConsumer):
-    """Realtime channel for staff-only agent audit updates."""
+class StaffAgentDeveloperConsumer(AsyncJsonWebsocketConsumer):
+    """Realtime channel for staff-only live-chat developer updates."""
 
     async def connect(self):
         user = self.scope.get("user")
@@ -26,20 +28,26 @@ class StaffAgentAuditConsumer(AsyncJsonWebsocketConsumer):
             await self.close(code=4404)
             return
         self.agent_id = str(agent_id)
+        query = parse_qs((self.scope.get("query_string") or b"").decode("utf-8"))
+        staff_context_type = (query.get("staff_context_type") or [None])[0]
+        staff_context_id = (query.get("staff_context_id") or [None])[0]
+        if bool(staff_context_type) != bool(staff_context_id):
+            await self.close(code=4403)
+            return
 
         try:
-            await self._ensure_agent_exists(self.agent_id)
+            await self._ensure_agent_exists(self.agent_id, staff_context_type, staff_context_id)
         except PermissionDenied:
             await self.close(code=4403)
             return
-        except Exception:
+        except DatabaseError:
             logger.exception("Failed resolving agent %s for audit websocket", self.agent_id)
             await self.close(code=1011)
             return
 
         self.group_name = f"agent-audit-{self.agent_id}"
         if self.channel_layer is None:
-            logger.error("StaffAgentAuditConsumer cannot attach to channel layer (agent=%s)", self.agent_id)
+            logger.error("StaffAgentDeveloperConsumer cannot attach to channel layer (agent=%s)", self.agent_id)
             await self.close(code=1011)
             return
 
@@ -58,9 +66,25 @@ class StaffAgentAuditConsumer(AsyncJsonWebsocketConsumer):
             await self.send_json({"type": "pong"})
 
     async def audit_event(self, event):
-        await self.send_json({"type": "audit.event", "payload": event.get("payload")})
+        await self.send_json({"type": "developer.event", "payload": event.get("payload")})
 
     @database_sync_to_async
-    def _ensure_agent_exists(self, agent_id: str) -> None:
-        if not PersistentAgent.objects.filter(id=agent_id).exists():
+    def _ensure_agent_exists(
+        self,
+        agent_id: str,
+        staff_context_type: str | None,
+        staff_context_id: str | None,
+    ) -> None:
+        agent = PersistentAgent.objects.filter(id=agent_id).first()
+        if agent is None:
             raise PermissionDenied("Agent does not exist")
+        if not staff_context_type:
+            return
+        if staff_context_type == "organization":
+            matches = str(agent.organization_id) == str(staff_context_id)
+        elif staff_context_type == "personal":
+            matches = agent.organization_id is None and str(agent.user_id) == str(staff_context_id)
+        else:
+            matches = False
+        if not matches:
+            raise PermissionDenied("Agent does not belong to the staff context")

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Plus, Zap } from 'lucide-react'
-import type { ConsoleContext } from '../api/context'
+import type { ConsoleContext, StaffViewContext } from '../api/context'
 import { jsonFetch } from '../api/http'
 import { SubscriptionUpgradeModal } from '../components/common/SubscriptionUpgradeModal'
 import type { SelectionShellPage } from '../components/agentChat/SelectionShellPageSwitcher'
@@ -56,6 +56,7 @@ type ConsoleSessionPayload = {
   user_id?: string
   email?: string
   timezone?: string
+  is_system_admin?: boolean
 }
 
 type ImmersiveAppProps = {
@@ -79,7 +80,13 @@ type AgentShellPageConfig = {
   render: (context: AgentShellPageRenderContext) => ReactNode
 }
 
-const AGENT_SHELL_PRESERVED_QUERY_KEYS = ['embed', 'return_to'] as const
+const AGENT_SHELL_PRESERVED_QUERY_KEYS = [
+  'embed',
+  'return_to',
+  'developer',
+  'staff_context_type',
+  'staff_context_id',
+] as const
 const AGENT_SHELL_PAGE_CONFIG: Record<AgentShellPage, AgentShellPageConfig> = {
   billing: {
     path: '/app/billing',
@@ -339,6 +346,8 @@ function cleanQueryForTracking(search: string): string {
   const params = new URLSearchParams(search)
   params.delete('embed')
   params.delete('return_to')
+  params.delete('staff_context_type')
+  params.delete('staff_context_id')
   const cleaned = params.toString()
   return cleaned ? `?${cleaned}` : ''
 }
@@ -388,6 +397,8 @@ function buildAgentSelectionPath(currentSearch = ''): string {
 
 function appendContextQuery(path: string, context: ConsoleContext): string {
   const url = new URL(path, window.location.origin)
+  url.searchParams.delete('staff_context_type')
+  url.searchParams.delete('staff_context_id')
   url.searchParams.set('context_type', context.type)
   url.searchParams.set('context_id', context.id)
   return `${url.pathname}${url.search}${url.hash}`
@@ -398,6 +409,16 @@ function parseBooleanFlag(value: string | null): boolean {
     return false
   }
   return ['1', 'true', 'yes', 'on'].includes(value.toLowerCase())
+}
+
+function parseStaffViewContext(search: string): StaffViewContext | null {
+  const params = new URLSearchParams(search)
+  const type = params.get('staff_context_type')
+  const id = params.get('staff_context_id')?.trim()
+  if ((type !== 'personal' && type !== 'organization') || !id) {
+    return null
+  }
+  return { type, id }
 }
 
 function hasUpgradeModalRequest(search: string): boolean {
@@ -694,7 +715,13 @@ export function ImmersiveApp({
   const [viewerUserId, setViewerUserId] = useState<number | null>(null)
   const [viewerEmail, setViewerEmail] = useState<string | null>(null)
   const [viewerTimeZone, setViewerTimeZone] = useState<string | null>(null)
+  const [isSystemAdmin, setIsSystemAdmin] = useState(false)
   const [selectionRefreshKey, setSelectionRefreshKey] = useState(0)
+  const developerMode = useMemo(
+    () => parseBooleanFlag(new URLSearchParams(location.search).get('developer')),
+    [location.search],
+  )
+  const staffContext = useMemo(() => parseStaffViewContext(location.search), [location.search])
   const hasSkippedInitialSegmentPage = useRef(false)
   const dispatch = useAppDispatch()
   const {
@@ -795,6 +822,7 @@ export function ImmersiveApp({
         setViewerUserId(Number.isFinite(numeric) ? numeric : null)
         setViewerEmail(payload?.email ? payload.email : null)
         setViewerTimeZone(payload?.timezone?.trim() || null)
+        setIsSystemAdmin(payload?.is_system_admin === true)
       } catch (err) {
         if (controller.signal.aborted) {
           return
@@ -803,10 +831,22 @@ export function ImmersiveApp({
         setViewerEmail(null)
         setScheduleDisplayTimeZone(null)
         setViewerTimeZone(null)
+        setIsSystemAdmin(false)
       }
     }
     void loadViewer()
     return () => controller.abort()
+  }, [])
+
+  const handleDeveloperModeChange = useCallback((enabled: boolean) => {
+    const url = new URL(window.location.href)
+    if (enabled) {
+      url.searchParams.set('developer', '1')
+    } else {
+      url.searchParams.delete('developer')
+    }
+    window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`)
+    window.dispatchEvent(new PopStateEvent('popstate'))
   }, [])
 
   const handleClose = useCallback(() => {
@@ -924,6 +964,10 @@ export function ImmersiveApp({
     viewerUserId,
     viewerEmail,
     viewerTimeZone,
+    isSystemAdmin,
+    developerMode,
+    staffContext,
+    onDeveloperModeChange: handleDeveloperModeChange,
     pipedreamAppsSettingsUrl,
     pipedreamAppSearchUrl,
     nativeIntegrationsUrl,

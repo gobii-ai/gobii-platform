@@ -29,9 +29,9 @@ export type AgentChatIdentityState = {
   agentEmail: string | null
   agentSms: string | null
   agentNextScheduledAt: string | null
-  auditUrl: string | null
   agentIsOrgOwned: boolean
   canManageAgent: boolean
+  canSendMessages: boolean
   isCollaborator: boolean
   hideInsightsPanel: boolean
   enabledIntegrationTabs: Record<string, true>
@@ -94,9 +94,9 @@ type AgentIdentityUpdateInput = {
   agentEmail?: string | null
   agentSms?: string | null
   agentNextScheduledAt?: string | null
-  auditUrl?: string | null
   agentIsOrgOwned?: boolean
   canManageAgent?: boolean
+  canSendMessages?: boolean
   isCollaborator?: boolean
   hideInsightsPanel?: boolean
   enabledIntegrationTabs?: Record<string, boolean | true> | null
@@ -145,9 +145,9 @@ export function createInitialSession(): AgentChatSession {
       agentEmail: null,
       agentSms: null,
       agentNextScheduledAt: null,
-      auditUrl: null,
       agentIsOrgOwned: false,
       canManageAgent: true,
+      canSendMessages: true,
       isCollaborator: false,
       hideInsightsPanel: false,
       enabledIntegrationTabs: {},
@@ -234,14 +234,14 @@ function applyIdentityUpdate(session: AgentChatSession, update: AgentIdentityUpd
   if (Object.prototype.hasOwnProperty.call(update ?? {}, 'agentNextScheduledAt')) {
     session.identity.agentNextScheduledAt = update?.agentNextScheduledAt ?? null
   }
-  if (Object.prototype.hasOwnProperty.call(update ?? {}, 'auditUrl')) {
-    session.identity.auditUrl = update?.auditUrl ?? null
-  }
   if (Object.prototype.hasOwnProperty.call(update ?? {}, 'agentIsOrgOwned')) {
     session.identity.agentIsOrgOwned = Boolean(update?.agentIsOrgOwned)
   }
   if (Object.prototype.hasOwnProperty.call(update ?? {}, 'canManageAgent')) {
     session.identity.canManageAgent = update?.canManageAgent ?? true
+  }
+  if (Object.prototype.hasOwnProperty.call(update ?? {}, 'canSendMessages')) {
+    session.identity.canSendMessages = update?.canSendMessages ?? true
   }
   if (Object.prototype.hasOwnProperty.call(update ?? {}, 'isCollaborator')) {
     session.identity.isCollaborator = Boolean(update?.isCollaborator)

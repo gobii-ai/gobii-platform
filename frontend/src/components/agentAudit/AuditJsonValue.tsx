@@ -3,7 +3,6 @@ import { useMemo } from 'react'
 import { createNormalizeContext, normalizeStructuredValue, tryParseJson } from '../agentChat/toolDetails/normalize'
 import { JsonBlock } from '../agentChat/toolDetails/shared'
 import { isRecord } from '../../util/objectUtils'
-import { renderHtmlOrText } from './eventPrimitives'
 
 type AuditJsonValueProps = {
   value: unknown
@@ -41,10 +40,11 @@ export function AuditJsonValue({ value }: AuditJsonValueProps) {
   }
 
   if (typeof normalized === 'string') {
-    return renderHtmlOrText(normalized, {
-      htmlClassName: 'prose prose-sm max-w-none rounded-xl bg-white px-3 py-2 text-slate-800 shadow-inner shadow-slate-200/60',
-      textClassName: 'whitespace-pre-wrap break-words rounded-xl bg-indigo-50 px-3 py-2 text-[12px] text-slate-800',
-    })
+    return (
+      <pre className="whitespace-pre-wrap break-words rounded-xl bg-indigo-50 px-3 py-2 font-mono text-[12px] text-slate-800">
+        {normalized}
+      </pre>
+    )
   }
 
   return (

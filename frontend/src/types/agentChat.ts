@@ -1,4 +1,12 @@
 import type { SignupPreviewState } from './agentRoster'
+import type {
+  AuditCompletionEvent,
+  AuditErrorEvent,
+  AuditMessageEvent,
+  AuditStepEvent,
+  AuditSystemMessageEvent,
+  AuditToolCallEvent,
+} from './agentAudit'
 
 export type Attachment = {
   id: string
@@ -66,13 +74,17 @@ export type ToolCallEntry = {
   showSql?: boolean
   parameters?: unknown
   sqlStatements?: string[]
-  result?: string | null
+  result?: unknown
   charterText?: string | null
   status?: ToolCallStatus | null
   cursor?: string
   chartImageUrl?: string | null
   createImageUrl?: string | null
   createVideoUrl?: string | null
+  developerRaw?: boolean
+  developerExecutionDurationMs?: number | null
+  developerCompletion?: AuditCompletionEvent
+  developerStep?: AuditStepEvent
 }
 
 export type ToolClusterEvent = {
@@ -308,7 +320,26 @@ export type HistoricalPlanCompatEvent = Omit<PlanEvent, 'kind'> & {
   changes: Array<Omit<PlanStepChange, 'stepId'> & { cardId: string; stepId?: string }>
 }
 
-export type TimelineEvent = MessageEvent | ToolClusterEvent | ThinkingEvent | UserActionEvent | PlanEvent | HistoricalPlanCompatEvent
+type DeveloperEvent<T, Kind extends string> = Omit<T, 'kind'> & {
+  kind: Kind
+  cursor: string
+}
+
+export type DeveloperCompletionEvent = DeveloperEvent<AuditCompletionEvent, 'developer_completion'>
+export type DeveloperToolCallEvent = DeveloperEvent<AuditToolCallEvent, 'developer_tool_call'>
+export type DeveloperMessageEvent = DeveloperEvent<AuditMessageEvent, 'developer_message'>
+export type DeveloperStepEvent = DeveloperEvent<AuditStepEvent, 'developer_step'>
+export type DeveloperSystemMessageEvent = DeveloperEvent<AuditSystemMessageEvent, 'developer_system_message'>
+export type DeveloperErrorEvent = DeveloperEvent<AuditErrorEvent, 'developer_error'>
+export type DeveloperTimelineEvent =
+  | DeveloperCompletionEvent
+  | DeveloperToolCallEvent
+  | DeveloperMessageEvent
+  | DeveloperStepEvent
+  | DeveloperSystemMessageEvent
+  | DeveloperErrorEvent
+
+export type TimelineEvent = MessageEvent | ToolClusterEvent | ThinkingEvent | UserActionEvent | PlanEvent | HistoricalPlanCompatEvent | DeveloperTimelineEvent
 
 export type AgentTimelineSnapshot = {
   events: TimelineEvent[]

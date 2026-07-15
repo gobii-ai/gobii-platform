@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
-import { createOrganization, fetchConsoleContext, switchConsoleContext, type ConsoleContext, type ConsoleContextData, type ConsoleContextOption } from '../api/context'
+import { createOrganization, fetchConsoleContext, switchConsoleContext, type ConsoleContext, type ConsoleContextData, type ConsoleContextOption, type StaffViewContext } from '../api/context'
 import { readStoredConsoleContext, storeConsoleContext } from '../util/consoleContextStorage'
 
 type UseConsoleContextSwitcherOptions = {
@@ -9,6 +9,7 @@ type UseConsoleContextSwitcherOptions = {
   forAgentId?: string
   onSwitched?: (context: ConsoleContext) => void
   persistSession?: boolean
+  staffContext?: StaffViewContext | null
 }
 
 type UseConsoleContextSwitcherResult = {
@@ -24,8 +25,13 @@ type UseConsoleContextSwitcherResult = {
 
 const CONSOLE_CONTEXT_QUERY_KEY = ['console-context'] as const
 
-export function consoleContextQueryKey(forAgentId?: string) {
-  return [...CONSOLE_CONTEXT_QUERY_KEY, forAgentId ?? null] as const
+export function consoleContextQueryKey(forAgentId?: string, staffContext?: StaffViewContext | null) {
+  return [
+    ...CONSOLE_CONTEXT_QUERY_KEY,
+    forAgentId ?? null,
+    staffContext?.type ?? null,
+    staffContext?.id ?? null,
+  ] as const
 }
 
 function notifyConsoleContextUpdated(context: ConsoleContext): void {
@@ -40,15 +46,19 @@ export function useConsoleContextSwitcher({
   forAgentId,
   onSwitched,
   persistSession = true,
+  staffContext = null,
 }: UseConsoleContextSwitcherOptions): UseConsoleContextSwitcherResult {
   const [isSwitching, setIsSwitching] = useState(false)
   const [mutationError, setMutationError] = useState<string | null>(null)
   const queryClient = useQueryClient()
   const mountedRef = useRef(true)
-  const queryKey = useMemo(() => consoleContextQueryKey(forAgentId), [forAgentId])
+  const queryKey = useMemo(
+    () => consoleContextQueryKey(forAgentId, staffContext),
+    [forAgentId, staffContext],
+  )
   const contextQuery = useQuery({
     queryKey,
-    queryFn: () => fetchConsoleContext({ forAgentId }),
+    queryFn: () => fetchConsoleContext({ forAgentId, staffContext }),
     enabled,
     staleTime: 60_000,
     refetchOnWindowFocus: false,
@@ -73,7 +83,7 @@ export function useConsoleContextSwitcher({
   }, [queryError])
 
   useEffect(() => {
-    if (!data) {
+    if (!data || data.context.isStaffView) {
       return
     }
     const stored = readStoredConsoleContext()

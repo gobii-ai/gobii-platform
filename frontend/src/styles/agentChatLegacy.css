@@ -331,6 +331,7 @@
 .banner {
     position: relative;
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 1rem;
     container-type: inline-size;
@@ -344,6 +345,72 @@
     border-bottom: 1px solid rgba(170, 116, 206, 0.22);
     box-shadow: 0 1px 4px rgba(64, 27, 104, 0.05);
     pointer-events: auto;
+}
+.banner-developer-controls {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+}
+.developer-mode-controls {
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 0.5rem;
+}
+.developer-export-control {
+    display: inline-flex;
+    align-items: center;
+}
+.agent-chat-button.developer-export-trigger {
+    border-top-right-radius: 0;
+    border-bottom-right-radius: 0;
+    padding-right: 0.45rem;
+}
+.developer-export-chevron {
+    width: 0.8rem !important;
+    height: 0.8rem !important;
+}
+.agent-chat-button.developer-export-download {
+    margin-left: -1px;
+    border-top-left-radius: 0;
+    border-bottom-left-radius: 0;
+}
+.developer-export-popover {
+    z-index: 50;
+    min-width: 9.5rem;
+    border: 1px solid rgba(124, 58, 237, 0.18);
+    border-radius: 0.7rem;
+    background: rgba(255, 255, 255, 0.98);
+    box-shadow: 0 12px 30px rgba(41, 28, 84, 0.16);
+}
+.developer-export-menu {
+    padding: 0.35rem;
+}
+.developer-export-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.125rem;
+    outline: none;
+}
+.developer-export-option {
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.5rem 0.6rem;
+    border-radius: 0.45rem;
+    color: #3b2d6b;
+    font-size: 0.75rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+.developer-export-option:hover,
+.developer-export-option[data-focused] {
+    background: rgba(99, 102, 241, 0.08);
+    outline: none;
+}
+.developer-export-check {
+    width: 0.85rem;
+    height: 0.85rem;
+    color: #4f46e5;
 }
 @media (min-width: 768px) {
     .chat-sidebar[data-sidebar-mode='gallery'],

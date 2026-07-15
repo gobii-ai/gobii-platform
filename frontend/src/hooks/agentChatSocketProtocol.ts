@@ -1,4 +1,4 @@
-import type { ConsoleContext } from '../api/context'
+import type { ConsoleContext, StaffViewContext } from '../api/context'
 
 export type AgentChatSocketSubscription = {
   agentId: string
@@ -61,12 +61,14 @@ export function syncAgentChatSocketSubscriptions({
   currentSubscriptions,
   desiredSubscriptions,
   contextOverride,
+  staffContextOverride,
   sendSocketMessage,
   handleSendFailure,
 }: {
   currentSubscriptions: Map<string, AgentChatSocketSubscription['mode']>
   desiredSubscriptions: AgentChatSocketSubscription[]
   contextOverride: AgentChatSocketContextOverride
+  staffContextOverride?: StaffViewContext | null
   sendSocketMessage: (payload: Record<string, unknown>) => boolean
   handleSendFailure: () => void
 }): boolean {
@@ -94,7 +96,9 @@ export function syncAgentChatSocketSubscriptions({
       agent_id: subscription.agentId,
       mode: subscription.mode,
     }
-    if (contextOverride?.type && contextOverride?.id) {
+    if (staffContextOverride?.type && staffContextOverride?.id) {
+      payload.staff_context = { type: staffContextOverride.type, id: staffContextOverride.id }
+    } else if (contextOverride?.type && contextOverride?.id) {
       payload.context = { type: contextOverride.type, id: contextOverride.id }
     }
     if (!sendSocketMessage(payload)) {

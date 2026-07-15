@@ -11,8 +11,8 @@ from api.models import Organization, OrganizationMembership
 from api.services.organization_permissions import user_role_can_create_org_agents
 from console.forms import OrganizationForm
 from console.agent_context import resolve_context_override_for_agent
-from console.context_helpers import build_console_context, resolve_console_context
-from console.context_overrides import get_context_override
+from console.context_helpers import build_console_context, resolve_console_context, resolve_staff_console_context
+from console.context_overrides import get_context_override, get_staff_context_override
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 
 
@@ -46,9 +46,15 @@ class SwitchContextView(LoginRequiredMixin, View):
 
     def get(self, request):
         override = get_context_override(request)
+        staff_override = get_staff_context_override(request)
         for_agent_id = (request.GET.get("for_agent") or "").strip()
         requested_agent_status = None
-        if for_agent_id:
+        if staff_override:
+            try:
+                resolved = resolve_staff_console_context(request.user, staff_override)
+            except PermissionDenied:
+                return JsonResponse({"error": "Not permitted"}, status=403)
+        elif for_agent_id:
             override, error_code = resolve_context_override_for_agent(
                 request.user,
                 for_agent_id,
@@ -60,16 +66,17 @@ class SwitchContextView(LoginRequiredMixin, View):
                 return JsonResponse({"error": "Not permitted"}, status=403)
             if error_code == "deleted":
                 requested_agent_status = "deleted"
-        if override:
-            try:
-                resolved = resolve_console_context(request.user, request.session, override=override)
-            except PermissionDenied:
-                return JsonResponse({"error": "Invalid context override."}, status=403)
-        else:
-            resolved = build_console_context(request)
+        if not staff_override:
+            if override:
+                try:
+                    resolved = resolve_console_context(request.user, request.session, override=override)
+                except PermissionDenied:
+                    return JsonResponse({"error": "Invalid context override."}, status=403)
+            else:
+                resolved = build_console_context(request)
         current_context = resolved.current_context
 
-        if not override:
+        if not override and not staff_override:
             session_context = {
                 "type": request.session.get("context_type"),
                 "id": request.session.get("context_id"),
@@ -113,6 +120,7 @@ class SwitchContextView(LoginRequiredMixin, View):
                     "id": current_context.id,
                     "name": current_context.name,
                     "canCreateAgents": resolved.can_create_org_agents,
+                    "isStaffView": bool(staff_override),
                 },
                 "personal": {"id": str(request.user.id), "name": personal_name},
                 "organizations": organizations,

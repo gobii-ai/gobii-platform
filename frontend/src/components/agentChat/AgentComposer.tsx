@@ -11,6 +11,7 @@ import {
   KeyRound,
   Loader2,
   Mail,
+  Megaphone,
   MessageSquare,
   MessageSquareQuote,
   OctagonAlert,
@@ -501,6 +502,9 @@ function ComposerActionMenu({
 
 type AgentComposerProps = {
   onSubmit?: (message: string, attachments?: File[]) => void | Promise<void>
+  onSystemSubmit?: (message: string) => void | Promise<void>
+  normalSendDisabledReason?: string | null
+  showActionMenu?: boolean
   pendingActionRequests?: PendingActionRequest[]
   onSkipPlanning?: () => void | Promise<void>
   onRespondHumanInput?: (response: HumanInputComposerResponse | HumanInputComposerBatchResponse) => Promise<void>
@@ -552,6 +556,9 @@ type AgentComposerProps = {
 
 export const AgentComposer = memo(function AgentComposer({
   onSubmit,
+  onSystemSubmit,
+  normalSendDisabledReason = null,
+  showActionMenu = true,
   pendingActionRequests = [],
   onSkipPlanning,
   onRespondHumanInput,
@@ -705,6 +712,7 @@ export const AgentComposer = memo(function AgentComposer({
   const [attachments, setAttachments] = useState<File[]>([])
   const [attachmentError, setAttachmentError] = useState<string | null>(null)
   const [isSending, setIsSending] = useState(false)
+  const [isSendingSystem, setIsSendingSystem] = useState(false)
   const [isDragActive, setIsDragActive] = useState(false)
   const [activePendingActionId, setActivePendingActionId] = useState<string | null>(null)
   const [activeHumanInputRequestId, setActiveHumanInputRequestId] = useState<string | null>(null)
@@ -742,14 +750,14 @@ export const AgentComposer = memo(function AgentComposer({
   const [countdownProgress, setCountdownProgress] = useState(0)
   const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const lastRotationTimeRef = useRef<number>(Date.now())
-  const feedbackMessage = disabledReason || attachmentError || submitError
+  const feedbackMessage = disabledReason || normalSendDisabledReason || attachmentError || submitError
   const feedbackMessageHtml = useMemo(() => {
     if (!feedbackMessage || !INLINE_HTML_TAG_PATTERN.test(feedbackMessage)) {
       return null
     }
     return sanitizeHtml(feedbackMessage)
   }, [feedbackMessage])
-  const showSubmitErrorAlert = Boolean((attachmentError || submitError) && !disabledReason)
+  const showSubmitErrorAlert = Boolean((attachmentError || submitError) && !disabledReason && !normalSendDisabledReason)
   const seenHumanInputBatchAnalyticsRef = useRef<Set<string>>(new Set())
 
   // Track previous processing state for auto-expand/collapse
@@ -1342,7 +1350,7 @@ export const AgentComposer = memo(function AgentComposer({
   const submitShortcutHint = shouldShowSubmitShortcutHint()
     ? `${isMacOS() ? '⌘↵' : 'Ctrl+↵'} to ${activeHumanInputUsesMainComposer ? 'submit' : 'send'}`
     : ''
-  const composerPlaceholder = disabledReason || [
+  const composerPlaceholder = disabledReason || normalSendDisabledReason || [
     activeHumanInputUsesMainComposer ? 'Type your answer' : 'Message',
     submitShortcutHint,
   ].filter(Boolean).join(' · ')
@@ -1670,7 +1678,7 @@ export const AgentComposer = memo(function AgentComposer({
     }
     const trimmed = body.trim()
     const lacksRequiredContent = requiresMessageBody ? !trimmed : !trimmed && attachments.length === 0
-    if (lacksRequiredContent || disabled || isSending) {
+    if (lacksRequiredContent || disabled || normalSendDisabledReason || isSending || isSendingSystem) {
       return
     }
     const attachmentsSnapshot = attachments.slice()
@@ -1716,10 +1724,33 @@ export const AgentComposer = memo(function AgentComposer({
     body,
     disabled,
     isSending,
+    isSendingSystem,
+    normalSendDisabledReason,
     onSubmit,
     requiresMessageBody,
     submitFreeTextHumanInputFromComposer,
   ])
+
+  const submitSystemMessage = useCallback(async () => {
+    const trimmed = body.trim()
+    if (!onSystemSubmit || !trimmed || attachments.length > 0 || disabled || isSending || isSendingSystem) {
+      return
+    }
+    const bodySnapshot = body
+    try {
+      setIsSendingSystem(true)
+      setBody('')
+      clearAgentChatMessageDraft(agentId)
+      requestAnimationFrame(() => adjustTextareaHeight(true))
+      await onSystemSubmit(trimmed)
+    } catch {
+      setBody(bodySnapshot)
+      writeAgentChatMessageDraft(agentId, bodySnapshot)
+      requestAnimationFrame(() => adjustTextareaHeight(true))
+    } finally {
+      setIsSendingSystem(false)
+    }
+  }, [adjustTextareaHeight, agentId, attachments.length, body, disabled, isSending, isSendingSystem, onSystemSubmit])
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -1886,7 +1917,7 @@ export const AgentComposer = memo(function AgentComposer({
         : ' overflow-hidden rounded-[1.25rem]'
       : ''
   }`
-  const composerActionsDisabled = disabled || isSending
+  const composerActionsDisabled = disabled || isSending || isSendingSystem
   const handleOpenAppsModal = useCallback(() => {
     if (!showAppsControl || !agentId) {
       return
@@ -1910,11 +1941,12 @@ export const AgentComposer = memo(function AgentComposer({
   const hasComposerSendContent = Boolean(body.trim()) || attachments.length > 0
   const showStopProcessingButton = showStopProcessing && !hasComposerSendContent
   const sendDisabled = composerActionsDisabled
+    || Boolean(normalSendDisabledReason)
     || stopProcessingBusy
     || (activeHumanInputUsesMainComposer ? !body.trim() || Boolean(busyHumanInputRequestId) : requiresMessageBody ? !body.trim() : !body.trim() && attachments.length === 0)
   const sendTitle = stopProcessingBusy
     ? 'Stopping'
-    : disabledReason || (sendButtonBusy ? activeHumanInputUsesMainComposer ? 'Submitting' : 'Sending' : `${activeHumanInputUsesMainComposer ? 'Submit' : 'Send'} (${isMacOS() ? '⌘↵' : 'Ctrl+Enter'})`)
+    : disabledReason || normalSendDisabledReason || (sendButtonBusy ? activeHumanInputUsesMainComposer ? 'Submitting' : 'Sending' : `${activeHumanInputUsesMainComposer ? 'Submit' : 'Send'} (${isMacOS() ? '⌘↵' : 'Ctrl+Enter'})`)
   const renderSkipPlanningButton = (className = 'composer-skip-planning-button') => (
     <button
       type="button"
@@ -1954,13 +1986,13 @@ export const AgentComposer = memo(function AgentComposer({
           >
             Dismiss
           </button>
-        ) : (
+        ) : showActionMenu ? (
           <ComposerActionMenu
             disabled={composerActionsDisabled}
             onUploadFiles={handleOpenFilePicker}
             appsAction={appsAction}
           />
-        )}
+        ) : null}
       </div>
       <div className="composer-utility-row__actions">
         {showIntelligenceSelector ? (
@@ -1975,6 +2007,18 @@ export const AgentComposer = memo(function AgentComposer({
             busy={intelligenceBusy}
             error={intelligenceError}
           />
+        ) : null}
+        {onSystemSubmit ? (
+          <button
+            type="button"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-amber-600 text-white transition hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-50"
+            onClick={() => void submitSystemMessage()}
+            disabled={disabled || isSending || isSendingSystem || !body.trim() || attachments.length > 0}
+            title={attachments.length > 0 ? 'System messages cannot include attachments' : 'Send as a staff system message'}
+          >
+            {isSendingSystem ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <Megaphone className="h-4 w-4" aria-hidden />}
+            <span className="sr-only">Send system message</span>
+          </button>
         ) : null}
         {showStopProcessingButton ? (
           <button
@@ -2374,7 +2418,7 @@ export const AgentComposer = memo(function AgentComposer({
                   ) : (
                     <span className="composer-submit-error-text">{feedbackMessage}</span>
                   )}
-                  {!disabledReason && showSubmitErrorUpgrade && isProprietaryMode && canManageAgent ? (
+                  {!disabledReason && !normalSendDisabledReason && showSubmitErrorUpgrade && isProprietaryMode && canManageAgent ? (
                     <button
                       type="button"
                       className="composer-submit-error-upgrade"

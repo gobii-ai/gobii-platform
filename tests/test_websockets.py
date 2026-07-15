@@ -9,6 +9,7 @@ from channels.layers import get_channel_layer
 from channels.testing import WebsocketCommunicator
 from django.test import SimpleTestCase, override_settings, tag
 
+from console.agent_audit.consumers import StaffAgentDeveloperConsumer
 from console.agent_chat.consumers import AgentChatSessionConsumer, AgentChatSubscription
 from config.asgi import application
 
@@ -28,6 +29,77 @@ class EchoConsumerTests(SimpleTestCase):
             self.assertFalse(connected)
 
         async_to_sync(_run)()
+
+
+@override_settings(CHANNEL_LAYERS=CHANNEL_LAYER_SETTINGS)
+@tag("batch_websocket")
+class StaffAgentDeveloperConsumerTests(SimpleTestCase):
+    def _build_communicator(self, *, is_staff: bool) -> WebsocketCommunicator:
+        communicator = WebsocketCommunicator(
+            StaffAgentDeveloperConsumer.as_asgi(),
+            "/?staff_context_type=organization&staff_context_id=org-1",
+        )
+        communicator.scope["user"] = SimpleNamespace(
+            is_authenticated=True,
+            is_staff=is_staff,
+            is_superuser=False,
+        )
+        communicator.scope["url_route"] = {"kwargs": {"agent_id": "agent-a"}}
+        return communicator
+
+    def test_developer_consumer_rejects_nonstaff_viewers(self) -> None:
+        async def _run():
+            communicator = self._build_communicator(is_staff=False)
+            connected, _ = await communicator.connect()
+            self.assertFalse(connected)
+
+        async_to_sync(_run)()
+
+    def test_developer_consumer_forwards_staff_events(self) -> None:
+        captured_context = {}
+
+        async def _allow_agent(_consumer, agent_id, context_type, context_id):
+            captured_context.update(
+                agent_id=agent_id,
+                context_type=context_type,
+                context_id=context_id,
+            )
+
+        async def _run():
+            communicator = self._build_communicator(is_staff=True)
+            connected, _ = await communicator.connect()
+            self.assertTrue(connected)
+
+            channel_layer = get_channel_layer()
+            self.assertIsNotNone(channel_layer)
+            try:
+                await channel_layer.group_send(
+                    "agent-audit-agent-a",
+                    {
+                        "type": "audit_event",
+                        "payload": {"kind": "developer_completion", "id": "completion-1"},
+                    },
+                )
+                event = await communicator.receive_json_from()
+                self.assertEqual(event["type"], "developer.event")
+                self.assertEqual(event["payload"]["id"], "completion-1")
+            finally:
+                await communicator.disconnect()
+
+        with patch(
+            "console.agent_audit.consumers.StaffAgentDeveloperConsumer._ensure_agent_exists",
+            new=_allow_agent,
+        ):
+            async_to_sync(_run)()
+
+        self.assertEqual(
+            captured_context,
+            {
+                "agent_id": "agent-a",
+                "context_type": "organization",
+                "context_id": "org-1",
+            },
+        )
 
 
 @override_settings(CHANNEL_LAYERS=CHANNEL_LAYER_SETTINGS)

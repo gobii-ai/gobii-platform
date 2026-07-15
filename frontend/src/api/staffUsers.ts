@@ -17,7 +17,7 @@ export type StaffAgentSummary = {
   name: string
   organizationName: string | null
   adminUrl: string
-  auditUrl: string
+  developerChatUrl: string
   lastInteractionAt: string | null
 }
 

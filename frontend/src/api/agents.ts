@@ -1,5 +1,5 @@
 import { HttpError, jsonFetch, jsonRequest } from './http'
-import type { ConsoleContext } from './context'
+import type { ConsoleContext, StaffViewContext } from './context'
 import type { AgentRosterEntry, AgentRosterSortMode, AgentTransferInvite, PlanningState, SignupPreviewState } from '../types/agentRoster'
 import type { AccountPauseInfo, BillingStatusInfo } from '../types/agentAddons'
 import type { LlmIntelligenceConfig } from '../types/llmIntelligence'
@@ -52,7 +52,8 @@ export type AgentProfilePayload = {
   is_collaborator: boolean
   can_manage_agent: boolean
   can_manage_collaborators: boolean
-  audit_url?: string | null
+  can_send_messages?: boolean
+  developer_live_chat_url?: string | null
   preferred_llm_tier: string | null
   email: string | null
   sms: string | null
@@ -98,11 +99,12 @@ export function agentProfilePayloadToRosterEntry(agent: AgentProfilePayload): Ag
     dailyCreditRemaining: agent.daily_credit_remaining,
     dailyCreditLow: Boolean(agent.daily_credit_low),
     last24hCreditBurn: agent.last_24h_credit_burn,
-    auditUrl: agent.audit_url ?? null,
+    developerLiveChatUrl: agent.developer_live_chat_url ?? null,
     isOrgOwned: agent.is_org_owned,
     isCollaborator: agent.is_collaborator,
     canManageAgent: agent.can_manage_agent,
     canManageCollaborators: agent.can_manage_collaborators,
+    canSendMessages: agent.can_send_messages !== false,
     preferredLlmTier: agent.preferred_llm_tier,
     email: agent.email,
     sms: agent.sms,
@@ -121,7 +123,7 @@ export function agentProfilePayloadToRosterEntry(agent: AgentProfilePayload): Ag
 }
 
 export async function fetchAgentRoster(
-  options: { forAgentId?: string; context?: ConsoleContext } = {},
+  options: { forAgentId?: string; context?: ConsoleContext; staffContext?: StaffViewContext | null } = {},
 ): Promise<{
   context: ConsoleContext
   agents: AgentRosterEntry[]
@@ -137,10 +139,14 @@ export async function fetchAgentRoster(
   llmIntelligence?: LlmIntelligenceConfig | null
 }> {
   const query = options.forAgentId ? `?for_agent=${encodeURIComponent(options.forAgentId)}` : ''
-  const headers = options.context ? {
+  const headers: Record<string, string> = options.context ? {
     'X-Gobii-Context-Type': options.context.type,
     'X-Gobii-Context-Id': options.context.id,
-  } : undefined
+  } : {}
+  if (options.staffContext) {
+    headers['X-Gobii-Staff-Context-Type'] = options.staffContext.type
+    headers['X-Gobii-Staff-Context-Id'] = options.staffContext.id
+  }
   const payload = await jsonFetch<AgentRosterPayload>(`/console/api/agents/roster/${query}`, { headers })
   const agents = payload.agents.map(agentProfilePayloadToRosterEntry)
   return {

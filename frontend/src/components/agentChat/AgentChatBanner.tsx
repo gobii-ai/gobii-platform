@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
-import { CreditCard, EllipsisVertical, ListTodo, Settings, Share2, Stethoscope, UserPlus, X, Zap } from 'lucide-react'
+import { Code2, CreditCard, EllipsisVertical, ListTodo, Settings, Share2, UserPlus, X, Zap } from 'lucide-react'
 import { Button, Dialog, DialogTrigger, Popover } from 'react-aria-components'
 
 import { ensureAuthenticated, selectSubscriptionState, subscriptionActions } from '../../store/subscriptionSlice'
@@ -36,6 +36,10 @@ type AgentChatBannerProps = {
   publicShareDisabled?: boolean
   publicShareDisabledReason?: string | null
   sidebarMode?: AgentChatSidebarMode
+  developerMode?: boolean
+  showDeveloperMode?: boolean
+  onDeveloperModeChange?: (enabled: boolean) => void
+  developerControls?: ReactNode
   children?: ReactNode
 }
 
@@ -61,6 +65,10 @@ export const AgentChatBanner = memo(function AgentChatBanner({
   publicShareDisabled = false,
   publicShareDisabledReason = null,
   sidebarMode = 'list',
+  developerMode = false,
+  showDeveloperMode = false,
+  onDeveloperModeChange,
+  developerControls = null,
   children,
 }: AgentChatBannerProps) {
   const dispatch = useAppDispatch()
@@ -69,7 +77,6 @@ export const AgentChatBanner = memo(function AgentChatBanner({
   const agentName = agentNameOverride ?? activeSession.identity.agentName
   const agentAvatarUrl = activeSession.identity.agentAvatarUrl
   const agentMiniDescription = activeSession.identity.agentMiniDescription
-  const auditUrl = activeSession.identity.auditUrl
   const isOrgOwned = activeSession.identity.agentIsOrgOwned
   const canManageAgent = activeSession.identity.canManageAgent
   const isCollaborator = activeSession.identity.isCollaborator
@@ -154,13 +161,12 @@ export const AgentChatBanner = memo(function AgentChatBanner({
   const showSettingsButton = canShowBannerActions && Boolean(onSettingsOpen)
   const showShareButton = canShowBannerActions && Boolean(onShare)
   const showPublicShareButton = canShowBannerActions && Boolean(onPublicShare)
-  const showAuditButton = Boolean(auditUrl)
   const showAttentionDot = softTargetExceeded || hardLimitReached
   const settingsLabel = hardLimitReached
     ? 'Daily task limit reached. Open agent settings'
     : 'Open agent settings'
   const [overflowMenuOpen, setOverflowMenuOpen] = useState(false)
-  const showMobileOverflow = showShareButton || showPublicShareButton || showAuditButton || showSettingsButton
+  const showMobileOverflow = showShareButton || showPublicShareButton || showSettingsButton || showDeveloperMode
   const shareLabel = shareDisabledReason || 'Invite collaborators'
   const publicShareLabel = publicShareDisabledReason || 'Share this agent'
   const resolvedSettingsLabel = settingsDisabledReason || settingsLabel
@@ -285,6 +291,9 @@ export const AgentChatBanner = memo(function AgentChatBanner({
               {hasPlan ? <span className="banner-plan-count">{planSnapshot.doingCount + planSnapshot.todoCount}</span> : null}
             </AgentChatButton>
           ) : null}
+          {developerMode && developerControls ? (
+            <div className="banner-developer-controls">{developerControls}</div>
+          ) : null}
           {showShareButton ? (
             <AgentChatButton
               className="banner-action banner-action--pill banner-share banner-desktop-only"
@@ -315,19 +324,18 @@ export const AgentChatBanner = memo(function AgentChatBanner({
               <span className="banner-share-label">Share</span>
             </AgentChatButton>
           ) : null}
-          {showAuditButton ? (
+          {showDeveloperMode ? (
             <AgentChatButton
-              as="a"
-              className="banner-action banner-action--square banner-settings banner-desktop-only"
-              variant="soft"
+              className="banner-action banner-action--pill banner-desktop-only"
+              variant={developerMode ? 'solid' : 'soft'}
               size="sm"
-              href={auditUrl ?? undefined}
-              target="_blank"
-              rel="noreferrer"
-              aria-label="Open audit timeline"
-              title="Open audit timeline"
+              onClick={() => onDeveloperModeChange?.(!developerMode)}
+              aria-pressed={developerMode}
+              aria-label="Toggle Developer Mode"
+              title="Toggle Developer Mode"
             >
-              <Stethoscope size={16} strokeWidth={2.2} />
+              <Code2 size={16} strokeWidth={2.2} />
+              <span>Developer Mode</span>
             </AgentChatButton>
           ) : null}
           {showMobileOverflow ? (
@@ -340,7 +348,7 @@ export const AgentChatBanner = memo(function AgentChatBanner({
               </Button>
               <Popover className="banner-overflow-popover">
                 <Dialog className="banner-overflow-menu">
-                  {showShareButton || showPublicShareButton || showAuditButton || showSettingsButton ? (
+                  {showShareButton || showPublicShareButton || showSettingsButton || showDeveloperMode ? (
                     <div className="banner-overflow-section">
                       <div className="banner-overflow-heading">Actions</div>
                       <div className="banner-overflow-items">
@@ -388,20 +396,22 @@ export const AgentChatBanner = memo(function AgentChatBanner({
                             </span>
                           </AgentChatMenuItem>
                         ) : null}
-                        {showAuditButton ? (
+                        {showDeveloperMode ? (
                           <AgentChatMenuItem
-                            as="a"
+                            type="button"
                             className="banner-overflow-item"
-                            href={auditUrl ?? undefined}
-                            target="_blank"
-                            rel="noreferrer"
-                            onClick={() => setOverflowMenuOpen(false)}
+                            onClick={() => {
+                              onDeveloperModeChange?.(!developerMode)
+                              setOverflowMenuOpen(false)
+                            }}
                           >
                             <span className="banner-overflow-item-icon" aria-hidden="true">
-                              <Stethoscope size={14} />
+                              <Code2 size={14} />
                             </span>
                             <span className="banner-overflow-item-copy">
-                              <span className="banner-overflow-item-label">Audit timeline</span>
+                              <span className="banner-overflow-item-label">
+                                {developerMode ? 'Turn off Developer Mode' : 'Turn on Developer Mode'}
+                              </span>
                             </span>
                           </AgentChatMenuItem>
                         ) : null}
@@ -464,7 +474,6 @@ export const AgentChatBanner = memo(function AgentChatBanner({
             </AgentChatButton>
           ) : null}
         </div>
-
       </div>
       {children ? <div className="banner-secondary">{children}</div> : null}
     </div>

@@ -761,15 +761,15 @@ function ScenarioGroup({
              </div>
            )}
           <div className="flex items-center gap-2">
-            {run && run.agent_id && isStaff ? (
+            {run?.developer_live_chat_url && isStaff ? (
               <a
-                href={`/console/staff/agents/${run.agent_id}/audit/`}
+                href={run.developer_live_chat_url}
                 onClick={(e) => e.stopPropagation()}
                 className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-amber-800 bg-amber-50 border border-amber-200 rounded hover:bg-amber-100 transition-colors"
-                title="View agent audit"
+                title="Open developer live chat"
               >
                 <Stethoscope className="w-3.5 h-3.5" />
-                Audit
+                Live Chat
               </a>
             ) : null}
             {isCompleted && (
@@ -836,7 +836,7 @@ function TaskRow({ task }: { task: EvalTask }) {
   const creditChip = task.credits_cost != null ? `${task.credits_cost.toFixed(3)} cr` : '0 cr'
   const debugEntries = Object.entries(task.debug_artifacts || {})
   const artifactLinks = task.artifact_links || {}
-  const hasDebugContext = debugEntries.length > 0 || task.llm_question || task.llm_answer || artifactLinks.agent_audit_url
+  const hasDebugContext = debugEntries.length > 0 || task.llm_question || task.llm_answer || artifactLinks.developer_live_chat_url
 
   return (
     <div className={`
@@ -866,12 +866,12 @@ function TaskRow({ task }: { task: EvalTask }) {
           <details className="mt-2 rounded-lg bg-white p-2.5 text-xs ring-1 ring-slate-100">
             <summary className="cursor-pointer font-semibold text-slate-700">Debug context</summary>
             <div className="mt-2 space-y-2">
-              {artifactLinks.agent_audit_url ? (
+              {artifactLinks.developer_live_chat_url ? (
                 <a
-                  href={artifactLinks.agent_audit_url}
+                  href={artifactLinks.developer_live_chat_url}
                   className="inline-flex items-center rounded bg-amber-50 px-2 py-1 font-semibold text-amber-800 ring-1 ring-amber-200 hover:bg-amber-100"
                 >
-                  Agent audit timeline
+                  Developer live chat
                 </a>
               ) : null}
               {task.llm_question || task.llm_answer ? (

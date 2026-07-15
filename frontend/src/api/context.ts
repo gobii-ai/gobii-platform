@@ -8,7 +8,10 @@ export type ConsoleContext = {
   name: string
   canCreateAgents?: boolean
   personalSignupPreviewCreateAvailable?: boolean
+  isStaffView?: boolean
 }
+
+export type StaffViewContext = Pick<ConsoleContext, 'type' | 'id'>
 
 export type ConsoleContextOption = ConsoleContext & {
   role?: string | null
@@ -20,6 +23,7 @@ type ConsoleContextPayload = {
   name: string
   canCreateAgents?: boolean
   personalSignupPreviewCreateAvailable?: boolean
+  isStaffView?: boolean
 }
 
 type ConsoleContextResponsePayload = {
@@ -49,10 +53,14 @@ export type ConsoleContextData = {
   requestedAgentStatus?: 'deleted' | 'missing' | null
 }
 
-export async function fetchConsoleContext(options: { forAgentId?: string } = {}): Promise<ConsoleContextData> {
-  const query = options.forAgentId
-    ? `?for_agent=${encodeURIComponent(options.forAgentId)}`
-    : ''
+export async function fetchConsoleContext(options: { forAgentId?: string; staffContext?: StaffViewContext | null } = {}): Promise<ConsoleContextData> {
+  const params = new URLSearchParams()
+  if (options.forAgentId) params.set('for_agent', options.forAgentId)
+  if (options.staffContext) {
+    params.set('staff_context_type', options.staffContext.type)
+    params.set('staff_context_id', options.staffContext.id)
+  }
+  const query = params.toString() ? `?${params.toString()}` : ''
   const payload = await jsonFetch<ConsoleContextResponsePayload>(`/console/switch-context/${query}`)
   return {
     context: payload.context,

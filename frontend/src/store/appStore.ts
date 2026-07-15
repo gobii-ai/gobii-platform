@@ -4,7 +4,6 @@ import type { QueryClient } from '@tanstack/react-query'
 
 import { agentRosterPreferencesReducer } from './agentRosterPreferencesSlice'
 import { agentSettingsReducer } from './agentSettingsSlice'
-import { auditReducer } from './auditSlice'
 import { chatReducer } from './chatSlice'
 import { immersiveShellReducer } from './immersiveShellSlice'
 import { registerImmersiveShellListeners } from './listeners/immersiveShellListeners'
@@ -18,7 +17,6 @@ export type AppStoreExtra = {
 const rootReducer = combineReducers({
   agentRosterPreferences: agentRosterPreferencesReducer,
   agentSettings: agentSettingsReducer,
-  audit: auditReducer,
   chat: chatReducer,
   immersiveShell: immersiveShellReducer,
   subscription: subscriptionReducer,

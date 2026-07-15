@@ -50,6 +50,16 @@ function applyConsoleContextHeaders(headers: Headers): boolean {
   return applied
 }
 
+function applyStaffViewContextHeaders(headers: Headers): void {
+  if (typeof window === 'undefined') return
+  const params = new URLSearchParams(window.location.search)
+  const type = params.get('staff_context_type')
+  const id = params.get('staff_context_id')?.trim()
+  if ((type !== 'personal' && type !== 'organization') || !id) return
+  if (!headers.has('X-Gobii-Staff-Context-Type')) headers.set('X-Gobii-Staff-Context-Type', type)
+  if (!headers.has('X-Gobii-Staff-Context-Id')) headers.set('X-Gobii-Staff-Context-Id', id)
+}
+
 function normalizePathname(pathname: string): string {
   const cleaned = pathname.length > 1 ? pathname.replace(/\/+$/, '') : pathname
   return cleaned.toLowerCase()
@@ -162,6 +172,7 @@ async function jsonFetchInternal<T>(
     }
   }
   const appliedContextHeaders = shouldApplyConsoleContextHeaders(input) ? applyConsoleContextHeaders(headers) : false
+  applyStaffViewContextHeaders(headers)
 
   const response = await fetch(input, {
     credentials: 'same-origin',

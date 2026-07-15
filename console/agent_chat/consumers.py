@@ -5,7 +5,9 @@ from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncJsonWebsocketConsumer
 from django.core.exceptions import PermissionDenied
 
-from console.agent_chat.access import resolve_agent
+from api.models import PersistentAgent
+from console.agent_chat.access import agent_belongs_to_console_context, resolve_agent
+from console.context_helpers import resolve_staff_console_context
 from console.agent_chat.realtime import user_profile_group_name, user_stream_group_name
 
 
@@ -182,8 +184,11 @@ class AgentChatSessionConsumer(AsyncJsonWebsocketConsumer):
             agent_id = content.get("agent_id")
             mode = content.get("mode")
             context_override = content.get("context")
+            staff_context_override = content.get("staff_context")
             if context_override is not None and not isinstance(context_override, dict):
                 context_override = None
+            if staff_context_override is not None and not isinstance(staff_context_override, dict):
+                staff_context_override = None
             if not agent_id:
                 await self.send_json({"type": "subscription.error", "message": "agent_id is required"})
                 return
@@ -196,7 +201,12 @@ class AgentChatSessionConsumer(AsyncJsonWebsocketConsumer):
                     }
                 )
                 return
-            await self._subscribe(str(agent_id), mode=mode, context_override=context_override)
+            await self._subscribe(
+                str(agent_id),
+                mode=mode,
+                context_override=context_override,
+                staff_context_override=staff_context_override,
+            )
             return
         if message_type == "unsubscribe":
             agent_id = content.get("agent_id")
@@ -235,10 +245,23 @@ class AgentChatSessionConsumer(AsyncJsonWebsocketConsumer):
     async def pending_action_requests_event(self, event):
         await self._send_agent_event("pending_action_requests.updated", event)
 
-    async def _subscribe(self, agent_id: str, *, mode: str, context_override=None) -> None:
+    async def _subscribe(
+        self,
+        agent_id: str,
+        *,
+        mode: str,
+        context_override=None,
+        staff_context_override=None,
+    ) -> None:
         if agent_id not in self.subscriptions:
             try:
-                await self._resolve_agent(self.user, self.session, agent_id, context_override=context_override)
+                await self._resolve_agent(
+                    self.user,
+                    self.session,
+                    agent_id,
+                    context_override=context_override,
+                    staff_context_override=staff_context_override,
+                )
             except PermissionDenied as exc:
                 logger.warning(
                     "AgentChatSessionConsumer permission denied for user %s agent %s: %s",
@@ -342,7 +365,20 @@ class AgentChatSessionConsumer(AsyncJsonWebsocketConsumer):
         return None
 
     @database_sync_to_async
-    def _resolve_agent(self, user, session, agent_id, context_override=None):
+    def _resolve_agent(
+        self,
+        user,
+        session,
+        agent_id,
+        context_override=None,
+        staff_context_override=None,
+    ):
+        if staff_context_override:
+            context_info = resolve_staff_console_context(user, staff_context_override)
+            agent = PersistentAgent.objects.non_eval().alive().filter(id=agent_id).first()
+            if agent is None or not agent_belongs_to_console_context(agent, context_info.current_context):
+                raise PermissionDenied("Agent does not belong to the staff context")
+            return agent
         return resolve_agent(
             user,
             session,

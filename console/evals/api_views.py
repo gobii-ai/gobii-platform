@@ -32,7 +32,7 @@ from api.evals.tasks import gc_eval_runs_task, run_eval_task
 from api.models import BrowserUseAgent, EvalRun, EvalRunTask, EvalSuiteRun, GlobalAgentSkill, PersistentAgent
 from console.api_helpers import _parse_json_body
 from console.context_helpers import build_console_context
-from util.urls import IMMERSIVE_APP_BASE_PATH
+from util.urls import IMMERSIVE_APP_BASE_PATH, build_staff_developer_chat_path_for_agent
 
 logger = logging.getLogger(__name__)
 
@@ -49,8 +49,8 @@ def _serialize_eval_task(task: EvalRunTask) -> dict[str, Any]:
         "message_id": str(task.first_message_id) if task.first_message_id else None,
         "step_id": str(task.first_step_id) if task.first_step_id else None,
         "browser_task_id": str(task.first_browser_task_id) if task.first_browser_task_id else None,
-        "agent_audit_url": (
-            f"/console/staff/agents/{task.run.agent_id}/audit/"
+        "developer_live_chat_url": (
+            build_staff_developer_chat_path_for_agent(task.run.agent)
             if task.run_id and task.run.agent_id
             else None
         ),
@@ -124,6 +124,7 @@ def _serialize_eval_run(run: EvalRun, *, include_tasks: bool = False) -> dict[st
         "started_at": run.started_at.isoformat() if run.started_at else None,
         "finished_at": run.finished_at.isoformat() if run.finished_at else None,
         "agent_id": str(run.agent_id) if run.agent_id else None,
+        "developer_live_chat_url": build_staff_developer_chat_path_for_agent(run.agent) if run.agent_id else None,
         "llm_routing_profile_name": run.llm_routing_profile_name or None,
         "primary_model": run.primary_model or None,
         "prompt_tokens": run.prompt_tokens,

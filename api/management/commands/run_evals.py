@@ -19,6 +19,7 @@ from api.evals.tasks import run_eval_task, gc_eval_runs_task
 from api.evals.runner import _update_suite_state
 from api.models import BrowserUseAgent, EvalRun, EvalRunTask, EvalSuiteRun, LLMRoutingProfile, PersistentAgent
 from api.evals.llm_routing_profile_snapshot import create_eval_profile_snapshot
+from util.urls import build_staff_developer_chat_path_for_agent
 
 
 @dataclass(frozen=True)
@@ -430,7 +431,7 @@ class Command(BaseCommand):
         max_runs_total = max(0, int(options.get("max_runs_total") or 0))
         max_scenarios = max(0, int(options.get("max_scenarios") or 0))
         base_site_url = (settings.PUBLIC_SITE_URL or "http://localhost:8000").rstrip("/")
-        printed_audit_agents: set[str] = set()
+        printed_developer_chat_agents: set[str] = set()
 
         if list_catalog:
             self._print_eval_catalog(catalog_filters)
@@ -579,12 +580,14 @@ class Command(BaseCommand):
             )
             return agent
 
-        def _print_audit_link(agent: PersistentAgent) -> None:
+        def _print_developer_chat_link(agent: PersistentAgent) -> None:
             agent_id = str(agent.id)
-            if agent_id in printed_audit_agents:
+            if agent_id in printed_developer_chat_agents:
                 return
-            self.stdout.write(f"  Audit agent timeline: {base_site_url}/console/staff/agents/{agent_id}/audit/")
-            printed_audit_agents.add(agent_id)
+            self.stdout.write(
+                f"  Developer live chat: {base_site_url}{build_staff_developer_chat_path_for_agent(agent)}"
+            )
+            printed_developer_chat_agents.add(agent_id)
 
         shared_agent: PersistentAgent | None = None
         if agent_strategy == EvalSuiteRun.AgentStrategy.REUSE_AGENT:
@@ -608,7 +611,7 @@ class Command(BaseCommand):
                         f"for personal-agent scenario(s): {scenario_list}"
                     )
             self.stdout.write(f"Using provided agent for reuse: {shared_agent.name} ({shared_agent.id})")
-            _print_audit_link(shared_agent)
+            _print_developer_chat_link(shared_agent)
 
         suite_runs = []
         run_ids = []
@@ -668,7 +671,7 @@ class Command(BaseCommand):
                                 organization=scenario_eval_organization,
                             )
                             self.stdout.write(f"  Created ephemeral agent for {scenario.slug}: {run_agent.id}")
-                            _print_audit_link(run_agent)
+                            _print_developer_chat_link(run_agent)
 
                         run = EvalRun.objects.create(
                             suite_run=suite_run,

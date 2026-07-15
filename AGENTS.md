@@ -15,7 +15,7 @@ Writing unit tests:
 
 Writing evals:
 - The point of evals is to help us optimize agent prompts, tool definitions, system skills, etc. Do not make eval prompts too strong or give guidance that should be handled by general prompting.
-- Evals should run in the real world harness, with our real world prompts and tool definitions, and create real events that can be seen in the agent auditor.
+- Evals should run in the real world harness, with our real world prompts and tool definitions, and create real events that can be seen in Live Chat Developer Mode.
 - It's ok to mock/synthesize external or unpredictable things like third-party integrations.
 - Do not over-optimize for a specific use case.
 - In general, try to avoid gearing prompts towards a highly specific use case.

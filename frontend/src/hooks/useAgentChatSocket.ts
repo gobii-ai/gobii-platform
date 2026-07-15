@@ -16,6 +16,7 @@ import {
   type AgentChatSocketSubscription,
 } from './agentChatSocketProtocol'
 import { routeAgentChatSocketMessage } from './agentChatSocketMessageRouter'
+import type { StaffViewContext } from '../api/context'
 
 const RECONNECT_BASE_DELAY_MS = 1000
 const RECONNECT_MAX_DELAY_MS = 15000
@@ -72,6 +73,7 @@ export function useAgentChatSocket(
   desiredSubscriptionsInput: AgentChatSocketSubscription[],
   options: {
     contextOverride?: AgentChatSocketContextOverride
+    staffContextOverride?: StaffViewContext | null
     onCreditEvent?: (payload: Record<string, unknown>) => void
     onAgentProfileEvent?: (payload: Record<string, unknown>) => void
     onMessageNotificationEvent?: (payload: AgentMessageNotification) => void
@@ -146,6 +148,7 @@ export function useAgentChatSocket(
   const lastActivityAtRef = useRef(0)
   const desiredSubscriptionsRef = useRef<AgentChatSocketSubscription[]>(desiredSubscriptions)
   const contextOverrideRef = useRef<AgentChatSocketContextOverride>(options.contextOverride)
+  const staffContextOverrideRef = useRef<StaffViewContext | null | undefined>(options.staffContextOverride)
   const activeAgentIdRef = useRef<string | null>(findActiveAgentChatSocketId(desiredSubscriptions))
   const subscribedAgentsRef = useRef<Map<string, AgentChatSocketSubscription['mode']>>(new Map())
   const [snapshot, setSnapshot] = useState<AgentChatSocketSnapshot>({
@@ -162,6 +165,10 @@ export function useAgentChatSocket(
   useEffect(() => {
     contextOverrideRef.current = options.contextOverride
   }, [options.contextOverride])
+
+  useEffect(() => {
+    staffContextOverrideRef.current = options.staffContextOverride
+  }, [options.staffContextOverride])
 
   const updateSnapshot = useCallback((updates: Partial<AgentChatSocketSnapshot>) => {
     setSnapshot((current) => ({ ...current, ...updates }))
@@ -285,6 +292,7 @@ export function useAgentChatSocket(
       currentSubscriptions: subscribedAgentsRef.current,
       desiredSubscriptions: nextSubscriptions,
       contextOverride: contextOverrideRef.current,
+      staffContextOverride: staffContextOverrideRef.current,
       sendSocketMessage,
       handleSendFailure: () => {
         updateSnapshot({ status: 'reconnecting', lastError: 'WebSocket send failed.' })

@@ -1093,7 +1093,7 @@ class AgentChatAccessTests(TestCase):
         finally:
             clear_processing_queued_flag(self.org_agent.id)
 
-    def test_roster_includes_audit_url_for_staff(self):
+    def test_roster_includes_developer_live_chat_url_for_staff(self):
         User = get_user_model()
         staff_user = User.objects.create_superuser(
             username="staff@example.com",
@@ -1122,8 +1122,11 @@ class AgentChatAccessTests(TestCase):
             entry for entry in payload.get("agents", []) if entry.get("id") == str(persistent_agent.id)
         )
         self.assertEqual(
-            matching_entry.get("audit_url"),
-            f"/console/staff/agents/{persistent_agent.id}/audit/",
+            matching_entry.get("developer_live_chat_url"),
+            (
+                f"/app/agents/{persistent_agent.id}?developer=1"
+                f"&staff_context_type=personal&staff_context_id={staff_user.id}"
+            ),
         )
 
 
