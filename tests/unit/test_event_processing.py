@@ -447,7 +447,7 @@ class PromptContextBuilderTests(TestCase):
             TaskCredit.objects.filter(pk=existing_credit.pk).update(**credit_defaults)
         self._storage_dir = tempfile.mkdtemp()
         self._storage = FileSystemStorage(location=self._storage_dir)
-        self._storage_patch = patch('api.agent.core.prompt_context.default_storage', self._storage)
+        self._storage_patch = patch('api.services.prompt_archives.default_storage', self._storage)
         self._admin_storage_patch = patch('api.admin.default_storage', self._storage)
         self._print_patch = patch('api.agent.core.prompt_context.print')
         self._storage_patch.start()
