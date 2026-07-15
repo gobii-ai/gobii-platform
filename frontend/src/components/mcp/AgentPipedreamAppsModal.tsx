@@ -113,6 +113,7 @@ export function AgentPipedreamAppsModal({
   const emailSettingsQuery = useQuery({
     queryKey: ['agent-email-settings', agentId],
     queryFn: () => fetchAgentEmailSettings(`/console/api/agents/${agentId}/email-settings/`),
+    enabled: Boolean(nativeIntegrationsUrl),
   })
   const discordAppQuery = useQuery({
     queryKey: discordQueryKey,
