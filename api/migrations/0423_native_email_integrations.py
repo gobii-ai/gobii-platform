@@ -80,7 +80,7 @@ def remove_unrepresentable_oauth_sessions(apps, schema_editor):
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("api", "0421_migrate_brightdata_base_tools_to_builtin"),
+        ("api", "0422_update_pretrained_employee_descriptions"),
         ("contenttypes", "0002_remove_content_type_name"),
     ]
 
