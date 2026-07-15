@@ -58,6 +58,16 @@ type OAuthConnectionProgress = {
   phase: 'authorizing' | 'finishing'
 }
 
+type NativeOAuthCompleteMessage = {
+  type?: string
+  providerKey?: string
+  ok?: boolean
+  error?: string
+}
+
+const NATIVE_OAUTH_COMPLETE_MESSAGE = 'gobii:native-oauth-complete'
+const NATIVE_OAUTH_COMPLETE_PREFIX = 'gobii:native_oauth_complete:'
+
 const standaloneInputClassName = 'mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100'
 const embeddedInputClassName = 'mt-1 w-full rounded-lg border border-slate-200/20 bg-slate-950/45 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-blue-300/50 focus:outline-none focus:ring-2 focus:ring-blue-300/20'
 const standalonePrimaryButtonClassName = 'inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-700 disabled:opacity-60'
@@ -151,6 +161,7 @@ export function AgentEmailSettingsScreen({
   const [baseline, setBaseline] = useState<EmailSettingsDraft | null>(null)
   const [oauthConnectionProgress, setOAuthConnectionProgress] = useState<OAuthConnectionProgress | null>(null)
   const oauthPopupRef = useRef<Window | null>(null)
+  const oauthProviderRef = useRef<'gmail' | 'outlook' | null>(null)
   const draftDirtyRef = useRef(false)
 
   const settingsQuery = useQuery({
@@ -170,39 +181,77 @@ export function AgentEmailSettingsScreen({
   }, [settings])
 
   const refresh = useCallback(async () => {
-    await queryClient.invalidateQueries({ queryKey })
-  }, [queryClient, queryKey])
+    const next = await fetchAgentEmailSettings(emailSettingsUrl)
+    queryClient.setQueryData(queryKey, next)
+    return next
+  }, [emailSettingsUrl, queryClient, queryKey])
 
   useEffect(() => {
-    const handleMessage = (event: MessageEvent<{ type?: string; providerKey?: string; ok?: boolean; error?: string }>) => {
-      if (event.origin !== window.location.origin || event.data?.type !== 'gobii:native-oauth-complete') return
-      if (!event.data.ok) {
+    const handleComplete = (payload: NativeOAuthCompleteMessage) => {
+      if (payload.type !== NATIVE_OAUTH_COMPLETE_MESSAGE || payload.providerKey !== oauthProviderRef.current) return
+      if (!payload.ok) {
+        oauthPopupRef.current = null
+        oauthProviderRef.current = null
         setOAuthConnectionProgress(null)
-        setError(event.data.error || 'Unable to connect the mailbox.')
+        setError(payload.error || 'Unable to connect the mailbox.')
         return
       }
       setOAuthConnectionProgress((current) => current ? { ...current, phase: 'finishing' } : null)
-      void refresh().finally(() => {
-        oauthPopupRef.current = null
-        setOAuthConnectionProgress(null)
-      })
+      void refresh()
+        .catch((caught) => setError(safeErrorMessage(caught)))
+        .finally(() => {
+          oauthPopupRef.current = null
+          oauthProviderRef.current = null
+          setOAuthConnectionProgress(null)
+        })
+    }
+    const handleMessage = (event: MessageEvent<NativeOAuthCompleteMessage>) => {
+      if (event.origin === window.location.origin) handleComplete(event.data)
+    }
+    const handleStorage = (event: StorageEvent) => {
+      if (!event.key?.startsWith(NATIVE_OAUTH_COMPLETE_PREFIX) || !event.newValue) return
+      try {
+        handleComplete(JSON.parse(event.newValue))
+        localStorage.removeItem(event.key)
+      } catch (caught) {
+        console.warn('Invalid native integration OAuth completion payload', caught)
+      }
     }
     window.addEventListener('message', handleMessage)
-    return () => window.removeEventListener('message', handleMessage)
+    window.addEventListener('storage', handleStorage)
+    return () => {
+      window.removeEventListener('message', handleMessage)
+      window.removeEventListener('storage', handleStorage)
+    }
   }, [refresh])
 
   useEffect(() => {
-    if (oauthConnectionProgress?.phase !== 'authorizing' || !oauthPopupRef.current) return
-    const popup = oauthPopupRef.current
-    const interval = window.setInterval(() => {
-      if (!popup.closed) return
-      window.clearInterval(interval)
-      oauthPopupRef.current = null
-      setOAuthConnectionProgress(null)
-      setError('The authorization window was closed before the mailbox connected.')
-    }, 500)
-    return () => window.clearInterval(interval)
-  }, [oauthConnectionProgress?.phase])
+    if (oauthConnectionProgress?.phase !== 'authorizing') return
+    let focusTimer: number | null = null
+    const handleFocus = () => {
+      focusTimer = window.setTimeout(() => {
+        const provider = oauthProviderRef.current
+        if (!provider) return
+        void refresh()
+          .then((nextSettings) => {
+            if (nextSettings.activeMode === 'oauth' && nextSettings.oauth.provider === provider) {
+              oauthPopupRef.current = null
+              oauthProviderRef.current = null
+            }
+            setOAuthConnectionProgress(null)
+          })
+          .catch((caught) => {
+            setError(safeErrorMessage(caught))
+            setOAuthConnectionProgress(null)
+          })
+      }, 750)
+    }
+    window.addEventListener('focus', handleFocus)
+    return () => {
+      window.removeEventListener('focus', handleFocus)
+      if (focusTimer !== null) window.clearTimeout(focusTimer)
+    }
+  }, [oauthConnectionProgress?.phase, refresh])
 
   const actionMutation = useMutation({
     mutationFn: ({ action, values = {} }: { action: string; values?: Record<string, unknown> }) =>
@@ -277,6 +326,7 @@ export function AgentEmailSettingsScreen({
 
   const connect = useCallback((provider: 'gmail' | 'outlook') => {
     if (!settings) return
+    oauthProviderRef.current = provider
     setOAuthConnectionProgress({ provider, phase: 'authorizing' })
     void run(async () => {
       try {
@@ -298,6 +348,7 @@ export function AgentEmailSettingsScreen({
       } catch (caught) {
         oauthPopupRef.current?.close()
         oauthPopupRef.current = null
+        oauthProviderRef.current = null
         setOAuthConnectionProgress(null)
         throw caught
       }

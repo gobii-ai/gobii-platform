@@ -205,6 +205,7 @@ type NativeIntegrationInsightPanelFrameProps = {
   ariaLabel: string
   providerLabel: string
   provider?: NativeIntegrationProvider | null
+  configured?: boolean
   connected: boolean
   fallbackIcon: ReactNode
   unavailableMessage?: string | null
@@ -215,12 +216,14 @@ type NativeIntegrationInsightPanelFrameProps = {
   text?: string | null
   actions?: ReactNode
   statusMessage?: string | null
+  statusTone?: 'success' | 'error'
 }
 
 export function NativeIntegrationInsightPanelFrame({
   ariaLabel,
   providerLabel,
   provider = null,
+  configured,
   connected,
   fallbackIcon,
   unavailableMessage = null,
@@ -231,7 +234,9 @@ export function NativeIntegrationInsightPanelFrame({
   text = null,
   actions = null,
   statusMessage = null,
+  statusTone = 'success',
 }: NativeIntegrationInsightPanelFrameProps) {
+  const isConfigured = configured ?? Boolean(provider)
   let headerConnected = connected
   let content: ReactNode
 
@@ -246,7 +251,7 @@ export function NativeIntegrationInsightPanelFrame({
         {loadingMessage}
       </div>
     )
-  } else if (errorMessage || !provider) {
+  } else if (errorMessage || !isConfigured) {
     headerConnected = false
     content = <p className="google-drive-insight-panel__error">{errorMessage ?? notConfiguredMessage}</p>
   } else {
@@ -259,7 +264,11 @@ export function NativeIntegrationInsightPanelFrame({
           </div>
           {actions ? <div className="google-drive-insight-panel__actions">{actions}</div> : null}
         </div>
-        {statusMessage ? <p className="google-drive-insight-panel__status">{statusMessage}</p> : null}
+        {statusMessage ? (
+          <p className={statusTone === 'error' ? 'google-drive-insight-panel__error' : 'google-drive-insight-panel__status'}>
+            {statusMessage}
+          </p>
+        ) : null}
       </>
     )
   }
