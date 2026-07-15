@@ -313,6 +313,20 @@ export const AgentChatBanner = memo(function AgentChatBanner({
               {hasPlan ? <span className="banner-plan-count">{planSnapshot.doingCount + planSnapshot.todoCount}</span> : null}
             </AgentChatButton>
           ) : null}
+          {showDeveloperMode ? (
+            <AgentChatButton
+              className="banner-action banner-action--pill banner-developer-mode-toggle banner-desktop-only"
+              variant={developerMode ? 'solid' : 'soft'}
+              size="sm"
+              onClick={() => onDeveloperModeChange?.(!developerMode)}
+              aria-pressed={developerMode}
+              aria-label="Toggle Developer Mode"
+              title="Toggle Developer Mode"
+            >
+              <Code2 size={16} strokeWidth={2.2} />
+              <span>{developerMode ? 'Dev Mode On' : 'Dev Mode Off'}</span>
+            </AgentChatButton>
+          ) : null}
           {developerMode && developerControls ? (
             <div className="banner-developer-controls">{developerControls}</div>
           ) : null}
@@ -344,20 +358,6 @@ export const AgentChatBanner = memo(function AgentChatBanner({
             >
               <Share2 size={16} strokeWidth={2.2} />
               <span className="banner-share-label">Share</span>
-            </AgentChatButton>
-          ) : null}
-          {showDeveloperMode ? (
-            <AgentChatButton
-              className="banner-action banner-action--pill banner-desktop-only"
-              variant={developerMode ? 'solid' : 'soft'}
-              size="sm"
-              onClick={() => onDeveloperModeChange?.(!developerMode)}
-              aria-pressed={developerMode}
-              aria-label="Toggle Developer Mode"
-              title="Toggle Developer Mode"
-            >
-              <Code2 size={16} strokeWidth={2.2} />
-              <span>Developer Mode</span>
             </AgentChatButton>
           ) : null}
           {showMobileOverflow ? (
@@ -421,7 +421,7 @@ export const AgentChatBanner = memo(function AgentChatBanner({
                             </span>
                           </AgentChatMenuItem>
                         ) : null}
-                        {showDeveloperMode ? (
+                        {showDeveloperMode && (!developerMode || developerActionLayout !== 'partial') ? (
                           <AgentChatMenuItem
                             type="button"
                             className="banner-overflow-item"

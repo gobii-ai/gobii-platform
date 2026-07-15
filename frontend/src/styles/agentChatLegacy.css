@@ -1010,6 +1010,9 @@
 .banner[data-developer-mode='true'][data-developer-action-layout='overflow'] .banner-mobile-only {
     display: inline-flex;
 }
+.banner[data-developer-mode='true'][data-developer-action-layout='partial'] .banner-developer-mode-toggle {
+    display: inline-flex;
+}
 .banner[data-developer-mode='true'][data-developer-action-layout='partial'] .banner-developer-controls .developer-action--admin,
 .banner[data-developer-mode='true'][data-developer-action-layout='partial'] .banner-developer-controls .developer-action--export {
     display: none;
