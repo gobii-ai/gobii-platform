@@ -11,7 +11,7 @@ from datetime import datetime, timezone, timedelta
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from functools import partial
 from time import monotonic
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Set, Tuple
 from uuid import UUID
 
 from django.core.exceptions import ObjectDoesNotExist
@@ -76,6 +76,12 @@ from .compaction import ensure_comms_compacted, ensure_steps_compacted, llm_summ
 from .llm_config import AgentLLMTier, LLMNotConfiguredError, REFERENCE_TOKENIZER_MODEL, apply_tier_credit_multiplier, get_agent_llm_tier, get_llm_config, get_llm_config_with_failover
 from . import internal_reasoning
 from .promptree import Prompt, hmt
+from .prompt_run_cache import (
+    CONTACTS_SNAPSHOT,
+    FILES_SNAPSHOT,
+    MESSAGES_SNAPSHOT,
+    PromptRunCache,
+)
 from .step_compaction import llm_summarise_steps
 
 from ..files.filesystem_prompt import MAX_RECENT_FILES_IN_PROMPT, format_agent_filesystem_prompt
@@ -92,7 +98,7 @@ from ..system_skills.discovery import format_system_skill_discovery_prompt
 from .tool_results import PREVIEW_TIER_COUNT, SPAWN_WEB_TASK_RESULT_TOOL_NAME, ToolCallResultRecord, ToolResultPromptInfo, prepare_tool_results_for_prompt
 from .daily_limit_mode import DAILY_LIMIT_ALLOWED_TOOL_NAMES_TEXT, is_daily_hard_limit_message_only_mode
 from .contact_results import ContactSQLiteRecord, store_contacts_for_prompt
-from .contact_snapshot import build_contact_activity_by_key, build_contacts_snapshot_records
+from .contact_snapshot import build_contacts_snapshot_records
 from .file_results import FileSQLiteRecord, store_files_for_prompt
 from .message_results import MessageSQLiteRecord, store_messages_for_prompt
 from api.services.email_verification import has_verified_email
@@ -872,12 +878,17 @@ def compute_burn_rate(
     }
 
 
-def _create_token_estimator(model: str) -> callable:
+def _create_token_estimator(model: str, run_cache: PromptRunCache | None = None) -> callable:
     """Create a token counter function using litellm for the specified model."""
 
     def token_estimator(text: str) -> int:
+        def _count(value: str) -> int:
+            return token_counter(model=model, text=value)
+
         try:
-            return token_counter(model=model, text=text)
+            if run_cache is not None:
+                return run_cache.token_counts.count(model, text, _count)
+            return _count(text)
         except Exception as e:
             logger.warning(
                 "Token counting failed for model %s: %s, falling back to word count",
@@ -887,6 +898,26 @@ def _create_token_estimator(model: str) -> callable:
             return len(text.split())
 
     return token_estimator
+
+
+def _get_prompt_snapshot(
+    span,
+    run_cache: PromptRunCache | None,
+    domain: str,
+    builder: Callable[[], Any],
+    store: Callable[[Any], None],
+    records: Callable[[Any], Sequence[Any]] = lambda snapshot: snapshot,
+) -> Any:
+    snapshot, cache_hit = run_cache.get_or_build(domain, builder) if run_cache else (builder(), False)
+    snapshot_records = records(snapshot)
+    if not cache_hit:
+        store(snapshot_records)
+    span.set_attributes({
+        "prompt.snapshot.cache_hit": cache_hit,
+        "prompt.snapshot.cache_miss": not cache_hit,
+        "prompt.snapshot.records": len(snapshot_records),
+    })
+    return snapshot
 
 
 def _resolve_max_iterations(max_iterations: Optional[int]) -> int:
@@ -1069,6 +1100,7 @@ def _get_dedicated_ip_count(owner) -> int:
         )
         return 0
 
+@tracer.start_as_current_span("Prompt Capability Sections")
 def _build_agent_capabilities_sections(agent: PersistentAgent) -> dict[str, str]:
     """Return structured capability text for plan/plan_info, settings, and email settings."""
 
@@ -1281,6 +1313,7 @@ def _render_prompt_context_once(
     prompt_failover_configs: Sequence[Tuple[str, str, Mapping[str, Any]]] | None = None,
     system_directive_block: str = "",
     skip_compaction: bool = False,
+    run_cache: PromptRunCache | None = None,
 ) -> PromptRenderResult:
     max_iterations = _resolve_max_iterations(max_iterations)
     planning_mode_active = agent.planning_state == PersistentAgent.PlanningState.PLANNING
@@ -1305,30 +1338,31 @@ def _render_prompt_context_once(
     )
 
     # Create token estimator for the specific model
-    token_estimator = _create_token_estimator(model)
+    token_estimator = _create_token_estimator(model, run_cache)
 
     # Initialize promptree with the token estimator
     prompt = Prompt(token_estimator=token_estimator)
     config_authority = _ConfigAuthorityResolver(agent)
 
     # System instruction (highest priority, never shrinks)
-    peer_dm_context = _get_active_peer_dm_context(agent)
-    proactive_context = _get_recent_proactive_context(agent)
-    implied_send_context = _get_implied_send_context(
-        agent,
-        allow_implied_send=prompt_allows_implied_send,
-    )
-    implied_send_active = implied_send_context is not None
-    system_prompt = _get_system_instruction(
-        agent,
-        is_first_run=is_first_run,
-        peer_dm_context=peer_dm_context,
-        proactive_context=proactive_context,
-        implied_send_context=implied_send_context,
-        continuation_notice=continuation_notice,
-        system_directive_block=system_directive_block,
-    )
-    system_prompt = _append_agent_owner_custom_instructions(system_prompt, agent)
+    with tracer.start_as_current_span("Prompt System Sections"):
+        peer_dm_context = _get_active_peer_dm_context(agent)
+        proactive_context = _get_recent_proactive_context(agent)
+        implied_send_context = _get_implied_send_context(
+            agent,
+            allow_implied_send=prompt_allows_implied_send,
+        )
+        implied_send_active = implied_send_context is not None
+        system_prompt = _get_system_instruction(
+            agent,
+            is_first_run=is_first_run,
+            peer_dm_context=peer_dm_context,
+            proactive_context=proactive_context,
+            implied_send_context=implied_send_context,
+            continuation_notice=continuation_notice,
+            system_directive_block=system_directive_block,
+        )
+        system_prompt = _append_agent_owner_custom_instructions(system_prompt, agent)
 
     # Medium priority sections (weight=6) - important but can be shrunk if needed
     important_group = prompt.group("important", weight=6)
@@ -1412,21 +1446,25 @@ def _render_prompt_context_once(
             cap_group.section_text("agent_email_settings", email_settings_text, weight=1, non_shrinkable=True)
 
     # Contacts block - use promptree natively
-    contact_activity_by_key = build_contact_activity_by_key(agent)
-    contact_records = build_contacts_snapshot_records(
-        agent,
-        display_name_for_user=_build_user_display_name,
-        user_can_configure=config_authority.user_can_configure,
-        activity_by_key=contact_activity_by_key,
-    )
-    recent_contacts_text = _build_contacts_block(
-        agent,
-        important_group,
-        span,
-        config_authority,
-        contact_records,
-    )
-    store_contacts_for_prompt(contact_records)
+    with tracer.start_as_current_span("Prompt Contacts Snapshot") as contacts_span:
+        contact_records = _get_prompt_snapshot(
+            contacts_span,
+            run_cache,
+            CONTACTS_SNAPSHOT,
+            lambda: build_contacts_snapshot_records(
+                agent,
+                display_name_for_user=_build_user_display_name,
+                user_can_configure=config_authority.user_can_configure,
+            ),
+            store_contacts_for_prompt,
+        )
+        recent_contacts_text = _build_contacts_block(
+            agent,
+            important_group,
+            span,
+            config_authority,
+            contact_records,
+        )
     _build_webhooks_block(agent, important_group, span)
     _build_mcp_servers_block(agent, important_group, span)
 
@@ -1516,12 +1554,24 @@ def _render_prompt_context_once(
             non_shrinkable=True,
         )
 
-    files_snapshot = _build_sqlite_files_snapshot(agent)
-    store_files_for_prompt(files_snapshot.records)
+    with tracer.start_as_current_span("Prompt Files Snapshot") as files_span:
+        files_snapshot = _get_prompt_snapshot(
+            files_span,
+            run_cache,
+            FILES_SNAPSHOT,
+            lambda: _build_sqlite_files_snapshot(agent),
+            store_files_for_prompt,
+            records=lambda snapshot: snapshot.records,
+        )
 
     # Unified history follows the important context (order within user prompt: important -> unified_history -> critical)
     unified_history_group = prompt.group("unified_history", weight=3)
-    fresh_tool_call_step_ids = _get_unified_history_prompt(agent, unified_history_group, config_authority)
+    fresh_tool_call_step_ids = _get_unified_history_prompt(
+        agent,
+        unified_history_group,
+        config_authority,
+        run_cache=run_cache,
+    )
 
     # Variable priority sections (weight=4) - can be heavily shrunk with smart truncation
     variable_group = prompt.group("variable", weight=4)
@@ -1617,15 +1667,16 @@ def _render_prompt_context_once(
     # High priority sections (weight=10) - critical information that shouldn't shrink much
     critical_group = prompt.group("critical", weight=10)
 
-    if daily_credit_state is None:
-        daily_credit_state = get_agent_daily_credit_state(agent)
-    add_budget_awareness_sections(
-        critical_group,
-        current_iteration=current_iteration,
-        max_iterations=max_iterations,
-        daily_credit_state=daily_credit_state,
-        agent=agent,
-    )
+    with tracer.start_as_current_span("Prompt Dynamic Critical Sections"):
+        if daily_credit_state is None:
+            daily_credit_state = get_agent_daily_credit_state(agent)
+        add_budget_awareness_sections(
+            critical_group,
+            current_iteration=current_iteration,
+            max_iterations=max_iterations,
+            daily_credit_state=daily_credit_state,
+            agent=agent,
+        )
 
     reasoning_streak_text = _get_reasoning_streak_prompt(
         reasoning_only_streak,
@@ -1734,7 +1785,22 @@ def _render_prompt_context_once(
     token_budget = get_prompt_token_budget(agent)
     system_tokens = token_estimator(system_prompt)
     user_token_budget = max(1, token_budget - system_tokens)
-    user_content = prompt.render(user_token_budget)
+    token_hits_before = run_cache.token_counts.hits if run_cache is not None else 0
+    token_misses_before = run_cache.token_counts.misses if run_cache is not None else 0
+    with tracer.start_as_current_span("Promptree Render") as render_span:
+        user_content = prompt.render(user_token_budget)
+        render_span.set_attribute("prompt.fast_path", prompt.used_fast_path())
+        render_span.set_attribute("prompt.characters", len(user_content))
+        render_span.set_attribute("prompt.fitted_tokens", prompt.get_tokens_after_fitting())
+        if run_cache is not None:
+            render_span.set_attribute(
+                "prompt.token_cache.hits",
+                run_cache.token_counts.hits - token_hits_before,
+            )
+            render_span.set_attribute(
+                "prompt.token_cache.misses",
+                run_cache.token_counts.misses - token_misses_before,
+            )
 
     # Get token counts before and after fitting
     tokens_before = prompt.get_tokens_before_fitting() + system_tokens
@@ -1778,6 +1844,7 @@ def _latest_prompt_token_seed(agent: PersistentAgent) -> int:
     return max(int(value or 0), 0)
 
 
+@tracer.start_as_current_span("Archive Prompt Context")
 def _archive_prompt_render(agent: PersistentAgent, result: PromptRenderResult) -> Optional[UUID]:
     span = trace.get_current_span()
     archive_key, raw_bytes, compressed_bytes, archive_id = archive_agent_prompt(
@@ -1901,6 +1968,7 @@ def build_prompt_context(
     include_metadata: bool = False,
     system_directive_block: str = "",
     routing_token_seed: Optional[int] = None,
+    run_cache: PromptRunCache | None = None,
 ) -> tuple[List[dict], int, Optional[UUID]] | tuple[List[dict], int, Optional[UUID], dict[str, Any]]:
     """
     Return a system + user message for the LLM using promptree for token budget management.
@@ -1948,6 +2016,7 @@ def build_prompt_context(
             continuation_notice=continuation_notice,
             routing_profile=routing_profile,
             system_directive_block=system_directive_block,
+            run_cache=run_cache,
         ),
     )
     render_result.metadata["prompt_failover_configs"] = list(prompt_failover_configs or [])
@@ -4177,10 +4246,13 @@ def _build_sqlite_files_snapshot(agent: PersistentAgent) -> _FileSnapshotBundle:
     return _FileSnapshotBundle(has_filespace=True, records=records)
 
 
+@tracer.start_as_current_span("Prompt Unified History")
 def _get_unified_history_prompt(
     agent: PersistentAgent,
     history_group,
     config_authority: _ConfigAuthorityResolver,
+    *,
+    run_cache: PromptRunCache | None = None,
 ) -> Set[str]:
     """Add summaries + interleaved recent steps & messages to the provided promptree group."""
     epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
@@ -4589,7 +4661,14 @@ def _get_unified_history_prompt(
 
         structured_events.append((m.timestamp, event_type, components))
 
-    store_messages_for_prompt(_build_sqlite_messages_snapshot_records(agent))
+    with tracer.start_as_current_span("Prompt Messages Snapshot") as messages_span:
+        _get_prompt_snapshot(
+            messages_span,
+            run_cache,
+            MESSAGES_SNAPSHOT,
+            lambda: _build_sqlite_messages_snapshot_records(agent),
+            store_messages_for_prompt,
+        )
 
     # Include most recent completed browser tasks as structured events
     for t in completed_tasks:
@@ -4735,6 +4814,7 @@ def get_agent_tools(agent: PersistentAgent = None) -> List[dict]:
 
     return static_tools
 
+@tracer.start_as_current_span("Prompt Dynamic Browser Tasks")
 def _build_browser_tasks_sections(agent: PersistentAgent, tasks_group) -> None:
     """Add individual sections for each browser task to the provided promptree group."""
     # ALL active tasks (spawn_web_task enforces the per-agent max during creation)

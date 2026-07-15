@@ -83,6 +83,11 @@ from .daily_limit_mode import (
 from .period_events import DAILY_HARD_LIMIT_BLOCKED_EVENT, DAILY_HARD_LIMIT_EXCEEDED_EVENT, DAILY_SOFT_LIMIT_EXCEEDED_EVENT, should_emit_daily_agent_event
 from .agent_judge import maybe_run_agent_judge
 from .prompt_context import build_prompt_context, get_agent_daily_credit_state, get_agent_tools
+from .prompt_run_cache import (
+    PromptRunCache,
+    bind_prompt_run_cache,
+    reset_prompt_run_cache,
+)
 
 from ..tools.apply_patch import execute_apply_patch
 from ..tools.charter_updater import execute_update_charter
@@ -5161,18 +5166,19 @@ def _process_agent_events_locked(
     """Core event processing logic, called while holding the distributed lock."""
     budget_ctx = get_budget_context()
     try:
-        agent = (
-            PersistentAgent.objects.alive().select_related(
-                "organization",
-                "organization__billing",
-                "user",
-                "user__billing",
-                "preferred_contact_endpoint",
-                "browser_use_agent",
+        with tracer.start_as_current_span("Agent Bootstrap Load"):
+            agent = (
+                PersistentAgent.objects.alive().select_related(
+                    "organization",
+                    "organization__billing",
+                    "user",
+                    "user__billing",
+                    "preferred_contact_endpoint",
+                    "browser_use_agent",
+                )
+                .prefetch_related("webhooks")
+                .get(id=persistent_agent_id)
             )
-            .prefetch_related("webhooks")
-            .get(id=persistent_agent_id)
-        )
     except PersistentAgent.DoesNotExist:
         clear_processing_work_state(persistent_agent_id)
         _close_active_cycle_for_skipped_agent(
@@ -5221,8 +5227,11 @@ def _process_agent_events_locked(
     except Exception as e:
         logger.debug("Failed to broadcast processing state at start for agent %s: %s", persistent_agent_id, e)
 
-    owner = resolve_agent_owner(agent)
-    pause_state = get_owner_execution_pause_state(owner)
+    with tracer.start_as_current_span("Agent Bootstrap Owner Gating") as owner_gating_span:
+        owner = resolve_agent_owner(agent)
+        pause_state = get_owner_execution_pause_state(owner)
+        owner_gating_span.set_attribute("owner.execution_paused", pause_state["paused"])
+        owner_gating_span.set_attribute("owner.execution_pause_reason", pause_state["reason"] or "")
     if pause_state["paused"]:
         pause_reason = pause_state["reason"] or "unknown"
         msg = f"Skipped processing because {EXECUTION_PAUSE_MESSAGE.lower()}"
@@ -5420,7 +5429,8 @@ def _process_agent_events_locked(
         span.set_attribute('credit_check.error', str(e))
         return agent
 
-    prior_run_count = _get_completed_process_run_count(agent)
+    with tracer.start_as_current_span("Agent Bootstrap Run Count"):
+        prior_run_count = _get_completed_process_run_count(agent)
 
     # Determine whether this is the first processing run before recording the system step
     is_first_run = prior_run_count == 0
@@ -5545,7 +5555,9 @@ def _run_agent_loop(
     except Exception:
         logger.debug("Autotool heuristic check failed", exc_info=True)
 
-    tools = get_agent_tools(agent)
+    with tracer.start_as_current_span("Agent Bootstrap Tool Discovery") as tools_span:
+        tools = get_agent_tools(agent)
+        tools_span.set_attribute("persistent_agent.tools.count", len(tools))
     current_planning_state = agent.planning_state
     owner = resolve_agent_owner(agent)
     # Completion billing metadata is effectively scoped to this processing run,
@@ -5599,6 +5611,11 @@ def _run_agent_loop(
     def _current_human_inbound_generation() -> int:
         return get_human_inbound_generation(agent.id, client=redis_client)
 
+    prompt_run_cache = PromptRunCache(
+        agent_id=str(agent.id),
+        snapshot_reuse_enabled=settings.AGENT_PROMPT_RUN_CACHE_ENABLED,
+    )
+    prompt_run_cache_token = bind_prompt_run_cache(prompt_run_cache)
     try:
         for i in range(max_remaining):
             previous_planning_state = current_planning_state
@@ -5700,9 +5717,11 @@ def _run_agent_loop(
                     judge_trigger_reasons.append("burn_rate_tier_step_down")
                 maybe_run_agent_judge(agent, tools=tools, extra_trigger_reasons=judge_trigger_reasons)
 
-                prompt_human_generation = _current_human_inbound_generation()
-                config_snapshot = seed_sqlite_agent_config(agent)
-                skills_snapshot = seed_sqlite_skills(agent)
+                with tracer.start_as_current_span("Agent Iteration Preparation"):
+                    prompt_human_generation = _current_human_inbound_generation()
+                    prompt_run_cache.observe_human_generation(prompt_human_generation)
+                    config_snapshot = seed_sqlite_agent_config(agent)
+                    skills_snapshot = seed_sqlite_skills(agent)
                 current_notice = continuation_notice
                 continuation_notice = None
                 routing_profile = get_current_eval_routing_profile()
@@ -5721,6 +5740,7 @@ def _run_agent_loop(
                         include_metadata=True,
                         system_directive_block=stale_prompt_system_directive_block,
                         routing_token_seed=routing_token_seed,
+                        run_cache=prompt_run_cache,
                     )
                 except Exception as exc:
                     log_prompt_construction_error(
@@ -5751,6 +5771,7 @@ def _run_agent_loop(
                 prompt_archive_attached = False
                 latest_human_generation = _current_human_inbound_generation()
                 if latest_human_generation > prompt_human_generation:
+                    prompt_run_cache.observe_human_generation(latest_human_generation)
                     stale_prompt_system_directive_block = str(
                         prompt_metadata.get("system_directive_block") or stale_prompt_system_directive_block or ""
                     )
@@ -6514,4 +6535,5 @@ def _run_agent_loop(
 
         return cumulative_token_usage
     finally:
+        reset_prompt_run_cache(prompt_run_cache_token)
         clear_runtime_tier_override(agent)

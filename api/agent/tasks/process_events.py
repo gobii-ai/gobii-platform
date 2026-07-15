@@ -157,17 +157,21 @@ class ProcessAgentEventsTaskBase(Task):
     """Task base that records queued processing state before enqueueing."""
 
     def apply_async(self, args=None, kwargs=None, **options):
-        agent_id = _extract_agent_id(args, kwargs)
-        kwargs = dict(kwargs or {})
-        kwargs.setdefault(PROCESS_AGENT_EVENTS_QUEUED_AT_KWARG, time.time())
-        kwargs.setdefault(
-            PROCESS_AGENT_EVENTS_QUEUED_QUEUE_KWARG,
-            str(options.get("queue") or AGENT_DEFAULT_PROCESSING_QUEUE),
-        )
-        if agent_id:
-            set_processing_queued_flag(agent_id)
-            _broadcast_processing_state(agent_id)
-        return super().apply_async(args=args, kwargs=kwargs, **options)
+        with tracer.start_as_current_span("Enqueue Process Agent Events"):
+            agent_id = _extract_agent_id(args, kwargs)
+            kwargs = dict(kwargs or {})
+            kwargs.setdefault(PROCESS_AGENT_EVENTS_QUEUED_AT_KWARG, time.time())
+            kwargs.setdefault(
+                PROCESS_AGENT_EVENTS_QUEUED_QUEUE_KWARG,
+                str(options.get("queue") or AGENT_DEFAULT_PROCESSING_QUEUE),
+            )
+            if agent_id:
+                with tracer.start_as_current_span("Set Processing Queued Flag"):
+                    set_processing_queued_flag(agent_id)
+                with tracer.start_as_current_span("Broadcast Processing Queued State"):
+                    _broadcast_processing_state(agent_id)
+            with tracer.start_as_current_span("Publish Process Agent Events Task"):
+                return super().apply_async(args=args, kwargs=kwargs, **options)
 
 
 def enqueue_interactive_process_agent_events(

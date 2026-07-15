@@ -10,6 +10,7 @@ from util.tool_costs import get_tool_credit_cost_for_channel
 
 from dataclasses import dataclass
 from decimal import Decimal
+from time import monotonic
 from typing import Iterable, Any, Tuple
 
 import logging
@@ -67,6 +68,81 @@ class InboundMessageInfo:
     """Info about the stored message."""
 
     message: PersistentAgentMessage
+
+
+@dataclass
+class _ProcessingDispatch:
+    """Post-commit attachment and processing dispatch state."""
+
+    owner_id: UUID
+    channel: str
+    trigger_processing: bool
+    prioritized: bool = False
+    message_id: str | None = None
+    has_attachments: bool = False
+    filespace_import_mode: str = "sync"
+    should_skip_processing: bool = True
+    persisted_at: float = 0.0
+    ready: bool = False
+
+    def dispatch(self) -> None:
+        if not self.ready:
+            return
+
+        with tracer.start_as_current_span("ingest.dispatch_after_commit") as span:
+            span.set_attributes({
+                "persistent_agent.id": str(self.owner_id),
+                "message.id": self.message_id or "",
+                "message.has_attachments": self.has_attachments,
+                "processing.skipped": self.should_skip_processing,
+                "message.persist_to_dispatch_ms": round(
+                    (monotonic() - self.persisted_at) * 1000,
+                    3,
+                ),
+            })
+
+            is_interactive = self.channel == CommsChannel.WEB
+            inbound_generation = None
+            if self.prioritized:
+                if not self.trigger_processing:
+                    return
+                if is_interactive:
+                    inbound_generation = bump_human_inbound_generation(self.owner_id)
+                if self.should_skip_processing:
+                    return
+
+            if self.has_attachments and self.message_id:
+                self._dispatch_attachment_import()
+
+            if not self.trigger_processing:
+                return
+            if not self.prioritized:
+                if is_interactive:
+                    inbound_generation = bump_human_inbound_generation(self.owner_id)
+                if self.should_skip_processing:
+                    return
+
+            from api.agent.tasks import enqueue_interactive_process_agent_events, process_agent_events_task
+
+            if is_interactive:
+                enqueue_interactive_process_agent_events(
+                    str(self.owner_id),
+                    inbound_generation=inbound_generation,
+                )
+            else:
+                process_agent_events_task.delay(str(self.owner_id))
+
+    def _dispatch_attachment_import(self) -> None:
+        if self.filespace_import_mode != "sync":
+            enqueue_import_after_commit(self.message_id)
+            return
+        try:
+            import_message_attachments_to_filespace(self.message_id)
+        except Exception:
+            logging.exception(
+                "Failed synchronous filespace import for message %s",
+                self.message_id,
+            )
 
 
 def _is_owner_sender(agent: PersistentAgent, channel: CommsChannel | str, sender: str | None) -> bool:
@@ -432,6 +508,7 @@ def ingest_inbound_message(
     parsed: ParsedMessage,
     filespace_import_mode: str = "sync",
     trigger_processing: bool = True,
+    prioritize_processing_dispatch: bool = False,
 ) -> InboundMessageInfo:
     """Persist an inbound message and trigger event processing."""
 
@@ -448,6 +525,19 @@ def ingest_inbound_message(
 
         agent_id = get_agent_id_from_address(channel, parsed.recipient)
 
+        processing_dispatch = None
+        if agent_id:
+            processing_dispatch = _ProcessingDispatch(
+                owner_id=agent_id,
+                channel=channel_val,
+                trigger_processing=trigger_processing,
+                prioritized=prioritize_processing_dispatch,
+            )
+        if processing_dispatch and prioritize_processing_dispatch:
+            # Register before message creation so realtime post-save callbacks cannot
+            # delay interactive worker dispatch after the transaction commits.
+            transaction.on_commit(processing_dispatch.dispatch, robust=True)
+
         if agent_id:
             baggage.set_baggage("agent.id", agent_id)
             span.set_attribute("agent.id", str(agent_id))
@@ -458,14 +548,17 @@ def ingest_inbound_message(
                 channel_val,
             )
 
-        message = PersistentAgentMessage.objects.create(
-            is_outbound=False,
-            from_endpoint=from_ep,
-            conversation=conv,
-            body=parsed.body,
-            raw_payload=parsed.raw_payload,
-            owner_agent_id=agent_id,
-        )
+        with traced("AGENT MSG Persist") as persist_span:
+            message = PersistentAgentMessage.objects.create(
+                is_outbound=False,
+                from_endpoint=from_ep,
+                conversation=conv,
+                body=parsed.body,
+                raw_payload=parsed.raw_payload,
+                owner_agent_id=agent_id,
+            )
+            message_persisted_at = monotonic()
+            persist_span.set_attribute("message.id", str(message.id))
         if channel_val in {CommsChannel.WEB, CommsChannel.EMAIL, CommsChannel.SMS}:
             agent_obj = PersistentAgent.objects.filter(id=message.owner_agent_id).first()
             read_user = resolve_inbound_read_user(agent_obj, channel_val, parsed.sender)
@@ -567,8 +660,6 @@ def ingest_inbound_message(
                 and isinstance(parsed.raw_payload, dict)
                 and str(parsed.raw_payload.get("source_kind", "")).strip().lower() == "webhook"
             )
-            is_interrupting_human_input = channel_val == CommsChannel.WEB
-
             try:
                 if agent_obj and (channel_val in {CommsChannel.EMAIL, CommsChannel.SMS} or is_inbound_webhook):
                     owner = resolve_agent_owner(agent_obj)
@@ -760,45 +851,15 @@ def ingest_inbound_message(
             except Exception:
                 logging.exception("Error during out-of-credits pre-processing check (WEB)")
 
-            def _trigger_processing() -> None:
-                if not trigger_processing:
-                    return
-                inbound_generation = None
-                if is_interrupting_human_input:
-                    inbound_generation = bump_human_inbound_generation(owner_id)
-                if should_skip_processing:
-                    return
-                from api.agent.tasks import enqueue_interactive_process_agent_events, process_agent_events_task
-                # Top-level trigger: no budget context provided
-                if is_interrupting_human_input:
-                    enqueue_interactive_process_agent_events(
-                        str(owner_id),
-                        inbound_generation=inbound_generation,
-                    )
-                elif inbound_generation is None:
-                    process_agent_events_task.delay(str(owner_id))
-                else:
-                    process_agent_events_task.delay(str(owner_id), inbound_generation=inbound_generation)
-
-            has_attachments = message.attachments.exists()
-            message_id = str(message.id)
-
-            if has_attachments and filespace_import_mode == "sync":
-                def _import_then_maybe_process() -> None:
-                    try:
-                        import_message_attachments_to_filespace(message_id)
-                    except Exception:
-                        logging.exception(
-                            "Failed synchronous filespace import for message %s",
-                            message_id,
-                        )
-                    _trigger_processing()
-
-                transaction.on_commit(_import_then_maybe_process)
-            else:
-                if has_attachments:
-                    enqueue_import_after_commit(message_id)
-                transaction.on_commit(_trigger_processing)
+            if processing_dispatch is not None:
+                processing_dispatch.message_id = str(message.id)
+                processing_dispatch.has_attachments = message.attachments.exists()
+                processing_dispatch.filespace_import_mode = filespace_import_mode
+                processing_dispatch.should_skip_processing = should_skip_processing
+                processing_dispatch.persisted_at = message_persisted_at
+                processing_dispatch.ready = True
+                if not prioritize_processing_dispatch:
+                    transaction.on_commit(processing_dispatch.dispatch)
 
         return InboundMessageInfo(message=message)
 

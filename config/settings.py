@@ -90,6 +90,7 @@ REFERRAL_DEFERRED_GRANT = env.bool("REFERRAL_DEFERRED_GRANT", default=True)
 DEFERRED_REFERRAL_CREDITS_ENABLED = env.bool("DEFERRED_REFERRAL_CREDITS_ENABLED", default=False)
 # Allow disabling the first-run setup redirect (e.g., in automated tests)
 FIRST_RUN_SETUP_ENABLED = env.bool("FIRST_RUN_SETUP_ENABLED", default=True)
+AGENT_PROMPT_RUN_CACHE_ENABLED = env.bool("AGENT_PROMPT_RUN_CACHE_ENABLED", default=True)
 # Permit skipping LLM bootstrap enforcement (useful for non-interactive tests)
 LLM_BOOTSTRAP_OPTIONAL = env.bool("LLM_BOOTSTRAP_OPTIONAL", default=False)
 # Redirect legacy console HTML pages to the immersive app. Console APIs and

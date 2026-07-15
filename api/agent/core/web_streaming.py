@@ -14,35 +14,22 @@ class WebStreamTarget:
 
 
 def resolve_web_stream_target(agent: PersistentAgent) -> Optional[WebStreamTarget]:
-    """Return the active web UI target if the agent's latest outbound message was web."""
-    last_outbound = (
-        PersistentAgentMessage.objects.filter(owner_agent=agent, is_outbound=True)
-        .select_related("to_endpoint")
-        .order_by("-timestamp", "-seq")
-        .first()
-    )
-    if not last_outbound or not last_outbound.to_endpoint:
-        return None
-    if last_outbound.to_endpoint.channel != CommsChannel.WEB:
-        return None
-
+    """Return the web UI target represented by the agent's latest message."""
     latest_message = (
         PersistentAgentMessage.objects.filter(owner_agent=agent)
         .select_related("from_endpoint", "to_endpoint")
         .order_by("-timestamp", "-seq")
         .first()
     )
-    if not latest_message or not latest_message.from_endpoint:
-        return None
-    if latest_message.from_endpoint.channel != CommsChannel.WEB:
+    if not latest_message:
         return None
 
-    if latest_message.is_outbound:
-        if not latest_message.to_endpoint:
-            return None
-        address = latest_message.to_endpoint.address
-    else:
-        address = latest_message.from_endpoint.address
+    target_endpoint = (
+        latest_message.to_endpoint if latest_message.is_outbound else latest_message.from_endpoint
+    )
+    if not target_endpoint or target_endpoint.channel != CommsChannel.WEB:
+        return None
+    address = target_endpoint.address
 
     user_id, agent_id = parse_web_user_address(address)
     if user_id is None or agent_id != str(agent.id):

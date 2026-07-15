@@ -13,6 +13,7 @@ from django.contrib.auth import get_user_model
 from django.core import mail
 from django.core.files.base import ContentFile
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.db import DatabaseError
 from django.test import Client, TestCase, override_settings, tag
 from django.urls import reverse
 from django.utils import timezone
@@ -2776,6 +2777,105 @@ class AgentChatAPITests(TestCase):
         self.assertEqual(props.get("agent_id"), str(self.agent.id))
         self.assertIn("message_id", props)
         self.assertEqual(props.get("message_length"), len("Hello agent"))
+
+    @tag("batch_agent_chat")
+    def test_console_message_dispatches_before_message_realtime_and_capi_callbacks(self):
+        self.client.force_login(self.user)
+        order = []
+
+        with (
+            patch(
+                "api.agent.tasks.enqueue_interactive_process_agent_events",
+                side_effect=lambda *args, **kwargs: order.append("enqueue"),
+            ),
+            patch(
+                "console.agent_chat.signals._send",
+                side_effect=lambda *args, **kwargs: order.append("realtime"),
+            ),
+            patch(
+                "api.agent.comms.message_service.emit_configured_custom_capi_event",
+                side_effect=lambda *args, **kwargs: order.append("capi"),
+            ),
+            patch(
+                "api.agent.comms.message_service._is_owner_sender",
+                return_value=True,
+            ),
+        ):
+            with self.captureOnCommitCallbacks(execute=True):
+                response = self.client.post(
+                    f"/console/api/agents/{self.agent.id}/messages/",
+                    data=json.dumps({"body": "Start quickly"}),
+                    content_type="application/json",
+                )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertIn("enqueue", order)
+        self.assertIn("realtime", order)
+        self.assertIn("capi", order)
+        self.assertLess(order.index("enqueue"), order.index("realtime"))
+        self.assertLess(order.index("enqueue"), order.index("capi"))
+
+    @tag("batch_agent_chat")
+    def test_console_message_imports_attachments_before_prioritized_dispatch(self):
+        self.client.force_login(self.user)
+        order = []
+        attachment = SimpleUploadedFile("latency.txt", b"latency", content_type="text/plain")
+
+        with (
+            patch(
+                "api.agent.comms.message_service.import_message_attachments_to_filespace",
+                side_effect=lambda *args, **kwargs: order.append("import"),
+            ),
+            patch(
+                "api.agent.tasks.enqueue_interactive_process_agent_events",
+                side_effect=lambda *args, **kwargs: order.append("enqueue"),
+            ),
+        ):
+            with self.captureOnCommitCallbacks(execute=True):
+                response = self.client.post(
+                    f"/console/api/agents/{self.agent.id}/messages/",
+                    data={"body": "Use this", "attachments": attachment},
+                )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(order, ["import", "enqueue"])
+
+    @tag("batch_agent_chat")
+    def test_console_message_rollback_discards_prioritized_dispatch(self):
+        self.client.force_login(self.user)
+
+        with (
+            patch(
+                "api.agent.comms.message_service.PersistentAgentMessage.objects.create",
+                side_effect=DatabaseError("insert failed"),
+            ),
+            patch("api.agent.tasks.enqueue_interactive_process_agent_events") as enqueue,
+            self.assertRaises(DatabaseError),
+        ):
+            with self.captureOnCommitCallbacks(execute=True):
+                self.client.post(
+                    f"/console/api/agents/{self.agent.id}/messages/",
+                    data=json.dumps({"body": "Do not enqueue"}),
+                    content_type="application/json",
+                )
+
+        enqueue.assert_not_called()
+
+    @tag("batch_agent_chat")
+    @patch("tasks.services.TaskCreditService.calculate_available_tasks_for_owner", return_value=0)
+    def test_console_message_skip_processing_prevents_prioritized_dispatch(self, _mock_available):
+        self.client.force_login(self.user)
+
+        with patch("api.agent.tasks.enqueue_interactive_process_agent_events") as enqueue:
+            with self.captureOnCommitCallbacks(execute=True):
+                response = self.client.post(
+                    f"/console/api/agents/{self.agent.id}/messages/",
+                    data=json.dumps({"body": "No credits"}),
+                    content_type="application/json",
+                )
+
+        self.assertEqual(response.status_code, 201)
+        enqueue.assert_not_called()
 
     @tag("batch_agent_chat")
     @patch("console.api_views.Analytics.track_event")
