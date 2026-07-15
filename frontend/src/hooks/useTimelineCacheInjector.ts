@@ -1,6 +1,7 @@
 import type { QueryClient, InfiniteData } from '@tanstack/react-query'
 
 import { fetchAgentTimeline, type TimelineResponse } from '../api/agentChat'
+import type { StaffViewContext } from '../api/context'
 import type { PendingActionRequest, PendingHumanInputAction, PendingHumanInputRequest, ProcessingSnapshot, TimelineEvent } from '../types/agentChat'
 import type { AgentRosterEntry } from '../types/agentRoster'
 import { compareTimelineCursors } from '../util/timelineCursor'
@@ -19,6 +20,9 @@ export type RefreshTimelineOptions = {
   mode?: RefreshTimelineMode
   maxNewerPages?: number
   minimumUpdatedAt?: number | null
+  developerMode?: boolean
+  staffContext?: StaffViewContext | null
+  allowDuringQueryFetch?: boolean
 }
 
 export type RefreshTimelineResult = {
@@ -535,10 +539,12 @@ async function performTimelineLatestRefresh(
 ): Promise<RefreshTimelineResult> {
   const mode = options?.mode ?? 'fast'
   const maxNewerPages = Math.max(1, options?.maxNewerPages ?? DEFAULT_CONTIGUOUS_BACKFILL_MAX_PAGES)
-  const key = timelineQueryKey(agentId)
+  const developerMode = options?.developerMode === true
+  const staffContext = options?.staffContext ?? null
+  const key = timelineQueryKey(agentId, developerMode, staffContext)
   const queryState = queryClient.getQueryState(key)
   if (
-    queryState?.fetchStatus === 'fetching'
+    (!options?.allowDuringQueryFetch && queryState?.fetchStatus === 'fetching')
     || (options?.minimumUpdatedAt && queryState?.dataUpdatedAt && queryState.dataUpdatedAt >= options.minimumUpdatedAt)
   ) {
     return { newerPagesFetched: 0, remainingNewerGap: false }
@@ -550,6 +556,8 @@ async function performTimelineLatestRefresh(
     const response = await fetchAgentTimeline(agentId, {
       direction: 'initial',
       limit: TIMELINE_PAGE_SIZE,
+      developerMode,
+      staffContext,
     })
     const latestPage = timelineResponseToPage(response)
     const latestMerge = mergeLatestPageIntoTailAndDetectGap(queryClient, key, latestPage)
@@ -563,6 +571,8 @@ async function performTimelineLatestRefresh(
           direction: 'newer',
           cursor,
           limit: TIMELINE_PAGE_SIZE,
+          developerMode,
+          staffContext,
         })
         const newerPage = timelineResponseToPage(newerResponse)
         const newerMerge = mergeNewerPageIntoTail(queryClient, key, newerPage)
@@ -595,7 +605,12 @@ export async function refreshTimelineLatestInCache(
   agentId: string,
   options?: RefreshTimelineOptions,
 ): Promise<RefreshTimelineResult> {
-  const existing = timelineRefreshesInFlight.get(agentId)
+  const refreshKey = JSON.stringify(timelineQueryKey(
+    agentId,
+    options?.developerMode === true,
+    options?.staffContext ?? null,
+  ))
+  const existing = timelineRefreshesInFlight.get(refreshKey)
   if (existing) {
     const result = await existing.promise
     if (options?.mode !== 'contiguous' || existing.mode === 'contiguous' || !result.remainingNewerGap) {
@@ -604,11 +619,11 @@ export async function refreshTimelineLatestInCache(
   }
 
   const promise = performTimelineLatestRefresh(queryClient, agentId, options)
-  timelineRefreshesInFlight.set(agentId, { mode: options?.mode ?? 'fast', promise })
+  timelineRefreshesInFlight.set(refreshKey, { mode: options?.mode ?? 'fast', promise })
   return promise.finally(() => {
-    const current = timelineRefreshesInFlight.get(agentId)
+    const current = timelineRefreshesInFlight.get(refreshKey)
     if (current?.promise === promise) {
-      timelineRefreshesInFlight.delete(agentId)
+      timelineRefreshesInFlight.delete(refreshKey)
     }
   })
 }

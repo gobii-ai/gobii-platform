@@ -1,9 +1,9 @@
-import { QueryClient } from '@tanstack/react-query'
+import { QueryClient, type InfiniteData } from '@tanstack/react-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { TimelineResponse } from '../api/agentChat'
 import { refreshTimelineLatestInCache } from './useTimelineCacheInjector'
-import { timelineQueryKey } from './useAgentTimeline'
+import { timelineQueryKey, timelineResponseToPage, type TimelinePage } from './useAgentTimeline'
 
 const { fetchAgentTimelineMock } = vi.hoisted(() => ({
   fetchAgentTimelineMock: vi.fn(),
@@ -81,5 +81,45 @@ describe('refreshTimelineLatestInCache', () => {
 
     initialRequest.resolve('loaded')
     await initial
+  })
+
+  it('refreshes and merges the staff-context developer timeline', async () => {
+    const staffContext = { type: 'organization' as const, id: 'org-1' }
+    const key = timelineQueryKey('agent-1', true, staffContext)
+    queryClient.setQueryData<InfiniteData<TimelinePage>>(key, {
+      pages: [timelineResponseToPage(emptyTimelineResponse)],
+      pageParams: [undefined],
+    })
+    fetchAgentTimelineMock.mockResolvedValue({
+      ...emptyTimelineResponse,
+      events: [{
+        kind: 'developer_error',
+        cursor: '200:error:error-1',
+        id: 'error-1',
+        timestamp: '2026-07-15T12:00:00Z',
+        category: 'OTHER',
+        source: 'tests.realtime',
+        level: 'ERROR',
+        message: 'Realtime failure',
+        exception_class: '',
+        traceback: '',
+        context: {},
+        completion_id: null,
+      }],
+    } satisfies TimelineResponse)
+
+    await refreshTimelineLatestInCache(queryClient, 'agent-1', {
+      developerMode: true,
+      staffContext,
+      allowDuringQueryFetch: true,
+    })
+
+    expect(fetchAgentTimelineMock).toHaveBeenCalledWith('agent-1', expect.objectContaining({
+      developerMode: true,
+      staffContext,
+    }))
+    expect(queryClient.getQueryData<InfiniteData<TimelinePage>>(key)?.pages[0].events).toEqual([
+      expect.objectContaining({ kind: 'developer_error', id: 'error-1' }),
+    ])
   })
 })
