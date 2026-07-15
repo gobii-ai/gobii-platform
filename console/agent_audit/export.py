@@ -199,6 +199,10 @@ def _serialize_completion_chunk(
             tool_calls_by_completion_id[completion_id].append(serialize_tool_call(step))
 
     _prime_prompt_payload_cache(prompt_archive_by_completion_id.values(), prompt_payload_cache)
+    _prime_prompt_payload_cache(
+        (completion.prompt_archive for completion in completions if completion.prompt_archive is not None),
+        prompt_payload_cache,
+    )
 
     serialized: list[dict[str, Any]] = []
     for completion in completions:

@@ -949,6 +949,37 @@ class StaffAgentAuditAPITests(TestCase):
         prompt_payload = exported_completion["prompt_archive"]["payload"]
         self.assertEqual(prompt_payload, {"error": "missing_payload"})
 
+    def test_audit_export_loads_completion_prompt_archive_payload(self):
+        prompt_archive = PersistentAgentPromptArchive.objects.create(
+            agent=self.agent,
+            rendered_at=timezone.now(),
+            storage_key="test/audit_export/direct-completion.json.zst",
+            raw_bytes=100,
+            compressed_bytes=50,
+            tokens_before=10,
+            tokens_after=8,
+            tokens_saved=2,
+        )
+        PersistentAgentCompletion.objects.create(
+            agent=self.agent,
+            completion_type=PersistentAgentCompletion.CompletionType.SHORT_DESCRIPTION,
+            prompt_archive=prompt_archive,
+            llm_model="openrouter/test-model",
+            llm_provider="openrouter",
+            billed=True,
+        )
+
+        prompt_payload = {
+            "system_prompt": "system prompt text",
+            "user_prompt": "user prompt text",
+        }
+        with patch("console.agent_audit.export._load_prompt_archive_payload", return_value=prompt_payload):
+            response = self.client.get(f"/console/api/staff/agents/{self.agent.id}/developer/export/")
+
+        self.assertEqual(response.status_code, 200)
+        exported_completion = self._read_export_payload(response)["completions"][0]
+        self.assertEqual(exported_completion["prompt_archive"]["payload"], prompt_payload)
+
     def test_audit_export_requires_staff(self):
         self.client.force_login(self.nonstaff)
         response = self.client.get(f"/console/api/staff/agents/{self.agent.id}/developer/export/")

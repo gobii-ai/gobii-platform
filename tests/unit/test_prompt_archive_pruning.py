@@ -9,9 +9,10 @@ from django.test import TestCase, tag
 from django.utils import timezone
 from unittest.mock import patch
 
-from api.agent.core.prompt_context import _archive_rendered_prompt, get_prompt_token_budget
+from api.agent.core.prompt_context import get_prompt_token_budget
 from api.models import BrowserUseAgent, PersistentAgent, PersistentAgentPromptArchive
 from api.maintenance.prompt_archives import prune_prompt_archives_for_cutoff
+from api.services.prompt_archives import archive_agent_prompt
 
 User = get_user_model()
 
@@ -42,7 +43,7 @@ class PromptArchivePruningTests(TestCase):
         self.addCleanup(lambda: shutil.rmtree(self.storage_dir, ignore_errors=True))
 
     def _make_archive(self, days_ago: int) -> PersistentAgentPromptArchive:
-        key, _, _, archive_id = _archive_rendered_prompt(
+        key, _, _, archive_id = archive_agent_prompt(
             agent=self.agent,
             system_prompt="System prompt",
             user_prompt="User prompt",
