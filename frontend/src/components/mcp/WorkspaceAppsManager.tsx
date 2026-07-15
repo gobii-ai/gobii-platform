@@ -439,7 +439,6 @@ export function WorkspaceAppsManager({
     <AgentEmailSettingsScreen
       agentId={activeEmailAgentId}
       emailSettingsUrl={`/console/api/agents/${activeEmailAgentId}/email-settings/`}
-      ensureAccountUrl={`/console/api/agents/${activeEmailAgentId}/email-settings/ensure-account/`}
       testUrl={`/console/api/agents/${activeEmailAgentId}/email-settings/test/`}
       onBack={() => setActiveEmailAgentId(null)}
       onSaved={() => {

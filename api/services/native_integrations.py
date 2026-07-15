@@ -236,6 +236,7 @@ GMAIL_PROVIDER = NativeIntegrationProvider(
     token_endpoint="https://oauth2.googleapis.com/token",
     scopes=(
         "openid",
+        "profile",
         "email",
         "https://www.googleapis.com/auth/gmail.send",
         "https://www.googleapis.com/auth/gmail.readonly",

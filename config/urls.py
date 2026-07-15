@@ -135,7 +135,7 @@ from console.native_integrations_api import (
     NativeIntegrationPickerTokenAPIView,
     NativeIntegrationRevokeAPIView,
 )
-from console.email_settings.views import AgentEmailSettingsAPIView, AgentEmailSettingsEnsureAccountAPIView, AgentEmailSettingsTestAPIView
+from console.email_settings.views import AgentEmailSettingsAPIView, AgentEmailSettingsTestAPIView
 from console.discord_api import (
     AgentDiscordAppView,
     AgentDiscordChannelsView,
@@ -380,11 +380,6 @@ urlpatterns = [
     path("console/api/agents/<uuid:agent_id>/profile/", AgentProfileAPIView.as_view(), name="console_agent_profile"),
     path("console/api/agents/<uuid:agent_id>/stop/", AgentStopAPIView.as_view(), name="console_agent_stop"),
     path("console/api/agents/<uuid:agent_id>/email-settings/", AgentEmailSettingsAPIView.as_view(), name="console_agent_email_settings"),
-    path(
-        "console/api/agents/<uuid:agent_id>/email-settings/ensure-account/",
-        AgentEmailSettingsEnsureAccountAPIView.as_view(),
-        name="console_agent_email_settings_ensure_account",
-    ),
     path(
         "console/api/agents/<uuid:agent_id>/email-settings/test/",
         AgentEmailSettingsTestAPIView.as_view(),
