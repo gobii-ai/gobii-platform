@@ -483,9 +483,8 @@ def broadcast_message_attachment_update(message_id: str) -> None:
     try:
         from asgiref.sync import async_to_sync
         from channels.layers import get_channel_layer
+        from console.agent_chat.realtime import send_developer_update
         from console.agent_chat.timeline import is_chat_hidden_message, serialize_message_event
-        from console.agent_audit.serializers import serialize_message as serialize_audit_message
-        from console.agent_audit.realtime import send_audit_event
     except Exception:
         logger.exception("Failed to import realtime modules for message %s", message_id)
         return
@@ -502,11 +501,7 @@ def broadcast_message_attachment_update(message_id: str) -> None:
     except Exception:
         logger.exception("Failed to broadcast chat attachment update for message %s", message_id)
 
-    try:
-        audit_payload = serialize_audit_message(message)
-        send_audit_event(str(agent_id), audit_payload)
-    except Exception:
-        logger.exception("Failed to broadcast audit attachment update for message %s", message_id)
+    send_developer_update(str(agent_id))
 
 
 def enqueue_import_after_commit(message_id: str) -> None:

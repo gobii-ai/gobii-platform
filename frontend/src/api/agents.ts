@@ -1,5 +1,5 @@
 import { HttpError, jsonFetch, jsonRequest } from './http'
-import type { ConsoleContext, StaffViewContext } from './context'
+import { staffViewContextHeaders, type ConsoleContext, type StaffViewContext } from './context'
 import type { AgentRosterEntry, AgentRosterSortMode, AgentTransferInvite, PlanningState, SignupPreviewState } from '../types/agentRoster'
 import type { AccountPauseInfo, BillingStatusInfo } from '../types/agentAddons'
 import type { LlmIntelligenceConfig } from '../types/llmIntelligence'
@@ -139,13 +139,12 @@ export async function fetchAgentRoster(
   llmIntelligence?: LlmIntelligenceConfig | null
 }> {
   const query = options.forAgentId ? `?for_agent=${encodeURIComponent(options.forAgentId)}` : ''
-  const headers: Record<string, string> = options.context ? {
-    'X-Gobii-Context-Type': options.context.type,
-    'X-Gobii-Context-Id': options.context.id,
-  } : {}
-  if (options.staffContext) {
-    headers['X-Gobii-Staff-Context-Type'] = options.staffContext.type
-    headers['X-Gobii-Staff-Context-Id'] = options.staffContext.id
+  const headers: Record<string, string> = {
+    ...(options.context ? {
+      'X-Gobii-Context-Type': options.context.type,
+      'X-Gobii-Context-Id': options.context.id,
+    } : {}),
+    ...staffViewContextHeaders(options.staffContext),
   }
   const payload = await jsonFetch<AgentRosterPayload>(`/console/api/agents/roster/${query}`, { headers })
   const agents = payload.agents.map(agentProfilePayloadToRosterEntry)

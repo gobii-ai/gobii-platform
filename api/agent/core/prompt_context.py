@@ -678,28 +678,6 @@ Facts, URLs, names, and numbers must come from tool results, schema, hints, meta
 """
 
 
-def _archive_rendered_prompt(
-    agent: PersistentAgent,
-    system_prompt: str,
-    user_prompt: str,
-    tokens_before: int,
-    tokens_after: int,
-    tokens_saved: int,
-    token_budget: int,
-) -> Tuple[Optional[str], Optional[int], Optional[int], Optional[UUID]]:
-    return archive_agent_prompt(
-        agent=agent,
-        system_prompt=system_prompt,
-        user_prompt=user_prompt,
-        tokens_before=tokens_before,
-        tokens_after=tokens_after,
-        tokens_saved=tokens_saved,
-        token_budget=token_budget,
-    )
-
-
-
-
 def _get_inactive_weeks(interaction_anchor: Optional[datetime], now: datetime) -> int:
     """Return whole inactive weeks since the last known interaction anchor."""
 
@@ -1802,7 +1780,7 @@ def _latest_prompt_token_seed(agent: PersistentAgent) -> int:
 
 def _archive_prompt_render(agent: PersistentAgent, result: PromptRenderResult) -> Optional[UUID]:
     span = trace.get_current_span()
-    archive_key, raw_bytes, compressed_bytes, archive_id = _archive_rendered_prompt(
+    archive_key, raw_bytes, compressed_bytes, archive_id = archive_agent_prompt(
         agent=agent,
         system_prompt=str(result.messages[0]["content"]),
         user_prompt=str(result.messages[1]["content"]),
@@ -3305,18 +3283,9 @@ def _consume_system_prompt_messages(agent: PersistentAgent) -> str:
         )
         return ""
 
-    try:
-        from console.agent_audit.realtime import broadcast_system_message_audit
+    from console.agent_chat.realtime import send_developer_update
 
-        for message, _ in message_payloads:
-            message.delivered_at = now
-            broadcast_system_message_audit(message)
-    except Exception:
-        logger.debug(
-            "Failed to broadcast system directive delivery for agent %s",
-            agent.id,
-            exc_info=True,
-        )
+    send_developer_update(str(agent.id))
 
     return _format_system_directive_prompt_block(message_payloads)
 

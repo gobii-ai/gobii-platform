@@ -8,7 +8,7 @@ import { AnalyticsEvent } from '../../constants/analyticsEvents'
 import { AgentComposer } from './AgentComposer'
 import { AgentTimelinePane } from './AgentTimelinePane'
 import { ChatSidebar, type ChatSidebarProps } from './ChatSidebar'
-import { AgentChatBanner } from './AgentChatBanner'
+import { AgentChatBanner, type DeveloperModeControlGroups } from './AgentChatBanner'
 import { AgentChatSettingsPanel } from './AgentChatSettingsPanel'
 import { AgentChatAddonsPanel } from './AgentChatAddonsPanel'
 import { PlanPanel } from './PlanPanel'
@@ -226,7 +226,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   developerMode?: boolean
   showDeveloperMode?: boolean
   onDeveloperModeChange?: (enabled: boolean) => void
-  developerControls?: ReactNode
+  developerControls?: DeveloperModeControlGroups | null
   onRetryMessage?: (message: AgentMessage) => void | Promise<void>
   onComposerFocus?: () => void
   onComposerRequestScrollToBottom?: () => void

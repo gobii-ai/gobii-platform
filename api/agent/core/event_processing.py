@@ -1188,14 +1188,14 @@ def _emit_tool_call_realtime(step: "PersistentAgentStep", context: str) -> None:
         )
 
 
-def _emit_tool_call_audit(step: "PersistentAgentStep", context: str) -> None:
+def _emit_tool_call_developer_update(step: "PersistentAgentStep", context: str) -> None:
     try:
-        from console.agent_chat.signals import emit_tool_call_audit
+        from console.agent_chat.signals import emit_tool_call_developer_update
 
-        emit_tool_call_audit(step)
+        emit_tool_call_developer_update(step)
     except Exception:
         logger.debug(
-            "Failed to broadcast %s tool call audit for agent %s step %s",
+            "Failed to broadcast %s tool call developer update for agent %s step %s",
             context,
             getattr(step, "agent_id", None),
             getattr(step, "id", None),
@@ -1539,7 +1539,7 @@ def _finalize_pending_tool_call_step(
 
     _emit_tool_call_realtime(step, "finalized")
     if not created_tool_call:
-        _emit_tool_call_audit(step, "finalized")
+        _emit_tool_call_developer_update(step, "finalized")
 
 
 def _clear_refunded_step_charge(step: "PersistentAgentStep") -> None:

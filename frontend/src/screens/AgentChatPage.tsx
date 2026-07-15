@@ -24,7 +24,11 @@ import type { AgentSpawnIntent, TemplateRecommendation } from '../api/agentSpawn
 import type { ConsoleContext, StaffViewContext } from '../api/context'
 import { fetchUsageBurnRate, fetchUsageSummary } from '../components/usage/api'
 import { AgentChatLayout, type AgentChatLayoutSidebarConfig } from '../components/agentChat/AgentChatLayout'
-import { DeveloperModeControls } from '../components/agentChat/DeveloperModeControls'
+import {
+  DeveloperJudgeReviewModal,
+  DeveloperModeControls,
+  useDeveloperModeActions,
+} from '../components/agentChat/DeveloperModeControls'
 import { groupDeveloperActivityEvents } from '../components/agentChat/developerTimelineDisplay'
 import { EmbeddedAgentContactRequestsPanel } from '../components/agentChat/EmbeddedAgentContactRequestsPanel'
 import { EmbeddedAgentEmailSettingsPanel } from '../components/agentChat/EmbeddedAgentEmailSettingsPanel'
@@ -45,7 +49,6 @@ import { parseToolSearchResult } from '../components/agentChat/tooling/searchUti
 import type { ConnectionStatusTone } from '../components/agentChat/AgentChatBanner'
 import { useTimelineScrollController } from '../components/agentChat/useTimelineScrollController'
 import { useAgentChatSocket } from '../hooks/useAgentChatSocket'
-import { useDeveloperModeSocket } from '../hooks/useDeveloperModeSocket'
 import { useAgentWebSession } from '../hooks/useAgentWebSession'
 import { useAgentRoster } from '../hooks/useAgentRoster'
 import { useAgentQuickSettings } from '../hooks/useAgentQuickSettings'
@@ -1050,7 +1053,37 @@ export function AgentChatPage({
     developerMode: developerModeEnabled,
     staffContext,
   })
-  useDeveloperModeSocket(activeAgentId, developerModeEnabled, staffContext)
+  const developerRefreshStateRef = useRef<{
+    agentId: string | null
+    running: boolean
+    requested: boolean
+  }>({ agentId: null, running: false, requested: false })
+  const handleDeveloperUpdate = useCallback((updatedAgentId: string) => {
+    if (!developerModeEnabled || updatedAgentId !== activeAgentId) return
+    let state = developerRefreshStateRef.current
+    if (state.agentId !== updatedAgentId) {
+      state = { agentId: updatedAgentId, running: false, requested: false }
+      developerRefreshStateRef.current = state
+    }
+    state.requested = true
+    if (state.running) return
+    state.running = true
+    void (async () => {
+      try {
+        while (state.requested) {
+          state.requested = false
+          await refreshTimelineLatestInCache(queryClient, updatedAgentId, {
+            mode: 'contiguous',
+            developerMode: true,
+            staffContext,
+            allowDuringQueryFetch: true,
+          })
+        }
+      } finally {
+        state.running = false
+      }
+    })()
+  }, [activeAgentId, developerModeEnabled, queryClient, staffContext])
   const flatEvents = useMemo(() => flattenTimelinePages(timelineQuery.data), [timelineQuery.data])
   const initialPageResponse = useMemo(() => getInitialPageResponse(timelineQuery.data), [timelineQuery.data])
   const timelinePendingActionRequests = useMemo<PendingActionRequest[]>(
@@ -1167,6 +1200,7 @@ export function AgentChatPage({
   const timelineHasMoreNewer = !isNewAgent ? hasMoreNewer : false
   const timelineHasUnseenActivity = !isNewAgent && isStoreSynced ? hasUnseenActivity : false
   const timelineProcessingActive = !isNewAgent && isStoreSynced ? processingActive : false
+  const developerActions = useDeveloperModeActions(activeAgentId, timelineProcessingActive)
   const timelineAwaitingResponse = !isNewAgent && isStoreSynced ? awaitingResponse : false
   const timelineStreaming = !isNewAgent && isStoreSynced ? streaming : null
   const timelineLoadingOlder = !isNewAgent ? timelineQuery.isFetchingPreviousPage : false
@@ -1788,6 +1822,7 @@ export function AgentChatPage({
     onCreditEvent: handleCreditEvent,
     onAgentProfileEvent: handleAgentProfileEvent,
     onMessageNotificationEvent: handleAgentMessageNotificationEvent,
+    onDeveloperUpdate: handleDeveloperUpdate,
   })
   useEffect(() => {
     if (!agentContextReady) return
@@ -4154,6 +4189,7 @@ export function AgentChatPage({
         workspaceContext={effectiveContext}
       />
       {createOrganizationModal}
+      {developerModeEnabled ? <DeveloperJudgeReviewModal actions={developerActions} /> : null}
       <AgentChatLayout
         agentId={activeAgentId}
         bannerAgentName={isNewAgent ? 'New Agent' : transientBannerAgentName}
@@ -4165,9 +4201,10 @@ export function AgentChatPage({
         developerMode={developerModeEnabled}
         showDeveloperMode={isSystemAdmin}
         onDeveloperModeChange={onDeveloperModeChange}
-        developerControls={developerModeEnabled && activeAgentId ? (
-          <DeveloperModeControls key={activeAgentId} agentId={activeAgentId} processingActive={timelineProcessingActive} />
-        ) : null}
+        developerControls={developerModeEnabled && activeAgentId ? {
+          primary: <DeveloperModeControls actions={developerActions} group="primary" />,
+          secondary: <DeveloperModeControls actions={developerActions} group="secondary" />,
+        } : null}
         dailyCredits={dailyCreditsInfo}
         dailyCreditsStatus={dailyCreditsStatus}
         dailyCreditsLoading={canManageDailyCredits ? quickSettingsLoading : false}

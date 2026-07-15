@@ -77,6 +77,7 @@ export function useAgentChatSocket(
     onCreditEvent?: (payload: Record<string, unknown>) => void
     onAgentProfileEvent?: (payload: Record<string, unknown>) => void
     onMessageNotificationEvent?: (payload: AgentMessageNotification) => void
+    onDeveloperUpdate?: (agentId: string) => void
   } = {},
 ): AgentChatSocketSnapshot {
   const queryClient = useQueryClient()
@@ -108,6 +109,7 @@ export function useAgentChatSocket(
   const messageNotificationEventRef = useRef<typeof options.onMessageNotificationEvent | null>(
     options.onMessageNotificationEvent ?? null,
   )
+  const developerUpdateRef = useRef<typeof options.onDeveloperUpdate | null>(options.onDeveloperUpdate ?? null)
 
   useEffect(() => {
     receiveEventRef.current = (event) => {
@@ -131,7 +133,8 @@ export function useAgentChatSocket(
     creditEventRef.current = options.onCreditEvent ?? null
     profileEventRef.current = options.onAgentProfileEvent ?? null
     messageNotificationEventRef.current = options.onMessageNotificationEvent ?? null
-  }, [options.onCreditEvent, options.onAgentProfileEvent, options.onMessageNotificationEvent])
+    developerUpdateRef.current = options.onDeveloperUpdate ?? null
+  }, [options.onCreditEvent, options.onAgentProfileEvent, options.onDeveloperUpdate, options.onMessageNotificationEvent])
 
   const retryRef = useRef(0)
   const socketRef = useRef<WebSocket | null>(null)
@@ -442,6 +445,7 @@ export function useAgentChatSocket(
             onCreditEvent: creditEventRef.current,
             onAgentProfileEvent: profileEventRef.current,
             onMessageNotificationEvent: messageNotificationEventRef.current,
+            onDeveloperUpdate: developerUpdateRef.current,
           })
           if (outcome.type === 'subscription_error') {
             if (outcome.agentId) {

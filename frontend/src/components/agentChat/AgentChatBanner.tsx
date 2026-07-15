@@ -14,6 +14,10 @@ import { AgentChatAvatar, AgentChatButton, AgentChatMenuItem } from './uiPrimiti
 
 export type ConnectionStatusTone = 'connected' | 'connecting' | 'reconnecting' | 'offline' | 'error'
 type DeveloperActionLayout = 'expanded' | 'partial' | 'overflow'
+export type DeveloperModeControlGroups = {
+  primary: ReactNode
+  secondary: ReactNode
+}
 
 const EXPANDED_DEVELOPER_ACTIONS_MIN_WIDTH = 1360
 const PARTIAL_DEVELOPER_ACTIONS_MIN_WIDTH = 960
@@ -43,7 +47,7 @@ type AgentChatBannerProps = {
   developerMode?: boolean
   showDeveloperMode?: boolean
   onDeveloperModeChange?: (enabled: boolean) => void
-  developerControls?: ReactNode
+  developerControls?: DeveloperModeControlGroups | null
   children?: ReactNode
 }
 
@@ -327,8 +331,11 @@ export const AgentChatBanner = memo(function AgentChatBanner({
               <span>{developerMode ? 'Dev Mode On' : 'Dev Mode Off'}</span>
             </AgentChatButton>
           ) : null}
-          {developerMode && developerControls ? (
-            <div className="banner-developer-controls">{developerControls}</div>
+          {developerMode && developerControls && developerActionLayout !== 'overflow' ? (
+            <div className="banner-developer-controls">
+              {developerControls.primary}
+              {developerActionLayout === 'expanded' ? developerControls.secondary : null}
+            </div>
           ) : null}
           {showShareButton ? (
             <AgentChatButton
@@ -368,10 +375,7 @@ export const AgentChatBanner = memo(function AgentChatBanner({
               >
                 <EllipsisVertical size={16} strokeWidth={2.2} />
               </Button>
-              <Popover
-                className="banner-overflow-popover"
-                data-developer-action-layout={developerActionLayout}
-              >
+              <Popover className="banner-overflow-popover">
                 <Dialog className="banner-overflow-menu">
                   {showShareButton || showPublicShareButton || showSettingsButton || showDeveloperMode ? (
                     <div className="banner-overflow-section">
@@ -463,7 +467,10 @@ export const AgentChatBanner = memo(function AgentChatBanner({
                           </AgentChatMenuItem>
                         ) : null}
                         {developerMode && developerControls && developerActionLayout !== 'expanded' ? (
-                          <div className="banner-overflow-developer-controls">{developerControls}</div>
+                          <div className="banner-overflow-developer-controls">
+                            {developerActionLayout === 'overflow' ? developerControls.primary : null}
+                            {developerControls.secondary}
+                          </div>
                         ) : null}
                       </div>
                     </div>

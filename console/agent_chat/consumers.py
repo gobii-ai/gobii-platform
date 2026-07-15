@@ -84,6 +84,12 @@ class AgentChatConsumer(AsyncJsonWebsocketConsumer):
     async def timeline_event(self, event):
         await self.send_json({"type": "timeline.event", "payload": event.get("payload")})
 
+    async def developer_event(self, event):
+        user = self.scope.get("user")
+        if not (getattr(user, "is_staff", False) or getattr(user, "is_superuser", False)):
+            return
+        await self.send_json({"type": "developer.updated", "agent_id": self.agent_id})
+
     async def processing_event(self, event):
         await self.send_json({"type": "processing", "payload": event.get("payload")})
 
@@ -212,6 +218,11 @@ class AgentChatSessionConsumer(AsyncJsonWebsocketConsumer):
 
     async def timeline_event(self, event):
         await self._send_agent_event("timeline.event", event)
+
+    async def developer_event(self, event):
+        if not (getattr(self.user, "is_staff", False) or getattr(self.user, "is_superuser", False)):
+            return
+        await self._send_agent_event("developer.updated", event)
 
     async def processing_event(self, event):
         await self._send_agent_event("processing", event)
@@ -376,7 +387,6 @@ class AgentChatSessionConsumer(AsyncJsonWebsocketConsumer):
                 user,
                 agent_id,
                 staff_context_override,
-                include_historical=False,
             )
         return resolve_agent(
             user,

@@ -9,7 +9,6 @@ from channels.layers import get_channel_layer
 from channels.testing import WebsocketCommunicator
 from django.test import SimpleTestCase, override_settings, tag
 
-from console.agent_audit.consumers import StaffAgentDeveloperConsumer
 from console.agent_chat.consumers import AgentChatSessionConsumer, AgentChatSubscription
 from config.asgi import application
 
@@ -33,83 +32,49 @@ class EchoConsumerTests(SimpleTestCase):
 
 @override_settings(CHANNEL_LAYERS=CHANNEL_LAYER_SETTINGS)
 @tag("batch_websocket")
-class StaffAgentDeveloperConsumerTests(SimpleTestCase):
-    def _build_communicator(self, *, is_staff: bool) -> WebsocketCommunicator:
-        communicator = WebsocketCommunicator(
-            StaffAgentDeveloperConsumer.as_asgi(),
-            "/?staff_context_type=organization&staff_context_id=org-1",
-        )
+class AgentChatSessionConsumerTests(SimpleTestCase):
+    def _build_communicator(self, *, is_staff: bool = False) -> WebsocketCommunicator:
+        communicator = WebsocketCommunicator(AgentChatSessionConsumer.as_asgi(), "/")
         communicator.scope["user"] = SimpleNamespace(
             is_authenticated=True,
             is_staff=is_staff,
             is_superuser=False,
+            id=123,
         )
-        communicator.scope["url_route"] = {"kwargs": {"agent_id": "agent-a"}}
+        communicator.scope["session"] = None
         return communicator
 
-    def test_developer_consumer_rejects_nonstaff_viewers(self) -> None:
-        async def _run():
-            communicator = self._build_communicator(is_staff=False)
-            connected, _ = await communicator.connect()
-            self.assertFalse(connected)
+    def test_session_consumer_only_forwards_developer_updates_to_staff(self) -> None:
+        async def _allow_subscription(*args, **kwargs):
+            return None
 
-        async_to_sync(_run)()
-
-    def test_developer_consumer_forwards_staff_events(self) -> None:
-        captured_context = {}
-
-        async def _allow_agent(_consumer, agent_id, context_type, context_id):
-            captured_context.update(
-                agent_id=agent_id,
-                context_type=context_type,
-                context_id=context_id,
-            )
-
-        async def _run():
-            communicator = self._build_communicator(is_staff=True)
+        async def _run(is_staff: bool):
+            communicator = self._build_communicator(is_staff=is_staff)
             connected, _ = await communicator.connect()
             self.assertTrue(connected)
-
-            channel_layer = get_channel_layer()
-            self.assertIsNotNone(channel_layer)
             try:
-                await channel_layer.group_send(
-                    "agent-audit-agent-a",
-                    {
-                        "type": "audit_event",
-                        "payload": {"kind": "developer_completion", "id": "completion-1"},
-                    },
+                await communicator.send_json_to(
+                    {"type": "subscribe", "agent_id": "agent-a", "mode": "active"}
                 )
-                event = await communicator.receive_json_from()
-                self.assertEqual(event["type"], "developer.event")
-                self.assertEqual(event["payload"]["id"], "completion-1")
+                await asyncio.sleep(0.01)
+                await get_channel_layer().group_send(
+                    "agent-chat-agent-a",
+                    {"type": "developer_event", "agent_id": "agent-a"},
+                )
+                if is_staff:
+                    event = await communicator.receive_json_from()
+                    self.assertEqual(event, {"type": "developer.updated", "agent_id": "agent-a", "payload": None})
+                else:
+                    self.assertTrue(await communicator.receive_nothing(timeout=0.1))
             finally:
                 await communicator.disconnect()
 
         with patch(
-            "console.agent_audit.consumers.StaffAgentDeveloperConsumer._ensure_agent_exists",
-            new=_allow_agent,
+            "console.agent_chat.consumers.AgentChatSessionConsumer._resolve_agent",
+            new=_allow_subscription,
         ):
-            async_to_sync(_run)()
-
-        self.assertEqual(
-            captured_context,
-            {
-                "agent_id": "agent-a",
-                "context_type": "organization",
-                "context_id": "org-1",
-            },
-        )
-
-
-@override_settings(CHANNEL_LAYERS=CHANNEL_LAYER_SETTINGS)
-@tag("batch_websocket")
-class AgentChatSessionConsumerTests(SimpleTestCase):
-    def _build_communicator(self) -> WebsocketCommunicator:
-        communicator = WebsocketCommunicator(AgentChatSessionConsumer.as_asgi(), "/")
-        communicator.scope["user"] = SimpleNamespace(is_authenticated=True, id=123)
-        communicator.scope["session"] = None
-        return communicator
+            async_to_sync(_run)(False)
+            async_to_sync(_run)(True)
 
     def test_session_consumer_retains_multiple_subscriptions_and_targeted_unsubscribe(self) -> None:
         async def _allow_subscription(*args, **kwargs):

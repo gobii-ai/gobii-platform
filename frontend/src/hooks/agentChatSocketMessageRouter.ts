@@ -84,6 +84,7 @@ export function routeAgentChatSocketMessage({
   onCreditEvent,
   onAgentProfileEvent,
   onMessageNotificationEvent,
+  onDeveloperUpdate,
 }: {
   payload: unknown
   queryClient: QueryClient
@@ -97,6 +98,7 @@ export function routeAgentChatSocketMessage({
   onCreditEvent?: ((payload: Record<string, unknown>) => void) | null
   onAgentProfileEvent?: ((payload: Record<string, unknown>) => void) | null
   onMessageNotificationEvent?: ((payload: AgentMessageNotification) => void) | null
+  onDeveloperUpdate?: ((agentId: string) => void) | null
 }): AgentChatSocketMessageOutcome {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     return { type: 'ignored' }
@@ -124,6 +126,12 @@ export function routeAgentChatSocketMessage({
     } else if (payloadAgentId) {
       injectRealtimeEventIntoCache(queryClient, payloadAgentId, message.payload as TimelineEvent)
     }
+    return { type: 'handled' }
+  }
+
+  if (messageType === 'developer.updated') {
+    const payloadAgentId = extractAgentChatSocketEnvelopeAgentId(message)
+    if (payloadAgentId) onDeveloperUpdate?.(payloadAgentId)
     return { type: 'handled' }
   }
 

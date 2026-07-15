@@ -13,6 +13,13 @@ export type ConsoleContext = {
 
 export type StaffViewContext = Pick<ConsoleContext, 'type' | 'id'>
 
+export function staffViewContextHeaders(context?: StaffViewContext | null): Record<string, string> {
+  return context ? {
+    'X-Gobii-Staff-Context-Type': context.type,
+    'X-Gobii-Staff-Context-Id': context.id,
+  } : {}
+}
+
 export type ConsoleContextOption = ConsoleContext & {
   role?: string | null
 }
@@ -56,12 +63,10 @@ export type ConsoleContextData = {
 export async function fetchConsoleContext(options: { forAgentId?: string; staffContext?: StaffViewContext | null } = {}): Promise<ConsoleContextData> {
   const params = new URLSearchParams()
   if (options.forAgentId) params.set('for_agent', options.forAgentId)
-  if (options.staffContext) {
-    params.set('staff_context_type', options.staffContext.type)
-    params.set('staff_context_id', options.staffContext.id)
-  }
   const query = params.toString() ? `?${params.toString()}` : ''
-  const payload = await jsonFetch<ConsoleContextResponsePayload>(`/console/switch-context/${query}`)
+  const payload = await jsonFetch<ConsoleContextResponsePayload>(`/console/switch-context/${query}`, {
+    headers: staffViewContextHeaders(options.staffContext),
+  })
   return {
     context: payload.context,
     personal: {

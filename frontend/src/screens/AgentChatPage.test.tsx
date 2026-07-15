@@ -391,10 +391,6 @@ vi.mock('../hooks/useAgentChatSocket', () => ({
   useAgentChatSocket: vi.fn(() => ({ status: 'connected', lastError: null })),
 }))
 
-vi.mock('../hooks/useDeveloperModeSocket', () => ({
-  useDeveloperModeSocket: vi.fn(),
-}))
-
 vi.mock('../hooks/useAgentWebSession', () => ({
   useAgentWebSession: vi.fn(() => ({ status: 'connected', error: null })),
 }))

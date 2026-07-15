@@ -29,9 +29,7 @@ from api.models import (
     PersistentAgentUserActionEvent,
 )
 from api.services.signup_preview import transition_agent_to_signup_preview_waiting
-from console.agent_audit.realtime import broadcast_system_message_audit, send_audit_event
-from console.agent_audit.serializers import serialize_completion, serialize_error, serialize_message, serialize_step, serialize_tool_call
-from console.agent_chat.realtime import send_user_group_event, user_profile_group_name
+from console.agent_chat.realtime import send_developer_update, send_user_group_event, user_profile_group_name
 from console.insight_views import build_usage_metadata_for_agent
 from util.text_sanitizer import sanitize_notification_preview_text
 from api.agent.comms.message_reads import build_agent_message_read_state_for_users, is_peer_dm_message, serialize_latest_agent_message_read_state
@@ -253,10 +251,10 @@ def emit_agent_usage_update(agent: PersistentAgent) -> None:
             send_user_group_event(str(agent.id), user_id, "usage_update_event", payload)
 
 
-def _broadcast_audit_event(agent_id: str | None, payload: dict) -> None:
+def _broadcast_developer_update(agent_id: str | None) -> None:
     if not agent_id:
         return
-    send_audit_event(agent_id, payload)
+    send_developer_update(agent_id)
 
 
 def emit_pending_human_input_requests_update(agent: PersistentAgent) -> None:
@@ -303,7 +301,7 @@ def emit_pending_action_requests_update(agent: PersistentAgent) -> None:
         send_user_group_event(str(agent.id), user_id, "pending_action_requests_event", payload)
 
 
-def _should_audit_tool_call(tool_call: PersistentAgentToolCall | None) -> bool:
+def _should_emit_tool_call_developer_update(tool_call: PersistentAgentToolCall | None) -> bool:
     if tool_call is None:
         return False
     return tool_call.status != "pending"
@@ -315,18 +313,11 @@ def emit_tool_call_realtime(step: PersistentAgentStep) -> None:
     _broadcast_tool_cluster(step)
 
 
-def emit_tool_call_audit(step: PersistentAgentStep) -> None:
+def emit_tool_call_developer_update(step: PersistentAgentStep) -> None:
     tool_call = getattr(step, "tool_call", None)
-    if not _should_audit_tool_call(tool_call):
+    if not _should_emit_tool_call_developer_update(tool_call):
         return
-    agent_id = getattr(step, "agent_id", None)
-    if not agent_id:
-        return
-    try:
-        audit_payload = serialize_tool_call(step)
-        _broadcast_audit_event(str(agent_id), audit_payload)
-    except Exception:
-        logger.debug("Failed to broadcast audit tool call %s", getattr(step, "id", None), exc_info=True)
+    _broadcast_developer_update(getattr(step, "agent_id", None))
 
 
 @receiver(post_save, sender=PersistentAgentMessage)
@@ -353,11 +344,7 @@ def broadcast_new_message(sender, instance: PersistentAgentMessage, created: boo
         except PersistentAgentMessage.DoesNotExist:
             return
         if is_hidden:
-            try:
-                audit_payload = serialize_message(msg)
-                _broadcast_audit_event(str(owner_agent_id), audit_payload)
-            except Exception:
-                logger.debug("Failed to broadcast audit message for %s", message_id, exc_info=True)
+            _broadcast_developer_update(str(owner_agent_id))
             return
         try:
             payload = serialize_message_event(msg)
@@ -371,11 +358,7 @@ def broadcast_new_message(sender, instance: PersistentAgentMessage, created: boo
                 emit_message_notification(msg)
             except Exception:
                 logger.debug("Failed to broadcast message notification for %s", message_id, exc_info=True)
-        try:
-            audit_payload = serialize_message(msg)
-            _broadcast_audit_event(str(owner_agent_id), audit_payload)
-        except Exception:
-            logger.debug("Failed to broadcast audit message for %s", message_id, exc_info=True)
+        _broadcast_developer_update(str(owner_agent_id))
         if preview_state_transitioned:
             try:
                 emit_agent_profile_update(msg.owner_agent)
@@ -500,16 +483,12 @@ def broadcast_new_tool_step(sender, instance: PersistentAgentStep, created: bool
         except PersistentAgentStep.DoesNotExist:  # pragma: no cover - defensive guard
             return
         emit_tool_call_realtime(step)
-        try:
-            tool_call = getattr(step, "tool_call", None)
-            if tool_call is None and not (step.description or "").startswith("Tool call"):
-                step_payload = serialize_step(step)
-                _broadcast_audit_event(str(step.agent_id), step_payload)
-            if _should_audit_tool_call(tool_call):
-                audit_payload = serialize_tool_call(step)
-                _broadcast_audit_event(str(step.agent_id), audit_payload)
-        except Exception:
-            logger.debug("Failed to broadcast audit tool step %s", getattr(step, "id", None), exc_info=True)
+        tool_call = getattr(step, "tool_call", None)
+        if (
+            tool_call is None
+            and not (step.description or "").startswith("Tool call")
+        ) or _should_emit_tool_call_developer_update(tool_call):
+            _broadcast_developer_update(str(step.agent_id))
 
     transaction.on_commit(_on_commit)
 
@@ -520,13 +499,9 @@ def broadcast_new_tool_call(sender, instance: PersistentAgentToolCall, created: 
         return
     step = instance.step
     emit_tool_call_realtime(step)
-    if not _should_audit_tool_call(instance):
+    if not _should_emit_tool_call_developer_update(instance):
         return
-    try:
-        audit_payload = serialize_tool_call(step)
-        _broadcast_audit_event(str(step.agent_id), audit_payload)
-    except Exception:
-        logger.debug("Failed to broadcast audit tool call %s", getattr(step, "id", None), exc_info=True)
+    _broadcast_developer_update(str(step.agent_id))
 
 
 @receiver(post_save, sender=PersistentAgentCompletion)
@@ -541,22 +516,14 @@ def broadcast_new_completion(sender, instance: PersistentAgentCompletion, create
                 transaction.on_commit(lambda: emit_agent_usage_update(instance.agent))
         except Exception:
             logger.debug("Failed to broadcast thinking event for %s", instance.id, exc_info=True)
-    try:
-        audit_payload = serialize_completion(instance)
-        _broadcast_audit_event(str(instance.agent_id), audit_payload)
-    except Exception:
-        logger.debug("Failed to broadcast audit completion %s", getattr(instance, "id", None), exc_info=True)
+    _broadcast_developer_update(str(instance.agent_id))
 
 
 @receiver(post_save, sender=PersistentAgentError)
 def broadcast_new_error(sender, instance: PersistentAgentError, created: bool, **kwargs):
     if not created:
         return
-    try:
-        audit_payload = serialize_error(instance)
-        _broadcast_audit_event(str(instance.agent_id), audit_payload)
-    except Exception:
-        logger.debug("Failed to broadcast audit error %s", getattr(instance, "id", None), exc_info=True)
+    _broadcast_developer_update(str(instance.agent_id))
 
 
 @receiver(post_save, sender=PersistentAgent)
@@ -603,24 +570,8 @@ def broadcast_run_start(sender, instance: PersistentAgentSystemStep, created: bo
         return
     if instance.code != PersistentAgentSystemStep.Code.PROCESS_EVENTS:
         return
-    try:
-        payload = {
-            "run_id": str(instance.step_id),
-            "kind": "run_started",
-            "timestamp": instance.step.created_at.isoformat() if instance.step else None,
-            "sequence": (
-                PersistentAgentSystemStep.objects.filter(
-                    step__agent_id=instance.step.agent_id if instance.step else None,
-                    code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
-                    step__created_at__lte=getattr(instance.step, "created_at", None),
-                ).count()
-                if instance.step_id
-                else None
-            ),
-        }
-        send_audit_event(str(instance.step.agent_id), payload)
-    except Exception:
-        logger.debug("Failed to broadcast audit run start %s", getattr(instance, "step_id", None), exc_info=True)
+    if instance.step_id:
+        _broadcast_developer_update(str(instance.step.agent_id))
 
 
 @receiver(post_save, sender=PersistentAgentSystemStep)
@@ -649,7 +600,7 @@ def broadcast_credit_limit_event(sender, instance: PersistentAgentSystemStep, cr
 
 @receiver(post_save, sender=PersistentAgentSystemMessage)
 def broadcast_system_message(sender, instance: PersistentAgentSystemMessage, created: bool, **kwargs):
-    broadcast_system_message_audit(instance)
+    _broadcast_developer_update(str(instance.agent_id))
 
 
 @receiver(post_save, sender=BrowserUseAgentTask)
@@ -686,17 +637,7 @@ def _broadcast_processing(agent):
     _send(_group_name(agent.id), "processing_event", payload, agent_id=str(agent.id))
     emit_agent_usage_update(agent)
     _emit_processing_profile_update_if_changed(agent, snapshot.active)
-    try:
-        send_audit_event(
-            str(agent.id),
-            {
-                "kind": "processing_status",
-                "active": snapshot.active,
-                "timestamp": timezone.now().isoformat(),
-            },
-        )
-    except Exception:
-        logger.debug("Failed to broadcast processing status to audit channel for agent %s", agent.id, exc_info=True)
+    _broadcast_developer_update(str(agent.id))
 
 
 def broadcast_plan_changes(agent, changes, snapshot, *, explanation: str = "") -> None:

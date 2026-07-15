@@ -14,7 +14,7 @@ import type { InsightsResponse } from '../types/insight'
 import type { AccountPauseInfo, BillingStatusInfo, ContactCapInfo, ContactCapStatus } from '../types/agentAddons'
 import type { DailyCreditsStatus } from '../types/dailyCredits'
 import { jsonFetch, jsonRequest } from './http'
-import type { StaffViewContext } from './context'
+import { staffViewContextHeaders, type StaffViewContext } from './context'
 
 export type TimelineDirection = 'initial' | 'older' | 'newer'
 export type SuggestionCategory = 'capabilities' | 'deliverables' | 'integrations' | 'planning'
@@ -88,15 +88,10 @@ export async function fetchAgentTimeline(
   if (params.developerMode) query.set('developer', '1')
 
   const url = `/console/api/agents/${agentId}/timeline/${query.toString() ? `?${query.toString()}` : ''}`
-  const headers: Record<string, string> = {}
-  if (params.staffContext) {
-    headers['X-Gobii-Staff-Context-Type'] = params.staffContext.type
-    headers['X-Gobii-Staff-Context-Id'] = params.staffContext.id
-  }
   const response = await jsonFetch<TimelineResponse & {
     pending_human_input_requests?: unknown[]
     pending_action_requests?: unknown[]
-  }>(url, { ...(params.signal ? { signal: params.signal } : {}), headers })
+  }>(url, { ...(params.signal ? { signal: params.signal } : {}), headers: staffViewContextHeaders(params.staffContext) })
   return {
     ...response,
     pending_human_input_requests: normalizePendingHumanInputRequests(response.pending_human_input_requests),
