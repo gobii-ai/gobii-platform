@@ -1250,6 +1250,7 @@ class HomePageTests(TestCase):
         session[PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY] = "sales-pipeline-whisperer"
         session["agent_charter"] = "Template charter"
         session["agent_charter_source"] = "template"
+        session[page_views.PREFERRED_LLM_TIER_SESSION_KEY] = "standard"
         session.save()
 
         response = self.client.post("/spawn-agent/", {"charter": "Custom charter"})
@@ -1257,6 +1258,7 @@ class HomePageTests(TestCase):
 
         session = self.client.session
         self.assertNotIn(PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY, session)
+        self.assertNotIn(page_views.PREFERRED_LLM_TIER_SESSION_KEY, session)
         self.assertEqual(session["agent_charter_source"], "user")
         self.assertEqual(session["agent_charter"], "Custom charter")
 
@@ -1274,6 +1276,7 @@ class HomePageTests(TestCase):
             {
                 "charter": "Custom charter",
                 "preferred_llm_tier": "premium",
+                "preferred_llm_tier_is_explicit": "true",
                 "selected_pipedream_app_slugs": ["slack", "trello", "slack"],
                 "return_to": "/",
                 "embed": "1",
@@ -1322,6 +1325,7 @@ class HomePageTests(TestCase):
             {
                 "charter": "   ",
                 "preferred_llm_tier": "premium",
+                "preferred_llm_tier_is_explicit": "true",
                 "selected_pipedream_app_slugs": ["slack", "trello", "slack"],
                 "return_to": "/",
                 "embed": "1",
@@ -1494,6 +1498,7 @@ class HomePageTests(TestCase):
             {
                 "charter": "Custom charter",
                 "preferred_llm_tier": "premium",
+                "preferred_llm_tier_is_explicit": "true",
                 "selected_pipedream_app_slugs": ["slack", "trello", "slack"],
                 "trial_onboarding": "1",
                 "trial_onboarding_target": TRIAL_ONBOARDING_TARGET_AGENT_UI,
@@ -1565,6 +1570,7 @@ class HomePageTests(TestCase):
             {
                 "charter": " ",
                 "preferred_llm_tier": "premium",
+                "preferred_llm_tier_is_explicit": "true",
                 "selected_pipedream_app_slugs": ["slack", "trello", "slack"],
                 "trial_onboarding": "1",
                 "trial_onboarding_target": TRIAL_ONBOARDING_TARGET_AGENT_UI,
@@ -1604,6 +1610,7 @@ class HomePageTests(TestCase):
                 {
                     "charter": "Custom charter",
                     "preferred_llm_tier": "premium",
+                    "preferred_llm_tier_is_explicit": "true",
                     "selected_pipedream_app_slugs": ["slack", "trello", "slack"],
                     "trial_onboarding": "1",
                     "trial_onboarding_target": TRIAL_ONBOARDING_TARGET_AGENT_UI,

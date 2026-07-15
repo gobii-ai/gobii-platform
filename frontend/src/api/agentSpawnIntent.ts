@@ -9,6 +9,7 @@ export type TemplateRecommendation = {
   templateCode: string
   templateId: string
   templateSource: 'organization' | 'public'
+  preferredLlmTier?: string | null
   likeCount: number
   isOfficial: boolean
 }

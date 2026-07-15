@@ -15,5 +15,6 @@ export type LlmIntelligenceConfig = {
   upgradeUrl: string | null
   maxAllowedTier?: IntelligenceTierKey | null
   maxAllowedTierRank?: number | null
+  defaultTier?: IntelligenceTierKey | null
   systemDefaultTier?: IntelligenceTierKey | null
 }

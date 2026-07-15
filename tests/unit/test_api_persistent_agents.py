@@ -594,6 +594,39 @@ class PersistentAgentAPITests(TestCase):
         self.assertEqual(email_meta.display_name, "API @ Persistent Agent")
         self.process_events_mock.assert_called_with(str(agent.id))
 
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_create_agent_without_tier_uses_active_trial_default(self):
+        from tests.utils.llm_seed import get_intelligence_tier
+
+        standard_tier = get_intelligence_tier("standard")
+        max_tier = get_intelligence_tier("max")
+        standard_tier.__class__.objects.update(
+            is_default=False,
+            is_trial_default=False,
+        )
+        standard_tier.is_default = True
+        standard_tier.save(update_fields=["is_default"])
+        max_tier.is_trial_default = True
+        max_tier.save(update_fields=["is_trial_default"])
+
+        with (
+            patch("util.user_behavior.is_owner_currently_in_trial", return_value=True),
+            patch("api.services.billing_snapshot.is_owner_currently_in_trial", return_value=True),
+            patch("api.agent.core.llm_config.get_owner_plan", return_value={"id": "pro"}),
+        ):
+            payload = self._create_agent_via_api({'name': 'Trial Default API Agent'})
+
+        agent = PersistentAgent.objects.get(id=payload['id'])
+        self.assertEqual(agent.preferred_llm_tier, max_tier)
+        created_properties = [
+            call.kwargs.get("properties") or {}
+            for call in self.analytics_mock.call_args_list
+            if (call.kwargs.get("properties") or {}).get("agent_id") == str(agent.id)
+        ]
+        self.assertTrue(created_properties)
+        self.assertEqual(created_properties[0]["preferred_llm_tier"], "max")
+        self.assertTrue(created_properties[0]["billing_is_trial"])
+
     def test_create_agent_duplicate_name_returns_validation_error(self):
         self._create_agent_via_api({'name': 'Duplicate Agent'})
 

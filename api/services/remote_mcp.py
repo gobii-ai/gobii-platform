@@ -1770,6 +1770,7 @@ def _build_intelligence_options(owner):
         PersistentAgent._meta.get_field("preferred_llm_tier").remote_field.model.objects.order_by("rank", "key")
     )
     current_default = get_system_default_tier().value
+    current_owner_default = resolve_preferred_tier_for_owner(owner, None).value
     options = []
     for tier in tiers:
         tier_key = tier.key
@@ -1786,12 +1787,15 @@ def _build_intelligence_options(owner):
                 "rank": tier.rank,
                 "credit_multiplier": tier.credit_multiplier,
                 "is_default": tier.is_default or tier_key == current_default,
+                "is_owner_default": tier_key == current_owner_default,
+                "is_trial_default": tier.is_trial_default,
                 "allowed": allowed,
             }
         )
     return {
         "type": "string",
         "current_system_default": current_default,
+        "current_owner_default": current_owner_default,
         "max_allowed_tier": max_allowed.value,
         "max_allowed_rank": max_allowed_rank,
         "options": options,

@@ -15,7 +15,7 @@ from enum import Enum
 from typing import Dict, List, Tuple, Any, Optional
 
 from django.apps import apps
-from django.core.exceptions import AppRegistryNotReady
+from django.core.exceptions import AppRegistryNotReady, ObjectDoesNotExist
 from django.core.cache import cache
 from django.db.models import Q
 from django.db.utils import DatabaseError
@@ -32,6 +32,7 @@ logger = logging.getLogger(__name__)
 
 _TIER_MULTIPLIER_CACHE_KEY = "intelligence_tier_multipliers:v1"
 _TIER_DEFAULT_CACHE_KEY = "intelligence_tier_default:v1"
+_TIER_TRIAL_DEFAULT_CACHE_KEY = "intelligence_tier_trial_default:v1"
 _DEFAULT_TIER_MULTIPLIERS: Dict[str, Decimal] = {
     "standard": Decimal("1.00"),
     "premium": Decimal("2.00"),
@@ -129,7 +130,7 @@ _RUNTIME_TIER_OVERRIDE_ATTR = "_runtime_llm_tier_override"
 
 
 def invalidate_llm_tier_default_cache() -> None:
-    cache.delete(_TIER_DEFAULT_CACHE_KEY)
+    cache.delete_many((_TIER_DEFAULT_CACHE_KEY, _TIER_TRIAL_DEFAULT_CACHE_KEY))
 
 
 def _load_system_default_tier_key() -> str | None:
@@ -167,6 +168,62 @@ def get_system_default_tier(*, force_refresh: bool = False) -> "AgentLLMTier":
     return tier
 
 
+def _load_trial_default_tier_key() -> str | None:
+    """Return the active-trial default tier key from the DB, if configured."""
+
+    try:
+        IntelligenceTier = apps.get_model("api", "IntelligenceTier")
+        return (
+            IntelligenceTier.objects.filter(is_trial_default=True)
+            .values_list("key", flat=True)
+            .first()
+        )
+    except (AppRegistryNotReady, DatabaseError, LookupError):
+        logger.debug("Failed to load trial default intelligence tier", exc_info=True)
+        return None
+
+
+def get_trial_default_tier(*, force_refresh: bool = False) -> "AgentLLMTier":
+    """Return the configured active-trial default, falling back to the system default."""
+
+    cached = None if force_refresh else cache.get(_TIER_TRIAL_DEFAULT_CACHE_KEY)
+    if cached:
+        try:
+            return AgentLLMTier(str(cached))
+        except ValueError:
+            pass
+
+    tier_key = _load_trial_default_tier_key()
+    try:
+        tier = (
+            AgentLLMTier(tier_key)
+            if tier_key
+            else get_system_default_tier(force_refresh=force_refresh)
+        )
+    except ValueError:
+        tier = get_system_default_tier(force_refresh=force_refresh)
+
+    cache.set(_TIER_TRIAL_DEFAULT_CACHE_KEY, tier.value, timeout=300)
+    return tier
+
+
+def _owner_uses_trial_default(owner: Any | None) -> bool:
+    if owner is None or not settings.GOBII_PROPRIETARY_MODE:
+        return False
+
+    from util.user_behavior import is_owner_currently_in_trial
+
+    try:
+        return is_owner_currently_in_trial(owner)
+    except (AppRegistryNotReady, DatabaseError, ObjectDoesNotExist, TypeError, ValueError):
+        logger.warning(
+            "Failed to resolve trial status for intelligence default owner %s",
+            getattr(owner, "pk", None),
+            exc_info=True,
+        )
+        return False
+
+
 def _is_org_owner(owner: Any) -> bool:
     owner_meta = getattr(owner, "_meta", None)
     return bool(owner_meta and owner_meta.app_label == "api" and owner_meta.model_name == "organization")
@@ -182,7 +239,12 @@ def resolve_preferred_tier_for_owner(owner: Any | None, tier_key: str | None) ->
         except ValueError:
             requested = None
 
-    resolved = requested or get_system_default_tier()
+    if requested is not None:
+        resolved = requested
+    elif _owner_uses_trial_default(owner):
+        resolved = get_trial_default_tier()
+    else:
+        resolved = get_system_default_tier()
     if owner is None:
         return resolved
     if not getattr(settings, "GOBII_PROPRIETARY_MODE", False):
@@ -204,7 +266,7 @@ def resolve_intelligence_tier_for_owner(owner: Any | None, tier_key: str | None)
     Return the IntelligenceTier model for the given owner + requested tier key.
 
     This resolves:
-    - invalid/blank input -> system default
+    - invalid/blank input -> active-trial default, then system default
     - plan clamping (in proprietary mode)
     and then returns the matching IntelligenceTier row.
     """

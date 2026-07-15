@@ -1124,21 +1124,30 @@ class HomePage(TemplateView):
             )
         context["home_spawn_requires_trial"] = home_spawn_requires_trial
 
+        intelligence_props = build_llm_intelligence_props(
+            owner,
+            owner_type,
+            organization,
+            intelligence_upgrade_url,
+        )
+        context['llm_intelligence'] = intelligence_props
+
         preferred_llm_tier_raw = self.request.session.get(PREFERRED_LLM_TIER_SESSION_KEY)
-        # Never plan-clamp in the homepage selector. Clamping happens when the agent is
-        # persisted and at runtime.
-        preferred_llm_tier = resolve_preferred_tier_for_owner(None, preferred_llm_tier_raw).value
+        # Preserve explicit session choices without plan-clamping them. The owner-aware
+        # displayed default is already clamped by build_llm_intelligence_props().
+        preferred_llm_tier = (
+            resolve_preferred_tier_for_owner(None, preferred_llm_tier_raw).value
+            if preferred_llm_tier_raw
+            else intelligence_props["defaultTier"]
+        )
         # Do not write back the clamped tier into the session.
         # We want to preserve the user's requested tier so it can take effect automatically
         # after a plan upgrade (e.g., returning from Stripe before webhooks settle).
         context['preferred_llm_tier'] = preferred_llm_tier
         context['preferred_llm_tier_label'] = get_llm_tier_label(preferred_llm_tier)
-
-        context['llm_intelligence'] = build_llm_intelligence_props(
-            owner,
-            owner_type,
-            organization,
-            intelligence_upgrade_url,
+        context['preferred_llm_tier_is_explicit'] = bool(
+            preferred_llm_tier_raw
+            and self.request.session.get('agent_charter_source') != 'template'
         )
         try:
             billing_url = f"{IMMERSIVE_APP_BASE_PATH}/billing"
@@ -1364,11 +1373,16 @@ class HomeAgentSpawnView(TemplateView):
                 request.session.pop("agent_charter_override", None)
                 request.session.pop("agent_charter_source", None)
             preferred_llm_tier_raw = (request.POST.get("preferred_llm_tier") or "").strip()
-            if preferred_llm_tier_raw:
+            preferred_llm_tier_is_explicit = (
+                request.POST.get("preferred_llm_tier_is_explicit") or ""
+            ).strip().lower() in {"1", "true", "yes", "on"}
+            if preferred_llm_tier_is_explicit and preferred_llm_tier_raw:
                 # Never plan-clamp session preference here; clamping happens at persistence/runtime.
                 preferred_llm_tier = resolve_preferred_tier_for_owner(None, preferred_llm_tier_raw).value
                 request.session[PREFERRED_LLM_TIER_SESSION_KEY] = preferred_llm_tier
-                request.session.modified = True
+            else:
+                request.session.pop(PREFERRED_LLM_TIER_SESSION_KEY, None)
+            request.session.modified = True
 
             # Track analytics for home page agent creation start (only for authenticated users)
             if request.user.is_authenticated:

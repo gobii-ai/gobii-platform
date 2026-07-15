@@ -25,7 +25,7 @@ TEMPLATE_SOURCE_PUBLIC = "public"
 
 def _routeable_public_template_queryset():
     return (
-        PersistentAgentTemplate.objects.select_related("public_profile")
+        PersistentAgentTemplate.objects.select_related("public_profile", "preferred_llm_tier")
         .filter(organization__isnull=True, is_active=True)
         .filter(Q(slug__gt="") | Q(code__gt=""))
     )
@@ -34,7 +34,7 @@ def _routeable_public_template_queryset():
 def _active_organization_template_queryset(context_info: ConsoleContextInfo):
     if context_info.current_context.type != "organization":
         return PersistentAgentTemplate.objects.none()
-    return PersistentAgentTemplate.objects.filter(
+    return PersistentAgentTemplate.objects.select_related("preferred_llm_tier").filter(
         organization_id=context_info.current_context.id,
         public_profile__isnull=True,
         is_active=True,
@@ -165,6 +165,7 @@ def _serialize_template(template: PersistentAgentTemplate) -> dict[str, Any]:
         "templateCode": template.code,
         "templateId": str(template.id),
         "templateSource": template_source,
+        "preferredLlmTier": template.preferred_llm_tier.key,
         "likeCount": like_count,
         "isOfficial": bool(template.is_official),
     }

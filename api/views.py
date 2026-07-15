@@ -795,12 +795,21 @@ class PersistentAgentViewSet(viewsets.ModelViewSet):
         return Response(serializer.data)
 
     def perform_create(self, serializer):
+        from api.services.billing_snapshot import get_billing_snapshot_for_owner
+
         agent = serializer.save()
         invalidate_account_info_cache(self.request.user.id)
+
+        owner = self._request_organization() or self.request.user
+        billing_snapshot = get_billing_snapshot_for_owner(owner)
         self._track_agent_event(
             agent,
             AnalyticsEvent.PERSISTENT_AGENT_CREATED,
             organization_event=AnalyticsEvent.ORGANIZATION_PERSISTENT_AGENT_CREATED,
+            extra={
+                "preferred_llm_tier": agent.preferred_llm_tier.key,
+                "billing_is_trial": billing_snapshot["billing_is_trial"],
+            },
         )
         transaction.on_commit(
             lambda: emit_configured_custom_capi_event(

@@ -88,6 +88,9 @@ export function AgentIntelligenceSelector({
       return
     }
     if (resolvedKey === currentTier) {
+      if (allowLockedSelection) {
+        onSelect(resolvedKey)
+      }
       setOpen(false)
       return
     }

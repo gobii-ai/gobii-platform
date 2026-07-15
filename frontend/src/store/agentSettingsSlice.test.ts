@@ -24,11 +24,17 @@ describe('agentSettingsSlice', () => {
 
     store.dispatch(agentSettingsActions.draftTierSet('advanced'))
 
-    expect(selectAgentSettingsState(store.getState()).draftTier).toBe('advanced')
+    expect(selectAgentSettingsState(store.getState())).toMatchObject({
+      draftTier: 'advanced',
+      draftTierOverride: 'advanced',
+    })
 
     store.dispatch(agentSettingsActions.draftTierReset())
 
-    expect(selectAgentSettingsState(store.getState()).draftTier).toBe('standard')
+    expect(selectAgentSettingsState(store.getState())).toMatchObject({
+      draftTier: 'standard',
+      draftTierOverride: null,
+    })
   })
 
   it('optimistically saves intelligence tier and clears saving state', async () => {

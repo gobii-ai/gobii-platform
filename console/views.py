@@ -51,6 +51,7 @@ from api.agent.core.llm_config import (
     get_llm_tier_ranks,
     apply_user_quota_tier_override,
     max_allowed_tier_for_plan,
+    resolve_preferred_tier_for_owner,
 )
 from api.agent.avatar import maybe_schedule_agent_avatar
 from api.agent.short_description import compute_charter_hash, maybe_schedule_mini_description, maybe_schedule_short_description
@@ -186,6 +187,7 @@ def build_llm_intelligence_props(
     allowed_tier = max_allowed_tier_for_plan(plan, is_organization=(owner_type == 'organization'))
     allowed_tier = apply_user_quota_tier_override(owner, allowed_tier)
     system_default_tier = get_system_default_tier().value
+    default_tier = resolve_preferred_tier_for_owner(owner, None).value
     tier_ranks = get_llm_tier_ranks()
     allowed_rank = tier_ranks.get(allowed_tier.value)
     if allowed_rank is None:
@@ -256,6 +258,7 @@ def build_llm_intelligence_props(
         "upgradeUrl": upgrade_url,
         "maxAllowedTier": max_allowed_tier_key,
         "maxAllowedTierRank": max_allowed_rank,
+        "defaultTier": default_tier,
         "systemDefaultTier": system_default_tier,
     }
 

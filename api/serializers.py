@@ -569,16 +569,6 @@ class PersistentAgentSerializer(serializers.ModelSerializer):
         preferred_input = validated_data.pop('preferred_contact_endpoint', None)
         preferred_endpoint = preferred_input if not isinstance(preferred_input, str) else None
         preferred_channel = preferred_input if isinstance(preferred_input, str) else None
-        preferred_tier = validated_data.get('preferred_llm_tier')
-        if not preferred_tier:
-            try:
-                validated_data['preferred_llm_tier'] = resolve_intelligence_tier_for_owner(
-                    organization or request.user,
-                    None,
-                )
-            except ValueError:
-                raise serializers.ValidationError({'preferred_llm_tier': ['Unsupported intelligence tier selection.']})
-
         with transaction.atomic():
             provision_kwargs = {
                 'user': request.user,

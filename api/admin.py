@@ -5670,15 +5670,15 @@ class IntelligenceTierAdminForm(forms.ModelForm):
         return normalize_tool_blacklist(self.cleaned_data.get("blacklisted_tools"))
 
     def validate_constraints(self):
-        # IntelligenceTier enforces a single default tier via a DB UniqueConstraint.
-        # When an admin flips a different tier to default, we clear the prior default
-        # in IntelligenceTierAdmin.save_model() (transactionally) after validation.
+        # IntelligenceTier enforces single system and trial defaults via DB constraints.
+        # When an admin flips either selection, save_model() clears the corresponding
+        # prior default transactionally after validation.
         #
         # Django validates model constraints during form validation; that would raise
         # a validation error before save_model() can clear the old default. Avoid the
-        # false-positive by skipping constraint validation for the "is_default=True"
-        # path; the DB constraint still protects integrity at save time.
-        if self.cleaned_data.get("is_default"):
+        # false-positive by skipping constraint validation while either default is being
+        # selected; the DB constraints still protect integrity at save time.
+        if self.cleaned_data.get("is_default") or self.cleaned_data.get("is_trial_default"):
             return
         return super().validate_constraints()
 
@@ -5692,10 +5692,11 @@ class IntelligenceTierAdmin(admin.ModelAdmin):
         "rank",
         "credit_multiplier",
         "is_default",
+        "is_trial_default",
         "blacklisted_tool_count",
         "updated_at",
     )
-    list_filter = ("key", "is_default")
+    list_filter = ("key", "is_default", "is_trial_default")
     search_fields = ("display_name", "key")
     ordering = ("rank", "key")
 
@@ -5704,13 +5705,19 @@ class IntelligenceTierAdmin(admin.ModelAdmin):
         return len(obj.blacklisted_tools or [])
 
     def save_model(self, request, obj, form, change):
-        # Keep "default tier" selection unique without relying solely on constraint errors.
-        if getattr(obj, "is_default", False):
+        # Keep each default selection unique without relying solely on constraint errors.
+        if getattr(obj, "is_default", False) or getattr(obj, "is_trial_default", False):
             with transaction.atomic():
-                qs = IntelligenceTier.objects.filter(is_default=True)
-                if getattr(obj, "pk", None):
-                    qs = qs.exclude(pk=obj.pk)
-                qs.update(is_default=False)
+                if getattr(obj, "is_default", False):
+                    qs = IntelligenceTier.objects.filter(is_default=True)
+                    if getattr(obj, "pk", None):
+                        qs = qs.exclude(pk=obj.pk)
+                    qs.update(is_default=False)
+                if getattr(obj, "is_trial_default", False):
+                    qs = IntelligenceTier.objects.filter(is_trial_default=True)
+                    if getattr(obj, "pk", None):
+                        qs = qs.exclude(pk=obj.pk)
+                    qs.update(is_trial_default=False)
                 return super().save_model(request, obj, form, change)
         return super().save_model(request, obj, form, change)
 

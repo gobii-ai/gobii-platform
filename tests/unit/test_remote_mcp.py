@@ -6,7 +6,7 @@ from datetime import timedelta
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase, tag
+from django.test import TestCase, override_settings, tag
 from django.utils import timezone
 
 from api.models import (
@@ -402,6 +402,30 @@ class RemoteMCPViewTests(TestCase):
             self._structured_content(missing_agent_response)["details"]["code"],
             "agent_not_found_or_inaccessible",
         )
+
+    def test_config_options_expose_owner_and_trial_intelligence_defaults(self):
+        agent = self._create_agent(self.user, "MCP Config Agent")
+        self.premium_tier.is_trial_default = True
+        self.premium_tier.save(update_fields=["is_trial_default"])
+
+        with (
+            override_settings(GOBII_PROPRIETARY_MODE=True),
+            patch("util.user_behavior.is_owner_currently_in_trial", return_value=True),
+            patch("api.agent.core.llm_config.get_owner_plan", return_value={"id": "pro"}),
+        ):
+            response = self._call_tool(
+                "gobii_get_agent_config_options",
+                {"agent_id": str(agent.id)},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        intelligence_field = self._structured_content(response)["fields"]["preferred_llm_tier"]
+        self.assertEqual(intelligence_field["current_system_default"], "standard")
+        self.assertEqual(intelligence_field["current_owner_default"], "premium")
+        tier_options = {option["key"]: option for option in intelligence_field["options"]}
+        self.assertTrue(tier_options["standard"]["is_default"])
+        self.assertTrue(tier_options["premium"]["is_owner_default"])
+        self.assertTrue(tier_options["premium"]["is_trial_default"])
 
     def test_lifecycle_tools_create_update_link_and_archive_agent(self):
         existing_agent = self._create_agent(self.user, "Existing MCP Agent")

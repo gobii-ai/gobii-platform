@@ -773,7 +773,7 @@ def _persist_quick_create_draft(
 
     if preferred_llm_tier_key:
         request.session["agent_preferred_llm_tier"] = preferred_llm_tier_key
-    else:
+    elif not preserve_template_attribution:
         request.session.pop("agent_preferred_llm_tier", None)
 
     if charter_override:

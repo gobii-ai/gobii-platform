@@ -212,7 +212,11 @@ class NewAgentTemplateRecommendationTests(TestCase):
         slug="",
         is_official=False,
         priority=100,
+        preferred_llm_tier=None,
     ):
+        template_kwargs = {
+            "preferred_llm_tier": preferred_llm_tier,
+        } if preferred_llm_tier is not None else {}
         template = PersistentAgentTemplate.objects.create(
             code=code,
             slug=slug,
@@ -225,6 +229,7 @@ class NewAgentTemplateRecommendationTests(TestCase):
             is_active=is_active,
             is_official=is_official,
             priority=priority,
+            **template_kwargs,
         )
         for index in range(likes):
             like_user = get_user_model().objects.create_user(
@@ -271,7 +276,12 @@ class NewAgentTemplateRecommendationTests(TestCase):
     @tag("batch_public_templates")
     @patch("console.agent_chat.template_recommendations.get_summarization_llm_configs")
     def test_no_existing_charters_returns_default_templates_without_llm(self, mock_get_configs):
-        self._create_template("talent-scout", category="People", likes=2)
+        self._create_template(
+            "talent-scout",
+            category="People",
+            likes=2,
+            preferred_llm_tier=get_intelligence_tier("premium"),
+        )
         self._create_template("candidate-researcher", category="People", likes=1)
         self._create_template("lead-hunter", category="Revenue", likes=3)
 
@@ -282,6 +292,7 @@ class NewAgentTemplateRecommendationTests(TestCase):
             [template["templateCode"] for template in payload["templates"]],
             ["talent-scout", "candidate-researcher", "lead-hunter"],
         )
+        self.assertEqual(payload["templates"][0]["preferredLlmTier"], "premium")
         mock_get_configs.assert_not_called()
 
     @tag("batch_public_templates")

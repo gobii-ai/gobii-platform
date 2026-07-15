@@ -33,8 +33,9 @@ from api.models import (
     build_web_agent_address,
     build_web_user_address,
 )
-from api.services.persistent_agents import PersistentAgentProvisioningError, PersistentAgentProvisioningService, ensure_default_agent_email_endpoint
+from api.services.billing_snapshot import get_billing_snapshot_for_owner
 from api.services.owner_execution_pause import get_owner_account_pause_state
+from api.services.persistent_agents import PersistentAgentProvisioningError, PersistentAgentProvisioningService, ensure_default_agent_email_endpoint
 from api.services.signup_preview import get_signup_preview_creation_state
 from api.services.signup_preview import user_has_existing_personal_agent_for_signup_preview
 from api.pipedream_app_utils import normalize_app_slugs
@@ -228,13 +229,6 @@ def create_persistent_agent_from_charter(
         )
         if selected_template is None:
             raise ValidationError("This template is no longer available.")
-        if not preferred_llm_tier_key:
-            template_preferred_llm_tier = getattr(selected_template, "preferred_llm_tier", None)
-            preferred_llm_tier_key = (
-                getattr(template_preferred_llm_tier, "key", template_preferred_llm_tier)
-                or None
-            )
-
     owner = organization or request.user
     if get_owner_account_pause_state(owner).get("customer_paused"):
         raise ValidationError(_customer_account_pause_creation_message(owner))
@@ -534,6 +528,7 @@ def create_persistent_agent_from_charter(
                 del request.session[key]
         clear_trial_onboarding_intent(request)
 
+        billing_snapshot = get_billing_snapshot_for_owner(owner)
         base_props = {
             "agent_id": str(persistent_agent.id),
             "agent_name": agent_name,
@@ -545,6 +540,8 @@ def create_persistent_agent_from_charter(
             "template_code": selected_template.code if selected_template else "",
             "template_source": template_source if selected_template else "",
             "template_schedule_applied": applied_schedule or "",
+            "preferred_llm_tier": persistent_agent.preferred_llm_tier.key,
+            "billing_is_trial": billing_snapshot["billing_is_trial"],
         }
         props = Analytics.with_org_properties(base_props, organization=organization)
         marketing_props = Analytics.with_org_properties(

@@ -92,6 +92,15 @@ class PersistentAgentProvisioningService:
         if not AgentService.has_agents_available(owner):
             raise PersistentAgentProvisioningError("Agent limit reached for this user.")
 
+        selected_template = None
+        if template_code:
+            selected_template = PretrainedWorkerTemplateService.get_template_by_code(
+                template_code,
+                organization=organization,
+            )
+            if selected_template is None:
+                raise PersistentAgentProvisioningError(f"Unknown template code '{template_code}'.")
+
         applied_template_code: Optional[str] = None
         applied_schedule: Optional[str] = None
 
@@ -115,7 +124,14 @@ class PersistentAgentProvisioningService:
                     delattr(browser_agent, "_agent_creation_organization")
 
             owner = organization or user
-            preferred_key = getattr(preferred_llm_tier, "key", None) if preferred_llm_tier is not None else None
+            preferred_value = preferred_llm_tier
+            if preferred_value is None and selected_template is not None:
+                preferred_value = selected_template.preferred_llm_tier
+            preferred_key = (
+                getattr(preferred_value, "key", preferred_value)
+                if preferred_value is not None
+                else None
+            )
             try:
                 computed_tier = resolve_intelligence_tier_for_owner(owner, preferred_key)
             except ValueError:
@@ -170,28 +186,21 @@ class PersistentAgentProvisioningService:
                 )
                 persistent_agent.save(update_fields=["daily_credit_limit"])
 
-            if template_code:
-                template = PretrainedWorkerTemplateService.get_template_by_code(
-                    template_code,
-                    organization=organization,
-                )
-                if template is None:
-                    raise PersistentAgentProvisioningError(f"Unknown template code '{template_code}'.")
-
-                applied_template_code = template.code
+            if selected_template is not None:
+                applied_template_code = selected_template.code
                 updates: list[str] = []
 
-                if not charter and template.charter:
-                    persistent_agent.charter = template.charter
+                if not charter and selected_template.charter:
+                    persistent_agent.charter = selected_template.charter
                     updates.append("charter")
 
                 computed = PretrainedWorkerTemplateService.compute_schedule_with_jitter(
-                    template.base_schedule,
-                    template.schedule_jitter_minutes,
+                    selected_template.base_schedule,
+                    selected_template.schedule_jitter_minutes,
                 )
                 if computed:
                     persistent_agent.schedule = computed
-                    persistent_agent.schedule_snapshot = template.base_schedule
+                    persistent_agent.schedule_snapshot = selected_template.base_schedule
                     applied_schedule = computed
                     updates.extend(["schedule", "schedule_snapshot"])
 

@@ -91,6 +91,7 @@ import {
   selectAgentTierOverrides,
   selectAgentTierSavingById,
   selectDraftIntelligenceTier,
+  selectDraftIntelligenceTierOverride,
   updateAgentIntelligenceTier,
 } from '../store/agentSettingsSlice'
 import { mergeTimelineEvents } from '../stores/agentChatTimeline'
@@ -943,6 +944,7 @@ export function AgentChatPage({
     body: string
     attachments: File[]
     tier: IntelligenceTierKey
+    tierOverride: IntelligenceTierKey | null
     charterOverride?: string | null
     selectedPipedreamAppSlugs?: string[]
     template?: CreateAgentTemplateOptions | null
@@ -1953,6 +1955,7 @@ export function AgentChatPage({
     return map
   }, [llmIntelligence?.options])
   const draftIntelligenceTier = useAppSelector(selectDraftIntelligenceTier)
+  const draftIntelligenceTierOverride = useAppSelector(selectDraftIntelligenceTierOverride)
   const intelligenceOverrides = useAppSelector(selectAgentTierOverrides)
   const intelligenceSavingById = useAppSelector(selectAgentTierSavingById)
   const intelligenceErrorById = useAppSelector(selectAgentTierErrorById)
@@ -2129,21 +2132,24 @@ export function AgentChatPage({
     if (!isNewAgent) {
       return
     }
-    if (!llmIntelligence?.systemDefaultTier) {
+    const configuredDefault = llmIntelligence?.defaultTier ?? llmIntelligence?.systemDefaultTier
+    if (!configuredDefault || draftIntelligenceTierOverride !== null) {
       return
     }
-    // Only auto-apply the system default when the draft is still at the initial value,
-    // so we don't overwrite a user selection.
-    if (draftIntelligenceTier !== 'standard') {
-      return
-    }
-    const systemDefault = llmIntelligence.systemDefaultTier
-    const isKnownTier = llmIntelligence.options.some((option) => option.key === systemDefault)
-    const resolvedTier = isKnownTier ? systemDefault : 'standard'
+    const isKnownTier = llmIntelligence?.options.some((option) => option.key === configuredDefault) ?? false
+    const resolvedTier = isKnownTier ? configuredDefault : 'standard'
     if (resolvedTier !== draftIntelligenceTier) {
-      dispatch(agentSettingsActions.draftTierSet(resolvedTier))
+      dispatch(agentSettingsActions.draftTierDefaultSet(resolvedTier))
     }
-  }, [dispatch, draftIntelligenceTier, isNewAgent, llmIntelligence?.options, llmIntelligence?.systemDefaultTier])
+  }, [
+    dispatch,
+    draftIntelligenceTier,
+    draftIntelligenceTierOverride,
+    isNewAgent,
+    llmIntelligence?.defaultTier,
+    llmIntelligence?.options,
+    llmIntelligence?.systemDefaultTier,
+  ])
 
   const resolvedIntelligenceTier = useMemo(() => {
     if (isNewAgent) {
@@ -2655,7 +2661,7 @@ export function AgentChatPage({
   const createNewAgent = useCallback(
     async (
       body: string,
-      tier: IntelligenceTierKey,
+      tierOverride?: IntelligenceTierKey,
       charterOverride?: string | null,
       selectedPipedreamAppSlugs?: string[],
       attachments: File[] = [],
@@ -2667,7 +2673,7 @@ export function AgentChatPage({
         const preferredContactMethod = spawnFlow ? 'email' : 'web'
         const result = await createAgent(
           body,
-          tier,
+          tierOverride,
           charterOverride,
           selectedPipedreamAppSlugs,
           preferredContactMethod,
@@ -3436,7 +3442,7 @@ export function AgentChatPage({
     closeGate()
     void createNewAgent(
       pending.body,
-      tierToUse,
+      needsPlanUpgrade ? tierToUse : pending.tierOverride ?? undefined,
       pending.charterOverride,
       pending.selectedPipedreamAppSlugs,
       pending.attachments,
@@ -3470,7 +3476,13 @@ export function AgentChatPage({
       if (!authenticated) {
         return
       }
-      const selectedTier = (resolvedIntelligenceTier || 'standard') as IntelligenceTierKey
+      const templateTier = template?.preferredLlmTier?.trim() || null
+      const selectedTier = (
+        draftIntelligenceTierOverride
+        || templateTier
+        || resolvedIntelligenceTier
+        || 'standard'
+      ) as IntelligenceTierKey
       const option = llmIntelligence?.options.find((item) => item.key === selectedTier) ?? null
       const allowedTier = (llmIntelligence?.maxAllowedTier || 'standard') as IntelligenceTierKey
       const multiplier = option?.multiplier ?? 1
@@ -3513,6 +3525,7 @@ export function AgentChatPage({
           body,
           attachments,
           tier: selectedTier,
+          tierOverride: draftIntelligenceTierOverride as IntelligenceTierKey | null,
           charterOverride,
           selectedPipedreamAppSlugs,
           template,
@@ -3535,7 +3548,9 @@ export function AgentChatPage({
       }
       await createNewAgent(
         body,
-        selectedTier,
+        draftIntelligenceTierOverride
+          ? (draftIntelligenceTierOverride as IntelligenceTierKey)
+          : undefined,
         charterOverride,
         selectedPipedreamAppSlugs,
         attachments,
@@ -3566,6 +3581,7 @@ export function AgentChatPage({
     createNewAgent,
     currentPlan,
     dispatch,
+    draftIntelligenceTierOverride,
     extraTasksEnabled,
     hasUnlimitedQuota,
     isNewAgent,
@@ -3610,6 +3626,7 @@ export function AgentChatPage({
           templateCode: template.templateCode,
           templateId: template.templateId || template.id,
           templateSource: template.templateSource || 'public',
+          ...(template.preferredLlmTier ? { preferredLlmTier: template.preferredLlmTier } : {}),
         },
       )
     } finally {
@@ -3838,7 +3855,7 @@ export function AgentChatPage({
     }
 
     const preferredTierRaw = spawnIntent.preferred_llm_tier?.trim() || null
-    const desiredTierRaw = preferredTierRaw || llmIntelligence?.systemDefaultTier || null
+    const desiredTierRaw = preferredTierRaw || llmIntelligence?.defaultTier || llmIntelligence?.systemDefaultTier || null
     if (desiredTierRaw) {
       let resolvedTier = desiredTierRaw
       if (llmIntelligence) {
@@ -3846,6 +3863,14 @@ export function AgentChatPage({
         resolvedTier = isKnownTier ? desiredTierRaw : 'standard'
       }
       if (resolvedTier !== draftIntelligenceTier) {
+        dispatch(
+          preferredTierRaw
+            ? agentSettingsActions.draftTierSet(resolvedTier)
+            : agentSettingsActions.draftTierDefaultSet(resolvedTier),
+        )
+        return
+      }
+      if (preferredTierRaw && draftIntelligenceTierOverride !== resolvedTier) {
         dispatch(agentSettingsActions.draftTierSet(resolvedTier))
         return
       }
@@ -3863,6 +3888,7 @@ export function AgentChatPage({
     contextReady,
     dispatch,
     draftIntelligenceTier,
+    draftIntelligenceTierOverride,
     handleSend,
     isNewAgent,
     llmIntelligence,

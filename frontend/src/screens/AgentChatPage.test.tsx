@@ -707,7 +707,7 @@ describe('AgentChatPage trial onboarding', () => {
     await waitFor(() => {
       expect(createAgentMock).toHaveBeenCalledWith(
         'Build me an agent',
-        'standard',
+        undefined,
         null,
         ['slack'],
         'email',
@@ -741,7 +741,7 @@ describe('AgentChatPage trial onboarding', () => {
     await waitFor(() => {
       expect(createAgentMock).toHaveBeenCalledWith(
         'Help me get started',
-        'standard',
+        undefined,
         null,
         [],
         'email',
@@ -795,7 +795,7 @@ describe('AgentChatPage trial onboarding', () => {
     await waitFor(() => {
       expect(createAgentMock).toHaveBeenCalledWith(
         'Talent Scout',
-        'standard',
+        undefined,
         null,
         [],
         'web',

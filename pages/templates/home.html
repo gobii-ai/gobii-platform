@@ -549,6 +549,7 @@
                       data-billing-url="{{ billing_url|default_if_none:'' }}"
                     >
                       <input type="hidden" name="preferred_llm_tier" id="preferred-llm-tier" value="{{ preferred_llm_tier }}">
+                      <input type="hidden" name="preferred_llm_tier_is_explicit" value="{% if preferred_llm_tier_is_explicit %}true{% else %}false{% endif %}">
                       <button
                         type="button"
                         class="group flex items-center gap-1.5 rounded-lg bg-transparent px-2 py-1.5 text-xs font-medium text-slate-500 transition-all hover:text-indigo-600"
@@ -1172,10 +1173,11 @@
 	      const trigger = selector.querySelector('[data-intelligence-trigger]')
 	      const menu = selector.querySelector('[data-intelligence-menu]')
 	      const input = selector.querySelector('input[name="preferred_llm_tier"]')
+	      const explicitInput = selector.querySelector('input[name="preferred_llm_tier_is_explicit"]')
 	      const currentLabel = selector.querySelector('[data-intelligence-current]')
 	      const options = Array.from(selector.querySelectorAll('[data-intelligence-option]'))
 
-	      if (!trigger || !menu || !input || options.length === 0) {
+	      if (!trigger || !menu || !input || !explicitInput || options.length === 0) {
 	        return
 	      }
 
@@ -1318,6 +1320,7 @@
 	            return
 	          }
 	          input.value = tier
+	          explicitInput.value = 'true'
 	          applySelection(tier)
 	          closeMenu()
 	        })
@@ -1413,6 +1416,7 @@
           const locked = selectedOption ? selectedOption.dataset.locked === 'true' : false
           if (locked) {
             input.value = maxAllowedTier || 'standard'
+            explicitInput.value = 'true'
             applySelection(input.value)
           }
           bypassGate = true

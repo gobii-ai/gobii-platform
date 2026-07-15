@@ -142,6 +142,10 @@ class IntelligenceTier(models.Model):
         default=False,
         help_text="When enabled, this tier is used as the system default for new agents (clamped per plan).",
     )
+    is_trial_default = models.BooleanField(
+        default=False,
+        help_text="When enabled, this tier is used as the default for new agents owned by active trials (clamped per plan).",
+    )
     blacklisted_tools = models.JSONField(
         default=list,
         blank=True,
@@ -160,6 +164,11 @@ class IntelligenceTier(models.Model):
                 fields=("is_default",),
                 condition=Q(is_default=True),
                 name="unique_default_intelligence_tier",
+            ),
+            UniqueConstraint(
+                fields=("is_trial_default",),
+                condition=Q(is_trial_default=True),
+                name="unique_trial_default_intelligence_tier",
             ),
         ]
 

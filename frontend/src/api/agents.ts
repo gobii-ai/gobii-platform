@@ -23,6 +23,7 @@ export type CreateAgentTemplateOptions = {
   templateCode?: string | null
   templateId?: string | null
   templateSource?: 'organization' | 'public' | null
+  preferredLlmTier?: string | null
 }
 
 export type CreateAgentResponse = {

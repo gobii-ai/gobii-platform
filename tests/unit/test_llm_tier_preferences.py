@@ -1,11 +1,15 @@
 from decimal import Decimal
 from datetime import timedelta
+import importlib
 from unittest.mock import patch
 
+from django.apps import apps
 from django.contrib.auth import get_user_model
+from django.contrib import admin
 from django.test import TestCase, tag, override_settings
 from django.utils import timezone
 from django.core.cache import cache
+from django.db import DatabaseError, IntegrityError, transaction
 
 from api.agent.core.llm_config import (
     AgentLLMTier,
@@ -17,17 +21,22 @@ from api.agent.core.llm_config import (
     get_credit_multiplier_for_tier,
     get_next_lower_configured_tier,
     get_system_default_tier,
+    get_trial_default_tier,
     resolve_preferred_tier_for_owner,
     set_runtime_tier_override,
 )
+from api.admin import IntelligenceTierAdmin
 from api.models import (
     BrowserUseAgent,
     BrowserUseAgentTask,
+    IntelligenceTier,
     PersistentAgent,
+    PersistentAgentTemplate,
     TaskCredit,
     TaskCreditConfig,
     UserQuota,
 )
+from api.services.persistent_agents import PersistentAgentProvisioningService
 from api.services.tool_blacklist import get_agent_tool_blacklist, get_tier_tool_blacklist
 from constants.plans import PlanNames
 from tests.utils.llm_seed import get_intelligence_tier
@@ -165,10 +174,12 @@ class SystemDefaultTierTests(TestCase):
             password="test123",
         )
         self.standard = get_intelligence_tier("standard")
+        self.premium = get_intelligence_tier("premium")
         self.max_tier = get_intelligence_tier("max")
-        self.standard.__class__.objects.update(is_default=False)
+        self.standard.__class__.objects.update(is_default=False, is_trial_default=False)
         self.max_tier.is_default = True
-        self.max_tier.save(update_fields=["is_default"])
+        self.max_tier.is_trial_default = True
+        self.max_tier.save(update_fields=["is_default", "is_trial_default"])
         cache.clear()
 
     def test_system_default_tier_used_when_owner_unknown(self):
@@ -204,6 +215,163 @@ class SystemDefaultTierTests(TestCase):
                 with patch("api.agent.core.llm_config.get_owner_plan", return_value={"name": plan_name}):
                     resolved = resolve_preferred_tier_for_owner(self.user, AgentLLMTier.ULTRA_MAX.value)
                 self.assertEqual(resolved, AgentLLMTier.ULTRA_MAX)
+
+    def test_max_is_seeded_as_trial_default(self):
+        IntelligenceTier.objects.update(is_trial_default=False)
+        migration = importlib.import_module(
+            "api.migrations.0422_intelligencetier_trial_default"
+        )
+        migration.seed_trial_default_intelligence_tier(apps, None)
+
+        self.assertTrue(
+            IntelligenceTier.objects.filter(key="max", is_trial_default=True).exists()
+        )
+        self.assertEqual(get_trial_default_tier(force_refresh=True), AgentLLMTier.MAX)
+
+    def test_trial_default_is_unique(self):
+        self.standard.is_trial_default = True
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            self.standard.save(update_fields=["is_trial_default"])
+
+    def test_admin_switches_trial_default_without_changing_system_default(self):
+        get_trial_default_tier(force_refresh=True)
+        self.standard.is_trial_default = True
+
+        IntelligenceTierAdmin(IntelligenceTier, admin.site).save_model(
+            request=None,
+            obj=self.standard,
+            form=None,
+            change=True,
+        )
+
+        self.standard.refresh_from_db()
+        self.max_tier.refresh_from_db()
+        self.assertTrue(self.standard.is_trial_default)
+        self.assertFalse(self.max_tier.is_trial_default)
+        self.assertTrue(self.max_tier.is_default)
+        self.assertEqual(get_trial_default_tier(), AgentLLMTier.STANDARD)
+
+    def test_active_trial_uses_trial_default(self):
+        with (
+            patch("util.user_behavior.is_owner_currently_in_trial", return_value=True),
+            patch("api.agent.core.llm_config.get_owner_plan", return_value={"id": "pro"}),
+        ):
+            resolved = resolve_preferred_tier_for_owner(self.user, None)
+
+        self.assertEqual(resolved, AgentLLMTier.MAX)
+
+    def test_explicit_selection_overrides_trial_default(self):
+        with (
+            patch("util.user_behavior.is_owner_currently_in_trial", return_value=True),
+            patch("api.agent.core.llm_config.get_owner_plan", return_value={"id": "pro"}),
+        ):
+            resolved = resolve_preferred_tier_for_owner(self.user, "premium")
+
+        self.assertEqual(resolved, AgentLLMTier.PREMIUM)
+
+    def test_non_trial_owner_uses_system_default(self):
+        IntelligenceTier.objects.update(is_default=False)
+        self.standard.is_default = True
+        self.standard.save(update_fields=["is_default"])
+
+        with (
+            patch("util.user_behavior.is_owner_currently_in_trial", return_value=False),
+            patch("api.agent.core.llm_config.get_owner_plan", return_value={"id": "pro"}),
+        ):
+            resolved = resolve_preferred_tier_for_owner(self.user, None)
+
+        self.assertEqual(resolved, AgentLLMTier.STANDARD)
+
+    def test_trial_default_is_clamped_by_user_quota(self):
+        self.user.quota.max_intelligence_tier = AgentLLMTier.PREMIUM.value
+        self.user.quota.save(update_fields=["max_intelligence_tier"])
+
+        with (
+            patch("util.user_behavior.is_owner_currently_in_trial", return_value=True),
+            patch("api.agent.core.llm_config.get_owner_plan", return_value={"id": "pro"}),
+        ):
+            resolved = resolve_preferred_tier_for_owner(self.user, None)
+
+        self.assertEqual(resolved, AgentLLMTier.PREMIUM)
+
+    def test_missing_trial_default_falls_back_to_system_default(self):
+        IntelligenceTier.objects.update(is_trial_default=False)
+        cache.clear()
+
+        with (
+            patch("util.user_behavior.is_owner_currently_in_trial", return_value=True),
+            patch("api.agent.core.llm_config.get_owner_plan", return_value={"id": "pro"}),
+        ):
+            resolved = resolve_preferred_tier_for_owner(self.user, None)
+
+        self.assertEqual(resolved, AgentLLMTier.MAX)
+
+    def test_trial_lookup_failure_falls_back_to_system_default(self):
+        IntelligenceTier.objects.update(is_default=False)
+        self.standard.is_default = True
+        self.standard.save(update_fields=["is_default"])
+
+        with (
+            patch(
+                "util.user_behavior.is_owner_currently_in_trial",
+                side_effect=DatabaseError("subscription lookup failed"),
+            ),
+            patch("api.agent.core.llm_config.get_owner_plan", return_value={"id": "pro"}),
+        ):
+            resolved = resolve_preferred_tier_for_owner(self.user, None)
+
+        self.assertEqual(resolved, AgentLLMTier.STANDARD)
+
+
+@tag("batch_llm_intelligence")
+@override_settings(GOBII_PROPRIETARY_MODE=True)
+class TrialTemplateTierProvisioningTests(TestCase):
+    def setUp(self):
+        cache.clear()
+        self.user = User.objects.create_user(
+            username="trial-template@example.com",
+            email="trial-template@example.com",
+            password="test123",
+        )
+        self.user.quota.agent_limit = 5
+        self.user.quota.save(update_fields=["agent_limit"])
+        self.standard = get_intelligence_tier("standard")
+        self.premium = get_intelligence_tier("premium")
+        self.template = PersistentAgentTemplate.objects.create(
+            code="trial-template-precedence",
+            display_name="Trial template",
+            tagline="Use the configured template tier",
+            description="Template precedence coverage",
+            charter="Run the premium template workflow",
+            preferred_llm_tier=self.premium,
+        )
+
+    def test_template_tier_overrides_trial_default(self):
+        with (
+            patch("util.user_behavior.is_owner_currently_in_trial", return_value=True),
+            patch("api.agent.core.llm_config.get_owner_plan", return_value={"id": "pro"}),
+        ):
+            result = PersistentAgentProvisioningService.provision(
+                user=self.user,
+                name="Template Tier Agent",
+                template_code=self.template.code,
+            )
+
+        self.assertEqual(result.agent.preferred_llm_tier, self.premium)
+
+    def test_explicit_tier_overrides_template_and_trial_defaults(self):
+        with (
+            patch("util.user_behavior.is_owner_currently_in_trial", return_value=True),
+            patch("api.agent.core.llm_config.get_owner_plan", return_value={"id": "pro"}),
+        ):
+            result = PersistentAgentProvisioningService.provision(
+                user=self.user,
+                name="Explicit Tier Agent",
+                template_code=self.template.code,
+                preferred_llm_tier=self.standard,
+            )
+
+        self.assertEqual(result.agent.preferred_llm_tier, self.standard)
 
 
 @tag("batch_llm_intelligence")

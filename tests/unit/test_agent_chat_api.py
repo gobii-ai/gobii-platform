@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch
 from allauth.account.models import EmailAddress
 from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.core.cache import cache
 from django.core import mail
 from django.core.files.base import ContentFile
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -121,6 +122,17 @@ class AgentChatAPITests(TestCase):
                 "is_default": False,
             },
         )
+        IntelligenceTier.objects.update(is_trial_default=False)
+        cls.max_tier, _ = IntelligenceTier.objects.update_or_create(
+            key="max",
+            defaults={
+                "display_name": "Max",
+                "rank": 3,
+                "credit_multiplier": "5.00",
+                "is_default": False,
+                "is_trial_default": True,
+            },
+        )
         user_model = get_user_model()
         cls.user = user_model.objects.create_user(
             username="agent-owner",
@@ -176,6 +188,7 @@ class AgentChatAPITests(TestCase):
         )
 
     def setUp(self):
+        cache.clear()
         self.client = Client()
         self.client.force_login(self.user)
 
@@ -884,6 +897,60 @@ class AgentChatAPITests(TestCase):
         created_agent = PersistentAgent.objects.get(id=payload["agent_id"])
         self.assertIsNotNone(created_agent.preferred_llm_tier)
         self.assertEqual(created_agent.preferred_llm_tier.key, "standard")
+
+    @tag("batch_agent_chat")
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_quick_create_without_tier_uses_active_trial_default(self):
+        with (
+            patch("util.user_behavior.is_owner_currently_in_trial", return_value=True),
+            patch("api.agent.core.llm_config.get_owner_plan", return_value={"id": "pro"}),
+        ):
+            response = self.client.post(
+                "/console/api/agents/create/",
+                data=json.dumps({"message": "Create with the trial default"}),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        created_agent = PersistentAgent.objects.get(id=response.json()["agent_id"])
+        self.assertEqual(created_agent.preferred_llm_tier, self.max_tier)
+
+    @tag("batch_agent_chat")
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_quick_create_explicit_standard_overrides_active_trial_default(self):
+        with (
+            patch("util.user_behavior.is_owner_currently_in_trial", return_value=True),
+            patch("api.agent.core.llm_config.get_owner_plan", return_value={"id": "pro"}),
+        ):
+            response = self.client.post(
+                "/console/api/agents/create/",
+                data=json.dumps(
+                    {
+                        "message": "Create with an explicit standard tier",
+                        "preferred_llm_tier": "standard",
+                    }
+                ),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        created_agent = PersistentAgent.objects.get(id=response.json()["agent_id"])
+        self.assertEqual(created_agent.preferred_llm_tier, self.standard_tier)
+
+    @tag("batch_agent_chat")
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_roster_intelligence_metadata_exposes_active_trial_default(self):
+        with (
+            patch("util.user_behavior.is_owner_currently_in_trial", return_value=True),
+            patch("api.agent.core.llm_config.get_owner_plan", return_value={"id": "pro"}),
+            patch("console.views.reconcile_user_plan_from_stripe", return_value={"id": "pro"}),
+        ):
+            response = self.client.get("/console/api/agents/roster/")
+
+        self.assertEqual(response.status_code, 200, response.content)
+        intelligence = response.json()["llmIntelligence"]
+        self.assertEqual(intelligence["defaultTier"], "max")
+        self.assertEqual(intelligence["systemDefaultTier"], "standard")
 
     @tag("batch_agent_chat")
     @patch("api.views.Analytics.track_event")

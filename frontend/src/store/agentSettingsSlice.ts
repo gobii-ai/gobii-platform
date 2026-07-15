@@ -6,6 +6,7 @@ import type { AppDispatch, RootState } from './appStore'
 
 export type AgentSettingsState = {
   draftTier: string
+  draftTierOverride: string | null
   tierOverridesByAgentId: Record<string, string>
   savingByAgentId: Record<string, boolean>
   errorByAgentId: Record<string, string | null>
@@ -13,6 +14,7 @@ export type AgentSettingsState = {
 
 const initialState: AgentSettingsState = {
   draftTier: 'standard',
+  draftTierOverride: null,
   tierOverridesByAgentId: {},
   savingByAgentId: {},
   errorByAgentId: {},
@@ -24,9 +26,14 @@ const agentSettingsSlice = createSlice({
   reducers: {
     draftTierSet(state, action: PayloadAction<string>) {
       state.draftTier = action.payload
+      state.draftTierOverride = action.payload
+    },
+    draftTierDefaultSet(state, action: PayloadAction<string>) {
+      state.draftTier = action.payload
     },
     draftTierReset(state) {
       state.draftTier = 'standard'
+      state.draftTierOverride = null
     },
     tierOverrideSet(state, action: PayloadAction<{ agentId: string; tier: string }>) {
       state.tierOverridesByAgentId[action.payload.agentId] = action.payload.tier
@@ -43,6 +50,7 @@ const agentSettingsSlice = createSlice({
     workflowResetForAgent(state, action: PayloadAction<string | null>) {
       if (!action.payload) {
         state.draftTier = 'standard'
+        state.draftTierOverride = null
         return
       }
       state.savingByAgentId[action.payload] = false
@@ -88,6 +96,7 @@ export function updateAgentIntelligenceTier({
 
 export const selectAgentSettingsState = (state: RootState): AgentSettingsState => state.agentSettings
 export const selectDraftIntelligenceTier = (state: RootState): string => state.agentSettings.draftTier
+export const selectDraftIntelligenceTierOverride = (state: RootState): string | null => state.agentSettings.draftTierOverride
 export const selectAgentTierOverrides = (state: RootState): Record<string, string> => state.agentSettings.tierOverridesByAgentId
 export const selectAgentTierSavingById = (state: RootState): Record<string, boolean> => state.agentSettings.savingByAgentId
 export const selectAgentTierErrorById = (state: RootState): Record<string, string | null> => state.agentSettings.errorByAgentId

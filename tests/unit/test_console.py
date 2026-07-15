@@ -2759,7 +2759,7 @@ class ConsoleViewsTest(TestCase):
                 data=json.dumps(
                     {
                         "message": "Draft from immersive app",
-                        "preferred_llm_tier": "premium",
+                        "preferred_llm_tier": "standard",
                         "charter_override": "Override charter",
                         "selected_pipedream_app_slugs": ["slack", "notion", "trello"],
                     }
@@ -2775,7 +2775,7 @@ class ConsoleViewsTest(TestCase):
         session = self.client.session
         self.assertEqual(session.get("agent_charter"), "Draft from immersive app")
         self.assertEqual(session.get("agent_charter_source"), "user")
-        self.assertEqual(session.get("agent_preferred_llm_tier"), "premium")
+        self.assertEqual(session.get("agent_preferred_llm_tier"), "standard")
         self.assertEqual(session.get("agent_charter_override"), "Override charter")
         self.assertEqual(
             session.get(AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY),
@@ -2783,6 +2783,25 @@ class ConsoleViewsTest(TestCase):
         )
         self.assertNotIn(PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY, session)
         self.assertNotIn(AGENT_TEMPLATE_SOURCE_SESSION_KEY, session)
+
+    @override_flag(PERSONAL_FREE_TRIAL_ENFORCEMENT_WAFFLE_SWITCH, active=False)
+    @patch("console.agent_creation.enqueue_interactive_process_agent_events")
+    @tag("batch_console_agents_management")
+    def test_trial_required_quick_create_does_not_persist_untouched_tier(self, _mock_delay):
+        session = self.client.session
+        session["agent_preferred_llm_tier"] = "standard"
+        session.save()
+
+        with self.settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True):
+            response = self.client.post(
+                "/console/api/agents/create/",
+                data=json.dumps({"message": "Draft with the displayed default"}),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertTrue(response.json().get("requires_plan_selection"))
+        self.assertNotIn("agent_preferred_llm_tier", self.client.session)
 
     @override_settings(PIPEDREAM_PREFETCH_APPS="trello")
     @override_flag(PERSONAL_FREE_TRIAL_ENFORCEMENT_WAFFLE_SWITCH, active=False)
@@ -2805,6 +2824,8 @@ class ConsoleViewsTest(TestCase):
         session["agent_charter_source"] = "template"
         session[PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY] = template.code
         session[AGENT_TEMPLATE_SOURCE_SESSION_KEY] = AGENT_TEMPLATE_SOURCE_PRETRAINED_WORKER
+        template_tier = getattr(template.preferred_llm_tier, "key", template.preferred_llm_tier)
+        session["agent_preferred_llm_tier"] = template_tier
         session.save()
 
         with self.settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True):
@@ -2813,7 +2834,6 @@ class ConsoleViewsTest(TestCase):
                 data=json.dumps(
                     {
                         "message": template.charter,
-                        "preferred_llm_tier": "premium",
                         "charter_override": "Override template charter",
                         "selected_pipedream_app_slugs": ["slack", "notion", "trello"],
                     }
@@ -2829,7 +2849,7 @@ class ConsoleViewsTest(TestCase):
         session = self.client.session
         self.assertEqual(session.get("agent_charter"), template.charter)
         self.assertEqual(session.get("agent_charter_source"), "template")
-        self.assertEqual(session.get("agent_preferred_llm_tier"), "premium")
+        self.assertEqual(session.get("agent_preferred_llm_tier"), template_tier)
         self.assertEqual(session.get("agent_charter_override"), "Override template charter")
         self.assertEqual(
             session.get(AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY),
@@ -2923,6 +2943,11 @@ class ConsoleViewsTest(TestCase):
         properties = created_event_calls[0]["properties"]
         self.assertEqual(properties.get("template_code"), template.code)
         self.assertEqual(properties.get("template_source"), AGENT_TEMPLATE_SOURCE_PRETRAINED_WORKER)
+        self.assertEqual(
+            properties.get("preferred_llm_tier"),
+            getattr(template.preferred_llm_tier, "key", template.preferred_llm_tier),
+        )
+        self.assertIn("billing_is_trial", properties)
         self.assertNotIn(AGENT_TEMPLATE_SOURCE_SESSION_KEY, self.client.session)
 
     @override_settings(
