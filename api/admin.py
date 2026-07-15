@@ -79,8 +79,9 @@ from .models import (
 )
 from django.contrib.auth import get_user_model
 from django.contrib.auth.admin import UserAdmin
-from django.urls import NoReverseMatch, reverse, path
+from django.urls import reverse, path
 from django.utils.html import format_html
+from util.urls import build_staff_developer_chat_path_for_agent
 from django.utils import timezone
 from django.utils.text import get_valid_filename
 from django.http import HttpResponse, HttpResponseRedirect, FileResponse, StreamingHttpResponse
@@ -3459,7 +3460,7 @@ class PersistentAgentAdmin(admin.ModelAdmin):
     raw_id_fields = ('user', 'browser_use_agent')
     readonly_fields = (
         'id', 'ownership_scope', 'created_at', 'updated_at',
-        'browser_use_agent_link', 'agent_actions', 'messages_summary_link', 'audit_link',
+        'browser_use_agent_link', 'agent_actions', 'messages_summary_link', 'developer_chat_link',
         'last_expired_at', 'sleep_email_sent_at', 'deleted_at',
         'short_description', 'short_description_charter_hash', 'short_description_requested_hash',
         'avatar_charter_hash', 'avatar_requested_hash', 'avatar_last_generation_attempt_at',
@@ -3513,7 +3514,7 @@ class PersistentAgentAdmin(admin.ModelAdmin):
             'fields': ('agent_actions',)
         }),
         ('Data Links', {
-            'fields': ('messages_summary_link', 'audit_link')
+            'fields': ('messages_summary_link', 'developer_chat_link')
         }),
     )
 
@@ -3716,15 +3717,12 @@ class PersistentAgentAdmin(admin.ModelAdmin):
             '<a href="{}">View all {} messages</a>', url, count
         )
 
-    @admin.display(description="Staff Audit")
-    def audit_link(self, obj):
+    @admin.display(description="Developer Live Chat")
+    def developer_chat_link(self, obj):
         if not obj or not obj.pk:
             return "-"
-        try:
-            url = reverse("console-agent-audit", args=[obj.pk])
-        except NoReverseMatch:
-            return "-"
-        return format_html('<a href="{}" target="_blank">Open audit timeline</a>', url)
+        url = build_staff_developer_chat_path_for_agent(obj)
+        return format_html('<a href="{}" target="_blank">Open developer live chat</a>', url)
 
     @admin.display(description='Agent Actions')
     def agent_actions(self, obj):

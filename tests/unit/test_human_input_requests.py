@@ -1362,6 +1362,10 @@ class HumanInputRequestTests(TestCase):
             mock_log_completion.call_args.kwargs["completion_type"],
             PersistentAgentCompletion.CompletionType.HUMAN_INPUT_REQUEST_MATCHING,
         )
+        self.assertEqual(
+            mock_log_completion.call_args.kwargs["prompt_messages"],
+            mock_run_completion.call_args.kwargs["messages"],
+        )
 
     @patch("api.agent.comms.human_input_requests.get_summarization_llm_config")
     @patch("api.agent.comms.human_input_requests.run_completion")

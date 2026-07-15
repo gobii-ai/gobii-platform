@@ -4,7 +4,8 @@ import json
 import logging
 from decimal import Decimal, InvalidOperation
 from numbers import Number
-from typing import Any, Optional, Tuple
+from typing import Any, Optional, Sequence, Tuple
+from uuid import UUID
 
 import litellm
 from opentelemetry import trace
@@ -606,6 +607,65 @@ def set_usage_span_attributes(span, usage: Any) -> None:
         logger.debug("Failed to set usage span attributes", exc_info=True)
 
 
+def _stringify_prompt_content(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    try:
+        return json.dumps(content, ensure_ascii=False, indent=2, default=str)
+    except (TypeError, ValueError):
+        return str(content)
+
+
+def _split_prompt_messages(messages: Sequence[dict[str, Any]]) -> tuple[str, str]:
+    system_parts: list[str] = []
+    conversation_parts: list[tuple[str, str]] = []
+    for message in messages:
+        role = str(message.get("role") or "user").strip().lower()
+        content = _stringify_prompt_content(message.get("content"))
+        if role in {"system", "developer"}:
+            system_parts.append(content)
+        else:
+            conversation_parts.append((role, content))
+
+    if len(conversation_parts) == 1 and conversation_parts[0][0] == "user":
+        user_prompt = conversation_parts[0][1]
+    else:
+        user_prompt = "\n\n".join(
+            f"{role.title()}:\n{content}"
+            for role, content in conversation_parts
+        )
+    return "\n\n".join(system_parts), user_prompt
+
+
+def _archive_completion_prompt(
+    *,
+    agent: Any,
+    completion_type: str,
+    token_usage: Optional[dict],
+    prompt_messages: Optional[Sequence[dict[str, Any]]],
+    prompt_text: Optional[str],
+) -> Optional[UUID]:
+    if not prompt_messages and not prompt_text:
+        return None
+
+    from api.services.prompt_archives import archive_agent_prompt
+
+    system_prompt, user_prompt = _split_prompt_messages(prompt_messages or [])
+    if prompt_text:
+        user_prompt = prompt_text
+    prompt_tokens = coerce_int((token_usage or {}).get("prompt_tokens"))
+    return archive_agent_prompt(
+        agent=agent,
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        tokens_before=prompt_tokens,
+        tokens_after=prompt_tokens,
+        tokens_saved=0,
+        token_budget=0,
+        extra_payload={"completion_type": completion_type},
+    )[3]
+
+
 def log_agent_completion(
     agent: Any,
     token_usage: Optional[dict] = None,
@@ -620,6 +680,8 @@ def log_agent_completion(
     response_id: Optional[str] = None,
     request_duration_ms: Optional[int] = None,
     time_to_first_token_ms: Optional[int] = None,
+    prompt_messages: Optional[Sequence[dict[str, Any]]] = None,
+    prompt_text: Optional[str] = None,
 ) -> Tuple[Optional[dict], Optional[Any]]:
     """
     Persist an agent completion, optionally deriving token usage and thinking content from a LiteLLM response.
@@ -661,9 +723,17 @@ def log_agent_completion(
         from ...models import PersistentAgentCompletion  # local import to avoid cycles
 
         billing_snapshot = get_billing_snapshot_for_owner(resolve_agent_owner(agent))
+        prompt_archive_id = _archive_completion_prompt(
+            agent=agent,
+            completion_type=completion_type,
+            token_usage=derived_token_usage,
+            prompt_messages=prompt_messages,
+            prompt_text=prompt_text,
+        )
         PersistentAgentCompletion.objects.create(
             agent=agent,
             eval_run_id=resolved_eval_run_id,
+            prompt_archive_id=prompt_archive_id,
             thinking_content=thinking_content,
             **billing_snapshot,
             **completion_kwargs_from_usage(

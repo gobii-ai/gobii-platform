@@ -16,7 +16,7 @@ export type EvalTask = {
     message_id: string | null
     step_id: string | null
     browser_task_id: string | null
-    agent_audit_url: string | null
+    developer_live_chat_url: string | null
   }
   llm_question: string
   llm_answer: string
@@ -53,6 +53,7 @@ export type EvalRun = {
   started_at: string | null
   finished_at: string | null
   agent_id: string | null
+  developer_live_chat_url: string | null
   llm_routing_profile_name?: string | null
   // Fingerprint fields for comparison
   scenario_fingerprint?: string

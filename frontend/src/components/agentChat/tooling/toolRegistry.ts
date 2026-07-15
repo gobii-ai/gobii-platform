@@ -1,4 +1,4 @@
-import { Brain, Waypoints } from 'lucide-react'
+import { Brain, Cpu, StepForward, Waypoints, Wrench } from 'lucide-react'
 import { resolveDetailComponent } from '../toolDetails'
 import { isPlainObject, parseResultObject } from '../../../util/objectUtils'
 import { compareTimelineCursors } from '../../../util/timelineCursor'
@@ -9,6 +9,7 @@ import { classifySqliteStatements } from '../../tooling/agentConfigSql'
 import { extractSqlStatementsFromParameters, extractSqliteStatementResult, extractSqliteGroupedResult, getSqliteInternalTableDisplay } from '../../tooling/sqliteDisplay'
 import { ThinkingDetail } from '../toolDetails/details/common'
 import { buildAgentConfigEntry, buildSqliteSyntheticId } from './sqliteEntries'
+import { DeveloperCompletionDetail, DeveloperStepDetail, RawDeveloperToolDetail } from '../DeveloperToolDetails'
 
 const TOOL_DESCRIPTORS = buildToolDescriptorMap(resolveDetailComponent)
 
@@ -340,6 +341,47 @@ function buildSqliteEntries(clusterCursor: string, entry: ToolCallEntry, options
 
 function buildToolEntries(clusterCursor: string, entry: ToolCallEntry, options: ToolDisplayOptions = {}): ToolEntryDisplay[] {
   const toolName = entry.toolName ?? entry.meta?.label ?? 'tool'
+  if (entry.developerEvent) {
+    const completion = entry.developerEvent.kind === 'completion' ? entry.developerEvent : null
+    const step = entry.developerEvent.kind === 'step' ? entry.developerEvent : null
+    const parameters = isPlainObject(entry.parameters) ? (entry.parameters as Record<string, unknown>) : null
+    return [{
+      id: entry.id,
+      clusterCursor,
+      cursor: entry.cursor,
+      toolName,
+      label: completion
+        ? `${completion.completion_type || 'unknown'} completion`
+        : step?.is_system
+          ? step.system_code || 'System step'
+          : step
+            ? 'Step'
+            : toolName,
+      caption: completion
+        ? [completion.llm_model, completion.llm_provider].filter(Boolean).join(' · ') || 'LLM completion'
+        : step
+          ? truncate(step.description || (step.is_system ? 'System step' : 'Agent step'), 100)
+          : null,
+      timestamp: entry.timestamp ?? null,
+      status: entry.status ?? null,
+      icon: completion ? Cpu : step ? StepForward : Wrench,
+      iconSrc: null,
+      iconBgClass: completion ? 'bg-sky-100' : step?.is_system ? 'bg-amber-100' : 'bg-indigo-100',
+      iconColorClass: completion ? 'text-sky-700' : step?.is_system ? 'text-amber-700' : 'text-indigo-700',
+      parameters,
+      rawParameters: entry.parameters,
+      result: entry.result,
+      summary: null,
+      charterText: null,
+      detailComponent: completion
+        ? DeveloperCompletionDetail
+        : step
+          ? DeveloperStepDetail
+          : RawDeveloperToolDetail,
+      meta: entry.meta,
+      sourceEntry: entry,
+    }]
+  }
   const normalizedName = (toolName || '').toLowerCase()
   if (CHAT_SKIP_TOOL_NAMES.has(normalizedName as string)) {
     return []

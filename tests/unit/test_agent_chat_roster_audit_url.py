@@ -5,9 +5,9 @@ from django.urls import reverse
 from api.models import BrowserUseAgent, PersistentAgent
 
 
-class AgentChatRosterAuditUrlTests(TestCase):
+class AgentChatRosterDeveloperUrlTests(TestCase):
     @tag("batch_agent_chat")
-    def test_roster_includes_audit_url_for_superuser_non_staff(self):
+    def test_roster_includes_developer_url_for_superuser_non_staff(self):
         user_model = get_user_model()
         user = user_model.objects.create_user(
             username="superuser-non-staff",
@@ -37,6 +37,8 @@ class AgentChatRosterAuditUrlTests(TestCase):
         agent_entry = next((entry for entry in agents if entry.get("id") == str(agent.id)), None)
         self.assertIsNotNone(agent_entry)
 
-        expected_audit_url = reverse("console-agent-audit", kwargs={"agent_id": agent.id})
-        self.assertEqual(agent_entry.get("audit_url"), expected_audit_url)
-
+        expected_url = (
+            f"/app/agents/{agent.id}?developer=1"
+            f"&staff_context_type=personal&staff_context_id={user.id}"
+        )
+        self.assertEqual(agent_entry.get("developer_live_chat_url"), expected_url)

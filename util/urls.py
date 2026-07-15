@@ -9,6 +9,9 @@ from config import settings
 
 IMMERSIVE_RETURN_TO_SESSION_KEY = "immersive_return_to"
 IMMERSIVE_APP_BASE_PATH = "/app"
+DEVELOPER_MODE_QUERY_PARAM = "developer"
+STAFF_CONTEXT_TYPE_QUERY_PARAM = "staff_context_type"
+STAFF_CONTEXT_ID_QUERY_PARAM = "staff_context_id"
 DAILY_LIMIT_ACTION_TOKEN_SALT = "agent_daily_limit_action"
 DAILY_LIMIT_ACTION_TOKEN_TTL_SECONDS = 7 * 24 * 60 * 60
 
@@ -166,6 +169,38 @@ def build_immersive_chat_url(
 ) -> str:
     path = f"{IMMERSIVE_APP_BASE_PATH}/agents/{agent_id}"
     return _build_immersive_url(request, path, return_to=return_to, embed=embed)
+
+
+def build_staff_developer_chat_path(
+    agent_id,
+    *,
+    context_type: str,
+    context_id,
+) -> str:
+    """Build a staff-only live-chat URL without impersonating the target context."""
+    path = f"{IMMERSIVE_APP_BASE_PATH}/agents/{agent_id}"
+    return append_query_params(
+        path,
+        {
+            DEVELOPER_MODE_QUERY_PARAM: "1",
+            STAFF_CONTEXT_TYPE_QUERY_PARAM: context_type,
+            STAFF_CONTEXT_ID_QUERY_PARAM: str(context_id),
+        },
+    )
+
+
+def build_staff_developer_chat_path_for_agent(agent) -> str:
+    if agent.organization_id:
+        return build_staff_developer_chat_path(
+            agent.id,
+            context_type="organization",
+            context_id=agent.organization_id,
+        )
+    return build_staff_developer_chat_path(
+        agent.id,
+        context_type="personal",
+        context_id=agent.user_id,
+    )
 
 
 def build_immersive_contact_requests_path(agent_id) -> str:

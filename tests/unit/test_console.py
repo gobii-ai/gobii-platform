@@ -225,7 +225,7 @@ class ConsoleViewsTest(TestCase):
 
     @tag("batch_console_agents")
     @override_settings(GOBII_PROPRIETARY_MODE=True)
-    def test_staff_agent_audit_page_exposes_admin_settings_url(self):
+    def test_removed_staff_agent_audit_page_returns_not_found(self):
         from api.models import BrowserUseAgent, PersistentAgent
 
         User = get_user_model()
@@ -247,13 +247,8 @@ class ConsoleViewsTest(TestCase):
             browser_use_agent=browser_agent,
         )
 
-        response = self.client.get(reverse("console-agent-audit", kwargs={"agent_id": persistent_agent.id}))
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(
-            response,
-            f'data-admin-agent-url="/admin/api/persistentagent/{persistent_agent.id}/change/"',
-        )
-        self.assertContains(response, "https://js.stripe.com/dahlia/stripe.js")
+        response = self.client.get(f"/console/staff/agents/{persistent_agent.id}/audit/")
+        self.assertEqual(response.status_code, 404)
 
     @tag("batch_console_agents")
     def test_agents_page_embeds_rich_card_payload_fields(self):
@@ -319,7 +314,7 @@ class ConsoleViewsTest(TestCase):
         self.assertEqual(matching_entry.get("dailyCreditLow"), False)
 
     @tag("batch_console_agents")
-    def test_staff_agent_audit_page_accessible_for_soft_deleted_agent(self):
+    def test_removed_staff_agent_audit_page_is_not_available_for_soft_deleted_agent(self):
         from api.models import BrowserUseAgent, PersistentAgent
 
         User = get_user_model()
@@ -344,8 +339,8 @@ class ConsoleViewsTest(TestCase):
         self.assertEqual(delete_response.status_code, 200)
 
         self.client.force_login(admin_user)
-        response = self.client.get(reverse("console-agent-audit", kwargs={"agent_id": persistent_agent.id}))
-        self.assertEqual(response.status_code, 200)
+        response = self.client.get(f"/console/staff/agents/{persistent_agent.id}/audit/")
+        self.assertEqual(response.status_code, 404)
 
     @tag("batch_console_agents")
     def test_staff_status_page_renders_react_mount(self):
@@ -645,6 +640,21 @@ class ConsoleViewsTest(TestCase):
         self.assertEqual(payload["agents"][0]["lastInteractionAt"], org_agent.last_interaction_at.isoformat())
         org_entry = next(entry for entry in payload["agents"] if entry["id"] == str(org_agent.id))
         self.assertEqual(org_entry["organizationName"], "Ops Team")
+        self.assertEqual(
+            org_entry["developerChatUrl"],
+            (
+                f"/app/agents/{org_agent.id}?developer=1"
+                f"&staff_context_type=organization&staff_context_id={organization.id}"
+            ),
+        )
+        personal_entry = next(entry for entry in payload["agents"] if entry["id"] == str(personal_agent.id))
+        self.assertEqual(
+            personal_entry["developerChatUrl"],
+            (
+                f"/app/agents/{personal_agent.id}?developer=1"
+                f"&staff_context_type=personal&staff_context_id={target_user.id}"
+            ),
+        )
         self.assertEqual(Decimal(payload["taskCredits"]["available"]), Decimal("10"))
         self.assertEqual(len(payload["taskCredits"]["recentGrants"]), 1)
         self.assertEqual(payload["taskCredits"]["recentGrants"][0]["grantType"], "Compensation")
@@ -2129,7 +2139,7 @@ class ConsoleViewsTest(TestCase):
         self.assertContains(response, 'data-trial-eligible="false"')
 
     @tag("batch_console_agents")
-    def test_agent_chat_shell_exposes_audit_url_for_staff(self):
+    def test_agent_chat_shell_does_not_expose_legacy_audit_url_for_staff(self):
         from api.models import BrowserUseAgent, PersistentAgent
 
         User = get_user_model()
@@ -2155,14 +2165,7 @@ class ConsoleViewsTest(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'data-is-staff="true"')
-        self.assertContains(
-            response,
-            f'data-audit-url="/console/staff/agents/{persistent_agent.id}/audit/"',
-        )
-        self.assertContains(
-            response,
-            'data-audit-url-template="/console/staff/agents/00000000-0000-0000-0000-000000000000/audit/"',
-        )
+        self.assertNotContains(response, "data-audit-url")
 
     @tag("batch_console_agents")
     @override_settings(
@@ -4773,7 +4776,7 @@ _OBSOLETE_LEGACY_CONSOLE_PAGE_TESTS = (
     "test_agent_chat_shell_exposes_cta_no_charge_during_trial_data_attribute_state",
     "test_agent_chat_shell_exposes_cta_pricing_cancel_text_under_btn_data_attribute_state",
     "test_agent_chat_shell_exposes_trial_ineligible_data_attribute",
-    "test_agent_chat_shell_exposes_audit_url_for_staff",
+    "test_agent_chat_shell_does_not_expose_legacy_audit_url_for_staff",
     "test_agent_chat_shell_hides_pipedream_data_attributes_when_unconfigured",
     "test_agent_chat_settings_shell_route_serves_chat_shell",
     "test_agent_detail_updates_daily_credit_limit",

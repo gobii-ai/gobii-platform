@@ -23,6 +23,7 @@ class FakeNotification {
 
 const {
   createAgentMock,
+  createSystemMessageMock,
   updateAgentMock,
   fetchAgentSpawnIntentMock,
   updateUserPreferencesMock,
@@ -39,6 +40,7 @@ const {
   usageBurnRateState,
 } = vi.hoisted(() => ({
   createAgentMock: vi.fn(),
+  createSystemMessageMock: vi.fn(),
   updateAgentMock: vi.fn(),
   fetchAgentSpawnIntentMock: vi.fn(),
   updateUserPreferencesMock: vi.fn(),
@@ -125,6 +127,11 @@ vi.mock('../api/agents', async (importOriginal) => ({
   updateAgent: updateAgentMock,
 }))
 
+vi.mock('../api/agentAudit', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../api/agentAudit')>()),
+  createSystemMessage: createSystemMessageMock,
+}))
+
 vi.mock('../api/agentSpawnIntent', () => ({
   fetchAgentSpawnIntent: fetchAgentSpawnIntentMock,
 }))
@@ -185,6 +192,13 @@ vi.mock('../components/agentChat/AgentChatLayout', async () => {
       events,
       templateRecommendations,
       onTemplateRecommendationCreate,
+      composerDisabled,
+      normalSendDisabledReason,
+      developerMode,
+      onSendSystemMessage,
+      showComposerActionMenu,
+      onShare,
+      onPublicShare,
     }: {
       spawnIntentLoading?: boolean
       agentId?: string | null
@@ -223,6 +237,13 @@ vi.mock('../components/agentChat/AgentChatLayout', async () => {
         templateId: string
         templateSource: 'organization' | 'public'
       }, position: number) => void | Promise<void>
+      composerDisabled?: boolean
+      normalSendDisabledReason?: string | null
+      developerMode?: boolean
+      onSendSystemMessage?: (body: string) => void | Promise<void>
+      showComposerActionMenu?: boolean
+      onShare?: () => void
+      onPublicShare?: () => void
     }) => {
       const {
         isUpgradeModalOpen,
@@ -256,6 +277,15 @@ vi.mock('../components/agentChat/AgentChatLayout', async () => {
           <div data-testid="discord-native-tab-enabled">{String(Boolean(enabledIntegrationTabs.discordNative))}</div>
           <div data-testid="meta-ads-tab-enabled">{String(Boolean(enabledIntegrationTabs.metaAds))}</div>
           <div data-testid="timeline-event-count">{events?.length ?? 0}</div>
+          <div data-testid="developer-mode">{String(Boolean(developerMode))}</div>
+          <div data-testid="composer-disabled">{String(Boolean(composerDisabled))}</div>
+          <div data-testid="normal-send-disabled-reason">{normalSendDisabledReason ?? ''}</div>
+          <div data-testid="composer-action-menu-visible">{String(showComposerActionMenu !== false)}</div>
+          <div data-testid="collaborate-visible">{String(Boolean(onShare))}</div>
+          <div data-testid="public-share-visible">{String(Boolean(onPublicShare))}</div>
+          <button type="button" data-testid="send-system-message" onClick={() => void onSendSystemMessage?.('Staff directive')}>
+            Send system message
+          </button>
           {templateRecommendations?.map((template, index) => (
             <button
               key={template.id}
@@ -493,7 +523,12 @@ function createTestQueryClient() {
   })
 }
 
-function renderAgentChatPage(options: { agentId?: string | null } = { agentId: null }) {
+function renderAgentChatPage(
+  options: {
+    agentId?: string | null
+    props?: Partial<ComponentProps<typeof AgentChatPage>>
+  } = { agentId: null },
+) {
   if (!appStore) {
     queryClient = createTestQueryClient()
     appStore = createTestAppStore({ queryClient })
@@ -501,6 +536,7 @@ function renderAgentChatPage(options: { agentId?: string | null } = { agentId: n
   const props: ComponentProps<typeof AgentChatPage> = {
     viewerUserId: 1,
     viewerEmail: 'user@example.com',
+    ...options.props,
   }
   if ('agentId' in options) {
     props.agentId = options.agentId
@@ -562,6 +598,8 @@ describe('AgentChatPage trial onboarding', () => {
   beforeEach(() => {
     window.history.pushState({}, '', '/app/agents/new?spawn=1')
     createAgentMock.mockReset()
+    createSystemMessageMock.mockReset()
+    createSystemMessageMock.mockResolvedValue({})
     createAgentMock.mockResolvedValue({
       agent_id: 'agent-1',
       agent_name: 'Test Agent',
@@ -809,6 +847,37 @@ describe('AgentChatPage trial onboarding', () => {
     expect(addonsRefetchMock).toHaveBeenCalled()
   })
 
+  it('keeps system messaging available in an override-only developer view', async () => {
+    rosterState.agents = [
+      {
+        ...buildRosterAgent('agent-1', 'Test Agent'),
+        canManageAgent: true,
+        canSendMessages: false,
+      },
+    ]
+
+    renderAgentChatPage({
+      agentId: 'agent-1',
+      props: {
+        isSystemAdmin: true,
+        developerMode: true,
+        staffContext: { type: 'organization', id: 'org-1' },
+      },
+    })
+
+    expect(await screen.findByTestId('developer-mode')).toHaveTextContent('true')
+    expect(screen.getByTestId('composer-disabled')).toHaveTextContent('false')
+    expect(screen.getByTestId('normal-send-disabled-reason')).toHaveTextContent(/read-only/i)
+    expect(screen.getByTestId('composer-action-menu-visible')).toHaveTextContent('false')
+    expect(screen.getByTestId('collaborate-visible')).toHaveTextContent('false')
+    expect(screen.getByTestId('public-share-visible')).toHaveTextContent('false')
+
+    fireEvent.click(screen.getByTestId('send-system-message'))
+    await waitFor(() => {
+      expect(createSystemMessageMock).toHaveBeenCalledWith('agent-1', { body: 'Staff directive' })
+    })
+  })
+
   it('keeps empty-state preview creation blocked when an active preview already exists', async () => {
     window.history.pushState({}, '', '/app/agents')
     seedSubscriptionState(appStore, {
@@ -842,7 +911,7 @@ describe('AgentChatPage trial onboarding', () => {
         processingActive: false,
         miniDescription: '',
         shortDescription: '',
-        auditUrl: null,
+        developerLiveChatUrl: null,
         isOrgOwned: false,
         isCollaborator: false,
         canManageAgent: true,
@@ -878,7 +947,7 @@ describe('AgentChatPage trial onboarding', () => {
         processingActive: false,
         miniDescription: '',
         shortDescription: '',
-        auditUrl: null,
+        developerLiveChatUrl: null,
         isOrgOwned: false,
         isCollaborator: false,
         canManageAgent: true,
@@ -946,7 +1015,7 @@ describe('AgentChatPage trial onboarding', () => {
         processingActive: false,
         miniDescription: '',
         shortDescription: '',
-        auditUrl: null,
+        developerLiveChatUrl: null,
         isOrgOwned: false,
         isCollaborator: false,
         canManageAgent: true,
@@ -1000,7 +1069,7 @@ describe('AgentChatPage trial onboarding', () => {
         processingActive: false,
         miniDescription: '',
         shortDescription: '',
-        auditUrl: null,
+        developerLiveChatUrl: null,
         isOrgOwned: false,
         isCollaborator: false,
         canManageAgent: true,
@@ -1050,7 +1119,7 @@ describe('AgentChatPage trial onboarding', () => {
         processingActive: false,
         miniDescription: '',
         shortDescription: '',
-        auditUrl: null,
+        developerLiveChatUrl: null,
         isOrgOwned: false,
         isCollaborator: false,
         canManageAgent: true,

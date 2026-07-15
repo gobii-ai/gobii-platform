@@ -5,11 +5,14 @@ import { ToolClusterCard } from './ToolClusterCard'
 import { CollapsedActivityCard } from './CollapsedActivityCard'
 import { InlineScheduleCard } from './InlineStatusCard'
 import type { SimplifiedTimelineItem } from '../../hooks/useSimplifiedTimeline'
-import type { AgentMessage } from '../../types/agentChat'
+import type { AgentMessage, DeveloperTimelineEvent } from '../../types/agentChat'
+import type { ToolClusterEvent } from '../../types/agentChat'
 import { buildThinkingCluster, flattenTimelineEventsToEntries } from './activityEntryUtils'
 import type { StatusExpansionTargets } from './statusExpansion'
 import { useAppSelector } from '../../store/hooks'
 import { selectImmersiveShellViewer } from '../../store/immersiveShellSlice'
+import { selectActiveChatAgentId } from '../../store/chatSlice'
+import { DeveloperTimelineEventCard } from './DeveloperTimelineEventCard'
 
 type TimelineEventItemProps = {
   event: SimplifiedTimelineItem
@@ -45,12 +48,22 @@ export const TimelineEventItem = memo(function TimelineEventItem({
   onRetryMessage,
 }: TimelineEventItemProps) {
   const timeZone = useAppSelector(selectImmersiveShellViewer).timeZone
+  const activeAgentId = useAppSelector(selectActiveChatAgentId)
   const collapsedEntries = useMemo(() => {
     if (event.kind !== 'collapsed-group') {
       return []
     }
     return event.displayEntries ?? flattenTimelineEventsToEntries(event.events)
   }, [event, timeZone])
+
+  if (event.kind.startsWith('developer_')) {
+    return (
+      <DeveloperTimelineEventCard
+        agentId={activeAgentId ?? ''}
+        event={event as DeveloperTimelineEvent}
+      />
+    )
+  }
 
   if (event.kind === 'collapsed-group') {
     return <CollapsedActivityCard overlayId={event.cursor} entries={collapsedEntries} label={event.summary.label} subtitle="Collapsed actions" />
@@ -99,7 +112,7 @@ export const TimelineEventItem = memo(function TimelineEventItem({
   }
   return (
     <ToolClusterCard
-      cluster={event}
+      cluster={event as ToolClusterEvent}
       isLatestEvent={isLatestEvent}
       suppressedThinkingCursor={suppressedThinkingCursor}
       statusExpansionTargets={statusExpansionTargets}

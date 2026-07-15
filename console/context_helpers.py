@@ -9,10 +9,11 @@ other helpers can consume the same data shape.
 from dataclasses import dataclass
 from typing import Optional
 
+from django.contrib.auth import get_user_model
 from django.contrib.auth.models import AbstractBaseUser
 from django.core.exceptions import PermissionDenied, ValidationError
 
-from api.models import OrganizationMembership
+from api.models import Organization, OrganizationMembership
 from api.services.organization_permissions import user_role_can_create_org_agents
 from console.context_overrides import get_context_override
 
@@ -125,6 +126,39 @@ def resolve_console_context(
         current_membership=membership,
         can_manage_org_agents=can_manage_org_agents,
         can_create_org_agents=can_create_org_agents,
+    )
+
+
+def resolve_staff_console_context(user: AbstractBaseUser, override: dict) -> ConsoleContextInfo:
+    """Resolve a read-only staff viewing context without granting membership."""
+    if not (user.is_staff or user.is_superuser):
+        raise PermissionDenied("Staff context is not permitted.")
+
+    context_type = str(override.get("type") or "").strip().lower()
+    context_id = str(override.get("id") or "").strip()
+    if context_type == "organization":
+        organization = Organization.objects.filter(id=context_id).first()
+        if organization is None:
+            raise PermissionDenied("Organization does not exist.")
+        context = ConsoleContext(type="organization", id=str(organization.id), name=organization.name)
+    elif context_type == "personal":
+        user_model = get_user_model()
+        target_user = user_model.objects.filter(id=context_id).first()
+        if target_user is None:
+            raise PermissionDenied("User does not exist.")
+        context = ConsoleContext(
+            type="personal",
+            id=str(target_user.id),
+            name=target_user.get_full_name() or target_user.get_username() or target_user.email or "Personal",
+        )
+    else:
+        raise PermissionDenied("Invalid staff context.")
+
+    return ConsoleContextInfo(
+        current_context=context,
+        current_membership=None,
+        can_manage_org_agents=False,
+        can_create_org_agents=False,
     )
 
 

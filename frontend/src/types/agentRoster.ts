@@ -26,11 +26,12 @@ export type AgentRosterEntry = {
   dailyCreditRemaining: number | null
   dailyCreditLow: boolean
   last24hCreditBurn: number | null
-  auditUrl?: string | null
+  developerLiveChatUrl?: string | null
   isOrgOwned?: boolean
   isCollaborator?: boolean
   canManageAgent?: boolean
   canManageCollaborators?: boolean
+  canSendMessages?: boolean
   preferredLlmTier?: string | null
   email?: string | null
   sms?: string | null

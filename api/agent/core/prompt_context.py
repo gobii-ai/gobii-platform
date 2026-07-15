@@ -12,12 +12,9 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from functools import partial
 from time import monotonic
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple
-from uuid import UUID, uuid4
+from uuid import UUID
 
-import zstandard as zstd
 from django.core.exceptions import ObjectDoesNotExist
-from django.core.files.base import ContentFile
-from django.core.files.storage import default_storage
 from django.contrib.auth import get_user_model
 from django.db import DatabaseError, transaction
 from django.db.models import Q, Prefetch, Sum
@@ -40,6 +37,7 @@ from api.services.prompt_settings import get_prompt_settings
 from api.services.sandbox_compute import sandbox_compute_enabled_for_agent
 from api.services.user_timezone import is_offpeak_hour, resolve_user_local_time, resolve_user_timezone
 from api.services.agent_owner_custom_instructions import get_custom_instructions_for_organization_id, get_custom_instructions_for_user_id
+from api.services.prompt_archives import archive_agent_prompt
 
 from ...models import (
     AgentCommPeerState,
@@ -678,105 +676,6 @@ Use parse_number, parse_date, html_to_text, clean_text, extract_urls, extract_em
 ## Ground Everything in Evidence
 Facts, URLs, names, and numbers must come from tool results, schema, hints, metadata, or query output. Search terms are not evidence. Verify hard filters, dedupe overlapping evidence, stop once verified rows satisfy the request, and say when a source lacks a fact.
 """
-
-
-def _archive_rendered_prompt(
-    agent: PersistentAgent,
-    system_prompt: str,
-    user_prompt: str,
-    tokens_before: int,
-    tokens_after: int,
-    tokens_saved: int,
-    token_budget: int,
-) -> Tuple[Optional[str], Optional[int], Optional[int], Optional[UUID]]:
-    """Compress and persist the rendered prompt to object storage."""
-
-    timestamp = datetime.now(timezone.utc)
-    archive_payload = {
-        "agent_id": str(agent.id),
-        "rendered_at": timestamp.isoformat(),
-        "system_prompt": system_prompt,
-        "user_prompt": user_prompt,
-        "token_budget": token_budget,
-        "tokens_before": tokens_before,
-        "tokens_after": tokens_after,
-        "tokens_saved": tokens_saved,
-    }
-
-    try:
-        payload_bytes = json.dumps(archive_payload).encode("utf-8")
-        compressed = zstd.ZstdCompressor(level=3).compress(payload_bytes)
-        archive_key = (
-            f"persistent_agents/{agent.id}/prompt_archives/"
-            f"{timestamp.strftime('%Y%m%dT%H%M%S%fZ')}_{uuid4().hex}.json.zst"
-        )
-        default_storage.save(archive_key, ContentFile(compressed))
-        archive_id: Optional[UUID] = None
-        try:
-            archive = PersistentAgentPromptArchive.objects.create(
-                agent=agent,
-                rendered_at=timestamp,
-                storage_key=archive_key,
-                raw_bytes=len(payload_bytes),
-                compressed_bytes=len(compressed),
-                tokens_before=tokens_before,
-                tokens_after=tokens_after,
-                tokens_saved=tokens_saved,
-            )
-            archive_id = archive.id
-        except Exception as exc:
-            from api.models import PersistentAgentError
-            from api.services.agent_error_logging import log_agent_error
-
-            log_agent_error(
-                agent,
-                category=PersistentAgentError.Category.PROMPT_CONSTRUCTION,
-                source="api.agent.core.prompt_context._archive_prompt.metadata",
-                message=f"Prompt archive metadata persistence failed for agent {agent.id}",
-                exc=exc,
-                logger=logger,
-                context={
-                    "archive_key": archive_key,
-                    "raw_bytes": len(payload_bytes),
-                    "compressed_bytes": len(compressed),
-                    "tokens_before": tokens_before,
-                    "tokens_after": tokens_after,
-                    "tokens_saved": tokens_saved,
-                },
-            )
-            try:
-                default_storage.delete(archive_key)
-                logger.info("Deleted orphaned prompt archive from storage: %s", archive_key)
-            except Exception:
-                logger.exception("Failed to delete orphaned prompt archive from storage: %s", archive_key)
-        logger.info(
-            "Archived prompt for agent %s: key=%s raw_bytes=%d compressed_bytes=%d",
-            agent.id,
-            archive_key,
-            len(payload_bytes),
-            len(compressed),
-        )
-        return archive_key, len(payload_bytes), len(compressed), archive_id
-    except Exception as exc:
-        from api.models import PersistentAgentError
-        from api.services.agent_error_logging import log_agent_error
-
-        log_agent_error(
-            agent,
-            category=PersistentAgentError.Category.PROMPT_CONSTRUCTION,
-            source="api.agent.core.prompt_context._archive_prompt",
-            message=f"Prompt archive persistence failed for agent {agent.id}",
-            exc=exc,
-            logger=logger,
-            context={
-                "tokens_before": tokens_before,
-                "tokens_after": tokens_after,
-                "tokens_saved": tokens_saved,
-            },
-        )
-        return None, None, None, None
-
-
 
 
 def _get_inactive_weeks(interaction_anchor: Optional[datetime], now: datetime) -> int:
@@ -1881,7 +1780,7 @@ def _latest_prompt_token_seed(agent: PersistentAgent) -> int:
 
 def _archive_prompt_render(agent: PersistentAgent, result: PromptRenderResult) -> Optional[UUID]:
     span = trace.get_current_span()
-    archive_key, raw_bytes, compressed_bytes, archive_id = _archive_rendered_prompt(
+    archive_key, raw_bytes, compressed_bytes, archive_id = archive_agent_prompt(
         agent=agent,
         system_prompt=str(result.messages[0]["content"]),
         user_prompt=str(result.messages[1]["content"]),
@@ -3384,18 +3283,9 @@ def _consume_system_prompt_messages(agent: PersistentAgent) -> str:
         )
         return ""
 
-    try:
-        from console.agent_audit.realtime import broadcast_system_message_audit
+    from console.agent_chat.realtime import send_developer_update
 
-        for message, _ in message_payloads:
-            message.delivered_at = now
-            broadcast_system_message_audit(message)
-    except Exception:
-        logger.debug(
-            "Failed to broadcast system directive delivery for agent %s",
-            agent.id,
-            exc_info=True,
-        )
+    send_developer_update(str(agent.id))
 
     return _format_system_directive_prompt_block(message_payloads)
 

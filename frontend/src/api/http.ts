@@ -1,4 +1,5 @@
 import { clearStoredConsoleContext, readStoredConsoleContext } from '../util/consoleContextStorage'
+import { parseStaffViewContext } from '../util/staffViewContext'
 
 export class HttpError extends Error {
   public readonly status: number
@@ -48,6 +49,14 @@ function applyConsoleContextHeaders(headers: Headers): boolean {
     applied = true
   }
   return applied
+}
+
+function applyStaffViewContextHeaders(headers: Headers): void {
+  if (typeof window === 'undefined') return
+  const context = parseStaffViewContext(window.location.search)
+  if (!context) return
+  if (!headers.has('X-Gobii-Staff-Context-Type')) headers.set('X-Gobii-Staff-Context-Type', context.type)
+  if (!headers.has('X-Gobii-Staff-Context-Id')) headers.set('X-Gobii-Staff-Context-Id', context.id)
 }
 
 function normalizePathname(pathname: string): string {
@@ -162,6 +171,7 @@ async function jsonFetchInternal<T>(
     }
   }
   const appliedContextHeaders = shouldApplyConsoleContextHeaders(input) ? applyConsoleContextHeaders(headers) : false
+  applyStaffViewContextHeaders(headers)
 
   const response = await fetch(input, {
     credentials: 'same-origin',

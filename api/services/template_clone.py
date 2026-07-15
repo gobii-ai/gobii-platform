@@ -224,6 +224,7 @@ class TemplateCloneService:
             model=model,
             provider=provider,
             pricing_model=params.get("pricing_model"),
+            prompt_messages=prompt,
         )
 
         tool_payload = TemplateCloneService._extract_tool_payload(response)

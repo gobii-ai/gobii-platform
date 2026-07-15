@@ -949,6 +949,13 @@ const ACTIVE_LABEL_MAP: Record<string, string> = {
 }
 
 function deriveActivityDescriptor(entry: ToolEntryDisplay): ActivityDescriptor {
+  if (entry.sourceEntry?.developerEvent) {
+    return {
+      kind: 'tool',
+      label: entry.label,
+      detail: entry.caption ?? null,
+    }
+  }
   const semantic = deriveSemanticPreview(entry)
   const kind = classifyActivity(entry)
   const toolName = (entry.toolName || '').toLowerCase()

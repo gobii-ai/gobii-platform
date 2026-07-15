@@ -3,6 +3,7 @@ import { useInfiniteQuery, type InfiniteData } from '@tanstack/react-query'
 import { fetchAgentTimeline, type TimelineResponse } from '../api/agentChat'
 import type { PlanSnapshot, TimelineEvent } from '../types/agentChat'
 import { mergeTimelineEvents, prepareTimelineEvents } from '../stores/agentChatTimeline'
+import type { StaffViewContext } from '../api/context'
 
 export const TIMELINE_PAGE_SIZE = 50
 export const TIMELINE_STALE_TIME_MS = 5 * 60_000
@@ -32,13 +33,19 @@ export function timelineResponseToPage(response: TimelineResponse): TimelinePage
 
 type PageParam = { direction: 'initial' } | { direction: 'older'; cursor: string } | { direction: 'newer'; cursor: string }
 
-export function timelineQueryKey(agentId: string | null) {
-  return ['agent-timeline', agentId] as const
+export function timelineQueryKey(agentId: string | null, developerMode = false, staffContext?: StaffViewContext | null) {
+  return [
+    'agent-timeline',
+    agentId,
+    developerMode ? 'developer' : 'standard',
+    staffContext ? `${staffContext.type}:${staffContext.id}` : null,
+  ] as const
 }
 
-export function useAgentTimeline(agentId: string | null, options?: { enabled?: boolean }) {
+export function useAgentTimeline(agentId: string | null, options?: { enabled?: boolean; developerMode?: boolean; staffContext?: StaffViewContext | null }) {
+  const developerMode = options?.developerMode === true
   return useInfiniteQuery<TimelinePage, Error, InfiniteData<TimelinePage>, ReturnType<typeof timelineQueryKey>, PageParam | undefined>({
-    queryKey: timelineQueryKey(agentId),
+    queryKey: timelineQueryKey(agentId, developerMode, options?.staffContext),
     queryFn: async ({ pageParam, signal }) => {
       if (!agentId) {
         throw new Error('No agentId')
@@ -47,17 +54,17 @@ export function useAgentTimeline(agentId: string | null, options?: { enabled?: b
       const direction = pageParam?.direction ?? 'initial'
 
       if (direction === 'initial') {
-        const response = await fetchAgentTimeline(agentId, { direction: 'initial', limit: TIMELINE_PAGE_SIZE, signal })
+        const response = await fetchAgentTimeline(agentId, { direction: 'initial', limit: TIMELINE_PAGE_SIZE, signal, developerMode, staffContext: options?.staffContext })
         return timelineResponseToPage(response)
       }
 
       if (direction === 'older' && 'cursor' in pageParam!) {
-        const response = await fetchAgentTimeline(agentId, { direction: 'older', cursor: pageParam.cursor, limit: TIMELINE_PAGE_SIZE, signal })
+        const response = await fetchAgentTimeline(agentId, { direction: 'older', cursor: pageParam.cursor, limit: TIMELINE_PAGE_SIZE, signal, developerMode, staffContext: options?.staffContext })
         return timelineResponseToPage(response)
       }
 
       if (direction === 'newer' && 'cursor' in pageParam!) {
-        const response = await fetchAgentTimeline(agentId, { direction: 'newer', cursor: pageParam.cursor, limit: TIMELINE_PAGE_SIZE, signal })
+        const response = await fetchAgentTimeline(agentId, { direction: 'newer', cursor: pageParam.cursor, limit: TIMELINE_PAGE_SIZE, signal, developerMode, staffContext: options?.staffContext })
         return timelineResponseToPage(response)
       }
 

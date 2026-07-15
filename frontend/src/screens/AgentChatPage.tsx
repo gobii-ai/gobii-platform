@@ -5,6 +5,7 @@ import noiseDarkTextureUrl from '../assets/textures/noise-dark.png'
 
 import { agentProfilePayloadToRosterEntry, createAgent, respondToAgentTransferInvite, type CreateAgentTemplateOptions } from '../api/agents'
 import { currentOrganizationTemplatesQueryKey, fetchCurrentOrganizationTemplates, launchOrganizationTemplate, type OrganizationTemplate } from '../api/organization'
+import { createSystemMessage } from '../api/agentAudit'
 import {
   stopAgentProcessing,
   fulfillRequestedSecrets,
@@ -20,9 +21,15 @@ import {
   type AgentMessageReadState,
 } from '../api/agentChat'
 import type { AgentSpawnIntent, TemplateRecommendation } from '../api/agentSpawnIntent'
-import type { ConsoleContext } from '../api/context'
+import type { ConsoleContext, StaffViewContext } from '../api/context'
 import { fetchUsageBurnRate, fetchUsageSummary } from '../components/usage/api'
 import { AgentChatLayout, type AgentChatLayoutSidebarConfig } from '../components/agentChat/AgentChatLayout'
+import {
+  DeveloperJudgeReviewModal,
+  DeveloperModeControls,
+  useDeveloperModeActions,
+} from '../components/agentChat/DeveloperModeControls'
+import { groupDeveloperActivityEvents } from '../components/agentChat/developerTimelineDisplay'
 import { EmbeddedAgentContactRequestsPanel } from '../components/agentChat/EmbeddedAgentContactRequestsPanel'
 import { EmbeddedAgentEmailSettingsPanel } from '../components/agentChat/EmbeddedAgentEmailSettingsPanel'
 import { EmbeddedAgentFilesPanel } from '../components/agentChat/EmbeddedAgentFilesPanel'
@@ -110,7 +117,6 @@ import { appendReturnTo } from '../util/returnTo'
 
 const LOW_CREDIT_DAY_THRESHOLD = 2
 const ROSTER_REFRESH_INTERVAL_MS = 20_000
-const AUDIT_URL_TEMPLATE_PLACEHOLDER = '00000000-0000-0000-0000-000000000000'
 const SIGNUP_PREVIEW_PANEL_SOURCE = 'signup_preview_panel'
 
 function createOptimisticClientId(): string {
@@ -833,8 +839,10 @@ export type AgentChatPageProps = {
   agentSms?: string | null
   collaboratorInviteUrl?: string | null
   isStaff?: boolean
-  auditUrl?: string | null
-  auditUrlTemplate?: string | null
+  isSystemAdmin?: boolean
+  developerMode?: boolean
+  staffContext?: StaffViewContext | null
+  onDeveloperModeChange?: (enabled: boolean) => void
   maxChatUploadSizeBytes?: number | null
   viewerUserId?: number | null
   viewerEmail?: string | null
@@ -877,8 +885,10 @@ export function AgentChatPage({
   agentEmail,
   agentSms,
   collaboratorInviteUrl,
-  auditUrl,
-  auditUrlTemplate,
+  isSystemAdmin = false,
+  developerMode = false,
+  staffContext = null,
+  onDeveloperModeChange,
   maxChatUploadSizeBytes = null,
   viewerUserId,
   viewerEmail,
@@ -909,6 +919,7 @@ export function AgentChatPage({
   onOpenIntegrations,
   appLocationSearch,
 }: AgentChatPageProps) {
+  const developerModeEnabled = developerMode && isSystemAdmin
   const pendingReadMarkerByAgentRef = useRef<Record<string, string>>({})
   const [shellPathname, setShellPathname] = useState(() => (
     typeof window === 'undefined' ? '' : window.location.pathname
@@ -992,6 +1003,7 @@ export function AgentChatPage({
     forAgentId: contextLookupAgentId,
     onSwitched: handleContextSwitched,
     persistSession: persistContextSession,
+    staffContext,
   })
 
   const [switchingAgentId, setSwitchingAgentId] = useState<string | null>(null)
@@ -1036,7 +1048,42 @@ export function AgentChatPage({
   }, [dispatch, viewerEmail, viewerTimeZone, viewerUserId])
 
   // React-query timeline data
-  const timelineQuery = useAgentTimeline(activeAgentId, { enabled: agentContextReady && !isNewAgent })
+  const timelineQuery = useAgentTimeline(activeAgentId, {
+    enabled: agentContextReady && !isNewAgent,
+    developerMode: developerModeEnabled,
+    staffContext,
+  })
+  const developerRefreshStateRef = useRef<{
+    agentId: string | null
+    running: boolean
+    requested: boolean
+  }>({ agentId: null, running: false, requested: false })
+  const handleDeveloperUpdate = useCallback((updatedAgentId: string) => {
+    if (!developerModeEnabled || updatedAgentId !== activeAgentId) return
+    let state = developerRefreshStateRef.current
+    if (state.agentId !== updatedAgentId) {
+      state = { agentId: updatedAgentId, running: false, requested: false }
+      developerRefreshStateRef.current = state
+    }
+    state.requested = true
+    if (state.running) return
+    state.running = true
+    void (async () => {
+      try {
+        while (state.requested) {
+          state.requested = false
+          await refreshTimelineLatestInCache(queryClient, updatedAgentId, {
+            mode: 'contiguous',
+            developerMode: true,
+            staffContext,
+            allowDuringQueryFetch: true,
+          })
+        }
+      } finally {
+        state.running = false
+      }
+    })()
+  }, [activeAgentId, developerModeEnabled, queryClient, staffContext])
   const flatEvents = useMemo(() => flattenTimelinePages(timelineQuery.data), [timelineQuery.data])
   const initialPageResponse = useMemo(() => getInitialPageResponse(timelineQuery.data), [timelineQuery.data])
   const timelinePendingActionRequests = useMemo<PendingActionRequest[]>(
@@ -1141,15 +1188,19 @@ export function AgentChatPage({
     if (isNewAgent) {
       return []
     }
+    if (developerModeEnabled) {
+      return flatEvents
+    }
     if (!isStoreSynced || pendingEvents.length === 0) {
       return flatEvents
     }
     return mergeTimelineEvents(flatEvents, pendingEvents)
-  }, [flatEvents, isNewAgent, isStoreSynced, pendingEvents])
+  }, [developerModeEnabled, flatEvents, isNewAgent, isStoreSynced, pendingEvents])
   const timelineHasMoreOlder = !isNewAgent ? hasMoreOlder : false
   const timelineHasMoreNewer = !isNewAgent ? hasMoreNewer : false
   const timelineHasUnseenActivity = !isNewAgent && isStoreSynced ? hasUnseenActivity : false
   const timelineProcessingActive = !isNewAgent && isStoreSynced ? processingActive : false
+  const developerActions = useDeveloperModeActions(activeAgentId, timelineProcessingActive)
   const timelineAwaitingResponse = !isNewAgent && isStoreSynced ? awaitingResponse : false
   const timelineStreaming = !isNewAgent && isStoreSynced ? streaming : null
   const timelineLoadingOlder = !isNewAgent ? timelineQuery.isFetchingPreviousPage : false
@@ -1166,8 +1217,10 @@ export function AgentChatPage({
     || (timelineStreaming && !timelineStreaming.done),
   )
   const displayEvents = useMemo(
-    () => collapseDetailedStatusRuns(timelineEvents, statusExpansionTargets, { keepTrailingActivityExpanded }),
-    [keepTrailingActivityExpanded, timelineEvents, statusExpansionTargets, viewerTimeZone],
+    () => developerModeEnabled
+      ? groupDeveloperActivityEvents(timelineEvents)
+      : collapseDetailedStatusRuns(timelineEvents, statusExpansionTargets, { keepTrailingActivityExpanded }),
+    [developerModeEnabled, keepTrailingActivityExpanded, timelineEvents, statusExpansionTargets, viewerTimeZone],
   )
   const latestTimelineCursor = timelineEvents.length ? timelineEvents[timelineEvents.length - 1].cursor : ''
   const timelineStreamingVersion = timelineStreaming
@@ -1372,14 +1425,18 @@ export function AgentChatPage({
     },
     [queryClient],
   )
-  const { status: sessionStatus, error: sessionError } = useAgentWebSession(liveAgentId, {
+  const { status: sessionStatus, error: sessionError } = useAgentWebSession(staffContext ? null : liveAgentId, {
     keepAliveWhenHidden: Boolean(timelineProcessingActive || timelineAwaitingResponse),
   })
-  const rosterContextKey = effectiveContext ? `${effectiveContext.type}:${effectiveContext.id}` : 'unknown'
+  const rosterContextKey = effectiveContext
+    ? `${effectiveContext.type}:${effectiveContext.id}:${staffContext ? 'staff' : 'normal'}`
+    : 'unknown'
   const rosterQuery = useAgentRoster({
     enabled: contextReady,
     context: effectiveContext,
     contextKey: rosterContextKey,
+    forAgentId: routeAgentId ?? undefined,
+    staffContext,
     refetchIntervalMs: ROSTER_REFRESH_INTERVAL_MS,
   })
   const applyCreatedAgentProfile = useCallback((profile: AgentRosterEntry) => {
@@ -1761,9 +1818,11 @@ export function AgentChatPage({
   })
   const socketSnapshot = useAgentChatSocket(desiredSocketSubscriptions, {
     contextOverride: contextReady ? effectiveContext : null,
+    staffContextOverride: staffContext,
     onCreditEvent: handleCreditEvent,
     onAgentProfileEvent: handleAgentProfileEvent,
     onMessageNotificationEvent: handleAgentMessageNotificationEvent,
+    onDeveloperUpdate: handleDeveloperUpdate,
   })
   useEffect(() => {
     if (!agentContextReady) return
@@ -1801,6 +1860,7 @@ export function AgentChatPage({
   const resolvedIsOrgOwned = activeRosterMeta?.isOrgOwned ?? false
   const activeIsCollaborator = activeRosterMeta?.isCollaborator ?? (isCollaborator ?? false)
   const activeCanManageAgent = activeRosterMeta?.canManageAgent ?? !activeIsCollaborator
+  const activeCanSendMessages = activeRosterMeta?.canSendMessages ?? !staffContext
   const activeCanManageCollaborators = activeRosterMeta?.canManageCollaborators ?? (canManageCollaborators ?? true)
   const hasAgentReply = useMemo(() => hasAgentResponse(timelineEvents), [timelineEvents])
 
@@ -1977,7 +2037,9 @@ export function AgentChatPage({
       return null
     }
     return {
-      current: contextData.context,
+      current: contextData.context.isStaffView
+        ? { ...contextData.context, name: `${contextData.context.name} · Staff view` }
+        : contextData.context,
       personal: contextData.personal,
       organizations: contextData.organizations,
       onSwitch: switchContext,
@@ -2213,6 +2275,7 @@ export function AgentChatPage({
     resolvedInviteUrl
       && !isSelectionView
       && !isNewAgent
+      && activeCanSendMessages
       && activeCanManageCollaborators
       && !isCollaboratorOnly,
   )
@@ -2220,6 +2283,7 @@ export function AgentChatPage({
     activeAgentId
       && !isSelectionView
       && !isNewAgent
+      && activeCanSendMessages
       && !resolvedIsOrgOwned
       && activeCanManageAgent
       && !isCollaboratorOnly,
@@ -2317,7 +2381,9 @@ export function AgentChatPage({
   const personalSignupPreviewCreateAvailable = Boolean(
     rosterQuery.data?.context.personalSignupPreviewCreateAvailable,
   )
-  const sendMessageDisabledReason = !isNewAgent && selectedAgentAccountPause?.paused
+  const sendMessageDisabledReason = !isNewAgent && !activeCanSendMessages
+    ? 'This staff view is read-only. You can send a system message in Developer Mode.'
+    : !isNewAgent && selectedAgentAccountPause?.paused
     ? resolveSendMessagePausedMessage(selectedAgentAccountPause.resumeAt)
     : (!isNewAgent && effectiveBillingStatus?.delinquent
       ? resolveSendMessageDisabledMessage(effectiveBillingStatus.reason)
@@ -3517,6 +3583,18 @@ export function AgentChatPage({
     shouldFetchUsageBurnRate,
   ])
 
+  const handleSendSystemMessage = useCallback(async (body: string) => {
+    if (!activeAgentId || !developerModeEnabled) return
+    dispatch(chatActions.sendMessageErrorSet({ agentId: activeAgentId, message: null }))
+    try {
+      await createSystemMessage(activeAgentId, { body })
+      await queryClient.invalidateQueries({ queryKey: ['agent-timeline', activeAgentId, 'developer'] })
+    } catch (error) {
+      dispatch(chatActions.sendMessageErrorSet({ agentId: activeAgentId, message: safeErrorMessage(error) }))
+      throw error
+    }
+  }, [activeAgentId, developerModeEnabled, dispatch, queryClient])
+
   const handleTemplateRecommendationCreate = useCallback(async (template: TemplateRecommendation) => {
     if (templateRecommendationSubmittingId) {
       return
@@ -3955,26 +4033,6 @@ export function AgentChatPage({
     teamTemplateMenu,
   ])
 
-  const activeAuditUrl = useMemo(() => {
-    if (!activeAgentId) {
-      return null
-    }
-    const rosterEntry = rosterAgents.find((agent) => agent.id === activeAgentId)
-    const rosterAuditUrl = rosterEntry?.auditUrl ?? null
-    if (rosterAuditUrl) {
-      return rosterAuditUrl
-    }
-    if (auditUrlTemplate) {
-      return auditUrlTemplate.replace(AUDIT_URL_TEMPLATE_PLACEHOLDER, activeAgentId)
-    }
-    // Fall back to the mount node audit URL for the initially-loaded agent (console shell path).
-    // Non-staff users will not be served audit URLs, so this still stays staff-only.
-    if (activeAgentId === agentId) {
-      return auditUrl ?? null
-    }
-    return null
-  }, [activeAgentId, agentId, auditUrl, auditUrlTemplate, rosterAgents])
-
   useEffect(() => {
     if (!activeAgentId) {
       return
@@ -3986,9 +4044,9 @@ export function AgentChatPage({
       agentMiniDescription: isNewAgent ? null : resolvedMiniDescription,
       agentEmail: resolvedAgentEmail,
       agentSms: resolvedAgentSms,
-      auditUrl: activeAuditUrl,
       agentIsOrgOwned: resolvedIsOrgOwned || effectiveContext?.type === 'organization',
       canManageAgent: activeCanManageAgent,
+      canSendMessages: activeCanSendMessages,
       isCollaborator: isCollaboratorOnly,
       hideInsightsPanel: isCollaboratorOnly,
       enabledIntegrationTabs: {
@@ -4001,8 +4059,8 @@ export function AgentChatPage({
     }))
   }, [
     activeAgentId,
-    activeAuditUrl,
     activeCanManageAgent,
+    activeCanSendMessages,
     apolloNativeTabEnabled,
     discordNativeTabEnabled,
     dispatch,
@@ -4131,6 +4189,7 @@ export function AgentChatPage({
         workspaceContext={effectiveContext}
       />
       {createOrganizationModal}
+      {developerModeEnabled ? <DeveloperJudgeReviewModal actions={developerActions} /> : null}
       <AgentChatLayout
         agentId={activeAgentId}
         bannerAgentName={isNewAgent ? 'New Agent' : transientBannerAgentName}
@@ -4139,6 +4198,13 @@ export function AgentChatPage({
         onComposerFocus={handleComposerFocus}
         onComposerRequestScrollToBottom={scrollToBottom}
         onClose={onClose}
+        developerMode={developerModeEnabled}
+        showDeveloperMode={isSystemAdmin}
+        onDeveloperModeChange={onDeveloperModeChange}
+        developerControls={developerModeEnabled && activeAgentId ? {
+          primary: <DeveloperModeControls actions={developerActions} group="primary" />,
+          secondary: <DeveloperModeControls actions={developerActions} group="secondary" />,
+        } : null}
         dailyCredits={dailyCreditsInfo}
         dailyCreditsStatus={dailyCreditsStatus}
         dailyCreditsLoading={canManageDailyCredits ? quickSettingsLoading : false}
@@ -4177,8 +4243,11 @@ export function AgentChatPage({
         onUpgrade={handleUpgrade}
         composerError={sendMessageError ?? createAgentError?.message ?? null}
         composerErrorShowUpgrade={sendMessageError ? false : Boolean(createAgentError?.showUpgradeCta)}
-        composerDisabled={Boolean(sendMessageDisabledReason)}
-        composerDisabledReason={sendMessageDisabledReason}
+        composerDisabled={Boolean(sendMessageDisabledReason) && !developerModeEnabled}
+        composerDisabledReason={developerModeEnabled ? null : sendMessageDisabledReason}
+        normalSendDisabledReason={developerModeEnabled ? sendMessageDisabledReason : null}
+        showComposerActionMenu={activeCanSendMessages}
+        onSendSystemMessage={developerModeEnabled ? handleSendSystemMessage : undefined}
         showSubscriptionExpiredPanel={
           !isNewAgent
           && effectiveBillingStatus?.delinquent

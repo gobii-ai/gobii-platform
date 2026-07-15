@@ -201,6 +201,10 @@ class AgentChatSuggestionsAPITests(TestCase):
             _mock_log_completion.call_args.kwargs["completion_type"],
             PersistentAgentCompletion.CompletionType.AGENT_CHAT_SUGGESTION,
         )
+        self.assertEqual(
+            _mock_log_completion.call_args.kwargs["prompt_messages"],
+            messages,
+        )
 
 
 @tag("batch_agent_chat")

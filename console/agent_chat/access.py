@@ -3,7 +3,7 @@ from django.db.models import QuerySet
 
 from api.models import OrganizationMembership, PersistentAgent, AgentCollaborator
 from api.services.signup_preview import user_can_access_signup_preview_agent
-from console.context_helpers import ConsoleContext, resolve_console_context
+from console.context_helpers import ConsoleContext, resolve_console_context, resolve_staff_console_context
 from console.context_overrides import get_context_override
 from console.role_constants import MEMBER_MANAGE_ROLES
 from util.trial_enforcement import PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE, can_user_access_personal_agent_chat, can_user_use_personal_agents_and_api
@@ -67,7 +67,7 @@ def user_can_manage_agent(
     *,
     allow_delinquent_personal_chat: bool = False,
 ) -> bool:
-    if user.is_staff:
+    if user.is_staff or user.is_superuser:
         return True
     if agent.user_id == user.id:
         if _is_blocked_personal_owner(
@@ -92,7 +92,7 @@ def user_can_manage_agent_settings(
     *,
     allow_delinquent_personal_chat: bool = False,
 ) -> bool:
-    if user.is_staff:
+    if user.is_staff or user.is_superuser:
         return True
     if agent.user_id == user.id:
         return not _is_blocked_personal_owner(
@@ -111,6 +111,46 @@ def user_can_manage_agent_settings(
 
 def user_is_collaborator(user, agent: PersistentAgent) -> bool:
     return AgentCollaborator.objects.filter(agent=agent, user=user).exists()
+
+
+def user_has_natural_agent_chat_access(user, agent: PersistentAgent) -> bool:
+    """Return access held by the user independently of the staff override."""
+    if agent.organization_id:
+        if OrganizationMembership.objects.filter(
+            user=user,
+            org_id=agent.organization_id,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        ).exists():
+            return True
+    elif agent.user_id == user.id:
+        return True
+    return user_is_collaborator(user, agent)
+
+
+def agent_belongs_to_console_context(agent: PersistentAgent, context: ConsoleContext) -> bool:
+    if context.type == "organization":
+        return str(agent.organization_id) == str(context.id)
+    return agent.organization_id is None and str(agent.user_id) == str(context.id)
+
+
+def resolve_staff_agent(
+    user,
+    agent_id: str,
+    staff_context_override: dict | None = None,
+    *,
+    include_historical: bool = True,
+) -> PersistentAgent:
+    if not (user.is_staff or user.is_superuser):
+        raise PermissionDenied("Staff access required.")
+    queryset = PersistentAgent.objects.all() if include_historical else PersistentAgent.objects.non_eval().alive()
+    agent = queryset.filter(id=agent_id).first()
+    if agent is None:
+        raise PermissionDenied("Agent not found.")
+    if staff_context_override:
+        context = resolve_staff_console_context(user, staff_context_override).current_context
+        if not agent_belongs_to_console_context(agent, context):
+            raise PermissionDenied("Agent does not belong to the staff context.")
+    return agent
 
 
 def resolve_agent(

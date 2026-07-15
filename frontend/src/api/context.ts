@@ -8,6 +8,16 @@ export type ConsoleContext = {
   name: string
   canCreateAgents?: boolean
   personalSignupPreviewCreateAvailable?: boolean
+  isStaffView?: boolean
+}
+
+export type StaffViewContext = Pick<ConsoleContext, 'type' | 'id'>
+
+export function staffViewContextHeaders(context?: StaffViewContext | null): Record<string, string> {
+  return context ? {
+    'X-Gobii-Staff-Context-Type': context.type,
+    'X-Gobii-Staff-Context-Id': context.id,
+  } : {}
 }
 
 export type ConsoleContextOption = ConsoleContext & {
@@ -20,6 +30,7 @@ type ConsoleContextPayload = {
   name: string
   canCreateAgents?: boolean
   personalSignupPreviewCreateAvailable?: boolean
+  isStaffView?: boolean
 }
 
 type ConsoleContextResponsePayload = {
@@ -49,11 +60,13 @@ export type ConsoleContextData = {
   requestedAgentStatus?: 'deleted' | 'missing' | null
 }
 
-export async function fetchConsoleContext(options: { forAgentId?: string } = {}): Promise<ConsoleContextData> {
-  const query = options.forAgentId
-    ? `?for_agent=${encodeURIComponent(options.forAgentId)}`
-    : ''
-  const payload = await jsonFetch<ConsoleContextResponsePayload>(`/console/switch-context/${query}`)
+export async function fetchConsoleContext(options: { forAgentId?: string; staffContext?: StaffViewContext | null } = {}): Promise<ConsoleContextData> {
+  const params = new URLSearchParams()
+  if (options.forAgentId) params.set('for_agent', options.forAgentId)
+  const query = params.toString() ? `?${params.toString()}` : ''
+  const payload = await jsonFetch<ConsoleContextResponsePayload>(`/console/switch-context/${query}`, {
+    headers: staffViewContextHeaders(options.staffContext),
+  })
   return {
     context: payload.context,
     personal: {

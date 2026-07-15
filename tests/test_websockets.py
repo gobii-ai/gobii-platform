@@ -33,11 +33,48 @@ class EchoConsumerTests(SimpleTestCase):
 @override_settings(CHANNEL_LAYERS=CHANNEL_LAYER_SETTINGS)
 @tag("batch_websocket")
 class AgentChatSessionConsumerTests(SimpleTestCase):
-    def _build_communicator(self) -> WebsocketCommunicator:
+    def _build_communicator(self, *, is_staff: bool = False) -> WebsocketCommunicator:
         communicator = WebsocketCommunicator(AgentChatSessionConsumer.as_asgi(), "/")
-        communicator.scope["user"] = SimpleNamespace(is_authenticated=True, id=123)
+        communicator.scope["user"] = SimpleNamespace(
+            is_authenticated=True,
+            is_staff=is_staff,
+            is_superuser=False,
+            id=123,
+        )
         communicator.scope["session"] = None
         return communicator
+
+    def test_session_consumer_only_forwards_developer_updates_to_staff(self) -> None:
+        async def _allow_subscription(*args, **kwargs):
+            return None
+
+        async def _run(is_staff: bool):
+            communicator = self._build_communicator(is_staff=is_staff)
+            connected, _ = await communicator.connect()
+            self.assertTrue(connected)
+            try:
+                await communicator.send_json_to(
+                    {"type": "subscribe", "agent_id": "agent-a", "mode": "active"}
+                )
+                await asyncio.sleep(0.01)
+                await get_channel_layer().group_send(
+                    "agent-chat-agent-a",
+                    {"type": "developer_event", "agent_id": "agent-a"},
+                )
+                if is_staff:
+                    event = await communicator.receive_json_from()
+                    self.assertEqual(event, {"type": "developer.updated", "agent_id": "agent-a", "payload": None})
+                else:
+                    self.assertTrue(await communicator.receive_nothing(timeout=0.1))
+            finally:
+                await communicator.disconnect()
+
+        with patch(
+            "console.agent_chat.consumers.AgentChatSessionConsumer._resolve_agent",
+            new=_allow_subscription,
+        ):
+            async_to_sync(_run)(False)
+            async_to_sync(_run)(True)
 
     def test_session_consumer_retains_multiple_subscriptions_and_targeted_unsubscribe(self) -> None:
         async def _allow_subscription(*args, **kwargs):

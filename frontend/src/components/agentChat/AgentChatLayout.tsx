@@ -8,7 +8,7 @@ import { AnalyticsEvent } from '../../constants/analyticsEvents'
 import { AgentComposer } from './AgentComposer'
 import { AgentTimelinePane } from './AgentTimelinePane'
 import { ChatSidebar, type ChatSidebarProps } from './ChatSidebar'
-import { AgentChatBanner } from './AgentChatBanner'
+import { AgentChatBanner, type DeveloperModeControlGroups } from './AgentChatBanner'
 import { AgentChatSettingsPanel } from './AgentChatSettingsPanel'
 import { AgentChatAddonsPanel } from './AgentChatAddonsPanel'
 import { PlanPanel } from './PlanPanel'
@@ -220,6 +220,13 @@ type AgentChatLayoutProps = AgentTimelineProps & {
     body: string,
     attachments?: File[],
   ) => void | Promise<void>
+  onSendSystemMessage?: (body: string) => void | Promise<void>
+  normalSendDisabledReason?: string | null
+  showComposerActionMenu?: boolean
+  developerMode?: boolean
+  showDeveloperMode?: boolean
+  onDeveloperModeChange?: (enabled: boolean) => void
+  developerControls?: DeveloperModeControlGroups | null
   onRetryMessage?: (message: AgentMessage) => void | Promise<void>
   onComposerFocus?: () => void
   onComposerRequestScrollToBottom?: () => void
@@ -331,6 +338,13 @@ export function AgentChatLayout({
   onBlockedSettingsClick,
   onBlockedCollaborate,
   onSendMessage,
+  onSendSystemMessage,
+  normalSendDisabledReason = null,
+  showComposerActionMenu = true,
+  developerMode = false,
+  showDeveloperMode = false,
+  onDeveloperModeChange,
+  developerControls = null,
   onRetryMessage,
   onComposerFocus,
   onComposerRequestScrollToBottom,
@@ -1442,6 +1456,10 @@ export function AgentChatLayout({
           publicShareDisabled={previewActionsDisabled}
           publicShareDisabledReason={previewActionsDisabledReason}
           sidebarMode={sidebarMode}
+          developerMode={developerMode}
+          showDeveloperMode={showDeveloperMode}
+          onDeveloperModeChange={onDeveloperModeChange}
+          developerControls={developerControls}
         >
           {showHighPriorityBanner && highPriorityBanner ? (
             <HighPriorityBanner
@@ -1598,6 +1616,9 @@ export function AgentChatLayout({
           ) : (
             <AgentComposer
               onSubmit={onSendMessage}
+              onSystemSubmit={onSendSystemMessage}
+              normalSendDisabledReason={normalSendDisabledReason}
+              showActionMenu={showComposerActionMenu}
               pendingActionRequests={pendingActionRequests}
               onSkipPlanning={onSkipPlanning}
               onRespondHumanInput={onRespondHumanInputRequest}

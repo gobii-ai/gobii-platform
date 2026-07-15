@@ -1,10 +1,14 @@
 """Test token usage tracking in persistent agent steps."""
 import json
+import shutil
+import tempfile
 from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import patch, MagicMock
+import zstandard
 from django.test import TestCase, tag
 from django.contrib.auth import get_user_model
+from django.core.files.storage import FileSystemStorage
 from api.models import (
     PersistentAgent,
     PersistentAgentCompletion,
@@ -661,11 +665,22 @@ class TokenUsageTrackingTest(TestCase):
             provider="provider",
         )
 
-        log_agent_completion(
-            self.agent,
-            completion_type=PersistentAgentCompletion.CompletionType.OTHER,
-            response=response,
-        )
+        storage_dir = tempfile.mkdtemp()
+        self.addCleanup(lambda: shutil.rmtree(storage_dir, ignore_errors=True))
+        storage = FileSystemStorage(location=storage_dir)
+        with patch(
+            "api.services.prompt_archives.default_storage",
+            storage,
+        ):
+            log_agent_completion(
+                self.agent,
+                completion_type=PersistentAgentCompletion.CompletionType.OTHER,
+                response=response,
+                prompt_messages=[
+                    {"role": "system", "content": "System instructions"},
+                    {"role": "user", "content": "User request"},
+                ],
+            )
 
         completion = PersistentAgentCompletion.objects.filter(
             agent=self.agent,
@@ -677,6 +692,11 @@ class TokenUsageTrackingTest(TestCase):
         self.assertEqual(completion.llm_model, "provider/model")
         self.assertEqual(completion.llm_provider, "provider")
         self.assertEqual(completion.thinking_content, "Reasoned path")
+        self.assertIsNotNone(completion.prompt_archive_id)
+        with storage.open(completion.prompt_archive.storage_key, "rb") as archive_file:
+            archive_payload = json.loads(zstandard.ZstdDecompressor().decompress(archive_file.read()))
+        self.assertEqual(archive_payload["system_prompt"], "System instructions")
+        self.assertEqual(archive_payload["user_prompt"], "User request")
 
     def test_log_agent_completion_uses_provider_cost_details_for_image_response(self):
         response = SimpleNamespace(

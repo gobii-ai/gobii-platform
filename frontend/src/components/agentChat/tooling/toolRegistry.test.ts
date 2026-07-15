@@ -65,6 +65,63 @@ function clusterForApplyPatch(): ToolClusterEvent {
 }
 
 describe('transformToolCluster Google API display', () => {
+  it('preserves raw developer tool names and payloads', () => {
+    const cluster = clusterForRequest('https://example.com')
+    cluster.collapseThreshold = Number.POSITIVE_INFINITY
+    cluster.entries[0] = {
+      ...cluster.entries[0],
+      toolName: 'search_web',
+      parameters: { q: 'raw query' },
+      result: { items: [{ id: 1 }] },
+      developerEvent: {
+        kind: 'tool_call',
+        id: 'tool-call-1',
+        timestamp: '2026-01-01T00:00:00Z',
+        completion_id: null,
+        tool_name: 'search_web',
+        parameters: { q: 'raw query' },
+        result: { items: [{ id: 1 }] },
+      },
+    }
+
+    const transformed = transformToolCluster(cluster)
+
+    expect(transformed.collapsible).toBe(false)
+    expect(transformed.entries[0]).toMatchObject({
+      label: 'search_web',
+      rawParameters: { q: 'raw query' },
+      result: { items: [{ id: 1 }] },
+    })
+  })
+
+  it('renders developer steps as expandable tool-cluster entries', () => {
+    const cluster = clusterForRequest('https://example.com')
+    cluster.collapseThreshold = Number.POSITIVE_INFINITY
+    cluster.entries[0] = {
+      ...cluster.entries[0],
+      toolName: '__developer_step__',
+      developerEvent: {
+        kind: 'step',
+        id: 'step-1',
+        timestamp: '2026-07-07T12:21:33Z',
+        description: 'Internal reasoning: send an email instead.',
+        completion_id: 'completion-1',
+        is_system: false,
+        system_code: null,
+        system_notes: null,
+      },
+    }
+
+    const transformed = transformToolCluster(cluster)
+
+    expect(transformed.collapsible).toBe(false)
+    expect(transformed.entries[0]).toMatchObject({
+      label: 'Step',
+      caption: 'Internal reasoning: send an email instead.',
+      toolName: '__developer_step__',
+    })
+  })
+
   it('labels apply_patch previews with the target file path', () => {
     const transformed = transformToolCluster(clusterForApplyPatch())
 

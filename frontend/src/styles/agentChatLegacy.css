@@ -331,6 +331,7 @@
 .banner {
     position: relative;
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 1rem;
     container-type: inline-size;
@@ -344,6 +345,99 @@
     border-bottom: 1px solid rgba(170, 116, 206, 0.22);
     box-shadow: 0 1px 4px rgba(64, 27, 104, 0.05);
     pointer-events: auto;
+}
+.banner-developer-controls {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 0.5rem;
+}
+.developer-mode-controls {
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 0.5rem;
+}
+.developer-export-control {
+    --banner-action-height: 1.75rem;
+    --banner-action-bg: #ffffff;
+    --banner-action-border: rgba(124, 58, 237, 0.22);
+    display: inline-flex;
+    align-items: center;
+    height: var(--banner-action-height);
+    overflow: hidden;
+    border: 1px solid var(--banner-action-border);
+    border-radius: 0.5rem;
+    background: var(--banner-action-bg);
+}
+.developer-export-control:focus-within {
+    outline: 2px solid rgba(99, 102, 241, 0.4);
+    outline-offset: 1px;
+}
+.developer-export-control .agent-chat-button.banner-action {
+    height: 100%;
+    min-height: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+}
+.developer-export-control .agent-chat-button.banner-action:is(:hover, :active, :focus-visible) {
+    transform: none;
+}
+.developer-export-control .agent-chat-button.banner-action:focus-visible {
+    outline: none;
+}
+.developer-export-trigger {
+    padding-right: 0.45rem;
+}
+.developer-export-chevron {
+    width: 0.8rem !important;
+    height: 0.8rem !important;
+}
+.developer-export-download {
+    border-left: 1px solid var(--banner-action-border) !important;
+}
+.developer-export-popover {
+    z-index: 60;
+    width: 10rem;
+    max-width: calc(100vw - 1rem);
+    border: 1px solid rgba(124, 58, 237, 0.18);
+    border-radius: 0.625rem;
+    background: #ffffff;
+    box-shadow: 0 12px 28px rgba(41, 28, 84, 0.16);
+    overflow: hidden;
+}
+.developer-export-menu {
+    display: flex;
+    flex-direction: column;
+    gap: 0.125rem;
+    padding: 0.25rem;
+    outline: none;
+}
+.developer-export-option {
+    justify-content: space-between;
+    min-height: 2rem;
+    gap: 0.75rem;
+    padding: 0.45rem 0.6rem;
+    border-radius: 0.4rem;
+    color: #3b2d6b;
+    font-size: 0.75rem;
+    font-weight: 650;
+    line-height: 1.2;
+    cursor: pointer;
+    outline: none;
+}
+.developer-export-option[data-hovered],
+.developer-export-option[data-focused] {
+    background: rgba(99, 102, 241, 0.08);
+}
+.developer-export-option[data-selected='true'] {
+    color: #4338ca;
+}
+.developer-export-check {
+    width: 0.85rem;
+    height: 0.85rem;
+    color: #4f46e5;
 }
 @media (min-width: 768px) {
     .chat-sidebar[data-sidebar-mode='gallery'],
@@ -586,6 +680,7 @@
     box-shadow: 0 18px 45px rgba(41, 28, 84, 0.18);
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
+    outline: none;
 }
 .banner-overflow-menu {
     padding: 0.45rem;
@@ -594,6 +689,57 @@
     margin-top: 0.35rem;
     padding-top: 0.35rem;
     border-top: 1px solid rgba(99, 102, 241, 0.08);
+}
+.banner-overflow-developer-controls {
+    display: block;
+}
+.banner-overflow-developer-controls .developer-mode-controls {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.2rem;
+    padding: 0.15rem;
+}
+.banner-overflow-developer-controls .agent-chat-button.banner-action {
+    width: 100%;
+    min-height: 2.7rem;
+    justify-content: flex-start;
+    border-color: transparent;
+    border-radius: 0.8rem;
+    background: transparent;
+    padding: 0.72rem 0.75rem;
+    color: #453370;
+    font-size: 0.78rem;
+}
+.banner-overflow-developer-controls > .developer-mode-controls > .agent-chat-button.banner-action > svg:first-child {
+    width: 1.7rem;
+    height: 1.7rem;
+    padding: 0.4rem;
+    border-radius: 999px;
+    background: rgba(99, 102, 241, 0.1);
+    color: #4f46e5;
+}
+.banner-overflow-developer-controls .agent-chat-button.banner-action:hover:not(:disabled):not([aria-disabled='true']) {
+    border-color: transparent;
+    background: rgba(99, 102, 241, 0.08);
+    transform: none;
+}
+.banner-overflow-developer-controls .developer-export-control {
+    width: 100%;
+    height: 2.7rem;
+    border-color: transparent;
+    background: transparent;
+}
+.banner-overflow-developer-controls .developer-export-control:focus-within {
+    outline-offset: -1px;
+}
+.banner-overflow-developer-controls .developer-export-trigger {
+    flex: 1;
+    justify-content: space-between;
+}
+.banner-overflow-developer-controls .developer-export-download {
+    width: 2.7rem !important;
+    border-left: 0 !important;
+    justify-content: center;
 }
 .banner-overflow-heading {
     padding: 0.35rem 0.55rem 0.3rem;
@@ -850,6 +996,17 @@
         padding: 0 0.45rem;
         justify-content: center;
     }
+}
+.banner[data-developer-mode='true'][data-developer-action-layout='partial'] .banner-desktop-only,
+.banner[data-developer-mode='true'][data-developer-action-layout='overflow'] .banner-desktop-only {
+    display: none;
+}
+.banner[data-developer-mode='true'][data-developer-action-layout='partial'] .banner-mobile-only,
+.banner[data-developer-mode='true'][data-developer-action-layout='overflow'] .banner-mobile-only {
+    display: inline-flex;
+}
+.banner[data-developer-mode='true'][data-developer-action-layout='partial'] .banner-developer-mode-toggle {
+    display: inline-flex;
 }
 .banner-close {
     isolation: isolate;

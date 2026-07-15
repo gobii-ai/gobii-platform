@@ -83,6 +83,13 @@ function pickNonEmptyArray<T>(value: T[] | null | undefined, fallback: T[] | nul
   return fallback ?? undefined
 }
 
+function pickToolResult(value: unknown, fallback: unknown): unknown {
+  if ((typeof value === 'string' || value == null) && (typeof fallback === 'string' || fallback == null)) {
+    return pickNonEmptyString(value ?? undefined, fallback ?? undefined)
+  }
+  return value ?? fallback
+}
+
 function sortThinkingEntries(entries: ThinkingEvent[]): ThinkingEvent[] {
   return [...entries].sort((left, right) => compareTimelineCursors(left.cursor, right.cursor))
 }
@@ -151,7 +158,7 @@ function mergeToolEntry(base: ToolCallEntry, incoming: ToolCallEntry): ToolCallE
     toolName: pickNonEmptyString(incoming.toolName ?? undefined, base.toolName ?? undefined),
     parameters: incoming.parameters ?? base.parameters,
     sqlStatements: pickNonEmptyArray(incoming.sqlStatements ?? undefined, base.sqlStatements ?? undefined),
-    result: pickNonEmptyString(incoming.result ?? undefined, base.result ?? undefined),
+    result: pickToolResult(incoming.result, base.result),
     charterText: pickNonEmptyString(incoming.charterText ?? undefined, base.charterText ?? undefined),
     status: incoming.status ?? base.status,
     cursor: incoming.cursor ?? base.cursor,

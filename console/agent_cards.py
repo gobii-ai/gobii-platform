@@ -3,13 +3,12 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any, Literal
 
 from django.db.models import Sum
-from django.urls import reverse
 from django.utils import timezone
 
 from api.agent.short_description import build_listing_description, build_mini_description
 from api.models import AgentTransferInvite, PersistentAgent, PersistentAgentStep
 from api.services.daily_credit_settings import get_daily_credit_settings_for_owner
-from util.urls import IMMERSIVE_APP_BASE_PATH, build_immersive_chat_url
+from util.urls import IMMERSIVE_APP_BASE_PATH, build_immersive_chat_url, build_staff_developer_chat_path_for_agent
 
 
 def _first_endpoint_address(endpoints) -> str | None:
@@ -185,6 +184,6 @@ def serialize_agent_card_payload(
         "dailyCreditRemaining": remaining,
         "dailyCreditLow": bool(getattr(agent, "daily_credit_low", False)),
         "last24hCreditBurn": recent_burn,
-        "auditUrl": reverse("console-agent-audit", kwargs={"agent_id": agent.id}) if is_staff else None,
+        "developerChatUrl": build_staff_developer_chat_path_for_agent(agent) if is_staff else None,
         "isShared": bool(is_shared),
     }

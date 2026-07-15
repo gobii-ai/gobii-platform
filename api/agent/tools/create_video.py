@@ -73,6 +73,7 @@ def _log_video_generation_completion(
     model_name: str,
     pricing_model: str | None = None,
     response: Any,
+    prompt: str,
 ) -> None:
     if response is None:
         return
@@ -83,6 +84,7 @@ def _log_video_generation_completion(
         model=model_name,
         provider=provider_hint_from_model(model_name),
         pricing_model=pricing_model,
+        prompt_text=prompt,
     )
 
 
@@ -700,6 +702,7 @@ def execute_create_video(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
                 model_name=config.model,
                 pricing_model=config.pricing_model,
                 response=generated.response,
+                prompt=prompt.strip(),
             )
             video_bytes = generated.video_bytes
             break
@@ -709,6 +712,7 @@ def execute_create_video(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
                 model_name=config.model,
                 pricing_model=config.pricing_model,
                 response=exc.response,
+                prompt=prompt.strip(),
             )
             errors.append(f"{config.endpoint_key or config.model}: {exc}")
             logger.info("Video generation attempt failed: %s", errors[-1])

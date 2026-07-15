@@ -14,6 +14,23 @@ def user_profile_group_name(user_id: int) -> str:
     return f"agent-chat-user-{user_id}"
 
 
+def send_developer_update(agent_id: str) -> None:
+    """Notify staff chat subscribers that the enriched timeline changed."""
+    if not agent_id:
+        return
+    channel_layer = get_channel_layer()
+    if channel_layer is None:
+        logger.debug("Channel layer unavailable; skipping developer update for agent %s", agent_id)
+        return
+    try:
+        async_to_sync(channel_layer.group_send)(
+            f"agent-chat-{agent_id}",
+            {"type": "developer_event", "agent_id": str(agent_id)},
+        )
+    except Exception:
+        logger.debug("Failed to send developer update for agent %s", agent_id, exc_info=True)
+
+
 def send_stream_event(agent_id: str, user_id: int, payload: dict) -> None:
     if not agent_id or user_id is None:
         return

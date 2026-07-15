@@ -9,9 +9,10 @@ from django.test import TestCase, tag
 from django.utils import timezone
 from unittest.mock import patch
 
-from api.agent.core.prompt_context import _archive_rendered_prompt, get_prompt_token_budget
+from api.agent.core.prompt_context import get_prompt_token_budget
 from api.models import BrowserUseAgent, PersistentAgent, PersistentAgentPromptArchive
 from api.maintenance.prompt_archives import prune_prompt_archives_for_cutoff
+from api.services.prompt_archives import archive_agent_prompt
 
 User = get_user_model()
 
@@ -33,7 +34,7 @@ class PromptArchivePruningTests(TestCase):
         )
         self.storage_dir = tempfile.mkdtemp()
         self.storage = FileSystemStorage(location=self.storage_dir)
-        self.storage_patch = patch('api.agent.core.prompt_context.default_storage', self.storage)
+        self.storage_patch = patch('api.services.prompt_archives.default_storage', self.storage)
         self.models_storage_patch = patch('api.models.default_storage', self.storage)
         self.storage_patch.start()
         self.models_storage_patch.start()
@@ -42,7 +43,7 @@ class PromptArchivePruningTests(TestCase):
         self.addCleanup(lambda: shutil.rmtree(self.storage_dir, ignore_errors=True))
 
     def _make_archive(self, days_ago: int) -> PersistentAgentPromptArchive:
-        key, _, _, archive_id = _archive_rendered_prompt(
+        key, _, _, archive_id = archive_agent_prompt(
             agent=self.agent,
             system_prompt="System prompt",
             user_prompt="User prompt",

@@ -19,7 +19,6 @@ const LlmConfigScreen = lazy(async () => ({ default: (await import('./screens/Ll
 const SystemSettingsScreen = lazy(async () => ({ default: (await import('./screens/SystemSettingsScreen')).SystemSettingsScreen }))
 const EvalsScreen = lazy(async () => ({ default: (await import('./screens/EvalsScreen')).EvalsScreen }))
 const EvalsDetailScreen = lazy(async () => ({ default: (await import('./screens/EvalsDetailScreen')).EvalsDetailScreen }))
-const AgentAuditScreen = lazy(async () => ({ default: (await import('./screens/AgentAuditScreen')).AgentAuditScreen }))
 const ImmersiveApp = lazy(async () => ({ default: (await import('./screens/ImmersiveApp')).ImmersiveApp }))
 
 const LoadingFallback = () => (
@@ -48,8 +47,6 @@ if (shouldInitializeSubscriptionStore) {
 }
 const isStaff = mountNode.dataset.isStaff === 'true'
 
-const agentId = mountNode.dataset.agentId || null
-const agentName = mountNode.dataset.agentName || null
 const maxChatUploadSizeBytesRaw = mountNode.dataset.maxChatUploadSizeBytes
 const maxChatUploadSizeBytesValue = maxChatUploadSizeBytesRaw ? Number.parseInt(maxChatUploadSizeBytesRaw, 10) : null
 const maxChatUploadSizeBytes =
@@ -170,18 +167,6 @@ switch (appName) {
     screen = <EvalsDetailScreen suiteRunId={suiteRunId} isStaff={isStaff} />
     break
   }
-  case 'agent-audit':
-    if (!agentId) {
-      throw new Error('Agent identifier is required for audit screen')
-    }
-    screen = (
-      <AgentAuditScreen
-        agentId={agentId}
-        agentName={agentName}
-        adminAgentUrl={mountNode.dataset.adminAgentUrl}
-      />
-    )
-    break
   case 'immersive-app':
     screen = (
       <ImmersiveApp

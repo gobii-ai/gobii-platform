@@ -9,7 +9,7 @@ import time
 import uuid
 import base64
 import zipfile
-from datetime import datetime, timedelta, timezone as dt_timezone
+from datetime import timedelta
 from decimal import Decimal, InvalidOperation
 from smtplib import SMTPException
 from typing import Any
@@ -133,9 +133,7 @@ from api.public_profiles import generate_handle_suggestion
 from django.core.files.storage import default_storage
 from agents.services import PretrainedWorkerTemplateService
 from config.socialaccount_adapter import OAUTH_CHARTER_COOKIE, restore_oauth_session_state
-from console.agent_audit.events import fetch_audit_events
 from console.agent_audit.export import InvalidAuditExportRange, build_audit_export_range, write_agent_audit_export_json
-from console.agent_audit.timeline import build_audit_timeline
 from console.agent_audit.serializers import serialize_system_message
 from console.llm_tier_usage import build_browser_endpoint_tier_usage, build_persistent_endpoint_tier_usage
 from api.encryption import SecretsEncryption
@@ -170,7 +168,7 @@ from util.onboarding import TRIAL_ONBOARDING_TARGET_AGENT_UI, set_trial_onboardi
 from util.personal_signup_preview import resolve_personal_signup_preview, resolve_personal_signup_preview_onboarding_state
 from util.trial_enforcement import PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE, TrialRequiredValidationError, can_user_send_personal_agent_chat_message
 from util.subscription_helper import get_user_max_contacts_per_agent
-from util.urls import IMMERSIVE_APP_BASE_PATH, append_context_query
+from util.urls import IMMERSIVE_APP_BASE_PATH, append_context_query, build_staff_developer_chat_path_for_agent
 
 from console.agent_chat.access import (
     agent_queryset_for,
@@ -179,6 +177,8 @@ from console.agent_chat.access import (
     shared_agent_queryset_for,
     user_can_manage_agent,
     user_can_manage_agent_settings,
+    user_has_natural_agent_chat_access,
+    resolve_staff_agent,
     user_is_collaborator,
 )
 from console.agent_chat.pending_actions import (
@@ -200,6 +200,7 @@ from console.agent_chat.timeline import (
     serialize_processing_snapshot,
     serialize_user_action_event,
 )
+from console.agent_chat.developer_timeline import fetch_developer_timeline_window
 from console.agent_chat.user_actions import (
     record_contact_requests_resolved,
     record_human_input_answered,
@@ -210,8 +211,8 @@ from console.agent_chat.user_actions import (
 from console.agent_chat.suggestions import DEFAULT_PROMPT_COUNT, build_agent_timeline_suggestions
 from console.agent_chat.template_recommendations import build_new_agent_template_recommendations
 from console.api_helpers import ApiLoginRequiredMixin, _coerce_bool, _parse_json_body
-from console.context_helpers import build_console_context, resolve_console_context
-from console.context_overrides import get_context_override
+from console.context_helpers import build_console_context, resolve_console_context, resolve_staff_console_context
+from console.context_overrides import get_context_override, get_staff_context_override
 from console.agent_context import resolve_context_override_for_agent
 from console.billing_initial_data import build_billing_initial_data
 from console.forms import MCPServerConfigForm, PhoneVerifyForm, UserProfileForm
@@ -447,6 +448,7 @@ class ConsoleSessionAPIView(LoginRequiredMixin, View):
                 "user_id": str(request.user.id),
                 "email": request.user.email,
                 "timezone": UserPreference.resolve_user_timezone(request.user),
+                "is_system_admin": bool(request.user.is_staff or request.user.is_superuser),
             }
         )
 
@@ -2038,7 +2040,7 @@ def _serialize_staff_agent_summary(agent: PersistentAgent) -> dict[str, Any]:
         "name": agent.name or "",
         "organizationName": agent.organization.name if agent.organization_id else None,
         "adminUrl": reverse("admin:api_persistentagent_change", args=[agent.id]),
-        "auditUrl": reverse("console-agent-audit", kwargs={"agent_id": agent.id}),
+        "developerChatUrl": build_staff_developer_chat_path_for_agent(agent),
         "lastInteractionAt": agent.last_interaction_at.isoformat() if agent.last_interaction_at else None,
     }
 
@@ -2603,103 +2605,8 @@ class StaffUserEmailTriggerAPIView(SystemAdminAPIView):
         )
 
 
-class StaffAgentSearchAPIView(SystemAdminAPIView):
-    """Search persistent agents by name or id for staff tools."""
-
-    http_method_names = ["get"]
-
-    def get(self, request: HttpRequest, *args: Any, **kwargs: Any):
-        query = (request.GET.get("q") or "").strip()
-        limit_raw = request.GET.get("limit") or "8"
-        try:
-            limit = int(limit_raw)
-        except ValueError:
-            return HttpResponseBadRequest("limit must be an integer")
-        limit = max(1, min(limit, 25))
-        if not query:
-            return JsonResponse({"agents": []})
-
-        filters = Q(name__icontains=query)
-        try:
-            filters |= Q(id=uuid.UUID(query))
-        except (TypeError, ValueError):
-            pass
-
-        queryset = PersistentAgent.objects.all()
-        eligible_for = (request.GET.get("eligible_for") or "").strip()
-        if eligible_for == "llm_performance":
-            queryset = queryset.non_eval().alive()
-        elif eligible_for:
-            return HttpResponseBadRequest("eligible_for must be llm_performance")
-
-        matches = (
-            queryset.filter(filters)
-            .only("id", "name")
-            .order_by("name")[:limit]
-        )
-        payload = [{"id": str(agent.id), "name": agent.name or ""} for agent in matches]
-        return JsonResponse({"agents": payload})
-
-
-class StaffAgentAuditAPIView(SystemAdminAPIView):
-    """Return audit runs (PROCESS_EVENTS loops) for any agent."""
-
-    http_method_names = ["get"]
-
-    def get(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
-        agent = get_object_or_404(PersistentAgent, pk=agent_id)
-        cursor = request.GET.get("cursor") or None
-        at_raw = request.GET.get("at")
-        day_raw = request.GET.get("day")
-        tz_offset_raw = request.GET.get("tz_offset_minutes")
-        tz_offset = 0
-        try:
-            if tz_offset_raw is not None:
-                tz_offset = int(tz_offset_raw)
-        except ValueError:
-            return HttpResponseBadRequest("tz_offset_minutes must be an integer")
-        tzinfo = dt_timezone(timedelta(minutes=tz_offset))
-        at_dt = None
-        if at_raw:
-            try:
-                at_dt = datetime.fromisoformat(at_raw.replace("Z", "+00:00"))
-                if timezone.is_naive(at_dt):
-                    at_dt = timezone.make_aware(at_dt, timezone.get_current_timezone())
-            except ValueError:
-                return HttpResponseBadRequest("at must be an ISO8601 datetime")
-        elif day_raw:
-            try:
-                day_dt = datetime.fromisoformat(day_raw).date()
-            except ValueError:
-                return HttpResponseBadRequest("day must be YYYY-MM-DD")
-            at_dt = datetime.combine(day_dt + timedelta(days=1), datetime.min.time(), tzinfo=tzinfo)
-
-        try:
-            limit = int(request.GET.get("limit", 3))
-        except ValueError:
-            return HttpResponseBadRequest("limit must be an integer")
-        limit = max(1, min(limit, 50))
-
-        events, has_more, next_cursor = fetch_audit_events(agent, cursor=cursor, limit=limit, at=at_dt)
-
-        processing_active = compute_processing_status(agent)
-
-        return JsonResponse(
-            {
-                "events": events,
-                "has_more": has_more,
-                "next_cursor": next_cursor,
-                "processing_active": processing_active,
-                "agent": {
-                    "id": str(agent.id),
-                    "name": agent.name,
-                },
-            }
-        )
-
-
-class StaffAgentAuditExportAPIView(SystemAdminAPIView):
-    """Build and return a downloadable zip export for staff audit review."""
+class StaffAgentDeveloperExportAPIView(SystemAdminAPIView):
+    """Build and return a downloadable debugging export for Developer Mode."""
 
     http_method_names = ["get"]
 
@@ -2750,45 +2657,6 @@ class StaffAgentAuditExportAPIView(SystemAdminAPIView):
         )
 
 
-class StaffAgentAuditTimelineAPIView(SystemAdminAPIView):
-    """Return coarse activity buckets to drive audit timeline UI."""
-
-    http_method_names = ["get"]
-
-    def get(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
-        agent = get_object_or_404(PersistentAgent, pk=agent_id)
-        days_raw = request.GET.get("days")
-        days = None
-        if days_raw:
-            try:
-                days = int(days_raw)
-            except ValueError:
-                return HttpResponseBadRequest("days must be an integer")
-            days = max(1, min(days, 365))
-        tz_offset_raw = request.GET.get("tz_offset_minutes")
-        tz_offset = 0
-        try:
-            if tz_offset_raw is not None:
-                tz_offset = int(tz_offset_raw)
-        except ValueError:
-            return HttpResponseBadRequest("tz_offset_minutes must be an integer")
-        tzinfo = dt_timezone(timedelta(minutes=tz_offset))
-
-        timeline = build_audit_timeline(agent, days=days, tzinfo=tzinfo)
-        payload = {
-            "buckets": [
-                {
-                    "day": bucket.day.isoformat(),
-                    "count": bucket.count,
-                }
-                for bucket in timeline.buckets
-            ],
-            "latest": timeline.latest_day.isoformat() if timeline.latest_day else None,
-            "days": timeline.span_days,
-        }
-        return JsonResponse(payload)
-
-
 class StaffAgentProcessEventsAPIView(SystemAdminAPIView):
     """Staff-only hook to enqueue a PROCESS_EVENTS run for an agent."""
 
@@ -2826,7 +2694,7 @@ class StaffAgentRunJudgeAPIView(SystemAdminAPIView):
         suggestion = result.get("suggestion")
         if isinstance(suggestion, dict) and suggestion.get("suggestionId"):
             suggestion["decisionApiUrl"] = reverse(
-                "console_agent_audit_judge_suggestion_decision",
+                "console_agent_developer_judge_suggestion_decision",
                 kwargs={"agent_id": agent.id, "suggestion_id": suggestion["suggestionId"]},
             )
         return JsonResponse(result, status=200)
@@ -3042,7 +2910,8 @@ def _serialize_agent_profile_payload(
             or agent.user_id == user.id
             or (agent.organization_id and agent.organization_id in admin_org_ids)
         ),
-        "audit_url": card_payload["auditUrl"],
+        "can_send_messages": user_has_natural_agent_chat_access(user, agent),
+        "developer_live_chat_url": card_payload["developerChatUrl"],
         "preferred_llm_tier": getattr(getattr(agent, "preferred_llm_tier", None), "key", None),
         "email": card_payload["primaryEmail"],
         "sms": card_payload["primarySms"],
@@ -3158,6 +3027,9 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
 
     def get(self, request: HttpRequest, *args: Any, **kwargs: Any):
         override = get_context_override(request)
+        staff_override = get_staff_context_override(request)
+        if staff_override and not (request.user.is_staff or request.user.is_superuser):
+            return JsonResponse({"error": "Not permitted"}, status=403)
         for_agent_id = request.GET.get("for_agent")
         requested_agent_status = None
         resolved_preferences = UserPreference.resolve_known_preferences(request.user)
@@ -3176,7 +3048,7 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
         agent_chat_notifications_enabled = resolved_preferences.get(
             UserPreference.KEY_AGENT_CHAT_NOTIFICATIONS_ENABLED
         )
-        if for_agent_id:
+        if for_agent_id and not staff_override:
             override_for_agent, error_response, requested_agent_status = self._resolve_override_for_agent(
                 request,
                 for_agent_id,
@@ -3186,11 +3058,14 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
             if override_for_agent is not None:
                 override = override_for_agent
 
-        context_info = resolve_console_context(
-            request.user,
-            request.session,
-            override=override,
-        )
+        try:
+            context_info = (
+                resolve_staff_console_context(request.user, staff_override)
+                if staff_override
+                else resolve_console_context(request.user, request.session, override=override)
+            )
+        except PermissionDenied:
+            return JsonResponse({"error": "Not permitted"}, status=403)
 
         upgrade_url = None
         if settings.GOBII_PROPRIETARY_MODE:
@@ -3207,6 +3082,10 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
             if organization:
                 owner = organization
                 owner_type = "organization"
+        elif staff_override:
+            owner = User.objects.filter(id=context_info.current_context.id).first()
+            if owner is None:
+                return JsonResponse({"error": "Not permitted"}, status=403)
 
         llm_intelligence = build_llm_intelligence_props(
             owner,
@@ -3231,18 +3110,33 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
             queryset=PersistentAgentSystemSkillState.objects.filter(is_enabled=True).order_by("skill_key"),
             to_attr="enabled_system_skill_states_for_roster",
         )
-        agents_qs = (
-            agent_queryset_for(
-                request.user,
-                context_info.current_context,
-                allow_delinquent_personal_chat=True,
+        if staff_override:
+            agents_qs = PersistentAgent.objects.non_eval().alive().select_related("browser_use_agent")
+            if context_info.current_context.type == "organization":
+                agents_qs = agents_qs.filter(organization_id=context_info.current_context.id)
+            else:
+                agents_qs = agents_qs.filter(
+                    organization__isnull=True,
+                    user_id=context_info.current_context.id,
+                )
+            agents_qs = agents_qs.prefetch_related(
+                email_prefetch,
+                sms_prefetch,
+                enabled_system_skills_prefetch,
+            ).order_by("name")
+        else:
+            agents_qs = (
+                agent_queryset_for(
+                    request.user,
+                    context_info.current_context,
+                    allow_delinquent_personal_chat=True,
+                )
+                .prefetch_related(email_prefetch, sms_prefetch, enabled_system_skills_prefetch)
+                .order_by("name")
             )
-            .prefetch_related(email_prefetch, sms_prefetch, enabled_system_skills_prefetch)
-            .order_by("name")
-        )
         agent_ids = list(agents_qs.values_list("id", flat=True))
         agents = list(agents_qs)
-        if context_info.current_context.type == "personal":
+        if context_info.current_context.type == "personal" and not staff_override:
             shared_qs = (
                 shared_agent_queryset_for(request.user)
                 .prefetch_related(email_prefetch, sms_prefetch, enabled_system_skills_prefetch)
@@ -3254,6 +3148,23 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
             shared_agents = []
         collaborators_by_agent_id = {agent.id for agent in shared_agents}
         agents += shared_agents
+        if staff_override and for_agent_id and all(str(agent.id) != str(for_agent_id) for agent in agents):
+            requested_agent = (
+                PersistentAgent.objects
+                .select_related("browser_use_agent")
+                .prefetch_related(email_prefetch, sms_prefetch, enabled_system_skills_prefetch)
+                .filter(id=for_agent_id)
+                .first()
+            )
+            if requested_agent is not None:
+                matches_context = (
+                    str(requested_agent.organization_id) == context_info.current_context.id
+                    if context_info.current_context.type == "organization"
+                    else requested_agent.organization_id is None
+                    and str(requested_agent.user_id) == context_info.current_context.id
+                )
+                if matches_context:
+                    agents.append(requested_agent)
         enrich_agents_for_card_surface(agents, owner)
         user = request.user
         processing_activity_by_agent_id = build_processing_activity_map(agents)
@@ -3324,6 +3235,7 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
                     "id": context_info.current_context.id,
                     "name": context_info.current_context.name,
                     "canCreateAgents": context_info.can_create_org_agents,
+                    "isStaffView": bool(staff_override),
                     "personalSignupPreviewCreateAvailable": _personal_signup_preview_create_available(
                         request,
                         context_info,
@@ -3949,13 +3861,23 @@ class AgentTimelineAPIView(LoginRequiredMixin, View):
         if direction_raw not in {"initial", "older", "newer"}:
             return HttpResponseBadRequest("Invalid direction parameter")
         direction = direction_raw  # type: ignore[assignment]
-        agent = resolve_agent_for_request(
-            request,
-            agent_id,
-            allow_shared=True,
-            allow_delinquent_personal_chat=True,
-        )
-        agent = self._resume_signup_preview_if_eligible(request, agent)
+        developer_mode = str(request.GET.get("developer") or "").strip().lower() in {"1", "true", "yes", "on"}
+        if developer_mode:
+            if not (request.user.is_staff or request.user.is_superuser):
+                return JsonResponse({"error": "forbidden"}, status=403)
+            staff_override = get_staff_context_override(request)
+            try:
+                agent = resolve_staff_agent(request.user, agent_id, staff_override)
+            except PermissionDenied:
+                raise Http404("Agent not found.")
+        else:
+            agent = resolve_agent_for_request(
+                request,
+                agent_id,
+                allow_shared=True,
+                allow_delinquent_personal_chat=True,
+            )
+            agent = self._resume_signup_preview_if_eligible(request, agent)
 
         cursor = request.GET.get("cursor") or None
         try:
@@ -3963,13 +3885,21 @@ class AgentTimelineAPIView(LoginRequiredMixin, View):
         except ValueError:
             return HttpResponseBadRequest("limit must be an integer")
 
-        window = fetch_timeline_window(
-            agent,
-            cursor=cursor,
-            direction=direction,
-            limit=limit,
-            viewer_user=request.user,
-        )
+        if developer_mode:
+            window = fetch_developer_timeline_window(
+                agent,
+                cursor=cursor,
+                direction=direction,
+                limit=limit,
+            )
+        else:
+            window = fetch_timeline_window(
+                agent,
+                cursor=cursor,
+                direction=direction,
+                limit=limit,
+                viewer_user=request.user,
+            )
         payload = {
             "events": window.events,
             "has_more_older": window.has_more_older,
@@ -4863,6 +4793,8 @@ class AgentMessageCreateAPIView(LoginRequiredMixin, View):
             allow_shared=True,
             allow_delinquent_personal_chat=True,
         )
+        if not user_has_natural_agent_chat_access(request.user, agent):
+            return JsonResponse({"error": "This staff view is read-only for user messages."}, status=403)
         if (
             agent.organization_id is None
             and agent.user_id is not None

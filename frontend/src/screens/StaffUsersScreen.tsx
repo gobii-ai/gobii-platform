@@ -446,10 +446,10 @@ function AgentsCard({
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <a
-                    href={agent.auditUrl}
+                    href={agent.developerChatUrl}
                     className="inline-flex items-center gap-2 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-800 transition hover:bg-amber-100"
                   >
-                    Audit
+                    Developer Live Chat
                   </a>
                   <AdminLink href={agent.adminUrl} label="Admin" compact />
                 </div>

@@ -26,8 +26,12 @@ from api.models import (
     PersistentAgentStep,
     PersistentAgentSystemMessage,
     PersistentAgentToolCall,
+    Organization,
+    EvalRun,
+    EvalRunTask,
 )
 from api.agent.core.agent_judge import NO_ACTION, REPORT_TOOL_NAME
+from console.agent_audit.serializers import serialize_completion
 
 
 def _judge_response(payload: dict):
@@ -104,7 +108,7 @@ class StaffAgentAuditAPITests(TestCase):
 
     def test_process_events_endpoint_enqueues_task(self):
         with patch("console.api_views.process_agent_events_task.delay") as mock_delay:
-            response = self.client.post(f"/console/api/staff/agents/{self.agent.id}/audit/process/")
+            response = self.client.post(f"/console/api/staff/agents/{self.agent.id}/developer/process/")
         self.assertEqual(response.status_code, 202)
         mock_delay.assert_called_once_with(str(self.agent.id))
         payload = response.json()
@@ -130,7 +134,7 @@ class StaffAgentAuditAPITests(TestCase):
             "api.agent.core.agent_judge.run_completion",
             return_value=response_payload,
         ) as run_mock:
-            response = self.client.post(f"/console/api/staff/agents/{self.agent.id}/audit/judge/")
+            response = self.client.post(f"/console/api/staff/agents/{self.agent.id}/developer/judge/")
 
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.json()["ran"])
@@ -149,7 +153,7 @@ class StaffAgentAuditAPITests(TestCase):
             "console.api_views.run_manual_agent_judge",
             return_value={"ran": False, "status": "llm_not_configured"},
         ):
-            response = self.client.post(f"/console/api/staff/agents/{self.agent.id}/audit/judge/")
+            response = self.client.post(f"/console/api/staff/agents/{self.agent.id}/developer/judge/")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"ran": False, "status": "llm_not_configured"})
@@ -170,7 +174,7 @@ class StaffAgentAuditAPITests(TestCase):
             "api.agent.core.agent_judge.run_completion",
             return_value=response_payload,
         ):
-            response = self.client.post(f"/console/api/staff/agents/{self.agent.id}/audit/judge/")
+            response = self.client.post(f"/console/api/staff/agents/{self.agent.id}/developer/judge/")
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
@@ -200,7 +204,7 @@ class StaffAgentAuditAPITests(TestCase):
         )
 
         decision_url = (
-            f"/console/api/staff/agents/{self.agent.id}/audit/"
+            f"/console/api/staff/agents/{self.agent.id}/developer/"
             f"judge-suggestions/{suggestion.id}/decision/"
         )
         approve_response = self.client.post(
@@ -243,7 +247,7 @@ class StaffAgentAuditAPITests(TestCase):
         )
 
         decision_url = (
-            f"/console/api/staff/agents/{self.agent.id}/audit/"
+            f"/console/api/staff/agents/{self.agent.id}/developer/"
             f"judge-suggestions/{suggestion.id}/decision/"
         )
         reject_response = self.client.post(
@@ -260,7 +264,7 @@ class StaffAgentAuditAPITests(TestCase):
 
     def test_manual_judge_endpoint_requires_staff(self):
         self.client.force_login(self.nonstaff)
-        response = self.client.post(f"/console/api/staff/agents/{self.agent.id}/audit/judge/")
+        response = self.client.post(f"/console/api/staff/agents/{self.agent.id}/developer/judge/")
         self.assertEqual(response.status_code, 403)
 
     def test_create_system_message(self):
@@ -275,6 +279,293 @@ class StaffAgentAuditAPITests(TestCase):
         self.assertEqual(data.get("kind"), "system_message")
         self.assertEqual(data.get("body"), "Priority directive")
         self.assertNotIn("is_active", data)
+
+    def test_console_session_exposes_server_derived_system_admin_flag(self):
+        self.assertTrue(self.client.get("/console/api/session/").json()["is_system_admin"])
+        self.client.force_login(self.nonstaff)
+        self.assertFalse(self.client.get("/console/api/session/").json()["is_system_admin"])
+
+    def test_prompt_archive_is_staff_only(self):
+        completion = PersistentAgentCompletion.objects.create(
+            agent=self.agent,
+            completion_type=PersistentAgentCompletion.CompletionType.LLM_JUDGE,
+        )
+        payload = {
+            "agent_id": str(self.agent.id),
+            "rendered_at": timezone.now().isoformat(),
+            "system_prompt": "system developer prompt",
+            "user_prompt": "user developer prompt",
+            "tokens_before": 4,
+            "tokens_after": 4,
+            "tokens_saved": 0,
+        }
+        raw = json.dumps(payload).encode("utf-8")
+        storage_key = f"test/developer_prompt/{uuid4().hex}.json.zst"
+        compressed = zstd.ZstdCompressor(level=3).compress(raw)
+        default_storage.save(storage_key, ContentFile(compressed))
+        archive = PersistentAgentPromptArchive.objects.create(
+            agent=self.agent,
+            rendered_at=timezone.now(),
+            storage_key=storage_key,
+            raw_bytes=len(raw),
+            compressed_bytes=len(compressed),
+            tokens_before=4,
+            tokens_after=4,
+            tokens_saved=0,
+        )
+        completion.prompt_archive = archive
+        completion.save(update_fields=["prompt_archive"])
+        self.assertEqual(serialize_completion(completion)["prompt_archive"]["id"], str(archive.id))
+
+        timeline_response = self.client.get(
+            f"/console/api/agents/{self.agent.id}/timeline/?developer=1"
+        )
+        completion_event = next(
+            event for event in timeline_response.json()["events"]
+            if event["kind"] == "developer_completion"
+        )
+        self.assertEqual(completion_event["prompt_archive"]["id"], str(archive.id))
+
+        response = self.client.get(f"/console/api/staff/prompt-archives/{archive.id}/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["payload"]["system_prompt"], "system developer prompt")
+        self.assertEqual(response.json()["payload"]["user_prompt"], "user developer prompt")
+
+        self.client.force_login(self.nonstaff)
+        forbidden = self.client.get(f"/console/api/staff/prompt-archives/{archive.id}/")
+        self.assertEqual(forbidden.status_code, 403)
+
+    def test_staff_context_roster_is_read_only_without_mutating_session(self):
+        session = self.client.session
+        session["context_type"] = "personal"
+        session["context_id"] = str(self.staff.id)
+        session.save()
+        session_before = dict(self.client.session)
+
+        response = self.client.get(
+            f"/console/api/agents/roster/?for_agent={self.agent.id}",
+            HTTP_X_GOBII_STAFF_CONTEXT_TYPE="personal",
+            HTTP_X_GOBII_STAFF_CONTEXT_ID=str(self.nonstaff.id),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["context"]["isStaffView"])
+        entry = next(item for item in payload["agents"] if item["id"] == str(self.agent.id))
+        self.assertFalse(entry["can_send_messages"])
+        self.assertEqual(dict(self.client.session), session_before)
+
+        user_message_response = self.client.post(
+            f"/console/api/agents/{self.agent.id}/messages/",
+            data=json.dumps({"body": "staff override user message"}),
+            content_type="application/json",
+        )
+        self.assertEqual(user_message_response.status_code, 403)
+
+        system_message_response = self.client.post(
+            f"/console/api/staff/agents/{self.agent.id}/system-messages/",
+            data=json.dumps({"body": "staff-only directive"}),
+            content_type="application/json",
+        )
+        self.assertEqual(system_message_response.status_code, 201)
+
+    def test_nonstaff_cannot_resolve_staff_context_or_developer_timeline(self):
+        self.client.force_login(self.nonstaff)
+        roster_response = self.client.get(
+            "/console/api/agents/roster/",
+            HTTP_X_GOBII_STAFF_CONTEXT_TYPE="personal",
+            HTTP_X_GOBII_STAFF_CONTEXT_ID=str(self.nonstaff.id),
+        )
+        self.assertEqual(roster_response.status_code, 403)
+
+        developer_response = self.client.get(
+            f"/console/api/agents/{self.agent.id}/timeline/?developer=1"
+        )
+        self.assertEqual(developer_response.status_code, 403)
+
+        normal_response = self.client.get(f"/console/api/agents/{self.agent.id}/timeline/")
+        self.assertEqual(normal_response.status_code, 200)
+        self.assertFalse(any(event["kind"].startswith("developer_") for event in normal_response.json()["events"]))
+
+    def test_staff_context_roster_contains_all_agents_in_unrelated_organization(self):
+        organization = Organization.objects.create(
+            name="Unrelated Staff View Org",
+            slug=f"staff-view-{uuid4().hex[:8]}",
+            created_by=self.nonstaff,
+        )
+        organization.billing.purchased_seats = 2
+        organization.billing.save(update_fields=["purchased_seats"])
+        agents = []
+        for index in range(2):
+            browser_agent = BrowserUseAgent.objects.create(
+                user=self.nonstaff,
+                name=f"Org Browser {index}",
+            )
+            agents.append(PersistentAgent.objects.create(
+                user=self.nonstaff,
+                organization=organization,
+                name=f"Org Agent {index}",
+                charter="Test staff org roster",
+                browser_use_agent=browser_agent,
+            ))
+
+        response = self.client.get(
+            "/console/api/agents/roster/",
+            HTTP_X_GOBII_STAFF_CONTEXT_TYPE="organization",
+            HTTP_X_GOBII_STAFF_CONTEXT_ID=str(organization.id),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        roster_ids = {item["id"] for item in response.json()["agents"]}
+        self.assertTrue({str(agent.id) for agent in agents}.issubset(roster_ids))
+        self.assertFalse(any(item["can_send_messages"] for item in response.json()["agents"]))
+
+    def test_staff_roster_includes_requested_eval_soft_deleted_agent(self):
+        PersistentAgent.objects.filter(id=self.agent.id).update(
+            execution_environment="eval",
+            is_deleted=True,
+            is_active=False,
+        )
+
+        response = self.client.get(
+            f"/console/api/agents/roster/?for_agent={self.agent.id}",
+            HTTP_X_GOBII_STAFF_CONTEXT_TYPE="personal",
+            HTTP_X_GOBII_STAFF_CONTEXT_ID=str(self.nonstaff.id),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(str(self.agent.id), {item["id"] for item in response.json()["agents"]})
+
+    def test_developer_timeline_exposes_raw_tool_payload_and_stable_cursors(self):
+        completion = PersistentAgentCompletion.objects.create(
+            agent=self.agent,
+            completion_type=PersistentAgentCompletion.CompletionType.ORCHESTRATOR,
+        )
+        tool_step = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            completion=completion,
+            description="Tool call: raw_test_tool",
+        )
+        PersistentAgentToolCall.objects.create(
+            step=tool_step,
+            tool_name="raw_test_tool",
+            tool_params={"nested": {"value": 7}},
+            result=json.dumps({"ok": True}),
+        )
+        for index in range(4):
+            PersistentAgentError.objects.create(
+                agent=self.agent,
+                category=PersistentAgentError.Category.OTHER,
+                source="tests.pagination",
+                message=f"error-{index}",
+            )
+
+        initial = self.client.get(
+            f"/console/api/agents/{self.agent.id}/timeline/?developer=1&limit=3"
+        )
+        self.assertEqual(initial.status_code, 200)
+        initial_payload = initial.json()
+        self.assertEqual(len(initial_payload["events"]), 3)
+        self.assertTrue(initial_payload["has_more_older"])
+
+        older = self.client.get(
+            f"/console/api/agents/{self.agent.id}/timeline/",
+            {
+                "developer": "1",
+                "direction": "older",
+                "cursor": initial_payload["events"][0]["cursor"],
+                "limit": 10,
+            },
+        )
+        self.assertEqual(older.status_code, 200)
+        older_payload = older.json()
+        initial_cursors = {event["cursor"] for event in initial_payload["events"]}
+        older_cursors = {event["cursor"] for event in older_payload["events"]}
+        self.assertTrue(initial_cursors.isdisjoint(older_cursors))
+        newer = self.client.get(
+            f"/console/api/agents/{self.agent.id}/timeline/",
+            {
+                "developer": "1",
+                "direction": "newer",
+                "cursor": older_payload["events"][-1]["cursor"],
+                "limit": 10,
+            },
+        )
+        self.assertEqual(newer.status_code, 200)
+        self.assertEqual({event["cursor"] for event in newer.json()["events"]}, initial_cursors)
+
+        all_events = initial_payload["events"] + older_payload["events"]
+        tool_event = next(event for event in all_events if event["kind"] == "developer_tool_call")
+        self.assertEqual(tool_event["tool_name"], "raw_test_tool")
+        self.assertEqual(tool_event["parameters"], {"nested": {"value": 7}})
+        self.assertEqual(tool_event["result"], json.dumps({"ok": True}))
+
+    def test_developer_timeline_uses_regular_chat_email_rendering(self):
+        message = self._create_agent_message(
+            '<div style="font-family: sans-serif"><p>Hello <strong>there</strong>.</p></div>'
+        )
+
+        response = self.client.get(
+            f"/console/api/agents/{self.agent.id}/timeline/?developer=1&limit=10"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        event = next(
+            event
+            for event in response.json()["events"]
+            if event["kind"] == "message" and event["message"]["id"] == str(message.id)
+        )
+        self.assertIn("<strong>there</strong>", event["message"]["bodyHtml"])
+        self.assertNotIn("&lt;strong&gt;", event["message"]["bodyHtml"])
+        self.assertEqual(event["message"]["bodyText"], message.body)
+
+    def test_developer_timeline_rejects_mismatched_staff_context(self):
+        response = self.client.get(
+            f"/console/api/agents/{self.agent.id}/timeline/?developer=1",
+            HTTP_X_GOBII_STAFF_CONTEXT_TYPE="personal",
+            HTTP_X_GOBII_STAFF_CONTEXT_ID=str(self.staff.id),
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_eval_task_payload_links_to_developer_live_chat(self):
+        from console.evals.api_views import _serialize_eval_task
+
+        run = EvalRun.objects.create(
+            scenario_slug="developer-link-test",
+            agent=self.agent,
+            initiated_by=self.staff,
+        )
+        task = EvalRunTask.objects.create(
+            run=run,
+            sequence=1,
+            name="Inspect link",
+            assertion_type="deterministic",
+        )
+
+        payload = _serialize_eval_task(task)
+        self.assertEqual(
+            payload["artifact_links"]["developer_live_chat_url"],
+            (
+                f"/app/agents/{self.agent.id}?developer=1"
+                f"&staff_context_type=personal&staff_context_id={self.nonstaff.id}"
+            ),
+        )
+
+    def test_django_admin_links_to_developer_live_chat(self):
+        self.staff.is_superuser = True
+        self.staff.save(update_fields=["is_superuser"])
+
+        response = self.client.get(f"/admin/api/persistentagent/{self.agent.id}/change/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Open developer live chat")
+        self.assertContains(
+            response,
+            (
+                f"/app/agents/{self.agent.id}?developer=1&amp;"
+                f"staff_context_type=personal&amp;staff_context_id={self.nonstaff.id}"
+            ),
+        )
 
     def test_log_agent_error_helper_persists_and_logs(self):
         from api.services.agent_error_logging import log_agent_error
@@ -346,7 +637,7 @@ class StaffAgentAuditAPITests(TestCase):
         self.assertIn("ValidationError", persisted.traceback)
         self.assertEqual(persisted.context["task_id"], "task-123")
 
-    def test_audit_api_returns_error_events(self):
+    def test_developer_timeline_returns_error_events(self):
         PersistentAgentError.objects.create(
             agent=self.agent,
             category=PersistentAgentError.Category.TASK_QUOTA_EXCEEDED,
@@ -358,15 +649,15 @@ class StaffAgentAuditAPITests(TestCase):
             context={"validation_messages": ["Task quota exceeded"]},
         )
 
-        response = self.client.get(f"/console/api/staff/agents/{self.agent.id}/audit/?limit=10")
+        response = self.client.get(f"/console/api/agents/{self.agent.id}/timeline/?developer=1&limit=10")
         self.assertEqual(response.status_code, 200)
         events = response.json()["events"]
-        error_event = next(event for event in events if event["kind"] == "error")
+        error_event = next(event for event in events if event["kind"] == "developer_error")
         self.assertEqual(error_event["category"], PersistentAgentError.Category.TASK_QUOTA_EXCEEDED)
         self.assertEqual(error_event["source"], "tests.quota")
         self.assertEqual(error_event["context"]["validation_messages"], ["Task quota exceeded"])
 
-    def test_audit_api_returns_completion_reasoning(self):
+    def test_developer_timeline_returns_completion_reasoning(self):
         PersistentAgentCompletion.objects.create(
             agent=self.agent,
             completion_type=PersistentAgentCompletion.CompletionType.LLM_JUDGE,
@@ -375,14 +666,14 @@ class StaffAgentAuditAPITests(TestCase):
             llm_provider="test-provider",
         )
 
-        response = self.client.get(f"/console/api/staff/agents/{self.agent.id}/audit/?limit=10")
+        response = self.client.get(f"/console/api/agents/{self.agent.id}/timeline/?developer=1&limit=10")
         self.assertEqual(response.status_code, 200)
         events = response.json()["events"]
-        completion_event = next(event for event in events if event["kind"] == "completion")
+        completion_event = next(event for event in events if event["kind"] == "developer_completion")
         self.assertEqual(completion_event["completion_type"], PersistentAgentCompletion.CompletionType.LLM_JUDGE)
         self.assertEqual(completion_event["thinking"], "Judge reasoning trace.")
 
-    def test_audit_timeline_counts_error_events(self):
+    def test_removed_audit_timeline_returns_not_found(self):
         PersistentAgentError.objects.create(
             agent=self.agent,
             category=PersistentAgentError.Category.OTHER,
@@ -391,9 +682,7 @@ class StaffAgentAuditAPITests(TestCase):
         )
 
         response = self.client.get(f"/console/api/staff/agents/{self.agent.id}/audit/timeline/")
-        self.assertEqual(response.status_code, 200)
-        payload = response.json()
-        self.assertEqual(sum(bucket["count"] for bucket in payload["buckets"]), 1)
+        self.assertEqual(response.status_code, 404)
 
     def test_system_message_requires_staff(self):
         self.client.force_login(self.nonstaff)
@@ -490,7 +779,7 @@ class StaffAgentAuditAPITests(TestCase):
             context={"provider_candidates": [{"provider": "openrouter", "model": "test"}]},
         )
 
-        response = self.client.get(f"/console/api/staff/agents/{self.agent.id}/audit/export/")
+        response = self.client.get(f"/console/api/staff/agents/{self.agent.id}/developer/export/")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Content-Type"], "application/zip")
         self.assertIn("attachment; filename=", response["Content-Disposition"])
@@ -571,7 +860,7 @@ class StaffAgentAuditAPITests(TestCase):
         )
         PersistentAgentError.objects.filter(id=old_error.id).update(created_at=old_at)
 
-        response = self.client.get(f"/console/api/staff/agents/{self.agent.id}/audit/export/?range=24h")
+        response = self.client.get(f"/console/api/staff/agents/{self.agent.id}/developer/export/?range=24h")
 
         self.assertEqual(response.status_code, 200)
         export_payload = self._read_export_payload(response)
@@ -604,7 +893,7 @@ class StaffAgentAuditAPITests(TestCase):
         )
         PersistentAgentError.objects.filter(id=old_error.id).update(created_at=old_at)
 
-        response = self.client.get(f"/console/api/staff/agents/{self.agent.id}/audit/export/?range=all")
+        response = self.client.get(f"/console/api/staff/agents/{self.agent.id}/developer/export/?range=all")
 
         self.assertEqual(response.status_code, 200)
         export_payload = self._read_export_payload(response)
@@ -615,7 +904,7 @@ class StaffAgentAuditAPITests(TestCase):
         self.assertEqual([item["id"] for item in export_payload["errors"]], [str(old_error.id)])
 
     def test_audit_export_rejects_invalid_range(self):
-        response = self.client.get(f"/console/api/staff/agents/{self.agent.id}/audit/export/?range=yesterday")
+        response = self.client.get(f"/console/api/staff/agents/{self.agent.id}/developer/export/?range=yesterday")
 
         self.assertEqual(response.status_code, 400)
 
@@ -650,7 +939,7 @@ class StaffAgentAuditAPITests(TestCase):
         )
 
         with patch("console.agent_audit.export.default_storage.open", side_effect=missing_object_error):
-            response = self.client.get(f"/console/api/staff/agents/{self.agent.id}/audit/export/")
+            response = self.client.get(f"/console/api/staff/agents/{self.agent.id}/developer/export/")
 
         self.assertEqual(response.status_code, 200)
         archive_bytes = b"".join(response.streaming_content)
@@ -660,7 +949,38 @@ class StaffAgentAuditAPITests(TestCase):
         prompt_payload = exported_completion["prompt_archive"]["payload"]
         self.assertEqual(prompt_payload, {"error": "missing_payload"})
 
+    def test_audit_export_loads_completion_prompt_archive_payload(self):
+        prompt_archive = PersistentAgentPromptArchive.objects.create(
+            agent=self.agent,
+            rendered_at=timezone.now(),
+            storage_key="test/audit_export/direct-completion.json.zst",
+            raw_bytes=100,
+            compressed_bytes=50,
+            tokens_before=10,
+            tokens_after=8,
+            tokens_saved=2,
+        )
+        PersistentAgentCompletion.objects.create(
+            agent=self.agent,
+            completion_type=PersistentAgentCompletion.CompletionType.SHORT_DESCRIPTION,
+            prompt_archive=prompt_archive,
+            llm_model="openrouter/test-model",
+            llm_provider="openrouter",
+            billed=True,
+        )
+
+        prompt_payload = {
+            "system_prompt": "system prompt text",
+            "user_prompt": "user prompt text",
+        }
+        with patch("console.agent_audit.export._load_prompt_archive_payload", return_value=prompt_payload):
+            response = self.client.get(f"/console/api/staff/agents/{self.agent.id}/developer/export/")
+
+        self.assertEqual(response.status_code, 200)
+        exported_completion = self._read_export_payload(response)["completions"][0]
+        self.assertEqual(exported_completion["prompt_archive"]["payload"], prompt_payload)
+
     def test_audit_export_requires_staff(self):
         self.client.force_login(self.nonstaff)
-        response = self.client.get(f"/console/api/staff/agents/{self.agent.id}/audit/export/")
+        response = self.client.get(f"/console/api/staff/agents/{self.agent.id}/developer/export/")
         self.assertEqual(response.status_code, 403)
