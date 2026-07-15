@@ -36,6 +36,8 @@ class ApiConfig(AppConfig):
             logger = logging.getLogger(__name__)
             logger.error(f"Failed to import collaborator_signals: {e}")
 
+        from .agent import prompt_cache_signals  # noqa: F401  # pragma: no cover
+
         try:
             from . import system_setting_signals  # noqa: F401  # pragma: no cover
         except ImportError as e:  # pragma: no cover - optional dependency

@@ -23,11 +23,13 @@ from typing import Optional
 import zstandard as zstd
 from django.core.files import File
 from django.core.files.storage import default_storage
+from opentelemetry import trace
 
 from .sqlite_guardrails import clear_guarded_connection, open_guarded_sqlite_connection
 from . import sqlite_analysis, sqlite_digest
 
 logger = logging.getLogger(__name__)
+tracer = trace.get_tracer("gobii.utils")
 
 # Context variable to expose the SQLite DB path to tool execution helpers
 _sqlite_db_path_var: contextvars.ContextVar[str] = contextvars.ContextVar("sqlite_db_path", default=None)
@@ -1038,8 +1040,13 @@ def agent_sqlite_db(agent_uuid: str):  # noqa: D401 – simple generator context
         db_path = os.path.join(tmp_dir, "state.db")
 
         # ---------------- Restore phase ---------------- #
-        if default_storage.exists(storage_key):
-            _restore_sqlite_db_from_storage(storage_key, db_path, agent_uuid)
+        with tracer.start_as_current_span("Restore Agent SQLite State") as restore_span:
+            restored = False
+            if default_storage.exists(storage_key):
+                restored = _restore_sqlite_db_from_storage(storage_key, db_path, agent_uuid)
+            restore_span.set_attribute("sqlite.restored", restored)
+            if os.path.exists(db_path):
+                restore_span.set_attribute("sqlite.restored_bytes", os.path.getsize(db_path))
 
         token = set_sqlite_db_path(db_path)
 

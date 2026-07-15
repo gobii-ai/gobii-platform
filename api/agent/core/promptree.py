@@ -126,6 +126,7 @@ class Prompt:
         self._last: List[_Node] = []
         self._tokens_before_fitting: int = 0
         self._tokens_after_fitting: int = 0
+        self._used_fast_path: bool = False
 
     # builder shortcuts ---------------------------------------------------
     def group(self, name: str, *, weight: int = 1) -> _Node:
@@ -170,17 +171,27 @@ class Prompt:
 
     # public --------------------------------------------------------------
     def render(self, max_tokens: int, **ctx) -> str:
+        self._used_fast_path = False
         # Pass 1: render everything in full
         self._render(self.root, ctx)
         leaves = self._flat(self.root)
 
-        # Pre‑compute overhead (wrapper tag) & total tokens
+        unshrunk_output = self._assemble(self.root, wrap_leaves=True)
+        unshrunk_tokens = self._tok(unshrunk_output)
+        self._tokens_before_fitting = unshrunk_tokens
+        if unshrunk_tokens <= max_tokens:
+            for n in leaves:
+                n.shrunk = False
+            self._tokens_after_fitting = unshrunk_tokens
+            self._last = leaves
+            self._used_fast_path = True
+            return unshrunk_output
+
+        # Pre-compute leaf overhead only when fitting is actually required.
         for n in leaves:
             overhead = self._tok(f"<{n.name}></{n.name}>")
             n._overhead_tokens = overhead  # type: ignore[attr-defined]
             n._length = n.tokens + overhead  # type: ignore[attr-defined]
-
-        self._tokens_before_fitting = sum(n._length for n in leaves)  # type: ignore[attr-defined]
 
         # Pass 2: global allocation
         budgets = self._allocate(leaves, max_tokens)
@@ -207,16 +218,8 @@ class Prompt:
         self._tokens_after_fitting = sum(n.tokens for n in leaves)
         self._last = leaves
 
-        # Assemble nested output with group tags
-        def _assemble(node: _Node) -> str:
-            if node.children:
-                inner = "\n".join(_assemble(c) for c in node.children)
-                if node.name == "root":
-                    return inner  # Skip wrapping the synthetic root
-                return f"<{node.name}>" + inner + f"</{node.name}>"
-            return node.text
-
-        output = _assemble(self.root)
+        # Fitting stores wrapper tags in each leaf; only group tags remain to assemble.
+        output = self._assemble(self.root)
         self._tokens_after_fitting = self._tok(output)
         return output
 
@@ -235,9 +238,21 @@ class Prompt:
     def get_tokens_after_fitting(self) -> int:
         return self._tokens_after_fitting
 
+    def used_fast_path(self) -> bool:
+        return self._used_fast_path
+
     # internals -----------------------------------------------------------
     def _tok(self, txt: str) -> int:
         return self.token_estimator(txt)
+
+    def _assemble(self, node: _Node, *, wrap_leaves: bool = False) -> str:
+        if node.children:
+            inner = "\n".join(
+                self._assemble(child, wrap_leaves=wrap_leaves)
+                for child in node.children
+            )
+            return inner if node.name == "root" else f"<{node.name}>{inner}</{node.name}>"
+        return f"<{node.name}>{node.text}</{node.name}>" if wrap_leaves else node.text
 
     def _render(self, n: _Node, ctx: Dict[str, Any]):
         if n.children:

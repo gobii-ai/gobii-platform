@@ -3,6 +3,7 @@ import string
 from django.test import TestCase, tag
 
 from api.agent.core.promptree import Prompt, hmt
+from api.agent.core.prompt_run_cache import BoundedTokenCountCache
 
 
 def _long_random_text(words: int = 3000) -> str:
@@ -253,6 +254,69 @@ class PromptRenderingTests(TestCase):
         result = p.render(100)
         self.assertIn("Hello", result)
         self.assertIn("How are you?", result)
+
+    def test_below_budget_fast_path_preserves_exact_nested_output(self):
+        estimator = len
+        prompt = Prompt(token_estimator=estimator)
+        group = prompt.group("group")
+        group.section_text("first", "alpha")
+        group.section_text("second", "beta")
+        expected = "<group><first>alpha</first>\n<second>beta</second></group>"
+
+        result = prompt.render(len(expected))
+
+        self.assertEqual(result, expected)
+        self.assertEqual(prompt.get_tokens_before_fitting(), len(expected))
+        self.assertEqual(prompt.get_tokens_after_fitting(), len(expected))
+        self.assertTrue(prompt.used_fast_path())
+
+    def test_over_budget_render_uses_existing_fitting_path(self):
+        prompt = Prompt(token_estimator=lambda text: len(text.split()))
+        prompt.section_text("large", "word " * 100)
+
+        result = prompt.render(20)
+
+        self.assertFalse(prompt.used_fast_path())
+        self.assertIn("BYTES TRUNCATED", result)
+        self.assertEqual(result.count("<large>"), 1)
+        self.assertEqual(result.count("</large>"), 1)
+
+
+@tag("batch_promptree")
+class BoundedTokenCountCacheTests(TestCase):
+    def test_cache_is_model_specific_and_evicts_oldest_entry(self):
+        cache = BoundedTokenCountCache(max_entries=2, max_chars=100)
+        calls = []
+
+        def compute(text):
+            calls.append(text)
+            return len(text)
+
+        self.assertEqual(cache.count("model-a", "one", compute), 3)
+        self.assertEqual(cache.count("model-a", "one", compute), 3)
+        self.assertEqual(cache.count("model-b", "one", compute), 3)
+        self.assertEqual(cache.count("model-a", "two", compute), 3)
+        self.assertEqual(cache.count("model-a", "one", compute), 3)
+
+        self.assertEqual(cache.hits, 1)
+        self.assertEqual(cache.misses, 4)
+        self.assertEqual(calls, ["one", "one", "two", "one"])
+
+    def test_cache_evicts_to_retained_character_limit(self):
+        cache = BoundedTokenCountCache(max_entries=10, max_chars=5)
+        calls = []
+
+        def compute(text):
+            calls.append(text)
+            return len(text)
+
+        cache.count("model", "abc", compute)
+        cache.count("model", "def", compute)
+        cache.count("model", "abc", compute)
+
+        self.assertEqual(cache.hits, 0)
+        self.assertEqual(cache.misses, 3)
+        self.assertEqual(calls, ["abc", "def", "abc"])
 
     def test_context_variable_substitution(self):
         """Test that context variables are properly substituted."""
