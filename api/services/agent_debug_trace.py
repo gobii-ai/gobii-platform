@@ -350,7 +350,11 @@ def _build_completions_section(
     bounds: DebugTraceBounds,
     detail: str,
 ) -> dict[str, Any]:
-    queryset = PersistentAgentCompletion.objects.filter(agent=agent).order_by("-created_at", "-id")
+    queryset = (
+        PersistentAgentCompletion.objects.filter(agent=agent)
+        .select_related("prompt_archive")
+        .order_by("-created_at", "-id")
+    )
     queryset = _apply_created_bounds(queryset, "created_at", bounds)
     completions = list(queryset[:limit])
     completion_ids = [completion.id for completion in completions]
@@ -387,7 +391,7 @@ def _build_completions_section(
     items = [
         _serialize_completion_debug(
             completion,
-            prompt_archive=prompt_archives_by_completion_id.get(completion.id),
+            prompt_archive=completion.prompt_archive or prompt_archives_by_completion_id.get(completion.id),
             tool_call_count=tool_counts_by_completion_id.get(completion.id, 0),
             detail=detail,
         )

@@ -11370,6 +11370,14 @@ class PersistentAgentCompletion(models.Model):
         blank=True,
         help_text="Reasoning/thinking content returned by the LLM when available.",
     )
+    prompt_archive = models.OneToOneField(
+        "PersistentAgentPromptArchive",
+        on_delete=models.SET_NULL,
+        related_name="completion",
+        null=True,
+        blank=True,
+        help_text="Archived prompt payload used for this completion, when available.",
+    )
     input_cost_total = models.DecimalField(
         max_digits=12,
         decimal_places=6,

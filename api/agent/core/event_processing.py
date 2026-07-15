@@ -6005,6 +6005,7 @@ def _run_agent_loop(
                         completion = PersistentAgentCompletion.objects.create(
                             agent=agent,
                             eval_run_id=eval_run_id,
+                            prompt_archive_id=prompt_archive_id,
                             llm_tool_names=_tool_definition_names_for_completion(iteration_tools),
                             thinking_content=thinking_content,
                             **billing_snapshot,

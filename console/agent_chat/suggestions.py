@@ -330,12 +330,13 @@ def _generate_dynamic_suggestions(
 
     for provider_key, model, params in configs:
         try:
+            prompt_messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ]
             response = run_completion(
                 model=model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
+                messages=prompt_messages,
                 params=params,
                 tools=[tool_def],
                 drop_params=True,
@@ -347,6 +348,7 @@ def _generate_dynamic_suggestions(
                 model=model,
                 provider=provider_key,
                 pricing_model=params.get("pricing_model"),
+                prompt_messages=prompt_messages,
             )
             suggestions = _extract_generated_suggestions(response, prompt_count)
             if suggestions:

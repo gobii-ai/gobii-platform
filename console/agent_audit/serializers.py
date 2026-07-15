@@ -128,6 +128,7 @@ def serialize_tool_call(step: PersistentAgentStep) -> dict:
 
 
 def serialize_completion(completion: PersistentAgentCompletion, prompt_archive: PersistentAgentPromptArchive | None = None, tool_calls: list[dict] | None = None) -> dict:
+    prompt_archive = prompt_archive or getattr(completion, "prompt_archive", None)
     return {
         "kind": "completion",
         "id": str(completion.id),

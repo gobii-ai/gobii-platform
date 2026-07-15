@@ -461,6 +461,7 @@ def llm_summarise_steps(
             model=model,
             provider=provider,
             pricing_model=params.get("pricing_model"),
+            prompt_messages=prompt,
         )
 
         set_usage_span_attributes(trace.get_current_span(), usage)

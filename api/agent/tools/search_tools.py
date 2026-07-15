@@ -975,12 +975,13 @@ def _search_with_llm(
                 ):
                     run_kwargs["safety_identifier"] = str(safety_value)
 
+                prompt_messages = [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ]
                 response = run_completion(
                     model=model,
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt},
-                    ],
+                    messages=prompt_messages,
                     params=params,
                     tools=tool_defs,
                     drop_params=True,
@@ -994,6 +995,7 @@ def _search_with_llm(
                     model=model,
                     provider=provider,
                     pricing_model=params.get("pricing_model"),
+                    prompt_messages=prompt_messages,
                 )
                 set_usage_span_attributes(trace.get_current_span(), usage)
 

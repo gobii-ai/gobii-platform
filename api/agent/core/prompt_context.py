@@ -12,12 +12,9 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from functools import partial
 from time import monotonic
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple
-from uuid import UUID, uuid4
+from uuid import UUID
 
-import zstandard as zstd
 from django.core.exceptions import ObjectDoesNotExist
-from django.core.files.base import ContentFile
-from django.core.files.storage import default_storage
 from django.contrib.auth import get_user_model
 from django.db import DatabaseError, transaction
 from django.db.models import Q, Prefetch, Sum
@@ -40,6 +37,7 @@ from api.services.prompt_settings import get_prompt_settings
 from api.services.sandbox_compute import sandbox_compute_enabled_for_agent
 from api.services.user_timezone import is_offpeak_hour, resolve_user_local_time, resolve_user_timezone
 from api.services.agent_owner_custom_instructions import get_custom_instructions_for_organization_id, get_custom_instructions_for_user_id
+from api.services.prompt_archives import archive_agent_prompt
 
 from ...models import (
     AgentCommPeerState,
@@ -689,92 +687,15 @@ def _archive_rendered_prompt(
     tokens_saved: int,
     token_budget: int,
 ) -> Tuple[Optional[str], Optional[int], Optional[int], Optional[UUID]]:
-    """Compress and persist the rendered prompt to object storage."""
-
-    timestamp = datetime.now(timezone.utc)
-    archive_payload = {
-        "agent_id": str(agent.id),
-        "rendered_at": timestamp.isoformat(),
-        "system_prompt": system_prompt,
-        "user_prompt": user_prompt,
-        "token_budget": token_budget,
-        "tokens_before": tokens_before,
-        "tokens_after": tokens_after,
-        "tokens_saved": tokens_saved,
-    }
-
-    try:
-        payload_bytes = json.dumps(archive_payload).encode("utf-8")
-        compressed = zstd.ZstdCompressor(level=3).compress(payload_bytes)
-        archive_key = (
-            f"persistent_agents/{agent.id}/prompt_archives/"
-            f"{timestamp.strftime('%Y%m%dT%H%M%S%fZ')}_{uuid4().hex}.json.zst"
-        )
-        default_storage.save(archive_key, ContentFile(compressed))
-        archive_id: Optional[UUID] = None
-        try:
-            archive = PersistentAgentPromptArchive.objects.create(
-                agent=agent,
-                rendered_at=timestamp,
-                storage_key=archive_key,
-                raw_bytes=len(payload_bytes),
-                compressed_bytes=len(compressed),
-                tokens_before=tokens_before,
-                tokens_after=tokens_after,
-                tokens_saved=tokens_saved,
-            )
-            archive_id = archive.id
-        except Exception as exc:
-            from api.models import PersistentAgentError
-            from api.services.agent_error_logging import log_agent_error
-
-            log_agent_error(
-                agent,
-                category=PersistentAgentError.Category.PROMPT_CONSTRUCTION,
-                source="api.agent.core.prompt_context._archive_prompt.metadata",
-                message=f"Prompt archive metadata persistence failed for agent {agent.id}",
-                exc=exc,
-                logger=logger,
-                context={
-                    "archive_key": archive_key,
-                    "raw_bytes": len(payload_bytes),
-                    "compressed_bytes": len(compressed),
-                    "tokens_before": tokens_before,
-                    "tokens_after": tokens_after,
-                    "tokens_saved": tokens_saved,
-                },
-            )
-            try:
-                default_storage.delete(archive_key)
-                logger.info("Deleted orphaned prompt archive from storage: %s", archive_key)
-            except Exception:
-                logger.exception("Failed to delete orphaned prompt archive from storage: %s", archive_key)
-        logger.info(
-            "Archived prompt for agent %s: key=%s raw_bytes=%d compressed_bytes=%d",
-            agent.id,
-            archive_key,
-            len(payload_bytes),
-            len(compressed),
-        )
-        return archive_key, len(payload_bytes), len(compressed), archive_id
-    except Exception as exc:
-        from api.models import PersistentAgentError
-        from api.services.agent_error_logging import log_agent_error
-
-        log_agent_error(
-            agent,
-            category=PersistentAgentError.Category.PROMPT_CONSTRUCTION,
-            source="api.agent.core.prompt_context._archive_prompt",
-            message=f"Prompt archive persistence failed for agent {agent.id}",
-            exc=exc,
-            logger=logger,
-            context={
-                "tokens_before": tokens_before,
-                "tokens_after": tokens_after,
-                "tokens_saved": tokens_saved,
-            },
-        )
-        return None, None, None, None
+    return archive_agent_prompt(
+        agent=agent,
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        tokens_before=tokens_before,
+        tokens_after=tokens_after,
+        tokens_saved=tokens_saved,
+        token_budget=token_budget,
+    )
 
 
 

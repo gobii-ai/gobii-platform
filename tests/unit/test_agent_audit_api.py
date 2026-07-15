@@ -31,6 +31,7 @@ from api.models import (
     EvalRunTask,
 )
 from api.agent.core.agent_judge import NO_ACTION, REPORT_TOOL_NAME
+from console.agent_audit.serializers import serialize_completion
 
 
 def _judge_response(payload: dict):
@@ -287,12 +288,7 @@ class StaffAgentAuditAPITests(TestCase):
     def test_prompt_archive_is_staff_only(self):
         completion = PersistentAgentCompletion.objects.create(
             agent=self.agent,
-            completion_type=PersistentAgentCompletion.CompletionType.ORCHESTRATOR,
-        )
-        prompt_step = PersistentAgentStep.objects.create(
-            agent=self.agent,
-            completion=completion,
-            description="Prompt archive step",
+            completion_type=PersistentAgentCompletion.CompletionType.LLM_JUDGE,
         )
         payload = {
             "agent_id": str(self.agent.id),
@@ -316,8 +312,10 @@ class StaffAgentAuditAPITests(TestCase):
             tokens_before=4,
             tokens_after=4,
             tokens_saved=0,
-            step=prompt_step,
         )
+        completion.prompt_archive = archive
+        completion.save(update_fields=["prompt_archive"])
+        self.assertEqual(serialize_completion(completion)["prompt_archive"]["id"], str(archive.id))
 
         timeline_response = self.client.get(
             f"/console/api/agents/{self.agent.id}/timeline/?developer=1"

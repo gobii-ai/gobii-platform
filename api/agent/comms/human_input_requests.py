@@ -1354,12 +1354,13 @@ def _resolve_requests_with_llm(
                 "type": "function",
                 "function": {"name": "resolve_human_input_requests"},
             }
+        prompt_messages = _build_human_input_matching_messages(
+            body_text=body_text,
+            request_objects=request_objects,
+        )
         response = run_completion(
             model=model,
-            messages=_build_human_input_matching_messages(
-                body_text=body_text,
-                request_objects=request_objects,
-            ),
+            messages=prompt_messages,
             params=completion_params,
             tools=tools,
             drop_params=True,
@@ -1372,6 +1373,7 @@ def _resolve_requests_with_llm(
             model=model,
             provider=provider,
             pricing_model=completion_params.get("pricing_model"),
+            prompt_messages=prompt_messages,
         )
         tool_payload = _extract_human_input_match_tool_payload(response)
         if not tool_payload:

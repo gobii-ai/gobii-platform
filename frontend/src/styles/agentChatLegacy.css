@@ -679,6 +679,7 @@
     box-shadow: 0 18px 45px rgba(41, 28, 84, 0.18);
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
+    outline: none;
 }
 .banner-overflow-menu {
     padding: 0.45rem;
@@ -687,6 +688,63 @@
     margin-top: 0.35rem;
     padding-top: 0.35rem;
     border-top: 1px solid rgba(99, 102, 241, 0.08);
+}
+.banner-overflow-developer-controls {
+    display: block;
+}
+.banner-overflow-developer-controls .developer-mode-controls {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.2rem;
+    padding: 0.15rem;
+}
+.banner-overflow-developer-controls .agent-chat-button.banner-action {
+    width: 100%;
+    min-height: 2.7rem;
+    justify-content: flex-start;
+    border-color: transparent;
+    border-radius: 0.8rem;
+    background: transparent;
+    padding: 0.72rem 0.75rem;
+    color: #453370;
+    font-size: 0.78rem;
+}
+.banner-overflow-developer-controls .developer-action--process > svg:first-child,
+.banner-overflow-developer-controls .developer-action--judge > svg:first-child,
+.banner-overflow-developer-controls .developer-action--admin > svg:first-child {
+    width: 1.7rem;
+    height: 1.7rem;
+    padding: 0.4rem;
+    border-radius: 999px;
+    background: rgba(99, 102, 241, 0.1);
+    color: #4f46e5;
+}
+.banner-overflow-developer-controls .agent-chat-button.banner-action:hover:not(:disabled):not([aria-disabled='true']) {
+    border-color: transparent;
+    background: rgba(99, 102, 241, 0.08);
+    transform: none;
+}
+.banner-overflow-developer-controls .developer-export-control {
+    width: 100%;
+    height: 2.7rem;
+    border-color: transparent;
+    background: transparent;
+}
+.banner-overflow-developer-controls .developer-export-control:focus-within {
+    outline-offset: -1px;
+}
+.banner-overflow-developer-controls .developer-export-trigger {
+    flex: 1;
+    justify-content: space-between;
+}
+.banner-overflow-developer-controls .developer-export-download {
+    width: 2.7rem !important;
+    border-left: 0 !important;
+    justify-content: center;
+}
+.banner-overflow-popover[data-developer-action-layout='partial'] .developer-action--process,
+.banner-overflow-popover[data-developer-action-layout='partial'] .developer-action--judge {
+    display: none;
 }
 .banner-overflow-heading {
     padding: 0.35rem 0.55rem 0.3rem;
@@ -943,6 +1001,21 @@
         padding: 0 0.45rem;
         justify-content: center;
     }
+}
+.banner[data-developer-mode='true'][data-developer-action-layout='partial'] .banner-desktop-only,
+.banner[data-developer-mode='true'][data-developer-action-layout='overflow'] .banner-desktop-only {
+    display: none;
+}
+.banner[data-developer-mode='true'][data-developer-action-layout='partial'] .banner-mobile-only,
+.banner[data-developer-mode='true'][data-developer-action-layout='overflow'] .banner-mobile-only {
+    display: inline-flex;
+}
+.banner[data-developer-mode='true'][data-developer-action-layout='partial'] .banner-developer-controls .developer-action--admin,
+.banner[data-developer-mode='true'][data-developer-action-layout='partial'] .banner-developer-controls .developer-action--export {
+    display: none;
+}
+.banner[data-developer-mode='true'][data-developer-action-layout='overflow'] .banner-developer-controls {
+    display: none;
 }
 .banner-close {
     isolation: isolate;

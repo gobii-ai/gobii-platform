@@ -33,7 +33,7 @@ class PromptArchivePruningTests(TestCase):
         )
         self.storage_dir = tempfile.mkdtemp()
         self.storage = FileSystemStorage(location=self.storage_dir)
-        self.storage_patch = patch('api.agent.core.prompt_context.default_storage', self.storage)
+        self.storage_patch = patch('api.services.prompt_archives.default_storage', self.storage)
         self.models_storage_patch = patch('api.models.default_storage', self.storage)
         self.storage_patch.start()
         self.models_storage_patch.start()

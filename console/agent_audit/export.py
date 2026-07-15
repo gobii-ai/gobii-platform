@@ -150,7 +150,7 @@ def _iter_completion_chunks(
 ) -> Iterable[Sequence[PersistentAgentCompletion]]:
     chunk: list[PersistentAgentCompletion] = []
     queryset = _apply_export_range(
-        PersistentAgentCompletion.objects.filter(agent=agent),
+        PersistentAgentCompletion.objects.filter(agent=agent).select_related("prompt_archive"),
         export_range,
         "created_at",
     ).order_by("-created_at", "-id")
@@ -203,7 +203,7 @@ def _serialize_completion_chunk(
     serialized: list[dict[str, Any]] = []
     for completion in completions:
         completion_id = str(completion.id)
-        archive = prompt_archive_by_completion_id.get(completion_id)
+        archive = completion.prompt_archive or prompt_archive_by_completion_id.get(completion_id)
         prompt_meta = serialize_prompt_meta(archive) if archive is not None else None
         prompt_payload: dict[str, Any] | None = None
         if archive is not None:

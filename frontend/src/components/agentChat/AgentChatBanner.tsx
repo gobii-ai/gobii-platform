@@ -13,6 +13,10 @@ import type { AgentChatSidebarMode } from './sidebarMode'
 import { AgentChatAvatar, AgentChatButton, AgentChatMenuItem } from './uiPrimitives'
 
 export type ConnectionStatusTone = 'connected' | 'connecting' | 'reconnecting' | 'offline' | 'error'
+type DeveloperActionLayout = 'expanded' | 'partial' | 'overflow'
+
+const EXPANDED_DEVELOPER_ACTIONS_MIN_WIDTH = 1360
+const PARTIAL_DEVELOPER_ACTIONS_MIN_WIDTH = 960
 
 type AgentChatBannerProps = {
   agentNameOverride?: string | null
@@ -86,7 +90,9 @@ export const AgentChatBanner = memo(function AgentChatBanner({
   const trimmedMiniDescription = agentMiniDescription?.trim() || ''
   const bannerRef = useRef<HTMLDivElement | null>(null)
   const [animate, setAnimate] = useState(false)
+  const [developerActionLayout, setDeveloperActionLayout] = useState<DeveloperActionLayout>('expanded')
   const hasAnimatedRef = useRef(false)
+  const hasDeveloperControls = Boolean(developerControls)
 
   // Subscription state
   const {
@@ -124,9 +130,21 @@ export const AgentChatBanner = memo(function AgentChatBanner({
 
     const updateHeight = () => {
       const height = node.getBoundingClientRect().height
-      const primaryHeight = node.querySelector<HTMLElement>('.banner')?.getBoundingClientRect().height ?? height
+      const primaryBanner = node.querySelector<HTMLElement>('.banner')
+      const primaryRect = primaryBanner?.getBoundingClientRect()
+      const primaryHeight = primaryRect?.height ?? height
       document.documentElement.style.setProperty('--agent-chat-banner-height', `${height}px`)
       document.documentElement.style.setProperty('--agent-chat-primary-banner-height', `${primaryHeight}px`)
+
+      if (!developerMode || !hasDeveloperControls || !primaryRect) {
+        setDeveloperActionLayout('expanded')
+      } else if (primaryRect.width >= EXPANDED_DEVELOPER_ACTIONS_MIN_WIDTH) {
+        setDeveloperActionLayout('expanded')
+      } else if (primaryRect.width >= PARTIAL_DEVELOPER_ACTIONS_MIN_WIDTH) {
+        setDeveloperActionLayout('partial')
+      } else {
+        setDeveloperActionLayout('overflow')
+      }
     }
 
     updateHeight()
@@ -138,7 +156,7 @@ export const AgentChatBanner = memo(function AgentChatBanner({
       document.documentElement.style.removeProperty('--agent-chat-banner-height')
       document.documentElement.style.removeProperty('--agent-chat-primary-banner-height')
     }
-  }, [])
+  }, [developerMode, hasDeveloperControls])
 
   // Animate on first appearance only (not when switching agents)
   useEffect(() => {
@@ -211,7 +229,11 @@ export const AgentChatBanner = memo(function AgentChatBanner({
 
   return (
     <div className="banner-shell" data-sidebar-mode={sidebarMode} ref={bannerRef}>
-      <div className="banner">
+      <div
+        className="banner"
+        data-developer-mode={developerMode ? 'true' : 'false'}
+        data-developer-action-layout={developerActionLayout}
+      >
         {/* Left: Avatar + Info */}
         <div className="banner-left">
           <AgentChatAvatar
@@ -346,7 +368,10 @@ export const AgentChatBanner = memo(function AgentChatBanner({
               >
                 <EllipsisVertical size={16} strokeWidth={2.2} />
               </Button>
-              <Popover className="banner-overflow-popover">
+              <Popover
+                className="banner-overflow-popover"
+                data-developer-action-layout={developerActionLayout}
+              >
                 <Dialog className="banner-overflow-menu">
                   {showShareButton || showPublicShareButton || showSettingsButton || showDeveloperMode ? (
                     <div className="banner-overflow-section">
@@ -436,6 +461,9 @@ export const AgentChatBanner = memo(function AgentChatBanner({
                               <span className="banner-overflow-item-label">Settings</span>
                             </span>
                           </AgentChatMenuItem>
+                        ) : null}
+                        {developerMode && developerControls && developerActionLayout !== 'expanded' ? (
+                          <div className="banner-overflow-developer-controls">{developerControls}</div>
                         ) : null}
                       </div>
                     </div>

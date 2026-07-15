@@ -143,7 +143,7 @@ def _event(payload: dict, *, timestamp: datetime, kind: str, identifier, develop
 
 def _completion_events(agent, cursor, direction, limit, at, developer):
     queryset = _apply_cursor(
-        PersistentAgentCompletion.objects.filter(agent=agent),
+        PersistentAgentCompletion.objects.filter(agent=agent).select_related("prompt_archive"),
         cursor,
         direction=direction,
         kind="completion",
@@ -162,7 +162,11 @@ def _completion_events(agent, cursor, direction, limit, at, developer):
     }
     return [
         _event(
-            serialize_completion(completion, prompt_archive=prompt_archives.get(completion.id), tool_calls=[]),
+            serialize_completion(
+                completion,
+                prompt_archive=completion.prompt_archive or prompt_archives.get(completion.id),
+                tool_calls=[],
+            ),
             timestamp=completion.created_at,
             kind="completion",
             identifier=completion.id,

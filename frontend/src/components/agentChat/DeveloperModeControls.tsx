@@ -97,19 +97,19 @@ export function DeveloperModeControls({ agentId, processingActive }: DeveloperMo
   return (
     <>
       <div className="developer-mode-controls">
-        <AgentChatButton className="banner-action banner-action--pill" size="sm" onClick={() => void processEvents()} disabled={processQueueing || processQueued || processingActive}>
+        <AgentChatButton className="banner-action banner-action--pill developer-action developer-action--process" size="sm" onClick={() => void processEvents()} disabled={processQueueing || processQueued || processingActive}>
           {processQueueing || processQueued || processingActive ? <Loader2 className="animate-spin" aria-hidden /> : <RefreshCcw aria-hidden />}
           {processingActive ? 'Processing…' : processQueueing ? 'Queueing…' : processQueued ? 'Queued…' : 'Process events'}
         </AgentChatButton>
-        <AgentChatButton className="banner-action banner-action--pill" size="sm" onClick={() => void runJudge()} disabled={judgeRunning}>
+        <AgentChatButton className="banner-action banner-action--pill developer-action developer-action--judge" size="sm" onClick={() => void runJudge()} disabled={judgeRunning}>
           <Brain className={judgeRunning ? 'animate-pulse' : undefined} aria-hidden />
           {judgeRunning ? 'Judging…' : 'Run LLM judge'}
         </AgentChatButton>
-        <AgentChatButton as="a" className="banner-action banner-action--pill" size="sm" href={adminUrl} target="_blank" rel="noreferrer" title="Open agent in Django admin">
+        <AgentChatButton as="a" className="banner-action banner-action--pill developer-action developer-action--admin" size="sm" href={adminUrl} target="_blank" rel="noreferrer" title="Open agent in Django admin">
           <Settings aria-hidden />
           Django admin
         </AgentChatButton>
-        <div className="developer-export-control">
+        <div className="developer-export-control developer-action developer-action--export">
           <MenuTrigger isOpen={exportMenuOpen} onOpenChange={setExportMenuOpen}>
             <Button
               className="agent-chat-button banner-action banner-action--pill developer-export-trigger"

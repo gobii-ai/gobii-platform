@@ -41,6 +41,7 @@ def _log_avatar_image_generation_completion(
     model_name: str | None,
     pricing_model: str | None = None,
     response: Any,
+    prompt: str,
 ) -> None:
     log_agent_completion(
         agent,
@@ -49,6 +50,7 @@ def _log_avatar_image_generation_completion(
         model=model_name,
         provider=provider_hint_from_model(model_name),
         pricing_model=pricing_model,
+        prompt_text=prompt,
     )
 
 
@@ -148,6 +150,7 @@ def _generate_visual_description_via_llm(
         model=model,
         provider=provider,
         pricing_model=params.get("pricing_model"),
+        prompt_messages=prompt,
     )
 
     try:
@@ -192,6 +195,7 @@ def _generate_avatar_image(agent: PersistentAgent, prompt: str) -> AvatarGenerat
                 model_name=model_name,
                 pricing_model=pricing_model,
                 response=generated.response,
+                prompt=prompt,
             )
             image_bytes = generated.image_bytes
             mime_type = generated.mime_type
@@ -208,6 +212,7 @@ def _generate_avatar_image(agent: PersistentAgent, prompt: str) -> AvatarGenerat
                 model_name=model_name,
                 pricing_model=pricing_model,
                 response=getattr(exc, "response", None),
+                prompt=prompt,
             )
             errors.append(f"{config.endpoint_key or config.model}: {exc}")
             logger.info("Avatar generation attempt failed: %s", errors[-1])
@@ -217,6 +222,7 @@ def _generate_avatar_image(agent: PersistentAgent, prompt: str) -> AvatarGenerat
                 model_name=model_name,
                 pricing_model=pricing_model,
                 response=None,
+                prompt=prompt,
             )
             errors.append(f"{config.endpoint_key or config.model}: {exc}")
             logger.info("Avatar generation attempt failed: %s", errors[-1])
@@ -226,6 +232,7 @@ def _generate_avatar_image(agent: PersistentAgent, prompt: str) -> AvatarGenerat
                 model_name=model_name,
                 pricing_model=pricing_model,
                 response=None,
+                prompt=prompt,
             )
             errors.append(f"{config.endpoint_key or config.model}: {type(exc).__name__}: {exc}")
             logger.warning("Avatar generation attempt failed", exc_info=True)

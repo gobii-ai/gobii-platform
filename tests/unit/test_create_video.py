@@ -703,3 +703,4 @@ class ExecuteCreateVideoTests(TestCase):
             mock_log_completion.call_args.kwargs["completion_type"],
             PersistentAgentCompletion.CompletionType.VIDEO_GENERATION,
         )
+        self.assertEqual(mock_log_completion.call_args.kwargs["prompt_text"], "a sunset")
