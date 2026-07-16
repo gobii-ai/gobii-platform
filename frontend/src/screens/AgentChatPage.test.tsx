@@ -38,6 +38,7 @@ const {
   agentChatStoreState,
   timelineState,
   usageBurnRateState,
+  fetchUsageBurnRateMock,
 } = vi.hoisted(() => ({
   createAgentMock: vi.fn(),
   createSystemMessageMock: vi.fn(),
@@ -119,6 +120,7 @@ const {
     projection: { projected_days_remaining: null as number | null },
     snapshot: { burn_rate_per_day: null as number | null },
   },
+  fetchUsageBurnRateMock: vi.fn(),
 }))
 
 vi.mock('../api/agents', async (importOriginal) => ({
@@ -172,7 +174,7 @@ vi.mock('../components/usage/api', () => ({
       enabled: false,
     },
   })),
-  fetchUsageBurnRate: vi.fn(async () => usageBurnRateState),
+  fetchUsageBurnRate: fetchUsageBurnRateMock,
 }))
 
 vi.mock('../components/agentChat/AgentChatLayout', async () => {
@@ -631,6 +633,8 @@ describe('AgentChatPage trial onboarding', () => {
     })
     updateAgentMock.mockReset()
     fetchAgentSpawnIntentMock.mockReset()
+    fetchUsageBurnRateMock.mockReset()
+    fetchUsageBurnRateMock.mockImplementation(async () => usageBurnRateState)
     updateUserPreferencesMock.mockReset()
     updateUserPreferencesMock.mockResolvedValue({ preferences: {} })
     useQuickSettingsMock.mockClear()
@@ -650,6 +654,12 @@ describe('AgentChatPage trial onboarding', () => {
     usageBurnRateState.extra_tasks.enabled = false
     usageBurnRateState.projection.projected_days_remaining = null
     usageBurnRateState.snapshot.burn_rate_per_day = null
+    llmIntelligence.maxAllowedTier = 'standard'
+    llmIntelligence.options.splice(0, llmIntelligence.options.length, {
+      key: 'standard',
+      label: 'Standard',
+      multiplier: 1,
+    })
     agentChatStoreState.agentId = null
     agentChatStoreState.pendingEvents = []
     agentChatStoreState.hasUnseenActivity = false
@@ -754,6 +764,12 @@ describe('AgentChatPage trial onboarding', () => {
 
   it('routes template recommendations through the new-agent credit gate', async () => {
     window.history.pushState({}, '', '/app/agents/new')
+    llmIntelligence.maxAllowedTier = 'premium'
+    llmIntelligence.options.push({
+      key: 'premium',
+      label: 'Premium',
+      multiplier: 2,
+    })
     usageBurnRateState.quota.unlimited = false
     usageBurnRateState.projection.projected_days_remaining = 1
     usageBurnRateState.snapshot.burn_rate_per_day = 5
@@ -778,6 +794,7 @@ describe('AgentChatPage trial onboarding', () => {
             templateCode: 'talent-scout',
             templateId: 'template-1',
             templateSource: 'public',
+            preferredLlmTier: 'max',
             likeCount: 4,
             isOfficial: true,
           },
@@ -790,6 +807,12 @@ describe('AgentChatPage trial onboarding', () => {
     fireEvent.click(await screen.findByTestId('template-recommendation-template-1'))
 
     expect(createAgentMock).not.toHaveBeenCalled()
+    await waitFor(() => {
+      expect(fetchUsageBurnRateMock).toHaveBeenCalledWith(
+        { tier: 'premium' },
+        expect.any(AbortSignal),
+      )
+    })
     fireEvent.click(await screen.findByTestId('intelligence-gate-continue'))
 
     await waitFor(() => {
@@ -804,6 +827,7 @@ describe('AgentChatPage trial onboarding', () => {
           templateCode: 'talent-scout',
           templateId: 'template-1',
           templateSource: 'public',
+          preferredLlmTier: 'max',
         },
       )
     })

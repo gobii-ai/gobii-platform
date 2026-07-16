@@ -119,6 +119,22 @@ import { appendReturnTo } from '../util/returnTo'
 const LOW_CREDIT_DAY_THRESHOLD = 2
 const ROSTER_REFRESH_INTERVAL_MS = 20_000
 const SIGNUP_PREVIEW_PANEL_SOURCE = 'signup_preview_panel'
+const INTELLIGENCE_TIER_ORDER: Record<IntelligenceTierKey, number> = {
+  standard: 0,
+  premium: 1,
+  max: 2,
+  ultra: 3,
+  ultra_max: 4,
+}
+
+function clampIntelligenceTier(
+  requestedTier: IntelligenceTierKey,
+  maxAllowedTier: IntelligenceTierKey,
+): IntelligenceTierKey {
+  return INTELLIGENCE_TIER_ORDER[requestedTier] <= INTELLIGENCE_TIER_ORDER[maxAllowedTier]
+    ? requestedTier
+    : maxAllowedTier
+}
 
 function createOptimisticClientId(): string {
   const now = Date.now()
@@ -3066,7 +3082,6 @@ export function AgentChatPage({
   const burnRateTier = (resolvedIntelligenceTier || 'standard') as IntelligenceTierKey
   const {
     data: burnRateSummary,
-    refetch: refetchBurnRateSummary,
   } = useQuery<UsageBurnRateResponse, Error>({
     queryKey: ['usage-burn-rate', 'agent-chat', usageContextKey, burnRateTier],
     queryFn: ({ signal }) => fetchUsageBurnRate({ tier: burnRateTier }, signal),
@@ -3477,23 +3492,27 @@ export function AgentChatPage({
         return
       }
       const templateTier = template?.preferredLlmTier?.trim() || null
-      const selectedTier = (
+      const requestedTier = (
         draftIntelligenceTierOverride
         || templateTier
         || resolvedIntelligenceTier
         || 'standard'
       ) as IntelligenceTierKey
-      const option = llmIntelligence?.options.find((item) => item.key === selectedTier) ?? null
       const allowedTier = (llmIntelligence?.maxAllowedTier || 'standard') as IntelligenceTierKey
+      const selectedTier = clampIntelligenceTier(requestedTier, allowedTier)
+      const option = llmIntelligence?.options.find((item) => item.key === selectedTier) ?? null
       const multiplier = option?.multiplier ?? 1
       let estimatedDaysRemaining: number | null = null
       let burnRatePerDay: number | null = null
       let lowCredits = false
-      let burnRatePayload = burnRateSummary
+      let burnRatePayload = selectedTier === burnRateTier ? burnRateSummary : undefined
       if (!burnRatePayload && shouldFetchUsageBurnRate) {
         try {
-          const refreshed = await refetchBurnRateSummary()
-          burnRatePayload = refreshed.data
+          burnRatePayload = await queryClient.fetchQuery({
+            queryKey: ['usage-burn-rate', 'agent-chat', usageContextKey, selectedTier],
+            queryFn: ({ signal }) => fetchUsageBurnRate({ tier: selectedTier }, signal),
+            staleTime: 60_000,
+          })
         } catch (err) {
           burnRatePayload = undefined
         }
@@ -3585,18 +3604,17 @@ export function AgentChatPage({
     extraTasksEnabled,
     hasUnlimitedQuota,
     isNewAgent,
-    llmIntelligence?.canEdit,
     llmIntelligence?.maxAllowedTier,
-    llmIntelligence?.maxAllowedTierRank,
     llmIntelligence?.options,
     queryClient,
     receiveRealtimeEvent,
     resolvedIntelligenceTier,
-    refetchBurnRateSummary,
+    burnRateTier,
     scrollToBottom,
     sendMessage,
     sendMessageDisabledReason,
     shouldFetchUsageBurnRate,
+    usageContextKey,
   ])
 
   const handleSendSystemMessage = useCallback(async (body: string) => {
