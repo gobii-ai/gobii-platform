@@ -15,7 +15,10 @@ from api.models import (
     Organization,
     SmsContactPurpose,
 )
-from api.agent.tools.request_contact_permission import execute_request_contact_permission
+from api.agent.tools.request_contact_permission import (
+    execute_request_contact_permission,
+    get_request_contact_permission_tool,
+)
 from constants.feature_flags import SMS_CONTACT_PURPOSE_REQUIRED
 
 User = get_user_model()
@@ -351,6 +354,102 @@ class AllowlistDirectionTests(TestCase):
             request.sms_contact_purpose_details,
             "Internal team action item alerts only.",
         )
+
+    def test_request_contact_permission_auto_approves_new_email(self):
+        self.agent.contact_approval_mode = PersistentAgent.ContactApprovalMode.AUTO_APPROVE_EMAIL
+        self.agent.save(update_fields=["contact_approval_mode"])
+
+        result = execute_request_contact_permission(self.agent, {
+            "contacts": [
+                {
+                    "channel": "email",
+                    "address": "Auto.Approved@Example.com",
+                    "name": "Auto Approved",
+                    "reason": "Send an update.",
+                    "purpose": "Status update",
+                }
+            ]
+        })
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["auto_approved_count"], 1)
+        self.assertEqual(result["created_count"], 0)
+        self.assertIsNone(result["approval_url"])
+        request = CommsAllowlistRequest.objects.get(address="auto.approved@example.com")
+        self.assertEqual(request.status, CommsAllowlistRequest.RequestStatus.APPROVED)
+        entry = CommsAllowlistEntry.objects.get(address="auto.approved@example.com")
+        self.assertTrue(entry.allow_inbound)
+        self.assertTrue(entry.allow_outbound)
+        self.assertFalse(entry.can_configure)
+
+    def test_request_contact_permission_auto_approves_email_but_keeps_sms_pending(self):
+        self.agent.contact_approval_mode = PersistentAgent.ContactApprovalMode.AUTO_APPROVE_EMAIL
+        self.agent.save(update_fields=["contact_approval_mode"])
+
+        result = execute_request_contact_permission(self.agent, {
+            "contacts": [
+                {
+                    "channel": "email",
+                    "address": "email@example.com",
+                    "reason": "Send an update.",
+                    "purpose": "Status update",
+                },
+                {
+                    "channel": "sms",
+                    "address": "+15551234567",
+                    "reason": "Send an alert.",
+                    "purpose": "Operational alert",
+                },
+            ]
+        })
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["auto_approved_count"], 1)
+        self.assertEqual(result["created_count"], 1)
+        self.assertIsNotNone(result["approval_url"])
+        self.assertEqual(
+            CommsAllowlistRequest.objects.get(channel=CommsChannel.EMAIL).status,
+            CommsAllowlistRequest.RequestStatus.APPROVED,
+        )
+        self.assertEqual(
+            CommsAllowlistRequest.objects.get(channel=CommsChannel.SMS).status,
+            CommsAllowlistRequest.RequestStatus.PENDING,
+        )
+
+    def test_request_contact_permission_leaves_existing_pending_email_for_review(self):
+        self.agent.contact_approval_mode = PersistentAgent.ContactApprovalMode.AUTO_APPROVE_EMAIL
+        self.agent.save(update_fields=["contact_approval_mode"])
+        pending = CommsAllowlistRequest.objects.create(
+            agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address="pending@example.com",
+            reason="Existing request.",
+            purpose="Existing purpose",
+        )
+
+        result = execute_request_contact_permission(self.agent, {
+            "contacts": [
+                {
+                    "channel": "email",
+                    "address": "pending@example.com",
+                    "reason": "Try again.",
+                    "purpose": "Follow up",
+                }
+            ]
+        })
+
+        self.assertEqual(result["already_pending_count"], 1)
+        pending.refresh_from_db()
+        self.assertEqual(pending.status, CommsAllowlistRequest.RequestStatus.PENDING)
+        self.assertFalse(CommsAllowlistEntry.objects.filter(address="pending@example.com").exists())
+
+    def test_auto_approval_tool_description_keeps_sms_review_explicit(self):
+        self.agent.contact_approval_mode = PersistentAgent.ContactApprovalMode.AUTO_APPROVE_EMAIL
+        tool = get_request_contact_permission_tool(self.agent)
+        description = tool["function"]["description"]
+
+        self.assertIn("call send_email directly", description)
+        self.assertIn("SMS contacts still require human approval", description)
     
     def test_case_insensitive_email_with_directions(self):
         """Test that email addresses are case-insensitive with direction settings."""

@@ -15,6 +15,7 @@ export type AgentOrganization = {
 } | null
 
 export type MiniDescriptionMode = 'auto' | 'manual'
+export type ContactApprovalMode = 'require_approval' | 'auto_approve_email'
 
 export type AgentSummary = {
   id: string
@@ -27,6 +28,7 @@ export type AgentSummary = {
   createdAtDisplay: string
   pendingTransfer: PendingTransfer | null
   whitelistPolicy: string
+  contactApprovalMode: ContactApprovalMode
   organization: AgentOrganization
   preferredLlmTier: string
 }

@@ -45,6 +45,7 @@ import type {
   AgentInboundWebhook,
   AgentOrganization,
   AgentSettingsData,
+  ContactApprovalMode,
   MiniDescriptionMode,
   AgentSettingsReassignmentInfo as ReassignmentInfo,
   AgentSummary,
@@ -133,6 +134,7 @@ type FormState = {
   sliderValue: number
   dedicatedProxyId: string
   preferredTier: IntelligenceTierKey
+  contactApprovalMode: ContactApprovalMode
 }
 
 const generateTempId = () =>
@@ -433,6 +435,7 @@ export function AgentSettingsWorkspace({
       sliderValue: initialData.dailyCredits.sliderValue ?? fallbackSliderEmptyValue,
       dedicatedProxyId: initialData.dedicatedIps.selectedId ?? '',
       preferredTier: (initialData.agent.preferredLlmTier || 'standard') as IntelligenceTierKey,
+      contactApprovalMode: initialData.agent.contactApprovalMode,
     }),
     [
       initialData.agent.name,
@@ -441,6 +444,7 @@ export function AgentSettingsWorkspace({
       initialData.agent.miniDescriptionMode,
       initialData.agent.isActive,
       initialData.agent.preferredLlmTier,
+      initialData.agent.contactApprovalMode,
       initialData.dailyCredits.limit,
       initialData.dailyCredits.sliderValue,
       initialData.dedicatedIps.selectedId,
@@ -554,6 +558,7 @@ export function AgentSettingsWorkspace({
       formState.sliderValue !== savedFormState.sliderValue ||
       formState.dedicatedProxyId !== savedFormState.dedicatedProxyId ||
       formState.preferredTier !== savedFormState.preferredTier ||
+      formState.contactApprovalMode !== savedFormState.contactApprovalMode ||
       avatarFile !== null ||
       (removeAvatar && Boolean(savedAvatarUrl))
     )
@@ -1187,6 +1192,9 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
         }
         if (data?.miniDescriptionMode === 'auto' || data?.miniDescriptionMode === 'manual') {
           nextFormState.miniDescriptionMode = data.miniDescriptionMode
+        }
+        if (data?.contactApprovalMode === 'require_approval' || data?.contactApprovalMode === 'auto_approve_email') {
+          nextFormState.contactApprovalMode = data.contactApprovalMode
         }
         if (serverTierRaw && (initialData.llmIntelligence?.options ?? []).some((option) => option.key === serverTierRaw)) {
           const serverTier = serverTierRaw as IntelligenceTierKey
@@ -1898,6 +1906,7 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
       {initialData.allowlist.show && (
         <input type="hidden" name="whitelist_policy" value={initialData.agent.whitelistPolicy} />
       )}
+      <input type="hidden" name="contact_approval_mode" value={formState.contactApprovalMode} />
         <details className={sectionClassName} id="agent-identity">
           <summary className={sectionSummaryClassName}>
             <div>
@@ -2202,9 +2211,14 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
               state={savedAllowlistState}
               rows={allowlistRows}
               projectedSlotsUsed={projectedContactSlots}
+              contactApprovalMode={formState.contactApprovalMode}
               saving={saving}
               onAddContact={openAddContactModal}
               onRemoveRows={confirmAllowlistRemoval}
+              onContactApprovalModeChange={(contactApprovalMode) => setFormState((prev) => ({
+                ...prev,
+                contactApprovalMode,
+              }))}
               contactRequestsUrl={initialData.urls.contactRequests}
               onOpenContactRequests={onOpenContactRequests}
             />
@@ -2465,14 +2479,27 @@ type AllowlistManagerProps = {
   state: AllowlistState
   rows: AllowlistTableRow[]
   projectedSlotsUsed: number
+  contactApprovalMode: ContactApprovalMode
   saving: boolean
   onAddContact: () => void
   onRemoveRows: (rows: AllowlistTableRow[]) => void
+  onContactApprovalModeChange: (mode: ContactApprovalMode) => void
   contactRequestsUrl: string
   onOpenContactRequests?: () => void
 }
 
-function AllowlistManager({ state, rows, projectedSlotsUsed, saving, onAddContact, onRemoveRows, contactRequestsUrl, onOpenContactRequests }: AllowlistManagerProps) {
+function AllowlistManager({
+  state,
+  rows,
+  projectedSlotsUsed,
+  contactApprovalMode,
+  saving,
+  onAddContact,
+  onRemoveRows,
+  onContactApprovalModeChange,
+  contactRequestsUrl,
+  onOpenContactRequests,
+}: AllowlistManagerProps) {
   const contactCapReached = typeof state.maxContacts === 'number' && state.maxContacts > 0 && projectedSlotsUsed >= state.maxContacts
   const embeddedInfoBannerClassName = 'flex items-start gap-2 rounded-lg border border-amber-300/20 bg-amber-950/30 px-4 py-3'
   const embeddedInfoCardClassName = 'rounded-xl border border-slate-200/20 bg-slate-950/35 px-4 py-4'
@@ -2481,12 +2508,60 @@ function AllowlistManager({ state, rows, projectedSlotsUsed, saving, onAddContac
 
   return (
     <div className="space-y-5">
-      <div className="space-y-1">
-        <p className="text-xs text-gray-500">
-          By default, the agent owner and team members can communicate with this agent. You can add additional contacts below.
-          Note: Multi-recipient messaging is limited to email only.
-        </p>
-        <p className="text-xs text-slate-600">Contact slots include allowlist entries and collaborators.</p>
+      <div className="space-y-3">
+        <div>
+          <h4 className="text-sm font-semibold text-slate-700">New contact approval</h4>
+          <p className="mt-1 text-xs text-slate-500">Choose how this agent handles email addresses that are not already listed.</p>
+        </div>
+        <div className="grid gap-3 lg:grid-cols-2" role="radiogroup" aria-label="New contact approval">
+          <button
+            type="button"
+            role="radio"
+            aria-checked={contactApprovalMode === 'require_approval'}
+            onClick={() => onContactApprovalModeChange('require_approval')}
+            className={`flex items-start gap-3 rounded-xl border px-4 py-4 text-left transition-colors ${
+              contactApprovalMode === 'require_approval'
+                ? 'border-blue-400/60 bg-blue-950/30'
+                : 'border-slate-200/20 bg-transparent hover:border-slate-300/40'
+            }`}
+          >
+            <span className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-slate-200/20 bg-slate-900/45 text-slate-300">
+              <ShieldAlert className="size-4" aria-hidden="true" />
+            </span>
+            <span>
+              <span className="block text-sm font-semibold text-slate-100">Ask before adding</span>
+              <span className="mt-1 block text-xs leading-5 text-slate-400">Review each new email or SMS contact before the agent can reach them.</span>
+            </span>
+          </button>
+          <button
+            type="button"
+            role="radio"
+            aria-checked={contactApprovalMode === 'auto_approve_email'}
+            onClick={() => onContactApprovalModeChange('auto_approve_email')}
+            className={`flex items-start gap-3 rounded-xl border px-4 py-4 text-left transition-colors ${
+              contactApprovalMode === 'auto_approve_email'
+                ? 'border-blue-400/60 bg-blue-950/30'
+                : 'border-slate-200/20 bg-transparent hover:border-slate-300/40'
+            }`}
+          >
+            <span className="relative flex size-9 shrink-0 items-center justify-center rounded-lg border border-slate-200/20 bg-slate-900/45 text-slate-300">
+              <Mail className="size-4" aria-hidden="true" />
+              <Zap className="absolute -right-1 -top-1 size-3 text-amber-300" aria-hidden="true" />
+            </span>
+            <span>
+              <span className="block text-sm font-semibold text-slate-100">Automatically allow email contacts</span>
+              <span className="mt-1 block text-xs leading-5 text-slate-400">Anyone your agent emails is added to its contacts.</span>
+            </span>
+          </button>
+        </div>
+        {contactApprovalMode === 'auto_approve_email' && (
+          <div className="flex items-start gap-2 rounded-lg border border-amber-300/20 bg-amber-950/30 px-4 py-3 text-xs leading-5 text-amber-100">
+            <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-400" aria-hidden="true" />
+            <p>
+              This agent can add email contacts without asking you first. New contacts remain visible and removable below. SMS contacts always require approval.
+            </p>
+          </div>
+        )}
       </div>
 
       {!state.emailVerified && (
@@ -2523,13 +2598,18 @@ function AllowlistManager({ state, rows, projectedSlotsUsed, saving, onAddContac
               </a>
             )}
           </div>
+          {contactApprovalMode === 'auto_approve_email' && (
+            <p className="mt-2 pl-7 text-xs text-amber-200/80">
+              Email requests shown here predate automatic approval; SMS requests always need your review.
+            </p>
+          )}
         </div>
       )}
 
       {(state.ownerEmail || state.ownerPhone) && (
         <div className={embeddedInfoCardClassName}>
           <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Owner Endpoints</div>
-          <p className="mt-1 text-xs text-slate-600">Owner endpoints are always allowed in default mode.</p>
+          <p className="mt-1 text-xs text-slate-600">Owner endpoints can always be contacted by the agent.</p>
           {state.ownerEmail && (
             <div className="mt-3 flex items-center gap-2 text-sm text-slate-700">
               <span className={embeddedInfoIconClassName}>

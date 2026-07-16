@@ -103,7 +103,7 @@ def get_static_tool_definitions(agent: Optional[PersistentAgent]) -> List[dict]:
         get_spawn_web_task_tool(agent),
         get_search_tools_tool(),
         get_request_human_input_tool(),
-        get_request_contact_permission_tool(),
+        get_request_contact_permission_tool(agent),
         get_secure_credentials_request_tool(),
     ])
 

@@ -1104,6 +1104,7 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
                 'createdAtDisplay': _datetime_display(agent.created_at, "F j, Y \a\t g:i A"),
                 'pendingTransfer': pending_transfer_payload,
                 'whitelistPolicy': agent.whitelist_policy,
+                'contactApprovalMode': agent.contact_approval_mode,
                 'preferredLlmTier': getattr(getattr(agent, 'preferred_llm_tier', None), 'key', AgentLLMTier.STANDARD.value),
                 'organization': (
                     {
@@ -1597,6 +1598,12 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
 
         # Handle whitelist policy update (flag removed)
         new_whitelist_policy = request.POST.get('whitelist_policy', '').strip()
+        new_contact_approval_mode = (
+            request.POST.get('contact_approval_mode')
+            or agent.contact_approval_mode
+        ).strip()
+        if new_contact_approval_mode not in PersistentAgent.ContactApprovalMode.values:
+            return _general_error("Select a valid contact approval option.")
 
         avatar_file = request.FILES.get('avatar')
         clear_avatar_flag = (request.POST.get('clear_avatar') or '').strip().lower() in {'1', 'true', 'yes', 'on'}
@@ -1649,6 +1656,7 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
         prev_hard_limit = agent.get_daily_credit_hard_limit()
         prev_preferred_tier = getattr(getattr(agent, "preferred_llm_tier", None), "key", AgentLLMTier.STANDARD.value)
         prev_whitelist_policy = agent.whitelist_policy
+        prev_contact_approval_mode = agent.contact_approval_mode
 
         plan = None
         if owner is not None:
@@ -1830,6 +1838,10 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
                         agent.whitelist_policy = new_whitelist_policy
                         agent_fields_to_update.append('whitelist_policy')
 
+                if agent.contact_approval_mode != new_contact_approval_mode:
+                    agent.contact_approval_mode = new_contact_approval_mode
+                    agent_fields_to_update.append('contact_approval_mode')
+
                 # Update daily credit limit if changed
                 if agent.daily_credit_limit != new_daily_limit:
                     agent.daily_credit_limit = new_daily_limit
@@ -1978,6 +1990,8 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
                     update_props['previous_preferred_llm_tier'] = prev_preferred_tier
                 if 'whitelist_policy' in changed_fields_for_analytics:
                     update_props['previous_whitelist_policy'] = prev_whitelist_policy
+                if 'contact_approval_mode' in changed_fields_for_analytics:
+                    update_props['previous_contact_approval_mode'] = prev_contact_approval_mode
                 Analytics.track_event(
                     user_id=request.user.id,
                     event=AnalyticsEvent.PERSISTENT_AGENT_UPDATED,
@@ -2011,6 +2025,7 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
                 'miniDescription': agent.mini_description,
                 'miniDescriptionMode': agent.mini_description_mode,
                 'preferredLlmTier': getattr(getattr(agent, "preferred_llm_tier", None), "key", None),
+                'contactApprovalMode': agent.contact_approval_mode,
                 'warning': preferred_tier_warning,
             })
 
