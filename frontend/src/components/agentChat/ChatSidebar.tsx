@@ -5,7 +5,7 @@ import { ArrowLeftRight, Bell, BellOff, Check, LayoutGrid, List, PanelLeft, Pane
 import type { ConsoleContext } from '../../api/context'
 import { useAppSelector } from '../../store/hooks'
 import { selectImmersiveShellActiveAgentId } from '../../store/immersiveShellSlice'
-import type { AgentCollaborationInvite, AgentRosterEntry, AgentRosterSortMode, AgentTransferInvite } from '../../types/agentRoster'
+import type { AgentRosterEntry, AgentRosterSortMode, AgentSidebarInvite } from '../../types/agentRoster'
 import { buildAgentSearchBlob } from '../../util/agentCards'
 import { ActionConfirmDialog } from '../common/ActionConfirmDialog'
 import { AgentCreateSplitButton, type TeamTemplateCreateMenu } from './AgentCreateSplitButton'
@@ -16,7 +16,7 @@ import { SelectionShellPageSwitcher, SELECTION_SHELL_PAGE_LABELS, type Selection
 import { AgentEmptyState, AgentListItem, AgentListSectionHeader, AgentSearchInput, AgentSortToggle } from './ChatSidebarParts'
 import { ProductAnnouncementBell } from './ProductAnnouncementBell'
 import { SidebarSettingsMenu, type SidebarSettingsInfo } from './SidebarSettingsMenu'
-import { AgentInviteDetails, AgentInviteSidebarItem, type AgentInviteAction, type AgentInviteDialogState, type SidebarAgentInvite } from './AgentInviteSidebarItem'
+import { AgentInviteDetails, AgentInviteSidebarItem, type AgentInviteAction, type AgentInviteDialogState } from './AgentInviteSidebarItem'
 import { getNextAgentChatSidebarMode, getPreviousAgentChatSidebarMode, type AgentChatSidebarMode, SIDEBAR_MOBILE_BREAKPOINT_PX, type AgentDrawerViewMode } from './sidebarMode'
 import { AgentChatAvatar, AgentChatButton } from './uiPrimitives'
 
@@ -46,8 +46,7 @@ function clampContextMenuPosition(x: number, y: number): ContextMenuPosition {
 
 export type ChatSidebarProps = {
   agents?: AgentRosterEntry[]
-  transferInvites?: AgentTransferInvite[]
-  collaborationInvites?: AgentCollaborationInvite[]
+  agentInvites?: AgentSidebarInvite[]
   favoriteAgentIds?: string[]
   mutedAgentIds?: string[]
   activeAgentId?: string | null
@@ -57,8 +56,7 @@ export type ChatSidebarProps = {
   desktopMode?: AgentChatSidebarMode
   onDesktopModeChange?: (mode: AgentChatSidebarMode) => void
   onSelectAgent?: (agent: AgentRosterEntry) => void
-  onRespondTransferInvite?: (invite: AgentTransferInvite, action: AgentInviteAction) => Promise<void>
-  onRespondCollaborationInvite?: (invite: AgentCollaborationInvite, action: AgentInviteAction) => Promise<void>
+  onRespondInvite?: (invite: AgentSidebarInvite, action: AgentInviteAction) => Promise<void>
   onConfigureAgent?: (agent: AgentRosterEntry) => void
   onToggleAgentFavorite?: (agentId: string) => void
   onToggleAgentMute?: (agentId: string) => void
@@ -83,8 +81,7 @@ export type ChatSidebarProps = {
 
 export const ChatSidebar = memo(function ChatSidebar({
   agents = [],
-  transferInvites = [],
-  collaborationInvites = [],
+  agentInvites = [],
   favoriteAgentIds = [],
   mutedAgentIds = [],
   activeAgentId: activeAgentIdOverride,
@@ -94,8 +91,7 @@ export const ChatSidebar = memo(function ChatSidebar({
   desktopMode = 'list',
   onDesktopModeChange,
   onSelectAgent,
-  onRespondTransferInvite,
-  onRespondCollaborationInvite,
+  onRespondInvite,
   onConfigureAgent,
   onToggleAgentFavorite,
   onToggleAgentMute,
@@ -293,9 +289,9 @@ export const ChatSidebar = memo(function ChatSidebar({
     }
   }, [createAgentDisabled, isMobile, onBlockedCreateAgent, onCreateAgent])
 
-  const openInviteDialog = useCallback((item: SidebarAgentInvite, action: AgentInviteAction) => {
+  const openInviteDialog = useCallback((invite: AgentSidebarInvite, action: AgentInviteAction) => {
     setInviteError(null)
-    setInviteDialog({ ...item, action })
+    setInviteDialog({ invite, action })
   }, [])
 
   const closeInviteDialog = useCallback(() => {
@@ -307,23 +303,13 @@ export const ChatSidebar = memo(function ChatSidebar({
   }, [inviteBusy])
 
   const handleConfirmInvite = useCallback(async () => {
-    if (!inviteDialog) {
-      return
-    }
-    const canRespond = inviteDialog.kind === 'transfer'
-      ? Boolean(onRespondTransferInvite)
-      : Boolean(onRespondCollaborationInvite)
-    if (!canRespond) {
+    if (!inviteDialog || !onRespondInvite) {
       return
     }
     setInviteBusy(true)
     setInviteError(null)
     try {
-      if (inviteDialog.kind === 'transfer') {
-        await onRespondTransferInvite?.(inviteDialog.invite, inviteDialog.action)
-      } else {
-        await onRespondCollaborationInvite?.(inviteDialog.invite, inviteDialog.action)
-      }
+      await onRespondInvite(inviteDialog.invite, inviteDialog.action)
       setInviteDialog(null)
       if (isMobile && inviteDialog.action === 'accept') {
         setDrawerOpen(false)
@@ -333,7 +319,7 @@ export const ChatSidebar = memo(function ChatSidebar({
     } finally {
       setInviteBusy(false)
     }
-  }, [inviteDialog, isMobile, onRespondCollaborationInvite, onRespondTransferInvite])
+  }, [inviteDialog, isMobile, onRespondInvite])
 
   const closeAgentContextMenu = useCallback(() => {
     setAgentContextMenu(null)
@@ -444,13 +430,13 @@ export const ChatSidebar = memo(function ChatSidebar({
   const inviteDialogElement = inviteDialog ? (
     <ActionConfirmDialog
       open={true}
-      title={inviteDialog.kind === 'transfer'
+      title={inviteDialog.invite.kind === 'transfer'
         ? `${inviteDialog.action === 'accept' ? 'Accept' : 'Decline'} transfer for ${inviteDialog.invite.agent_name || 'this agent'}?`
         : inviteDialog.action === 'accept'
           ? `Collaborate on ${inviteDialog.invite.agent_name || 'this agent'}?`
           : `Decline collaboration invite for ${inviteDialog.invite.agent_name || 'this agent'}?`}
       description={
-        inviteDialog.kind === 'transfer'
+        inviteDialog.invite.kind === 'transfer'
           ? inviteDialog.action === 'accept'
             ? 'Ownership will move to your personal workspace. The original owner will be notified, and the agent may be paused if you are at your agent limit.'
             : 'The original owner will be notified, and ownership will not change.'
@@ -459,7 +445,7 @@ export const ChatSidebar = memo(function ChatSidebar({
             : 'You will not receive access to this agent.'
       }
       confirmLabel={inviteDialog.action === 'accept'
-        ? inviteDialog.kind === 'transfer' ? 'Accept transfer' : 'Accept invite'
+        ? inviteDialog.invite.kind === 'transfer' ? 'Accept transfer' : 'Accept invite'
         : 'Decline invite'}
       busy={inviteBusy}
       danger={inviteDialog.action === 'decline'}
@@ -468,15 +454,14 @@ export const ChatSidebar = memo(function ChatSidebar({
       onClose={closeInviteDialog}
       localError={inviteError}
     >
-      <AgentInviteDetails item={inviteDialog} />
+      <AgentInviteDetails invite={inviteDialog.invite} />
     </ActionConfirmDialog>
   ) : null
 
   const renderListContent = useCallback((variant: 'drawer' | 'sidebar', collapsedView: boolean) => {
     const sourceAgents = collapsedView ? collapsedFilteredAgents : filteredAgents
     const emptyCount = collapsedView ? collapsedFilteredAgents.length : filteredAgents.length
-    const inviteCount = transferInvites.length + collaborationInvites.length
-    const showInvites = !collapsedView && inviteCount > 0
+    const showInvites = !collapsedView && agentInvites.length > 0
     const hasListRows = hasAgents || showInvites
     const renderAgentItem = (agent: AgentRosterEntry, isFavorite: boolean) => (
       <AgentListItem
@@ -533,7 +518,7 @@ export const ChatSidebar = memo(function ChatSidebar({
           hasAgents={hasListRows}
           loading={loading}
           errorMessage={errorMessage}
-          filteredCount={emptyCount + (showInvites ? inviteCount : 0)}
+          filteredCount={emptyCount + (showInvites ? agentInvites.length : 0)}
           searchQuery={searchQuery}
         />
 
@@ -546,23 +531,14 @@ export const ChatSidebar = memo(function ChatSidebar({
                 <AgentListSectionHeader
                   variant={variant}
                   label="Invites"
-                  count={inviteCount}
+                  count={agentInvites.length}
                 />
-                {transferInvites.map((invite) => (
+                {agentInvites.map((invite) => (
                   <AgentInviteSidebarItem
-                    key={`transfer-${invite.id}`}
+                    key={`${invite.kind}-${invite.id}`}
                     variant={variant}
-                    item={{ kind: 'transfer', invite }}
-                    disabled={!onRespondTransferInvite || inviteBusy}
-                    onRespond={openInviteDialog}
-                  />
-                ))}
-                {collaborationInvites.map((invite) => (
-                  <AgentInviteSidebarItem
-                    key={`collaboration-${invite.id}`}
-                    variant={variant}
-                    item={{ kind: 'collaboration', invite }}
-                    disabled={!onRespondCollaborationInvite || inviteBusy}
+                    invite={invite}
+                    disabled={!onRespondInvite || inviteBusy}
                     onRespond={openInviteDialog}
                   />
                 ))}
@@ -600,7 +576,7 @@ export const ChatSidebar = memo(function ChatSidebar({
   }, [
     activeAgentId,
     allFilteredAgents,
-    collaborationInvites,
+    agentInvites,
     collapsedFilteredAgents,
     createAgentButtonDisabled,
     createAgentDisabled,
@@ -617,15 +593,13 @@ export const ChatSidebar = memo(function ChatSidebar({
     mutedAgentIdSet,
     onCreateAgent,
     inviteBusy,
-    onRespondCollaborationInvite,
-    onRespondTransferInvite,
+    onRespondInvite,
     onToggleAgentFavorite,
     openAgentContextMenu,
     openInviteDialog,
     searchQuery,
     switchingAgentId,
     teamTemplateMenu,
-    transferInvites,
   ])
 
   if (isMobile) {

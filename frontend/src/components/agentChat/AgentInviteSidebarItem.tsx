@@ -1,40 +1,24 @@
 import { Check, X } from 'lucide-react'
 
-import type { AgentCollaborationInvite, AgentTransferInvite } from '../../types/agentRoster'
+import type { AgentSidebarInvite } from '../../types/agentRoster'
 import { AgentChatAvatar } from './uiPrimitives'
 
 export type AgentInviteAction = 'accept' | 'decline'
 
-export type SidebarAgentInvite =
-  | { kind: 'transfer'; invite: AgentTransferInvite }
-  | { kind: 'collaboration'; invite: AgentCollaborationInvite }
-
-export type AgentInviteDialogState = SidebarAgentInvite & {
+export type AgentInviteDialogState = {
+  invite: AgentSidebarInvite
   action: AgentInviteAction
 }
 
-function inviteSenderName(item: SidebarAgentInvite): string {
-  return item.kind === 'transfer'
-    ? item.invite.initiated_by_name
-    : item.invite.invited_by_name
-}
-
-function inviteSenderEmail(item: SidebarAgentInvite): string {
-  return item.kind === 'transfer'
-    ? item.invite.initiated_by_email
-    : item.invite.invited_by_email
-}
-
-export function AgentInviteDetails({ item }: { item: SidebarAgentInvite }) {
-  const senderName = inviteSenderName(item) || inviteSenderEmail(item) || 'Someone'
-  const senderEmail = inviteSenderEmail(item)
-  const message = item.kind === 'transfer' ? item.invite.message.trim() : ''
+export function AgentInviteDetails({ invite }: { invite: AgentSidebarInvite }) {
+  const senderName = invite.sender_name || invite.sender_email || 'Someone'
+  const message = invite.message.trim()
 
   return (
     <dl className="grid gap-3 text-sm text-slate-700">
       <div className="grid gap-1">
         <dt className="text-xs font-bold uppercase tracking-wide text-slate-500">From</dt>
-        <dd className="m-0 break-words">{senderName}{senderEmail && senderName !== senderEmail ? ` (${senderEmail})` : ''}</dd>
+        <dd className="m-0 break-words">{senderName}{invite.sender_email && senderName !== invite.sender_email ? ` (${invite.sender_email})` : ''}</dd>
       </div>
       {message ? (
         <div className="grid gap-1">
@@ -47,18 +31,18 @@ export function AgentInviteDetails({ item }: { item: SidebarAgentInvite }) {
 }
 
 export function AgentInviteSidebarItem({
-  item,
+  invite,
   variant,
   disabled,
   onRespond,
 }: {
-  item: SidebarAgentInvite
+  invite: AgentSidebarInvite
   variant: 'drawer' | 'sidebar'
   disabled: boolean
-  onRespond: (item: SidebarAgentInvite, action: AgentInviteAction) => void
+  onRespond: (invite: AgentSidebarInvite, action: AgentInviteAction) => void
 }) {
-  const agentName = item.invite.agent_name || 'Agent'
-  const inviteLabel = item.kind === 'transfer' ? 'Transfer invitation' : 'Collaboration invitation'
+  const agentName = invite.agent_name || 'Agent'
+  const inviteLabel = invite.kind === 'transfer' ? 'Transfer invitation' : 'Collaboration invitation'
   return (
     <div
       className="agent-roster-item agent-invite"
@@ -70,7 +54,7 @@ export function AgentInviteSidebarItem({
         <span className="agent-roster-item__avatar-wrap">
           <AgentChatAvatar
             name={agentName}
-            avatarUrl={item.invite.agent_avatar_url}
+            avatarUrl={invite.agent_avatar_url}
             className="agent-roster-item__avatar"
             imageClassName="agent-roster-item__avatar-image"
             textClassName="agent-roster-item__avatar-text"
@@ -85,7 +69,7 @@ export function AgentInviteSidebarItem({
         <button
           type="button"
           className="agent-invite__action agent-invite__action--decline"
-          onClick={() => onRespond(item, 'decline')}
+          onClick={() => onRespond(invite, 'decline')}
           disabled={disabled}
           aria-label={`Decline ${inviteLabel.toLowerCase()} for ${agentName}`}
           title="Decline"
@@ -95,7 +79,7 @@ export function AgentInviteSidebarItem({
         <button
           type="button"
           className="agent-invite__action agent-invite__action--accept"
-          onClick={() => onRespond(item, 'accept')}
+          onClick={() => onRespond(invite, 'accept')}
           disabled={disabled}
           aria-label={`Accept ${inviteLabel.toLowerCase()} for ${agentName}`}
           title="Accept"

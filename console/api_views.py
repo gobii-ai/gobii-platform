@@ -2961,99 +2961,61 @@ def _build_agent_critical_status_payload(request: HttpRequest, agent: Persistent
     }
 
 
-def _serialize_roster_transfer_invite(invite: AgentTransferInvite) -> dict[str, Any]:
+def _serialize_roster_agent_invite(
+    invite: AgentTransferInvite | AgentCollaboratorInvite,
+) -> dict[str, Any]:
     agent = invite.agent
-    initiator = invite.initiated_by
-    created_at = invite.created_at
-
-    initiator_email = getattr(initiator, "email", "") or ""
-    initiator_name = ""
-    if initiator:
-        initiator_name = initiator.get_full_name() or initiator_email or getattr(initiator, "username", "")
+    is_transfer = isinstance(invite, AgentTransferInvite)
+    sender = invite.initiated_by if is_transfer else invite.invited_by
+    sender_email = sender.email or ""
+    sender_name = sender.get_full_name() or sender_email or sender.username
+    route_prefix = "console-agent-transfer-invite" if is_transfer else "console-agent-collaborator-invite"
+    route_arg = invite.id if is_transfer else invite.token
 
     return {
         "id": str(invite.id),
-        "agent_id": str(agent.id),
+        "kind": "transfer" if is_transfer else "collaboration",
         "agent_name": agent.name or "Agent",
         "agent_avatar_url": agent.get_avatar_thumbnail_url(),
-        "initiated_by_name": initiator_name or "Gobii user",
-        "initiated_by_email": initiator_email,
-        "recipient_email": invite.to_email or "",
-        "message": invite.message or "",
-        "created_at": created_at.isoformat() if created_at else None,
-        "accept_url": reverse("console-agent-transfer-invite-accept-api", args=[invite.id]),
-        "decline_url": reverse("console-agent-transfer-invite-decline-api", args=[invite.id]),
+        "sender_name": sender_name or "Gobii user",
+        "sender_email": sender_email,
+        "message": (invite.message or "") if is_transfer else "",
+        "accept_url": reverse(f"{route_prefix}-accept-api", args=[route_arg]),
+        "decline_url": reverse(f"{route_prefix}-decline-api", args=[route_arg]),
     }
 
 
-def _pending_roster_transfer_invites_for_user(request: HttpRequest) -> list[dict[str, Any]]:
-    user_email = (request.user.email or "").strip()
-    if not user_email:
-        return []
+def _pending_roster_agent_invites_for_user(request: HttpRequest) -> list[dict[str, Any]]:
+    from allauth.account.models import EmailAddress
 
-    invites = (
+    primary_email = (request.user.email or "").strip().lower()
+    transfer_invites = (
         AgentTransferInvite.objects
         .select_related("agent", "initiated_by")
         .filter(
-            to_email__iexact=user_email,
+            to_email__iexact=primary_email,
             status=AgentTransferInvite.Status.PENDING,
         )
-        .order_by("-created_at", "-id")
+        if primary_email else AgentTransferInvite.objects.none()
     )
-    return [_serialize_roster_transfer_invite(invite) for invite in invites]
-
-
-def _serialize_roster_collaboration_invite(invite: AgentCollaboratorInvite) -> dict[str, Any]:
-    agent = invite.agent
-    inviter = invite.invited_by
-    inviter_email = getattr(inviter, "email", "") or ""
-    inviter_name = inviter.get_full_name() or inviter_email or getattr(inviter, "username", "")
-
-    return {
-        "id": str(invite.id),
-        "token": invite.token,
-        "agent_id": str(agent.id),
-        "agent_name": agent.name or "Agent",
-        "agent_avatar_url": agent.get_avatar_thumbnail_url(),
-        "invited_by_name": inviter_name or "Gobii user",
-        "invited_by_email": inviter_email,
-        "recipient_email": invite.email or "",
-        "created_at": invite.created_at.isoformat() if invite.created_at else None,
-        "expires_at": invite.expires_at.isoformat() if invite.expires_at else None,
-        "accept_url": reverse("console-agent-collaborator-invite-accept-api", args=[invite.token]),
-        "decline_url": reverse("console-agent-collaborator-invite-decline-api", args=[invite.token]),
-    }
-
-
-def _pending_roster_collaboration_invites_for_user(request: HttpRequest) -> list[dict[str, Any]]:
-    from allauth.account.models import EmailAddress
-
     recipient_emails = {
-        email.strip().lower()
-        for email in [
-            request.user.email or "",
-            *EmailAddress.objects.filter(user=request.user).values_list("email", flat=True),
-        ]
-        if email and email.strip()
+        email.lower()
+        for email in EmailAddress.objects.filter(user=request.user, verified=True)
+        .values_list("email", flat=True)
     }
-    if not recipient_emails:
-        return []
-
-    recipient_query = Q()
-    for email in recipient_emails:
-        recipient_query |= Q(email__iexact=email)
-
-    invites = (
+    recipient_emails.add(primary_email)
+    collaboration_invites = (
         AgentCollaboratorInvite.objects
         .select_related("agent", "invited_by")
         .filter(
-            recipient_query,
+            email__in=recipient_emails,
             status=AgentCollaboratorInvite.InviteStatus.PENDING,
             expires_at__gt=timezone.now(),
         )
-        .order_by("-created_at", "-id")
     )
-    return [_serialize_roster_collaboration_invite(invite) for invite in invites]
+    invites = [*transfer_invites, *collaboration_invites]
+    invites.sort(key=lambda invite: (invite.created_at, str(invite.id)), reverse=True)
+    return [_serialize_roster_agent_invite(invite) for invite in invites]
 
 
 @method_decorator(csrf_exempt, name="dispatch")
@@ -3305,8 +3267,7 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
                 "billingStatus": billing_status,
                 "accountPause": account_pause,
                 "agents": payload,
-                "transfer_invites": _pending_roster_transfer_invites_for_user(request),
-                "collaboration_invites": _pending_roster_collaboration_invites_for_user(request),
+                "agent_invites": _pending_roster_agent_invites_for_user(request),
                 "llmIntelligence": llm_intelligence,
             }
         )

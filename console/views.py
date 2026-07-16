@@ -2615,20 +2615,6 @@ def _send_agent_transfer_owner_notification(request, action: str, original_owner
         )
 
 
-def _agent_transfer_response_agent_payload(request, agent: PersistentAgent) -> dict[str, Any]:
-    return {
-        "id": str(agent.id),
-        "name": agent.name or "",
-        "isActive": bool(agent.is_active),
-        "detailUrl": _agent_settings_app_path(agent),
-        "chatUrl": build_immersive_chat_url(
-            request,
-            agent.id,
-            return_to=f"{IMMERSIVE_APP_BASE_PATH}/agents",
-        ),
-    }
-
-
 class AgentTransferInviteRespondAPIView(LoginRequiredMixin, View):
     """JSON accept/decline endpoint for app sidebar transfer invites."""
 
@@ -2662,7 +2648,11 @@ class AgentTransferInviteRespondAPIView(LoginRequiredMixin, View):
                     "ok": True,
                     "action": action,
                     "message": message,
-                    "agent": _agent_transfer_response_agent_payload(request, agent),
+                    "redirectUrl": build_immersive_chat_url(
+                        request,
+                        agent.id,
+                        return_to=f"{IMMERSIVE_APP_BASE_PATH}/agents",
+                    ),
                 }
             else:
                 agent = invite.agent
@@ -2672,7 +2662,7 @@ class AgentTransferInviteRespondAPIView(LoginRequiredMixin, View):
                     "ok": True,
                     "action": action,
                     "message": "Transfer invitation declined.",
-                    "agent": None,
+                    "redirectUrl": f"{IMMERSIVE_APP_BASE_PATH}/agents",
                 }
         except AgentTransferDenied as exc:
             return JsonResponse({"ok": False, "error": str(exc)}, status=403)
@@ -2805,7 +2795,9 @@ class AgentCollaboratorInviteValidationMixin:
             return True
         from allauth.account.models import EmailAddress
 
-        return EmailAddress.objects.filter(user=user, email__iexact=invite_email).exists()
+        return EmailAddress.objects.filter(
+            user=user, email__iexact=invite_email, verified=True,
+        ).exists()
 
     def _resolve_invite_or_issue(self, request, token: str):
         try:

@@ -1,6 +1,6 @@
 import { HttpError, jsonFetch, jsonRequest } from './http'
 import { staffViewContextHeaders, type ConsoleContext, type StaffViewContext } from './context'
-import type { AgentCollaborationInvite, AgentRosterEntry, AgentRosterSortMode, AgentTransferInvite, PlanningState, SignupPreviewState } from '../types/agentRoster'
+import type { AgentRosterEntry, AgentRosterSortMode, AgentSidebarInvite, PlanningState, SignupPreviewState } from '../types/agentRoster'
 import type { AccountPauseInfo, BillingStatusInfo } from '../types/agentAddons'
 import type { LlmIntelligenceConfig } from '../types/llmIntelligence'
 
@@ -79,8 +79,7 @@ type AgentRosterPayload = {
   billingStatus?: BillingStatusInfo | null
   accountPause?: AccountPauseInfo | null
   llmIntelligence?: LlmIntelligenceConfig | null
-  transfer_invites?: AgentTransferInvite[]
-  collaboration_invites?: AgentCollaborationInvite[]
+  agent_invites?: AgentSidebarInvite[]
   agents: AgentProfilePayload[]
 }
 
@@ -128,8 +127,7 @@ export async function fetchAgentRoster(
 ): Promise<{
   context: ConsoleContext
   agents: AgentRosterEntry[]
-  transferInvites: AgentTransferInvite[]
-  collaborationInvites: AgentCollaborationInvite[]
+  agentInvites: AgentSidebarInvite[]
   agentRosterSortMode: AgentRosterSortMode
   favoriteAgentIds: string[]
   mutedAgentIds: string[]
@@ -153,8 +151,7 @@ export async function fetchAgentRoster(
   return {
     context: payload.context,
     agents,
-    transferInvites: payload.transfer_invites ?? [],
-    collaborationInvites: payload.collaboration_invites ?? [],
+    agentInvites: payload.agent_invites ?? [],
     agentRosterSortMode: payload.agent_roster_sort_mode ?? 'recent',
     favoriteAgentIds: Array.isArray(payload.favorite_agent_ids)
       ? payload.favorite_agent_ids.filter((value): value is string => typeof value === 'string')
@@ -176,17 +173,11 @@ export async function fetchAgentProfile(agentId: string): Promise<AgentRosterEnt
   return agentProfilePayloadToRosterEntry(payload)
 }
 
-export type AgentTransferInviteActionResponse = {
+export type AgentInviteActionResponse = {
   ok: boolean
   action: 'accept' | 'decline'
   message?: string
-  agent?: {
-    id: string
-    name: string
-    isActive: boolean
-    detailUrl: string
-    chatUrl: string
-  } | null
+  redirectUrl?: string
 }
 
 function extractApiErrorMessage(error: unknown, fallback: string): string {
@@ -202,16 +193,20 @@ function extractApiErrorMessage(error: unknown, fallback: string): string {
   return fallback
 }
 
-export async function respondToAgentTransferInvite(
+export async function respondToAgentInvite(
   url: string,
-): Promise<AgentTransferInviteActionResponse> {
+): Promise<AgentInviteActionResponse> {
   try {
-    return await jsonRequest<AgentTransferInviteActionResponse>(url, {
+    const result = await jsonRequest<AgentInviteActionResponse>(url, {
       method: 'POST',
       includeCsrf: true,
     })
+    if (!result.ok) {
+      throw new Error(result.message || 'This invite is no longer available.')
+    }
+    return result
   } catch (error) {
-    throw new Error(extractApiErrorMessage(error, 'Could not respond to the transfer invite.'))
+    throw new Error(extractApiErrorMessage(error, 'Could not respond to the invite.'))
   }
 }
 
