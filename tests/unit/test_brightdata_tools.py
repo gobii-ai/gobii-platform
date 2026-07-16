@@ -46,12 +46,31 @@ def _response(text: str, status_code: int = 200):
     return response
 
 
+def _bing_response(*results: dict):
+    body = {
+        "_type": "SearchResponse",
+        "queryContext": {"originalQuery": "cats"},
+        "webPages": {"totalEstimatedMatches": len(results), "value": list(results)},
+    }
+    return _response(
+        json.dumps(
+            {
+                "status_code": 200,
+                "headers": {"content-type": "application/json"},
+                "body": json.dumps(body),
+            }
+        )
+    )
+
+
 @tag("batch_mcp_tools")
 @override_settings(
     BRIGHT_DATA_TOKEN="test-token",
+    BRIGHT_DATA_SERP_ZONE="test-serp-zone",
     BRIGHT_DATA_WEB_UNLOCKER_ZONE="test-zone",
     BRIGHT_DATA_WEB_UNLOCKER_ZONE_FALLBACK="",
     BRIGHT_DATA_REQUEST_TIMEOUT_SECONDS=42.0,
+    BRIGHT_DATA_SEARCH_REQUEST_TIMEOUT_SECONDS=7.0,
     BRIGHT_DATA_DATASET_POLL_TIMEOUT_SECONDS=600.0,
 )
 class BrightDataNativeToolTests(SimpleTestCase):
@@ -370,42 +389,73 @@ class BrightDataNativeToolTests(SimpleTestCase):
         mock_post.assert_called_once()
         call = mock_post.call_args
         self.assertEqual(call.args[0], BRIGHTDATA_API_URL)
-        self.assertEqual(call.kwargs["timeout"], 42.0)
+        self.assertEqual(call.kwargs["timeout"], 7.0)
         self.assertEqual(call.kwargs["headers"]["Authorization"], "Bearer test-token")
         self.assertEqual(
             call.kwargs["json"],
             {
                 "url": "https://www.google.com/search?q=native%20api&start=20&gl=us&brd_json=1",
-                "zone": "test-zone",
+                "zone": "test-serp-zone",
                 "format": "raw",
                 "data_format": "parsed_light",
             },
         )
 
     @patch("api.agent.tools.brightdata.requests.post")
-    def test_bing_and_yandex_return_markdown(self, mock_post):
-        mock_post.side_effect = [_response("bing markdown"), _response("yandex markdown")]
+    def test_bing_returns_unwrapped_json(self, mock_post):
+        mock_post.return_value = _bing_response(
+            {"name": "Cats", "url": "https://example.com/cats", "snippet": "Cat facts"},
+        )
 
-        bing = execute_brightdata_search_engine(
+        result = execute_brightdata_search_engine(
             None,
             {"query": "cats", "engine": "bing", "cursor": "3"},
         )
-        yandex = execute_brightdata_search_engine(
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(json.loads(result["result"])["webPages"]["value"][0]["name"], "Cats")
+        self.assertEqual(
+            mock_post.call_args.kwargs["json"],
+            {
+                "url": "https://www.bing.com/search?q=cats&first=31",
+                "zone": "test-serp-zone",
+                "format": "json",
+                "data_format": "parsed_bing_api",
+            },
+        )
+        self.assertEqual(mock_post.call_args.kwargs["timeout"], 7.0)
+
+    @patch("api.agent.tools.brightdata.requests.post", return_value=_response("yandex markdown"))
+    def test_yandex_returns_markdown(self, mock_post):
+        result = execute_brightdata_search_engine(
             None,
             {"query": "cats", "engine": "yandex", "cursor": "3"},
         )
 
-        self.assertEqual(bing, {"status": "success", "result": "bing markdown"})
-        self.assertEqual(yandex, {"status": "success", "result": "yandex markdown"})
+        self.assertEqual(result, {"status": "success", "result": "yandex markdown"})
         self.assertEqual(
-            mock_post.call_args_list[0].kwargs["json"]["url"],
-            "https://www.bing.com/search?q=cats&first=31",
-        )
-        self.assertEqual(
-            mock_post.call_args_list[1].kwargs["json"]["url"],
+            mock_post.call_args.kwargs["json"]["url"],
             "https://yandex.com/search/?text=cats&p=3",
         )
-        self.assertEqual(mock_post.call_args_list[0].kwargs["json"]["data_format"], "markdown")
+        self.assertEqual(mock_post.call_args.kwargs["json"]["data_format"], "markdown")
+
+    @override_settings(BRIGHT_DATA_WEB_UNLOCKER_ZONE_FALLBACK="web-fallback-zone")
+    @patch("api.agent.tools.brightdata.requests.post")
+    def test_google_timeout_uses_bing_json_without_web_unlocker_fallback(self, mock_post):
+        mock_post.side_effect = [
+            Timeout(),
+            _bing_response({"name": "Cats", "url": "https://example.com/cats"}),
+        ]
+
+        result = execute_brightdata_search_engine(None, {"query": "cats"})
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(json.loads(result["result"])["_type"], "SearchResponse")
+        self.assertEqual(
+            [call.kwargs["json"]["zone"] for call in mock_post.call_args_list],
+            ["test-serp-zone", "test-serp-zone"],
+        )
+        self.assertEqual(mock_post.call_args_list[1].kwargs["json"]["data_format"], "parsed_bing_api")
 
     @patch("api.agent.tools.brightdata.requests.post")
     def test_scrape_matches_mcp_markdown_processing(self, mock_post):
@@ -434,6 +484,7 @@ class BrightDataNativeToolTests(SimpleTestCase):
                 "data_format": "markdown",
             },
         )
+        self.assertEqual(mock_post.call_args.kwargs["timeout"], 42.0)
 
     @patch("api.agent.tools.brightdata.requests.post")
     def test_rejects_pdf_before_request(self, mock_post):
@@ -456,57 +507,6 @@ class BrightDataNativeToolTests(SimpleTestCase):
 
         self.assertEqual(result["status"], "error")
         self.assertIn("Unexpected non-JSON", result["message"])
-
-    @override_settings(BRIGHT_DATA_WEB_UNLOCKER_ZONE_FALLBACK="fallback-zone")
-    @patch("api.agent.tools.brightdata.requests.post")
-    def test_google_search_retries_once_with_fallback_zone(self, mock_post):
-        mock_post.side_effect = [
-            _response("not json"),
-            _response('{"organic": [{"link": "https://example.com", "title": "Fallback"}]}'),
-        ]
-
-        result = execute_brightdata_search_engine(None, {"query": "cats"})
-
-        self.assertEqual(result["status"], "success")
-        self.assertEqual(json.loads(result["result"])["organic"][0]["title"], "Fallback")
-        self.assertEqual(
-            [call.kwargs["json"]["zone"] for call in mock_post.call_args_list],
-            ["test-zone", "fallback-zone"],
-        )
-
-    @override_settings(BRIGHT_DATA_WEB_UNLOCKER_ZONE_FALLBACK="fallback-zone")
-    @patch("api.agent.tools.brightdata.requests.post")
-    def test_google_search_returns_last_error_when_both_zones_fail(self, mock_post):
-        mock_post.side_effect = [_response("primary failed", 500), _response("fallback denied", 401)]
-
-        result = execute_brightdata_search_engine(None, {"query": "cats"})
-
-        self.assertEqual(result["status"], "error")
-        self.assertEqual(result["status_code"], 401)
-        self.assertFalse(result["retryable"])
-        self.assertIn("both primary and fallback zones", result["message"])
-        self.assertIn("fallback denied", result["message"])
-
-    @override_settings(BRIGHT_DATA_WEB_UNLOCKER_ZONE_FALLBACK="test-zone")
-    @patch("api.agent.tools.brightdata.requests.post", return_value=_response("not json"))
-    def test_google_search_does_not_retry_same_zone(self, mock_post):
-        result = execute_brightdata_search_engine(None, {"query": "cats"})
-
-        self.assertEqual(result["status"], "error")
-        mock_post.assert_called_once()
-
-    @override_settings(BRIGHT_DATA_WEB_UNLOCKER_ZONE_FALLBACK="fallback-zone")
-    @patch("api.agent.tools.brightdata.requests.post")
-    def test_bing_search_retries_with_fallback_zone(self, mock_post):
-        mock_post.side_effect = [_response("failed", 500), _response("fallback markdown")]
-
-        result = execute_brightdata_search_engine(None, {"query": "cats", "engine": "bing"})
-
-        self.assertEqual(result, {"status": "success", "result": "fallback markdown"})
-        self.assertEqual(
-            [call.kwargs["json"]["zone"] for call in mock_post.call_args_list],
-            ["test-zone", "fallback-zone"],
-        )
 
     @override_settings(BRIGHT_DATA_WEB_UNLOCKER_ZONE_FALLBACK="fallback-zone")
     @patch("api.agent.tools.brightdata.requests.post")
@@ -550,15 +550,26 @@ class BrightDataNativeToolTests(SimpleTestCase):
         self.assertEqual(result["status"], "error")
         self.assertTrue(result["retryable"])
 
-    @override_settings(BRIGHT_DATA_TOKEN="", BRIGHT_DATA_WEB_UNLOCKER_ZONE="")
+    @override_settings(BRIGHT_DATA_TOKEN="", BRIGHT_DATA_SERP_ZONE="")
     @patch("api.agent.tools.brightdata.requests.post")
-    def test_missing_configuration_is_non_retryable(self, mock_post):
+    def test_missing_search_configuration_is_non_retryable(self, mock_post):
         result = execute_brightdata_search_engine(None, {"query": "cats"})
 
         self.assertEqual(result["status"], "error")
         self.assertFalse(result["retryable"])
         self.assertIn("BRIGHT_DATA_TOKEN", result["message"])
+        self.assertIn("BRIGHT_DATA_SERP_ZONE", result["message"])
+        mock_post.assert_not_called()
+
+    @override_settings(BRIGHT_DATA_WEB_UNLOCKER_ZONE="")
+    @patch("api.agent.tools.brightdata.requests.post")
+    def test_missing_scrape_configuration_is_non_retryable(self, mock_post):
+        result = execute_brightdata_scrape_as_markdown(None, {"url": "https://example.com"})
+
+        self.assertEqual(result["status"], "error")
+        self.assertFalse(result["retryable"])
         self.assertIn("BRIGHT_DATA_WEB_UNLOCKER_ZONE", result["message"])
+        self.assertNotIn("BRIGHT_DATA_SERP_ZONE", result["message"])
         mock_post.assert_not_called()
 
     def test_rejects_invalid_cursor_and_geo_location(self):
@@ -575,9 +586,11 @@ class BrightDataNativeToolTests(SimpleTestCase):
 @tag("batch_mcp_tools")
 @override_settings(
     BRIGHT_DATA_TOKEN="test-token",
+    BRIGHT_DATA_SERP_ZONE="test-serp-zone",
     BRIGHT_DATA_WEB_UNLOCKER_ZONE="test-zone",
     BRIGHT_DATA_WEB_UNLOCKER_ZONE_FALLBACK="",
     BRIGHT_DATA_REQUEST_TIMEOUT_SECONDS=42.0,
+    BRIGHT_DATA_SEARCH_REQUEST_TIMEOUT_SECONDS=7.0,
     BRIGHT_DATA_DATASET_POLL_TIMEOUT_SECONDS=600.0,
 )
 class BrightDataToolManagerTests(TestCase):

@@ -86,10 +86,11 @@ Depending on which Gobii features you enable, your deployment may also need:
 
 Bright Data web search, markdown scraping, and LinkedIn person profiles use the native Bright Data API. Other Bright Data tools continue to use the preconfigured platform MCP server.
 
-1. Set `BRIGHT_DATA_TOKEN` in your deployment environment. Native search and markdown scraping also require `BRIGHT_DATA_WEB_UNLOCKER_ZONE`; LinkedIn person profiles require only the token.
+1. Set `BRIGHT_DATA_TOKEN` in your deployment environment. Native search requires `BRIGHT_DATA_SERP_ZONE`, markdown scraping requires `BRIGHT_DATA_WEB_UNLOCKER_ZONE`, and LinkedIn person profiles require only the token.
    - For Docker Compose, place these values in a `.env` file and pass them into the `web` and `worker` services (or use an `env_file`).
-   - The zone must already exist; Gobii does not create or modify Bright Data zones.
-   - Optionally set `BRIGHT_DATA_WEB_UNLOCKER_ZONE_FALLBACK` to retry failed native search and markdown scraping requests once with a second existing zone.
+   - The zones must already exist; Gobii does not create or modify Bright Data zones.
+   - Optionally set `BRIGHT_DATA_WEB_UNLOCKER_ZONE_FALLBACK` to retry failed native markdown scraping requests once with a second Web Unlocker zone.
+   - Optionally set `BRIGHT_DATA_SEARCH_REQUEST_TIMEOUT_SECONDS` to change the 10-second timeout for each native search attempt.
    - Optionally set `BRIGHT_DATA_DATASET_POLL_TIMEOUT_SECONDS` to change the 600-second maximum wait for a LinkedIn profile snapshot.
 2. Restart the stack so the containers pick up the variables.
 3. Native Bright Data search and markdown scraping are enabled by default. LinkedIn person profiles remain available through normal tool discovery. In the Console, use **MCP Servers** to manage any additional Bright Data tools.

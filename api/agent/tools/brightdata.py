@@ -114,10 +114,16 @@ def get_brightdata_linkedin_person_profile_tool() -> dict[str, Any]:
     )
 
 
-def _configuration_error(*, require_web_unlocker_zone: bool = True) -> Optional[dict[str, Any]]:
+def _configuration_error(
+    *,
+    require_web_unlocker_zone: bool = False,
+    require_serp_zone: bool = False,
+) -> Optional[dict[str, Any]]:
     missing = []
     if not settings.BRIGHT_DATA_TOKEN:
         missing.append("BRIGHT_DATA_TOKEN")
+    if require_serp_zone and not settings.BRIGHT_DATA_SERP_ZONE:
+        missing.append("BRIGHT_DATA_SERP_ZONE")
     if require_web_unlocker_zone and not settings.BRIGHT_DATA_WEB_UNLOCKER_ZONE:
         missing.append("BRIGHT_DATA_WEB_UNLOCKER_ZONE")
     if not missing:
@@ -153,11 +159,12 @@ def _request_brightdata(
     *,
     params: Optional[dict[str, Any]] = None,
     payload: Any = None,
+    timeout: Optional[float] = None,
 ) -> tuple[Optional[Response], Optional[dict[str, Any]]]:
     request = requests.post if method == "POST" else requests.get
     request_kwargs = {
         "headers": _request_headers(),
-        "timeout": settings.BRIGHT_DATA_REQUEST_TIMEOUT_SECONDS,
+        "timeout": settings.BRIGHT_DATA_REQUEST_TIMEOUT_SECONDS if timeout is None else timeout,
     }
     if params is not None:
         request_kwargs["params"] = params
@@ -177,8 +184,17 @@ def _request_brightdata(
     return response, None
 
 
-def _post_brightdata(payload: dict[str, Any]) -> tuple[Optional[str], Optional[dict[str, Any]]]:
-    response, request_error = _request_brightdata("POST", BRIGHTDATA_API_URL, payload=payload)
+def _post_brightdata(
+    payload: dict[str, Any],
+    *,
+    timeout: Optional[float] = None,
+) -> tuple[Optional[str], Optional[dict[str, Any]]]:
+    response, request_error = _request_brightdata(
+        "POST",
+        BRIGHTDATA_API_URL,
+        payload=payload,
+        timeout=timeout,
+    )
     if request_error:
         return None, request_error
     return response.text, None
@@ -198,21 +214,17 @@ def _parse_cursor(cursor: Any) -> tuple[Optional[int], Optional[dict[str, Any]]]
 def _search_url(
     engine: str,
     query: str,
-    cursor: Any = None,
+    page: int,
     geo_location: Optional[str] = None,
-) -> tuple[Optional[str], Optional[dict[str, Any]]]:
-    page, cursor_error = _parse_cursor(cursor)
-    if cursor_error:
-        return None, cursor_error
-
+) -> str:
     encoded_query = quote(query, safe="-_.!~*'()")
     if engine == "yandex":
-        return f"https://yandex.com/search/?text={encoded_query}&p={page}", None
+        return f"https://yandex.com/search/?text={encoded_query}&p={page}"
     if engine == "bing":
-        return f"https://www.bing.com/search?q={encoded_query}&first={(page * 10) + 1}", None
+        return f"https://www.bing.com/search?q={encoded_query}&first={(page * 10) + 1}"
 
     location = f"&gl={geo_location}" if geo_location else ""
-    return f"https://www.google.com/search?q={encoded_query}&start={page * 10}{location}", None
+    return f"https://www.google.com/search?q={encoded_query}&start={page * 10}{location}"
 
 
 def _clean_google_search_response(
@@ -247,24 +259,57 @@ def _clean_google_search_response(
     return json.dumps({"organic": cleaned}, ensure_ascii=False, indent=2), None
 
 
+def _clean_bing_search_response(
+    response_text: str,
+) -> tuple[Optional[str], Optional[dict[str, Any]]]:
+    try:
+        payload = json.loads(response_text)
+    except json.JSONDecodeError:
+        return None, _error("Unexpected non-JSON response from Bright Data for Bing search.")
+
+    if not isinstance(payload, dict):
+        return None, _error("Bright Data returned an unexpected Bing search response.")
+
+    status_code = payload.get("status_code")
+    if isinstance(status_code, int) and status_code >= 400:
+        return None, _error(
+            f"Bright Data Bing search returned target HTTP {status_code}.",
+            status_code=status_code,
+            retryable=status_code == 429 or status_code >= 500,
+        )
+
+    body = payload.get("body", payload)
+    body_text = body if isinstance(body, str) else json.dumps(body, ensure_ascii=False, separators=(",", ":"))
+    try:
+        body = json.loads(body_text)
+    except json.JSONDecodeError:
+        return None, _error("Bright Data returned malformed Bing search JSON.")
+    if not isinstance(body, dict) or not isinstance(body.get("webPages"), dict):
+        return None, _error("Bright Data returned an unexpected Bing search response.")
+
+    return body_text, None
+
+
 def _execute_with_zone_fallback(
     payload: dict[str, Any],
     operation: str,
     process_response: Callable[[str], tuple[Optional[str], Optional[dict[str, Any]]]],
+    *,
+    primary_zone: str,
+    fallback_zone: str = "",
+    timeout: Optional[float] = None,
 ) -> tuple[Optional[str], Optional[dict[str, Any]]]:
-    config_error = _configuration_error()
-    if config_error:
-        return None, config_error
-
-    primary_zone = settings.BRIGHT_DATA_WEB_UNLOCKER_ZONE
-    fallback_zone = settings.BRIGHT_DATA_WEB_UNLOCKER_ZONE_FALLBACK.strip()
     zones = [primary_zone]
+    fallback_zone = fallback_zone.strip()
     if fallback_zone and fallback_zone != primary_zone:
         zones.append(fallback_zone)
 
     last_error = None
     for attempt, zone in enumerate(zones):
-        response_text, request_error = _post_brightdata({**payload, "zone": zone})
+        response_text, request_error = _post_brightdata(
+            {**payload, "zone": zone},
+            timeout=timeout,
+        )
         if request_error:
             last_error = request_error
         else:
@@ -294,6 +339,23 @@ def _non_empty_search_response(response_text: str) -> tuple[Optional[str], Optio
     if response_text.strip():
         return response_text, None
     return None, _error("Bright Data returned an empty search_engine result.")
+
+
+def _should_try_bing_fallback(search_error: dict[str, Any]) -> bool:
+    return search_error.get("status_code") not in {401, 403}
+
+
+def _combined_search_error(
+    google_error: dict[str, Any],
+    bing_error: dict[str, Any],
+) -> dict[str, Any]:
+    combined_error = dict(bing_error)
+    combined_error["message"] = (
+        "Bright Data Google search failed and the Bing fallback also failed. "
+        f"Google failure: {google_error.get('message', 'unknown')}. "
+        f"Bing failure: {bing_error.get('message', 'unknown')}"
+    )
+    return combined_error
 
 
 def _processed_scrape_response(response_text: str) -> tuple[Optional[str], Optional[dict[str, Any]]]:
@@ -388,6 +450,22 @@ def _poll_linkedin_person_profile_snapshot(
         time.sleep(min(_DATASET_POLL_INTERVAL_SECONDS, remaining))
 
 
+def _execute_bing_json_search(
+    target_url: str,
+) -> tuple[Optional[str], Optional[dict[str, Any]]]:
+    return _execute_with_zone_fallback(
+        {
+            "url": target_url,
+            "format": "json",
+            "data_format": "parsed_bing_api",
+        },
+        "Bing search",
+        _clean_bing_search_response,
+        primary_zone=settings.BRIGHT_DATA_SERP_ZONE,
+        timeout=settings.BRIGHT_DATA_SEARCH_REQUEST_TIMEOUT_SECONDS,
+    )
+
+
 def execute_brightdata_search_engine(_agent: Any, params: dict[str, Any]) -> dict[str, Any]:
     query = params.get("query") if isinstance(params, dict) else None
     if not isinstance(query, str) or not query.strip():
@@ -405,12 +483,16 @@ def execute_brightdata_search_engine(_agent: Any, params: dict[str, Any]) -> dic
     ):
         return _error("Bright Data geo_location must be a two-letter country code.")
 
-    target_url, url_error = _search_url(engine, query, params.get("cursor"), geo_location)
-    if url_error:
-        return url_error
+    page, cursor_error = _parse_cursor(params.get("cursor"))
+    if cursor_error:
+        return cursor_error
+    target_url = _search_url(engine, query, page, geo_location)
 
-    is_google = engine == "google"
-    if is_google:
+    config_error = _configuration_error(require_serp_zone=True)
+    if config_error:
+        return config_error
+
+    if engine == "google":
         result, search_error = _execute_with_zone_fallback(
             {
                 "url": f"{target_url}&brd_json=1",
@@ -419,7 +501,18 @@ def execute_brightdata_search_engine(_agent: Any, params: dict[str, Any]) -> dic
             },
             "Google search",
             _clean_google_search_response,
+            primary_zone=settings.BRIGHT_DATA_SERP_ZONE,
+            timeout=settings.BRIGHT_DATA_SEARCH_REQUEST_TIMEOUT_SECONDS,
         )
+        if search_error and _should_try_bing_fallback(search_error):
+            bing_url = _search_url("bing", query, page, geo_location)
+            logger.warning("Bright Data Google search failed; trying the Bing JSON fallback")
+            result, bing_error = _execute_bing_json_search(bing_url)
+            if not bing_error:
+                return {"status": "success", "result": result}
+            return _combined_search_error(search_error, bing_error)
+    elif engine == "bing":
+        result, search_error = _execute_bing_json_search(target_url)
     else:
         result, search_error = _execute_with_zone_fallback(
             {
@@ -429,6 +522,8 @@ def execute_brightdata_search_engine(_agent: Any, params: dict[str, Any]) -> dic
             },
             f"{engine.title()} search",
             _non_empty_search_response,
+            primary_zone=settings.BRIGHT_DATA_SERP_ZONE,
+            timeout=settings.BRIGHT_DATA_SEARCH_REQUEST_TIMEOUT_SECONDS,
         )
     if search_error:
         return search_error
@@ -513,6 +608,10 @@ def execute_brightdata_scrape_as_markdown(_agent: Any, params: dict[str, Any]) -
     if validation_error:
         return validation_error
 
+    config_error = _configuration_error(require_web_unlocker_zone=True)
+    if config_error:
+        return config_error
+
     result, scrape_error = _execute_with_zone_fallback(
         {
             "url": url,
@@ -521,6 +620,8 @@ def execute_brightdata_scrape_as_markdown(_agent: Any, params: dict[str, Any]) -
         },
         "markdown scrape",
         _processed_scrape_response,
+        primary_zone=settings.BRIGHT_DATA_WEB_UNLOCKER_ZONE,
+        fallback_zone=settings.BRIGHT_DATA_WEB_UNLOCKER_ZONE_FALLBACK,
     )
     if scrape_error:
         return scrape_error
