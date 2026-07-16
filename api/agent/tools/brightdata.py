@@ -214,21 +214,17 @@ def _parse_cursor(cursor: Any) -> tuple[Optional[int], Optional[dict[str, Any]]]
 def _search_url(
     engine: str,
     query: str,
-    cursor: Any = None,
+    page: int,
     geo_location: Optional[str] = None,
-) -> tuple[Optional[str], Optional[dict[str, Any]]]:
-    page, cursor_error = _parse_cursor(cursor)
-    if cursor_error:
-        return None, cursor_error
-
+) -> str:
     encoded_query = quote(query, safe="-_.!~*'()")
     if engine == "yandex":
-        return f"https://yandex.com/search/?text={encoded_query}&p={page}", None
+        return f"https://yandex.com/search/?text={encoded_query}&p={page}"
     if engine == "bing":
-        return f"https://www.bing.com/search?q={encoded_query}&first={(page * 10) + 1}", None
+        return f"https://www.bing.com/search?q={encoded_query}&first={(page * 10) + 1}"
 
     location = f"&gl={geo_location}" if geo_location else ""
-    return f"https://www.google.com/search?q={encoded_query}&start={page * 10}{location}", None
+    return f"https://www.google.com/search?q={encoded_query}&start={page * 10}{location}"
 
 
 def _clean_google_search_response(
@@ -283,15 +279,15 @@ def _clean_bing_search_response(
         )
 
     body = payload.get("body", payload)
-    if isinstance(body, str):
-        try:
-            body = json.loads(body)
-        except json.JSONDecodeError:
-            return None, _error("Bright Data returned malformed Bing search JSON.")
+    body_text = body if isinstance(body, str) else json.dumps(body, ensure_ascii=False, separators=(",", ":"))
+    try:
+        body = json.loads(body_text)
+    except json.JSONDecodeError:
+        return None, _error("Bright Data returned malformed Bing search JSON.")
     if not isinstance(body, dict) or not isinstance(body.get("webPages"), dict):
         return None, _error("Bright Data returned an unexpected Bing search response.")
 
-    return json.dumps(body, ensure_ascii=False, separators=(",", ":")), None
+    return body_text, None
 
 
 def _execute_with_zone_fallback(
@@ -487,16 +483,16 @@ def execute_brightdata_search_engine(_agent: Any, params: dict[str, Any]) -> dic
     ):
         return _error("Bright Data geo_location must be a two-letter country code.")
 
-    target_url, url_error = _search_url(engine, query, params.get("cursor"), geo_location)
-    if url_error:
-        return url_error
+    page, cursor_error = _parse_cursor(params.get("cursor"))
+    if cursor_error:
+        return cursor_error
+    target_url = _search_url(engine, query, page, geo_location)
 
     config_error = _configuration_error(require_serp_zone=True)
     if config_error:
         return config_error
 
-    is_google = engine == "google"
-    if is_google:
+    if engine == "google":
         result, search_error = _execute_with_zone_fallback(
             {
                 "url": f"{target_url}&brd_json=1",
@@ -509,9 +505,7 @@ def execute_brightdata_search_engine(_agent: Any, params: dict[str, Any]) -> dic
             timeout=settings.BRIGHT_DATA_SEARCH_REQUEST_TIMEOUT_SECONDS,
         )
         if search_error and _should_try_bing_fallback(search_error):
-            bing_url, bing_url_error = _search_url("bing", query, params.get("cursor"), geo_location)
-            if bing_url_error:
-                return bing_url_error
+            bing_url = _search_url("bing", query, page, geo_location)
             logger.warning("Bright Data Google search failed; trying the Bing JSON fallback")
             result, bing_error = _execute_bing_json_search(bing_url)
             if not bing_error:
