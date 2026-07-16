@@ -795,7 +795,9 @@ const chatSlice = createSlice({
         if (processingActive && !session.processing.processingActive) {
           session.processing.processingStartedAt = session.processing.processingStartedAt ?? Date.now()
         } else if (!processingActive) {
-          session.processing.processingStartedAt = null
+          session.processing.processingStartedAt = session.processing.awaitingResponse
+            ? session.processing.processingStartedAt
+            : null
         }
         session.processing.processingActive = processingActive
       }
