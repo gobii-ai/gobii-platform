@@ -78,6 +78,25 @@ class BlogSeoTests(TestCase):
         )
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_blog_post_renders_faq_graph_and_named_author_metadata(self):
+        response = self.client.get("/blog/newsletter-2026-04-08-inbound-webhooks/")
+
+        self.assertEqual(response.status_code, 200)
+        soup = BeautifulSoup(response.content, "html.parser")
+        structured_data = json.loads(soup.find("script", type="application/ld+json").string)
+        graph = structured_data["@graph"]
+        article = next(item for item in graph if item["@type"] == "BlogPosting")
+        faq_page = next(item for item in graph if item["@type"] == "FAQPage")
+
+        self.assertEqual(article["author"]["@type"], "Person")
+        self.assertEqual(article["author"]["name"], "Will Bonde")
+        self.assertEqual(article["author"]["jobTitle"], "Growth & Engineering")
+        self.assertTrue(article["author"]["url"].endswith("/team/"))
+        self.assertEqual(len(faq_page["mainEntity"]), 4)
+        self.assertContains(response, "Updated July 16, 2026")
+        self.assertContains(response, faq_page["mainEntity"][0]["acceptedAnswer"]["text"])
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_blog_index_renders_topic_hub_metadata_and_structured_data(self):
         response = self.client.get("/blog/")
 
@@ -103,6 +122,16 @@ class BlogSeoTests(TestCase):
         self.assertNotContains(response, "bg-sky-950")
         self.assertNotContains(response, "text-cyan-50")
         self.assertNotContains(response, "bg-[#")
+
+        integrations_section = next(
+            section
+            for section in response.context["topic_sections"]
+            if section["name"] == "MCP and integrations"
+        )
+        self.assertIn(
+            "newsletter-2026-04-08-inbound-webhooks",
+            [post["slug"] for post in integrations_section["posts"]],
+        )
 
         structured_data = json.loads(soup.find("script", type="application/ld+json").string)
         self.assertEqual(structured_data["@type"], "Blog")

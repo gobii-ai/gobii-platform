@@ -47,6 +47,10 @@
       {% if post.published_at %}
         <time datetime="{{ post.published_at|date:'c' }}">{{ post.published_at|date:"F j, Y" }}</time>
       {% endif %}
+      {% if post.updated_at and post.updated_at != post.published_at %}
+        <span class="h-1 w-1 rounded-full bg-slate-300"></span>
+        <time datetime="{{ post.updated_at|date:'c' }}">Updated {{ post.updated_at|date:"F j, Y" }}</time>
+      {% endif %}
       {% if post.meta.author %}
         <span class="h-1 w-1 rounded-full bg-slate-300"></span>
         <span>{{ post.meta.author }}</span>
