@@ -2646,16 +2646,27 @@ def _build_contacts_block(
                 allowed_lines.append(f"- email: {collaborator.user.email} (collaborator)")
 
     if owner_email_verified:
-        allowed_lines.append("Only contact people listed here or in recent conversations.")
+        auto_approve_email = agent.contact_approval_mode == PersistentAgent.ContactApprovalMode.AUTO_APPROVE_EMAIL
+        if auto_approve_email:
+            allowed_lines.append(
+                "You may email a new address directly with send_email; each new To/CC email recipient is automatically added to the contact list up to the account contact limit."
+            )
+            allowed_lines.append(
+                "Do not request contact permission for a new email recipient. SMS contacts still require request_contact_permission and human approval."
+            )
+        else:
+            allowed_lines.append("Only contact people listed here or in recent conversations.")
+            allowed_lines.append("To reach someone new, use request_contact_permission—it returns a link to share with the user.")
+            allowed_lines.append(
+                "If the user asks you to email or text a specific new address or phone number, request contact permission before reading files, searching, drafting, tool search, or asking non-blocking follow-up questions."
+            )
+            allowed_lines.append(
+                "Do not infer approval from local lead status or an empty pending contacts queue."
+            )
         allowed_lines.append(
-            f"For bulk or exact recipient checks, query {CONTACTS_TABLE}; safe outbound recipients "
+            f"For existing or bulk recipient checks, query {CONTACTS_TABLE}; safe outbound recipients "
             "have status='allowed' AND allow_outbound=1. Use ORDER BY relevance_at DESC for "
-            "recently active or updated contacts. Do not infer approval from local lead status or "
-            "an empty pending contacts queue."
-        )
-        allowed_lines.append("To reach someone new, use request_contact_permission—it returns a link to share with the user.")
-        allowed_lines.append(
-            "If the user asks you to email or text a specific new address or phone number, request contact permission before reading files, searching, drafting, tool search, or asking non-blocking follow-up questions."
+            "recently active or updated contacts."
         )
         allowed_lines.append("You do not have to message or reply to everyone; you may choose the best contact or contacts for your needs.")
     else:

@@ -31,7 +31,7 @@ import { SettingsBanner } from '../components/agentSettings/SettingsBanner'
 import { getSettingsSurfaceClassName } from '../components/common/SettingsSurface'
 import { AgentIntelligenceSlider } from '../components/common/AgentIntelligenceSlider'
 import { SaveBar } from '../components/common/SaveBar'
-import { AddContactModal } from '../components/agentSettings/AddContactModal'
+import { AddContactModal, EditContactModal } from '../components/agentSettings/AddContactModal'
 import { AllowlistContactsTable } from '../components/agentSettings/AllowlistContactsTable'
 import { CollaboratorsTable } from '../components/agentSettings/CollaboratorsTable'
 import type { AllowlistInput, AllowlistTableRow, CollaboratorTableRow, PendingAllowlistAction, PendingCollaboratorAction } from '../components/agentSettings/contactTypes'
@@ -45,6 +45,7 @@ import type {
   AgentInboundWebhook,
   AgentOrganization,
   AgentSettingsData,
+  ContactApprovalMode,
   MiniDescriptionMode,
   AgentSettingsReassignmentInfo as ReassignmentInfo,
   AgentSummary,
@@ -133,7 +134,25 @@ type FormState = {
   sliderValue: number
   dedicatedProxyId: string
   preferredTier: IntelligenceTierKey
+  contactApprovalMode: ContactApprovalMode
 }
+
+const CONTACT_APPROVAL_OPTIONS = [
+  {
+    value: 'require_approval',
+    title: 'Ask before adding',
+    description: 'Review each new email or SMS contact before the agent can reach them.',
+    icon: ShieldAlert,
+    badge: null,
+  },
+  {
+    value: 'auto_approve_email',
+    title: 'Automatically allow email contacts',
+    description: 'Anyone your agent emails is added to its contacts.',
+    icon: Mail,
+    badge: Zap,
+  },
+] as const
 
 const generateTempId = () =>
   typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `temp-${Date.now()}-${Math.random().toString(36).slice(2)}`
@@ -229,7 +248,7 @@ function stagePersistedRowActions<
     .filter((row) => !row.temp)
     .map(getPersistedAction)
     .filter((action): action is Extract<TPendingAction, PendingIdAction> => action !== null)
-  const persistedKeys = new Set(persistedActions.map((action) => `${action.type}:${action.id}`))
+  const persistedIds = new Set(persistedActions.map((action) => action.id))
 
   const next = pendingActions.filter((action) => {
     if (isCreatePendingAction(action)) {
@@ -240,7 +259,7 @@ function stagePersistedRowActions<
       return true
     }
 
-    return !persistedKeys.has(`${action.type}:${action.id}`)
+    return !persistedIds.has(action.id)
   })
 
   return [...next, ...persistedActions] as TPendingAction[]
@@ -279,7 +298,7 @@ async function runPendingActionGroup<TAction>({
 }
 
 function buildAllowlistRows(state: AllowlistState, pendingActions: PendingAllowlistAction[]): AllowlistTableRow[] {
-  return buildStagedRows({
+  const rows = buildStagedRows({
     baseRows: [
       ...state.entries.map<AllowlistTableRow>((entry) => ({
         id: entry.id,
@@ -307,7 +326,7 @@ function buildAllowlistRows(state: AllowlistState, pendingActions: PendingAllowl
       })),
     ],
     pendingActions,
-    createRow: (action) => ({
+    createRow: (action): AllowlistTableRow => ({
       id: action.tempId,
       kind: 'entry',
       channel: action.channel,
@@ -331,6 +350,17 @@ function buildAllowlistRows(state: AllowlistState, pendingActions: PendingAllowl
       }
       return left.id.localeCompare(right.id)
     },
+  })
+  const updates = new Map(
+    pendingActions
+      .filter((action): action is Extract<PendingAllowlistAction, { type: 'update' }> => action.type === 'update')
+      .map((action) => [action.id, action] as const),
+  )
+  return rows.map((row) => {
+    const update = updates.get(row.id)
+    return update
+      ? { ...row, allowInbound: update.allowInbound, allowOutbound: update.allowOutbound }
+      : row
   })
 }
 
@@ -433,6 +463,7 @@ export function AgentSettingsWorkspace({
       sliderValue: initialData.dailyCredits.sliderValue ?? fallbackSliderEmptyValue,
       dedicatedProxyId: initialData.dedicatedIps.selectedId ?? '',
       preferredTier: (initialData.agent.preferredLlmTier || 'standard') as IntelligenceTierKey,
+      contactApprovalMode: initialData.agent.contactApprovalMode,
     }),
     [
       initialData.agent.name,
@@ -441,6 +472,7 @@ export function AgentSettingsWorkspace({
       initialData.agent.miniDescriptionMode,
       initialData.agent.isActive,
       initialData.agent.preferredLlmTier,
+      initialData.agent.contactApprovalMode,
       initialData.dailyCredits.limit,
       initialData.dailyCredits.sliderValue,
       initialData.dedicatedIps.selectedId,
@@ -554,6 +586,7 @@ export function AgentSettingsWorkspace({
       formState.sliderValue !== savedFormState.sliderValue ||
       formState.dedicatedProxyId !== savedFormState.dedicatedProxyId ||
       formState.preferredTier !== savedFormState.preferredTier ||
+      formState.contactApprovalMode !== savedFormState.contactApprovalMode ||
       avatarFile !== null ||
       (removeAvatar && Boolean(savedAvatarUrl))
     )
@@ -974,7 +1007,16 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
   const submitAllowlistAction = useCallback(
     async (action: PendingAllowlistAction) => {
       const formData = new FormData()
-      formData.append('action', action.type === 'cancel_invite' ? 'cancel_invite' : action.type === 'remove' ? 'remove_allowlist' : 'add_allowlist')
+      formData.append(
+        'action',
+        action.type === 'cancel_invite'
+          ? 'cancel_invite'
+          : action.type === 'remove'
+            ? 'remove_allowlist'
+            : action.type === 'update'
+              ? 'update_allowlist'
+              : 'add_allowlist',
+      )
       if (action.type === 'create') {
         formData.append('channel', action.channel)
         formData.append('address', action.address)
@@ -989,6 +1031,10 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
         if (action.smsContactPermissionAttested != null) {
           formData.append('sms_contact_permission_attested', String(action.smsContactPermissionAttested))
         }
+      } else if (action.type === 'update') {
+        formData.append('entry_id', action.id)
+        formData.append('allow_inbound', String(action.allowInbound))
+        formData.append('allow_outbound', String(action.allowOutbound))
       } else if (action.type === 'remove') {
         formData.append('entry_id', action.id)
       } else {
@@ -1187,6 +1233,9 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
         }
         if (data?.miniDescriptionMode === 'auto' || data?.miniDescriptionMode === 'manual') {
           nextFormState.miniDescriptionMode = data.miniDescriptionMode
+        }
+        if (data?.contactApprovalMode === 'require_approval' || data?.contactApprovalMode === 'auto_approve_email') {
+          nextFormState.contactApprovalMode = data.contactApprovalMode
         }
         if (serverTierRaw && (initialData.llmIntelligence?.options ?? []).some((option) => option.key === serverTierRaw)) {
           const serverTier = serverTierRaw as IntelligenceTierKey
@@ -1524,6 +1573,54 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
       />
     ))
   }, [showModal, stageAllowlistAdd])
+
+  const stageAllowlistUpdate = useCallback(
+    async (row: AllowlistTableRow, input: AllowlistInput) => {
+      if (row.temp) {
+        setPendingAllowlistActions((prev) => prev.map((action) => (
+          action.type === 'create' && action.tempId === row.id
+            ? { ...action, allowInbound: input.allowInbound, allowOutbound: input.allowOutbound }
+            : action
+        )))
+        return
+      }
+
+      const savedEntry = savedAllowlistState.entries.find((entry) => entry.id === row.id)
+      setPendingAllowlistActions((prev) => {
+        const withoutCurrentUpdate = prev.filter((action) => !(action.type === 'update' && action.id === row.id))
+        if (
+          savedEntry
+          && savedEntry.allowInbound === input.allowInbound
+          && savedEntry.allowOutbound === input.allowOutbound
+        ) {
+          return withoutCurrentUpdate
+        }
+        return [
+          ...withoutCurrentUpdate,
+          {
+            type: 'update',
+            id: row.id,
+            allowInbound: input.allowInbound,
+            allowOutbound: input.allowOutbound,
+          },
+        ]
+      })
+    },
+    [savedAllowlistState.entries],
+  )
+
+  const openEditContactModal = useCallback(
+    (row: AllowlistTableRow) => {
+      showModal((onClose) => (
+        <EditContactModal
+          contact={row}
+          onSubmit={(input) => stageAllowlistUpdate(row, input)}
+          onClose={onClose}
+        />
+      ))
+    },
+    [showModal, stageAllowlistUpdate],
+  )
 
   const confirmAllowlistRemoval = useCallback(
     (rows: AllowlistTableRow[]) => {
@@ -1898,6 +1995,7 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
       {initialData.allowlist.show && (
         <input type="hidden" name="whitelist_policy" value={initialData.agent.whitelistPolicy} />
       )}
+      <input type="hidden" name="contact_approval_mode" value={formState.contactApprovalMode} />
         <details className={sectionClassName} id="agent-identity">
           <summary className={sectionSummaryClassName}>
             <div>
@@ -2202,9 +2300,15 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
               state={savedAllowlistState}
               rows={allowlistRows}
               projectedSlotsUsed={projectedContactSlots}
+              contactApprovalMode={formState.contactApprovalMode}
               saving={saving}
               onAddContact={openAddContactModal}
+              onEditContact={openEditContactModal}
               onRemoveRows={confirmAllowlistRemoval}
+              onContactApprovalModeChange={(contactApprovalMode) => setFormState((prev) => ({
+                ...prev,
+                contactApprovalMode,
+              }))}
               contactRequestsUrl={initialData.urls.contactRequests}
               onOpenContactRequests={onOpenContactRequests}
             />
@@ -2465,14 +2569,29 @@ type AllowlistManagerProps = {
   state: AllowlistState
   rows: AllowlistTableRow[]
   projectedSlotsUsed: number
+  contactApprovalMode: ContactApprovalMode
   saving: boolean
   onAddContact: () => void
+  onEditContact: (row: AllowlistTableRow) => void
   onRemoveRows: (rows: AllowlistTableRow[]) => void
+  onContactApprovalModeChange: (mode: ContactApprovalMode) => void
   contactRequestsUrl: string
   onOpenContactRequests?: () => void
 }
 
-function AllowlistManager({ state, rows, projectedSlotsUsed, saving, onAddContact, onRemoveRows, contactRequestsUrl, onOpenContactRequests }: AllowlistManagerProps) {
+function AllowlistManager({
+  state,
+  rows,
+  projectedSlotsUsed,
+  contactApprovalMode,
+  saving,
+  onAddContact,
+  onEditContact,
+  onRemoveRows,
+  onContactApprovalModeChange,
+  contactRequestsUrl,
+  onOpenContactRequests,
+}: AllowlistManagerProps) {
   const contactCapReached = typeof state.maxContacts === 'number' && state.maxContacts > 0 && projectedSlotsUsed >= state.maxContacts
   const embeddedInfoBannerClassName = 'flex items-start gap-2 rounded-lg border border-amber-300/20 bg-amber-950/30 px-4 py-3'
   const embeddedInfoCardClassName = 'rounded-xl border border-slate-200/20 bg-slate-950/35 px-4 py-4'
@@ -2481,13 +2600,53 @@ function AllowlistManager({ state, rows, projectedSlotsUsed, saving, onAddContac
 
   return (
     <div className="space-y-5">
-      <div className="space-y-1">
-        <p className="text-xs text-gray-500">
-          By default, the agent owner and team members can communicate with this agent. You can add additional contacts below.
-          Note: Multi-recipient messaging is limited to email only.
-        </p>
-        <p className="text-xs text-slate-600">Contact slots include allowlist entries and collaborators.</p>
-      </div>
+      <fieldset className="space-y-3">
+        <legend className="text-sm font-semibold text-slate-700">New contact approval</legend>
+        <p className="text-xs text-slate-500">Choose how this agent handles email addresses that are not already listed.</p>
+        <div className="grid gap-3 lg:grid-cols-2">
+          {CONTACT_APPROVAL_OPTIONS.map((option) => {
+            const Icon = option.icon
+            const Badge = option.badge
+            const selected = contactApprovalMode === option.value
+            return (
+              <label
+                key={option.value}
+                className={`flex cursor-pointer items-start gap-3 rounded-xl border px-4 py-4 text-left transition-colors ${
+                  selected
+                    ? 'border-blue-400/60 bg-blue-950/30'
+                    : 'border-slate-200/20 bg-transparent hover:border-slate-300/40'
+                } ${saving ? 'cursor-not-allowed opacity-60' : ''}`}
+              >
+                <span className="relative flex size-9 shrink-0 items-center justify-center rounded-lg border border-slate-200/20 bg-slate-900/45 text-slate-300">
+                  <Icon className="size-4" aria-hidden="true" />
+                  {Badge && <Badge className="absolute -right-1 -top-1 size-3 text-amber-300" aria-hidden="true" />}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-semibold text-slate-100">{option.title}</span>
+                  <span className="mt-1 block text-xs leading-5 text-slate-400">{option.description}</span>
+                </span>
+                <input
+                  type="radio"
+                  name="contact-approval-mode-choice"
+                  value={option.value}
+                  checked={selected}
+                  disabled={saving}
+                  onChange={() => onContactApprovalModeChange(option.value)}
+                  className="mt-2 size-4 shrink-0 accent-blue-500"
+                />
+              </label>
+            )
+          })}
+        </div>
+        {contactApprovalMode === 'auto_approve_email' && (
+          <div className="flex items-start gap-2 rounded-lg border border-amber-300/20 bg-amber-950/30 px-4 py-3 text-xs leading-5 text-amber-100">
+            <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-400" aria-hidden="true" />
+            <p>
+              This agent can add email contacts without asking you first. New contacts remain visible and removable below. SMS contacts always require approval.
+            </p>
+          </div>
+        )}
+      </fieldset>
 
       {!state.emailVerified && (
         <div className={embeddedInfoBannerClassName}>
@@ -2523,13 +2682,18 @@ function AllowlistManager({ state, rows, projectedSlotsUsed, saving, onAddContac
               </a>
             )}
           </div>
+          {contactApprovalMode === 'auto_approve_email' && (
+            <p className="mt-2 pl-7 text-xs text-amber-200/80">
+              Email requests shown here predate automatic approval; SMS requests always need your review.
+            </p>
+          )}
         </div>
       )}
 
       {(state.ownerEmail || state.ownerPhone) && (
         <div className={embeddedInfoCardClassName}>
           <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Owner Endpoints</div>
-          <p className="mt-1 text-xs text-slate-600">Owner endpoints are always allowed in default mode.</p>
+          <p className="mt-1 text-xs text-slate-600">Owner endpoints can always be contacted by the agent.</p>
           {state.ownerEmail && (
             <div className="mt-3 flex items-center gap-2 text-sm text-slate-700">
               <span className={embeddedInfoIconClassName}>
@@ -2579,6 +2743,7 @@ function AllowlistManager({ state, rows, projectedSlotsUsed, saving, onAddContac
         <AllowlistContactsTable
           rows={rows}
           disabled={saving}
+          onEditRow={onEditContact}
           onRemoveRow={(row) => onRemoveRows([row])}
           onRemoveRows={onRemoveRows}
         />

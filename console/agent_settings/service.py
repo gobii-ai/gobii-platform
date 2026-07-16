@@ -485,13 +485,6 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
         except (AttributeError, DatabaseError):
             owner_phone = None
 
-        html = render_to_string('console/partials/_allowlist_entries_inline.html', {
-            'allowlist_entries': entries,
-            'pending_invites': pending_invites,
-            'owner_email': owner_email,
-            'owner_phone': owner_phone,
-        })
-
         active_count = CommsAllowlistEntry.objects.filter(
             agent=agent,
             is_active=True
@@ -507,7 +500,6 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
 
         return {
             'success': True,
-            'html': html,
             'active_count': total_count,
             'allowlist': self._serialize_allowlist_state(
                 agent,
@@ -685,6 +677,41 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
         except Exception as exc:
             return JsonResponse({'success': False, 'error': str(exc)})
 
+    def _handle_update_allowlist_ajax(
+        self,
+        request,
+        agent: PersistentAgent,
+        *,
+        max_contacts_per_agent: int | None,
+    ) -> JsonResponse:
+        entry_id = request.POST.get('entry_id')
+        allow_inbound = request.POST.get('allow_inbound')
+        allow_outbound = request.POST.get('allow_outbound')
+        if allow_inbound not in {'true', 'false'} or allow_outbound not in {'true', 'false'}:
+            return JsonResponse({'success': False, 'error': 'Select valid inbound and outbound permissions.'})
+
+        entry = CommsAllowlistEntry.objects.filter(
+            agent=agent,
+            id=entry_id,
+            is_active=True,
+        ).first()
+        if entry is None:
+            return JsonResponse({'success': False, 'error': 'Contact not found.'}, status=404)
+
+        entry.allow_inbound = allow_inbound == 'true'
+        entry.allow_outbound = allow_outbound == 'true'
+        try:
+            entry.save(update_fields=['allow_inbound', 'allow_outbound', 'updated_at'])
+        except ValidationError as exc:
+            return JsonResponse({'success': False, 'error': _format_validation_error(exc)})
+
+        process_agent_events_task.delay(str(agent.id))
+        return self._allowlist_ajax_success_response(
+            request,
+            agent,
+            max_contacts_per_agent=max_contacts_per_agent,
+        )
+
     def _handle_cancel_invite_ajax(
         self,
         request,
@@ -713,6 +740,7 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
     ) -> JsonResponse | None:
         handlers = {
             'add_allowlist': self._handle_add_allowlist_ajax,
+            'update_allowlist': self._handle_update_allowlist_ajax,
             'remove_allowlist': self._handle_remove_allowlist_ajax,
             'cancel_invite': self._handle_cancel_invite_ajax,
         }
@@ -1104,6 +1132,7 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
                 'createdAtDisplay': _datetime_display(agent.created_at, "F j, Y \a\t g:i A"),
                 'pendingTransfer': pending_transfer_payload,
                 'whitelistPolicy': agent.whitelist_policy,
+                'contactApprovalMode': agent.contact_approval_mode,
                 'preferredLlmTier': getattr(getattr(agent, 'preferred_llm_tier', None), 'key', AgentLLMTier.STANDARD.value),
                 'organization': (
                     {
@@ -1186,6 +1215,7 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
         action = request.POST.get('action')
         ajax_actions = {
             'add_allowlist',
+            'update_allowlist',
             'remove_allowlist',
             'cancel_invite',
             'add_collaborator',
@@ -1597,6 +1627,12 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
 
         # Handle whitelist policy update (flag removed)
         new_whitelist_policy = request.POST.get('whitelist_policy', '').strip()
+        new_contact_approval_mode = (
+            request.POST.get('contact_approval_mode')
+            or agent.contact_approval_mode
+        ).strip()
+        if new_contact_approval_mode not in PersistentAgent.ContactApprovalMode.values:
+            return _general_error("Select a valid contact approval option.")
 
         avatar_file = request.FILES.get('avatar')
         clear_avatar_flag = (request.POST.get('clear_avatar') or '').strip().lower() in {'1', 'true', 'yes', 'on'}
@@ -1649,6 +1685,7 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
         prev_hard_limit = agent.get_daily_credit_hard_limit()
         prev_preferred_tier = getattr(getattr(agent, "preferred_llm_tier", None), "key", AgentLLMTier.STANDARD.value)
         prev_whitelist_policy = agent.whitelist_policy
+        prev_contact_approval_mode = agent.contact_approval_mode
 
         plan = None
         if owner is not None:
@@ -1830,6 +1867,10 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
                         agent.whitelist_policy = new_whitelist_policy
                         agent_fields_to_update.append('whitelist_policy')
 
+                if agent.contact_approval_mode != new_contact_approval_mode:
+                    agent.contact_approval_mode = new_contact_approval_mode
+                    agent_fields_to_update.append('contact_approval_mode')
+
                 # Update daily credit limit if changed
                 if agent.daily_credit_limit != new_daily_limit:
                     agent.daily_credit_limit = new_daily_limit
@@ -1978,6 +2019,8 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
                     update_props['previous_preferred_llm_tier'] = prev_preferred_tier
                 if 'whitelist_policy' in changed_fields_for_analytics:
                     update_props['previous_whitelist_policy'] = prev_whitelist_policy
+                if 'contact_approval_mode' in changed_fields_for_analytics:
+                    update_props['previous_contact_approval_mode'] = prev_contact_approval_mode
                 Analytics.track_event(
                     user_id=request.user.id,
                     event=AnalyticsEvent.PERSISTENT_AGENT_UPDATED,
@@ -2011,6 +2054,7 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
                 'miniDescription': agent.mini_description,
                 'miniDescriptionMode': agent.mini_description_mode,
                 'preferredLlmTier': getattr(getattr(agent, "preferred_llm_tier", None), "key", None),
+                'contactApprovalMode': agent.contact_approval_mode,
                 'warning': preferred_tier_warning,
             })
 

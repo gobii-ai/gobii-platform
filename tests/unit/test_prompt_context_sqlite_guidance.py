@@ -128,6 +128,30 @@ class PromptContextContactsGuidanceTests(TestCase):
         self.assertNotIn("person-00@example.com", allowed_contacts)
         self.assertIn("status='allowed' AND allow_outbound=1", allowed_contacts)
 
+    def test_auto_approval_prompt_sends_email_directly_but_keeps_sms_approval(self):
+        self.agent.contact_approval_mode = PersistentAgent.ContactApprovalMode.AUTO_APPROVE_EMAIL
+        self.agent.save(update_fields=["contact_approval_mode"])
+        collector = _PromptSectionCollector()
+        config_authority = prompt_context._ConfigAuthorityResolver(self.agent)
+        contact_records = prompt_context.build_contacts_snapshot_records(
+            self.agent,
+            display_name_for_user=prompt_context._build_user_display_name,
+            user_can_configure=config_authority.user_can_configure,
+        )
+
+        prompt_context._build_contacts_block(
+            self.agent,
+            collector,
+            _NoopSpan(),
+            config_authority,
+            contact_records,
+        )
+
+        allowed_contacts = collector.sections["allowed_contacts"]
+        self.assertIn("email a new address directly with send_email", allowed_contacts)
+        self.assertIn("SMS contacts still require request_contact_permission", allowed_contacts)
+        self.assertNotIn("To reach someone new, use request_contact_permission", allowed_contacts)
+
     def test_allowed_contact_channels_do_not_imply_sending_channels(self):
         PersistentAgentCommsEndpoint.objects.create(
             owner_agent=self.agent,

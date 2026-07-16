@@ -22,6 +22,7 @@ export type PendingAllowlistAction =
       smsContactPermissionAttested?: boolean | null
       smsContactPermissionAttestedAt?: string | null
     }
+  | { type: 'update'; id: string; allowInbound: boolean; allowOutbound: boolean }
   | { type: 'remove'; id: string }
   | { type: 'cancel_invite'; id: string }
 

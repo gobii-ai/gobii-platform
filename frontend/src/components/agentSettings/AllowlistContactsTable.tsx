@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { ColumnDef, RowSelectionState } from '@tanstack/react-table'
 import { getCoreRowModel, useReactTable } from '@tanstack/react-table'
-import { ArrowDownToLine, ArrowUpFromLine, Mail, Phone, Trash2 } from 'lucide-react'
+import { ArrowDownToLine, ArrowUpFromLine, Mail, Pencil, Phone, Trash2 } from 'lucide-react'
 
 import type { AllowlistTableRow } from './contactTypes'
 import { TanStackTableShell } from '../common/TanStackTableShell'
 import {
   EmbeddedRemoveButton,
   EmbeddedStatusBadge,
+  EmbeddedTableActionButton,
   EmbeddedTableFrame,
   EmbeddedTableHeader,
   embeddedBulkBannerClassName,
@@ -17,6 +18,7 @@ import {
 type AllowlistContactsTableProps = {
   rows: AllowlistTableRow[]
   disabled?: boolean
+  onEditRow: (row: AllowlistTableRow) => void
   onRemoveRow: (row: AllowlistTableRow) => void
   onRemoveRows: (rows: AllowlistTableRow[]) => void
 }
@@ -32,6 +34,9 @@ function renderStatus(row: AllowlistTableRow) {
   if (row.pendingType === 'remove') {
     return <EmbeddedStatusBadge tone="danger">Pending removal</EmbeddedStatusBadge>
   }
+  if (row.pendingType === 'update') {
+    return <EmbeddedStatusBadge tone="pending">Pending changes</EmbeddedStatusBadge>
+  }
   if (row.pendingType === 'cancel_invite') {
     return <EmbeddedStatusBadge tone="danger">Pending cancel</EmbeddedStatusBadge>
   }
@@ -41,7 +46,7 @@ function renderStatus(row: AllowlistTableRow) {
   return <EmbeddedStatusBadge tone="active">Allowed</EmbeddedStatusBadge>
 }
 
-export function AllowlistContactsTable({ rows, disabled = false, onRemoveRow, onRemoveRows }: AllowlistContactsTableProps) {
+export function AllowlistContactsTable({ rows, disabled = false, onEditRow, onRemoveRow, onRemoveRows }: AllowlistContactsTableProps) {
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({})
 
   useEffect(() => {
@@ -149,14 +154,25 @@ export function AllowlistContactsTable({ rows, disabled = false, onRemoveRow, on
           }
 
           return (
-            <EmbeddedRemoveButton onClick={() => onRemoveRow(row.original)} disabled={disabled}>
-              {row.original.kind === 'invite' ? 'Cancel invite' : 'Remove'}
-            </EmbeddedRemoveButton>
+            <div className="flex items-center gap-2">
+              {row.original.kind === 'entry' && (
+                <EmbeddedTableActionButton
+                  icon={Pencil}
+                  onClick={() => onEditRow(row.original)}
+                  disabled={disabled}
+                >
+                  Edit
+                </EmbeddedTableActionButton>
+              )}
+              <EmbeddedRemoveButton onClick={() => onRemoveRow(row.original)} disabled={disabled}>
+                {row.original.kind === 'invite' ? 'Cancel invite' : 'Remove'}
+              </EmbeddedRemoveButton>
+            </div>
           )
         },
       },
     ]
-  }, [disabled, onRemoveRow])
+  }, [disabled, onEditRow, onRemoveRow])
 
   const table = useReactTable({
     data: rows,

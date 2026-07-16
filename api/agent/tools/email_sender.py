@@ -12,7 +12,15 @@ from typing import Dict, Any
 from django.conf import settings
 from django.db import transaction
 
-from ...models import PersistentAgent, PersistentAgentCommsEndpoint, PersistentAgentConversationParticipant, PersistentAgentMessage, CommsChannel, DeliveryStatus
+from ...models import (
+    CommsAllowlistEntry,
+    CommsChannel,
+    DeliveryStatus,
+    PersistentAgent,
+    PersistentAgentCommsEndpoint,
+    PersistentAgentConversationParticipant,
+    PersistentAgentMessage,
+)
 from ..comms.email_threading import get_message_channel, get_message_contact_address, normalize_email_address
 from ..comms.outbound_delivery import deliver_agent_email
 from ..comms.email_endpoint_routing import resolve_agent_email_sender_endpoint_for_message
@@ -25,6 +33,10 @@ from ..files.attachment_helpers import AttachmentResolutionError, create_message
 from ..files.filespace_service import broadcast_message_attachment_update
 from api.services.email_verification import require_verified_email, EmailVerificationError
 from api.services.signup_preview import can_bypass_email_verification_for_signup_preview_first_email
+from api.services.contact_authorization import (
+    AutomaticContactAuthorizationError,
+    authorize_email_contacts,
+)
 from .attachment_guidance import SEND_EMAIL_ATTACHMENTS_DESCRIPTION
 
 logger = logging.getLogger(__name__)
@@ -255,8 +267,27 @@ def execute_send_email(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
         from django.db import close_old_connections
         from django.db.utils import OperationalError
         all_recipients = [to_address] + cc_addresses
+        if agent.contact_approval_mode == PersistentAgent.ContactApprovalMode.AUTO_APPROVE_EMAIL:
+            try:
+                authorize_email_contacts(agent, all_recipients)
+            except AutomaticContactAuthorizationError as exc:
+                return {"status": "error", "message": str(exc)}
+
         for recipient in all_recipients:
             if not agent.is_recipient_whitelisted(CommsChannel.EMAIL, recipient):
+                if CommsAllowlistEntry.objects.filter(
+                    agent=agent,
+                    channel=CommsChannel.EMAIL,
+                    address=recipient,
+                    is_active=True,
+                ).exists():
+                    return {
+                        "status": "error",
+                        "message": (
+                            f"Outbound email is disabled for contact '{recipient}'. "
+                            "The owner can enable it in Contacts & Access."
+                        ),
+                    }
                 return {
                     "status": "error",
                     "message": (

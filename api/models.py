@@ -6378,6 +6378,20 @@ class PersistentAgent(models.Model):
             "Manual: only addresses/numbers listed on the agent's allowlist (includes owner/org members by default)."
         ),
     )
+
+    class ContactApprovalMode(models.TextChoices):
+        REQUIRE_APPROVAL = "require_approval", "Require approval"
+        AUTO_APPROVE_EMAIL = "auto_approve_email", "Automatically allow email contacts"
+
+    contact_approval_mode = models.CharField(
+        max_length=32,
+        choices=ContactApprovalMode.choices,
+        default=ContactApprovalMode.REQUIRE_APPROVAL,
+        help_text=(
+            "Controls whether new email recipients require per-contact approval or are "
+            "automatically added to the agent's contact list. SMS always requires approval."
+        ),
+    )
     execution_environment = models.CharField(
         max_length=64,
         default=get_default_execution_environment,
