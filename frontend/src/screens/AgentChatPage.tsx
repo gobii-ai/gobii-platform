@@ -1833,14 +1833,16 @@ export function AgentChatPage({
     const activeRosterPlanningState = activeRosterMeta?.planningState ?? 'skipped'
     pendingAgentMetaRef.current = null
     setAgentId(activeAgentId, {
-      agentName: resolvedPendingMeta?.agentName ?? agentName,
-      agentAvatarUrl: resolvedPendingMeta?.agentAvatarUrl ?? agentAvatarUrl,
+      agentName: resolvedPendingMeta?.agentName ?? activeRosterMeta?.name ?? agentName,
+      agentAvatarUrl: resolvedPendingMeta?.agentAvatarUrl ?? activeRosterMeta?.avatarUrl ?? agentAvatarUrl,
       processingActive: resolvedPendingMeta?.processingActive ?? activeRosterMeta?.processingActive,
       signupPreviewState: resolvedPendingMeta?.signupPreviewState ?? activeRosterSignupPreviewState,
       planningState: resolvedPendingMeta?.planningState ?? activeRosterPlanningState,
     })
   }, [
     activeAgentId,
+    activeRosterMeta?.avatarUrl,
+    activeRosterMeta?.name,
     activeRosterMeta?.planningState,
     activeRosterMeta?.processingActive,
     activeRosterMeta?.signupPreviewState,
@@ -1865,10 +1867,10 @@ export function AgentChatPage({
   const hasAgentReply = useMemo(() => hasAgentResponse(timelineEvents), [timelineEvents])
 
   useEffect(() => {
-    if (!isNewAgent && activeAgentId && transientBannerAgentName && resolvedAgentName) {
+    if (!isNewAgent && activeAgentId && transientBannerAgentName && isStoreSynced && storedAgentName?.trim()) {
       setTransientBannerAgentName(null)
     }
-  }, [activeAgentId, isNewAgent, resolvedAgentName, transientBannerAgentName])
+  }, [activeAgentId, isNewAgent, isStoreSynced, storedAgentName, transientBannerAgentName])
 
   const effectiveSignupPreviewState = useMemo<SignupPreviewState>(() => {
     if (

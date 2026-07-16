@@ -928,7 +928,7 @@ export function AgentChatLayout({
       || (!autoScrollPinned && (hasUnseenActivity || !isNearBottom))
     )
 
-  const showBanner = Boolean(agentName)
+  const showBanner = Boolean(agentName || activeAgentId)
   const showHardLimitCallout = Boolean(
     (dailyCreditsStatus?.hardLimitReached || dailyCreditsStatus?.hardLimitBlocked) && onUpdateDailyCredits,
   )
