@@ -12,7 +12,15 @@ from typing import Dict, Any
 from django.conf import settings
 from django.db import transaction
 
-from ...models import PersistentAgent, PersistentAgentCommsEndpoint, PersistentAgentConversationParticipant, PersistentAgentMessage, CommsChannel, DeliveryStatus
+from ...models import (
+    CommsAllowlistEntry,
+    CommsChannel,
+    DeliveryStatus,
+    PersistentAgent,
+    PersistentAgentCommsEndpoint,
+    PersistentAgentConversationParticipant,
+    PersistentAgentMessage,
+)
 from ..comms.email_threading import get_message_channel, get_message_contact_address, normalize_email_address
 from ..comms.outbound_delivery import deliver_agent_email
 from ..comms.email_endpoint_routing import resolve_agent_email_sender_endpoint_for_message
@@ -267,6 +275,19 @@ def execute_send_email(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
 
         for recipient in all_recipients:
             if not agent.is_recipient_whitelisted(CommsChannel.EMAIL, recipient):
+                if CommsAllowlistEntry.objects.filter(
+                    agent=agent,
+                    channel=CommsChannel.EMAIL,
+                    address=recipient,
+                    is_active=True,
+                ).exists():
+                    return {
+                        "status": "error",
+                        "message": (
+                            f"Outbound email is disabled for contact '{recipient}'. "
+                            "The owner can enable it in Contacts & Access."
+                        ),
+                    }
                 return {
                     "status": "error",
                     "message": (

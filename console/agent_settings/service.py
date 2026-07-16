@@ -677,6 +677,41 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
         except Exception as exc:
             return JsonResponse({'success': False, 'error': str(exc)})
 
+    def _handle_update_allowlist_ajax(
+        self,
+        request,
+        agent: PersistentAgent,
+        *,
+        max_contacts_per_agent: int | None,
+    ) -> JsonResponse:
+        entry_id = request.POST.get('entry_id')
+        allow_inbound = request.POST.get('allow_inbound')
+        allow_outbound = request.POST.get('allow_outbound')
+        if allow_inbound not in {'true', 'false'} or allow_outbound not in {'true', 'false'}:
+            return JsonResponse({'success': False, 'error': 'Select valid inbound and outbound permissions.'})
+
+        entry = CommsAllowlistEntry.objects.filter(
+            agent=agent,
+            id=entry_id,
+            is_active=True,
+        ).first()
+        if entry is None:
+            return JsonResponse({'success': False, 'error': 'Contact not found.'}, status=404)
+
+        entry.allow_inbound = allow_inbound == 'true'
+        entry.allow_outbound = allow_outbound == 'true'
+        try:
+            entry.save(update_fields=['allow_inbound', 'allow_outbound', 'updated_at'])
+        except ValidationError as exc:
+            return JsonResponse({'success': False, 'error': _format_validation_error(exc)})
+
+        process_agent_events_task.delay(str(agent.id))
+        return self._allowlist_ajax_success_response(
+            request,
+            agent,
+            max_contacts_per_agent=max_contacts_per_agent,
+        )
+
     def _handle_cancel_invite_ajax(
         self,
         request,
@@ -705,6 +740,7 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
     ) -> JsonResponse | None:
         handlers = {
             'add_allowlist': self._handle_add_allowlist_ajax,
+            'update_allowlist': self._handle_update_allowlist_ajax,
             'remove_allowlist': self._handle_remove_allowlist_ajax,
             'cancel_invite': self._handle_cancel_invite_ajax,
         }
@@ -1179,6 +1215,7 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
         action = request.POST.get('action')
         ajax_actions = {
             'add_allowlist',
+            'update_allowlist',
             'remove_allowlist',
             'cancel_invite',
             'add_collaborator',

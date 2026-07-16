@@ -31,7 +31,7 @@ import { SettingsBanner } from '../components/agentSettings/SettingsBanner'
 import { getSettingsSurfaceClassName } from '../components/common/SettingsSurface'
 import { AgentIntelligenceSlider } from '../components/common/AgentIntelligenceSlider'
 import { SaveBar } from '../components/common/SaveBar'
-import { AddContactModal } from '../components/agentSettings/AddContactModal'
+import { AddContactModal, EditContactModal } from '../components/agentSettings/AddContactModal'
 import { AllowlistContactsTable } from '../components/agentSettings/AllowlistContactsTable'
 import { CollaboratorsTable } from '../components/agentSettings/CollaboratorsTable'
 import type { AllowlistInput, AllowlistTableRow, CollaboratorTableRow, PendingAllowlistAction, PendingCollaboratorAction } from '../components/agentSettings/contactTypes'
@@ -248,7 +248,7 @@ function stagePersistedRowActions<
     .filter((row) => !row.temp)
     .map(getPersistedAction)
     .filter((action): action is Extract<TPendingAction, PendingIdAction> => action !== null)
-  const persistedKeys = new Set(persistedActions.map((action) => `${action.type}:${action.id}`))
+  const persistedIds = new Set(persistedActions.map((action) => action.id))
 
   const next = pendingActions.filter((action) => {
     if (isCreatePendingAction(action)) {
@@ -259,7 +259,7 @@ function stagePersistedRowActions<
       return true
     }
 
-    return !persistedKeys.has(`${action.type}:${action.id}`)
+    return !persistedIds.has(action.id)
   })
 
   return [...next, ...persistedActions] as TPendingAction[]
@@ -298,7 +298,7 @@ async function runPendingActionGroup<TAction>({
 }
 
 function buildAllowlistRows(state: AllowlistState, pendingActions: PendingAllowlistAction[]): AllowlistTableRow[] {
-  return buildStagedRows({
+  const rows = buildStagedRows({
     baseRows: [
       ...state.entries.map<AllowlistTableRow>((entry) => ({
         id: entry.id,
@@ -326,7 +326,7 @@ function buildAllowlistRows(state: AllowlistState, pendingActions: PendingAllowl
       })),
     ],
     pendingActions,
-    createRow: (action) => ({
+    createRow: (action): AllowlistTableRow => ({
       id: action.tempId,
       kind: 'entry',
       channel: action.channel,
@@ -350,6 +350,17 @@ function buildAllowlistRows(state: AllowlistState, pendingActions: PendingAllowl
       }
       return left.id.localeCompare(right.id)
     },
+  })
+  const updates = new Map(
+    pendingActions
+      .filter((action): action is Extract<PendingAllowlistAction, { type: 'update' }> => action.type === 'update')
+      .map((action) => [action.id, action] as const),
+  )
+  return rows.map((row) => {
+    const update = updates.get(row.id)
+    return update
+      ? { ...row, allowInbound: update.allowInbound, allowOutbound: update.allowOutbound }
+      : row
   })
 }
 
@@ -996,7 +1007,16 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
   const submitAllowlistAction = useCallback(
     async (action: PendingAllowlistAction) => {
       const formData = new FormData()
-      formData.append('action', action.type === 'cancel_invite' ? 'cancel_invite' : action.type === 'remove' ? 'remove_allowlist' : 'add_allowlist')
+      formData.append(
+        'action',
+        action.type === 'cancel_invite'
+          ? 'cancel_invite'
+          : action.type === 'remove'
+            ? 'remove_allowlist'
+            : action.type === 'update'
+              ? 'update_allowlist'
+              : 'add_allowlist',
+      )
       if (action.type === 'create') {
         formData.append('channel', action.channel)
         formData.append('address', action.address)
@@ -1011,6 +1031,10 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
         if (action.smsContactPermissionAttested != null) {
           formData.append('sms_contact_permission_attested', String(action.smsContactPermissionAttested))
         }
+      } else if (action.type === 'update') {
+        formData.append('entry_id', action.id)
+        formData.append('allow_inbound', String(action.allowInbound))
+        formData.append('allow_outbound', String(action.allowOutbound))
       } else if (action.type === 'remove') {
         formData.append('entry_id', action.id)
       } else {
@@ -1549,6 +1573,54 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
       />
     ))
   }, [showModal, stageAllowlistAdd])
+
+  const stageAllowlistUpdate = useCallback(
+    async (row: AllowlistTableRow, input: AllowlistInput) => {
+      if (row.temp) {
+        setPendingAllowlistActions((prev) => prev.map((action) => (
+          action.type === 'create' && action.tempId === row.id
+            ? { ...action, allowInbound: input.allowInbound, allowOutbound: input.allowOutbound }
+            : action
+        )))
+        return
+      }
+
+      const savedEntry = savedAllowlistState.entries.find((entry) => entry.id === row.id)
+      setPendingAllowlistActions((prev) => {
+        const withoutCurrentUpdate = prev.filter((action) => !(action.type === 'update' && action.id === row.id))
+        if (
+          savedEntry
+          && savedEntry.allowInbound === input.allowInbound
+          && savedEntry.allowOutbound === input.allowOutbound
+        ) {
+          return withoutCurrentUpdate
+        }
+        return [
+          ...withoutCurrentUpdate,
+          {
+            type: 'update',
+            id: row.id,
+            allowInbound: input.allowInbound,
+            allowOutbound: input.allowOutbound,
+          },
+        ]
+      })
+    },
+    [savedAllowlistState.entries],
+  )
+
+  const openEditContactModal = useCallback(
+    (row: AllowlistTableRow) => {
+      showModal((onClose) => (
+        <EditContactModal
+          contact={row}
+          onSubmit={(input) => stageAllowlistUpdate(row, input)}
+          onClose={onClose}
+        />
+      ))
+    },
+    [showModal, stageAllowlistUpdate],
+  )
 
   const confirmAllowlistRemoval = useCallback(
     (rows: AllowlistTableRow[]) => {
@@ -2231,6 +2303,7 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
               contactApprovalMode={formState.contactApprovalMode}
               saving={saving}
               onAddContact={openAddContactModal}
+              onEditContact={openEditContactModal}
               onRemoveRows={confirmAllowlistRemoval}
               onContactApprovalModeChange={(contactApprovalMode) => setFormState((prev) => ({
                 ...prev,
@@ -2303,7 +2376,7 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
         error={saveError}
         helperText="Save now to update the chat shell and gallery immediately."
         variant="embedded"
-        placement="fixed"
+        placement="sticky"
       />
 
       {modal}
@@ -2499,6 +2572,7 @@ type AllowlistManagerProps = {
   contactApprovalMode: ContactApprovalMode
   saving: boolean
   onAddContact: () => void
+  onEditContact: (row: AllowlistTableRow) => void
   onRemoveRows: (rows: AllowlistTableRow[]) => void
   onContactApprovalModeChange: (mode: ContactApprovalMode) => void
   contactRequestsUrl: string
@@ -2512,6 +2586,7 @@ function AllowlistManager({
   contactApprovalMode,
   saving,
   onAddContact,
+  onEditContact,
   onRemoveRows,
   onContactApprovalModeChange,
   contactRequestsUrl,
@@ -2668,6 +2743,7 @@ function AllowlistManager({
         <AllowlistContactsTable
           rows={rows}
           disabled={saving}
+          onEditRow={onEditContact}
           onRemoveRow={(row) => onRemoveRows([row])}
           onRemoveRows={onRemoveRows}
         />

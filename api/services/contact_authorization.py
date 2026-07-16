@@ -41,24 +41,25 @@ def authorize_email_contacts(agent: PersistentAgent, addresses) -> None:
                 "This agent requires approval before adding new email contacts."
             )
 
+        active_contact_addresses = set(
+            CommsAllowlistEntry.objects.select_for_update().filter(
+                agent=locked_agent,
+                channel=CommsChannel.EMAIL,
+                address__in=normalized_addresses,
+                is_active=True,
+            ).values_list("address", flat=True)
+        )
         addresses_to_authorize = [
             address
             for address in normalized_addresses
-            if not locked_agent.is_recipient_whitelisted(CommsChannel.EMAIL, address)
+            if address not in active_contact_addresses
+            and not locked_agent.is_recipient_whitelisted(CommsChannel.EMAIL, address)
         ]
         agent.whitelist_policy = locked_agent.whitelist_policy
         if not addresses_to_authorize:
             return
 
-        active_addresses = set(
-            CommsAllowlistEntry.objects.select_for_update().filter(
-                agent=locked_agent,
-                channel=CommsChannel.EMAIL,
-                address__in=addresses_to_authorize,
-                is_active=True,
-            ).values_list("address", flat=True)
-        )
-        slots_needed = len(addresses_to_authorize) - len(active_addresses)
+        slots_needed = len(addresses_to_authorize)
 
         contact_cap = get_user_max_contacts_per_agent(
             locked_agent.user,

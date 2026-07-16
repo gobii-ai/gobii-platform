@@ -4,7 +4,13 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase, tag
 from django.urls import reverse
 
-from api.models import BrowserUseAgent, CommsAllowlistRequest, CommsChannel, PersistentAgent
+from api.models import (
+    BrowserUseAgent,
+    CommsAllowlistEntry,
+    CommsAllowlistRequest,
+    CommsChannel,
+    PersistentAgent,
+)
 
 
 @tag("batch_console_allowlist")
@@ -128,3 +134,36 @@ class AgentSettingsContactApprovalTests(TestCase):
         self.assertTrue(payload["success"])
         self.assertIn("allowlist", payload)
         self.assertNotIn("html", payload)
+
+    @patch("console.agent_settings.service.process_agent_events_task.delay")
+    def test_allowlist_ajax_updates_contact_directions(self, _mock_process_events):
+        entry = CommsAllowlistEntry.objects.create(
+            agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address="permissions@example.com",
+            allow_inbound=True,
+            allow_outbound=True,
+        )
+        self.client.force_login(self.owner)
+
+        response = self.client.post(
+            self.url,
+            {
+                "action": "update_allowlist",
+                "entry_id": str(entry.id),
+                "allow_inbound": "false",
+                "allow_outbound": "true",
+            },
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+        )
+
+        self.assertEqual(response.status_code, 200, response.content.decode())
+        entry.refresh_from_db()
+        self.assertFalse(entry.allow_inbound)
+        self.assertTrue(entry.allow_outbound)
+        serialized = next(
+            item for item in response.json()["allowlist"]["entries"]
+            if item["id"] == str(entry.id)
+        )
+        self.assertFalse(serialized["allowInbound"])
+        self.assertTrue(serialized["allowOutbound"])

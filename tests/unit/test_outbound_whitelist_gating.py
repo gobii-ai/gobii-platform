@@ -191,6 +191,31 @@ class OutboundWhitelistGatingTests(TransactionTestCase):
         self.assertFalse(entry.can_configure)
         mock_deliver_email.assert_called_once()
 
+    @patch("api.agent.tools.email_sender.deliver_agent_email")
+    @tag("batch_outbound_email")
+    def test_email_auto_approval_preserves_disabled_outbound(self, mock_deliver_email, mock_close_old_connections):
+        self.agent.contact_approval_mode = PersistentAgent.ContactApprovalMode.AUTO_APPROVE_EMAIL
+        self.agent.save(update_fields=["contact_approval_mode"])
+        entry = CommsAllowlistEntry.objects.create(
+            agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address="inbound-only@example.com",
+            allow_inbound=True,
+            allow_outbound=False,
+        )
+
+        result = execute_send_email(self.agent, {
+            "to_address": entry.address,
+            "subject": "Should remain blocked",
+            "mobile_first_html": "<p>Hello</p>",
+        })
+
+        self.assertEqual(result.get("status"), "error")
+        self.assertIn("Outbound email is disabled", result.get("message", ""))
+        entry.refresh_from_db()
+        self.assertFalse(entry.allow_outbound)
+        mock_deliver_email.assert_not_called()
+
     @patch("api.services.contact_authorization.get_user_max_contacts_per_agent", return_value=1)
     @patch("api.agent.tools.email_sender.deliver_agent_email")
     @tag("batch_outbound_email")
