@@ -2124,6 +2124,90 @@ class DailyLimitMessageOnlyModeTests(TestCase):
         self.assertIsNone(tool_call.step.credits_cost)
         self.assertIsNone(tool_call.step.completion_id)
 
+    @patch("api.agent.core.event_processing.execute_send_email", return_value={"status": "ok", "auto_sleep_ok": True})
+    @patch(
+        "api.agent.core.event_processing.TaskCreditService.check_and_consume_credit_for_owner",
+        return_value={"success": True, "credit": None},
+    )
+    @patch(
+        "api.agent.core.event_processing.TaskCreditService.calculate_available_tasks_for_owner",
+        return_value=Decimal("0"),
+    )
+    @patch("api.agent.core.event_processing.build_prompt_context")
+    @patch("api.agent.core.event_processing.get_agent_daily_credit_state", return_value={})
+    @patch("api.agent.core.event_processing.get_agent_tools")
+    @patch("api.agent.core.event_processing.settings.GOBII_PROPRIETARY_MODE", True)
+    def test_task_credit_mode_filters_tools_and_sends_without_billing(
+        self,
+        mock_get_tools,
+        _mock_get_daily_state,
+        mock_build_prompt,
+        _mock_available,
+        mock_consume,
+        mock_send_email,
+    ):
+        mock_get_tools.return_value = [
+            self._tool_definition("send_email"),
+            self._tool_definition("sleep_until_next_trigger"),
+            self._tool_definition("sqlite_query"),
+        ]
+        mock_build_prompt.return_value = ([{"role": "system", "content": "sys"}], 1000, None)
+        completion = self._completion(
+            tool_calls=[
+                self._tool_call(
+                    "send_email",
+                    {
+                        "to_address": "owner@example.com",
+                        "subject": "Task credits exhausted",
+                        "mobile_first_html": "<p>Please restore task credits.</p>",
+                    },
+                )
+            ]
+        )
+        observed_tool_names = []
+
+        def _capture_completion(*_args, **kwargs):
+            observed_tool_names.extend(tool["function"]["name"] for tool in kwargs["tools"])
+            return (
+                completion,
+                {
+                    "prompt_tokens": 10,
+                    "completion_tokens": 5,
+                    "total_tokens": 15,
+                    "model": "m",
+                    "provider": "p",
+                },
+            )
+
+        with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1), patch(
+            "api.agent.core.event_processing._completion_with_failover",
+            side_effect=_capture_completion,
+        ):
+            ep._run_agent_loop(
+                self.agent,
+                is_first_run=False,
+                credit_snapshot={
+                    "available": Decimal("0"),
+                    "daily_state": {},
+                    "refresh_task_credits": True,
+                },
+            )
+
+        self.assertEqual(
+            observed_tool_names,
+            ["send_email", "sleep_until_next_trigger"],
+        )
+        mock_build_prompt.assert_called_once()
+        self.assertEqual(mock_build_prompt.call_args.kwargs["task_credit_available"], Decimal("0"))
+        mock_send_email.assert_called_once()
+        mock_consume.assert_not_called()
+        tool_call = PersistentAgentToolCall.objects.get(
+            step__agent=self.agent,
+            tool_name="send_email",
+        )
+        self.assertIsNone(tool_call.step.credits_cost)
+        self.assertIsNone(tool_call.step.completion_id)
+
     @patch(
         "api.agent.core.event_processing.TaskCreditService.check_and_consume_credit_for_owner",
         return_value={"success": True, "credit": None},

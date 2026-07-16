@@ -347,3 +347,19 @@ class SystemSkillDiscoveryTests(TestCase):
         user_prompt = next(message["content"] for message in messages if message["role"] == "user")
         self.assertIn("DAILY HARD LIMIT MODE", user_prompt)
         self.assertNotIn("## Suggested Capability Discovery", user_prompt)
+
+    def test_task_credit_mode_omits_discovery_hint(self):
+        self._inbound("Find 10 candidates for this role.")
+
+        with patch("api.agent.core.prompt_context.ensure_steps_compacted"), patch(
+            "api.agent.core.prompt_context.ensure_comms_compacted"
+        ):
+            messages, _tokens, _metadata = build_prompt_context_preview(
+                self.agent,
+                daily_credit_state={},
+                task_credit_available=0,
+            )
+
+        user_prompt = next(message["content"] for message in messages if message["role"] == "user")
+        self.assertIn("TASK CREDIT MESSAGE-ONLY MODE", user_prompt)
+        self.assertNotIn("## Suggested Capability Discovery", user_prompt)

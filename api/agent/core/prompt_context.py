@@ -96,7 +96,12 @@ from ..tools.sqlite_skills import format_recent_skills_for_prompt
 from ..tools.tool_manager import ensure_default_tools_enabled, ensure_skill_tools_enabled, get_enabled_tool_definitions
 from ..system_skills.discovery import format_system_skill_discovery_prompt
 from .tool_results import PREVIEW_TIER_COUNT, SPAWN_WEB_TASK_RESULT_TOOL_NAME, ToolCallResultRecord, ToolResultPromptInfo, prepare_tool_results_for_prompt
-from .daily_limit_mode import DAILY_LIMIT_ALLOWED_TOOL_NAMES_TEXT, is_daily_hard_limit_message_only_mode
+from .daily_limit_mode import (
+    CREDIT_MESSAGE_ONLY_ALLOWED_TOOL_NAMES_TEXT,
+    is_credit_message_only_mode,
+    is_daily_hard_limit_message_only_mode,
+    is_task_credit_message_only_mode,
+)
 from .contact_results import ContactSQLiteRecord, store_contacts_for_prompt
 from .contact_snapshot import build_contacts_snapshot_records
 from .file_results import FileSQLiteRecord, store_files_for_prompt
@@ -119,7 +124,6 @@ SQLITE_MESSAGES_SNAPSHOT_MAX_BYTES = 5_000_000
 SQLITE_MESSAGES_SNAPSHOT_MAX_RECORDS = 10_000
 CONTACT_PROMPT_INLINE_LIMIT = 25
 CONTACT_PROMPT_SAMPLE_LIMIT = 10
-MESSAGE_ONLY_TOOL_NAMES_TEXT = DAILY_LIMIT_ALLOWED_TOOL_NAMES_TEXT
 SQLITE_EFFICIENCY_WARNING = (
     "SQLite efficiency warning: you've been reading full __tool_results.result_text blobs one at a time. "
     "Stop fetching by single result_id; run one shaped query across all needed rows using IN/CTEs/"
@@ -1308,6 +1312,7 @@ def _render_prompt_context_once(
     reasoning_only_streak: int = 0,
     is_first_run: bool = False,
     daily_credit_state: Optional[dict] = None,
+    task_credit_available=None,
     continuation_notice: Optional[str] = None,
     routing_profile: Any = None,
     prompt_failover_configs: Sequence[Tuple[str, str, Mapping[str, Any]]] | None = None,
@@ -1675,6 +1680,7 @@ def _render_prompt_context_once(
             current_iteration=current_iteration,
             max_iterations=max_iterations,
             daily_credit_state=daily_credit_state,
+            task_credit_available=task_credit_available,
             agent=agent,
         )
 
@@ -1760,7 +1766,7 @@ def _render_prompt_context_once(
                 non_shrinkable=True,
             )
 
-    if is_daily_hard_limit_message_only_mode(daily_credit_state):
+    if is_credit_message_only_mode(daily_credit_state, task_credit_available):
         discovery_prompt, discovery_keys = "", ()
     else:
         discovery_prompt, discovery_keys = format_system_skill_discovery_prompt(agent)
@@ -1962,6 +1968,7 @@ def build_prompt_context(
     reasoning_only_streak: int = 0,
     is_first_run: bool = False,
     daily_credit_state: Optional[dict] = None,
+    task_credit_available=None,
     continuation_notice: Optional[str] = None,
     routing_profile: Any = None,
     prefer_low_latency: Optional[bool] = None,
@@ -1980,6 +1987,7 @@ def build_prompt_context(
         reasoning_only_streak: Number of consecutive iterations without tool calls.
         is_first_run: Whether this is the very first processing cycle for the agent.
         daily_credit_state: Pre-computed daily credit state (optional).
+        task_credit_available: Pre-computed owner task-credit availability (optional).
         continuation_notice: Optional system note to inject for follow-up loops.
         routing_profile: LLMRoutingProfile instance for eval routing (optional).
         prefer_low_latency: Optional low-latency routing hint used to match the
@@ -2013,6 +2021,7 @@ def build_prompt_context(
             reasoning_only_streak=reasoning_only_streak,
             is_first_run=is_first_run,
             daily_credit_state=daily_credit_state,
+            task_credit_available=task_credit_available,
             continuation_notice=continuation_notice,
             routing_profile=routing_profile,
             system_directive_block=system_directive_block,
@@ -2048,6 +2057,7 @@ def build_prompt_context_preview(
     reasoning_only_streak: int = 0,
     is_first_run: bool = False,
     daily_credit_state: Optional[dict] = None,
+    task_credit_available=None,
     continuation_notice: Optional[str] = None,
     routing_profile: Any = None,
     prefer_low_latency: Optional[bool] = None,
@@ -2071,6 +2081,7 @@ def build_prompt_context_preview(
             reasoning_only_streak=reasoning_only_streak,
             is_first_run=is_first_run,
             daily_credit_state=daily_credit_state,
+            task_credit_available=task_credit_available,
             continuation_notice=continuation_notice,
             routing_profile=routing_profile,
         ),
@@ -2783,6 +2794,7 @@ def add_budget_awareness_sections(
     current_iteration: int,
     max_iterations: int,
     daily_credit_state: dict | None = None,
+    task_credit_available=None,
     agent: PersistentAgent | None = None,
 ) -> bool:
     """Populate structured budget awareness sections in the prompt tree."""
@@ -2872,6 +2884,43 @@ def add_budget_awareness_sections(
         except Exception:
             logger.warning("Failed to compute browser task usage for prompt.", exc_info=True)
 
+    task_message_only_mode = is_task_credit_message_only_mode(task_credit_available)
+    daily_message_only_mode = is_daily_hard_limit_message_only_mode(daily_credit_state)
+    if agent is not None and (task_message_only_mode or daily_message_only_mode):
+        restrictions = []
+        recovery_actions = []
+        if daily_message_only_mode:
+            restrictions.append("DAILY HARD LIMIT MODE: You reached today's hard task limit.")
+            links = build_agent_daily_limit_action_links(agent.id, agent.organization_id)
+            recovery_actions.append(
+                f"Ask the user to raise the limit: settings {links['settings_url']} ; "
+                f"double {links['double_limit_url']} ; unlimited {links['unlimited_limit_url']}."
+            )
+        if task_message_only_mode:
+            owner_label = "organization workspace" if agent.organization_id else "account"
+            billing_url = _build_console_url("billing")
+            if agent.organization_id:
+                billing_url = append_context_query(billing_url, str(agent.organization_id))
+            restrictions.append(
+                f"TASK CREDIT MESSAGE-ONLY MODE: This {owner_label} has no task credits remaining."
+            )
+            recovery_actions.append(
+                f"Tell the user that task credits can be restored from the billing page: {billing_url}."
+            )
+        sections.append((
+            "credit_message_only_mode",
+            (
+                f"{' '.join(restrictions)} "
+                "Only message and sleep tools are available right now: "
+                f"{CREDIT_MESSAGE_ONLY_ALLOWED_TOOL_NAMES_TEXT}. "
+                "Do not attempt any other tools or non-message work. "
+                f"{' '.join(recovery_actions)} "
+                "Resume non-message work once all active credit restrictions are resolved."
+            ),
+            9,
+            True,
+        ))
+
     if daily_credit_state:
         try:
             default_task_cost = get_default_task_credit_cost()
@@ -2880,30 +2929,13 @@ def add_budget_awareness_sections(
             soft_target = daily_credit_state.get("soft_target")
             used = daily_credit_state.get("used", Decimal("0"))
             next_reset = daily_credit_state.get("next_reset")
-            message_only_mode = is_daily_hard_limit_message_only_mode(daily_credit_state)
+            message_only_mode = daily_message_only_mode
             reset_text = f"Next reset at {next_reset.isoformat()}. " if next_reset else ""
             limits_are_equal = (
                 soft_target is not None
                 and hard_limit is not None
                 and soft_target == hard_limit
             )
-
-            if message_only_mode and agent is not None:
-                links = build_agent_daily_limit_action_links(agent.id, agent.organization_id)
-                sections.append((
-                    "daily_limit_message_only_mode",
-                    (
-                        "DAILY HARD LIMIT MODE: You reached today's hard task limit. "
-                        "Only message and sleep tools are available until the user raises the limit: "
-                        f"{MESSAGE_ONLY_TOOL_NAMES_TEXT}. "
-                        "Do not attempt any other tools or non-message work right now. "
-                        f"Ask the user to raise the limit with one of these links: settings {links['settings_url']} ; "
-                        f"double {links['double_limit_url']} ; unlimited {links['unlimited_limit_url']}. "
-                        "Once the user raises the limit, you can continue the task."
-                    ),
-                    9,
-                    True,
-                ))
 
             if soft_target is not None and not limits_are_equal:
                 if used > soft_target:

@@ -2864,7 +2864,7 @@ class AgentChatAPITests(TestCase):
 
     @tag("batch_agent_chat")
     @patch("tasks.services.TaskCreditService.calculate_available_tasks_for_owner", return_value=0)
-    def test_console_message_skip_processing_prevents_prioritized_dispatch(self, _mock_available):
+    def test_console_message_out_of_credits_preserves_prioritized_dispatch(self, mock_available):
         self.client.force_login(self.user)
         attachment = SimpleUploadedFile("deferred.txt", b"deferred", content_type="text/plain")
 
@@ -2880,7 +2880,8 @@ class AgentChatAPITests(TestCase):
 
         self.assertEqual(response.status_code, 201)
         import_attachments.assert_called_once()
-        enqueue.assert_not_called()
+        mock_available.assert_called_once()
+        enqueue.assert_called_once()
 
     @tag("batch_agent_chat")
     @patch("console.api_views.Analytics.track_event")

@@ -1,5 +1,5 @@
 from decimal import Decimal
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from django.test import TestCase, override_settings, tag
 from django.contrib.auth import get_user_model
@@ -74,7 +74,7 @@ class InboundOutOfCreditsReplyTests(PauseOwnerMixin, TestCase):
     @override_settings(PUBLIC_SITE_URL="https://example.com")
     @patch("api.agent.tasks.process_agent_events_task.delay")
     @patch("tasks.services.TaskCreditService.calculate_available_tasks_for_owner", return_value=0)
-    def test_reply_sent_and_processing_skipped_when_out_of_credits(self, mock_calc, mock_delay):
+    def test_processing_runs_without_fixed_reply_when_out_of_credits(self, mock_calc, mock_delay):
         sender = self.owner.email  # owner is whitelisted by default
         parsed = ParsedMessage(
             sender=sender,
@@ -91,12 +91,9 @@ class InboundOutOfCreditsReplyTests(PauseOwnerMixin, TestCase):
         with self.captureOnCommitCallbacks(execute=True):
             ingest_inbound_message(CommsChannel.EMAIL, parsed)
 
-        # Should have sent one email reply to sender and owner, and skipped processing
-        self.assertEqual(len(mail.outbox), 1)
-        self.assertIn(sender, mail.outbox[0].to)
-        self.assertIn(self.owner.email, mail.outbox[0].to)
-        self.assertIn("/app/billing", mail.outbox[0].body)
-        mock_delay.assert_not_called()
+        self.assertEqual(len(mail.outbox), 0)
+        mock_calc.assert_not_called()
+        mock_delay.assert_called_once()
 
     @tag("batch_email")
     @patch("api.agent.tasks.process_agent_events_task.delay")
@@ -159,7 +156,7 @@ class InboundOutOfCreditsReplyTests(PauseOwnerMixin, TestCase):
             with self.captureOnCommitCallbacks(execute=True):
                 ingest_inbound_message(CommsChannel.EMAIL, parsed)
 
-        mock_calc.assert_called_once()
+        mock_calc.assert_not_called()
         mock_delay.assert_called_once()
         self.assertEqual(len(mail.outbox), 0)
         self.assertFalse(
@@ -173,7 +170,7 @@ class InboundOutOfCreditsReplyTests(PauseOwnerMixin, TestCase):
     @override_settings(PUBLIC_SITE_URL="https://example.com")
     @patch("api.agent.tasks.process_agent_events_task.delay")
     @patch("tasks.services.TaskCreditService.calculate_available_tasks_for_owner", return_value=0)
-    def test_org_owned_reply_sent_to_sender_and_owner_when_out_of_credits(self, mock_calc, mock_delay):
+    def test_org_owned_email_queues_processing_without_fixed_reply(self, mock_calc, mock_delay):
         org = Organization.objects.create(name="Acme", slug="acme", created_by=self.owner)
         org_billing = org.billing
         org_billing.purchased_seats = 1
@@ -220,13 +217,9 @@ class InboundOutOfCreditsReplyTests(PauseOwnerMixin, TestCase):
         with self.captureOnCommitCallbacks(execute=True):
             ingest_inbound_message(CommsChannel.EMAIL, parsed)
 
-        self.assertEqual(len(mail.outbox), 1)
-        self.assertEqual(set(mail.outbox[0].to), {member.email, self.owner.email})
-        self.assertNotIn(agent_creator.email, mail.outbox[0].to)
-        self.assertIn("/app/billing?context_type=organization", mail.outbox[0].body)
-        self.assertIn(str(org.id), mail.outbox[0].body)
-        mock_delay.assert_not_called()
-        mock_calc.assert_called_once()
+        self.assertEqual(len(mail.outbox), 0)
+        mock_delay.assert_called_once()
+        mock_calc.assert_not_called()
 
     @tag("batch_email")
     @patch("api.agent.tasks.process_agent_events_task.delay")
@@ -445,6 +438,39 @@ class InboundDailyCreditsWebChatTests(TestCase):
             address=build_web_agent_address(self.agent.id),
             is_primary=True,
         )
+
+    @tag("batch_agent_chat")
+    @patch("channels.layers.get_channel_layer")
+    @patch("api.agent.tasks.enqueue_interactive_process_agent_events")
+    @patch("tasks.services.TaskCreditService.calculate_available_tasks_for_owner", return_value=0)
+    def test_task_credit_exhaustion_queues_processing_and_notifies_ui(
+        self,
+        mock_calc,
+        mock_enqueue,
+        mock_get_channel_layer,
+    ):
+        channel_layer = MagicMock()
+        channel_layer.group_send = AsyncMock()
+        mock_get_channel_layer.return_value = channel_layer
+        parsed = ParsedMessage(
+            sender=build_web_user_address(self.owner.id, self.agent.id),
+            recipient=build_web_agent_address(self.agent.id),
+            subject=None,
+            body="Hello",
+            attachments=[],
+            raw_payload={"provider": "test"},
+            msg_channel=CommsChannel.WEB,
+        )
+
+        with self.captureOnCommitCallbacks(execute=True):
+            ingest_inbound_message(CommsChannel.WEB, parsed)
+
+        mock_calc.assert_called_once()
+        mock_enqueue.assert_called_once()
+        channel_layer.group_send.assert_awaited_once()
+        payload = channel_layer.group_send.await_args.args[1]["payload"]
+        self.assertEqual(payload["kind"], "task_credits_exhausted")
+        self.assertEqual(payload["available"], 0.0)
 
     @tag("batch_agent_chat")
     @override_settings(PUBLIC_SITE_URL="https://example.com")

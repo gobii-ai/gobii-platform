@@ -2864,6 +2864,9 @@
 .hard-limit-callout-header {
     gap: 0.75rem;
 }
+.hard-limit-callout-content {
+    min-width: 0;
+}
 .hard-limit-callout-actions {
     flex-wrap: wrap;
     align-items: center;
@@ -2911,6 +2914,37 @@
     border-radius: 0.55rem;
     background: linear-gradient(135deg, #6366f1 0%, #7c3aed 100%);
     box-shadow: 0 10px 20px rgba(99, 102, 241, 0.2);
+}
+.task-credits-callout .hard-limit-callout-header {
+    align-items: flex-start;
+}
+.task-credits-callout .hard-limit-callout-icon {
+    margin-top: 0.1rem;
+}
+.task-credits-callout .hard-limit-callout-content > .hard-limit-callout-actions {
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+}
+.task-credits-callout .hard-limit-callout-content > .hard-limit-callout-actions .hard-limit-callout-button {
+    min-height: 2.5rem;
+    white-space: nowrap;
+}
+.hard-limit-callout-button--upgrade {
+    background: linear-gradient(135deg, #6366f1 0%, #7c3aed 100%);
+}
+.hard-limit-callout-button--upgrade:hover {
+    background: linear-gradient(135deg, #4f46e5 0%, #6d28d9 100%);
+}
+.hard-limit-callout-button--addons {
+    border: 1px solid rgba(124, 45, 18, 0.24);
+    background: rgba(255, 255, 255, 0.72);
+    color: var(--callout-text);
+}
+.hard-limit-callout[data-tone='critical'] .hard-limit-callout-button--addons {
+    border-color: rgba(127, 29, 29, 0.24);
+}
+.hard-limit-callout-button--addons:hover {
+    background: rgba(255, 255, 255, 0.96);
 }
 .hard-limit-callout-button:focus-visible {
     outline: 2px solid rgba(14, 165, 233, 0.4);
@@ -2975,11 +3009,27 @@
     text-decoration: underline;
 }
 @media (max-width: 640px) {
+    .task-credits-callout {
+        padding: 1rem 2.75rem 1rem 1rem;
+    }
+    .task-credits-callout .hard-limit-callout-content > .hard-limit-callout-actions .hard-limit-callout-button {
+        min-height: 2.75rem;
+    }
     .hard-limit-callout[data-billing-issue='no_org_seats'] {
         grid-template-columns: 1fr;
     }
     .hard-limit-callout[data-billing-issue='no_org_seats'] .hard-limit-callout-actions {
         justify-content: flex-start;
+    }
+}
+@media (max-width: 360px) {
+    .task-credits-callout .hard-limit-callout-content > .hard-limit-callout-actions {
+        display: grid;
+        grid-template-columns: 1fr;
+    }
+    .task-credits-callout .hard-limit-callout-content > .hard-limit-callout-actions .hard-limit-callout-button {
+        justify-content: center;
+        width: 100%;
     }
 }
 .agent-chat-section-card.starter-prompts-card {

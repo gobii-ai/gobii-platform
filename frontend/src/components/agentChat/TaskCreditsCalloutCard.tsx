@@ -31,10 +31,11 @@ export function TaskCreditsCalloutCard({
     dispatch(subscriptionActions.openUpgradeModal({ source: 'task_credits_callout' }))
   }, [dispatch])
   const isNoOrgSeats = billingIssue === 'no_org_seats'
+  const showCreditActions = !isNoOrgSeats && Boolean(showUpgrade || onOpenPacks)
 
   return (
     <AgentChatSectionCard
-      className="timeline-event hard-limit-callout"
+      className="timeline-event hard-limit-callout task-credits-callout"
       tone={isOutOfCredits || isNoOrgSeats ? 'critical' : 'warning'}
       data-billing-issue={isNoOrgSeats ? 'no_org_seats' : undefined}
     >
@@ -52,7 +53,7 @@ export function TaskCreditsCalloutCard({
         <span className="hard-limit-callout-icon" aria-hidden="true">
           <AlertTriangle size={16} />
         </span>
-        <div>
+        <div className="hard-limit-callout-content">
           <p className="hard-limit-callout-title">
             {isNoOrgSeats ? 'No Seats Purchased' : isOutOfCredits ? 'Out of task credits' : 'Task credits running low'}
           </p>
@@ -64,18 +65,36 @@ export function TaskCreditsCalloutCard({
               : 'Your account is almost out of task credits.'}
             {!isNoOrgSeats ? (
               showUpgrade ? (
-                <>
-                  {' Upgrade to allow your agents to do more work for you. '}
-                  <button type="button" className="banner-upgrade banner-upgrade--text banner-upgrade--inline" onClick={handleUpgradeClick}>
-                    <Zap size={14} strokeWidth={2} />
-                    <span>Upgrade</span>
-                  </button>
-                </>
+                ' Upgrade to allow your agents to do more work for you.'
               ) : (
                 <span> for this billing period.</span>
               )
             ) : null}
           </p>
+          {showCreditActions ? (
+            <div className="hard-limit-callout-actions">
+              {showUpgrade ? (
+                <button
+                  type="button"
+                  className="hard-limit-callout-button hard-limit-callout-button--upgrade"
+                  onClick={handleUpgradeClick}
+                >
+                  <Zap size={16} strokeWidth={2} />
+                  Upgrade
+                </button>
+              ) : null}
+              {onOpenPacks ? (
+                <button
+                  type="button"
+                  className="hard-limit-callout-button hard-limit-callout-button--addons"
+                  onClick={onOpenPacks}
+                >
+                  <PlusSquare size={16} />
+                  Open add-ons
+                </button>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       </div>
       {isNoOrgSeats && onPurchaseSeats ? (
@@ -83,14 +102,6 @@ export function TaskCreditsCalloutCard({
           <button type="button" className="hard-limit-callout-button hard-limit-callout-button--purchase" onClick={onPurchaseSeats}>
             <CreditCard size={14} strokeWidth={2} />
             Purchase Seats
-          </button>
-        </div>
-      ) : null}
-      {onOpenPacks && !isNoOrgSeats ? (
-        <div className="hard-limit-callout-actions">
-          <button type="button" className="hard-limit-callout-button" onClick={onOpenPacks}>
-            <PlusSquare size={16} />
-            Open add-ons
           </button>
         </div>
       ) : null}
