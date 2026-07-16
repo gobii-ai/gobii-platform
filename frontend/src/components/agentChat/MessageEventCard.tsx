@@ -264,7 +264,7 @@ export const MessageEventCard = memo(function MessageEventCard({
                 >
                   {copied ? <Check className="h-3.5 w-3.5" aria-hidden="true" /> : <Copy className="h-3.5 w-3.5" aria-hidden="true" />}
                 </button>
-                <MessageFeedbackActions agentId={agentId} message={message} />
+                <MessageFeedbackActions key={`${message.id}:${message.viewerFeedback ?? ''}`} agentId={agentId} message={message} />
                 <button
                   type="button"
                   className="chat-message-action-button"

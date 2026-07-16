@@ -59,8 +59,9 @@ export function MessageFeedbackActions({ agentId, message }: MessageFeedbackActi
           </button>
         )
       })}
+      {error ? <span className="chat-message-feedback-error absolute right-0 top-[calc(100%+0.3rem)] z-[1] w-max max-w-[min(16rem,80vw)] rounded-md border border-rose-600/35 bg-white px-2 py-1 text-[0.6875rem] font-medium leading-tight text-rose-700" role="alert">{error}</span> : null}
       <span className="sr-only" role="status" aria-live="polite">
-        {error || (submitting ? 'Saving message feedback' : '')}
+        {submitting ? 'Saving message feedback' : ''}
       </span>
     </>
   )

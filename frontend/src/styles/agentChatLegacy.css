@@ -3609,6 +3609,10 @@
     transform: translateY(-50%);
     transition: opacity 0.15s ease;
 }
+.chat-message-actions:has(.chat-message-feedback-error) {
+    opacity: 1;
+    pointer-events: auto;
+}
 .chat-message-action-button {
     width: 1.45rem;
     height: 1.45rem;

@@ -4948,7 +4948,6 @@ class AgentMessageCopyAPIView(LoginRequiredMixin, View):
         return JsonResponse({"ok": True})
 
 
-@method_decorator(csrf_exempt, name="dispatch")
 class AgentMessageFeedbackAPIView(LoginRequiredMixin, View):
     http_method_names = ["post"]
 

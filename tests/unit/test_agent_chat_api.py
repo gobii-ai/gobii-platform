@@ -3067,6 +3067,11 @@ class AgentChatAPITests(TestCase):
             data=json.dumps({"feedback": ["up"]}),
             content_type="application/json",
         )
+        non_object_response = self.client.post(
+            f"/console/api/agents/{self.agent.id}/messages/{outbound.id}/feedback/",
+            data=json.dumps(["up"]),
+            content_type="application/json",
+        )
         inbound_response = self.client.post(
             f"/console/api/agents/{self.agent.id}/messages/{inbound.id}/feedback/",
             data=json.dumps({"feedback": "down"}),
@@ -3084,11 +3089,34 @@ class AgentChatAPITests(TestCase):
         )
 
         self.assertEqual(invalid_response.status_code, 400)
+        self.assertEqual(non_object_response.status_code, 400)
+        self.assertEqual(non_object_response.content, b"JSON object expected")
         self.assertEqual(inbound_response.status_code, 404)
         self.assertEqual(peer_response.status_code, 404)
         self.assertEqual(foreign_response.status_code, 404)
         self.assertFalse(PersistentAgentMessageFeedback.objects.exists())
         mock_track_event.assert_not_called()
+
+    @tag("batch_agent_chat")
+    def test_agent_message_feedback_requires_csrf_token(self):
+        message = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=self.agent_endpoint,
+            to_endpoint=self.user_endpoint,
+            is_outbound=True,
+            body="CSRF-protected feedback",
+        )
+        csrf_client = Client(enforce_csrf_checks=True)
+        csrf_client.force_login(self.user)
+
+        response = csrf_client.post(
+            f"/console/api/agents/{self.agent.id}/messages/{message.id}/feedback/",
+            data=json.dumps({"feedback": "up"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(PersistentAgentMessageFeedback.objects.filter(message=message, user=self.user).exists())
 
     @tag("batch_agent_chat")
     @override_settings(SUPPORT_EMAIL="support@example.com")
