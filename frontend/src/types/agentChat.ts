@@ -31,6 +31,8 @@ export type WebhookMeta = {
   payload?: unknown
 }
 
+export type AgentMessageFeedback = 'up' | 'down'
+
 export type AgentMessage = {
   id: string
   cursor?: string
@@ -55,6 +57,7 @@ export type AgentMessage = {
   sourceKind?: string | null
   sourceLabel?: string | null
   webhookMeta?: WebhookMeta | null
+  viewerFeedback?: AgentMessageFeedback | null
 }
 
 export type ToolMeta = {

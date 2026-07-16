@@ -24,6 +24,7 @@ from console.api_views import (
     AgentFsNodeUploadAPIView,
     AgentMessageCopyAPIView,
     AgentMessageCreateAPIView,
+    AgentMessageFeedbackAPIView,
     AgentMessageReportIssueAPIView,
     AgentLatestMessageReadAPIView,
     AgentHumanInputRequestBatchResponseAPIView,
@@ -359,6 +360,11 @@ urlpatterns = [
         "console/api/agents/<uuid:agent_id>/messages/<uuid:message_id>/copy/",
         AgentMessageCopyAPIView.as_view(),
         name="console_agent_message_copy",
+    ),
+    path(
+        "console/api/agents/<uuid:agent_id>/messages/<uuid:message_id>/feedback/",
+        AgentMessageFeedbackAPIView.as_view(),
+        name="console_agent_message_feedback",
     ),
     path(
         "console/api/agents/<uuid:agent_id>/messages/<uuid:message_id>/report-issue/",

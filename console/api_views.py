@@ -96,6 +96,7 @@ from api.models import (
     PersistentAgentHumanInputRequest,
     PersistentAgentJudgeSuggestion,
     PersistentAgentMessage,
+    PersistentAgentMessageFeedback,
     PersistentAgentSecret,
     PersistentAgentSystemSkillState,
     PersistentAgentSystemMessage,
@@ -4883,7 +4884,7 @@ class AgentMessageCreateAPIView(LoginRequiredMixin, View):
 AGENT_MESSAGE_REPORT_COMMENT_MAX_LENGTH = 2000
 
 
-def _resolve_reportable_agent_message(agent: PersistentAgent, message_id: str) -> PersistentAgentMessage:
+def _resolve_actionable_agent_message(agent: PersistentAgent, message_id: str) -> PersistentAgentMessage:
     message = (
         PersistentAgentMessage.objects.filter(
             id=message_id,
@@ -4897,6 +4898,20 @@ def _resolve_reportable_agent_message(agent: PersistentAgent, message_id: str) -
     if message is None:
         raise Http404("Message not found.")
     return message
+
+
+def _resolve_agent_message_action(
+    request: HttpRequest,
+    agent_id: str,
+    message_id: str,
+) -> tuple[PersistentAgent, PersistentAgentMessage]:
+    agent = resolve_agent_for_request(
+        request,
+        agent_id,
+        allow_shared=True,
+        allow_delinquent_personal_chat=True,
+    )
+    return agent, _resolve_actionable_agent_message(agent, message_id)
 
 
 def _agent_message_action_properties(
@@ -4923,13 +4938,7 @@ class AgentMessageCopyAPIView(LoginRequiredMixin, View):
     http_method_names = ["post"]
 
     def post(self, request: HttpRequest, agent_id: str, message_id: str, *args: Any, **kwargs: Any):
-        agent = resolve_agent_for_request(
-            request,
-            agent_id,
-            allow_shared=True,
-            allow_delinquent_personal_chat=True,
-        )
-        message = _resolve_reportable_agent_message(agent, message_id)
+        agent, message = _resolve_agent_message_action(request, agent_id, message_id)
         Analytics.track_event(
             user_id=str(request.user.id),
             event=AnalyticsEvent.AGENT_MESSAGE_COPIED,
@@ -4939,22 +4948,68 @@ class AgentMessageCopyAPIView(LoginRequiredMixin, View):
         return JsonResponse({"ok": True})
 
 
+class AgentMessageFeedbackAPIView(LoginRequiredMixin, View):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, agent_id: str, message_id: str, *args: Any, **kwargs: Any):
+        agent, message = _resolve_agent_message_action(request, agent_id, message_id)
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        if "feedback" not in payload:
+            return HttpResponseBadRequest("feedback is required")
+        feedback = payload["feedback"]
+        if feedback is not None and feedback not in PersistentAgentMessageFeedback.Rating.values:
+            return HttpResponseBadRequest("feedback must be 'up', 'down', or null")
+
+        with transaction.atomic():
+            existing = (
+                PersistentAgentMessageFeedback.objects.select_for_update()
+                .filter(message=message, user=request.user)
+                .first()
+            )
+            previous_feedback = existing.rating if existing else None
+            changed = previous_feedback != feedback
+            if changed and feedback is None:
+                existing.delete()
+            elif changed and existing is not None:
+                existing.rating = feedback
+                existing.save(update_fields=["rating", "updated_at"])
+            elif changed:
+                PersistentAgentMessageFeedback.objects.update_or_create(
+                    message=message,
+                    user=request.user,
+                    defaults={"rating": feedback},
+                )
+
+        if changed:
+            Analytics.track_event(
+                user_id=str(request.user.id),
+                event=AnalyticsEvent.AGENT_MESSAGE_FEEDBACK_UPDATED,
+                source=AnalyticsSource.WEB,
+                properties=_agent_message_action_properties(
+                    agent,
+                    message,
+                    {
+                        "previous_feedback": previous_feedback or "none",
+                        "feedback": feedback or "none",
+                    },
+                ),
+            )
+
+        return JsonResponse({"ok": True, "feedback": feedback})
+
+
 @method_decorator(csrf_exempt, name="dispatch")
 class AgentMessageReportIssueAPIView(LoginRequiredMixin, View):
     http_method_names = ["post"]
 
     def post(self, request: HttpRequest, agent_id: str, message_id: str, *args: Any, **kwargs: Any):
-        agent = resolve_agent_for_request(
-            request,
-            agent_id,
-            allow_shared=True,
-            allow_delinquent_personal_chat=True,
-        )
-        message = _resolve_reportable_agent_message(agent, message_id)
+        agent, message = _resolve_agent_message_action(request, agent_id, message_id)
         try:
             payload = _parse_json_body(request)
-            if not isinstance(payload, dict):
-                return HttpResponseBadRequest("Invalid request payload.")
         except ValueError as exc:
             return HttpResponseBadRequest(str(exc))
 

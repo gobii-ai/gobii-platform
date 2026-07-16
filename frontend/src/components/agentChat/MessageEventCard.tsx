@@ -2,7 +2,9 @@ import ReactJsonView from '@microlink/react-json-view'
 import { memo, useCallback, useMemo, useState } from 'react'
 import { Check, Copy, Flag, RotateCcw } from 'lucide-react'
 import type { AgentMessage } from './types'
+import { trackAgentMessageCopy } from '../../api/agentChat'
 import { MessageContent } from './MessageContent'
+import { MessageFeedbackActions } from './MessageFeedbackActions'
 import { AgentAvatarBadge } from '../common/AgentAvatarBadge'
 import { useRelativeTimestamp } from '../../hooks/useRelativeTimestamp'
 import { sanitizeHtml } from '../../util/sanitize'
@@ -24,13 +26,13 @@ function getChannelLabel(raw?: string) {
 
 type MessageEventCardProps = {
   eventCursor: string
+  agentId?: string | null
   message: AgentMessage
   agentFirstName: string
   agentAvatarUrl?: string | null
   viewerUserId?: number | null
   viewerEmail?: string | null
   onMessageLinkClick?: (href: string) => boolean | void
-  onMessageCopied?: (message: AgentMessage) => void | Promise<void>
   onReportMessage?: (message: AgentMessage) => void
   onRetryMessage?: (message: AgentMessage) => void | Promise<void>
 }
@@ -72,13 +74,13 @@ async function writeMessageToClipboard(plainText: string, htmlText: string): Pro
 
 export const MessageEventCard = memo(function MessageEventCard({
   eventCursor,
+  agentId,
   message,
   agentFirstName,
   agentAvatarUrl,
   viewerUserId,
   viewerEmail,
   onMessageLinkClick,
-  onMessageCopied,
   onReportMessage,
   onRetryMessage,
 }: MessageEventCardProps) {
@@ -201,11 +203,15 @@ export const MessageEventCard = memo(function MessageEventCard({
       await writeMessageToClipboard(clipboardPlainText, clipboardHtml)
       setCopied(true)
       window.setTimeout(() => setCopied(false), 1600)
-      void onMessageCopied?.(message)
+      if (agentId) {
+        void trackAgentMessageCopy(agentId, message.id).catch(() => {
+          // Copying is already complete; tracking should not interrupt the UI.
+        })
+      }
     } catch {
       setCopied(false)
     }
-  }, [clipboardHtml, clipboardPlainText, copyDisabled, message, onMessageCopied])
+  }, [agentId, clipboardHtml, clipboardPlainText, copyDisabled, message.id])
 
   const handleReportMessage = useCallback(() => {
     onReportMessage?.(message)
@@ -258,6 +264,7 @@ export const MessageEventCard = memo(function MessageEventCard({
                 >
                   {copied ? <Check className="h-3.5 w-3.5" aria-hidden="true" /> : <Copy className="h-3.5 w-3.5" aria-hidden="true" />}
                 </button>
+                <MessageFeedbackActions key={`${message.id}:${message.viewerFeedback ?? ''}`} agentId={agentId} message={message} />
                 <button
                   type="button"
                   className="chat-message-action-button"

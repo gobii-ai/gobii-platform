@@ -49,7 +49,6 @@ type AgentTimelinePaneProps = {
   onHardLimitOpenSettings: () => void
   onHardLimitQuickIncrease?: () => void
   onJumpToLatest?: () => void
-  onMessageCopied?: (message: AgentMessage) => void | Promise<void>
   onMessageLinkClick?: (href: string) => boolean | void
   onPurchaseSeats?: () => void
   onReportMessage?: (message: AgentMessage) => void
@@ -106,7 +105,6 @@ export function AgentTimelinePane({
   onHardLimitOpenSettings,
   onHardLimitQuickIncrease,
   onJumpToLatest,
-  onMessageCopied,
   onMessageLinkClick,
   onPurchaseSeats,
   onReportMessage,
@@ -215,7 +213,6 @@ export function AgentTimelinePane({
                       animateIncoming={animateCursors?.has(event.cursor) ?? false}
                       onIncomingAnimationConsumed={onIncomingAnimationConsumed}
                       onMessageLinkClick={onMessageLinkClick}
-                      onMessageCopied={onMessageCopied}
                       onReportMessage={onReportMessage}
                       onRetryMessage={onRetryMessage}
                     />

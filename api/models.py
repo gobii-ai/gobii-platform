@@ -11082,6 +11082,36 @@ class PersistentAgentMessage(models.Model):
         super().save(*args, **kwargs)
 
 
+class PersistentAgentMessageFeedback(models.Model):
+
+    class Rating(models.TextChoices):
+        UP = "up", "Thumbs up"
+        DOWN = "down", "Thumbs down"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    message = models.ForeignKey(
+        PersistentAgentMessage,
+        on_delete=models.CASCADE,
+        related_name="feedback",
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="persistent_agent_message_feedback",
+    )
+    rating = models.CharField(max_length=8, choices=Rating.choices)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["message", "user"], name="uniq_pa_msg_feedback_message_user"),
+        ]
+
+    def __str__(self):
+        return f"MSG_FEEDBACK<{self.message_id}:{self.user_id}:{self.rating}>"
+
+
 class PersistentAgentMessageRead(models.Model):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)

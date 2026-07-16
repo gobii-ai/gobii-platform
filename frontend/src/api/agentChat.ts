@@ -1,4 +1,5 @@
 import type {
+  AgentMessageFeedback,
   PendingActionRequest,
   PendingContactRequest,
   PendingHumanInputRequest,
@@ -460,6 +461,18 @@ export async function trackAgentMessageCopy(agentId: string, messageId: string):
   return jsonRequest<{ ok: boolean }>(`/console/api/agents/${agentId}/messages/${messageId}/copy/`, {
     method: 'POST',
     includeCsrf: true,
+  })
+}
+
+export async function updateAgentMessageFeedback(
+  agentId: string,
+  messageId: string,
+  feedback: AgentMessageFeedback | null,
+): Promise<{ ok: boolean; feedback: AgentMessageFeedback | null }> {
+  return jsonRequest<{ ok: boolean; feedback: AgentMessageFeedback | null }>(`/console/api/agents/${agentId}/messages/${messageId}/feedback/`, {
+    method: 'POST',
+    includeCsrf: true,
+    json: { feedback },
   })
 }
 

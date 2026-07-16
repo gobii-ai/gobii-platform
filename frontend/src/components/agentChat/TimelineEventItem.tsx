@@ -26,7 +26,6 @@ type TimelineEventItemProps = {
   animateIncoming?: boolean
   onIncomingAnimationConsumed?: (cursor: string) => void
   onMessageLinkClick?: (href: string) => boolean | void
-  onMessageCopied?: (message: AgentMessage) => void | Promise<void>
   onReportMessage?: (message: AgentMessage) => void
   onRetryMessage?: (message: AgentMessage) => void | Promise<void>
 }
@@ -43,7 +42,6 @@ export const TimelineEventItem = memo(function TimelineEventItem({
   animateIncoming = false,
   onIncomingAnimationConsumed,
   onMessageLinkClick,
-  onMessageCopied,
   onReportMessage,
   onRetryMessage,
 }: TimelineEventItemProps) {
@@ -75,13 +73,13 @@ export const TimelineEventItem = memo(function TimelineEventItem({
     return (
       <MessageEventCard
         eventCursor={event.cursor}
+        agentId={activeAgentId}
         message={event.message}
         agentFirstName={agentFirstName}
         agentAvatarUrl={agentAvatarUrl}
         viewerUserId={viewerUserId ?? null}
         viewerEmail={viewerEmail ?? null}
         onMessageLinkClick={onMessageLinkClick}
-        onMessageCopied={onMessageCopied}
         onReportMessage={onReportMessage}
         onRetryMessage={onRetryMessage}
       />

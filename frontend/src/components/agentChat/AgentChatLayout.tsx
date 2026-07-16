@@ -13,7 +13,7 @@ import { AgentChatSettingsPanel } from './AgentChatSettingsPanel'
 import { AgentChatAddonsPanel } from './AgentChatAddonsPanel'
 import { PlanPanel } from './PlanPanel'
 import { HighPriorityBanner, type HighPriorityBannerConfig } from './HighPriorityBanner'
-import { reportAgentMessageIssue, trackAgentMessageCopy, type PendingActionMutationResult } from '../../api/agentChat'
+import { reportAgentMessageIssue, type PendingActionMutationResult } from '../../api/agentChat'
 import { AgentSignupPreviewPanel } from './AgentSignupPreviewPanel'
 import { AgentUpgradePlansPanel } from './AgentUpgradePlansPanel'
 import type { AgentChatSidebarMode } from './sidebarMode'
@@ -660,15 +660,6 @@ export function AgentChatLayout({
   const handleAddonsClose = useCallback(() => {
     setAddonsMode(null)
   }, [])
-
-  const handleMessageCopied = useCallback((message: AgentMessage) => {
-    if (!agentId) {
-      return
-    }
-    void trackAgentMessageCopy(agentId, message.id).catch(() => {
-      // Copying is already complete; tracking should not interrupt the UI.
-    })
-  }, [agentId])
 
   const handleReportMessage = useCallback((message: AgentMessage) => {
     setReportMessage(message)
@@ -1533,7 +1524,6 @@ export function AgentChatLayout({
             onHardLimitOpenSettings={handleSettingsOpen}
             onHardLimitQuickIncrease={quickIncreaseTarget !== null ? handleQuickIncreaseLimit : undefined}
             onJumpToLatest={onJumpToLatest}
-            onMessageCopied={handleMessageCopied}
             onMessageLinkClick={handleMessageLinkClick}
             onPurchaseSeats={handlePurchaseSeats}
             onReportMessage={handleReportMessage}
