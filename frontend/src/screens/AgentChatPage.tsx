@@ -4,6 +4,7 @@ import { AlertTriangle, Building2, Plus } from 'lucide-react'
 import noiseDarkTextureUrl from '../assets/textures/noise-dark.png'
 
 import { agentProfilePayloadToRosterEntry, createAgent, respondToAgentTransferInvite, type CreateAgentTemplateOptions } from '../api/agents'
+import { respondToAgentCollaboratorInvite } from '../api/agentCollaboratorInvites'
 import { currentOrganizationTemplatesQueryKey, fetchCurrentOrganizationTemplates, launchOrganizationTemplate, type OrganizationTemplate } from '../api/organization'
 import { createSystemMessage } from '../api/agentAudit'
 import {
@@ -101,7 +102,7 @@ import { collapseDetailedStatusRuns } from '../hooks/useSimplifiedTimeline'
 import { usePageLifecycle } from '../hooks/usePageLifecycle'
 import { HttpError } from '../api/http'
 import { safeErrorMessage } from '../api/safeErrorMessage'
-import type { AgentRosterEntry, AgentRosterSortMode, AgentTransferInvite, PlanningState, SignupPreviewState } from '../types/agentRoster'
+import type { AgentCollaborationInvite, AgentRosterEntry, AgentRosterSortMode, AgentTransferInvite, PlanningState, SignupPreviewState } from '../types/agentRoster'
 import type { BillingStatusInfo } from '../types/agentAddons'
 import type { AgentMessage, AgentMessageNotification, PendingActionRequest, PendingHumanInputRequest, PlanSnapshot, TimelineEvent } from '../types/agentChat'
 import type { DailyCreditsUpdatePayload } from '../types/dailyCredits'
@@ -563,6 +564,7 @@ type AgentRosterQueryData = {
   agentChatNotificationsEnabled?: boolean
   agents: AgentRosterEntry[]
   transferInvites?: AgentTransferInvite[]
+  collaborationInvites?: AgentCollaborationInvite[]
   llmIntelligence?: unknown
 }
 
@@ -2496,6 +2498,20 @@ export function AgentChatPage({
     }
   }, [queryClient])
 
+  const handleRespondCollaborationInvite = useCallback(async (
+    invite: AgentCollaborationInvite,
+    action: 'accept' | 'decline',
+  ) => {
+    const url = action === 'accept' ? invite.accept_url : invite.decline_url
+    const result = await respondToAgentCollaboratorInvite(url)
+    await queryClient.invalidateQueries({ queryKey: ['agent-roster'], exact: false })
+    if (action === 'accept' && result.redirectUrl) {
+      if (!navigateWithinApp(result.redirectUrl)) {
+        window.location.assign(result.redirectUrl)
+      }
+    }
+  }, [queryClient])
+
   const handleOpenFullSettings = useCallback(() => {
     navigateToShellSubview('settings')
   }, [navigateToShellSubview])
@@ -3275,6 +3291,7 @@ export function AgentChatPage({
   const selectionSidebarProps: SelectionSidebarProps = {
     agents: sidebarAgents,
     transferInvites: rosterQuery.data?.transferInvites ?? [],
+    collaborationInvites: rosterQuery.data?.collaborationInvites ?? [],
     favoriteAgentIds,
     mutedAgentIds,
     activeAgentId: null,
@@ -3282,6 +3299,7 @@ export function AgentChatPage({
     errorMessage: rosterErrorMessage,
     onSelectAgent: handleSelectAgent,
     onRespondTransferInvite: handleRespondTransferInvite,
+    onRespondCollaborationInvite: handleRespondCollaborationInvite,
     onConfigureAgent: handleConfigureAgent,
     onToggleAgentFavorite: handleToggleAgentFavorite,
     onToggleAgentMute: handleToggleAgentMute,
@@ -3933,6 +3951,7 @@ export function AgentChatPage({
   const chatLayoutSidebar = useMemo<AgentChatLayoutSidebarConfig>(() => ({
     agents: sidebarAgents,
     transferInvites: rosterQuery.data?.transferInvites ?? [],
+    collaborationInvites: rosterQuery.data?.collaborationInvites ?? [],
     favoriteAgentIds,
     mutedAgentIds,
     insightsPanelExpandedPreference,
@@ -3941,6 +3960,7 @@ export function AgentChatPage({
     errorMessage: rosterErrorMessage,
     onSelectAgent: handleSelectAgent,
     onRespondTransferInvite: handleRespondTransferInvite,
+    onRespondCollaborationInvite: handleRespondCollaborationInvite,
     onConfigureAgent: handleConfigureAgent,
     onToggleAgentFavorite: handleToggleAgentFavorite,
     onToggleAgentMute: handleToggleAgentMute,
@@ -4009,6 +4029,7 @@ export function AgentChatPage({
     handleInsightsPanelExpandedPreferenceChange,
     handleOpenSupport,
     handleRespondTransferInvite,
+    handleRespondCollaborationInvite,
     handleSelectAgent,
     handleToggleAgentFavorite,
     handleToggleAgentMute,
@@ -4022,6 +4043,7 @@ export function AgentChatPage({
     rosterErrorMessage,
     rosterLoading,
     rosterQuery.data?.transferInvites,
+    rosterQuery.data?.collaborationInvites,
     scrollToAgentId,
     selectionPage,
     selectionShellPanel,

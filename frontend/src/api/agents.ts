@@ -1,6 +1,6 @@
 import { HttpError, jsonFetch, jsonRequest } from './http'
 import { staffViewContextHeaders, type ConsoleContext, type StaffViewContext } from './context'
-import type { AgentRosterEntry, AgentRosterSortMode, AgentTransferInvite, PlanningState, SignupPreviewState } from '../types/agentRoster'
+import type { AgentCollaborationInvite, AgentRosterEntry, AgentRosterSortMode, AgentTransferInvite, PlanningState, SignupPreviewState } from '../types/agentRoster'
 import type { AccountPauseInfo, BillingStatusInfo } from '../types/agentAddons'
 import type { LlmIntelligenceConfig } from '../types/llmIntelligence'
 
@@ -80,6 +80,7 @@ type AgentRosterPayload = {
   accountPause?: AccountPauseInfo | null
   llmIntelligence?: LlmIntelligenceConfig | null
   transfer_invites?: AgentTransferInvite[]
+  collaboration_invites?: AgentCollaborationInvite[]
   agents: AgentProfilePayload[]
 }
 
@@ -128,6 +129,7 @@ export async function fetchAgentRoster(
   context: ConsoleContext
   agents: AgentRosterEntry[]
   transferInvites: AgentTransferInvite[]
+  collaborationInvites: AgentCollaborationInvite[]
   agentRosterSortMode: AgentRosterSortMode
   favoriteAgentIds: string[]
   mutedAgentIds: string[]
@@ -152,6 +154,7 @@ export async function fetchAgentRoster(
     context: payload.context,
     agents,
     transferInvites: payload.transfer_invites ?? [],
+    collaborationInvites: payload.collaboration_invites ?? [],
     agentRosterSortMode: payload.agent_roster_sort_mode ?? 'recent',
     favoriteAgentIds: Array.isArray(payload.favorite_agent_ids)
       ? payload.favorite_agent_ids.filter((value): value is string => typeof value === 'string')

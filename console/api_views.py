@@ -90,6 +90,7 @@ from api.models import (
     AgentEmailAccount,
     AgentEmailOAuthCredential,
     AgentEmailOAuthSession,
+    AgentCollaboratorInvite,
     AgentTransferInvite,
     PersistentAgent,
     PersistentAgentCommsEndpoint,
@@ -3002,6 +3003,59 @@ def _pending_roster_transfer_invites_for_user(request: HttpRequest) -> list[dict
     return [_serialize_roster_transfer_invite(invite) for invite in invites]
 
 
+def _serialize_roster_collaboration_invite(invite: AgentCollaboratorInvite) -> dict[str, Any]:
+    agent = invite.agent
+    inviter = invite.invited_by
+    inviter_email = getattr(inviter, "email", "") or ""
+    inviter_name = inviter.get_full_name() or inviter_email or getattr(inviter, "username", "")
+
+    return {
+        "id": str(invite.id),
+        "token": invite.token,
+        "agent_id": str(agent.id),
+        "agent_name": agent.name or "Agent",
+        "agent_avatar_url": agent.get_avatar_thumbnail_url(),
+        "invited_by_name": inviter_name or "Gobii user",
+        "invited_by_email": inviter_email,
+        "recipient_email": invite.email or "",
+        "created_at": invite.created_at.isoformat() if invite.created_at else None,
+        "expires_at": invite.expires_at.isoformat() if invite.expires_at else None,
+        "accept_url": reverse("console-agent-collaborator-invite-accept-api", args=[invite.token]),
+        "decline_url": reverse("console-agent-collaborator-invite-decline-api", args=[invite.token]),
+    }
+
+
+def _pending_roster_collaboration_invites_for_user(request: HttpRequest) -> list[dict[str, Any]]:
+    from allauth.account.models import EmailAddress
+
+    recipient_emails = {
+        email.strip().lower()
+        for email in [
+            request.user.email or "",
+            *EmailAddress.objects.filter(user=request.user).values_list("email", flat=True),
+        ]
+        if email and email.strip()
+    }
+    if not recipient_emails:
+        return []
+
+    recipient_query = Q()
+    for email in recipient_emails:
+        recipient_query |= Q(email__iexact=email)
+
+    invites = (
+        AgentCollaboratorInvite.objects
+        .select_related("agent", "invited_by")
+        .filter(
+            recipient_query,
+            status=AgentCollaboratorInvite.InviteStatus.PENDING,
+            expires_at__gt=timezone.now(),
+        )
+        .order_by("-created_at", "-id")
+    )
+    return [_serialize_roster_collaboration_invite(invite) for invite in invites]
+
+
 @method_decorator(csrf_exempt, name="dispatch")
 class AgentChatRosterAPIView(LoginRequiredMixin, View):
     http_method_names = ["get"]
@@ -3252,6 +3306,7 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
                 "accountPause": account_pause,
                 "agents": payload,
                 "transfer_invites": _pending_roster_transfer_invites_for_user(request),
+                "collaboration_invites": _pending_roster_collaboration_invites_for_user(request),
                 "llmIntelligence": llm_intelligence,
             }
         )
