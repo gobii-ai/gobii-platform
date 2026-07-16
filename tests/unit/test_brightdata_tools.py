@@ -394,7 +394,7 @@ class BrightDataNativeToolTests(SimpleTestCase):
         self.assertEqual(
             call.kwargs["json"],
             {
-                "url": "https://www.google.com/search?q=native%20api&start=20&gl=us",
+                "url": "https://www.google.com/search?q=native%20api&start=20&gl=us&brd_json=1",
                 "zone": "test-serp-zone",
                 "format": "raw",
                 "data_format": "parsed_light",

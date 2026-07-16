@@ -499,7 +499,7 @@ def execute_brightdata_search_engine(_agent: Any, params: dict[str, Any]) -> dic
     if is_google:
         result, search_error = _execute_with_zone_fallback(
             {
-                "url": target_url,
+                "url": f"{target_url}&brd_json=1",
                 "format": "raw",
                 "data_format": "parsed_light",
             },
