@@ -39,6 +39,7 @@ from api.models import (
     PersistentAgentCompletion,
     PersistentAgentMessage,
     PersistentAgentMessageAttachment,
+    PersistentAgentMessageFeedback,
     PersistentAgentStep,
     PersistentAgentToolCall,
     PersistentAgentUserActionEvent,
@@ -338,6 +339,23 @@ def _build_web_user_lookup(messages: Iterable[PersistentAgentMessage]) -> dict[i
     return {user.id: _build_user_display_name(user) for user in users}
 
 
+def _build_viewer_message_feedback_lookup(
+    messages: Iterable[PersistentAgentMessage],
+    viewer_user,
+) -> dict[uuid.UUID, str]:
+    if viewer_user is None or not getattr(viewer_user, "is_authenticated", False):
+        return {}
+    message_ids = {message.id for message in messages}
+    if not message_ids:
+        return {}
+    return dict(
+        PersistentAgentMessageFeedback.objects.filter(
+            message_id__in=message_ids,
+            user=viewer_user,
+        ).values_list("message_id", "rating")
+    )
+
+
 def _discord_outbound_channel_label(message: PersistentAgentMessage, conversation) -> str:
     if not message.is_outbound:
         return ""
@@ -468,7 +486,11 @@ def serialize_plan_snapshot(agent: PersistentAgent, snapshot: PlanSnapshot | Non
     }
 
 
-def _serialize_message(env: MessageEnvelope, user_lookup: Mapping[int, str | None] | None = None) -> dict:
+def _serialize_message(
+    env: MessageEnvelope,
+    user_lookup: Mapping[int, str | None] | None = None,
+    feedback_lookup: Mapping[uuid.UUID, str] | None = None,
+) -> dict:
     message = env.message
     timestamp = message.timestamp
     channel = "web"
@@ -555,6 +577,7 @@ def _serialize_message(env: MessageEnvelope, user_lookup: Mapping[int, str | Non
             "sourceKind": source_kind,
             "sourceLabel": source_label,
             "webhookMeta": webhook_meta,
+            "viewerFeedback": feedback_lookup.get(message.id) if feedback_lookup else None,
         },
     }
 
@@ -1483,6 +1506,10 @@ def fetch_timeline_window(
     if " " in agent_name:
         agent_name = agent_name.split()[0]
     user_lookup = _build_web_user_lookup(env.message for env in message_envelopes)
+    feedback_lookup = _build_viewer_message_feedback_lookup(
+        (env.message for env in truncated if isinstance(env, MessageEnvelope)),
+        viewer_user,
+    )
     for env in truncated:
         if isinstance(env, StepEnvelope):
             cluster_buffer.append(env)
@@ -1497,7 +1524,7 @@ def fetch_timeline_window(
         elif isinstance(env, UserActionEnvelope):
             timeline_events.append(_serialize_user_action(env, viewer_user=viewer_user))
         else:
-            timeline_events.append(_serialize_message(env, user_lookup))
+            timeline_events.append(_serialize_message(env, user_lookup, feedback_lookup))
     if cluster_buffer:
         timeline_events.append(_build_cluster(cluster_buffer, tool_label_map))
 

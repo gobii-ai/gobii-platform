@@ -1,4 +1,4 @@
-import type { AgentMessage, AgentTimelineSnapshot, TimelineEvent, MessageEvent, ToolClusterEvent, ToolCallEntry, ThinkingEvent, PlanEvent, PlanStepChange, PlanSnapshot } from '../../types/agentChat'
+import type { AgentMessage, AgentMessageFeedback, AgentTimelineSnapshot, TimelineEvent, MessageEvent, ToolClusterEvent, ToolCallEntry, ThinkingEvent, PlanEvent, PlanStepChange, PlanSnapshot } from '../../types/agentChat'
 
 export type AgentTimelineProps = AgentTimelineSnapshot
 
@@ -12,4 +12,5 @@ export type {
   PlanStepChange,
   PlanSnapshot,
   AgentMessage,
+  AgentMessageFeedback,
 }

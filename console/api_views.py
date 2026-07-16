@@ -96,6 +96,7 @@ from api.models import (
     PersistentAgentHumanInputRequest,
     PersistentAgentJudgeSuggestion,
     PersistentAgentMessage,
+    PersistentAgentMessageFeedback,
     PersistentAgentSecret,
     PersistentAgentSystemSkillState,
     PersistentAgentSystemMessage,
@@ -4937,6 +4938,70 @@ class AgentMessageCopyAPIView(LoginRequiredMixin, View):
             properties=_agent_message_action_properties(agent, message),
         )
         return JsonResponse({"ok": True})
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class AgentMessageFeedbackAPIView(LoginRequiredMixin, View):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, agent_id: str, message_id: str, *args: Any, **kwargs: Any):
+        agent = resolve_agent_for_request(
+            request,
+            agent_id,
+            allow_shared=True,
+            allow_delinquent_personal_chat=True,
+        )
+        message = _resolve_reportable_agent_message(agent, message_id)
+        try:
+            payload = _parse_json_body(request)
+            if not isinstance(payload, dict):
+                return HttpResponseBadRequest("Invalid request payload.")
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        if "feedback" not in payload:
+            return HttpResponseBadRequest("feedback is required")
+        feedback = payload["feedback"]
+        valid_feedback = {choice.value for choice in PersistentAgentMessageFeedback.Rating}
+        if feedback is not None and (not isinstance(feedback, str) or feedback not in valid_feedback):
+            return HttpResponseBadRequest("feedback must be 'up', 'down', or null")
+
+        with transaction.atomic():
+            existing = (
+                PersistentAgentMessageFeedback.objects.select_for_update()
+                .filter(message=message, user=request.user)
+                .first()
+            )
+            previous_feedback = existing.rating if existing else None
+            changed = previous_feedback != feedback
+            if changed and feedback is None:
+                PersistentAgentMessageFeedback.objects.filter(
+                    message=message,
+                    user=request.user,
+                ).delete()
+            elif changed:
+                PersistentAgentMessageFeedback.objects.update_or_create(
+                    message=message,
+                    user=request.user,
+                    defaults={"rating": feedback},
+                )
+
+        if changed:
+            Analytics.track_event(
+                user_id=str(request.user.id),
+                event=AnalyticsEvent.AGENT_MESSAGE_FEEDBACK_UPDATED,
+                source=AnalyticsSource.WEB,
+                properties=_agent_message_action_properties(
+                    agent,
+                    message,
+                    {
+                        "previous_feedback": previous_feedback or "none",
+                        "feedback": feedback or "none",
+                    },
+                ),
+            )
+
+        return JsonResponse({"ok": True, "feedback": feedback})
 
 
 @method_decorator(csrf_exempt, name="dispatch")

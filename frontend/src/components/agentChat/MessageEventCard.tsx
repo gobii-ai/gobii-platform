@@ -1,8 +1,9 @@
 import ReactJsonView from '@microlink/react-json-view'
 import { memo, useCallback, useMemo, useState } from 'react'
 import { Check, Copy, Flag, RotateCcw } from 'lucide-react'
-import type { AgentMessage } from './types'
+import type { AgentMessage, AgentMessageFeedback } from './types'
 import { MessageContent } from './MessageContent'
+import { MessageFeedbackActions } from './MessageFeedbackActions'
 import { AgentAvatarBadge } from '../common/AgentAvatarBadge'
 import { useRelativeTimestamp } from '../../hooks/useRelativeTimestamp'
 import { sanitizeHtml } from '../../util/sanitize'
@@ -31,6 +32,7 @@ type MessageEventCardProps = {
   viewerEmail?: string | null
   onMessageLinkClick?: (href: string) => boolean | void
   onMessageCopied?: (message: AgentMessage) => void | Promise<void>
+  onMessageFeedback?: (message: AgentMessage, feedback: AgentMessageFeedback | null) => Promise<AgentMessageFeedback | null>
   onReportMessage?: (message: AgentMessage) => void
   onRetryMessage?: (message: AgentMessage) => void | Promise<void>
 }
@@ -79,6 +81,7 @@ export const MessageEventCard = memo(function MessageEventCard({
   viewerEmail,
   onMessageLinkClick,
   onMessageCopied,
+  onMessageFeedback,
   onReportMessage,
   onRetryMessage,
 }: MessageEventCardProps) {
@@ -258,6 +261,7 @@ export const MessageEventCard = memo(function MessageEventCard({
                 >
                   {copied ? <Check className="h-3.5 w-3.5" aria-hidden="true" /> : <Copy className="h-3.5 w-3.5" aria-hidden="true" />}
                 </button>
+                <MessageFeedbackActions message={message} onMessageFeedback={onMessageFeedback} />
                 <button
                   type="button"
                   className="chat-message-action-button"

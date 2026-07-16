@@ -3632,6 +3632,19 @@
     cursor: not-allowed;
     opacity: 0.45;
 }
+.chat-message-action-button[data-feedback="up"][data-active="true"] {
+    border-color: rgba(5, 150, 105, 0.4);
+    background: rgba(236, 253, 245, 0.96);
+    color: #047857;
+}
+.chat-message-action-button[data-feedback="down"][data-active="true"] {
+    border-color: rgba(225, 29, 72, 0.38);
+    background: rgba(255, 241, 242, 0.96);
+    color: #be123c;
+}
+.chat-message-action-button[data-feedback][data-active="true"] svg {
+    fill: currentColor;
+}
 .chat-bubble:hover .chat-timestamp {
     opacity: 1;
 }

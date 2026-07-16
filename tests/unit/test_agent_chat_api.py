@@ -51,6 +51,7 @@ from api.models import (
     PersistentAgentInboundWebhook,
     PersistentAgentMessage,
     PersistentAgentMessageAttachment,
+    PersistentAgentMessageFeedback,
     PersistentAgentSecret,
     PersistentAgentStep,
     PersistentAgentToolCall,
@@ -2903,6 +2904,191 @@ class AgentChatAPITests(TestCase):
         self.assertEqual(props.get("message_id"), str(message.id))
         self.assertNotIn("body", props)
         self.assertNotIn("comment", props)
+
+    @tag("batch_agent_chat")
+    @patch("console.api_views.Analytics.track_event")
+    def test_agent_message_feedback_creates_switches_and_clears(self, mock_track_event):
+        message = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=self.agent_endpoint,
+            to_endpoint=self.user_endpoint,
+            is_outbound=True,
+            body="Rate this agent reply",
+        )
+        url = f"/console/api/agents/{self.agent.id}/messages/{message.id}/feedback/"
+
+        up_response = self.client.post(
+            url,
+            data=json.dumps({"feedback": "up"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(up_response.status_code, 200, up_response.content)
+        self.assertEqual(up_response.json(), {"ok": True, "feedback": "up"})
+        feedback = PersistentAgentMessageFeedback.objects.get(message=message, user=self.user)
+        self.assertEqual(feedback.rating, PersistentAgentMessageFeedback.Rating.UP)
+        self.assertEqual(mock_track_event.call_args.kwargs["event"], AnalyticsEvent.AGENT_MESSAGE_FEEDBACK_UPDATED)
+        props = mock_track_event.call_args.kwargs["properties"]
+        self.assertEqual(props["previous_feedback"], "none")
+        self.assertEqual(props["feedback"], "up")
+        self.assertNotIn("body", props)
+
+        mock_track_event.reset_mock()
+        repeated_response = self.client.post(
+            url,
+            data=json.dumps({"feedback": "up"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(repeated_response.status_code, 200, repeated_response.content)
+        self.assertEqual(PersistentAgentMessageFeedback.objects.filter(message=message, user=self.user).count(), 1)
+        mock_track_event.assert_not_called()
+
+        down_response = self.client.post(
+            url,
+            data=json.dumps({"feedback": "down"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(down_response.status_code, 200, down_response.content)
+        feedback.refresh_from_db()
+        self.assertEqual(feedback.rating, PersistentAgentMessageFeedback.Rating.DOWN)
+        props = mock_track_event.call_args.kwargs["properties"]
+        self.assertEqual(props["previous_feedback"], "up")
+        self.assertEqual(props["feedback"], "down")
+
+        mock_track_event.reset_mock()
+        clear_response = self.client.post(
+            url,
+            data=json.dumps({"feedback": None}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(clear_response.status_code, 200, clear_response.content)
+        self.assertEqual(clear_response.json(), {"ok": True, "feedback": None})
+        self.assertFalse(PersistentAgentMessageFeedback.objects.filter(message=message, user=self.user).exists())
+        props = mock_track_event.call_args.kwargs["properties"]
+        self.assertEqual(props["previous_feedback"], "down")
+        self.assertEqual(props["feedback"], "none")
+
+    @tag("batch_agent_chat")
+    def test_timeline_serializes_feedback_for_current_viewer(self):
+        message = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=self.agent_endpoint,
+            to_endpoint=self.user_endpoint,
+            is_outbound=True,
+            body="Viewer-specific feedback",
+        )
+        other_user = get_user_model().objects.create_user(
+            username="feedback-viewer",
+            email="feedback-viewer@example.com",
+            password="password123",
+        )
+        PersistentAgentMessageFeedback.objects.create(
+            message=message,
+            user=self.user,
+            rating=PersistentAgentMessageFeedback.Rating.UP,
+        )
+        PersistentAgentMessageFeedback.objects.create(
+            message=message,
+            user=other_user,
+            rating=PersistentAgentMessageFeedback.Rating.DOWN,
+        )
+
+        owner_window = fetch_timeline_window(self.agent, viewer_user=self.user)
+        other_window = fetch_timeline_window(self.agent, viewer_user=other_user)
+        anonymous_window = fetch_timeline_window(self.agent)
+
+        def serialized_feedback(window):
+            return next(
+                event["message"]["viewerFeedback"]
+                for event in window.events
+                if event.get("kind") == "message" and event["message"]["id"] == str(message.id)
+            )
+
+        self.assertEqual(serialized_feedback(owner_window), "up")
+        self.assertEqual(serialized_feedback(other_window), "down")
+        self.assertIsNone(serialized_feedback(anonymous_window))
+
+    @tag("batch_agent_chat")
+    @patch("console.api_views.Analytics.track_event")
+    def test_agent_message_feedback_rejects_invalid_or_unreportable_messages(self, mock_track_event):
+        outbound = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=self.agent_endpoint,
+            to_endpoint=self.user_endpoint,
+            is_outbound=True,
+            body="Valid outbound message",
+        )
+        inbound = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=self.user_endpoint,
+            to_endpoint=self.agent_endpoint,
+            is_outbound=False,
+            body="Inbound user message",
+        )
+        peer = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            peer_agent=self.agent,
+            from_endpoint=self.agent_endpoint,
+            to_endpoint=self.user_endpoint,
+            is_outbound=True,
+            body="Peer message",
+        )
+        other_user = get_user_model().objects.create_user(
+            username="foreign-feedback-owner",
+            email="foreign-feedback-owner@example.com",
+            password="password123",
+        )
+        other_browser_agent = BrowserUseAgent.objects.create(user=other_user, name="Foreign Feedback Browser Agent")
+        other_agent = PersistentAgent.objects.create(
+            user=other_user,
+            name="Foreign Feedback Agent",
+            charter="Other work",
+            browser_use_agent=other_browser_agent,
+        )
+        other_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=other_agent,
+            channel=CommsChannel.WEB,
+            address=build_web_agent_address(other_agent.id),
+            is_primary=True,
+        )
+        foreign_message = PersistentAgentMessage.objects.create(
+            owner_agent=other_agent,
+            from_endpoint=other_endpoint,
+            to_endpoint=self.user_endpoint,
+            is_outbound=True,
+            body="Foreign agent reply",
+        )
+
+        invalid_response = self.client.post(
+            f"/console/api/agents/{self.agent.id}/messages/{outbound.id}/feedback/",
+            data=json.dumps({"feedback": ["up"]}),
+            content_type="application/json",
+        )
+        inbound_response = self.client.post(
+            f"/console/api/agents/{self.agent.id}/messages/{inbound.id}/feedback/",
+            data=json.dumps({"feedback": "down"}),
+            content_type="application/json",
+        )
+        peer_response = self.client.post(
+            f"/console/api/agents/{self.agent.id}/messages/{peer.id}/feedback/",
+            data=json.dumps({"feedback": "up"}),
+            content_type="application/json",
+        )
+        foreign_response = self.client.post(
+            f"/console/api/agents/{self.agent.id}/messages/{foreign_message.id}/feedback/",
+            data=json.dumps({"feedback": "up"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(invalid_response.status_code, 400)
+        self.assertEqual(inbound_response.status_code, 404)
+        self.assertEqual(peer_response.status_code, 404)
+        self.assertEqual(foreign_response.status_code, 404)
+        self.assertFalse(PersistentAgentMessageFeedback.objects.exists())
+        mock_track_event.assert_not_called()
 
     @tag("batch_agent_chat")
     @override_settings(SUPPORT_EMAIL="support@example.com")

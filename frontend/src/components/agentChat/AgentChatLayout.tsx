@@ -13,7 +13,7 @@ import { AgentChatSettingsPanel } from './AgentChatSettingsPanel'
 import { AgentChatAddonsPanel } from './AgentChatAddonsPanel'
 import { PlanPanel } from './PlanPanel'
 import { HighPriorityBanner, type HighPriorityBannerConfig } from './HighPriorityBanner'
-import { reportAgentMessageIssue, trackAgentMessageCopy, type PendingActionMutationResult } from '../../api/agentChat'
+import { reportAgentMessageIssue, trackAgentMessageCopy, updateAgentMessageFeedback, type PendingActionMutationResult } from '../../api/agentChat'
 import { AgentSignupPreviewPanel } from './AgentSignupPreviewPanel'
 import { AgentUpgradePlansPanel } from './AgentUpgradePlansPanel'
 import type { AgentChatSidebarMode } from './sidebarMode'
@@ -26,7 +26,7 @@ import { useIsMobile } from '../../hooks/useIsMobile'
 import type { SelectionShellPage } from './SelectionShellPageSwitcher'
 import type { SidebarSettingsInfo } from './SidebarSettingsMenu'
 import type { AgentTimelineProps } from './types'
-import type { PendingActionRequest, AgentMessage, PlanSnapshot } from '../../types/agentChat'
+import type { PendingActionRequest, AgentMessage, AgentMessageFeedback, PlanSnapshot } from '../../types/agentChat'
 import type { SignupPreviewState } from '../../types/agentRoster'
 import type { TemplateRecommendation } from '../../api/agentSpawnIntent'
 import { isContinuationUpgradeModalSource, selectSubscriptionState, subscriptionActions, type PlanTier } from '../../store/subscriptionSlice'
@@ -668,6 +668,17 @@ export function AgentChatLayout({
     void trackAgentMessageCopy(agentId, message.id).catch(() => {
       // Copying is already complete; tracking should not interrupt the UI.
     })
+  }, [agentId])
+
+  const handleMessageFeedback = useCallback(async (
+    message: AgentMessage,
+    feedback: AgentMessageFeedback | null,
+  ): Promise<AgentMessageFeedback | null> => {
+    if (!agentId) {
+      throw new Error('Agent is unavailable.')
+    }
+    const response = await updateAgentMessageFeedback(agentId, message.id, feedback)
+    return response.feedback
   }, [agentId])
 
   const handleReportMessage = useCallback((message: AgentMessage) => {
@@ -1534,6 +1545,7 @@ export function AgentChatLayout({
             onHardLimitQuickIncrease={quickIncreaseTarget !== null ? handleQuickIncreaseLimit : undefined}
             onJumpToLatest={onJumpToLatest}
             onMessageCopied={handleMessageCopied}
+            onMessageFeedback={handleMessageFeedback}
             onMessageLinkClick={handleMessageLinkClick}
             onPurchaseSeats={handlePurchaseSeats}
             onReportMessage={handleReportMessage}
