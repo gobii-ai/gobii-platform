@@ -2189,7 +2189,7 @@ class DailyLimitMessageOnlyModeTests(TestCase):
                 credit_snapshot={
                     "available": Decimal("0"),
                     "daily_state": {},
-                    "task_credit_exempt": False,
+                    "refresh_task_credits": True,
                 },
             )
 

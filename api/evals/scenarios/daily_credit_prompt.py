@@ -9,7 +9,7 @@ from django.core.files.storage import default_storage
 from django.urls import reverse
 from django.utils import timezone
 
-from api.agent.core.daily_limit_mode import DAILY_LIMIT_ALLOWED_TOOL_NAMES
+from api.agent.core.daily_limit_mode import CREDIT_MESSAGE_ONLY_ALLOWED_TOOL_NAMES
 from api.evals.base import EvalScenario, ScenarioTask
 from api.evals.execution import ScenarioExecutionTools
 from api.evals.registry import register_scenario
@@ -380,7 +380,7 @@ class DailyCreditPromptHardLimitHitScenario(DailyCreditPromptScenario):
         )
         return (
             "DAILY HARD LIMIT MODE",
-            "Only message and sleep tools are available until the user raises the limit",
+            "Only message and sleep tools are available right now",
             settings_url,
             f"double {double_limit_url_prefix}?token=",
             f"unlimited {unlimited_limit_url_prefix}?token=",
@@ -399,7 +399,7 @@ class DailyCreditPromptHardLimitHitScenario(DailyCreditPromptScenario):
         )
         disallowed = [
             call for call in calls
-            if call.tool_name not in DAILY_LIMIT_ALLOWED_TOOL_NAMES
+            if call.tool_name not in CREDIT_MESSAGE_ONLY_ALLOWED_TOOL_NAMES
         ]
         if disallowed:
             self.record_task_result(

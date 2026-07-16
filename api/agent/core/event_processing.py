@@ -74,11 +74,11 @@ from api.evals.credit_policy import is_eval_credit_exempt_context
 from api.evals.execution import get_current_eval_routing_profile
 from . import internal_reasoning
 from .daily_limit_mode import (
-    DAILY_LIMIT_ALLOWED_TOOL_NAMES_TEXT,
-    DAILY_LIMIT_MESSAGE_TOOL_NAMES,
+    CREDIT_MESSAGE_ONLY_ALLOWED_TOOL_NAMES_TEXT,
+    CREDIT_MESSAGE_TOOL_NAMES,
     filter_tools_for_credit_message_only_mode,
     is_credit_message_only_mode,
-    is_daily_limit_allowed_tool,
+    is_credit_message_only_allowed_tool,
     is_daily_hard_limit_message_only_mode,
     is_task_credit_message_only_mode,
 )
@@ -176,7 +176,7 @@ def _coerce_loop_iteration_limit(value: int | None) -> int:
 
 TOOL_ERROR_TYPE_MAX_BYTES = 120
 PREFERRED_PROVIDER_MAX_AGE = timedelta(hours=1)
-MESSAGE_TOOL_NAMES = set(DAILY_LIMIT_MESSAGE_TOOL_NAMES)
+MESSAGE_TOOL_NAMES = set(CREDIT_MESSAGE_TOOL_NAMES)
 MESSAGE_SUCCESS_STATUSES = {"ok", "queued", "sent", "success"}
 MESSAGE_TOOL_BODY_KEYS = {
     "send_email": "mobile_first_html",
@@ -2586,24 +2586,14 @@ def _prepare_tool_batch_impl(
             )
             if (
                 is_credit_message_only_mode(daily_state, task_credit_available)
-                and not is_daily_limit_allowed_tool(tool_name)
+                and not is_credit_message_only_allowed_tool(tool_name)
             ):
-                restriction_label = (
-                    "Combined daily and task credit message-only mode"
-                    if is_daily_hard_limit_message_only_mode(daily_state)
-                    and is_task_credit_message_only_mode(task_credit_available)
-                    else (
-                        "Daily hard limit mode"
-                        if is_daily_hard_limit_message_only_mode(daily_state)
-                        else "Task credit message-only mode"
-                    )
-                )
                 try:
                     step_kwargs = {
                         "agent": agent,
                         "description": (
-                            f"{restriction_label} is active. Only message and sleep tools are allowed right now: "
-                            f"{DAILY_LIMIT_ALLOWED_TOOL_NAMES_TEXT}. "
+                            "Credit message-only mode is active. Only message and sleep tools are allowed right now: "
+                            f"{CREDIT_MESSAGE_ONLY_ALLOWED_TOOL_NAMES_TEXT}. "
                             f"Do not call {tool_name}; message the user with the relevant billing or limit guidance."
                         ),
                     }
@@ -4481,35 +4471,6 @@ def _ensure_credit_for_tool(
                 pass
         return {"cost": None, "credit": None}
 
-    cost: Decimal | None = None
-    consumed: dict | None = None
-    consumed_credit = None
-
-    # Determine tool cost up-front so we can gate on fractional balances
-    try:
-        cost = get_tool_credit_cost(tool_name)
-    except Exception as e:
-        log_credit_failure(
-            agent,
-            e,
-            source="api.agent.core.event_processing._ensure_credit_for_tool.cost",
-            logger=logger,
-            context={
-                "operation": "get_tool_credit_cost",
-                "tool_name": tool_name,
-                "owner_label": owner_label,
-                "owner_type": "organization" if owner_is_org else "user",
-                "owner_id": str(getattr(owner, "id", "")) if owner is not None else None,
-                "user_id": str(getattr(owner_user, "id", "")) if owner_user is not None else None,
-                "fallback": "default_task_credit_cost",
-            },
-        )
-        # Fallback to default single-task cost when lookup fails
-        cost = get_default_task_credit_cost()
-
-    if cost is not None:
-        cost = apply_tier_credit_multiplier(agent, cost)
-
     if credit_snapshot is not None and "available" in credit_snapshot:
         available = credit_snapshot.get("available")
     else:
@@ -4528,7 +4489,6 @@ def _ensure_credit_for_tool(
                     "owner_type": "organization" if owner_is_org else "user",
                     "owner_id": str(getattr(owner, "id", "")) if owner is not None else None,
                     "user_id": str(getattr(owner_user, "id", "")) if owner_user is not None else None,
-                    "cost": str(cost) if cost is not None else None,
                 },
             )
             available = None
@@ -4543,7 +4503,7 @@ def _ensure_credit_for_tool(
         if credit_snapshot is not None:
             credit_snapshot["daily_state"] = daily_state
 
-    if is_credit_message_only_mode(daily_state, available) and is_daily_limit_allowed_tool(tool_name):
+    if is_credit_message_only_mode(daily_state, available) and is_credit_message_only_allowed_tool(tool_name):
         if span is not None:
             try:
                 span.add_event("Tool allowed in credit message-only mode")
@@ -4551,6 +4511,34 @@ def _ensure_credit_for_tool(
             except Exception:
                 pass
         return {"cost": None, "credit": None}
+
+    cost: Decimal | None = None
+    consumed: dict | None = None
+    consumed_credit = None
+
+    # Price chargeable calls after the free message-only path is ruled out.
+    try:
+        cost = get_tool_credit_cost(tool_name)
+    except Exception as e:
+        log_credit_failure(
+            agent,
+            e,
+            source="api.agent.core.event_processing._ensure_credit_for_tool.cost",
+            logger=logger,
+            context={
+                "operation": "get_tool_credit_cost",
+                "tool_name": tool_name,
+                "owner_label": owner_label,
+                "owner_type": "organization" if owner_is_org else "user",
+                "owner_id": str(getattr(owner, "id", "")) if owner is not None else None,
+                "user_id": str(getattr(owner_user, "id", "")) if owner_user is not None else None,
+                "fallback": "default_task_credit_cost",
+            },
+        )
+        cost = get_default_task_credit_cost()
+
+    if cost is not None:
+        cost = apply_tier_credit_multiplier(agent, cost)
 
     hard_limit = daily_state.get("hard_limit")
     hard_remaining = daily_state.get("hard_limit_remaining")
@@ -5301,7 +5289,7 @@ def _process_agent_events_locked(
             )
 
         if is_eval_credit_exempt_context(agent=agent, eval_run_id=getattr(budget_ctx, "eval_run_id", None)):
-            credit_snapshot = {"available": None, "daily_state": {}, "task_credit_exempt": True}
+            credit_snapshot = {"available": None, "daily_state": {}}
             span.add_event("Eval credit gate bypassed")
             span.set_attribute("credit_check.eval_bypass", True)
         elif settings.GOBII_PROPRIETARY_MODE:
@@ -5311,7 +5299,7 @@ def _process_agent_events_locked(
                 if can_bypass_task_credit_for_signup_preview(agent):
                     span.add_event("Signup preview credit gate bypassed")
                     span.set_attribute("credit_check.signup_preview_bypass", True)
-                    credit_snapshot = {"available": None, "daily_state": {}, "task_credit_exempt": True}
+                    credit_snapshot = {"available": None, "daily_state": {}}
                 else:
                     owner_label = (
                         f"organization {getattr(owner, 'id', 'unknown')}"
@@ -5344,7 +5332,7 @@ def _process_agent_events_locked(
                     credit_snapshot = {
                         "available": available,
                         "daily_state": daily_state,
-                        "task_credit_exempt": False,
+                        "refresh_task_credits": True,
                     }
                     try:
                         span.set_attribute(
@@ -5694,13 +5682,13 @@ def _run_agent_loop(
                 )
                 if (
                     isinstance(credit_snapshot, dict)
-                    and not credit_snapshot.get("task_credit_exempt", False)
+                    and credit_snapshot.get("refresh_task_credits", False)
                     and settings.GOBII_PROPRIETARY_MODE
                     and owner is not None
                 ):
                     try:
                         task_credit_available = TaskCreditService.calculate_available_tasks_for_owner(owner)
-                    except Exception:
+                    except (ArithmeticError, DatabaseError, KeyError, TypeError, ValueError):
                         logger.warning(
                             "Failed to refresh task credits for agent %s during loop; continuing without restriction.",
                             agent.id,

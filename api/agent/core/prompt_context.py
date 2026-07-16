@@ -97,7 +97,7 @@ from ..tools.tool_manager import ensure_default_tools_enabled, ensure_skill_tool
 from ..system_skills.discovery import format_system_skill_discovery_prompt
 from .tool_results import PREVIEW_TIER_COUNT, SPAWN_WEB_TASK_RESULT_TOOL_NAME, ToolCallResultRecord, ToolResultPromptInfo, prepare_tool_results_for_prompt
 from .daily_limit_mode import (
-    DAILY_LIMIT_ALLOWED_TOOL_NAMES_TEXT,
+    CREDIT_MESSAGE_ONLY_ALLOWED_TOOL_NAMES_TEXT,
     is_credit_message_only_mode,
     is_daily_hard_limit_message_only_mode,
     is_task_credit_message_only_mode,
@@ -124,7 +124,6 @@ SQLITE_MESSAGES_SNAPSHOT_MAX_BYTES = 5_000_000
 SQLITE_MESSAGES_SNAPSHOT_MAX_RECORDS = 10_000
 CONTACT_PROMPT_INLINE_LIMIT = 25
 CONTACT_PROMPT_SAMPLE_LIMIT = 10
-MESSAGE_ONLY_TOOL_NAMES_TEXT = DAILY_LIMIT_ALLOWED_TOOL_NAMES_TEXT
 SQLITE_EFFICIENCY_WARNING = (
     "SQLite efficiency warning: you've been reading full __tool_results.result_text blobs one at a time. "
     "Stop fetching by single result_id; run one shaped query across all needed rows using IN/CTEs/"
@@ -2886,20 +2885,37 @@ def add_budget_awareness_sections(
             logger.warning("Failed to compute browser task usage for prompt.", exc_info=True)
 
     task_message_only_mode = is_task_credit_message_only_mode(task_credit_available)
-    if task_message_only_mode and agent is not None:
-        billing_url = _build_console_url("billing")
-        owner_label = "organization workspace" if agent.organization_id else "account"
-        if agent.organization_id:
-            billing_url = append_context_query(billing_url, str(agent.organization_id))
+    daily_message_only_mode = is_daily_hard_limit_message_only_mode(daily_credit_state)
+    if agent is not None and (task_message_only_mode or daily_message_only_mode):
+        restrictions = []
+        recovery_actions = []
+        if daily_message_only_mode:
+            restrictions.append("DAILY HARD LIMIT MODE: You reached today's hard task limit.")
+            links = build_agent_daily_limit_action_links(agent.id, agent.organization_id)
+            recovery_actions.append(
+                f"Ask the user to raise the limit: settings {links['settings_url']} ; "
+                f"double {links['double_limit_url']} ; unlimited {links['unlimited_limit_url']}."
+            )
+        if task_message_only_mode:
+            owner_label = "organization workspace" if agent.organization_id else "account"
+            billing_url = _build_console_url("billing")
+            if agent.organization_id:
+                billing_url = append_context_query(billing_url, str(agent.organization_id))
+            restrictions.append(
+                f"TASK CREDIT MESSAGE-ONLY MODE: This {owner_label} has no task credits remaining."
+            )
+            recovery_actions.append(
+                f"Tell the user that task credits can be restored from the billing page: {billing_url}."
+            )
         sections.append((
-            "task_credit_message_only_mode",
+            "credit_message_only_mode",
             (
-                f"TASK CREDIT MESSAGE-ONLY MODE: This {owner_label} has no task credits remaining. "
+                f"{' '.join(restrictions)} "
                 "Only message and sleep tools are available right now: "
-                f"{MESSAGE_ONLY_TOOL_NAMES_TEXT}. "
+                f"{CREDIT_MESSAGE_ONLY_ALLOWED_TOOL_NAMES_TEXT}. "
                 "Do not attempt any other tools or non-message work. "
-                f"Tell the user that task credits can be restored from the billing page: {billing_url}. "
-                "Once task credits are available again, you can continue the task."
+                f"{' '.join(recovery_actions)} "
+                "Resume non-message work once all active credit restrictions are resolved."
             ),
             9,
             True,
@@ -2913,34 +2929,13 @@ def add_budget_awareness_sections(
             soft_target = daily_credit_state.get("soft_target")
             used = daily_credit_state.get("used", Decimal("0"))
             next_reset = daily_credit_state.get("next_reset")
-            message_only_mode = is_daily_hard_limit_message_only_mode(daily_credit_state)
+            message_only_mode = daily_message_only_mode
             reset_text = f"Next reset at {next_reset.isoformat()}. " if next_reset else ""
             limits_are_equal = (
                 soft_target is not None
                 and hard_limit is not None
                 and soft_target == hard_limit
             )
-
-            if message_only_mode and agent is not None:
-                links = build_agent_daily_limit_action_links(agent.id, agent.organization_id)
-                sections.append((
-                    "daily_limit_message_only_mode",
-                    (
-                        "DAILY HARD LIMIT MODE: You reached today's hard task limit. "
-                        "Only message and sleep tools are available until the user raises the limit: "
-                        f"{MESSAGE_ONLY_TOOL_NAMES_TEXT}. "
-                        "Do not attempt any other tools or non-message work right now. "
-                        f"Ask the user to raise the limit with one of these links: settings {links['settings_url']} ; "
-                        f"double {links['double_limit_url']} ; unlimited {links['unlimited_limit_url']}. "
-                        + (
-                            " Task credits must also be restored before you can continue non-message work."
-                            if task_message_only_mode
-                            else " Once the user raises the limit, you can continue the task."
-                        )
-                    ),
-                    9,
-                    True,
-                ))
 
             if soft_target is not None and not limits_are_equal:
                 if used > soft_target:

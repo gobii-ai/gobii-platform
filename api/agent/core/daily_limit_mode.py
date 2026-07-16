@@ -4,7 +4,7 @@ from typing import Sequence
 from util.constants.task_constants import TASKS_UNLIMITED
 
 
-DAILY_LIMIT_MESSAGE_TOOL_NAMES = frozenset(
+CREDIT_MESSAGE_TOOL_NAMES = frozenset(
     {
         "send_email",
         "send_sms",
@@ -12,19 +12,16 @@ DAILY_LIMIT_MESSAGE_TOOL_NAMES = frozenset(
         "send_agent_message",
     }
 )
-DAILY_LIMIT_SLEEP_TOOL_NAME = "sleep_until_next_trigger"
-DAILY_LIMIT_ALLOWED_TOOL_NAMES = DAILY_LIMIT_MESSAGE_TOOL_NAMES | frozenset(
-    {DAILY_LIMIT_SLEEP_TOOL_NAME}
+CREDIT_MESSAGE_ONLY_ALLOWED_TOOL_NAMES = CREDIT_MESSAGE_TOOL_NAMES | frozenset(
+    {"sleep_until_next_trigger"}
 )
-DAILY_LIMIT_ALLOWED_TOOL_NAMES_TEXT = (
+CREDIT_MESSAGE_ONLY_ALLOWED_TOOL_NAMES_TEXT = (
     "send_email, send_sms, send_chat_message, send_agent_message, and sleep_until_next_trigger"
 )
 
 
-
-
-def is_daily_limit_allowed_tool(tool_name: str | None) -> bool:
-    return bool(tool_name and tool_name in DAILY_LIMIT_ALLOWED_TOOL_NAMES)
+def is_credit_message_only_allowed_tool(tool_name: str | None) -> bool:
+    return bool(tool_name and tool_name in CREDIT_MESSAGE_ONLY_ALLOWED_TOOL_NAMES)
 
 
 def is_daily_hard_limit_message_only_mode(daily_credit_state: dict | None) -> bool:
@@ -85,10 +82,6 @@ def filter_tools_for_credit_message_only_mode(tools: Sequence[dict]) -> list[dic
         function_block = tool.get("function")
         if not isinstance(function_block, dict):
             continue
-        if is_daily_limit_allowed_tool(function_block.get("name")):
+        if is_credit_message_only_allowed_tool(function_block.get("name")):
             filtered.append(tool)
     return filtered
-
-
-def filter_tools_for_daily_limit_message_only_mode(tools: Sequence[dict]) -> list[dict]:
-    return filter_tools_for_credit_message_only_mode(tools)

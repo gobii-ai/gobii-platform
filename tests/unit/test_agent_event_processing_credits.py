@@ -662,6 +662,7 @@ class PersistentAgentToolCreditTests(TestCase):
         result = _ensure_credit_for_tool(self.agent, "send_email", span=span)
 
         self.assertEqual(result, {"cost": None, "credit": None})
+        _mock_cost.assert_not_called()
         mock_consume.assert_not_called()
         span.add_event.assert_any_call("Tool allowed in credit message-only mode")
         span.set_attribute.assert_any_call("credit_check.message_only_mode", True)
@@ -1456,7 +1457,7 @@ class PersistentAgentToolCreditTests(TestCase):
                 credit_snapshot={
                     "available": Decimal("0"),
                     "daily_state": {},
-                    "task_credit_exempt": False,
+                    "refresh_task_credits": True,
                 },
             )
 

@@ -790,9 +790,9 @@ class DailyLimitPromptContextTests(TestCase):
         self.assertIn(settings_url, content)
         self.assertIn(f"double {double_limit_url_prefix}?token=", content)
         self.assertIn(f"unlimited {unlimited_limit_url_prefix}?token=", content)
-        self.assertIn("Only message and sleep tools are available until the user raises the limit", content)
+        self.assertIn("Only message and sleep tools are available right now", content)
         self.assertIn("sleep_until_next_trigger", content)
-        self.assertIn("Once the user raises the limit, you can continue the task.", content)
+        self.assertIn("Resume non-message work once all active credit restrictions are resolved.", content)
 
     @override_settings(PUBLIC_SITE_URL="https://example.com")
     def test_prompt_includes_personal_task_credit_message_only_guidance(self):
@@ -801,7 +801,7 @@ class DailyLimitPromptContextTests(TestCase):
         self.assertIn("TASK CREDIT MESSAGE-ONLY MODE", content)
         self.assertIn("Only message and sleep tools are available right now", content)
         self.assertIn("/app/billing", content)
-        self.assertIn("Once task credits are available again, you can continue the task.", content)
+        self.assertIn("Resume non-message work once all active credit restrictions are resolved.", content)
 
     @override_settings(PUBLIC_SITE_URL="https://example.com")
     def test_prompt_includes_org_billing_context_and_both_recovery_actions(self):
@@ -833,7 +833,9 @@ class DailyLimitPromptContextTests(TestCase):
         self.assertIn("DAILY HARD LIMIT MODE", content)
         self.assertIn("context_type=organization", content)
         self.assertIn(str(org.id), content)
-        self.assertIn("Task credits must also be restored", content)
+        self.assertIn("Ask the user to raise the limit", content)
+        self.assertIn("task credits can be restored from the billing page", content)
+        self.assertEqual(content.count("Only message and sleep tools are available right now"), 1)
 
 
 @tag("batch_event_processing")
