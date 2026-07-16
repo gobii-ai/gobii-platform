@@ -108,12 +108,13 @@ class EmailSenderDbConnectionTests(TransactionTestCase):
         description = tool["function"]["description"]
         properties = tool["function"]["parameters"]["properties"]
 
-        self.assertIn("body-only HTML", description)
-        self.assertIn("Do not use <style> blocks or CSS classes", description)
-        self.assertIn("inline style attrs", description)
-        self.assertIn("tables/cells", description)
-        self.assertIn("Do NOT leave report metrics in plain lists", description)
-        self.assertIn("Do NOT use Markdown pipe tables", description)
+        self.assertIn("Body-only HTML", description)
+        self.assertIn("No <style> blocks/classes", description)
+        self.assertIn("inline CSS only", description)
+        self.assertIn("tasteful icon marker and obvious inline-styled badge", description)
+        self.assertIn("distinct styled sections/tables", description)
+        self.assertIn("Never leave metrics in plain lists", description)
+        self.assertIn("Markdown pipe tables", description)
         self.assertIn("reply_to_message_id", properties)
 
     def test_execute_send_email_retries_on_operational_error(self):

@@ -10,11 +10,42 @@ from util.text_sanitizer import (
     strip_redundant_blockquote_quotes,
     normalize_llm_output,
     sanitize_notification_preview_text,
+    has_humanized_message_style_violation,
+    normalize_humanized_message_style,
 )
 
 
 @tag("batch_text_sanitization")
 class TextSanitizationTests(TestCase):
+    def test_humanized_message_style_rejects_unicode_and_double_dashes(self):
+        self.assertTrue(has_humanized_message_style_violation("That works—let's do it."))
+        self.assertTrue(has_humanized_message_style_violation("That works -- let's do it."))
+        self.assertTrue(has_humanized_message_style_violation("<p>That works&mdash;let's do it.</p>"))
+
+    def test_humanized_message_style_allows_normal_hyphens_and_non_prose(self):
+        self.assertFalse(has_humanized_message_style_violation("A low-pressure, 15-minute chat works."))
+        self.assertFalse(has_humanized_message_style_violation("See https://example.test/a--b and `git --help`."))
+
+    def test_humanized_message_style_normalizes_prose_but_preserves_tables(self):
+        text = "Update — done.\n\n| Item | Status |\n| --- | --- |\n| Copy | Done |"
+
+        self.assertEqual(
+            normalize_humanized_message_style(text),
+            "Update, done.\n\n| Item | Status |\n| --- | --- |\n| Copy | Done |",
+        )
+
+    def test_humanized_message_style_preserves_rich_html_exactly(self):
+        text = (
+            '<table style="--accent: #fff"><tr><td>15</td><td>16</td></tr></table>'
+            '<p>Daily update — everything landed.</p>'
+        )
+
+        self.assertEqual(
+            normalize_humanized_message_style(text),
+            '<table style="--accent: #fff"><tr><td>15</td><td>16</td></tr></table>'
+            '<p>Daily update, everything landed.</p>',
+        )
+
     def test_strip_control_chars_removes_disallowed_characters(self):
         dirty = "Hello\x00World\u0019"
 

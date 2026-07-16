@@ -244,8 +244,7 @@ def get_send_chat_tool() -> Dict[str, Any]:
                     "body": {
                         "type": "string",
                         "description": (
-                            "User-facing chat text. For reports, use Markdown sections, bullets/tables, status labels, tasteful emoji labels; "
-                            "preserve url/link/listing_url/detail_url item fields as clickable row labels or a Link column; source/feed URLs do not substitute for item links. "
+                            "Natural recipient-facing text with personality; never type an em/en dash or double hyphen. General messages use conversational prose, not template labels. Reports use rich Markdown sections, tables/metric blocks, status labels, tasteful emoji labels, visuals, and clickable item links. "
                             "Do not pass placeholders or tool-call/XML syntax; it is sent literally."
                         ),
                     },

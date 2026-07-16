@@ -51,6 +51,7 @@ CHARTER_NARROWS_SCOPE_PRESERVING_UNRELATED_GUIDANCE = "charter_narrows_scope_pre
 CHARTER_IGNORES_ONE_OFF_PREFERENCE = "charter_ignores_one_off_preference"
 CHARTER_ADDS_FEEDBACK_RULE_FROM_CORRECTION = "charter_adds_feedback_rule_from_correction"
 CHARTER_ADDS_PLAIN_PREFERENCE_WITHOUT_SAVE_WORD = "charter_adds_plain_preference_without_save_word"
+CHARTER_PATCHES_DIRECT_STYLE_CORRECTION = "charter_patches_direct_style_correction"
 
 TOOL_CHOICE_EXACT_JSON_URL_USES_HTTP_REQUEST = "tool_choice_exact_json_url_uses_http_request"
 TOOL_CHOICE_CSV_DELIVERABLE_USES_CREATE_CSV = "tool_choice_csv_deliverable_uses_create_csv"
@@ -354,6 +355,7 @@ CHARTER_MEMORY_MICRO_SCENARIO_SLUGS = [
     CHARTER_IGNORES_ONE_OFF_PREFERENCE,
     CHARTER_ADDS_FEEDBACK_RULE_FROM_CORRECTION,
     CHARTER_ADDS_PLAIN_PREFERENCE_WITHOUT_SAVE_WORD,
+    CHARTER_PATCHES_DIRECT_STYLE_CORRECTION,
 ]
 
 TOOL_CHOICE_MICRO_SCENARIO_SLUGS = [
@@ -2073,6 +2075,37 @@ class CharterAddsPlainPreferenceWithoutSaveWordScenario(CharterMemoryScenario):
         added_format_preference = "table" in charter and ("bullet" in charter or "takeaway" in charter)
         passed = bool(mutation_calls and preserved_job and added_format_preference)
         return passed, f"mutation_count={len(mutation_calls)}, charter={agent.charter!r}."
+
+
+@register_scenario
+class CharterPatchesDirectStyleCorrectionScenario(CharterMemoryScenario):
+    slug = CHARTER_PATCHES_DIRECT_STYLE_CORRECTION
+    description = "A direct correction should trigger one partial SQLite charter patch without explicit save wording."
+    tasks = [
+        ScenarioTask(name="inject_prompt", assertion_type="manual"),
+        ScenarioTask(name="verify_partial_style_correction_saved", assertion_type="manual"),
+    ]
+    existing_charter = (
+        "Research qualified prospects and send concise, personalized outreach. "
+        "Keep daily outreach below 20 messages."
+    )
+    prior_outbound_body = "Thanks for the context—I'd be delighted to explore how we can unlock value together."
+    prompt = (
+        "That sounded automated. Stop writing like a template, and don't use em dashes or double hyphens "
+        "in my messages. Rewrite it more naturally."
+    )
+    verification_task_name = "verify_partial_style_correction_saved"
+    success_summary = "Agent used one partial SQLite patch to save the correction while preserving outreach limits."
+    failure_summary = "Expected one patch_text charter mutation preserving the prospecting job and daily limit"
+
+    def _charter_check(self, agent, mutation_calls):
+        charter = (agent.charter or "").lower()
+        sql = "\n".join(json.dumps(call.tool_params or {}) for call in mutation_calls).lower()
+        preserved = "qualified prospect" in charter and "below 20" in charter
+        added_style = ("natural" in charter or "human" in charter) and ("dash" in charter or "template" in charter)
+        used_one_patch = len(mutation_calls) == 1 and "patch_text" in sql
+        passed = preserved and added_style and used_one_patch
+        return passed, f"mutation_count={len(mutation_calls)}, used_patch={used_one_patch}, charter={agent.charter!r}."
 
 
 @register_scenario

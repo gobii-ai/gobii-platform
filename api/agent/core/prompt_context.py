@@ -682,7 +682,7 @@ grep_context_all(
         json_extract(result_json,'$.excerpt'), '<pattern>', 120, 12)
 If still unclear, try wider context (200 chars) before inventing a field or claim.
 ## Data Cleaning Functions
-Use parse_number, parse_date, html_to_text, clean_text, extract_urls, extract_emails, extract_json, grep_context_all, regexp_extract, split_sections, COALESCE, NULLIF, CAST, CASE, GROUP BY/HAVING, window functions, json_each/json_extract. sqlite_batch sql is one semicolon-separated string.
+Use patch_text(text,old,new) for exact replacement (old='' appends once); use parse_number, parse_date, html_to_text, clean_text, extract_urls, extract_emails, extract_json, grep_context_all, regexp_extract, split_sections, COALESCE, NULLIF, CAST, CASE, GROUP BY/HAVING, window functions, json_each/json_extract. sqlite_batch sql is one semicolon-separated string.
 ## Ground Everything in Evidence
 Facts, URLs, names, and numbers must come from tool results, schema, hints, metadata, or query output. Search terms are not evidence. Verify hard filters, dedupe overlapping evidence, stop once verified rows satisfy the request, and say when a source lacks a fact.
 """
@@ -1535,8 +1535,7 @@ def _render_prompt_context_once(
                 "Planning Mode is active; end_planning(full_plan=...) replaces your runtime charter."
                 if planning_mode_active
                 else (
-                    "Charter is durable standing memory. Update for ongoing role/scope, recurrence, or user feedback/preferences unless clearly one-off. "
-                    "Preserve still-relevant guidance; do not update for one-off details, completed work, or weak guesses."
+                    "Charter is durable memory. Merge ongoing role/scope, recurrence, and user corrections; preserve unrelated guidance and omit one-offs, completed work, or guesses."
                 )
             ),
             weight=2,
@@ -1644,8 +1643,9 @@ def _render_prompt_context_once(
         )
     else:
         agent_config_note = (
-            f"Write charter/schedule changes to {AGENT_CONFIG_TABLE} id=1 via sqlite_batch; clear schedule with NULL or ''. "
-            "For setup, update config first; do not fetch targets unless asked to run now."
+            f"Write {AGENT_CONFIG_TABLE} id=1 via sqlite_batch; clear schedule with NULL or ''. "
+            "Before replying to a direct correction, make one partial charter UPDATE with patch_text; do not wait for explicit save wording. "
+            "Setup: update config first; fetch targets only if asked to run now."
         )
     variable_group.section_text(
         "agent_config_note",
@@ -3204,7 +3204,8 @@ def _get_web_chat_formatting_guidance() -> str:
 
     return (
         "Web chat and peer DM formatting:\n"
-        "Markdown. Start with answer/main finding. Reports: brief human lead-in, titled sections, bullets/tables, status labels. "
+        "Start with the answer/main finding. General messages use natural prose with personality, not report labels. "
+        "Reports use a human lead-in, titled sections, bullets/tables, status labels, and tasteful visuals. "
         "Metric, pending-item, or next-run reports: compact operating update with a small table or metric block and done/pending/next. "
         "Address known recipients naturally once around actions; avoid generic delivery logs and agent-name self-intros unless asked. "
         "Use whitespace, not separators. Charts: paste create_chart result.inline; don't attach/read/rebuild."
@@ -3714,10 +3715,10 @@ def _get_system_instruction(
         f"{charter_and_schedule_intro}"
 
         "\n\n"
-        "## Durable Config\n\n"
+        "## Durable Config (CRITICAL)\n\n"
 
-        "Update charter/schedule only for durable role/scope, preferences, feedback, monitoring, recurrence, or memory. "
-        "Merge changes; preserve unrelated guidance/tools, including unavailable saved channels; never save one-offs, transient facts, completed work, or weak guesses.\n\n"
+        "Direct behavior/output corrections are durable unless explicitly one-response. Before replying, patch only the relevant charter clause with one sqlite_batch UPDATE using patch_text; never wait for 'update your charter' or mention the patch. "
+        "Otherwise mutate config only for durable role, scope, preferences, monitoring, recurrence, or memory; never save transient facts, completed work, or guesses.\n\n"
 
         f"{schedule_updates_guidance}"
 
@@ -3732,7 +3733,6 @@ def _get_system_instruction(
         "Do not add charts, files, broad extra research, follow-up questions, plans, or comparisons unless requested or materially necessary. "
         "APIs > extractors > scraping. Follow important leads, not every lead. "
         "Clarifying questions: decide-and-proceed with reasonable defaults. Ask only for irreversible, likely-wrong, or truly blocking choices; no preference surveys or multi-question batteries. "
-        "If the user explicitly asks you to update your ongoing charter/schedule, do that with sensible assumptions instead of asking for ideal criteria first; questions can wait for a later refinement unless the user requested them before setup. "
         "After simple facts, prices, statuses, exact lookups, or one-shot answers, do not add optional follow-up questions like asking whether to monitor, track, chart, compare, or set up alerts. Answer the request and stop. "
         "If the user asks for a representative item from a category, such as 'a vendor', 'a supplement', 'a competitor', or 'a fintech company', pick a reasonable representative or search the category broadly and state the assumption; do not stop to ask which example unless the exact identity is essential. "
         "For lead sourcing and LinkedIn-style lookups, a category-level target is normally enough to proceed: use the structured search/listing tool with the category or a well-known representative, then report that assumption. Do not turn these into company-choice surveys. "
@@ -3747,9 +3747,11 @@ def _get_system_instruction(
         "Action over deliberation.\n\n"
 
         "## Communication Style\n\n"
-        "Be warm, natural, direct, and context-aware without padding. "
-        "Use plain language; clarity and honesty beat forced friendliness. "
-        "Cut filler, hype, cliches, redundant setup, decorative emoji, and AI-giveaway phrases like \"dive into\", \"unleash\", and \"game-changing\". "
+        "Delivered messages should sound like a specific real person in this relationship: warm, direct, contextual, with natural personality, rhythm, and contractions, never a template. "
+        "Never use Unicode dash punctuation, double hyphens, or dash-line substitutes in recipient prose; rewrite with ordinary punctuation. "
+        "Plain clarity and honesty beat forced friendliness or corporate polish. "
+        "Cut filler, hype, cliches, redundant setup, emoji clutter, and AI-giveaway phrases like \"dive into\", \"unleash\", and \"game-changing\". "
+        "Avoid canned acknowledgements, fake enthusiasm, generic compliments, symmetrical rhetoric, and needless restatement. "
         "Hedge only when unsure. When drafting/editing copy, preserve the user's meaning, voice, key terms, and commitments. "
         "For casual greetings, respond socially; if recent context matters, acknowledge it briefly and bridge to the next useful step. "
         "Do not invent work, results, preferences, or personal experiences. This applies only to delivered messages, not progress narration before tool calls.\n\n"
@@ -3814,13 +3816,11 @@ def _get_system_instruction(
         "For explicit deep/exhaustive research, do not finalize from search results alone: after discovery, scrape/open at least 4 promising result URLs (or all useful URLs if fewer), then synthesize. Search snippets are leads, not citable sources. Start with one broad search, two only if the first misses a requested angle; scrape strongest pages instead of separate searches per company/competitor. Do not send progress messages or chase extra names once scraped sources cover requested angles. If scrapes support the memo, final next with literal URLs; keep chat deep memos under about 5,000 chars unless asked otherwise.\n\n"
 
         "## Configuration Discipline (CRITICAL)\n\n"
-        "__agent_config is durable operating memory, not normal task output. "
-        "Mutate only for durable behavior/context, alerts/preferences, or recurrence. "
-        "Never update charter/schedule for one-off work, transient facts, completed answers, weak guesses, or describing what you just did. Finished answers/briefings/charts/lookups/one-off research are not charter changes. "
-        "Do not set a schedule merely to continue or remember a single research question; only schedule work when the user asked for recurring monitoring, alerts, digests, follow-up, or durable role changes. "
-        "For scheduled runs, keep cadence unless explicitly changed. For future recurring digests/reports/monitors/alerts, update charter/schedule once and stop; do not run the first job unless asked. "
+        "Finished answers/briefings/charts/lookups/one-off research are not charter changes; never store transient facts, results, or guesses in __agent_config. "
+        "Do not set a schedule merely to continue or remember a single research question; schedule only user-requested recurrence. "
+        "Keep cadence unless changed. Set future recurring work once and stop; do not run it unless asked. "
         "If a future job will email/text and the user says not to send now, do not request contact permission during setup; record recipient/permission needs in charter and request permission only when a send is due. "
-        "Respect one-off preferences like 'stand by' or 'don't follow up unless I ask' in the current conversation without mutating config. When in doubt, leave config unchanged, deliver the result, and stop.\n\n"
+        "Keep explicitly one-off preferences like 'stand by' in the current conversation; otherwise treat corrections as durable.\n\n"
 
         "## Plan Discipline (CRITICAL)\n\n"
         "Use `update_plan` only for substantial multi-step work where a visible plan helps. "

@@ -46,6 +46,40 @@ class SqliteGuardrailsMaintenanceTests(SimpleTestCase):
         self.assertIn("A" * 80, snippets[0])
         self.assertIn("B" * 80, snippets[0])
 
+    def test_patch_text_replaces_or_appends_without_rewriting_other_text(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            conn = open_guarded_sqlite_connection(os.path.join(tmp_dir, "state.db"))
+            try:
+                replaced = conn.execute(
+                    "SELECT patch_text(?, ?, ?)",
+                    ("Research leads. Send weekly.", "Send weekly.", "Send daily."),
+                ).fetchone()[0]
+                appended = conn.execute(
+                    "SELECT patch_text(?, '', ?)",
+                    (replaced, "Keep outreach natural."),
+                ).fetchone()[0]
+                duplicate = conn.execute(
+                    "SELECT patch_text(?, '', ?)",
+                    (appended, "Keep outreach natural."),
+                ).fetchone()[0]
+            finally:
+                clear_guarded_connection(conn)
+                conn.close()
+
+        self.assertEqual(replaced, "Research leads. Send daily.")
+        self.assertEqual(appended, "Research leads. Send daily.\nKeep outreach natural.")
+        self.assertEqual(duplicate, appended)
+
+    def test_patch_text_fails_when_replacement_target_is_missing(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            conn = open_guarded_sqlite_connection(os.path.join(tmp_dir, "state.db"))
+            try:
+                with self.assertRaises(sqlite3.OperationalError):
+                    conn.execute("SELECT patch_text('Keep A.', 'Missing B.', 'Use C.')").fetchone()
+            finally:
+                clear_guarded_connection(conn)
+                conn.close()
+
     def test_statistical_aggregates_match_sample_and_population_semantics(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             db_path = os.path.join(tmp_dir, "state.db")

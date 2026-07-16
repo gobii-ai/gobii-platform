@@ -67,6 +67,73 @@ class ImpliedSendTests(TestCase):
             browser_use_agent=browser_agent,
         )
 
+    def test_humanized_message_normalization_covers_built_in_delivery_channels(self):
+        for tool_name, params in (
+            ("send_chat_message", {"body": "Quick update—this is done."}),
+            ("send_sms", {"body": "Quick update -- this is done."}),
+            ("send_email", {"subject": "Update—done", "mobile_first_html": "<p>Done.</p>"}),
+            ("send_discord_message", {"message": "Quick update—this is done."}),
+        ):
+            with self.subTest(tool_name=tool_name):
+                result = ep._normalize_humanized_message_params(tool_name, params)
+                self.assertNotIn("—", str(result))
+                self.assertNotIn("--", str(result))
+
+        self.assertEqual(
+            ep._normalize_humanized_message_params(
+                "send_email",
+                {
+                    "subject": "Quick update",
+                    "mobile_first_html": "<p>A natural, low-pressure note.</p>",
+                },
+            ),
+            {
+                "subject": "Quick update",
+                "mobile_first_html": "<p>A natural, low-pressure note.</p>",
+            },
+        )
+
+    def test_direct_corrections_require_durable_patch_except_when_one_off(self):
+        self.assertTrue(ep._user_text_is_direct_correction("That sounded automated. Stop writing like a template."))
+        self.assertTrue(ep._user_text_is_direct_correction("You sound robotic."))
+        self.assertTrue(ep._user_text_is_direct_correction("Lowercase is too informal."))
+        self.assertTrue(ep._user_text_is_direct_correction("No more em dashes."))
+        self.assertTrue(ep._user_text_is_direct_correction("Don't use em dashes."))
+        self.assertFalse(ep._user_text_is_direct_correction("For this response, don't use headings."))
+        self.assertFalse(ep._user_text_is_direct_correction("Don't browse. Just answer the question."))
+        self.assertFalse(
+            ep._user_text_is_direct_correction(
+                "Constraint: do not imply a prior relationship or make unsupported claims. Send the email now."
+            )
+        )
+
+    def test_correction_patch_must_use_patch_text_before_reply(self):
+        def call(name, params):
+            return {
+                "id": name,
+                "type": "function",
+                "function": {"name": name, "arguments": json.dumps(params)},
+            }
+
+        patch_call = call(
+            "sqlite_batch",
+            {
+                "sql": (
+                    "UPDATE __agent_config SET charter = "
+                    "patch_text(charter, '', 'Keep messages natural.') WHERE id = 1"
+                )
+            },
+        )
+        reply_call = call("send_chat_message", {"body": "Got it.", "will_continue_work": False})
+        concatenation_call = call(
+            "sqlite_batch",
+            {"sql": "UPDATE __agent_config SET charter = charter || 'Keep messages natural.' WHERE id = 1"},
+        )
+
+        self.assertTrue(ep._tool_calls_patch_correction_before_reply([patch_call, reply_call]))
+        self.assertFalse(ep._tool_calls_patch_correction_before_reply([reply_call, patch_call]))
+        self.assertFalse(ep._tool_calls_patch_correction_before_reply([concatenation_call]))
+
     def _add_inbound_web_message(self, body):
         user_endpoint = PersistentAgentCommsEndpoint.objects.create(
             owner_agent=None,

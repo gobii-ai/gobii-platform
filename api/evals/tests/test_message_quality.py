@@ -8,6 +8,7 @@ from api.evals.scenarios.message_quality import (
     MESSAGE_QUALITY_SUITE_SLUG,
     REPORT_MESSAGE_QUALITY_CASES,
     SIMPLE_EMAIL_QUALITY_CASES,
+    HUMAN_MESSAGE_QUALITY_CASES,
     MessageQualityScenario,
 )
 from api.evals.suites import SuiteRegistry
@@ -20,7 +21,7 @@ class MessageQualityScenarioTests(SimpleTestCase):
 
         self.assertIsNotNone(suite)
         self.assertEqual(tuple(suite.scenario_slugs), MESSAGE_QUALITY_SCENARIO_SLUGS)
-        self.assertEqual(len(suite.scenario_slugs), 12)
+        self.assertEqual(len(suite.scenario_slugs), 13)
 
     def test_generated_cases_cover_email_and_chat_for_each_real_world_domain(self):
         channels_by_brief = {}
@@ -69,6 +70,18 @@ class MessageQualityScenarioTests(SimpleTestCase):
         self.assertIn("Fail if it looks like a report", question)
         self.assertIn("tables", question)
         self.assertIn("emoji section labels", question)
+        self.assertIn("naturally written", question)
+
+    def test_human_message_eval_relies_on_base_behavior(self):
+        case = HUMAN_MESSAGE_QUALITY_CASES[0]
+        prompt = MessageQualityScenario()._prompt(case).lower()
+        question = MessageQualityScenario._judge_question(case)
+
+        self.assertNotIn("human", prompt)
+        self.assertNotIn("natural", prompt)
+        self.assertNotIn("dash", prompt)
+        self.assertIn("natural message", question)
+        self.assertIn("assistant cadence", question)
 
     def test_rich_email_judge_rewards_status_encoding_without_mandating_emoji(self):
         case = next(case for case in REPORT_MESSAGE_QUALITY_CASES if case.channel == "email")
@@ -139,6 +152,18 @@ class MessageQualityScenarioTests(SimpleTestCase):
         )
 
         self.assertEqual(failures, ["Message body was empty."])
+
+    def test_delivery_basics_reject_ai_dash_tells(self):
+        case = HUMAN_MESSAGE_QUALITY_CASES[0]
+        body = "The copy finished—Morgan is checking two invoices now."
+
+        failures = MessageQualityScenario()._formatting_failures(
+            case,
+            {"body": body, "will_continue_work": False},
+            body,
+        )
+
+        self.assertIn("Recipient-facing prose used prohibited dash punctuation", failures[0])
 
     def test_delivery_basics_accept_terminal_tool_result_when_continue_flag_omitted(self):
         case = next(case for case in MESSAGE_QUALITY_CASES if case.channel == "chat")

@@ -14,6 +14,8 @@ __all__ = [
     "strip_redundant_blockquote_quotes",
     "normalize_llm_output",
     "sanitize_notification_preview_text",
+    "has_humanized_message_style_violation",
+    "normalize_humanized_message_style",
 ]
 
 
@@ -30,11 +32,45 @@ _CONTROL_CHAR_SUBSTITUTIONS = {
 }
 _CONTROL_HEX_SEQUENCE_RE = re.compile(r"([\u0000-\u0001])([0-9a-fA-F]{2})")
 _TRANSLATION_TABLE = str.maketrans(_CONTROL_CHAR_SUBSTITUTIONS)
+_NON_PROSE_RE = re.compile(
+    r"<(?:code|pre)\b[^>]*>.*?</(?:code|pre)>|```.*?```|`[^`\n]+`|(?:https?://|www\.)[^\s<>]+|<[^>]+>|^[ \t]*\|?[ \t]*:?-{3,}:?[ \t]*(?:\|[ \t]*:?-{3,}:?[ \t]*)+\|?[ \t]*$",
+    re.IGNORECASE | re.DOTALL | re.MULTILINE,
+)
+_FORBIDDEN_DASH_RE = re.compile(
+    r"[ \t]*(?:[\u2012\u2013\u2014\u2015\u2e3a\u2e3b]+|--+|&(?:mdash|ndash|#8211|#8212|#x2013|#x2014);)[ \t]*",
+    re.IGNORECASE,
+)
+
+
+def normalize_humanized_message_style(value: str | None) -> str:
+    text = value or ""
+
+    def normalize_prose(prose: str) -> str:
+        def punctuate(match):
+            before = prose[:match.start()].rstrip()
+            after = prose[match.end():].lstrip()
+            return ", " if before and after and not before.endswith("\n") and not after.startswith("\n") else ""
+
+        return _FORBIDDEN_DASH_RE.sub(punctuate, prose)
+
+    parts = []
+    cursor = 0
+    for match in _NON_PROSE_RE.finditer(text):
+        parts.extend((normalize_prose(text[cursor:match.start()]), match.group(0)))
+        cursor = match.end()
+    parts.append(normalize_prose(text[cursor:]))
+    return "".join(parts)
+
+
+def has_humanized_message_style_violation(value: str | None) -> bool:
+    return normalize_humanized_message_style(value) != (value or "")
+
 
 def _decode_control_hex(match: re.Match[str]) -> str:
     high = ord(match.group(1))
     low = int(match.group(2), 16)
     return chr((high << 8) | low)
+
 
 def strip_control_chars(value: str | None) -> str:
     """Remove disallowed control characters from outbound message bodies."""

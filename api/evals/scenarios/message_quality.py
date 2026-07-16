@@ -22,6 +22,7 @@ from api.models import (
     PersistentAgentMessage,
     PersistentAgentToolCall,
 )
+from util.text_sanitizer import has_humanized_message_style_violation
 
 
 MESSAGE_QUALITY_SUITE_SLUG = "message_quality_reports"
@@ -182,7 +183,26 @@ SIMPLE_EMAIL_QUALITY_CASES = (
     ),
 )
 
-MESSAGE_QUALITY_CASES = REPORT_MESSAGE_QUALITY_CASES + SIMPLE_EMAIL_QUALITY_CASES
+HUMAN_MESSAGE_QUALITY_CASES = (
+    MessageQualityCase(
+        slug="message_quality_chat_project_update",
+        channel="chat",
+        recipient="web-user",
+        subject="Project update",
+        brief="quick project update",
+        source_facts=(
+            "The user asked whether the billing migration is still on track.\n"
+            "Current status: the data copy finished this morning.\n"
+            "Remaining work: verify 12 edge-case invoices and switch traffic tomorrow at 10 AM ET.\n"
+            "Risk: two invoices have unexpected tax rounding; Morgan is checking them now.\n"
+            "No action is needed from the user."
+        ),
+        source_example_ids=(),
+        quality_target="human_message",
+    ),
+)
+
+MESSAGE_QUALITY_CASES = REPORT_MESSAGE_QUALITY_CASES + SIMPLE_EMAIL_QUALITY_CASES + HUMAN_MESSAGE_QUALITY_CASES
 MESSAGE_QUALITY_SCENARIO_SLUGS = tuple(case.slug for case in MESSAGE_QUALITY_CASES)
 
 
@@ -218,7 +238,7 @@ class MessageQualityScenario(EvalScenario, ScenarioExecutionTools):
                 eval_run_id=run_id,
                 mock_config=mock_config,
                 eval_stop_policy={
-                    "stop_on_tool_names_after_finish": [case.expected_tool],
+                    "stop_on_tool_names_after_execution": [case.expected_tool],
                     "stop_on_unexpected_relevant_tool": True,
                     "allowed_tool_names": self._allowed_tool_names(case),
                     "ignored_tool_names": ["update_plan"],
@@ -288,6 +308,11 @@ class MessageQualityScenario(EvalScenario, ScenarioExecutionTools):
                 f"{case.source_facts}\n\n"
                 "Send the email now."
             )
+        if case.quality_target == "human_message":
+            return (
+                "Send me a quick chat update using only the details below. Do not browse, create files, "
+                f"or ask follow-up questions.\n\n{case.source_facts}\n\nSend the update now."
+            )
 
         if case.channel == "email":
             delivery_instruction = (
@@ -326,10 +351,15 @@ class MessageQualityScenario(EvalScenario, ScenarioExecutionTools):
             if call.tool_name in MESSAGE_TOOL_NAMES
         ]
         expected_calls = [call for call in send_calls if call.tool_name == case.expected_tool]
+        successful_calls = [
+            call
+            for call in expected_calls
+            if str(self._tool_result(call).get("status") or "").lower() in {"ok", "queued", "sent", "success"}
+        ]
         unexpected_calls = self._unexpected_message_calls(case, send_calls)
 
-        if len(expected_calls) == 1 and not unexpected_calls:
-            sent_message = self._sent_message_for_call(expected_calls[0])
+        if len(successful_calls) == 1 and not unexpected_calls:
+            sent_message = self._sent_message_for_call(successful_calls[0])
             confirmation_count = len(self._allowed_confirmation_calls(case, send_calls))
             confirmation_note = (
                 f" with {confirmation_count} web chat confirmation call(s)"
@@ -341,14 +371,17 @@ class MessageQualityScenario(EvalScenario, ScenarioExecutionTools):
                 None,
                 EvalRunTask.Status.PASSED,
                 task_name="verify_expected_send_tool",
-                observed_summary=f"Agent called {case.expected_tool} exactly once{confirmation_note}.",
-                artifacts=self._task_artifacts(expected_calls[0], sent_message),
+                observed_summary=(
+                    f"Agent delivered once via {case.expected_tool} after {len(expected_calls)} attempt(s)"
+                    f"{confirmation_note}."
+                ),
+                artifacts=self._task_artifacts(successful_calls[0], sent_message),
             )
-            return expected_calls[0]
+            return successful_calls[0]
 
         summary = (
-            f"Expected one {case.expected_tool} call; saw "
-            f"{len(expected_calls)} expected and {len(unexpected_calls)} unexpected message send calls."
+            f"Expected one successful {case.expected_tool} delivery; saw {len(successful_calls)} successful, "
+            f"{len(expected_calls)} total attempts, and {len(unexpected_calls)} unexpected message calls."
         )
         self.record_task_result(
             run_id,
@@ -485,12 +518,16 @@ class MessageQualityScenario(EvalScenario, ScenarioExecutionTools):
     def _expected_delivery_summary(case: MessageQualityCase) -> str:
         if case.quality_target == "simple_email":
             return f"Agent should send a concise outreach email via {case.expected_tool}."
+        if case.quality_target == "human_message":
+            return f"Agent should send a natural, context-specific update via {case.expected_tool}."
         return f"Agent should send a polished {case.channel} report via {case.expected_tool}."
 
     @staticmethod
     def _expected_judge_summary(case: MessageQualityCase) -> str:
         if case.quality_target == "simple_email":
             return "Judge should pass only restrained, professional outreach email formatting."
+        if case.quality_target == "human_message":
+            return "Judge should pass only a natural, specific message without assistant-like tells."
         return "Judge should pass only polished, rich, readable report formatting."
 
     @staticmethod
@@ -502,10 +539,17 @@ class MessageQualityScenario(EvalScenario, ScenarioExecutionTools):
         if case.quality_target == "simple_email":
             return (
                 "Does this email fit a simple professional cold outreach use case? Pass only if it is "
-                "body-only HTML that stays restrained: a greeting, one to three short paragraphs, a clear "
+                "body-only HTML that sounds naturally written for this recipient and stays restrained: a greeting, one to three short paragraphs, a clear "
                 "reason and ask, and an optional simple signoff. Fail if it looks like a report, newsletter, "
                 "or marketing landing page; uses tables, metric blocks, status badges, emoji section labels, "
-                "heavy colors, multiple headings, or excessive visual styling."
+                "heavy colors, multiple headings, excessive visual styling, generic praise, canned assistant language, or a templated cadence."
+            )
+        if case.quality_target == "human_message":
+            return (
+                "Would this read as a natural message from a thoughtful person who knows this context? Pass only if it is "
+                "specific, conversational, appropriately candid, and allowed to show natural personality or charm. Fail for canned acknowledgements, generic "
+                "enthusiasm, request restatement, polished assistant cadence, symmetrical rhetoric, report formatting, "
+                "template labels, or needless headings. Do not penalize expressive formatting in an explicitly requested report or dashboard."
             )
         if case.channel == "email":
             return (
@@ -675,6 +719,10 @@ class MessageQualityScenario(EvalScenario, ScenarioExecutionTools):
         failures = []
         if not body.strip():
             failures.append("Message body was empty.")
+        if has_humanized_message_style_violation(body) or (
+            case.channel == "email" and has_humanized_message_style_violation(str(params.get("subject") or ""))
+        ):
+            failures.append("Recipient-facing prose used prohibited dash punctuation or a double-hyphen workaround.")
         result = self._tool_result(send_call) if send_call is not None else {}
         if params.get("will_continue_work") is not False and result.get("auto_sleep_ok") is not True:
             failures.append("will_continue_work should be false for final report delivery.")
