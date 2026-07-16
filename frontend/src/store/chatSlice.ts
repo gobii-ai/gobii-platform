@@ -216,46 +216,46 @@ function getSession(state: ChatState, agentId: string | null | undefined): Agent
 }
 
 function applyIdentityUpdate(session: AgentChatSession, update: AgentIdentityUpdateInput | null | undefined) {
-  if (Object.prototype.hasOwnProperty.call(update ?? {}, 'agentName')) {
+  if (update?.agentName !== undefined) {
     session.identity.agentName = update?.agentName ?? null
   }
-  if (Object.prototype.hasOwnProperty.call(update ?? {}, 'agentAvatarUrl')) {
+  if (update?.agentAvatarUrl !== undefined) {
     session.identity.agentAvatarUrl = update?.agentAvatarUrl ?? null
   }
-  if (Object.prototype.hasOwnProperty.call(update ?? {}, 'agentMiniDescription')) {
+  if (update?.agentMiniDescription !== undefined) {
     session.identity.agentMiniDescription = update?.agentMiniDescription ?? null
   }
-  if (Object.prototype.hasOwnProperty.call(update ?? {}, 'agentEmail')) {
+  if (update?.agentEmail !== undefined) {
     session.identity.agentEmail = update?.agentEmail ?? null
   }
-  if (Object.prototype.hasOwnProperty.call(update ?? {}, 'agentSms')) {
+  if (update?.agentSms !== undefined) {
     session.identity.agentSms = update?.agentSms ?? null
   }
-  if (Object.prototype.hasOwnProperty.call(update ?? {}, 'agentNextScheduledAt')) {
+  if (update?.agentNextScheduledAt !== undefined) {
     session.identity.agentNextScheduledAt = update?.agentNextScheduledAt ?? null
   }
-  if (Object.prototype.hasOwnProperty.call(update ?? {}, 'agentIsOrgOwned')) {
+  if (update?.agentIsOrgOwned !== undefined) {
     session.identity.agentIsOrgOwned = Boolean(update?.agentIsOrgOwned)
   }
-  if (Object.prototype.hasOwnProperty.call(update ?? {}, 'canManageAgent')) {
+  if (update?.canManageAgent !== undefined) {
     session.identity.canManageAgent = update?.canManageAgent ?? true
   }
-  if (Object.prototype.hasOwnProperty.call(update ?? {}, 'canSendMessages')) {
+  if (update?.canSendMessages !== undefined) {
     session.identity.canSendMessages = update?.canSendMessages ?? true
   }
-  if (Object.prototype.hasOwnProperty.call(update ?? {}, 'isCollaborator')) {
+  if (update?.isCollaborator !== undefined) {
     session.identity.isCollaborator = Boolean(update?.isCollaborator)
   }
-  if (Object.prototype.hasOwnProperty.call(update ?? {}, 'hideInsightsPanel')) {
+  if (update?.hideInsightsPanel !== undefined) {
     session.identity.hideInsightsPanel = Boolean(update?.hideInsightsPanel)
   }
-  if (Object.prototype.hasOwnProperty.call(update ?? {}, 'enabledIntegrationTabs')) {
+  if (update?.enabledIntegrationTabs !== undefined) {
     session.identity.enabledIntegrationTabs = normalizeEnabledIntegrationTabs(update?.enabledIntegrationTabs)
   }
-  if (Object.prototype.hasOwnProperty.call(update ?? {}, 'signupPreviewState')) {
+  if (update?.signupPreviewState !== undefined) {
     session.identity.signupPreviewState = update?.signupPreviewState ?? 'none'
   }
-  if (Object.prototype.hasOwnProperty.call(update ?? {}, 'planningState')) {
+  if (update?.planningState !== undefined) {
     session.identity.planningState = update?.planningState ?? 'skipped'
   }
 }
@@ -777,19 +777,29 @@ const chatSlice = createSlice({
       }>,
     ) => {
       const { agentId, options } = action.payload
+      const selectionChanged = state.activeAgentId !== agentId
       state.activeAgentId = agentId
       if (!agentId) {
         return
       }
       const session = ensureSession(state, agentId)
-      session.timelineUi.hasUnseenActivity = false
-      session.timelineUi.pendingEvents = []
-      session.timelineUi.realtimeEventCursorIds = {}
-      session.timelineUi.autoScrollPinned = true
-      session.timelineUi.autoScrollPinSuppressedUntil = null
-      if (Object.prototype.hasOwnProperty.call(options ?? {}, 'processingActive')) {
-        session.processing.processingActive = Boolean(options?.processingActive)
-        session.processing.processingStartedAt = options?.processingActive ? Date.now() : null
+      if (selectionChanged) {
+        session.timelineUi.hasUnseenActivity = false
+        session.timelineUi.pendingEvents = []
+        session.timelineUi.realtimeEventCursorIds = {}
+        session.timelineUi.autoScrollPinned = true
+        session.timelineUi.autoScrollPinSuppressedUntil = null
+      }
+      if (options?.processingActive !== undefined) {
+        const processingActive = Boolean(options.processingActive)
+        if (processingActive && !session.processing.processingActive) {
+          session.processing.processingStartedAt = session.processing.processingStartedAt ?? Date.now()
+        } else if (!processingActive) {
+          session.processing.processingStartedAt = session.processing.awaitingResponse
+            ? session.processing.processingStartedAt
+            : null
+        }
+        session.processing.processingActive = processingActive
       }
       applyIdentityUpdate(session, options)
     },
