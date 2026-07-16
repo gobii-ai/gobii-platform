@@ -246,14 +246,13 @@ class AgentTransferServiceTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
-        transfer_invites = payload.get("transfer_invites", [])
-        self.assertEqual(len(transfer_invites), 1)
-        invite_payload = transfer_invites[0]
+        agent_invites = payload.get("agent_invites", [])
+        self.assertEqual(len(agent_invites), 1)
+        invite_payload = agent_invites[0]
         self.assertEqual(invite_payload["id"], str(invite.id))
-        self.assertEqual(invite_payload["agent_id"], str(self.agent.id))
+        self.assertEqual(invite_payload["kind"], "transfer")
         self.assertEqual(invite_payload["agent_name"], self.agent.name)
-        self.assertEqual(invite_payload["initiated_by_email"], self.owner.email)
-        self.assertEqual(invite_payload["recipient_email"], self.recipient.email)
+        self.assertEqual(invite_payload["sender_email"], self.owner.email)
         self.assertEqual(
             invite_payload["accept_url"],
             reverse("console-agent-transfer-invite-accept-api", args=[invite.id]),
@@ -277,7 +276,7 @@ class AgentTransferServiceTests(TestCase):
         response = self.client.get(reverse("console_agent_roster"))
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json().get("transfer_invites"), [])
+        self.assertEqual(response.json().get("agent_invites"), [])
         handled.refresh_from_db()
         self.assertEqual(handled.status, AgentTransferInvite.Status.DECLINED)
 
@@ -294,8 +293,7 @@ class AgentTransferServiceTests(TestCase):
         payload = response.json()
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["action"], "accept")
-        self.assertEqual(payload["agent"]["id"], str(self.agent.id))
-        self.assertIn(f"/app/agents/{self.agent.id}", payload["agent"]["chatUrl"])
+        self.assertIn(f"/app/agents/{self.agent.id}", payload["redirectUrl"])
         self.agent.refresh_from_db()
         self.assertEqual(self.agent.user, self.recipient)
         invite.refresh_from_db()
@@ -311,7 +309,7 @@ class AgentTransferServiceTests(TestCase):
 
         roster_response = self.client.get(reverse("console_agent_roster"))
         self.assertEqual(roster_response.status_code, 200)
-        self.assertEqual(roster_response.json().get("transfer_invites"), [])
+        self.assertEqual(roster_response.json().get("agent_invites"), [])
         self.process_events_mock.delay.assert_called_once_with(str(self.agent.id))
         self.process_events_mock.delay.reset_mock()
 
@@ -328,7 +326,7 @@ class AgentTransferServiceTests(TestCase):
         payload = response.json()
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["action"], "decline")
-        self.assertIsNone(payload["agent"])
+        self.assertEqual(payload["redirectUrl"], "/app/agents")
         self.agent.refresh_from_db()
         self.assertEqual(self.agent.user, self.owner)
         invite.refresh_from_db()
@@ -342,7 +340,7 @@ class AgentTransferServiceTests(TestCase):
 
         roster_response = self.client.get(reverse("console_agent_roster"))
         self.assertEqual(roster_response.status_code, 200)
-        self.assertEqual(roster_response.json().get("transfer_invites"), [])
+        self.assertEqual(roster_response.json().get("agent_invites"), [])
         self.process_events_mock.delay.assert_not_called()
 
     def tearDown(self) -> None:

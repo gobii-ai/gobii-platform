@@ -90,6 +90,7 @@ from api.models import (
     AgentEmailAccount,
     AgentEmailOAuthCredential,
     AgentEmailOAuthSession,
+    AgentCollaboratorInvite,
     AgentTransferInvite,
     PersistentAgent,
     PersistentAgentCommsEndpoint,
@@ -2960,46 +2961,60 @@ def _build_agent_critical_status_payload(request: HttpRequest, agent: Persistent
     }
 
 
-def _serialize_roster_transfer_invite(invite: AgentTransferInvite) -> dict[str, Any]:
+def _serialize_roster_agent_invite(
+    invite: AgentTransferInvite | AgentCollaboratorInvite,
+) -> dict[str, Any]:
     agent = invite.agent
-    initiator = invite.initiated_by
-    created_at = invite.created_at
-
-    initiator_email = getattr(initiator, "email", "") or ""
-    initiator_name = ""
-    if initiator:
-        initiator_name = initiator.get_full_name() or initiator_email or getattr(initiator, "username", "")
+    is_transfer = isinstance(invite, AgentTransferInvite)
+    sender = invite.initiated_by if is_transfer else invite.invited_by
+    sender_email = sender.email or ""
+    sender_name = sender.get_full_name() or sender_email or sender.username
+    route_prefix = "console-agent-transfer-invite" if is_transfer else "console-agent-collaborator-invite"
+    route_arg = invite.id if is_transfer else invite.token
 
     return {
         "id": str(invite.id),
-        "agent_id": str(agent.id),
+        "kind": "transfer" if is_transfer else "collaboration",
         "agent_name": agent.name or "Agent",
         "agent_avatar_url": agent.get_avatar_thumbnail_url(),
-        "initiated_by_name": initiator_name or "Gobii user",
-        "initiated_by_email": initiator_email,
-        "recipient_email": invite.to_email or "",
-        "message": invite.message or "",
-        "created_at": created_at.isoformat() if created_at else None,
-        "accept_url": reverse("console-agent-transfer-invite-accept-api", args=[invite.id]),
-        "decline_url": reverse("console-agent-transfer-invite-decline-api", args=[invite.id]),
+        "sender_name": sender_name or "Gobii user",
+        "sender_email": sender_email,
+        "message": (invite.message or "") if is_transfer else "",
+        "accept_url": reverse(f"{route_prefix}-accept-api", args=[route_arg]),
+        "decline_url": reverse(f"{route_prefix}-decline-api", args=[route_arg]),
     }
 
 
-def _pending_roster_transfer_invites_for_user(request: HttpRequest) -> list[dict[str, Any]]:
-    user_email = (request.user.email or "").strip()
-    if not user_email:
-        return []
+def _pending_roster_agent_invites_for_user(request: HttpRequest) -> list[dict[str, Any]]:
+    from allauth.account.models import EmailAddress
 
-    invites = (
+    primary_email = (request.user.email or "").strip().lower()
+    transfer_invites = (
         AgentTransferInvite.objects
         .select_related("agent", "initiated_by")
         .filter(
-            to_email__iexact=user_email,
+            to_email__iexact=primary_email,
             status=AgentTransferInvite.Status.PENDING,
         )
-        .order_by("-created_at", "-id")
+        if primary_email else AgentTransferInvite.objects.none()
     )
-    return [_serialize_roster_transfer_invite(invite) for invite in invites]
+    recipient_emails = {
+        email.lower()
+        for email in EmailAddress.objects.filter(user=request.user, verified=True)
+        .values_list("email", flat=True)
+    }
+    collaboration_invites = (
+        AgentCollaboratorInvite.objects
+        .select_related("agent", "invited_by")
+        .filter(
+            email__in=recipient_emails,
+            status=AgentCollaboratorInvite.InviteStatus.PENDING,
+            expires_at__gt=timezone.now(),
+        )
+    )
+    invites = [*transfer_invites, *collaboration_invites]
+    invites.sort(key=lambda invite: (invite.created_at, str(invite.id)), reverse=True)
+    return [_serialize_roster_agent_invite(invite) for invite in invites]
 
 
 @method_decorator(csrf_exempt, name="dispatch")
@@ -3251,7 +3266,7 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
                 "billingStatus": billing_status,
                 "accountPause": account_pause,
                 "agents": payload,
-                "transfer_invites": _pending_roster_transfer_invites_for_user(request),
+                "agent_invites": _pending_roster_agent_invites_for_user(request),
                 "llmIntelligence": llm_intelligence,
             }
         )

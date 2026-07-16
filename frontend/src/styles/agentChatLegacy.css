@@ -6269,29 +6269,38 @@
     color: #6366f1;
     flex-shrink: 0;
 }
-.agent-transfer-invite {
-    --transfer-invite-bg: rgba(125, 211, 252, 0.08);
-    --transfer-invite-border: rgba(125, 211, 252, 0.2);
-    --roster-hover-bg: var(--transfer-invite-bg);
-    border: 1px solid var(--transfer-invite-border);
-    background: var(--transfer-invite-bg);
+.agent-invite {
+    --agent-invite-bg: rgba(125, 211, 252, 0.08);
+    --agent-invite-border: rgba(125, 211, 252, 0.2);
+    --roster-hover-bg: var(--agent-invite-bg);
+    border: 1px solid var(--agent-invite-border);
+    background: var(--agent-invite-bg);
     cursor: default;
 }
-.agent-transfer-invite[data-variant='drawer'] {
-    --transfer-invite-bg: #ffffff;
-    --transfer-invite-border: rgba(99, 102, 241, 0.18);
+.agent-invite[data-variant='drawer'] {
+    --agent-invite-bg: #ffffff;
+    --agent-invite-border: rgba(99, 102, 241, 0.18);
 }
-.agent-transfer-invite[data-variant='sidebar']:hover .agent-roster-item__avatar {
+.agent-invite[data-variant='sidebar']:hover .agent-roster-item__avatar {
     transform: none;
 }
-.agent-transfer-invite__actions {
+.agent-invite[data-variant='sidebar'] .agent-roster-item__leading {
+    margin-right: 0.5rem;
+}
+.agent-invite__actions {
     align-items: center;
     gap: 0.35rem;
 }
-.agent-transfer-invite__action {
+.agent-roster-item.agent-invite[data-variant='sidebar'] .agent-invite__actions {
+    width: auto;
+    flex: 0 0 auto;
+    margin-left: 0.5rem;
+}
+.agent-invite__action {
     display: inline-flex;
     align-items: center;
     justify-content: center;
+    flex: 0 0 1.65rem;
     width: 1.65rem;
     height: 1.65rem;
     border: 0;
@@ -6299,27 +6308,27 @@
     cursor: pointer;
     transition: background 0.15s ease, color 0.15s ease, transform 0.15s ease;
 }
-.agent-transfer-invite__action:hover {
+.agent-invite__action:hover {
     transform: translateY(-1px);
 }
-.agent-transfer-invite__action:disabled {
+.agent-invite__action:disabled {
     cursor: default;
     opacity: 0.55;
     transform: none;
 }
-.agent-transfer-invite__action--accept {
+.agent-invite__action--accept {
     background: rgba(52, 211, 153, 0.18);
     color: #a7f3d0;
 }
-.agent-transfer-invite__action--decline {
+.agent-invite__action--decline {
     background: rgba(251, 113, 133, 0.16);
     color: #fecdd3;
 }
-.agent-transfer-invite[data-variant='drawer'] .agent-transfer-invite__action--accept {
+.agent-invite[data-variant='drawer'] .agent-invite__action--accept {
     background: rgba(16, 185, 129, 0.14);
     color: #047857;
 }
-.agent-transfer-invite[data-variant='drawer'] .agent-transfer-invite__action--decline {
+.agent-invite[data-variant='drawer'] .agent-invite__action--decline {
     background: rgba(244, 63, 94, 0.12);
     color: #be123c;
 }
@@ -7784,7 +7793,7 @@
 .agent-mobile-sheet--sidebar :is(.chat-context-switcher__heading, .agent-roster-section-header) {
     color: rgba(226, 232, 240, 0.56);
 }
-.agent-mobile-sheet--sidebar :is(.chat-context-switcher__item, .agent-roster-item, .agent-transfer-invite) {
+.agent-mobile-sheet--sidebar :is(.chat-context-switcher__item, .agent-roster-item, .agent-invite) {
     color: rgba(255, 255, 255, 0.88);
 }
 .agent-mobile-sheet--sidebar :is(.chat-context-switcher__item:hover, .chat-context-switcher__item[data-selected='true'], .chat-context-switcher__item[data-focused='true'], .agent-roster-item:active) {
@@ -7845,15 +7854,15 @@
 .agent-mobile-sheet--sidebar .agent-roster-item__check {
     color: #c4b5fd;
 }
-.agent-mobile-sheet--sidebar .agent-transfer-invite {
-    --transfer-invite-bg: rgba(125, 211, 252, 0.08);
-    --transfer-invite-border: rgba(125, 211, 252, 0.2);
+.agent-mobile-sheet--sidebar .agent-invite {
+    --agent-invite-bg: rgba(125, 211, 252, 0.08);
+    --agent-invite-border: rgba(125, 211, 252, 0.2);
 }
-.agent-mobile-sheet--sidebar .agent-transfer-invite__action--accept {
+.agent-mobile-sheet--sidebar .agent-invite__action--accept {
     background: rgba(52, 211, 153, 0.18);
     color: #a7f3d0;
 }
-.agent-mobile-sheet--sidebar .agent-transfer-invite__action--decline {
+.agent-mobile-sheet--sidebar .agent-invite__action--decline {
     background: rgba(251, 113, 133, 0.16);
     color: #fecdd3;
 }
