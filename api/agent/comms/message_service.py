@@ -1,28 +1,22 @@
-from __future__ import annotations
-
 from uuid import UUID
 from urllib.parse import urlparse
 
-from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
+from util.analytics import Analytics
 from util.tool_costs import get_tool_credit_cost_for_channel
 
 """Service helpers for inbound communication messages."""
 
 from dataclasses import dataclass
-from decimal import Decimal
 from time import monotonic
-from typing import Iterable, Any, Tuple
+from typing import Any, Iterable, MutableMapping, Tuple
 
 import logging
 import mimetypes
 import os
 import requests
-from django.contrib.sites.models import Site
 from django.core.exceptions import MultipleObjectsReturned, ValidationError
 from django.core.files.base import ContentFile, File
-from django.core.mail import send_mail
 from django.db import DatabaseError, transaction
-from django.template.loader import render_to_string
 from django.utils import timezone
 from api.agent.core.processing_flags import bump_human_inbound_generation
 from ..files.filespace_service import enqueue_import_after_commit, import_message_attachments_to_filespace
@@ -58,8 +52,7 @@ from opentelemetry import baggage
 from config import settings
 from util.constants.task_constants import TASKS_UNLIMITED
 from opentelemetry import trace
-from util.subscription_helper import get_owner_plan
-from util.urls import append_context_query, build_agent_detail_url, build_site_url
+from util.urls import build_agent_detail_url, build_site_url
 
 tracer = trace.get_tracer("gobii.utils")
 
@@ -158,13 +151,6 @@ def _is_owner_sender(agent: PersistentAgent, channel: CommsChannel | str, sender
         ).exists()
 
     return False
-
-
-def _is_daily_hard_limit_exhausted(agent: PersistentAgent) -> bool:
-    if agent.daily_credit_limit is None:
-        return False
-    remaining = agent.get_daily_credit_remaining()
-    return remaining is None or remaining <= Decimal("0")
 
 
 @tracer.start_as_current_span("_get_or_create_endpoint")
@@ -676,137 +662,6 @@ def ingest_inbound_message(
             except Exception:
                 logging.exception("Error during billing-pause pre-processing check")
 
-            try:
-                if not should_skip_processing and agent_obj and agent_obj.user_id and channel_val == CommsChannel.EMAIL:
-                    from tasks.services import TaskCreditService
-
-                    if agent_obj.is_sender_whitelisted(CommsChannel.EMAIL, parsed.sender):
-                        owner = getattr(agent_obj, "organization", None) or getattr(agent_obj, "user", None)
-                        available = TaskCreditService.calculate_available_tasks_for_owner(owner)
-                        min_cost = get_tool_credit_cost_for_channel(channel_val)
-                        if (
-                            available != TASKS_UNLIMITED
-                            and available < min_cost
-                            and not _is_daily_hard_limit_exhausted(agent_obj)
-                        ):
-                            # Prepare and send out-of-credits reply via configured backend (Mailgun in prod)
-                            try:
-                                try:
-                                    billing_url = _build_site_url("/app/billing")
-                                    if agent_obj.organization_id:
-                                        billing_url = append_context_query(
-                                            billing_url,
-                                            agent_obj.organization_id,
-                                        )
-                                except (
-                                    Site.DoesNotExist,
-                                    MultipleObjectsReturned,
-                                    DatabaseError,
-                                    ValueError,
-                                ):
-                                    billing_url = ""
-                                context = {
-                                    "agent": agent_obj,
-                                    "owner": agent_obj.user,
-                                    "sender": parsed.sender,
-                                    "subject": parsed.subject or "",
-                                    "is_proprietary_mode": settings.GOBII_PROPRIETARY_MODE,
-                                    "billing_url": billing_url,
-                                }
-                                subject = render_to_string(
-                                    "emails/agent_out_of_credits_subject.txt", context
-                                ).strip() or f"Re: {parsed.subject or agent_obj.name}"
-                                text_body = render_to_string(
-                                    "emails/agent_out_of_credits.txt", context
-                                )
-                                html_body = render_to_string(
-                                    "emails/agent_out_of_credits.html", context
-                                )
-                                recipients = {parsed.sender}
-                                try:
-                                    if agent_obj.organization_id:
-                                        from api.models import OrganizationMembership
-
-                                        owner_equivalent_memberships = OrganizationMembership.objects.filter(
-                                            org=agent_obj.organization,
-                                            role__in=[
-                                                OrganizationMembership.OrgRole.OWNER,
-                                                OrganizationMembership.OrgRole.SOLUTIONS_PARTNER,
-                                            ],
-                                            status=OrganizationMembership.OrgStatus.ACTIVE,
-                                        ).select_related("user")
-                                        for membership in owner_equivalent_memberships:
-                                            owner_email = (membership.user.email or "").strip()
-                                            if owner_email:
-                                                recipients.add(owner_email)
-                                    else:
-                                        owner_email = (agent_obj.user.email or "").strip()
-                                        if owner_email:
-                                            recipients.add(owner_email)
-                                except Exception:
-                                    logging.warning(
-                                        "Failed to add owner emails to recipients for agent %s",
-                                        agent_obj.id,
-                                        exc_info=True,
-                                    )
-
-                                send_mail(
-                                    subject=subject,
-                                    message=text_body,
-                                    from_email=None,  # use DEFAULT_FROM_EMAIL
-                                    recipient_list=list(recipients),
-                                    html_message=html_body,
-                                    fail_silently=True,
-                                )
-
-                                Analytics.track_event(
-                                    user_id=str(agent_obj.user.id),
-                                    event=AnalyticsEvent.PERSISTENT_AGENT_EMAIL_OUT_OF_CREDITS,
-                                    source=AnalyticsSource.EMAIL,
-                                    properties=Analytics.with_org_properties(
-                                        {
-                                            "agent_id": str(agent_obj.id),
-                                            "agent_name": agent_obj.name,
-                                            "channel": channel_val,
-                                            "sender": parsed.sender,
-                                        },
-                                        organization=getattr(agent_obj, "organization", None),
-                                    ),
-                                )
-                                # Track upsell message shown for out-of-credits email
-                                try:
-                                    ooc_owner = getattr(agent_obj, "organization", None) or getattr(agent_obj, "user", None)
-                                    ooc_plan = get_owner_plan(ooc_owner) if ooc_owner else None
-                                    ooc_plan_id = str(ooc_plan.get("id", "")).strip() if ooc_plan else ""
-                                except Exception:
-                                    ooc_plan_id = ""
-                                Analytics.track_event(
-                                    user_id=str(getattr(agent_obj.user, "id", "")),
-
-                                    event=AnalyticsEvent.UPSELL_MESSAGE_SHOWN,
-                                    source=AnalyticsSource.EMAIL,
-                                    properties=Analytics.with_org_properties(
-                                        {
-                                            "agent_id": str(agent_obj.id),
-                                            "agent_name": agent_obj.name,
-                                            "message_type": "task_credits_exhausted",
-                                            "medium": "email",
-                                            "recipient_type": "inbound_contact",
-                                            "upsell_shown": True,
-                                            "plan": ooc_plan_id,
-                                        },
-                                        organization=getattr(agent_obj, "organization", None),
-                                    ),
-                                )
-                            except Exception:
-                                # Do not block on email failures
-                                logging.exception("Failed sending out-of-credits reply email")
-
-                            # Skip processing by the agent
-                            should_skip_processing = True
-            except Exception:
-                logging.exception("Error during out-of-credits pre-processing check")
-
             # Let the orchestrator decide how to respond; only notify the UI that credits are exhausted.
             try:
                 if not should_skip_processing and agent_obj and agent_obj.user_id and channel_val == CommsChannel.WEB:
@@ -817,7 +672,6 @@ def ingest_inbound_message(
                         available = TaskCreditService.calculate_available_tasks_for_owner(owner)
                         min_cost = get_tool_credit_cost_for_channel(channel_val)
                         if available != TASKS_UNLIMITED and available < min_cost:
-                            should_skip_processing = not _is_daily_hard_limit_exhausted(agent_obj)
                             # Send credit_event via websocket to trigger frontend refresh
                             def _send_credit_event():
                                 try:

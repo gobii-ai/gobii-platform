@@ -96,7 +96,12 @@ from ..tools.sqlite_skills import format_recent_skills_for_prompt
 from ..tools.tool_manager import ensure_default_tools_enabled, ensure_skill_tools_enabled, get_enabled_tool_definitions
 from ..system_skills.discovery import format_system_skill_discovery_prompt
 from .tool_results import PREVIEW_TIER_COUNT, SPAWN_WEB_TASK_RESULT_TOOL_NAME, ToolCallResultRecord, ToolResultPromptInfo, prepare_tool_results_for_prompt
-from .daily_limit_mode import DAILY_LIMIT_ALLOWED_TOOL_NAMES_TEXT, is_daily_hard_limit_message_only_mode
+from .daily_limit_mode import (
+    DAILY_LIMIT_ALLOWED_TOOL_NAMES_TEXT,
+    is_credit_message_only_mode,
+    is_daily_hard_limit_message_only_mode,
+    is_task_credit_message_only_mode,
+)
 from .contact_results import ContactSQLiteRecord, store_contacts_for_prompt
 from .contact_snapshot import build_contacts_snapshot_records
 from .file_results import FileSQLiteRecord, store_files_for_prompt
@@ -1308,6 +1313,7 @@ def _render_prompt_context_once(
     reasoning_only_streak: int = 0,
     is_first_run: bool = False,
     daily_credit_state: Optional[dict] = None,
+    task_credit_available=None,
     continuation_notice: Optional[str] = None,
     routing_profile: Any = None,
     prompt_failover_configs: Sequence[Tuple[str, str, Mapping[str, Any]]] | None = None,
@@ -1675,6 +1681,7 @@ def _render_prompt_context_once(
             current_iteration=current_iteration,
             max_iterations=max_iterations,
             daily_credit_state=daily_credit_state,
+            task_credit_available=task_credit_available,
             agent=agent,
         )
 
@@ -1760,7 +1767,7 @@ def _render_prompt_context_once(
                 non_shrinkable=True,
             )
 
-    if is_daily_hard_limit_message_only_mode(daily_credit_state):
+    if is_credit_message_only_mode(daily_credit_state, task_credit_available):
         discovery_prompt, discovery_keys = "", ()
     else:
         discovery_prompt, discovery_keys = format_system_skill_discovery_prompt(agent)
@@ -1962,6 +1969,7 @@ def build_prompt_context(
     reasoning_only_streak: int = 0,
     is_first_run: bool = False,
     daily_credit_state: Optional[dict] = None,
+    task_credit_available=None,
     continuation_notice: Optional[str] = None,
     routing_profile: Any = None,
     prefer_low_latency: Optional[bool] = None,
@@ -1980,6 +1988,7 @@ def build_prompt_context(
         reasoning_only_streak: Number of consecutive iterations without tool calls.
         is_first_run: Whether this is the very first processing cycle for the agent.
         daily_credit_state: Pre-computed daily credit state (optional).
+        task_credit_available: Pre-computed owner task-credit availability (optional).
         continuation_notice: Optional system note to inject for follow-up loops.
         routing_profile: LLMRoutingProfile instance for eval routing (optional).
         prefer_low_latency: Optional low-latency routing hint used to match the
@@ -2013,6 +2022,7 @@ def build_prompt_context(
             reasoning_only_streak=reasoning_only_streak,
             is_first_run=is_first_run,
             daily_credit_state=daily_credit_state,
+            task_credit_available=task_credit_available,
             continuation_notice=continuation_notice,
             routing_profile=routing_profile,
             system_directive_block=system_directive_block,
@@ -2048,6 +2058,7 @@ def build_prompt_context_preview(
     reasoning_only_streak: int = 0,
     is_first_run: bool = False,
     daily_credit_state: Optional[dict] = None,
+    task_credit_available=None,
     continuation_notice: Optional[str] = None,
     routing_profile: Any = None,
     prefer_low_latency: Optional[bool] = None,
@@ -2071,6 +2082,7 @@ def build_prompt_context_preview(
             reasoning_only_streak=reasoning_only_streak,
             is_first_run=is_first_run,
             daily_credit_state=daily_credit_state,
+            task_credit_available=task_credit_available,
             continuation_notice=continuation_notice,
             routing_profile=routing_profile,
         ),
@@ -2783,6 +2795,7 @@ def add_budget_awareness_sections(
     current_iteration: int,
     max_iterations: int,
     daily_credit_state: dict | None = None,
+    task_credit_available=None,
     agent: PersistentAgent | None = None,
 ) -> bool:
     """Populate structured budget awareness sections in the prompt tree."""
@@ -2872,6 +2885,26 @@ def add_budget_awareness_sections(
         except Exception:
             logger.warning("Failed to compute browser task usage for prompt.", exc_info=True)
 
+    task_message_only_mode = is_task_credit_message_only_mode(task_credit_available)
+    if task_message_only_mode and agent is not None:
+        billing_url = _build_console_url("billing")
+        owner_label = "organization workspace" if agent.organization_id else "account"
+        if agent.organization_id:
+            billing_url = append_context_query(billing_url, str(agent.organization_id))
+        sections.append((
+            "task_credit_message_only_mode",
+            (
+                f"TASK CREDIT MESSAGE-ONLY MODE: This {owner_label} has no task credits remaining. "
+                "Only message and sleep tools are available right now: "
+                f"{MESSAGE_ONLY_TOOL_NAMES_TEXT}. "
+                "Do not attempt any other tools or non-message work. "
+                f"Tell the user that task credits can be restored from the billing page: {billing_url}. "
+                "Once task credits are available again, you can continue the task."
+            ),
+            9,
+            True,
+        ))
+
     if daily_credit_state:
         try:
             default_task_cost = get_default_task_credit_cost()
@@ -2899,7 +2932,11 @@ def add_budget_awareness_sections(
                         "Do not attempt any other tools or non-message work right now. "
                         f"Ask the user to raise the limit with one of these links: settings {links['settings_url']} ; "
                         f"double {links['double_limit_url']} ; unlimited {links['unlimited_limit_url']}. "
-                        "Once the user raises the limit, you can continue the task."
+                        + (
+                            " Task credits must also be restored before you can continue non-message work."
+                            if task_message_only_mode
+                            else " Once the user raises the limit, you can continue the task."
+                        )
                     ),
                     9,
                     True,

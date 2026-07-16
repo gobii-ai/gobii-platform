@@ -1,6 +1,8 @@
 from decimal import Decimal
 from typing import Sequence
 
+from util.constants.task_constants import TASKS_UNLIMITED
+
 
 DAILY_LIMIT_MESSAGE_TOOL_NAMES = frozenset(
     {
@@ -53,7 +55,29 @@ def is_daily_hard_limit_message_only_mode(daily_credit_state: dict | None) -> bo
         return False
 
 
-def filter_tools_for_daily_limit_message_only_mode(tools: Sequence[dict]) -> list[dict]:
+def is_task_credit_message_only_mode(task_credit_available) -> bool:
+    if task_credit_available is None or task_credit_available == TASKS_UNLIMITED:
+        return False
+
+    try:
+        available = task_credit_available
+        if not isinstance(available, Decimal):
+            available = Decimal(str(available))
+        return available <= Decimal("0")
+    except (ArithmeticError, TypeError, ValueError):
+        return False
+
+
+def is_credit_message_only_mode(
+    daily_credit_state: dict | None,
+    task_credit_available=None,
+) -> bool:
+    return is_daily_hard_limit_message_only_mode(
+        daily_credit_state
+    ) or is_task_credit_message_only_mode(task_credit_available)
+
+
+def filter_tools_for_credit_message_only_mode(tools: Sequence[dict]) -> list[dict]:
     filtered: list[dict] = []
     for tool in tools:
         if not isinstance(tool, dict):
@@ -64,3 +88,7 @@ def filter_tools_for_daily_limit_message_only_mode(tools: Sequence[dict]) -> lis
         if is_daily_limit_allowed_tool(function_block.get("name")):
             filtered.append(tool)
     return filtered
+
+
+def filter_tools_for_daily_limit_message_only_mode(tools: Sequence[dict]) -> list[dict]:
+    return filter_tools_for_credit_message_only_mode(tools)

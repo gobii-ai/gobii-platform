@@ -49,6 +49,7 @@ from api.models import (
     BrowserUseAgent,
     CommsAllowlistEntry,
     CommsChannel,
+    Organization,
     PersistentAgent,
     PersistentAgentCommsEndpoint,
     PersistentAgentKanbanCard,
@@ -704,7 +705,7 @@ class DailyLimitPromptContextTests(TestCase):
             browser_use_agent=browser_agent,
         )
 
-    def _render_prompt_content(self, daily_state):
+    def _render_prompt_content(self, daily_state, *, task_credit_available=None):
         with patch("api.agent.core.prompt_context.ensure_steps_compacted"), patch(
             "api.agent.core.prompt_context.ensure_comms_compacted"
         ), patch(
@@ -714,6 +715,7 @@ class DailyLimitPromptContextTests(TestCase):
             context, _, _ = build_prompt_context(
                 self.agent,
                 daily_credit_state=daily_state,
+                task_credit_available=task_credit_available,
             )
 
         user_message = next(message for message in context if message["role"] == "user")
@@ -791,6 +793,47 @@ class DailyLimitPromptContextTests(TestCase):
         self.assertIn("Only message and sleep tools are available until the user raises the limit", content)
         self.assertIn("sleep_until_next_trigger", content)
         self.assertIn("Once the user raises the limit, you can continue the task.", content)
+
+    @override_settings(PUBLIC_SITE_URL="https://example.com")
+    def test_prompt_includes_personal_task_credit_message_only_guidance(self):
+        content = self._render_prompt_content({}, task_credit_available=Decimal("0"))
+
+        self.assertIn("TASK CREDIT MESSAGE-ONLY MODE", content)
+        self.assertIn("Only message and sleep tools are available right now", content)
+        self.assertIn("/app/billing", content)
+        self.assertIn("Once task credits are available again, you can continue the task.", content)
+
+    @override_settings(PUBLIC_SITE_URL="https://example.com")
+    def test_prompt_includes_org_billing_context_and_both_recovery_actions(self):
+        org = Organization.objects.create(
+            name="Prompt Org",
+            slug="prompt-org",
+            created_by=self.agent.user,
+        )
+        org.billing.purchased_seats = 1
+        org.billing.save(update_fields=["purchased_seats"])
+        self.agent.organization = org
+        self.agent.save(update_fields=["organization"])
+        daily_state = {
+            "hard_limit": Decimal("2"),
+            "hard_limit_remaining": Decimal("0"),
+            "soft_target": Decimal("1"),
+            "soft_target_remaining": Decimal("0"),
+            "soft_target_exceeded": True,
+            "used": Decimal("2"),
+            "next_reset": timezone.now(),
+        }
+
+        content = self._render_prompt_content(
+            daily_state,
+            task_credit_available=Decimal("0"),
+        )
+
+        self.assertIn("TASK CREDIT MESSAGE-ONLY MODE", content)
+        self.assertIn("DAILY HARD LIMIT MODE", content)
+        self.assertIn("context_type=organization", content)
+        self.assertIn(str(org.id), content)
+        self.assertIn("Task credits must also be restored", content)
 
 
 @tag("batch_event_processing")

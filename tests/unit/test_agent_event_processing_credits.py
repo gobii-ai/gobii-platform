@@ -13,6 +13,7 @@ from api.models import (
     PersistentAgentCompletion,
     PersistentAgentCommsEndpoint,
     PersistentAgentError,
+    Organization,
     PersistentAgentStep,
     PersistentAgentSystemStep,
     PersistentAgentToolCall,
@@ -29,6 +30,11 @@ import uuid
 from util.analytics import AnalyticsEvent, AnalyticsSource
 from util.constants.task_constants import TASKS_UNLIMITED
 from api.agent.core.event_processing import _ensure_credit_for_tool
+from api.agent.core.daily_limit_mode import (
+    filter_tools_for_credit_message_only_mode,
+    is_credit_message_only_mode,
+    is_task_credit_message_only_mode,
+)
 from api.agent.core.llm_config import (
     AgentLLMTier,
     apply_tier_credit_multiplier,
@@ -58,6 +64,41 @@ class _DummySpan:
 
     def set_attribute(self, *_args, **_kwargs):
         return None
+
+
+@tag("batch_event_processing_credits")
+class CreditMessageOnlyModeTests(TestCase):
+    def test_task_credit_mode_only_activates_for_exhausted_finite_balance(self):
+        self.assertTrue(is_task_credit_message_only_mode(Decimal("0")))
+        self.assertTrue(is_task_credit_message_only_mode(Decimal("-0.1")))
+        self.assertFalse(is_task_credit_message_only_mode(Decimal("0.1")))
+        self.assertFalse(is_task_credit_message_only_mode(TASKS_UNLIMITED))
+        self.assertFalse(is_task_credit_message_only_mode(None))
+        self.assertFalse(is_task_credit_message_only_mode("unknown"))
+
+    def test_combined_mode_activates_for_either_limit(self):
+        daily_exhausted = {
+            "hard_limit": Decimal("1"),
+            "hard_limit_remaining": Decimal("0"),
+        }
+        self.assertTrue(is_credit_message_only_mode(daily_exhausted, Decimal("5")))
+        self.assertTrue(is_credit_message_only_mode({}, Decimal("0")))
+        self.assertTrue(is_credit_message_only_mode(daily_exhausted, Decimal("0")))
+        self.assertFalse(is_credit_message_only_mode({}, Decimal("5")))
+
+    def test_restricted_tool_filter_keeps_only_message_and_sleep_tools(self):
+        tools = [
+            {"type": "function", "function": {"name": "send_email"}},
+            {"type": "function", "function": {"name": "sleep_until_next_trigger"}},
+            {"type": "function", "function": {"name": "sqlite_query"}},
+        ]
+
+        filtered = filter_tools_for_credit_message_only_mode(tools)
+
+        self.assertEqual(
+            [tool["function"]["name"] for tool in filtered],
+            ["send_email", "sleep_until_next_trigger"],
+        )
 
 
 @tag("batch_event_processing_credits")
@@ -132,35 +173,55 @@ class PersistentAgentCreditGateTests(TestCase):
             grant_type="Compensation",
         )
 
-    def test_proprietary_mode_out_of_credits_exits_early(self):
-        # Force the credit check to report 0 available
+    def test_proprietary_mode_out_of_credits_enters_message_only_mode(self):
         with patch("config.settings.GOBII_PROPRIETARY_MODE", True), patch(
             "api.agent.core.event_processing.TaskCreditService.calculate_available_tasks_for_owner",
             return_value=0,
-        ):
-            # Patch the heavy loop to ensure it would raise if called
-            with patch("api.agent.core.event_processing._run_agent_loop") as loop_mock:
-                from api.agent.core.event_processing import _process_agent_events_locked
+        ), patch("api.agent.core.event_processing._run_agent_loop", return_value={}) as loop_mock:
+            from api.agent.core.event_processing import _process_agent_events_locked
 
-                _process_agent_events_locked(self.agent.id, _DummySpan())
+            _process_agent_events_locked(self.agent.id, _DummySpan())
 
-                # Ensure loop never runs due to early exit
-                loop_mock.assert_not_called()
+        loop_mock.assert_called_once()
+        self.assertEqual(loop_mock.call_args.kwargs["credit_snapshot"]["available"], 0)
 
-        # The early exit creates a SystemStep with PROCESS_EVENTS + credit_insufficient
         sys_steps = PersistentAgentSystemStep.objects.filter(
             step__agent=self.agent,
             code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
         )
-        self.assertTrue(sys_steps.exists(), "Expected a system step to be created on early exit")
+        self.assertTrue(sys_steps.exists(), "Expected a message-only mode system step")
 
         notes = list(sys_steps.values_list("notes", flat=True))
         self.assertIn("credit_insufficient", notes)
 
-        # Ensure that no "Process events" description (from normal path) was created
-        self.assertFalse(
+        self.assertTrue(
             self.agent.steps.filter(description="Process events").exists(),
-            "Normal event-window step should not be created on early exit",
+            "Expected normal event processing to continue in restricted mode",
+        )
+
+    def test_org_out_of_credits_enters_message_only_mode(self):
+        org = Organization.objects.create(name="Creditless Org", slug="creditless-org", created_by=self.user)
+        org.billing.purchased_seats = 1
+        org.billing.save(update_fields=["purchased_seats"])
+        self.agent.organization = org
+        self.agent.save(update_fields=["organization"])
+
+        with patch("config.settings.GOBII_PROPRIETARY_MODE", True), patch(
+            "api.agent.core.event_processing.TaskCreditService.calculate_available_tasks_for_owner",
+            return_value=Decimal("0"),
+        ) as available_mock, patch(
+            "api.agent.core.event_processing._run_agent_loop",
+            return_value={},
+        ) as loop_mock:
+            from api.agent.core.event_processing import _process_agent_events_locked
+
+            _process_agent_events_locked(self.agent.id, _DummySpan())
+
+        available_mock.assert_called_once_with(org)
+        loop_mock.assert_called_once()
+        self.assertEqual(
+            loop_mock.call_args.kwargs["credit_snapshot"]["available"],
+            Decimal("0"),
         )
 
     def test_signup_preview_first_reply_bypasses_startup_credit_gate(self):
@@ -584,6 +645,26 @@ class PersistentAgentToolCreditTests(TestCase):
         self.assertEqual(step.task_credit_id, credit.id)
         self.assertEqual(completion.credits_cost, amount)
         self.assertEqual(tool_call.status, "complete")
+
+    @patch("api.agent.core.event_processing.settings.GOBII_PROPRIETARY_MODE", True)
+    @patch("api.agent.core.event_processing.TaskCreditService.check_and_consume_credit_for_owner")
+    @patch("api.agent.core.event_processing.TaskCreditService.calculate_available_tasks_for_owner")
+    @patch("api.agent.core.event_processing.get_tool_credit_cost", return_value=Decimal("0.8"))
+    def test_task_credit_mode_allows_message_without_consuming_credit(
+        self,
+        _mock_cost,
+        mock_available,
+        mock_consume,
+    ):
+        mock_available.return_value = Decimal("0")
+        span = MagicMock()
+
+        result = _ensure_credit_for_tool(self.agent, "send_email", span=span)
+
+        self.assertEqual(result, {"cost": None, "credit": None})
+        mock_consume.assert_not_called()
+        span.add_event.assert_any_call("Tool allowed in credit message-only mode")
+        span.set_attribute.assert_any_call("credit_check.message_only_mode", True)
 
     @patch("api.agent.core.event_processing.settings.GOBII_PROPRIETARY_MODE", True)
     @patch("api.agent.core.event_processing.TaskCreditService.check_and_consume_credit_for_owner")
@@ -1306,6 +1387,82 @@ class PersistentAgentToolCreditTests(TestCase):
                 code=PersistentAgentSystemStep.Code.BURN_RATE_COOLDOWN,
             ).exists()
         )
+
+    def test_task_credit_availability_refreshes_each_iteration(self):
+        response = MagicMock()
+        response.choices = [
+            MagicMock(
+                message=MagicMock(
+                    content="Let me think about this",
+                    tool_calls=[],
+                    function_call=None,
+                )
+            )
+        ]
+        token_usage = {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "cached_tokens": 0,
+        }
+        tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "send_email",
+                    "description": "send_email",
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "sqlite_query",
+                    "description": "sqlite_query",
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            },
+        ]
+        observed_tools = []
+
+        def capture_completion(*_args, **kwargs):
+            observed_tools.append([tool["function"]["name"] for tool in kwargs["tools"]])
+            return response, token_usage
+
+        with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 2), patch(
+            "api.agent.core.event_processing.settings.GOBII_PROPRIETARY_MODE",
+            True,
+        ), patch(
+            "api.agent.core.event_processing.TaskCreditService.calculate_available_tasks_for_owner",
+            side_effect=[Decimal("0"), Decimal("5")],
+        ) as available_mock, patch(
+            "api.agent.core.event_processing.get_agent_daily_credit_state",
+            return_value={},
+        ), patch(
+            "api.agent.core.event_processing.get_agent_tools",
+            return_value=tools,
+        ), patch(
+            "api.agent.core.event_processing.build_prompt_context",
+            return_value=([], 0, None),
+        ), patch(
+            "api.agent.core.event_processing._completion_with_failover",
+            side_effect=capture_completion,
+        ), patch(
+            "api.agent.core.event_processing._schedule_agent_follow_up",
+        ):
+            ep._run_agent_loop(
+                self.agent,
+                is_first_run=False,
+                credit_snapshot={
+                    "available": Decimal("0"),
+                    "daily_state": {},
+                    "task_credit_exempt": False,
+                },
+            )
+
+        self.assertEqual(available_mock.call_count, 2)
+        self.assertEqual(observed_tools[0], ["send_email"])
+        self.assertEqual(observed_tools[1], ["send_email", "sqlite_query"])
 
     def test_runtime_tier_step_down_activates_once_to_standard(self):
         self.agent.preferred_llm_tier = get_intelligence_tier("ultra_max")
