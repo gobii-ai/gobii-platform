@@ -1149,6 +1149,13 @@ def _normalize_tool_calls(message: Any) -> list[Any]:
     return _tool_calls_from_content(message)
 
 
+def _defer_tool_calls_behind_discovery(tool_calls: list[Any]) -> list[Any]:
+    discovery_calls = [call for call in tool_calls if _get_tool_call_name(call) == "search_tools"]
+    if not discovery_calls or len(discovery_calls) == len(tool_calls):
+        return tool_calls
+    return discovery_calls
+
+
 def _get_tool_call_name(call: Any) -> Optional[str]:
     if call is None:
         return None
@@ -6221,6 +6228,13 @@ def _run_agent_loop(
                         )
                         _mark_accepted_human_generation_consumed()
                         continue
+                discovery_tool_calls = _defer_tool_calls_behind_discovery(raw_tool_calls)
+                if len(discovery_tool_calls) != len(raw_tool_calls):
+                    logger.info(
+                        "Agent %s: deferring non-discovery tool calls until search_tools updates the prompt.",
+                        agent.id,
+                    )
+                    raw_tool_calls = discovery_tool_calls
                 raw_tool_names = [_get_tool_call_name(call) for call in raw_tool_calls]
                 has_explicit_send = any(name in MESSAGE_TOOL_NAMES for name in raw_tool_names if name)
                 has_explicit_sleep = any(name == "sleep_until_next_trigger" for name in raw_tool_names if name)

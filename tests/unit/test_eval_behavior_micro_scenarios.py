@@ -801,6 +801,24 @@ class BehaviorMicroHelperTests(TestCase):
                     CommsAllowlistEntry.objects.filter(agent=self.agent, channel=CommsChannel.SMS).exists()
                 )
 
+    def test_outbound_sms_send_cases_seed_sending_endpoint(self):
+        for slug in (
+            "common_use_case_065_send_status_sms",
+            "common_use_case_066_send_meeting_sms",
+        ):
+            with self.subTest(slug=slug):
+                scenario = ScenarioRegistry.get(slug)
+
+                scenario._seed_outbound_contact_context(self.agent.id)
+
+                endpoint = PersistentAgentCommsEndpoint.objects.get(
+                    owner_agent=self.agent,
+                    channel=CommsChannel.SMS,
+                )
+                self.assertTrue(endpoint.is_primary)
+
+                endpoint.delete()
+
     def test_outbound_contact_lookup_sqlite_preamble_does_not_stop_eval(self):
         scenario = ScenarioRegistry.get("common_use_case_066_send_meeting_sms")
         policy = scenario._build_eval_stop_policy()

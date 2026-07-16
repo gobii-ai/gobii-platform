@@ -159,8 +159,29 @@ def _dedupe_mock() -> dict:
         "Claim: CareMesh is strongest for HIPAA-regulated healthcare support because it includes a BAA, PHI redaction, escalation routing, and audit exports.",
         "Claim: BrightSupport is strongest for SMB teams because it offers quick setup, low administration, and transparent monthly pricing.",
     )
-    rules = [{"url_contains": url, "result": {"status": "ok", "status_code": 200, "url": url, "content": {"url": url, "text": _large_page(f"Source {i}", (claim,))}}} for i, (url, claim) in enumerate(zip(SOURCE_URLS, claims), start=1)]
-    return {"http_request": {"rules": rules, "default": {"status": "error", "message": "Unknown eval URL."}}}
+    pages = {
+        url: _large_page(f"Source {i}", (claim,))
+        for i, (url, claim) in enumerate(zip(SOURCE_URLS, claims), start=1)
+    }
+    return {
+        "http_request": {
+            "rules": [
+                {
+                    "url_contains": url,
+                    "result": {"status": "ok", "status_code": 200, "url": url, "content": {"url": url, "text": page}},
+                }
+                for url, page in pages.items()
+            ],
+            "default": {"status": "error", "message": "Unknown eval URL."},
+        },
+        "mcp_brightdata_scrape_as_markdown": {
+            "rules": [
+                {"url_contains": url, "result": {"status": "ok", "url": url, "result": page}}
+                for url, page in pages.items()
+            ],
+            "default": {"status": "error", "message": "Unknown eval URL."},
+        },
+    }
 
 
 MOCK_BUILDERS = {"web": _web_mock, "product": _product_mock, "dedupe": _dedupe_mock, "inventory": _inventory_mock}
@@ -296,7 +317,7 @@ class SqliteDedupeRequeryScenario(SqliteToolResultScenario):
     slug = SQLITE_DEDUPE_REQUERY
     description = "Duplicate source synthesis should use aggregate SQLite/CTE queries, not repeated blob re-fetches."
     tasks = [ScenarioTask(name="inject_prompt", assertion_type="agent_processing"), ScenarioTask(name="verify_dedupe_sqlite_usage", assertion_type="tool_call"), ScenarioTask(name="verify_sourced_answer", assertion_type="manual")]
-    builtin_tools = ("http_request",)
+    builtin_tools = ("http_request", "mcp_brightdata_scrape_as_markdown")
     prompt = "Fetch these four source URLs, dedupe overlapping claims, and return the two strongest unique claims with citations. Use one aggregate sqlite_batch CTE/group/ranking query over __tool_results; do not repeatedly fetch result_text for the same result. Send one final answer with full source URLs, no progress note.\n\n" + "\n".join(f"- {url}" for url in SOURCE_URLS)
     mock_kind = "dedupe"
     verify_task_name = "verify_dedupe_sqlite_usage"

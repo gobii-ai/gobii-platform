@@ -2728,6 +2728,20 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
         }.get(case.slug)
 
     def _seed_outbound_contact_context(self, agent_id):
+        if self.case.slug in {
+            "common_use_case_065_send_status_sms",
+            "common_use_case_066_send_meeting_sms",
+        }:
+            endpoint_suffix = int(str(agent_id).replace("-", "")[-8:], 16) % 10_000_000
+            PersistentAgentCommsEndpoint.objects.get_or_create(
+                owner_agent_id=agent_id,
+                channel=CommsChannel.SMS,
+                defaults={
+                    "address": f"+1556{endpoint_suffix:07d}",
+                    "is_primary": True,
+                },
+            )
+
         target = self._outbound_allowed_contact_for_case(self.case)
         if not target:
             return

@@ -93,6 +93,16 @@ class ImpliedSendTests(TestCase):
             },
         )
 
+    def test_search_tools_is_a_discovery_barrier_for_same_batch_work(self):
+        search_call = {"function": {"name": "search_tools", "arguments": '{"query":"meta gobii"}'}}
+        research_call = {"function": {"name": "mcp_brightdata_search_engine", "arguments": "{}"}}
+
+        self.assertEqual(
+            ep._defer_tool_calls_behind_discovery([search_call, research_call]),
+            [search_call],
+        )
+        self.assertEqual(ep._defer_tool_calls_behind_discovery([research_call]), [research_call])
+
     def test_direct_corrections_require_durable_patch_except_when_one_off(self):
         self.assertTrue(ep._user_text_is_direct_correction("That sounded automated. Stop writing like a template."))
         self.assertTrue(ep._user_text_is_direct_correction("You sound robotic."))

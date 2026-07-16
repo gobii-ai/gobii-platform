@@ -309,7 +309,9 @@ RECRUITMENT_SOURCING_CASES = (
         allowed_extra_tool_names=(
             "mcp_brightdata_web_data_linkedin_company_profile",
             "mcp_brightdata_web_data_linkedin_person_profile",
+            "mcp_brightdata_linkedin_person_profile",
             "mcp_brightdata_web_data_linkedin_job_listings",
+            "mcp_brightdata_scrape_as_markdown",
             "http_request",
         ),
         forbidden_tool_names=("apollo_io-search-contacts",),
@@ -393,6 +395,37 @@ RECRUITMENT_SOURCING_CASES = (
                     "evidence": "Attorney recruiting profile similar to boutique legal staffing archetypes.",
                 }
             ),
+            "mcp_brightdata_linkedin_person_profile": _linkedin_profile_result(
+                {
+                    "name": "Carolina Vega",
+                    "title": "Legal Recruiter",
+                    "company": "NALSC-style boutique legal search firm",
+                    "location": "Charlotte, NC",
+                    "url": "https://www.linkedin.com/in/carolina-vega-eval",
+                    "evidence": "Attorney recruiting profile similar to boutique legal staffing archetypes.",
+                }
+            ),
+            "mcp_brightdata_scrape_as_markdown": {
+                "rules": [
+                    {
+                        "url_contains": "northstarlegal.example.test",
+                        "result": {
+                            "status": "ok",
+                            "url": "https://northstarlegal.example.test/team",
+                            "result": "NorthStar Legal Search is an attorney search and boutique legal recruiting team.",
+                        },
+                    },
+                    {
+                        "url_contains": "nalsc.org/eval-directory",
+                        "result": {
+                            "status": "ok",
+                            "url": "https://www.nalsc.org/eval-directory",
+                            "result": "NALSC-style directory archetype for boutique legal search firms.",
+                        },
+                    },
+                ],
+                "default": {"status": "error", "message": "Unknown fallback source URL."},
+            },
             "mcp_brightdata_web_data_linkedin_job_listings": {
                 "status": "success",
                 "result": [

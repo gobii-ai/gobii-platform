@@ -670,7 +670,7 @@ columns: result_id, tool_name, created_at, result_json, result_text, analysis_js
 # __messages (special table)
 columns include message_id, seq, timestamp, channel, is_outbound, from_address, to_address, subject, body, body_bytes, body_is_truncated, attachment_paths_json, attachment_count, rejected_attachments_json, latest_status, latest_sent_at, latest_delivered_at, latest_error_message. message_id is the internal Gobii id accepted by send_email.reply_to_message_id. attachments → SELECT message_id, value AS path FROM __messages, json_each(attachment_paths_json). Use __messages only for structured analysis/history, not freshness checks.
 # __files (special table; metadata only)
-columns: node_id, filespace_id, path, name, parent_path, mime_type, size_bytes, checksum_sha256, created_at, updated_at. recent_files → SELECT * FROM __files ORDER BY updated_at DESC LIMIT 30. metadata only; read_file gets contents.
+columns: node_id, filespace_id, path, name, parent_path, mime_type, size_bytes, checksum_sha256, created_at, updated_at. Query only for discovery or metadata when no exact path is known. Exact path → pass it directly to the consumer tool. recent_files → SELECT * FROM __files ORDER BY updated_at DESC LIMIT 30. metadata only; read_file gets contents.
 # __contacts (special table)
 columns: contact_id, channel, address, normalized_address, display_name, source, status, allow_inbound, allow_outbound, can_configure, requested_at, responded_at, updated_at, last_conversed_at, relevance_at. Safe outbound recipients require status='allowed' AND allow_outbound=1. Recent contacts → ORDER BY relevance_at DESC. Bulk outreach join example: lower(leads.email)=__contacts.normalized_address AND __contacts.channel='email' AND __contacts.status='allowed' AND __contacts.allow_outbound=1. Do not infer approval from local lead status or an empty pending request queue.
 # JSON: path from hint, field from hint
@@ -3779,21 +3779,21 @@ def _get_system_instruction(
         "scheduled exact feed/API briefing -> http_request then send concise sourced report; no update_plan/files/charts unless asked\n"
         "localhost/private/rendered/login page -> spawn_web_task (or retry with it after scrape/http cannot access)\n"
         "webpage screenshot/visual capture/PDF/rendered artifact -> spawn_web_task\n"
-        "read_file path -> filespace path only; never http(s) URL\n"
+        "provided filespace path -> pass directly to the requested tool; read_file only when contents are needed, never for http(s) URLs\n"
         "data/api/feed/file URL -> http_request (PDF may need read_file; browser only if blocked or rendered/login needed)\n"
         "HTML page to read -> scrape_as_markdown or structured extractor; known platforms/social -> structured extractor first\n"
         "local reviews/maps lead screen -> structured Maps/reviews tool directly; omitted city -> representative market/broad query, not human input\n"
         "weather geocoding -> forecast/current API before replying\n"
         "current prices/quotes -> known API or search for API/data endpoint, then http_request; avoid generic result pages\n"
-        "create/launch/deploy/manage agent, specialist-agent, or entire research/analyst/scout team -> search_tools('meta gobii control plane') before update_plan/research/config\n"
+        "create/launch/deploy/manage agent, specialist-agent, or entire research/analyst/scout team -> only search_tools('meta gobii control plane') first; never batch with update_plan/research/config\n"
         "discovery hint -> search_tools(exact query); enabled tool fits -> use directly; no fit or task evolved -> search_tools(domain)\n"
         "interactive/login/JS-only -> spawn_web_task; if active_browser_tasks >= 3 -> sleep_until_next_trigger\n"
         "store/query data only when reuse, joins, filtering, chart input, aggregation, or size makes direct reading unreliable\n"
         "result_satisfies_request -> report then stop; fetch more only when current results cannot satisfy the request\n"
         "```\n"
 
-        "For MCP tools (Google Sheets, Slack, etc.), call the matching tool; do not list/open first unless required. If auth is needed, share the connect link and wait. "
-        "Email/SMS imperatives map directly to send_email/send_sms, or request_contact_permission if contact is not allowed. "
+        "For MCP tools (Google Sheets, Slack, etc.), call the matching tool; do not list/open first unless required. If auth is needed, repeat the exact setup URL from tool/skill guidance, never substitute a settings page, then wait. "
+        "Email/SMS imperatives map directly to send_email/send_sms. For a specific new number when send_sms is absent, call request_contact_permission directly; never search for messaging tools. "
         "Do not downgrade requested email/SMS delivery to chat unless the send tool result proves delivery is blocked and no setup path exists. "
         "Never ask for passwords or 2FA codes for OAuth services. Avoid 2FA/MFA unless the user explicitly asks for it, because those flows may hit system limitations; prefer non-2FA paths when available. "
         "For credential domains, think broadly: *.google.com covers more than one subdomain. "

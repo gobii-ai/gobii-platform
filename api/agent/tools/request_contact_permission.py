@@ -24,6 +24,10 @@ logger = logging.getLogger(__name__)
 
 def get_request_contact_permission_tool(agent: PersistentAgent | None = None) -> dict:
     """Return the tool definition for requesting contact permission."""
+    sms_guidance = (
+        "If the user asks to text a specific new number and send_sms is unavailable, call this tool directly; "
+        "do not search for an SMS tool. "
+    )
     auto_approve_email = bool(
         agent
         and agent.contact_approval_mode == PersistentAgent.ContactApprovalMode.AUTO_APPROVE_EMAIL
@@ -31,6 +35,7 @@ def get_request_contact_permission_tool(agent: PersistentAgent | None = None) ->
     if auto_approve_email:
         description = (
             "Request approval before texting a specific contact not in your allowlist. "
+            f"{sms_guidance}"
             "New email recipients do not need this tool: call send_email directly and they will be added automatically. "
             "If this tool is called for a new email contact, the contact is approved immediately without a review link. "
             "SMS contacts still require human approval, and pending SMS requests return a URL you MUST send to the user. "
@@ -39,6 +44,7 @@ def get_request_contact_permission_tool(agent: PersistentAgent | None = None) ->
     else:
         description = (
             "Request approval before emailing/texting a specific contact not in your allowlist. "
+            f"{sms_guidance}"
             "Use this instead of request_human_input for email/SMS contact approval. "
             "Returns a URL you MUST send so the user can approve. "
             "Check allowed contacts first; if the user just gave a specific email/phone not already allowed, request before reading files, searching, drafting, or non-blocking follow-up. "

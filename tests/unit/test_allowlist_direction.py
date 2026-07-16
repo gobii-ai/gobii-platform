@@ -450,6 +450,7 @@ class AllowlistDirectionTests(TestCase):
 
         self.assertIn("call send_email directly", description)
         self.assertIn("SMS contacts still require human approval", description)
+        self.assertIn("do not search for an SMS tool", description)
     
     def test_case_insensitive_email_with_directions(self):
         """Test that email addresses are case-insensitive with direction settings."""

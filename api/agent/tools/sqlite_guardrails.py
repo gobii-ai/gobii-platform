@@ -28,7 +28,7 @@ def _regexp(pattern: str, string: Optional[str]) -> bool:
 
 
 def _patch_text(value: Optional[str], old: Optional[str], new: Optional[str]) -> str:
-    """Apply one exact replacement, or append once when old is empty."""
+    """Apply one exact replacement, otherwise append the new text once."""
     text = value or ""
     replacement = (new or "").strip()
     if not old:
@@ -36,7 +36,9 @@ def _patch_text(value: Optional[str], old: Optional[str], new: Optional[str]) ->
             return text
         return "\n".join(filter(None, (text.rstrip(), replacement)))
     if old not in text:
-        raise ValueError("patch_text target was not found")
+        if not replacement or replacement in text:
+            return text
+        return "\n".join(filter(None, (text.rstrip(), replacement)))
     return text.replace(old, replacement, 1)
 
 

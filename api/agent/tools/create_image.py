@@ -431,6 +431,7 @@ def get_create_image_tool() -> Dict[str, Any]:
                 "Use for logos, illustrations, banners, thumbnails, posters, concept art, artwork, and visual assets. "
                 "For transformations of existing images, pass `source_images` to preserve subject, layout, product, "
                 "person, logo, text, or brand elements; prompt-only generation is not enough when fidelity matters. "
+                "When a source path is already provided, call this tool directly; do not query SQLite or read the file first. "
                 "For style or art-direction changes where no subject, logo, or layout needs preservation, refine the "
                 "prompt instead of adding source images. "
                 "Returns `file`, `inline`, `inline_html`, and `attach` placeholders for reuse in messages and "
