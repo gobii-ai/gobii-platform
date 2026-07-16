@@ -1,19 +1,25 @@
-import { useCallback, useState } from 'react'
+import { useState } from 'react'
 import { ThumbsDown, ThumbsUp } from 'lucide-react'
 import type { AgentMessage, AgentMessageFeedback } from './types'
+import { updateAgentMessageFeedback } from '../../api/agentChat'
+
+const FEEDBACK_OPTIONS = [
+  { value: 'up', label: 'Thumbs up', Icon: ThumbsUp },
+  { value: 'down', label: 'Thumbs down', Icon: ThumbsDown },
+] as const
 
 type MessageFeedbackActionsProps = {
+  agentId?: string | null
   message: AgentMessage
-  onMessageFeedback?: (message: AgentMessage, feedback: AgentMessageFeedback | null) => Promise<AgentMessageFeedback | null>
 }
 
-export function MessageFeedbackActions({ message, onMessageFeedback }: MessageFeedbackActionsProps) {
+export function MessageFeedbackActions({ agentId, message }: MessageFeedbackActionsProps) {
   const [feedback, setFeedback] = useState<AgentMessageFeedback | null>(message.viewerFeedback ?? null)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const handleFeedback = useCallback(async (requestedFeedback: AgentMessageFeedback) => {
-    if (!onMessageFeedback || submitting) {
+  async function handleFeedback(requestedFeedback: AgentMessageFeedback) {
+    if (!agentId || submitting) {
       return
     }
     const previousFeedback = feedback
@@ -22,44 +28,37 @@ export function MessageFeedbackActions({ message, onMessageFeedback }: MessageFe
     setError(null)
     setSubmitting(true)
     try {
-      const savedFeedback = await onMessageFeedback(message, nextFeedback)
-      setFeedback(savedFeedback)
+      const response = await updateAgentMessageFeedback(agentId, message.id, nextFeedback)
+      setFeedback(response.feedback)
     } catch {
       setFeedback(previousFeedback)
       setError('Unable to save feedback. Please try again.')
     } finally {
       setSubmitting(false)
     }
-  }, [feedback, message, onMessageFeedback, submitting])
+  }
 
   return (
     <>
-      <button
-        type="button"
-        className="chat-message-action-button"
-        data-active={feedback === 'up' ? 'true' : 'false'}
-        data-feedback="up"
-        onClick={() => void handleFeedback('up')}
-        disabled={submitting || !onMessageFeedback}
-        title={error || (feedback === 'up' ? 'Remove thumbs up' : 'Thumbs up')}
-        aria-label={feedback === 'up' ? 'Remove thumbs up feedback' : 'Give thumbs up feedback'}
-        aria-pressed={feedback === 'up'}
-      >
-        <ThumbsUp className="h-3.5 w-3.5" aria-hidden="true" />
-      </button>
-      <button
-        type="button"
-        className="chat-message-action-button"
-        data-active={feedback === 'down' ? 'true' : 'false'}
-        data-feedback="down"
-        onClick={() => void handleFeedback('down')}
-        disabled={submitting || !onMessageFeedback}
-        title={error || (feedback === 'down' ? 'Remove thumbs down' : 'Thumbs down')}
-        aria-label={feedback === 'down' ? 'Remove thumbs down feedback' : 'Give thumbs down feedback'}
-        aria-pressed={feedback === 'down'}
-      >
-        <ThumbsDown className="h-3.5 w-3.5" aria-hidden="true" />
-      </button>
+      {FEEDBACK_OPTIONS.map(({ value, label, Icon }) => {
+        const active = feedback === value
+        return (
+          <button
+            key={value}
+            type="button"
+            className="chat-message-action-button"
+            data-active={active ? 'true' : 'false'}
+            data-feedback={value}
+            onClick={() => void handleFeedback(value)}
+            disabled={submitting || !agentId}
+            title={error || (active ? `Remove ${label.toLowerCase()}` : label)}
+            aria-label={active ? `Remove ${label.toLowerCase()} feedback` : `Give ${label.toLowerCase()} feedback`}
+            aria-pressed={active}
+          >
+            <Icon className="h-3.5 w-3.5" aria-hidden="true" />
+          </button>
+        )
+      })}
       <span className="sr-only" role="status" aria-live="polite">
         {error || (submitting ? 'Saving message feedback' : '')}
       </span>

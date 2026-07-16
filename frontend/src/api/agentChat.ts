@@ -464,17 +464,12 @@ export async function trackAgentMessageCopy(agentId: string, messageId: string):
   })
 }
 
-export type AgentMessageFeedbackResponse = {
-  ok: boolean
-  feedback: AgentMessageFeedback | null
-}
-
 export async function updateAgentMessageFeedback(
   agentId: string,
   messageId: string,
   feedback: AgentMessageFeedback | null,
-): Promise<AgentMessageFeedbackResponse> {
-  return jsonRequest<AgentMessageFeedbackResponse>(`/console/api/agents/${agentId}/messages/${messageId}/feedback/`, {
+): Promise<{ ok: boolean; feedback: AgentMessageFeedback | null }> {
+  return jsonRequest<{ ok: boolean; feedback: AgentMessageFeedback | null }>(`/console/api/agents/${agentId}/messages/${messageId}/feedback/`, {
     method: 'POST',
     includeCsrf: true,
     json: { feedback },

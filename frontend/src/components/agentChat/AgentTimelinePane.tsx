@@ -11,7 +11,7 @@ import { StarterPromptSuggestions, type StarterPrompt } from './StarterPromptSug
 import { TemplateRecommendationCards } from './TemplateRecommendationCards'
 import type { SimplifiedTimelineItem } from '../../hooks/useSimplifiedTimeline'
 import type { TemplateRecommendation } from '../../api/agentSpawnIntent'
-import type { AgentMessage, AgentMessageFeedback } from '../../types/agentChat'
+import type { AgentMessage } from '../../types/agentChat'
 import type { StatusExpansionTargets } from './statusExpansion'
 import { chatActions, selectActiveChatSession } from '../../store/chatSlice'
 import { useAppDispatch, useAppSelector } from '../../store/hooks'
@@ -49,8 +49,6 @@ type AgentTimelinePaneProps = {
   onHardLimitOpenSettings: () => void
   onHardLimitQuickIncrease?: () => void
   onJumpToLatest?: () => void
-  onMessageCopied?: (message: AgentMessage) => void | Promise<void>
-  onMessageFeedback?: (message: AgentMessage, feedback: AgentMessageFeedback | null) => Promise<AgentMessageFeedback | null>
   onMessageLinkClick?: (href: string) => boolean | void
   onPurchaseSeats?: () => void
   onReportMessage?: (message: AgentMessage) => void
@@ -107,8 +105,6 @@ export function AgentTimelinePane({
   onHardLimitOpenSettings,
   onHardLimitQuickIncrease,
   onJumpToLatest,
-  onMessageCopied,
-  onMessageFeedback,
   onMessageLinkClick,
   onPurchaseSeats,
   onReportMessage,
@@ -217,8 +213,6 @@ export function AgentTimelinePane({
                       animateIncoming={animateCursors?.has(event.cursor) ?? false}
                       onIncomingAnimationConsumed={onIncomingAnimationConsumed}
                       onMessageLinkClick={onMessageLinkClick}
-                      onMessageCopied={onMessageCopied}
-                      onMessageFeedback={onMessageFeedback}
                       onReportMessage={onReportMessage}
                       onRetryMessage={onRetryMessage}
                     />

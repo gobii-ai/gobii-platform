@@ -5,7 +5,7 @@ import { ToolClusterCard } from './ToolClusterCard'
 import { CollapsedActivityCard } from './CollapsedActivityCard'
 import { InlineScheduleCard } from './InlineStatusCard'
 import type { SimplifiedTimelineItem } from '../../hooks/useSimplifiedTimeline'
-import type { AgentMessage, AgentMessageFeedback, DeveloperTimelineEvent } from '../../types/agentChat'
+import type { AgentMessage, DeveloperTimelineEvent } from '../../types/agentChat'
 import type { ToolClusterEvent } from '../../types/agentChat'
 import { buildThinkingCluster, flattenTimelineEventsToEntries } from './activityEntryUtils'
 import type { StatusExpansionTargets } from './statusExpansion'
@@ -26,8 +26,6 @@ type TimelineEventItemProps = {
   animateIncoming?: boolean
   onIncomingAnimationConsumed?: (cursor: string) => void
   onMessageLinkClick?: (href: string) => boolean | void
-  onMessageCopied?: (message: AgentMessage) => void | Promise<void>
-  onMessageFeedback?: (message: AgentMessage, feedback: AgentMessageFeedback | null) => Promise<AgentMessageFeedback | null>
   onReportMessage?: (message: AgentMessage) => void
   onRetryMessage?: (message: AgentMessage) => void | Promise<void>
 }
@@ -44,8 +42,6 @@ export const TimelineEventItem = memo(function TimelineEventItem({
   animateIncoming = false,
   onIncomingAnimationConsumed,
   onMessageLinkClick,
-  onMessageCopied,
-  onMessageFeedback,
   onReportMessage,
   onRetryMessage,
 }: TimelineEventItemProps) {
@@ -77,14 +73,13 @@ export const TimelineEventItem = memo(function TimelineEventItem({
     return (
       <MessageEventCard
         eventCursor={event.cursor}
+        agentId={activeAgentId}
         message={event.message}
         agentFirstName={agentFirstName}
         agentAvatarUrl={agentAvatarUrl}
         viewerUserId={viewerUserId ?? null}
         viewerEmail={viewerEmail ?? null}
         onMessageLinkClick={onMessageLinkClick}
-        onMessageCopied={onMessageCopied}
-        onMessageFeedback={onMessageFeedback}
         onReportMessage={onReportMessage}
         onRetryMessage={onRetryMessage}
       />
