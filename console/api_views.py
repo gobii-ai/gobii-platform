@@ -3003,7 +3003,6 @@ def _pending_roster_agent_invites_for_user(request: HttpRequest) -> list[dict[st
         for email in EmailAddress.objects.filter(user=request.user, verified=True)
         .values_list("email", flat=True)
     }
-    recipient_emails.add(primary_email)
     collaboration_invites = (
         AgentCollaboratorInvite.objects
         .select_related("agent", "invited_by")

@@ -90,14 +90,20 @@ class AgentCollaboratorInviteViewTests(TestCase):
             invited_by=self.owner,
             expires_at=timezone.now() + timedelta(days=7),
         )
-
-    def test_roster_includes_pending_collaboration_invite_for_recipient(self):
-        user = User.objects.create_user(
+        self.recipient = User.objects.create_user(
             username="collab",
-            email="collab@example.com",
+            email=self.invite.email,
             password="testpass123",
         )
-        self.client.force_login(user)
+        EmailAddress.objects.create(
+            user=self.recipient,
+            email=self.invite.email,
+            verified=True,
+            primary=True,
+        )
+
+    def test_roster_includes_pending_collaboration_invite_for_recipient(self):
+        self.client.force_login(self.recipient)
 
         response = self.client.get(reverse("console_agent_roster"))
 
@@ -119,28 +125,23 @@ class AgentCollaboratorInviteViewTests(TestCase):
         )
 
     def test_roster_excludes_other_expired_and_handled_collaboration_invites(self):
-        user = User.objects.create_user(
-            username="collab",
-            email="collab@example.com",
-            password="testpass123",
-        )
         self.invite.email = "somebody-else@example.com"
         self.invite.save(update_fields=["email"])
         AgentCollaboratorInvite.objects.create(
             agent=self.agent,
-            email=user.email,
+            email=self.recipient.email,
             invited_by=self.owner,
             expires_at=timezone.now() - timedelta(minutes=1),
         )
         AgentCollaboratorInvite.objects.create(
             agent=self.agent,
-            email=user.email,
+            email=self.recipient.email,
             invited_by=self.owner,
             status=AgentCollaboratorInvite.InviteStatus.REJECTED,
             expires_at=timezone.now() + timedelta(days=7),
             responded_at=timezone.now(),
         )
-        self.client.force_login(user)
+        self.client.force_login(self.recipient)
 
         response = self.client.get(reverse("console_agent_roster"))
 
@@ -148,8 +149,10 @@ class AgentCollaboratorInviteViewTests(TestCase):
         self.assertEqual(response.json().get("agent_invites"), [])
 
     def test_roster_matches_associated_account_email(self):
+        self.invite.email = "associated@example.com"
+        self.invite.save(update_fields=["email"])
         user = User.objects.create_user(
-            username="collab",
+            username="alternate",
             email="primary@example.com",
             password="testpass123",
         )
@@ -168,18 +171,9 @@ class AgentCollaboratorInviteViewTests(TestCase):
             [str(self.invite.id)],
         )
 
-    def test_unverified_associated_email_cannot_view_or_accept_invite(self):
-        user = User.objects.create_user(
-            username="collab",
-            email="primary@example.com",
-            password="testpass123",
-        )
-        EmailAddress.objects.create(
-            user=user,
-            email=self.invite.email,
-            verified=False,
-        )
-        self.client.force_login(user)
+    def test_unverified_primary_email_cannot_view_or_accept_invite(self):
+        EmailAddress.objects.filter(user=self.recipient).update(verified=False)
+        self.client.force_login(self.recipient)
 
         roster_response = self.client.get(reverse("console_agent_roster"))
         accept_response = self.client.post(
@@ -191,16 +185,11 @@ class AgentCollaboratorInviteViewTests(TestCase):
         self.assertEqual(accept_response.status_code, 200)
         self.assertEqual(accept_response.json().get("issue"), "wrong_account")
         self.assertFalse(
-            AgentCollaborator.objects.filter(agent=self.agent, user=user).exists()
+            AgentCollaborator.objects.filter(agent=self.agent, user=self.recipient).exists()
         )
 
     def test_accept_view_creates_collaborator(self):
-        user = User.objects.create_user(
-            username="collab",
-            email="collab@example.com",
-            password="testpass123",
-        )
-        self.client.force_login(user)
+        self.client.force_login(self.recipient)
         url = reverse("agent_collaborator_invite_accept", kwargs={"token": self.invite.token})
 
         response = self.client.post(url)
@@ -215,18 +204,13 @@ class AgentCollaboratorInviteViewTests(TestCase):
             ),
         )
         self.assertTrue(
-            AgentCollaborator.objects.filter(agent=self.agent, user=user).exists()
+            AgentCollaborator.objects.filter(agent=self.agent, user=self.recipient).exists()
         )
         self.invite.refresh_from_db()
         self.assertEqual(self.invite.status, AgentCollaboratorInvite.InviteStatus.ACCEPTED)
 
     def test_legacy_accept_get_redirects_to_immersive_app(self):
-        user = User.objects.create_user(
-            username="collab",
-            email="collab@example.com",
-            password="testpass123",
-        )
-        self.client.force_login(user)
+        self.client.force_login(self.recipient)
         url = reverse("agent_collaborator_invite_accept", kwargs={"token": self.invite.token})
 
         response = self.client.get(url)
@@ -238,12 +222,7 @@ class AgentCollaboratorInviteViewTests(TestCase):
         )
 
     def test_legacy_reject_get_redirects_to_immersive_app(self):
-        user = User.objects.create_user(
-            username="collab",
-            email="collab@example.com",
-            password="testpass123",
-        )
-        self.client.force_login(user)
+        self.client.force_login(self.recipient)
         url = reverse("agent_collaborator_invite_reject", kwargs={"token": self.invite.token})
 
         response = self.client.get(url)
@@ -255,12 +234,7 @@ class AgentCollaboratorInviteViewTests(TestCase):
         )
 
     def test_accept_api_creates_collaborator(self):
-        user = User.objects.create_user(
-            username="collab",
-            email="collab@example.com",
-            password="testpass123",
-        )
-        self.client.force_login(user)
+        self.client.force_login(self.recipient)
         url = reverse("console-agent-collaborator-invite-accept-api", kwargs={"token": self.invite.token})
 
         response = self.client.post(url)
@@ -279,19 +253,14 @@ class AgentCollaboratorInviteViewTests(TestCase):
             ),
         )
         self.assertTrue(
-            AgentCollaborator.objects.filter(agent=self.agent, user=user).exists()
+            AgentCollaborator.objects.filter(agent=self.agent, user=self.recipient).exists()
         )
         roster_response = self.client.get(reverse("console_agent_roster"))
         self.assertEqual(roster_response.status_code, 200)
         self.assertEqual(roster_response.json().get("agent_invites"), [])
 
     def test_decline_api_marks_invite_declined(self):
-        user = User.objects.create_user(
-            username="collab",
-            email="collab@example.com",
-            password="testpass123",
-        )
-        self.client.force_login(user)
+        self.client.force_login(self.recipient)
         url = reverse("console-agent-collaborator-invite-decline-api", kwargs={"token": self.invite.token})
 
         response = self.client.post(url)
@@ -304,7 +273,7 @@ class AgentCollaboratorInviteViewTests(TestCase):
         self.invite.refresh_from_db()
         self.assertEqual(self.invite.status, AgentCollaboratorInvite.InviteStatus.REJECTED)
         self.assertFalse(
-            AgentCollaborator.objects.filter(agent=self.agent, user=user).exists()
+            AgentCollaborator.objects.filter(agent=self.agent, user=self.recipient).exists()
         )
         roster_response = self.client.get(reverse("console_agent_roster"))
         self.assertEqual(roster_response.status_code, 200)
@@ -330,12 +299,7 @@ class AgentCollaboratorInviteViewTests(TestCase):
     @patch("console.views.Analytics.track_event")
     @patch("api.agent.tasks.process_events.process_agent_events_task.delay")
     def test_accept_view_records_system_step_and_triggers_processing(self, mock_delay, _mock_track_event):
-        user = User.objects.create_user(
-            username="collab",
-            email="collab@example.com",
-            password="testpass123",
-        )
-        self.client.force_login(user)
+        self.client.force_login(self.recipient)
         url = reverse("agent_collaborator_invite_accept", kwargs={"token": self.invite.token})
 
         with self.captureOnCommitCallbacks(execute=True):

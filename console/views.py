@@ -2791,8 +2791,6 @@ class AgentCollaboratorInviteValidationMixin:
         invite_email = (invite.email or "").strip().lower()
         if not invite_email:
             return False
-        if (user.email or "").strip().lower() == invite_email:
-            return True
         from allauth.account.models import EmailAddress
 
         return EmailAddress.objects.filter(
