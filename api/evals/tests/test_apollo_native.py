@@ -103,7 +103,6 @@ class ApolloNativeScenarioTests(SimpleTestCase):
         instructions = _apollo_native_prompt_instructions(SimpleNamespace())
 
         self.assertIn("For 401, ask the user to reconnect Apollo", instructions)
-        self.assertIn("/app/integrations", instructions)
         self.assertIn("for 403, stop retrying", instructions)
         self.assertIn("master API key", instructions)
         self.assertIn("For 422, repair the request shape", instructions)

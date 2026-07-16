@@ -52,9 +52,10 @@ def _apollo_http_error_guidance(status_code: int, content: Any) -> str:
     content_text = json.dumps(content) if isinstance(content, (dict, list)) else str(content or "")
     content_lower = content_text.lower()
     if status_code == 401:
+        integrations_url = f"{settings.PUBLIC_SITE_URL.rstrip('/')}/app/integrations"
         return (
             "Native Apollo auth was applied, but Apollo rejected authorization. Ask the user to reconnect Apollo "
-            "from /app/integrations before retrying."
+            f"at {integrations_url} before retrying."
         )
     if status_code == 403:
         return (

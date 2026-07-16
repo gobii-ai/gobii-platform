@@ -156,7 +156,7 @@ def _apollo_native_prompt_instructions(agent) -> str:
         "validation error, or partial side-effect failure. A 200 with an empty `people`, `contacts`, `accounts`, "
         "`organizations`, or `emailer_campaigns` array is a no-result response unless Apollo includes an explicit "
         "error. A 200 `/people/match` response with a blank person object or missing email is no_match/no_email, "
-        f"not an integration failure. For 401, ask the user to reconnect Apollo at `{integrations_url}`; for 403, stop retrying and explain "
+        "not an integration failure. For 401, ask the user to reconnect Apollo; for 403, stop retrying and explain "
         "that the connected Apollo account may lack the required plan, master API key, or scope. For 422, repair "
         "the request shape before retrying; in per-person enrichment batches, treat one invalid or unmatched person "
         "as a row-level miss and continue with the remaining valid people when possible.\n"

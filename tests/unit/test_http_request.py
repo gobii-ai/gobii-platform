@@ -5,7 +5,7 @@ from io import BytesIO
 from unittest.mock import patch, MagicMock
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase, tag
+from django.test import TestCase, override_settings, tag
 
 from api.models import BrowserUseAgent, PersistentAgent
 from api.agent.tools.http_request import _native_http_error_guidance, execute_http_request
@@ -159,6 +159,7 @@ class HttpRequestJsonParsingTests(TestCase):
         _, kwargs = mock_request.call_args
         self.assertEqual(kwargs["headers"]["User-Agent"], "agent/1.0")
 
+    @override_settings(PUBLIC_SITE_URL="https://app.example.test")
     def test_apollo_auth_plan_and_validation_error_guidance_is_specific(self):
         reconnect_guidance = _native_http_error_guidance("apollo", 401, {"error": "Unauthorized"})
         plan_guidance = _native_http_error_guidance("apollo", 403, {"error": "Forbidden"})
@@ -169,6 +170,7 @@ class HttpRequestJsonParsingTests(TestCase):
         )
 
         self.assertIn("reconnect Apollo", reconnect_guidance)
+        self.assertIn("https://app.example.test/app/integrations", reconnect_guidance)
         self.assertIn("Stop retrying", plan_guidance)
         self.assertIn("required plan", plan_guidance)
         self.assertIn("master API key", plan_guidance)
