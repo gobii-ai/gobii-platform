@@ -147,10 +147,11 @@ export function UsageTrendSection({
       },
       tooltip: {
         trigger: 'axis',
+        appendTo: 'body',
         backgroundColor: 'rgba(15, 23, 42, 0.96)',
         borderColor: 'rgba(148, 163, 184, 0.25)',
         textStyle: { color: '#f8fafc' },
-        valueFormatter: (value: TooltipFormatterValue, _dataIndex: number) => {
+        valueFormatter: (value: TooltipFormatterValue) => {
           const numericValue = Array.isArray(value) ? value[0] : value
           return typeof numericValue === 'number' ? creditFormatter.format(numericValue) : `${numericValue ?? ''}`
         },
