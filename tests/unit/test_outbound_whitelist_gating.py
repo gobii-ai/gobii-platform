@@ -130,6 +130,40 @@ class OutboundWhitelistGatingTests(TransactionTestCase):
 
     @patch("api.agent.tools.email_sender.deliver_agent_email")
     @tag("batch_outbound_email")
+    def test_email_auto_approval_activates_manual_policy(self, mock_deliver_email, mock_close_old_connections):
+        self.agent.contact_approval_mode = PersistentAgent.ContactApprovalMode.AUTO_APPROVE_EMAIL
+        self.agent.whitelist_policy = PersistentAgent.WhitelistPolicy.DEFAULT
+        self.agent.save(update_fields=["contact_approval_mode", "whitelist_policy"])
+
+        result = execute_send_email(self.agent, {
+            "to_address": "new-policy-contact@example.com",
+            "subject": "Automatic contacts",
+            "mobile_first_html": "<p>Hello</p>",
+        })
+
+        self.assertEqual(result.get("status"), "ok")
+        self.agent.refresh_from_db()
+        self.assertEqual(self.agent.whitelist_policy, PersistentAgent.WhitelistPolicy.MANUAL)
+        mock_deliver_email.assert_called_once()
+
+    @patch("api.agent.tools.email_sender.deliver_agent_email")
+    @tag("batch_outbound_email")
+    def test_email_auto_approval_honors_mode_change_before_lock(self, mock_deliver_email, mock_close_old_connections):
+        self.agent.contact_approval_mode = PersistentAgent.ContactApprovalMode.AUTO_APPROVE_EMAIL
+
+        result = execute_send_email(self.agent, {
+            "to_address": "needs-review@example.com",
+            "subject": "Automatic contacts",
+            "mobile_first_html": "<p>Hello</p>",
+        })
+
+        self.assertEqual(result.get("status"), "error")
+        self.assertIn("requires approval", result.get("message", ""))
+        self.assertFalse(CommsAllowlistEntry.objects.filter(agent=self.agent).exists())
+        mock_deliver_email.assert_not_called()
+
+    @patch("api.agent.tools.email_sender.deliver_agent_email")
+    @tag("batch_outbound_email")
     def test_email_auto_approval_reactivates_inactive_contact(self, mock_deliver_email, mock_close_old_connections):
         self.agent.contact_approval_mode = PersistentAgent.ContactApprovalMode.AUTO_APPROVE_EMAIL
         self.agent.save(update_fields=["contact_approval_mode"])

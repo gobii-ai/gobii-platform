@@ -137,6 +137,19 @@ type FormState = {
   contactApprovalMode: ContactApprovalMode
 }
 
+const CONTACT_APPROVAL_OPTIONS = [
+  {
+    value: 'require_approval',
+    title: 'Ask before adding',
+    description: 'Review each new email or SMS contact before the agent can reach them.',
+  },
+  {
+    value: 'auto_approve_email',
+    title: 'Automatically allow email contacts',
+    description: 'Anyone your agent emails is added to its contacts.',
+  },
+] as const
+
 const generateTempId = () =>
   typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `temp-${Date.now()}-${Math.random().toString(36).slice(2)}`
 
@@ -2508,51 +2521,37 @@ function AllowlistManager({
 
   return (
     <div className="space-y-5">
-      <div className="space-y-3">
-        <div>
-          <h4 className="text-sm font-semibold text-slate-700">New contact approval</h4>
-          <p className="mt-1 text-xs text-slate-500">Choose how this agent handles email addresses that are not already listed.</p>
-        </div>
-        <div className="grid gap-3 lg:grid-cols-2" role="radiogroup" aria-label="New contact approval">
-          <button
-            type="button"
-            role="radio"
-            aria-checked={contactApprovalMode === 'require_approval'}
-            onClick={() => onContactApprovalModeChange('require_approval')}
-            className={`flex items-start gap-3 rounded-xl border px-4 py-4 text-left transition-colors ${
-              contactApprovalMode === 'require_approval'
-                ? 'border-blue-400/60 bg-blue-950/30'
-                : 'border-slate-200/20 bg-transparent hover:border-slate-300/40'
-            }`}
-          >
-            <span className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-slate-200/20 bg-slate-900/45 text-slate-300">
-              <ShieldAlert className="size-4" aria-hidden="true" />
-            </span>
-            <span>
-              <span className="block text-sm font-semibold text-slate-100">Ask before adding</span>
-              <span className="mt-1 block text-xs leading-5 text-slate-400">Review each new email or SMS contact before the agent can reach them.</span>
-            </span>
-          </button>
-          <button
-            type="button"
-            role="radio"
-            aria-checked={contactApprovalMode === 'auto_approve_email'}
-            onClick={() => onContactApprovalModeChange('auto_approve_email')}
-            className={`flex items-start gap-3 rounded-xl border px-4 py-4 text-left transition-colors ${
-              contactApprovalMode === 'auto_approve_email'
-                ? 'border-blue-400/60 bg-blue-950/30'
-                : 'border-slate-200/20 bg-transparent hover:border-slate-300/40'
-            }`}
-          >
-            <span className="relative flex size-9 shrink-0 items-center justify-center rounded-lg border border-slate-200/20 bg-slate-900/45 text-slate-300">
-              <Mail className="size-4" aria-hidden="true" />
-              <Zap className="absolute -right-1 -top-1 size-3 text-amber-300" aria-hidden="true" />
-            </span>
-            <span>
-              <span className="block text-sm font-semibold text-slate-100">Automatically allow email contacts</span>
-              <span className="mt-1 block text-xs leading-5 text-slate-400">Anyone your agent emails is added to its contacts.</span>
-            </span>
-          </button>
+      <fieldset className="space-y-3">
+        <legend className="text-sm font-semibold text-slate-700">New contact approval</legend>
+        <p className="text-xs text-slate-500">Choose how this agent handles email addresses that are not already listed.</p>
+        <div className="grid gap-3 lg:grid-cols-2">
+          {CONTACT_APPROVAL_OPTIONS.map((option) => {
+            const selected = contactApprovalMode === option.value
+            return (
+              <label
+                key={option.value}
+                className={`flex cursor-pointer items-start gap-3 rounded-xl border px-4 py-4 text-left transition-colors ${
+                  selected
+                    ? 'border-blue-400/60 bg-blue-950/30'
+                    : 'border-slate-200/20 bg-transparent hover:border-slate-300/40'
+                } ${saving ? 'cursor-not-allowed opacity-60' : ''}`}
+              >
+                <input
+                  type="radio"
+                  name="contact-approval-mode-choice"
+                  value={option.value}
+                  checked={selected}
+                  disabled={saving}
+                  onChange={() => onContactApprovalModeChange(option.value)}
+                  className="mt-1 size-4 shrink-0 accent-blue-500"
+                />
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-semibold text-slate-100">{option.title}</span>
+                  <span className="mt-1 block text-xs leading-5 text-slate-400">{option.description}</span>
+                </span>
+              </label>
+            )
+          })}
         </div>
         {contactApprovalMode === 'auto_approve_email' && (
           <div className="flex items-start gap-2 rounded-lg border border-amber-300/20 bg-amber-950/30 px-4 py-3 text-xs leading-5 text-amber-100">
@@ -2562,7 +2561,7 @@ function AllowlistManager({
             </p>
           </div>
         )}
-      </div>
+      </fieldset>
 
       {!state.emailVerified && (
         <div className={embeddedInfoBannerClassName}>

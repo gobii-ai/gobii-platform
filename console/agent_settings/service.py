@@ -485,13 +485,6 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
         except (AttributeError, DatabaseError):
             owner_phone = None
 
-        html = render_to_string('console/partials/_allowlist_entries_inline.html', {
-            'allowlist_entries': entries,
-            'pending_invites': pending_invites,
-            'owner_email': owner_email,
-            'owner_phone': owner_phone,
-        })
-
         active_count = CommsAllowlistEntry.objects.filter(
             agent=agent,
             is_active=True
@@ -507,7 +500,6 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
 
         return {
             'success': True,
-            'html': html,
             'active_count': total_count,
             'allowlist': self._serialize_allowlist_state(
                 agent,

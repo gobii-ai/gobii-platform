@@ -213,23 +213,18 @@ def execute_request_contact_permission(agent: PersistentAgent, params: dict) -> 
             ):
                 try:
                     with transaction.atomic():
-                        request_obj = CommsAllowlistRequest.objects.create(
+                        authorize_email_contacts(agent, [address])
+                        CommsAllowlistRequest.objects.create(
                             agent=agent,
                             channel=channel_enum,
                             address=address,
                             name=name,
                             reason=reason,
                             purpose=purpose,
-                            expires_at=timezone.now() + timedelta(days=7),
+                            status=CommsAllowlistRequest.RequestStatus.APPROVED,
+                            responded_at=timezone.now(),
                         )
-                        authorize_email_contacts(agent, [address])
-                        request_obj.approve(invited_by=agent.user, skip_invitation=True)
-                    auto_approved.append({
-                        "address": address,
-                        "channel": channel,
-                        "name": name or "Unknown",
-                        "purpose": purpose,
-                    })
+                    auto_approved.append(f"{name or 'Unknown'} ({address})")
                 except (AutomaticContactAuthorizationError, IntegrityError, ValidationError, ValueError) as exc:
                     errors.append(f"Failed to automatically allow '{address}': {exc}")
                 continue
@@ -267,19 +262,20 @@ def execute_request_contact_permission(agent: PersistentAgent, params: dict) -> 
             errors.append(error_msg)
             logger.exception("Error creating contact request for agent %s", agent.id)
     
-    # Generate the full external URL for the contact requests page
-    try:
-        approval_url = build_immersive_contact_requests_site_url(
-            agent.id,
-            str(agent.organization_id) if agent.organization_id else None,
-        )
-    except Exception:
-        logger.warning(
-            "Failed to generate contact requests URL for agent %s; returning relative fallback",
-            agent.id,
-            exc_info=True,
-        )
-        approval_url = build_immersive_contact_requests_path(agent.id)
+    approval_url = None
+    if created_requests:
+        try:
+            approval_url = build_immersive_contact_requests_site_url(
+                agent.id,
+                str(agent.organization_id) if agent.organization_id else None,
+            )
+        except Exception:
+            logger.warning(
+                "Failed to generate contact requests URL for agent %s; returning relative fallback",
+                agent.id,
+                exc_info=True,
+            )
+            approval_url = build_immersive_contact_requests_path(agent.id)
     
     # Build response message
     parts = []
@@ -291,9 +287,7 @@ def execute_request_contact_permission(agent: PersistentAgent, params: dict) -> 
         parts.append(f"Created {len(created_requests)} contact request(s): {contacts_list}")
 
     if auto_approved:
-        contacts_list = ", ".join([
-            f"{c['name']} ({c['address']})" for c in auto_approved
-        ])
+        contacts_list = ", ".join(auto_approved)
         parts.append(f"Automatically allowed {len(auto_approved)} email contact(s): {contacts_list}")
     
     if already_allowed:
@@ -315,10 +309,8 @@ def execute_request_contact_permission(agent: PersistentAgent, params: dict) -> 
         message += f". You must now send a message to the user asking them to approve the contact request(s) at {approval_url}"
     
     # Determine status
-    if (created_requests or auto_approved) and not errors:
-        status = "ok"
-    elif (created_requests or auto_approved) and errors:
-        status = "partial"
+    if created_requests or auto_approved:
+        status = "partial" if errors else "ok"
     elif already_allowed and not errors:
         status = "ok"
     else:
@@ -331,5 +323,5 @@ def execute_request_contact_permission(agent: PersistentAgent, params: dict) -> 
         "auto_approved_count": len(auto_approved),
         "already_allowed_count": len(already_allowed),
         "already_pending_count": len(already_pending),
-        "approval_url": approval_url if created_requests else None
+        "approval_url": approval_url
     }

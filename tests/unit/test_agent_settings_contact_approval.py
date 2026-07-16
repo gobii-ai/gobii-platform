@@ -1,3 +1,5 @@
+from unittest.mock import patch
+
 from django.contrib.auth import get_user_model
 from django.test import TestCase, tag
 from django.urls import reverse
@@ -106,3 +108,23 @@ class AgentSettingsContactApprovalTests(TestCase):
             self.agent.contact_approval_mode,
             PersistentAgent.ContactApprovalMode.REQUIRE_APPROVAL,
         )
+
+    @patch("console.agent_settings.service.process_agent_events_task.delay")
+    def test_allowlist_ajax_returns_structured_payload_without_legacy_html(self, _mock_process_events):
+        self.client.force_login(self.owner)
+
+        response = self.client.post(
+            self.url,
+            {
+                "action": "add_allowlist",
+                "channel": CommsChannel.EMAIL,
+                "address": "structured@example.com",
+            },
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+        )
+
+        self.assertEqual(response.status_code, 200, response.content.decode())
+        payload = response.json()
+        self.assertTrue(payload["success"])
+        self.assertIn("allowlist", payload)
+        self.assertNotIn("html", payload)
