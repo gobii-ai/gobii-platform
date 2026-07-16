@@ -34,11 +34,8 @@ def authorize_email_contacts(agent: PersistentAgent, addresses) -> None:
         return
 
     with transaction.atomic():
-        locked_agent = (
-            PersistentAgent.objects.select_for_update()
-            .select_related("user", "organization")
-            .get(pk=agent.pk)
-        )
+        # PostgreSQL cannot lock the nullable side of the organization outer join.
+        locked_agent = PersistentAgent.objects.select_for_update().get(pk=agent.pk)
         if locked_agent.contact_approval_mode != PersistentAgent.ContactApprovalMode.AUTO_APPROVE_EMAIL:
             raise AutomaticContactAuthorizationError(
                 "This agent requires approval before adding new email contacts."

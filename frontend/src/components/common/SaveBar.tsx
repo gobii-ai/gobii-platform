@@ -47,7 +47,9 @@ export function SaveBar({
   const isEmbedded = variant === 'embedded'
   const isFixed = placement === 'fixed'
   const rootClassName = isFixed ? 'fixed inset-x-0 bottom-0 z-40 pointer-events-none' : 'sticky bottom-4 z-20'
-  const frameClassName = isFixed ? 'pointer-events-auto mx-auto w-full max-w-5xl px-4 pb-4' : 'w-full'
+  const frameClassName = isFixed
+    ? `pointer-events-auto mx-auto w-full px-4 pb-4 ${isEmbedded ? '' : 'max-w-5xl'}`
+    : 'w-full'
   const surfaceClassName = isEmbedded
     ? getSettingsSurfaceClassName({ variant: 'embedded', className: 'px-4 py-3' })
     : getSettingsSurfaceClassName({

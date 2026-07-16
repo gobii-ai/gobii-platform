@@ -142,11 +142,15 @@ const CONTACT_APPROVAL_OPTIONS = [
     value: 'require_approval',
     title: 'Ask before adding',
     description: 'Review each new email or SMS contact before the agent can reach them.',
+    icon: ShieldAlert,
+    badge: null,
   },
   {
     value: 'auto_approve_email',
     title: 'Automatically allow email contacts',
     description: 'Anyone your agent emails is added to its contacts.',
+    icon: Mail,
+    badge: Zap,
   },
 ] as const
 
@@ -2299,7 +2303,7 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
         error={saveError}
         helperText="Save now to update the chat shell and gallery immediately."
         variant="embedded"
-        placement="sticky"
+        placement="fixed"
       />
 
       {modal}
@@ -2526,6 +2530,8 @@ function AllowlistManager({
         <p className="text-xs text-slate-500">Choose how this agent handles email addresses that are not already listed.</p>
         <div className="grid gap-3 lg:grid-cols-2">
           {CONTACT_APPROVAL_OPTIONS.map((option) => {
+            const Icon = option.icon
+            const Badge = option.badge
             const selected = contactApprovalMode === option.value
             return (
               <label
@@ -2536,6 +2542,14 @@ function AllowlistManager({
                     : 'border-slate-200/20 bg-transparent hover:border-slate-300/40'
                 } ${saving ? 'cursor-not-allowed opacity-60' : ''}`}
               >
+                <span className="relative flex size-9 shrink-0 items-center justify-center rounded-lg border border-slate-200/20 bg-slate-900/45 text-slate-300">
+                  <Icon className="size-4" aria-hidden="true" />
+                  {Badge && <Badge className="absolute -right-1 -top-1 size-3 text-amber-300" aria-hidden="true" />}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-semibold text-slate-100">{option.title}</span>
+                  <span className="mt-1 block text-xs leading-5 text-slate-400">{option.description}</span>
+                </span>
                 <input
                   type="radio"
                   name="contact-approval-mode-choice"
@@ -2543,12 +2557,8 @@ function AllowlistManager({
                   checked={selected}
                   disabled={saving}
                   onChange={() => onContactApprovalModeChange(option.value)}
-                  className="mt-1 size-4 shrink-0 accent-blue-500"
+                  className="mt-2 size-4 shrink-0 accent-blue-500"
                 />
-                <span className="min-w-0 flex-1">
-                  <span className="block text-sm font-semibold text-slate-100">{option.title}</span>
-                  <span className="mt-1 block text-xs leading-5 text-slate-400">{option.description}</span>
-                </span>
               </label>
             )
           })}
