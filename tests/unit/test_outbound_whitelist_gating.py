@@ -148,7 +148,11 @@ class OutboundWhitelistGatingTests(TransactionTestCase):
 
     @patch("api.agent.tools.email_sender.deliver_agent_email")
     @tag("batch_outbound_email")
-    def test_email_auto_approval_honors_mode_change_before_lock(self, mock_deliver_email, mock_close_old_connections):
+    def test_email_auto_approval_uses_persisted_mode_and_ignores_instance_changes(
+        self,
+        mock_deliver_email,
+        mock_close_old_connections,
+    ):
         self.agent.contact_approval_mode = PersistentAgent.ContactApprovalMode.AUTO_APPROVE_EMAIL
 
         result = execute_send_email(self.agent, {
@@ -193,7 +197,11 @@ class OutboundWhitelistGatingTests(TransactionTestCase):
 
     @patch("api.agent.tools.email_sender.deliver_agent_email")
     @tag("batch_outbound_email")
-    def test_email_auto_approval_preserves_disabled_outbound(self, mock_deliver_email, mock_close_old_connections):
+    def test_email_auto_approval_preflights_blocked_recipient_before_adding_contacts(
+        self,
+        mock_deliver_email,
+        mock_close_old_connections,
+    ):
         self.agent.contact_approval_mode = PersistentAgent.ContactApprovalMode.AUTO_APPROVE_EMAIL
         self.agent.save(update_fields=["contact_approval_mode"])
         entry = CommsAllowlistEntry.objects.create(
@@ -206,6 +214,7 @@ class OutboundWhitelistGatingTests(TransactionTestCase):
 
         result = execute_send_email(self.agent, {
             "to_address": entry.address,
+            "cc_addresses": ["new-contact@example.com"],
             "subject": "Should remain blocked",
             "mobile_first_html": "<p>Hello</p>",
         })
@@ -214,6 +223,12 @@ class OutboundWhitelistGatingTests(TransactionTestCase):
         self.assertIn("Outbound email is disabled", result.get("message", ""))
         entry.refresh_from_db()
         self.assertFalse(entry.allow_outbound)
+        self.assertFalse(
+            CommsAllowlistEntry.objects.filter(
+                agent=self.agent,
+                address="new-contact@example.com",
+            ).exists()
+        )
         mock_deliver_email.assert_not_called()
 
     @patch("api.services.contact_authorization.get_user_max_contacts_per_agent", return_value=1)

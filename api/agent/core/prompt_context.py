@@ -2649,15 +2649,14 @@ def _build_contacts_block(
             allowed_lines.append(
                 "If the user asks you to email or text a specific new address or phone number, request contact permission before reading files, searching, drafting, tool search, or asking non-blocking follow-up questions."
             )
+            allowed_lines.append(
+                "Do not infer approval from local lead status or an empty pending contacts queue."
+            )
         allowed_lines.append(
             f"For existing or bulk recipient checks, query {CONTACTS_TABLE}; safe outbound recipients "
             "have status='allowed' AND allow_outbound=1. Use ORDER BY relevance_at DESC for "
             "recently active or updated contacts."
         )
-        if not auto_approve_email:
-            allowed_lines.append(
-                "Do not infer approval from local lead status or an empty pending contacts queue."
-            )
         allowed_lines.append("You do not have to message or reply to everyone; you may choose the best contact or contacts for your needs.")
     else:
         allowed_lines.append("External contacts are unavailable until your owner verifies their email address.")

@@ -41,18 +41,33 @@ def authorize_email_contacts(agent: PersistentAgent, addresses) -> None:
                 "This agent requires approval before adding new email contacts."
             )
 
-        active_contact_addresses = set(
+        active_contacts = dict(
             CommsAllowlistEntry.objects.select_for_update().filter(
                 agent=locked_agent,
                 channel=CommsChannel.EMAIL,
                 address__in=normalized_addresses,
                 is_active=True,
-            ).values_list("address", flat=True)
+            ).values_list("address", "allow_outbound")
         )
+        blocked_address = next(
+            (
+                address
+                for address in normalized_addresses
+                if active_contacts.get(address) is False
+                and not locked_agent.is_internal_responder_identity(CommsChannel.EMAIL, address)
+            ),
+            None,
+        )
+        if blocked_address:
+            raise AutomaticContactAuthorizationError(
+                f"Outbound email is disabled for contact '{blocked_address}'. "
+                "The owner can enable it in Contacts & Access."
+            )
+
         addresses_to_authorize = [
             address
             for address in normalized_addresses
-            if address not in active_contact_addresses
+            if address not in active_contacts
             and not locked_agent.is_recipient_whitelisted(CommsChannel.EMAIL, address)
         ]
         agent.whitelist_policy = locked_agent.whitelist_policy
