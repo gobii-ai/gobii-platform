@@ -58,7 +58,7 @@ def ensure_eval_local_compat_columns(stdout=None) -> int:
     compat_fields = (
         (BrowserUseAgentTask, ("filespace_artifacts",)),
         (EvalRunTask, ("debug_artifacts",)),
-        (PersistentAgent, ("sms_disabled",)),
+        (PersistentAgent, ("sms_disabled", "mini_description_mode")),
         (AgentAllowlistInvite, sms_contact_fields),
         (CommsAllowlistEntry, sms_contact_fields),
         (CommsAllowlistRequest, sms_contact_fields),
@@ -68,7 +68,7 @@ def ensure_eval_local_compat_columns(stdout=None) -> int:
         (ImageGenerationModelEndpoint, ("litellm_pricing_model",)),
         (VideoGenerationModelEndpoint, ("litellm_pricing_model",)),
         (PersistentAgentToolCall, ("parent_tool_call",)),
-        (PersistentAgentCompletion, ("time_to_first_token_ms",)),
+        (PersistentAgentCompletion, ("time_to_first_token_ms", "prompt_archive")),
     )
     existing_tables = set(connection.introspection.table_names())
     missing_by_model = []

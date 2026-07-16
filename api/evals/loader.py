@@ -8,6 +8,7 @@ from api.evals.scenarios.custom_tool_result_contract import CUSTOM_TOOL_RESULT_C
 from api.evals.scenarios.daily_credit_prompt import DAILY_CREDIT_PROMPT_SCENARIO_SLUGS, DAILY_CREDIT_PROMPT_SUITE_SLUG
 from api.evals.scenarios.sqlite_tool_results import SQLITE_TOOL_RESULT_SCENARIO_SLUGS, SQLITE_TOOL_RESULT_SUITE_SLUG
 from api.evals.scenarios.message_quality import MESSAGE_QUALITY_SCENARIO_SLUGS, MESSAGE_QUALITY_SUITE_SLUG
+from api.evals.scenarios.outreach import OUTREACH_SCENARIO_SLUGS, OUTREACH_SUITE_SLUG
 from api.evals.scenarios.google_sheets_native import GOOGLE_SHEETS_NATIVE_SCENARIO_SLUGS, GOOGLE_SHEETS_NATIVE_SUITE_SLUG
 from api.evals.scenarios.apollo_native import APOLLO_NATIVE_SCENARIO_SLUGS, APOLLO_NATIVE_SUITE_SLUG
 from api.evals.scenarios.recruitment_sourcing import RECRUITMENT_SOURCING_SCENARIO_SLUGS, RECRUITMENT_SOURCING_SUITE_SLUG
@@ -83,8 +84,13 @@ register_builtin_suites(
         ),
         EvalSuite(
             slug=MESSAGE_QUALITY_SUITE_SLUG,
-            description="Message formatting evals for rich reports and restrained simple emails.",
+            description="Message-quality evals for rich email and chat reports plus natural human messages.",
             scenario_slugs=MESSAGE_QUALITY_SCENARIO_SLUGS,
+        ),
+        EvalSuite(
+            slug=OUTREACH_SUITE_SLUG,
+            description="Human email-outreach evals across sales, recruiting, support, partnerships, and follow-ups.",
+            scenario_slugs=OUTREACH_SCENARIO_SLUGS,
         ),
         EvalSuite(
             slug=GOOGLE_SHEETS_NATIVE_SUITE_SLUG,

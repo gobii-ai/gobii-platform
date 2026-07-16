@@ -41,14 +41,6 @@ class MessageQualityScenarioTests(SimpleTestCase):
         self.assertEqual(len(channels_by_brief), 5)
         self.assertTrue(all(channels == {"email", "chat"} for channels in channels_by_brief.values()))
 
-    def test_simple_email_cases_are_restrained_outreach_counterexamples(self):
-        self.assertEqual(len(SIMPLE_EMAIL_QUALITY_CASES), 2)
-
-        for case in SIMPLE_EMAIL_QUALITY_CASES:
-            self.assertEqual(case.channel, "email")
-            self.assertEqual(case.quality_target, "simple_email")
-            self.assertIn("cold_outreach", case.slug)
-
     def test_generated_scenarios_have_message_quality_metadata(self):
         registered = ScenarioRegistry.list_all()
 

@@ -18,6 +18,7 @@ HUBSPOT_NATIVE_SYSTEM_SKILL_KEY = "hubspot_native"
 DISCORD_NATIVE_SYSTEM_SKILL_KEY = "discord_native"
 CODE_WORK_SYSTEM_SKILL_KEY = "code_work"
 RECRUITMENT_SOURCING_SYSTEM_SKILL_KEY = "recruitment_sourcing"
+OUTREACH_SYSTEM_SKILL_KEY = "outreach"
 
 
 def _custom_tool_development_prompt_available(agent) -> bool:
@@ -549,6 +550,7 @@ RECRUITMENT_SOURCING_SYSTEM_SKILL = SystemSkillDefinition(
         "staffing",
         "shortlist candidates",
         "find candidates",
+        "find and contact candidates",
         "source candidates",
         "hiring criteria",
         "job description sourcing",
@@ -560,6 +562,7 @@ RECRUITMENT_SOURCING_SYSTEM_SKILL = SystemSkillDefinition(
         "candidate sourcing",
         "talent sourcing",
         "find candidates",
+        "find and contact candidates",
         "source candidates",
         "screen candidates",
         "shortlist candidates",
@@ -632,6 +635,125 @@ RECRUITMENT_SOURCING_SYSTEM_SKILL = SystemSkillDefinition(
         "the verified partial set, the reason the rest is blocked or low confidence, and the next bounded search path. "
         "Once the verified set can answer the request, deliver it instead of repeating source searches or ledger reads. "
         "Quality and criteria fidelity beat volume."
+    ),
+)
+
+
+OUTREACH_SYSTEM_SKILL = SystemSkillDefinition(
+    skill_key=OUTREACH_SYSTEM_SKILL_KEY,
+    name="Outreach",
+    search_summary=(
+        "Research, write, send, and track concise human email outreach across sales, recruiting, support, "
+        "partnerships, and follow-up sequences."
+    ),
+    tool_names=("send_email",),
+    enables=(
+        "research and personalize email outreach from grounded recipient and company facts",
+        "write concise cold emails, recruiting messages, support follow-ups, and partnership pitches",
+        "send authorized outreach with restrained body-only HTML and clear calls to action",
+        "manage approved follow-up sequences and stop conditions",
+        "dedupe recipients and track outreach, reply, bounce, opt-out, and wrong-person states",
+    ),
+    use_when=(
+        "the user asks to write, draft, edit, humanize, or send a cold email",
+        "the user asks for email outreach to prospects, candidates, customers, partners, media, or investors",
+        "the user asks to contact sourced leads or candidates by email",
+        "the user asks to create or run an outreach campaign or email sequence",
+        "the user asks to follow up after no reply or handle an outreach response",
+        "the agent charter authorizes ongoing email outreach, prospecting, recruiting outreach, or partnership outreach",
+    ),
+    query_aliases=(
+        "outreach",
+        "email outreach",
+        "cold email",
+        "cold outreach",
+        "sales outreach",
+        "prospect outreach",
+        "candidate outreach",
+        "recruiting outreach",
+        "customer outreach",
+        "customer success outreach",
+        "support outreach",
+        "partnership outreach",
+        "PR outreach",
+        "media outreach",
+        "investor outreach",
+        "outreach campaign",
+        "email sequence",
+        "follow-up email",
+        "follow up email",
+        "follow-up sequence",
+        "contact these leads",
+        "contact these candidates",
+        "find and contact candidates",
+    ),
+    discovery_triggers=(
+        "email outreach",
+        "cold email",
+        "cold outreach",
+        "sales outreach",
+        "prospect outreach",
+        "candidate outreach",
+        "recruiting outreach",
+        "customer outreach",
+        "customer success outreach",
+        "support outreach",
+        "partnership outreach",
+        "PR outreach",
+        "media outreach",
+        "investor outreach",
+        "outreach campaign",
+        "email sequence",
+        "follow up email",
+        "follow up sequence",
+        "contact these leads",
+        "contact these candidates",
+        "find and contact candidates",
+    ),
+    prompt_instructions=(
+        "Treat outreach as a recipient-facing workflow, not a report-writing task. Recruitment Sourcing decides whom "
+        "to source and qualify. Provider skills such as Apollo handle provider-specific search, enrichment, CRM, or "
+        "sequence APIs. Use Outreach for recipient selection, grounded personalization, message copy, delivery, "
+        "follow-ups, and response state. Use both skills when the task spans both responsibilities.\n"
+        "Start from the sender's goal, audience, relationship, relevant evidence, and desired next step. Ask only when "
+        "a missing recipient, batch boundary, purpose, or cadence makes action unsafe or likely wrong. A clear current "
+        "send request or standing charter authorizing the stated outreach is approval; do not request redundant "
+        "confirmation. Never broaden the approved audience, batch, channel, or sequence on your own.\n"
+        "Personalize only from facts in the conversation, files, connected systems, or research results. Verify current "
+        "claims when the task depends on them. Never invent familiarity, recipient activity, contact details, pain "
+        "points, customer names, metrics, results, or reasons for contacting someone. Specific truthful relevance beats "
+        "generic praise. Do not use phrases such as 'I imagine' or 'you must be' to convert a public signal into an "
+        "unsupported need or problem.\n"
+        "Preserve the sender's voice, meaning, key terms, and commitments. Use plain language, active voice, natural "
+        "sentence variation, one clear purpose, and usually one low-friction ask. Prefer concise outreach, often 80 to "
+        "180 words, and specific subjects, often 3 to 7 words, but let context control length. Do not use fake `Re:` or "
+        "`Fwd:`, clickbait, all caps, vague urgency, or unsupported promises.\n"
+        "Use restrained body-only HTML for `send_email`, usually `<p>`, `<br>`, and `<a>` only. Do not use report "
+        "headings, tables, metric blocks, badges, decorative colors, visual cards, emoji, Markdown, or HTML wrapper "
+        "tags. Never leave unresolved placeholders such as `{{first_name}}`, `[COMPANY]`, or `<first_name>`. Do not use "
+        "em dashes. Generally avoid semicolons.\n"
+        "Remove filler, hype, cliches, and machine-like setup. Avoid stock phrases such as 'hope this email finds you "
+        "well', 'I wanted to reach out', 'just checking in', 'circle back', 'game-changer', 'unlock', 'dive into', and "
+        "'delve'. Do not flatten a distinctive sender into bland corporate copy, and do not apply a blanket ban to "
+        "ordinary words when the sentence sounds natural and precise.\n"
+        "For multi-recipient work, use available SQLite or CRM state to dedupe before sending and track stable recipient "
+        "identity, campaign or purpose, approval scope, attempt count, last message, next authorized action, and status. "
+        "Useful states include drafted, approved, sent, replied, bounced, opted_out, wrong_person, and stopped. Respect "
+        "contact permissions, suppression lists, opt-outs, and applicable sending limits.\n"
+        "Create follow-ups only when the user or standing charter authorized a cadence or next attempt. Preserve the "
+        "thread with `reply_to_message_id` when available, and retain the existing subject rather than inventing a new "
+        "one. Each follow-up should add a relevant fact, answer an open "
+        "question, or become shorter; do not repeat the original pitch, guilt the recipient, manufacture urgency, or "
+        "pretend they saw the prior message. Stop on any reply, opt-out, hard bounce, wrong-person signal, completed "
+        "goal, or approved attempt limit.\n"
+        "Classify replies by their actual meaning, including positive interest, question, objection, not interested, "
+        "wrong person, out of office, bounce, and opt-out. Update campaign state before taking the next action. Answer "
+        "questions directly, route support issues toward resolution rather than promotion, and never continue a sequence "
+        "after a stop condition.\n"
+        "Immediately before every `send_email` call, scan the final subject and body character by character. The Unicode "
+        "em dash character `—` must appear zero times. Replace it with a period, comma, colon, hyphen, or parenthesis. "
+        "Resolve every placeholder. Remove any report structure, decorative style, emoji, "
+        "invented inference, or extra ask. Call `send_email` only after this final check passes."
     ),
 )
 
@@ -1035,6 +1157,7 @@ DEFAULT_SYSTEM_SKILL_DEFINITIONS = {
     GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL.skill_key: GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL,
     APOLLO_NATIVE_SYSTEM_SKILL.skill_key: APOLLO_NATIVE_SYSTEM_SKILL,
     RECRUITMENT_SOURCING_SYSTEM_SKILL.skill_key: RECRUITMENT_SOURCING_SYSTEM_SKILL,
+    OUTREACH_SYSTEM_SKILL.skill_key: OUTREACH_SYSTEM_SKILL,
     HUBSPOT_NATIVE_SYSTEM_SKILL.skill_key: HUBSPOT_NATIVE_SYSTEM_SKILL,
     META_ADS_SYSTEM_SKILL.skill_key: META_ADS_SYSTEM_SKILL,
     DISCORD_NATIVE_SYSTEM_SKILL.skill_key: DISCORD_NATIVE_SYSTEM_SKILL,

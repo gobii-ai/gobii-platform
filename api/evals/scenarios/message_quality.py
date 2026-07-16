@@ -156,43 +156,6 @@ REPORT_MESSAGE_QUALITY_CASES = (
     _case("trading_dashboard", "chat", "web-user", "AI Trading System Dashboard", "trading_dashboard"),
 )
 
-SIMPLE_EMAIL_QUALITY_CASES = (
-    MessageQualityCase(
-        slug="message_quality_email_cold_outreach_intro",
-        channel="email",
-        recipient="maya.chen@example.test",
-        subject="Quick intro from Ridge Analytics",
-        brief="cold outreach intro to a finance lead",
-        source_facts=(
-            "Sender: Elena from Ridge Analytics.\n"
-            "Recipient: Maya Chen, VP Finance at Northstar Labs.\n"
-            "Context: Northstar Labs is hiring an Accounts Payable Manager.\n"
-            "Relevant offer: Ridge Analytics flags unusual vendor spend and duplicate invoice risk for finance teams.\n"
-            "Ask: whether Maya is open to a 15-minute intro next week.\n"
-            "Constraint: do not imply a prior relationship or make unsupported customer claims."
-        ),
-        source_example_ids=(),
-        quality_target="simple_email",
-    ),
-    MessageQualityCase(
-        slug="message_quality_email_cold_outreach_partner",
-        channel="email",
-        recipient="jordan.rivera@example.test",
-        subject="Partner idea for your RevOps clients",
-        brief="cold outreach partner idea",
-        source_facts=(
-            "Sender: Priya from Atlas Workflow.\n"
-            "Recipient: Jordan Rivera at Beacon RevOps.\n"
-            "Context: Beacon RevOps advises B2B SaaS teams on onboarding and retention operations.\n"
-            "Relevant offer: Atlas Workflow turns scattered onboarding notes into tracked implementation checklists.\n"
-            "Ask: whether Jordan would be open to comparing notes for 20 minutes.\n"
-            "Constraint: keep the ask low-pressure and do not include pricing."
-        ),
-        source_example_ids=(),
-        quality_target="simple_email",
-    ),
-)
-
 HUMAN_MESSAGE_QUALITY_CASES = (
     MessageQualityCase(
         slug="message_quality_chat_project_update",
@@ -270,7 +233,6 @@ PORTFOLIO_REPORT_QUALITY_CASES = (
 
 MESSAGE_QUALITY_CASES = (
     REPORT_MESSAGE_QUALITY_CASES
-    + SIMPLE_EMAIL_QUALITY_CASES
     + HUMAN_MESSAGE_QUALITY_CASES
     + OWNER_UPDATE_QUALITY_CASES
     + PORTFOLIO_REPORT_QUALITY_CASES
@@ -285,6 +247,8 @@ MESSAGE_QUALITY_SCENARIO_SLUGS = (
 
 MESSAGE_TOOL_NAMES = {"send_email", "send_chat_message", "send_sms", "send_agent_message"}
 EMAIL_ALLOWED_CONFIRMATION_TOOLS = {"send_chat_message"}
+
+
 class MessageQualityScenario(EvalScenario, ScenarioExecutionTools):
     tier = "extended"
     category = "message_quality"
@@ -378,13 +342,6 @@ class MessageQualityScenario(EvalScenario, ScenarioExecutionTools):
             )
 
     def _prompt(self, case: MessageQualityCase) -> str:
-        if case.quality_target == "simple_email":
-            return (
-                f"Send a cold outreach email to {case.recipient} with subject '{case.subject}'.\n\n"
-                "Use only these details; do not browse, create files, or ask follow-up questions.\n\n"
-                f"{case.source_facts}\n\n"
-                "Send the email now."
-            )
         if case.quality_target == "human_message":
             return (
                 "Send me a quick chat update using only the details below. Do not browse, create files, "
@@ -608,8 +565,6 @@ class MessageQualityScenario(EvalScenario, ScenarioExecutionTools):
 
     @staticmethod
     def _expected_delivery_summary(case: MessageQualityCase) -> str:
-        if case.quality_target == "simple_email":
-            return f"Agent should send a concise outreach email via {case.expected_tool}."
         if case.quality_target == "human_message":
             return f"Agent should send a natural, context-specific update via {case.expected_tool}."
         if case.quality_target == "human_reply":
@@ -622,8 +577,6 @@ class MessageQualityScenario(EvalScenario, ScenarioExecutionTools):
 
     @staticmethod
     def _expected_judge_summary(case: MessageQualityCase) -> str:
-        if case.quality_target == "simple_email":
-            return "Judge should pass only restrained, professional outreach email formatting."
         if case.quality_target == "human_message":
             return "Judge should pass only a natural, specific message without assistant-like tells."
         if case.quality_target == "human_reply":
@@ -640,14 +593,6 @@ class MessageQualityScenario(EvalScenario, ScenarioExecutionTools):
 
     @staticmethod
     def _judge_question(case: MessageQualityCase) -> str:
-        if case.quality_target == "simple_email":
-            return (
-                "Does this email fit a simple professional cold outreach use case? Pass only if it is "
-                "body-only HTML that sounds naturally written for this recipient and stays restrained: a greeting, one to three short paragraphs, a clear "
-                "reason and ask, and an optional simple signoff. Fail if it looks like a report, newsletter, "
-                "or marketing landing page; uses tables, metric blocks, status badges, emoji section labels, "
-                "heavy colors, multiple headings, excessive visual styling, generic praise, canned assistant language, or a templated cadence."
-            )
         if case.quality_target == "human_message":
             return (
                 "Would this read as a natural message from a thoughtful person who knows this context? Pass only if it is "

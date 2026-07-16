@@ -50,6 +50,7 @@ from api.models import (
     LLMProvider,
     Organization,
     PersistentAgent,
+    PersistentAgentCompletion,
     PersistentModelEndpoint,
     ProfilePersistentTierEndpoint,
 )
@@ -1394,12 +1395,75 @@ class MetaGobiiLocalEvalSetupTests(TestCase):
         with patch("api.evals.local_setup.connection", FakeConnection(schema_editor)):
             added = ensure_eval_local_compat_columns(stdout=stdout)
 
-        self.assertEqual(added, 1)
+        self.assertEqual(added, 2)
         self.assertEqual(
-            schema_editor.added_fields[0],
-            (PersistentAgent, PersistentAgent._meta.get_field("sms_disabled")),
+            schema_editor.added_fields,
+            [
+                (PersistentAgent, PersistentAgent._meta.get_field("sms_disabled")),
+                (PersistentAgent, PersistentAgent._meta.get_field("mini_description_mode")),
+            ],
         )
         self.assertIn("api_persistentagent.sms_disabled", stdout.getvalue())
+        self.assertIn("api_persistentagent.mini_description_mode", stdout.getvalue())
+
+    def test_local_eval_schema_compat_adds_missing_completion_columns(self):
+        class FakeCursor:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, traceback):
+                return False
+
+        class FakeIntrospection:
+            def table_names(self):
+                return ["api_persistentagentcompletion"]
+
+            def get_table_description(self, cursor, table_name):
+                return [SimpleNamespace(name="id")]
+
+        class FakeSchemaEditor:
+            def __init__(self):
+                self.added_fields = []
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, traceback):
+                return False
+
+            def add_field(self, model, field):
+                self.added_fields.append((model, field))
+
+        class FakeConnection:
+            def __init__(self, schema_editor):
+                self.introspection = FakeIntrospection()
+                self._schema_editor = schema_editor
+
+            def cursor(self):
+                return FakeCursor()
+
+            def schema_editor(self):
+                return self._schema_editor
+
+        stdout = StringIO()
+        schema_editor = FakeSchemaEditor()
+
+        with patch("api.evals.local_setup.connection", FakeConnection(schema_editor)):
+            added = ensure_eval_local_compat_columns(stdout=stdout)
+
+        self.assertEqual(added, 2)
+        self.assertEqual(
+            schema_editor.added_fields,
+            [
+                (
+                    PersistentAgentCompletion,
+                    PersistentAgentCompletion._meta.get_field("time_to_first_token_ms"),
+                ),
+                (PersistentAgentCompletion, PersistentAgentCompletion._meta.get_field("prompt_archive")),
+            ],
+        )
+        self.assertIn("api_persistentagentcompletion.time_to_first_token_ms", stdout.getvalue())
+        self.assertIn("api_persistentagentcompletion.prompt_archive_id", stdout.getvalue())
 
     def test_local_eval_schema_compat_adds_missing_allowlist_sms_columns(self):
         class FakeCursor:
