@@ -44,22 +44,38 @@ class BlogSeoTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         soup = BeautifulSoup(response.content, "html.parser")
+        image_alt = "A persistent Gobii AI agent posting a daily bug briefing inside a Discord channel"
         self.assertEqual(
             soup.find("meta", property="og:image:alt")["content"],
-            "Gobii Discord integration",
+            image_alt,
         )
         self.assertEqual(
             soup.find("meta", attrs={"name": "twitter:image:alt"})["content"],
-            "Gobii Discord integration",
+            image_alt,
         )
 
         structured_data = json.loads(soup.find("script", type="application/ld+json").string)
-        self.assertEqual(structured_data["@type"], "BlogPosting")
-        self.assertEqual(structured_data["inLanguage"], "en-US")
-        self.assertEqual(structured_data["isPartOf"]["name"], "Gobii Blog")
-        self.assertEqual(structured_data["keywords"], ["newsletter", "weekly", "product-updates"])
-        self.assertGreater(structured_data["wordCount"], 0)
-        self.assertEqual(structured_data["image"], structured_data["thumbnailUrl"])
+        article = next(item for item in structured_data["@graph"] if item["@type"] == "BlogPosting")
+        faq_page = next(item for item in structured_data["@graph"] if item["@type"] == "FAQPage")
+        self.assertEqual(article["inLanguage"], "en-US")
+        self.assertEqual(article["isPartOf"]["name"], "Gobii Blog")
+        self.assertEqual(
+            article["keywords"],
+            [
+                "newsletter",
+                "weekly",
+                "product-updates",
+                "discord-ai-agent",
+                "integrations",
+                "collaboration",
+            ],
+        )
+        self.assertEqual(article["author"]["name"], "Will Bonde")
+        self.assertEqual(len(faq_page["mainEntity"]), 4)
+        self.assertGreater(article["wordCount"], 0)
+        self.assertEqual(article["image"], article["thumbnailUrl"])
+        self.assertTrue(article["image"].endswith("newsletter-2026-06-02-discord-integration-hero.webp"))
+        self.assertContains(response, "Updated July 16, 2026")
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_blog_post_uses_default_social_alt_for_default_social_image(self):
@@ -76,6 +92,25 @@ class BlogSeoTests(TestCase):
             soup.find("meta", attrs={"name": "twitter:image:alt"})["content"],
             "Gobii logo",
         )
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_blog_post_renders_faq_graph_and_named_author_metadata(self):
+        response = self.client.get("/blog/newsletter-2026-04-08-inbound-webhooks/")
+
+        self.assertEqual(response.status_code, 200)
+        soup = BeautifulSoup(response.content, "html.parser")
+        structured_data = json.loads(soup.find("script", type="application/ld+json").string)
+        graph = structured_data["@graph"]
+        article = next(item for item in graph if item["@type"] == "BlogPosting")
+        faq_page = next(item for item in graph if item["@type"] == "FAQPage")
+
+        self.assertEqual(article["author"]["@type"], "Person")
+        self.assertEqual(article["author"]["name"], "Will Bonde")
+        self.assertEqual(article["author"]["jobTitle"], "Growth & Engineering")
+        self.assertTrue(article["author"]["url"].endswith("/team/"))
+        self.assertEqual(len(faq_page["mainEntity"]), 4)
+        self.assertContains(response, "Updated July 16, 2026")
+        self.assertContains(response, faq_page["mainEntity"][0]["acceptedAnswer"]["text"])
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_blog_index_renders_topic_hub_metadata_and_structured_data(self):
@@ -104,6 +139,20 @@ class BlogSeoTests(TestCase):
         self.assertNotContains(response, "text-cyan-50")
         self.assertNotContains(response, "bg-[#")
 
+        integrations_section = next(
+            section
+            for section in response.context["topic_sections"]
+            if section["name"] == "MCP and integrations"
+        )
+        self.assertIn(
+            "newsletter-2026-04-08-inbound-webhooks",
+            [post["slug"] for post in integrations_section["posts"]],
+        )
+        self.assertIn(
+            "newsletter-2026-06-02-discord-integration",
+            [post["slug"] for post in integrations_section["posts"]],
+        )
+
         structured_data = json.loads(soup.find("script", type="application/ld+json").string)
         self.assertEqual(structured_data["@type"], "Blog")
         self.assertEqual(structured_data["name"], "Gobii AI Agent Automation Blog")
@@ -113,3 +162,12 @@ class BlogSeoTests(TestCase):
         self.assertGreaterEqual(len(structured_data["blogPost"]), 40)
         self.assertIn("description", structured_data["blogPost"][0])
         self.assertIn("author", structured_data["blogPost"][0])
+        inbound_webhooks = next(
+            post
+            for post in structured_data["blogPost"]
+            if post["url"].endswith("/blog/newsletter-2026-04-08-inbound-webhooks/")
+        )
+        self.assertEqual(inbound_webhooks["author"]["@type"], "Person")
+        self.assertEqual(inbound_webhooks["author"]["name"], "Will Bonde")
+        self.assertEqual(inbound_webhooks["author"]["jobTitle"], "Growth & Engineering")
+        self.assertTrue(inbound_webhooks["author"]["url"].endswith("/team/"))

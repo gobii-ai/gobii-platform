@@ -18,6 +18,8 @@ Connecting agents to everyday tools should not require a pile of API keys, OAuth
 
 Gobii's integration library gives agents a simpler way to connect to the systems your team already uses. Instead of configuring everything from scratch, you can browse pre-configured integrations in the console and add the ones your workflows need.
 
+For a messaging-specific workflow, the native [Discord AI agent integration](/blog/newsletter-2026-06-02-discord-integration/) lets a persistent agent subscribe to selected server channels and respond with the surrounding context.
+
 [Explore integrations](https://gobii.ai/console/advanced/mcp-servers/?utm_source=blog&utm_medium=web&utm_content=hero)
 
 ## Why Integrations Matter

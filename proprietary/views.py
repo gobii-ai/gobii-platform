@@ -39,6 +39,53 @@ def _keyword_list(value):
     return []
 
 
+def _blog_faq_items(value):
+    if not isinstance(value, list):
+        return []
+
+    items = []
+    for entry in value:
+        if not isinstance(entry, dict):
+            continue
+        question = str(entry.get("question") or "").strip()
+        answer = str(entry.get("answer") or "").strip()
+        if question and answer:
+            items.append({"question": question, "answer": answer})
+    return items
+
+
+def _blog_author_schema(meta, request):
+    author_name = meta.get("author")
+    if author_name:
+        author_type = meta.get("author_type")
+        if not author_type:
+            lowered = str(author_name).lower()
+            author_type = (
+                "Organization"
+                if "team" in lowered or "gobii" in lowered
+                else "Person"
+            )
+    else:
+        author_name = "Gobii"
+        author_type = "Organization"
+
+    author = {
+        "@type": author_type,
+        "name": author_name,
+    }
+    author_url = meta.get("author_url")
+    if author_url:
+        author["url"] = (
+            author_url
+            if str(author_url).startswith("http")
+            else request.build_absolute_uri(str(author_url))
+        )
+    author_job_title = meta.get("author_job_title")
+    if author_type == "Person" and author_job_title:
+        author["jobTitle"] = str(author_job_title)
+    return author
+
+
 BLOG_INDEX_KEYWORDS = (
     "AI agent automation",
     "browser agents",
@@ -87,6 +134,8 @@ BLOG_INDEX_TOPIC_SECTIONS = (
         ),
         "slugs": (
             "newsletter-2026-05-19-remote-mcp",
+            "newsletter-2026-04-08-inbound-webhooks",
+            "newsletter-2026-06-02-discord-integration",
             "newsletter-2025-11-11-agents-just-got-way-more-connected-mcp-support-is-here",
             "newsletter-2026-03-17-one-click-integrations-for-your-agents",
         ),
@@ -954,10 +1003,7 @@ class BlogIndexView(ProprietaryModeRequiredMixin, TemplateView):
                 "@type": "BlogPosting",
                 "headline": post["title"],
                 "url": self.request.build_absolute_uri(post["url"]),
-                "author": {
-                    "@type": "Organization",
-                    "name": "Gobii",
-                },
+                "author": _blog_author_schema(post["meta"], self.request),
                 "isPartOf": {
                     "@type": "Blog",
                     "name": blog_name,
@@ -1061,25 +1107,14 @@ class BlogPostView(ProprietaryModeRequiredMixin, TemplateView):
         published_iso = published_at.isoformat() if published_at else None
         updated_at = post.get("updated_at") or published_at
         updated_iso = updated_at.isoformat() if updated_at else None
-        author_name = post["meta"].get("author")
-        if author_name:
-            author_type = post["meta"].get("author_type")
-            if not author_type:
-                lowered = str(author_name).lower()
-                author_type = "Organization" if "team" in lowered or "gobii" in lowered else "Person"
-        else:
-            author_name = "Gobii"
-            author_type = "Organization"
+        author = _blog_author_schema(post["meta"], self.request)
 
         structured_data = {
             "@context": "https://schema.org",
             "@type": "BlogPosting",
             "headline": seo_title,
             "description": seo_description,
-            "author": {
-                "@type": author_type,
-                "name": author_name,
-            },
+            "author": author,
             "publisher": {
                 "@type": "Organization",
                 "name": "Gobii",
@@ -1111,6 +1146,33 @@ class BlogPostView(ProprietaryModeRequiredMixin, TemplateView):
             structured_data["wordCount"] = post["word_count"]
         if keywords:
             structured_data["keywords"] = keywords
+
+        faq_items = _blog_faq_items(post["meta"].get("faq"))
+        if faq_items:
+            article_schema = dict(structured_data)
+            article_schema.pop("@context", None)
+            article_schema["@id"] = f"{canonical_url}#article"
+            structured_data = {
+                "@context": "https://schema.org",
+                "@graph": [
+                    article_schema,
+                    {
+                        "@type": "FAQPage",
+                        "@id": f"{canonical_url}#faq",
+                        "mainEntity": [
+                            {
+                                "@type": "Question",
+                                "name": item["question"],
+                                "acceptedAnswer": {
+                                    "@type": "Answer",
+                                    "text": item["answer"],
+                                },
+                            }
+                            for item in faq_items
+                        ],
+                    },
+                ],
+            }
 
         recent_posts = [p for p in get_all_blog_posts() if p["slug"] != post["slug"]][:3]
 
