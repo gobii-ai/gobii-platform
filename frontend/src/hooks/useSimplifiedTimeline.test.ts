@@ -172,6 +172,28 @@ describe('collapseDetailedStatusRuns', () => {
     expect(result[2]).toBe(scheduleUpdate)
   })
 
+  it('keeps assignment updates expanded between adjacent activity runs', () => {
+    const assignmentUpdate = stepCluster('3:step:assignment', ['sqlite_batch'])
+    assignmentUpdate.entries[0].parameters = {
+      sql: "UPDATE __agent_config SET charter=patch_text(charter, 'Old', 'New') WHERE id=1",
+    }
+    const result = collapseDetailedStatusRuns(
+      [
+        stepCluster('2:step:older', ['search_web']),
+        assignmentUpdate,
+        stepCluster('4:step:newer', ['create_pdf']),
+      ],
+      { latestPlanCursor: null, latestScheduleEntryId: null },
+    )
+
+    expect(result.map((event) => event.kind)).toEqual(['steps', 'steps', 'steps'])
+    expect(result[1]).toMatchObject({
+      cursor: assignmentUpdate.cursor,
+      collapsible: false,
+      collapseThreshold: Infinity,
+    })
+  })
+
   it('drops runs with no visible actions', () => {
     const result = collapseDetailedStatusRuns([stepCluster('1:step:hidden', ['update_plan'])], {
       latestPlanCursor: null,

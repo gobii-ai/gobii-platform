@@ -5,7 +5,6 @@ import { CalendarClock, Clock, Repeat } from 'lucide-react'
 import { describeSchedule } from '../../../../util/schedule'
 import type { ScheduleDescription } from '../../../../util/schedule'
 import type { ToolDetailProps } from '../../tooling/types'
-import { parseAgentConfigUpdates } from '../../../tooling/agentConfigSql'
 import type { AgentConfigCharterChange } from '../../../tooling/agentConfigSql'
 import { KeyValueList, Section, TruncatedMarkdown } from '../shared'
 import { useAppSelector } from '../../../../store/hooks'
@@ -217,11 +216,11 @@ function CharterChangeDetail({ change }: { change: AgentConfigCharterChange }) {
 
 export function AgentConfigUpdateDetail({ entry }: ToolDetailProps) {
   const timeZone = useAppSelector(selectImmersiveShellViewer).timeZone
-  const statements = entry.sqlStatements ?? []
-  const parsedUpdate = parseAgentConfigUpdates(statements)
+  const parsedUpdate = entry.agentConfigUpdate
   const charterText = entry.charterText ?? parsedUpdate?.charterValue ?? null
-  const charterChange = entry.charterChange ?? parsedUpdate?.charterChange ?? null
-  const updatesCharter = Boolean(parsedUpdate?.updatesCharter || charterText || charterChange)
+  const charterChange = parsedUpdate?.charterChange ?? null
+  const hasCharterText = charterText !== null
+  const updatesCharter = Boolean(parsedUpdate?.updatesCharter || hasCharterText || charterChange)
   const updatesSchedule = parsedUpdate?.updatesSchedule ?? false
   const scheduleCleared = parsedUpdate?.scheduleCleared ?? false
   const scheduleRaw = parsedUpdate?.scheduleValue ?? null
@@ -235,13 +234,17 @@ export function AgentConfigUpdateDetail({ entry }: ToolDetailProps) {
     <div className="space-y-4">
       {updatesSchedule && scheduleDetails ? renderScheduleCard(scheduleDetails) : null}
       {updatesCharter && charterChange ? <CharterChangeDetail change={charterChange} /> : null}
-      {updatesCharter && charterText ? (
+      {updatesCharter && hasCharterText ? (
         <div className="space-y-2">
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Updated assignment</p>
-          <TruncatedMarkdown content={charterText} maxLines={3} />
+          {charterText ? (
+            <TruncatedMarkdown content={charterText} maxLines={3} />
+          ) : (
+            <p className="text-sm text-slate-600">The assignment is now empty.</p>
+          )}
         </div>
       ) : null}
-      {updatesCharter && !charterText && !charterChange ? (
+      {updatesCharter && !hasCharterText && !charterChange ? (
         <p className="text-sm text-slate-600">
           The updated assignment text is not available for this historical event.
         </p>

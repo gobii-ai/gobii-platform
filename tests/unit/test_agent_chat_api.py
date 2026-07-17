@@ -1014,6 +1014,22 @@ class AgentChatAPITests(TestCase):
         self.assertEqual(realtime_entry["charterText"], "Full updated assignment")
 
     @tag("batch_agent_chat")
+    def test_timeline_preserves_empty_assignment_display_snapshot(self):
+        step = PersistentAgentStep.objects.create(agent=self.agent, description="Clear assignment")
+        PersistentAgentToolCall.objects.create(
+            step=step,
+            tool_name="sqlite_batch",
+            tool_params={"sql": "UPDATE __agent_config SET charter='' WHERE id=1"},
+            result=json.dumps({"status": "ok"}),
+            display_metadata={"agent_config": {"charter": ""}},
+        )
+
+        entry = build_tool_cluster_from_steps([step])["entries"][0]
+
+        self.assertIn("charterText", entry)
+        self.assertEqual(entry["charterText"], "")
+
+    @tag("batch_agent_chat")
     def test_agent_profile_endpoint_returns_lightweight_roster_entry(self):
         response = self.client.get(
             reverse("console_agent_profile", kwargs={"agent_id": self.agent.id}),

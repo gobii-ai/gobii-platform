@@ -759,7 +759,7 @@ def _serialize_step_entry(env: StepEnvelope, labels: Mapping[str, str]) -> dict:
     agent_config = display_metadata.get("agent_config")
     if isinstance(agent_config, dict):
         charter_text = agent_config.get("charter")
-        if isinstance(charter_text, str) and charter_text.strip():
+        if isinstance(charter_text, str):
             entry["charterText"] = charter_text
     preview_url = _extract_tool_preview_url(tool_call)
     if preview_url:

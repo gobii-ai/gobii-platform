@@ -13,6 +13,7 @@ import type { StatusExpansionTargets } from './statusExpansion'
 import { isStatusDisplayEntry, resolveEntrySeparation } from './statusExpansion'
 import { useAppSelector } from '../../store/hooks'
 import { selectImmersiveShellViewer } from '../../store/immersiveShellSlice'
+import { buildToolClusterRenderSegments } from './toolClusterSegments'
 
 type ToolClusterCardProps = {
   cluster: ToolClusterEvent
@@ -22,10 +23,6 @@ type ToolClusterCardProps = {
   animateIncoming?: boolean
   onIncomingAnimationConsumed?: (cursor: string) => void
 }
-
-type ToolClusterRenderSegment =
-  | { kind: 'preview', key: string, entries: ToolEntryDisplay[] }
-  | { kind: 'separate', key: string, entry: ToolEntryDisplay }
 
 export const ToolClusterCard = memo(function ToolClusterCard({
   cluster,
@@ -86,36 +83,10 @@ export const ToolClusterCard = memo(function ToolClusterCard({
     () => resolvedTransformed.entries.filter((entry) => !entry.separateFromPreview),
     [resolvedTransformed.entries],
   )
-  const renderSegments = useMemo<ToolClusterRenderSegment[]>(() => {
-    const segments: ToolClusterRenderSegment[] = []
-    let currentPreviewEntries: ToolEntryDisplay[] = []
-    const flushPreview = () => {
-      if (!currentPreviewEntries.length) return
-      segments.push({
-        kind: 'preview',
-        key: `preview:${currentPreviewEntries[0].id}`,
-        entries: currentPreviewEntries,
-      })
-      currentPreviewEntries = []
-    }
-
-    for (const entry of resolvedTransformed.entries) {
-      if (entry.separateFromPreview) {
-        flushPreview()
-        segments.push({ kind: 'separate', key: `separate:${entry.id}`, entry })
-      } else {
-        currentPreviewEntries.push(entry)
-      }
-    }
-    flushPreview()
-    return segments
-  }, [resolvedTransformed.entries])
-  const lastPreviewSegmentIndex = useMemo(() => {
-    for (let index = renderSegments.length - 1; index >= 0; index -= 1) {
-      if (renderSegments[index].kind === 'preview') return index
-    }
-    return -1
-  }, [renderSegments])
+  const renderSegments = useMemo(
+    () => buildToolClusterRenderSegments(resolvedTransformed.entries),
+    [resolvedTransformed.entries],
+  )
 
   const [timelineOpen, setTimelineOpen] = useState(false)
   const [timelineInitialEntryId, setTimelineInitialEntryId] = useState<string | null>(null)
@@ -219,7 +190,7 @@ export const ToolClusterCard = memo(function ToolClusterCard({
       data-earliest={resolvedTransformed.earliestTimestamp}
     >
       <div className="tool-cluster-shell">
-        {renderSegments.map((segment, segmentIndex) => {
+        {renderSegments.map((segment) => {
           if (segment.kind === 'separate') {
             return <div key={segment.key} className="tool-cluster-separate-list">{renderSeparatedEntry(segment.entry)}</div>
           }
@@ -231,7 +202,6 @@ export const ToolClusterCard = memo(function ToolClusterCard({
             collapsible: false,
             collapseThreshold: Infinity,
           }
-          const isTrailingPreview = segmentIndex === lastPreviewSegmentIndex
           return (
             <div key={segment.key} className="tool-cluster-summary">
               {shouldCollapsePreviewEntries && segment.entries.length > 1 ? (
@@ -243,8 +213,8 @@ export const ToolClusterCard = memo(function ToolClusterCard({
               ) : (
                 <ToolClusterLivePreview
                   cluster={segmentCluster}
-                  isLatestEvent={isLatestEvent && isTrailingPreview}
-                  animateIncoming={animateIncoming && isTrailingPreview}
+                  isLatestEvent={isLatestEvent && segment.isTrailing}
+                  animateIncoming={animateIncoming && segment.isTrailing}
                   previewEntryLimit={segment.entries.length}
                   onOpenTimeline={handleToggleCluster}
                   onSelectEntry={handlePreviewEntrySelect}

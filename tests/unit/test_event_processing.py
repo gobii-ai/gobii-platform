@@ -158,13 +158,27 @@ class ToolDisplayMetadataTests(TestCase):
             exec_params={
                 "sql": (
                     "UPDATE __agent_config "
-                    "SET charter=patch_text(charter, 'old clause', 'new clause') WHERE id=1"
+                    "SET charter=patch_text(charter, 'old where clause', 'new clause') WHERE id=1"
                 ),
             },
         )
 
         self.assertEqual(
             _capture_tool_display_metadata(patch_call, {"status": "ok"}),
+            {"agent_config": {"charter": "Updated full assignment"}},
+        )
+
+        insert_call = SimpleNamespace(
+            tool_name="sqlite_batch",
+            exec_params={
+                "sql": (
+                    "INSERT OR REPLACE INTO __agent_config (id, charter, schedule) "
+                    "VALUES (1, 'Replacement assignment', NULL)"
+                ),
+            },
+        )
+        self.assertEqual(
+            _capture_tool_display_metadata(insert_call, {"status": "ok"}),
             {"agent_config": {"charter": "Updated full assignment"}},
         )
 
@@ -180,6 +194,18 @@ class ToolDisplayMetadataTests(TestCase):
             exec_params={"sql": "SELECT charter FROM __agent_config WHERE id=1"},
         )
         self.assertEqual(_capture_tool_display_metadata(read_call, {"status": "ok"}), {})
+        mock_read_snapshot.assert_not_called()
+
+        schedule_call = SimpleNamespace(
+            tool_name="sqlite_batch",
+            exec_params={
+                "sql": (
+                    "UPDATE __agent_config SET schedule='0 9 * * *' "
+                    "WHERE charter='Unchanged assignment'"
+                ),
+            },
+        )
+        self.assertEqual(_capture_tool_display_metadata(schedule_call, {"status": "ok"}), {})
         mock_read_snapshot.assert_not_called()
 
 

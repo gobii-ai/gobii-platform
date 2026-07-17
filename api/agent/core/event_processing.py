@@ -97,7 +97,12 @@ from ..tools.email_sender import execute_send_email
 from ..tools.sms_sender import execute_send_sms
 from ..tools.spawn_web_task import execute_spawn_web_task
 from ..tools.schedule_updater import execute_update_schedule
-from ..tools.sqlite_agent_config import apply_sqlite_agent_config_updates, read_sqlite_agent_config_snapshot, seed_sqlite_agent_config
+from ..tools.sqlite_agent_config import (
+    apply_sqlite_agent_config_updates,
+    read_sqlite_agent_config_snapshot,
+    seed_sqlite_agent_config,
+    sqlite_statement_assigns_agent_config_field,
+)
 from ..tools.sqlite_skills import apply_sqlite_skill_updates, refresh_skills_for_tool, seed_sqlite_skills
 from ..tools.custom_tools import execute_create_custom_tool
 from ..tools.custom_tool_names import CREATE_CUSTOM_TOOL_NAME
@@ -188,7 +193,6 @@ MESSAGE_TOOL_BODY_KEYS = {
 HUMANIZED_MESSAGE_BODY_KEYS = {**MESSAGE_TOOL_BODY_KEYS, "send_discord_message": "message"}
 SQLITE_MUTATION_RE = re.compile(r"\b(?:insert|update|delete|replace|alter|drop|create)\b", re.IGNORECASE)
 AGENT_CONFIG_TABLE_RE = re.compile(r"\b__agent_config\b", re.IGNORECASE)
-AGENT_CONFIG_CHARTER_ASSIGNMENT_RE = re.compile(r"\bcharter\b\s*=", re.IGNORECASE)
 DURABLE_CONFIG_INTENT_RE = re.compile(
     r"\b(?:going forward|from now on|in the future|next time|always|never|remember|prefer|preference|"
     r"(?:my |this )?feedback:|each time|every time|make (?:that|this|it) a rule|should(?:n'?t| not) have to|"
@@ -2155,9 +2159,7 @@ def _sqlite_batch_is_only_agent_config_mutation(tool_params: Dict[str, Any]) -> 
 
 def _sqlite_batch_mutates_agent_charter(tool_params: Dict[str, Any]) -> bool:
     return any(
-        AGENT_CONFIG_TABLE_RE.search(statement)
-        and SQLITE_MUTATION_RE.search(statement)
-        and AGENT_CONFIG_CHARTER_ASSIGNMENT_RE.search(statement)
+        sqlite_statement_assigns_agent_config_field(statement, "charter")
         for statement in _sqlite_batch_statements(tool_params)
     )
 

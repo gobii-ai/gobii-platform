@@ -1,7 +1,7 @@
 import type { ReactElement } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import type { ToolCallEntry } from '../../../types/agentChat'
-import type { AgentConfigCharterChange, SqliteInternalTableKind, SqliteStatementOperation } from '../../tooling/agentConfigSql'
+import type { AgentConfigSqlUpdate, SqliteInternalTableKind, SqliteStatementOperation } from '../../tooling/agentConfigSql'
 
 export type ToolDetailComponent = (props: ToolDetailProps) => ReactElement
 
@@ -23,7 +23,7 @@ export type ToolEntryDisplay = {
   result: unknown
   summary?: string | null
   charterText?: string | null
-  charterChange?: AgentConfigCharterChange | null
+  agentConfigUpdate?: AgentConfigSqlUpdate | null
   sqlStatements?: string[]
   detailComponent: ToolDetailComponent
   meta?: ToolCallEntry['meta']
@@ -74,7 +74,6 @@ export type ToolDescriptorTransform = {
   iconColorClass?: string
   caption?: string | null
   charterText?: string | null
-  charterChange?: AgentConfigCharterChange | null
   sqlStatements?: string[]
   summary?: string | null
   detailComponent?: ToolDetailComponent

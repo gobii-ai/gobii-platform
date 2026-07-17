@@ -115,79 +115,32 @@ function extractSqlAssignment(statement: string, field: string): string | null {
   return null
 }
 
-function extractFunctionAssignmentArguments(
-  statement: string,
-  field: string,
-  functionName: string,
-): string[] | null {
-  const fieldToken = escapeRegExp(field)
-  const functionToken = escapeRegExp(functionName)
-  const assignment = new RegExp(`\\b${fieldToken}\\b\\s*=\\s*${functionToken}\\s*\\(`, 'i').exec(statement)
-  if (!assignment) {
-    return null
-  }
-
-  const argumentsStart = assignment.index + assignment[0].length
-  let depth = 1
-  let inSingle = false
-  let inDouble = false
-
-  for (let index = argumentsStart; index < statement.length; index += 1) {
-    const char = statement[index]
-    const next = index + 1 < statement.length ? statement[index + 1] : ''
-    if (inSingle) {
-      if (char === "'" && next === "'") {
-        index += 1
-      } else if (char === "'") {
-        inSingle = false
-      }
-      continue
-    }
-    if (inDouble) {
-      if (char === '"' && next === '"') {
-        index += 1
-      } else if (char === '"') {
-        inDouble = false
-      }
-      continue
-    }
-    if (char === "'") {
-      inSingle = true
-      continue
-    }
-    if (char === '"') {
-      inDouble = true
-      continue
-    }
-    if (char === '(') {
-      depth += 1
-      continue
-    }
-    if (char !== ')') {
-      continue
-    }
-    depth -= 1
-    if (depth === 0) {
-      return splitSqlByComma(statement.slice(argumentsStart, index))
-    }
-  }
-
-  return null
+function extractUpdateAssignments(statement: string): string | null {
+  const normalized = normalizeSqlForParsing(statement)
+  const update = /\bupdate\s+[`"\[]?__agent_config[`"\]]?\s+[\s\S]*?\bset\b/i.exec(normalized)
+  if (!update) return null
+  const assignmentsStart = update.index + update[0].length
+  const assignmentsTail = normalized.slice(assignmentsStart)
+  const terminator = /\b(?:where|returning)\b/i.exec(assignmentsTail)
+  const assignmentsEnd = assignmentsStart + (terminator?.index ?? assignmentsTail.length)
+  return statement.slice(assignmentsStart, assignmentsEnd)
 }
 
 function parsePatchTextAssignment(statement: string): AgentConfigCharterChange | null {
-  const args = extractFunctionAssignmentArguments(statement, 'charter', 'patch_text')
-  if (!args || args.length !== 3) {
+  const match = statement.match(
+    /\bcharter\b\s*=\s*patch_text\s*\(\s*([`"'\[\]A-Z_][`"'\[\]A-Z0-9_.]*)\s*,\s*(null|'(?:[^']|'')*'|"(?:[^"]|"")*")\s*,\s*(null|'(?:[^']|'')*'|"(?:[^"]|"")*")\s*\)/i,
+  )
+  if (!match) {
     return null
   }
 
-  const target = args[0].replace(/[`"'\[\]]/g, '').trim().toLowerCase()
+  const target = match[1].replace(/[`"'\[\]]/g, '').trim().toLowerCase()
   if (target !== 'charter' && !target.endsWith('.charter')) {
     return null
   }
 
-  const previousText = decodeSqlLiteral(args[1] ?? '')
-  const replacementText = decodeSqlLiteral(args[2] ?? '')
+  const previousText = decodeSqlLiteral(match[2] ?? '')
+  const replacementText = decodeSqlLiteral(match[3] ?? '')
   if (previousText === undefined || replacementText === undefined) {
     return null
   }
@@ -565,17 +518,23 @@ export function parseAgentConfigUpdates(statements: string[]): AgentConfigSqlUpd
     if (!MUTATION_RE.test(statement)) {
       continue
     }
+    const updateAssignments = extractUpdateAssignments(statement)
+    const assignmentSource = updateAssignments ?? ''
 
-    if (hasAssignment(statement, 'charter')) {
+    if (hasAssignment(assignmentSource, 'charter')) {
       updatesCharter = true
-      const parsedCharter = extractSqlAssignment(statement, 'charter')
+      const parsedCharter = extractSqlAssignment(assignmentSource, 'charter')
       if (parsedCharter !== null) {
         charterValue = parsedCharter
         charterChange = null
       } else {
-        charterChange = parsePatchTextAssignment(statement) ?? charterChange
+        const parsedChange = parsePatchTextAssignment(assignmentSource)
+        if (parsedChange) {
+          charterValue = null
+          charterChange = parsedChange
+        }
       }
-    } else {
+    } else if (updateAssignments === null) {
       const parsedInsertCharter = parseInsertValueAssignment(statement, 'charter')
       if (parsedInsertCharter.present) {
         updatesCharter = true
@@ -585,19 +544,19 @@ export function parseAgentConfigUpdates(statements: string[]): AgentConfigSqlUpd
       }
     }
 
-    if (hasAssignment(statement, 'schedule')) {
+    if (hasAssignment(assignmentSource, 'schedule')) {
       updatesSchedule = true
-      if (isClearingAssignment(statement, 'schedule')) {
+      if (isClearingAssignment(assignmentSource, 'schedule')) {
         scheduleCleared = true
         scheduleValue = null
       } else {
-        const parsedSchedule = extractSqlAssignment(statement, 'schedule')
+        const parsedSchedule = extractSqlAssignment(assignmentSource, 'schedule')
         if (parsedSchedule !== null) {
           scheduleValue = parsedSchedule
           scheduleCleared = false
         }
       }
-    } else {
+    } else if (updateAssignments === null) {
       const parsedInsertSchedule = parseInsertValueAssignment(statement, 'schedule')
       if (parsedInsertSchedule.present) {
         updatesSchedule = true
