@@ -56,12 +56,14 @@ METRIC_FIELDS = frozenset({
     'employees', 'employee_count', 'company_size', 'num_employees_enum', 'size',
 })
 
-# Fields containing URLs (shown for easy access)
-URL_FIELDS = frozenset({
-    'url', 'link', 'href', 'profile_url', 'website', 'homepage',
-    'linkedin_url', 'twitter_url', 'github_url', 'apply_link',
-    'job_link', 'company_url', 'source_url', 'image_url', 'product_url',
-})
+# Fields containing URLs (shown for easy access). The order prefers item-level
+# destinations over source or image URLs when a record exposes several.
+URL_FIELD_PRIORITY = (
+    'url', 'link', 'href', 'profile_url', 'listing_url', 'detail_url', 'item_url',
+    'linkedin_url', 'twitter_url', 'github_url', 'apply_link', 'job_link',
+    'product_url', 'company_url', 'website', 'homepage', 'source_url', 'image_url',
+)
+URL_FIELDS = frozenset(URL_FIELD_PRIORITY)
 
 # Fields with location info
 LOCATION_FIELDS = frozenset({
@@ -251,7 +253,6 @@ def _hint_from_array(items: list) -> Optional[str]:
 
     lines = []
     extracted_items = []
-    urls = []
 
     for item in items[:MAX_ITEMS]:
         if not isinstance(item, dict):
@@ -259,25 +260,30 @@ def _hint_from_array(items: list) -> Optional[str]:
 
         extracted = _extract_item_fields(item, item_type)
         if extracted.get('display'):
-            extracted_items.append(extracted['display'])
-        if extracted.get('url'):
-            urls.append(extracted['url'])
+            extracted_items.append(extracted)
 
     if not extracted_items:
         return None
 
     # Format header line with emoji based on type
     emoji = _emoji_for_type(item_type)
-    header = f"{emoji} {' | '.join(extracted_items[:3])}"
+    header = f"{emoji} {' | '.join(item['display'] for item in extracted_items[:3])}"
     if len(header) > MAX_LINE_LEN:
         header = header[:MAX_LINE_LEN-3] + "..."
     lines.append(header)
 
-    # Add URLs (shortened)
-    for url in urls[:MAX_URLS]:
-        short_url = _shorten_url(url)
-        if short_url:
-            lines.append(f"→ {short_url}")
+    # Keep each URL adjacent to its entity. If the byte cap is tight, show fewer
+    # complete pairs rather than corrupting a path, query, or fragment.
+    urls_added = 0
+    for item in extracted_items:
+        url = item.get('url')
+        if not url or urls_added >= MAX_URLS:
+            continue
+        line = f"→ {item['display']}: {url}"
+        if len('\n'.join([*lines, line]).encode('utf-8')) > MAX_HINT_BYTES:
+            continue
+        lines.append(line)
+        urls_added += 1
 
     hint = '\n'.join(lines)
     return _enforce_limit(hint)
@@ -341,6 +347,17 @@ def _detect_item_type(item: dict) -> str:
     return 'unknown'
 
 
+def _get_complete_http_url(obj: dict) -> Optional[str]:
+    for field in URL_FIELD_PRIORITY:
+        value = _get_nested(obj, field)
+        if not isinstance(value, str):
+            continue
+        value = value.strip()
+        if re.match(r'^https?://[^\s]+$', value, re.IGNORECASE):
+            return value
+    return None
+
+
 def _extract_item_fields(item: dict, item_type: str) -> dict:
     """Extract relevant fields from an item based on its type."""
     result = {'display': None, 'url': None}
@@ -352,9 +369,7 @@ def _extract_item_fields(item: dict, item_type: str) -> dict:
     role = _get_field(item, ROLE_FIELDS, 40)
 
     # Get URL
-    url = _get_field(item, URL_FIELDS, 200)
-    if url and isinstance(url, str) and url.startswith('http'):
-        result['url'] = url
+    result['url'] = _get_complete_http_url(item)
 
     # Build display string based on type
     if item_type == 'job':
@@ -540,20 +555,20 @@ def _hint_from_object(obj: dict) -> Optional[str]:
         if metrics:
             lines.append(metrics)
 
-        # Line 3: Location or URL
+        # Line 3: Location
         location = _get_field(obj, LOCATION_FIELDS, 40)
-        url = _get_field(obj, URL_FIELDS, 100)
 
         if location:
             lines.append(f"📍 {location}")
-        elif url and isinstance(url, str) and url.startswith('http'):
-            lines.append(f"→ {_shorten_url(url)}")
 
-    # For non-generic types, add URL if present and not already shown
-    if item_type != 'unknown' and item_type not in ('post', 'review'):
-        url = _get_field(obj, URL_FIELDS, 100)
-        if url and isinstance(url, str) and url.startswith('http'):
-            lines.append(f"→ {_shorten_url(url)}")
+    # Keep a complete item URL adjacent to the entity that owns it.
+    if item_type not in ('post', 'review'):
+        url = _get_complete_http_url(obj)
+        identity = _get_field(obj, IDENTITY_FIELDS, MAX_FIELD_LEN) or 'item'
+        if url:
+            url_line = f"→ {identity}: {url}"
+            if len('\n'.join([*lines, url_line]).encode('utf-8')) <= MAX_HINT_BYTES:
+                lines.append(url_line)
 
     hint = '\n'.join(lines)
     return _enforce_limit(hint)
@@ -641,7 +656,7 @@ def hint_from_serp(payload: dict, max_items: int = 5) -> Optional[str]:
         return None
 
     summaries = []
-    urls = []
+    linked_items = []
 
     for item in items:
         domain = item.get('d') or _domain_from_url(item.get('u', ''))
@@ -654,14 +669,17 @@ def hint_from_serp(payload: dict, max_items: int = 5) -> Optional[str]:
             summaries.append(domain)
 
         if url:
-            urls.append(url)
+            linked_items.append((title or domain, url))
 
     if not summaries:
         return None
 
     lines = [f"🔍 {' | '.join(summaries[:3])}"]
-    for url in urls[:max_items]:
-        lines.append(f"→ {url}")
+    for title, url in linked_items[:max_items]:
+        line = f"→ {title}: {url}"
+        if len('\n'.join([*lines, line]).encode('utf-8')) > MAX_HINT_BYTES:
+            continue
+        lines.append(line)
 
     return _enforce_limit('\n'.join(lines))
 
@@ -946,14 +964,6 @@ def _get_nested(obj: dict, field: str) -> Any:
             return v
 
     return None
-
-
-def _shorten_url(url: str) -> str:
-    """Shorten URL for display."""
-    if not url:
-        return ''
-    short = url.replace('https://www.', '').replace('https://', '').replace('http://', '')
-    return short[:70]
 
 
 def _format_count(value) -> str:

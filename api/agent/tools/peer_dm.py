@@ -91,7 +91,7 @@ def get_send_agent_message_tool() -> Dict[str, Any]:
                     },
                     "message": {
                         "type": "string",
-                        "description": "New information, question, or handoff the peer needs; never an acknowledgment-only reply.",
+                        "description": "New information, question, or handoff the peer needs; never an acknowledgment-only reply. Use exact returned item URLs; leave other items unlinked.",
                     },
                     "attachments": {
                         "type": "array",

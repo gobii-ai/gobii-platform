@@ -58,7 +58,10 @@ def get_send_sms_tool() -> Dict[str, Any]:
                         },
                         "description": "Additional E.164 phone numbers for group SMS (optional)"
                     },
-                    "body": {"type": "string", "description": "SMS content."},
+                    "body": {
+                        "type": "string",
+                        "description": "SMS content. Use exact returned item URLs; leave other items unlinked.",
+                    },
                     "attachments": {
                         "type": "array",
                         "items": {"type": "string"},

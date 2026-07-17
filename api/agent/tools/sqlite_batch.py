@@ -1518,7 +1518,7 @@ def _row_url_reporting_note(rows: List[Dict[str, Any]]) -> str:
                 ("_listing_url", "_detail_url", "_item_url", "_link")
             ):
                 continue
-            if isinstance(value, str) and value.strip():
+            if isinstance(value, str) and re.match(r"^https?://[^\s]+$", value.strip(), re.IGNORECASE):
                 url_fields.add(key_text)
 
     if not url_fields:
@@ -1527,8 +1527,7 @@ def _row_url_reporting_note(rows: List[Dict[str, Any]]) -> str:
     fields = ", ".join(sorted(url_fields)[:4])
     return (
         f" [!] REPORTING: rows include item URL field(s) {fields}; "
-        "include these row links in reports/tables (click row label or add Link column). "
-        "Feed/source URLs are not item links."
+        "copy those exact item URLs into reports. Rows without a complete item URL stay unlinked."
     )
 
 

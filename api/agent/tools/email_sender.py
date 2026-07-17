@@ -199,7 +199,7 @@ def get_send_email_tool() -> Dict[str, Any]:
                         "type": "string",
                         "description": (
                             "HTML body only; no <html>/<head>/<body>. Single-quoted attrs. "
-                            "Reports/dashboards should style section headers, tables/cells, key numbers/statuses/changes with visible colors/badges/icons; use styled tables or metric blocks and preserve url/link/listing_url/detail_url item fields as clickable row labels or a Link column; source/feed URLs do not substitute for item links. "
+                            "Reports should use styled tables or metric blocks. Use exact returned item URLs; leave other rows unlinked. "
                             "Tool-call/XML is literal. Inline images: attach file + <img src='cid:filename'>."
                         ),
                     },

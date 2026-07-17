@@ -62,6 +62,38 @@ class LinkedInSchemaTests(SimpleTestCase):
         # Should show multiple people
         self.assertIn('Will Bonde', hint)
 
+    def test_url_pairs_preserve_entity_and_complete_url(self):
+        url = 'https://profiles.example.test/avery?campaign=q3#experience'
+        payload = {
+            'result': [
+                {'name': 'Avery Chen', 'subtitle': 'Controller', 'profile_url': url},
+                {
+                    'name': 'Jordan Lee',
+                    'subtitle': 'Finance Director',
+                    'console_host': 'profiles.example.test',
+                    'console_route': '/jordan-lee',
+                },
+            ],
+        }
+
+        hint = extract_context_hint('mcp_example_people_search', payload)
+
+        self.assertIn(f'→ Avery Chen: Controller: {url}', hint)
+        self.assertNotIn('https://profiles.example.test/jordan-lee', hint)
+
+    def test_byte_cap_omits_oversized_url_instead_of_truncating_it(self):
+        oversized_url = f"https://profiles.example.test/{'segment/' * 100}?view=full#bio"
+        payload = {
+            'result': [
+                {'name': 'Avery Chen', 'subtitle': 'Controller', 'profile_url': oversized_url},
+            ],
+        }
+
+        hint = extract_context_hint('mcp_example_people_search', payload)
+
+        self.assertIn('Avery Chen', hint)
+        self.assertNotIn('https://profiles.example.test/', hint)
+
     def test_linkedin_person_profile(self):
         """LinkedIn person profile: single object with name, headline, experience."""
         payload = {
