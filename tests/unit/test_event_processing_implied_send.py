@@ -70,7 +70,7 @@ class ImpliedSendTests(TestCase):
     def test_humanized_message_normalization_covers_built_in_delivery_channels(self):
         for tool_name, params in (
             ("send_chat_message", {"body": "Quick update—this is done."}),
-            ("send_sms", {"body": "Quick update -- this is done."}),
+            ("send_sms", {"body": "Quick update - this is done."}),
             ("send_email", {"subject": "Update—done", "mobile_first_html": "<p>Done.</p>"}),
             ("send_discord_message", {"message": "Quick update—this is done."}),
         ):
@@ -78,6 +78,7 @@ class ImpliedSendTests(TestCase):
                 result = ep._normalize_humanized_message_params(tool_name, params)
                 self.assertNotIn("—", str(result))
                 self.assertNotIn("--", str(result))
+                self.assertNotIn(" - ", str(result))
 
         self.assertEqual(
             ep._normalize_humanized_message_params(
@@ -454,6 +455,8 @@ class ImpliedSendTests(TestCase):
 
         self.assertEqual(result.get("status"), "ok")
         self.assertTrue(result.get("skipped"))
+        self.assertIn("deliver the substantive reply in this web chat", result.get("message", ""))
+        self.assertIn("do not switch to email or SMS", result.get("message", ""))
         self.assertEqual(
             PersistentAgentMessage.objects.filter(owner_agent=self.agent, is_outbound=True).count(),
             0,

@@ -1127,7 +1127,9 @@ class ContinuationModePromptContextTests(TestCase):
 
         self.assertIn("## Communication Style", system_prompt)
         self.assertIn("Delivered messages should sound like a specific real person", system_prompt)
-        self.assertIn("Never use Unicode dash punctuation", system_prompt)
+        self.assertIn("No dash punctuation", system_prompt)
+        self.assertIn("including spaced single hyphens", system_prompt)
+        self.assertIn("bullets, and tables are fine", system_prompt)
         self.assertIn("clarity and honesty beat forced friendliness", system_prompt.lower())
         self.assertIn("preserve the user's meaning, voice, key terms, and commitments", system_prompt)
         self.assertIn("AI-giveaway phrases", system_prompt)

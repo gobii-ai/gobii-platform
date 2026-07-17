@@ -33,11 +33,11 @@ _CONTROL_CHAR_SUBSTITUTIONS = {
 _CONTROL_HEX_SEQUENCE_RE = re.compile(r"([\u0000-\u0001])([0-9a-fA-F]{2})")
 _TRANSLATION_TABLE = str.maketrans(_CONTROL_CHAR_SUBSTITUTIONS)
 _NON_PROSE_RE = re.compile(
-    r"<(?:code|pre)\b[^>]*>.*?</(?:code|pre)>|```.*?```|`[^`\n]+`|(?:https?://|www\.)[^\s<>]+|<[^>]+>|^[ \t]*\|?[ \t]*:?-{3,}:?[ \t]*(?:\|[ \t]*:?-{3,}:?[ \t]*)+\|?[ \t]*$",
+    r"<(?:code|pre)\b[^>]*>.*?</(?:code|pre)>|```.*?```|`[^`\n]+`|(?:https?://|www\.)[^\s<>]+|<[^>]+>|^[ \t]*[-+*][ \t]+|^[ \t]*\|?[ \t]*:?-{3,}:?[ \t]*(?:\|[ \t]*:?-{3,}:?[ \t]*)+\|?[ \t]*$",
     re.IGNORECASE | re.DOTALL | re.MULTILINE,
 )
 _FORBIDDEN_DASH_RE = re.compile(
-    r"[ \t]*(?:[\u2012\u2013\u2014\u2015\u2e3a\u2e3b]+|--+|&(?:mdash|ndash|#8211|#8212|#x2013|#x2014);)[ \t]*",
+    r"(?:[ \t]*(?:[\u2012\u2013\u2014\u2015\u2e3a\u2e3b]+|--+|&(?:mdash|ndash|#8211|#8212|#x2013|#x2014);)[ \t]*|[ \t]+-[ \t]+)",
     re.IGNORECASE,
 )
 
@@ -47,9 +47,11 @@ def normalize_humanized_message_style(value: str | None) -> str:
 
     def normalize_prose(prose: str) -> str:
         def punctuate(match):
-            before = prose[:match.start()].rstrip()
-            after = prose[match.end():].lstrip()
-            return ", " if before and after and not before.endswith("\n") and not after.startswith("\n") else ""
+            before = prose[:match.start()].rstrip(" \t")
+            after = prose[match.end():].lstrip(" \t")
+            if not before or not after or before.endswith("\n") or after.startswith("\n"):
+                return ""
+            return ", "
 
         return _FORBIDDEN_DASH_RE.sub(punctuate, prose)
 

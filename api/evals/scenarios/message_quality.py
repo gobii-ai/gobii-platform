@@ -1,6 +1,7 @@
 import json
 import re
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Any
 from uuid import UUID
 
@@ -10,7 +11,7 @@ from api.agent.comms.message_service import _ensure_participant, _get_or_create_
 from api.agent.tools.tool_manager import mark_tool_enabled_without_discovery
 from api.evals.base import EvalScenario, ScenarioTask
 from api.evals.execution import ScenarioExecutionTools
-from api.evals.registry import ScenarioRegistry
+from api.evals.registry import ScenarioRegistry, register_scenario
 from api.models import (
     CommsAllowlistEntry,
     CommsChannel,
@@ -26,6 +27,7 @@ from util.text_sanitizer import has_humanized_message_style_violation
 
 
 MESSAGE_QUALITY_SUITE_SLUG = "message_quality_reports"
+REPLY_CHANNEL_CONTINUITY_SLUG = "message_quality_reply_stays_in_web_chat"
 
 
 @dataclass(frozen=True)
@@ -200,10 +202,53 @@ HUMAN_MESSAGE_QUALITY_CASES = (
         source_example_ids=(),
         quality_target="human_message",
     ),
+    MessageQualityCase(
+        slug="message_quality_chat_evidence_acknowledgement",
+        channel="chat",
+        recipient="web-user",
+        subject="Regression evidence",
+        brief="brief acknowledgement of evidence for an existing issue",
+        source_facts=(
+            "Quick heads-up: the two-hour regression run reproduced malformed source links again. "
+            "I already logged it under existing issue 49 about source verification and fabricated URLs, "
+            "so there is nothing for you to update or create. Just wanted you to know."
+        ),
+        source_example_ids=(),
+        quality_target="human_reply",
+    ),
 )
 
-MESSAGE_QUALITY_CASES = REPORT_MESSAGE_QUALITY_CASES + SIMPLE_EMAIL_QUALITY_CASES + HUMAN_MESSAGE_QUALITY_CASES
-MESSAGE_QUALITY_SCENARIO_SLUGS = tuple(case.slug for case in MESSAGE_QUALITY_CASES)
+OWNER_UPDATE_QUALITY_CASES = (
+    MessageQualityCase(
+        slug="message_quality_chat_owner_pipeline_update",
+        channel="chat",
+        recipient="web-user",
+        subject="Pipeline update",
+        brief="owner-facing recruiting pipeline update",
+        source_facts=(
+            "Audience: the owner of the recruiting agent.\n"
+            "Pipeline: 18 candidates reviewed, 6 qualified, 3 awaiting recruiter review, and 2 interviews booked.\n"
+            "Sources: 11 candidates came from LinkedIn and 7 came from referrals.\n"
+            "Quality: qualified candidates average 8.4 out of 10; the target is 8.0.\n"
+            "Blocker: four profiles are missing compensation expectations.\n"
+            "Spend: $186 used from a $250 weekly sourcing budget.\n"
+            "Next: verify compensation for the four blocked profiles and prepare the six qualified candidates for review."
+        ),
+        source_example_ids=(),
+        quality_target="owner_update",
+    ),
+)
+
+MESSAGE_QUALITY_CASES = (
+    REPORT_MESSAGE_QUALITY_CASES
+    + SIMPLE_EMAIL_QUALITY_CASES
+    + HUMAN_MESSAGE_QUALITY_CASES
+    + OWNER_UPDATE_QUALITY_CASES
+)
+MESSAGE_QUALITY_SCENARIO_SLUGS = (
+    *(case.slug for case in MESSAGE_QUALITY_CASES),
+    REPLY_CHANNEL_CONTINUITY_SLUG,
+)
 
 
 MESSAGE_TOOL_NAMES = {"send_email", "send_chat_message", "send_sms", "send_agent_message"}
@@ -313,6 +358,14 @@ class MessageQualityScenario(EvalScenario, ScenarioExecutionTools):
                 "Send me a quick chat update using only the details below. Do not browse, create files, "
                 f"or ask follow-up questions.\n\n{case.source_facts}\n\nSend the update now."
             )
+        if case.quality_target == "human_reply":
+            return case.source_facts
+        if case.quality_target == "owner_update":
+            return (
+                "How are things looking with the recruiting work right now? Give me the useful update "
+                "using only the details below. Do not browse, create files, or ask follow-up questions.\n\n"
+                f"{case.source_facts}\n\nSend me the update now."
+            )
 
         if case.channel == "email":
             delivery_instruction = (
@@ -354,7 +407,8 @@ class MessageQualityScenario(EvalScenario, ScenarioExecutionTools):
         successful_calls = [
             call
             for call in expected_calls
-            if str(self._tool_result(call).get("status") or "").lower() in {"ok", "queued", "sent", "success"}
+            if self._tool_result(call).get("skipped") is not True
+            and str(self._tool_result(call).get("status") or "").lower() in {"ok", "queued", "sent", "success"}
         ]
         unexpected_calls = self._unexpected_message_calls(case, send_calls)
 
@@ -520,6 +574,10 @@ class MessageQualityScenario(EvalScenario, ScenarioExecutionTools):
             return f"Agent should send a concise outreach email via {case.expected_tool}."
         if case.quality_target == "human_message":
             return f"Agent should send a natural, context-specific update via {case.expected_tool}."
+        if case.quality_target == "human_reply":
+            return f"Agent should acknowledge the user's note naturally via {case.expected_tool}."
+        if case.quality_target == "owner_update":
+            return f"Agent should send a polished, scannable owner update via {case.expected_tool}."
         return f"Agent should send a polished {case.channel} report via {case.expected_tool}."
 
     @staticmethod
@@ -528,6 +586,10 @@ class MessageQualityScenario(EvalScenario, ScenarioExecutionTools):
             return "Judge should pass only restrained, professional outreach email formatting."
         if case.quality_target == "human_message":
             return "Judge should pass only a natural, specific message without assistant-like tells."
+        if case.quality_target == "human_reply":
+            return "Judge should pass only a concise, natural acknowledgement without evaluative padding."
+        if case.quality_target == "owner_update":
+            return "Judge should pass only a human, polished, decision-useful owner update."
         return "Judge should pass only polished, rich, readable report formatting."
 
     @staticmethod
@@ -550,6 +612,21 @@ class MessageQualityScenario(EvalScenario, ScenarioExecutionTools):
                 "specific, conversational, appropriately candid, and allowed to show natural personality or charm. Fail for canned acknowledgements, generic "
                 "enthusiasm, request restatement, polished assistant cadence, symmetrical rhetoric, report formatting, "
                 "template labels, or needless headings. Do not penalize expressive formatting in an explicitly requested report or dashboard."
+            )
+        if case.quality_target == "human_reply":
+            return (
+                "Does this sound like a person responding directly to a short operational note? Pass only if it is a concise, "
+                "context-aware acknowledgement. Fail if it opens by evaluating or praising the result, adds a formulaic concession such as 'even if', "
+                "says this is exactly the kind of evidence needed, restates the user's rationale or decision, or stacks polished "
+                "assistant-style framing around a simple confirmation. Do not require exact wording; a short acknowledgement is enough."
+            )
+        if case.quality_target == "owner_update":
+            return (
+                "Does this feel like a polished update from a thoughtful operator to the owner of the work? "
+                "Pass only if it stays human and direct while making the multi-part operational state easy to scan, "
+                "with clear visual grouping and proportionate use of sections, bullets, a compact table, metric blocks, "
+                "or status labels. Fail if it is a dense plain paragraph, a loose fact dump, needlessly over-formatted, "
+                "or templated/corporate. Do not require any one specific Markdown element."
             )
         if case.channel == "email":
             return (
@@ -737,6 +814,171 @@ class MessageQualityScenario(EvalScenario, ScenarioExecutionTools):
             if re.search(r"^\s*\|.+\|\s*$", body, re.MULTILINE):
                 failures.append("Email body should use HTML tables, not Markdown pipe tables.")
         return failures
+
+
+@register_scenario
+class ReplyChannelContinuityScenario(EvalScenario, ScenarioExecutionTools):
+    slug = REPLY_CHANNEL_CONTINUITY_SLUG
+    version = "1.0"
+    description = "A reply to an active web conversation should not move to an older or preferred email thread."
+    tier = "core"
+    category = "message_quality"
+    expected_runtime = "short"
+    cost_class = "low"
+    owner = "agent-platform"
+    area = "agent_behavior"
+    tags = ("message_quality", "tool_choice", "send_chat_message", "reply_channel")
+    tasks = [
+        ScenarioTask(name="inject_prompt", assertion_type="manual"),
+        ScenarioTask(name="verify_web_chat_delivery", assertion_type="manual"),
+        ScenarioTask(name="verify_no_cross_channel_reply", assertion_type="manual"),
+    ]
+
+    @staticmethod
+    def _seed_email_context(agent: PersistentAgent) -> PersistentAgentCommsEndpoint:
+        owner_email, _ = PersistentAgentCommsEndpoint.objects.get_or_create(
+            channel=CommsChannel.EMAIL,
+            address="owner@example.test",
+            defaults={"owner_agent": None},
+        )
+        agent_email, _ = PersistentAgentCommsEndpoint.objects.get_or_create(
+            owner_agent=agent,
+            channel=CommsChannel.EMAIL,
+            defaults={"address": f"agent-{agent.id}@eval.local", "is_primary": True},
+        )
+        CommsAllowlistEntry.objects.update_or_create(
+            agent=agent,
+            channel=CommsChannel.EMAIL,
+            address=owner_email.address,
+            defaults={
+                "is_active": True,
+                "allow_inbound": True,
+                "allow_outbound": True,
+                "verified": True,
+                "can_configure": True,
+            },
+        )
+        conversation = _get_or_create_conversation(
+            CommsChannel.EMAIL,
+            owner_email.address,
+            owner_agent=agent,
+        )
+        _ensure_participant(
+            conversation,
+            owner_email,
+            PersistentAgentConversationParticipant.ParticipantRole.EXTERNAL,
+        )
+        _ensure_participant(
+            conversation,
+            agent_email,
+            PersistentAgentConversationParticipant.ParticipantRole.AGENT,
+        )
+        prior_email = PersistentAgentMessage.objects.create(
+            owner_agent=agent,
+            from_endpoint=owner_email,
+            to_endpoint=agent_email,
+            conversation=conversation,
+            is_outbound=False,
+            body="Please keep the current outreach batch moving and send a few more when they are ready.",
+            raw_payload={"subject": "Send a few more"},
+        )
+        PersistentAgentMessage.objects.filter(pk=prior_email.pk).update(
+            timestamp=timezone.now() - timedelta(minutes=20),
+        )
+        return owner_email
+
+    @staticmethod
+    def _result(call: PersistentAgentToolCall) -> dict[str, Any]:
+        return MessageQualityScenario._tool_result(call)
+
+    def run(self, run_id: str, agent_id: str) -> None:
+        agent = PersistentAgent.objects.get(id=agent_id)
+        mark_tool_enabled_without_discovery(agent, "send_email")
+        mark_tool_enabled_without_discovery(agent, "send_chat_message")
+        owner_email = self._seed_email_context(agent)
+
+        self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="inject_prompt")
+        with self.wait_for_agent_idle(agent_id, timeout=120):
+            inbound = self.inject_message(
+                agent_id,
+                (
+                    "One more thing for this outreach batch only: lead with the self-serve value, mention that it works "
+                    "with the tools people already use, and route unusually large opportunities to the enterprise team. "
+                    "Got it? We can handle the queue separately after this reply."
+                ),
+                trigger_processing=False,
+                eval_run_id=run_id,
+            )
+            PersistentAgent.objects.filter(id=agent_id).update(preferred_contact_endpoint=owner_email)
+            self.trigger_processing(
+                agent_id,
+                eval_run_id=run_id,
+                mock_config={
+                    "send_email": {
+                        "status": "ok",
+                        "message": "Mocked email delivery for reply-channel regression eval.",
+                        "message_id": "eval-reply-channel-email",
+                    },
+                },
+                eval_stop_policy={
+                    "stop_on_tool_names_after_execution": ["send_chat_message", "send_email"],
+                    "stop_on_unexpected_relevant_tool": True,
+                    "allowed_tool_names": [
+                        "sqlite_batch",
+                        "send_chat_message",
+                        "send_email",
+                        "update_plan",
+                    ],
+                    "ignored_tool_names": ["sqlite_batch", "update_plan"],
+                    "max_relevant_tool_calls": 8,
+                },
+            )
+
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED,
+            task_name="inject_prompt",
+            observed_summary="Web prompt injected with an older preferred email path available.",
+            artifacts={"message": inbound},
+        )
+
+        calls = MessageQualityScenario._tool_calls_for_run(run_id, after=inbound.timestamp)
+        chat_calls = [call for call in calls if call.tool_name == "send_chat_message"]
+        delivered_chats = [
+            call
+            for call in chat_calls
+            if self._result(call).get("skipped") is not True
+            and str(self._result(call).get("status") or "").lower() in {"ok", "sent", "success"}
+        ]
+        email_calls = [call for call in calls if call.tool_name == "send_email"]
+
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED if len(delivered_chats) == 1 else EvalRunTask.Status.FAILED,
+            task_name="verify_web_chat_delivery",
+            expected_summary="Agent should deliver one non-skipped reply in the active web conversation.",
+            observed_summary=(
+                f"Saw {len(delivered_chats)} delivered web reply/replies after {len(chat_calls)} chat attempt(s)."
+            ),
+            artifacts={"step": (delivered_chats[0].step if delivered_chats else chat_calls[0].step)}
+            if chat_calls
+            else {},
+        )
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED if not email_calls else EvalRunTask.Status.FAILED,
+            task_name="verify_no_cross_channel_reply",
+            expected_summary="Agent should not move the reply to the older email thread.",
+            observed_summary=(
+                "Agent kept the reply out of email."
+                if not email_calls
+                else f"Agent attempted {len(email_calls)} cross-channel email reply/replies."
+            ),
+            artifacts={"step": email_calls[0].step} if email_calls else {},
+        )
 
 
 def _scenario_class(case: MessageQualityCase):

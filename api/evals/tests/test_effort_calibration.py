@@ -741,7 +741,8 @@ class EffortCalibrationHarnessTests(TestCase):
 
         self.assertEqual(result["status"], "ok")
         self.assertTrue(result["skipped"])
-        self.assertIn("eval in-progress", result["message"])
+        self.assertIn("deliver the substantive reply in this web chat", result["message"])
+        self.assertIn("do not switch to email or SMS", result["message"])
         self.assertFalse(PersistentAgentMessage.objects.filter(owner_agent=agent, is_outbound=True).exists())
 
     def test_send_chat_skips_progress_only_message_before_any_reply(self):
@@ -1034,7 +1035,8 @@ class FirstRunPromptCalibrationTests(TestCase):
             context, _, _ = build_prompt_context_preview(agent, is_first_run=False)
 
         system_prompt = next(message["content"] for message in context if message["role"] == "system")
-        self.assertIn("Use exactly the requested delivery channel", system_prompt)
+        self.assertIn("Use the requested channel; otherwise reply on the latest inbound channel", system_prompt)
+        self.assertIn("A skipped web send never permits switching", system_prompt)
         self.assertIn("Set false after delivery/config and no active work", system_prompt)
         self.assertIn("Do not set a schedule merely to continue or remember a single research question", system_prompt)
         self.assertIn("explicit SQLite/database request and sqlite_batch is callable", system_prompt)
