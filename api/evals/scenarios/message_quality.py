@@ -1,3 +1,4 @@
+import html
 import json
 import re
 from dataclasses import dataclass
@@ -26,9 +27,9 @@ from api.models import (
     PersistentAgentMessage,
     PersistentAgentToolCall,
     build_web_user_address,
+    SmsContactPurpose,
 )
 from api.services.web_sessions import start_web_session
-from util.text_sanitizer import has_humanized_message_style_violation
 
 
 MESSAGE_QUALITY_SUITE_SLUG = "message_quality_reports"
@@ -48,6 +49,11 @@ class MessageQualityCase:
     source_example_ids: tuple[str, ...]
     quality_target: str = "rich_report"
     required_entity_names: tuple[str, ...] = ()
+    judge_focus: str = ""
+    prior_subject: str = ""
+    prior_body: str = ""
+    exact_subject: str = ""
+    exact_body: str = ""
 
     @property
     def expected_tool(self) -> str:
@@ -55,7 +61,13 @@ class MessageQualityCase:
             return "send_email"
         if self.channel == "chat":
             return "send_chat_message"
+        if self.channel == "sms":
+            return "send_sms"
         raise ValueError(f"Unsupported message quality channel: {self.channel}")
+
+    @property
+    def is_followup(self) -> bool:
+        return bool(self.prior_body)
 
 
 REAL_WORLD_REPORT_FACTS = {
@@ -156,7 +168,7 @@ REPORT_MESSAGE_QUALITY_CASES = (
     _case("trading_dashboard", "chat", "web-user", "AI Trading System Dashboard", "trading_dashboard"),
 )
 
-HUMAN_MESSAGE_QUALITY_CASES = (
+RECIPIENT_MESSAGE_QUALITY_CASES = (
     MessageQualityCase(
         slug="message_quality_chat_project_update",
         channel="chat",
@@ -171,7 +183,152 @@ HUMAN_MESSAGE_QUALITY_CASES = (
             "No action is needed from the user."
         ),
         source_example_ids=(),
-        quality_target="human_message",
+        quality_target="recipient_message",
+        judge_focus="The update should answer the user's status question directly without adding an ask.",
+    ),
+    MessageQualityCase(
+        slug="message_quality_email_cold_sales_finance",
+        channel="email",
+        recipient="maya.chen@example.test",
+        subject="",
+        brief="cold sales introduction to a finance leader",
+        source_facts=(
+            "Sender: Elena from Ridge Analytics.\n"
+            "Recipient: Maya Chen, VP Finance at Northstar Labs.\n"
+            "Known context: Northstar Labs is hiring an Accounts Payable Manager.\n"
+            "Relevant offer: Ridge Analytics flags unusual vendor spend and duplicate invoice risk for finance teams.\n"
+            "Desired next step: ask whether Maya is open to a 15-minute introduction next week."
+        ),
+        source_example_ids=(),
+        quality_target="recipient_message",
+        judge_focus=(
+            "Require a credible connection between the known hiring signal and the offer. Fail vague prospecting "
+            "copy, false familiarity, or unsupported customer and performance claims."
+        ),
+    ),
+    MessageQualityCase(
+        slug="message_quality_email_recruiting_candidate",
+        channel="email",
+        recipient="alex.morgan@example.test",
+        subject="",
+        brief="recruiting message to a qualified candidate",
+        source_facts=(
+            "Sender: Mara, a recruiter at Cedar Stack.\n"
+            "Recipient: Alex Morgan, Senior Data Engineer at Harbor Grid.\n"
+            "Verified public evidence: Alex led Python streaming reliability work and maintains an open-source Kafka "
+            "monitoring plugin.\n"
+            "Role: Staff Data Platform Engineer at Cedar Stack, focused on production event systems and open to remote "
+            "employees in the United States.\n"
+            "Compensation and Alex's interest are unknown.\n"
+            "Desired next step: ask whether Alex wants a short role overview."
+        ),
+        source_example_ids=(),
+        quality_target="recipient_message",
+        judge_focus=(
+            "Connect the verified experience to the role without inventing qualifications, interest, compensation, "
+            "or a prior relationship. The invitation should be informative and low pressure."
+        ),
+    ),
+    MessageQualityCase(
+        slug="message_quality_email_customer_recovery",
+        channel="email",
+        recipient="rene.lopez@example.test",
+        subject="",
+        brief="customer recovery after a service issue",
+        source_facts=(
+            "Sender: Devon from Customer Success at SlateSync.\n"
+            "Recipient: Rene Lopez, operations lead at Brightpath.\n"
+            "Known issue: Brightpath's recent CSV import failed because the file had duplicate column names.\n"
+            "Current status: SlateSync engineering shipped a fix and the import is ready to retry.\n"
+            "Desired next step: offer to join Rene for a 15-minute retry session."
+        ),
+        source_example_ids=(),
+        quality_target="recipient_message",
+        judge_focus=(
+            "Acknowledge the concrete issue, state the resolution plainly, and make the next step easy. Fail "
+            "promotional copy, blame, defensiveness, or an attempt to upsell."
+        ),
+    ),
+    MessageQualityCase(
+        slug="message_quality_email_partnership_revops",
+        channel="email",
+        recipient="jordan.rivera@example.test",
+        subject="",
+        brief="partnership message based on a specific audience fit",
+        source_facts=(
+            "Sender: Priya from Atlas Workflow.\n"
+            "Recipient: Jordan Rivera at Beacon RevOps.\n"
+            "Known context: Beacon RevOps advises B2B SaaS teams on onboarding and retention operations.\n"
+            "Relevant offer: Atlas Workflow turns scattered onboarding notes into tracked implementation checklists.\n"
+            "Desired next step: ask whether Jordan is open to comparing notes for 20 minutes."
+        ),
+        source_example_ids=(),
+        quality_target="recipient_message",
+        judge_focus=(
+            "Explain the specific audience and workflow overlap. Fail vague synergy language, one-sided promotion, "
+            "invented partnership history, or pressure to commit."
+        ),
+    ),
+    MessageQualityCase(
+        slug="message_quality_email_no_reply_followup",
+        channel="email",
+        recipient="maya.chen@example.test",
+        subject="",
+        brief="follow-up after an unanswered finance email",
+        source_facts=(
+            "Sender: Elena from Ridge Analytics.\n"
+            "Recipient: Maya Chen, VP Finance at Northstar Labs.\n"
+            "The prior email introduced Ridge Analytics after Northstar Labs began hiring an Accounts Payable Manager.\n"
+            "New relevant context: Ridge Analytics has a short checklist for duplicate-invoice controls during AP team "
+            "growth.\n"
+            "Desired next step: ask whether Maya wants the checklist, while making it easy to decline."
+        ),
+        source_example_ids=(),
+        quality_target="recipient_message",
+        judge_focus=(
+            "Require a useful new reason to respond and a graceful way to decline. Fail guilt, manufactured urgency, "
+            "claims that the recipient read the first email, or a repeated original pitch."
+        ),
+        prior_subject="Duplicate invoice risk during AP growth",
+        prior_body=(
+            "<p>Hi Maya,</p>"
+            "<p>I saw that Northstar Labs is hiring an Accounts Payable Manager. Ridge Analytics helps finance teams "
+            "flag unusual vendor spend and duplicate invoice risk as AP operations grow.</p>"
+            "<p>Would you be open to a 15-minute introduction next week?</p>"
+            "<p>Thanks,<br>Elena</p>"
+        ),
+    ),
+    MessageQualityCase(
+        slug="message_quality_email_exact_copy",
+        channel="email",
+        recipient="maya.chen@example.test",
+        subject="Launch note — approved 🚀",
+        brief="exact user-authored launch note",
+        source_facts="The user supplied final approved email copy and asked for exact delivery.",
+        source_example_ids=(),
+        quality_target="exact_copy",
+        exact_subject="Launch note — approved 🚀",
+        exact_body=(
+            "<div style='color:#17324d'><p>Hi Maya—great news 🚀</p>"
+            "<p>The launch is approved. Please keep both asks: confirm Tuesday, and invite Jordan.</p>"
+            "<p>—Elena</p></div>"
+        ),
+    ),
+    MessageQualityCase(
+        slug="message_quality_sms_schedule_update",
+        channel="sms",
+        recipient="+15555550123",
+        subject="",
+        brief="concise meeting schedule update",
+        source_facts=(
+            "Sender: Morgan.\n"
+            "Recipient: Casey.\n"
+            "The project review moved from 2 PM to 3 PM ET today.\n"
+            "No reply or other action is needed."
+        ),
+        source_example_ids=(),
+        quality_target="recipient_message",
+        judge_focus="Keep the SMS brief and direct, and do not add a question or call to action.",
     ),
     MessageQualityCase(
         slug="message_quality_chat_evidence_acknowledgement",
@@ -185,7 +342,11 @@ HUMAN_MESSAGE_QUALITY_CASES = (
             "so there is nothing for you to update or create. Just wanted you to know."
         ),
         source_example_ids=(),
-        quality_target="human_reply",
+        quality_target="recipient_message",
+        judge_focus=(
+            "A brief acknowledgement is enough. Fail evaluative praise, formulaic concessions, claims that this is "
+            "exactly the evidence needed, or a restatement of the user's reasoning."
+        ),
     ),
 )
 
@@ -233,7 +394,7 @@ PORTFOLIO_REPORT_QUALITY_CASES = (
 
 MESSAGE_QUALITY_CASES = (
     REPORT_MESSAGE_QUALITY_CASES
-    + HUMAN_MESSAGE_QUALITY_CASES
+    + RECIPIENT_MESSAGE_QUALITY_CASES
     + OWNER_UPDATE_QUALITY_CASES
     + PORTFOLIO_REPORT_QUALITY_CASES
 )
@@ -256,7 +417,15 @@ class MessageQualityScenario(EvalScenario, ScenarioExecutionTools):
     cost_class = "high"
     owner = "agent-platform"
     area = "agent_behavior"
-    tags = ("message_quality", "response_quality", "llm_judge", "send_email", "send_chat_message")
+    tags = (
+        "message_quality",
+        "response_quality",
+        "human_output",
+        "llm_judge",
+        "send_email",
+        "send_chat_message",
+        "send_sms",
+    )
     tasks = [
         ScenarioTask(name="inject_prompt", assertion_type="manual"),
         ScenarioTask(name="verify_expected_send_tool", assertion_type="manual"),
@@ -328,6 +497,14 @@ class MessageQualityScenario(EvalScenario, ScenarioExecutionTools):
         agent = PersistentAgent.objects.get(id=agent_id)
         mark_tool_enabled_without_discovery(agent, "send_email")
         mark_tool_enabled_without_discovery(agent, "send_chat_message")
+        if case.channel == "sms":
+            PersistentAgentCommsEndpoint.objects.get_or_create(
+                owner_agent=agent,
+                channel=CommsChannel.SMS,
+                address=f"+1555{int(agent.id) % 10_000_000:07d}",
+                defaults={"is_primary": True},
+            )
+            mark_tool_enabled_without_discovery(agent, "send_sms")
         if case.channel == "email":
             CommsAllowlistEntry.objects.update_or_create(
                 agent=agent,
@@ -340,15 +517,104 @@ class MessageQualityScenario(EvalScenario, ScenarioExecutionTools):
                     "verified": True,
                 },
             )
+        elif case.channel == "sms":
+            CommsAllowlistEntry.objects.update_or_create(
+                agent=agent,
+                channel=CommsChannel.SMS,
+                address=case.recipient,
+                defaults={
+                    "is_active": True,
+                    "allow_inbound": True,
+                    "allow_outbound": True,
+                    "verified": True,
+                    "sms_contact_purpose": SmsContactPurpose.OTHER_OPERATIONAL,
+                    "sms_contact_purpose_details": "Operational schedule update requested by the eval user.",
+                    "sms_contact_permission_attested": True,
+                    "sms_contact_permission_attested_at": timezone.now(),
+                },
+            )
+        if case.is_followup:
+            self._seed_prior_message(agent, case)
+
+    @staticmethod
+    def _seed_prior_message(agent: PersistentAgent, case: MessageQualityCase) -> PersistentAgentMessage:
+        existing = MessageQualityScenario._prior_message(agent.id, case.slug)
+        if existing is not None:
+            return existing
+
+        from_endpoint, _ = PersistentAgentCommsEndpoint.objects.get_or_create(
+            owner_agent=agent,
+            channel=CommsChannel.EMAIL,
+            address=f"agent-{agent.id}@eval.local",
+            defaults={"is_primary": True},
+        )
+        to_endpoint, _ = PersistentAgentCommsEndpoint.objects.get_or_create(
+            channel=CommsChannel.EMAIL,
+            address=case.recipient,
+            defaults={"owner_agent": None},
+        )
+        conversation = _get_or_create_conversation(
+            CommsChannel.EMAIL,
+            case.recipient,
+            owner_agent=agent,
+        )
+        _ensure_participant(
+            conversation,
+            from_endpoint,
+            PersistentAgentConversationParticipant.ParticipantRole.AGENT,
+        )
+        _ensure_participant(
+            conversation,
+            to_endpoint,
+            PersistentAgentConversationParticipant.ParticipantRole.EXTERNAL,
+        )
+        return PersistentAgentMessage.objects.create(
+            owner_agent=agent,
+            from_endpoint=from_endpoint,
+            conversation=conversation,
+            is_outbound=True,
+            body=case.prior_body,
+            raw_payload={
+                "subject": case.prior_subject,
+                "source": "eval_message_quality_prior",
+                "case_slug": case.slug,
+            },
+        )
+
+    @staticmethod
+    def _prior_message(agent_id, case_slug: str) -> PersistentAgentMessage | None:
+        return (
+            PersistentAgentMessage.objects.filter(
+                owner_agent_id=agent_id,
+                raw_payload__source="eval_message_quality_prior",
+                raw_payload__case_slug=case_slug,
+            )
+            .order_by("timestamp", "seq")
+            .first()
+        )
 
     def _prompt(self, case: MessageQualityCase) -> str:
-        if case.quality_target == "human_message":
+        if case.quality_target == "exact_copy":
             return (
-                "Send me a quick chat update using only the details below. Do not browse, create files, "
-                f"or ask follow-up questions.\n\n{case.source_facts}\n\nSend the update now."
+                f"Send an email to {case.recipient} using the subject and body exactly as written. "
+                "Do not rewrite, reformat, or add anything.\n\n"
+                f"Subject: {case.exact_subject}\n\n"
+                f"Body:\n{case.exact_body}\n\n"
+                "Send the email now."
             )
-        if case.quality_target == "human_reply":
-            return case.source_facts
+        if case.quality_target == "recipient_message":
+            if case.channel == "chat":
+                action = "Send me a quick chat update"
+            elif case.channel == "sms":
+                action = f"Send an SMS to {case.recipient}"
+            elif case.is_followup:
+                action = f"Send a follow-up email in the existing thread to {case.recipient}"
+            else:
+                action = f"Send an email to {case.recipient}"
+            return (
+                f"{action} using only the details below. Do not browse, create files, or ask follow-up questions.\n\n"
+                f"{case.source_facts}\n\nSend the message now."
+            )
         if case.quality_target == "owner_update":
             return (
                 "How are things looking with the recruiting work right now? Give me the useful update "
@@ -524,14 +790,10 @@ class MessageQualityScenario(EvalScenario, ScenarioExecutionTools):
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="judge_message_quality")
         params = self._tool_params(send_call)
         sent_message = self._sent_message_for_call(send_call)
+        judge_context = self._judge_context(case, params, body)
         choice, reasoning = self.llm_judge(
             question=self._judge_question(case),
-            context=(
-                f"Delivery channel: {case.channel}\n"
-                f"Source facts:\n{case.source_facts}\n\n"
-                f"Tool params:\n{json.dumps(params, indent=2, ensure_ascii=False, default=str)}\n\n"
-                f"Message body:\n{body}"
-            ),
+            context=judge_context,
             options=["Pass", "Fail"],
         )
         if self._judge_reasoning_is_unusable(reasoning):
@@ -540,12 +802,7 @@ class MessageQualityScenario(EvalScenario, ScenarioExecutionTools):
                     f"{self._judge_question(case)} Your reasoning must cite concrete formatting evidence "
                     "from the message body."
                 ),
-                context=(
-                    f"Delivery channel: {case.channel}\n"
-                    f"Source facts:\n{case.source_facts}\n\n"
-                    f"Tool params:\n{json.dumps(params, indent=2, ensure_ascii=False, default=str)}\n\n"
-                    f"Message body:\n{body}"
-                ),
+                context=judge_context,
                 options=["Pass", "Fail"],
             )
 
@@ -564,11 +821,26 @@ class MessageQualityScenario(EvalScenario, ScenarioExecutionTools):
         )
 
     @staticmethod
+    def _judge_context(case: MessageQualityCase, params: dict[str, Any], body: str) -> str:
+        expected_copy = ""
+        if case.quality_target == "exact_copy":
+            expected_copy = (
+                f"\n\nExpected exact subject:\n{case.exact_subject}"
+                f"\n\nExpected exact body:\n{case.exact_body}"
+            )
+        return (
+            f"Delivery channel: {case.channel}\n"
+            f"Source facts:\n{case.source_facts}{expected_copy}\n\n"
+            f"Tool params:\n{json.dumps(params, indent=2, ensure_ascii=False, default=str)}\n\n"
+            f"Message body:\n{body}"
+        )
+
+    @staticmethod
     def _expected_delivery_summary(case: MessageQualityCase) -> str:
-        if case.quality_target == "human_message":
-            return f"Agent should send a natural, context-specific update via {case.expected_tool}."
-        if case.quality_target == "human_reply":
-            return f"Agent should acknowledge the user's note naturally via {case.expected_tool}."
+        if case.quality_target == "exact_copy":
+            return "Agent should deliver the supplied email copy exactly through send_email."
+        if case.quality_target == "recipient_message":
+            return f"Agent should send one grounded, context-specific message via {case.expected_tool}."
         if case.quality_target == "owner_update":
             return f"Agent should send a polished, scannable owner update via {case.expected_tool}."
         if case.quality_target == "owner_research":
@@ -577,10 +849,10 @@ class MessageQualityScenario(EvalScenario, ScenarioExecutionTools):
 
     @staticmethod
     def _expected_judge_summary(case: MessageQualityCase) -> str:
-        if case.quality_target == "human_message":
-            return "Judge should pass only a natural, specific message without assistant-like tells."
-        if case.quality_target == "human_reply":
-            return "Judge should pass only a concise, natural acknowledgement without evaluative padding."
+        if case.quality_target == "exact_copy":
+            return "Judge should pass only faithful delivery of the user-authored copy."
+        if case.quality_target == "recipient_message":
+            return "Judge should pass only a grounded, natural message appropriate to its recipient and purpose."
         if case.quality_target == "owner_update":
             return "Judge should pass only a human, polished, decision-useful owner update."
         if case.quality_target == "owner_research":
@@ -593,19 +865,20 @@ class MessageQualityScenario(EvalScenario, ScenarioExecutionTools):
 
     @staticmethod
     def _judge_question(case: MessageQualityCase) -> str:
-        if case.quality_target == "human_message":
+        if case.quality_target == "exact_copy":
             return (
-                "Would this read as a natural message from a thoughtful person who knows this context? Pass only if it is "
-                "specific, conversational, appropriately candid, and allowed to show natural personality or charm. Fail for canned acknowledgements, generic "
-                "enthusiasm, request restatement, polished assistant cadence, symmetrical rhetoric, report formatting, "
-                "template labels, or needless headings. Do not penalize expressive formatting in an explicitly requested report or dashboard."
+                "Did the agent faithfully deliver the exact user-authored subject and body without rewriting, "
+                "reformatting, omission, or additions? Do not penalize intentional punctuation, emoji, multiple asks, "
+                "branding, or HTML structure."
             )
-        if case.quality_target == "human_reply":
+        if case.quality_target == "recipient_message":
             return (
-                "Does this sound like a person responding directly to a short operational note? Pass only if it is a concise, "
-                "context-aware acknowledgement. Fail if it opens by evaluating or praising the result, adds a formulaic concession such as 'even if', "
-                "says this is exactly the kind of evidence needed, restates the user's rationale or decision, or stacks polished "
-                "assistant-style framing around a simple confirmation. Do not require exact wording; a short acknowledgement is enough."
+                "Would this read as a grounded, natural message from a thoughtful person in this specific relationship? "
+                "Pass only if it uses the supplied facts accurately, fits the channel and purpose, and makes any requested "
+                "next step clear and proportionate. Fail invented familiarity, recipient activity, claims, evidence, "
+                "interest, or commitments; generic template language; padded assistant cadence; misleading subjects; or "
+                "structure that does not fit the message. Do not penalize punctuation, emoji, formatting, length, or "
+                f"multiple asks merely as style preferences. {case.judge_focus}"
             )
         if case.quality_target == "owner_update":
             return (
@@ -797,23 +1070,45 @@ class MessageQualityScenario(EvalScenario, ScenarioExecutionTools):
         missing_entities = self._missing_required_entity_names(case, body)
         if missing_entities:
             failures.append(f"Message omitted required entities: {', '.join(missing_entities)}.")
-        if has_humanized_message_style_violation(body) or (
-            case.channel == "email" and has_humanized_message_style_violation(str(params.get("subject") or ""))
-        ):
-            failures.append("Recipient-facing prose used prohibited dash punctuation or a double-hyphen workaround.")
         result = self._tool_result(send_call) if send_call is not None else {}
         if params.get("will_continue_work") is not False and result.get("auto_sleep_ok") is not True:
-            failures.append("will_continue_work should be false for final report delivery.")
+            failures.append("will_continue_work should be false for final message delivery.")
 
         if case.channel == "email":
             if params.get("to_address") != case.recipient:
                 failures.append(f"send_email.to_address should be {case.recipient}.")
-            if not params.get("subject"):
+            subject = str(params.get("subject") or "")
+            if not subject:
                 failures.append("send_email.subject is missing.")
             if re.search(r"</?(?:html|head|body)\b", body, re.IGNORECASE):
                 failures.append("Email body should not include html/head/body wrapper tags.")
             if re.search(r"^\s*\|.+\|\s*$", body, re.MULTILINE):
                 failures.append("Email body should use HTML tables, not Markdown pipe tables.")
+            if not case.is_followup and re.match(r"\s*(?:re|fwd)\s*:", html.unescape(subject), re.IGNORECASE):
+                failures.append("Initial email should not use a fake reply or forward subject.")
+        elif case.channel == "sms" and params.get("to_number") != case.recipient:
+            failures.append(f"send_sms.to_number should be {case.recipient}.")
+
+        if case.quality_target != "rich_report":
+            unescaped_content = html.unescape(f"{params.get('subject') or ''}\n{body}")
+            if re.search(
+                r"\{\{?[^}\n]+\}\}?|\[[A-Z][A-Z0-9_ -]{2,}\]|<\s*(?:first|last)[_-]?name\s*>",
+                unescaped_content,
+                re.IGNORECASE,
+            ):
+                failures.append("Message contains an unresolved placeholder.")
+
+        if case.quality_target == "exact_copy":
+            if params.get("subject") != case.exact_subject:
+                failures.append("Exact-copy email subject was changed.")
+            if body != case.exact_body:
+                failures.append("Exact-copy email body was changed.")
+
+        if case.is_followup and send_call is not None:
+            prior = self._prior_message(send_call.step.agent_id, case.slug)
+            expected_reply_id = str(prior.id) if prior is not None else ""
+            if str(params.get("reply_to_message_id") or "") != expected_reply_id:
+                failures.append("Follow-up email should reply in the seeded thread.")
         return failures
 
     @staticmethod
@@ -1275,6 +1570,7 @@ def _scenario_class(case: MessageQualityCase):
         tags = (
             "message_quality",
             "response_quality",
+            "human_output",
             "llm_judge",
             case.channel,
             case.expected_tool,

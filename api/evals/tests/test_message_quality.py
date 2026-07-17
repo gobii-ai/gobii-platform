@@ -1,4 +1,7 @@
-from django.test import SimpleTestCase, tag
+import uuid
+
+from django.contrib.auth import get_user_model
+from django.test import SimpleTestCase, TestCase, tag
 
 import api.evals.loader  # noqa: F401 - registers scenarios and suites
 from api.evals.registry import ScenarioRegistry
@@ -11,13 +14,24 @@ from api.evals.scenarios.message_quality import (
     OWNER_UPDATE_QUALITY_CASES,
     PORTFOLIO_REPORT_QUALITY_CASES,
     REPLY_CHANNEL_CONTINUITY_SLUG,
+    RECIPIENT_MESSAGE_QUALITY_CASES,
     REPORT_MESSAGE_QUALITY_CASES,
-    SIMPLE_EMAIL_QUALITY_CASES,
     UNAVAILABLE_WEB_CHANNEL_CONTINUITY_SLUG,
-    HUMAN_MESSAGE_QUALITY_CASES,
     MessageQualityScenario,
 )
 from api.evals.suites import SuiteRegistry
+from api.models import (
+    BrowserUseAgent,
+    CommsAllowlistEntry,
+    CommsChannel,
+    PersistentAgent,
+    PersistentAgentCommsEndpoint,
+    PersistentAgentStep,
+    PersistentAgentToolCall,
+)
+
+
+User = get_user_model()
 
 
 @tag("eval_sim")
@@ -27,7 +41,7 @@ class MessageQualityScenarioTests(SimpleTestCase):
 
         self.assertIsNotNone(suite)
         self.assertEqual(tuple(suite.scenario_slugs), MESSAGE_QUALITY_SCENARIO_SLUGS)
-        self.assertEqual(len(suite.scenario_slugs), 19)
+        self.assertEqual(len(suite.scenario_slugs), 24)
         self.assertIn(REPLY_CHANNEL_CONTINUITY_SLUG, suite.scenario_slugs)
         self.assertIn(UNAVAILABLE_WEB_CHANNEL_CONTINUITY_SLUG, suite.scenario_slugs)
         self.assertIn(FAILED_EMAIL_DELIVERY_RECOVERY_SLUG, suite.scenario_slugs)
@@ -79,49 +93,37 @@ class MessageQualityScenarioTests(SimpleTestCase):
             )
         )
 
-    def test_simple_email_prompt_does_not_specify_formatting_style(self):
-        case = SIMPLE_EMAIL_QUALITY_CASES[0]
-        scenario = MessageQualityScenario()
-        prompt = scenario._prompt(case)
-
-        self.assertIn("Send a cold outreach email", prompt)
-        self.assertNotIn("rich", prompt.lower())
-        self.assertNotIn("emoji", prompt.lower())
-        self.assertNotIn("color", prompt.lower())
-        self.assertNotIn("table", prompt.lower())
-
-    def test_simple_email_judge_rejects_overformatted_report_style(self):
-        case = SIMPLE_EMAIL_QUALITY_CASES[0]
-        question = MessageQualityScenario._judge_question(case)
-
-        self.assertIn("restrained", question)
-        self.assertIn("Fail if it looks like a report", question)
-        self.assertIn("tables", question)
-        self.assertIn("emoji section labels", question)
-        self.assertIn("naturally written", question)
-
-    def test_human_message_eval_relies_on_base_behavior(self):
-        case = HUMAN_MESSAGE_QUALITY_CASES[0]
+    def test_recipient_message_evals_cover_email_chat_sms_and_rely_on_base_behavior(self):
+        self.assertEqual({case.channel for case in RECIPIENT_MESSAGE_QUALITY_CASES}, {"email", "chat", "sms"})
+        case = RECIPIENT_MESSAGE_QUALITY_CASES[0]
         prompt = MessageQualityScenario()._prompt(case).lower()
         question = MessageQualityScenario._judge_question(case)
 
         self.assertNotIn("human", prompt)
         self.assertNotIn("natural", prompt)
         self.assertNotIn("dash", prompt)
-        self.assertIn("natural message", question)
-        self.assertIn("assistant cadence", question)
+        self.assertIn("grounded, natural message", question)
+        self.assertIn("padded assistant cadence", question)
 
-    def test_human_reply_eval_does_not_name_the_slop_patterns(self):
-        case = next(case for case in HUMAN_MESSAGE_QUALITY_CASES if case.quality_target == "human_reply")
+    def test_recipient_message_prompts_do_not_leak_style_rubric(self):
+        forbidden_terms = ("invented familiarity", "template language", "assistant cadence", "low pressure")
+
+        for case in RECIPIENT_MESSAGE_QUALITY_CASES:
+            prompt = MessageQualityScenario()._prompt(case).lower()
+            for term in forbidden_terms:
+                self.assertNotIn(term, prompt)
+
+    def test_evidence_acknowledgement_eval_does_not_name_the_judge_guidance(self):
+        case = next(case for case in RECIPIENT_MESSAGE_QUALITY_CASES if "evidence_acknowledgement" in case.slug)
         prompt = MessageQualityScenario()._prompt(case).lower()
         question = MessageQualityScenario._judge_question(case)
 
         self.assertNotIn("exactly the kind", prompt)
         self.assertNotIn("formulaic", prompt)
-        self.assertNotIn("evaluating", prompt)
-        self.assertIn("evaluating or praising", question)
-        self.assertIn("such as 'even if'", question)
-        self.assertIn("exactly the kind of evidence", question)
+        self.assertNotIn("evaluative praise", prompt)
+        self.assertIn("evaluative praise", question)
+        self.assertIn("formulaic concessions", question)
+        self.assertIn("exactly the evidence needed", question)
 
     def test_owner_update_eval_does_not_name_the_desired_format(self):
         case = OWNER_UPDATE_QUALITY_CASES[0]
@@ -241,20 +243,17 @@ class MessageQualityScenarioTests(SimpleTestCase):
 
         self.assertEqual(failures, ["Message body was empty."])
 
-    def test_delivery_basics_reject_ai_dash_tells(self):
-        case = HUMAN_MESSAGE_QUALITY_CASES[0]
-        for body in (
-            "The copy finished—Morgan is checking two invoices now.",
-            "The copy finished - Morgan is checking two invoices now.",
-        ):
-            with self.subTest(body=body):
-                failures = MessageQualityScenario()._formatting_failures(
-                    case,
-                    {"body": body, "will_continue_work": False},
-                    body,
-                )
+    def test_delivery_basics_allow_intentional_punctuation(self):
+        case = RECIPIENT_MESSAGE_QUALITY_CASES[0]
+        body = "The copy finished—Morgan is checking two invoices now."
 
-                self.assertIn("Recipient-facing prose used prohibited dash punctuation", failures[0])
+        failures = MessageQualityScenario()._formatting_failures(
+            case,
+            {"body": body, "will_continue_work": False},
+            body,
+        )
+
+        self.assertEqual(failures, [])
 
     def test_delivery_basics_accept_terminal_tool_result_when_continue_flag_omitted(self):
         case = next(case for case in MESSAGE_QUALITY_CASES if case.channel == "chat")
@@ -287,6 +286,57 @@ class MessageQualityScenarioTests(SimpleTestCase):
         scenario = MessageQualityScenario()
 
         self.assertEqual(set(scenario._mock_config(case)), {"send_email"})
+
+    def test_sms_delivery_stays_mocked_to_avoid_external_send(self):
+        case = next(case for case in MESSAGE_QUALITY_CASES if case.channel == "sms")
+
+        self.assertEqual(set(MessageQualityScenario()._mock_config(case)), {"send_sms"})
+
+    def test_exact_copy_case_preserves_subject_body_punctuation_emoji_and_html(self):
+        case = next(case for case in RECIPIENT_MESSAGE_QUALITY_CASES if case.quality_target == "exact_copy")
+        params = {
+            "to_address": case.recipient,
+            "subject": case.exact_subject,
+            "mobile_first_html": case.exact_body,
+            "will_continue_work": False,
+        }
+
+        self.assertEqual(MessageQualityScenario()._formatting_failures(case, params, case.exact_body), [])
+        judge_context = MessageQualityScenario._judge_context(case, params, case.exact_body)
+        self.assertIn(f"Expected exact subject:\n{case.exact_subject}", judge_context)
+        self.assertIn(f"Expected exact body:\n{case.exact_body}", judge_context)
+
+        changed = {**params, "subject": "Launch note approved", "mobile_first_html": "<p>Rewritten.</p>"}
+        failures = MessageQualityScenario()._formatting_failures(case, changed, changed["mobile_first_html"])
+        self.assertIn("Exact-copy email subject was changed.", failures)
+        self.assertIn("Exact-copy email body was changed.", failures)
+
+    def test_recipient_message_checks_placeholders_fake_reply_subjects_and_sms_recipient(self):
+        email_case = next(
+            case
+            for case in RECIPIENT_MESSAGE_QUALITY_CASES
+            if case.channel == "email" and not case.is_followup and case.quality_target == "recipient_message"
+        )
+        failures = MessageQualityScenario()._formatting_failures(
+            email_case,
+            {
+                "to_address": email_case.recipient,
+                "subject": "Re: Update",
+                "mobile_first_html": "<p>Hi {{first_name}}</p>",
+                "will_continue_work": False,
+            },
+            "<p>Hi {{first_name}}</p>",
+        )
+        self.assertIn("Initial email should not use a fake reply or forward subject.", failures)
+        self.assertIn("Message contains an unresolved placeholder.", failures)
+
+        sms_case = next(case for case in RECIPIENT_MESSAGE_QUALITY_CASES if case.channel == "sms")
+        failures = MessageQualityScenario()._formatting_failures(
+            sms_case,
+            {"to_number": "+15555559999", "body": "Moved to 3 PM.", "will_continue_work": False},
+            "Moved to 3 PM.",
+        )
+        self.assertIn(f"send_sms.to_number should be {sms_case.recipient}.", failures)
 
     def test_email_cases_allow_web_chat_confirmation_as_secondary_delivery(self):
         case = next(case for case in MESSAGE_QUALITY_CASES if case.channel == "email")
@@ -330,3 +380,79 @@ class MessageQualityScenarioTests(SimpleTestCase):
         )
 
         self.assertIsNone(scenario._sent_message_for_call(call))
+
+
+@tag("eval_sim")
+class MessageQualityFollowupThreadTests(TestCase):
+    def setUp(self):
+        suffix = uuid.uuid4().hex
+        self.user = User.objects.create_user(
+            username=f"message-quality-eval-{suffix}@example.com",
+            email=f"message-quality-eval-{suffix}@example.com",
+            password="password",
+        )
+        browser_agent = BrowserUseAgent.objects.create(
+            user=self.user,
+            name=f"message-quality-browser-{suffix}",
+        )
+        self.agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Message Quality Eval Agent",
+            charter="Send approved messages.",
+            browser_use_agent=browser_agent,
+        )
+
+    def test_sms_case_prepares_a_mock_safe_sender_and_recipient(self):
+        case = next(case for case in RECIPIENT_MESSAGE_QUALITY_CASES if case.channel == "sms")
+
+        MessageQualityScenario()._prepare_agent_for_case(str(self.agent.id), case)
+
+        self.assertTrue(
+            PersistentAgentCommsEndpoint.objects.filter(
+                owner_agent=self.agent,
+                channel=CommsChannel.SMS,
+                is_primary=True,
+            ).exists()
+        )
+        allowlist = CommsAllowlistEntry.objects.get(
+            agent=self.agent,
+            channel=CommsChannel.SMS,
+            address=case.recipient,
+        )
+        self.assertTrue(allowlist.allow_outbound)
+        self.assertTrue(allowlist.sms_contact_permission_attested)
+
+    def test_followup_requires_the_seeded_reply_message_id(self):
+        scenario = MessageQualityScenario()
+        case = next(case for case in RECIPIENT_MESSAGE_QUALITY_CASES if case.is_followup)
+        prior = scenario._seed_prior_message(self.agent, case)
+        step = PersistentAgentStep.objects.create(agent=self.agent, description="Send follow-up")
+        body = (
+            "<p>Hi Maya,</p>"
+            "<p>We put together a short duplicate-invoice checklist for growing AP teams. "
+            "Would it be useful if I sent it over?</p>"
+            "<p>If not, no problem.</p><p>Thanks,<br>Elena</p>"
+        )
+        params = {
+            "to_address": case.recipient,
+            "subject": f"Re: {case.prior_subject}",
+            "reply_to_message_id": str(prior.id),
+            "mobile_first_html": body,
+            "will_continue_work": False,
+        }
+        send_call = PersistentAgentToolCall.objects.create(
+            step=step,
+            tool_name="send_email",
+            tool_params=params,
+        )
+
+        self.assertEqual(scenario._formatting_failures(case, params, body, send_call=send_call), [])
+
+        wrong_thread_params = {**params, "reply_to_message_id": str(uuid.uuid4())}
+        failures = scenario._formatting_failures(
+            case,
+            wrong_thread_params,
+            body,
+            send_call=send_call,
+        )
+        self.assertIn("Follow-up email should reply in the seeded thread.", failures)

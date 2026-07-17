@@ -1278,12 +1278,15 @@ class ContinuationModePromptContextTests(TestCase):
         system_prompt = self._render_system_prompt(is_first_run=False)
 
         self.assertIn("## Communication Style", system_prompt)
-        self.assertIn("Delivered messages should sound like a specific real person", system_prompt)
-        self.assertIn("No dash punctuation", system_prompt)
-        self.assertIn("including spaced single hyphens", system_prompt)
-        self.assertIn("bullets, and tables are fine", system_prompt)
-        self.assertIn("clarity and honesty beat forced friendliness", system_prompt.lower())
-        self.assertIn("preserve the user's meaning, voice, key terms, and commitments", system_prompt)
+        self.assertIn("from a specific sender to a specific recipient", system_prompt)
+        self.assertIn("Explicit user direction and approved copy control", system_prompt)
+        self.assertIn("Ground claims and personalization", system_prompt)
+        self.assertIn("everyday messages use natural prose", system_prompt)
+        self.assertIn("reports and digests may use headings, tables", system_prompt)
+        self.assertIn("Before sending, verify recipient", system_prompt)
+        self.assertNotIn("Never use Unicode dash punctuation", system_prompt)
+        self.assertIn("plain clarity beats corporate polish", system_prompt.lower())
+        self.assertIn("otherwise preserve meaning and commitments", system_prompt)
         self.assertIn("AI-giveaway phrases", system_prompt)
 
     def test_prompt_calibrates_deep_work_updates_without_status_spam(self):

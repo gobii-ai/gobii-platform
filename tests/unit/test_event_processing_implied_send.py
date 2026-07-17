@@ -77,32 +77,20 @@ class ImpliedSendTests(TestCase):
             browser_use_agent=browser_agent,
         )
 
-    def test_humanized_message_normalization_covers_built_in_delivery_channels(self):
+    def test_message_tool_param_normalization_preserves_user_authored_copy(self):
         for tool_name, params in (
             ("send_chat_message", {"body": "Quick update—this is done."}),
-            ("send_sms", {"body": "Quick update - this is done."}),
-            ("send_email", {"subject": "Update—done", "mobile_first_html": "<p>Done.</p>"}),
-            ("send_discord_message", {"message": "Quick update—this is done."}),
-        ):
-            with self.subTest(tool_name=tool_name):
-                result = ep._normalize_humanized_message_params(tool_name, params)
-                self.assertNotIn("—", str(result))
-                self.assertNotIn("--", str(result))
-                self.assertNotIn(" - ", str(result))
-
-        self.assertEqual(
-            ep._normalize_humanized_message_params(
+            ("send_sms", {"body": "Quick update -- this is done."}),
+            (
                 "send_email",
                 {
-                    "subject": "Quick update",
-                    "mobile_first_html": "<p>A natural, low-pressure note.</p>",
+                    "subject": "Update—done 🚀",
+                    "mobile_first_html": "<div style='color:red'><p>Done—exactly.</p></div>",
                 },
             ),
-            {
-                "subject": "Quick update",
-                "mobile_first_html": "<p>A natural, low-pressure note.</p>",
-            },
-        )
+        ):
+            with self.subTest(tool_name=tool_name):
+                self.assertEqual(ep._normalize_tool_params(tool_name, params), params)
 
     def test_run_setup_resets_inbound_scope_when_prompt_cache_setup_fails(self):
         with patch.object(ep, "PromptRunCache", side_effect=RuntimeError("cache setup failed")), \

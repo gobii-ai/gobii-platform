@@ -155,7 +155,6 @@ from api.services.web_sessions import has_deliverable_web_session
 from config import settings
 from config.redis_client import get_redis_client
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
-from util.text_sanitizer import normalize_humanized_message_style
 from .web_streaming import WebStreamBroadcaster, resolve_web_stream_target
 
 logger = logging.getLogger(__name__)
@@ -199,7 +198,6 @@ MESSAGE_TOOL_BODY_KEYS = {
     "send_chat_message": "body",
     "send_agent_message": "message",
 }
-HUMANIZED_MESSAGE_BODY_KEYS = {**MESSAGE_TOOL_BODY_KEYS, "send_discord_message": "message"}
 SQLITE_MUTATION_RE = re.compile(r"\b(?:insert|update|delete|replace|alter|drop|create)\b", re.IGNORECASE)
 AGENT_CONFIG_TABLE_RE = re.compile(r"\b__agent_config\b", re.IGNORECASE)
 DURABLE_CONFIG_INTENT_RE = re.compile(
@@ -2456,19 +2454,6 @@ def _message_tool_body_from_params(tool_name: str, tool_params: Dict[str, Any]) 
     return str(tool_params.get(body_key) or "") if body_key else ""
 
 
-def _normalize_humanized_message_params(tool_name: str, tool_params: Dict[str, Any]) -> Dict[str, Any]:
-    body_key = HUMANIZED_MESSAGE_BODY_KEYS.get(tool_name)
-    if not body_key:
-        return tool_params
-    normalized = dict(tool_params)
-    keys = [body_key]
-    if tool_name == "send_email":
-        keys.append("subject")
-    for key in keys:
-        normalized[key] = normalize_humanized_message_style(str(normalized.get(key) or ""))
-    return normalized
-
-
 def _message_tool_has_progress_intent(tool_name: str, tool_params: Dict[str, Any]) -> bool:
     if tool_name not in MESSAGE_TOOL_NAMES:
         return False
@@ -3151,10 +3136,7 @@ def _prepare_tool_batch_impl(
             if normalized_tool_name != tool_name:
                 logger.info("Agent %s: normalized tool call %s -> %s", agent.id, tool_name, normalized_tool_name)
                 tool_name = normalized_tool_name
-            tool_params = _normalize_humanized_message_params(
-                tool_name,
-                _normalize_tool_params(tool_name, tool_params),
-            )
+            tool_params = _normalize_tool_params(tool_name, tool_params)
             if _should_skip_irrelevant_agent_config_mutation(
                 agent,
                 tool_name,
@@ -3214,7 +3196,6 @@ def _prepare_tool_batch_impl(
                 exec_params = tool_params
             else:
                 exec_params = _substitute_variables_in_params(tool_params)
-            exec_params = _normalize_humanized_message_params(tool_name, exec_params)
             if tool_name == "sqlite_batch":
                 exec_params = dict(exec_params)
                 exec_params["_has_user_facing_message"] = has_user_facing_message
