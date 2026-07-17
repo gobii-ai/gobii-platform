@@ -60,12 +60,22 @@ class OutreachSystemSkillTests(TestCase):
         self.assertEqual(definition.tool_names, ("send_email",))
         self.assertFalse(definition.default_enabled)
         self.assertNotIn(OUTREACH_SYSTEM_SKILL_KEY, default_enabled_system_skill_keys())
-        self.assertIn("restrained body-only HTML", definition.prompt_instructions)
+        self.assertIn("User-provided instructions and approved copy control", definition.prompt_instructions)
+        self.assertIn("Default to valid, restrained body-only HTML", definition.prompt_instructions)
         self.assertIn("Never leave unresolved placeholders", definition.prompt_instructions)
-        self.assertIn("Do not use em dashes", definition.prompt_instructions)
+        self.assertIn("These are defaults, not bans", definition.prompt_instructions)
+        self.assertIn("Never replace intentional em dashes", definition.prompt_instructions)
         self.assertIn("Immediately before every `send_email` call", definition.prompt_instructions)
         self.assertIn("reply_to_message_id", definition.prompt_instructions)
         self.assertIn("opted_out", definition.prompt_instructions)
+
+    def test_outreach_style_defaults_do_not_override_explicit_user_direction(self):
+        instructions = SYSTEM_SKILL_REGISTRY[OUTREACH_SYSTEM_SKILL_KEY].prompt_instructions
+
+        self.assertIn("When asked to preserve or send supplied copy exactly, do not rewrite it", instructions)
+        self.assertIn("Keep intentional branding, structure, punctuation, emoji, length, and multiple asks", instructions)
+        self.assertNotIn("Do not use em dashes", instructions)
+        self.assertNotIn("em dash character `—` must appear zero times", instructions)
 
     def test_enable_outreach_uses_static_send_email_tool(self):
         result = enable_system_skills(self.agent, [OUTREACH_SYSTEM_SKILL_KEY])
@@ -92,7 +102,7 @@ class OutreachSystemSkillTests(TestCase):
         self.assertIn("System Skill: Outreach", block)
         self.assertIn("Tools: send_email", block)
         self.assertIn("Treat outreach as a recipient-facing workflow", block)
-        self.assertIn("The Unicode em dash character", block)
+        self.assertIn("User-provided instructions and approved copy control", block)
 
     def test_discovery_suggests_outreach_from_charter(self):
         self.agent.charter = "Write and send personalized cold email outreach to approved prospects."
