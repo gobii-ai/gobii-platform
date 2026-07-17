@@ -36,6 +36,13 @@ MESSAGE_QUALITY_SUITE_SLUG = "message_quality_reports"
 REPLY_CHANNEL_CONTINUITY_SLUG = "message_quality_reply_stays_in_web_chat"
 UNAVAILABLE_WEB_CHANNEL_CONTINUITY_SLUG = "message_quality_unavailable_web_does_not_switch_channels"
 FAILED_EMAIL_DELIVERY_RECOVERY_SLUG = "message_quality_failed_email_reports_failure"
+REPLY_CHANNEL_PRIOR_EMAIL_BODY = (
+    "Thanks for the onboarding summary. We'll review it tomorrow; nothing else is needed today."
+)
+REPLY_CHANNEL_WEB_PROMPT = (
+    "One correction for the onboarding notes: enterprise customers keep their current workflow during migration. "
+    "Please acknowledge that here in chat. No other action is needed."
+)
 
 
 @dataclass(frozen=True)
@@ -713,6 +720,7 @@ class MessageQualityScenario(EvalScenario, ScenarioExecutionTools):
         tool_names = ["update_plan", case.expected_tool]
         if case.channel == "email":
             tool_names.extend(sorted(EMAIL_ALLOWED_CONFIRMATION_TOOLS))
+        if case.channel in {"email", "sms"}:
             tool_names.append("sqlite_batch")
         return tool_names
 
@@ -1313,8 +1321,8 @@ class ReplyChannelContinuityScenario(EvalScenario, ScenarioExecutionTools):
             to_endpoint=agent_email,
             conversation=conversation,
             is_outbound=False,
-            body="Please keep the current outreach batch moving and send a few more when they are ready.",
-            raw_payload={"subject": "Send a few more"},
+            body=REPLY_CHANNEL_PRIOR_EMAIL_BODY,
+            raw_payload={"subject": "Onboarding summary"},
         )
         PersistentAgentMessage.objects.filter(pk=prior_email.pk).update(
             timestamp=timezone.now() - timedelta(minutes=20),
@@ -1349,11 +1357,7 @@ class ReplyChannelContinuityScenario(EvalScenario, ScenarioExecutionTools):
         with self.wait_for_agent_idle(agent_id, timeout=120):
             inbound = self.inject_message(
                 agent_id,
-                (
-                    "One more thing for this outreach batch only: lead with the self-serve value, mention that it works "
-                    "with the tools people already use, and route unusually large opportunities to the enterprise team. "
-                    "Got it? We can handle the queue separately after this reply."
-                ),
+                REPLY_CHANNEL_WEB_PROMPT,
                 trigger_processing=False,
                 eval_run_id=run_id,
             )
@@ -1566,6 +1570,7 @@ class UnavailableWebChannelContinuityScenario(EvalScenario, ScenarioExecutionToo
 def _scenario_class(case: MessageQualityCase):
     class _MessageQualityCaseScenario(MessageQualityScenario):
         slug = case.slug
+        requires_personal_agent = case.channel == "sms"
         description = f"Judge {case.quality_target} formatting for {case.expected_tool} on a real-world {case.brief} task."
         tags = (
             "message_quality",

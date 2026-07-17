@@ -14,6 +14,8 @@ from api.evals.scenarios.message_quality import (
     OWNER_UPDATE_QUALITY_CASES,
     PORTFOLIO_REPORT_QUALITY_CASES,
     REPLY_CHANNEL_CONTINUITY_SLUG,
+    REPLY_CHANNEL_PRIOR_EMAIL_BODY,
+    REPLY_CHANNEL_WEB_PROMPT,
     RECIPIENT_MESSAGE_QUALITY_CASES,
     REPORT_MESSAGE_QUALITY_CASES,
     UNAVAILABLE_WEB_CHANNEL_CONTINUITY_SLUG,
@@ -54,6 +56,13 @@ class MessageQualityScenarioTests(SimpleTestCase):
 
         self.assertEqual(len(channels_by_brief), 5)
         self.assertTrue(all(channels == {"email", "chat"} for channels in channels_by_brief.values()))
+
+    def test_reply_channel_fixture_only_requests_an_acknowledgement(self):
+        self.assertIn("nothing else is needed", REPLY_CHANNEL_PRIOR_EMAIL_BODY)
+        self.assertIn("acknowledge that here in chat", REPLY_CHANNEL_WEB_PROMPT)
+        self.assertIn("No other action is needed", REPLY_CHANNEL_WEB_PROMPT)
+        self.assertNotIn("outreach batch", REPLY_CHANNEL_PRIOR_EMAIL_BODY.lower())
+        self.assertNotIn("outreach batch", REPLY_CHANNEL_WEB_PROMPT.lower())
 
     def test_generated_scenarios_have_message_quality_metadata(self):
         registered = ScenarioRegistry.list_all()
@@ -181,7 +190,7 @@ class MessageQualityScenarioTests(SimpleTestCase):
         self.assertIn("Prefer tasteful emoji", question)
         self.assertNotIn("emoji used tastefully", question)
 
-    def test_chat_judge_does_not_require_recommendation(self):
+    def test_chat_judge_does_not_require_recommendation_or_emoji(self):
         case = next(case for case in REPORT_MESSAGE_QUALITY_CASES if case.channel == "chat")
         question = MessageQualityScenario._judge_question(case)
 
@@ -352,10 +361,11 @@ class MessageQualityScenarioTests(SimpleTestCase):
         )
         self.assertIn("send_chat_message", MessageQualityScenario._allowed_tool_names(case))
 
-    def test_email_cases_allow_sqlite_contact_lookup_preamble(self):
-        case = next(case for case in MESSAGE_QUALITY_CASES if case.channel == "email")
-
-        self.assertIn("sqlite_batch", MessageQualityScenario._allowed_tool_names(case))
+    def test_external_recipient_cases_allow_sqlite_contact_lookup_preamble(self):
+        for channel in ("email", "sms"):
+            with self.subTest(channel=channel):
+                case = next(case for case in MESSAGE_QUALITY_CASES if case.channel == channel)
+                self.assertIn("sqlite_batch", MessageQualityScenario._allowed_tool_names(case))
 
     def test_email_cases_still_reject_other_secondary_delivery_channels(self):
         case = next(case for case in MESSAGE_QUALITY_CASES if case.channel == "email")
@@ -402,8 +412,11 @@ class MessageQualityFollowupThreadTests(TestCase):
             browser_use_agent=browser_agent,
         )
 
-    def test_sms_case_prepares_a_mock_safe_sender_and_recipient(self):
+    def test_sms_case_uses_personal_eval_agent_with_authorized_mock_contact(self):
         case = next(case for case in RECIPIENT_MESSAGE_QUALITY_CASES if case.channel == "sms")
+        scenario = ScenarioRegistry.get(case.slug)
+
+        self.assertTrue(scenario.requires_personal_agent)
 
         MessageQualityScenario()._prepare_agent_for_case(str(self.agent.id), case)
 
