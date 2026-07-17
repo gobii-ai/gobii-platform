@@ -163,6 +163,18 @@ def _web_query_value(params: dict) -> str | None:
     return None
 
 
+def _message_call_body(call: PersistentAgentToolCall) -> str:
+    params = call.tool_params or {}
+    return str(params.get("body") or params.get("message") or "").strip()
+
+
+def _message_call_continues(call: PersistentAgentToolCall) -> bool:
+    value = (call.tool_params or {}).get("will_continue_work")
+    if isinstance(value, str):
+        return value.strip().casefold() in {"1", "true", "yes"}
+    return value is True
+
+
 def _sqlite_result_text_reads(sql: str) -> list[str]:
     reads = []
     for statement in split_sql_statements(sql):
@@ -755,6 +767,77 @@ class EffortCalibrationScenario(EvalScenario, ScenarioExecutionTools):
             task_name=task_name,
             observed_summary=f"Expected at most {max_updates} plan update(s); saw {len(plan_calls)}.",
             artifacts={"step": plan_calls[0].step},
+        )
+        return False
+
+    def _record_deep_work_updates(
+        self,
+        run_id: str,
+        *,
+        after,
+        task_name: str,
+        work_tool_names: Iterable[str],
+        update_tool_name: str,
+        min_updates: int = 2,
+        max_updates: int = 3,
+    ) -> bool:
+        self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name=task_name)
+        calls = _tool_calls_for_run(run_id, after=after)
+        work_names = set(work_tool_names)
+        work_positions = [index for index, call in enumerate(calls) if call.tool_name in work_names]
+        update_calls = [
+            (index, call)
+            for index, call in enumerate(calls)
+            if call.tool_name == update_tool_name and _message_call_continues(call)
+        ]
+        bodies = [_message_call_body(call) for _index, call in update_calls]
+        malformed = [
+            body
+            for body in bodies
+            if not 40 <= len(body) <= 600
+            or "?" in body
+            or _looks_like_routine_progress_message(body)
+        ]
+        duplicates = _find_near_duplicate_texts(bodies)
+        has_early_update = bool(work_positions and update_calls and update_calls[0][0] < work_positions[0])
+        has_midwork_update = bool(
+            len(work_positions) >= 3
+            and any(work_positions[1] < position < work_positions[-1] for position, _call in update_calls[1:])
+        )
+        count_ok = min_updates <= len(update_calls) <= max_updates
+
+        if count_ok and has_early_update and has_midwork_update and not malformed and not duplicates:
+            self.record_task_result(
+                run_id,
+                None,
+                EvalRunTask.Status.PASSED,
+                task_name=task_name,
+                observed_summary=(
+                    f"Sent {len(update_calls)} useful deep-work updates: one before work and one after a material phase, "
+                    "with no generic narration or duplicate status spam."
+                ),
+                artifacts={"step": update_calls[0][1].step},
+            )
+            return True
+
+        failures = []
+        if not count_ok:
+            failures.append(f"updates={len(update_calls)}, expected {min_updates}-{max_updates}")
+        if not has_early_update:
+            failures.append("no kickoff before the first work call")
+        if not has_midwork_update:
+            failures.append("no milestone update between substantive work calls")
+        if malformed:
+            failures.append(f"generic, internal, interrogative, or badly sized update(s): {malformed[:2]}")
+        if duplicates:
+            failures.append(f"near-duplicate updates: {duplicates[:2]}")
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.FAILED,
+            task_name=task_name,
+            observed_summary="; ".join(failures),
+            artifacts={"step": update_calls[0][1].step} if update_calls else {},
         )
         return False
 
@@ -2644,6 +2727,7 @@ class EffortExplicitDeepResearchRemainsCapableScenario(EffortCalibrationScenario
     )
     tasks = [
         ScenarioTask(name="inject_prompt", assertion_type="manual"),
+        ScenarioTask(name="verify_deep_work_updates", assertion_type="manual"),
         ScenarioTask(name="verify_deep_research_budget", assertion_type="manual"),
         ScenarioTask(name="verify_rich_hierarchical_memo", assertion_type="manual"),
         ScenarioTask(name="verify_plan_budget", assertion_type="manual"),
@@ -2846,10 +2930,8 @@ class EffortExplicitDeepResearchRemainsCapableScenario(EffortCalibrationScenario
         prompt = (
             "Do deep, exhaustive current research on Northstar Robotics in warehouse automation. "
             "Build a source-backed investment-style memo comparing Northstar with at least four competitors, "
-            "cite at least four sources, include a compact table, and go deeper than a quick summary. "
-            "Use a finite source plan: one broad discovery search first, then scrape the strongest source pages; "
-            "add another search only if the first result set misses the requested company, competitor, or market "
-            "angles. Keep the memo dense and under 4,800 characters. Do not create files or charts."
+            "cite at least four sources, and include a compact table. I need enough depth to make an investment "
+            "decision, not a quick summary. Keep the memo dense and under 4,800 characters. Do not create files or charts."
         )
 
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="inject_prompt")
@@ -2859,6 +2941,18 @@ class EffortExplicitDeepResearchRemainsCapableScenario(EffortCalibrationScenario
                 prompt,
                 trigger_processing=False,
                 eval_run_id=run_id,
+            )
+            self._record_simulated_tool_call(
+                run_id,
+                agent_id,
+                tool_name="send_chat_message",
+                tool_params={
+                    "body": (
+                        "I’m digging into Northstar’s market position now. I’ll pressure test the brownfield "
+                        "warehouse angle against the strongest competitors before I give you a recommendation."
+                    ),
+                    "will_continue_work": True,
+                },
             )
             self._record_simulated_tool_call(
                 run_id,
@@ -2891,6 +2985,19 @@ class EffortExplicitDeepResearchRemainsCapableScenario(EffortCalibrationScenario
                     tool_params={"url": source_urls[index]},
                     result=mock_config["mcp_brightdata_scrape_as_markdown"]["rules"][index]["result"],
                 )
+                if index == 2:
+                    self._record_simulated_tool_call(
+                        run_id,
+                        agent_id,
+                        tool_name="send_chat_message",
+                        tool_params={
+                            "body": (
+                                "The brownfield wedge is holding up, and interoperability looks like the real buying "
+                                "driver. I’m checking whether the customer evidence is strong enough to support the thesis."
+                            ),
+                            "will_continue_work": True,
+                        },
+                    )
             self._send_simulated_web_report(
                 agent_id,
                 (
@@ -2964,6 +3071,14 @@ class EffortExplicitDeepResearchRemainsCapableScenario(EffortCalibrationScenario
             artifacts={"message": inbound},
         )
 
+        self._record_deep_work_updates(
+            run_id,
+            after=inbound.timestamp,
+            task_name="verify_deep_work_updates",
+            work_tool_names={"mcp_brightdata_search_engine", "mcp_brightdata_scrape_as_markdown"},
+            update_tool_name="send_chat_message",
+        )
+
         self._record_research_tool_budget(
             run_id,
             after=inbound.timestamp,
@@ -3019,4 +3134,4 @@ class EffortExplicitDeepResearchRemainsCapableScenario(EffortCalibrationScenario
             after=inbound.timestamp,
             task_name="verify_no_config_churn",
         )
-        self._record_orchestrator_budget(run_id, task_name="verify_turn_budget", max_completions=9)
+        self._record_orchestrator_budget(run_id, task_name="verify_turn_budget", max_completions=11)

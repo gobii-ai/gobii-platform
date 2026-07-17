@@ -117,7 +117,7 @@ from ..tools.search_tools import execute_search_tools
 from ..tools.static_tools import planning_mode_disallows_tool
 from ..tools.tool_manager import ToolCatalogEntry, execute_enabled_tool, auto_enable_heuristic_tools, get_parallel_safe_tool_rejection_reason, resolve_tool_entry, should_skip_auto_substitution
 from ...services.tool_blacklist import is_tool_blacklisted_for_agent, tool_blacklist_error
-from ..tools.web_chat_sender import execute_send_chat_message
+from ..tools.web_chat_sender import execute_send_chat_message, _looks_like_routine_progress_message
 from ..tools.peer_dm import execute_send_agent_message
 from ..tools.webhook_sender import execute_send_webhook_event
 from ..tools.agent_variables import clear_variables, get_all_variables, replace_all_variables, substitute_variables
@@ -233,6 +233,16 @@ PLANNING_EXECUTE_NOW_RE = re.compile(
     re.IGNORECASE,
 )
 PLANNING_READY_WITHOUT_GATE_RE = re.compile(r"\b(?:plan(?:'s| is) clear|scope(?:'s| is) clear|task(?:'s| is) clear|lock it in|get (?:this )?rolling)\b", re.IGNORECASE)
+SUBSTANTIAL_WORK_RE = re.compile(
+    r"\b(?:deep|exhaustive|comprehensive|thorough|extensive|large[- ]batch|multi[- ]phase|end[- ]to[- ]end|"
+    r"market map|implementation|deploy(?:ment|ing)?|migration|audit)\b",
+    re.IGNORECASE,
+)
+NON_SUBSTANTIAL_WORK_RE = re.compile(
+    r"\b(?:not|isn'?t|is not|don'?t|do not)\s+(?:an?\s+)?(?:deep|exhaustive|comprehensive|thorough|extensive)\b",
+    re.IGNORECASE,
+)
+DEEP_WORK_UPDATE_CORRECTION_PREFIX = "Deep-work communication correction:"
 # Canonical phrase the agent should use to signal continuation.
 # Prompts tell the agent to include this exact phrase when it has more work.
 CANONICAL_CONTINUATION_PHRASE = "CONTINUE_WORK_SIGNAL"
@@ -265,6 +275,147 @@ def _latest_inbound_message_text(agent: PersistentAgent) -> str:
         .first()
     )
     return str(message or "")
+
+
+def _deep_work_update_gate_reason(
+    latest_user_text: str,
+    current_tool_names: list[str],
+    *,
+    prior_work_count: int,
+    prior_update_count: int,
+    batch_has_progress_update: bool,
+    prior_has_midwork_update: bool = False,
+    prior_correction_count: int = 0,
+) -> str | None:
+    work_names = [
+        name
+        for name in current_tool_names
+        if name and name not in MESSAGE_TOOL_NAMES | {"sleep_until_next_trigger", "request_human_input"}
+    ]
+    if not work_names or batch_has_progress_update:
+        return None
+
+    substantial_start = bool(
+        SUBSTANTIAL_WORK_RE.search(latest_user_text or "")
+        and not NON_SUBSTANTIAL_WORK_RE.search(latest_user_text or "")
+    )
+    if prior_update_count == 0 and prior_work_count == 0 and substantial_start and prior_correction_count < 4:
+        return "kickoff"
+    if (
+        prior_update_count >= 1
+        and prior_work_count > 0
+        and not prior_has_midwork_update
+        and prior_work_count + len(work_names) >= 6
+        and prior_correction_count < 6
+    ):
+        return "milestone"
+    return None
+
+
+def _tool_call_is_progress_update(call: Any, expected_tool_name: str) -> bool:
+    tool_name = _get_tool_call_name(call)
+    if tool_name != expected_tool_name:
+        return False
+    try:
+        _raw_args, params = _parse_tool_call_params(_get_tool_call_arguments(call))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return False
+    body = str(params.get(MESSAGE_TOOL_BODY_KEYS.get(tool_name, "")) or "")
+    return (
+        _coerce_optional_bool(params.get("will_continue_work")) is True
+        and not _looks_like_routine_progress_message(body)
+    )
+
+
+def _deep_work_update_gate_context(
+    agent: PersistentAgent,
+    tool_calls: list[Any],
+) -> str | None:
+    if agent.planning_state == PersistentAgent.PlanningState.PLANNING:
+        return None
+    latest_inbound = (
+        PersistentAgentMessage.objects.filter(owner_agent=agent, is_outbound=False)
+        .order_by("-timestamp", "-seq")
+        .select_related("conversation")
+        .only("timestamp", "body", "conversation__channel", "conversation__is_peer_dm")
+        .first()
+    )
+    if latest_inbound is None or latest_inbound.conversation is None:
+        return None
+    if latest_inbound.conversation.is_peer_dm:
+        expected_message_tool = "send_agent_message"
+    else:
+        expected_message_tool = {
+            CommsChannel.EMAIL: "send_email",
+            CommsChannel.SMS: "send_sms",
+            CommsChannel.WEB: "send_chat_message",
+        }.get(latest_inbound.conversation.channel)
+    if expected_message_tool is None:
+        return None
+
+    prior_calls = PersistentAgentToolCall.objects.filter(
+        step__agent=agent,
+        step__created_at__gt=latest_inbound.timestamp,
+        status="complete",
+    )
+    prior_updates = []
+    for row in prior_calls.filter(tool_name=expected_message_tool).values(
+        "tool_name", "tool_params", "step__created_at"
+    ):
+        params = row["tool_params"] or {}
+        body = str(params.get(MESSAGE_TOOL_BODY_KEYS.get(row["tool_name"], "")) or "")
+        if (
+            _coerce_optional_bool(params.get("will_continue_work")) is True
+            and not _looks_like_routine_progress_message(body)
+        ):
+            prior_updates.append(row)
+    prior_work_calls = prior_calls.exclude(
+        tool_name__in=MESSAGE_TOOL_NAMES | {"sleep_until_next_trigger", "request_human_input", "update_plan"}
+    )
+    first_work_at = prior_work_calls.order_by("step__created_at").values_list("step__created_at", flat=True).first()
+    prior_correction_count = PersistentAgentStep.objects.filter(
+        agent=agent,
+        created_at__gt=latest_inbound.timestamp,
+        description__startswith=DEEP_WORK_UPDATE_CORRECTION_PREFIX,
+    ).count()
+    return _deep_work_update_gate_reason(
+        latest_inbound.body or "",
+        [_get_tool_call_name(call) or "" for call in tool_calls],
+        prior_work_count=prior_work_calls.count(),
+        prior_update_count=len(prior_updates),
+        prior_has_midwork_update=bool(
+            first_work_at and any(row["step__created_at"] > first_work_at for row in prior_updates)
+        ),
+        batch_has_progress_update=bool(
+            tool_calls and _tool_call_is_progress_update(tool_calls[0], expected_message_tool)
+        ),
+        prior_correction_count=prior_correction_count,
+    )
+
+
+def _record_deep_work_update_correction(
+    agent: PersistentAgent,
+    reason: str,
+    *,
+    attach_completion: Any,
+    attach_prompt_archive: Any,
+) -> None:
+    if reason == "kickoff":
+        instruction = (
+            "The task calls were held because this substantial request needs a kickoff. Repeat them in your next "
+            "response, adding the same-channel send tool as the first call with will_continue_work=true. Briefly "
+            "name the outcome and when the requester will hear a substantive finding, without listing methods."
+        )
+    else:
+        instruction = (
+            "The task calls were held because substantial work needs a milestone update. Repeat them in your next "
+            "response, adding the same-channel send tool as the first call with will_continue_work=true. Its body "
+            "must give the strongest concrete finding so far, not say what you are about to do or name mechanics."
+        )
+    step_kwargs = {"agent": agent, "description": f"{DEEP_WORK_UPDATE_CORRECTION_PREFIX} {instruction}"}
+    attach_completion(step_kwargs)
+    step = PersistentAgentStep.objects.create(**step_kwargs)
+    attach_prompt_archive(step)
 
 
 def _user_asked_for_setup_question(text: str) -> bool:
@@ -2629,6 +2780,20 @@ def _prepare_tool_batch_impl(
     followup_required = False
     all_calls_sleep = not has_non_sleep_calls
     abort_after_execution = False
+    deep_work_update_reason = _deep_work_update_gate_context(agent, tool_calls)
+    if deep_work_update_reason:
+        _record_deep_work_update_correction(
+            agent,
+            deep_work_update_reason,
+            attach_completion=attach_completion,
+            attach_prompt_archive=attach_prompt_archive,
+        )
+        logger.info(
+            "Agent %s: paused tool batch for required deep-work %s update.",
+            agent.id,
+            deep_work_update_reason,
+        )
+        return _PreparedToolBatch([], True, False, False, "deep_work_update_gate")
     batch_has_human_input_request = any(
         _get_tool_call_name(call) == "request_human_input"
         for call in tool_calls

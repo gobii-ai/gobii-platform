@@ -324,6 +324,49 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
         self.assertFalse(passed)
         self.assertIn("progress_messages=1", recorded[-1][1]["observed_summary"])
 
+    def test_deep_work_update_check_requires_useful_kickoff_and_milestone(self):
+        scenario, recorded = EffortCalibrationScenario(), []
+        scenario.record_task_result = lambda *args, **kwargs: recorded.append((args, kwargs))
+        calls = [
+            SimpleNamespace(
+                tool_name="send_chat_message",
+                tool_params={
+                    "body": (
+                        "I’m digging into Northstar’s position now. I’ll pressure test the market angle before "
+                        "I give you a recommendation."
+                    ),
+                    "will_continue_work": True,
+                },
+                step="kickoff",
+            ),
+            SimpleNamespace(tool_name="mcp_brightdata_search_engine", tool_params={}, step="search"),
+            SimpleNamespace(tool_name="mcp_brightdata_scrape_as_markdown", tool_params={}, step="source-one"),
+            SimpleNamespace(tool_name="mcp_brightdata_scrape_as_markdown", tool_params={}, step="source-two"),
+            SimpleNamespace(
+                tool_name="send_chat_message",
+                tool_params={
+                    "body": (
+                        "The brownfield wedge is holding up, and interoperability looks like the real buying "
+                        "driver. I’m checking whether the customer proof supports that thesis."
+                    ),
+                    "will_continue_work": True,
+                },
+                step="milestone",
+            ),
+            SimpleNamespace(tool_name="mcp_brightdata_scrape_as_markdown", tool_params={}, step="source-three"),
+        ]
+        with patch("api.evals.scenarios.effort_calibration._tool_calls_for_run", return_value=calls):
+            passed = scenario._record_deep_work_updates(
+                "run",
+                after=None,
+                task_name="verify_deep_work_updates",
+                work_tool_names={"mcp_brightdata_search_engine", "mcp_brightdata_scrape_as_markdown"},
+                update_tool_name="send_chat_message",
+            )
+
+        self.assertTrue(passed, recorded[-1][1]["observed_summary"])
+        self.assertIn("one before work and one after a material phase", recorded[-1][1]["observed_summary"])
+
     def test_question_count_ignores_source_url_query_strings(self):
         self.assertEqual(
             _question_count("Sources: https://www.ycombinator.com/companies?batch=Winter%202026"),
@@ -741,6 +784,7 @@ class EffortCalibrationHarnessTests(TestCase):
 
         self.assertEqual(result["status"], "ok")
         self.assertTrue(result["skipped"])
+        self.assertIn("do not repeat it", result["message"])
         self.assertIn("deliver the substantive reply in this web chat", result["message"])
         self.assertIn("do not switch to email or SMS", result["message"])
         self.assertFalse(PersistentAgentMessage.objects.filter(owner_agent=agent, is_outbound=True).exists())

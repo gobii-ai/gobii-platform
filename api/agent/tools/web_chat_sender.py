@@ -113,6 +113,15 @@ def _strip_trailing_optional_followup(body: str) -> str:
     return _TRAILING_OPTIONAL_FOLLOWUP_RE.sub("", body or "").rstrip()
 
 
+def _strip_leading_routine_preamble(body: str) -> str:
+    preamble, separator, report = (body or "").partition("\n\n")
+    if not separator or not report.strip() or not _looks_like_routine_progress_message(preamble):
+        return body
+    if not re.match(r"\s*(?:#{1,6}\s|\*\*[^*\n]+\*\*)", report):
+        return body
+    return report.lstrip()
+
+
 _TOOL_FRUSTRATION_PROGRESS_RE = re.compile(
     r"\b(?:fabricated(?:\b| (?:test data|links|results))|fake (?:job ids|links|data|results)|eval environment|stop fighting the sim|pivot hard|trying every tool|"
     r"same fabricated|same data set|same simulated results|simulated results|instructions say|"
@@ -234,9 +243,9 @@ def get_send_chat_tool() -> Dict[str, Any]:
         "function": {
             "name": "send_chat_message",
             "description": (
-                "Send a user-facing web chat message for free-text questions, context, config changes, capability/status/policy answers, findings, or finals. "
-                "Do not use this to simulate or confirm an email/SMS delivery; if the user asked to email or text and the send_email/send_sms tool is available, call that tool instead. "
-                "Do not narrate what you will do next or send progress-only notes about tool sequencing, plan mechanics, or internal reasoning."
+                "Send web chat for questions, context, config/status/policy changes, findings, or finals. "
+                "Only for deep/exhaustive, large-batch, large implementation/deployment, or explicitly long-running work, call this FIRST with scope + next checkpoint and will_continue_work=true; call again at first material milestone. "
+                "Never simulate email/SMS; use its send tool when requested. No generic progress, tool sequencing, plan mechanics, or internal reasoning."
             ),
             "parameters": {
                 "type": "object",
@@ -300,13 +309,14 @@ def execute_send_chat_message(agent: PersistentAgent, params: Dict[str, Any]) ->
         return {
             "status": "ok",
             "message": (
-                "Skipped in-progress chat message. Continue the work, then deliver the substantive reply "
+                "Recorded in-progress chat message for eval; do not repeat it. Continue the work, then deliver the substantive reply "
                 "in this web chat; do not switch to email or SMS unless the user requested it."
             ),
             "auto_sleep_ok": False,
             "skipped": True,
         }
     if not will_continue:
+        body = _strip_leading_routine_preamble(body)
         body = _strip_trailing_optional_followup(body)
         if not body:
             return {"status": "error", "message": "Message body is required after removing optional follow-up."}
