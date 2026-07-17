@@ -39,31 +39,18 @@ def _patch_text(value: Optional[str], old: Optional[str], new: Optional[str]) ->
             return text
         return "\n".join(filter(None, (text.rstrip(), replacement)))
 
-    if old is None:
+    match_count = text.count(old or "")
+    if old is None or match_count != 1:
         message = "patch_text requires old='' for append or a non-null exact replacement target."
-        _PATCH_TEXT_ERROR.set(message)
-        raise sqlite3.OperationalError(message)
-
-    match_count = text.count(old)
-    if match_count == 0:
-        message = (
-            "patch_text replacement target was not found. "
-            "Read the relevant text and retry with an exact target, or use old='' to append."
-        )
-        _PATCH_TEXT_ERROR.set(message)
-        raise sqlite3.OperationalError(message)
-    if match_count > 1:
-        message = (
-            f"patch_text replacement target matched {match_count} times. "
-            "Retry with a longer target that occurs exactly once."
-        )
+        if old is not None:
+            message = (
+                "patch_text replacement target was not found. Read the text and retry with an exact target."
+                if match_count == 0
+                else f"patch_text replacement target matched {match_count} times; retry with a longer target."
+            )
         _PATCH_TEXT_ERROR.set(message)
         raise sqlite3.OperationalError(message)
     return text.replace(old, replacement, 1)
-
-
-def clear_patch_text_error() -> None:
-    _PATCH_TEXT_ERROR.set(None)
 
 
 def consume_patch_text_error() -> Optional[str]:
@@ -1139,7 +1126,7 @@ def clear_guarded_connection(conn: sqlite3.Connection) -> None:
     conn_id = id(conn)
     _QUERY_STARTS.pop(conn_id, None)
     _QUERY_TIMEOUTS.pop(conn_id, None)
-    clear_patch_text_error()
+    consume_patch_text_error()
 
 
 def _make_progress_handler(conn_id: int):

@@ -17,7 +17,7 @@ from contextvars import copy_context
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from decimal import Decimal
-from typing import Callable, List, Tuple, Union, Optional, Dict, Any, Literal, Sequence
+from typing import Callable, List, Tuple, Union, Optional, Dict, Any, Literal
 from urllib.parse import unquote_plus
 from uuid import UUID
 
@@ -1905,7 +1905,6 @@ class _ToolExecutionOutcome:
     updated_tools: Optional[List[dict]]
     variable_map: Dict[str, str]
     display_metadata: Dict[str, Any] = field(default_factory=dict)
-    persisted_step: Optional["PersistentAgentStep"] = None
 
 
 @dataclass
@@ -2336,13 +2335,6 @@ def _sqlite_batch_is_only_agent_config_mutation(tool_params: Dict[str, Any]) -> 
     ) and all(AGENT_CONFIG_TABLE_RE.search(statement) for statement in statements)
 
 
-def _sqlite_batch_mutates_agent_charter(tool_params: Dict[str, Any]) -> bool:
-    return any(
-        sqlite_statement_assigns_agent_config_field(statement, "charter")
-        for statement in _sqlite_batch_statements(tool_params)
-    )
-
-
 def _sqlite_batch_agent_config_attempted_fields(tool_params: Dict[str, Any]) -> tuple[str, ...]:
     statements = _sqlite_batch_statements(tool_params)
     return tuple(
@@ -2355,69 +2347,37 @@ def _sqlite_batch_agent_config_attempted_fields(tool_params: Dict[str, Any]) -> 
     )
 
 
-def _agent_config_attempted_fields_from_outcomes(
-    outcomes: Sequence[_ToolExecutionOutcome],
-) -> tuple[str, ...]:
-    attempted: set[str] = set()
-    for outcome in outcomes:
-        if outcome.prepared.tool_name != "sqlite_batch":
-            continue
-        attempted.update(
-            _sqlite_batch_agent_config_attempted_fields(outcome.prepared.exec_params)
-        )
-    return tuple(field for field in ("charter", "schedule") if field in attempted)
+def _sqlite_batch_mutates_agent_charter(tool_params: Dict[str, Any]) -> bool:
+    return "charter" in _sqlite_batch_agent_config_attempted_fields(tool_params)
 
 
-def _persist_agent_config_update_results(
-    outcomes: Sequence[_ToolExecutionOutcome],
+def _annotate_agent_config_update_result(
+    outcomes: list[_ToolExecutionOutcome],
     config_apply: AgentConfigApplyResult,
 ) -> None:
+    config_outcomes = []
     for outcome in outcomes:
-        if outcome.prepared.tool_name != "sqlite_batch":
-            continue
-        attempted_fields = _sqlite_batch_agent_config_attempted_fields(
-            outcome.prepared.exec_params
-        )
-        if not attempted_fields:
-            continue
+        if outcome.prepared.tool_name == "sqlite_batch":
+            fields = _sqlite_batch_agent_config_attempted_fields(outcome.prepared.exec_params)
+            if fields:
+                config_outcomes.append((outcome, fields))
+    if not config_outcomes:
+        return
 
-        attempted_set = set(attempted_fields)
-        payload = {
-            "attempted_fields": list(attempted_fields),
-            "updated_fields": [
-                field for field in config_apply.updated_fields if field in attempted_set
-            ],
-            "unchanged_fields": [
-                field for field in config_apply.unchanged_fields if field in attempted_set
-            ],
-            "charter_hash_before": config_apply.charter_hash_before,
-            "charter_hash_after": config_apply.charter_hash_after,
-            "errors": list(config_apply.errors),
-        }
-        result = dict(outcome.result) if isinstance(outcome.result, dict) else {
-            "status": "ok",
-            "result": outcome.result,
-        }
-        result["agent_config_update"] = payload
-        outcome.result = result
-
-        step = outcome.persisted_step or outcome.prepared.pending_step
-        if step is None:
-            logger.warning(
-                "Could not enrich sqlite_batch config result for call %s because no persisted step was available.",
-                getattr(outcome.prepared, "call_id", None) or "<none>",
-            )
-            continue
-        try:
-            serialized_result = _normalize_tool_result_content(json.dumps(result))
-            PersistentAgentToolCall.objects.filter(step_id=step.id).update(
-                result=serialized_result
-            )
-        except (DatabaseError, TypeError, ValueError):
-            logger.exception(
-                "Failed to persist reconciled agent config result for step %s.",
-                step.id,
-            )
+    attempted = {field for _outcome, fields in config_outcomes for field in fields}
+    attempted_fields = tuple(field for field in ("charter", "schedule") if field in attempted)
+    updated_fields = list(config_apply.updated_fields)
+    target = max(config_outcomes, key=lambda item: item[0].prepared.idx)[0]
+    result = dict(target.result) if isinstance(target.result, dict) else {
+        "status": "ok",
+        "result": target.result,
+    }
+    result["agent_config_update"] = {
+        "updated_fields": updated_fields,
+        "unchanged_fields": [field for field in attempted_fields if field not in updated_fields],
+        "errors": config_apply.errors,
+    }
+    target.result = result
 
 
 def _user_text_has_durable_config_intent(text: str) -> bool:
@@ -3580,7 +3540,6 @@ def _finalize_tool_batch(
                 attach_prompt_archive=attach_prompt_archive,
                 display_metadata=outcome.display_metadata,
             )
-        outcome.persisted_step = step
         if is_error_status:
             _refund_tool_credit_on_error_if_configured(
                 agent=agent,
@@ -6518,58 +6477,7 @@ def _run_agent_loop(
                     _attach_prompt_archive(step)
                     return step
 
-                def _apply_agent_config_updates(
-                    attempted_fields: Sequence[str] = (),
-                ) -> AgentConfigApplyResult:
-                    config_apply = apply_sqlite_agent_config_updates(
-                        agent,
-                        config_snapshot,
-                        attempted_fields=attempted_fields,
-                    )
-                    for error in config_apply.errors:
-                        try:
-                            step_kwargs = {
-                                "agent": agent,
-                                "description": f"Agent config update failed: {error}",
-                            }
-                            _attach_completion(step_kwargs)
-                            step = PersistentAgentStep.objects.create(**step_kwargs)
-                            _attach_prompt_archive(step)
-                        except Exception:
-                            logger.debug(
-                                "Failed to persist config update error step for agent %s",
-                                agent.id,
-                                exc_info=True,
-                            )
-                    return config_apply
-
-                def _apply_skill_updates() -> tuple[bool, bool]:
-                    """Apply skill updates and return (had_errors, changed)."""
-                    skill_apply = apply_sqlite_skill_updates(agent, skills_snapshot)
-
-                    if not skill_apply.errors:
-                        return False, bool(skill_apply.changed)
-
-                    for error in skill_apply.errors:
-                        try:
-                            step_kwargs = {
-                                "agent": agent,
-                                "description": f"Skill update failed: {error}",
-                            }
-                            _attach_completion(step_kwargs)
-                            step = PersistentAgentStep.objects.create(**step_kwargs)
-                            _attach_prompt_archive(step)
-                        except Exception:
-                            logger.debug(
-                                "Failed to persist skill update error step for agent %s",
-                                agent.id,
-                                exc_info=True,
-                            )
-                    return True, bool(skill_apply.changed)
-
-                def _apply_runtime_updates(
-                    attempted_config_fields: Sequence[str] = (),
-                ) -> tuple[bool, AgentConfigApplyResult]:
+                def _apply_runtime_updates() -> tuple[bool, AgentConfigApplyResult]:
                     # Some unit tests call _run_agent_loop directly without agent_sqlite_db().
                     # In that mode, reconciliation has no SQLite state to diff against.
                     if not get_sqlite_db_path():
@@ -6577,18 +6485,34 @@ def _run_agent_loop(
                             "Agent %s: skipping runtime SQLite reconciliation (no db path).",
                             agent.id,
                         )
-                        config_apply = apply_sqlite_agent_config_updates(
-                            agent,
-                            None,
-                            attempted_fields=attempted_config_fields,
-                        )
-                        return bool(config_apply.errors), config_apply
-                    config_apply = _apply_agent_config_updates(attempted_config_fields)
-                    skill_errors, skills_changed = _apply_skill_updates()
-                    if skills_changed:
+                        return False, AgentConfigApplyResult(updated_fields=(), errors={})
+                    config_apply = apply_sqlite_agent_config_updates(agent, config_snapshot)
+                    skill_apply = apply_sqlite_skill_updates(agent, skills_snapshot)
+                    error_groups = (
+                        ("Agent config", config_apply.errors.values()),
+                        ("Skill", skill_apply.errors),
+                    )
+                    for label, errors in error_groups:
+                        for error in errors:
+                            try:
+                                step_kwargs = {
+                                    "agent": agent,
+                                    "description": f"{label} update failed: {error}",
+                                }
+                                _attach_completion(step_kwargs)
+                                step = PersistentAgentStep.objects.create(**step_kwargs)
+                                _attach_prompt_archive(step)
+                            except Exception:
+                                logger.debug(
+                                    "Failed to persist %s update error step for agent %s",
+                                    label.lower(),
+                                    agent.id,
+                                    exc_info=True,
+                                )
+                    if skill_apply.changed:
                         nonlocal tools
                         tools = get_agent_tools(agent)
-                    return bool(config_apply.errors) or skill_errors, config_apply
+                    return bool(config_apply.errors or skill_apply.errors), config_apply
 
                 msg_content = _extract_message_content(msg)
                 raw_message_text = (msg_content or "").strip()
@@ -6857,6 +6781,12 @@ def _run_agent_loop(
                 )
                 tools = executed_batch.tools
 
+                runtime_errors, config_apply = _apply_runtime_updates()
+                _annotate_agent_config_update_result(
+                    executed_batch.execution_outcomes,
+                    config_apply,
+                )
+
                 finalized_batch = _finalize_tool_batch(
                     agent,
                     executed_batch.execution_outcomes,
@@ -6901,16 +6831,6 @@ def _run_agent_loop(
                     _mark_accepted_human_generation_consumed()
                     return cumulative_token_usage
 
-                attempted_config_fields = _agent_config_attempted_fields_from_outcomes(
-                    executed_batch.execution_outcomes
-                )
-                runtime_errors, config_apply = _apply_runtime_updates(
-                    attempted_config_fields
-                )
-                _persist_agent_config_update_results(
-                    executed_batch.execution_outcomes,
-                    config_apply,
-                )
                 if runtime_errors:
                     followup_required = True
 

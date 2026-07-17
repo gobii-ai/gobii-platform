@@ -8,9 +8,10 @@ persisting final values to Postgres.
 
 import logging
 import re
+import sqlite3
+from contextlib import contextmanager
 from dataclasses import dataclass
-from hashlib import sha256
-from typing import Optional, Sequence
+from typing import Optional
 
 from .charter_updater import execute_update_charter
 from .schedule_updater import execute_update_schedule
@@ -31,6 +32,16 @@ AGENT_CONFIG_INSERT_RE = re.compile(
 )
 
 
+@contextmanager
+def _guarded_connection(db_path: str):
+    conn = open_guarded_sqlite_connection(db_path)
+    try:
+        yield conn
+    finally:
+        clear_guarded_connection(conn)
+        conn.close()
+
+
 @dataclass(frozen=True)
 class AgentConfigSnapshot:
     charter: str
@@ -39,12 +50,8 @@ class AgentConfigSnapshot:
 
 @dataclass(frozen=True)
 class AgentConfigApplyResult:
-    attempted_fields: Sequence[str]
-    updated_fields: Sequence[str]
-    unchanged_fields: Sequence[str]
-    errors: Sequence[str]
-    charter_hash_before: str
-    charter_hash_after: str
+    updated_fields: tuple[str, ...]
+    errors: dict[str, str]
 
 
 def sqlite_statement_assigns_agent_config_field(statement: str, field_name: str) -> bool:
@@ -77,132 +84,59 @@ def seed_sqlite_agent_config(agent) -> Optional[AgentConfigSnapshot]:
         logger.warning("SQLite DB path unavailable; cannot seed agent config.")
         return None
 
-    conn = None
     try:
-        conn = open_guarded_sqlite_connection(db_path)
-        conn.execute(f'DROP TABLE IF EXISTS "{AGENT_CONFIG_TABLE}";')
-        conn.execute(
-            f"""
-            CREATE TABLE "{AGENT_CONFIG_TABLE}" (
-                id INTEGER PRIMARY KEY CHECK (id = 1),
-                charter TEXT,
-                schedule TEXT
-            );
-            """
-        )
-        charter = agent.charter or ""
-        schedule = agent.schedule
-        conn.execute(
-            f'INSERT INTO "{AGENT_CONFIG_TABLE}" (id, charter, schedule) VALUES (1, ?, ?);',
-            (charter, schedule),
-        )
-        conn.commit()
-        return AgentConfigSnapshot(charter=charter, schedule=schedule)
-    except Exception:
+        with _guarded_connection(db_path) as conn:
+            conn.execute(f'DROP TABLE IF EXISTS "{AGENT_CONFIG_TABLE}";')
+            conn.execute(
+                f"""
+                CREATE TABLE "{AGENT_CONFIG_TABLE}" (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    charter TEXT,
+                    schedule TEXT
+                );
+                """
+            )
+            snapshot = AgentConfigSnapshot(charter=agent.charter or "", schedule=agent.schedule)
+            conn.execute(
+                f'INSERT INTO "{AGENT_CONFIG_TABLE}" (id, charter, schedule) VALUES (1, ?, ?);',
+                (snapshot.charter, snapshot.schedule),
+            )
+            conn.commit()
+            return snapshot
+    except (RuntimeError, sqlite3.Error):
         logger.exception("Failed to seed agent config table for agent %s", getattr(agent, "id", None))
         return None
-    finally:
-        if conn is not None:
-            try:
-                clear_guarded_connection(conn)
-                conn.close()
-            except Exception:
-                pass
 
 
 def apply_sqlite_agent_config_updates(
     agent,
     baseline: Optional[AgentConfigSnapshot],
-    attempted_fields: Sequence[str] = (),
 ) -> AgentConfigApplyResult:
     """Apply any SQLite config updates to the persistent agent record."""
-    field_order = ("charter", "schedule")
-    attempted_field_set = set(attempted_fields)
-    normalized_attempted_fields = tuple(
-        field for field in field_order if field in attempted_field_set
-    )
-    errors: list[str] = []
+    updated_fields: list[str] = []
+    errors: dict[str, str] = {}
     current = read_sqlite_agent_config_snapshot()
-    persisted_before = AgentConfigSnapshot(
-        charter=agent.charter or "",
-        schedule=agent.schedule,
-    )
 
     if baseline is None or current is None:
         _drop_agent_config_table()
-        if normalized_attempted_fields:
-            errors.append("Agent config state was unavailable; no attempted updates were persisted.")
-        return _build_apply_result(
-            attempted_fields=normalized_attempted_fields,
-            before=persisted_before,
-            after=persisted_before,
-            errors=errors,
-        )
+        return AgentConfigApplyResult(updated_fields=(), errors=errors)
 
     if _normalize_charter(current.charter) != _normalize_charter(baseline.charter):
         result = execute_update_charter(agent, {"new_charter": _normalize_charter(current.charter)})
-        if not isinstance(result, dict) or result.get("status") != "ok":
-            errors.append(result.get("message", "Charter update failed.") if isinstance(result, dict) else "Charter update failed.")
+        if isinstance(result, dict) and result.get("status") == "ok":
+            updated_fields.append("charter")
+        else:
+            errors["charter"] = result.get("message", "Charter update failed.") if isinstance(result, dict) else "Charter update failed."
 
     if _normalize_schedule(current.schedule) != _normalize_schedule(baseline.schedule):
         result = execute_update_schedule(agent, {"new_schedule": current.schedule})
-        if not isinstance(result, dict) or result.get("status") != "ok":
-            errors.append(result.get("message", "Schedule update failed.") if isinstance(result, dict) else "Schedule update failed.")
+        if isinstance(result, dict) and result.get("status") == "ok":
+            updated_fields.append("schedule")
+        else:
+            errors["schedule"] = result.get("message", "Schedule update failed.") if isinstance(result, dict) else "Schedule update failed."
 
     _drop_agent_config_table()
-    agent.refresh_from_db(fields=["charter", "schedule"])
-    persisted_after = AgentConfigSnapshot(
-        charter=agent.charter or "",
-        schedule=agent.schedule,
-    )
-    effective_attempted_fields = tuple(
-        field
-        for field in field_order
-        if field in normalized_attempted_fields or _snapshot_field_changed(baseline, current, field)
-    )
-    return _build_apply_result(
-        attempted_fields=effective_attempted_fields,
-        before=persisted_before,
-        after=persisted_after,
-        errors=errors,
-    )
-
-
-def _build_apply_result(
-    *,
-    attempted_fields: Sequence[str],
-    before: AgentConfigSnapshot,
-    after: AgentConfigSnapshot,
-    errors: Sequence[str],
-) -> AgentConfigApplyResult:
-    updated_fields = tuple(
-        field for field in attempted_fields if _snapshot_field_changed(before, after, field)
-    )
-    unchanged_fields = tuple(field for field in attempted_fields if field not in updated_fields)
-    return AgentConfigApplyResult(
-        attempted_fields=tuple(attempted_fields),
-        updated_fields=updated_fields,
-        unchanged_fields=unchanged_fields,
-        errors=tuple(errors),
-        charter_hash_before=_charter_hash(before.charter),
-        charter_hash_after=_charter_hash(after.charter),
-    )
-
-
-def _snapshot_field_changed(
-    before: AgentConfigSnapshot,
-    after: AgentConfigSnapshot,
-    field: str,
-) -> bool:
-    if field == "charter":
-        return _normalize_charter(before.charter) != _normalize_charter(after.charter)
-    if field == "schedule":
-        return _normalize_schedule(before.schedule) != _normalize_schedule(after.schedule)
-    return False
-
-
-def _charter_hash(value: Optional[str]) -> str:
-    return sha256(_normalize_charter(value).encode("utf-8")).hexdigest()
+    return AgentConfigApplyResult(updated_fields=tuple(updated_fields), errors=errors)
 
 
 def read_sqlite_agent_config_snapshot() -> Optional[AgentConfigSnapshot]:
@@ -210,25 +144,15 @@ def read_sqlite_agent_config_snapshot() -> Optional[AgentConfigSnapshot]:
     if not db_path:
         return None
 
-    conn = None
     try:
-        conn = open_guarded_sqlite_connection(db_path)
-        cur = conn.cursor()
-        cur.execute(f'SELECT charter, schedule FROM "{AGENT_CONFIG_TABLE}" WHERE id = 1;')
-        row = cur.fetchone()
-        if not row:
-            return None
-        return AgentConfigSnapshot(charter=row[0] or "", schedule=row[1])
-    except Exception:
+        with _guarded_connection(db_path) as conn:
+            row = conn.execute(
+                f'SELECT charter, schedule FROM "{AGENT_CONFIG_TABLE}" WHERE id = 1;'
+            ).fetchone()
+            return AgentConfigSnapshot(charter=row[0] or "", schedule=row[1]) if row else None
+    except (RuntimeError, sqlite3.Error):
         logger.exception("Failed to read agent config table.")
         return None
-    finally:
-        if conn is not None:
-            try:
-                clear_guarded_connection(conn)
-                conn.close()
-            except Exception:
-                pass
 
 
 def _drop_agent_config_table() -> None:
@@ -236,20 +160,12 @@ def _drop_agent_config_table() -> None:
     if not db_path:
         return
 
-    conn = None
     try:
-        conn = open_guarded_sqlite_connection(db_path)
-        conn.execute(f'DROP TABLE IF EXISTS "{AGENT_CONFIG_TABLE}";')
-        conn.commit()
-    except Exception:
+        with _guarded_connection(db_path) as conn:
+            conn.execute(f'DROP TABLE IF EXISTS "{AGENT_CONFIG_TABLE}";')
+            conn.commit()
+    except (RuntimeError, sqlite3.Error):
         logger.exception("Failed to drop agent config table.")
-    finally:
-        if conn is not None:
-            try:
-                clear_guarded_connection(conn)
-                conn.close()
-            except Exception:
-                pass
 
 
 def _normalize_charter(value: Optional[str]) -> str:
@@ -257,7 +173,4 @@ def _normalize_charter(value: Optional[str]) -> str:
 
 
 def _normalize_schedule(value: Optional[str]) -> Optional[str]:
-    if value is None:
-        return None
-    trimmed = value.strip()
-    return trimmed or None
+    return value.strip() or None if value is not None else None

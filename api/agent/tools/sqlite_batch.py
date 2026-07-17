@@ -16,7 +16,6 @@ from sqlparse import tokens as sql_tokens
 from sqlparse.sql import Statement
 from .sqlite_guardrails import (
     clear_guarded_connection,
-    clear_patch_text_error,
     consume_patch_text_error,
     get_blocked_statement_reason,
     open_guarded_sqlite_connection,
@@ -1364,7 +1363,7 @@ def _execute_with_autocorrections(
         current_query, corrections = queue_items.popleft()
         attempts += 1
         try:
-            clear_patch_text_error()
+            consume_patch_text_error()
             start_query_timer(conn)
             cur.execute(current_query)
             if cur.description is not None:
