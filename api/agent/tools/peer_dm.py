@@ -33,19 +33,9 @@ _SUBSTANTIVE_REPLY_RE = re.compile(
     r"\b(?:attached|completed|created|fixed|found|logged|merged|recorded|sent|updated|"
     r"(?:i'll|will) (?:attach|complete|create|fix|log|merge|record|send|update))\b",
 )
-_SUBSTANTIVE_REPLY_PHRASES = (
-    "?",
-    "http://",
-    "https://",
-    " actually ",
-    " but ",
-    " correction",
-    " error",
-    " however",
-    " mismatch",
-    " missing",
-    " need you",
-    " please",
+_SUBSTANTIVE_REPLY_PATTERN_RE = re.compile(
+    r"\?|https?://|\b(?:actually|but|correction|error|however|mismatch|missing|please)\b|"
+    r"\bneed you\b",
 )
 
 
@@ -64,8 +54,7 @@ def _is_acknowledgment_only_peer_reply(body: str) -> bool:
         return False
     if _SUBSTANTIVE_REPLY_RE.search(normalized):
         return False
-    padded = f" {normalized} "
-    return not any(phrase in padded for phrase in _SUBSTANTIVE_REPLY_PHRASES)
+    return not _SUBSTANTIVE_REPLY_PATTERN_RE.search(normalized)
 
 
 def _should_suppress_peer_acknowledgment(inbound_body: str, outbound_body: str) -> bool:

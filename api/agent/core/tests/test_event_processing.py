@@ -664,6 +664,12 @@ class PeerMessageToolHandlingTests(SimpleTestCase):
                 "Thanks, I'll update the ledger with today's check.",
             )
         )
+        self.assertFalse(
+            _should_suppress_peer_acknowledgment(
+                "Quick status: no change, and no action needed.",
+                "Thanks—but the customer count is wrong.",
+            )
+        )
 
     def test_send_agent_message_does_not_deliver_suppressed_acknowledgment(self):
         agent = SimpleNamespace(id=uuid4())
