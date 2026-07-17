@@ -9,6 +9,7 @@ persisting final values to Postgres.
 import logging
 import re
 from dataclasses import dataclass
+from hashlib import sha256
 from typing import Optional, Sequence
 
 from .charter_updater import execute_update_charter
@@ -38,8 +39,12 @@ class AgentConfigSnapshot:
 
 @dataclass(frozen=True)
 class AgentConfigApplyResult:
+    attempted_fields: Sequence[str]
     updated_fields: Sequence[str]
+    unchanged_fields: Sequence[str]
     errors: Sequence[str]
+    charter_hash_before: str
+    charter_hash_after: str
 
 
 def sqlite_statement_assigns_agent_config_field(statement: str, field_name: str) -> bool:
@@ -108,32 +113,96 @@ def seed_sqlite_agent_config(agent) -> Optional[AgentConfigSnapshot]:
 def apply_sqlite_agent_config_updates(
     agent,
     baseline: Optional[AgentConfigSnapshot],
+    attempted_fields: Sequence[str] = (),
 ) -> AgentConfigApplyResult:
     """Apply any SQLite config updates to the persistent agent record."""
-    updated_fields: list[str] = []
+    field_order = ("charter", "schedule")
+    attempted_field_set = set(attempted_fields)
+    normalized_attempted_fields = tuple(
+        field for field in field_order if field in attempted_field_set
+    )
     errors: list[str] = []
     current = read_sqlite_agent_config_snapshot()
+    persisted_before = AgentConfigSnapshot(
+        charter=agent.charter or "",
+        schedule=agent.schedule,
+    )
 
     if baseline is None or current is None:
         _drop_agent_config_table()
-        return AgentConfigApplyResult(updated_fields=updated_fields, errors=errors)
+        if normalized_attempted_fields:
+            errors.append("Agent config state was unavailable; no attempted updates were persisted.")
+        return _build_apply_result(
+            attempted_fields=normalized_attempted_fields,
+            before=persisted_before,
+            after=persisted_before,
+            errors=errors,
+        )
 
     if _normalize_charter(current.charter) != _normalize_charter(baseline.charter):
         result = execute_update_charter(agent, {"new_charter": _normalize_charter(current.charter)})
-        if isinstance(result, dict) and result.get("status") == "ok":
-            updated_fields.append("charter")
-        else:
+        if not isinstance(result, dict) or result.get("status") != "ok":
             errors.append(result.get("message", "Charter update failed.") if isinstance(result, dict) else "Charter update failed.")
 
     if _normalize_schedule(current.schedule) != _normalize_schedule(baseline.schedule):
         result = execute_update_schedule(agent, {"new_schedule": current.schedule})
-        if isinstance(result, dict) and result.get("status") == "ok":
-            updated_fields.append("schedule")
-        else:
+        if not isinstance(result, dict) or result.get("status") != "ok":
             errors.append(result.get("message", "Schedule update failed.") if isinstance(result, dict) else "Schedule update failed.")
 
     _drop_agent_config_table()
-    return AgentConfigApplyResult(updated_fields=updated_fields, errors=errors)
+    agent.refresh_from_db(fields=["charter", "schedule"])
+    persisted_after = AgentConfigSnapshot(
+        charter=agent.charter or "",
+        schedule=agent.schedule,
+    )
+    effective_attempted_fields = tuple(
+        field
+        for field in field_order
+        if field in normalized_attempted_fields or _snapshot_field_changed(baseline, current, field)
+    )
+    return _build_apply_result(
+        attempted_fields=effective_attempted_fields,
+        before=persisted_before,
+        after=persisted_after,
+        errors=errors,
+    )
+
+
+def _build_apply_result(
+    *,
+    attempted_fields: Sequence[str],
+    before: AgentConfigSnapshot,
+    after: AgentConfigSnapshot,
+    errors: Sequence[str],
+) -> AgentConfigApplyResult:
+    updated_fields = tuple(
+        field for field in attempted_fields if _snapshot_field_changed(before, after, field)
+    )
+    unchanged_fields = tuple(field for field in attempted_fields if field not in updated_fields)
+    return AgentConfigApplyResult(
+        attempted_fields=tuple(attempted_fields),
+        updated_fields=updated_fields,
+        unchanged_fields=unchanged_fields,
+        errors=tuple(errors),
+        charter_hash_before=_charter_hash(before.charter),
+        charter_hash_after=_charter_hash(after.charter),
+    )
+
+
+def _snapshot_field_changed(
+    before: AgentConfigSnapshot,
+    after: AgentConfigSnapshot,
+    field: str,
+) -> bool:
+    if field == "charter":
+        return _normalize_charter(before.charter) != _normalize_charter(after.charter)
+    if field == "schedule":
+        return _normalize_schedule(before.schedule) != _normalize_schedule(after.schedule)
+    return False
+
+
+def _charter_hash(value: Optional[str]) -> str:
+    return sha256(_normalize_charter(value).encode("utf-8")).hexdigest()
 
 
 def read_sqlite_agent_config_snapshot() -> Optional[AgentConfigSnapshot]:

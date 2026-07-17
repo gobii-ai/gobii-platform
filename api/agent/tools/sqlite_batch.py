@@ -14,7 +14,15 @@ from typing import Any, Dict, List, Optional, TYPE_CHECKING
 import sqlparse
 from sqlparse import tokens as sql_tokens
 from sqlparse.sql import Statement
-from .sqlite_guardrails import clear_guarded_connection, get_blocked_statement_reason, open_guarded_sqlite_connection, start_query_timer, stop_query_timer
+from .sqlite_guardrails import (
+    clear_guarded_connection,
+    clear_patch_text_error,
+    consume_patch_text_error,
+    get_blocked_statement_reason,
+    open_guarded_sqlite_connection,
+    start_query_timer,
+    stop_query_timer,
+)
 from .sqlite_autocorrect import build_cte_column_candidates, build_sqlglot_candidates
 from .sqlite_query_quality import build_tool_result_query_advisories
 from .sqlite_state import EPHEMERAL_TABLES, _sqlite_db_path_var  # type: ignore
@@ -1356,6 +1364,7 @@ def _execute_with_autocorrections(
         current_query, corrections = queue_items.popleft()
         attempts += 1
         try:
+            clear_patch_text_error()
             start_query_timer(conn)
             cur.execute(current_query)
             if cur.description is not None:
@@ -1389,7 +1398,7 @@ def _execute_with_autocorrections(
                     result_entry["warning_code"] = "zero_rows_affected"
             return result_entry, current_query, corrections, None
         except Exception as orig_exc:
-            last_error_message = str(orig_exc)
+            last_error_message = consume_patch_text_error() or str(orig_exc)
             last_error_query = current_query
             conn.rollback()
             for updated_sql, fixes in _build_autocorrection_candidates(current_query, last_error_message, conn):

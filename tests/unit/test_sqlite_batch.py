@@ -119,6 +119,22 @@ class SqliteBatchToolTests(TestCase):
             finally:
                 conn.close()
 
+    def test_patch_text_reports_missing_and_ambiguous_targets(self):
+        with self._with_temp_db() as (db_path, token, tmp):
+            missing = execute_sqlite_batch(
+                self.agent,
+                {"sql": "SELECT patch_text('Keep A.', 'Missing B.', 'Use C.')"},
+            )
+            ambiguous = execute_sqlite_batch(
+                self.agent,
+                {"sql": "SELECT patch_text('Keep A. Keep A.', 'Keep A.', 'Use B.')"},
+            )
+
+        self.assertEqual(missing.get("status"), "error")
+        self.assertIn("replacement target was not found", missing.get("message", ""))
+        self.assertEqual(ambiguous.get("status"), "error")
+        self.assertIn("matched 2 times", ambiguous.get("message", ""))
+
     def test_single_query_field_is_normalized(self):
         with self._with_temp_db():
             out = execute_sqlite_batch(self.agent, {"sql": "SELECT 42 AS answer"})
