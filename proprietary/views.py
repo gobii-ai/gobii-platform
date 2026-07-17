@@ -103,6 +103,7 @@ BLOG_INDEX_TOPIC_SECTIONS = (
         "slugs": (
             "newsletter-2026-05-19-remote-mcp",
             "newsletter-2026-04-08-inbound-webhooks",
+            "newsletter-2026-06-02-discord-integration",
             "newsletter-2025-11-11-agents-just-got-way-more-connected-mcp-support-is-here",
             "newsletter-2026-03-17-one-click-integrations-for-your-agents",
         ),

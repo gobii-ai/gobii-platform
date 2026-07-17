@@ -44,22 +44,38 @@ class BlogSeoTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         soup = BeautifulSoup(response.content, "html.parser")
+        image_alt = "A persistent Gobii AI agent posting a daily bug briefing inside a Discord channel"
         self.assertEqual(
             soup.find("meta", property="og:image:alt")["content"],
-            "Gobii Discord integration",
+            image_alt,
         )
         self.assertEqual(
             soup.find("meta", attrs={"name": "twitter:image:alt"})["content"],
-            "Gobii Discord integration",
+            image_alt,
         )
 
         structured_data = json.loads(soup.find("script", type="application/ld+json").string)
-        self.assertEqual(structured_data["@type"], "BlogPosting")
-        self.assertEqual(structured_data["inLanguage"], "en-US")
-        self.assertEqual(structured_data["isPartOf"]["name"], "Gobii Blog")
-        self.assertEqual(structured_data["keywords"], ["newsletter", "weekly", "product-updates"])
-        self.assertGreater(structured_data["wordCount"], 0)
-        self.assertEqual(structured_data["image"], structured_data["thumbnailUrl"])
+        article = next(item for item in structured_data["@graph"] if item["@type"] == "BlogPosting")
+        faq_page = next(item for item in structured_data["@graph"] if item["@type"] == "FAQPage")
+        self.assertEqual(article["inLanguage"], "en-US")
+        self.assertEqual(article["isPartOf"]["name"], "Gobii Blog")
+        self.assertEqual(
+            article["keywords"],
+            [
+                "newsletter",
+                "weekly",
+                "product-updates",
+                "discord-ai-agent",
+                "integrations",
+                "collaboration",
+            ],
+        )
+        self.assertEqual(article["author"]["name"], "Will Bonde")
+        self.assertEqual(len(faq_page["mainEntity"]), 4)
+        self.assertGreater(article["wordCount"], 0)
+        self.assertEqual(article["image"], article["thumbnailUrl"])
+        self.assertTrue(article["image"].endswith("newsletter-2026-06-02-discord-integration-hero.webp"))
+        self.assertContains(response, "Updated July 16, 2026")
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_blog_post_uses_default_social_alt_for_default_social_image(self):
@@ -130,6 +146,10 @@ class BlogSeoTests(TestCase):
         )
         self.assertIn(
             "newsletter-2026-04-08-inbound-webhooks",
+            [post["slug"] for post in integrations_section["posts"]],
+        )
+        self.assertIn(
+            "newsletter-2026-06-02-discord-integration",
             [post["slug"] for post in integrations_section["posts"]],
         )
 
