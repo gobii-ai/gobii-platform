@@ -73,3 +73,8 @@ from .responsibility_boundaries import (
     RESPONSIBILITY_BOUNDARY_SUITE_SLUG,
     ResponsibilityBoundaryScenario,
 )
+from .hallucinated_links import (
+    HALLUCINATED_LINK_SCENARIO_SLUGS,
+    HALLUCINATED_LINKS_SUITE_SLUG,
+    HallucinatedLinkScenario,
+)
