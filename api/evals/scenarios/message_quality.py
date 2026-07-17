@@ -309,16 +309,16 @@ RECIPIENT_MESSAGE_QUALITY_CASES = (
         slug="message_quality_email_exact_copy",
         channel="email",
         recipient="maya.chen@example.test",
-        subject="Launch note — approved 🚀",
+        subject="Launch note: approved 🚀",
         brief="exact user-authored launch note",
         source_facts="The user supplied final approved email copy and asked for exact delivery.",
         source_example_ids=(),
         quality_target="exact_copy",
-        exact_subject="Launch note — approved 🚀",
+        exact_subject="Launch note: approved 🚀",
         exact_body=(
-            "<div style='color:#17324d'><p>Hi Maya—great news 🚀</p>"
+            "<div style='color:#17324d'><p>Hi Maya, great news! 🚀</p>"
             "<p>The launch is approved. Please keep both asks: confirm Tuesday, and invite Jordan.</p>"
-            "<p>—Elena</p></div>"
+            "<p>Thanks,<br>Elena</p></div>"
         ),
     ),
     MessageQualityCase(

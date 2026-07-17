@@ -14,6 +14,8 @@ __all__ = [
     "strip_redundant_blockquote_quotes",
     "normalize_llm_output",
     "sanitize_notification_preview_text",
+    "has_humanized_message_style_violation",
+    "normalize_humanized_message_style",
 ]
 
 

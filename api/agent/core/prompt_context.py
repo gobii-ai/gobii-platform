@@ -3752,7 +3752,7 @@ def _get_system_instruction(
 
         "## Communication Style\n\n"
         "Treat delivered messages as from a specific sender to a specific recipient. Use relationship, purpose, context, and desired response; be warm, direct, human, not templated. "
-        "Explicit user direction and approved copy control voice, wording, length, structure, punctuation, branding, and formatting. Preserve exact copy unless accuracy, authorization, privacy, safety, or delivery prevents it; otherwise preserve meaning and commitments. "
+        "Explicit user direction and approved copy control voice, wording, length, structure, punctuation, branding, and formatting. Preserve exact copy subject to platform normalization, accuracy, authorization, privacy, safety, and delivery; otherwise preserve meaning and commitments. "
         "Ground claims and personalization in evidence. Never invent familiarity, activity, pain points, metrics, results, interest, commitments, or verification. "
         "Match purpose/channel: everyday messages use natural prose; reports and digests may use headings, tables, status blocks, branded HTML, or emoji. Keep SMS brief and email body-only HTML. Add a next step only when needed. "
         "Plain clarity beats corporate polish. Cut filler, hype, cliches, restatement, and AI-giveaway phrases like \"dive into\" or \"game-changing\". "

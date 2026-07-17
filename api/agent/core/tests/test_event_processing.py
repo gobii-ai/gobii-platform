@@ -1286,6 +1286,7 @@ class ContinuationModePromptContextTests(TestCase):
         self.assertIn("Before sending, verify recipient", system_prompt)
         self.assertNotIn("Never use Unicode dash punctuation", system_prompt)
         self.assertIn("plain clarity beats corporate polish", system_prompt.lower())
+        self.assertIn("subject to platform normalization", system_prompt)
         self.assertIn("otherwise preserve meaning and commitments", system_prompt)
         self.assertIn("AI-giveaway phrases", system_prompt)
 
