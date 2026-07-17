@@ -77,10 +77,10 @@ def get_send_agent_message_tool() -> Dict[str, Any]:
         "function": {
             "name": "send_agent_message",
             "description": (
-                "Send a concise direct message only for a needed handoff or material change within your charter. "
+                "Send a concise message only for a necessary handoff within your charter or an update on substantial peer-requested work. "
                 "Never use it for thanks, receipts, 'noted' replies, or routine FYI acknowledgments. "
-                "If sending more than one message to the same peer, send the first with will_continue_work=true "
-                "and wait for the result before sending the next; rapid same-peer messages may be debounced."
+                "For repeat messages, first send with will_continue_work=true and await the result; rapid same-peer "
+                "messages may be debounced."
             ),
             "parameters": {
                 "type": "object",
