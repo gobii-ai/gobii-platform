@@ -2300,6 +2300,7 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
               state={savedAllowlistState}
               rows={allowlistRows}
               projectedSlotsUsed={projectedContactSlots}
+              contactAutoApproveEmailEnabled={initialData.features.contactAutoApproveEmail}
               contactApprovalMode={formState.contactApprovalMode}
               saving={saving}
               onAddContact={openAddContactModal}
@@ -2569,6 +2570,7 @@ type AllowlistManagerProps = {
   state: AllowlistState
   rows: AllowlistTableRow[]
   projectedSlotsUsed: number
+  contactAutoApproveEmailEnabled: boolean
   contactApprovalMode: ContactApprovalMode
   saving: boolean
   onAddContact: () => void
@@ -2583,6 +2585,7 @@ function AllowlistManager({
   state,
   rows,
   projectedSlotsUsed,
+  contactAutoApproveEmailEnabled,
   contactApprovalMode,
   saving,
   onAddContact,
@@ -2600,53 +2603,55 @@ function AllowlistManager({
 
   return (
     <div className="space-y-5">
-      <fieldset className="space-y-3">
-        <legend className="text-sm font-semibold text-slate-700">New contact approval</legend>
-        <p className="text-xs text-slate-500">Choose how this agent handles email addresses that are not already listed.</p>
-        <div className="grid gap-3 lg:grid-cols-2">
-          {CONTACT_APPROVAL_OPTIONS.map((option) => {
-            const Icon = option.icon
-            const Badge = option.badge
-            const selected = contactApprovalMode === option.value
-            return (
-              <label
-                key={option.value}
-                className={`flex cursor-pointer items-start gap-3 rounded-xl border px-4 py-4 text-left transition-colors ${
-                  selected
-                    ? 'border-blue-400/60 bg-blue-950/30'
-                    : 'border-slate-200/20 bg-transparent hover:border-slate-300/40'
-                } ${saving ? 'cursor-not-allowed opacity-60' : ''}`}
-              >
-                <span className="relative flex size-9 shrink-0 items-center justify-center rounded-lg border border-slate-200/20 bg-slate-900/45 text-slate-300">
-                  <Icon className="size-4" aria-hidden="true" />
-                  {Badge && <Badge className="absolute -right-1 -top-1 size-3 text-amber-300" aria-hidden="true" />}
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block text-sm font-semibold text-slate-100">{option.title}</span>
-                  <span className="mt-1 block text-xs leading-5 text-slate-400">{option.description}</span>
-                </span>
-                <input
-                  type="radio"
-                  name="contact-approval-mode-choice"
-                  value={option.value}
-                  checked={selected}
-                  disabled={saving}
-                  onChange={() => onContactApprovalModeChange(option.value)}
-                  className="mt-2 size-4 shrink-0 accent-blue-500"
-                />
-              </label>
-            )
-          })}
-        </div>
-        {contactApprovalMode === 'auto_approve_email' && (
-          <div className="flex items-start gap-2 rounded-lg border border-amber-300/20 bg-amber-950/30 px-4 py-3 text-xs leading-5 text-amber-100">
-            <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-400" aria-hidden="true" />
-            <p>
-              This agent can add email contacts without asking you first. New contacts remain visible and removable below. SMS contacts always require approval.
-            </p>
+      {contactAutoApproveEmailEnabled && (
+        <fieldset className="space-y-3">
+          <legend className="text-sm font-semibold text-slate-700">New contact approval</legend>
+          <p className="text-xs text-slate-500">Choose how this agent handles email addresses that are not already listed.</p>
+          <div className="grid gap-3 lg:grid-cols-2">
+            {CONTACT_APPROVAL_OPTIONS.map((option) => {
+              const Icon = option.icon
+              const Badge = option.badge
+              const selected = contactApprovalMode === option.value
+              return (
+                <label
+                  key={option.value}
+                  className={`flex cursor-pointer items-start gap-3 rounded-xl border px-4 py-4 text-left transition-colors ${
+                    selected
+                      ? 'border-blue-400/60 bg-blue-950/30'
+                      : 'border-slate-200/20 bg-transparent hover:border-slate-300/40'
+                  } ${saving ? 'cursor-not-allowed opacity-60' : ''}`}
+                >
+                  <span className="relative flex size-9 shrink-0 items-center justify-center rounded-lg border border-slate-200/20 bg-slate-900/45 text-slate-300">
+                    <Icon className="size-4" aria-hidden="true" />
+                    {Badge && <Badge className="absolute -right-1 -top-1 size-3 text-amber-300" aria-hidden="true" />}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm font-semibold text-slate-100">{option.title}</span>
+                    <span className="mt-1 block text-xs leading-5 text-slate-400">{option.description}</span>
+                  </span>
+                  <input
+                    type="radio"
+                    name="contact-approval-mode-choice"
+                    value={option.value}
+                    checked={selected}
+                    disabled={saving}
+                    onChange={() => onContactApprovalModeChange(option.value)}
+                    className="mt-2 size-4 shrink-0 accent-blue-500"
+                  />
+                </label>
+              )
+            })}
           </div>
-        )}
-      </fieldset>
+          {contactApprovalMode === 'auto_approve_email' && (
+            <div className="flex items-start gap-2 rounded-lg border border-amber-300/20 bg-amber-950/30 px-4 py-3 text-xs leading-5 text-amber-100">
+              <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-400" aria-hidden="true" />
+              <p>
+                This agent can add email contacts without asking you first. New contacts remain visible and removable below. SMS contacts always require approval.
+              </p>
+            </div>
+          )}
+        </fieldset>
+      )}
 
       {!state.emailVerified && (
         <div className={embeddedInfoBannerClassName}>

@@ -232,6 +232,7 @@ export type AgentSettingsData = {
   inboundWebhooks: AgentInboundWebhook[]
   features: {
     organizations: boolean
+    contactAutoApproveEmail: boolean
   }
   reassignment: AgentSettingsReassignmentInfo
   llmIntelligence: LlmIntelligenceConfig | null

@@ -12,6 +12,8 @@ from console.mixins import AgentOwnerContextOverrideMixin
 from console.agent_chat.access import resolve_manageable_agent_for_request, user_can_manage_agent, user_is_collaborator
 from api.agent.tasks.process_events import process_agent_events_task
 from api.models import CommsAllowlistEntry, UserPhoneNumber
+from constants.feature_flags import CONTACT_AUTO_APPROVE_EMAIL
+
 
 class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, DetailView):
     """Shared backend for agent settings payloads and mutations."""
@@ -1066,6 +1068,7 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
 
         features = {
             'organizations': flag_is_active(request, 'organizations'),
+            'contactAutoApproveEmail': flag_is_active(request, CONTACT_AUTO_APPROVE_EMAIL),
         }
 
         can_reassign = bool(context.get('can_reassign'))
@@ -1633,6 +1636,12 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
         ).strip()
         if new_contact_approval_mode not in PersistentAgent.ContactApprovalMode.values:
             return _general_error("Select a valid contact approval option.")
+        if (
+            new_contact_approval_mode == PersistentAgent.ContactApprovalMode.AUTO_APPROVE_EMAIL
+            and agent.contact_approval_mode != PersistentAgent.ContactApprovalMode.AUTO_APPROVE_EMAIL
+            and not flag_is_active(request, CONTACT_AUTO_APPROVE_EMAIL)
+        ):
+            return _general_error("Automatic email contact approval is not available.")
 
         avatar_file = request.FILES.get('avatar')
         clear_avatar_flag = (request.POST.get('clear_avatar') or '').strip().lower() in {'1', 'true', 'yes', 'on'}
