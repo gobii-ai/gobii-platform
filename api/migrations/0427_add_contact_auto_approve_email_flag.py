@@ -29,7 +29,7 @@ def noop(apps, schema_editor):
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("api", "0426_persistentagenttoolcall_display_metadata"),
+        ("api", "0425_persistentagent_contact_approval_mode"),
         ("waffle", "0001_initial"),
     ]
 

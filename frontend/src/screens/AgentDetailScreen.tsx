@@ -2300,7 +2300,10 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
               state={savedAllowlistState}
               rows={allowlistRows}
               projectedSlotsUsed={projectedContactSlots}
-              contactAutoApproveEmailEnabled={initialData.features.contactAutoApproveEmail}
+              contactAutoApproveEmailEnabled={
+                initialData.features.contactAutoApproveEmail
+                || savedFormState.contactApprovalMode === 'auto_approve_email'
+              }
               contactApprovalMode={formState.contactApprovalMode}
               saving={saving}
               onAddContact={openAddContactModal}
