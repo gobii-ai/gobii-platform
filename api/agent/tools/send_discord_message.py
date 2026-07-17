@@ -20,8 +20,8 @@ def get_send_discord_message_tool() -> Dict[str, Any]:
         "function": {
             "name": "send_discord_message",
             "description": (
-                "Send a message to a Discord channel subscribed through the native Gobii Discord bot. "
-                "The backend sends via a channel webhook using this agent's name and avatar."
+                "Send a message to a subscribed Discord channel only when this agent owns the response. "
+                "Do not answer questions addressed to someone else or duplicate another agent's work."
             ),
             "parameters": {
                 "type": "object",

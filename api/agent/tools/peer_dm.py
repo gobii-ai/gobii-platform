@@ -2,18 +2,63 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any, Dict
 from uuid import UUID
 
 from ..files.attachment_helpers import AttachmentResolutionError, resolve_filespace_attachments
 from .attachment_guidance import SEND_TOOL_ATTACHMENTS_DESCRIPTION
 from ..peer_comm import PeerMessagingDuplicateError, PeerMessagingError, PeerMessagingService
-from ...models import PersistentAgent
+from ...models import PersistentAgent, PersistentAgentMessage
 
 logger = logging.getLogger(__name__)
 
 
 RETRYABLE_PEER_MESSAGE_STATUSES = {"debounced", "throttled"}
+
+_NO_ACTION_PEER_UPDATE_PHRASES = (
+    "i'll own it from here",
+    "i will own it from here",
+    "no action needed",
+    "no change",
+    "no follow-up needed",
+    "no new signal",
+    "nothing new",
+)
+_ACKNOWLEDGMENT_PREFIX_RE = re.compile(
+    r"^(?:thanks\b|thank you\b|noted\b|received\b|got it\b|acknowledged\b|understood\b|"
+    r"sounds good\b|all yours\b|no (?:\w+ )?action (?:is )?needed\b)",
+)
+_SUBSTANTIVE_REPLY_RE = re.compile(
+    r"\b(?:attached|completed|created|fixed|found|logged|merged|recorded|sent|updated|"
+    r"(?:i'll|will) (?:attach|complete|create|fix|log|merge|record|send|update))\b",
+)
+_SUBSTANTIVE_REPLY_PATTERN_RE = re.compile(
+    r"\?|https?://|\b(?:actually|but|correction|error|however|mismatch|missing|please)\b|"
+    r"\bneed you\b",
+)
+
+
+def _normalize_peer_message(body: str) -> str:
+    return " ".join(str(body or "").replace("’", "'").lower().split())
+
+
+def _is_no_action_peer_update(body: str) -> bool:
+    normalized = _normalize_peer_message(body)
+    return any(phrase in normalized for phrase in _NO_ACTION_PEER_UPDATE_PHRASES)
+
+
+def _is_acknowledgment_only_peer_reply(body: str) -> bool:
+    normalized = _normalize_peer_message(body)
+    if not _ACKNOWLEDGMENT_PREFIX_RE.match(normalized):
+        return False
+    if _SUBSTANTIVE_REPLY_RE.search(normalized):
+        return False
+    return not _SUBSTANTIVE_REPLY_PATTERN_RE.search(normalized)
+
+
+def _should_suppress_peer_acknowledgment(inbound_body: str, outbound_body: str) -> bool:
+    return _is_no_action_peer_update(inbound_body) and _is_acknowledgment_only_peer_reply(outbound_body)
 
 
 def _should_continue_work(params: Dict[str, Any]) -> bool:
@@ -32,8 +77,8 @@ def get_send_agent_message_tool() -> Dict[str, Any]:
         "function": {
             "name": "send_agent_message",
             "description": (
-                "Send a concise direct message to another agent that shares a peer link with you. "
-                "Use this to coordinate tasks with partner agents. Keep messages focused and avoid loops. "
+                "Send a concise direct message only for a necessary handoff within your charter. "
+                "Never use it for thanks, receipts, 'noted' replies, or routine status/FYI acknowledgments. "
                 "If sending more than one message to the same peer, send the first with will_continue_work=true "
                 "and wait for the result before sending the next; rapid same-peer messages may be debounced."
             ),
@@ -46,7 +91,7 @@ def get_send_agent_message_tool() -> Dict[str, Any]:
                     },
                     "message": {
                         "type": "string",
-                        "description": "The body of the message to send. Keep it brief and actionable.",
+                        "description": "New information, question, or handoff the peer needs; never an acknowledgment-only reply.",
                     },
                     "attachments": {
                         "type": "array",
@@ -111,6 +156,24 @@ def execute_send_agent_message(agent: PersistentAgent, params: Dict[str, Any]) -
             "status": "error",
             "message": str(exc),
         }
+
+    if not resolved_attachments and _is_acknowledgment_only_peer_reply(str(message)):
+        latest_inbound = (
+            PersistentAgentMessage.objects.filter(
+                owner_agent=agent,
+                peer_agent=peer_agent,
+                is_outbound=False,
+                conversation__is_peer_dm=True,
+            )
+            .order_by("-timestamp", "-id")
+            .first()
+        )
+        if latest_inbound is not None and _is_no_action_peer_update(latest_inbound.body or ""):
+            return {
+                "status": "suppressed",
+                "message": "Acknowledgment-only peer reply suppressed because the latest update requires no action.",
+                "auto_sleep_ok": not will_continue,
+            }
 
     service = PeerMessagingService(agent, peer_agent)
 
