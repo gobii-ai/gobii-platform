@@ -243,9 +243,10 @@ def get_send_chat_tool() -> Dict[str, Any]:
         "function": {
             "name": "send_chat_message",
             "description": (
-                "Send web chat for questions, context, config/status/policy changes, findings, or finals. "
-                "Only for deep/exhaustive, large-batch, large implementation/deployment, or explicitly long-running work, call this FIRST with scope + next checkpoint and will_continue_work=true; call again at first material milestone. "
-                "Never simulate email/SMS; use its send tool when requested. No generic progress, tool sequencing, plan mechanics, or internal reasoning."
+                "Send web chat for user-facing content. "
+                "Deep/exhaustive, large-batch, large implementation/deployment, or explicitly long work only: send scope + next checkpoint FIRST with will_continue_work=true, then one material milestone. "
+                "Do not use this to simulate or confirm an email/SMS delivery; if the user asked to email or text and the send_email/send_sms tool is available, call that tool instead. "
+                "No generic or internal progress."
             ),
             "parameters": {
                 "type": "object",
