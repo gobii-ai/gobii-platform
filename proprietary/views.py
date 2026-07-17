@@ -1192,7 +1192,7 @@ class BlogPostView(ProprietaryModeRequiredMixin, TemplateView):
             person_schema = {
                 "@type": "Person",
                 "@id": author_id,
-                "name": author_name,
+                "name": author["name"],
                 "worksFor": {"@id": organization_id},
             }
             if author_url:
