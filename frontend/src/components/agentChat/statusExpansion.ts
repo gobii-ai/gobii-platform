@@ -21,6 +21,19 @@ export function isScheduleDisplayEntry(entry: ToolEntryDisplay): boolean {
   return Boolean(parsedUpdate?.updatesSchedule)
 }
 
+export function isAssignmentDisplayEntry(entry: ToolEntryDisplay): boolean {
+  if (entry.toolName === 'update_charter') {
+    return true
+  }
+
+  if (entry.toolName !== 'sqlite_batch' || !entry.sqlStatements?.length) {
+    return false
+  }
+
+  const parsedUpdate = parseAgentConfigUpdates(entry.sqlStatements)
+  return Boolean(parsedUpdate?.updatesCharter)
+}
+
 export function isStatusDisplayEntry(entry: ToolEntryDisplay): boolean {
   return isScheduleDisplayEntry(entry)
 }

@@ -77,7 +77,7 @@ def apply_sqlite_agent_config_updates(
     """Apply any SQLite config updates to the persistent agent record."""
     updated_fields: list[str] = []
     errors: list[str] = []
-    current = _read_agent_config_snapshot()
+    current = read_sqlite_agent_config_snapshot()
 
     if baseline is None or current is None:
         _drop_agent_config_table()
@@ -101,7 +101,7 @@ def apply_sqlite_agent_config_updates(
     return AgentConfigApplyResult(updated_fields=updated_fields, errors=errors)
 
 
-def _read_agent_config_snapshot() -> Optional[AgentConfigSnapshot]:
+def read_sqlite_agent_config_snapshot() -> Optional[AgentConfigSnapshot]:
     db_path = get_sqlite_db_path()
     if not db_path:
         return None

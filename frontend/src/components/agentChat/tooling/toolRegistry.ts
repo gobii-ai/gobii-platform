@@ -207,6 +207,7 @@ function buildToolEntryDisplay(
     result: entry.result,
     summary: mergedTransform.summary ?? entry.summary ?? null,
     charterText: mergedTransform.charterText ?? entry.charterText ?? null,
+    charterChange: mergedTransform.charterChange ?? null,
     sqlStatements: mergedTransform.sqlStatements ?? entry.sqlStatements,
     detailComponent: finalDetailComponent,
     meta: entry.meta,

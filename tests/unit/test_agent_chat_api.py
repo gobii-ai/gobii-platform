@@ -78,7 +78,7 @@ from api.services.pipedream_apps import get_owner_apps_state
 from api.services.web_sessions import heartbeat_web_session, start_web_session
 from config.redis_client import get_redis_client
 from console.agent_chat.plan_events import persist_plan_event
-from console.agent_chat.timeline import build_processing_snapshot
+from console.agent_chat.timeline import build_processing_snapshot, build_tool_cluster_from_steps
 from console.agent_chat.timeline import fetch_timeline_window
 from console.agent_chat.timeline import serialize_plan_event
 from util.onboarding import (
@@ -977,6 +977,41 @@ class AgentChatAPITests(TestCase):
         self.assertIn("accountPause", critical_status)
         self.assertIn("dailyCredits", critical_status)
         self.assertIn("contactCapStatus", critical_status)
+
+    @tag("batch_agent_chat")
+    def test_timeline_serializes_assignment_display_snapshot_for_pages_and_realtime(self):
+        step = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            description="Update assignment",
+        )
+        PersistentAgentToolCall.objects.create(
+            step=step,
+            tool_name="sqlite_batch",
+            tool_params={
+                "sql": (
+                    "UPDATE __agent_config "
+                    "SET charter=patch_text(charter, 'old clause', 'new clause') WHERE id=1"
+                ),
+            },
+            result=json.dumps({"status": "ok"}),
+            display_metadata={
+                "agent_config": {
+                    "charter": "Full updated assignment",
+                },
+            },
+        )
+
+        page_entry = next(
+            entry
+            for event in fetch_timeline_window(self.agent).events
+            if event.get("kind") == "steps"
+            for entry in event.get("entries", [])
+            if entry.get("id") == str(step.id)
+        )
+        realtime_entry = build_tool_cluster_from_steps([step])["entries"][0]
+
+        self.assertEqual(page_entry["charterText"], "Full updated assignment")
+        self.assertEqual(realtime_entry["charterText"], "Full updated assignment")
 
     @tag("batch_agent_chat")
     def test_agent_profile_endpoint_returns_lightweight_roster_entry(self):

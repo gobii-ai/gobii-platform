@@ -22,6 +22,7 @@ from redis.exceptions import RedisError
 
 from api.agent.core.event_processing import (
     OrchestratorPromptStale,
+    _capture_tool_display_metadata,
     _completion_with_failover,
     _execute_tool_call_runtime,
     _execute_prepared_tool_call,
@@ -145,6 +146,41 @@ from util.personal_signup_preview import GENERIC_STARTER_CHARTER
 from tests.utils.token_usage import make_completion_response
 
 User = get_user_model()
+
+
+@tag("batch_event_processing")
+class ToolDisplayMetadataTests(TestCase):
+    @patch("api.agent.core.event_processing.read_sqlite_agent_config_snapshot")
+    def test_assignment_snapshot_is_captured_only_for_successful_config_mutations(self, mock_read_snapshot):
+        mock_read_snapshot.return_value = SimpleNamespace(charter="Updated full assignment")
+        patch_call = SimpleNamespace(
+            tool_name="sqlite_batch",
+            exec_params={
+                "sql": (
+                    "UPDATE __agent_config "
+                    "SET charter=patch_text(charter, 'old clause', 'new clause') WHERE id=1"
+                ),
+            },
+        )
+
+        self.assertEqual(
+            _capture_tool_display_metadata(patch_call, {"status": "ok"}),
+            {"agent_config": {"charter": "Updated full assignment"}},
+        )
+
+        mock_read_snapshot.reset_mock()
+        self.assertEqual(
+            _capture_tool_display_metadata(patch_call, {"status": "error", "message": "failed"}),
+            {},
+        )
+        mock_read_snapshot.assert_not_called()
+
+        read_call = SimpleNamespace(
+            tool_name="sqlite_batch",
+            exec_params={"sql": "SELECT charter FROM __agent_config WHERE id=1"},
+        )
+        self.assertEqual(_capture_tool_display_metadata(read_call, {"status": "ok"}), {})
+        mock_read_snapshot.assert_not_called()
 
 
 @tag("batch_event_processing")

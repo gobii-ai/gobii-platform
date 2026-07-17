@@ -4,8 +4,14 @@ export type AgentConfigSqlUpdate = {
   updatesCharter: boolean
   updatesSchedule: boolean
   charterValue: string | null
+  charterChange: AgentConfigCharterChange | null
   scheduleValue: string | null
   scheduleCleared: boolean
+}
+
+export type AgentConfigCharterChange = {
+  previousText: string | null
+  replacementText: string | null
 }
 
 export type SqliteStatementOperation =
@@ -107,6 +113,85 @@ function extractSqlAssignment(statement: string, field: string): string | null {
     return doubleMatch[1].replace(/""/g, '"')
   }
   return null
+}
+
+function extractFunctionAssignmentArguments(
+  statement: string,
+  field: string,
+  functionName: string,
+): string[] | null {
+  const fieldToken = escapeRegExp(field)
+  const functionToken = escapeRegExp(functionName)
+  const assignment = new RegExp(`\\b${fieldToken}\\b\\s*=\\s*${functionToken}\\s*\\(`, 'i').exec(statement)
+  if (!assignment) {
+    return null
+  }
+
+  const argumentsStart = assignment.index + assignment[0].length
+  let depth = 1
+  let inSingle = false
+  let inDouble = false
+
+  for (let index = argumentsStart; index < statement.length; index += 1) {
+    const char = statement[index]
+    const next = index + 1 < statement.length ? statement[index + 1] : ''
+    if (inSingle) {
+      if (char === "'" && next === "'") {
+        index += 1
+      } else if (char === "'") {
+        inSingle = false
+      }
+      continue
+    }
+    if (inDouble) {
+      if (char === '"' && next === '"') {
+        index += 1
+      } else if (char === '"') {
+        inDouble = false
+      }
+      continue
+    }
+    if (char === "'") {
+      inSingle = true
+      continue
+    }
+    if (char === '"') {
+      inDouble = true
+      continue
+    }
+    if (char === '(') {
+      depth += 1
+      continue
+    }
+    if (char !== ')') {
+      continue
+    }
+    depth -= 1
+    if (depth === 0) {
+      return splitSqlByComma(statement.slice(argumentsStart, index))
+    }
+  }
+
+  return null
+}
+
+function parsePatchTextAssignment(statement: string): AgentConfigCharterChange | null {
+  const args = extractFunctionAssignmentArguments(statement, 'charter', 'patch_text')
+  if (!args || args.length !== 3) {
+    return null
+  }
+
+  const target = args[0].replace(/[`"'\[\]]/g, '').trim().toLowerCase()
+  if (target !== 'charter' && !target.endsWith('.charter')) {
+    return null
+  }
+
+  const previousText = decodeSqlLiteral(args[1] ?? '')
+  const replacementText = decodeSqlLiteral(args[2] ?? '')
+  if (previousText === undefined || replacementText === undefined) {
+    return null
+  }
+  return { previousText, replacementText }
 }
 
 function hasAssignment(statement: string, field: string): boolean {
@@ -468,6 +553,7 @@ export function parseAgentConfigUpdates(statements: string[]): AgentConfigSqlUpd
   let updatesCharter = false
   let updatesSchedule = false
   let charterValue: string | null = null
+  let charterChange: AgentConfigCharterChange | null = null
   let scheduleValue: string | null = null
   let scheduleCleared = false
 
@@ -485,6 +571,9 @@ export function parseAgentConfigUpdates(statements: string[]): AgentConfigSqlUpd
       const parsedCharter = extractSqlAssignment(statement, 'charter')
       if (parsedCharter !== null) {
         charterValue = parsedCharter
+        charterChange = null
+      } else {
+        charterChange = parsePatchTextAssignment(statement) ?? charterChange
       }
     } else {
       const parsedInsertCharter = parseInsertValueAssignment(statement, 'charter')
@@ -531,6 +620,7 @@ export function parseAgentConfigUpdates(statements: string[]): AgentConfigSqlUpd
     updatesCharter,
     updatesSchedule,
     charterValue,
+    charterChange,
     scheduleValue,
     scheduleCleared,
   }

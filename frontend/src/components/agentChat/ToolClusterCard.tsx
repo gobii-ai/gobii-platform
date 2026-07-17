@@ -7,7 +7,6 @@ import { ToolClusterLivePreview } from './ToolClusterLivePreview'
 import type { ToolClusterEvent } from './types'
 import type { ToolEntryDisplay } from './tooling/types'
 import { formatRelativeTimestamp } from '../../util/time'
-import { compareTimelineCursors } from '../../util/timelineCursor'
 import { CollapsedActivityCard } from './CollapsedActivityCard'
 import { buildActionCountLabel } from './activityEntryUtils'
 import type { StatusExpansionTargets } from './statusExpansion'
@@ -23,6 +22,10 @@ type ToolClusterCardProps = {
   animateIncoming?: boolean
   onIncomingAnimationConsumed?: (cursor: string) => void
 }
+
+type ToolClusterRenderSegment =
+  | { kind: 'preview', key: string, entries: ToolEntryDisplay[] }
+  | { kind: 'separate', key: string, entry: ToolEntryDisplay }
 
 export const ToolClusterCard = memo(function ToolClusterCard({
   cluster,
@@ -79,41 +82,40 @@ export const ToolClusterCard = memo(function ToolClusterCard({
       entries,
     }
   }, [statusExpansionTargets, transformed])
-  const separatedEntries = useMemo(
-    () => resolvedTransformed.entries.filter((entry) => entry.separateFromPreview),
-    [resolvedTransformed.entries],
-  )
   const previewEntries = useMemo(
     () => resolvedTransformed.entries.filter((entry) => !entry.separateFromPreview),
     [resolvedTransformed.entries],
   )
-  const visiblePreviewEntries = previewEntries
-  const separatedEntryPlacement = useMemo(() => {
-    if (!separatedEntries.length) {
-      return { beforePreview: [] as ToolEntryDisplay[], afterPreview: [] as ToolEntryDisplay[] }
+  const renderSegments = useMemo<ToolClusterRenderSegment[]>(() => {
+    const segments: ToolClusterRenderSegment[] = []
+    let currentPreviewEntries: ToolEntryDisplay[] = []
+    const flushPreview = () => {
+      if (!currentPreviewEntries.length) return
+      segments.push({
+        kind: 'preview',
+        key: `preview:${currentPreviewEntries[0].id}`,
+        entries: currentPreviewEntries,
+      })
+      currentPreviewEntries = []
     }
 
-    const firstVisiblePreviewCursor = visiblePreviewEntries[0]?.cursor
-    if (!firstVisiblePreviewCursor) {
-      return { beforePreview: [] as ToolEntryDisplay[], afterPreview: separatedEntries }
-    }
-
-    const beforePreview: ToolEntryDisplay[] = []
-    const afterPreview: ToolEntryDisplay[] = []
-    for (const entry of separatedEntries) {
-      if (!entry.cursor) {
-        afterPreview.push(entry)
-        continue
-      }
-      if (compareTimelineCursors(entry.cursor, firstVisiblePreviewCursor) <= 0) {
-        beforePreview.push(entry)
+    for (const entry of resolvedTransformed.entries) {
+      if (entry.separateFromPreview) {
+        flushPreview()
+        segments.push({ kind: 'separate', key: `separate:${entry.id}`, entry })
       } else {
-        afterPreview.push(entry)
+        currentPreviewEntries.push(entry)
       }
     }
-    return { beforePreview, afterPreview }
-  }, [separatedEntries, visiblePreviewEntries])
-  const hasPreviewEntries = previewEntries.length > 0
+    flushPreview()
+    return segments
+  }, [resolvedTransformed.entries])
+  const lastPreviewSegmentIndex = useMemo(() => {
+    for (let index = renderSegments.length - 1; index >= 0; index -= 1) {
+      if (renderSegments[index].kind === 'preview') return index
+    }
+    return -1
+  }, [renderSegments])
 
   const [timelineOpen, setTimelineOpen] = useState(false)
   const [timelineInitialEntryId, setTimelineInitialEntryId] = useState<string | null>(null)
@@ -141,8 +143,12 @@ export const ToolClusterCard = memo(function ToolClusterCard({
     () => resolvedTransformed.entries.some((entry) => isStatusDisplayEntry(entry) && entry.separateFromPreview),
     [resolvedTransformed.entries],
   )
+  const hasSeparatedEntry = useMemo(
+    () => resolvedTransformed.entries.some((entry) => entry.separateFromPreview),
+    [resolvedTransformed.entries],
+  )
   const shouldCollapse = useMemo(() => {
-    if (hasExpandedStatusEntry) {
+    if (hasSeparatedEntry) {
       return false
     }
     if (resolvedTransformed.collapsible) {
@@ -152,7 +158,7 @@ export const ToolClusterCard = memo(function ToolClusterCard({
       return false
     }
     return resolvedTransformed.entries.some((entry) => isStatusDisplayEntry(entry) && !entry.separateFromPreview)
-  }, [hasExpandedStatusEntry, resolvedTransformed.collapsible, resolvedTransformed.entries, statusExpansionTargets])
+  }, [hasSeparatedEntry, resolvedTransformed.collapsible, resolvedTransformed.entries, statusExpansionTargets])
   const shouldCollapsePreviewEntries = hasExpandedStatusEntry && previewEntries.length > 1
 
   if (!isClusterRenderable(resolvedTransformed)) {
@@ -213,33 +219,41 @@ export const ToolClusterCard = memo(function ToolClusterCard({
       data-earliest={resolvedTransformed.earliestTimestamp}
     >
       <div className="tool-cluster-shell">
-        {separatedEntryPlacement.beforePreview.length ? (
-          <div className="tool-cluster-separate-list">{separatedEntryPlacement.beforePreview.map(renderSeparatedEntry)}</div>
-        ) : null}
-        {hasPreviewEntries ? (
-          <div className="tool-cluster-summary">
-            {shouldCollapsePreviewEntries ? (
-              <CollapsedActivityCard
-                overlayId={`${resolvedTransformed.cursor}:preview`}
-                entries={previewEntries}
-                label={buildActionCountLabel(previewEntries.length)}
-              />
-            ) : (
-              <ToolClusterLivePreview
-                cluster={resolvedTransformed}
-                isLatestEvent={isLatestEvent}
-                animateIncoming={animateIncoming}
-                previewEntryLimit={previewEntries.length}
-                onOpenTimeline={handleToggleCluster}
-                onSelectEntry={handlePreviewEntrySelect}
-                onIncomingAnimationConsumed={onIncomingAnimationConsumed}
-              />
-            )}
-          </div>
-        ) : null}
-        {separatedEntryPlacement.afterPreview.length ? (
-          <div className="tool-cluster-separate-list">{separatedEntryPlacement.afterPreview.map(renderSeparatedEntry)}</div>
-        ) : null}
+        {renderSegments.map((segment, segmentIndex) => {
+          if (segment.kind === 'separate') {
+            return <div key={segment.key} className="tool-cluster-separate-list">{renderSeparatedEntry(segment.entry)}</div>
+          }
+
+          const segmentCluster = {
+            ...resolvedTransformed,
+            entries: segment.entries,
+            entryCount: segment.entries.length,
+            collapsible: false,
+            collapseThreshold: Infinity,
+          }
+          const isTrailingPreview = segmentIndex === lastPreviewSegmentIndex
+          return (
+            <div key={segment.key} className="tool-cluster-summary">
+              {shouldCollapsePreviewEntries && segment.entries.length > 1 ? (
+                <CollapsedActivityCard
+                  overlayId={`${resolvedTransformed.cursor}:${segment.key}`}
+                  entries={segment.entries}
+                  label={buildActionCountLabel(segment.entries.length)}
+                />
+              ) : (
+                <ToolClusterLivePreview
+                  cluster={segmentCluster}
+                  isLatestEvent={isLatestEvent && isTrailingPreview}
+                  animateIncoming={animateIncoming && isTrailingPreview}
+                  previewEntryLimit={segment.entries.length}
+                  onOpenTimeline={handleToggleCluster}
+                  onSelectEntry={handlePreviewEntrySelect}
+                  onIncomingAnimationConsumed={onIncomingAnimationConsumed}
+                />
+              )}
+            </div>
+          )
+        })}
       </div>
       <ToolClusterTimelineOverlay
         open={timelineOpen}
