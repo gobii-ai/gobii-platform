@@ -42,7 +42,10 @@ from django.urls import reverse
 from api.agent.core.prompt_context import build_prompt_context, build_prompt_context_preview
 from api.agent.peer_comm import PeerMessagingError
 from api.agent.tools.sqlite_state import reset_sqlite_db_path, set_sqlite_db_path
-from api.agent.tools.peer_dm import execute_send_agent_message
+from api.agent.tools.peer_dm import (
+    _should_suppress_peer_acknowledgment,
+    execute_send_agent_message,
+)
 from api.agent.tools.tool_manager import _normalize_tool_params_unicode_escapes
 from api.agent.tools.web_chat_sender import _looks_like_routine_progress_message
 from api.models import (
@@ -628,6 +631,72 @@ class WebChatProgressSuppressionTests(SimpleTestCase):
 
 @tag("batch_event_processing")
 class PeerMessageToolHandlingTests(SimpleTestCase):
+    def test_suppresses_acknowledgment_only_reply_to_no_action_update(self):
+        self.assertTrue(
+            _should_suppress_peer_acknowledgment(
+                "Quick status: Engineering accepted ENG-241. I'll own it from here.",
+                "Noted, thanks for the update. I'll track it as Engineering-owned.",
+            )
+        )
+        self.assertTrue(
+            _should_suppress_peer_acknowledgment(
+                "FYI: no new signal today.",
+                "Received.",
+            )
+        )
+
+    def test_allows_substantive_reply_to_no_action_update(self):
+        self.assertFalse(
+            _should_suppress_peer_acknowledgment(
+                "FYI: no new signal today.",
+                "Thanks. I logged the correction under CS-41.",
+            )
+        )
+        self.assertFalse(
+            _should_suppress_peer_acknowledgment(
+                "Quick status: Engineering accepted ENG-241. I'll own it from here.",
+                "Got it, but the customer name is missing. Can you send it?",
+            )
+        )
+        self.assertFalse(
+            _should_suppress_peer_acknowledgment(
+                "FYI: no new signal today.",
+                "Thanks, I'll update the ledger with today's check.",
+            )
+        )
+
+    def test_send_agent_message_does_not_deliver_suppressed_acknowledgment(self):
+        agent = SimpleNamespace(id=uuid4())
+        peer_agent = SimpleNamespace(id=uuid4())
+        latest_inbound = SimpleNamespace(
+            body="Quick status: Engineering accepted ENG-241. I'll own it from here."
+        )
+        message_queryset = MagicMock()
+        message_queryset.order_by.return_value.first.return_value = latest_inbound
+
+        with patch(
+            "api.agent.tools.peer_dm.PersistentAgent.objects.get",
+            return_value=peer_agent,
+        ), patch(
+            "api.agent.tools.peer_dm.PersistentAgentMessage.objects.filter",
+            return_value=message_queryset,
+        ), patch(
+            "api.agent.tools.peer_dm.resolve_filespace_attachments",
+            return_value=[],
+        ), patch("api.agent.tools.peer_dm.PeerMessagingService") as service_cls:
+            result = execute_send_agent_message(
+                agent,
+                {
+                    "peer_agent_id": str(peer_agent.id),
+                    "message": "Noted, thanks for the update. All yours.",
+                    "will_continue_work": False,
+                },
+            )
+
+        self.assertEqual(result["status"], "suppressed")
+        self.assertTrue(result["auto_sleep_ok"])
+        service_cls.assert_not_called()
+
     def test_mcp_session_death_errors_are_retryable(self):
         self.assertTrue(_infer_retryable_from_text("Connection closed"))
         self.assertTrue(_infer_retryable_from_text("Event loop is closed"))
