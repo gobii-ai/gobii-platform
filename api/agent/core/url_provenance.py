@@ -3,11 +3,13 @@ import json
 import re
 from collections.abc import Iterable
 
-from api.models import PersistentAgent, PersistentAgentMessage, PersistentAgentToolCall
-
-
 _HTTP_URL_RE = re.compile(r'''https?://[^\s<>"'`\[\]\\]+''', re.IGNORECASE)
 _TRAILING_PUNCTUATION = ".,;:!?"
+_SOURCE_BEARING_TOOL_NAMES = frozenset({
+    "http_request",
+    "spawn_web_task",
+    "spawn_web_task_result",
+})
 
 
 def _trim_url(raw_url: str) -> str:
@@ -59,7 +61,9 @@ def _urls_from_json_value(value: object) -> set[str]:
     return set()
 
 
-def _urls_from_tool_result(result: str) -> set[str]:
+def _urls_from_tool_result(result: object) -> set[str]:
+    if not isinstance(result, str):
+        return _urls_from_json_value(result)
     try:
         payload = json.loads(result)
     except (json.JSONDecodeError, TypeError):
@@ -67,47 +71,44 @@ def _urls_from_tool_result(result: str) -> set[str]:
     return _urls_from_json_value(payload)
 
 
-def build_delivery_url_inventory(
-    agent: PersistentAgent,
+def source_urls_from_tool_result(tool_name: str, result: object) -> frozenset[str]:
+    if tool_name not in _SOURCE_BEARING_TOOL_NAMES and not tool_name.startswith("mcp_"):
+        return frozenset()
+    return frozenset(_urls_from_tool_result(result))
+
+
+def trusted_urls_from_prompt(
+    system_prompt: str,
+    user_prompt: str,
     *,
-    system_prompt: str = "",
+    inbound_urls: Iterable[str] = (),
+    source_result_urls: Iterable[str] = (),
 ) -> frozenset[str]:
-    """Collect literal source URLs without trusting prior agent-authored messages."""
-    urls = set(extract_http_urls(system_prompt))
-    urls.update(extract_http_urls(agent.charter or ""))
-
-    inbound_messages = (
-        PersistentAgentMessage.objects.filter(
-            owner_agent=agent,
-            is_outbound=False,
-            body__icontains="http",
-        )
-        .values_list("body", flat=True)
-        .iterator(chunk_size=200)
+    """Trust generated prompt sections plus sourced URLs visible in unified history."""
+    opening = "<unified_history>"
+    closing = "</unified_history>"
+    start = user_prompt.find(opening)
+    # Use the outer closing tag even when a message contains prompt-like markup.
+    end = user_prompt.rfind(closing) if start >= 0 else -1
+    generated_user_prompt = (
+        user_prompt[:start] + user_prompt[end + len(closing):]
+        if start >= 0 and end >= 0
+        else user_prompt
     )
-    for body in inbound_messages:
-        urls.update(extract_http_urls(body))
+    rendered_urls = set(extract_http_urls(system_prompt))
+    rendered_urls.update(extract_http_urls(user_prompt))
+    trusted_urls = set(extract_http_urls(system_prompt))
+    trusted_urls.update(extract_http_urls(generated_user_prompt))
+    trusted_urls.update(rendered_urls.intersection({*inbound_urls, *source_result_urls}))
+    return frozenset(trusted_urls)
 
-    tool_results = (
-        PersistentAgentToolCall.objects.filter(
-            step__agent=agent,
-            result__icontains="http",
-        )
-        # SQLite output is derived from agent-authored SQL. Trusting it would let
-        # a model turn URL components into a new URL and then cite its own query.
-        .exclude(tool_name="sqlite_batch")
-        .values_list("result", flat=True)
-        .iterator(chunk_size=100)
-    )
-    for result in tool_results:
-        urls.update(_urls_from_tool_result(result))
 
-    skill_instructions = (
-        agent.skills.filter(instructions__icontains="http")
-        .values_list("instructions", flat=True)
-        .iterator(chunk_size=100)
-    )
-    for instructions in skill_instructions:
-        urls.update(extract_http_urls(instructions))
-
+def build_delivery_url_inventory(
+    *,
+    trusted_prompt_urls: Iterable[str] = (),
+    run_source_urls: Iterable[str] = (),
+) -> frozenset[str]:
+    """Combine URLs trusted by this prompt render and this processing run."""
+    urls = set(trusted_prompt_urls)
+    urls.update(run_source_urls)
     return frozenset(urls)

@@ -98,6 +98,11 @@ from ..tools.sqlite_skills import format_recent_skills_for_prompt
 from ..tools.tool_manager import ensure_default_tools_enabled, ensure_skill_tools_enabled, get_enabled_tool_definitions
 from ..system_skills.discovery import format_system_skill_discovery_prompt
 from .tool_results import PREVIEW_TIER_COUNT, SPAWN_WEB_TASK_RESULT_TOOL_NAME, ToolCallResultRecord, ToolResultPromptInfo, prepare_tool_results_for_prompt
+from .url_provenance import (
+    extract_http_urls,
+    source_urls_from_tool_result,
+    trusted_urls_from_prompt,
+)
 from .daily_limit_mode import (
     CREDIT_MESSAGE_ONLY_ALLOWED_TOOL_NAMES_TEXT,
     is_credit_message_only_mode,
@@ -1551,7 +1556,7 @@ def _render_prompt_context_once(
 
     # Unified history follows the important context (order within user prompt: important -> unified_history -> critical)
     unified_history_group = prompt.group("unified_history", weight=3)
-    fresh_tool_call_step_ids = _get_unified_history_prompt(
+    fresh_tool_call_step_ids, inbound_urls, source_result_urls = _get_unified_history_prompt(
         agent,
         unified_history_group,
         config_authority,
@@ -1807,6 +1812,14 @@ def _render_prompt_context_once(
                 prompt_failover_configs
             ),
             "fresh_tool_call_step_ids": sorted(fresh_tool_call_step_ids),
+            "trusted_delivery_urls": sorted(
+                trusted_urls_from_prompt(
+                    system_prompt,
+                    user_content,
+                    inbound_urls=inbound_urls,
+                    source_result_urls=source_result_urls,
+                )
+            ),
         },
     )
 
@@ -4271,7 +4284,7 @@ def _get_unified_history_prompt(
     config_authority: _ConfigAuthorityResolver,
     *,
     run_cache: PromptRunCache | None = None,
-) -> Set[str]:
+) -> tuple[Set[str], set[str], set[str]]:
     """Add summaries + interleaved recent steps & messages to the provided promptree group."""
     epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
     unified_limit, unified_hysteresis = _get_unified_history_limits(agent)
@@ -4816,7 +4829,18 @@ def _get_unified_history_prompt(
                     non_shrinkable=non_shrinkable,
                 )
 
-    return fresh_tool_call_step_ids
+    inbound_urls = {
+        url
+        for message in messages
+        if not message.is_outbound
+        for url in extract_http_urls(message.body or "")
+    }
+    source_result_urls = {
+        url
+        for record in tool_call_records
+        for url in source_urls_from_tool_result(record.tool_name, record.result_text)
+    }
+    return fresh_tool_call_step_ids, inbound_urls, source_result_urls
 
 
 def get_agent_tools(agent: PersistentAgent = None) -> List[dict]:

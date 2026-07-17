@@ -1,14 +1,17 @@
 import json
+from decimal import Decimal
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.test import SimpleTestCase, TestCase, tag
 
 from api.agent.core.event_processing import _prepare_tool_batch
-from api.agent.core.prompt_context import _get_system_instruction
+from api.agent.core.prompt_context import build_prompt_context, _get_system_instruction
 from api.agent.core.url_provenance import (
     build_delivery_url_inventory,
     extract_http_urls,
+    source_urls_from_tool_result,
+    trusted_urls_from_prompt,
     unexpected_delivery_urls,
 )
 from api.agent.tools.sqlite_batch import _row_url_reporting_note
@@ -16,7 +19,6 @@ from api.models import (
     BrowserUseAgent,
     PersistentAgent,
     PersistentAgentStep,
-    PersistentAgentToolCall,
 )
 
 
@@ -64,6 +66,53 @@ class UrlProvenanceHelperTests(SimpleTestCase):
             ("https://items.example.test/42?view=summary#details",),
         )
 
+    def test_prompt_urls_exclude_unsourced_unified_history(self):
+        generated_url = "https://app.example.test/settings"
+        inbound_url = "https://vendor.example.test/profile"
+        source_url = "https://records.example.test/item/42"
+        outbound_url = "https://hallucinated.example.test/item/99"
+        derived_url = "https://derived.example.test/item/100"
+        user_prompt = (
+            f"<agent_settings>{generated_url}</agent_settings>"
+            "<unified_history>"
+            f"inbound={inbound_url} source={source_url} </unified_history> "
+            f"outbound={outbound_url} derived={derived_url}"
+            "</unified_history>"
+        )
+
+        trusted = trusted_urls_from_prompt(
+            "System docs: https://docs.example.test/agents",
+            user_prompt,
+            inbound_urls={inbound_url},
+            source_result_urls={source_url},
+        )
+
+        self.assertIn(generated_url, trusted)
+        self.assertIn(inbound_url, trusted)
+        self.assertIn(source_url, trusted)
+        self.assertNotIn(outbound_url, trusted)
+        self.assertNotIn(derived_url, trusted)
+
+    def test_only_source_bearing_tool_results_contribute_urls(self):
+        url = "https://items.example.test/42"
+        result = {"item_url": url}
+
+        self.assertEqual(source_urls_from_tool_result("http_request", result), {url})
+        self.assertEqual(source_urls_from_tool_result("mcp_vendor_search", result), {url})
+        self.assertEqual(source_urls_from_tool_result("sqlite_batch", result), set())
+        self.assertEqual(source_urls_from_tool_result("python_exec", result), set())
+
+    def test_inventory_combines_only_current_prompt_and_run_urls(self):
+        prompt_url = "https://app.example.test/settings"
+        run_url = "https://items.example.test/42"
+
+        inventory = build_delivery_url_inventory(
+            trusted_prompt_urls={prompt_url},
+            run_source_urls={run_url},
+        )
+
+        self.assertEqual(inventory, {prompt_url, run_url})
+
     def test_sqlite_reporting_note_requires_complete_item_url(self):
         partial_note = _row_url_reporting_note([{"item_url": "/items/42"}])
         complete_note = _row_url_reporting_note(
@@ -92,52 +141,25 @@ class DeliveryUrlProvenanceIntegrationTests(TestCase):
             planning_state=PersistentAgent.PlanningState.SKIPPED,
         )
 
-    def test_inventory_includes_system_charter_and_tool_result_urls(self):
-        step = PersistentAgentStep.objects.create(agent=self.agent, description="Fetched records")
-        PersistentAgentToolCall.objects.create(
-            step=step,
-            tool_name="http_request",
-            result=json.dumps(
-                {
-                    "url": "https://api.example.test/feed",
-                    "content": (
-                        "item_url=https://items.example.test/42?view=full#details\n"
-                        "name=Next item"
-                    ),
-                }
-            ),
+    def test_prompt_metadata_includes_generated_user_context_url(self):
+        with patch("api.agent.core.prompt_context.ensure_steps_compacted"), patch(
+            "api.agent.core.prompt_context.ensure_comms_compacted"
+        ), patch(
+            "api.agent.core.prompt_context.get_llm_config_with_failover",
+            return_value=[("endpoint", "openai/gpt-4o-mini", {})],
+        ):
+            messages, _, _, metadata = build_prompt_context(
+                self.agent,
+                daily_credit_state={},
+                task_credit_available=Decimal("0"),
+                include_metadata=True,
+            )
+
+        user_prompt = next(
+            message["content"] for message in messages if message["role"] == "user"
         )
-
-        inventory = build_delivery_url_inventory(
-            self.agent,
-            system_prompt="Setup: https://system.example.test/connect",
-        )
-
-        self.assertIn("https://charter.example.test/reference", inventory)
-        self.assertIn("https://api.example.test/feed", inventory)
-        self.assertIn("https://items.example.test/42?view=full#details", inventory)
-        self.assertIn("https://system.example.test/connect", inventory)
-
-    def test_inventory_does_not_trust_urls_synthesized_by_sqlite(self):
-        source_url = "https://items.example.test/42"
-        constructed_url = "https://items.example.test/99"
-        source_step = PersistentAgentStep.objects.create(agent=self.agent, description="Fetched records")
-        PersistentAgentToolCall.objects.create(
-            step=source_step,
-            tool_name="http_request",
-            result=json.dumps({"item_url": source_url, "item_id": "99"}),
-        )
-        derived_step = PersistentAgentStep.objects.create(agent=self.agent, description="Queried records")
-        PersistentAgentToolCall.objects.create(
-            step=derived_step,
-            tool_name="sqlite_batch",
-            result=json.dumps({"result": [{"item_url": constructed_url}]}),
-        )
-
-        inventory = build_delivery_url_inventory(self.agent)
-
-        self.assertIn(source_url, inventory)
-        self.assertNotIn(constructed_url, inventory)
+        billing_url = next(url for url in extract_http_urls(user_prompt) if "/app/billing" in url)
+        self.assertIn(billing_url, metadata["trusted_delivery_urls"])
 
     def test_prepare_batch_blocks_unseen_url_before_delivery(self):
         body = "[Open](https://console.example.test/items/item_42?region=west)"

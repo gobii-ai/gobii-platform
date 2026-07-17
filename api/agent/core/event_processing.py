@@ -96,7 +96,11 @@ from .prompt_run_cache import (
     bind_prompt_run_cache,
     reset_prompt_run_cache,
 )
-from .url_provenance import build_delivery_url_inventory, unexpected_delivery_urls
+from .url_provenance import (
+    build_delivery_url_inventory,
+    source_urls_from_tool_result,
+    unexpected_delivery_urls,
+)
 
 from ..tools.apply_patch import execute_apply_patch
 from ..tools.charter_updater import execute_update_charter
@@ -2470,19 +2474,6 @@ def _record_delivery_url_provenance_correction(
     attach_completion(step_kwargs)
     step = PersistentAgentStep.objects.create(**step_kwargs)
     attach_prompt_archive(step)
-
-
-def _system_prompt_text(messages: list[Any]) -> str:
-    parts: list[str] = []
-    for message in messages:
-        if not isinstance(message, dict) or message.get("role") != "system":
-            continue
-        content = message.get("content")
-        if isinstance(content, str):
-            parts.append(content)
-        elif content is not None:
-            parts.append(json.dumps(content, ensure_ascii=False, default=str))
-    return "\n".join(parts)
 
 
 def _message_tool_has_progress_intent(tool_name: str, tool_params: Dict[str, Any]) -> bool:
@@ -6034,6 +6025,7 @@ def _run_agent_loop(
     empty_response_loop_retries = 0
     direct_correction_patch_seen = False
     explicit_prefer_low_latency = prefer_low_latency
+    run_source_urls: set[str] = set()
 
     def _current_human_inbound_generation() -> int:
         return get_human_inbound_generation(agent.id, client=redis_client)
@@ -6816,16 +6808,10 @@ def _run_agent_loop(
                     for name in tool_names
                     if name
                 ):
-                    try:
-                        delivery_url_inventory = build_delivery_url_inventory(
-                            agent,
-                            system_prompt=_system_prompt_text(history),
-                        )
-                    except DatabaseError:
-                        logger.exception(
-                            "Agent %s: URL provenance inventory unavailable; relying on prompt guidance.",
-                            agent.id,
-                        )
+                    delivery_url_inventory = build_delivery_url_inventory(
+                        trusted_prompt_urls=prompt_metadata.get("trusted_delivery_urls") or (),
+                        run_source_urls=run_source_urls,
+                    )
                 prepared_batch = _prepare_tool_batch(
                     agent,
                     tool_calls=list(tool_calls or []),
@@ -6859,6 +6845,13 @@ def _run_agent_loop(
                     lock_extender=lock_extender,
                 )
                 tools = executed_batch.tools
+                for outcome in executed_batch.execution_outcomes:
+                    run_source_urls.update(
+                        source_urls_from_tool_result(
+                            outcome.prepared.tool_name,
+                            outcome.result,
+                        )
+                    )
 
                 if not executed_batch.abort_after_execution or _get_processing_abort_reason(agent.id) is None:
                     runtime_errors, config_apply = _apply_runtime_updates()

@@ -59,9 +59,10 @@ METRIC_FIELDS = frozenset({
 # Fields containing URLs (shown for easy access). The order prefers item-level
 # destinations over source or image URLs when a record exposes several.
 URL_FIELD_PRIORITY = (
-    'url', 'link', 'href', 'profile_url', 'listing_url', 'detail_url', 'item_url',
+    'profile_url', 'listing_url', 'detail_url', 'item_url',
     'linkedin_url', 'twitter_url', 'github_url', 'apply_link', 'job_link',
-    'product_url', 'company_url', 'website', 'homepage', 'source_url', 'image_url',
+    'product_url', 'company_url', 'url', 'link', 'href', 'website', 'homepage',
+    'source_url', 'image_url',
 )
 URL_FIELDS = frozenset(URL_FIELD_PRIORITY)
 
@@ -633,7 +634,7 @@ _URL_PATTERNS = [
     re.compile(r'\[([^\]]{2,80})\]\((https?://[^)]+)\)'),
     re.compile(r'\[([^\]]{2,80})\]:\s*(https?://\S+)'),
 ]
-_BARE_URL = re.compile(r'https?://[^\s\)\]"\'<>]{10,200}')
+_BARE_URL = re.compile(r'https?://[^\s\)\]"\'<>]{10,}')
 _PRICE_PATTERN = re.compile(r'\$[\d,]+(?:\.\d{2})?|\d+(?:,\d{3})*(?:\.\d{2})?\s*(?:USD|EUR|GBP)')
 
 
@@ -695,7 +696,7 @@ def _serp_items_from_results(results: Any, max_items: int) -> list[dict]:
         title = item.get('title') or item.get('name') or ''
         if not isinstance(url, str) or not url.startswith('http'):
             continue
-        items.append({'t': str(title)[:60], 'u': url[:200], 'p': index + 1})
+        items.append({'t': str(title)[:60], 'u': url, 'p': index + 1})
     return items
 
 
@@ -717,7 +718,7 @@ def _extract_serp_items(text: str, max_items: int) -> list[dict]:
                 title = _title_from_url(url)
 
             seen_domains.add(domain)
-            items.append({'t': title[:60], 'u': url[:200], 'd': domain})
+            items.append({'t': title[:60], 'u': url, 'd': domain})
 
             if len(items) >= max_items:
                 return items
@@ -731,7 +732,7 @@ def _extract_serp_items(text: str, max_items: int) -> list[dict]:
             continue
 
         seen_domains.add(domain)
-        items.append({'t': _title_from_url(url), 'u': url[:200], 'd': domain})
+        items.append({'t': _title_from_url(url), 'u': url, 'd': domain})
 
         if len(items) >= max_items:
             break

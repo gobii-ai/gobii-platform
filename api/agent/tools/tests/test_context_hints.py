@@ -81,6 +81,22 @@ class LinkedInSchemaTests(SimpleTestCase):
         self.assertIn(f'→ Avery Chen: Controller: {url}', hint)
         self.assertNotIn('https://profiles.example.test/jordan-lee', hint)
 
+    def test_entity_specific_url_takes_priority_over_generic_url(self):
+        profile_url = 'https://profiles.example.test/avery'
+        payload = {
+            'result': [{
+                'name': 'Avery Chen',
+                'subtitle': 'Controller',
+                'url': 'https://search.example.test/result/1',
+                'profile_url': profile_url,
+            }],
+        }
+
+        hint = extract_context_hint('mcp_example_people_search', payload)
+
+        self.assertIn(profile_url, hint)
+        self.assertNotIn('https://search.example.test/result/1', hint)
+
     def test_byte_cap_omits_oversized_url_instead_of_truncating_it(self):
         oversized_url = f"https://profiles.example.test/{'segment/' * 100}?view=full#bio"
         payload = {
@@ -242,6 +258,23 @@ class SerpHintTests(SimpleTestCase):
         self.assertIsNotNone(hint)
         self.assertIn('northstar.example.test', hint)
         self.assertIn('https://northstar.example.test/blog/atlas-launch', hint)
+
+    def test_serp_preserves_urls_longer_than_200_characters(self):
+        url = f"https://northstar.example.test/items/{'segment-' * 28}?view=full#details"
+        payload = {
+            'results': [{'title': 'Northstar item', 'url': url}],
+        }
+
+        hint = hint_from_serp(payload)
+
+        self.assertIn(url, hint)
+
+    def test_serp_preserves_long_bare_urls(self):
+        url = f"https://northstar.example.test/items/{'segment-' * 28}?view=full#details"
+
+        hint = hint_from_serp({'result': f'Search result: {url}'})
+
+        self.assertIn(url, hint)
 
     def test_serp_raw_markdown(self):
         """Test extraction from raw markdown."""
