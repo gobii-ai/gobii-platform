@@ -2,6 +2,9 @@
 PERSISTENT_AGENTS = "persistent_agents"
 ORGANIZATIONS = "organizations"
 
+# Controls whether users may opt agents into automatically allowing new email contacts.
+CONTACT_AUTO_APPROVE_EMAIL = "contact_auto_approve_email"
+
 # Soft-expiration for free-plan agents that go inactive
 AGENT_SOFT_EXPIRATION = "agent_soft_expiration"
 

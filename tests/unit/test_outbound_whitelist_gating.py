@@ -6,6 +6,7 @@ from allauth.account.models import EmailAddress
 from django.db import connection
 from django.test import TransactionTestCase, tag
 from django.contrib.auth import get_user_model
+from waffle.testutils import override_flag
 
 from api.models import (
     PersistentAgent,
@@ -17,6 +18,7 @@ from api.models import (
 from api.agent.tools.email_sender import execute_send_email
 from api.agent.tools.sms_sender import execute_send_sms
 from config import settings
+from constants.feature_flags import CONTACT_AUTO_APPROVE_EMAIL
 
 
 User = get_user_model()
@@ -126,6 +128,32 @@ class OutboundWhitelistGatingTests(TransactionTestCase):
         ])
         self.assertTrue(all(entry.allow_inbound and entry.allow_outbound for entry in entries))
         self.assertTrue(all(not entry.can_configure for entry in entries))
+        mock_deliver_email.assert_called_once()
+
+    @patch("api.agent.tools.email_sender.deliver_agent_email")
+    @tag("batch_outbound_email")
+    def test_existing_auto_approval_continues_when_rollout_flag_is_disabled(
+        self,
+        mock_deliver_email,
+        mock_close_old_connections,
+    ):
+        self.agent.contact_approval_mode = PersistentAgent.ContactApprovalMode.AUTO_APPROVE_EMAIL
+        self.agent.save(update_fields=["contact_approval_mode"])
+
+        with override_flag(CONTACT_AUTO_APPROVE_EMAIL, active=False):
+            result = execute_send_email(self.agent, {
+                "to_address": "existing-opt-in@example.com",
+                "subject": "Existing opt-in",
+                "mobile_first_html": "<p>Hello</p>",
+            })
+
+        self.assertEqual(result.get("status"), "ok")
+        self.assertTrue(
+            CommsAllowlistEntry.objects.filter(
+                agent=self.agent,
+                address="existing-opt-in@example.com",
+            ).exists()
+        )
         mock_deliver_email.assert_called_once()
 
     @patch("api.agent.tools.email_sender.deliver_agent_email")
