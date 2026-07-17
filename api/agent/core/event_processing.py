@@ -97,7 +97,12 @@ from ..tools.email_sender import execute_send_email
 from ..tools.sms_sender import execute_send_sms
 from ..tools.spawn_web_task import execute_spawn_web_task
 from ..tools.schedule_updater import execute_update_schedule
-from ..tools.sqlite_agent_config import apply_sqlite_agent_config_updates, seed_sqlite_agent_config
+from ..tools.sqlite_agent_config import (
+    apply_sqlite_agent_config_updates,
+    read_sqlite_agent_config_snapshot,
+    seed_sqlite_agent_config,
+    sqlite_statement_assigns_agent_config_field,
+)
 from ..tools.sqlite_skills import apply_sqlite_skill_updates, refresh_skills_for_tool, seed_sqlite_skills
 from ..tools.custom_tools import execute_create_custom_tool
 from ..tools.custom_tool_names import CREATE_CUSTOM_TOOL_NAME
@@ -1312,6 +1317,7 @@ def _persist_tool_call_step(
     attach_completion: Any,
     attach_prompt_archive: Any,
     parent_tool_call: Any = None,
+    display_metadata: Dict[str, Any] | None = None,
 ) -> Optional["PersistentAgentStep"]:
     """Persist a tool call step with robust error handling.
 
@@ -1349,6 +1355,7 @@ def _persist_tool_call_step(
             tool_name=safe_tool_name,
             tool_params=tool_params,
             result=normalized_result,
+            display_metadata=display_metadata or None,
             execution_duration_ms=execution_duration_ms,
             status=tool_call_status,
         )
@@ -1496,6 +1503,7 @@ def _finalize_pending_tool_call_step(
     execution_duration_ms: Optional[int],
     status: str,
     parent_tool_call: Any = None,
+    display_metadata: Dict[str, Any] | None = None,
 ) -> None:
     from api.models import PersistentAgentToolCall
 
@@ -1541,6 +1549,7 @@ def _finalize_pending_tool_call_step(
                 tool_name=safe_tool_name,
                 tool_params=tool_params,
                 result=normalized_result,
+                display_metadata=display_metadata or None,
                 execution_duration_ms=execution_duration_ms,
                 status=status,
             )
@@ -1549,9 +1558,10 @@ def _finalize_pending_tool_call_step(
             tool_call.tool_name = safe_tool_name
             tool_call.tool_params = tool_params
             tool_call.result = normalized_result
+            tool_call.display_metadata = display_metadata or None
             tool_call.execution_duration_ms = execution_duration_ms
             tool_call.status = status
-            update_fields = ["tool_name", "tool_params", "result", "execution_duration_ms", "status"]
+            update_fields = ["tool_name", "tool_params", "result", "display_metadata", "execution_duration_ms", "status"]
             if parent_tool_call is not None and tool_call.parent_tool_call_id is None:
                 tool_call.parent_tool_call = parent_tool_call
                 update_fields.append("parent_tool_call")
@@ -1732,6 +1742,7 @@ class _ToolExecutionOutcome:
     duration_ms: int
     updated_tools: Optional[List[dict]]
     variable_map: Dict[str, str]
+    display_metadata: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -2146,6 +2157,13 @@ def _sqlite_batch_is_only_agent_config_mutation(tool_params: Dict[str, Any]) -> 
     ) and all(AGENT_CONFIG_TABLE_RE.search(statement) for statement in statements)
 
 
+def _sqlite_batch_mutates_agent_charter(tool_params: Dict[str, Any]) -> bool:
+    return any(
+        sqlite_statement_assigns_agent_config_field(statement, "charter")
+        for statement in _sqlite_batch_statements(tool_params)
+    )
+
+
 def _user_text_has_durable_config_intent(text: str) -> bool:
     normalized = " ".join((text or "").split())
     if TRANSIENT_CONFIG_SCOPE_RE.search(normalized) and not STRONG_DURABLE_CONFIG_INTENT_RE.search(normalized):
@@ -2489,6 +2507,27 @@ def _tool_result_is_success(result: Any) -> bool:
     return True
 
 
+def _capture_tool_display_metadata(
+    prepared: _PreparedToolExecution,
+    result: Any,
+) -> Dict[str, Any]:
+    if (
+        prepared.tool_name != "sqlite_batch"
+        or not _tool_result_is_success(result)
+        or not _sqlite_batch_mutates_agent_charter(prepared.exec_params)
+    ):
+        return {}
+
+    snapshot = read_sqlite_agent_config_snapshot()
+    if snapshot is None:
+        return {}
+    return {
+        "agent_config": {
+            "charter": snapshot.charter,
+        },
+    }
+
+
 def _mark_tool_outcome_failed(
     outcome: _ToolExecutionOutcome,
     exc: Exception,
@@ -2559,12 +2598,14 @@ def _execute_prepared_tool_call(
         )
         updated_tools = None
     duration_ms = int(round((time.monotonic() - tool_started_at) * 1000))
+    display_metadata = _capture_tool_display_metadata(prepared, result)
     return _ToolExecutionOutcome(
         prepared=prepared,
         result=result,
         duration_ms=duration_ms,
         updated_tools=updated_tools,
         variable_map=get_all_variables(),
+        display_metadata=display_metadata,
     )
 
 
@@ -3236,6 +3277,7 @@ def _finalize_tool_batch(
                 result_content=result_content,
                 execution_duration_ms=outcome.duration_ms,
                 status=tool_status,
+                display_metadata=outcome.display_metadata,
             )
             step = prepared.pending_step
         else:
@@ -3250,6 +3292,7 @@ def _finalize_tool_batch(
                 consumed_credit=prepared.consumed_credit,
                 attach_completion=attach_completion,
                 attach_prompt_archive=attach_prompt_archive,
+                display_metadata=outcome.display_metadata,
             )
         if is_error_status:
             _refund_tool_credit_on_error_if_configured(

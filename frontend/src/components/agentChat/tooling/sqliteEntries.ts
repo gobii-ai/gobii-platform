@@ -32,10 +32,14 @@ export function buildAgentConfigEntry(
     updatesCharter,
     updatesSchedule,
     charterValue,
+    charterChange,
     scheduleValue,
     scheduleCleared,
   } = parsedUpdate
   const scheduleKnown = scheduleCleared || scheduleValue !== null
+  const hasCharterSnapshot = typeof entry.charterText === 'string'
+  const resolvedCharter = hasCharterSnapshot ? entry.charterText : charterValue
+  const charterCaption = resolvedCharter?.trim() || charterChange?.replacementText?.trim() || null
   const normalizedSchedule = scheduleCleared ? null : scheduleValue
   const scheduleSummary = scheduleKnown ? summarizeSchedule(normalizedSchedule, { timeZone: options.timeZone }) : null
   const scheduleCaption = scheduleCleared
@@ -64,7 +68,11 @@ export function buildAgentConfigEntry(
         : 'Assignment and schedule updated.'
   } else if (updatesCharter) {
     label = 'Assignment updated'
-    caption = charterValue ? truncate(charterValue, 48) : 'Assignment updated'
+    caption = charterCaption
+      ? truncate(charterCaption, 48)
+      : hasCharterSnapshot || charterValue === ''
+        ? 'Assignment cleared'
+        : 'Assignment updated'
     summary = 'Assignment updated.'
     icon = FileCheck2
   } else if (updatesSchedule) {
@@ -95,7 +103,8 @@ export function buildAgentConfigEntry(
     rawParameters: entry.parameters,
     result: extractSqliteGroupedResult(entry.result, statementIndexes),
     summary,
-    charterText: charterValue ?? null,
+    charterText: resolvedCharter ?? null,
+    agentConfigUpdate: parsedUpdate,
     sqlStatements: statements,
     detailComponent: AgentConfigUpdateDetail,
     meta: entry.meta,

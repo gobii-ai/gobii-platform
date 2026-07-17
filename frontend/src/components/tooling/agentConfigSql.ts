@@ -4,8 +4,14 @@ export type AgentConfigSqlUpdate = {
   updatesCharter: boolean
   updatesSchedule: boolean
   charterValue: string | null
+  charterChange: AgentConfigCharterChange | null
   scheduleValue: string | null
   scheduleCleared: boolean
+}
+
+export type AgentConfigCharterChange = {
+  previousText: string | null
+  replacementText: string | null
 }
 
 export type SqliteStatementOperation =
@@ -107,6 +113,38 @@ function extractSqlAssignment(statement: string, field: string): string | null {
     return doubleMatch[1].replace(/""/g, '"')
   }
   return null
+}
+
+function extractUpdateAssignments(statement: string): string | null {
+  const normalized = normalizeSqlForParsing(statement)
+  const update = /\bupdate\s+[`"\[]?__agent_config[`"\]]?\s+[\s\S]*?\bset\b/i.exec(normalized)
+  if (!update) return null
+  const assignmentsStart = update.index + update[0].length
+  const assignmentsTail = normalized.slice(assignmentsStart)
+  const terminator = /\b(?:where|returning)\b/i.exec(assignmentsTail)
+  const assignmentsEnd = assignmentsStart + (terminator?.index ?? assignmentsTail.length)
+  return statement.slice(assignmentsStart, assignmentsEnd)
+}
+
+function parsePatchTextAssignment(statement: string): AgentConfigCharterChange | null {
+  const match = statement.match(
+    /\bcharter\b\s*=\s*patch_text\s*\(\s*([`"'\[\]A-Z_][`"'\[\]A-Z0-9_.]*)\s*,\s*(null|'(?:[^']|'')*'|"(?:[^"]|"")*")\s*,\s*(null|'(?:[^']|'')*'|"(?:[^"]|"")*")\s*\)/i,
+  )
+  if (!match) {
+    return null
+  }
+
+  const target = match[1].replace(/[`"'\[\]]/g, '').trim().toLowerCase()
+  if (target !== 'charter' && !target.endsWith('.charter')) {
+    return null
+  }
+
+  const previousText = decodeSqlLiteral(match[2] ?? '')
+  const replacementText = decodeSqlLiteral(match[3] ?? '')
+  if (previousText === undefined || replacementText === undefined) {
+    return null
+  }
+  return { previousText, replacementText }
 }
 
 function hasAssignment(statement: string, field: string): boolean {
@@ -468,6 +506,7 @@ export function parseAgentConfigUpdates(statements: string[]): AgentConfigSqlUpd
   let updatesCharter = false
   let updatesSchedule = false
   let charterValue: string | null = null
+  let charterChange: AgentConfigCharterChange | null = null
   let scheduleValue: string | null = null
   let scheduleCleared = false
 
@@ -479,14 +518,23 @@ export function parseAgentConfigUpdates(statements: string[]): AgentConfigSqlUpd
     if (!MUTATION_RE.test(statement)) {
       continue
     }
+    const updateAssignments = extractUpdateAssignments(statement)
+    const assignmentSource = updateAssignments ?? ''
 
-    if (hasAssignment(statement, 'charter')) {
+    if (hasAssignment(assignmentSource, 'charter')) {
       updatesCharter = true
-      const parsedCharter = extractSqlAssignment(statement, 'charter')
+      const parsedCharter = extractSqlAssignment(assignmentSource, 'charter')
       if (parsedCharter !== null) {
         charterValue = parsedCharter
+        charterChange = null
+      } else {
+        const parsedChange = parsePatchTextAssignment(assignmentSource)
+        if (parsedChange) {
+          charterValue = null
+          charterChange = parsedChange
+        }
       }
-    } else {
+    } else if (updateAssignments === null) {
       const parsedInsertCharter = parseInsertValueAssignment(statement, 'charter')
       if (parsedInsertCharter.present) {
         updatesCharter = true
@@ -496,19 +544,19 @@ export function parseAgentConfigUpdates(statements: string[]): AgentConfigSqlUpd
       }
     }
 
-    if (hasAssignment(statement, 'schedule')) {
+    if (hasAssignment(assignmentSource, 'schedule')) {
       updatesSchedule = true
-      if (isClearingAssignment(statement, 'schedule')) {
+      if (isClearingAssignment(assignmentSource, 'schedule')) {
         scheduleCleared = true
         scheduleValue = null
       } else {
-        const parsedSchedule = extractSqlAssignment(statement, 'schedule')
+        const parsedSchedule = extractSqlAssignment(assignmentSource, 'schedule')
         if (parsedSchedule !== null) {
           scheduleValue = parsedSchedule
           scheduleCleared = false
         }
       }
-    } else {
+    } else if (updateAssignments === null) {
       const parsedInsertSchedule = parseInsertValueAssignment(statement, 'schedule')
       if (parsedInsertSchedule.present) {
         updatesSchedule = true
@@ -531,6 +579,7 @@ export function parseAgentConfigUpdates(statements: string[]): AgentConfigSqlUpd
     updatesCharter,
     updatesSchedule,
     charterValue,
+    charterChange,
     scheduleValue,
     scheduleCleared,
   }

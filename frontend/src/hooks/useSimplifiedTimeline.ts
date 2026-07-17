@@ -3,7 +3,7 @@ import type { TimelineEvent, ToolCallEntry, ToolClusterEvent } from '../types/ag
 import { isClusterRenderable, transformToolCluster } from '../components/agentChat/tooling/toolRegistry'
 import { buildActionCountLabel, flattenTimelineEventsToEntries } from '../components/agentChat/activityEntryUtils'
 import type { StatusExpansionTargets } from '../components/agentChat/statusExpansion'
-import { eventHasLatestStatus, isStatusDisplayEntry, resolveEntrySeparation } from '../components/agentChat/statusExpansion'
+import { eventHasLatestStatus, isAssignmentDisplayEntry, isStatusDisplayEntry, resolveEntrySeparation } from '../components/agentChat/statusExpansion'
 import type { ToolEntryDisplay } from '../components/agentChat/tooling/types'
 
 // ---------------------------------------------------------------------------
@@ -305,6 +305,15 @@ export function collapseDetailedStatusRuns(
     }
 
     if (event.kind === 'plan' || event.kind === 'kanban') {
+      continue
+    }
+
+    if (
+      event.kind === 'steps'
+      && transformToolCluster(event).entries.some((entry) => isAssignmentDisplayEntry(entry) && entry.separateFromPreview)
+    ) {
+      flush()
+      result.push(disableStepClusterCollapse(event))
       continue
     }
 

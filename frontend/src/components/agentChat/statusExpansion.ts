@@ -1,5 +1,4 @@
 import type { TimelineEvent, ToolClusterEvent } from '../../types/agentChat'
-import { parseAgentConfigUpdates } from '../tooling/agentConfigSql'
 import { transformToolCluster } from './tooling/toolRegistry'
 import type { ToolEntryDisplay } from './tooling/types'
 
@@ -13,12 +12,15 @@ export function isScheduleDisplayEntry(entry: ToolEntryDisplay): boolean {
     return true
   }
 
-  if (entry.toolName !== 'sqlite_batch' || !entry.sqlStatements?.length) {
-    return false
+  return entry.agentConfigUpdate?.updatesSchedule === true
+}
+
+export function isAssignmentDisplayEntry(entry: ToolEntryDisplay): boolean {
+  if (entry.toolName === 'update_charter') {
+    return true
   }
 
-  const parsedUpdate = parseAgentConfigUpdates(entry.sqlStatements)
-  return Boolean(parsedUpdate?.updatesSchedule)
+  return entry.agentConfigUpdate?.updatesCharter === true
 }
 
 export function isStatusDisplayEntry(entry: ToolEntryDisplay): boolean {

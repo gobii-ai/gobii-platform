@@ -5,7 +5,7 @@ import { CalendarClock, Clock, Repeat } from 'lucide-react'
 import { describeSchedule } from '../../../../util/schedule'
 import type { ScheduleDescription } from '../../../../util/schedule'
 import type { ToolDetailProps } from '../../tooling/types'
-import { parseAgentConfigUpdates } from '../../../tooling/agentConfigSql'
+import type { AgentConfigCharterChange } from '../../../tooling/agentConfigSql'
 import { KeyValueList, Section, TruncatedMarkdown } from '../shared'
 import { useAppSelector } from '../../../../store/hooks'
 import { selectImmersiveShellViewer } from '../../../../store/immersiveShellSlice'
@@ -191,12 +191,36 @@ export function UpdateScheduleDetail({ entry }: ToolDetailProps) {
   )
 }
 
+function CharterChangeDetail({ change }: { change: AgentConfigCharterChange }) {
+  const previousText = change.previousText?.trim() || null
+  const replacementText = change.replacementText?.trim() || null
+
+  return (
+    <div className="space-y-2 text-sm">
+      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Change applied</p>
+      {previousText ? (
+        <div className="grid gap-1 sm:grid-cols-[3rem_minmax(0,1fr)]">
+          <span className="text-xs font-medium text-slate-500">From</span>
+          <p className="whitespace-pre-wrap break-words text-slate-500 line-through">{previousText}</p>
+        </div>
+      ) : null}
+      <div className="grid gap-1 sm:grid-cols-[3rem_minmax(0,1fr)]">
+        <span className="text-xs font-medium text-slate-500">{previousText ? 'To' : 'Added'}</span>
+        <p className="whitespace-pre-wrap break-words text-slate-700">
+          {replacementText ?? (previousText ? 'Removed from the assignment.' : 'No assignment text was added.')}
+        </p>
+      </div>
+    </div>
+  )
+}
+
 export function AgentConfigUpdateDetail({ entry }: ToolDetailProps) {
   const timeZone = useAppSelector(selectImmersiveShellViewer).timeZone
-  const statements = entry.sqlStatements ?? []
-  const parsedUpdate = parseAgentConfigUpdates(statements)
-  const charterText = parsedUpdate?.charterValue ?? entry.charterText ?? null
-  const updatesCharter = parsedUpdate?.updatesCharter ?? Boolean(charterText)
+  const parsedUpdate = entry.agentConfigUpdate
+  const charterText = entry.charterText ?? parsedUpdate?.charterValue ?? null
+  const charterChange = parsedUpdate?.charterChange ?? null
+  const hasCharterText = charterText !== null
+  const updatesCharter = Boolean(parsedUpdate?.updatesCharter || hasCharterText || charterChange)
   const updatesSchedule = parsedUpdate?.updatesSchedule ?? false
   const scheduleCleared = parsedUpdate?.scheduleCleared ?? false
   const scheduleRaw = parsedUpdate?.scheduleValue ?? null
@@ -208,17 +232,22 @@ export function AgentConfigUpdateDetail({ entry }: ToolDetailProps) {
 
   return (
     <div className="space-y-4">
-      {/* Schedule - shown first as the hero element when present */}
       {updatesSchedule && scheduleDetails ? renderScheduleCard(scheduleDetails) : null}
-
-      {/* Assignment - truncated with expand */}
-      {updatesCharter && charterText ? (
+      {updatesCharter && charterChange ? <CharterChangeDetail change={charterChange} /> : null}
+      {updatesCharter && hasCharterText ? (
         <div className="space-y-2">
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Assignment</p>
-          <div className="rounded-xl bg-slate-50/80 p-3.5 shadow-sm border border-slate-100">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Updated assignment</p>
+          {charterText ? (
             <TruncatedMarkdown content={charterText} maxLines={3} />
-          </div>
+          ) : (
+            <p className="text-sm text-slate-600">The assignment is now empty.</p>
+          )}
         </div>
+      ) : null}
+      {updatesCharter && !hasCharterText && !charterChange ? (
+        <p className="text-sm text-slate-600">
+          The updated assignment text is not available for this historical event.
+        </p>
       ) : null}
     </div>
   )
