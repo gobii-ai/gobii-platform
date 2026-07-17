@@ -162,3 +162,12 @@ class BlogSeoTests(TestCase):
         self.assertGreaterEqual(len(structured_data["blogPost"]), 40)
         self.assertIn("description", structured_data["blogPost"][0])
         self.assertIn("author", structured_data["blogPost"][0])
+        inbound_webhooks = next(
+            post
+            for post in structured_data["blogPost"]
+            if post["url"].endswith("/blog/newsletter-2026-04-08-inbound-webhooks/")
+        )
+        self.assertEqual(inbound_webhooks["author"]["@type"], "Person")
+        self.assertEqual(inbound_webhooks["author"]["name"], "Will Bonde")
+        self.assertEqual(inbound_webhooks["author"]["jobTitle"], "Growth & Engineering")
+        self.assertTrue(inbound_webhooks["author"]["url"].endswith("/team/"))

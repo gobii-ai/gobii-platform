@@ -54,6 +54,38 @@ def _blog_faq_items(value):
     return items
 
 
+def _blog_author_schema(meta, request):
+    author_name = meta.get("author")
+    if author_name:
+        author_type = meta.get("author_type")
+        if not author_type:
+            lowered = str(author_name).lower()
+            author_type = (
+                "Organization"
+                if "team" in lowered or "gobii" in lowered
+                else "Person"
+            )
+    else:
+        author_name = "Gobii"
+        author_type = "Organization"
+
+    author = {
+        "@type": author_type,
+        "name": author_name,
+    }
+    author_url = meta.get("author_url")
+    if author_url:
+        author["url"] = (
+            author_url
+            if str(author_url).startswith("http")
+            else request.build_absolute_uri(str(author_url))
+        )
+    author_job_title = meta.get("author_job_title")
+    if author_type == "Person" and author_job_title:
+        author["jobTitle"] = str(author_job_title)
+    return author
+
+
 BLOG_INDEX_KEYWORDS = (
     "AI agent automation",
     "browser agents",
@@ -971,10 +1003,7 @@ class BlogIndexView(ProprietaryModeRequiredMixin, TemplateView):
                 "@type": "BlogPosting",
                 "headline": post["title"],
                 "url": self.request.build_absolute_uri(post["url"]),
-                "author": {
-                    "@type": "Organization",
-                    "name": "Gobii",
-                },
+                "author": _blog_author_schema(post["meta"], self.request),
                 "isPartOf": {
                     "@type": "Blog",
                     "name": blog_name,
@@ -1078,30 +1107,7 @@ class BlogPostView(ProprietaryModeRequiredMixin, TemplateView):
         published_iso = published_at.isoformat() if published_at else None
         updated_at = post.get("updated_at") or published_at
         updated_iso = updated_at.isoformat() if updated_at else None
-        author_name = post["meta"].get("author")
-        if author_name:
-            author_type = post["meta"].get("author_type")
-            if not author_type:
-                lowered = str(author_name).lower()
-                author_type = "Organization" if "team" in lowered or "gobii" in lowered else "Person"
-        else:
-            author_name = "Gobii"
-            author_type = "Organization"
-
-        author = {
-            "@type": author_type,
-            "name": author_name,
-        }
-        author_url = post["meta"].get("author_url")
-        if author_url:
-            author["url"] = (
-                author_url
-                if str(author_url).startswith("http")
-                else self.request.build_absolute_uri(str(author_url))
-            )
-        author_job_title = post["meta"].get("author_job_title")
-        if author_type == "Person" and author_job_title:
-            author["jobTitle"] = str(author_job_title)
+        author = _blog_author_schema(post["meta"], self.request)
 
         structured_data = {
             "@context": "https://schema.org",
