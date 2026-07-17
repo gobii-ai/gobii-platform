@@ -1,3 +1,4 @@
+import html
 import re
 from dataclasses import dataclass
 
@@ -274,24 +275,26 @@ class OutreachScenario(MessageQualityScenario):
     ) -> list[str]:
         failures = super()._formatting_failures(case, params, body, send_call=send_call)
         subject = str(params.get("subject") or "")
+        unescaped_body = html.unescape(body)
+        unescaped_subject = html.unescape(subject)
 
-        if "—" in body or "—" in subject:
+        if "—" in unescaped_body or "—" in unescaped_subject:
             failures.append("Outreach should not use em dashes.")
-        if re.search(r"[\U0001F300-\U0001FAFF\u2600-\u27BF]", body + subject):
+        if re.search(r"[\U0001F300-\U0001FAFF\u2600-\u27BF]", unescaped_body + unescaped_subject):
             failures.append("Outreach should not use emoji or decorative symbols.")
         if re.search(
             r"\{\{?[^}\n]+\}\}?|\[[A-Z][A-Z0-9_ -]{2,}\]|<\s*(?:first|last)[_-]?name\s*>",
-            f"{subject}\n{body}",
+            f"{unescaped_subject}\n{unescaped_body}",
             re.I,
         ):
             failures.append("Outreach contains an unresolved placeholder.")
-        if re.search(r"<\s*(?:h[1-6]|table|thead|tbody|tr|td|th|ul|ol)\b", body, re.I):
+        if re.search(r"<\s*(?:h[1-6]|table|thead|tbody|tr|td|th|ul|ol)\b", unescaped_body, re.I):
             failures.append("Outreach should not use report-style headings, tables, or lists.")
-        if re.search(r"^\s{0,3}(?:#{1,6}\s+|(?:[-*+] |\d+\. ))", body, re.MULTILINE):
+        if re.search(r"^\s{0,3}(?:#{1,6}\s+|(?:[-*+] |\d+\. ))", unescaped_body, re.MULTILINE):
             failures.append("Outreach should not use Markdown headings or lists.")
-        if re.search(r"\s(?:style|class)\s*=", body, re.I):
+        if re.search(r"\s(?:style|class)\s*=", unescaped_body, re.I):
             failures.append("Outreach should not use decorative style or class attributes.")
-        if not case.is_followup and re.match(r"\s*(?:re|fwd)\s*:", subject, re.I):
+        if not case.is_followup and re.match(r"\s*(?:re|fwd)\s*:", unescaped_subject, re.I):
             failures.append("Initial outreach should not use a fake reply or forward subject.")
 
         if case.is_followup and send_call is not None:

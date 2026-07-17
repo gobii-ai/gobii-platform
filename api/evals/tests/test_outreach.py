@@ -137,6 +137,32 @@ class OutreachScenarioTests(SimpleTestCase):
 
         self.assertEqual(failures, [])
 
+    def test_formatting_checks_decode_html_entities(self):
+        scenario = OutreachScenario()
+        case = OUTREACH_CASES[0]
+        body = (
+            "&lt;h2 style='color: blue'&gt;Results&lt;/h2&gt;"
+            "<p>Hi &lt;first_name&gt;, this changes everything &#128640;</p>"
+        )
+
+        failures = scenario._formatting_failures(
+            case,
+            {
+                "to_address": case.recipient,
+                "subject": "Re&#58; Update &mdash; next steps",
+                "mobile_first_html": body,
+                "will_continue_work": False,
+            },
+            body,
+        )
+
+        self.assertIn("Outreach should not use em dashes.", failures)
+        self.assertIn("Outreach should not use emoji or decorative symbols.", failures)
+        self.assertIn("Outreach contains an unresolved placeholder.", failures)
+        self.assertIn("Outreach should not use report-style headings, tables, or lists.", failures)
+        self.assertIn("Outreach should not use decorative style or class attributes.", failures)
+        self.assertIn("Initial outreach should not use a fake reply or forward subject.", failures)
+
     def test_followup_case_requires_existing_thread_without_prompting_the_style(self):
         followup = next(case for case in OUTREACH_CASES if case.domain == "followup")
         prompt = OutreachScenario()._prompt(followup)
