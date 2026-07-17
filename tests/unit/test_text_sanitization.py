@@ -17,13 +17,15 @@ from util.text_sanitizer import (
 
 @tag("batch_text_sanitization")
 class TextSanitizationTests(TestCase):
-    def test_humanized_message_style_rejects_unicode_and_double_dashes(self):
+    def test_humanized_message_style_rejects_dash_punctuation(self):
         self.assertTrue(has_humanized_message_style_violation("That works—let's do it."))
         self.assertTrue(has_humanized_message_style_violation("That works -- let's do it."))
+        self.assertTrue(has_humanized_message_style_violation("That works - let's do it."))
         self.assertTrue(has_humanized_message_style_violation("<p>That works&mdash;let's do it.</p>"))
 
-    def test_humanized_message_style_allows_normal_hyphens_and_non_prose(self):
+    def test_humanized_message_style_allows_hyphenation_lists_and_non_prose(self):
         self.assertFalse(has_humanized_message_style_violation("A low-pressure, 15-minute chat works."))
+        self.assertFalse(has_humanized_message_style_violation("- Ready\n  - Still in progress\n+ Complete"))
         self.assertFalse(has_humanized_message_style_violation("See https://example.test/a--b and `git --help`."))
 
     def test_humanized_message_style_normalizes_prose_but_preserves_tables(self):
@@ -32,6 +34,15 @@ class TextSanitizationTests(TestCase):
         self.assertEqual(
             normalize_humanized_message_style(text),
             "Update, done.\n\n| Item | Status |\n| --- | --- |\n| Copy | Done |",
+        )
+
+        self.assertEqual(
+            normalize_humanized_message_style("Update - done.\n\n- First item\n- Second item"),
+            "Update, done.\n\n- First item\n- Second item",
+        )
+        self.assertEqual(
+            normalize_humanized_message_style("Rhode Island\n---\nOverview"),
+            "Rhode Island\n\nOverview",
         )
 
     def test_humanized_message_style_preserves_rich_html_exactly(self):

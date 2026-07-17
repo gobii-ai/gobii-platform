@@ -244,7 +244,7 @@ def get_send_chat_tool() -> Dict[str, Any]:
                     "body": {
                         "type": "string",
                         "description": (
-                            "Natural recipient-facing text with personality; never type an em/en dash or double hyphen. General messages use conversational prose, not template labels. Reports use rich Markdown sections, tables/metric blocks, status labels, tasteful emoji labels, visuals, and clickable item links. "
+                            "Natural recipient text; no dash punctuation between phrases, including spaced hyphens. Keep simple exchanges/outreach light. Reports to owners/creators and multi-part findings use polished Markdown sections, tables/metric blocks, status labels, and tasteful visual cues. "
                             "Do not pass placeholders or tool-call/XML syntax; it is sent literally."
                         ),
                     },
@@ -299,7 +299,10 @@ def execute_send_chat_message(agent: PersistentAgent, params: Dict[str, Any]) ->
     if agent.execution_environment == "eval" and will_continue:
         return {
             "status": "ok",
-            "message": "Skipped eval in-progress chat message.",
+            "message": (
+                "Skipped in-progress chat message. Continue the work, then deliver the substantive reply "
+                "in this web chat; do not switch to email or SMS unless the user requested it."
+            ),
             "auto_sleep_ok": False,
             "skipped": True,
         }
@@ -312,7 +315,10 @@ def execute_send_chat_message(agent: PersistentAgent, params: Dict[str, Any]) ->
     ):
         return {
             "status": "ok",
-            "message": "Skipped routine progress-only chat message.",
+            "message": (
+                "Skipped routine progress-only chat message. Continue the work, then deliver the substantive reply "
+                "in this web chat; do not switch to email or SMS unless the user requested it."
+            ),
             "auto_sleep_ok": False,
             "skipped": True,
         }
