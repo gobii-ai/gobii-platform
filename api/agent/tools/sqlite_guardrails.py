@@ -27,6 +27,21 @@ def _regexp(pattern: str, string: Optional[str]) -> bool:
         return False
 
 
+def _patch_text(value: Optional[str], old: Optional[str], new: Optional[str]) -> str:
+    """Apply one exact replacement, otherwise append the new text once."""
+    text = value or ""
+    replacement = (new or "").strip()
+    if not old:
+        if not replacement or replacement in text:
+            return text
+        return "\n".join(filter(None, (text.rstrip(), replacement)))
+    if old not in text:
+        if not replacement or replacement in text:
+            return text
+        return "\n".join(filter(None, (text.rstrip(), replacement)))
+    return text.replace(old, replacement, 1)
+
+
 def _regexp_extract(string: Optional[str], pattern: str, group: int = 0) -> Optional[str]:
     """Extract first regex match from string.
 
@@ -1113,6 +1128,7 @@ def _make_progress_handler(conn_id: int):
 def _register_safe_functions(conn: sqlite3.Connection) -> None:
     """Register safe custom functions for text analysis."""
     conn.create_function("REGEXP", 2, _regexp)
+    conn.create_function("patch_text", 3, _patch_text)
     conn.create_function("regexp_extract", 2, _regexp_extract)
     conn.create_function("regexp_extract", 3, _regexp_extract)  # With group arg
     conn.create_function("regexp_find_all", 2, _regexp_find_all)

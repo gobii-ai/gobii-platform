@@ -1005,13 +1005,20 @@ def get_create_custom_tool_tool() -> Dict[str, Any]:
                     "source_code": {
                         "type": "string",
                         "description": (
-                            "Optional full Python source. Preferred for one-step creation: provide this together with "
-                            "source_path so the file is written and registered in one create_custom_tool call."
+                            "Optional full Python source. It must contain the exact import `from _gobii_ctx import main`, "
+                            "define `run(params, ctx)`, use `with ctx.sqlite() as db:` for SQLite, and end with the exact "
+                            "line `if __name__ == '__main__': main(run)`. `sqlite3.Row` has no `.get()`; use key indexing. "
+                            "Preferred for one-step creation: provide this with source_path so the file is written and "
+                            "registered in one call."
                         ),
                     },
                     "parameters_schema": {
                         "type": "object",
-                        "description": "JSON schema for tool input params. Use {\"type\": \"object\", \"properties\": {}} if no params needed.",
+                        "description": (
+                            "JSON schema object, not JSON-encoded text: `properties` is an object and `required` is an "
+                            "array of property-name strings. Use {\"type\": \"object\", \"properties\": {}} if no "
+                            "params are needed."
+                        ),
                     },
                     "timeout_seconds": {
                         "type": "integer",

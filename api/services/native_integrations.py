@@ -1198,25 +1198,28 @@ def save_native_integration_credentials(
     owner_org,
     credentials: dict[str, Any],
 ) -> GlobalSecret:
-    secret = get_native_integration_secret(provider.key, owner_user, owner_org)
-    if secret is None:
-        secret = GlobalSecret(
-            user=owner_user,
-            organization=owner_org,
-            name=provider.display_name,
-            description=provider.description,
-            secret_type=GlobalSecret.SecretType.INTEGRATION,
-            domain_pattern=GlobalSecret.INTEGRATION_DOMAIN_SENTINEL,
-            key=provider.secret_key,
-        )
-    else:
-        secret.name = provider.display_name
-        secret.description = provider.description
-        secret.key = provider.secret_key
+    owner = owner_org or owner_user
+    with transaction.atomic():
+        owner._meta.model._default_manager.select_for_update().get(pk=owner.pk)
+        secret = get_native_integration_secret(provider.key, owner_user, owner_org)
+        if secret is None:
+            secret = GlobalSecret(
+                user=owner_user,
+                organization=owner_org,
+                name=provider.display_name,
+                description=provider.description,
+                secret_type=GlobalSecret.SecretType.INTEGRATION,
+                domain_pattern=GlobalSecret.INTEGRATION_DOMAIN_SENTINEL,
+                key=provider.secret_key,
+            )
+        else:
+            secret.name = provider.display_name
+            secret.description = provider.description
+            secret.key = provider.secret_key
 
-    secret.set_value(json.dumps(credentials, separators=(",", ":"), sort_keys=True))
-    secret.save()
-    return secret
+        secret.set_value(json.dumps(credentials, separators=(",", ":"), sort_keys=True))
+        secret.save()
+        return secret
 
 
 def delete_native_integration_credentials(provider_key: str, owner_user, owner_org) -> bool:

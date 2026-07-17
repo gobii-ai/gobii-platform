@@ -142,6 +142,7 @@ from api.services.web_sessions import has_deliverable_web_session
 from config import settings
 from config.redis_client import get_redis_client
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
+from util.text_sanitizer import normalize_humanized_message_style
 from .web_streaming import WebStreamBroadcaster, resolve_web_stream_target
 
 logger = logging.getLogger(__name__)
@@ -184,6 +185,7 @@ MESSAGE_TOOL_BODY_KEYS = {
     "send_chat_message": "body",
     "send_agent_message": "message",
 }
+HUMANIZED_MESSAGE_BODY_KEYS = {**MESSAGE_TOOL_BODY_KEYS, "send_discord_message": "message"}
 SQLITE_MUTATION_RE = re.compile(r"\b(?:insert|update|delete|replace|alter|drop|create)\b", re.IGNORECASE)
 AGENT_CONFIG_TABLE_RE = re.compile(r"\b__agent_config\b", re.IGNORECASE)
 DURABLE_CONFIG_INTENT_RE = re.compile(
@@ -196,6 +198,16 @@ DURABLE_CONFIG_INTENT_RE = re.compile(
 )
 TRANSIENT_CONFIG_SCOPE_RE = re.compile(
     r"\b(?:for this (?:answer|response|report|task|time)|this time|just this once|today only|for now)\b",
+    re.IGNORECASE,
+)
+DIRECT_USER_CORRECTION_RE = re.compile(
+    r"\b(?:stop|quit)\b[^.!?]{0,100}\b(?:writ\w*|say\w*|send\w*|sound\w*|use(?:d|s|ing)?|"
+    r"includ\w*|format\w*|reply\w*|respond\w*|messag\w*|introduc\w*)\b|"
+    r"\b(?:sound(?:s|ed)?|reads?|feels?|looks?)\b.{0,60}\b(?:automated|templated|robotic|generic|formal|"
+    r"informal|spammy|salesy|corporate|product[ -]?y)\b|"
+    r"\b(?:too|overly)\s+(?:formal|informal|generic|spammy|salesy|corporate|product[ -]?y)\b|"
+    r"\b(?:no\s+(?:more\s+)?|(?:don'?t|do not|never)\s+use\s+)(?:em|en|unicode|double)[ -]?"
+    r"(?:dashes|hyphens)\b",
     re.IGNORECASE,
 )
 STRONG_DURABLE_CONFIG_INTENT_RE = re.compile(
@@ -391,6 +403,25 @@ def _record_defaultable_setup_question_correction(
         "Agent %s: rejected defaultable setup question and requested sqlite_batch configuration.",
         agent.id,
     )
+
+
+def _record_missing_direct_correction_patch(
+    agent: PersistentAgent,
+    *,
+    attach_completion: Any,
+    attach_prompt_archive: Any,
+) -> None:
+    step_kwargs = {
+        "agent": agent,
+        "description": (
+            "Tool policy: persist this direct user correction before replying. Call sqlite_batch now with one "
+            "UPDATE __agent_config SET charter=patch_text(charter, old, new) WHERE id=1, changing only the "
+            "relevant clause and preserving unrelated charter guidance."
+        ),
+    }
+    attach_completion(step_kwargs)
+    step = PersistentAgentStep.objects.create(**step_kwargs)
+    attach_prompt_archive(step)
 
 
 def _truncate_text_bytes(text: str, max_bytes: int) -> str:
@@ -1116,6 +1147,13 @@ def _normalize_tool_calls(message: Any) -> list[Any]:
         return [coerced] if coerced else []
 
     return _tool_calls_from_content(message)
+
+
+def _defer_tool_calls_behind_discovery(tool_calls: list[Any]) -> list[Any]:
+    discovery_calls = [call for call in tool_calls if _get_tool_call_name(call) == "search_tools"]
+    if not discovery_calls or len(discovery_calls) == len(tool_calls):
+        return tool_calls
+    return discovery_calls
 
 
 def _get_tool_call_name(call: Any) -> Optional[str]:
@@ -2115,6 +2153,33 @@ def _user_text_has_durable_config_intent(text: str) -> bool:
     return bool(DURABLE_CONFIG_INTENT_RE.search(normalized))
 
 
+def _user_text_is_direct_correction(text: str) -> bool:
+    normalized = " ".join((text or "").split())
+    return bool(
+        normalized
+        and not TRANSIENT_CONFIG_SCOPE_RE.search(normalized)
+        and DIRECT_USER_CORRECTION_RE.search(normalized)
+    )
+
+
+def _tool_calls_patch_correction_before_reply(tool_calls: list[Any]) -> bool:
+    patch_seen = False
+    for call in tool_calls:
+        tool_name = _get_tool_call_name(call)
+        if tool_name in MESSAGE_TOOL_NAMES and not patch_seen:
+            return False
+        if tool_name != "sqlite_batch":
+            continue
+        try:
+            _raw_args, tool_params = _parse_tool_call_params(_get_tool_call_arguments(call))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        sql = "\n".join(_sqlite_batch_statements(tool_params))
+        if _sqlite_batch_is_only_agent_config_mutation(tool_params) and "patch_text" in sql.lower():
+            patch_seen = True
+    return patch_seen
+
+
 def _looks_like_one_off_user_task(text: str) -> bool:
     normalized = " ".join((text or "").split())
     return bool(normalized and ONE_OFF_TASK_RE.search(normalized) and not _user_text_has_durable_config_intent(normalized))
@@ -2132,6 +2197,19 @@ def _should_skip_planning_execute_tool_search(agent: PersistentAgent, tool_name:
 def _message_tool_body_from_params(tool_name: str, tool_params: Dict[str, Any]) -> str:
     body_key = MESSAGE_TOOL_BODY_KEYS.get(tool_name)
     return str(tool_params.get(body_key) or "") if body_key else ""
+
+
+def _normalize_humanized_message_params(tool_name: str, tool_params: Dict[str, Any]) -> Dict[str, Any]:
+    body_key = HUMANIZED_MESSAGE_BODY_KEYS.get(tool_name)
+    if not body_key:
+        return tool_params
+    normalized = dict(tool_params)
+    keys = [body_key]
+    if tool_name == "send_email":
+        keys.append("subject")
+    for key in keys:
+        normalized[key] = normalize_humanized_message_style(str(normalized.get(key) or ""))
+    return normalized
 
 
 def _message_tool_has_progress_intent(tool_name: str, tool_params: Dict[str, Any]) -> bool:
@@ -2769,7 +2847,10 @@ def _prepare_tool_batch_impl(
             if normalized_tool_name != tool_name:
                 logger.info("Agent %s: normalized tool call %s -> %s", agent.id, tool_name, normalized_tool_name)
                 tool_name = normalized_tool_name
-            tool_params = _normalize_tool_params(tool_name, tool_params)
+            tool_params = _normalize_humanized_message_params(
+                tool_name,
+                _normalize_tool_params(tool_name, tool_params),
+            )
             if _should_skip_irrelevant_agent_config_mutation(
                 agent,
                 tool_name,
@@ -2825,6 +2906,7 @@ def _prepare_tool_batch_impl(
                 exec_params = tool_params
             else:
                 exec_params = _substitute_variables_in_params(tool_params)
+            exec_params = _normalize_humanized_message_params(tool_name, exec_params)
             if tool_name == "sqlite_batch":
                 exec_params = dict(exec_params)
                 exec_params["_has_user_facing_message"] = has_user_facing_message
@@ -5580,6 +5662,7 @@ def _run_agent_loop(
     continuation_notice: Optional[str] = None
     stale_prompt_system_directive_block = ""
     empty_response_loop_retries = 0
+    direct_correction_patch_seen = False
     explicit_prefer_low_latency = prefer_low_latency
 
     def _current_human_inbound_generation() -> int:
@@ -6129,6 +6212,29 @@ def _run_agent_loop(
                 )
 
                 raw_tool_calls = _normalize_tool_calls(msg)
+                direct_correction_patch_this_response = False
+                direct_correction_pending = (
+                    not direct_correction_patch_seen
+                    and _user_text_is_direct_correction(_latest_inbound_message_text(agent))
+                )
+                if direct_correction_pending:
+                    direct_correction_patch_this_response = _tool_calls_patch_correction_before_reply(raw_tool_calls)
+                    direct_correction_patch_seen = direct_correction_patch_this_response
+                    if not direct_correction_patch_seen:
+                        _record_missing_direct_correction_patch(
+                            agent,
+                            attach_completion=_attach_completion,
+                            attach_prompt_archive=_attach_prompt_archive,
+                        )
+                        _mark_accepted_human_generation_consumed()
+                        continue
+                discovery_tool_calls = _defer_tool_calls_behind_discovery(raw_tool_calls)
+                if len(discovery_tool_calls) != len(raw_tool_calls):
+                    logger.info(
+                        "Agent %s: deferring non-discovery tool calls until search_tools updates the prompt.",
+                        agent.id,
+                    )
+                    raw_tool_calls = discovery_tool_calls
                 raw_tool_names = [_get_tool_call_name(call) for call in raw_tool_calls]
                 has_explicit_send = any(name in MESSAGE_TOOL_NAMES for name in raw_tool_names if name)
                 has_explicit_sleep = any(name == "sleep_until_next_trigger" for name in raw_tool_names if name)
@@ -6168,7 +6274,10 @@ def _run_agent_loop(
                     if implied_call:
                         implied_send = True
                         implied_stop_after_send = not implied_will_continue  # Stop unless continuation phrase
-                        tool_calls = [implied_call] + tool_calls
+                        if direct_correction_patch_this_response:
+                            tool_calls.append(implied_call)
+                        else:
+                            tool_calls = [implied_call] + tool_calls
                         logger.info(
                             "Agent %s: treating message content as implied %s send.",
                             agent.id,

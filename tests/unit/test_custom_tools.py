@@ -191,6 +191,12 @@ class CustomToolsTests(TestCase):
     @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
     def test_custom_tool_guidance_requires_helpful_side_effect_results(self, _mock_sandbox):
         create_tool_description = get_create_custom_tool_tool()["function"]["description"]
+        source_code_description = (
+            get_create_custom_tool_tool()["function"]["parameters"]["properties"]["source_code"]["description"]
+        )
+        parameters_schema_description = (
+            get_create_custom_tool_tool()["function"]["parameters"]["properties"]["parameters_schema"]["description"]
+        )
         skill_instructions = CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL.prompt_instructions
 
         for text in (
@@ -221,6 +227,10 @@ class CustomToolsTests(TestCase):
             "require source params like `urls`, `domains`, `candidates`, `source_table`, or `input_table`",
         ):
             self.assertIn(text, create_tool_description)
+
+        self.assertIn("`sqlite3.Row` has no `.get()`", source_code_description)
+        self.assertIn("`required` is an array", parameters_schema_description)
+        self.assertIn("not JSON-encoded text", parameters_schema_description)
 
         for text in (
             "exact import `from _gobii_ctx import main`",

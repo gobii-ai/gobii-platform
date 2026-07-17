@@ -26,6 +26,7 @@ from api.evals.scenarios.behavior_micro import (
     CHARTER_ADDS_FEEDBACK_RULE_FROM_CORRECTION,
     CHARTER_ADDS_INFERRED_PREFERENCE_PRESERVING_EXISTING,
     CHARTER_ADDS_PLAIN_PREFERENCE_WITHOUT_SAVE_WORD,
+    CHARTER_PATCHES_DIRECT_STYLE_CORRECTION,
     CHARTER_EXPANDS_SPARSE_CHARTER_WITH_DETAIL,
     CHARTER_IGNORES_ONE_OFF_PREFERENCE,
     CHARTER_MEMORY_MICRO_SCENARIO_SLUGS,
@@ -116,6 +117,7 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
         self.assertIn(CHARTER_IGNORES_ONE_OFF_PREFERENCE, charter_memory_suite.scenario_slugs)
         self.assertIn(CHARTER_ADDS_FEEDBACK_RULE_FROM_CORRECTION, charter_memory_suite.scenario_slugs)
         self.assertIn(CHARTER_ADDS_PLAIN_PREFERENCE_WITHOUT_SAVE_WORD, charter_memory_suite.scenario_slugs)
+        self.assertIn(CHARTER_PATCHES_DIRECT_STYLE_CORRECTION, charter_memory_suite.scenario_slugs)
 
     def test_common_use_case_micro_evals_are_complete_and_registered(self):
         registered = ScenarioRegistry.list_all()
@@ -798,6 +800,24 @@ class BehaviorMicroHelperTests(TestCase):
                 self.assertFalse(
                     CommsAllowlistEntry.objects.filter(agent=self.agent, channel=CommsChannel.SMS).exists()
                 )
+
+    def test_outbound_sms_send_cases_seed_sending_endpoint(self):
+        for slug in (
+            "common_use_case_065_send_status_sms",
+            "common_use_case_066_send_meeting_sms",
+        ):
+            with self.subTest(slug=slug):
+                scenario = ScenarioRegistry.get(slug)
+
+                scenario._seed_outbound_contact_context(self.agent.id)
+
+                endpoint = PersistentAgentCommsEndpoint.objects.get(
+                    owner_agent=self.agent,
+                    channel=CommsChannel.SMS,
+                )
+                self.assertTrue(endpoint.is_primary)
+
+                endpoint.delete()
 
     def test_outbound_contact_lookup_sqlite_preamble_does_not_stop_eval(self):
         scenario = ScenarioRegistry.get("common_use_case_066_send_meeting_sms")
