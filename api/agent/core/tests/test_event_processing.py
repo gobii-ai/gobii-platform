@@ -17,6 +17,7 @@ from django.test import SimpleTestCase, TestCase, override_settings, tag
 from django.utils import timezone
 
 from api.agent.core.event_processing import (
+    _deep_work_update_gate_reason,
     _finalize_tool_batch,
     _contact_permission_params_from_misrouted_human_input,
     _ensure_credit_for_tool,
@@ -47,7 +48,7 @@ from api.agent.tools.peer_dm import (
     execute_send_agent_message,
 )
 from api.agent.tools.tool_manager import _normalize_tool_params_unicode_escapes
-from api.agent.tools.web_chat_sender import _looks_like_routine_progress_message
+from api.agent.tools.web_chat_sender import _looks_like_routine_progress_message, _strip_leading_routine_preamble
 from api.models import (
     BrowserUseAgent,
     CommsAllowlistEntry,
@@ -141,6 +142,69 @@ class ImpliedContinuationDecisionTests(SimpleTestCase):
         )
 
         self.assertFalse(result)
+
+
+@tag("batch_event_processing")
+class DeepWorkUpdateGateTests(SimpleTestCase):
+    def test_requires_kickoff_only_for_substantial_work(self):
+        self.assertEqual(
+            _deep_work_update_gate_reason(
+                "Do deep, exhaustive research on this market.",
+                ["mcp_brightdata_search_engine"],
+                prior_work_count=0,
+                prior_update_count=0,
+                batch_has_progress_update=False,
+            ),
+            "kickoff",
+        )
+        self.assertIsNone(
+            _deep_work_update_gate_reason(
+                "What is the latest price?",
+                ["search", "scrape_one", "scrape_two"],
+                prior_work_count=0,
+                prior_update_count=0,
+                batch_has_progress_update=False,
+            )
+        )
+        self.assertIsNone(
+            _deep_work_update_gate_reason(
+                "Build a line chart from these six points.",
+                ["create_chart"],
+                prior_work_count=0,
+                prior_update_count=0,
+                batch_has_progress_update=False,
+            )
+        )
+        self.assertIsNone(
+            _deep_work_update_gate_reason(
+                "Give me a substantive report, but treat this as bounded, not exhaustive research.",
+                ["search", "scrape"],
+                prior_work_count=0,
+                prior_update_count=0,
+                batch_has_progress_update=False,
+            )
+        )
+
+    def test_requires_one_milestone_without_blocking_an_update_batch(self):
+        self.assertEqual(
+            _deep_work_update_gate_reason(
+                "Prepare the report.",
+                ["scrape_one", "scrape_two", "scrape_three", "scrape_four"],
+                prior_work_count=2,
+                prior_update_count=1,
+                batch_has_progress_update=False,
+            ),
+            "milestone",
+        )
+        self.assertIsNone(
+            _deep_work_update_gate_reason(
+                "Prepare the report.",
+                ["send_chat_message", "scrape_one"],
+                prior_work_count=2,
+                prior_update_count=1,
+                batch_has_progress_update=True,
+            )
+        )
 
 
 @tag('batch_event_processing')
@@ -556,6 +620,18 @@ class ToolParamParsingTests(SimpleTestCase):
 
 @tag("batch_event_processing")
 class WebChatProgressSuppressionTests(SimpleTestCase):
+    def test_strips_process_preamble_from_structured_final(self):
+        body = (
+            "I already have the sources. Let me compile the report.\n\n"
+            "**Northstar Robotics, Latest News**\n\n"
+            "Here are the three material developments."
+        )
+
+        self.assertEqual(
+            _strip_leading_routine_preamble(body),
+            "**Northstar Robotics, Latest News**\n\nHere are the three material developments.",
+        )
+
     def test_suppresses_current_research_progress_with_let_me_grab(self):
         self.assertTrue(
             _looks_like_routine_progress_message(
@@ -627,6 +703,18 @@ class WebChatProgressSuppressionTests(SimpleTestCase):
                 "I need to read the current file, then update it to make `input_urls` and `output_table` required params."
             )
         )
+
+    def test_allows_concrete_deep_work_updates(self):
+        updates = (
+            "I’m digging into Northstar’s market position now. I’ll pressure test the brownfield warehouse "
+            "angle against the strongest competitors before I give you a recommendation.",
+            "The brownfield wedge is holding up, and interoperability looks like the real buying driver. "
+            "I’m checking whether the customer evidence is strong enough to support the thesis.",
+        )
+
+        for update in updates:
+            self.assertFalse(_looks_like_routine_progress_message(update))
+
 
 
 @tag("batch_event_processing")
@@ -1133,6 +1221,17 @@ class ContinuationModePromptContextTests(TestCase):
         self.assertIn("clarity and honesty beat forced friendliness", system_prompt.lower())
         self.assertIn("preserve the user's meaning, voice, key terms, and commitments", system_prompt)
         self.assertIn("AI-giveaway phrases", system_prompt)
+
+    def test_prompt_calibrates_deep_work_updates_without_status_spam(self):
+        system_prompt = self._render_system_prompt(is_first_run=False)
+
+        self.assertIn("## Work Updates (CRITICAL)", system_prompt)
+        self.assertIn("Short work: no updates, one result", system_prompt)
+        self.assertIn("FIRST call the same-channel send tool", system_prompt)
+        self.assertIn("latest requester concise scope + next checkpoint", system_prompt)
+        self.assertIn("At first meaningful milestone, send one useful update", system_prompt)
+        self.assertIn("No generic status, tool sequence, or internal reasoning", system_prompt)
+        self.assertIn("Peer request: use send_agent_message", system_prompt)
 
 
 @tag("batch_event_processing")
