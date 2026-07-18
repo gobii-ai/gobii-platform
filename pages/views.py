@@ -2021,9 +2021,14 @@ def _get_active_public_template_by_category_route(category_slug: str | None, tem
 
 
 def _get_active_public_template_by_legacy_path(handle: str | None, template_slug: str | None):
+    normalized_handle = str(handle or "").strip().lower()
+    normalized_template_slug = str(template_slug or "").strip()
+    if not normalized_handle or not normalized_template_slug:
+        return None
+
     template = _active_public_template_queryset().filter(
-        public_profile__handle=handle,
-        slug=template_slug,
+        public_profile__handle=normalized_handle,
+        slug=normalized_template_slug,
     ).first()
     if template:
         return template
@@ -2031,10 +2036,9 @@ def _get_active_public_template_by_legacy_path(handle: str | None, template_slug
     alias = (
         PersistentAgentTemplateUrlAlias.objects.select_related("template", "template__public_profile")
         .filter(
-            public_profile__handle=handle,
-            slug=template_slug,
+            Q(handle=normalized_handle) | Q(handle="", public_profile__handle=normalized_handle),
+            slug=normalized_template_slug,
             template__is_active=True,
-            template__public_profile__isnull=False,
             template__organization__isnull=True,
         )
         .first()

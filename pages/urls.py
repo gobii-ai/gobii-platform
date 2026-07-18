@@ -36,6 +36,7 @@ from .views import (
     WebManifestView,
     InstallScriptView,
     PublicTemplateDetailView,
+    PublicTemplateLegacyDetailRedirectView,
     PublicTemplateHireView,
     PublicTemplateLaunchView,
     public_template_social_image,
@@ -153,3 +154,10 @@ if settings.GOBII_PROPRIETARY_MODE:
             content_type='text/plain',
         ))
     )
+
+# Keep these root-level legacy redirects last; the two-slug pattern is intentionally broad.
+urlpatterns += [
+    path('<slug:handle>/<slug:template_slug>/', PublicTemplateLegacyDetailRedirectView.as_view(), name='public_template_legacy_detail'),
+    path('<slug:handle>/<slug:template_slug>/hire/', PublicTemplateHireView.as_view(), name='public_template_legacy_hire'),
+    path('<slug:handle>/<slug:template_slug>/spawn/', PublicTemplateLaunchView.as_view(), name='public_template_legacy_launch'),
+]
