@@ -30,7 +30,12 @@ class BlogFeed(Feed):
         return self._absolute_url(reverse("proprietary:blog_feed"))
 
     def items(self):
-        return get_all_blog_posts()[:BLOG_FEED_ITEM_LIMIT]
+        posts = sorted(
+            get_all_blog_posts(),
+            key=lambda post: post["updated_at"] or post["published_at"],
+            reverse=True,
+        )
+        return posts[:BLOG_FEED_ITEM_LIMIT]
 
     def item_title(self, item):
         return item["title"]

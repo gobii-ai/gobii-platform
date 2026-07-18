@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 import json
 from unittest.mock import patch
@@ -5,7 +6,7 @@ from unittest.mock import patch
 from bs4 import BeautifulSoup
 from django.test import TestCase, override_settings, tag
 
-from proprietary.feeds import BLOG_FEED_ITEM_LIMIT
+from proprietary.feeds import BLOG_FEED_ITEM_LIMIT, BlogFeed
 from proprietary.utils_blog import _parse_svg_length, get_all_blog_posts, load_blog_post
 
 
@@ -28,7 +29,11 @@ class BlogSeoTests(TestCase):
 
         feed = BeautifulSoup(response.content, "xml")
         items = feed.find_all("item")
-        posts = get_all_blog_posts()[:BLOG_FEED_ITEM_LIMIT]
+        posts = sorted(
+            get_all_blog_posts(),
+            key=lambda post: post["updated_at"] or post["published_at"],
+            reverse=True,
+        )[:BLOG_FEED_ITEM_LIMIT]
 
         self.assertEqual(feed.channel.title.get_text(strip=True), "Gobii AI Agent Automation Blog")
         self.assertEqual(feed.channel.link.get_text(strip=True), "https://gobii.ai/blog/")
@@ -67,6 +72,29 @@ class BlogSeoTests(TestCase):
             parsedate_to_datetime(response["Last-Modified"]),
             expected_updated_at,
         )
+
+    def test_blog_feed_prioritizes_recently_updated_posts_before_limiting(self):
+        newest_published_at = datetime(2026, 7, 31, tzinfo=timezone.utc)
+        posts = []
+        for index in range(BLOG_FEED_ITEM_LIMIT + 1):
+            published_at = newest_published_at - timedelta(days=index)
+            posts.append(
+                {
+                    "slug": f"post-{index}",
+                    "published_at": published_at,
+                    "updated_at": published_at,
+                }
+            )
+
+        oldest_post = posts[-1]
+        oldest_post["updated_at"] = newest_published_at + timedelta(days=1)
+
+        with patch("proprietary.feeds.get_all_blog_posts", return_value=posts):
+            feed_items = BlogFeed().items()
+
+        self.assertEqual(len(feed_items), BLOG_FEED_ITEM_LIMIT)
+        self.assertIs(feed_items[0], oldest_post)
+        self.assertIn(oldest_post, feed_items)
 
     @override_settings(GOBII_PROPRIETARY_MODE=False)
     def test_blog_feed_is_not_available_outside_proprietary_mode(self):
