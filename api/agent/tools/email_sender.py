@@ -29,6 +29,7 @@ from .outbound_duplicate_guard import detect_recent_duplicate_message
 from util.integrations import postmark_status
 from util.text_sanitizer import decode_unicode_escapes, strip_control_chars
 from .agent_variables import substitute_variables_with_filespace
+from api.agent.core.link_references import LinkReferenceResolutionError, link_reference_error_response
 from ..files.attachment_helpers import AttachmentResolutionError, create_message_attachments, resolve_filespace_attachments
 from ..files.filespace_service import broadcast_message_attachment_update
 from api.services.email_verification import require_verified_email, EmailVerificationError
@@ -199,7 +200,7 @@ def get_send_email_tool() -> Dict[str, Any]:
                         "type": "string",
                         "description": (
                             "HTML body only; no <html>/<head>/<body>. Single-quoted attrs. "
-                            "Reports should use styled tables or metric blocks. Use exact returned item URLs; leave other rows unlinked. "
+                            "Reports should use styled tables or metric blocks. "
                             "Tool-call/XML is literal. Inline images: attach file + <img src='cid:filename'>."
                         ),
                     },
@@ -236,7 +237,10 @@ def execute_send_email(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
     mobile_first_html = decode_unicode_escapes(params.get("mobile_first_html"))
     mobile_first_html = strip_control_chars(mobile_first_html)
     # Substitute $[var] placeholders with actual values (e.g., $[/charts/...]).
-    mobile_first_html = substitute_variables_with_filespace(mobile_first_html, agent)
+    try:
+        mobile_first_html = substitute_variables_with_filespace(mobile_first_html, agent)
+    except LinkReferenceResolutionError as exc:
+        return link_reference_error_response(exc)
     cc_addresses = [normalize_email_address(addr) for addr in params.get("cc_addresses", [])]
     will_continue = _should_continue_work(params)
     attachment_paths = params.get("attachments")

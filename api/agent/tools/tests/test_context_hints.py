@@ -78,7 +78,8 @@ class LinkedInSchemaTests(SimpleTestCase):
 
         hint = extract_context_hint('mcp_example_people_search', payload)
 
-        self.assertIn(f'→ Avery Chen: Controller: {url}', hint)
+        self.assertIn(f'Avery Chen: Controller | item_link={url}', hint)
+        self.assertIn('Jordan Lee: Finance Director | item_link=none', hint)
         self.assertNotIn('https://profiles.example.test/jordan-lee', hint)
 
     def test_entity_specific_url_takes_priority_over_generic_url(self):
@@ -96,6 +97,24 @@ class LinkedInSchemaTests(SimpleTestCase):
 
         self.assertIn(profile_url, hint)
         self.assertNotIn('https://search.example.test/result/1', hint)
+
+    def test_custom_item_url_field_is_explicit_and_components_are_not_links(self):
+        url = 'https://console.example.test/services/svc_1?region=east'
+        payload = {
+            'result': [
+                {'name': 'Linked Service', 'console_url': url},
+                {
+                    'name': 'Unlinked Service',
+                    'console_host': 'console.example.test',
+                    'console_route': '/services/svc_2',
+                },
+            ],
+        }
+
+        hint = extract_context_hint('mcp_example_services', payload)
+
+        self.assertIn(f'Linked Service | item_link={url}', hint)
+        self.assertIn('Unlinked Service | item_link=none', hint)
 
     def test_byte_cap_omits_oversized_url_instead_of_truncating_it(self):
         oversized_url = f"https://profiles.example.test/{'segment/' * 100}?view=full#bio"

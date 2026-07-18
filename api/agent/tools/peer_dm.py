@@ -10,6 +10,8 @@ from ..files.attachment_helpers import AttachmentResolutionError, resolve_filesp
 from .attachment_guidance import SEND_TOOL_ATTACHMENTS_DESCRIPTION
 from ..peer_comm import PeerMessagingDuplicateError, PeerMessagingError, PeerMessagingService
 from ...models import PersistentAgent, PersistentAgentMessage
+from .agent_variables import substitute_variables_with_filespace
+from api.agent.core.link_references import LinkReferenceResolutionError, link_reference_error_response
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +93,7 @@ def get_send_agent_message_tool() -> Dict[str, Any]:
                     },
                     "message": {
                         "type": "string",
-                        "description": "New information, question, or handoff the peer needs; never an acknowledgment-only reply. Use exact returned item URLs; leave other items unlinked.",
+                        "description": "New information, question, or handoff the peer needs; never an acknowledgment-only reply.",
                     },
                     "attachments": {
                         "type": "array",
@@ -121,6 +123,11 @@ def execute_send_agent_message(agent: PersistentAgent, params: Dict[str, Any]) -
             "status": "error",
             "message": "Parameters 'peer_agent_id' and 'message' are required.",
         }
+
+    try:
+        message = substitute_variables_with_filespace(str(message), agent)
+    except LinkReferenceResolutionError as exc:
+        return link_reference_error_response(exc)
 
     try:
         peer_agent_uuid = UUID(str(peer_agent_id_raw))

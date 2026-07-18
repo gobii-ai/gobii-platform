@@ -96,12 +96,11 @@ from .prompt_run_cache import (
     bind_prompt_run_cache,
     reset_prompt_run_cache,
 )
-from .url_provenance import (
-    build_delivery_url_inventory,
-    source_urls_from_tool_result,
-    unexpected_delivery_urls,
+from .link_references import (
+    LinkReferenceResolutionError,
+    link_reference_error_response,
+    resolve_link_reference_params,
 )
-
 from ..tools.apply_patch import execute_apply_patch
 from ..tools.charter_updater import execute_update_charter
 from ..tools.email_sender import execute_send_email
@@ -2451,31 +2450,6 @@ def _normalize_humanized_message_params(tool_name: str, tool_params: Dict[str, A
     return normalized
 
 
-def _record_delivery_url_provenance_correction(
-    agent: PersistentAgent,
-    unexpected_urls: tuple[str, ...],
-    *,
-    attach_completion: Any,
-    attach_prompt_archive: Any,
-) -> None:
-    preview = ", ".join(unexpected_urls[:5])
-    if len(unexpected_urls) > 5:
-        preview += f", and {len(unexpected_urls) - 5} more"
-    step_kwargs = {
-        "agent": agent,
-        "description": (
-            "Message delivery blocked because these HTTP(S) URLs were not present verbatim as complete URLs "
-            f"in prior context or tool results: {preview}. Keep URLs that were returned verbatim. For the "
-            "affected entities, put exactly 'No item URL provided' in the link field. Do not mention their "
-            "host, route, ID, or query fragments anywhere in the message. Alternatively, fetch a source that "
-            "returns a complete URL, then resend."
-        ),
-    }
-    attach_completion(step_kwargs)
-    step = PersistentAgentStep.objects.create(**step_kwargs)
-    attach_prompt_archive(step)
-
-
 def _message_tool_has_progress_intent(tool_name: str, tool_params: Dict[str, Any]) -> bool:
     if tool_name not in MESSAGE_TOOL_NAMES:
         return False
@@ -2681,6 +2655,15 @@ _REFRESHING_TOOL_EXECUTORS: Dict[str, _ToolExecutorResolver] = {
     "end_planning": lambda: execute_end_planning,
 }
 
+_LINK_REFERENCE_SENDER_TOOLS = {
+    "send_agent_message",
+    "send_chat_message",
+    "send_discord_message",
+    "send_email",
+    "send_sms",
+    "send_webhook_event",
+}
+
 
 def _execute_tool_call_runtime(
     agent: PersistentAgent,
@@ -2693,6 +2676,11 @@ def _execute_tool_call_runtime(
     resolved_entry: Optional[ToolCatalogEntry] = None,
 ) -> tuple[Any, Optional[List[dict]]]:
     updated_tools: Optional[List[dict]] = None
+    if tool_name not in _LINK_REFERENCE_SENDER_TOOLS:
+        try:
+            exec_params = resolve_link_reference_params(exec_params, agent)
+        except LinkReferenceResolutionError as exc:
+            return link_reference_error_response(exc), updated_tools
     mock_config = getattr(budget_ctx, "mock_config", None) if budget_ctx else None
     mock_result = _resolve_eval_mock_result(mock_config, tool_name, exec_params)
     if planning_mode_disallows_tool(agent, tool_name):
@@ -2870,7 +2858,6 @@ def _prepare_tool_batch_impl(
     attach_completion: Any,
     attach_prompt_archive: Any,
     rate_limit_batch: Optional[_ToolRateLimitBatch] = None,
-    delivery_url_inventory: frozenset[str] | None = None,
 ) -> _PreparedToolBatch:
     prepared_calls: list[_PreparedToolExecution] = []
     followup_required = False
@@ -3218,26 +3205,6 @@ def _prepare_tool_batch_impl(
                     tool_params["will_continue_work"] = False
                 explicit_continue = _coerce_optional_bool(tool_params.get("will_continue_work"))
 
-            body_key = HUMANIZED_MESSAGE_BODY_KEYS.get(tool_name)
-            delivery_body = tool_params.get(body_key) if body_key else None
-            if isinstance(delivery_body, str) and delivery_url_inventory is not None:
-                unexpected_urls = unexpected_delivery_urls(delivery_body, delivery_url_inventory)
-                if unexpected_urls:
-                    _record_delivery_url_provenance_correction(
-                        agent,
-                        unexpected_urls,
-                        attach_completion=attach_completion,
-                        attach_prompt_archive=attach_prompt_archive,
-                    )
-                    logger.warning(
-                        "Agent %s: blocked %s with %d URL(s) absent from source context.",
-                        agent.id,
-                        tool_name,
-                        len(unexpected_urls),
-                    )
-                    followup_required = True
-                    break
-
             if should_skip_auto_substitution(tool_name):
                 exec_params = tool_params
             else:
@@ -3348,7 +3315,6 @@ def _prepare_tool_batch(
     has_user_facing_message: bool,
     attach_completion: Any,
     attach_prompt_archive: Any,
-    delivery_url_inventory: frozenset[str] | None = None,
 ) -> _PreparedToolBatch:
     rate_limit_batch = None
     if len(tool_calls) > 1:
@@ -3370,7 +3336,6 @@ def _prepare_tool_batch(
         attach_completion=attach_completion,
         attach_prompt_archive=attach_prompt_archive,
         rate_limit_batch=rate_limit_batch,
-        delivery_url_inventory=delivery_url_inventory,
     )
 
 
@@ -6025,7 +5990,6 @@ def _run_agent_loop(
     empty_response_loop_retries = 0
     direct_correction_patch_seen = False
     explicit_prefer_low_latency = prefer_low_latency
-    run_source_urls: set[str] = set()
 
     def _current_human_inbound_generation() -> int:
         return get_human_inbound_generation(agent.id, client=redis_client)
@@ -6798,20 +6762,9 @@ def _run_agent_loop(
                     )
                 except Exception:
                     # Defensive fallback: assume we have actionable work so the agent keeps processing
-                    tool_names = []
                     has_non_sleep_calls = True
                     actionable_calls_total = len(tool_calls or []) if tool_calls else 0
                     has_user_facing_message = False
-                delivery_url_inventory = None
-                if any(
-                    name in HUMANIZED_MESSAGE_BODY_KEYS
-                    for name in tool_names
-                    if name
-                ):
-                    delivery_url_inventory = build_delivery_url_inventory(
-                        trusted_prompt_urls=prompt_metadata.get("trusted_delivery_urls") or (),
-                        run_source_urls=run_source_urls,
-                    )
                 prepared_batch = _prepare_tool_batch(
                     agent,
                     tool_calls=list(tool_calls or []),
@@ -6825,7 +6778,6 @@ def _run_agent_loop(
                     has_user_facing_message=has_user_facing_message,
                     attach_completion=_attach_completion,
                     attach_prompt_archive=_attach_prompt_archive,
-                    delivery_url_inventory=delivery_url_inventory,
                 )
                 followup_required = prepared_batch.followup_required
                 all_calls_sleep = prepared_batch.all_calls_sleep
@@ -6845,13 +6797,6 @@ def _run_agent_loop(
                     lock_extender=lock_extender,
                 )
                 tools = executed_batch.tools
-                for outcome in executed_batch.execution_outcomes:
-                    run_source_urls.update(
-                        source_urls_from_tool_result(
-                            outcome.prepared.tool_name,
-                            outcome.result,
-                        )
-                    )
 
                 if not executed_batch.abort_after_execution or _get_processing_abort_reason(agent.id) is None:
                     runtime_errors, config_apply = _apply_runtime_updates()

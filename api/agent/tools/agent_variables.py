@@ -144,6 +144,10 @@ def substitute_variables_with_filespace(text: str, agent) -> str:
     if not text:
         return text
 
+    from api.agent.core.link_references import resolve_link_references
+
+    text = resolve_link_references(text, agent)
+
     variables = _agent_variables.get({})
     filespace = None
     if agent is not None:

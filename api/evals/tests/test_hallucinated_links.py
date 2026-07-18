@@ -1,4 +1,7 @@
 from collections import Counter, defaultdict
+from datetime import datetime, timezone
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 from django.test import SimpleTestCase, tag
 
@@ -12,9 +15,13 @@ from api.evals.scenarios.hallucinated_links import (
     HALLUCINATED_LINKS_SUITE_SLUG,
     LINK_GROUNDING_PATTERNS,
     LONG_CONTEXT_MIN_CHARS,
+    extract_bare_link_like_destinations,
     extract_http_urls,
     provenance_failures,
 )
+from api.evals.execution import WaitForIdleContext
+from api.evals.runner import _update_suite_state
+from api.models import EvalRun, EvalSuiteRun
 from api.evals.suites import SuiteRegistry
 
 
@@ -164,3 +171,78 @@ class HallucinatedLinkScenarioTests(SimpleTestCase):
 
         self.assertIn(case.pattern.fixture_url, case.allowed_urls)
         self.assertNotIn(case.pattern.fixture_url, case.required_urls)
+
+    def test_candidate_pair_uses_one_http_fixture_and_url_free_long_filler(self):
+        cases = {
+            case.context_size: case
+            for case in HALLUCINATED_LINK_CASES
+            if case.pattern.slug_root == "association_candidate_tool"
+        }
+
+        self.assertEqual(cases["short"].pattern.context_source, "tool")
+        self.assertTrue(cases["short"].pattern.fixture_url)
+        self.assertTrue(cases["short"].pattern.history_messages_are_outbound)
+        self.assertEqual(len(cases["long"].context_messages()), 1)
+        self.assertEqual(
+            set(extract_http_urls(cases["long"].tool_payload())),
+            set(extract_http_urls(cases["short"].tool_payload())),
+        )
+
+        config = ScenarioRegistry.get(cases["short"].slug)._mock_config(cases["short"])
+        self.assertIn("http_request", config)
+        self.assertIn("mcp_brightdata_search_engine", config)
+        self.assertIn("mcp_brightdata_scrape_as_markdown", config)
+
+    def test_bare_domain_paths_are_recorded_as_diagnostics_only(self):
+        text = (
+            "Profile: linkedin.com/in/alice-romero. "
+            "Source: https://linkedin.com/in/ben-okafor and alice@example.com."
+        )
+
+        self.assertEqual(
+            extract_bare_link_like_destinations(text),
+            ("linkedin.com/in/alice-romero",),
+        )
+
+    def test_wait_for_idle_context_exposes_success_and_timeout_state(self):
+        listener = MagicMock()
+        listener.wait_for.return_value = {"payload": {"outstanding_tasks": 0}}
+        with patch("api.evals.execution.AgentEventListener", return_value=listener):
+            successful = WaitForIdleContext("agent-1", timeout=1)
+            with successful:
+                pass
+
+        self.assertTrue(successful.idle)
+        self.assertFalse(successful.timed_out)
+
+        with patch("api.evals.execution.AgentEventListener"):
+            timed_out = WaitForIdleContext("agent-2", timeout=0)
+            with timed_out:
+                pass
+
+        self.assertFalse(timed_out.idle)
+        self.assertTrue(timed_out.timed_out)
+
+    def test_running_suite_has_no_finished_at_even_when_a_child_errored(self):
+        finished = datetime(2026, 7, 18, tzinfo=timezone.utc)
+        runs = [
+            SimpleNamespace(status=EvalRun.Status.ERRORED, started_at=finished, finished_at=finished),
+            SimpleNamespace(status=EvalRun.Status.RUNNING, started_at=finished, finished_at=None),
+        ]
+        suite = SimpleNamespace(
+            runs=SimpleNamespace(all=lambda: runs),
+            status=EvalSuiteRun.Status.RUNNING,
+            started_at=None,
+            finished_at=finished,
+            save=MagicMock(),
+        )
+        manager = MagicMock()
+        manager.select_related.return_value.prefetch_related.return_value.get.return_value = suite
+
+        with patch("api.evals.runner.EvalSuiteRun.objects", manager), patch(
+            "api.evals.runner.broadcast_suite_update"
+        ):
+            _update_suite_state("suite-1")
+
+        self.assertEqual(suite.status, EvalSuiteRun.Status.RUNNING)
+        self.assertIsNone(suite.finished_at)

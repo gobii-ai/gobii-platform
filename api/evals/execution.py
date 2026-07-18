@@ -835,6 +835,8 @@ class WaitForIdleContext:
         self.agent_id = agent_id
         self.timeout = timeout
         self.listener: Optional[AgentEventListener] = None
+        self.idle = False
+        self.timed_out = False
 
     def __enter__(self):
         self.listener = AgentEventListener(self.agent_id, start_time=time.time())
@@ -855,8 +857,10 @@ class WaitForIdleContext:
                 break
             outstanding = int((event.get("payload") or {}).get("outstanding_tasks", 0) or 0)
             if outstanding == 0:
+                self.idle = True
                 return True  # Success
             remaining = max(0, deadline - time.time())
 
+        self.timed_out = True
         logger.warning(f"Timeout waiting for agent {self.agent_id} to go idle.")
         return False # Do not suppress exceptions, but flow continues if no exception

@@ -8,6 +8,8 @@ from django.core.exceptions import ObjectDoesNotExist, ValidationError
 
 from api.agent.files.attachment_helpers import AttachmentResolutionError, resolve_filespace_attachments
 from api.agent.tools.attachment_guidance import SEND_TOOL_ATTACHMENTS_DESCRIPTION
+from api.agent.tools.agent_variables import substitute_variables_with_filespace
+from api.agent.core.link_references import LinkReferenceResolutionError, link_reference_error_response
 from api.models import PersistentAgent
 from api.services.discord_bot import DiscordBotIntegrationError, send_channel_message
 
@@ -33,9 +35,8 @@ def get_send_discord_message_tool() -> Dict[str, Any]:
                     },
                     "message": {
                         "type": "string",
-                        "description": "Message body to send. Optional when attachments are provided. For reports, use Markdown sections, bullets/tables, status labels, tasteful emoji labels; "
-                                       "use exact returned item URLs and leave other rows unlinked. "
-                                       "Do not pass placeholders or tool-call/XML syntax; it is sent literally.",
+                        "description": "Message body to send. Optional when attachments are provided. For reports, use Markdown sections, bullets/tables, status labels, tasteful emoji labels. "
+                                       "Do not pass tool-call/XML syntax; it is sent literally.",
                     },
                     "attachments": {
                         "type": "array",
@@ -59,6 +60,10 @@ def execute_send_discord_message(agent: PersistentAgent, params: Dict[str, Any])
     attachment_paths = params.get("attachments")
     if not channel_id:
         return {"status": "error", "message": "channel_id is required."}
+    try:
+        body = substitute_variables_with_filespace(body, agent)
+    except LinkReferenceResolutionError as exc:
+        return link_reference_error_response(exc)
     try:
         resolved_attachments = resolve_filespace_attachments(agent, attachment_paths)
     except AttachmentResolutionError as exc:

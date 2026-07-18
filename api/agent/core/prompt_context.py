@@ -98,11 +98,7 @@ from ..tools.sqlite_skills import format_recent_skills_for_prompt
 from ..tools.tool_manager import ensure_default_tools_enabled, ensure_skill_tools_enabled, get_enabled_tool_definitions
 from ..system_skills.discovery import format_system_skill_discovery_prompt
 from .tool_results import PREVIEW_TIER_COUNT, SPAWN_WEB_TASK_RESULT_TOOL_NAME, ToolCallResultRecord, ToolResultPromptInfo, prepare_tool_results_for_prompt
-from .url_provenance import (
-    extract_http_urls,
-    source_urls_from_tool_result,
-    trusted_urls_from_prompt,
-)
+from .link_references import is_source_bearing_tool, rewrite_prompt_urls
 from .daily_limit_mode import (
     CREDIT_MESSAGE_ONLY_ALLOWED_TOOL_NAMES_TEXT,
     is_credit_message_only_mode,
@@ -1556,7 +1552,7 @@ def _render_prompt_context_once(
 
     # Unified history follows the important context (order within user prompt: important -> unified_history -> critical)
     unified_history_group = prompt.group("unified_history", weight=3)
-    fresh_tool_call_step_ids, inbound_urls, source_result_urls = _get_unified_history_prompt(
+    fresh_tool_call_step_ids = _get_unified_history_prompt(
         agent,
         unified_history_group,
         config_authority,
@@ -1812,14 +1808,6 @@ def _render_prompt_context_once(
                 prompt_failover_configs
             ),
             "fresh_tool_call_step_ids": sorted(fresh_tool_call_step_ids),
-            "trusted_delivery_urls": sorted(
-                trusted_urls_from_prompt(
-                    system_prompt,
-                    user_content,
-                    inbound_urls=inbound_urls,
-                    source_result_urls=source_result_urls,
-                )
-            ),
         },
     )
 
@@ -3768,7 +3756,7 @@ def _get_system_instruction(
 
         "## Output Rules\n\n"
         "Keep chat/outreach light. Owner reports on 4+ peers need resolved/total and one table with requested fields plus a source URL per row. In record lists, link each name to its item/detail URL; feed/source-only links are insufficient. For finite sets, grouped discovery isn't coverage: resolve/source each requested field. Label blockers partial; separate sourced unavailability from research gaps. Ground facts, numbers, units, and URLs in tool results; never relabel/convert units unless asked. Present requested data directly; omit unrelated/unavailable fields and follow-up offers after simple facts, prices, statuses, or lookups. "
-        "A delivered HTTP(S) URL must already appear verbatim as one complete string in prior context or a tool result. Never combine or present host, path, ID, slug, or query components as a URL; show no link. "
+        "Provided link-reference tokens are destinations; use them verbatim wherever a URL fits. No token means no entity link. Host, route, slug, profile ID, and public identifier are not links. "
         "Charts: create only when requested/materially useful. "
         "Paste create_chart result.inline/result.inline_html in the message; do not attach/read charts or invent paths, hashes, image tags, or <img> URLs. "
         "Use create_csv for tabular exports, create_pdf for PDFs, and create_file for other text/doc formats; create_file query mode must return exactly one row and one column.\n\n"
@@ -4284,7 +4272,7 @@ def _get_unified_history_prompt(
     config_authority: _ConfigAuthorityResolver,
     *,
     run_cache: PromptRunCache | None = None,
-) -> tuple[Set[str], set[str], set[str]]:
+) -> Set[str]:
     """Add summaries + interleaved recent steps & messages to the provided promptree group."""
     epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
     unified_limit, unified_hysteresis = _get_unified_history_limits(agent)
@@ -4485,6 +4473,13 @@ def _get_unified_history_prompt(
         tool_call_records,
         recency_positions=recency_positions,
         fresh_tool_call_step_ids=fresh_tool_call_step_ids,
+        url_rewriter=lambda text, record: rewrite_prompt_urls(
+            text,
+            agent,
+            create=is_source_bearing_tool(record.tool_name),
+            source_kind="tool_result" if is_source_bearing_tool(record.tool_name) else "",
+            source_object_id=record.result_id or record.step_id,
+        ),
     )
 
     # format steps (group meta/params/result components together)
@@ -4497,7 +4492,11 @@ def _get_unified_history_prompt(
 
             components = {
                 "meta": f"[{s.created_at.isoformat()}] Tool {tc.tool_name} called.",
-                "params": json.dumps(tc.tool_params)
+                "params": rewrite_prompt_urls(
+                    json.dumps(tc.tool_params),
+                    agent,
+                    create=False,
+                ),
             }
             parent_tool_call_id = tool_call_parent_ids.get(str(s.id))
             parent_result_info = tool_result_prompt_info.get(parent_tool_call_id) if parent_tool_call_id else None
@@ -4571,6 +4570,13 @@ def _get_unified_history_prompt(
 
         channel = m.from_endpoint.channel
         body = _redact_signed_filespace_urls(m.body or "", agent)
+        body = rewrite_prompt_urls(
+            body,
+            agent,
+            create=not m.is_outbound,
+            source_kind="inbound_message" if not m.is_outbound else "",
+            source_object_id=str(m.id),
+        )
         subject = ""
         raw_payload = m.raw_payload if isinstance(m.raw_payload, dict) else {}
         if raw_payload:
@@ -4708,7 +4714,7 @@ def _get_unified_history_prompt(
         files = _browser_task_files_payload(t)
         components = {
             "meta": f"[{t.updated_at.isoformat()}] Browser task completed with status '{t.status}' (id={t.id}).",
-            "prompt": t.prompt or "",
+            "prompt": rewrite_prompt_urls(t.prompt or "", agent, create=False),
         }
         result_info = tool_result_prompt_info.get(
             browser_task_result_record_ids.get(str(t.id), "")
@@ -4724,7 +4730,13 @@ def _get_unified_history_prompt(
             elif not result_summary and t.status == BrowserUseAgentTask.StatusChoices.CANCELLED:
                 result_summary = "Browser task was cancelled."
             if result_summary:
-                components["result_summary"] = result_summary
+                components["result_summary"] = rewrite_prompt_urls(
+                    result_summary,
+                    agent,
+                    create=True,
+                    source_kind="tool_result",
+                    source_object_id=str(t.id),
+                )
             if (
                 result_info.preview_text
                 and not files
@@ -4829,18 +4841,7 @@ def _get_unified_history_prompt(
                     non_shrinkable=non_shrinkable,
                 )
 
-    inbound_urls = {
-        url
-        for message in messages
-        if not message.is_outbound
-        for url in extract_http_urls(message.body or "")
-    }
-    source_result_urls = {
-        url
-        for record in tool_call_records
-        for url in source_urls_from_tool_result(record.tool_name, record.result_text)
-    }
-    return fresh_tool_call_step_ids, inbound_urls, source_result_urls
+    return fresh_tool_call_step_ids
 
 
 def get_agent_tools(agent: PersistentAgent = None) -> List[dict]:

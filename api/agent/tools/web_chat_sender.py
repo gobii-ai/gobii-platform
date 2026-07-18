@@ -15,6 +15,7 @@ from ..files.attachment_helpers import AttachmentResolutionError, create_message
 from ..files.filespace_service import broadcast_message_attachment_update
 from util.text_sanitizer import normalize_llm_output
 from .agent_variables import substitute_variables_with_filespace
+from api.agent.core.link_references import LinkReferenceResolutionError, link_reference_error_response
 from .attachment_guidance import SEND_TOOL_ATTACHMENTS_DESCRIPTION
 from ...models import (
     PersistentAgent,
@@ -294,7 +295,7 @@ def get_send_chat_tool() -> Dict[str, Any]:
                         "type": "string",
                         "description": (
                             "Natural recipient text; no dash punctuation between phrases. Keep chat/outreach light. Reports comparing 4+ peers use one linked table with a detail URL per row unless incomparable. "
-                            "Do not pass placeholders or tool-call/XML syntax; it is sent literally."
+                            "Do not pass tool-call/XML syntax; it is sent literally."
                         ),
                     },
                     "to_address": {
@@ -326,7 +327,10 @@ def execute_send_chat_message(agent: PersistentAgent, params: Dict[str, Any]) ->
     # Normalize LLM output: decode escapes, strip control chars, normalize whitespace
     body = normalize_llm_output((raw_body or "").strip())
     # Substitute $[var] placeholders with actual values (e.g., $[/charts/...]).
-    body = substitute_variables_with_filespace(body, agent)
+    try:
+        body = substitute_variables_with_filespace(body, agent)
+    except LinkReferenceResolutionError as exc:
+        return link_reference_error_response(exc)
     if not body:
         return {"status": "error", "message": "Message body is required."}
     if _looks_like_placeholder_body(body):

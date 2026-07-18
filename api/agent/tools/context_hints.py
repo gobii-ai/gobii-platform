@@ -65,6 +65,7 @@ URL_FIELD_PRIORITY = (
     'source_url', 'image_url',
 )
 URL_FIELDS = frozenset(URL_FIELD_PRIORITY)
+NON_ITEM_URL_FIELDS = frozenset({'source_url', 'feed_url', 'page_url', 'origin_url'})
 
 # Fields with location info
 LOCATION_FIELDS = frozenset({
@@ -87,7 +88,6 @@ TEXT_FIELDS = frozenset({
 # Hard limits - conservative for scalability with long histories
 MAX_HINT_BYTES = 500  # Enough for 4 items + URLs, not more
 MAX_ITEMS = 4
-MAX_URLS = 3
 MAX_FIELD_LEN = 50
 MAX_LINE_LEN = 120
 BARBELL_TARGET_BYTES = 8000
@@ -266,25 +266,19 @@ def _hint_from_array(items: list) -> Optional[str]:
     if not extracted_items:
         return None
 
-    # Format header line with emoji based on type
+    # Keep link availability adjacent to each entity. The prompt renderer later
+    # replaces complete URLs with opaque link references.
     emoji = _emoji_for_type(item_type)
-    header = f"{emoji} {' | '.join(item['display'] for item in extracted_items[:3])}"
-    if len(header) > MAX_LINE_LEN:
-        header = header[:MAX_LINE_LEN-3] + "..."
-    lines.append(header)
-
-    # Keep each URL adjacent to its entity. If the byte cap is tight, show fewer
-    # complete pairs rather than corrupting a path, query, or fragment.
-    urls_added = 0
     for item in extracted_items:
-        url = item.get('url')
-        if not url or urls_added >= MAX_URLS:
-            continue
-        line = f"→ {item['display']}: {url}"
+        item_link = item.get('url') or 'none'
+        line = f"{emoji} {item['display']} | item_link={item_link}"
         if len('\n'.join([*lines, line]).encode('utf-8')) > MAX_HINT_BYTES:
+            if item.get('url'):
+                fallback = f"{emoji} {item['display']} | item_link=available via query"
+                if len('\n'.join([*lines, fallback]).encode('utf-8')) <= MAX_HINT_BYTES:
+                    lines.append(fallback)
             continue
         lines.append(line)
-        urls_added += 1
 
     hint = '\n'.join(lines)
     return _enforce_limit(hint)
@@ -356,6 +350,11 @@ def _get_complete_http_url(obj: dict) -> Optional[str]:
         value = value.strip()
         if re.match(r'^https?://[^\s]+$', value, re.IGNORECASE):
             return value
+    for field, value in obj.items():
+        if str(field).lower() in NON_ITEM_URL_FIELDS or not str(field).lower().endswith(('_url', '_link')):
+            continue
+        if isinstance(value, str) and re.match(r'^https?://[^\s]+$', value.strip(), re.IGNORECASE):
+            return value.strip()
     return None
 
 
@@ -562,14 +561,13 @@ def _hint_from_object(obj: dict) -> Optional[str]:
         if location:
             lines.append(f"📍 {location}")
 
-    # Keep a complete item URL adjacent to the entity that owns it.
+    # Make missing links explicit so nearby identifiers are not treated as URL parts.
     if item_type not in ('post', 'review'):
         url = _get_complete_http_url(obj)
         identity = _get_field(obj, IDENTITY_FIELDS, MAX_FIELD_LEN) or 'item'
-        if url:
-            url_line = f"→ {identity}: {url}"
-            if len('\n'.join([*lines, url_line]).encode('utf-8')) <= MAX_HINT_BYTES:
-                lines.append(url_line)
+        link_line = f"→ {identity} | item_link={url or 'none'}"
+        if len('\n'.join([*lines, link_line]).encode('utf-8')) <= MAX_HINT_BYTES:
+            lines.append(link_line)
 
     hint = '\n'.join(lines)
     return _enforce_limit(hint)

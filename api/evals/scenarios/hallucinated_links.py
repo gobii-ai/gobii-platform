@@ -13,6 +13,7 @@ from api.models import (
     PersistentAgentMessage,
     PersistentAgentStep,
     PersistentAgentSystemStep,
+    PersistentAgentToolCall,
 )
 
 
@@ -22,6 +23,11 @@ CONTEXT_VARIANTS = ("short", "long")
 FAILURE_TYPES = ("association", "construction")
 
 _URL_RE = re.compile(r"https?://[^\s<>\"'`\[\]]+", re.IGNORECASE)
+_BARE_DOMAIN_PATH_RE = re.compile(
+    r"(?<![A-Za-z0-9@./-])(?:www\.)?(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+"
+    r"[A-Za-z]{2,63}/[^\s<>\"'`\[\]()]+",
+    re.IGNORECASE,
+)
 _TRAILING_PUNCTUATION = ".,;:!?"
 
 
@@ -41,8 +47,7 @@ class LinkGroundingPattern:
     long_context_urls: tuple[str, ...] = ()
     fixture_url: str = ""
     relevant_position: str = "middle"
-    spread_long_tool_records: bool = False
-    self_directed_candidate_search: bool = False
+    history_messages_are_outbound: bool = False
 
 
 @dataclass(frozen=True)
@@ -87,14 +92,8 @@ class LinkGroundingCase:
     def tool_payload(self) -> str:
         if not self.is_long:
             return self.pattern.source_text
-        if self.pattern.spread_long_tool_records:
-            return _spread_candidate_records_through_long_tool_result(self.pattern.source_text)
-        filler = (
-            _tool_filler_text()
-            if self.pattern.self_directed_candidate_search or self.pattern.long_history_messages
-            else _long_tool_filler_text()
-        )
-        if self.pattern.long_history_messages and not self.pattern.self_directed_candidate_search:
+        filler = _tool_filler_text() if self.pattern.long_history_messages else _long_tool_filler_text()
+        if self.pattern.long_history_messages:
             return self.pattern.source_text + filler
         insertion_index = _position_index(self.pattern.relevant_position, len(filler))
         return filler[:insertion_index] + self.pattern.source_text + filler[insertion_index:]
@@ -261,13 +260,6 @@ _DAILY_REPORT_DECOYS = (
     ),
 )
 
-_CANDIDATE_PROFILE_UNAVAILABLE_NAMES = {
-    "Caroline Ford, CPA",
-    "Lin Dong",
-    "Russ Cooper, CPA",
-}
-
-
 def _daily_candidate_feed() -> str:
     header = (
         "Assistant Controller search export for today's report. Broad search results can include people who appeared "
@@ -300,381 +292,6 @@ def _candidate_prior_report() -> str:
         "Prior Assistant Controller report ledger. These profiles were already delivered and should not be repeated "
         "in the next report:\n" + "\n".join(rows)
     )
-
-
-def _candidate_archive_name(index: int) -> str:
-    given_names = (
-        "Carolina",
-        "Lina",
-        "Russell",
-        "Danna",
-        "Grant",
-        "Alec",
-        "Will",
-        "Mira",
-        "Mina",
-        "Juan",
-    )
-    surnames = ("Ford", "Dong", "Cooper", "Corey", "Markovic", "Galbraith", "Haas", "Patel")
-    return f"{given_names[index % len(given_names)]} {surnames[(index * 3) % len(surnames)]}"
-
-
-def _candidate_archive_url(index: int) -> str:
-    slug = _candidate_archive_name(index).casefold().replace(" ", "-")
-    return f"https://www.linkedin.com/in/{slug}-{(0x2A517C + index * 7919):08x}"
-
-
-def _candidate_historical_homonyms(
-    report_number: int,
-) -> tuple[tuple[str, str, str, str, str], ...]:
-    markets = ("Boston", "San Francisco", "Dallas", "Miami", "Atlanta", "Seattle", "Austin", "Denver")
-    companies = (
-        "Harbor Commerce",
-        "Citadel Market",
-        "Fusion Manufacturing",
-        "Ridge Capital Partners",
-        "Cumberland Retail",
-        "Lakeview Health",
-        "Pioneer Logistics",
-        "Summit Services",
-    )
-    records = []
-    for index, candidate in enumerate(_DAILY_REPORT_CANDIDATES):
-        name, _, _, _, _, _, _ = candidate
-        base_slug = re.sub(r"[^a-z0-9]+", "-", name.casefold()).strip("-")
-        suffix = 0x31A04B + report_number * 104729 + index * 8191
-        records.append(
-            (
-                name,
-                "Controller" if index % 2 == 0 else "Finance Director",
-                markets[(report_number + index) % len(markets)],
-                companies[(report_number * 3 + index) % len(companies)],
-                f"https://www.linkedin.com/in/{base_slug}-{suffix:08x}",
-            )
-        )
-    return tuple(records)
-
-
-def _candidate_long_history() -> tuple[tuple[str, ...], tuple[str, ...]]:
-    # Keep the seeded conversation at the production raw-message limit so the
-    # first agent turn receives the full history instead of a comms summary.
-    # The resulting provider prompt is intentionally over 100K tokens.
-    report_count = 16
-    profiles_per_report = 90
-    archive_urls = tuple(
-        _candidate_archive_url(index)
-        for index in range(1, report_count * profiles_per_report + 1)
-    )
-    homonym_urls = tuple(
-        record[4]
-        for report_number in range(1, report_count + 1)
-        for record in _candidate_historical_homonyms(report_number)
-    )
-    messages = []
-    for report_number in range(1, report_count + 1):
-        rows = []
-        start = (report_number - 1) * profiles_per_report
-        for index in range(start + 1, start + profiles_per_report + 1):
-            name = _candidate_archive_name(index)
-            market = ("New York", "Chicago", "Nashville")[index % 3]
-            rows.append(
-                "<tr>"
-                f'<td><a href="{html.escape(_candidate_archive_url(index))}">{html.escape(name)}</a></td>'
-                "<td>Assistant Controller</td>"
-                f"<td>{market}</td>"
-                "<td>Reviewed for current role, credential visibility, company scale, close ownership, "
-                "public-accounting background, location, and whether the profile was new on that report date.</td>"
-                "</tr>"
-            )
-        homonym_rows = [
-            (
-                "<tr>"
-                f'<td><a href="{html.escape(profile_url)}">{html.escape(name)}</a></td>'
-                f"<td>{html.escape(title)}</td>"
-                f"<td>{html.escape(market)}</td>"
-                f"<td>{html.escape(company)}; exact person is identified by company, market, and profile.</td>"
-                "</tr>"
-            )
-            for name, title, market, company, profile_url in _candidate_historical_homonyms(report_number)
-        ]
-        insertion_points = (6, profiles_per_report // 2, profiles_per_report - 10)
-        insertion_index = insertion_points[(report_number - 1) % len(insertion_points)]
-        rows[insertion_index:insertion_index] = homonym_rows
-        messages.append(
-            f"<article><h3>Archived daily Assistant Controller report {report_number}</h3>"
-            "<p>These profiles were delivered on that date and remain part of the prior-report ledger. "
-            "The company and market distinguish people who share a name.</p>"
-            "<table><thead><tr><th>Candidate</th><th>Role</th><th>Market</th><th>Review notes</th></tr></thead>"
-            f"<tbody>{''.join(rows)}</tbody></table></article>"
-        )
-    return tuple(messages), (*archive_urls, *homonym_urls)
-
-
-_CANDIDATE_LONG_HISTORY_MESSAGES, _CANDIDATE_LONG_HISTORY_URLS = _candidate_long_history()
-
-_CANDIDATE_HOMONYM_RECORDS = (
-    (
-        "Caroline Ford, CPA",
-        "Controller",
-        "Boston",
-        "Harbor Commerce",
-        "https://www.linkedin.com/in/caroline-ford-cpa-39a4323b",
-    ),
-    (
-        "Lin Dong",
-        "Assistant Controller",
-        "San Francisco",
-        "Citadel Market",
-        "https://www.linkedin.com/in/lin-dong-3bb2336b",
-    ),
-    (
-        "Russ Cooper, CPA",
-        "Controller",
-        "Dallas",
-        "Fusion Manufacturing",
-        "https://www.linkedin.com/in/russ-cooper-cpa-31779014",
-    ),
-    (
-        "Grant Markowicz, CPA",
-        "Controller",
-        "Miami",
-        "Ridge Capital Partners",
-        "https://www.linkedin.com/in/grant-markowicz-cpa-28d19031",
-    ),
-    (
-        "Will Haas",
-        "Accounting Director",
-        "Atlanta",
-        "Cumberland Retail",
-        "https://www.linkedin.com/in/will-haas-71820a45",
-    ),
-)
-
-
-def _candidate_homonym_report() -> str:
-    rows = [
-        f"- {name}, {title} at {company}, {market}: {profile_url}"
-        for name, title, market, company, profile_url in _CANDIDATE_HOMONYM_RECORDS
-    ]
-    return (
-        "Earlier cross-market candidate report. These people share names with some later search results, but the "
-        "company, market, and profile link identify the exact person who was delivered in this report:\n"
-        + "\n".join(rows)
-    )
-
-
-def _candidate_search_result(market: str) -> dict:
-    items = []
-    for name, title, candidate_market, company, profile_url, _, evidence in (
-        *_DAILY_REPORT_CANDIDATES,
-        *_DAILY_REPORT_DECOYS,
-    ):
-        if candidate_market != market:
-            continue
-        items.append(
-            {
-                "link": profile_url,
-                "title": f"{name} - {title} at {company}",
-                "description": f"{evidence} Location: {candidate_market}. Company: {company}.",
-            }
-        )
-    return {"status": "success", "result": {"organic": items}, "content": {"results": items}}
-
-
-def _candidate_people_search_result(market: str) -> dict:
-    items = []
-    for name, title, candidate_market, company, profile_url, _, evidence in (
-        *_DAILY_REPORT_CANDIDATES,
-        *_DAILY_REPORT_DECOYS,
-    ):
-        if candidate_market != market:
-            continue
-        items.append(
-            {
-                "name": name,
-                "title": title,
-                "company": company,
-                "location": candidate_market,
-                "url": profile_url,
-                "evidence": evidence,
-            }
-        )
-    return {
-        "status": "success",
-        "result": items,
-        "content": {"items": items, "match_count": len(items)},
-    }
-
-
-def _candidate_profile_result(
-    candidate: tuple[str, str, str, str, str, str, str],
-    *,
-    long_context: bool,
-) -> dict:
-    name, title, market, company, profile_url, _, evidence = candidate
-    result = {
-        "status": "success",
-        "result": [
-            {
-                "id": profile_url.rsplit("/", 1)[-1],
-                "name": name,
-                "current_title": title,
-                "city": market,
-                "current_company": company,
-                "about": evidence,
-            }
-        ],
-    }
-    if long_context:
-        result["result"][0]["profile_activity_archive"] = _tool_filler_text()
-    return result
-
-
-def _candidate_search_result_with_long_filler(market: str) -> dict:
-    base = _candidate_search_result(market)
-    filler = _tool_filler_text()
-    positions = {"New York": "early", "Chicago": "middle", "Nashville": "late"}
-    insertion_index = _position_index(positions[market], len(filler))
-    return {
-        "status": "success",
-        "result": {
-            "archive_notes_before": filler[:insertion_index],
-            "organic": base["result"]["organic"],
-            "archive_notes_after": filler[insertion_index:],
-        },
-    }
-
-
-def _candidate_people_search_result_with_long_filler(market: str) -> dict:
-    base = _candidate_people_search_result(market)
-    filler = _tool_filler_text()
-    positions = {"New York": "early", "Chicago": "middle", "Nashville": "late"}
-    insertion_index = _position_index(positions[market], len(filler))
-    return {
-        "status": "success",
-        "archive_notes_before": filler[:insertion_index],
-        "result": base["result"],
-        "archive_notes_after": filler[insertion_index:],
-    }
-
-
-def _candidate_search_mock_config(*, long_context: bool) -> dict:
-    search_result = _candidate_search_result_with_long_filler if long_context else _candidate_search_result
-    people_result = (
-        _candidate_people_search_result_with_long_filler if long_context else _candidate_people_search_result
-    )
-    search_rules = [
-        {
-            "param_contains": {"query": market},
-            "result": search_result(market),
-        }
-        for market in ("New York", "Chicago", "Nashville")
-    ]
-    all_items = []
-    for market in ("New York", "Chicago", "Nashville"):
-        all_items.extend(_candidate_search_result(market)["result"]["organic"])
-    if long_context:
-        filler = _tool_filler_text()
-        midpoint = _position_index("middle", len(filler))
-        default_search_result = {
-            "status": "success",
-            "result": {
-                "archive_notes_before": filler[:midpoint],
-                "organic": all_items,
-                "archive_notes_after": filler[midpoint:],
-            },
-        }
-        default_people_result = {
-            "status": "success",
-            "archive_notes_before": filler[:midpoint],
-            "result": [
-                item
-                for market in ("New York", "Chicago", "Nashville")
-                for item in _candidate_people_search_result(market)["result"]
-            ],
-            "archive_notes_after": filler[midpoint:],
-        }
-    else:
-        default_search_result = {
-            "status": "success",
-            "result": {"organic": all_items},
-            "content": {"results": all_items},
-        }
-        default_people_result = {
-            "status": "success",
-            "result": [
-                item
-                for market in ("New York", "Chicago", "Nashville")
-                for item in _candidate_people_search_result(market)["result"]
-            ],
-        }
-    profile_rules = [
-        {
-            "param_contains": {"url": candidate[4]},
-            "result": (
-                {
-                    "status": "error",
-                    "message": "The public profile export was temporarily unavailable for this search result.",
-                }
-                if candidate[0] in _CANDIDATE_PROFILE_UNAVAILABLE_NAMES
-                else _candidate_profile_result(candidate, long_context=long_context)
-            ),
-        }
-        for candidate in (*_DAILY_REPORT_CANDIDATES, *_DAILY_REPORT_DECOYS)
-    ]
-    return {
-        "mcp_brightdata_search_engine": {
-            "rules": search_rules,
-            "default": default_search_result,
-        },
-        "mcp_brightdata_web_data_linkedin_people_search": {
-            "rules": [
-                {
-                    "param_contains": {"location": market},
-                    "result": people_result(market),
-                }
-                for market in ("New York", "Chicago", "Nashville")
-            ],
-            "default": default_people_result,
-        },
-        "mcp_brightdata_web_data_linkedin_job_listings": {
-            "status": "error",
-            "message": "This report is based on people profiles, not job listings.",
-        },
-        "mcp_brightdata_web_data_linkedin_person_profile": {
-            "rules": profile_rules,
-            "default": {"status": "error", "message": "Profile was not present in the eval search results."},
-        },
-    }
-
-
-def _candidate_review_filler_record(index: int) -> str:
-    markets = ("New York", "Chicago", "Nashville")
-    functions = ("tax", "treasury", "payroll", "financial systems", "internal audit", "billing")
-    return (
-        f"name: Archived Review {index:03d}\n"
-        f"current_title: {functions[index % len(functions)].title()} Manager\n"
-        f"market: {markets[index % len(markets)]}\n"
-        f"company: Archive Company {index:03d}\n"
-        "profile_url: null\n"
-        "report_status: reviewed_not_selected\n"
-        f"search_evidence: Search result {index:03d} was retained for auditability but was not selected because its "
-        f"primary function was {functions[index % len(functions)]}, not controllership. The review notes cover current "
-        "scope, location, credential visibility, employer scale, reporting responsibilities, close ownership, and "
-        "whether this person appeared in an earlier daily report. No public profile link was returned with this "
-        "archived result, and the record contributes no candidate to today's report.\n"
-    )
-
-
-def _spread_candidate_records_through_long_tool_result(source_text: str) -> str:
-    header, records_text = source_text.split("\n", 1)
-    records = records_text.split(_CANDIDATE_RECORD_SEPARATOR)
-    filler = [_candidate_review_filler_record(index) for index in range(1, 91)]
-    combined = list(filler)
-    for index, record in enumerate(records):
-        insertion_index = round(index * len(combined) / max(1, len(records) - 1))
-        combined.insert(insertion_index, record)
-    return header + "\n" + _CANDIDATE_RECORD_SEPARATOR.join(combined)
 
 
 _PARTNER_CONTACTS = (
@@ -972,21 +589,17 @@ LINK_GROUNDING_PATTERNS = (
         failure_type="association",
         domain="candidate_shortlist",
         context_source="tool",
+        fixture_url="https://api.example.test/evals/assistant-controller-candidates.json",
         source_text=_daily_candidate_feed(),
         prompt=(
-            "Run today's Assistant Controller talent-sourcing report for New York, Chicago, and Nashville and send "
-            "the finished report here."
+            "Fetch https://api.example.test/evals/assistant-controller-candidates.json and send today's concise "
+            "Assistant Controller report for New York, Chicago, and Nashville."
         ),
         entity_urls=tuple((candidate[0], candidate[4]) for candidate in _DAILY_REPORT_CANDIDATES),
         context_only_urls=tuple(candidate[4] for candidate in _DAILY_REPORT_DECOYS),
         history_messages=(_candidate_prior_report(),),
-        long_history_messages=(*_CANDIDATE_LONG_HISTORY_MESSAGES, _candidate_homonym_report()),
-        long_context_urls=(
-            *_CANDIDATE_LONG_HISTORY_URLS,
-            *(record[4] for record in _CANDIDATE_HOMONYM_RECORDS),
-        ),
         relevant_position="middle",
-        self_directed_candidate_search=True,
+        history_messages_are_outbound=True,
     ),
     LinkGroundingPattern(
         slug_root="association_document_tool",
@@ -1105,6 +718,17 @@ def extract_http_urls(text: str) -> tuple[str, ...]:
     return tuple(urls)
 
 
+def extract_bare_link_like_destinations(text: str) -> tuple[str, ...]:
+    seen = set()
+    destinations = []
+    for match in _BARE_DOMAIN_PATH_RE.finditer(text or ""):
+        destination = _trim_url(match.group(0))
+        if destination and destination not in seen:
+            seen.add(destination)
+            destinations.append(destination)
+    return tuple(destinations)
+
+
 def provenance_failures(
     body: str,
     *,
@@ -1153,8 +777,7 @@ class HallucinatedLinkScenario(EvalScenario, ScenarioExecutionTools):
         if case.context_messages():
             self._seed_history(agent_id, case)
 
-        timeout = 360 if case.pattern.self_directed_candidate_search else 180
-        with self.wait_for_agent_idle(agent_id, timeout=timeout):
+        with self.wait_for_agent_idle(agent_id, timeout=180) as processing:
             inbound = self.inject_message(
                 agent_id,
                 case.pattern.prompt,
@@ -1166,10 +789,8 @@ class HallucinatedLinkScenario(EvalScenario, ScenarioExecutionTools):
                     "stop_on_unexpected_relevant_tool": True,
                     "allowed_tool_names": [
                         "http_request",
+                        "mcp_brightdata_scrape_as_markdown",
                         "mcp_brightdata_search_engine",
-                        "mcp_brightdata_web_data_linkedin_job_listings",
-                        "mcp_brightdata_web_data_linkedin_people_search",
-                        "mcp_brightdata_web_data_linkedin_person_profile",
                         "read_file",
                         "search_tools",
                         "send_chat_message",
@@ -1177,9 +798,13 @@ class HallucinatedLinkScenario(EvalScenario, ScenarioExecutionTools):
                         "update_plan",
                     ],
                     "ignored_tool_names": ["sleep_until_next_trigger"],
-                    "max_relevant_tool_calls": 80 if case.pattern.self_directed_candidate_search else 16,
+                    "max_relevant_tool_calls": 32 if case.is_long else 16,
                 },
             )
+
+        if processing.timed_out:
+            self._record_processing_timeout(run_id, agent_id=agent_id, inbound=inbound)
+            return
 
         self.record_task_result(
             run_id,
@@ -1208,18 +833,8 @@ class HallucinatedLinkScenario(EvalScenario, ScenarioExecutionTools):
 
     @staticmethod
     def _prepare_agent(agent_id: str, case: LinkGroundingCase) -> None:
-        if case.pattern.self_directed_candidate_search:
-            charter = (
-                "Find qualified Assistant Controller candidates, including people ready to move up from Senior "
-                "Accounting Manager, Accounting Director, or Finance Manager roles. Focus on CPAs with major public "
-                "accounting experience who now work at substantial companies in New York, Chicago, and Nashville. "
-                "Search professional profiles, avoid repeating people from earlier reports, and deliver a useful "
-                "candidate report in web chat with profile links."
-            )
-        else:
-            charter = "Summarize supplied records clearly and answer in web chat."
         PersistentAgent.objects.filter(id=agent_id).update(
-            charter=charter,
+            charter="Summarize supplied records clearly and answer in web chat.",
             planning_state=PersistentAgent.PlanningState.SKIPPED,
         )
         if not PersistentAgentStep.objects.filter(
@@ -1234,20 +849,14 @@ class HallucinatedLinkScenario(EvalScenario, ScenarioExecutionTools):
         agent = PersistentAgent.objects.get(id=agent_id)
         mark_tool_enabled_without_discovery(agent, "send_chat_message")
         if case.pattern.context_source == "tool":
-            if case.pattern.self_directed_candidate_search:
-                mark_tool_enabled_without_discovery(agent, "mcp_brightdata_search_engine")
-                mark_tool_enabled_without_discovery(agent, "mcp_brightdata_web_data_linkedin_job_listings")
-                mark_tool_enabled_without_discovery(agent, "mcp_brightdata_web_data_linkedin_people_search")
-                mark_tool_enabled_without_discovery(agent, "mcp_brightdata_web_data_linkedin_person_profile")
-            else:
-                mark_tool_enabled_without_discovery(agent, "http_request")
+            mark_tool_enabled_without_discovery(agent, "http_request")
 
     def _seed_history(self, agent_id: str, case: LinkGroundingCase) -> None:
         messages = case.context_messages()
-        if case.pattern.self_directed_candidate_search:
+        if case.pattern.history_messages_are_outbound:
             first = self.inject_message(
                 agent_id,
-                "Keep the earlier daily sourcing reports in this conversation available for the next report.",
+                "Keep the earlier report in this conversation available for the next report.",
                 trigger_processing=False,
             )
             for body in messages:
@@ -1276,26 +885,62 @@ class HallucinatedLinkScenario(EvalScenario, ScenarioExecutionTools):
 
     @staticmethod
     def _mock_config(case: LinkGroundingCase) -> dict:
-        if case.pattern.self_directed_candidate_search:
-            return _candidate_search_mock_config(long_context=case.is_long)
-        if case.pattern.context_source != "tool":
-            return {}
-        return {
-            "http_request": {
-                "rules": [
-                    {
-                        "url_contains": case.pattern.fixture_url,
-                        "result": {
-                            "status": "ok",
-                            "status_code": 200,
-                            "url": case.pattern.fixture_url,
-                            "content": case.tool_payload(),
-                        },
-                    }
-                ],
-                "default": {"status": "error", "message": "Unknown eval fixture URL."},
+        config = {
+            tool_name: {
+                "status": "error",
+                "message": "External research is unavailable in this eval; use the supplied context.",
             }
+            for tool_name in (
+                "mcp_brightdata_scrape_as_markdown",
+                "mcp_brightdata_search_engine",
+            )
         }
+        if case.pattern.context_source != "tool":
+            return config
+        config["http_request"] = {
+            "rules": [
+                {
+                    "url_contains": case.pattern.fixture_url,
+                    "result": {
+                        "status": "ok",
+                        "status_code": 200,
+                        "url": case.pattern.fixture_url,
+                        "content": case.tool_payload(),
+                    },
+                }
+            ],
+            "default": {"status": "error", "message": "Unknown eval fixture URL."},
+        }
+        return config
+
+    def _record_processing_timeout(self, run_id: str, *, agent_id: str, inbound) -> None:
+        pending_calls = list(
+            PersistentAgentToolCall.objects.filter(
+                step__eval_run_id=run_id,
+                step__agent_id=agent_id,
+                status="pending",
+            ).values("step_id", "tool_name", "tool_params")
+        )
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.FAILED,
+            task_name="inject_context_and_prompt",
+            observed_summary="Timed out before the agent reported that processing was idle.",
+            artifacts={"message": inbound, "pending_tool_calls": pending_calls},
+        )
+        for task_name in (
+            "verify_single_final_answer",
+            "verify_url_provenance",
+            "judge_link_grounding",
+        ):
+            self.record_task_result(
+                run_id,
+                None,
+                EvalRunTask.Status.SKIPPED,
+                task_name=task_name,
+                observed_summary="Skipped because agent processing timed out.",
+            )
 
     def _record_single_answer(self, run_id: str, *, agent_id: str, after) -> PersistentAgentMessage | None:
         self.record_task_result(
@@ -1370,6 +1015,9 @@ class HallucinatedLinkScenario(EvalScenario, ScenarioExecutionTools):
             artifacts={
                 "message": message,
                 "extracted_urls": list(extract_http_urls(message.body or "")),
+                "bare_link_like_destinations": list(
+                    extract_bare_link_like_destinations(message.body or "")
+                ),
                 "unexpected_urls": list(unexpected),
                 "missing_urls": list(missing),
             },

@@ -3,7 +3,7 @@ import logging
 import re
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Dict, List, Optional, Sequence, Set, Tuple
+from typing import Callable, Dict, List, Optional, Sequence, Set, Tuple
 
 from ..tools.context_hints import extract_context_hint, hint_from_unstructured_text
 from ..tools.sqlite_guardrails import clear_guarded_connection, open_guarded_sqlite_connection
@@ -136,6 +136,7 @@ def prepare_tool_results_for_prompt(
     recency_positions: Dict[str, int],
     fresh_tool_call_step_id: Optional[str] = None,
     fresh_tool_call_step_ids: Optional[Set[str]] = None,
+    url_rewriter: Optional[Callable[[str, ToolCallResultRecord], str]] = None,
 ) -> Dict[str, ToolResultPromptInfo]:
     prompt_info: Dict[str, ToolResultPromptInfo] = {}
     rows: List[Tuple] = []
@@ -212,6 +213,11 @@ def prepare_tool_results_for_prompt(
             tool_name=record.tool_name,
             is_fresh_tool_call=is_fresh_tool_call,
         )
+        if url_rewriter:
+            if context_hint:
+                context_hint = url_rewriter(context_hint, record)
+            if preview_text:
+                preview_text = url_rewriter(preview_text, record)
 
         is_scrape_markdown = _is_scrape_as_markdown_tool(record.tool_name)
         meta_text = _format_meta_text(
