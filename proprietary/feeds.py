@@ -8,6 +8,11 @@ from proprietary.utils_blog import get_all_blog_posts
 BLOG_FEED_ITEM_LIMIT = 20
 
 
+def _feed_sort_key(post):
+    activity_at = post.get("updated_at") or post.get("published_at")
+    return activity_at is not None, activity_at
+
+
 class BlogFeed(Feed):
     title = "Gobii AI Agent Automation Blog"
     description = (
@@ -32,7 +37,7 @@ class BlogFeed(Feed):
     def items(self):
         posts = sorted(
             get_all_blog_posts(),
-            key=lambda post: post["updated_at"] or post["published_at"],
+            key=_feed_sort_key,
             reverse=True,
         )
         return posts[:BLOG_FEED_ITEM_LIMIT]

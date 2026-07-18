@@ -96,6 +96,27 @@ class BlogSeoTests(TestCase):
         self.assertIs(feed_items[0], oldest_post)
         self.assertIn(oldest_post, feed_items)
 
+    def test_blog_feed_sorts_undated_posts_last(self):
+        published_at = datetime(2026, 7, 31, tzinfo=timezone.utc)
+        dated_post = {
+            "slug": "dated-post",
+            "published_at": published_at,
+            "updated_at": published_at,
+        }
+        undated_post = {
+            "slug": "undated-post",
+            "published_at": None,
+            "updated_at": None,
+        }
+
+        with patch(
+            "proprietary.feeds.get_all_blog_posts",
+            return_value=[undated_post, dated_post],
+        ):
+            feed_items = BlogFeed().items()
+
+        self.assertEqual(feed_items, [dated_post, undated_post])
+
     @override_settings(GOBII_PROPRIETARY_MODE=False)
     def test_blog_feed_is_not_available_outside_proprietary_mode(self):
         response = self.client.get("/blog/feed.xml")
