@@ -117,7 +117,74 @@ def _enrich_blog_html(html: str, fallback_alt: str) -> str:
         elif not image.get("loading"):
             image["loading"] = "lazy"
 
+    for table in soup.find_all("table"):
+        first_row = table.find("tr")
+        column_count = (
+            len(first_row.find_all(["th", "td"], recursive=False))
+            if first_row
+            else 0
+        )
+        width_class = (
+            "blog-table-scroll--wide"
+            if column_count >= 4
+            else "blog-table-scroll--compact"
+        )
+        wrapper = soup.new_tag("div")
+        wrapper["class"] = ["blog-table-scroll", width_class]
+        wrapper["role"] = "region"
+        wrapper["aria-label"] = "Scrollable data table"
+        wrapper["tabindex"] = "0"
+        table.wrap(wrapper)
+
     return str(soup)
+
+
+def extract_blog_faq_items(html: str) -> list[dict[str, str]]:
+    soup = BeautifulSoup(html, "html.parser")
+    faq_heading = next(
+        (
+            heading
+            for heading in soup.find_all("h2")
+            if heading.get_text(" ", strip=True).casefold()
+            in {"faq", "frequently asked questions"}
+        ),
+        None,
+    )
+    if faq_heading is None:
+        return []
+
+    items = []
+    current_question = None
+    answer_parts = []
+
+    for sibling in faq_heading.find_next_siblings():
+        if sibling.name == "h2":
+            break
+        if sibling.name == "h3":
+            if current_question and answer_parts:
+                items.append(
+                    {
+                        "question": current_question,
+                        "answer": " ".join(answer_parts),
+                    }
+                )
+            current_question = sibling.get_text(" ", strip=True)
+            answer_parts = []
+            continue
+        if current_question:
+            answer_text = sibling.get_text(" ", strip=True)
+            if answer_text:
+                answer_parts.append(answer_text)
+
+    if current_question and answer_parts:
+        items.append(
+            {
+                "question": current_question,
+                "answer": " ".join(answer_parts),
+            }
+        )
+
+    return items
 
 
 @lru_cache(maxsize=100)
@@ -158,6 +225,7 @@ def load_blog_post(slug: str):
         "updated_at": updated_at,
         "word_count": _word_count(text_content),
         "image_alt": meta.get("image_alt") or _first_image_alt(html) or f"{title} image",
+        "has_lightbox": "data-lightbox=" in html,
     }
 
 @lru_cache(maxsize=1)

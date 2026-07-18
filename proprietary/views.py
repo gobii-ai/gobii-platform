@@ -17,7 +17,7 @@ from django.views.generic import TemplateView, RedirectView
 from django.core.mail import send_mail, BadHeaderError, EmailMultiAlternatives
 
 from proprietary.forms import SupportForm, PrequalifyForm
-from proprietary.utils_blog import load_blog_post, get_all_blog_posts
+from proprietary.utils_blog import extract_blog_faq_items, get_all_blog_posts, load_blog_post
 from util.waffle_flags import is_waffle_flag_active
 from util.subscription_helper import get_user_plan
 from api.services.trial_abuse import evaluate_user_trial_eligibility, user_has_prior_individual_history
@@ -1086,6 +1086,11 @@ class BlogPostView(ProprietaryModeRequiredMixin, TemplateView):
         default_image_url = self.request.build_absolute_uri(static(default_image_path))
 
         seo_title = post["meta"].get("seo_title") or post["meta"].get("title") or slug.replace("-", " ").title()
+        browser_title = (
+            seo_title
+            if str(seo_title).rstrip().endswith((" | Gobii", " - Gobii"))
+            else f"{seo_title} - Gobii"
+        )
         seo_description = (
             post["meta"].get("seo_description")
             or post["meta"].get("description")
@@ -1100,8 +1105,17 @@ class BlogPostView(ProprietaryModeRequiredMixin, TemplateView):
         else:
             og_image_url = default_image_url
             og_image_alt = default_image_alt
+        image_extension = og_image_url.split("?", 1)[0].lower().rsplit(".", 1)[-1]
+        og_image_type = {
+            "jpg": "image/jpeg",
+            "jpeg": "image/jpeg",
+            "png": "image/png",
+            "webp": "image/webp",
+            "svg": "image/svg+xml",
+        }.get(image_extension)
 
         keywords = _keyword_list(post["meta"].get("keywords")) or _keyword_list(post["meta"].get("tags"))
+        faq_items = extract_blog_faq_items(post["html"])
 
         published_at = post.get("published_at")
         published_iso = published_at.isoformat() if published_at else None
@@ -1147,6 +1161,145 @@ class BlogPostView(ProprietaryModeRequiredMixin, TemplateView):
         if keywords:
             structured_data["keywords"] = keywords
 
+        if post["meta"].get("schema_graph"):
+            site_url = self.request.build_absolute_uri("/")
+            organization_id = f"{site_url}#organization"
+            article_id = f"{canonical_url}#article"
+            image_id = f"{canonical_url}#primaryimage"
+            author_type = author["@type"]
+            author_url = author.get("url")
+            author_is_publisher = (
+                author_type == "Organization"
+                and str(author["name"]).casefold() == "gobii"
+            )
+            if author_is_publisher:
+                author_id = organization_id
+            elif author_url:
+                author_fragment = (
+                    "person" if author_type == "Person" else "organization"
+                )
+                author_id = f"{str(author_url).rstrip('/')}#{author_fragment}"
+            else:
+                author_id = f"{canonical_url}#author"
+
+            article_schema = {
+                key: value
+                for key, value in structured_data.items()
+                if key != "@context"
+            }
+            article_schema.update(
+                {
+                    "@id": article_id,
+                    "author": {"@id": author_id},
+                    "publisher": {"@id": organization_id},
+                    "image": {"@id": image_id},
+                }
+            )
+
+            author_schema = {
+                "@type": author_type,
+                "@id": author_id,
+                "name": author["name"],
+            }
+            if author_type == "Person":
+                author_schema["worksFor"] = {"@id": organization_id}
+            if author_url:
+                author_schema["url"] = author_url
+            if author_type == "Person" and author.get("jobTitle"):
+                author_schema["jobTitle"] = author["jobTitle"]
+            if post["meta"].get("author_bio"):
+                author_schema["description"] = post["meta"]["author_bio"]
+            author_same_as = _keyword_list(post["meta"].get("author_same_as"))
+            if author_same_as:
+                author_schema["sameAs"] = author_same_as
+
+            organization_schema = {
+                "@type": "Organization",
+                "@id": organization_id,
+                "name": "Gobii",
+                "url": site_url,
+                "logo": {
+                    "@type": "ImageObject",
+                    "url": brand_logo_url,
+                },
+            }
+            if author_is_publisher:
+                if post["meta"].get("author_bio"):
+                    organization_schema["description"] = post["meta"]["author_bio"]
+                if author_same_as:
+                    organization_schema["sameAs"] = author_same_as
+            image_schema = {
+                "@type": "ImageObject",
+                "@id": image_id,
+                "url": og_image_url,
+                "contentUrl": og_image_url,
+                "caption": og_image_alt,
+            }
+            if post["meta"].get("image_width"):
+                image_schema["width"] = post["meta"]["image_width"]
+            if post["meta"].get("image_height"):
+                image_schema["height"] = post["meta"]["image_height"]
+
+            breadcrumb_schema = {
+                "@type": "BreadcrumbList",
+                "@id": f"{canonical_url}#breadcrumb",
+                "itemListElement": [
+                    {
+                        "@type": "ListItem",
+                        "position": 1,
+                        "name": "Home",
+                        "item": site_url,
+                    },
+                    {
+                        "@type": "ListItem",
+                        "position": 2,
+                        "name": "Blog",
+                        "item": self.request.build_absolute_uri(
+                            reverse("proprietary:blog_index")
+                        ),
+                    },
+                    {
+                        "@type": "ListItem",
+                        "position": 3,
+                        "name": post["meta"].get("breadcrumb_title") or seo_title,
+                        "item": canonical_url,
+                    },
+                ],
+            }
+
+            graph = [article_schema]
+            if not author_is_publisher:
+                graph.append(author_schema)
+            graph.extend(
+                [
+                    organization_schema,
+                    image_schema,
+                    breadcrumb_schema,
+                ]
+            )
+            if faq_items:
+                graph.append(
+                    {
+                        "@type": "FAQPage",
+                        "@id": f"{canonical_url}#faq",
+                        "mainEntity": [
+                            {
+                                "@type": "Question",
+                                "name": item["question"],
+                                "acceptedAnswer": {
+                                    "@type": "Answer",
+                                    "text": item["answer"],
+                                },
+                            }
+                            for item in faq_items
+                        ],
+                    }
+                )
+            structured_data = {
+                "@context": "https://schema.org",
+                "@graph": graph,
+            }
+
         faq_items = _blog_faq_items(post["meta"].get("faq"))
         if faq_items:
             article_schema = dict(structured_data)
@@ -1180,12 +1333,22 @@ class BlogPostView(ProprietaryModeRequiredMixin, TemplateView):
             {
                 "post": post,
                 "seo_title": seo_title,
+                "browser_title": browser_title,
                 "seo_description": seo_description,
                 "canonical_url": canonical_url,
                 "og_image_url": og_image_url,
                 "og_image_alt": og_image_alt,
+                "og_image_type": og_image_type,
+                "og_image_width": post["meta"].get("image_width"),
+                "og_image_height": post["meta"].get("image_height"),
                 "recent_posts": recent_posts,
                 "structured_data_json": json.dumps(structured_data, ensure_ascii=False),
+                "suppress_preline": True,
+                "suppress_htmx": True,
+                "suppress_public_conversion_assets": True,
+                "suppress_phone_format_js": True,
+                "suppress_rewardful_js": True,
+                "suppress_stripe_js": True,
             }
         )
 
@@ -1196,6 +1359,8 @@ class BlogSitemap(sitemaps.Sitemap):
     changefreq = 'weekly'
 
     def items(self):
+        if not settings.GOBII_PROPRIETARY_MODE:
+            return []
         return get_all_blog_posts()
 
     def location(self, item):

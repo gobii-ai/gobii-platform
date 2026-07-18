@@ -2832,6 +2832,12 @@ class DataDeletionPolicyView(TemplateView):
     template_name = "data-deletion.html"
 
 
+class EditorialPolicyView(TemplateView):
+    """Public standards for Gobii articles and corrections."""
+
+    template_name = "editorial-policy.html"
+
+
 class SpecialAccessView(TemplateView):
     template_name = "special_access.html"
 
@@ -3938,6 +3944,7 @@ class StaticViewSitemap(sitemaps.Sitemap):
                 'proprietary:teams',
                 'proprietary:tos',
                 'proprietary:privacy',
+                'proprietary:editorial_policy',
                 'proprietary:about',
                 'proprietary:team',
                 'proprietary:careers',

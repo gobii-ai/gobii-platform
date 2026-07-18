@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+
+{% block title %}Editorial Policy | Gobii{% endblock %}
+
+{% block head_extras %}
+  {{ block.super }}
+  <meta name="description" content="How Gobii authors, sources, reviews, updates, and corrects articles about AI agents and business workflows.">
+{% endblock %}
+
+{% block content %}
+<article class="bg-white text-slate-900">
+  <div class="mx-auto max-w-3xl px-6 py-16 sm:py-20">
+    <h1 class="text-4xl font-semibold tracking-tight sm:text-5xl">Editorial Policy</h1>
+    <p class="mt-4 text-sm text-slate-600"><em>Last updated: July 9, 2026</em></p>
+    <p class="mt-8 text-lg leading-relaxed text-slate-700">
+      This policy covers articles, guides, comparisons, case studies, and product updates published on the Gobii website. It explains how we handle authorship, evidence, commercial context, updates, and corrections.
+    </p>
+
+    <div class="prose prose-slate mt-12 max-w-none lg:prose-lg">
+      <h2>Editorial standards</h2>
+      <p>We aim to publish useful, accurate material that clearly separates verified facts, Gobii's perspective, and first-hand experience. We do not publish invented statistics, customer outcomes, credentials, or deployment results.</p>
+
+      <h2>Authorship and review</h2>
+      <p>Guides and analysis should identify the person responsible for the article when a named author is available. Product release notes may use an organizational byline. Authors and editors are responsible for checking substantive claims, links, examples, and disclosures before publication.</p>
+
+      <h2>Sources and evidence</h2>
+      <p>Substantive claims about safety, permissions, data handling, evaluation, or regulation should link to primary or authoritative sources where practical. Quantitative claims should identify the source and year in the prose and include a source entry with a retrieval date. Product claims should link to documentation, public implementation details, or a clearly labeled first-hand test.</p>
+      <p>We identify anonymized examples as such and publish customer details or quotations only when we have permission. We do not present hypothetical workflows as observed deployments.</p>
+
+      <h2>Commercial context</h2>
+      <p>Gobii publishes material about problems its product is designed to solve. Readers should expect that perspective. Comparisons and recommendations should explain their criteria, avoid unsupported competitor claims, and disclose any material commercial relationship that could affect the coverage.</p>
+
+      <h2>AI-assisted editorial work</h2>
+      <p>Our team may use AI tools to help organize research, develop drafts, edit copy, or check technical implementation. A human editor remains accountable for the published article. AI-generated output is not treated as evidence, and factual claims must be checked against the cited source or first-hand record.</p>
+
+      <h2>Updates and corrections</h2>
+      <p>We update articles when product behavior, cited guidance, links, or other material facts change. Updated articles show a revised date in their metadata. When an error could change a reader's understanding or decision, we correct it promptly and add a visible correction note when context requires one.</p>
+      <p>To request a correction, use our <a href="{% url 'proprietary:contact' %}">contact page</a> and include the article URL, the statement in question, and any supporting source. We review the underlying evidence before changing the article.</p>
+    </div>
+  </div>
+</article>
+{% endblock %}

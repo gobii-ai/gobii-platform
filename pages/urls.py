@@ -65,10 +65,8 @@ def markdown_page_view(request, *args, **kwargs):
 
 sitemaps = {
     'static': StaticViewSitemap,
+    'blog': BlogSitemap,
 }
-
-if settings.GOBII_PROPRIETARY_MODE:
-    sitemaps['blog'] = BlogSitemap
 
 sitemaps['comparisons'] = ComparisonsSitemap
 sitemaps['public_template_categories'] = PublicTemplateCategorySitemap
