@@ -8,6 +8,10 @@ from api.evals.scenarios.custom_tool_result_contract import CUSTOM_TOOL_RESULT_C
 from api.evals.scenarios.daily_credit_prompt import DAILY_CREDIT_PROMPT_SCENARIO_SLUGS, DAILY_CREDIT_PROMPT_SUITE_SLUG
 from api.evals.scenarios.sqlite_tool_results import SQLITE_TOOL_RESULT_SCENARIO_SLUGS, SQLITE_TOOL_RESULT_SUITE_SLUG
 from api.evals.scenarios.message_quality import MESSAGE_QUALITY_SCENARIO_SLUGS, MESSAGE_QUALITY_SUITE_SLUG
+from api.evals.scenarios.reddit_content_quality import (
+    REDDIT_CONTENT_QUALITY_SCENARIO_SLUGS,
+    REDDIT_CONTENT_QUALITY_SUITE_SLUG,
+)
 from api.evals.scenarios.google_sheets_native import GOOGLE_SHEETS_NATIVE_SCENARIO_SLUGS, GOOGLE_SHEETS_NATIVE_SUITE_SLUG
 from api.evals.scenarios.apollo_native import APOLLO_NATIVE_SCENARIO_SLUGS, APOLLO_NATIVE_SUITE_SLUG
 from api.evals.scenarios.recruitment_sourcing import RECRUITMENT_SOURCING_SCENARIO_SLUGS, RECRUITMENT_SOURCING_SUITE_SLUG
@@ -85,6 +89,11 @@ register_builtin_suites(
             slug=MESSAGE_QUALITY_SUITE_SLUG,
             description="Message-quality evals for rich reports and recipient-aware email, chat, and SMS communication.",
             scenario_slugs=MESSAGE_QUALITY_SCENARIO_SLUGS,
+        ),
+        EvalSuite(
+            slug=REDDIT_CONTENT_QUALITY_SUITE_SLUG,
+            description="Reddit comment and post quality evals for grounded, useful community participation.",
+            scenario_slugs=REDDIT_CONTENT_QUALITY_SCENARIO_SLUGS,
         ),
         EvalSuite(
             slug=GOOGLE_SHEETS_NATIVE_SUITE_SLUG,

@@ -87,6 +87,42 @@ _WEB_SEARCH_SCHEMA = {
     "additionalProperties": False,
 }
 
+_REDDIT_REPLY_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "itemUrl": {
+            "type": "string",
+            "description": "Full Reddit URL for the post or comment receiving the reply.",
+        },
+        "body": {
+            "type": "string",
+            "description": "Reply text to publish exactly as supplied.",
+        },
+    },
+    "required": ["itemUrl", "body"],
+    "additionalProperties": False,
+}
+
+_REDDIT_CREATE_POST_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "subreddit": {
+            "type": "string",
+            "description": "Subreddit name without the r/ prefix.",
+        },
+        "title": {
+            "type": "string",
+            "description": "Post title to publish exactly as supplied.",
+        },
+        "body": {
+            "type": "string",
+            "description": "Post body to publish exactly as supplied.",
+        },
+    },
+    "required": ["subreddit", "title", "body"],
+    "additionalProperties": False,
+}
+
 _LINKEDIN_PEOPLE_SEARCH_SCHEMA = {
     "type": "object",
     "properties": {
@@ -197,6 +233,18 @@ EVAL_SYNTHETIC_TOOL_DEFINITIONS: Dict[str, Dict[str, Any]] = {
     "mcp_brightdata_web_data_reddit_posts": {
         "description": "Fetch Reddit posts; prefer this over browser automation for Reddit mentions or sentiment.",
         "parameters": _GENERIC_WEB_DATA_SCHEMA,
+    },
+    "mcp_reddit_reply-to-item": {
+        "description": (
+            "Reply to a Reddit post or comment. The body is published as written, so supply the complete final reply."
+        ),
+        "parameters": _REDDIT_REPLY_SCHEMA,
+    },
+    "mcp_reddit_create-post": {
+        "description": (
+            "Create a Reddit post. The title and body are published as written, so supply the complete final copy."
+        ),
+        "parameters": _REDDIT_CREATE_POST_SCHEMA,
     },
     "mcp_brightdata_web_data_google_maps_reviews": {
         "description": (
