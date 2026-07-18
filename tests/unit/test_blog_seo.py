@@ -1,4 +1,5 @@
 import json
+from unittest.mock import patch
 
 from bs4 import BeautifulSoup
 from django.test import TestCase, override_settings, tag
@@ -266,6 +267,47 @@ class BlogSeoTests(TestCase):
                 for item in faq_schema["mainEntity"]
             )
         )
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_schema_graph_reuses_publisher_for_gobii_authored_post(self):
+        post = {
+            "slug": "gobii-authored-post",
+            "meta": {
+                "title": "Gobii Authored Post",
+                "schema_graph": True,
+            },
+            "html": "<p>Post content.</p>",
+            "toc_html": "",
+            "summary": "Post summary.",
+            "published_at": None,
+            "updated_at": None,
+            "word_count": 2,
+            "image_alt": "Gobii Authored Post image",
+            "has_lightbox": False,
+        }
+
+        with patch("proprietary.views.load_blog_post", return_value=post):
+            response = self.client.get("/blog/gobii-authored-post/")
+
+        self.assertEqual(response.status_code, 200)
+        soup = BeautifulSoup(response.content, "html.parser")
+        structured_data = json.loads(
+            soup.find("script", type="application/ld+json").string
+        )
+        graph = structured_data["@graph"]
+        article_schema = next(
+            node for node in graph if node["@type"] == "BlogPosting"
+        )
+        organization_nodes = [
+            node for node in graph if node["@type"] == "Organization"
+        ]
+
+        self.assertEqual(len(organization_nodes), 1)
+        self.assertEqual(
+            article_schema["author"],
+            {"@id": organization_nodes[0]["@id"]},
+        )
+        self.assertNotIn("worksFor", organization_nodes[0])
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_hire_ai_employees_blog_post_renders_seo_and_only_live_cluster_links(self):

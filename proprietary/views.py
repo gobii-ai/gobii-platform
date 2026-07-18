@@ -1166,14 +1166,21 @@ class BlogPostView(ProprietaryModeRequiredMixin, TemplateView):
             organization_id = f"{site_url}#organization"
             article_id = f"{canonical_url}#article"
             image_id = f"{canonical_url}#primaryimage"
-            author_url = post["meta"].get("author_url")
-            if author_url and not str(author_url).startswith(("http://", "https://")):
-                author_url = self.request.build_absolute_uri(author_url)
-            author_id = (
-                f"{str(author_url).rstrip('/')}#person"
-                if author_url
-                else f"{canonical_url}#author"
+            author_type = author["@type"]
+            author_url = author.get("url")
+            author_is_publisher = (
+                author_type == "Organization"
+                and str(author["name"]).casefold() == "gobii"
             )
+            if author_is_publisher:
+                author_id = organization_id
+            elif author_url:
+                author_fragment = (
+                    "person" if author_type == "Person" else "organization"
+                )
+                author_id = f"{str(author_url).rstrip('/')}#{author_fragment}"
+            else:
+                author_id = f"{canonical_url}#author"
 
             article_schema = {
                 key: value
@@ -1189,21 +1196,22 @@ class BlogPostView(ProprietaryModeRequiredMixin, TemplateView):
                 }
             )
 
-            person_schema = {
-                "@type": "Person",
+            author_schema = {
+                "@type": author_type,
                 "@id": author_id,
                 "name": author["name"],
-                "worksFor": {"@id": organization_id},
             }
+            if author_type == "Person":
+                author_schema["worksFor"] = {"@id": organization_id}
             if author_url:
-                person_schema["url"] = author_url
-            if post["meta"].get("author_job_title"):
-                person_schema["jobTitle"] = post["meta"]["author_job_title"]
+                author_schema["url"] = author_url
+            if author_type == "Person" and author.get("jobTitle"):
+                author_schema["jobTitle"] = author["jobTitle"]
             if post["meta"].get("author_bio"):
-                person_schema["description"] = post["meta"]["author_bio"]
+                author_schema["description"] = post["meta"]["author_bio"]
             author_same_as = _keyword_list(post["meta"].get("author_same_as"))
             if author_same_as:
-                person_schema["sameAs"] = author_same_as
+                author_schema["sameAs"] = author_same_as
 
             organization_schema = {
                 "@type": "Organization",
@@ -1215,6 +1223,11 @@ class BlogPostView(ProprietaryModeRequiredMixin, TemplateView):
                     "url": brand_logo_url,
                 },
             }
+            if author_is_publisher:
+                if post["meta"].get("author_bio"):
+                    organization_schema["description"] = post["meta"]["author_bio"]
+                if author_same_as:
+                    organization_schema["sameAs"] = author_same_as
             image_schema = {
                 "@type": "ImageObject",
                 "@id": image_id,
@@ -1254,13 +1267,16 @@ class BlogPostView(ProprietaryModeRequiredMixin, TemplateView):
                 ],
             }
 
-            graph = [
-                article_schema,
-                person_schema,
-                organization_schema,
-                image_schema,
-                breadcrumb_schema,
-            ]
+            graph = [article_schema]
+            if not author_is_publisher:
+                graph.append(author_schema)
+            graph.extend(
+                [
+                    organization_schema,
+                    image_schema,
+                    breadcrumb_schema,
+                ]
+            )
             if faq_items:
                 graph.append(
                     {
