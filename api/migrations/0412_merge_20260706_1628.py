@@ -7,7 +7,7 @@ class Migration(migrations.Migration):
 
     dependencies = [
         ('api', '0411_persistent_agent_template_public_options'),
-        ('api', '0411_template_url_alias_legacy_handle'),
+        ('api', '0412_backfill_template_url_alias_handles'),
     ]
 
     operations = [
