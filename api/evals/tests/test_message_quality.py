@@ -3,6 +3,8 @@ from django.test import SimpleTestCase, tag
 import api.evals.loader  # noqa: F401 - registers scenarios and suites
 from api.evals.registry import ScenarioRegistry
 from api.evals.scenarios.message_quality import (
+    FAILED_EMAIL_DELIVERY_RECOVERY_SLUG,
+    FailedEmailDeliveryRecoveryScenario,
     MESSAGE_QUALITY_CASES,
     MESSAGE_QUALITY_SCENARIO_SLUGS,
     MESSAGE_QUALITY_SUITE_SLUG,
@@ -23,8 +25,9 @@ class MessageQualityScenarioTests(SimpleTestCase):
 
         self.assertIsNotNone(suite)
         self.assertEqual(tuple(suite.scenario_slugs), MESSAGE_QUALITY_SCENARIO_SLUGS)
-        self.assertEqual(len(suite.scenario_slugs), 16)
+        self.assertEqual(len(suite.scenario_slugs), 17)
         self.assertIn(REPLY_CHANNEL_CONTINUITY_SLUG, suite.scenario_slugs)
+        self.assertIn(FAILED_EMAIL_DELIVERY_RECOVERY_SLUG, suite.scenario_slugs)
 
     def test_generated_cases_cover_email_and_chat_for_each_real_world_domain(self):
         channels_by_brief = {}
@@ -58,6 +61,23 @@ class MessageQualityScenarioTests(SimpleTestCase):
         self.assertEqual(reply_channel_metadata.category, "message_quality")
         self.assertEqual(reply_channel_metadata.cost_class, "low")
         self.assertIn("reply_channel", reply_channel_metadata.tags)
+
+        failure_metadata = registered[FAILED_EMAIL_DELIVERY_RECOVERY_SLUG].get_metadata()
+        self.assertEqual(failure_metadata.category, "message_quality")
+        self.assertEqual(failure_metadata.cost_class, "low")
+        self.assertIn("tool_failure", failure_metadata.tags)
+
+    def test_failed_delivery_notice_requires_clear_non_delivery_language(self):
+        self.assertTrue(
+            FailedEmailDeliveryRecoveryScenario._notice_reports_failure(
+                "The provider rejected the email, so it was not delivered."
+            )
+        )
+        self.assertFalse(
+            FailedEmailDeliveryRecoveryScenario._notice_reports_failure(
+                "The email was sent successfully."
+            )
+        )
 
     def test_simple_email_prompt_does_not_specify_formatting_style(self):
         case = SIMPLE_EMAIL_QUALITY_CASES[0]

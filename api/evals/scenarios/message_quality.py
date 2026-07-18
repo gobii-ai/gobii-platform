@@ -28,6 +28,7 @@ from util.text_sanitizer import has_humanized_message_style_violation
 
 MESSAGE_QUALITY_SUITE_SLUG = "message_quality_reports"
 REPLY_CHANNEL_CONTINUITY_SLUG = "message_quality_reply_stays_in_web_chat"
+FAILED_EMAIL_DELIVERY_RECOVERY_SLUG = "message_quality_failed_email_reports_failure"
 
 
 @dataclass(frozen=True)
@@ -248,6 +249,7 @@ MESSAGE_QUALITY_CASES = (
 MESSAGE_QUALITY_SCENARIO_SLUGS = (
     *(case.slug for case in MESSAGE_QUALITY_CASES),
     REPLY_CHANNEL_CONTINUITY_SLUG,
+    FAILED_EMAIL_DELIVERY_RECOVERY_SLUG,
 )
 
 
@@ -814,6 +816,139 @@ class MessageQualityScenario(EvalScenario, ScenarioExecutionTools):
             if re.search(r"^\s*\|.+\|\s*$", body, re.MULTILINE):
                 failures.append("Email body should use HTML tables, not Markdown pipe tables.")
         return failures
+
+
+@register_scenario
+class FailedEmailDeliveryRecoveryScenario(EvalScenario, ScenarioExecutionTools):
+    slug = FAILED_EMAIL_DELIVERY_RECOVERY_SLUG
+    version = "1.0"
+    description = "A failed email result should remain unfinished and be reported accurately in the active chat."
+    tier = "core"
+    category = "message_quality"
+    expected_runtime = "short"
+    cost_class = "low"
+    owner = "agent-platform"
+    area = "agent_behavior"
+    tags = ("message_quality", "tool_failure", "send_email", "send_chat_message")
+    tasks = [
+        ScenarioTask(name="inject_prompt", assertion_type="manual"),
+        ScenarioTask(name="verify_failed_delivery_recorded", assertion_type="manual"),
+        ScenarioTask(name="verify_owner_notified", assertion_type="manual"),
+    ]
+
+    @staticmethod
+    def _notice_reports_failure(body: str) -> bool:
+        normalized = " ".join(str(body or "").replace("’", "'").lower().split())
+        return "email" in normalized and any(
+            phrase in normalized
+            for phrase in (
+                "could not send",
+                "couldn't send",
+                "did not send",
+                "didn't send",
+                "failed to send",
+                "not delivered",
+                "not sent",
+                "provider rejected",
+                "was rejected",
+            )
+        )
+
+    def run(self, run_id: str, agent_id: str) -> None:
+        agent = PersistentAgent.objects.get(id=agent_id)
+        mark_tool_enabled_without_discovery(agent, "send_email")
+        mark_tool_enabled_without_discovery(agent, "send_chat_message")
+        CommsAllowlistEntry.objects.update_or_create(
+            agent=agent,
+            channel=CommsChannel.EMAIL,
+            address="ops@example.test",
+            defaults={
+                "is_active": True,
+                "allow_inbound": True,
+                "allow_outbound": True,
+                "verified": True,
+            },
+        )
+
+        self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="inject_prompt")
+        with self.wait_for_agent_idle(agent_id, timeout=120):
+            inbound = self.inject_message(
+                agent_id,
+                "Email ops@example.test that today's maintenance window moved to 4:30 PM ET.",
+                trigger_processing=True,
+                eval_run_id=run_id,
+                mock_config={
+                    "send_email": {
+                        "status": "failed",
+                        "message": "The email provider rejected the message; nothing was delivered.",
+                        "auto_sleep_ok": True,
+                    },
+                },
+                eval_stop_policy={
+                    "stop_on_tool_names_after_execution": ["send_chat_message"],
+                    "stop_on_unexpected_relevant_tool": True,
+                    "allowed_tool_names": ["send_email", "send_chat_message", "sqlite_batch", "update_plan"],
+                    "ignored_tool_names": ["sqlite_batch", "update_plan"],
+                    "max_relevant_tool_calls": 4,
+                },
+            )
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED,
+            task_name="inject_prompt",
+            observed_summary="Email request injected and real agent processing completed.",
+            artifacts={"message": inbound},
+        )
+
+        calls = MessageQualityScenario._tool_calls_for_run(run_id, after=inbound.timestamp)
+        email_calls = [call for call in calls if call.tool_name == "send_email"]
+        failed_results = [
+            call
+            for call in email_calls
+            if str(MessageQualityScenario._tool_result(call).get("status") or "").lower()
+            in {"error", "failed", "failure"}
+        ]
+        failures_recorded = bool(email_calls) and len(failed_results) == len(email_calls) and all(
+            call.status == "error" for call in email_calls
+        )
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED if failures_recorded else EvalRunTask.Status.FAILED,
+            task_name="verify_failed_delivery_recorded",
+            expected_summary="Failed delivery results should be persisted as errors, never completed sends.",
+            observed_summary=(
+                f"Saw {len(failed_results)}/{len(email_calls)} failed email result(s); "
+                f"persisted statuses were {[call.status for call in email_calls]}."
+            ),
+            artifacts={"step": email_calls[0].step} if email_calls else {},
+        )
+
+        chat_calls = [call for call in calls if call.tool_name == "send_chat_message"]
+        delivered_chats = [
+            call
+            for call in chat_calls
+            if MessageQualityScenario._tool_result(call).get("skipped") is not True
+            and str(MessageQualityScenario._tool_result(call).get("status") or "").lower()
+            in {"ok", "sent", "success"}
+        ]
+        clear_notice = len(delivered_chats) == 1 and self._notice_reports_failure(
+            str(MessageQualityScenario._tool_params(delivered_chats[0]).get("body") or "")
+        )
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED if clear_notice else EvalRunTask.Status.FAILED,
+            task_name="verify_owner_notified",
+            expected_summary="Agent should tell the active-chat requester that the email was not delivered.",
+            observed_summary=(
+                "Agent accurately reported the failed email in web chat."
+                if clear_notice
+                else f"Saw {len(delivered_chats)} delivered chat notice(s), without one clear failure report."
+            ),
+            artifacts={"step": delivered_chats[0].step} if delivered_chats else {},
+        )
 
 
 @register_scenario

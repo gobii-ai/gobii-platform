@@ -23,6 +23,7 @@ from api.agent.core.event_processing import (
     _ensure_credit_for_tool,
     _process_agent_events_locked,
     _infer_retryable_from_text,
+    _is_error_status,
     _is_warning_status,
     _normalize_error_result,
     _normalize_tool_params,
@@ -209,6 +210,13 @@ class DeepWorkUpdateGateTests(SimpleTestCase):
 
 @tag('batch_event_processing')
 class ToolErrorNormalizationTests(SimpleTestCase):
+    def test_common_failure_statuses_are_errors(self):
+        for status in ("error", "failed", "failure", "FAILED"):
+            with self.subTest(status=status):
+                self.assertTrue(_is_error_status({"status": status}))
+
+        self.assertFalse(_is_error_status({"status": "ok"}))
+
     def test_native_http_error_preserves_response_context(self):
         result = _normalize_error_result(
             {

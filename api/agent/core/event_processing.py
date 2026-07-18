@@ -603,7 +603,7 @@ def _is_error_status(result: Any) -> bool:
     if not isinstance(result, dict):
         return False
     status = result.get("status")
-    return isinstance(status, str) and status.lower() == "error"
+    return isinstance(status, str) and status.lower() in {"error", "failed", "failure"}
 
 
 def _is_warning_status(result: Any) -> bool:
