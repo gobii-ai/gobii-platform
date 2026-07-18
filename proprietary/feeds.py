@@ -61,7 +61,7 @@ class BlogFeed(Feed):
         return item["updated_at"] or item["published_at"]
 
     def item_author_name(self, item):
-        return item["meta"]["author"]
+        return item["meta"].get("author") or "Gobii"
 
     def item_author_link(self, item):
         author_url = item["meta"].get("author_url")

@@ -117,6 +117,16 @@ class BlogSeoTests(TestCase):
 
         self.assertEqual(feed_items, [dated_post, undated_post])
 
+    def test_blog_feed_uses_default_author_when_author_is_missing(self):
+        feed = BlogFeed()
+
+        for meta in ({}, {"author": None}, {"author": ""}):
+            with self.subTest(meta=meta):
+                self.assertEqual(
+                    feed.item_author_name({"meta": meta}),
+                    "Gobii",
+                )
+
     @override_settings(GOBII_PROPRIETARY_MODE=False)
     def test_blog_feed_is_not_available_outside_proprietary_mode(self):
         response = self.client.get("/blog/feed.xml")
