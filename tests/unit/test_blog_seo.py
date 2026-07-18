@@ -631,11 +631,9 @@ class BlogSeoTests(TestCase):
             nodes["FAQPage"]["mainEntity"][0]["name"],
             "Do AI agent integrations always require an API key?",
         )
-        self.assertContains(
-            response,
-            "Updated <time datetime=\"2026-07-17T00:00:00+00:00\">July 17, 2026</time>",
-            html=True,
-        )
+        updated_time = soup.find("time", datetime="2026-07-17T00:00:00+00:00")
+        self.assertIsNotNone(updated_time)
+        self.assertEqual(updated_time.get_text(" ", strip=True), "Updated July 17, 2026")
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_blog_index_renders_topic_hub_metadata_and_structured_data(self):
