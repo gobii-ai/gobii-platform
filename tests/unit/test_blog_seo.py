@@ -1,16 +1,94 @@
+from email.utils import parsedate_to_datetime
 import json
 from unittest.mock import patch
 
 from bs4 import BeautifulSoup
 from django.test import TestCase, override_settings, tag
 
-from proprietary.utils_blog import _parse_svg_length, load_blog_post
+from proprietary.feeds import BLOG_FEED_ITEM_LIMIT
+from proprietary.utils_blog import _parse_svg_length, get_all_blog_posts, load_blog_post
 
 
 @tag("batch_pages")
 class BlogSeoTests(TestCase):
     def tearDown(self):
+        get_all_blog_posts.cache_clear()
         load_blog_post.cache_clear()
+
+    @override_settings(
+        GOBII_PROPRIETARY_MODE=True,
+        PUBLIC_SITE_URL="https://gobii.ai",
+    )
+    def test_blog_feed_uses_canonical_urls_and_content_metadata(self):
+        response = self.client.get("/blog/feed.xml", HTTP_HOST="preview.local")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/rss+xml; charset=utf-8")
+        self.assertIn("Last-Modified", response)
+
+        feed = BeautifulSoup(response.content, "xml")
+        items = feed.find_all("item")
+        posts = get_all_blog_posts()[:BLOG_FEED_ITEM_LIMIT]
+
+        self.assertEqual(feed.channel.title.get_text(strip=True), "Gobii AI Agent Automation Blog")
+        self.assertEqual(feed.channel.link.get_text(strip=True), "https://gobii.ai/blog/")
+        self.assertEqual(len(items), BLOG_FEED_ITEM_LIMIT)
+        self.assertEqual(
+            [item.title.get_text(strip=True) for item in items],
+            [post["title"] for post in posts],
+        )
+
+        first_item = items[0]
+        first_post = posts[0]
+        expected_url = f"https://gobii.ai{first_post['url']}"
+        self.assertEqual(first_item.link.get_text(strip=True), expected_url)
+        self.assertEqual(first_item.guid.get_text(strip=True), expected_url)
+        self.assertEqual(first_item.guid["isPermaLink"], "true")
+        self.assertEqual(first_item.description.get_text(strip=True), first_post["summary"])
+        self.assertEqual(
+            parsedate_to_datetime(first_item.pubDate.get_text(strip=True)),
+            first_post["published_at"],
+        )
+        self.assertEqual(first_item.creator.get_text(strip=True), first_post["meta"]["author"])
+        self.assertEqual(
+            [category.get_text(strip=True) for category in first_item.find_all("category")],
+            first_post["meta"]["tags"],
+        )
+
+        expected_updated_at = max(
+            post["updated_at"] or post["published_at"]
+            for post in posts
+        )
+        self.assertEqual(
+            parsedate_to_datetime(feed.channel.lastBuildDate.get_text(strip=True)),
+            expected_updated_at,
+        )
+        self.assertEqual(
+            parsedate_to_datetime(response["Last-Modified"]),
+            expected_updated_at,
+        )
+
+    @override_settings(GOBII_PROPRIETARY_MODE=False)
+    def test_blog_feed_is_not_available_outside_proprietary_mode(self):
+        response = self.client.get("/blog/feed.xml")
+
+        self.assertEqual(response.status_code, 404)
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_blog_pages_advertise_feed(self):
+        blog_post = get_all_blog_posts()[0]
+
+        for path in ("/blog/", blog_post["url"]):
+            with self.subTest(path=path):
+                response = self.client.get(path)
+                feed_link = BeautifulSoup(response.content, "html.parser").find(
+                    "link",
+                    rel="alternate",
+                    type="application/rss+xml",
+                )
+
+                self.assertIsNotNone(feed_link)
+                self.assertEqual(feed_link["href"], "/blog/feed.xml")
 
     def test_blog_post_enriches_local_images_for_cwv(self):
         post = load_blog_post("gobii-vs-openclaw")
