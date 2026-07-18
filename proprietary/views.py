@@ -1367,4 +1367,4 @@ class BlogSitemap(sitemaps.Sitemap):
         return item["url"]
 
     def lastmod(self, item):
-        return item.get("published_at")
+        return item.get("updated_at") or item.get("published_at")

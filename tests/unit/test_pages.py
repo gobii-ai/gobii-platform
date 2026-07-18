@@ -2331,6 +2331,15 @@ class SitemapTests(TestCase):
         self.assertNotIn("<loc>http://example.com/pretrained-workers/</loc>", content)
 
         sitemap = BeautifulSoup(content, "xml")
+        blog_lastmods = {
+            url.loc.get_text(strip=True): url.lastmod.get_text(strip=True)
+            for url in sitemap.find_all("url")
+            if url.loc and url.lastmod and "/blog/" in url.loc.get_text(strip=True)
+        }
+        self.assertEqual(
+            blog_lastmods["http://example.com/blog/newsletter-2026-06-02-discord-integration/"],
+            "2026-07-16",
+        )
         solution_lastmods = {
             url.loc.get_text(strip=True): url.lastmod.get_text(strip=True)
             for url in sitemap.find_all("url")

@@ -13,7 +13,18 @@ from pages.views import (
     TeamView,
     TermsOfServiceView,
 )
-from .views import BlogIndexView, BlogPostView, ContactView, PrequalifyView, PricingView, ShirtRedirectView, SupportView, TeamsView
+
+from .feeds import BlogFeed
+from .views import (
+    BlogIndexView,
+    BlogPostView,
+    ContactView,
+    PrequalifyView,
+    PricingView,
+    ShirtRedirectView,
+    SupportView,
+    TeamsView,
+)
 
 # Keep names consistent with pages app so existing {% url 'proprietary:...'%} still work
 app_name = "proprietary"
@@ -41,5 +52,6 @@ urlpatterns = [
 
     # Blog URLs
     path("blog/", BlogIndexView.as_view(), name="blog_index"),
+    path("blog/feed.xml", BlogFeed(), name="blog_feed"),
     path("blog/<slug:slug>/", BlogPostView.as_view(), name="blog_post"),
 ]
