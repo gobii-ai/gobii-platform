@@ -614,6 +614,30 @@ class BlogSeoTests(TestCase):
                 self.assertFalse(any(fragment in url for url in asset_urls))
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_blog_post_renders_faq_schema_and_updated_date(self):
+        response = self.client.get(
+            "/blog/newsletter-2026-03-17-one-click-integrations-for-your-agents/"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        soup = BeautifulSoup(response.content, "html.parser")
+        structured_data = json.loads(soup.find("script", type="application/ld+json").string)
+        nodes = {node["@type"]: node for node in structured_data["@graph"]}
+
+        self.assertEqual(nodes["BlogPosting"]["author"]["@type"], "Person")
+        self.assertEqual(nodes["BlogPosting"]["dateModified"], "2026-07-17T00:00:00+00:00")
+        self.assertEqual(len(nodes["FAQPage"]["mainEntity"]), 4)
+        self.assertEqual(
+            nodes["FAQPage"]["mainEntity"][0]["name"],
+            "Do AI agent integrations always require an API key?",
+        )
+        self.assertContains(
+            response,
+            "Updated <time datetime=\"2026-07-17T00:00:00+00:00\">July 17, 2026</time>",
+            html=True,
+        )
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_blog_index_renders_topic_hub_metadata_and_structured_data(self):
         response = self.client.get("/blog/")
 

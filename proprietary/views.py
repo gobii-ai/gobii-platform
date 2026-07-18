@@ -86,6 +86,21 @@ def _blog_author_schema(meta, request):
     return author
 
 
+def _faq_list(value):
+    if not isinstance(value, list):
+        return []
+
+    items = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        question = str(item.get("question") or "").strip()
+        answer = str(item.get("answer") or "").strip()
+        if question and answer:
+            items.append({"question": question, "answer": answer})
+    return items
+
+
 BLOG_INDEX_KEYWORDS = (
     "AI agent automation",
     "browser agents",
@@ -1312,6 +1327,34 @@ class BlogPostView(ProprietaryModeRequiredMixin, TemplateView):
                     {
                         "@type": "FAQPage",
                         "@id": f"{canonical_url}#faq",
+                        "mainEntity": [
+                            {
+                                "@type": "Question",
+                                "name": item["question"],
+                                "acceptedAnswer": {
+                                    "@type": "Answer",
+                                    "text": item["answer"],
+                                },
+                            }
+                            for item in faq_items
+                        ],
+                    },
+                ],
+            }
+
+        faq_items = _faq_list(post["meta"].get("faq"))
+        if faq_items:
+            blog_posting_schema = {
+                key: value
+                for key, value in structured_data.items()
+                if key != "@context"
+            }
+            structured_data = {
+                "@context": "https://schema.org",
+                "@graph": [
+                    blog_posting_schema,
+                    {
+                        "@type": "FAQPage",
                         "mainEntity": [
                             {
                                 "@type": "Question",
