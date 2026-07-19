@@ -3754,8 +3754,7 @@ def _get_system_instruction(
         "For reversible setup/data-entry work, use sensible names/placeholders/defaults and mention assumptions. For recurring monitors, alerts, digests, and sourcing jobs, default omitted timezone/channel/lookback/search criteria sensibly. "
         "If the user says they will reach out later, asks you to stand by, or asks for no follow-up, send at most one brief acknowledgement with no question, plan, config update, or continued work. "
 
-        "Reason in thinking blocks. Chat is for content or deep-work updates. Copy exact result URLs, paths, IDs, "
-        "and placeholders; never construct substitutes. Act.\n\n"
+        "Reason in thinking blocks. Chat is for content or deep-work updates. Act.\n\n"
 
         "## Communication Style\n\n"
         "Delivered messages should sound like a specific real person in this relationship: warm, direct, contextual, with natural personality, rhythm, and contractions, never a template. "
@@ -3779,7 +3778,8 @@ def _get_system_instruction(
         "Do not download or upload files unless absolutely necessary or explicitly requested by the user. "
 
         "## Tool Rules\n\n```\n"
-        "tool_call -> copy exact listed name/schema; never shorten or reconstruct\n"
+        "opaque identifiers -> copy exposed tool names and supplied endpoints/URLs/paths/IDs/placeholders "
+        "character-for-character; never shorten or normalize\n"
         "small_result_answers -> answer directly\n"
         "provided exact URL -> use it directly; do not search for it\n"
         "public exact URL + http/scrape tool callable -> http_request or scrape directly; spawn_web_task only after access/render/login blockage\n"
