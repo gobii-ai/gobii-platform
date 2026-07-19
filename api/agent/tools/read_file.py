@@ -25,6 +25,10 @@ ALLOWED_RESPONSE_FORMATS = {RESPONSE_FORMAT_MARKDOWN, RESPONSE_FORMAT_RAW_TEXT}
 TEMP_FILE_PREFIX = "agent_read_"
 BUFFER_SIZE = 64 * 1024
 DISALLOWED_CONTROL_CHARS = re.compile(r"[\x00-\x08\x0B\x0C\x0E-\x1F]")
+TOOL_RESULT_PSEUDO_PATH = re.compile(
+    r"^/?(?:(?:__)?tool_results|temporary_read)/(?P<result_id>[A-Za-z0-9_-]+)(?:/(?:result_text|result_json))?/?$",
+    re.IGNORECASE,
+)
 MARKITDOWN_OCR_PROMPT = (
     "Return exactly two labeled sections.\n\n"
     "Description:\n"
@@ -199,10 +203,10 @@ def get_read_file_tool() -> Dict[str, Any]:
         "function": {
             "name": "read_file",
             "description": (
-                "Read an agent-filesystem file as markdown or raw text. "
-                "Do not use this for http:// or https:// URLs; use http_request, scraping, or spawn_web_task for URLs. "
+                "Read filespace files as markdown or raw text. "
+                "For HTTP(S) URLs use http_request, scraping, or spawn_web_task, never read_file. "
                 "Defaults to raw_text for text and markdown for PDFs, images/OCR, scans, and office files. "
-                "Not for SQLite snapshots; use sqlite_batch on __tool_results, __messages, or __files."
+                "Tool-result IDs are SQLite rows, not paths; use sqlite_batch on __tool_results, __messages, or __files."
             ),
             "parameters": {
                 "type": "object",
@@ -253,6 +257,17 @@ def execute_read_file(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[st
             .first()
         )
         if not node:
+            if match := TOOL_RESULT_PSEUDO_PATH.fullmatch(path):
+                return {
+                    "status": "error",
+                    "code": "tool_result_requires_sqlite",
+                    "retryable": False,
+                    "message": (
+                        f"Tool result {match.group('result_id')} is a __tool_results row, not an agent file. "
+                        "Use one sqlite_batch query over __tool_results for all needed IDs; shape result_json when "
+                        "known, otherwise search result_text."
+                    ),
+                }
             return {"status": "error", "message": f"File not found: {path}"}
         if node.node_type != AgentFsNode.NodeType.FILE:
             return {"status": "error", "message": f"Path is a directory: {path}"}

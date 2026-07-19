@@ -293,7 +293,7 @@ def get_send_chat_tool() -> Dict[str, Any]:
                     "body": {
                         "type": "string",
                         "description": (
-                            "Natural recipient text; no dash punctuation between phrases, including spaced hyphens. Keep simple exchanges/outreach light. Reports to owners/creators and multi-part findings use polished Markdown sections, tables/metric blocks, status labels, and tasteful visual cues. "
+                            "Natural recipient text; no dash punctuation between phrases. Keep chat/outreach light. Reports comparing 4+ peers use one linked table with a detail URL per row unless incomparable. "
                             "Do not pass placeholders or tool-call/XML syntax; it is sent literally."
                         ),
                     },

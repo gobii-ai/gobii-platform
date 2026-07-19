@@ -4,6 +4,7 @@ from unittest.mock import patch
 from django.contrib.auth import get_user_model
 from django.test import TestCase, tag
 
+from api.agent.core.event_processing import _normalize_error_result
 from api.agent.files.filespace_service import write_bytes_to_dir
 from api.agent.tools.read_file import (
     MARKITDOWN_OCR_PROMPT,
@@ -49,7 +50,8 @@ class ReadFileToolTests(TestCase):
         self.assertEqual(properties["response_format"]["enum"], ["markdown", "raw_text"])
         self.assertIn("defaults to", properties["response_format"]["description"].lower())
         self.assertIn("pdf", tool["function"]["description"].lower())
-        self.assertIn("do not use this for http:// or https:// urls", tool["function"]["description"].lower())
+        self.assertIn("http(s) urls", tool["function"]["description"].lower())
+        self.assertIn("tool-result ids are sqlite rows, not paths", tool["function"]["description"].lower())
 
     def test_markitdown_prompt_requests_description_and_verbatim_text(self):
         self.assertIn("return exactly two labeled sections", MARKITDOWN_OCR_PROMPT.lower())
@@ -92,6 +94,66 @@ class ReadFileToolTests(TestCase):
         self.assertEqual(result.get("format"), "raw_text")
         self.assertEqual(result.get("text"), "hello scoped\n")
         mock_markitdown.assert_not_called()
+
+    def test_tool_result_pseudo_path_points_to_sqlite(self):
+        result = execute_read_file(
+            self.agent,
+            {"path": "$[tool_results/84b9b4/result_text]"},
+        )
+
+        self.assertEqual(result.get("status"), "error")
+        self.assertEqual(result.get("code"), "tool_result_requires_sqlite")
+        self.assertFalse(result.get("retryable"))
+        self.assertIn("__tool_results", result.get("message", ""))
+        self.assertIn("84b9b4", result.get("message", ""))
+        self.assertIn("one sqlite_batch", result.get("message", ""))
+        self.assertIn("all needed IDs", result.get("message", ""))
+        self.assertIn("result_text", result.get("message", ""))
+
+        normalized = _normalize_error_result(result)
+        self.assertEqual(normalized.get("status_code"), "tool_result_requires_sqlite")
+        self.assertIn("one sqlite_batch", normalized.get("message", ""))
+
+    def test_tool_result_pseudo_path_recognizes_table_name_variant(self):
+        result = execute_read_file(
+            self.agent,
+            {"path": "/__tool_results/a1b2-c3d4/result_json"},
+        )
+
+        self.assertEqual(result.get("code"), "tool_result_requires_sqlite")
+        self.assertIn("sqlite_batch", result.get("message", ""))
+
+    def test_temporary_read_pseudo_path_points_to_sqlite(self):
+        result = execute_read_file(
+            self.agent,
+            {"path": "$[/temporary_read/84b9b4]"},
+        )
+
+        self.assertEqual(result.get("code"), "tool_result_requires_sqlite")
+        self.assertFalse(result.get("retryable"))
+        self.assertIn("result_text", result.get("message", ""))
+
+    @patch("api.agent.tools.read_file.MarkItDown")
+    def test_real_temporary_read_file_takes_precedence(self, mock_markitdown):
+        self._write_file(
+            path="/temporary_read/84b9b4",
+            content=b"real file\n",
+            mime_type="text/plain",
+        )
+
+        result = execute_read_file(self.agent, {"path": "$[/temporary_read/84b9b4]"})
+
+        self.assertEqual(result.get("status"), "ok")
+        self.assertEqual(result.get("text"), "real file\n")
+        mock_markitdown.assert_not_called()
+
+    def test_ordinary_missing_file_keeps_existing_error(self):
+        result = execute_read_file(self.agent, {"path": "/exports/missing.txt"})
+
+        self.assertEqual(
+            result,
+            {"status": "error", "message": "File not found: /exports/missing.txt"},
+        )
 
     @patch("api.agent.tools.read_file.get_file_handler_llm_config", return_value=None)
     @patch("api.agent.tools.read_file.MarkItDown")

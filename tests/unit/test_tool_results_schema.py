@@ -399,9 +399,40 @@ class ToolResultSchemaTests(SimpleTestCase):
         prompt_info = info.get("step-scrape")
         self.assertIsNotNone(prompt_info)
         self.assertIn("SCRAPE MARKDOWN:", prompt_info.meta)
-        self.assertIn("json_extract(result_json,'$.result')", prompt_info.meta)
+        self.assertIn("first query all needed rows", prompt_info.meta)
+        self.assertIn("substr(result_text,-1500)", prompt_info.meta)
+        self.assertIn("facts may be at the end", prompt_info.meta)
+        self.assertIn("grep_context_all", prompt_info.meta)
+        self.assertIn("inspect analysis_json/result_json", prompt_info.meta)
+        self.assertIn("Never read_file", prompt_info.meta)
+        self.assertNotIn("CSV DATA", prompt_info.meta)
         self.assertIn("# Gemma 4", prompt_info.preview_text)
         self.assertNotIn('"status":"success"', prompt_info.preview_text)
+
+    def test_scrape_as_markdown_meta_does_not_misclassify_comma_heavy_page_as_csv(self):
+        markdown = "# Operations report\n\n" + "\n".join(
+            f"Section {index}: implementation, onboarding, controls, and support context."
+            for index in range(900)
+        )
+        record = tool_results.ToolCallResultRecord(
+            step_id="step-comma-heavy-scrape",
+            tool_name="mcp_brightdata_scrape_as_markdown",
+            created_at=datetime.now(timezone.utc),
+            result_text=json.dumps({"status": "success", "result": markdown}),
+        )
+
+        info = tool_results.prepare_tool_results_for_prompt(
+            [record],
+            recency_positions={},
+            fresh_tool_call_step_id="step-comma-heavy-scrape",
+        )
+
+        prompt_info = info["step-comma-heavy-scrape"]
+        self.assertNotIn("CSV DATA", prompt_info.meta)
+        self.assertNotIn("[JSON", prompt_info.meta)
+        self.assertNotIn("json_extract(result_json", prompt_info.meta)
+        self.assertIn("SCRAPE MARKDOWN", prompt_info.meta)
+        self.assertIn("result_text is the page text", prompt_info.meta)
 
 
 @tag("batch_tool_results")
@@ -623,7 +654,8 @@ class PreviewByteLimitTests(SimpleTestCase):
         self.assertFalse(is_inline)
         # Should include KB size in truncation message
         self.assertIn("KB", preview)
-        self.assertIn("substr", preview)
+        self.assertIn("search or sample both ends", preview)
+        self.assertNotIn("substr(col,1", preview)
 
     def test_sqlite_results_not_capped(self):
         """SQLite results should not have aggressive preview caps."""
@@ -748,6 +780,8 @@ class PreviewByteLimitTests(SimpleTestCase):
 
         self.assertFalse(is_inline)
         self.assertLess(len(preview), len(large_text))
+        self.assertIn("search or sample both ends", preview)
+        self.assertNotIn("substr(col,1,2000)", preview)
 
     def test_non_fresh_tool_call_still_truncated(self):
         """Non-fresh tool calls should follow normal truncation rules."""
