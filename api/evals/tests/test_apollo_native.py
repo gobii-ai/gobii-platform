@@ -55,7 +55,7 @@ class ApolloNativeScenarioTests(SimpleTestCase):
         for case in APOLLO_NATIVE_CASES:
             self.assertEqual(set(case.mock_config()), {"http_request"})
             mock = case.mock_config()["http_request"]
-            self.assertTrue(mock["rules"])
+            self.assertEqual(bool(mock["rules"]), "missing_connection" not in case.tags)
             self.assertIn("default", mock)
             for rule in mock["rules"]:
                 self.assertIn("url_contains", rule)
@@ -63,7 +63,7 @@ class ApolloNativeScenarioTests(SimpleTestCase):
 
     def test_cases_expect_http_request_not_legacy_apollo_tools_or_enablement(self):
         for case in APOLLO_NATIVE_CASES:
-            self.assertTrue(case.expected_http_requests)
+            self.assertEqual(bool(case.expected_http_requests), "missing_connection" not in case.tags)
             for expectation in case.expected_http_requests:
                 self.assertEqual(expectation.name.startswith("apollo_io-"), False)
                 self.assertTrue(expectation.url_terms)
@@ -108,6 +108,18 @@ class ApolloNativeScenarioTests(SimpleTestCase):
         self.assertIn("For 422, repair the request shape", instructions)
         self.assertIn("row-level miss", instructions)
 
+    @patch("api.agent.system_skills.defaults._native_integration_connected", return_value=False)
+    @patch("api.agent.system_skills.defaults.settings.PUBLIC_SITE_URL", "https://app.example.test")
+    def test_disconnected_apollo_prompt_is_a_setup_gate(self, _mock_connected):
+        instructions = _apollo_native_prompt_instructions(SimpleNamespace())
+
+        self.assertIn("Current state: Apollo is not connected", instructions)
+        self.assertIn("current requester in this conversation", instructions)
+        self.assertIn("https://app.example.test/app/integrations", instructions)
+        self.assertIn("Do not call `http_request`, `search_tools`", instructions)
+        self.assertNotIn("API cookbook:", instructions)
+        self.assertNotIn("mixed_people/api_search", instructions)
+
     def test_eval_stop_policy_allows_sqlite_batch_for_result_shaping(self):
         scenario = ScenarioRegistry.get(APOLLO_NATIVE_SCENARIO_SLUGS[0])
         policy = scenario._eval_stop_policy()
@@ -141,29 +153,16 @@ class ApolloNativeScenarioTests(SimpleTestCase):
         self.assertFalse(_call_matches_expectation(pending_call, expectation))
         self.assertTrue(_call_matches_expectation(complete_call, expectation))
 
-    def test_missing_connection_expected_http_request_accepts_error_tool_call(self):
-        expectation = ApolloHttpRequestExpectation(
-            name="apollo_search_attempt",
-            url_terms=("api.apollo.io/api/v1/mixed_people/api_search",),
-            allowed_statuses=("error",),
-        )
-        error_call = SimpleNamespace(
-            status="error",
-            tool_params={
-                "method": "POST",
-                "url": "https://api.apollo.io/api/v1/mixed_people/api_search",
-            },
-        )
-        complete_call = SimpleNamespace(
-            status="complete",
-            tool_params={
-                "method": "POST",
-                "url": "https://api.apollo.io/api/v1/mixed_people/api_search",
-            },
-        )
+    def test_missing_connection_uses_known_setup_state_without_doomed_api_call(self):
+        case = next(case for case in APOLLO_NATIVE_CASES if case.slug == APOLLO_NATIVE_MISSING_CONNECTION)
+        scenario = ScenarioRegistry.get(APOLLO_NATIVE_MISSING_CONNECTION)
 
-        self.assertTrue(_call_matches_expectation(error_call, expectation))
-        self.assertFalse(_call_matches_expectation(complete_call, expectation))
+        self.assertEqual(case.expected_http_requests, ())
+        self.assertTrue(scenario.requires_personal_agent)
+        self.assertIn(("api.apollo.io",), case.forbidden_url_terms)
+        self.assertNotIn("not connected", case.prompt.lower())
+        self.assertIn(("/app/integrations",), case.response_term_groups)
+        self.assertNotIn("connected", case.response_term_groups[-1])
 
     def test_expected_http_request_can_require_body_terms(self):
         create_case = next(case for case in APOLLO_NATIVE_CASES if case.slug == APOLLO_NATIVE_CREATE_CONTACT)

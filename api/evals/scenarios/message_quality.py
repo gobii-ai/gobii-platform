@@ -5,14 +5,17 @@ from datetime import timedelta
 from typing import Any
 from uuid import UUID
 
+from django.contrib.auth import get_user_model
 from django.utils import timezone
 
 from api.agent.comms.message_service import _ensure_participant, _get_or_create_conversation
 from api.agent.tools.tool_manager import mark_tool_enabled_without_discovery
+from api.agent.tools.web_chat_sender import WEB_CHAT_UNAVAILABLE_MESSAGE
 from api.evals.base import EvalScenario, ScenarioTask
 from api.evals.execution import ScenarioExecutionTools
 from api.evals.registry import ScenarioRegistry, register_scenario
 from api.models import (
+    AgentCollaborator,
     CommsAllowlistEntry,
     CommsChannel,
     DeliveryStatus,
@@ -22,12 +25,15 @@ from api.models import (
     PersistentAgentConversationParticipant,
     PersistentAgentMessage,
     PersistentAgentToolCall,
+    build_web_user_address,
 )
+from api.services.web_sessions import start_web_session
 from util.text_sanitizer import has_humanized_message_style_violation
 
 
 MESSAGE_QUALITY_SUITE_SLUG = "message_quality_reports"
 REPLY_CHANNEL_CONTINUITY_SLUG = "message_quality_reply_stays_in_web_chat"
+UNAVAILABLE_WEB_CHANNEL_CONTINUITY_SLUG = "message_quality_unavailable_web_does_not_switch_channels"
 FAILED_EMAIL_DELIVERY_RECOVERY_SLUG = "message_quality_failed_email_reports_failure"
 
 
@@ -249,6 +255,7 @@ MESSAGE_QUALITY_CASES = (
 MESSAGE_QUALITY_SCENARIO_SLUGS = (
     *(case.slug for case in MESSAGE_QUALITY_CASES),
     REPLY_CHANNEL_CONTINUITY_SLUG,
+    UNAVAILABLE_WEB_CHANNEL_CONTINUITY_SLUG,
     FAILED_EMAIL_DELIVERY_RECOVERY_SLUG,
 )
 
@@ -1026,11 +1033,25 @@ class ReplyChannelContinuityScenario(EvalScenario, ScenarioExecutionTools):
     def _result(call: PersistentAgentToolCall) -> dict[str, Any]:
         return MessageQualityScenario._tool_result(call)
 
+    @staticmethod
+    def _seed_competing_web_contact(agent: PersistentAgent) -> PersistentAgentCommsEndpoint:
+        observer = get_user_model().objects.create_user(
+            username=f"reply-observer-{agent.id}@eval.local",
+            email=f"reply-observer-{agent.id}@eval.local",
+        )
+        AgentCollaborator.objects.bulk_create([AgentCollaborator(agent=agent, user=observer)])
+        observer_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.WEB,
+            address=build_web_user_address(observer.id, agent.id),
+        )
+        start_web_session(agent, observer, source="eval-observer")
+        return observer_endpoint
+
     def run(self, run_id: str, agent_id: str) -> None:
         agent = PersistentAgent.objects.get(id=agent_id)
         mark_tool_enabled_without_discovery(agent, "send_email")
         mark_tool_enabled_without_discovery(agent, "send_chat_message")
-        owner_email = self._seed_email_context(agent)
+        self._seed_email_context(agent)
 
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="inject_prompt")
         with self.wait_for_agent_idle(agent_id, timeout=120):
@@ -1044,7 +1065,8 @@ class ReplyChannelContinuityScenario(EvalScenario, ScenarioExecutionTools):
                 trigger_processing=False,
                 eval_run_id=run_id,
             )
-            PersistentAgent.objects.filter(id=agent_id).update(preferred_contact_endpoint=owner_email)
+            observer_endpoint = self._seed_competing_web_contact(agent)
+            PersistentAgent.objects.filter(id=agent_id).update(preferred_contact_endpoint=observer_endpoint)
             self.trigger_processing(
                 agent_id,
                 eval_run_id=run_id,
@@ -1056,7 +1078,7 @@ class ReplyChannelContinuityScenario(EvalScenario, ScenarioExecutionTools):
                     },
                 },
                 eval_stop_policy={
-                    "stop_on_tool_names_after_execution": ["send_chat_message", "send_email"],
+                    "stop_on_tool_names_after_execution": ["send_email"],
                     "stop_on_unexpected_relevant_tool": True,
                     "allowed_tool_names": [
                         "sqlite_batch",
@@ -1074,7 +1096,10 @@ class ReplyChannelContinuityScenario(EvalScenario, ScenarioExecutionTools):
             None,
             EvalRunTask.Status.PASSED,
             task_name="inject_prompt",
-            observed_summary="Web prompt injected with an older preferred email path available.",
+            observed_summary=(
+                "Web prompt injected with an older email path and a different preferred, more recently active "
+                "web contact available."
+            ),
             artifacts={"message": inbound},
         )
 
@@ -1086,33 +1111,163 @@ class ReplyChannelContinuityScenario(EvalScenario, ScenarioExecutionTools):
             if self._result(call).get("skipped") is not True
             and str(self._result(call).get("status") or "").lower() in {"ok", "sent", "success"}
         ]
-        email_calls = [call for call in calls if call.tool_name == "send_email"]
+        cross_channel_calls = [
+            call
+            for call in calls
+            if call.tool_name in {"send_email", "send_sms", "send_agent_message"}
+        ]
+        outbound = list(
+            PersistentAgentMessage.objects.filter(
+                owner_agent_id=agent_id,
+                is_outbound=True,
+                timestamp__gt=inbound.timestamp,
+            )
+            .select_related("conversation", "to_endpoint")
+            .order_by("timestamp", "id")
+        )
+        exact_requester_delivery = (
+            len(delivered_chats) == 1
+            and len(outbound) == 1
+            and outbound[0].conversation_id == inbound.conversation_id
+            and outbound[0].to_endpoint_id == inbound.from_endpoint_id
+        )
 
         self.record_task_result(
             run_id,
             None,
-            EvalRunTask.Status.PASSED if len(delivered_chats) == 1 else EvalRunTask.Status.FAILED,
+            EvalRunTask.Status.PASSED if exact_requester_delivery else EvalRunTask.Status.FAILED,
             task_name="verify_web_chat_delivery",
-            expected_summary="Agent should deliver one non-skipped reply in the active web conversation.",
+            expected_summary="Agent should deliver one non-skipped reply to the exact latest web requester.",
             observed_summary=(
-                f"Saw {len(delivered_chats)} delivered web reply/replies after {len(chat_calls)} chat attempt(s)."
+                "Delivered one reply in the requester's exact conversation."
+                if exact_requester_delivery
+                else (
+                    f"Saw {len(delivered_chats)} delivered web reply/replies and {len(outbound)} outbound "
+                    "message(s), but the requester endpoint/conversation did not match exactly."
+                )
             ),
-            artifacts={"step": (delivered_chats[0].step if delivered_chats else chat_calls[0].step)}
-            if chat_calls
-            else {},
+            artifacts=(
+                {"message": outbound[0]}
+                if outbound
+                else ({"step": chat_calls[0].step} if chat_calls else {})
+            ),
         )
         self.record_task_result(
             run_id,
             None,
-            EvalRunTask.Status.PASSED if not email_calls else EvalRunTask.Status.FAILED,
+            EvalRunTask.Status.PASSED if not cross_channel_calls else EvalRunTask.Status.FAILED,
             task_name="verify_no_cross_channel_reply",
-            expected_summary="Agent should not move the reply to the older email thread.",
+            expected_summary="Agent should not move the reply to email, SMS, or a peer.",
             observed_summary=(
-                "Agent kept the reply out of email."
-                if not email_calls
-                else f"Agent attempted {len(email_calls)} cross-channel email reply/replies."
+                "Agent kept the reply on the requester's web conversation."
+                if not cross_channel_calls
+                else f"Agent attempted cross-channel replies via {[call.tool_name for call in cross_channel_calls]}."
             ),
-            artifacts={"step": email_calls[0].step} if email_calls else {},
+            artifacts={"step": cross_channel_calls[0].step} if cross_channel_calls else {},
+        )
+
+
+@register_scenario
+class UnavailableWebChannelContinuityScenario(EvalScenario, ScenarioExecutionTools):
+    slug = UNAVAILABLE_WEB_CHANNEL_CONTINUITY_SLUG
+    version = "1.0"
+    description = "An unavailable web reply should remain undelivered instead of silently moving to email."
+    tier = "core"
+    category = "message_quality"
+    expected_runtime = "short"
+    cost_class = "low"
+    owner = "agent-platform"
+    area = "agent_behavior"
+    tags = ("message_quality", "tool_failure", "send_chat_message", "reply_channel")
+    tasks = [
+        ScenarioTask(name="inject_prompt", assertion_type="manual"),
+        ScenarioTask(name="verify_web_failure_honored", assertion_type="manual"),
+        ScenarioTask(name="verify_no_cross_channel_reply", assertion_type="manual"),
+    ]
+
+    def run(self, run_id: str, agent_id: str) -> None:
+        agent = PersistentAgent.objects.get(id=agent_id)
+        mark_tool_enabled_without_discovery(agent, "send_email")
+        mark_tool_enabled_without_discovery(agent, "send_chat_message")
+        email_endpoint = ReplyChannelContinuityScenario._seed_email_context(agent)
+        PersistentAgent.objects.filter(id=agent_id).update(preferred_contact_endpoint=email_endpoint)
+
+        self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="inject_prompt")
+        with self.wait_for_agent_idle(agent_id, timeout=120):
+            inbound = self.inject_message(
+                agent_id,
+                "Could you summarize which outreach messages worked best and why? Please answer me here.",
+                trigger_processing=False,
+                eval_run_id=run_id,
+            )
+            self.trigger_processing(
+                agent_id,
+                eval_run_id=run_id,
+                mock_config={
+                    "send_chat_message": {
+                        "status": "error",
+                        "message": WEB_CHAT_UNAVAILABLE_MESSAGE,
+                        "retryable": False,
+                        "terminal_error": True,
+                    },
+                    "send_email": {
+                        "status": "ok",
+                        "message": "Mocked email delivery; using it would be a channel regression.",
+                        "message_id": "eval-wrong-channel-email",
+                    },
+                },
+                eval_stop_policy={
+                    "stop_on_tool_names_after_execution": ["send_email"],
+                    "stop_on_unexpected_relevant_tool": True,
+                    "allowed_tool_names": ["sqlite_batch", "send_chat_message", "send_email", "update_plan"],
+                    "ignored_tool_names": ["sqlite_batch", "update_plan", "sleep_until_next_trigger"],
+                    "max_relevant_tool_calls": 6,
+                },
+            )
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED,
+            task_name="inject_prompt",
+            observed_summary="Web request was processed with a synthetic expired-session failure and an older email path.",
+            artifacts={"message": inbound},
+        )
+
+        calls = MessageQualityScenario._tool_calls_for_run(run_id, after=inbound.timestamp)
+        chat_calls = [call for call in calls if call.tool_name == "send_chat_message"]
+        honored_failure = (
+            len(chat_calls) == 1
+            and chat_calls[0].status == "error"
+            and MessageQualityScenario._tool_params(chat_calls[0]).get("will_continue_work") is False
+            and "Do not move this reply" in str(MessageQualityScenario._tool_result(chat_calls[0]).get("message") or "")
+        )
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED if honored_failure else EvalRunTask.Status.FAILED,
+            task_name="verify_web_failure_honored",
+            observed_summary=(
+                "Agent attempted the requested web reply once and received the unavailable-session contract."
+                if honored_failure
+                else f"Expected one failed web attempt; saw {len(chat_calls)}."
+            ),
+            artifacts={"step": chat_calls[0].step} if chat_calls else {},
+        )
+
+        cross_channel_calls = [
+            call for call in calls if call.tool_name in {"send_email", "send_sms", "send_agent_message"}
+        ]
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED if not cross_channel_calls else EvalRunTask.Status.FAILED,
+            task_name="verify_no_cross_channel_reply",
+            observed_summary=(
+                "Agent left the unavailable web reply undelivered instead of changing media."
+                if not cross_channel_calls
+                else f"Agent changed channels via {[call.tool_name for call in cross_channel_calls]}."
+            ),
+            artifacts={"step": cross_channel_calls[0].step} if cross_channel_calls else {},
         )
 
 

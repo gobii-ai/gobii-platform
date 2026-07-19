@@ -9,6 +9,8 @@ from django.db.models import Max
 from django.utils import timezone
 
 from ..comms.message_service import _get_or_create_conversation, _ensure_participant
+from ..comms.message_reads import is_peer_dm_message
+from ..comms.routing import get_current_inbound_message, get_message_sender_address
 from ..files.attachment_helpers import AttachmentResolutionError, create_message_attachments, resolve_filespace_attachments
 from ..files.filespace_service import broadcast_message_attachment_update
 from util.text_sanitizer import normalize_llm_output
@@ -28,6 +30,15 @@ from ...models import (
 from ...services.email_verification import has_verified_email
 from ...services.web_sessions import get_deliverable_web_session, get_deliverable_web_sessions
 from .outbound_duplicate_guard import detect_recent_duplicate_message
+
+WEB_CHAT_UNAVAILABLE_MESSAGE = "No active web chat session exists for this requester. Do not move this reply to email, SMS, or another channel."
+BACKGROUND_WEB_UNAVAILABLE_MESSAGE = "No active web chat session exists for this recipient. Use an available configured delivery channel."
+WRONG_INBOUND_CHANNEL_MESSAGE = (
+    "The current request did not arrive in web chat. Reply on its inbound channel with the matching send tool; "
+    "do not provide another web target."
+)
+PEER_INBOUND_CHANNEL_MESSAGE = "The current request is a peer DM. Use send_agent_message only if a reply is needed; do not provide a web target."
+_CURRENT_INBOUND_UNSET = object()
 
 _PROGRESS_PREFIX_RE = re.compile(
     r"^(?:(?:good|great|okay|ok|alright|sure)[,! ]+)?(?:now\s+)?"
@@ -204,7 +215,20 @@ def has_other_contact_channel(agent: PersistentAgent, recipient_user) -> bool:
     return False
 
 
-def _resolve_default_web_chat_address(agent: PersistentAgent) -> str:
+def _resolve_default_web_chat_address(agent: PersistentAgent, *, current_inbound=_CURRENT_INBOUND_UNSET) -> str:
+    latest_inbound = (
+        get_current_inbound_message(agent)
+        if current_inbound is _CURRENT_INBOUND_UNSET
+        else current_inbound
+    )
+    if latest_inbound:
+        if is_peer_dm_message(latest_inbound) or latest_inbound.conversation.channel != CommsChannel.WEB:
+            return ""
+        latest_address = get_message_sender_address(latest_inbound)
+        if agent.is_recipient_whitelisted(CommsChannel.WEB, latest_address):
+            return latest_address
+        return ""
+
     if agent.preferred_contact_endpoint and agent.preferred_contact_endpoint.channel == CommsChannel.WEB:
         return agent.preferred_contact_endpoint.address
 
@@ -235,6 +259,21 @@ def _resolve_default_web_chat_address(agent: PersistentAgent) -> str:
     return ""
 
 
+def _web_unavailable_result(*, current_requester: bool, will_continue: bool) -> dict[str, Any]:
+    if current_requester:
+        return {
+            "status": "error",
+            "message": WEB_CHAT_UNAVAILABLE_MESSAGE,
+            "retryable": False,
+            "terminal_error": not will_continue,
+        }
+    return {
+        "status": "error",
+        "message": BACKGROUND_WEB_UNAVAILABLE_MESSAGE,
+        "retryable": False,
+    }
+
+
 def get_send_chat_tool() -> Dict[str, Any]:
     """Definition for the send_chat_message tool exposed to the agent."""
 
@@ -261,7 +300,7 @@ def get_send_chat_tool() -> Dict[str, Any]:
                     "to_address": {
                         "type": "string",
                         "description": (
-                            "Optional web chat address; omit to reply to the latest active or preferred web contact."
+                            "Optional web chat address; omit to reply to the latest web requester."
                         ),
                     },
                     "attachments": {
@@ -346,16 +385,39 @@ def execute_send_chat_message(agent: PersistentAgent, params: Dict[str, Any]) ->
             "message": f"Chat message exceeds maximum length of {max_len} characters.",
         }
 
+    current_inbound = get_current_inbound_message(agent)
+    current_requester_address = ""
+    current_inbound_is_web = False
+    if (
+        current_inbound is not None
+        and not is_peer_dm_message(current_inbound)
+        and current_inbound.conversation.channel == CommsChannel.WEB
+    ):
+        current_inbound_is_web = True
+        current_requester_address = get_message_sender_address(current_inbound)
+
     to_address = (params.get("to_address") or "").strip()
 
     if not to_address:
-        to_address = _resolve_default_web_chat_address(agent)
+        if current_inbound is not None and not current_inbound_is_web:
+            return {
+                "status": "error",
+                "message": (
+                    PEER_INBOUND_CHANNEL_MESSAGE
+                    if is_peer_dm_message(current_inbound)
+                    else WRONG_INBOUND_CHANNEL_MESSAGE
+                ),
+                "retryable": False,
+            }
+        to_address = _resolve_default_web_chat_address(agent, current_inbound=current_inbound)
+
+    is_current_requester = bool(current_requester_address and to_address == current_requester_address)
 
     if not to_address:
-        return {
-            "status": "error",
-            "message": "No eligible web chat recipient found. Provide 'to_address'.",
-        }
+        return _web_unavailable_result(
+            current_requester=current_inbound_is_web,
+            will_continue=will_continue,
+        )
 
     user_id, agent_id = parse_web_user_address(to_address)
     if agent_id != str(agent.id) or user_id is None:
@@ -375,13 +437,10 @@ def execute_send_chat_message(agent: PersistentAgent, params: Dict[str, Any]) ->
             recipient_user = None
 
         if not recipient_user:
-            return {
-                "status": "error",
-                "message": (
-                    "No active web chat session exists for this user. Retry using the user's most recently "
-                    "active non-web communication channel (e.g., email or SMS)."
-                ),
-            }
+            return _web_unavailable_result(
+                current_requester=is_current_requester,
+                will_continue=will_continue,
+            )
 
         # If the user has other communication channels, we want to ensure we're sending to an active chat session
         # If the user does not have other communication channels, pass through to web because it's our only choice
@@ -389,13 +448,10 @@ def execute_send_chat_message(agent: PersistentAgent, params: Dict[str, Any]) ->
             get_deliverable_web_session(agent, recipient_user) is None
             and has_other_contact_channel(agent, recipient_user)
         ):
-            return {
-                "status": "error",
-                "message": (
-                    "No active web chat session exists for this user. Retry using the user's most recently "
-                    "active non-web communication channel (e.g., email or SMS)."
-                ),
-            }
+            return _web_unavailable_result(
+                current_requester=is_current_requester,
+                will_continue=will_continue,
+            )
 
         if not agent.is_recipient_whitelisted(CommsChannel.WEB, to_address):
             return {

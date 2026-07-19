@@ -2,7 +2,7 @@ import hashlib
 import hmac
 import json
 import time
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings, tag
@@ -504,7 +504,7 @@ class PipedreamTriggerSubscriptionWebhookTests(TestCase):
         self.assertEqual(message.raw_payload["discord_author_id"], "u1")
         self.assertEqual(message.raw_payload["discord_attachments"], [{"url": "https://cdn.example/file.png"}])
         mock_max_file_size.assert_called()
-        mock_delay.assert_called_once_with(str(self.agent.id))
+        mock_delay.assert_called_once_with(str(self.agent.id), inbound_generation=ANY)
 
     @tag("batch_agent_webhooks")
     @patch("api.agent.comms.message_service.get_max_file_size", return_value=None)
@@ -573,7 +573,7 @@ class PipedreamTriggerSubscriptionWebhookTests(TestCase):
             auth=None,
         )
         mock_max_file_size.assert_called()
-        mock_delay.assert_called_once_with(str(self.agent.id))
+        mock_delay.assert_called_once_with(str(self.agent.id), inbound_generation=ANY)
 
     @tag("batch_agent_webhooks")
     @patch("api.agent.comms.message_service.requests.get")
@@ -608,7 +608,7 @@ class PipedreamTriggerSubscriptionWebhookTests(TestCase):
         self.assertEqual(message.raw_payload["discord_attachments"], ["1504906484096696551"])
         self.assertFalse(PersistentAgentMessageAttachment.objects.filter(message=message).exists())
         mock_get.assert_not_called()
-        mock_delay.assert_called_once_with(str(self.agent.id))
+        mock_delay.assert_called_once_with(str(self.agent.id), inbound_generation=ANY)
 
     @tag("batch_agent_webhooks")
     @override_settings(DISCORD_INBOUND_DEBOUNCE_SECONDS=15, CELERY_TASK_ALWAYS_EAGER=False)
@@ -713,7 +713,10 @@ class PipedreamTriggerSubscriptionWebhookTests(TestCase):
 
         mock_typing.assert_called_once_with("12345")
         mock_debounce_apply_async.assert_not_called()
-        mock_process_delay.assert_called_once_with(str(self.agent.id))
+        mock_process_delay.assert_called_once()
+        queued_args, queued_kwargs = mock_process_delay.call_args
+        self.assertEqual(queued_args, (str(self.agent.id),))
+        self.assertGreater(queued_kwargs["inbound_generation"], 0)
         self.assertEqual(fake_redis.values, {})
 
     @tag("batch_agent_webhooks")
@@ -773,7 +776,10 @@ class PipedreamTriggerSubscriptionWebhookTests(TestCase):
             process_discord_inbound_debounce(str(self.agent.id))
 
         mock_debounce_apply_async.assert_not_called()
-        mock_process_delay.assert_called_once_with(str(self.agent.id))
+        mock_process_delay.assert_called_once()
+        queued_args, queued_kwargs = mock_process_delay.call_args
+        self.assertEqual(queued_args, (str(self.agent.id),))
+        self.assertGreater(queued_kwargs["inbound_generation"], 0)
         self.assertEqual(fake_redis.values, {})
 
     @tag("batch_agent_webhooks")
@@ -808,7 +814,7 @@ class PipedreamTriggerSubscriptionWebhookTests(TestCase):
         self.assertEqual(message.raw_payload["source_label"], "_the_juicer_ in #general")
         self.assertEqual(message.raw_payload["discord_author_id"], "177593384389705729")
         self.assertEqual(message.raw_payload["discord_author_name"], "_the_juicer_")
-        mock_delay.assert_called_once_with(str(self.agent.id))
+        mock_delay.assert_called_once_with(str(self.agent.id), inbound_generation=ANY)
 
     @tag("batch_agent_webhooks")
     @patch("api.agent.tasks.process_agent_events_task.delay")

@@ -9,10 +9,18 @@ from django.test import TestCase, tag
 from django.utils import timezone
 
 from api.agent.core import event_processing as ep
+from api.agent.comms.routing import (
+    bind_inbound_routing_scope,
+    capture_inbound_routing_scope,
+    reset_inbound_routing_scope,
+)
 from api.agent.core.internal_reasoning import INTERNAL_REASONING_PREFIX
 from api.agent.core.prompt_context import _get_implied_send_context
+from api.agent.core.web_streaming import resolve_web_stream_target
 from api.agent.tools.web_chat_sender import execute_send_chat_message
 from api.models import (
+    AgentCollaborator,
+    AgentPeerLink,
     BrowserUseAgent,
     CommsChannel,
     PersistentAgent,
@@ -23,6 +31,7 @@ from api.models import (
     PersistentAgentCronTrigger,
     PersistentAgentWebSession,
     PersistentAgentStep,
+    PersistentAgentSystemStep,
     PersistentAgentToolCall,
     UserQuota,
     build_web_agent_address,
@@ -1495,7 +1504,7 @@ class ImpliedSendTests(TestCase):
         ).first()
         self.assertIsNotNone(correction_step)
         self.assertIn(
-            "most recently active non-web communication channel",
+            "do not switch channels",
             correction_step.description,
         )
 
@@ -1663,6 +1672,324 @@ class ImpliedSendTests(TestCase):
             build_web_user_address(self.user.id, self.agent.id),
         )
 
+    def test_latest_requester_beats_other_web_presence_and_preference(self):
+        requester_message = self._add_inbound_web_message("Can you answer me here?")
+        start_web_session(self.agent, self.user)
+
+        observer = get_user_model().objects.create_user(
+            username="implied-observer@example.com",
+            email="implied-observer@example.com",
+            password="password",
+        )
+        AgentCollaborator.objects.create(agent=self.agent, user=observer)
+        observer_address = build_web_user_address(observer.id, self.agent.id)
+        observer_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.WEB,
+            address=observer_address,
+        )
+        self.agent.preferred_contact_endpoint = observer_endpoint
+        self.agent.save(update_fields=["preferred_contact_endpoint"])
+        start_web_session(self.agent, observer)
+
+        context = _get_implied_send_context(self.agent)
+        self.assertEqual(context["to_address"], requester_message.from_endpoint.address)
+
+        result = execute_send_chat_message(self.agent, {"body": "Here is your answer."})
+
+        self.assertEqual(result["status"], "ok")
+        outbound = PersistentAgentMessage.objects.get(
+            owner_agent=self.agent,
+            is_outbound=True,
+            body="Here is your answer.",
+        )
+        self.assertEqual(outbound.to_endpoint.address, requester_message.from_endpoint.address)
+
+    def test_default_chat_does_not_switch_latest_email_request_to_web(self):
+        start_web_session(self.agent, self.user)
+        email_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.EMAIL,
+            address=self.user.email,
+        )
+        email_conversation = PersistentAgentConversation.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address=self.user.email,
+        )
+        PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            is_outbound=False,
+            from_endpoint=email_endpoint,
+            conversation=email_conversation,
+            body="Please answer this email.",
+        )
+
+        self.assertIsNone(_get_implied_send_context(self.agent))
+        result = execute_send_chat_message(self.agent, {"body": "Wrong channel"})
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("inbound channel", result["message"])
+        self.assertIn("do not provide another web target", result["message"])
+        self.assertIs(result["retryable"], False)
+        self.assertFalse(PersistentAgentMessage.objects.filter(is_outbound=True).exists())
+
+    def test_explicit_web_delivery_remains_available_from_email_context(self):
+        start_web_session(self.agent, self.user)
+        email_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.EMAIL,
+            address=self.user.email,
+        )
+        email_conversation = PersistentAgentConversation.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address=self.user.email,
+        )
+        PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            is_outbound=False,
+            from_endpoint=email_endpoint,
+            conversation=email_conversation,
+            body="Send Maya this update in web chat.",
+        )
+
+        result = execute_send_chat_message(
+            self.agent,
+            {
+                "to_address": build_web_user_address(self.user.id, self.agent.id),
+                "body": "The requested update.",
+            },
+        )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertTrue(PersistentAgentMessage.objects.filter(body="The requested update.").exists())
+
+    def test_inbound_scope_uses_run_boundary_and_survives_later_trigger(self):
+        requester_message = self._add_inbound_web_message("Can you answer me here?")
+        start_web_session(self.agent, self.user)
+        observer = get_user_model().objects.create_user(
+            username="routing-observer@example.com",
+            email="routing-observer@example.com",
+            password="password",
+        )
+        AgentCollaborator.objects.create(agent=self.agent, user=observer)
+        observer_address = build_web_user_address(observer.id, self.agent.id)
+        observer_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.WEB,
+            address=observer_address,
+        )
+        self.agent.preferred_contact_endpoint = observer_endpoint
+        self.agent.save(update_fields=["preferred_contact_endpoint"])
+        start_web_session(self.agent, observer)
+
+        process_step = PersistentAgentStep.objects.create(agent=self.agent, description="Process events")
+        cron_step = PersistentAgentStep.objects.create(agent=self.agent, description="Cron run")
+        PersistentAgentCronTrigger.objects.create(step=cron_step, cron_expression="0 9 * * *")
+        PersistentAgentStep.objects.filter(pk=cron_step.pk).update(
+            created_at=requester_message.timestamp + timedelta(seconds=1),
+        )
+
+        pending_scope = capture_inbound_routing_scope(self.agent, pending_inbound=True)
+        self.assertEqual(pending_scope.message_id, requester_message.id)
+        scope = capture_inbound_routing_scope(
+            self.agent,
+            pending_inbound=False,
+            background_before=process_step.created_at,
+        )
+        token = bind_inbound_routing_scope(scope)
+        try:
+            later_trigger = PersistentAgentStep.objects.create(agent=self.agent, description="Later proactive run")
+            PersistentAgentSystemStep.objects.create(
+                step=later_trigger,
+                code=PersistentAgentSystemStep.Code.PROACTIVE_TRIGGER,
+            )
+
+            context = _get_implied_send_context(self.agent)
+            stream_target = resolve_web_stream_target(self.agent)
+            result = execute_send_chat_message(self.agent, {"body": "Here is your answer."})
+        finally:
+            reset_inbound_routing_scope(token)
+
+        self.assertEqual(context["to_address"], requester_message.from_endpoint.address)
+        self.assertEqual(stream_target.address, requester_message.from_endpoint.address)
+        self.assertEqual(result["status"], "ok")
+        outbound = PersistentAgentMessage.objects.get(body="Here is your answer.")
+        self.assertEqual(outbound.to_endpoint.address, requester_message.from_endpoint.address)
+
+    def test_proactive_run_does_not_treat_historical_email_as_current_requester(self):
+        start_web_session(self.agent, self.user)
+        email_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.EMAIL,
+            address=self.user.email,
+        )
+        email_conversation = PersistentAgentConversation.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address=self.user.email,
+        )
+        inbound = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            is_outbound=False,
+            from_endpoint=email_endpoint,
+            conversation=email_conversation,
+            body="An older email request.",
+        )
+        trigger_step = PersistentAgentStep.objects.create(agent=self.agent, description="Scheduled run")
+        PersistentAgentSystemStep.objects.create(
+            step=trigger_step,
+            code=PersistentAgentSystemStep.Code.PROACTIVE_TRIGGER,
+        )
+        PersistentAgentStep.objects.filter(pk=trigger_step.pk).update(
+            created_at=inbound.timestamp + timedelta(seconds=1),
+        )
+
+        context = _get_implied_send_context(self.agent)
+        self.assertEqual(context["to_address"], build_web_user_address(self.user.id, self.agent.id))
+
+        result = execute_send_chat_message(self.agent, {"body": "Scheduled report"})
+        self.assertEqual(result["status"], "ok")
+        outbound = PersistentAgentMessage.objects.get(body="Scheduled report")
+        self.assertEqual(outbound.conversation.channel, CommsChannel.WEB)
+
+    def test_cron_run_does_not_treat_historical_email_as_current_requester(self):
+        start_web_session(self.agent, self.user)
+        email_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.EMAIL,
+            address=self.user.email,
+        )
+        email_conversation = PersistentAgentConversation.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address=self.user.email,
+        )
+        inbound = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            is_outbound=False,
+            from_endpoint=email_endpoint,
+            conversation=email_conversation,
+            body="An older email request.",
+        )
+        trigger_step = PersistentAgentStep.objects.create(agent=self.agent, description="Cron run")
+        PersistentAgentCronTrigger.objects.create(step=trigger_step, cron_expression="0 9 * * *")
+        PersistentAgentStep.objects.filter(pk=trigger_step.pk).update(
+            created_at=inbound.timestamp + timedelta(seconds=1),
+        )
+
+        context = _get_implied_send_context(self.agent)
+        self.assertEqual(context["to_address"], build_web_user_address(self.user.id, self.agent.id))
+
+        result = execute_send_chat_message(self.agent, {"body": "Cron report"})
+        self.assertEqual(result["status"], "ok")
+        outbound = PersistentAgentMessage.objects.get(body="Cron report")
+        self.assertEqual(outbound.conversation.channel, CommsChannel.WEB)
+
+    def test_webhook_run_uses_normal_owner_delivery_instead_of_reply_routing(self):
+        start_web_session(self.agent, self.user)
+        webhook_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.OTHER,
+            address="webhook:test-source",
+        )
+        webhook_conversation = PersistentAgentConversation.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.OTHER,
+            address="webhook:test-source",
+        )
+        PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            is_outbound=False,
+            from_endpoint=webhook_endpoint,
+            conversation=webhook_conversation,
+            body='{"status":"ready"}',
+            raw_payload={"source": "inbound_webhook", "source_kind": "webhook"},
+        )
+
+        scope = capture_inbound_routing_scope(self.agent, pending_inbound=False)
+        self.assertIsNone(scope.message_id)
+        self.assertEqual(
+            _get_implied_send_context(self.agent)["to_address"],
+            build_web_user_address(self.user.id, self.agent.id),
+        )
+
+        token = bind_inbound_routing_scope(scope)
+        try:
+            result = execute_send_chat_message(self.agent, {"body": "Webhook report"})
+        finally:
+            reset_inbound_routing_scope(token)
+
+        self.assertEqual(result["status"], "ok")
+        outbound = PersistentAgentMessage.objects.get(body="Webhook report")
+        self.assertEqual(outbound.conversation.channel, CommsChannel.WEB)
+
+    def test_pending_human_scope_ignores_a_newer_webhook(self):
+        requester_message = self._add_inbound_web_message("Please answer me here.")
+        webhook_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.OTHER,
+            address="webhook:newer-source",
+        )
+        webhook_conversation = PersistentAgentConversation.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.OTHER,
+            address="webhook:newer-source",
+        )
+        PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            is_outbound=False,
+            from_endpoint=webhook_endpoint,
+            conversation=webhook_conversation,
+            body='{"status":"ready"}',
+            raw_payload={"source": "inbound_webhook", "source_kind": "webhook"},
+        )
+
+        scope = capture_inbound_routing_scope(self.agent, pending_inbound=True)
+
+        self.assertIsNotNone(scope.message_id)
+        self.assertEqual(scope.message_id, requester_message.id)
+
+    def test_newer_peer_dm_does_not_leak_reply_to_historical_web_requester(self):
+        self._add_inbound_web_message("An older web request.")
+        peer_browser_agent = BrowserUseAgent.objects.create(
+            user=self.user,
+            name="peer-browser-for-implied-send",
+        )
+        peer = PersistentAgent.objects.create(
+            user=self.user,
+            name="Peer Agent",
+            charter="Test peer charter",
+            browser_use_agent=peer_browser_agent,
+        )
+        peer_link = AgentPeerLink.objects.create(
+            agent_a=self.agent,
+            agent_b=peer,
+            created_by=self.user,
+        )
+        peer_conversation = PersistentAgentConversation.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.OTHER,
+            address=f"peer:{peer.id}",
+            peer_link=peer_link,
+        )
+        peer_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=peer,
+            channel=CommsChannel.OTHER,
+            address=f"agent:{peer.id}",
+        )
+        PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            peer_agent=peer,
+            is_outbound=False,
+            from_endpoint=peer_endpoint,
+            conversation=peer_conversation,
+            body="Can you send me the current status?",
+        )
+        start_web_session(self.agent, self.user)
+
+        self.assertIsNone(_get_implied_send_context(self.agent))
+        result = execute_send_chat_message(self.agent, {"body": "This belongs in the peer thread."})
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("peer DM", result["message"])
+        self.assertIn("do not provide a web target", result["message"])
+        self.assertIs(result["retryable"], False)
+        self.assertFalse(PersistentAgentMessage.objects.filter(is_outbound=True).exists())
+
     def test_implied_send_ignores_hidden_session_after_visibility_grace(self):
         result = start_web_session(self.agent, self.user)
         PersistentAgentWebSession.objects.filter(pk=result.session.pk).update(
@@ -1711,7 +2038,7 @@ class ImpliedSendTests(TestCase):
         self.assertTrue(first_params.get("will_continue_work"))
         if len(mock_send_chat.call_args_list) > 1:
             second_params = mock_send_chat.call_args_list[1][0][1]
-            self.assertIsNone(second_params.get("will_continue_work"))
+            self.assertIs(second_params.get("will_continue_work"), False)
         self.assertEqual(mock_completion.call_count, 2)
 
     @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
@@ -1754,7 +2081,7 @@ class ImpliedSendTests(TestCase):
         mock_request_human_input.assert_not_called()
         params = mock_send_chat.call_args[0][1]
         self.assertIn("which target account segment", params["body"])
-        self.assertIsNone(params.get("will_continue_work"))
+        self.assertIs(params.get("will_continue_work"), False)
 
     @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
     @patch("api.agent.core.event_processing.execute_request_human_input", return_value={"status": "ok", "auto_sleep_ok": True})
@@ -1797,7 +2124,7 @@ class ImpliedSendTests(TestCase):
         mock_request_human_input.assert_not_called()
         params = mock_send_chat.call_args[0][1]
         self.assertIn("Which target account segment", params["body"])
-        self.assertIsNone(params.get("will_continue_work"))
+        self.assertIs(params.get("will_continue_work"), False)
 
     @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
     @patch("api.agent.core.event_processing.execute_request_human_input", return_value={"status": "ok", "auto_sleep_ok": True})

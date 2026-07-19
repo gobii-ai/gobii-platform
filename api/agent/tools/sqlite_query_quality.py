@@ -4,18 +4,46 @@ from types import SimpleNamespace
 from typing import Iterable
 
 import sqlparse
+from sqlparse import tokens as sql_tokens
+from sqlparse.sql import Parenthesis, Values
 
 
 TOOL_RESULTS_RE = re.compile(r'\b(?:from|join)\s+"?__tool_results"?\b', re.I)
 RESULT_ID_EQ_RE = re.compile(r"\b(?:[a-z_]\w*\.)?result_id\s*=\s*(['\"])(?P<id>[^'\"]+)\1", re.I)
 RESULT_ID_IN_RE = re.compile(r"\b(?:[a-z_]\w*\.)?result_id\s+in\s*\((?P<values>[^)]*)\)", re.I | re.S)
+RESULT_ID_IN_VALUE_RE = re.compile(r"(?:'(?:''|[^'])*'|\"(?:\"\"|[^\"])*\"|\?|[:@$][a-z_]\w*)", re.I)
 CREATE_TABLE_RE = re.compile(r'\bcreate\s+(?:temp(?:orary)?\s+)?table\s+(?:if\s+not\s+exists\s+)?"?(?P<name>[a-z_]\w*)"?', re.I)
 INSERT_INTO_RE = re.compile(r'\binsert\s+(?:or\s+\w+\s+)?into\s+"?(?P<name>[a-z_]\w*)"?', re.I)
-MANUAL_INSERT_VALUES_RE = re.compile(r'\binsert\s+(?:or\s+\w+\s+)?into\s+"?(?P<name>[a-z_]\w*)"?[\s\S]*?\bvalues\b', re.I)
+MANUAL_INSERT_VALUES_RE = re.compile(
+    r'\binsert\s+(?:or\s+\w+\s+)?into\s+"?(?P<name>[a-z_]\w*)"?\s*(?:\(\s*"?[a-z_]\w*"?(?:\s*,\s*"?[a-z_]\w*"?)*\s*\)\s*)?values\b', re.I
+)
 JSON_FUNCTION_RE = re.compile(r"\bjson_(?:extract|each)\s*\(", re.I)
+JSON_EACH_RE = re.compile(r"\bjson_each\s*\(", re.I)
+URL_RE = re.compile(r"https?://[^\s'\",)]+", re.I)
+BULK_MANUAL_VALUES_ROW_LIMIT = 6
+BULK_COPY_MESSAGE = (
+    "Query not executed: a large VALUES import while tool results exist is unreliable. Do not copy rows from visible "
+    "output; derive them from all relevant __tool_results rows in one INSERT ... SELECT/json_each query."
+)
+BLOB_LOOP_MESSAGE = (
+    "Query not executed: full result blobs were fetched one at a time. Combine prior outputs in one shaped query "
+    "using tool_name or result_id IN (...), plus CTEs/json_extract/json_each as needed."
+)
+ROW_LOOP_MESSAGE = (
+    "Query not executed: do not use per-result filters or tables. Replace them with one shaped INSERT ... SELECT/"
+    "json_each into a shared table over tool_name or result_id IN (...)."
+)
+MANUAL_COPY_MESSAGE = (
+    "This builds a VALUES table while multiple tool results exist. If those rows came from tool outputs, do not "
+    "continue: rebuild directly from all relevant __tool_results with json_extract/json_each or CTAS."
+)
+SINGLE_IMPORT_MESSAGE = (
+    "This imports one result_id while sibling tool results exist. If they share a dataset, replace separate imports "
+    "with one shaped query over tool_name or result_id IN (...)."
+)
 
 COUNT_FIELDS = (
-    "statement_count", "tool_result_statement_count", "single_result_id_filters",
+    "statement_count", "tool_result_statement_count", "single_result_id_filters", "single_tool_result_imports",
     "direct_result_text_fetches", "aggregate_tool_result_queries", "smart_tool_result_queries",
     "uses_json_functions", "uses_cte", "uses_join", "uses_group_by", "uses_window",
     "uses_order_by", "creates_working_table", "reads_working_table",
@@ -36,16 +64,13 @@ def summarize_sqlite_tool_result_calls(tool_calls: Iterable[object]):
 
 def summarize_sqlite_tool_result_sql(sql_values: Iterable[str], *, sqlite_call_count: int | None = None):
     sql_list = [str(sql or "") for sql in sql_values]
-    statements = [
-        statement.strip()
-        for sql in sql_list
-        for statement in sqlparse.split(sql or "")
-        if statement.strip()
-    ]
+    statements = [_structural_sql(stmt.strip()) for sql in sql_list for stmt in sqlparse.split(sql) if stmt.strip()]
     counts: Counter[str] = Counter()
     created_tables: list[str] = []
     working_sources: set[str] = set()
+    row_derived_sources: set[str] = set()
     manual_value_tables: list[str] = []
+    manual_value_rows = 0
     direct_fetch_keys: list[str] = []
 
     for statement in statements:
@@ -56,9 +81,14 @@ def summarize_sqlite_tool_result_sql(sql_values: Iterable[str], *, sqlite_call_c
         mentions = bool(TOOL_RESULTS_RE.search(statement))
         eq_count = len(RESULT_ID_EQ_RE.findall(statement))
         in_count = _result_id_in_count(statement)
-        single_result_filter = mentions and eq_count == 1 and in_count == 0
+        single_result_filter = mentions and (
+            (eq_count == 1 and in_count == 0)
+            or (eq_count == 0 and in_count == 1)
+        )
+        created_table = _created_table_name(statement)
+        inserted_table = _inserted_table_name(statement)
         direct_fetch = single_result_filter and _directly_selects_result_text(statement)
-        aggregate = mentions and not direct_fetch and (in_count > 1 or eq_count != 1)
+        aggregate = mentions and not direct_fetch and not single_result_filter
         flags = {
             "uses_json_functions": bool(JSON_FUNCTION_RE.search(statement)),
             "uses_cte": lowered.startswith("with ") or " with " in lowered,
@@ -69,6 +99,7 @@ def summarize_sqlite_tool_result_sql(sql_values: Iterable[str], *, sqlite_call_c
         }
         counts["tool_result_statement_count"] += int(mentions)
         counts["single_result_id_filters"] += int(single_result_filter)
+        counts["single_tool_result_imports"] += int(single_result_filter and bool(created_table or inserted_table))
         counts["direct_result_text_fetches"] += int(direct_fetch)
         counts["aggregate_tool_result_queries"] += int(aggregate)
         counts["smart_tool_result_queries"] += int(aggregate and any(flags.values()))
@@ -76,14 +107,17 @@ def summarize_sqlite_tool_result_sql(sql_values: Iterable[str], *, sqlite_call_c
             counts[key] += int(enabled)
         if direct_fetch:
             direct_fetch_keys.append(_direct_fetch_key(statement))
-        if table := _created_table_name(statement):
-            created_tables.append(table)
+        if created_table:
+            created_tables.append(created_table)
             if mentions:
-                working_sources.add(table)
+                working_sources.add(created_table)
         if table := _manual_values_table_name(statement):
             manual_value_tables.append(table)
-        if mentions and (table := _inserted_table_name(statement)):
-            working_sources.add(table)
+            manual_value_rows += _manual_values_row_count(statement)
+        if mentions and inserted_table:
+            working_sources.add(inserted_table)
+        if mentions and JSON_EACH_RE.search(statement):
+            row_derived_sources.update(table for table in (created_table, inserted_table) if table)
 
     created_unique = tuple(dict.fromkeys(created_tables))
     manual_values_unique = tuple(dict.fromkeys(manual_value_tables))
@@ -98,72 +132,124 @@ def summarize_sqlite_tool_result_sql(sql_values: Iterable[str], *, sqlite_call_c
         sqlite_call_count=sqlite_call_count if sqlite_call_count is not None else len(sql_list),
         duplicate_direct_fetches=duplicate_fetches,
         working_table_names=created_unique,
+        derived_working_table_names=tuple(table for table in created_unique if table in working_sources),
+        row_derived_working_table_names=tuple(table for table in created_unique if table in row_derived_sources),
         manual_values_table_names=manual_values_unique,
+        manual_values_rows=manual_value_rows,
         manual_values_working_tables=sum(1 for table in manual_values_unique if table in created_unique),
         **{field: counts[field] for field in COUNT_FIELDS},
     )
 
 
 def build_tool_result_query_advisories(
-    sql_values: Iterable[str],
-    *,
-    available_tool_result_rows: int,
+    sql_values: Iterable[str], *, available_tool_result_rows: int, tool_result_payloads: Iterable[str] = ()
 ) -> list[SimpleNamespace]:
     if available_tool_result_rows < 2:
         return []
+    sql_values = [str(sql or "") for sql in sql_values]
     advisories = []
     summary = summarize_sqlite_tool_result_sql(sql_values)
-    if summary.manual_values_working_tables:
-        advisories.append(
-            _advisory("manual_working_table_from_visible_results", "This builds a working table by hand-entering VALUES while multiple tool results exist. Derive rows from __tool_results in SQL with json_extract/json_each or CREATE TABLE ... AS SELECT.")
-        )
+    copied_provenance_urls = _matching_provenance_urls(sql_values, tool_result_payloads)
+    if summary.manual_values_rows >= BULK_MANUAL_VALUES_ROW_LIMIT and len(copied_provenance_urls) >= 2:
+        advisories.append(_advisory(
+            "bulk_manual_working_table_from_visible_results", BULK_COPY_MESSAGE, blocking=True
+        ))
+    elif summary.manual_values_working_tables:
+        advisories.append(_advisory("manual_working_table_from_visible_results", MANUAL_COPY_MESSAGE))
     if summary.direct_result_text_fetches >= 2 or summary.duplicate_direct_fetches:
-        advisories.append(
-            _advisory("tool_result_blob_fetch_loop", "You are fetching full result_text blobs one result at a time. Combine prior tool outputs in one shaped query using WHERE result_id IN (...), CTEs, json_extract/json_each, joins, aggregation, or CREATE TABLE ... AS SELECT for a working table.")
-        )
+        advisories.append(_advisory("tool_result_blob_fetch_loop", BLOB_LOOP_MESSAGE, blocking=True))
     elif summary.direct_result_text_fetches:
         advisories.append(
             _advisory("single_tool_result_blob_fetch", "This fetched one full result_text blob while multiple tool results are available. For multi-source synthesis, query the needed rows together; use substr(result_text,1,N) only for previews.")
         )
+    if summary.single_result_id_filters >= 2 and summary.direct_result_text_fetches < 2:
+        advisories.append(_advisory("tool_result_row_loop", ROW_LOOP_MESSAGE, blocking=True))
+    elif summary.single_tool_result_imports:
+        advisories.append(_advisory("single_tool_result_import", SINGLE_IMPORT_MESSAGE))
     return advisories
 
 
-def _advisory(code: str, message: str) -> SimpleNamespace:
-    return SimpleNamespace(code=code, message=message)
+def _advisory(code: str, message: str, *, blocking: bool = False) -> SimpleNamespace:
+    return SimpleNamespace(code=code, message=message, blocking=blocking)
 
 
 def _sql_values_from_params(params: dict) -> list[str]:
     value = params.get("sql") or params.get("query") or params.get("queries")
     if isinstance(value, (list, tuple)):
         return [str(item) for item in value if str(item or "").strip()]
-    if value:
-        return [str(value)]
-    return []
+    return [str(value)] if value else []
 
 
 def _normalize(statement: str) -> str:
     return re.sub(r"\s+", " ", statement or "").strip().lower()
 
 
+def _structural_sql(statement: str) -> str:
+    """Remove comments and mask string contents before structural regex checks."""
+    parsed = sqlparse.parse(statement or "")
+    if not parsed:
+        return ""
+    parts = []
+    for token in parsed[0].flatten():
+        if token.ttype in sql_tokens.Comment:
+            continue
+        if token.ttype in sql_tokens.Literal.String.Single:
+            parts.append("'value'")
+        elif token.ttype in sql_tokens.Literal.String.Symbol and not re.fullmatch(r'"[a-z_]\w*"', token.value, re.I):
+            parts.append('"value"')
+        else:
+            parts.append(token.value)
+    return "".join(parts)
+
+
+def _matching_provenance_urls(sql_values: Iterable[str], tool_result_payloads: Iterable[str]) -> set[str]:
+    query_urls = {
+        url
+        for sql in sql_values
+        for statement in sqlparse.parse(str(sql or ""))
+        for values_group in statement.tokens
+        if isinstance(values_group, Values)
+        for url in URL_RE.findall(
+            "".join(
+                token.value
+                for token in values_group.flatten()
+                if token.ttype not in sql_tokens.Comment
+            )
+        )
+    }
+    if len(query_urls) < 2:
+        return set()
+    payload_text = "\n".join(str(payload or "") for payload in tool_result_payloads)
+    return {url for url in query_urls if url in payload_text}
+
+
 def _result_id_in_count(statement: str) -> int:
-    counts = [len([v for v in match.group("values").split(",") if v.strip()]) for match in RESULT_ID_IN_RE.finditer(statement or "")]
+    counts = []
+    for match in RESULT_ID_IN_RE.finditer(statement or ""):
+        values = [value.strip() for value in match.group("values").split(",") if value.strip()]
+        valid_literals = values and all(RESULT_ID_IN_VALUE_RE.fullmatch(value) for value in values)
+        counts.append(len(values) if valid_literals else 2)
     return max(counts or [0])
 
 
-def _directly_selects_result_text(statement: str) -> bool:
-    match = re.search(
-        r'\bselect\b(?P<select>.*?)\bfrom\s+"?__tool_results"?\b',
-        statement or "",
-        re.I | re.S,
+def _manual_values_row_count(statement: str) -> int:
+    parsed = sqlparse.parse(statement or "")
+    return 0 if not parsed else sum(
+        isinstance(child, Parenthesis)
+        for values_group in parsed[0].tokens
+        if isinstance(values_group, Values)
+        for child in values_group.tokens
     )
+
+
+def _directly_selects_result_text(statement: str) -> bool:
+    match = re.search(r'\bselect\b(?P<select>.*?)\bfrom\s+"?__tool_results"?\b', statement or "", re.I | re.S)
     if not match:
         return False
     for field in match.group("select").split(","):
         cleaned = re.sub(r"\s+as\s+\"?[a-z_]\w*\"?$", "", field.strip(), flags=re.I).strip('"')
-        if (
-            cleaned == "*"
-            or cleaned.endswith(".*")
-            or re.fullmatch(r'(?:[a-z_]\w*\.)?"?result_text"?', cleaned, flags=re.I)
+        if cleaned == "*" or cleaned.endswith(".*") or re.fullmatch(
+            r'(?:[a-z_]\w*\.)?"?result_text"?', cleaned, flags=re.I
         ):
             return True
     return False

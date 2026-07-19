@@ -260,6 +260,18 @@ class ToolErrorNormalizationTests(SimpleTestCase):
 
         self.assertEqual(result, {"status": "error", "message": "Tool failed.", "retryable": False})
 
+    def test_terminal_error_preserves_explicit_contract(self):
+        result = _normalize_error_result(
+            {
+                "status": "error",
+                "message": "The requested delivery channel is unavailable.",
+                "retryable": False,
+                "terminal_error": True,
+            }
+        )
+
+        self.assertIs(result["terminal_error"], True)
+
 
 @tag('batch_event_processing')
 class MessageToolExplicitContinuationTests(TestCase):
@@ -323,6 +335,50 @@ class MessageToolExplicitContinuationTests(TestCase):
         self.assertTrue(finalized.progress_message_delivery_ok)
         self.assertFalse(finalized.terminal_message_delivery_ok)
         self.assertIs(finalized.last_explicit_continue, True)
+
+    def test_terminal_delivery_error_does_not_force_a_retry(self):
+        def finalize(*specs):
+            outcomes = []
+            for idx, (tool_name, explicit_continue, result) in enumerate(specs, start=1):
+                params = {"body": "Here is the answer.", "will_continue_work": explicit_continue}
+                prepared = _PreparedToolExecution(
+                    idx=idx, tool_name=tool_name, tool_params=params, exec_params=params,
+                    pending_step=None, credits_consumed=None, consumed_credit=None, call_id=f"call_{idx}",
+                    explicit_continue=explicit_continue, inferred_continue=False, parallel_safe=False,
+                    parallel_ineligible_reason=None,
+                )
+                outcomes.append(_ToolExecutionOutcome(
+                    prepared=prepared, result=result, duration_ms=1, updated_tools=None, variable_map={},
+                ))
+            return _finalize_tool_batch(
+                self.agent,
+                outcomes,
+                attach_completion=lambda kwargs: None,
+                attach_prompt_archive=lambda step: None,
+            )
+
+        terminal = {
+            "status": "error",
+            "message": "No active web chat session.",
+            "retryable": False,
+            "terminal_error": True,
+        }
+        finalized = finalize(("send_chat_message", False, terminal))
+        self.assertFalse(finalized.followup_required)
+        self.assertFalse(finalized.message_delivery_ok)
+        self.assertIs(finalized.last_explicit_continue, False)
+
+        progress_error = finalize(("send_chat_message", True, terminal))
+        self.assertTrue(progress_error.followup_required)
+
+        ordinary = {
+            "status": "error", "message": "Unauthorized.", "retryable": False, "auto_sleep_ok": True,
+        }
+        ordinary_error = finalize(("mcp_example", False, ordinary))
+        self.assertTrue(ordinary_error.followup_required)
+
+        mixed_errors = finalize(("mcp_example", False, ordinary), ("send_chat_message", False, terminal))
+        self.assertTrue(mixed_errors.followup_required)
 
     def test_preflight_terminal_message_detection_respects_explicit_continue_true(self):
         call = {
@@ -1234,12 +1290,13 @@ class ContinuationModePromptContextTests(TestCase):
         system_prompt = self._render_system_prompt(is_first_run=False)
 
         self.assertIn("## Work Updates (CRITICAL)", system_prompt)
-        self.assertIn("Short work: no updates, one result", system_prompt)
-        self.assertIn("FIRST call the same-channel send tool", system_prompt)
-        self.assertIn("latest requester concise scope + next checkpoint", system_prompt)
-        self.assertIn("At first meaningful milestone, send one useful update", system_prompt)
-        self.assertIn("No generic status, tool sequence, or internal reasoning", system_prompt)
-        self.assertIn("Peer request: use send_agent_message", system_prompt)
+        self.assertIn("Short work: no updates", system_prompt)
+        self.assertIn("FIRST send scope + next checkpoint on the inbound channel", system_prompt)
+        self.assertIn("Before work call 4 or after the first source batch/phase", system_prompt)
+        self.assertIn("send an evidence milestone", system_prompt)
+        self.assertIn("No generic narration/reasoning", system_prompt)
+        self.assertIn("Peer: send_agent_message only", system_prompt)
+        self.assertIn("For record lists, include item/detail URLs", system_prompt)
 
 
 @tag("batch_event_processing")

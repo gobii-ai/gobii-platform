@@ -1068,6 +1068,20 @@ def _table_row_count(conn: sqlite3.Connection, table_name: str) -> int:
         return 0
 
 
+def _recent_tool_result_payloads(conn: sqlite3.Connection, *, limit: int = 12) -> list[str]:
+    columns = [column for column in ("result_json", "result_text") if _table_has_column(conn, "__tool_results", column)]
+    if not columns:
+        return []
+    projection = " || char(10) || ".join(f"substr(coalesce({column}, ''), 1, 200000)" for column in columns)
+    try:
+        rows = conn.execute(
+            f'SELECT {projection} FROM "__tool_results" ORDER BY rowid DESC LIMIT ?', (limit,)
+        ).fetchall()
+        return [str(row[0] or "") for row in rows]
+    except sqlite3.Error:
+        return []
+
+
 def _autocorrect_missing_table_with_schema(
     sql: str,
     error_msg: str,
@@ -1726,8 +1740,27 @@ def _execute_sqlite_batch_inner(
         except Exception:
             pass
 
+        advisories = build_tool_result_query_advisories(
+            queries,
+            available_tool_result_rows=_table_row_count(conn, "__tool_results"),
+            tool_result_payloads=_recent_tool_result_payloads(conn),
+        )
         preview = [q.strip()[:160] for q in queries[:5]]
         logger.info("Agent %s executing sqlite_batch: %s queries (preview=%s)", agent_id, len(queries), preview)
+
+        blocking_advisories = [advisory for advisory in advisories if advisory.blocking]
+        if blocking_advisories:
+            return {
+                "status": "error",
+                "results": [],
+                "db_size_mb": round(_get_db_size_mb(db_path), 2),
+                "message": " ".join(advisory.message for advisory in blocking_advisories),
+                "retryable": True,
+                "advisories": [
+                    {"code": advisory.code, "message": advisory.message}
+                    for advisory in blocking_advisories
+                ],
+            }
 
         for idx, query in enumerate(queries):
             if not isinstance(query, str) or not query.strip():
@@ -1786,18 +1819,16 @@ def _execute_sqlite_batch_inner(
         if db_size_mb > 50:
             size_warning = " WARNING: DB SIZE EXCEEDS 50MB. YOU MUST EXECUTE MORE QUERIES TO SHRINK THE SIZE, OR THE WHOLE DB WILL BE WIPED!!!"
 
-        advisories = []
-        if not had_error:
-            advisories = build_tool_result_query_advisories(
-                queries,
-                available_tool_result_rows=_table_row_count(conn, "__tool_results"),
-            )
-            if advisories:
-                had_warning = True
+        if advisories:
+            had_warning = True
+        advice = (
+            " [!] SQLITE QUERY ADVICE: " + " ".join(advisory.message for advisory in advisories)
+            if advisories else ""
+        )
 
         # Build success message with any auto-corrections noted
         if had_error:
-            msg = error_message
+            msg = error_message + advice
         else:
             msg = f"Executed {len(results)} queries. Database size: {db_size_mb:.2f} MB.{size_warning}"
             if all_corrections:
@@ -1807,10 +1838,7 @@ def _execute_sqlite_batch_inner(
                     "For other patterns: escape single quotes as '' in SQL strings. "
                     + msg
                 )
-            if advisories:
-                msg += " [!] SQLITE QUERY ADVICE: " + " ".join(
-                    advisory.message for advisory in advisories
-                )
+            msg += advice
 
         response: Dict[str, Any] = {
             "status": "error" if had_error else ("warning" if had_warning else "ok"),
@@ -1861,12 +1889,15 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
         "function": {
             "name": "sqlite_batch",
             "description": (
-                "Durable SQLite memory for structured data. "
-                "Query/update structured data you already have. "
-                "For multiple outputs, use one shaped query with CTEs/IN/json_extract/json_each/joins/aggregation; persist extracts from __tool_results with CREATE TABLE ... AS SELECT, not hand-entered VALUES. "
-                "For repetitive imports, API fan-out, or large writes, prefer a custom tool writing to SQLite; query those tables here, no ATTACH. "
-                "`sql` is one semicolon-separated string. Escape quotes by doubling: 'O''Brien'. "
-                "grep_context_all/split_sections return string arrays: json_each(...), then ctx.value directly, not json_extract. "
+                "SQLite memory and logic. Model reusable domains in shared entity/event/relationship "
+                "tables; separate repeating parents/children with PRIMARY KEY/UNIQUE identity and provenance. Use joins/CTEs/"
+                "windows/aggregates; return only needed rows. Load all relevant __tool_results with one "
+                "INSERT ... SELECT/json_each query and an IN/tool_name filter; http_request payloads are under "
+                "result_json $.content. Never use per-result tables or hand-copy tool rows into VALUES. CTAS suits "
+                "extracts. For large/repetitive imports or API fan-out, prefer a custom tool writing to SQLite; no "
+                "ATTACH. Reusable pattern: CREATE TABLE with PRIMARY KEY/UNIQUE, then aggregate INSERT; CTAS only for "
+                "disposable extracts. `sql` is one semicolon-separated string; escape apostrophes as 'O''Brien'. "
+                "grep_context_all/split_sections arrays use json_each and ctx.value, not json_extract."
             ),
             "parameters": {
                 "type": "object",

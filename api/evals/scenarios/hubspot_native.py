@@ -167,36 +167,14 @@ HUBSPOT_NATIVE_CASES = (
     HubSpotNativeCase(
         slug=HUBSPOT_NATIVE_MISSING_CONNECTION,
         description="Report native integration setup guidance when HubSpot is not connected.",
-        prompt=(
-            "Use the native HubSpot integration to search for customer contacts in Texas. "
-            "If HubSpot is not connected, tell me what to do."
-        ),
-        http_rules=(
-            {
-                "url_contains": ("api.hubapi.com", "objects/contacts/search"),
-                "result": {
-                    "status": "error",
-                    "status_code": 401,
-                    "url": f"{HUBSPOT_API_BASE}/objects/contacts/search",
-                    "message": (
-                        "native_integration_not_connected: HubSpot is not connected. "
-                        "Ask the user to open /app/integrations and connect HubSpot."
-                    ),
-                    "content": {"ok": False},
-                }
-            },
-        ),
-        expected_http_requests=(
-            HubSpotHttpRequestExpectation(
-                name="hubspot_search_attempt",
-                url_terms=("api.hubapi.com/crm/v3/objects/contacts/search",),
-                allowed_statuses=("error",),
-            ),
-        ),
+        prompt="Use the native HubSpot integration to search for customer contacts in Texas.",
+        http_rules=(),
+        expected_http_requests=(),
+        forbidden_url_terms=(("api.hubapi.com",),),
         response_term_groups=(
             ("HubSpot",),
-            ("/app/integrations", "Integrations page", "Integrations section", "Agent Settings"),
-            ("connect", "connected"),
+            ("/app/integrations",),
+            ("not connected", "isn't connected", "connect HubSpot"),
         ),
         tags=("missing_connection",),
     ),

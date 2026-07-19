@@ -70,6 +70,7 @@ class _ProcessingDispatch:
     owner_id: UUID
     channel: str
     trigger_processing: bool
+    is_human_input: bool = True
     message_id: str | None = None
     has_attachments: bool = False
     filespace_import_mode: str = "sync"
@@ -100,11 +101,11 @@ class _ProcessingDispatch:
             if not self.trigger_processing:
                 return
 
-            inbound_generation = None
-            if is_interactive:
-                inbound_generation = bump_human_inbound_generation(self.owner_id)
             if self.should_skip_processing:
                 return
+            inbound_generation = None
+            if self.is_human_input:
+                inbound_generation = bump_human_inbound_generation(self.owner_id)
 
             from api.agent.tasks import enqueue_interactive_process_agent_events, process_agent_events_task
 
@@ -114,7 +115,12 @@ class _ProcessingDispatch:
                     inbound_generation=inbound_generation,
                 )
             else:
-                process_agent_events_task.delay(str(self.owner_id))
+                kwargs = (
+                    {"inbound_generation": inbound_generation}
+                    if inbound_generation is not None
+                    else {}
+                )
+                process_agent_events_task.delay(str(self.owner_id), **kwargs)
 
     def _dispatch_attachment_import(self) -> None:
         if self.filespace_import_mode != "sync":
@@ -490,6 +496,11 @@ def ingest_inbound_message(
     """Persist an inbound message and trigger event processing."""
 
     channel_val = channel.value if isinstance(channel, CommsChannel) else channel
+    is_inbound_webhook = (
+        channel_val == CommsChannel.OTHER
+        and isinstance(parsed.raw_payload, dict)
+        and str(parsed.raw_payload.get("source_kind", "")).strip().lower() == "webhook"
+    )
 
     with traced("AGENT MSG Ingest", channel=channel_val) as span:
         from_ep = _get_or_create_endpoint(channel_val, parsed.sender)
@@ -508,6 +519,7 @@ def ingest_inbound_message(
                 owner_id=agent_id,
                 channel=channel_val,
                 trigger_processing=trigger_processing,
+                is_human_input=not is_inbound_webhook,
             )
         if processing_dispatch and prioritize_processing_dispatch:
             # Register before message creation so realtime post-save callbacks cannot
@@ -631,11 +643,6 @@ def ingest_inbound_message(
             # current sender and skip processing for this inbound attempt.
             should_skip_processing = False
             pause_state = {"paused": False, "reason": "", "paused_at": None}
-            is_inbound_webhook = (
-                channel_val == CommsChannel.OTHER
-                and isinstance(parsed.raw_payload, dict)
-                and str(parsed.raw_payload.get("source_kind", "")).strip().lower() == "webhook"
-            )
             try:
                 if agent_obj and (channel_val in {CommsChannel.EMAIL, CommsChannel.SMS} or is_inbound_webhook):
                     owner = resolve_agent_owner(agent_obj)

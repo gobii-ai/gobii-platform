@@ -1,3 +1,4 @@
+import re
 from typing import Iterable
 
 from api.agent.tools.eval_synthetic_tools import EVAL_SYNTHETIC_TOOL_SERVER
@@ -126,14 +127,50 @@ def _web_mock() -> dict:
 
 
 def _product_mock() -> dict:
+    def expanded_plans(plans: Iterable[tuple]) -> list[dict]:
+        catalog = [
+            {"plan": plan, "monthly_price_usd": price, "included_seats": seats, "compliance": list(compliance), "fit_score": score}
+            for plan, price, seats, compliance, score in plans
+        ]
+        regional = [
+            {
+                "plan": f"Regional {index + 1}",
+                "monthly_price_usd": 240 + index * 25,
+                "included_seats": 8 + index * 2,
+                "compliance": [],
+                "fit_score": 30 + index,
+            }
+            for index in range(16)
+        ]
+        return [*regional, *catalog]
+
     payloads = {
-        url: {"vendor": vendor, "source_url": url, "plans": [{"plan": p, "monthly_price_usd": price, "included_seats": seats, "compliance": list(comp), "fit_score": score} for p, price, seats, comp, score in plans]}
+        url: {"vendor": vendor, "source_url": url, "plans": expanded_plans(plans)}
         for url, (vendor, plans) in zip(PRODUCT_URLS, PRODUCT_PLAN_ROWS)
     }
     return {"http_request": {"rules": [{"url_contains": url, "result": {"status": "ok", "status_code": 200, "url": url, "content": payload}} for url, payload in payloads.items()], "default": {"status": "error", "message": "Unknown eval URL."}}}
 
 
 def _inventory_mock() -> dict:
+    def expanded_rows(source_index: int, vehicles: Iterable[dict]) -> list[dict]:
+        dealer_names = ("Blue Ridge Auto", "Capital EV Center", "Piedmont Electric", "Potomac Motors")
+        filler = [
+            {
+                "vin": f"5YJYGDEE{source_index}{index:08d}",
+                "year": 2023 + index % 3,
+                "trim": "Model Y Long Range" if index % 2 else "Model Y",
+                "mileage": 41000 + index * 113,
+                "price_usd": 42000 + index * 97,
+                "distance_mi": 20 + index % 29,
+                "dealer": dealer_names[(source_index + index) % len(dealer_names)],
+                "listing_url": (
+                    f"https://listings.example.test/tesla/model-y/5yjygdee{source_index}{index:08d}"
+                ),
+            }
+            for index in range(40)
+        ]
+        return [*filler, *vehicles]
+
     rules = [
         {
             "url_contains": url,
@@ -143,11 +180,11 @@ def _inventory_mock() -> dict:
                 "url": url,
                 "content": {
                     "source_url": url,
-                    "vehicles": list(vehicles),
+                    "vehicles": expanded_rows(source_index, vehicles),
                 },
             },
         }
-        for url, vehicles in INVENTORY_ROWS
+        for source_index, (url, vehicles) in enumerate(INVENTORY_ROWS, start=1)
     ]
     return {"http_request": {"rules": rules, "default": {"status": "error", "message": "Unknown eval URL."}}}
 
@@ -187,6 +224,30 @@ def _dedupe_mock() -> dict:
 MOCK_BUILDERS = {"web": _web_mock, "product": _product_mock, "dedupe": _dedupe_mock, "inventory": _inventory_mock}
 
 
+def _sqlite_calls_with_persisted_effects(calls):
+    successful_calls = [
+        call for call in calls
+        if str(getattr(call, "status", "complete")).lower() == "complete"
+    ]
+    successful_sql = "\n".join(
+        str((call.tool_params or {}).get("sql") or "") for call in successful_calls
+    )
+    strategy_calls = []
+    for call in calls:
+        if call in successful_calls:
+            strategy_calls.append(call)
+            continue
+        if "Query not executed:" in str(getattr(call, "result", "")):
+            continue
+        failed_summary = summarize_sqlite_tool_result_calls([call])
+        if any(
+            re.search(rf'\b(?:from|join)\s+"?{re.escape(table)}"?\b', successful_sql, re.I)
+            for table in failed_summary.derived_working_table_names
+        ):
+            strategy_calls.append(call)
+    return successful_calls, strategy_calls
+
+
 class SqliteToolResultScenario(EvalScenario, ScenarioExecutionTools):
     tier = "core"
     category = "sqlite_tool_results"
@@ -210,7 +271,10 @@ class SqliteToolResultScenario(EvalScenario, ScenarioExecutionTools):
         self._record_sourced_answer(run_id, agent_id=agent_id, after=inbound.timestamp, task_name=self.sourced_answer_task_name, source_urls=self.answer_source_urls, required_terms=self.required_terms, min_sources=self.min_sources)
 
     def _ready_agent(self, agent_id: str) -> None:
-        PersistentAgent.objects.filter(id=agent_id).update(charter="Use tools for source data, SQLite for structured multi-result synthesis, and cite source URLs.", planning_state=PersistentAgent.PlanningState.SKIPPED)
+        PersistentAgent.objects.filter(id=agent_id).update(
+            charter="Research requested sources efficiently, synthesize the evidence, and cite source URLs.",
+            planning_state=PersistentAgent.PlanningState.SKIPPED,
+        )
         exists = PersistentAgentStep.objects.filter(agent_id=agent_id, system_step__code="PROCESS_EVENTS").exists()
         if not exists:
             step = PersistentAgentStep.objects.create(agent_id=agent_id, description="Process events")
@@ -223,19 +287,20 @@ class SqliteToolResultScenario(EvalScenario, ScenarioExecutionTools):
             if synthetic:
                 PersistentAgentEnabledTool.objects.filter(agent=agent, tool_full_name=tool_name).update(tool_server=EVAL_SYNTHETIC_TOOL_SERVER, tool_name=tool_name)
 
-    def _inject_and_wait(self, run_id: str, agent_id: str, prompt: str, mock_config: dict, *, allowed_tool_names: Iterable[str], max_relevant_tool_calls: int = 14):
-        self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="inject_prompt")
+    def _inject_and_wait(self, run_id: str, agent_id: str, prompt: str, mock_config: dict, *, allowed_tool_names: Iterable[str], max_relevant_tool_calls: int = 14, task_name: str = "inject_prompt"):
+        self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name=task_name)
         with self.wait_for_agent_idle(agent_id, timeout=240):
             inbound = self.inject_message(agent_id, prompt, trigger_processing=True, eval_run_id=run_id, mock_config=mock_config, eval_stop_policy={"max_relevant_tool_calls": max_relevant_tool_calls, "stop_on_unexpected_relevant_tool": True, "allowed_tool_names": list(allowed_tool_names), "ignored_tool_names": list(STOP_TOOL_NAMES)})
-        self.record_task_result(run_id, None, EvalRunTask.Status.PASSED, task_name="inject_prompt", observed_summary="Prompt injected and processing completed.", artifacts={"message": inbound})
+        self.record_task_result(run_id, None, EvalRunTask.Status.PASSED, task_name=task_name, observed_summary="Prompt injected and processing completed.", artifacts={"message": inbound})
         return inbound
 
     def _record_sqlite_usage(self, run_id: str, *, after, task_name: str, require_working_table: bool = False, max_direct_fetches: int = 0, max_single_result_filters: int | None = None) -> bool:
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name=task_name)
         calls = _tool_calls_for_run(run_id, after=after, tool_names={"sqlite_batch"})
-        summary = summarize_sqlite_tool_result_calls(calls)
+        successful_calls, strategy_calls = _sqlite_calls_with_persisted_effects(calls)
+        summary = summarize_sqlite_tool_result_calls(strategy_calls)
         failures = [msg for bad, msg in (
-            (not calls, "no sqlite_batch call observed"),
+            (not successful_calls, "no successful sqlite_batch call observed"),
             (summary.aggregate_tool_result_queries < 1, "no aggregate __tool_results query observed"),
             (summary.smart_tool_result_queries < 1, "no smart __tool_results query observed"),
             (summary.direct_result_text_fetches > max_direct_fetches, f"direct result_text fetches {summary.direct_result_text_fetches} > {max_direct_fetches}"),
@@ -247,7 +312,7 @@ class SqliteToolResultScenario(EvalScenario, ScenarioExecutionTools):
         status = EvalRunTask.Status.FAILED if failures else EvalRunTask.Status.PASSED
         usage = summary.__dict__
         observed = "; ".join(failures) if failures else f"Observed smart sqlite/tool-result usage: {usage}"
-        self.record_task_result(run_id, None, status, task_name=task_name, observed_summary=observed, artifacts={"step": calls[0].step, "usage": usage} if calls else {})
+        self.record_task_result(run_id, None, status, task_name=task_name, observed_summary=observed, artifacts={"step": strategy_calls[0].step, "usage": usage} if strategy_calls else {})
         return not failures
 
     def _record_sourced_answer(self, run_id: str, *, agent_id: str, after, task_name: str, source_urls: Iterable[str], required_terms: Iterable[str], min_sources: int) -> bool:
@@ -274,7 +339,8 @@ class SqliteToolResultScenario(EvalScenario, ScenarioExecutionTools):
         message = outbound[0]
         body = message.body or ""
         linked_sources = [url for url in source_urls if url in body]
-        missing_terms = [term for term in required_terms if term.casefold() not in body.casefold()]
+        normalized_body = body.casefold().replace(",", "")
+        missing_terms = [term for term in required_terms if term.casefold().replace(",", "") not in normalized_body]
         if len(linked_sources) >= min_sources and not missing_terms:
             self.record_task_result(run_id, None, EvalRunTask.Status.PASSED, task_name=task_name, observed_summary=f"Answer cited {len(linked_sources)} source URL(s) and included required facts.", artifacts={"message": message})
             return True
@@ -300,16 +366,151 @@ class SqliteMultiResultWebSynthesisScenario(SqliteToolResultScenario):
 @register_scenario
 class SqliteIntermediateWorkingTableScenario(SqliteToolResultScenario):
     slug = SQLITE_INTERMEDIATE_WORKING_TABLE
-    description = "Nontrivial multi-step synthesis should create and query a durable intermediate working table."
-    tasks = [ScenarioTask(name="inject_prompt", assertion_type="agent_processing"), ScenarioTask(name="verify_working_table_sqlite_usage", assertion_type="tool_call"), ScenarioTask(name="verify_sourced_answer", assertion_type="manual")]
+    description = "Multi-turn catalog reasoning should model related domain entities once and reuse them."
+    tasks = [
+        ScenarioTask(name="inject_prompt", assertion_type="agent_processing"),
+        ScenarioTask(name="verify_domain_model", assertion_type="tool_call"),
+        ScenarioTask(name="verify_initial_answer", assertion_type="manual"),
+        ScenarioTask(name="inject_followup", assertion_type="agent_processing"),
+        ScenarioTask(name="verify_model_reuse", assertion_type="tool_call"),
+        ScenarioTask(name="verify_followup_answer", assertion_type="manual"),
+    ]
     builtin_tools = ("http_request",)
-    prompt = "Fetch these product JSON endpoints. Then create durable SQLite table plan_candidates from __tool_results using json_extract/json_each, not hand-entered INSERT VALUES; http content is under result_json $.content and plans under $.content.plans. Query it to recommend the best plan for a 40-seat regulated support team needing HIPAA or SOC 2 under $900/month. Send one final answer with full source URLs.\n\n" + "\n".join(f"- {url}" for url in PRODUCT_URLS)
+    prompt = (
+        "Fetch these product catalog JSON endpoints and recommend the best plan for a 40-person regulated support "
+        "team that needs HIPAA or SOC 2 and must stay under $900/month. Include the plan, price, seat capacity, "
+        "compliance reason, and source URL. We'll have follow-up questions across vendors, plans, and compliance, so "
+        "keep the analysis reusable.\n\n"
+        + "\n".join(f"- {url}" for url in PRODUCT_URLS)
+    )
+    followup_prompt = (
+        "Using the same catalog, the team is now 70 people, SAML is mandatory, and the budget is $1,600/month. "
+        "Which plan is best? Reply with the plan, price, seat capacity, and source URL."
+    )
     mock_kind = "product"
-    verify_task_name = "verify_working_table_sqlite_usage"
-    require_working_table = True
-    max_single_result_filters = 3
-    answer_source_urls = PRODUCT_URLS
-    required_terms = ("CareMesh", "HIPAA", "$720")
+
+    def run(self, run_id: str, agent_id: str) -> None:
+        self._ready_agent(agent_id)
+        self._enable_tools(agent_id, self.builtin_tools)
+        allowed_tools = {*self.builtin_tools, "sqlite_batch", "update_plan", *MESSAGE_TOOL_NAMES}
+        initial = self._inject_and_wait(
+            run_id,
+            agent_id,
+            self.prompt,
+            _product_mock(),
+            allowed_tool_names=allowed_tools,
+            max_relevant_tool_calls=18,
+        )
+        model_tables = self._record_domain_model(run_id, after=initial.timestamp)
+        self._record_sourced_answer(
+            run_id,
+            agent_id=agent_id,
+            after=initial.timestamp,
+            task_name="verify_initial_answer",
+            source_urls=(PRODUCT_URLS[2],),
+            required_terms=("CareMesh", "Clinic", "720", "50", "HIPAA"),
+            min_sources=1,
+        )
+
+        followup = self._inject_and_wait(
+            run_id,
+            agent_id,
+            self.followup_prompt,
+            _product_mock(),
+            allowed_tool_names=allowed_tools,
+            max_relevant_tool_calls=24,
+            task_name="inject_followup",
+        )
+        self._record_model_reuse(run_id, after=followup.timestamp, model_tables=model_tables)
+        self._record_sourced_answer(
+            run_id,
+            agent_id=agent_id,
+            after=followup.timestamp,
+            task_name="verify_followup_answer",
+            source_urls=(PRODUCT_URLS[0],),
+            required_terms=("AxonFlow", "Enterprise", "1500", "80", "SAML"),
+            min_sources=1,
+        )
+
+    def _record_domain_model(self, run_id: str, *, after) -> tuple[str, ...]:
+        self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="verify_domain_model")
+        calls = _tool_calls_for_run(run_id, after=after, tool_names={"sqlite_batch"})
+        successful_calls, strategy_calls = _sqlite_calls_with_persisted_effects(calls)
+        summary = summarize_sqlite_tool_result_calls(strategy_calls)
+        successful_summary = summarize_sqlite_tool_result_calls(successful_calls)
+        successful_sql = "\n".join(str((call.tool_params or {}).get("sql") or "") for call in successful_calls)
+        strategy_sql = "\n".join(str((call.tool_params or {}).get("sql") or "") for call in strategy_calls)
+        model_tables = tuple(
+            table
+            for table in summary.derived_working_table_names
+            if table in successful_summary.derived_working_table_names
+            or re.search(rf'\b(?:from|join)\s+"?{re.escape(table)}"?\b', successful_sql, re.I)
+        )
+        read_tables = [
+            table
+            for table in model_tables
+            if re.search(rf'\b(?:from|join)\s+"?{re.escape(table)}"?\b', successful_sql, re.I)
+        ]
+        has_stable_identity = bool(
+            re.search(r"\b(?:primary\s+key|unique)\b", strategy_sql, re.I)
+        )
+        row_derived_model_tables = set(summary.row_derived_working_table_names).intersection(model_tables)
+        manually_populated_model_tables = set(summary.manual_values_table_names).intersection(model_tables)
+        failures = [message for failed, message in (
+            (not successful_calls, "no successful sqlite_batch call observed"),
+            (summary.tool_result_statement_count < 1 or summary.uses_json_functions < 1, "domain model was not derived from tool-result JSON"),
+            (summary.aggregate_tool_result_queries < 1, "domain model did not import tool results in aggregate"),
+            (
+                summary.single_result_id_filters > self.max_single_result_filters,
+                f"domain model imported tool results one result at a time "
+                f"({summary.single_result_id_filters} > {self.max_single_result_filters})",
+            ),
+            (not model_tables, "no reusable domain table was created"),
+            (not has_stable_identity, "domain model lacked stable identity constraints"),
+            (not row_derived_model_tables, "repeating child rows were not extracted into the domain model"),
+            (not re.search(r"\b(?:source_url|source_id|provenance)\b", strategy_sql, re.I), "domain model lacked source provenance"),
+            (not read_tables, "initial decision did not query the reusable domain model"),
+            (not re.search(r"\bwhere\b", successful_sql, re.I), "initial decision did not filter in SQL"),
+            (not re.search(r"\border\s+by\b", successful_sql, re.I), "initial decision did not rank in SQL"),
+            (bool(manually_populated_model_tables), "domain rows were hand-entered with VALUES"),
+        ) if failed]
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.FAILED if failures else EvalRunTask.Status.PASSED,
+            task_name="verify_domain_model",
+            observed_summary="; ".join(failures) if failures else f"Modeled and queried reusable domain tables: {model_tables}.",
+            artifacts={"step": successful_calls[0].step, "model_tables": model_tables} if successful_calls else {},
+        )
+        return model_tables
+
+    def _record_model_reuse(self, run_id: str, *, after, model_tables: Iterable[str]) -> None:
+        self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="verify_model_reuse")
+        calls = _tool_calls_for_run(run_id, after=after)
+        http_calls = [call for call in calls if call.tool_name == "http_request"]
+        sqlite_calls = [call for call in calls if call.tool_name == "sqlite_batch" and call.status == "complete"]
+        sql = "\n".join(str((call.tool_params or {}).get("sql") or "") for call in sqlite_calls)
+        read_tables = [
+            table
+            for table in model_tables
+            if re.search(rf'\b(?:from|join)\s+"?{re.escape(table)}"?\b', sql, re.I)
+        ]
+        failures = [message for failed, message in (
+            (bool(http_calls), f"follow-up refetched {len(http_calls)} source(s)"),
+            (not sqlite_calls, "follow-up did not query SQLite"),
+            ("__tool_results" in sql.casefold(), "follow-up reread raw tool results instead of the domain model"),
+            (not read_tables, f"follow-up did not read the reusable domain model: {read_tables}"),
+            (not re.search(r"\bwhere\b", sql, re.I), "follow-up did not apply decision filters in SQL"),
+            (not re.search(r"\border\s+by\b", sql, re.I), "follow-up did not rank candidates in SQL"),
+        ) if failed]
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.FAILED if failures else EvalRunTask.Status.PASSED,
+            task_name="verify_model_reuse",
+            observed_summary="; ".join(failures) if failures else f"Reused shaped domain model: {read_tables}.",
+            artifacts={"step": sqlite_calls[0].step, "read_tables": read_tables} if sqlite_calls else {},
+        )
 
 
 @register_scenario
@@ -333,7 +534,7 @@ class SqliteItemLinkReportScenario(SqliteToolResultScenario):
     description = "Reports over item records should preserve item-level listing URLs, not just source feed URLs."
     tasks = [ScenarioTask(name="inject_prompt", assertion_type="agent_processing"), ScenarioTask(name="verify_item_link_sqlite_usage", assertion_type="tool_call"), ScenarioTask(name="verify_listing_links_in_report", assertion_type="manual")]
     builtin_tools = ("http_request",)
-    prompt = "Fetch these vehicle inventory JSON feeds. Then use SQLite over __tool_results to compare 2023+ Tesla Model Y records within 50 miles and send one concise initial report with the best batch. Do not browse or create files.\n\n" + "\n".join(f"- {url}" for url in INVENTORY_URLS)
+    prompt = "Fetch these vehicle inventory JSON feeds, compare 2023+ Tesla Model Y records within 50 miles, and send one concise initial report with the best batch. Do not browse or create files.\n\n" + "\n".join(f"- {url}" for url in INVENTORY_URLS)
     mock_kind = "inventory"
     verify_task_name = "verify_item_link_sqlite_usage"
     answer_source_urls = LISTING_URLS

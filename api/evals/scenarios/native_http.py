@@ -212,6 +212,21 @@ class NativeHttpScenarioBase(EvalScenario, ScenarioExecutionTools):
             task_name="verify_expected_http_requests",
         )
         http_calls = tool_calls_for_run(run_id, after=inbound.timestamp, tool_names=["http_request"])
+        if not case.expected_http_requests:
+            self.record_task_result(
+                run_id,
+                None,
+                EvalRunTask.Status.PASSED if not http_calls else EvalRunTask.Status.FAILED,
+                task_name="verify_expected_http_requests",
+                observed_summary=(
+                    "Agent used the known disconnected state without making a doomed HTTP request."
+                    if not http_calls
+                    else f"Expected no HTTP request; saw {len(http_calls)}."
+                ),
+                artifacts={"step": http_calls[0].step} if http_calls else {},
+            )
+            return
+
         missing = [
             expectation.name
             for expectation in case.expected_http_requests
@@ -304,7 +319,13 @@ class NativeHttpScenarioBase(EvalScenario, ScenarioExecutionTools):
 
         final_response = (
             PersistentAgentMessage.objects
-            .filter(owner_agent_id=agent_id, is_outbound=True, timestamp__gt=inbound.timestamp)
+            .filter(
+                owner_agent_id=agent_id,
+                is_outbound=True,
+                timestamp__gt=inbound.timestamp,
+                conversation_id=inbound.conversation_id,
+                to_endpoint_id=inbound.from_endpoint_id,
+            )
             .order_by("-timestamp")
             .first()
         )
@@ -373,6 +394,8 @@ def register_native_http_scenarios(cases, scenario_class):
                 "description": case.description,
                 "tags": scenario_class.tags + case.tags,
                 "case": case,
+                # Connected cases use the eval organization; disconnected cases must not inherit its shared credentials.
+                "requires_personal_agent": "missing_connection" in case.tags,
             },
         )
         ScenarioRegistry.register(scenario_type())

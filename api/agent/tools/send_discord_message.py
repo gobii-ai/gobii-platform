@@ -20,8 +20,9 @@ def get_send_discord_message_tool() -> Dict[str, Any]:
         "function": {
             "name": "send_discord_message",
             "description": (
-                "Send a message to a subscribed Discord channel only when this agent owns the response. "
-                "Do not answer questions addressed to someone else or duplicate another agent's work."
+                "Send this agent's requested, owned contribution to a subscribed Discord channel. Include others' work "
+                "only when this agent's charter or request owns the aggregation, and attribute it; separate assignments "
+                "are not synthesis."
             ),
             "parameters": {
                 "type": "object",

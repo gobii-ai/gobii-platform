@@ -32,6 +32,8 @@ from api.models import (
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from util.text_sanitizer import normalize_llm_output
 
+from .routing import get_latest_inbound_human_message
+
 OPTION_NUMBER_RE = re.compile(r"^\s*(?:option\s+)?(?P<number>\d{1,2})(?:[\)\.\:\-\s]|$)", re.IGNORECASE)
 BATCH_ANSWER_ENTRY_RE = re.compile(r"^\s*(?P<number>\d{1,2})[\)\.\:\-]\s*(?P<body>.*)$")
 MAX_OPTION_COUNT = 6
@@ -247,20 +249,6 @@ def _validate_human_input_options(raw_options: list[dict[str, Any]] | None) -> d
     return None
 
 
-def _latest_inbound_human_message(agent: PersistentAgent) -> PersistentAgentMessage | None:
-    return (
-        PersistentAgentMessage.objects.filter(
-            owner_agent=agent,
-            is_outbound=False,
-            conversation__isnull=False,
-        )
-        .exclude(conversation__is_peer_dm=True)
-        .select_related("conversation", "from_endpoint")
-        .order_by("-timestamp")
-        .first()
-    )
-
-
 def _normalize_human_input_recipient(
     raw_recipient: HumanInputRecipient | dict[str, Any] | None,
 ) -> tuple[HumanInputRecipient | None, dict[str, Any] | None]:
@@ -357,7 +345,7 @@ def _resolve_explicit_human_input_target(
 
 
 def resolve_human_input_target(agent: PersistentAgent) -> HumanInputTarget | None:
-    latest_inbound = _latest_inbound_human_message(agent)
+    latest_inbound = get_latest_inbound_human_message(agent)
     if latest_inbound and latest_inbound.conversation_id:
         return HumanInputTarget(
             channel=latest_inbound.conversation.channel,

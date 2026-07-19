@@ -20,6 +20,7 @@ from api.models import (
 )
 from api.agent.comms.adapters import ParsedMessage
 from api.agent.comms.message_service import ingest_inbound_message
+from api.agent.core.processing_flags import get_human_inbound_generation
 from api.services.owner_execution_pause import (
     EXECUTION_PAUSE_REASON_BILLING_DELINQUENCY,
     EXECUTION_PAUSE_REASON_TRIAL_ENDED_NON_RENEWAL,
@@ -239,10 +240,12 @@ class InboundOutOfCreditsReplyTests(PauseOwnerMixin, TestCase):
             raw_payload={"provider": "test"},
             msg_channel=CommsChannel.EMAIL,
         )
+        generation_before = get_human_inbound_generation(self.agent.id)
 
         ingest_inbound_message(CommsChannel.EMAIL, parsed)
 
         mock_delay.assert_not_called()
+        self.assertEqual(get_human_inbound_generation(self.agent.id), generation_before)
         mock_deliver_email.assert_called_once()
         outbound = mock_deliver_email.call_args.args[0]
         self.assertEqual(outbound.owner_agent, self.agent)
@@ -381,10 +384,12 @@ class InboundDailyCreditsSmsTests(PauseOwnerMixin, TestCase):
             raw_payload={"provider": "test"},
             msg_channel=CommsChannel.SMS,
         )
+        generation_before = get_human_inbound_generation(self.agent.id)
 
         ingest_inbound_message(CommsChannel.SMS, parsed)
 
         mock_delay.assert_not_called()
+        self.assertEqual(get_human_inbound_generation(self.agent.id), generation_before)
         mock_deliver_sms.assert_called_once()
         outbound_msg = mock_deliver_sms.call_args.args[0]
         self.assertEqual(outbound_msg.owner_agent, self.agent)

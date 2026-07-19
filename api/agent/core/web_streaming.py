@@ -3,6 +3,8 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Optional
 
+from api.agent.comms.message_reads import is_peer_dm_message
+from api.agent.comms.routing import get_bound_inbound_routing_scope, get_current_inbound_message
 from api.models import CommsChannel, PersistentAgent, PersistentAgentMessage, parse_web_user_address
 
 
@@ -14,18 +16,21 @@ class WebStreamTarget:
 
 
 def resolve_web_stream_target(agent: PersistentAgent) -> Optional[WebStreamTarget]:
-    """Return the web UI target represented by the agent's latest message."""
-    latest_message = (
+    """Return the web UI target pinned to the current inbound request."""
+    scope = get_bound_inbound_routing_scope(agent)
+    latest_message = get_current_inbound_message(agent) if scope is not None else (
         PersistentAgentMessage.objects.filter(owner_agent=agent)
         .select_related("from_endpoint", "to_endpoint")
         .order_by("-timestamp", "-seq")
         .first()
     )
-    if not latest_message:
+    if not latest_message or is_peer_dm_message(latest_message):
         return None
 
     target_endpoint = (
-        latest_message.to_endpoint if latest_message.is_outbound else latest_message.from_endpoint
+        latest_message.from_endpoint
+        if scope is not None or not latest_message.is_outbound
+        else latest_message.to_endpoint
     )
     if not target_endpoint or target_endpoint.channel != CommsChannel.WEB:
         return None

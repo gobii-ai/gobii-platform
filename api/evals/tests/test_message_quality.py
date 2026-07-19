@@ -12,6 +12,7 @@ from api.evals.scenarios.message_quality import (
     REPLY_CHANNEL_CONTINUITY_SLUG,
     REPORT_MESSAGE_QUALITY_CASES,
     SIMPLE_EMAIL_QUALITY_CASES,
+    UNAVAILABLE_WEB_CHANNEL_CONTINUITY_SLUG,
     HUMAN_MESSAGE_QUALITY_CASES,
     MessageQualityScenario,
 )
@@ -25,8 +26,9 @@ class MessageQualityScenarioTests(SimpleTestCase):
 
         self.assertIsNotNone(suite)
         self.assertEqual(tuple(suite.scenario_slugs), MESSAGE_QUALITY_SCENARIO_SLUGS)
-        self.assertEqual(len(suite.scenario_slugs), 17)
+        self.assertEqual(len(suite.scenario_slugs), 18)
         self.assertIn(REPLY_CHANNEL_CONTINUITY_SLUG, suite.scenario_slugs)
+        self.assertIn(UNAVAILABLE_WEB_CHANNEL_CONTINUITY_SLUG, suite.scenario_slugs)
         self.assertIn(FAILED_EMAIL_DELIVERY_RECOVERY_SLUG, suite.scenario_slugs)
 
     def test_generated_cases_cover_email_and_chat_for_each_real_world_domain(self):
@@ -61,6 +63,11 @@ class MessageQualityScenarioTests(SimpleTestCase):
         self.assertEqual(reply_channel_metadata.category, "message_quality")
         self.assertEqual(reply_channel_metadata.cost_class, "low")
         self.assertIn("reply_channel", reply_channel_metadata.tags)
+
+        unavailable_metadata = registered[UNAVAILABLE_WEB_CHANNEL_CONTINUITY_SLUG].get_metadata()
+        self.assertEqual(unavailable_metadata.cost_class, "low")
+        self.assertIn("reply_channel", unavailable_metadata.tags)
+        self.assertIn("tool_failure", unavailable_metadata.tags)
 
         failure_metadata = registered[FAILED_EMAIL_DELIVERY_RECOVERY_SLUG].get_metadata()
         self.assertEqual(failure_metadata.category, "message_quality")

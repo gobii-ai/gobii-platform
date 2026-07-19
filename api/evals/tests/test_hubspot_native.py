@@ -1,12 +1,15 @@
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from django.test import SimpleTestCase, tag
 
 import api.evals.loader  # noqa: F401 - registers scenarios and suites
+from api.agent.system_skills.defaults import _hubspot_native_prompt_instructions
 from api.evals.scenarios.hubspot_native import (
     FORBIDDEN_HUBSPOT_DISCOVERY_TOOL_NAMES,
     HUBSPOT_NATIVE_CASES,
     HUBSPOT_NATIVE_CREATE_CONTACT,
+    HUBSPOT_NATIVE_MISSING_CONNECTION,
     HUBSPOT_NATIVE_SCENARIO_SLUGS,
     HUBSPOT_NATIVE_SUITE_SLUG,
     HubSpotHttpRequestExpectation,
@@ -26,6 +29,18 @@ class HubSpotNativeScenarioTests(SimpleTestCase):
         self.assertEqual(tuple(suite.scenario_slugs), HUBSPOT_NATIVE_SCENARIO_SLUGS)
         self.assertEqual(len(suite.scenario_slugs), 5)
 
+    @patch("api.agent.system_skills.defaults._native_integration_connected", return_value=False)
+    @patch("api.agent.system_skills.defaults.settings.PUBLIC_SITE_URL", "https://app.example.test")
+    def test_disconnected_hubspot_prompt_is_a_setup_gate(self, _mock_connected):
+        instructions = _hubspot_native_prompt_instructions(SimpleNamespace())
+
+        self.assertIn("Current state: HubSpot is not connected", instructions)
+        self.assertIn("current requester in this conversation", instructions)
+        self.assertIn("https://app.example.test/app/integrations", instructions)
+        self.assertIn("Do not call `http_request`, `search_tools`", instructions)
+        self.assertNotIn("API cookbook:", instructions)
+        self.assertNotIn("crm/v3/objects", instructions)
+
     def test_generated_scenarios_have_expected_metadata(self):
         registered = ScenarioRegistry.list_all()
 
@@ -44,7 +59,7 @@ class HubSpotNativeScenarioTests(SimpleTestCase):
         for case in HUBSPOT_NATIVE_CASES:
             self.assertEqual(set(case.mock_config()), {"http_request"})
             mock = case.mock_config()["http_request"]
-            self.assertTrue(mock["rules"])
+            self.assertEqual(bool(mock["rules"]), "missing_connection" not in case.tags)
             self.assertIn("default", mock)
             for rule in mock["rules"]:
                 self.assertIn("url_contains", rule)
@@ -52,7 +67,7 @@ class HubSpotNativeScenarioTests(SimpleTestCase):
 
     def test_cases_expect_http_request_not_discovery_or_enablement(self):
         for case in HUBSPOT_NATIVE_CASES:
-            self.assertTrue(case.expected_http_requests)
+            self.assertEqual(bool(case.expected_http_requests), "missing_connection" not in case.tags)
             for expectation in case.expected_http_requests:
                 self.assertTrue(expectation.url_terms)
                 self.assertIn(expectation.method, {"GET", "POST", "PATCH", "PUT", "DELETE"})
@@ -94,29 +109,16 @@ class HubSpotNativeScenarioTests(SimpleTestCase):
         self.assertFalse(_call_matches_expectation(pending_call, expectation))
         self.assertTrue(_call_matches_expectation(complete_call, expectation))
 
-    def test_missing_connection_expected_http_request_accepts_error_tool_call(self):
-        expectation = HubSpotHttpRequestExpectation(
-            name="hubspot_search_attempt",
-            url_terms=("api.hubapi.com/crm/v3/objects/contacts/search",),
-            allowed_statuses=("error",),
-        )
-        error_call = SimpleNamespace(
-            status="error",
-            tool_params={
-                "method": "POST",
-                "url": "https://api.hubapi.com/crm/v3/objects/contacts/search",
-            },
-        )
-        complete_call = SimpleNamespace(
-            status="complete",
-            tool_params={
-                "method": "POST",
-                "url": "https://api.hubapi.com/crm/v3/objects/contacts/search",
-            },
-        )
+    def test_missing_connection_uses_known_setup_state_without_doomed_api_call(self):
+        case = next(case for case in HUBSPOT_NATIVE_CASES if case.slug == HUBSPOT_NATIVE_MISSING_CONNECTION)
+        scenario = ScenarioRegistry.get(HUBSPOT_NATIVE_MISSING_CONNECTION)
 
-        self.assertTrue(_call_matches_expectation(error_call, expectation))
-        self.assertFalse(_call_matches_expectation(complete_call, expectation))
+        self.assertEqual(case.expected_http_requests, ())
+        self.assertTrue(scenario.requires_personal_agent)
+        self.assertIn(("api.hubapi.com",), case.forbidden_url_terms)
+        self.assertNotIn("not connected", case.prompt.lower())
+        self.assertIn(("/app/integrations",), case.response_term_groups)
+        self.assertNotIn("connected", case.response_term_groups[-1])
 
     def test_response_term_matching_accepts_currency_formatting(self):
         self.assertTrue(response_contains_term("Amount is now $25,000.", "25000"))

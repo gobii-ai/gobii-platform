@@ -552,6 +552,24 @@ def all_requests_have_options(requests):
     return all(_valid_human_input_options(request.options_json) for request in requests)
 
 
+def planning_requests_are_bounded(requests):
+    if not 1 <= len(requests) <= 3:
+        return False
+    option_modes = [_valid_human_input_options(request.options_json) for request in requests]
+    free_text_modes = [request.options_json == [] for request in requests]
+    return (
+        all(options or free_text for options, free_text in zip(option_modes, free_text_modes))
+        and sum(free_text_modes) <= 1
+    )
+
+
+def has_single_recipient_request(requests):
+    if len(requests) != 1:
+        return False
+    question = str(requests[0].question or "").lower()
+    return any(term in question for term in ("email", "address", "recipient", "client", "contact"))
+
+
 def _delivered_tool_result(call):
     result = call.result
     if isinstance(result, dict):
@@ -804,7 +822,7 @@ class BehaviorMicroScenario(EvalScenario, ScenarioExecutionTools):
 @register_scenario
 class PlanningFirstTurnAsksBoundedQuestionsScenario(BehaviorMicroScenario):
     slug = PLANNING_FIRST_TURN_ASKS_BOUNDED_QUESTIONS
-    description = "Planning mode should ask 1-3 tracked questions with options and not start work."
+    description = "Planning mode should ask 1-3 tracked questions, using options when choices are real, and not start work."
     category = "planning"
     tags = ("agent_behavior", "micro", "planning", "human_input")
     tasks = [
@@ -850,13 +868,13 @@ class PlanningFirstTurnAsksBoundedQuestionsScenario(BehaviorMicroScenario):
             for call in get_tool_calls_for_run(run_id, after=inbound.timestamp, tool_names={"send_chat_message"})
             if _is_bounded_planning_chat_question(call)
         ]
-        if 1 <= len(requests) <= 3 and all_requests_have_options(requests):
+        if planning_requests_are_bounded(requests):
             self.record_task_result(
                 run_id,
                 None,
                 EvalRunTask.Status.PASSED,
                 task_name="verify_bounded_questions",
-                observed_summary=f"Agent asked {len(requests)} tracked planning question(s), each with options.",
+                observed_summary=f"Agent asked {len(requests)} bounded tracked planning question(s).",
             )
         elif len(chat_question_calls) == 1:
             self.record_task_result(
@@ -874,8 +892,8 @@ class PlanningFirstTurnAsksBoundedQuestionsScenario(BehaviorMicroScenario):
                 EvalRunTask.Status.FAILED,
                 task_name="verify_bounded_questions",
                 observed_summary=(
-                    f"Expected 1-3 pending planning questions with options or one bounded chat clarification; "
-                    f"found {len(requests)} pending request(s) with options={all_requests_have_options(requests)} "
+                    f"Expected 1-3 bounded planning requests or one bounded chat clarification; "
+                    f"found {len(requests)} pending request(s) with bounded_modes={planning_requests_are_bounded(requests)} "
                     f"and {len(chat_question_calls)} bounded chat clarification(s)."
                 ),
             )
@@ -2393,13 +2411,13 @@ class ToolChoiceMissingRecipientUsesHumanInputScenario(BehaviorMicroScenario):
 
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="verify_human_input")
         requests = get_pending_human_input_requests(agent_id, run_id, after=inbound.timestamp)
-        if requests and all_requests_have_options(requests):
+        if has_single_recipient_request(requests):
             self.record_task_result(
                 run_id,
                 None,
                 EvalRunTask.Status.PASSED,
                 task_name="verify_human_input",
-                observed_summary=f"Agent requested missing recipient/details via {len(requests)} option-based human input request(s).",
+                observed_summary="Agent made one tracked request for the missing recipient details.",
             )
         else:
             self.record_task_result(
@@ -2408,8 +2426,8 @@ class ToolChoiceMissingRecipientUsesHumanInputScenario(BehaviorMicroScenario):
                 EvalRunTask.Status.FAILED,
                 task_name="verify_human_input",
                 observed_summary=(
-                    f"Agent did not create an option-based tracked human input request for missing email details; "
-                    f"found {len(requests)} with options={all_requests_have_options(requests)}."
+                    "Agent did not make one recipient-focused tracked request for missing email details; "
+                    f"found {len(requests)} request(s)."
                 ),
             )
 

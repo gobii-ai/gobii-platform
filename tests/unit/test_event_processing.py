@@ -1366,18 +1366,11 @@ class PromptContextBuilderTests(TestCase):
         self.assertIsNotNone(user_message)
         system_content = system_message["content"]
         user_content = user_message["content"]
-        combined = f"{system_content}\n{user_content}"
-
+        self.assertIn("__messages:", system_content)
+        self.assertIn("Structured history only, not freshness.", system_content)
+        self.assertNotIn("Structured history only, not freshness.", user_content)
         self.assertRegex(
-            combined,
-            re.compile(r"Use\s+__messages.*not freshness checks", re.IGNORECASE),
-        )
-        self.assertRegex(
-            combined,
-            re.compile(r"Use\s+__messages\s+only\s+for\s+structured\s+analysis/history", re.IGNORECASE),
-        )
-        self.assertRegex(
-            combined,
+            user_content,
             re.compile(r"<unified_history>.*Fresh inbound message for this run", re.IGNORECASE | re.DOTALL),
         )
         self.assertNotIn(
@@ -1775,12 +1768,12 @@ class PromptContextBuilderTests(TestCase):
              patch('api.agent.core.prompt_context.ensure_comms_compacted'):
             context, _, _ = build_prompt_context(self.agent)
 
-        user_message = next((m for m in context if m['role'] == 'user'), None)
-        self.assertIsNotNone(user_message)
-        content = user_message["content"]
+        system_message = next((m for m in context if m['role'] == 'system'), None)
+        self.assertIsNotNone(system_message)
+        content = system_message["content"]
 
         self.assertIn(
-            "Use read_file for contents of known filespace paths; use sqlite_batch on __tool_results, __files, or __contacts only for prior outputs, file metadata, or contact authority.",
+            "__files: node_id, path, name, mime_type, size_bytes, updated_at. Metadata only; use read_file for known-path contents.",
             content,
         )
         self.assertNotIn("Query __tool_results and __files with sqlite_batch (not read_file).", content)
@@ -2130,7 +2123,7 @@ class PromptContextBuilderTests(TestCase):
         ]
         self.assertIn("send_chat_message", tool_names)
 
-    def test_prompt_adds_retry_hint_when_send_chat_message_unavailable(self):
+    def test_prompt_keeps_unavailable_web_reply_on_same_channel(self):
         with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
              patch('api.agent.core.prompt_context.ensure_comms_compacted'):
             context, _, _ = build_prompt_context(self.agent)
@@ -2143,7 +2136,13 @@ class PromptContextBuilderTests(TestCase):
             content,
         )
         self.assertIn(
-            "send_chat_message broadcasts to active web chat users; if unavailable, use the most recent non-web channel from history/contacts",
+            "send_chat_message without a target replies to the latest web requester",
+            content,
+        )
+        self.assertIn("if unavailable, do not switch channels", content)
+        self.assertNotIn("use the most recent non-web channel", content)
+        self.assertIn(
+            "A skipped web send never permits switching",
             content,
         )
 
@@ -5125,7 +5124,7 @@ class HumanInboundGenerationTests(TestCase):
             inbound_generation=expected,
         )
 
-    def test_email_and_sms_messages_queue_without_bumping_generation(self):
+    def test_email_and_sms_messages_queue_with_generation(self):
         cases = [
             (CommsChannel.EMAIL, self.user.email, "human-generation-agent@example.com"),
             (CommsChannel.SMS, "+15555550100", "+15555550101"),
@@ -5135,13 +5134,17 @@ class HumanInboundGenerationTests(TestCase):
             with self.subTest(channel=channel):
                 self._owned_endpoint(channel, recipient)
                 before = get_human_inbound_generation(self.agent.id)
+                expected = before + 1
 
                 with patch("api.agent.tasks.process_agent_events_task.delay") as mock_delay:
                     with self.captureOnCommitCallbacks(execute=True):
                         self._ingest(channel, sender, recipient)
 
-                self.assertEqual(get_human_inbound_generation(self.agent.id), before)
-                mock_delay.assert_called_once_with(str(self.agent.id))
+                self.assertEqual(get_human_inbound_generation(self.agent.id), expected)
+                mock_delay.assert_called_once_with(
+                    str(self.agent.id),
+                    inbound_generation=expected,
+                )
 
     def test_web_human_input_panel_response_bumps_generation_and_queues_with_generation(self):
         conversation = PersistentAgentConversation.objects.create(
@@ -5192,7 +5195,7 @@ class HumanInboundGenerationTests(TestCase):
         self.assertEqual(get_human_inbound_generation(self.agent.id), before)
         mock_delay.assert_called_once_with(str(self.agent.id))
 
-    def test_peer_agent_message_does_not_bump_human_generation(self):
+    def test_peer_agent_message_queues_with_generation(self):
         peer_browser_agent = BrowserUseAgent.objects.create(user=self.user, name="PeerGenerationBA")
         peer_agent = PersistentAgent.objects.create(
             user=self.user,
@@ -5209,8 +5212,12 @@ class HumanInboundGenerationTests(TestCase):
             task_mock.delay = MagicMock()
             PeerMessagingService(self.agent, peer_agent).send_message("handoff")
 
-        self.assertEqual(get_human_inbound_generation(peer_agent.id), 0)
-        task_mock.delay.assert_called_once_with(str(peer_agent.id))
+        generation = get_human_inbound_generation(peer_agent.id)
+        self.assertEqual(generation, 1)
+        task_mock.delay.assert_called_once_with(
+            str(peer_agent.id),
+            inbound_generation=generation,
+        )
 
     def test_redundant_queued_task_skips_after_generation_is_consumed(self):
         generation = bump_human_inbound_generation(self.agent.id)
