@@ -119,6 +119,13 @@ from .ai_employees import (
     AI_EMPLOYEES_WORKFLOW_ITEMS,
     build_ai_employees_structured_data,
 )
+from .agent_api import (
+    AGENT_API_CLUSTER_GROUPS,
+    AGENT_API_DOCS_URL,
+    AGENT_API_FAQ_ITEMS,
+    AGENT_API_WORKFLOW_ITEMS,
+    build_agent_api_structured_data,
+)
 from .public_template_urls import (
     public_template_category_label,
     public_template_category_path,
@@ -3955,6 +3962,7 @@ class StaticViewSitemap(sitemaps.Sitemap):
                 'proprietary:blog_index',
                 'proprietary:comparisons',
                 'pages:ai_employees',
+                'pages:agent_api',
                 'pages:solutions',
                 'pages:recruiting_contact',
             ]
@@ -4324,6 +4332,82 @@ class AIEmployeesView(TemplateView):
             "ai_employees_pro_task_credits_display": f"{pro_task_credits:,}",
             "ai_employees_planned_cluster_links": [
                 dict(link) for link in AI_EMPLOYEES_CLUSTER_LINKS
+            ],
+            "canonical_url": canonical_url,
+        })
+        return context
+
+
+class AgentAPIView(TemplateView):
+    template_name = "agent_api.html"
+
+    ORGANIZATION_LOGO_PATH = "images/gobii_fish_with_text_purple_nav_2x.webp"
+    ORGANIZATION_SAME_AS = (
+        "https://www.linkedin.com/company/gobii-ai",
+        "https://github.com/gobii-ai",
+        "https://x.com/gobii_ai",
+        "https://medium.com/gobiiai",
+        "https://docs.gobii.ai/",
+    )
+    page_title = "Agent API: Outsource Multi-Step Work to AI Agents"
+    seo_title = "Agent API for Delegating Real Work | Gobii"
+    seo_description = (
+        "Use Gobii's Agent API to delegate browser work, research, data entry, and multi-step "
+        "workflows to supervised AI agents with visible progress."
+    )
+    social_image = "images/solutions/engineering-hero-1280.jpg"
+    social_image_alt = "Gobii Agent API for supervised multi-step browser and workflow automation"
+
+    def dispatch(self, request, *args, **kwargs):
+        if not settings.GOBII_PROPRIETARY_MODE:
+            return redirect("/", permanent=True)
+        return super().dispatch(request, *args, **kwargs)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        canonical_url = _public_site_absolute_url(reverse("pages:agent_api"))
+        home_url = _public_site_absolute_url(reverse("pages:home"))
+        engineering_url = _public_site_absolute_url(
+            reverse("pages:solution", kwargs={"slug": "engineering"})
+        )
+        terms_url = _public_site_absolute_url(reverse("proprietary:tos"))
+        social_image_url = _public_site_absolute_url(static(self.social_image))
+        structured_data = build_agent_api_structured_data(
+            page_title=self.page_title,
+            seo_title=self.seo_title,
+            seo_description=self.seo_description,
+            canonical_url=canonical_url,
+            home_url=home_url,
+            docs_url=AGENT_API_DOCS_URL,
+            engineering_url=engineering_url,
+            terms_url=terms_url,
+            social_image_url=social_image_url,
+            organization_logo_url=_public_site_absolute_url(static(self.ORGANIZATION_LOGO_PATH)),
+            organization_same_as=self.ORGANIZATION_SAME_AS,
+        )
+
+        context.update({
+            "suppress_htmx": True,
+            "suppress_preline": True,
+            "suppress_public_conversion_assets": True,
+            "suppress_phone_format_js": True,
+            "suppress_rewardful_js": True,
+            "suppress_stripe_js": True,
+            "agent_api_page_title": self.page_title,
+            "agent_api_seo_title": self.seo_title,
+            "agent_api_seo_description": self.seo_description,
+            "agent_api_social_image_url": social_image_url,
+            "agent_api_social_image_alt": self.social_image_alt,
+            "agent_api_structured_data_json": html_safe_json_dumps(structured_data),
+            "agent_api_docs_url": AGENT_API_DOCS_URL,
+            "agent_api_faq_items": [dict(item) for item in AGENT_API_FAQ_ITEMS],
+            "agent_api_workflow_items": [dict(item) for item in AGENT_API_WORKFLOW_ITEMS],
+            "agent_api_cluster_groups": [
+                {
+                    **group,
+                    "links": [dict(link) for link in group["links"]],
+                }
+                for group in AGENT_API_CLUSTER_GROUPS
             ],
             "canonical_url": canonical_url,
         })

@@ -80,6 +80,16 @@ def _blog_author_schema(meta, request):
             if str(author_url).startswith("http")
             else request.build_absolute_uri(str(author_url))
         )
+    author_email = meta.get("author_email")
+    if author_type == "Person" and author_email:
+        author["email"] = f"mailto:{str(author_email).removeprefix('mailto:')}"
+    author_image = meta.get("author_image")
+    if author_type == "Person" and author_image:
+        author["image"] = (
+            author_image
+            if str(author_image).startswith("http")
+            else request.build_absolute_uri(str(author_image))
+        )
     author_job_title = meta.get("author_job_title")
     if author_type == "Person" and author_job_title:
         author["jobTitle"] = str(author_job_title)
@@ -1175,10 +1185,13 @@ class BlogPostView(ProprietaryModeRequiredMixin, TemplateView):
             if author_is_publisher:
                 author_id = organization_id
             elif author_url:
-                author_fragment = (
-                    "person" if author_type == "Person" else "organization"
-                )
-                author_id = f"{str(author_url).rstrip('/')}#{author_fragment}"
+                if "#" in str(author_url):
+                    author_id = author_url
+                else:
+                    author_fragment = (
+                        "person" if author_type == "Person" else "organization"
+                    )
+                    author_id = f"{str(author_url).rstrip('/')}#{author_fragment}"
             else:
                 author_id = f"{canonical_url}#author"
 
@@ -1205,6 +1218,10 @@ class BlogPostView(ProprietaryModeRequiredMixin, TemplateView):
                 author_schema["worksFor"] = {"@id": organization_id}
             if author_url:
                 author_schema["url"] = author_url
+            if author_type == "Person" and author.get("email"):
+                author_schema["email"] = author["email"]
+            if author_type == "Person" and author.get("image"):
+                author_schema["image"] = author["image"]
             if author_type == "Person" and author.get("jobTitle"):
                 author_schema["jobTitle"] = author["jobTitle"]
             if post["meta"].get("author_bio"):

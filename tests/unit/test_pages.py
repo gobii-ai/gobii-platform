@@ -2184,7 +2184,7 @@ class LlmsTxtTests(TestCase):
         self.assertContains(response, "http://testserver/teams/")
         self.assertContains(response, "LinkedIn Recruiter, Greenhouse, and Google Sheets")
         self.assertContains(response, "http://testserver/solutions/")
-        self.assertContains(response, "http://testserver/solutions/engineering/")
+        self.assertContains(response, "http://testserver/agent-api/")
         self.assertContains(response, "Managed LinkedIn Recruiter automation is available through sales.")
         self.assertNotContains(response, "http://testserver/pretrained-workers/")
         self.assertNotContains(response, "http://testserver/library/")
@@ -2218,7 +2218,7 @@ class LlmsTxtTests(TestCase):
         self.assertContains(response, "## Recruiting Operations")
         self.assertContains(response, "Managed LinkedIn Recruiter automation is available through sales.")
         self.assertContains(response, "Solutions: http://testserver/solutions/")
-        self.assertContains(response, "API: http://testserver/solutions/engineering/")
+        self.assertContains(response, "Agent API: http://testserver/agent-api/")
         self.assertNotContains(response, "http://testserver/pretrained-workers/")
         self.assertNotContains(response, "http://testserver/library/")
 

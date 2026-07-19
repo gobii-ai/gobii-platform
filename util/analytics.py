@@ -782,6 +782,7 @@ PAGE_META = {
     "/accounts/login/":                 ("Auth",       "Login"),
     "/accounts/logout/":                ("Auth",       "Logout"),
     "/accounts/signup/":                ("Auth",       "Sign Up"),
+    "/agent-api/":                      ("Marketing",  "Agent API"),
     "/solutions/recruiting/":           ("Marketing",  "Solutions Recruiting"),
     "/solutions/recruiting/candidate-sourcing/": ("Marketing",  "Solutions Recruiting Candidate Sourcing"),
     "/solutions/sales/":                ("Marketing",  "Solutions Sales"),
