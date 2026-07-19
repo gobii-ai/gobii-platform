@@ -234,7 +234,7 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
         self.assertIn("Search LinkedIn", by_slug["common_use_case_034_linkedin_people_search"].prompt)
         self.assertIn("beta launched", by_slug["common_use_case_073_create_status_pdf"].prompt)
         self.assertIn("site plan", by_slug["common_use_case_074_create_permit_pdf"].prompt)
-        self.assertIn("Run a SQLite query", by_slug["common_use_case_086_sqlite_export_query_csv"].prompt)
+        self.assertIn("populated SQLite leads table", by_slug["common_use_case_086_sqlite_export_query_csv"].prompt)
         self.assertIn("https://status.example.test/support", by_slug["common_use_case_092_schedule_hourly_monitor"].prompt)
         self.assertIn("BTC-USD", by_slug["common_use_case_096_schedule_price_alert"].prompt)
         self.assertIn("https://borough.example.test/permits/decks", by_slug["common_use_case_097_schedule_permit_check"].prompt)
