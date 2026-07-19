@@ -10,6 +10,8 @@ seo_description: "Learn how Gobii AI agent integrations connect apps, scope acce
 image: "/static/images/blog/newsletters/newsletter-2026-03-17-ai-agent-integrations-hero.webp"
 image_alt: "AI agent connected securely to calendar, spreadsheet, document, CRM, chat, and project apps"
 og_image_alt: "AI agent connected securely to calendar, spreadsheet, document, CRM, chat, and project apps"
+image_width: 1200
+image_height: 630
 keywords:
   - AI agent integrations
   - connect apps to AI agents
