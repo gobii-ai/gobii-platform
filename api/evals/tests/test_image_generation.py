@@ -65,6 +65,10 @@ class ImageGenerationScenarioTests(SimpleTestCase):
         self.assertEqual(synthetic["description"], production["description"])
         self.assertEqual(synthetic["parameters"], production["parameters"])
         self.assertEqual(synthetic["system_skill_key"], IMAGE_GENERATION_SYSTEM_SKILL_KEY)
+        self.assertIn(
+            "require verbatim rendering",
+            production["parameters"]["properties"]["prompt"]["description"],
+        )
 
     def test_cases_encode_source_text_multi_asset_and_negative_constraints(self):
         by_slug = {case.slug: case for case in IMAGE_GENERATION_CASES}

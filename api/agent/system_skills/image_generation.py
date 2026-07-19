@@ -16,7 +16,7 @@ IMAGE_GENERATION_PROMPT_INSTRUCTIONS = (
     "lighting, palette/materials, exact text, constraints, and avoid items. Preserve an already detailed request "
     "instead of adding creative requirements. For a generic request, add only practical composition, framing, or "
     "polish details that materially help. Do not invent brands, slogans, characters, objects, palettes, or story "
-    "elements. Put required image text in quotes, require verbatim rendering, and prohibit extra text.\n"
+    "elements.\n"
     "For edits, write explicit invariants such as `change only X; preserve Y unchanged`, including identity, "
     "geometry, layout, typography, lighting, or surrounding objects as applicable. Repeat those invariants on every "
     "iteration. Make one targeted change per iteration and pass the prior generated file in `source_images` when "
