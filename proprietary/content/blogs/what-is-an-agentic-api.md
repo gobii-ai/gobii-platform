@@ -91,6 +91,8 @@ Because the cycle may pause between events, fetch, resume, cancel, deactivate, a
 
 Anthropic separates agentic systems into **two architectural categories**. Workflows follow predefined code paths; agents let models dynamically direct their process and tool use. A model API supports either design, but an agentic API packages the latter as a managed resource ([Anthropic, 2024](https://www.anthropic.com/engineering/building-effective-agents)).
 
+The [agentic API vs AI API comparison](/blog/agentic-api-vs-ai-api/) maps that control-flow boundary across model calls, deterministic workflows, and supervised agent runtimes.
+
 | Interface | Caller provides | System controls | Typical state | Best fit |
 | --- | --- | --- | --- | --- |
 | Conventional application API | Operation and fields | Coded business logic | Varies | Predictable transactions |

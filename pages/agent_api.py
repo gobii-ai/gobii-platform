@@ -16,7 +16,7 @@ AGENT_API_CLUSTER_GROUPS = (
             {
                 "anchor": "Agentic API vs AI API",
                 "url": "/blog/agentic-api-vs-ai-api/",
-                "status": "planned",
+                "status": "live",
             },
             {
                 "anchor": "Autonomous agent API",

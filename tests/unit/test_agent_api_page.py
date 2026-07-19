@@ -175,6 +175,7 @@ class AgentAPIPageTests(TestCase):
             live_urls,
             {
                 "/blog/what-is-an-agentic-api/",
+                "/blog/agentic-api-vs-ai-api/",
                 AGENT_API_DEVELOPER_DOCS_URL,
                 AGENT_API_DOCS_URL,
             },
