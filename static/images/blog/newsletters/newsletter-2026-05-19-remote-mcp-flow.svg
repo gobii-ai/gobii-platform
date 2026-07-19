@@ -1,0 +1,106 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 675" role="img" aria-labelledby="title desc">
+  <title id="title">Two MCP flows with different roles</title>
+  <desc id="desc">Remote MCP flows from an external AI client into Gobii persistent agents. Connected MCP servers flow from a Gobii agent out to external tools and data.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#070923"/>
+      <stop offset="0.55" stop-color="#14103b"/>
+      <stop offset="1" stop-color="#24104a"/>
+    </linearGradient>
+    <linearGradient id="remoteCard" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#32206f"/>
+      <stop offset="1" stop-color="#1a174b"/>
+    </linearGradient>
+    <linearGradient id="connectedCard" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#153d55"/>
+      <stop offset="1" stop-color="#171848"/>
+    </linearGradient>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="5" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <marker id="purpleArrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#a78bfa"/>
+    </marker>
+    <marker id="cyanArrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#22d3ee"/>
+    </marker>
+  </defs>
+
+  <rect x="10" y="10" width="1180" height="655" rx="34" fill="url(#background)"/>
+  <rect x="10" y="10" width="1180" height="655" rx="34" fill="none" stroke="#8b5cf6" stroke-opacity="0.45" stroke-width="2"/>
+
+  <text x="600" y="72" text-anchor="middle" fill="#ffffff" font-family="Inter, system-ui, sans-serif" font-size="34" font-weight="700">Two MCP flows, different roles</text>
+  <text x="600" y="103" text-anchor="middle" fill="#c4b5fd" font-family="Inter, system-ui, sans-serif" font-size="17">Choose by direction: which system needs the tools?</text>
+
+  <rect x="45" y="132" width="535" height="485" rx="28" fill="url(#remoteCard)" stroke="#8b5cf6" stroke-opacity="0.55"/>
+  <rect x="620" y="132" width="535" height="485" rx="28" fill="url(#connectedCard)" stroke="#22d3ee" stroke-opacity="0.48"/>
+
+  <circle cx="86" cy="178" r="15" fill="#8b5cf6" filter="url(#glow)"/>
+  <text x="116" y="185" fill="#ffffff" font-family="Inter, system-ui, sans-serif" font-size="27" font-weight="700">Remote MCP</text>
+  <text x="72" y="222" fill="#ddd6fe" font-family="Inter, system-ui, sans-serif" font-size="17">An outside AI client operates Gobii.</text>
+
+  <circle cx="661" cy="178" r="15" fill="#22d3ee" filter="url(#glow)"/>
+  <text x="691" y="185" fill="#ffffff" font-family="Inter, system-ui, sans-serif" font-size="27" font-weight="700">Connected MCP server</text>
+  <text x="647" y="222" fill="#cffafe" font-family="Inter, system-ui, sans-serif" font-size="17">A Gobii uses an outside server's tools.</text>
+
+  <rect x="72" y="267" width="140" height="118" rx="18" fill="#111435" stroke="#a78bfa" stroke-width="2"/>
+  <rect x="92" y="288" width="100" height="64" rx="8" fill="#251b57" stroke="#c4b5fd" stroke-opacity="0.65"/>
+  <path d="M108 307h47M108 320h66M108 333h39" stroke="#c4b5fd" stroke-width="6" stroke-linecap="round" opacity="0.85"/>
+  <text x="142" y="411" text-anchor="middle" fill="#ffffff" font-family="Inter, system-ui, sans-serif" font-size="17" font-weight="600">AI client</text>
+
+  <line x1="220" y1="326" x2="255" y2="326" stroke="#a78bfa" stroke-width="5" marker-end="url(#purpleArrow)" filter="url(#glow)"/>
+
+  <rect x="267" y="267" width="140" height="118" rx="18" fill="#23145b" stroke="#a78bfa" stroke-width="2"/>
+  <path d="M337 287l35 14v23c0 22-15 38-35 47-20-9-35-25-35-47v-23z" fill="none" stroke="#67e8f9" stroke-width="6"/>
+  <circle cx="337" cy="326" r="8" fill="#67e8f9"/>
+  <path d="M337 334v14" stroke="#67e8f9" stroke-width="6" stroke-linecap="round"/>
+  <text x="337" y="411" text-anchor="middle" fill="#ffffff" font-family="Inter, system-ui, sans-serif" font-size="17" font-weight="600">Gobii endpoint</text>
+
+  <line x1="415" y1="326" x2="450" y2="326" stroke="#a78bfa" stroke-width="5" marker-end="url(#purpleArrow)" filter="url(#glow)"/>
+
+  <rect x="462" y="267" width="92" height="118" rx="18" fill="#111435" stroke="#a78bfa" stroke-width="2"/>
+  <circle cx="493" cy="310" r="18" fill="#8b5cf6"/>
+  <circle cx="523" cy="310" r="18" fill="#8b5cf6"/>
+  <circle cx="508" cy="340" r="18" fill="#8b5cf6"/>
+  <circle cx="488" cy="308" r="4" fill="#ffffff"/>
+  <circle cx="518" cy="308" r="4" fill="#ffffff"/>
+  <circle cx="503" cy="338" r="4" fill="#ffffff"/>
+  <text x="508" y="411" text-anchor="middle" fill="#ffffff" font-family="Inter, system-ui, sans-serif" font-size="17" font-weight="600">Agents</text>
+
+  <text x="312" y="475" text-anchor="middle" fill="#c4b5fd" font-family="Inter, system-ui, sans-serif" font-size="18" font-weight="600">Client → authenticated endpoint → Gobii tools</text>
+  <text x="312" y="512" text-anchor="middle" fill="#a5b4fc" font-family="Inter, system-ui, sans-serif" font-size="15">Lifecycle · messages · timelines · links · files</text>
+  <rect x="109" y="548" width="406" height="40" rx="20" fill="#8b5cf6" fill-opacity="0.18"/>
+  <text x="312" y="574" text-anchor="middle" fill="#ddd6fe" font-family="Inter, system-ui, sans-serif" font-size="15">Gobii is the MCP server</text>
+
+  <rect x="647" y="267" width="112" height="118" rx="18" fill="#111435" stroke="#22d3ee" stroke-width="2"/>
+  <circle cx="703" cy="322" r="34" fill="#6d28d9"/>
+  <rect x="679" y="302" width="48" height="36" rx="15" fill="#17133c" stroke="#67e8f9" stroke-width="3"/>
+  <circle cx="694" cy="319" r="5" fill="#ffffff"/>
+  <circle cx="712" cy="319" r="5" fill="#ffffff"/>
+  <path d="M700 288l8-15 8 15M737 323l16-8-7 16" fill="#a78bfa"/>
+  <text x="703" y="411" text-anchor="middle" fill="#ffffff" font-family="Inter, system-ui, sans-serif" font-size="17" font-weight="600">Gobii</text>
+
+  <line x1="767" y1="326" x2="802" y2="326" stroke="#22d3ee" stroke-width="5" marker-end="url(#cyanArrow)" filter="url(#glow)"/>
+
+  <rect x="814" y="267" width="140" height="118" rx="18" fill="#113246" stroke="#22d3ee" stroke-width="2"/>
+  <circle cx="884" cy="326" r="36" fill="none" stroke="#67e8f9" stroke-width="5"/>
+  <path d="M866 326h36M884 308v36" stroke="#67e8f9" stroke-width="5" stroke-linecap="round"/>
+  <text x="884" y="411" text-anchor="middle" fill="#ffffff" font-family="Inter, system-ui, sans-serif" font-size="17" font-weight="600">MCP server</text>
+
+  <line x1="962" y1="326" x2="997" y2="326" stroke="#22d3ee" stroke-width="5" marker-end="url(#cyanArrow)" filter="url(#glow)"/>
+
+  <rect x="1009" y="267" width="120" height="118" rx="18" fill="#111435" stroke="#22d3ee" stroke-width="2"/>
+  <rect x="1030" y="291" width="34" height="34" rx="8" fill="#0891b2"/>
+  <rect x="1073" y="291" width="34" height="34" rx="8" fill="#8b5cf6"/>
+  <rect x="1051" y="334" width="34" height="34" rx="8" fill="#16a34a"/>
+  <text x="1069" y="411" text-anchor="middle" fill="#ffffff" font-family="Inter, system-ui, sans-serif" font-size="17" font-weight="600">Tools</text>
+
+  <text x="888" y="475" text-anchor="middle" fill="#a5f3fc" font-family="Inter, system-ui, sans-serif" font-size="18" font-weight="600">Gobii → assigned server → external tools</text>
+  <text x="888" y="512" text-anchor="middle" fill="#bae6fd" font-family="Inter, system-ui, sans-serif" font-size="15">Databases · APIs · services · private systems</text>
+  <rect x="685" y="548" width="406" height="40" rx="20" fill="#22d3ee" fill-opacity="0.14"/>
+  <text x="888" y="574" text-anchor="middle" fill="#cffafe" font-family="Inter, system-ui, sans-serif" font-size="15">Gobii is the MCP client</text>
+</svg>

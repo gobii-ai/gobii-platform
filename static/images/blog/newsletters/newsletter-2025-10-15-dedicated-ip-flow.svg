@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 420" role="img" aria-labelledby="title desc">
+  <title id="title">Dedicated IP route for a Gobii AI agent</title>
+  <desc id="desc">A Gobii sends supported outbound work through a dedicated egress IP. The destination allowlist checks that address before the approved service checks identity and permission.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#160b38"/>
+      <stop offset="1" stop-color="#281056"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1200" height="420" rx="24" fill="url(#background)"/>
+  <g opacity="0.16" stroke="#c4b5fd">
+    <path d="M0 70H1200M0 140H1200M0 210H1200M0 280H1200M0 350H1200"/>
+    <path d="M100 0V420M200 0V420M300 0V420M400 0V420M500 0V420M600 0V420M700 0V420M800 0V420M900 0V420M1000 0V420M1100 0V420"/>
+  </g>
+
+  <text x="600" y="48" fill="#ffffff" font-family="Inter, Arial, sans-serif" font-size="28" font-weight="700" text-anchor="middle">One stable route, clear security boundaries</text>
+
+  <g font-family="Inter, Arial, sans-serif">
+    <rect x="45" y="110" width="230" height="210" rx="24" fill="#3b1c6e" stroke="#a78bfa" stroke-width="2"/>
+    <circle cx="160" cy="177" r="42" fill="#a66ed2"/>
+    <rect x="121" y="158" width="78" height="45" rx="21" fill="#32125c"/>
+    <circle cx="145" cy="180" r="6" fill="#ffffff"/>
+    <circle cx="175" cy="180" r="6" fill="#ffffff"/>
+    <rect x="132" y="194" width="56" height="6" rx="3" fill="#22d3ee"/>
+    <text x="160" y="252" fill="#ffffff" font-size="22" font-weight="700" text-anchor="middle">Gobii</text>
+    <text x="160" y="281" fill="#ddd6fe" font-size="15" text-anchor="middle">Starts approved work</text>
+
+    <rect x="355" y="110" width="230" height="210" rx="24" fill="#3b1c6e" stroke="#a78bfa" stroke-width="2"/>
+    <path d="M470 145 L518 165 V205 C518 238 496 257 470 270 C444 257 422 238 422 205 V165 Z" fill="#5b21b6" stroke="#c4b5fd" stroke-width="3"/>
+    <polygon points="446,202 462,218 494,184 502,192 463,232 438,210" fill="#22d3ee"/>
+    <text x="470" y="289" fill="#ffffff" font-size="22" font-weight="700" text-anchor="middle">Egress gateway</text>
+
+    <rect x="665" y="110" width="230" height="210" rx="24" fill="#3b1c6e" stroke="#22d3ee" stroke-width="2"/>
+    <rect x="710" y="154" width="140" height="72" rx="16" fill="#1e1248" stroke="#22d3ee" stroke-width="2"/>
+    <text x="780" y="184" fill="#a5f3fc" font-size="16" font-weight="700" text-anchor="middle">DEDICATED IP</text>
+    <text x="780" y="210" fill="#ffffff" font-size="16" text-anchor="middle">stable egress</text>
+    <text x="780" y="259" fill="#ffffff" font-size="22" font-weight="700" text-anchor="middle">Allowlist check</text>
+    <text x="780" y="287" fill="#ddd6fe" font-size="15" text-anchor="middle">Matches the source address</text>
+
+    <rect x="975" y="110" width="180" height="210" rx="24" fill="#3b1c6e" stroke="#a78bfa" stroke-width="2"/>
+    <rect x="1022" y="153" width="86" height="74" rx="12" fill="#5b21b6"/>
+    <polygon points="1038,188 1057,205 1089,169 1097,177 1058,219 1030,197" fill="#22d3ee"/>
+    <text x="1065" y="259" fill="#ffffff" font-size="22" font-weight="700" text-anchor="middle">Service</text>
+    <text x="1065" y="287" fill="#ddd6fe" font-size="15" text-anchor="middle">Checks identity + role</text>
+  </g>
+
+  <g fill="#22d3ee">
+    <rect x="286" y="208" width="42" height="8" rx="4"/>
+    <polygon points="326,196 346,212 326,228"/>
+    <rect x="596" y="208" width="42" height="8" rx="4"/>
+    <polygon points="636,196 656,212 636,228"/>
+    <rect x="906" y="208" width="42" height="8" rx="4"/>
+    <polygon points="946,196 966,212 946,228"/>
+  </g>
+
+  <text x="600" y="382" fill="#ddd6fe" font-family="Inter, Arial, sans-serif" font-size="16" text-anchor="middle">A network match does not replace authentication, authorization, or runtime controls.</text>
+</svg>
