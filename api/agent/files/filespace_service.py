@@ -7,10 +7,12 @@ import re
 from dataclasses import dataclass
 from typing import Any, List
 
+from botocore.exceptions import BotoCoreError, ClientError
 from celery.utils.log import get_task_logger
 from django.core.exceptions import SuspiciousFileOperation
 from django.core.files.base import ContentFile
-from django.db import IntegrityError, transaction
+from django.db import DatabaseError, IntegrityError, transaction
+from google.api_core.exceptions import GoogleAPIError
 
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 
@@ -21,6 +23,8 @@ logger = get_task_logger(__name__)
 EXPORTS_DIR_NAME = "exports"
 DOWNLOADS_DIR_NAME = "downloads"
 UNSAFE_FILESPACE_PART_CHARS_RE = re.compile(r"(?u)[^-\w.+@]")
+FILESPACE_STORAGE_UNAVAILABLE = "Filespace storage unavailable. Retry this file tool once; do not use another file tool, Python, or shell. After another failure, report the blocker or return a small result inline."
+FILESPACE_PERSISTENCE_ERRORS = (BotoCoreError, ClientError, DatabaseError, GoogleAPIError, OSError, SuspiciousFileOperation)
 
 
 @dataclass
@@ -171,21 +175,25 @@ def _save_node_content(
     *,
     delete_node_on_failure: bool,
 ) -> dict[str, Any] | None:
+    previous_content_name = getattr(node.content, "name", None)
     try:
         node.content.save(node.name, ContentFile(content_bytes), save=False)
         node.save()
         node.refresh_from_db()
         return None
-    except Exception:
+    except FILESPACE_PERSISTENCE_ERRORS:
         logger.exception("Failed to persist file to %s for agent %s", dir_name, agent_id)
         try:
-            if node.content and getattr(node.content, "name", None):
+            if node.content and getattr(node.content, "name", None) != previous_content_name:
                 node.content.delete(save=False)
-        except Exception:
+        except FILESPACE_PERSISTENCE_ERRORS:
             logger.exception("Failed to clean up file content for node %s", node.id)
         if delete_node_on_failure:
-            node.delete()
-        return {"status": "error", "message": "Failed to save the file in the filespace."}
+            try:
+                node.delete()
+            except DatabaseError:
+                logger.exception("Failed to clean up file node %s", node.id)
+        return {"status": "error", "code": "filespace_storage_unavailable", "message": FILESPACE_STORAGE_UNAVAILABLE, "retryable": True}
 
 
 def _agent_has_access(agent: "PersistentAgent", filespace_id: "uuid.UUID") -> bool:

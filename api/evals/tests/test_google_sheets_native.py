@@ -14,6 +14,7 @@ from api.evals.scenarios.google_sheets_native import (
     GOOGLE_SHEETS_NATIVE_CREATE_AND_FORMAT,
     GOOGLE_SHEETS_NATIVE_CHART_WITH_HELPER_DATA,
     GOOGLE_SHEETS_NATIVE_CREATE_DEFAULT_COLUMNS,
+    GOOGLE_SHEETS_NATIVE_FORMAT_EXISTING_IDEMPOTENT,
     GOOGLE_SHEETS_NATIVE_LIST_TABS,
     GOOGLE_SHEETS_NATIVE_READ_RANGE,
     GOOGLE_SHEETS_NATIVE_SCENARIO_SLUGS,
@@ -79,12 +80,16 @@ class GoogleSheetsNativeScenarioTests(SimpleTestCase):
 
         self.assertIn("update_plan", policy["ignored_tool_names"])
 
-    def test_create_and_format_response_accepts_formatting_language(self):
+    def test_format_responses_accept_consistent_formatting_language(self):
         create_case = next(case for case in GOOGLE_SHEETS_NATIVE_CASES if case.slug == GOOGLE_SHEETS_NATIVE_CREATE_AND_FORMAT)
+        existing_case = next(
+            case for case in GOOGLE_SHEETS_NATIVE_CASES if case.slug == GOOGLE_SHEETS_NATIVE_FORMAT_EXISTING_IDEMPOTENT
+        )
 
         first_group = create_case.response_term_groups[0]
         self.assertIn("formatted", first_group)
         self.assertIn("styled", first_group)
+        self.assertEqual(existing_case.response_term_groups[0], first_group)
 
     def test_formatting_guidance_stops_after_successful_batch_update(self):
         with patch("api.agent.system_skills.defaults._native_integration_connected", return_value=True):

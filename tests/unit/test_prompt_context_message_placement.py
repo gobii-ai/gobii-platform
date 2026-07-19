@@ -42,6 +42,7 @@ class PromptContextSqlitePlacementTests(TestCase):
         self.assertEqual(all_contents.count(sqlite_guidance), 1)
         self.assertIn("<sqlite_guidance>", system_message["content"])
         self.assertIn("</sqlite_guidance>", system_message["content"])
-        self.assertIn("shared entity, event, and relationship tables", sqlite_guidance)
+        self.assertIn("keyed entities, events, and relations", sqlite_guidance)
+        self.assertIn("query unmatched inventory rows before reporting", sqlite_guidance)
         self.assertIn("return only needed rows to context", sqlite_guidance)
         self.assertIn("never make a table per result", sqlite_guidance)

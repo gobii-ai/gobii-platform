@@ -9,6 +9,7 @@ from api.evals.scenarios.message_quality import (
     MESSAGE_QUALITY_SCENARIO_SLUGS,
     MESSAGE_QUALITY_SUITE_SLUG,
     OWNER_UPDATE_QUALITY_CASES,
+    PORTFOLIO_REPORT_QUALITY_CASES,
     REPLY_CHANNEL_CONTINUITY_SLUG,
     REPORT_MESSAGE_QUALITY_CASES,
     SIMPLE_EMAIL_QUALITY_CASES,
@@ -26,7 +27,7 @@ class MessageQualityScenarioTests(SimpleTestCase):
 
         self.assertIsNotNone(suite)
         self.assertEqual(tuple(suite.scenario_slugs), MESSAGE_QUALITY_SCENARIO_SLUGS)
-        self.assertEqual(len(suite.scenario_slugs), 18)
+        self.assertEqual(len(suite.scenario_slugs), 19)
         self.assertIn(REPLY_CHANNEL_CONTINUITY_SLUG, suite.scenario_slugs)
         self.assertIn(UNAVAILABLE_WEB_CHANNEL_CONTINUITY_SLUG, suite.scenario_slugs)
         self.assertIn(FAILED_EMAIL_DELIVERY_RECOVERY_SLUG, suite.scenario_slugs)
@@ -142,6 +143,41 @@ class MessageQualityScenarioTests(SimpleTestCase):
         self.assertIn("owner of the work", question)
         self.assertIn("easy to scan", question)
 
+    def test_portfolio_eval_is_natural_and_does_not_prescribe_workflow_or_format(self):
+        case = PORTFOLIO_REPORT_QUALITY_CASES[0]
+        prompt = MessageQualityScenario()._prompt(case).lower()
+
+        self.assertIn("portfolio and founder update", prompt)
+        for prescription in ("sqlite", "markdown", "heading", "bullet", "table", "emoji"):
+            with self.subTest(prescription=prescription):
+                self.assertNotIn(prescription, prompt)
+
+    def test_portfolio_eval_detects_an_omitted_canonical_entity(self):
+        case = PORTFOLIO_REPORT_QUALITY_CASES[0]
+        body = (
+            "## Portfolio update\n\n"
+            "Juniper Vale is led by Maya Solis. Copperline Health was founded by Theo Grant and Nina Park."
+        )
+
+        failures = MessageQualityScenario()._formatting_failures(
+            case,
+            {"body": body, "will_continue_work": False},
+            body,
+        )
+
+        self.assertIn("Message omitted required entities: Harborlight Robotics.", failures)
+
+    def test_portfolio_and_generic_chat_judges_reward_flexible_hierarchy(self):
+        portfolio_question = MessageQualityScenario._judge_question(PORTFOLIO_REPORT_QUALITY_CASES[0])
+        generic_case = next(case for case in REPORT_MESSAGE_QUALITY_CASES if case.channel == "chat")
+        generic_question = MessageQualityScenario._judge_question(generic_case)
+
+        for question in (portfolio_question, generic_question):
+            with self.subTest(question=question):
+                self.assertIn("proportionate hierarchy", question)
+                self.assertIn("repetitive flat catalog wall", question)
+        self.assertIn("Do not require emoji, a table", generic_question)
+
     def test_rich_email_judge_rewards_status_encoding_without_mandating_emoji(self):
         case = next(case for case in REPORT_MESSAGE_QUALITY_CASES if case.channel == "email")
         question = MessageQualityScenario._judge_question(case)
@@ -156,6 +192,7 @@ class MessageQualityScenarioTests(SimpleTestCase):
         question = MessageQualityScenario._judge_question(case)
 
         self.assertIn("status labels", question)
+        self.assertIn("options, not requirements", question)
         self.assertNotIn("recommendation", question)
 
     def test_short_judge_reasoning_is_retried(self):

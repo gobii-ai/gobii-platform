@@ -2473,6 +2473,12 @@ class EffortSimpleCurrentCompanyReportScenario(EffortCalibrationScenario):
         ScenarioTask(name="verify_no_config_churn", assertion_type="manual"),
         ScenarioTask(name="verify_turn_budget", assertion_type="manual"),
     ]
+    required_concept_groups = (
+        ("Northstar Robotics", "Northstar"),
+        ("Atlas", "mixed-fleet", "mixed fleet"),
+        ("Series B", "$42M", "42M", "42 million"),
+        ("18 percent", "18%", "eighteen percent"),
+    )
 
     def run(self, run_id: str, agent_id: str) -> None:
         self._ready_agent(agent_id)
@@ -2682,7 +2688,7 @@ class EffortSimpleCurrentCompanyReportScenario(EffortCalibrationScenario):
             min_source_count=2,
             min_chars=650,
             max_chars=3000,
-            required_any_groups=(("Northstar Robotics", "Northstar"),),
+            required_any_groups=self.required_concept_groups,
         )
         self._record_no_question_battery(
             run_id,

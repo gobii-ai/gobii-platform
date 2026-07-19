@@ -182,7 +182,7 @@ RECRUITMENT_SOURCING_CASES = (
         mock_config={},
         forbidden_tool_names=SOURCING_TOOL_NAMES,
         response_term_groups=(
-            ("job posting", "requirements", "required skills", "screening criteria", "dealbreakers"),
+            ("job posting", "requirements", "required skills", "must-have skills", "screening criteria", "dealbreakers"),
             ("provide", "share", "wait", "missing", "more details", "additional details", "questions", "screen"),
         ),
         tags=("intake",),

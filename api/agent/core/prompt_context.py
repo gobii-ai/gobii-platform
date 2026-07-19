@@ -658,7 +658,7 @@ def _get_sqlite_guidance() -> str:
         "## SQLite Data\n\n"
         "Fetch new data with its source tool and answer small results directly. Use sqlite_batch for data already in "
         "SQLite when large/truncated or needing filtering, joins, aggregation, charts, reuse, or domain logic. Model "
-        "reusable domains once as shared entity, event, and relationship tables. Separate repeating parents from children "
+        "reusable domains as keyed entities, events, and relations; query unmatched inventory rows before reporting. Normalize parent/child data "
         "(vendors/plans, accounts/events) with PRIMARY KEY/UNIQUE identity, useful indexes, and source provenance; put "
         "logic in SQL and return only needed rows to context. Populate them from all relevant __tool_results rows with one "
         "shaped INSERT ... SELECT/json_each query and an IN/tool_name filter; never filter result_id one at a time; never "
@@ -3205,7 +3205,7 @@ def _get_web_chat_formatting_guidance() -> str:
     return (
         "Web chat and peer DM formatting:\n"
         "Start with the answer/main finding. Keep simple exchanges/outreach natural. "
-        "Reports to owners/creators and multi-part findings, metrics, or recommendations use polished sections, bullets/tables or metric blocks, status labels, and tasteful visual cues, even when not called a report. "
+        "Owner/creator reports and multi-part findings need polished hierarchy: sections, bullets, compact linked tables, metric/status blocks, or tasteful cues, even without a report label. "
         "Address known recipients naturally once around actions; avoid generic delivery logs and agent-name self-intros unless asked. "
         "Use whitespace, not separators. Charts: paste create_chart result.inline; don't attach/read/rebuild."
     )
@@ -3767,7 +3767,7 @@ def _get_system_instruction(
         "Do not invent work, results, preferences, or personal experiences.\n\n"
 
         "## Output Rules\n\n"
-        "Use the lightest clear structure: fact, list, table, or sectioned report. Ground facts, numbers, units, and URLs in tool results; do not relabel or convert units unless asked. For record lists, include item/detail URLs from results, not only feed/source URLs. Present requested returned data directly; omit unrelated fields and unavailable extras, summarize overflow, and do not add follow-up offers after simple facts, prices, statuses, or quick lookups. "
+        "Use proportionate structure. A bounded named set is a coverage contract: include each item or mark it unavailable/excluded; summarize only real overflow. Ground facts, numbers, units, and URLs in tool results; never relabel/convert units unless asked. Record lists keep item/detail URLs, not just feed/source URLs. Present requested data directly; omit unrelated/unavailable fields and follow-up offers after simple facts, prices, statuses, or lookups. "
         "Charts: create only when requested/materially useful. "
         "Paste create_chart result.inline/result.inline_html in the message; do not attach/read charts or invent paths, hashes, image tags, or <img> URLs. "
         "Use create_csv for tabular exports, create_pdf for PDFs, and create_file for other text/doc formats; create_file query mode must return exactly one row and one column.\n\n"

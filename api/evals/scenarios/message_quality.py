@@ -47,6 +47,7 @@ class MessageQualityCase:
     source_facts: str
     source_example_ids: tuple[str, ...]
     quality_target: str = "rich_report"
+    required_entity_names: tuple[str, ...] = ()
 
     @property
     def expected_tool(self) -> str:
@@ -246,11 +247,33 @@ OWNER_UPDATE_QUALITY_CASES = (
     ),
 )
 
+PORTFOLIO_REPORT_QUALITY_CASES = (
+    MessageQualityCase(
+        slug="message_quality_chat_owner_portfolio_founders",
+        channel="chat",
+        recipient="web-user",
+        subject="Portfolio founder update",
+        brief="owner-facing portfolio and founder update",
+        source_facts=(
+            "Audience: the owner of the investment research agent.\n"
+            "Juniper Vale builds billing reconciliation software; its founder is Maya Solis.\n"
+            "Copperline Health makes clinic scheduling software; its founders are Theo Grant and Nina Park.\n"
+            "Harborlight Robotics builds inspection drones; the available notes do not identify a founder.\n"
+            "All three are current portfolio companies. Keep Harborlight Robotics' founder status unresolved "
+            "rather than guessing."
+        ),
+        source_example_ids=("5ea74d2a-f275-479c-aabe-271ffc0eb7b7",),
+        quality_target="owner_research",
+        required_entity_names=("Juniper Vale", "Copperline Health", "Harborlight Robotics"),
+    ),
+)
+
 MESSAGE_QUALITY_CASES = (
     REPORT_MESSAGE_QUALITY_CASES
     + SIMPLE_EMAIL_QUALITY_CASES
     + HUMAN_MESSAGE_QUALITY_CASES
     + OWNER_UPDATE_QUALITY_CASES
+    + PORTFOLIO_REPORT_QUALITY_CASES
 )
 MESSAGE_QUALITY_SCENARIO_SLUGS = (
     *(case.slug for case in MESSAGE_QUALITY_CASES),
@@ -373,6 +396,12 @@ class MessageQualityScenario(EvalScenario, ScenarioExecutionTools):
             return (
                 "How are things looking with the recruiting work right now? Give me the useful update "
                 "using only the details below. Do not browse, create files, or ask follow-up questions.\n\n"
+                f"{case.source_facts}\n\nSend me the update now."
+            )
+        if case.quality_target == "owner_research":
+            return (
+                "Can you send me the useful portfolio and founder update from the notes below? "
+                "Use only these details; do not browse, create files, or ask follow-up questions.\n\n"
                 f"{case.source_facts}\n\nSend me the update now."
             )
 
@@ -587,6 +616,8 @@ class MessageQualityScenario(EvalScenario, ScenarioExecutionTools):
             return f"Agent should acknowledge the user's note naturally via {case.expected_tool}."
         if case.quality_target == "owner_update":
             return f"Agent should send a polished, scannable owner update via {case.expected_tool}."
+        if case.quality_target == "owner_research":
+            return f"Agent should send a complete, scannable portfolio update via {case.expected_tool}."
         return f"Agent should send a polished {case.channel} report via {case.expected_tool}."
 
     @staticmethod
@@ -599,6 +630,8 @@ class MessageQualityScenario(EvalScenario, ScenarioExecutionTools):
             return "Judge should pass only a concise, natural acknowledgement without evaluative padding."
         if case.quality_target == "owner_update":
             return "Judge should pass only a human, polished, decision-useful owner update."
+        if case.quality_target == "owner_research":
+            return "Judge should pass only a complete, polished, decision-useful portfolio update."
         return "Judge should pass only polished, rich, readable report formatting."
 
     @staticmethod
@@ -637,6 +670,15 @@ class MessageQualityScenario(EvalScenario, ScenarioExecutionTools):
                 "or status labels. Fail if it is a dense plain paragraph, a loose fact dump, needlessly over-formatted, "
                 "or templated/corporate. Do not require any one specific Markdown element."
             )
+        if case.quality_target == "owner_research":
+            return (
+                "Does this feel like a polished research update from a thoughtful operator to the owner of the work? "
+                "Pass only if it preserves the portfolio and founder status accurately, stays human and direct, "
+                "and uses proportionate hierarchy to make the entities and important differences easy to scan. "
+                "Headings, grouped bullets, a compact table, or status labels can all work; do not require any one. "
+                "Fail if it is dense plain prose, a repetitive flat catalog wall where every entry repeats the same "
+                "labels and cadence, guesses an unresolved founder, or is needlessly decorative or templated."
+            )
         if case.channel == "email":
             return (
                 "Does this email meet a high bar for formatting quality? Pass only if it is body-only HTML "
@@ -648,9 +690,11 @@ class MessageQualityScenario(EvalScenario, ScenarioExecutionTools):
                 "rich report."
             )
         return (
-            "Does this web chat message meet a high bar for report formatting quality? Pass only if it has "
-            "clear Markdown hierarchy, tasteful emoji or status labels, useful tables or metric blocks, bullets, "
-            "and good spacing. Fail if it is plain prose, cramped, hard to scan, or not report-like."
+            "Does this web chat message meet a high bar for report formatting quality? Pass only if it uses "
+            "clear, proportionate hierarchy to make the important findings and differences easy to scan. Short "
+            "sections, grouped bullets, compact tables, and status labels are options, not requirements. Fail if "
+            "it is plain or cramped, a repetitive flat catalog wall where every item repeats the same labels and "
+            "cadence, needlessly decorated, or hard to scan. Do not require emoji, a table, or any one Markdown element."
         )
 
     @staticmethod
@@ -805,6 +849,9 @@ class MessageQualityScenario(EvalScenario, ScenarioExecutionTools):
         failures = []
         if not body.strip():
             failures.append("Message body was empty.")
+        missing_entities = self._missing_required_entity_names(case, body)
+        if missing_entities:
+            failures.append(f"Message omitted required entities: {', '.join(missing_entities)}.")
         if has_humanized_message_style_violation(body) or (
             case.channel == "email" and has_humanized_message_style_violation(str(params.get("subject") or ""))
         ):
@@ -823,6 +870,11 @@ class MessageQualityScenario(EvalScenario, ScenarioExecutionTools):
             if re.search(r"^\s*\|.+\|\s*$", body, re.MULTILINE):
                 failures.append("Email body should use HTML tables, not Markdown pipe tables.")
         return failures
+
+    @staticmethod
+    def _missing_required_entity_names(case: MessageQualityCase, body: str) -> list[str]:
+        body_folded = (body or "").casefold()
+        return [name for name in case.required_entity_names if name.casefold() not in body_folded]
 
 
 @register_scenario

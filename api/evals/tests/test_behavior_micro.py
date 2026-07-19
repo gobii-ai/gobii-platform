@@ -1,3 +1,11 @@
+import json
+import sqlite3
+import tempfile
+from contextlib import contextmanager
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
+
 from django.test import SimpleTestCase, tag
 
 import api.evals.loader  # noqa: F401 - registers scenarios and suites
@@ -14,10 +22,81 @@ from api.evals.suites import SuiteRegistry
 
 APOLLO_CONNECT_SEARCH = "common_use_case_136_apollo_connect_tool_search"
 SLACK_CONNECT_SEARCH = "common_use_case_137_slack_connect_tool_search"
+SQLITE_EXPORT_QUERY_CSV = "common_use_case_086_sqlite_export_query_csv"
 
 
 @tag("eval_sim")
 class BehaviorMicroScenarioTests(SimpleTestCase):
+    def test_sqlite_export_case_seeds_exact_lead_fixture(self):
+        scenario = ScenarioRegistry.get(SQLITE_EXPORT_QUERY_CSV)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "state.db"
+
+            @contextmanager
+            def local_agent_db(_agent_id):
+                yield str(db_path)
+
+            with patch("api.evals.scenarios.behavior_micro.agent_sqlite_db", local_agent_db):
+                scenario._seed_sqlite_export_context("agent-123")
+
+            with sqlite3.connect(db_path) as conn:
+                rows = conn.execute("SELECT company, status FROM leads ORDER BY company;").fetchall()
+
+        self.assertEqual(rows, [("Acme", "open"), ("Globex", "open"), ("Initech", "contacted")])
+        self.assertIn("populated SQLite leads table", scenario.case.prompt)
+
+    def test_sqlite_export_uses_real_tools_without_changing_generic_mocks(self):
+        scenario = ScenarioRegistry.get(SQLITE_EXPORT_QUERY_CSV)
+        generic_sqlite_scenario = ScenarioRegistry.get("common_use_case_083_sqlite_query_counts")
+
+        self.assertNotIn("sqlite_batch", scenario._build_mock_config())
+        self.assertNotIn("create_csv", scenario._build_mock_config())
+        self.assertIn("sqlite_batch", generic_sqlite_scenario._build_mock_config())
+
+    def test_sqlite_export_stop_policy_waits_for_both_executed_tools(self):
+        scenario = ScenarioRegistry.get(SQLITE_EXPORT_QUERY_CSV)
+
+        self.assertEqual(
+            scenario._build_eval_stop_policy()["stop_when_all_seen"],
+            [
+                {"tool_name": "sqlite_batch", "after_execution": True},
+                {"tool_name": "create_csv", "after_execution": True},
+            ],
+        )
+
+    def test_sqlite_export_rejects_failed_or_incomplete_tool_results(self):
+        scenario = ScenarioRegistry.get(SQLITE_EXPORT_QUERY_CSV)
+        successful_sqlite = SimpleNamespace(
+            tool_name="sqlite_batch",
+            tool_params={},
+            status="complete",
+            result=json.dumps({"status": "ok", "results": [{"result": [{"company": "Acme"}]}]}),
+        )
+        successful_csv = SimpleNamespace(
+            tool_name="create_csv",
+            tool_params={},
+            status="complete",
+            result=json.dumps({"status": "ok", "file": "$[/exports/open-leads.csv]", "attach": "$[/exports/open-leads.csv]"}),
+        )
+        failed_sqlite = SimpleNamespace(
+            tool_name="sqlite_batch",
+            tool_params={},
+            status="error",
+            result=json.dumps({"status": "error", "message": "query failed"}),
+        )
+        incomplete_csv = SimpleNamespace(
+            tool_name="create_csv",
+            tool_params={},
+            status="complete",
+            result=json.dumps({"status": "ok"}),
+        )
+
+        self.assertTrue(scenario._call_satisfies_expected_tool(successful_sqlite, "sqlite_batch"))
+        self.assertTrue(scenario._call_satisfies_expected_tool(successful_csv, "create_csv"))
+        self.assertFalse(scenario._call_satisfies_expected_tool(failed_sqlite, "sqlite_batch"))
+        self.assertFalse(scenario._call_satisfies_expected_tool(incomplete_csv, "create_csv"))
+
     def test_integration_discovery_scenarios_are_registered_in_expected_suites(self):
         planning_suite = SuiteRegistry.get("planning_micro")
         tool_choice_suite = SuiteRegistry.get("tool_choice_micro")

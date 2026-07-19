@@ -540,7 +540,7 @@ GOOGLE_SHEETS_NATIVE_CASES = (
                 body_terms=("repeatcell", "autoresizedimensions"),
             ),
         ),
-        response_term_groups=(("formatted", "polished"),),
+        response_term_groups=(("polishing", "polished", "formatting", "formatted", "styled"),),
         tags=("format", "idempotent"),
     ),
     GoogleSheetsNativeCase(

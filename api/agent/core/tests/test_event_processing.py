@@ -1296,7 +1296,7 @@ class ContinuationModePromptContextTests(TestCase):
         self.assertIn("send an evidence milestone", system_prompt)
         self.assertIn("No generic narration/reasoning", system_prompt)
         self.assertIn("Peer: send_agent_message only", system_prompt)
-        self.assertIn("For record lists, include item/detail URLs", system_prompt)
+        self.assertIn("Record lists keep item/detail URLs", system_prompt)
 
 
 @tag("batch_event_processing")

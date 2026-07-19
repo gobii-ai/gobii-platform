@@ -1,11 +1,15 @@
+import csv
+import io
+import json
 from copy import deepcopy
 from dataclasses import dataclass, field
-import json
 
 from api.agent.comms.human_input_requests import MAX_OPTION_COUNT, dismiss_human_input_request
 from api.agent.core.processing_flags import get_human_inbound_generation
 from api.agent.files.filespace_service import write_bytes_to_dir
 from api.agent.tools.eval_synthetic_tools import EVAL_SYNTHETIC_TOOL_DEFINITIONS, EVAL_SYNTHETIC_TOOL_SERVER, is_eval_synthetic_tool_name
+from api.agent.tools.sqlite_guardrails import clear_guarded_connection, open_guarded_sqlite_connection
+from api.agent.tools.sqlite_state import agent_sqlite_db
 from api.agent.tools.tool_manager import mark_tool_enabled_without_discovery
 from api.evals.base import EvalScenario, ScenarioTask
 from api.evals.execution import ScenarioExecutionTools
@@ -18,6 +22,7 @@ from api.evals.stop_policy import (
     sqlite_batch_mutates_planning_state,
 )
 from api.models import (
+    AgentFsNode,
     EvalRunTask,
     CommsAllowlistEntry,
     CommsChannel,
@@ -277,7 +282,7 @@ COMMON_USE_CASE_RAW_EVAL_CASES = [
     {"slug": "common_use_case_083_sqlite_query_counts", "category": "database", "prompt": "Query SQLite for lead counts grouped by priority.", "expected_tools": ["sqlite_batch"], "forbidden_tools": ["google_sheets-get-values-in-range"], "plan_expected": False},
     {"slug": "common_use_case_084_sqlite_update_status", "category": "database", "prompt": "Update SQLite lead Acme to status contacted.", "expected_tools": ["sqlite_batch"], "forbidden_tools": ["google_sheets-update-row"], "plan_expected": False},
     {"slug": "common_use_case_085_sqlite_join_tables", "category": "database", "prompt": "The SQLite database already has accounts and contacts tables. Run a join query by account_id and summarize the rows.", "expected_tools": ["sqlite_batch"], "forbidden_tools": ["google_sheets-get-values-in-range"], "plan_expected": False},
-    {"slug": "common_use_case_086_sqlite_export_query_csv", "category": "database", "prompt": "Run a SQLite query for open leads, then create a CSV export.", "expected_tools": ["sqlite_batch", "create_csv"], "forbidden_tools": ["google_sheets-get-values-in-range"], "plan_expected": False},
+    {"slug": "common_use_case_086_sqlite_export_query_csv", "category": "database", "prompt": "The populated SQLite leads table has company and status columns. Query its open leads, then create a CSV export.", "expected_tools": ["sqlite_batch", "create_csv"], "forbidden_tools": ["google_sheets-get-values-in-range"], "plan_expected": False},
     {"slug": "common_use_case_087_sqlite_clean_duplicates", "category": "database", "prompt": "Remove duplicate emails from the SQLite contacts table.", "expected_tools": ["sqlite_batch"], "forbidden_tools": ["google_sheets-update-multiple-rows"], "plan_expected": False},
     {"slug": "common_use_case_088_sqlite_add_index", "category": "database", "prompt": "Add a SQLite index on contacts email for faster lookup.", "expected_tools": ["sqlite_batch"], "forbidden_tools": ["google_sheets-update-cell"], "plan_expected": False},
     {"slug": "common_use_case_089_sqlite_database_setup", "category": "database", "prompt": "Set up the SQLite database so you can store a lead tracker for this agent.", "expected_tools": ["sqlite_batch"], "forbidden_tools": ["google_sheets-create-spreadsheet"], "plan_expected": False},
@@ -2228,7 +2233,7 @@ class ToolChoiceExactJsonUrlUsesHttpRequestScenario(BehaviorMicroScenario):
 @register_scenario
 class ToolChoiceCsvDeliverableUsesCreateCsvScenario(BehaviorMicroScenario):
     slug = TOOL_CHOICE_CSV_DELIVERABLE_USES_CREATE_CSV
-    description = "A downloadable CSV request should use create_csv."
+    description = "A downloadable CSV request should execute create_csv and persist the requested rows."
     category = "files"
     tags = ("agent_behavior", "micro", "tool_choice", "files")
     tasks = [
@@ -2241,15 +2246,6 @@ class ToolChoiceCsvDeliverableUsesCreateCsvScenario(BehaviorMicroScenario):
         self._seed_prior_processing_run(agent_id)
         self._enable_builtin_tools(agent_id, ["create_csv"])
 
-        mock_config = {
-            "create_csv": {
-                "status": "ok",
-                "file": {"path": "/exports/q1-leads.csv"},
-                "message": "CSV created.",
-            },
-            "create_file": {"status": "error", "message": "Use create_csv for CSV deliverables."},
-        }
-
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="inject_prompt")
         with self.wait_for_agent_idle(agent_id, timeout=120):
             inbound = self.inject_message(
@@ -2260,10 +2256,12 @@ class ToolChoiceCsvDeliverableUsesCreateCsvScenario(BehaviorMicroScenario):
                 ),
                 trigger_processing=True,
                 eval_run_id=run_id,
-                mock_config=mock_config,
                 eval_stop_policy={
-                    "stop_on_tool_names": ["create_file"],
-                    "stop_when_all_seen": [{"tool_name": "create_csv"}],
+                    "stop_on_tool_names_after_execution": ["create_csv"],
+                    "stop_on_unexpected_relevant_tool": True,
+                    "allowed_tool_names": ["create_csv"],
+                    "ignored_tool_names": ["update_plan", "send_chat_message", "sleep_until_next_trigger"],
+                    "max_relevant_tool_calls": 3,
                 },
             )
         self.record_task_result(
@@ -2277,14 +2275,51 @@ class ToolChoiceCsvDeliverableUsesCreateCsvScenario(BehaviorMicroScenario):
 
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="verify_create_csv")
         create_csv_calls = get_tool_calls_for_run(run_id, after=inbound.timestamp, tool_names={"create_csv"})
-        if create_csv_calls:
+        successful_calls = []
+        for call in create_csv_calls:
+            result = call.result
+            if isinstance(result, str):
+                try:
+                    result = json.loads(result)
+                except json.JSONDecodeError:
+                    result = {}
+            if (
+                str(call.status or "").lower() == "complete"
+                and isinstance(result, dict)
+                and result.get("status") == "ok"
+                and result.get("file") == "$[/exports/q1-leads.csv]"
+            ):
+                successful_calls.append(call)
+
+        node = AgentFsNode.objects.filter(
+            created_by_agent_id=agent_id,
+            path="/exports/q1-leads.csv",
+        ).alive().first()
+        rows = []
+        read_error = None
+        if node is None or not node.content.name:
+            read_error = "missing content"
+        else:
+            try:
+                with node.content.open("rb") as handle:
+                    rows = list(csv.reader(io.StringIO(handle.read().decode("utf-8"))))
+            except (OSError, ValueError, UnicodeDecodeError, csv.Error) as exc:
+                read_error = exc.__class__.__name__
+
+        expected_rows = [
+            ["company", "priority"],
+            ["Acme", "high"],
+            ["Globex", "medium"],
+            ["Initech", "low"],
+        ]
+        if len(successful_calls) == 1 and len(create_csv_calls) == 1 and read_error is None and rows == expected_rows:
             self.record_task_result(
                 run_id,
                 None,
                 EvalRunTask.Status.PASSED,
                 task_name="verify_create_csv",
-                observed_summary="Agent used create_csv for the CSV deliverable.",
-                artifacts={"step": create_csv_calls[0].step},
+                observed_summary="Agent executed create_csv once and persisted the requested header and three rows.",
+                artifacts={"step": successful_calls[0].step},
             )
         else:
             self.record_task_result(
@@ -2292,7 +2327,12 @@ class ToolChoiceCsvDeliverableUsesCreateCsvScenario(BehaviorMicroScenario):
                 None,
                 EvalRunTask.Status.FAILED,
                 task_name="verify_create_csv",
-                observed_summary="Agent did not use create_csv for the CSV deliverable.",
+                observed_summary=(
+                    f"Expected one successful create_csv and exact persisted rows; saw "
+                    f"{len(create_csv_calls)} call(s), {len(successful_calls)} success(es), "
+                    f"read_error={read_error}, rows={rows}."
+                ),
+                artifacts={"step": create_csv_calls[0].step} if create_csv_calls else {},
             )
 
 
@@ -2702,8 +2742,9 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
         case = self.case
         forbidden_tools = case.forbidden_tool_names()
         accepted_tools = self._accepted_expected_tool_names()
+        real_tools = {"sqlite_batch", "create_csv"} if self._uses_real_sqlite_export_tools() else set()
         mocked_tools = [
-            *accepted_tools,
+            *[tool_name for tool_name in accepted_tools if tool_name not in real_tools],
             *[
                 tool_name
                 for tool_name in case.allowed_preamble_tool_names()
@@ -2735,6 +2776,26 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
 
     def _uses_real_contact_sqlite(self):
         return self.case.category == "outbound" and "sqlite_batch" in self.case.allowed_preamble_tool_names()
+
+    def _uses_real_sqlite_export_tools(self):
+        return self.case.slug == "common_use_case_086_sqlite_export_query_csv"
+
+    def _seed_sqlite_export_context(self, agent_id):
+        if not self._uses_real_sqlite_export_tools():
+            return
+        with agent_sqlite_db(str(agent_id)) as db_path:
+            conn = open_guarded_sqlite_connection(db_path)
+            try:
+                conn.execute("DROP TABLE IF EXISTS leads;")
+                conn.execute("CREATE TABLE leads (company TEXT PRIMARY KEY, status TEXT NOT NULL);")
+                conn.executemany(
+                    "INSERT INTO leads (company, status) VALUES (?, ?);",
+                    (("Acme", "open"), ("Globex", "open"), ("Initech", "contacted")),
+                )
+                conn.commit()
+            finally:
+                clear_guarded_connection(conn)
+                conn.close()
 
     @staticmethod
     def _outbound_allowed_contact_for_case(case):
@@ -2837,6 +2898,8 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
             condition["agent_config_field"] = config_field
         if self.case.expected_params and len(self.case.expected_tools) == 1:
             condition["params"] = self.case.expected_params
+        if self._uses_real_sqlite_export_tools():
+            condition["after_execution"] = True
         return condition
 
     def _build_eval_stop_policy(self):
@@ -2878,6 +2941,7 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
         self._seed_prior_tool_results_context(agent_id)
         self._seed_outbound_contact_context(agent_id)
         self._seed_file_context(agent_id)
+        self._seed_sqlite_export_context(agent_id)
         tool_names = self._tool_names_to_enable()
         synthetic_tool_names = [
             tool_name
@@ -3058,7 +3122,23 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
         config_field = self._agent_config_field_for_expected_call(expected_tool_name)
         if config_field and call.tool_name == "sqlite_batch":
             return sqlite_batch_mutates_agent_config_field(call, config_field)
+        if self._uses_real_sqlite_export_tools():
+            return self._real_sqlite_export_call_succeeded(call)
         return True
+
+    @staticmethod
+    def _real_sqlite_export_call_succeeded(call):
+        try:
+            result = json.loads(call.result or "{}")
+        except (TypeError, ValueError):
+            return False
+        if call.status != "complete" or not isinstance(result, dict):
+            return False
+        if call.tool_name == "sqlite_batch":
+            return result.get("status") in {"ok", "warning"} and bool(result.get("results"))
+        if call.tool_name == "create_csv":
+            return result.get("status") == "ok" and bool(result.get("file")) and result.get("attach") == result["file"]
+        return False
 
     @staticmethod
     def _request_human_input_call_has_options(call):

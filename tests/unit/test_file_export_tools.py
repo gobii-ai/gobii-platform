@@ -6,7 +6,7 @@ from unittest.mock import patch, MagicMock
 from django.contrib.auth import get_user_model
 from django.test import TestCase, tag, override_settings
 
-from api.agent.files.filespace_service import write_bytes_to_dir
+from api.agent.files.filespace_service import _save_node_content, write_bytes_to_dir
 from api.agent.tools.agent_variables import clear_variables, set_agent_variable
 from api.agent.tools.create_csv import execute_create_csv
 from api.agent.tools.create_file import execute_create_file
@@ -95,6 +95,48 @@ class FileExportToolTests(TestCase):
         self.assertEqual(node.mime_type, "text/csv")
         with node.content.open("rb") as handle:
             self.assertEqual(handle.read(), b"col1,col2\n1,2\n")
+
+    def test_storage_write_failure_gives_bounded_same_tool_recovery(self):
+        node = MagicMock()
+        node.name = "report.csv"
+        node.content.name = ""
+        node.content.save.side_effect = PermissionError("read-only media root")
+
+        with patch("api.agent.files.filespace_service.logger.exception"):
+            result = _save_node_content(
+                node,
+                b"company,priority\nAcme,high\n",
+                "exports",
+                str(self.agent.id),
+                delete_node_on_failure=True,
+            )
+
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["code"], "filespace_storage_unavailable")
+        self.assertTrue(result["retryable"])
+        self.assertIn("Retry this file tool once", result["message"])
+        self.assertIn("Python", result["message"])
+        self.assertIn("or shell", result["message"])
+        node.delete.assert_called_once_with()
+
+    def test_failed_overwrite_keeps_previous_file_content(self):
+        node = MagicMock()
+        node.name = "report.csv"
+        node.content.name = "agents/existing-report.csv"
+        node.content.save.side_effect = PermissionError("read-only media root")
+
+        with patch("api.agent.files.filespace_service.logger.exception"):
+            result = _save_node_content(
+                node,
+                b"company,priority\nAcme,high\n",
+                "exports",
+                str(self.agent.id),
+                delete_node_on_failure=False,
+            )
+
+        self.assertEqual(result["code"], "filespace_storage_unavailable")
+        node.content.delete.assert_not_called()
+        node.delete.assert_not_called()
 
     def test_create_csv_overwrites_exports_path(self):
         first = execute_create_csv(
