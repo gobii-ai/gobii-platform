@@ -485,9 +485,14 @@ class PeerMessagingService:
 
     @staticmethod
     def _enqueue_processing(agent_id: UUID) -> None:
+        from api.agent.core.processing_flags import bump_human_inbound_generation
         from api.agent.tasks import process_agent_events_task
 
-        process_agent_events_task.delay(str(agent_id))
+        inbound_generation = bump_human_inbound_generation(agent_id)
+        process_agent_events_task.delay(
+            str(agent_id),
+            inbound_generation=inbound_generation,
+        )
 
     @staticmethod
     def _schedule_follow_up(agent_id: UUID, eta) -> None:

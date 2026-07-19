@@ -55,6 +55,17 @@ def _native_integration_connected(agent, provider_key: str) -> bool:
     return native_integration_is_connected(provider_key, owner_user, owner_org)
 
 
+def _native_connection_gate(agent, provider_key: str, provider_name: str, setup_action: str) -> str:
+    if _native_integration_connected(agent, provider_key):
+        return ""
+    return (
+        f"Current state: {provider_name} is not connected. Do not call `http_request`, `search_tools`, legacy tools, "
+        f"or browser automation for {provider_name} while it is disconnected. Tell the current requester in this "
+        f"conversation to open `{_app_integrations_url()}` and {setup_action}. Park this work until the native "
+        "connection event wakes you; continue unrelated work if useful."
+    )
+
+
 def _google_sheets_native_prompt_context(agent) -> str:
     return _native_integration_prompt_context(agent, "google_drive")
 
@@ -68,14 +79,14 @@ def _hubspot_native_prompt_context(agent) -> str:
 
 
 def _google_sheets_native_prompt_instructions(agent) -> str:
-    integrations_url = _app_integrations_url()
-    setup_text = (
-        f"If setup is needed, tell the user to open `{integrations_url}`, connect Google Drive, "
-        "then choose the spreadsheet(s) the agent should be allowed to access. The native connection and file-selection "
-        "events will wake you once the user finishes.\n"
-        if not _native_integration_connected(agent, "google_drive")
-        else ""
+    connection_gate = _native_connection_gate(
+        agent,
+        "google_drive",
+        "Google Drive",
+        "connect Google Drive, then choose the spreadsheets I may access",
     )
+    if connection_gate:
+        return connection_gate
     missing_file_text = (
         "If the requested spreadsheet is not listed, ask the user to choose it through the Google Drive native "
         "integration before making Sheets API calls for that file."
@@ -101,7 +112,6 @@ def _google_sheets_native_prompt_instructions(agent) -> str:
         "Do not assume a tab is named `Sheet1`; fetch spreadsheet metadata and use the returned `sheets[].properties.title` "
         "before reading or writing a guessed tab. "
         "Do not use web search, `search_tools`, or public `docs.google.com` results to choose a private sheet.\n"
-        f"{setup_text}"
         f"{cookbook}\n"
         "When creating a reasonable new spreadsheet and the user has not specified columns, choose safe, obvious "
         "default columns and proceed instead of blocking on a preference question. For new data sheets, write the "
@@ -128,20 +138,20 @@ def _google_sheets_native_prompt_instructions(agent) -> str:
 
 
 def _apollo_native_prompt_instructions(agent) -> str:
-    integrations_url = _app_integrations_url()
-    setup_text = (
-        f"If setup is needed, tell the user to open `{integrations_url}` and connect Apollo; "
-        "the native connection event will wake you once the user finishes. "
-        if not _native_integration_connected(agent, "apollo")
-        else ""
+    connection_gate = _native_connection_gate(
+        agent,
+        "apollo",
+        "Apollo",
+        "connect Apollo",
     )
+    if connection_gate:
+        return connection_gate
     cookbook = render_native_api_cookbook("apollo")
     return (
         "Use `http_request` for Apollo REST API calls. Native Apollo OAuth is applied automatically for "
         "`https://api.apollo.io/` requests and the Apollo profile endpoint "
         "`https://app.apollo.io/api/v1/users/api_profile`.\n"
-        f"{setup_text}Use "
-        "`https://api.apollo.io/api/v1/...` for Apollo API work unless a documented OAuth metadata endpoint "
+        "Use `https://api.apollo.io/api/v1/...` for Apollo API work unless a documented OAuth metadata endpoint "
         "specifically uses `https://app.apollo.io/api/v1/...`.\n"
         "Use documented Apollo endpoints exactly. For people search, use `/mixed_people/api_search`; "
         "do not use `/mixed_people/search` or `/mixed_people`. For usage, use `/usage_stats/api_usage_stats`, not "
@@ -173,18 +183,18 @@ def _apollo_native_prompt_instructions(agent) -> str:
 
 
 def _hubspot_native_prompt_instructions(agent) -> str:
-    integrations_url = _app_integrations_url()
-    setup_text = (
-        f"If setup is needed, tell the user to open `{integrations_url}` and connect HubSpot; "
-        "the native connection event will wake you once the user finishes.\n"
-        if not _native_integration_connected(agent, "hubspot")
-        else ""
+    connection_gate = _native_connection_gate(
+        agent,
+        "hubspot",
+        "HubSpot",
+        "connect HubSpot",
     )
+    if connection_gate:
+        return connection_gate
     cookbook = render_native_api_cookbook("hubspot")
     return (
         "Use `http_request` for HubSpot REST API calls. Native HubSpot OAuth is applied automatically for "
         "`https://api.hubapi.com/` requests.\n"
-        f"{setup_text}"
         "Use HubSpot CRM v3 endpoints for core CRM work. Keep requests bounded with explicit filters, "
         "`limit`, and `after` pagination where applicable; report when more pages remain.\n"
         f"{cookbook}\n"

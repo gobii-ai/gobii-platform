@@ -1,5 +1,5 @@
 import json
-from unittest.mock import patch
+from unittest.mock import ANY, patch
 
 from django.contrib.auth import get_user_model
 from django.test import Client, TestCase, override_settings, tag
@@ -305,7 +305,7 @@ class SpawnAgentRequestDecisionAPITests(TestCase):
         step = PersistentAgentStep.objects.filter(agent=self.agent).order_by("-created_at").first()
         self.assertIsNotNone(step)
         self.assertIn("spawn request approved", step.description.lower())
-        delay_mock.assert_any_call(str(spawned_agent.id))
+        delay_mock.assert_any_call(str(spawned_agent.id), inbound_generation=ANY)
         delay_mock.assert_any_call(str(self.agent.id))
 
         timeline_response = self.client.get(

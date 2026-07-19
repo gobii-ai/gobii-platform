@@ -51,6 +51,29 @@ class PromptContextSqliteGuidanceTests(SimpleTestCase):
         self.assertIn("SQLite efficiency warning", warning)
         self.assertIn("one shaped query", warning)
 
+    def test_sqlite_retry_warning_flags_imports_split_across_calls(self):
+        warning = prompt_context._build_sqlite_retry_warning(
+            [
+                (
+                    {
+                        "sql": "INSERT INTO items SELECT result_json FROM __tool_results "
+                        "WHERE result_id='a1'"
+                    },
+                    "{}",
+                ),
+                (
+                    {
+                        "sql": "INSERT INTO items SELECT result_json FROM __tool_results "
+                        "WHERE result_id='b2'"
+                    },
+                    "{}",
+                ),
+            ]
+        )
+
+        self.assertIn("SQLite efficiency warning", warning)
+        self.assertIn("one result_id at a time", warning)
+
 
 class _PromptSectionCollector:
     def __init__(self):

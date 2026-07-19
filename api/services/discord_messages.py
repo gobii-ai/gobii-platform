@@ -12,6 +12,7 @@ from django.conf import settings
 from django.utils import timezone
 
 from config.redis_client import get_redis_client
+from api.agent.core.processing_flags import bump_human_inbound_generation, get_human_inbound_generation
 from api.models import CommsChannel, DeliveryStatus, PersistentAgent, PersistentAgentCommsEndpoint, PersistentAgentConversation, PersistentAgentConversationParticipant, PersistentAgentMessage
 
 logger = logging.getLogger(__name__)
@@ -236,13 +237,16 @@ def send_discord_typing_indicator(channel_id: str) -> bool:
 def process_agent_events_after_discord_debounce(agent_id: str, *, countdown: int = 0) -> None:
     from api.agent.tasks import process_agent_events_task
 
+    inbound_generation = get_human_inbound_generation(agent_id)
+    kwargs = {"inbound_generation": inbound_generation} if inbound_generation else {}
     if countdown > 0:
-        process_agent_events_task.apply_async(args=[agent_id], countdown=countdown)
+        process_agent_events_task.apply_async(args=[agent_id], kwargs=kwargs, countdown=countdown)
     else:
-        process_agent_events_task.delay(agent_id)
+        process_agent_events_task.delay(agent_id, **kwargs)
 
 
 def schedule_discord_inbound_processing(agent_id: str, *, typing_channel_id: str = "") -> dict[str, object]:
+    bump_human_inbound_generation(agent_id)
     debounce_seconds = discord_inbound_debounce_seconds()
     normalized_typing_channel_id = str(typing_channel_id or "").strip()
     if normalized_typing_channel_id:

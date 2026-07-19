@@ -1624,6 +1624,9 @@ class NativeIntegrationTests(TestCase):
 
                 self.assertIn(f"{provider_name} is not connected", block)
                 self.assertIn("https://app.example.test/app/integrations", block)
+                self.assertIn("Do not call `http_request`", block)
+                self.assertIn("current requester in this conversation", block)
+                self.assertNotIn("API cookbook:", block)
 
     @override_settings(PUBLIC_SITE_URL="https://app.example.test")
     def test_apollo_prompt_tells_agent_how_to_use_native_rest_api(self):
@@ -1639,6 +1642,8 @@ class NativeIntegrationTests(TestCase):
         self.assertIn("Native integration permissions", block)
         self.assertIn("Search Apollo people", block)
         self.assertIn("Granted scopes", block)
+        self.assertIn("API cookbook:", block)
+        self.assertNotIn("Current state: Apollo is not connected", block)
         self.assertIn("</skill_apollo_native>", block)
 
     @override_settings(PUBLIC_SITE_URL="https://app.example.test")
@@ -1655,4 +1660,6 @@ class NativeIntegrationTests(TestCase):
         self.assertIn("Native integration permissions", block)
         self.assertIn("Search and read HubSpot contacts", block)
         self.assertIn("Granted scopes", block)
+        self.assertIn("API cookbook:", block)
+        self.assertNotIn("Current state: HubSpot is not connected", block)
         self.assertIn("</skill_hubspot_native>", block)

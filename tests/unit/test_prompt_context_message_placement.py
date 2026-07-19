@@ -25,8 +25,8 @@ class PromptContextSqlitePlacementTests(TestCase):
             browser_use_agent=self.browser_agent,
         )
 
-    def test_sqlite_examples_only_in_system_message(self):
-        sqlite_examples = prompt_context._get_sqlite_examples()
+    def test_sqlite_guidance_only_in_system_message(self):
+        sqlite_guidance = prompt_context._get_sqlite_guidance()
 
         with patch("api.agent.core.prompt_context.ensure_steps_compacted"), patch(
             "api.agent.core.prompt_context.ensure_comms_compacted"
@@ -36,9 +36,12 @@ class PromptContextSqlitePlacementTests(TestCase):
         system_message = next(message for message in context if message["role"] == "system")
         user_message = next(message for message in context if message["role"] == "user")
 
-        self.assertEqual(system_message["content"].count(sqlite_examples), 1)
-        self.assertNotIn(sqlite_examples, user_message["content"])
+        self.assertEqual(system_message["content"].count(sqlite_guidance), 1)
+        self.assertNotIn(sqlite_guidance, user_message["content"])
         all_contents = "\n".join(message["content"] for message in context)
-        self.assertEqual(all_contents.count(sqlite_examples), 1)
-        self.assertIn("<sqlite_examples>", system_message["content"])
-        self.assertIn("</sqlite_examples>", system_message["content"])
+        self.assertEqual(all_contents.count(sqlite_guidance), 1)
+        self.assertIn("<sqlite_guidance>", system_message["content"])
+        self.assertIn("</sqlite_guidance>", system_message["content"])
+        self.assertIn("shared entity, event, and relationship tables", sqlite_guidance)
+        self.assertIn("return only needed rows to context", sqlite_guidance)
+        self.assertIn("never make a table per result", sqlite_guidance)

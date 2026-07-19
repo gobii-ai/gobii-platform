@@ -15,7 +15,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import copy_context
 from dataclasses import dataclass, field
-from datetime import timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Callable, List, Tuple, Union, Optional, Dict, Any, Literal
 from urllib.parse import unquote_plus
@@ -46,6 +46,7 @@ from .processing_flags import (
     clear_processing_stop_requested,
     clear_processing_work_state,
     enqueue_pending_agent,
+    get_consumed_human_inbound_generation,
     get_human_inbound_generation,
     get_pending_drain_settings,
     is_human_inbound_generation_consumed,
@@ -65,6 +66,11 @@ from .token_usage import completion_kwargs_from_usage, extract_reasoning_content
 from ..short_description import maybe_schedule_mini_description, maybe_schedule_short_description
 from ..avatar import maybe_schedule_agent_avatar
 from ..tags import maybe_schedule_agent_tags
+from ..comms.routing import (
+    bind_inbound_routing_scope,
+    capture_inbound_routing_scope,
+    reset_inbound_routing_scope,
+)
 from tasks.services import TaskCreditService
 from util.tool_costs import get_tool_credit_cost, get_default_task_credit_cost, should_refund_tool_credit_on_error
 from util.constants.task_constants import TASKS_UNLIMITED
@@ -160,6 +166,7 @@ MAX_ITERATIONS_FOLLOWUP_DELAY_SECONDS = 60
 ARG_LOG_MAX_CHARS = 500
 RESULT_LOG_MAX_CHARS = 500
 AUTO_SLEEP_FLAG = "auto_sleep_ok"
+TERMINAL_ERROR_FLAG = "terminal_error"
 TOOL_ERROR_MESSAGE_MAX_BYTES = 800
 TOOL_ERROR_DETAIL_MAX_BYTES = 1500
 TOOL_ERROR_NATIVE_CONTENT_MAX_BYTES = 6000
@@ -730,6 +737,8 @@ def _normalize_error_result(result: dict) -> dict:
         detail=detail,
         status_code=status_code,
     )
+    if result.get(TERMINAL_ERROR_FLAG) is True:
+        payload[TERMINAL_ERROR_FLAG] = True
     _copy_native_http_error_context(result, payload)
     return payload
 
@@ -3106,6 +3115,10 @@ def _prepare_tool_batch_impl(
                             agent.id,
                             tool_name,
                         )
+                if call_id == "implied_send" and _coerce_optional_bool(
+                    tool_params.get("will_continue_work")
+                ) is None:
+                    tool_params["will_continue_work"] = False
                 explicit_continue = _coerce_optional_bool(tool_params.get("will_continue_work"))
 
             if should_skip_auto_substitution(tool_name):
@@ -3473,6 +3486,13 @@ def _finalize_tool_batch(
             attach_originating_step_from_result(step, result)
 
         allow_auto_sleep = isinstance(result, dict) and result.get(AUTO_SLEEP_FLAG) is True
+        terminal_error = (
+            tool_name == "send_chat_message"
+            and isinstance(result, dict)
+            and result.get("retryable") is False
+            and result.get(TERMINAL_ERROR_FLAG) is True
+            and effective_explicit_continue is not True
+        )
         tool_had_warning = _is_warning_status(result)
         if effective_explicit_continue is not None:
             last_explicit_continue = effective_explicit_continue
@@ -3486,7 +3506,8 @@ def _finalize_tool_batch(
         elif tool_name == "search_tools":
             followup_required = True
         elif is_error_status or tool_had_warning:
-            followup_required = True
+            if not terminal_error:
+                followup_required = True
         elif (
             effective_explicit_continue is not True
             and not allow_auto_sleep
@@ -5333,6 +5354,7 @@ def process_agent_events(
             processed_agent = _process_agent_events_locked(
                 persistent_agent_id,
                 span,
+                inbound_generation=inbound_generation,
                 lock_extender=lock_extender,
                 heartbeat=heartbeat,
                 prefer_low_latency=prefer_low_latency,
@@ -5424,6 +5446,7 @@ def _process_agent_events_locked(
     persistent_agent_id: Union[str, UUID],
     span,
     *,
+    inbound_generation: int | str | None = None,
     lock_extender: Optional[_LockExtender] = None,
     heartbeat: Optional[_ProcessingHeartbeat] = None,
     prefer_low_latency: bool | None = None,
@@ -5730,6 +5753,8 @@ def _process_agent_events_locked(
         _run_agent_loop(
             agent,
             is_first_run=is_first_run,
+            inbound_generation=inbound_generation,
+            process_started_at=processing_step.created_at,
             credit_snapshot=credit_snapshot,
             run_sequence_number=run_sequence_number,
             lock_extender=lock_extender,
@@ -5764,6 +5789,8 @@ def _run_agent_loop(
     agent: PersistentAgent,
     *,
     is_first_run: bool,
+    inbound_generation: int | str | None = None,
+    process_started_at: datetime | None = None,
     credit_snapshot: Optional[Dict[str, Any]] = None,
     run_sequence_number: Optional[int] = None,
     lock_extender: Optional[_LockExtender] = None,
@@ -5876,12 +5903,32 @@ def _run_agent_loop(
     def _current_human_inbound_generation() -> int:
         return get_human_inbound_generation(agent.id, client=redis_client)
 
-    prompt_run_cache = PromptRunCache(
-        agent_id=str(agent.id),
-        snapshot_reuse_enabled=settings.AGENT_PROMPT_RUN_CACHE_ENABLED,
-    )
-    prompt_run_cache_token = bind_prompt_run_cache(prompt_run_cache)
+    routing_scope_generation = _current_human_inbound_generation()
+    consumed_inbound_generation = get_consumed_human_inbound_generation(agent.id, client=redis_client)
     try:
+        queued_inbound_generation = max(0, int(inbound_generation or 0))
+    except (TypeError, ValueError):
+        queued_inbound_generation = 0
+    routing_scope_tokens, prompt_run_cache_token = [], None
+    try:
+        has_pending_inbound = max(routing_scope_generation, queued_inbound_generation) > consumed_inbound_generation
+        initial_routing_scope = capture_inbound_routing_scope(
+            agent, pending_inbound=has_pending_inbound, background_before=process_started_at
+        )
+        routing_scope_tokens.append(bind_inbound_routing_scope(initial_routing_scope))
+
+        def _refresh_inbound_routing_scope(generation: int) -> None:
+            nonlocal routing_scope_generation
+            routing_scope_tokens.append(
+                bind_inbound_routing_scope(capture_inbound_routing_scope(agent, pending_inbound=True))
+            )
+            routing_scope_generation = generation
+
+        prompt_run_cache = PromptRunCache(
+            agent_id=str(agent.id),
+            snapshot_reuse_enabled=settings.AGENT_PROMPT_RUN_CACHE_ENABLED,
+        )
+        prompt_run_cache_token = bind_prompt_run_cache(prompt_run_cache)
         for i in range(max_remaining):
             previous_planning_state = current_planning_state
             try:
@@ -6006,6 +6053,8 @@ def _run_agent_loop(
 
                 with tracer.start_as_current_span("Agent Iteration Preparation"):
                     prompt_human_generation = _current_human_inbound_generation()
+                    if prompt_human_generation > routing_scope_generation:
+                        _refresh_inbound_routing_scope(prompt_human_generation)
                     prompt_run_cache.observe_human_generation(prompt_human_generation)
                     config_snapshot = seed_sqlite_agent_config(agent)
                     skills_snapshot = seed_sqlite_skills(agent)
@@ -6059,6 +6108,7 @@ def _run_agent_loop(
                 prompt_archive_attached = False
                 latest_human_generation = _current_human_inbound_generation()
                 if latest_human_generation > prompt_human_generation:
+                    _refresh_inbound_routing_scope(latest_human_generation)
                     prompt_run_cache.observe_human_generation(latest_human_generation)
                     stale_prompt_system_directive_block = str(
                         prompt_metadata.get("system_directive_block") or stale_prompt_system_directive_block or ""
@@ -6248,6 +6298,8 @@ def _run_agent_loop(
 
                 except OrchestratorPromptStale:
                     latest_human_generation = _current_human_inbound_generation()
+                    if latest_human_generation > routing_scope_generation:
+                        _refresh_inbound_routing_scope(latest_human_generation)
                     logger.info(
                         "Agent %s: discarded stale orchestrator completion for generation %s; latest is %s.",
                         agent.id,
@@ -6503,8 +6555,8 @@ def _run_agent_loop(
                                     "agent": agent,
                                     "description": (
                                         "Message delivery requires explicit send tools when implied send is unavailable. "
-                                        "If send_chat_message is unavailable, retry with send_email/send_sms using the user's most "
-                                        "recently active non-web communication channel from unified history/recent contacts."
+                                        "Reply to the latest requester on their inbound channel. If web delivery is unavailable, "
+                                        "do not switch channels."
                                     ),
                                 }
                                 _attach_completion(step_kwargs)
@@ -6855,5 +6907,8 @@ def _run_agent_loop(
 
         return cumulative_token_usage
     finally:
-        reset_prompt_run_cache(prompt_run_cache_token)
+        if prompt_run_cache_token is not None:
+            reset_prompt_run_cache(prompt_run_cache_token)
+        for routing_scope_token in reversed(routing_scope_tokens):
+            reset_inbound_routing_scope(routing_scope_token)
         clear_runtime_tier_override(agent)

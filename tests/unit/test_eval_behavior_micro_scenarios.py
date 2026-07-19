@@ -44,6 +44,8 @@ from api.evals.scenarios.behavior_micro import (
     UPDATE_PLAN_POLICY_EXPECT,
     UPDATE_PLAN_POLICY_OPTIONAL,
     all_requests_have_options,
+    has_single_recipient_request,
+    planning_requests_are_bounded,
     get_agent_config_mutation_calls_for_run,
     get_forbidden_calls_before_end_planning,
     get_common_use_case_tool_calls_for_run,
@@ -1800,6 +1802,25 @@ class BehaviorMicroHelperTests(TestCase):
         self.assertFalse(all_requests_have_options([with_options, without_options]))
         self.assertFalse(all_requests_have_options([missing_description]))
         self.assertFalse(all_requests_have_options([blank_title]))
+
+    def test_missing_recipient_check_accepts_one_focused_free_text_request(self):
+        focused = SimpleNamespace(question="What is the client's email address?")
+        unrelated = SimpleNamespace(question="Which format do you prefer?")
+
+        self.assertTrue(has_single_recipient_request([focused]))
+        self.assertFalse(has_single_recipient_request([focused, unrelated]))
+        self.assertFalse(has_single_recipient_request([unrelated]))
+
+    def test_planning_request_check_allows_one_free_text_identity_question(self):
+        options = SimpleNamespace(
+            options_json=[{"title": "Weekly", "description": "Send one weekly digest."}]
+        )
+        free_text = SimpleNamespace(options_json=[])
+
+        self.assertTrue(planning_requests_are_bounded([free_text, options, options]))
+        self.assertTrue(planning_requests_are_bounded([free_text]))
+        self.assertFalse(planning_requests_are_bounded([free_text, free_text]))
+        self.assertFalse(planning_requests_are_bounded([options] * 4))
 
     def test_request_human_input_eval_tool_check_accepts_valid_options_or_free_text(self):
         valid_single = SimpleNamespace(

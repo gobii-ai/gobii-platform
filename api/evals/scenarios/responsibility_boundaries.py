@@ -1,3 +1,5 @@
+import json
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -33,17 +35,19 @@ from api.services.discord_messages import (
 RESPONSIBILITY_BOUNDARY_PEER_FYI_NO_ACK = "responsibility_boundary_peer_fyi_no_ack"
 RESPONSIBILITY_BOUNDARY_PEER_REQUEST_HANDOFF = "responsibility_boundary_peer_request_handoff"
 RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_OWNER = "responsibility_boundary_shared_channel_owner"
+RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_OWNED_REPLY = "responsibility_boundary_shared_channel_owned_reply"
 RESPONSIBILITY_BOUNDARY_SUITE_SLUG = "responsibility_boundaries"
 RESPONSIBILITY_BOUNDARY_SCENARIO_SLUGS = (
     RESPONSIBILITY_BOUNDARY_PEER_FYI_NO_ACK,
     RESPONSIBILITY_BOUNDARY_PEER_REQUEST_HANDOFF,
     RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_OWNER,
+    RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_OWNED_REPLY,
 )
 
 LEDGER_CHARTER = (
     "Maintain the customer-signal ledger. Capture confirmed customer reports, merge duplicates, and summarize "
-    "recurring themes for the product team. Technical support and product-behavior investigation belong to "
-    "Engineering Agent. In shared channels, observe relevant signals and post only when the ledger needs information."
+    "recurring themes for the product team. You own customer-signal curation and reporting. Technical support and "
+    "product-behavior investigation belong to Engineering Agent."
 )
 
 
@@ -61,7 +65,7 @@ RESPONSIBILITY_BOUNDARY_CASES = (
         slug=RESPONSIBILITY_BOUNDARY_PEER_FYI_NO_ACK,
         description="A routine peer status update should not create acknowledgment chatter or adjacent work.",
         event_kind="peer_fyi",
-        prompt="Quick status: Engineering accepted ENG-241 for the Acme export report. I'll own it from here.",
+        prompt="Quick status: I accepted the staging export regression check and own the root-cause investigation.",
         tasks=(
             ScenarioTask(name="inject_event", assertion_type="agent_processing"),
             ScenarioTask(name="verify_silence", assertion_type="tool_call"),
@@ -72,8 +76,8 @@ RESPONSIBILITY_BOUNDARY_CASES = (
         description="An adjacent peer request should be handed back without taking over its owner's technical work.",
         event_kind="peer_request",
         prompt=(
-            "New customer report: Acme's export endpoint sometimes returns empty CSVs. Can you fetch "
-            "https://api.example.test/export-debug.json, identify the cause, and send me the answer for support?"
+            "Can you fetch https://api.example.test/export-debug.json, identify why the staging export regression "
+            "returns empty CSVs, and send me the technical cause?"
         ),
         tasks=(
             ScenarioTask(name="inject_event", assertion_type="agent_processing"),
@@ -82,12 +86,27 @@ RESPONSIBILITY_BOUNDARY_CASES = (
         ),
     ),
     ResponsibilityBoundaryCase(
+        slug=RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_OWNED_REPLY,
+        description="A shared-channel request should get one useful contribution from the agent whose charter owns it.",
+        event_kind="shared_channel_owned",
+        prompt=(
+            "For the noon product brief, could Customer Signals Agent pull "
+            "https://api.example.test/customer-signals-summary.json and post the current top confirmed theme and "
+            "report count? Engineering Agent, please keep the Acme empty-CSV root-cause check moving."
+        ),
+        tasks=(
+            ScenarioTask(name="inject_event", assertion_type="agent_processing"),
+            ScenarioTask(name="verify_owned_work", assertion_type="tool_call"),
+            ScenarioTask(name="verify_channel_result", assertion_type="manual"),
+        ),
+    ),
+    ResponsibilityBoundaryCase(
         slug=RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_OWNER,
         description="A shared-channel question addressed to another owner should not get a parallel answer.",
         event_kind="shared_channel",
         prompt=(
-            "@Engineering Agent could you check whether Acme's export API still returns empty CSVs and post "
-            "the root cause? We need to answer support before noon."
+            "@Engineering Agent could you check whether the staging export regression still returns empty CSVs and "
+            "post the root cause? We need the release check before noon."
         ),
         tasks=(
             ScenarioTask(name="inject_event", assertion_type="agent_processing"),
@@ -127,8 +146,10 @@ class ResponsibilityBoundaryScenario(EvalScenario, ScenarioExecutionTools):
 
     def _prepare_agent(self, agent_id: str) -> PersistentAgent:
         PersistentAgent.objects.filter(id=agent_id).update(
+            name=f"Customer Signals Agent {str(agent_id)[:8]}",
             charter=LEDGER_CHARTER,
             planning_state=PersistentAgent.PlanningState.SKIPPED,
+            schedule="0 9 * * *",
         )
         self._seed_prior_run(agent_id)
         agent = PersistentAgent.objects.select_related("user", "organization").get(id=agent_id)
@@ -192,7 +213,13 @@ class ResponsibilityBoundaryScenario(EvalScenario, ScenarioExecutionTools):
         )
 
     @staticmethod
-    def _discord_inbound(agent: PersistentAgent, run_id: str, body: str) -> PersistentAgentMessage:
+    def _discord_inbound(
+        agent: PersistentAgent,
+        run_id: str,
+        body: str,
+        *,
+        author_name: str = "Andrew",
+    ) -> PersistentAgentMessage:
         guild_id = "eval-guild"
         channel_id = f"eval-customer-signals-{str(run_id)[:8]}"
         channel_name = "customer-signals"
@@ -217,19 +244,22 @@ class ResponsibilityBoundaryScenario(EvalScenario, ScenarioExecutionTools):
             raw_payload={
                 "source": "discord_bot",
                 "source_kind": "discord",
-                "source_label": "Andrew in #customer-signals",
+                "source_label": f"{author_name} in #customer-signals",
                 "discord_channel_id": channel_id,
                 "discord_channel_name": channel_name,
-                "discord_author_name": "Andrew",
+                "discord_author_name": author_name,
             },
         )
 
     @staticmethod
-    def _mock_config(*, mock_peer_messages: bool = True) -> dict[str, Any]:
-        config = {
+    def _mock_config() -> dict[str, Any]:
+        return {
             "http_request": {
                 "status": "success",
-                "content": {"incident": "ENG-241", "root_cause": "An expired export worker lease"},
+                "content": {
+                    "top_theme": "Export reliability",
+                    "confirmed_reports": 3,
+                },
             },
             "send_discord_message": {
                 "status": "success",
@@ -238,20 +268,12 @@ class ResponsibilityBoundaryScenario(EvalScenario, ScenarioExecutionTools):
                 "auto_sleep_ok": True,
             },
         }
-        if mock_peer_messages:
-            config["send_agent_message"] = {
-                "status": "ok",
-                "message": "Peer message delivered.",
-                "remaining_credits": 29,
-                "auto_sleep_ok": True,
-            }
-        return config
 
     @staticmethod
-    def _stop_policy(terminal_tool: str) -> dict[str, Any]:
+    def _stop_policy(terminal_tool: str, *, allow_http: bool = False) -> dict[str, Any]:
         return {
             "ignored_tool_names": ["sleep_until_next_trigger", "update_plan", "sqlite_batch"],
-            "stop_on_tool_names": ["http_request"],
+            "stop_on_tool_names": [] if allow_http else ["http_request"],
             "stop_on_tool_names_after_finish": [terminal_tool],
             "max_relevant_tool_calls": 4,
         }
@@ -269,18 +291,42 @@ class ResponsibilityBoundaryScenario(EvalScenario, ScenarioExecutionTools):
 
     def run(self, run_id: str, agent_id: str) -> None:
         agent = self._prepare_agent(agent_id)
-        is_shared_channel = self.case.event_kind == "shared_channel"
+        is_shared_channel = self.case.event_kind.startswith("shared_channel")
         if is_shared_channel:
             result = enable_system_skills(agent, [DISCORD_NATIVE_SYSTEM_SKILL_KEY])
             if result.get("invalid"):
                 raise ValueError(f"Could not enable Discord system skill: {result}")
 
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="inject_event")
+        if self.case.event_kind == "shared_channel_owned":
+            self._discord_inbound(
+                agent,
+                run_id,
+                "@Engineering Agent, please own Acme's empty-CSV root-cause check.",
+            )
+            self._discord_inbound(
+                agent,
+                run_id,
+                "I've got the export regression check and will post the confirmed cause here.",
+                author_name="Engineering Agent",
+            )
         inbound = (
-            self._discord_inbound(agent, run_id, self.case.prompt)
+            self._discord_inbound(
+                agent,
+                run_id,
+                self.case.prompt.replace("Customer Signals Agent", agent.name),
+                author_name="Maya",
+            )
             if is_shared_channel
             else self._peer_inbound(agent, run_id, self.case.prompt)
         )
+        if self.case.event_kind == "shared_channel":
+            self._discord_inbound(
+                agent,
+                run_id,
+                "I've got the staging export regression check.",
+                author_name="Engineering Agent",
+            )
         if is_shared_channel:
             self._create_peer_link(agent, run_id)
         terminal_tool = "send_discord_message" if is_shared_channel else "send_agent_message"
@@ -288,10 +334,11 @@ class ResponsibilityBoundaryScenario(EvalScenario, ScenarioExecutionTools):
             self.trigger_processing(
                 agent_id,
                 eval_run_id=run_id,
-                mock_config=self._mock_config(
-                    mock_peer_messages=self.case.event_kind != "peer_fyi"
+                mock_config=self._mock_config(),
+                eval_stop_policy=self._stop_policy(
+                    terminal_tool,
+                    allow_http=self.case.event_kind == "shared_channel_owned",
                 ),
-                eval_stop_policy=self._stop_policy(terminal_tool),
             )
         self.record_task_result(
             run_id,
@@ -306,13 +353,85 @@ class ResponsibilityBoundaryScenario(EvalScenario, ScenarioExecutionTools):
         if self.case.event_kind == "peer_fyi":
             self._verify_silence(run_id, agent_id, inbound, calls)
         elif self.case.event_kind == "peer_request":
-            self._verify_handoff(run_id, inbound, calls)
+            self._verify_handoff(run_id, agent_id, inbound, calls)
+        elif self.case.event_kind == "shared_channel_owned":
+            self._verify_owned_request(run_id, inbound, calls)
         else:
             self._verify_no_interference(run_id, calls)
 
+    @staticmethod
+    def _call_succeeded(call: PersistentAgentToolCall) -> bool:
+        try:
+            result = json.loads(call.result or "{}")
+        except (TypeError, ValueError):
+            return False
+        return call.status == "complete" and str(result.get("status") or "").lower() in {"ok", "success"}
+
+    @staticmethod
+    def _action_calls(calls, *, allowed=()):
+        housekeeping = {"sleep_until_next_trigger", "update_plan", *allowed}
+        return [call for call in calls if call.tool_name not in housekeeping]
+
+    def _verify_owned_request(self, run_id: str, inbound: PersistentAgentMessage, calls) -> None:
+        http_calls = [call for call in calls if call.tool_name == "http_request"]
+        fetched_summary = (
+            len(http_calls) == 1
+            and self._call_succeeded(http_calls[0])
+            and "customer-signals-summary.json" in str((http_calls[0].tool_params or {}).get("url") or "")
+        )
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED if fetched_summary else EvalRunTask.Status.FAILED,
+            task_name="verify_owned_work",
+            observed_summary=(
+                "Agent completed the in-charter signal-summary lookup once."
+                if fetched_summary
+                else f"Expected one signal-summary lookup; saw {len(http_calls)} HTTP call(s)."
+            ),
+            artifacts={"step": http_calls[0].step} if http_calls else {},
+        )
+
+        channel_calls = [call for call in calls if call.tool_name == "send_discord_message"]
+        reply = str((channel_calls[0].tool_params or {}).get("message") or "") if len(channel_calls) == 1 else ""
+        params = (channel_calls[0].tool_params or {}) if channel_calls else {}
+        wrong_channel_calls = [
+            call
+            for call in calls
+            if call.tool_name in {"send_agent_message", "send_chat_message", "send_email", "send_sms"}
+        ]
+        reply_lower = reply.casefold()
+        material_reply = "export reliability" in reply_lower and bool(
+            re.search(r"\b(?:3|three)\b", reply_lower)
+        )
+        adjacent_details = ("empty-csv", "empty csv", "root cause", "confirmed cause")
+        extra_action_calls = self._action_calls(calls, allowed={"http_request", "send_discord_message"})
+        delivered_once = (
+            len(channel_calls) == 1
+            and self._call_succeeded(channel_calls[0])
+            and params.get("channel_id") == inbound.raw_payload["discord_channel_id"]
+            and params.get("will_continue_work") is False
+            and material_reply
+            and not any(detail in reply_lower for detail in adjacent_details)
+            and not wrong_channel_calls
+            and not extra_action_calls
+        )
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED if delivered_once else EvalRunTask.Status.FAILED,
+            task_name="verify_channel_result",
+            observed_summary=(
+                "Agent contributed the owned summary once in the exact shared channel."
+                if delivered_once
+                else f"Expected one successful owned-channel result; saw {len(channel_calls)} with reply={reply[:300]!r}."
+            ),
+            artifacts={"step": channel_calls[0].step} if channel_calls else {},
+        )
+
     def _verify_silence(self, run_id: str, agent_id: str, inbound, calls) -> None:
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="verify_silence")
-        work_calls = [call for call in calls if call.tool_name == "http_request"]
+        work_calls = self._action_calls(calls, allowed={"send_agent_message"})
         outbound = list(
             PersistentAgentMessage.objects.filter(
                 owner_agent_id=agent_id,
@@ -341,8 +460,8 @@ class ResponsibilityBoundaryScenario(EvalScenario, ScenarioExecutionTools):
             artifacts=artifacts,
         )
 
-    def _verify_handoff(self, run_id: str, inbound, calls) -> None:
-        work_calls = [call for call in calls if call.tool_name == "http_request"]
+    def _verify_handoff(self, run_id: str, agent_id: str, inbound, calls) -> None:
+        work_calls = self._action_calls(calls, allowed={"send_agent_message"})
         self.record_task_result(
             run_id,
             None,
@@ -351,23 +470,34 @@ class ResponsibilityBoundaryScenario(EvalScenario, ScenarioExecutionTools):
             observed_summary=(
                 "Agent did not perform the adjacent technical investigation."
                 if not work_calls
-                else "Agent took over Engineering's investigation by calling http_request."
+                else f"Agent took adjacent actions: {[call.tool_name for call in work_calls]}."
             ),
             artifacts={"step": work_calls[0].step} if work_calls else {},
         )
 
         peer_calls = [call for call in calls if call.tool_name == "send_agent_message"]
-        if len(peer_calls) != 1:
+        outbound = list(
+            PersistentAgentMessage.objects.filter(
+                owner_agent_id=agent_id,
+                peer_agent_id=inbound.peer_agent_id,
+                is_outbound=True,
+                timestamp__gt=inbound.timestamp,
+            ).order_by("timestamp", "id")
+        )
+        if len(peer_calls) != 1 or not self._call_succeeded(peer_calls[0]) or len(outbound) != 1:
             self.record_task_result(
                 run_id,
                 None,
                 EvalRunTask.Status.FAILED,
                 task_name="verify_handoff",
-                observed_summary=f"Expected one concise peer handoff response; observed {len(peer_calls)}.",
+                observed_summary=(
+                    f"Expected one successful persisted peer handoff; observed {len(peer_calls)} call(s) and "
+                    f"{len(outbound)} outbound message(s)."
+                ),
             )
             return
 
-        reply = str((peer_calls[0].tool_params or {}).get("message") or "")
+        reply = outbound[0].body or ""
         choice, reasoning = self.llm_judge(
             question=(
                 "Does the reply keep technical investigation with Engineering, avoid claiming to investigate or "
@@ -382,13 +512,11 @@ class ResponsibilityBoundaryScenario(EvalScenario, ScenarioExecutionTools):
             EvalRunTask.Status.PASSED if choice == "Boundary-preserving" else EvalRunTask.Status.FAILED,
             task_name="verify_handoff",
             observed_summary=f"{choice}: {reasoning}",
-            artifacts={"step": peer_calls[0].step, "reply": reply},
+            artifacts={"message": outbound[0], "reply": reply},
         )
 
     def _verify_no_interference(self, run_id: str, calls) -> None:
-        interference = [
-            call for call in calls if call.tool_name in {"send_discord_message", "http_request"}
-        ]
+        interference = self._action_calls(calls)
         self.record_task_result(
             run_id,
             None,

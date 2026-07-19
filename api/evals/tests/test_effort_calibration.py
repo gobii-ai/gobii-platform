@@ -45,6 +45,7 @@ from api.evals.scenarios.sqlite_tool_results import (
     SqliteIntermediateWorkingTableScenario,
     SqliteItemLinkReportScenario,
     SqliteToolResultScenario,
+    _decision_model_tables,
 )
 from api.evals.stop_policy import should_stop_for_eval_policy
 from api.evals.suites import SuiteRegistry
@@ -232,6 +233,23 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
         self.assertIn(scenario.sourced_answer_task_name, task_names)
         self.assertNotIn("verify_sourced_answer", task_names)
 
+    def test_sqlite_item_link_report_does_not_prescribe_its_implementation(self):
+        prompt = SqliteItemLinkReportScenario.prompt.lower()
+
+        self.assertNotIn("sqlite", prompt)
+        self.assertNotIn("__tool_results", prompt)
+        self.assertNotIn("json_extract", prompt)
+
+    def test_sqlite_domain_model_prompts_are_natural(self):
+        prompts = (
+            SqliteIntermediateWorkingTableScenario.prompt
+            + " "
+            + SqliteIntermediateWorkingTableScenario.followup_prompt
+        ).lower()
+
+        for implementation_term in ("sqlite", "__tool_results", "json_extract", "create table", "sql"):
+            self.assertNotIn(implementation_term, prompts)
+
     def test_monitor_pollution_allows_slow_background_browser_drain(self):
         self.assertGreaterEqual(BACKGROUND_DRAIN_TIMEOUT_SECONDS, 600)
 
@@ -243,6 +261,125 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
             passed = scenario._record_sqlite_usage("run", after=None, task_name="verify_working_table_sqlite_usage", require_working_table=True)
         self.assertFalse(passed)
         self.assertIn("no aggregate __tool_results query", recorded[-1][1]["observed_summary"])
+
+    def test_sqlite_usage_counts_persisted_aggregate_from_partially_failed_batch(self):
+        scenario, recorded = SqliteToolResultScenario(), []
+        scenario.record_task_result = lambda *args, **kwargs: recorded.append((args, kwargs))
+        calls = [
+            SimpleNamespace(
+                step="partial",
+                status="error",
+                result='{"status":"error","message":"Query 1 failed: no such column"}',
+                tool_name="sqlite_batch",
+                tool_params={
+                    "sql": (
+                        "CREATE TABLE inventory AS SELECT value FROM __tool_results, "
+                        "json_each(result_json, '$.content.items');"
+                        "SELECT missing_column FROM inventory;"
+                    )
+                },
+            ),
+            SimpleNamespace(
+                step="recovery",
+                status="complete",
+                result='{"status":"ok"}',
+                tool_name="sqlite_batch",
+                tool_params={
+                    "sql": "SELECT value FROM inventory WHERE value IS NOT NULL ORDER BY value"
+                },
+            ),
+        ]
+        with patch("api.evals.scenarios.sqlite_tool_results._tool_calls_for_run", return_value=calls):
+            passed = scenario._record_sqlite_usage(
+                "run",
+                after=None,
+                task_name="verify_sqlite_usage",
+                require_working_table=True,
+            )
+
+        self.assertTrue(passed, recorded[-1][1]["observed_summary"])
+        self.assertEqual(recorded[-1][1]["artifacts"]["step"], "partial")
+
+    def test_sqlite_domain_model_counts_persisted_schema_from_partially_failed_batch(self):
+        scenario, recorded = SqliteIntermediateWorkingTableScenario(), []
+        scenario.record_task_result = lambda *args, **kwargs: recorded.append((args, kwargs))
+        calls = [
+            SimpleNamespace(
+                step="partial",
+                status="error",
+                result='{"status":"error","message":"Query 1 failed: no such column"}',
+                tool_name="sqlite_batch",
+                tool_params={"sql": """
+                    CREATE TABLE catalog(vendor TEXT, plan TEXT, source_url TEXT,
+                                         PRIMARY KEY(vendor, plan));
+                    INSERT INTO catalog
+                    SELECT json_extract(result_json, '$.content.vendor'),
+                           json_extract(child.value, '$.plan'), source_url
+                    FROM __tool_results JOIN json_each(result_json, '$.content.plans') child;
+                """},
+            ),
+            SimpleNamespace(
+                step="recovery",
+                status="complete",
+                result='{"status":"ok"}',
+                tool_name="sqlite_batch",
+                tool_params={"sql": """
+                    INSERT INTO catalog
+                    SELECT json_extract(result_json, '$.content.vendor'),
+                           json_extract(child.value, '$.plan'),
+                           json_extract(result_json, '$.content.source_url')
+                    FROM __tool_results JOIN json_each(result_json, '$.content.plans') child;
+                    SELECT vendor, plan FROM catalog WHERE vendor IS NOT NULL ORDER BY plan;
+                """},
+            ),
+        ]
+        with patch("api.evals.scenarios.sqlite_tool_results._tool_calls_for_run", return_value=calls):
+            model_tables = scenario._record_domain_model("run", after=None)
+
+        self.assertEqual(model_tables, ("catalog",))
+        self.assertEqual(recorded[-1][0][2], EvalRunTask.Status.PASSED)
+
+    def test_sqlite_usage_does_not_count_preflight_rejected_loop(self):
+        scenario, recorded = SqliteToolResultScenario(), []
+        scenario.record_task_result = lambda *args, **kwargs: recorded.append((args, kwargs))
+        calls = [
+            SimpleNamespace(
+                step="rejected",
+                status="error",
+                result='{"status":"error","message":"Query not executed: use one shaped query"}',
+                tool_name="sqlite_batch",
+                tool_params={
+                    "sql": (
+                        "CREATE TABLE inventory(value TEXT);"
+                        "INSERT INTO inventory SELECT result_json FROM __tool_results WHERE result_id='r1';"
+                        "INSERT INTO inventory SELECT result_json FROM __tool_results WHERE result_id='r2';"
+                    )
+                },
+            ),
+            SimpleNamespace(
+                step="aggregate",
+                status="complete",
+                result='{"status":"ok"}',
+                tool_name="sqlite_batch",
+                tool_params={
+                    "sql": (
+                        "CREATE TABLE inventory AS SELECT value FROM __tool_results, "
+                        "json_each(result_json, '$.content.items') WHERE result_id IN ('r1','r2');"
+                        "SELECT value FROM inventory WHERE value IS NOT NULL ORDER BY value;"
+                    )
+                },
+            ),
+        ]
+        with patch("api.evals.scenarios.sqlite_tool_results._tool_calls_for_run", return_value=calls):
+            passed = scenario._record_sqlite_usage(
+                "run",
+                after=None,
+                task_name="verify_sqlite_usage",
+                require_working_table=True,
+                max_single_result_filters=0,
+            )
+
+        self.assertTrue(passed, recorded[-1][1]["observed_summary"])
 
     def test_sqlite_dedupe_usage_allows_bounded_schema_probe(self):
         scenario, recorded = SqliteDedupeRequeryScenario(), []
@@ -274,37 +411,330 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
             )
         self.assertTrue(passed, recorded[-1][1]["observed_summary"])
 
-    def test_sqlite_working_table_usage_allows_bounded_shape_repair(self):
+    def test_sqlite_domain_model_accepts_related_constrained_tables(self):
         scenario, recorded = SqliteIntermediateWorkingTableScenario(), []
         scenario.record_task_result = lambda *args, **kwargs: recorded.append((args, kwargs))
         calls = [
             SimpleNamespace(
+                step="rejected",
+                status="error",
+                tool_name="sqlite_batch",
+                tool_params={
+                    "sql": "CREATE TABLE rejected(vendor TEXT, plan TEXT); "
+                    "INSERT INTO rejected VALUES ('CareMesh', 'Clinic');"
+                },
+            ),
+            SimpleNamespace(
                 step="step",
+                status="complete",
                 tool_name="sqlite_batch",
                 tool_params={
                     "sql": """
-                    SELECT result_id, substr(result_json, 1, 500) FROM __tool_results WHERE result_id='r1';
-                    SELECT json_extract(result_json, '$.content.vendor') FROM __tool_results WHERE result_id='r1';
-                    DROP TABLE IF EXISTS plan_candidates;
-                    CREATE TABLE plan_candidates AS
-                    SELECT json_extract(result_json, '$.content.vendor') AS vendor,
-                           json_extract(p.value, '$.plan') AS plan
-                    FROM __tool_results, json_each(result_json, '$.content.plans') AS p;
-                    SELECT vendor, plan FROM plan_candidates ORDER BY vendor;
-                    SELECT result_json FROM __tool_results WHERE result_id='r1';
+                    CREATE TABLE vendors(vendor TEXT PRIMARY KEY, source_url TEXT NOT NULL);
+                    INSERT INTO vendors
+                    SELECT json_extract(result_json, '$.content.vendor'), json_extract(result_json, '$.content.source_url')
+                    FROM __tool_results;
+                    CREATE TABLE plans(vendor TEXT, plan TEXT, price INTEGER, seats INTEGER,
+                                       PRIMARY KEY(vendor, plan));
+                    INSERT INTO plans
+                    SELECT json_extract(t.result_json, '$.content.vendor'), json_extract(p.value, '$.plan'),
+                           json_extract(p.value, '$.monthly_price_usd'), json_extract(p.value, '$.included_seats')
+                    FROM __tool_results t JOIN json_each(t.result_json, '$.content.plans') p;
+                    SELECT v.vendor, p.plan FROM vendors v JOIN plans p ON p.vendor=v.vendor
+                    WHERE p.seats >= 40 ORDER BY p.price;
                     """
                 },
             )
         ]
         with patch("api.evals.scenarios.sqlite_tool_results._tool_calls_for_run", return_value=calls):
-            passed = scenario._record_sqlite_usage(
-                "run",
-                after=None,
-                task_name="verify_working_table_sqlite_usage",
-                require_working_table=True,
-                max_single_result_filters=scenario.max_single_result_filters,
+            model_tables = scenario._record_domain_model("run", after=None)
+
+        self.assertEqual(recorded[-1][0][2], EvalRunTask.Status.PASSED)
+        self.assertEqual(set(model_tables), {"vendors", "plans"})
+
+    def test_sqlite_domain_model_reuses_downstream_shaped_table(self):
+        scenario, recorded = SqliteIntermediateWorkingTableScenario(), []
+        scenario.record_task_result = lambda *args, **kwargs: recorded.append((args, kwargs))
+        initial_calls = [
+            SimpleNamespace(
+                step="initial",
+                status="error",
+                result='{"status":"error","message":"Query 4 failed: no such column"}',
+                tool_name="sqlite_batch",
+                tool_params={"sql": """
+                    CREATE TABLE raw_plans AS
+                    SELECT json_extract(result_json, '$.content.vendor') AS vendor,
+                           child.value AS plan_json,
+                           json_extract(result_json, '$.content.source_url') AS source_url
+                    FROM __tool_results JOIN json_each(result_json, '$.content.plans') child;
+                    CREATE TABLE plans(vendor TEXT, plan TEXT, price INTEGER, source_url TEXT,
+                                       PRIMARY KEY(vendor, plan));
+                    INSERT INTO plans
+                    SELECT vendor, json_extract(plan_json, '$.plan'),
+                           json_extract(plan_json, '$.monthly_price_usd'), source_url
+                    FROM raw_plans;
+                    SELECT missing_column FROM plans;
+                """},
+            ),
+            SimpleNamespace(
+                step="recovery",
+                status="complete",
+                result='{"status":"ok"}',
+                tool_name="sqlite_batch",
+                tool_params={"sql": """
+                    SELECT vendor, plan FROM plans WHERE price <= 900 ORDER BY price;
+                """},
             )
-        self.assertTrue(passed, recorded[-1][1]["observed_summary"])
+        ]
+        with patch("api.evals.scenarios.sqlite_tool_results._tool_calls_for_run", return_value=initial_calls):
+            model_tables = scenario._record_domain_model("run", after=None)
+
+        self.assertEqual(model_tables, ("plans",))
+        self.assertEqual(recorded[-1][0][2], EvalRunTask.Status.PASSED)
+
+        followup_calls = [
+            SimpleNamespace(
+                step="followup",
+                status="complete",
+                tool_name="sqlite_batch",
+                tool_params={"sql": "SELECT vendor, plan FROM plans WHERE price <= 1600 ORDER BY price;"},
+            )
+        ]
+        with patch("api.evals.scenarios.sqlite_tool_results._tool_calls_for_run", return_value=followup_calls):
+            scenario._record_model_reuse("run", after=None, model_tables=model_tables)
+
+        self.assertEqual(recorded[-1][0][2], EvalRunTask.Status.PASSED)
+
+    def test_sqlite_domain_model_rejects_per_result_tables(self):
+        scenario, recorded = SqliteIntermediateWorkingTableScenario(), []
+        scenario.record_task_result = lambda *args, **kwargs: recorded.append((args, kwargs))
+        calls = [
+            SimpleNamespace(
+                step="step",
+                status="complete",
+                tool_name="sqlite_batch",
+                tool_params={
+                    "sql": """
+                    CREATE TABLE plans_local AS SELECT result_json FROM __tool_results WHERE result_id='r1';
+                    CREATE TABLE plans_dealer AS SELECT result_json FROM __tool_results WHERE result_id='r2';
+                    SELECT * FROM plans_local UNION ALL SELECT * FROM plans_dealer;
+                    """
+                },
+            )
+        ]
+        with patch("api.evals.scenarios.sqlite_tool_results._tool_calls_for_run", return_value=calls):
+            scenario._record_domain_model("run", after=None)
+
+        self.assertEqual(recorded[-1][0][2], EvalRunTask.Status.FAILED)
+        self.assertIn("stable identity", recorded[-1][1]["observed_summary"])
+        self.assertIn("one result at a time", recorded[-1][1]["observed_summary"])
+
+    def test_sqlite_domain_model_rejects_shared_table_loaded_one_result_at_a_time(self):
+        scenario, recorded = SqliteIntermediateWorkingTableScenario(), []
+        scenario.record_task_result = lambda *args, **kwargs: recorded.append((args, kwargs))
+        calls = [
+            SimpleNamespace(
+                step="step",
+                status="complete",
+                tool_name="sqlite_batch",
+                tool_params={
+                    "sql": """
+                    CREATE TABLE catalog(vendor TEXT, plan TEXT, price INTEGER, source_url TEXT,
+                                         PRIMARY KEY(vendor, plan));
+                    INSERT INTO catalog
+                    SELECT json_extract(result_json, '$.content.vendor'),
+                           json_extract(plan.value, '$.name'), json_extract(plan.value, '$.price'),
+                           json_extract(result_json, '$.content.source_url')
+                    FROM __tool_results JOIN json_each(result_json, '$.content.plans') plan
+                    WHERE result_id IN ('r1');
+                    INSERT INTO catalog
+                    SELECT json_extract(result_json, '$.content.vendor'),
+                           json_extract(plan.value, '$.name'), json_extract(plan.value, '$.price'),
+                           json_extract(result_json, '$.content.source_url')
+                    FROM __tool_results JOIN json_each(result_json, '$.content.plans') plan
+                    WHERE result_id IN ('r2');
+                    SELECT vendor, plan FROM catalog WHERE price <= 900 ORDER BY price;
+                    """
+                },
+            )
+        ]
+        with patch("api.evals.scenarios.sqlite_tool_results._tool_calls_for_run", return_value=calls):
+            model_tables = scenario._record_domain_model("run", after=None)
+
+        self.assertEqual(model_tables, ("catalog",))
+        self.assertEqual(recorded[-1][0][2], EvalRunTask.Status.FAILED)
+        self.assertIn("did not import tool results in aggregate", recorded[-1][1]["observed_summary"])
+        self.assertIn("one result at a time", recorded[-1][1]["observed_summary"])
+
+    def test_sqlite_domain_model_rejects_empty_table_beside_raw_result_query(self):
+        scenario, recorded = SqliteIntermediateWorkingTableScenario(), []
+        scenario.record_task_result = lambda *args, **kwargs: recorded.append((args, kwargs))
+        calls = [
+            SimpleNamespace(
+                step="step",
+                status="complete",
+                tool_name="sqlite_batch",
+                tool_params={
+                    "sql": """
+                    SELECT json_extract(result_json, '$.content.vendor') FROM __tool_results;
+                    CREATE TABLE catalog(vendor TEXT, plan TEXT, source_url TEXT);
+                    SELECT c.vendor, c.plan FROM catalog c
+                    JOIN raw_plans r ON r.vendor = c.vendor
+                    WHERE c.vendor IS NOT NULL ORDER BY c.plan;
+                    """
+                },
+            )
+        ]
+        with patch("api.evals.scenarios.sqlite_tool_results._tool_calls_for_run", return_value=calls):
+            model_tables = scenario._record_domain_model("run", after=None)
+
+        self.assertEqual(model_tables, ())
+        self.assertEqual(recorded[-1][0][2], EvalRunTask.Status.FAILED)
+        self.assertIn("no reusable domain table", recorded[-1][1]["observed_summary"])
+
+    def test_sqlite_domain_model_requires_identity_on_the_decision_table(self):
+        scenario, recorded = SqliteIntermediateWorkingTableScenario(), []
+        scenario.record_task_result = lambda *args, **kwargs: recorded.append((args, kwargs))
+        calls = [
+            SimpleNamespace(
+                step="step",
+                status="complete",
+                tool_name="sqlite_batch",
+                tool_params={"sql": """
+                    CREATE TABLE identity_decoy(id TEXT PRIMARY KEY);
+                    CREATE TABLE raw_plans(vendor TEXT, plan_json TEXT, source_url TEXT,
+                                           PRIMARY KEY(vendor, plan_json));
+                    INSERT INTO raw_plans
+                    SELECT json_extract(result_json, '$.content.vendor'), child.value,
+                           json_extract(result_json, '$.content.source_url')
+                    FROM __tool_results JOIN json_each(result_json, '$.content.plans') child;
+                    CREATE TABLE catalog AS
+                    SELECT vendor, json_extract(plan_json, '$.plan') AS plan,
+                           source_url, 'not a key' AS "unique"
+                    FROM raw_plans;
+                    SELECT vendor, plan FROM catalog WHERE vendor IS NOT NULL ORDER BY plan;
+                """},
+            )
+        ]
+        with patch("api.evals.scenarios.sqlite_tool_results._tool_calls_for_run", return_value=calls):
+            model_tables = scenario._record_domain_model("run", after=None)
+
+        self.assertEqual(model_tables, ("raw_plans",))
+        self.assertEqual(recorded[-1][0][2], EvalRunTask.Status.FAILED)
+        self.assertIn("stable identity", recorded[-1][1]["observed_summary"])
+
+    def test_sqlite_decision_tables_require_a_ranked_select(self):
+        self.assertEqual(
+            _decision_model_tables(
+                "DELETE FROM plans WHERE price > 900 ORDER BY price LIMIT 1;",
+                ("plans",),
+            ),
+            (),
+        )
+        self.assertEqual(
+            _decision_model_tables(
+                "SELECT * FROM plans WHERE price <= 900 ORDER BY price;",
+                ("plans",),
+            ),
+            ("plans",),
+        )
+
+    def test_sqlite_domain_model_rejects_unexpanded_child_array(self):
+        scenario, recorded = SqliteIntermediateWorkingTableScenario(), []
+        scenario.record_task_result = lambda *args, **kwargs: recorded.append((args, kwargs))
+        calls = [
+            SimpleNamespace(
+                step="step",
+                status="complete",
+                tool_name="sqlite_batch",
+                tool_params={
+                    "sql": """
+                    CREATE TABLE catalog(vendor TEXT UNIQUE, plan TEXT, source_url TEXT);
+                    INSERT INTO catalog
+                    SELECT json_extract(result_json, '$.content.vendor') AS vendor,
+                           json_extract(result_json, '$.content.plans') AS plan,
+                           json_extract(result_json, '$.content.source_url') AS source_url
+                    FROM __tool_results;
+                    SELECT vendor, plan FROM catalog WHERE vendor IS NOT NULL ORDER BY vendor;
+                    """
+                },
+            )
+        ]
+        with patch("api.evals.scenarios.sqlite_tool_results._tool_calls_for_run", return_value=calls):
+            scenario._record_domain_model("run", after=None)
+
+        self.assertEqual(recorded[-1][0][2], EvalRunTask.Status.FAILED)
+        self.assertIn("repeating child rows were not extracted", recorded[-1][1]["observed_summary"])
+        self.assertNotIn("stable identity", recorded[-1][1]["observed_summary"])
+
+    def test_sqlite_domain_model_allows_separate_user_threshold_table(self):
+        scenario, recorded = SqliteIntermediateWorkingTableScenario(), []
+        scenario.record_task_result = lambda *args, **kwargs: recorded.append((args, kwargs))
+        calls = [
+            SimpleNamespace(
+                step="step",
+                status="complete",
+                tool_name="sqlite_batch",
+                tool_params={
+                    "sql": """
+                    CREATE TABLE catalog(vendor TEXT, plan TEXT, price INTEGER, source_url TEXT,
+                                         PRIMARY KEY(vendor, plan));
+                    INSERT INTO catalog
+                    SELECT json_extract(result_json, '$.content.vendor'),
+                           json_extract(plan.value, '$.name'), json_extract(plan.value, '$.price'),
+                           json_extract(result_json, '$.content.source_url')
+                    FROM __tool_results JOIN json_each(result_json, '$.content.plans') plan;
+                    CREATE TABLE decision_thresholds(team_size INTEGER, budget INTEGER);
+                    INSERT INTO decision_thresholds VALUES (40, 900);
+                    SELECT c.vendor, c.plan FROM catalog c CROSS JOIN decision_thresholds d
+                    WHERE c.price <= d.budget ORDER BY c.price;
+                    """
+                },
+            )
+        ]
+        with patch("api.evals.scenarios.sqlite_tool_results._tool_calls_for_run", return_value=calls):
+            model_tables = scenario._record_domain_model("run", after=None)
+
+        self.assertEqual(model_tables, ("catalog",))
+        self.assertEqual(recorded[-1][0][2], EvalRunTask.Status.PASSED)
+
+    def test_sqlite_domain_followup_reuses_relational_model_without_refetch(self):
+        scenario, recorded = SqliteIntermediateWorkingTableScenario(), []
+        scenario.record_task_result = lambda *args, **kwargs: recorded.append((args, kwargs))
+        calls = [
+            SimpleNamespace(
+                step="step",
+                status="complete",
+                tool_name="sqlite_batch",
+                tool_params={
+                    "sql": "SELECT v.vendor, p.plan, p.price FROM vendors v JOIN plans p ON p.vendor=v.vendor "
+                    "WHERE p.seats >= 70 ORDER BY p.price LIMIT 1;"
+                },
+            )
+        ]
+        with patch("api.evals.scenarios.sqlite_tool_results._tool_calls_for_run", return_value=calls):
+            scenario._record_model_reuse("run", after=None, model_tables=("vendors", "plans"))
+
+        self.assertEqual(recorded[-1][0][2], EvalRunTask.Status.PASSED)
+
+    def test_sqlite_domain_followup_rejects_refetch_and_raw_result_read(self):
+        scenario, recorded = SqliteIntermediateWorkingTableScenario(), []
+        scenario.record_task_result = lambda *args, **kwargs: recorded.append((args, kwargs))
+        calls = [
+            SimpleNamespace(step="http", status="complete", tool_name="http_request", tool_params={"url": "https://example.test"}),
+            SimpleNamespace(
+                step="sqlite",
+                status="complete",
+                tool_name="sqlite_batch",
+                tool_params={"sql": "SELECT result_json FROM __tool_results ORDER BY created_at DESC;"},
+            ),
+        ]
+        with patch("api.evals.scenarios.sqlite_tool_results._tool_calls_for_run", return_value=calls):
+            scenario._record_model_reuse("run", after=None, model_tables=("vendors", "plans"))
+
+        self.assertEqual(recorded[-1][0][2], EvalRunTask.Status.FAILED)
+        self.assertIn("refetched 1 source", recorded[-1][1]["observed_summary"])
+        self.assertIn("reread raw tool results", recorded[-1][1]["observed_summary"])
 
     def test_effort_no_question_check_rejects_progress_only_message(self):
         scenario, recorded = EffortCalibrationScenario(), []
@@ -1079,8 +1509,13 @@ class FirstRunPromptCalibrationTests(TestCase):
             context, _, _ = build_prompt_context_preview(agent, is_first_run=False)
 
         system_prompt = next(message["content"] for message in context if message["role"] == "system")
-        self.assertIn("Use the requested channel; otherwise reply on the latest inbound channel", system_prompt)
+        self.assertIn(
+            "Use the requested recipient/channel; otherwise reply to the latest inbound requester on that same channel",
+            system_prompt,
+        )
         self.assertIn("A skipped web send never permits switching", system_prompt)
+        self.assertIn("one compact tracked request; use options for a decision and free text", system_prompt)
+        self.assertIn("smallest exact charter phrase; preserve every unrelated word/setting verbatim", system_prompt)
         self.assertIn("Set false after delivery/config and no active work", system_prompt)
         self.assertIn("Do not set a schedule merely to continue or remember a single research question", system_prompt)
         self.assertIn("explicit SQLite/database request and sqlite_batch is callable", system_prompt)
@@ -1089,6 +1524,9 @@ class FirstRunPromptCalibrationTests(TestCase):
         self.assertIn("public exact URL + http/scrape tool callable", system_prompt)
         self.assertIn("spawn_web_task only after access/render/login blockage", system_prompt)
         self.assertIn("exact docs/blog/changelog/release-notes URL", system_prompt)
+        self.assertIn("opaque identifiers", system_prompt)
+        self.assertIn("character-for-character; never shorten or normalize", system_prompt)
+        self.assertIn("structured rows repeat with no next page", system_prompt)
         self.assertIn("Charts: create only when requested/materially useful", system_prompt)
         self.assertIn("Finished answers/briefings/charts/lookups/one-off research are not charter changes", system_prompt)
         self.assertIn("Email/SMS imperatives map directly to send_email/send_sms", system_prompt)

@@ -241,15 +241,117 @@ class SqliteBatchToolTests(TestCase):
             out = execute_sqlite_batch(self.agent, {"sql": 123})
             self.assertEqual(out.get("status"), "error")
 
-    def test_tool_definition_guides_bulk_work_into_custom_tools(self):
+    def test_tool_definition_guides_domain_modeling_and_bulk_work(self):
         definition = get_sqlite_batch_tool()
         description = definition["function"]["description"]
 
-        self.assertIn("Query/update structured data you already have", description)
-        self.assertIn("one shaped query with CTEs", description)
-        self.assertIn("from __tool_results", description)
+        self.assertIn("shared entity/event/relationship tables", description)
+        self.assertIn("separate repeating parents/children", description)
+        self.assertIn("PRIMARY KEY/UNIQUE identity and provenance", description)
+        self.assertIn("MUST use explicit CREATE TABLE", description)
+        self.assertIn("CTAS is disposable only", description)
+        self.assertIn("all relevant __tool_results", description)
+        self.assertIn("one INSERT ... SELECT/json_each query", description)
         self.assertIn("prefer a custom tool writing to SQLite", description)
         self.assertIn("no ATTACH", description)
+
+    def test_tool_result_ctas_warns_that_identity_is_disposable(self):
+        with self._with_temp_db() as (db_path, _token, _tmp):
+            conn = sqlite3.connect(db_path)
+            try:
+                conn.execute("CREATE TABLE __tool_results (result_id TEXT PRIMARY KEY, result_json TEXT)")
+                conn.executemany(
+                    "INSERT INTO __tool_results VALUES (?, ?)",
+                    [("r1", '{"items":[1]}'), ("r2", '{"items":[2]}')],
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            out = execute_sqlite_batch(
+                self.agent,
+                {
+                    "sql": "CREATE TABLE vendors AS SELECT result_json FROM __tool_results",
+                    "will_continue_work": True,
+                },
+            )
+
+            self.assertEqual(out.get("status"), "warning")
+            self.assertEqual(out.get("advisories", [{}])[0].get("code"), "tool_result_ctas")
+            self.assertIn("PRIMARY KEY/UNIQUE", out.get("message", ""))
+
+            disposable = execute_sqlite_batch(
+                self.agent,
+                {
+                    "sql": (
+                        "CREATE TEMP TABLE scratch(value INTEGER);"
+                        "INSERT INTO scratch SELECT p.value FROM __tool_results "
+                        "JOIN json_each(result_json, '$.items') p;"
+                    ),
+                    "will_continue_work": True,
+                },
+            )
+            self.assertEqual(disposable.get("status"), "ok")
+            self.assertNotIn("advisories", disposable)
+
+    def test_reusable_tool_result_table_requires_its_own_identity(self):
+        with self._with_temp_db() as (db_path, _token, _tmp):
+            conn = sqlite3.connect(db_path)
+            try:
+                conn.execute("CREATE TABLE __tool_results (result_id TEXT PRIMARY KEY, result_json TEXT)")
+                conn.executemany(
+                    "INSERT INTO __tool_results VALUES (?, ?)",
+                    [("r1", '{"plans":[{"vendor":"A"}]}'), ("r2", '{"plans":[{"vendor":"B"}]}')],
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            unkeyed = execute_sqlite_batch(
+                self.agent,
+                {
+                    "sql": (
+                        'CREATE TABLE decoy(id TEXT PRIMARY KEY);'
+                        'CREATE TABLE vendors(vendor TEXT, "unique" TEXT);'
+                        "INSERT INTO vendors(vendor) SELECT json_extract(p.value, '$.vendor') "
+                        "FROM __tool_results JOIN json_each(result_json, '$.plans') p;"
+                    ),
+                    "will_continue_work": True,
+                },
+            )
+            self.assertEqual(unkeyed.get("status"), "error")
+            self.assertEqual(unkeyed.get("advisories", [{}])[0].get("code"), "reusable_model_missing_identity")
+
+            keyed = execute_sqlite_batch(
+                self.agent,
+                {
+                    "sql": (
+                        "CREATE TABLE vendors(vendor TEXT PRIMARY KEY);"
+                        "INSERT OR IGNORE INTO vendors SELECT json_extract(p.value, '$.vendor') "
+                        "FROM __tool_results JOIN json_each(result_json, '$.plans') p;"
+                    ),
+                    "will_continue_work": True,
+                },
+            )
+            self.assertEqual(keyed.get("status"), "ok")
+            self.assertNotIn("advisories", keyed)
+
+            one_result_unkeyed = build_tool_result_query_advisories(
+                [
+                    "CREATE TABLE plans(plan TEXT);"
+                    "INSERT INTO plans SELECT p.value FROM __tool_results "
+                    "JOIN json_each(result_json, '$.plans') p;"
+                ],
+                available_tool_result_rows=1,
+            )
+            self.assertTrue(one_result_unkeyed[0].blocking)
+            self.assertEqual(one_result_unkeyed[0].code, "reusable_model_missing_identity")
+
+            one_result_ctas = build_tool_result_query_advisories(
+                ["CREATE TABLE plans AS SELECT result_json FROM __tool_results"],
+                available_tool_result_rows=1,
+            )
+            self.assertEqual(one_result_ctas[0].code, "tool_result_ctas")
 
     def test_single_tool_result_blob_fetch_returns_efficiency_advisory(self):
         with self._with_temp_db() as (db_path, _token, _tmp):
@@ -258,7 +360,10 @@ class SqliteBatchToolTests(TestCase):
                 conn.execute("CREATE TABLE __tool_results (result_id TEXT PRIMARY KEY, result_text TEXT)")
                 conn.executemany(
                     "INSERT INTO __tool_results (result_id, result_text) VALUES (?, ?)",
-                    [("r1", "alpha"), ("r2", "beta")],
+                    [
+                        ("r1", "https://source.example.test/a"),
+                        ("r2", "https://source.example.test/b"),
+                    ],
                 )
                 conn.commit()
             finally:
@@ -285,6 +390,198 @@ class SqliteBatchToolTests(TestCase):
             )
             self.assertEqual(preview.get("status"), "ok")
             self.assertNotIn("advisories", preview)
+
+    def test_manual_constants_are_allowed_despite_unrelated_tool_results(self):
+        with self._with_temp_db() as (db_path, _token, _tmp):
+            conn = sqlite3.connect(db_path)
+            try:
+                conn.execute("CREATE TABLE __tool_results (result_id TEXT PRIMARY KEY, result_text TEXT)")
+                conn.executemany(
+                    "INSERT INTO __tool_results (result_id, result_text) VALUES (?, ?)",
+                    [
+                        ("r1", "https://source.example.test/a"),
+                        ("r2", "https://source.example.test/b"),
+                    ],
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            out = execute_sqlite_batch(
+                self.agent,
+                {
+                    "sql": (
+                        "CREATE TABLE decision_thresholds(team_size INTEGER, budget INTEGER);"
+                        "INSERT INTO decision_thresholds VALUES (40, 900);"
+                        "SELECT team_size, budget FROM decision_thresholds;"
+                    ),
+                    "will_continue_work": True,
+                },
+            )
+
+            self.assertEqual(out.get("status"), "warning")
+            self.assertEqual(
+                out.get("advisories", [{}])[0].get("code"),
+                "manual_working_table_from_visible_results",
+            )
+            self.assertIn("If those rows came from tool outputs", out.get("message", ""))
+            conn = sqlite3.connect(db_path)
+            try:
+                row = conn.execute("SELECT team_size, budget FROM decision_thresholds").fetchone()
+            finally:
+                conn.close()
+            self.assertEqual(row, (40, 900))
+
+    def test_bulk_manual_tool_result_copy_is_rejected_before_execution(self):
+        with self._with_temp_db() as (db_path, _token, _tmp):
+            conn = sqlite3.connect(db_path)
+            try:
+                conn.execute("CREATE TABLE __tool_results (result_id TEXT PRIMARY KEY, result_text TEXT)")
+                conn.executemany(
+                    "INSERT INTO __tool_results (result_id, result_text) VALUES (?, ?)",
+                    [
+                        ("r1", "source https://source.example.test/a"),
+                        ("r2", "source https://source.example.test/b"),
+                    ],
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            rows = ",".join(
+                f"({index}, 'https://source.example.test/{'a' if index % 2 else 'b'}')"
+                for index in range(12)
+            )
+            out = execute_sqlite_batch(
+                self.agent,
+                {
+                    "sql": f"CREATE TABLE copied_rows(id INTEGER, label TEXT); INSERT INTO copied_rows VALUES {rows};",
+                    "will_continue_work": True,
+                },
+            )
+
+            self.assertEqual(out.get("status"), "error")
+            self.assertTrue(out.get("retryable"))
+            self.assertEqual(
+                out.get("advisories", [{}])[0].get("code"),
+                "bulk_manual_working_table_from_visible_results",
+            )
+            conn = sqlite3.connect(db_path)
+            try:
+                table = conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name='copied_rows'"
+                ).fetchone()
+            finally:
+                conn.close()
+            self.assertIsNone(table)
+
+    def test_bulk_manual_constants_are_not_blocked_by_unrelated_tool_results(self):
+        with self._with_temp_db() as (db_path, _token, _tmp):
+            conn = sqlite3.connect(db_path)
+            try:
+                conn.execute("CREATE TABLE __tool_results (result_id TEXT PRIMARY KEY, result_text TEXT)")
+                conn.executemany(
+                    "INSERT INTO __tool_results (result_id, result_text) VALUES (?, ?)",
+                    [
+                        ("r1", "https://source.example.test/a"),
+                        ("r2", "https://source.example.test/b"),
+                    ],
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            month_rows = ",".join(
+                f"({index}, 'month-{index}')" for index in range(1, 13)
+            )
+            out = execute_sqlite_batch(
+                self.agent,
+                {
+                    "sql": (
+                        "CREATE TABLE months(month_number INTEGER, label TEXT);"
+                        f"INSERT INTO months VALUES {month_rows};"
+                        "SELECT COUNT(*) AS count FROM months;"
+                        "-- unrelated notes https://source.example.test/a https://source.example.test/b"
+                    ),
+                    "will_continue_work": True,
+                },
+            )
+
+            self.assertEqual(out.get("status"), "warning")
+            self.assertEqual(out["results"][-1]["result"], [{"count": 12}])
+            self.assertNotEqual(
+                out.get("advisories", [{}])[0].get("code"),
+                "bulk_manual_working_table_from_visible_results",
+            )
+
+    def test_per_result_import_loop_is_rejected_before_execution(self):
+        with self._with_temp_db() as (db_path, _token, _tmp):
+            conn = sqlite3.connect(db_path)
+            try:
+                conn.execute(
+                    "CREATE TABLE __tool_results (result_id TEXT PRIMARY KEY, result_json TEXT)"
+                )
+                conn.executemany(
+                    "INSERT INTO __tool_results (result_id, result_json) VALUES (?, ?)",
+                    [("r1", '{"items":[1]}'), ("r2", '{"items":[2]}')],
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            out = execute_sqlite_batch(
+                self.agent,
+                {
+                    "sql": (
+                        "CREATE TABLE items(value INTEGER);"
+                        "INSERT INTO items SELECT value FROM __tool_results, "
+                        "json_each(result_json, '$.items') WHERE result_id='r1';"
+                        "INSERT INTO items SELECT value FROM __tool_results, "
+                        "json_each(result_json, '$.items') WHERE result_id='r2';"
+                    ),
+                    "will_continue_work": True,
+                },
+            )
+
+            self.assertEqual(out.get("status"), "error")
+            self.assertTrue(out.get("retryable"))
+            self.assertEqual(out.get("advisories", [{}])[0].get("code"), "tool_result_row_loop")
+            conn = sqlite3.connect(db_path)
+            try:
+                table = conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name='items'"
+                ).fetchone()
+            finally:
+                conn.close()
+            self.assertIsNone(table)
+
+    def test_single_result_import_warns_and_comments_do_not_trigger_guard(self):
+        one_import = build_tool_result_query_advisories(
+            [
+                "INSERT INTO items SELECT result_json FROM __tool_results "
+                "WHERE result_id='r1'"
+            ],
+            available_tool_result_rows=2,
+        )
+        commented = build_tool_result_query_advisories(
+            [
+                "SELECT 1 AS one -- FROM __tool_results WHERE result_id='r1'\n;"
+                "SELECT 'FROM __tool_results WHERE result_id=''r2''' AS note;"
+            ],
+            available_tool_result_rows=2,
+        )
+        double_quoted_text = build_tool_result_query_advisories(
+            [
+                'SELECT "result_text FROM __tool_results WHERE result_id=\'r1\'" AS note;'
+                'SELECT "result_text FROM __tool_results WHERE result_id=\'r2\'" AS note;'
+            ],
+            available_tool_result_rows=2,
+        )
+
+        self.assertEqual(one_import[0].code, "single_tool_result_import")
+        self.assertFalse(one_import[0].blocking)
+        self.assertEqual(commented, [])
+        self.assertEqual(double_quoted_text, [])
 
     def test_tool_result_quality_detects_smart_queries_and_advisories(self):
         sql = """
@@ -313,11 +610,26 @@ class SqliteBatchToolTests(TestCase):
         aggregate = summarize_sqlite_tool_result_sql(
             ["SELECT result_text FROM __tool_results WHERE result_id IN ('r1','r2')"]
         )
+        singleton_in = summarize_sqlite_tool_result_sql(
+            ["SELECT json_extract(result_json,'$.url') FROM __tool_results WHERE result_id IN ('r1')"]
+        )
+        subquery_in = summarize_sqlite_tool_result_sql(
+            [
+                "SELECT json_extract(result_json,'$.url') FROM __tool_results "
+                "WHERE result_id IN (SELECT result_id FROM __tool_results WHERE tool_name='http_request') "
+                "ORDER BY result_id"
+            ]
+        )
         advisories = build_tool_result_query_advisories(sql_values, available_tool_result_rows=3)
         self.assertEqual(summary.duplicate_direct_fetches, 1)
         self.assertEqual(preview.direct_result_text_fetches, 0)
         self.assertEqual(preview.single_result_id_filters, 1)
         self.assertEqual(aggregate.direct_result_text_fetches, 0)
+        self.assertEqual(singleton_in.single_result_id_filters, 1)
+        self.assertEqual(singleton_in.aggregate_tool_result_queries, 0)
+        self.assertEqual(subquery_in.single_result_id_filters, 0)
+        self.assertEqual(subquery_in.aggregate_tool_result_queries, 1)
+        self.assertEqual(subquery_in.smart_tool_result_queries, 1)
         self.assertEqual(advisories[0].code, "tool_result_blob_fetch_loop")
 
         summary = summarize_sqlite_tool_result_sql(
@@ -330,6 +642,38 @@ class SqliteBatchToolTests(TestCase):
         self.assertEqual(summary.manual_values_working_tables, 1)
         self.assertEqual(advisories[0].code, "manual_working_table_from_visible_results")
         self.assertIn("__tool_results", advisories[0].message)
+
+        json_values_path = summarize_sqlite_tool_result_sql(
+            [
+                "CREATE TABLE plans(vendor TEXT, plan TEXT, PRIMARY KEY(vendor, plan)); "
+                "INSERT INTO plans "
+                "SELECT json_extract(t.result_json, '$.vendor'), json_extract(p.value, '$.name') "
+                "FROM __tool_results t JOIN json_each(t.result_json, '$.values') p;"
+            ]
+        )
+        self.assertEqual(json_values_path.manual_values_working_tables, 0)
+        self.assertEqual(json_values_path.row_derived_working_table_names, ("plans",))
+        self.assertFalse(
+            build_tool_result_query_advisories(
+                [
+                    "CREATE TABLE plans(vendor TEXT, plan TEXT, PRIMARY KEY(vendor, plan)); "
+                    "INSERT INTO plans SELECT json_extract(t.result_json, '$.vendor'), "
+                    "json_extract(p.value, '$.name') FROM __tool_results t "
+                    "JOIN json_each(t.result_json, '$.values') p;"
+                ],
+                available_tool_result_rows=4,
+            )
+        )
+
+        advisories = build_tool_result_query_advisories(
+            [
+                "INSERT INTO plans SELECT result_json FROM __tool_results WHERE result_id='r1'",
+                "INSERT INTO plans SELECT result_json FROM __tool_results WHERE result_id='r2'",
+            ],
+            available_tool_result_rows=4,
+        )
+        self.assertEqual(advisories[0].code, "tool_result_row_loop")
+        self.assertIn("one shaped INSERT", advisories[0].message)
 
         calls = [
             SimpleNamespace(

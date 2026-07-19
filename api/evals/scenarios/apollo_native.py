@@ -159,36 +159,14 @@ APOLLO_NATIVE_CASES = (
     ApolloNativeCase(
         slug=APOLLO_NATIVE_MISSING_CONNECTION,
         description="Report native integration setup guidance when Apollo is not connected.",
-        prompt=(
-            "Use the native Apollo integration to search for RevOps directors in Texas. "
-            "If Apollo is not connected, tell me what to do."
-        ),
-        http_rules=(
-            {
-                "url_contains": ("api.apollo.io/api/v1", "mixed_people/api_search"),
-                "result": {
-                    "status": "error",
-                    "status_code": 401,
-                    "url": f"{APOLLO_API_BASE}/mixed_people/api_search",
-                    "message": (
-                        "native_integration_not_connected: Apollo is not connected. "
-                        "Ask the user to open /app/integrations and connect Apollo."
-                    ),
-                    "content": {"ok": False},
-                }
-            },
-        ),
-        expected_http_requests=(
-            ApolloHttpRequestExpectation(
-                name="apollo_search_attempt",
-                url_terms=("api.apollo.io/api/v1/mixed_people/api_search",),
-                allowed_statuses=("error",),
-            ),
-        ),
+        prompt="Use the native Apollo integration to search for RevOps directors in Texas.",
+        http_rules=(),
+        expected_http_requests=(),
+        forbidden_url_terms=(("api.apollo.io",), ("app.apollo.io",)),
         response_term_groups=(
             ("Apollo",),
-            ("/app/integrations", "Integrations page", "Integrations section"),
-            ("connect", "connected"),
+            ("/app/integrations",),
+            ("not connected", "isn't connected", "connect Apollo"),
         ),
         tags=("missing_connection",),
     ),

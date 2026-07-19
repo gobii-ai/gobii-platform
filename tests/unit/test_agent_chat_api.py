@@ -54,6 +54,7 @@ from api.models import (
     PersistentAgentMessageFeedback,
     PersistentAgentSecret,
     PersistentAgentStep,
+    PersistentAgentSystemStep,
     PersistentAgentToolCall,
     PersistentAgentUserActionEvent,
     PersistentAgentWebSession,
@@ -3868,6 +3869,15 @@ class AgentChatAPITests(TestCase):
         )
         self.assertEqual(result["status"], "error")
         self.assertIn("No active web chat session", result["message"])
+        self.assertIn("Do not move this reply", result["message"])
+        self.assertIs(result["retryable"], False)
+        self.assertIs(result["terminal_error"], True)
+
+        progress = execute_send_chat_message(
+            self.agent,
+            {"body": "I am still working on this.", "will_continue_work": True},
+        )
+        self.assertIs(progress["terminal_error"], False)
 
         start_web_session(self.agent, self.user)
         success = execute_send_chat_message(
@@ -3896,6 +3906,43 @@ class AgentChatAPITests(TestCase):
         )
 
         self.assertEqual(markdown_event["message"].get("bodyHtml"), "")
+
+    @tag("batch_agent_chat")
+    def test_background_web_failure_allows_configured_channel_fallback(self):
+        EmailAddress.objects.create(
+            user=self.user,
+            email=self.user.email,
+            verified=True,
+            primary=True,
+        )
+        PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address="agent@example.com",
+            is_primary=True,
+        )
+        inbound = PersistentAgentMessage.objects.filter(
+            owner_agent=self.agent,
+            is_outbound=False,
+        ).latest("timestamp")
+        trigger_step = PersistentAgentStep.objects.create(agent=self.agent, description="Scheduled run")
+        PersistentAgentSystemStep.objects.create(
+            step=trigger_step,
+            code=PersistentAgentSystemStep.Code.PROACTIVE_TRIGGER,
+        )
+        PersistentAgentStep.objects.filter(pk=trigger_step.pk).update(
+            created_at=inbound.timestamp + timedelta(seconds=1),
+        )
+
+        result = execute_send_chat_message(
+            self.agent,
+            {"body": "Scheduled report", "to_address": self.user_address},
+        )
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("configured delivery channel", result["message"])
+        self.assertIs(result["retryable"], False)
+        self.assertNotIn("terminal_error", result)
 
     @tag("batch_agent_chat")
     def test_web_chat_tool_allows_during_visibility_grace_window(self):
@@ -3952,6 +3999,9 @@ class AgentChatAPITests(TestCase):
         )
         self.assertEqual(rejected["status"], "error")
         self.assertIn("No active web chat session", rejected["message"])
+        self.assertIn("Do not move this reply", rejected["message"])
+        self.assertIs(rejected["retryable"], False)
+        self.assertIs(rejected["terminal_error"], True)
 
     @tag("batch_agent_chat")
     def test_web_chat_tool_allows_after_visibility_grace_when_web_is_only_channel(self):
