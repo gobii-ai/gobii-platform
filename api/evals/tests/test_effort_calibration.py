@@ -27,6 +27,7 @@ from api.evals.scenarios.effort_calibration import (
     EFFORT_TOOL_WAIT_NEXT_SCHEDULE_REQUIRES_SCHEDULE,
     EFFORT_UNSCHEDULED_REMAINING_WORK_SETS_RESUME,
     EffortCalibrationScenario,
+    EffortSimpleCurrentCompanyReportScenario,
     EffortTrivialAnswerStopsScenario,
     _find_near_duplicate_texts,
     _hierarchical_report_shape,
@@ -157,6 +158,47 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
         )
 
         self.assertTrue(ok, summary)
+
+    def test_current_company_report_requires_product_funding_and_customer_result(self):
+        groups = EffortSimpleCurrentCompanyReportScenario.required_concept_groups
+        self.assertEqual(len(groups), 4)
+
+        body = (
+            "## Northstar Robotics\n\n"
+            "### Current signals\n\n"
+            "Atlas is the product launch. The Series B funds expansion. "
+            "A pilot improved pick-pack cycles by 18 percent.\n\n"
+            "Sources: https://northstar.example.test/blog/atlas-launch and "
+            "https://news.example.test/northstar-series-b"
+        )
+        ok, summary = _hierarchical_report_shape(
+            body,
+            source_urls=(
+                "https://northstar.example.test/blog/atlas-launch",
+                "https://news.example.test/northstar-series-b",
+            ),
+            min_source_count=2,
+            min_chars=150,
+            max_chars=1000,
+            required_any_groups=groups,
+        )
+
+        self.assertTrue(ok, summary)
+
+        missing_outcome, summary = _hierarchical_report_shape(
+            body.replace("A pilot improved pick-pack cycles by 18 percent.", "Customer pilots are underway."),
+            source_urls=(
+                "https://northstar.example.test/blog/atlas-launch",
+                "https://news.example.test/northstar-series-b",
+            ),
+            min_source_count=2,
+            min_chars=150,
+            max_chars=1000,
+            required_any_groups=groups,
+        )
+
+        self.assertFalse(missing_outcome)
+        self.assertIn("18 percent", summary)
 
     def test_sqlite_tool_result_sourced_answer_rejects_progress_before_final(self):
         scenario, recorded = SqliteToolResultScenario(), []

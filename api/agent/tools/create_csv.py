@@ -6,8 +6,6 @@ from api.models import PersistentAgent
 from api.agent.tools.file_export_helpers import resolve_export_target, write_agent_export
 from .sqlite_query_runner import run_sqlite_select
 
-EXTENSION = ".csv"
-MIME_TYPE = "text/csv"
 MAX_EXPORT_ROWS = 5000
 
 
@@ -18,7 +16,7 @@ def get_create_csv_tool() -> Dict[str, Any]:
             "name": "create_csv",
             "description": (
                 "Create a CSV file and store it in the agent filespace. "
-                "Provide either raw CSV text or a SQLite SELECT query to export query results. "
+                "Provide exactly one content source: raw CSV text, or a SQLite SELECT query for data already in SQLite. "
                 "Recommended path: /exports/your-file.csv. Returns `file`, `inline`, `inline_html`, and `attach`."
             ),
             "parameters": {
@@ -58,10 +56,8 @@ def execute_create_csv(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
     csv_text = params.get("csv_text")
     query = params.get("query")
 
-    if not csv_text and not query:
-        return {"status": "error", "message": "Provide either csv_text or query."}
-    if csv_text and query:
-        return {"status": "error", "message": "Use csv_text OR query, not both."}
+    if bool(csv_text) == bool(query):
+        return {"status": "error", "message": "Provide exactly one of csv_text or query."}
 
     path, overwrite, error = resolve_export_target(params, agent_id=agent.id)
     if error:
@@ -92,8 +88,8 @@ def execute_create_csv(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
     return write_agent_export(
         agent=agent,
         content_bytes=csv_text_to_write.encode("utf-8"),
-        extension=EXTENSION,
-        mime_type=MIME_TYPE,
+        extension=".csv",
+        mime_type="text/csv",
         path=path,
         overwrite=overwrite,
         size_label="CSV",

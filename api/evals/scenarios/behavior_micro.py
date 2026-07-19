@@ -1,6 +1,8 @@
+import csv
+import io
+import json
 from copy import deepcopy
 from dataclasses import dataclass, field
-import json
 
 from api.agent.comms.human_input_requests import MAX_OPTION_COUNT, dismiss_human_input_request
 from api.agent.core.processing_flags import get_human_inbound_generation
@@ -18,6 +20,7 @@ from api.evals.stop_policy import (
     sqlite_batch_mutates_planning_state,
 )
 from api.models import (
+    AgentFsNode,
     EvalRunTask,
     CommsAllowlistEntry,
     CommsChannel,
@@ -2228,7 +2231,7 @@ class ToolChoiceExactJsonUrlUsesHttpRequestScenario(BehaviorMicroScenario):
 @register_scenario
 class ToolChoiceCsvDeliverableUsesCreateCsvScenario(BehaviorMicroScenario):
     slug = TOOL_CHOICE_CSV_DELIVERABLE_USES_CREATE_CSV
-    description = "A downloadable CSV request should use create_csv."
+    description = "A downloadable CSV request should execute create_csv and persist the requested rows."
     category = "files"
     tags = ("agent_behavior", "micro", "tool_choice", "files")
     tasks = [
@@ -2241,15 +2244,6 @@ class ToolChoiceCsvDeliverableUsesCreateCsvScenario(BehaviorMicroScenario):
         self._seed_prior_processing_run(agent_id)
         self._enable_builtin_tools(agent_id, ["create_csv"])
 
-        mock_config = {
-            "create_csv": {
-                "status": "ok",
-                "file": {"path": "/exports/q1-leads.csv"},
-                "message": "CSV created.",
-            },
-            "create_file": {"status": "error", "message": "Use create_csv for CSV deliverables."},
-        }
-
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="inject_prompt")
         with self.wait_for_agent_idle(agent_id, timeout=120):
             inbound = self.inject_message(
@@ -2260,10 +2254,12 @@ class ToolChoiceCsvDeliverableUsesCreateCsvScenario(BehaviorMicroScenario):
                 ),
                 trigger_processing=True,
                 eval_run_id=run_id,
-                mock_config=mock_config,
                 eval_stop_policy={
-                    "stop_on_tool_names": ["create_file"],
-                    "stop_when_all_seen": [{"tool_name": "create_csv"}],
+                    "stop_on_tool_names_after_execution": ["create_csv"],
+                    "stop_on_unexpected_relevant_tool": True,
+                    "allowed_tool_names": ["create_csv"],
+                    "ignored_tool_names": ["update_plan", "send_chat_message", "sleep_until_next_trigger"],
+                    "max_relevant_tool_calls": 3,
                 },
             )
         self.record_task_result(
@@ -2277,14 +2273,51 @@ class ToolChoiceCsvDeliverableUsesCreateCsvScenario(BehaviorMicroScenario):
 
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="verify_create_csv")
         create_csv_calls = get_tool_calls_for_run(run_id, after=inbound.timestamp, tool_names={"create_csv"})
-        if create_csv_calls:
+        successful_calls = []
+        for call in create_csv_calls:
+            result = call.result
+            if isinstance(result, str):
+                try:
+                    result = json.loads(result)
+                except json.JSONDecodeError:
+                    result = {}
+            if (
+                str(call.status or "").lower() == "complete"
+                and isinstance(result, dict)
+                and result.get("status") == "ok"
+                and result.get("file") == "$[/exports/q1-leads.csv]"
+            ):
+                successful_calls.append(call)
+
+        node = AgentFsNode.objects.filter(
+            created_by_agent_id=agent_id,
+            path="/exports/q1-leads.csv",
+        ).alive().first()
+        rows = []
+        read_error = None
+        if node is None or not node.content.name:
+            read_error = "missing content"
+        else:
+            try:
+                with node.content.open("rb") as handle:
+                    rows = list(csv.reader(io.StringIO(handle.read().decode("utf-8"))))
+            except (OSError, ValueError, UnicodeDecodeError, csv.Error) as exc:
+                read_error = exc.__class__.__name__
+
+        expected_rows = [
+            ["company", "priority"],
+            ["Acme", "high"],
+            ["Globex", "medium"],
+            ["Initech", "low"],
+        ]
+        if len(successful_calls) == 1 and len(create_csv_calls) == 1 and read_error is None and rows == expected_rows:
             self.record_task_result(
                 run_id,
                 None,
                 EvalRunTask.Status.PASSED,
                 task_name="verify_create_csv",
-                observed_summary="Agent used create_csv for the CSV deliverable.",
-                artifacts={"step": create_csv_calls[0].step},
+                observed_summary="Agent executed create_csv once and persisted the requested header and three rows.",
+                artifacts={"step": successful_calls[0].step},
             )
         else:
             self.record_task_result(
@@ -2292,7 +2325,12 @@ class ToolChoiceCsvDeliverableUsesCreateCsvScenario(BehaviorMicroScenario):
                 None,
                 EvalRunTask.Status.FAILED,
                 task_name="verify_create_csv",
-                observed_summary="Agent did not use create_csv for the CSV deliverable.",
+                observed_summary=(
+                    f"Expected one successful create_csv and exact persisted rows; saw "
+                    f"{len(create_csv_calls)} call(s), {len(successful_calls)} success(es), "
+                    f"read_error={read_error}, rows={rows}."
+                ),
+                artifacts={"step": create_csv_calls[0].step} if create_csv_calls else {},
             )
 
 
