@@ -1,0 +1,93 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="720" viewBox="0 0 1200 720" role="img" aria-labelledby="title desc">
+  <title id="title">Where control flow lives across three AI architectures</title>
+  <desc id="desc">A comparison of a model API, a deterministic workflow, and an agentic API. The caller controls each model request, application code controls a known workflow path, and a supervised agent runtime chooses bounded next steps until an outcome, limit, or escalation.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#050816"/>
+      <stop offset="1" stop-color="#17143d"/>
+    </linearGradient>
+    <linearGradient id="agentNode" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4338ca"/>
+      <stop offset="1" stop-color="#2563eb"/>
+    </linearGradient>
+    <marker id="blueArrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L10,5 L0,10 z" fill="#60a5fa"/>
+    </marker>
+    <marker id="violetArrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L10,5 L0,10 z" fill="#a78bfa"/>
+    </marker>
+  </defs>
+
+  <rect width="1200" height="720" rx="32" fill="url(#background)"/>
+
+  <g font-family="Inter, ui-sans-serif, system-ui, sans-serif">
+    <text x="64" y="68" fill="#ffffff" font-size="30" font-weight="760">Where does control flow live?</text>
+    <text x="64" y="101" fill="#c7d2fe" font-size="17">The meaningful boundary is who chooses the next step, not whether a model can call a tool.</text>
+
+    <g transform="translate(64 146)">
+      <rect width="1072" height="142" rx="22" fill="#10172d" stroke="#334155" stroke-width="2"/>
+      <text x="28" y="36" fill="#93c5fd" font-size="15" font-weight="700" letter-spacing="1.4">MODEL API</text>
+      <text x="28" y="67" fill="#ffffff" font-size="21" font-weight="720">Caller owns each request</text>
+      <text x="28" y="99" fill="#cbd5e1" font-size="15">Best for one bounded generation, extraction, or classification.</text>
+
+      <g transform="translate(500 34)">
+        <rect width="126" height="66" rx="15" fill="#172554" stroke="#60a5fa" stroke-width="2"/>
+        <text x="63" y="40" text-anchor="middle" fill="#dbeafe" font-size="16" font-weight="680">Request</text>
+        <path d="M134 33 H188" fill="none" stroke="#60a5fa" stroke-width="4" marker-end="url(#blueArrow)"/>
+        <rect x="200" width="126" height="66" rx="15" fill="#1e3a8a" stroke="#93c5fd" stroke-width="2"/>
+        <text x="263" y="40" text-anchor="middle" fill="#ffffff" font-size="16" font-weight="680">Model</text>
+        <path d="M334 33 H388" fill="none" stroke="#60a5fa" stroke-width="4" marker-end="url(#blueArrow)"/>
+        <rect x="400" width="126" height="66" rx="15" fill="#172554" stroke="#60a5fa" stroke-width="2"/>
+        <text x="463" y="40" text-anchor="middle" fill="#dbeafe" font-size="16" font-weight="680">Response</text>
+      </g>
+    </g>
+
+    <g transform="translate(64 310)">
+      <rect width="1072" height="158" rx="22" fill="#12172f" stroke="#4c1d95" stroke-width="2"/>
+      <text x="28" y="36" fill="#c4b5fd" font-size="15" font-weight="700" letter-spacing="1.4">DETERMINISTIC WORKFLOW</text>
+      <text x="28" y="67" fill="#ffffff" font-size="21" font-weight="720">Application code owns the path</text>
+      <text x="28" y="99" fill="#cbd5e1" font-size="15">Best when steps and branches are known before execution.</text>
+
+      <g transform="translate(500 32)">
+        <rect width="112" height="66" rx="15" fill="#2e1065" stroke="#a78bfa" stroke-width="2"/>
+        <text x="56" y="40" text-anchor="middle" fill="#ede9fe" font-size="16" font-weight="680">Step</text>
+        <path d="M120 33 H166" fill="none" stroke="#a78bfa" stroke-width="4" marker-end="url(#violetArrow)"/>
+        <path d="M208 0 L250 33 L208 66 L166 33 Z" fill="#4c1d95" stroke="#c4b5fd" stroke-width="2"/>
+        <text x="208" y="38" text-anchor="middle" fill="#ffffff" font-size="14" font-weight="680">Rule</text>
+        <path d="M250 33 H290 V13 H326" fill="none" stroke="#a78bfa" stroke-width="4" marker-end="url(#violetArrow)"/>
+        <path d="M250 33 H290 V73 H326" fill="none" stroke="#a78bfa" stroke-width="4"/>
+        <rect x="338" y="-20" width="112" height="58" rx="14" fill="#2e1065" stroke="#a78bfa" stroke-width="2"/>
+        <text x="394" y="15" text-anchor="middle" fill="#ede9fe" font-size="15" font-weight="680">Path A</text>
+        <rect x="338" y="48" width="112" height="58" rx="14" fill="#2e1065" stroke="#a78bfa" stroke-width="2"/>
+        <text x="394" y="83" text-anchor="middle" fill="#ede9fe" font-size="15" font-weight="680">Path B</text>
+        <path d="M458 9 H486 V43 H526" fill="none" stroke="#a78bfa" stroke-width="4"/>
+        <path d="M458 77 H486 V43 H526" fill="none" stroke="#a78bfa" stroke-width="4" marker-end="url(#violetArrow)"/>
+      </g>
+    </g>
+
+    <g transform="translate(64 490)">
+      <rect width="1072" height="166" rx="22" fill="#15153c" stroke="#6366f1" stroke-width="2"/>
+      <text x="28" y="36" fill="#a5b4fc" font-size="15" font-weight="700" letter-spacing="1.4">SUPERVISED AGENTIC API</text>
+      <text x="28" y="67" fill="#ffffff" font-size="21" font-weight="720">Runtime owns bounded next steps</text>
+      <text x="28" y="99" fill="#cbd5e1" font-size="15">Best for dynamic, tool-dependent work with exceptions.</text>
+      <text x="28" y="130" fill="#a5b4fc" font-size="14">Stops at an outcome, limit, checkpoint, or escalation.</text>
+
+      <g transform="translate(506 31)">
+        <rect width="112" height="72" rx="16" fill="#1e1b4b" stroke="#818cf8" stroke-width="2"/>
+        <text x="56" y="43" text-anchor="middle" fill="#e0e7ff" font-size="16" font-weight="680">Goal</text>
+        <path d="M120 36 H168" fill="none" stroke="#818cf8" stroke-width="4" marker-end="url(#violetArrow)"/>
+        <circle cx="250" cy="36" r="70" fill="url(#agentNode)" stroke="#a5b4fc" stroke-width="3"/>
+        <text x="250" y="22" text-anchor="middle" fill="#ffffff" font-size="16" font-weight="720">Plan</text>
+        <text x="250" y="43" text-anchor="middle" fill="#ffffff" font-size="16" font-weight="720">Act</text>
+        <text x="250" y="64" text-anchor="middle" fill="#ffffff" font-size="16" font-weight="720">Observe</text>
+        <path d="M216 -15 C277 -43 321 -2 315 47" fill="none" stroke="#c4b5fd" stroke-width="3" marker-end="url(#violetArrow)"/>
+        <path d="M318 36 H372" fill="none" stroke="#818cf8" stroke-width="4" marker-end="url(#blueArrow)"/>
+        <rect x="384" y="0" width="132" height="72" rx="16" fill="#172554" stroke="#60a5fa" stroke-width="2"/>
+        <text x="450" y="31" text-anchor="middle" fill="#dbeafe" font-size="15" font-weight="680">Checkpoint</text>
+        <text x="450" y="52" text-anchor="middle" fill="#dbeafe" font-size="15" font-weight="680">or result</text>
+      </g>
+    </g>
+
+    <text x="64" y="694" fill="#94a3b8" font-size="14">Authorization remains deterministic in every architecture.</text>
+  </g>
+</svg>
