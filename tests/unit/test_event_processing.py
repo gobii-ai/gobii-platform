@@ -1773,7 +1773,7 @@ class PromptContextBuilderTests(TestCase):
         content = system_message["content"]
 
         self.assertIn(
-            "__files: node_id, path, name, mime_type, size_bytes, updated_at. Metadata only; use read_file for known-path contents.",
+            "__files: node_id, path, name, mime_type, size_bytes, updated_at. Metadata only; read_file gets known-path contents.",
             content,
         )
         self.assertNotIn("Query __tool_results and __files with sqlite_batch (not read_file).", content)

@@ -5909,31 +5909,26 @@ def _run_agent_loop(
         queued_inbound_generation = max(0, int(inbound_generation or 0))
     except (TypeError, ValueError):
         queued_inbound_generation = 0
-    routing_scope_tokens = [
-        bind_inbound_routing_scope(
-            capture_inbound_routing_scope(
-                agent,
-                pending_inbound=(
-                    max(routing_scope_generation, queued_inbound_generation) > consumed_inbound_generation
-                ),
-                background_before=process_started_at,
-            )
-        )
-    ]
-
-    def _refresh_inbound_routing_scope(generation: int) -> None:
-        nonlocal routing_scope_generation
-        routing_scope_tokens.append(
-            bind_inbound_routing_scope(capture_inbound_routing_scope(agent, pending_inbound=True))
-        )
-        routing_scope_generation = generation
-
-    prompt_run_cache = PromptRunCache(
-        agent_id=str(agent.id),
-        snapshot_reuse_enabled=settings.AGENT_PROMPT_RUN_CACHE_ENABLED,
-    )
-    prompt_run_cache_token = bind_prompt_run_cache(prompt_run_cache)
+    routing_scope_tokens, prompt_run_cache_token = [], None
     try:
+        has_pending_inbound = max(routing_scope_generation, queued_inbound_generation) > consumed_inbound_generation
+        initial_routing_scope = capture_inbound_routing_scope(
+            agent, pending_inbound=has_pending_inbound, background_before=process_started_at
+        )
+        routing_scope_tokens.append(bind_inbound_routing_scope(initial_routing_scope))
+
+        def _refresh_inbound_routing_scope(generation: int) -> None:
+            nonlocal routing_scope_generation
+            routing_scope_tokens.append(
+                bind_inbound_routing_scope(capture_inbound_routing_scope(agent, pending_inbound=True))
+            )
+            routing_scope_generation = generation
+
+        prompt_run_cache = PromptRunCache(
+            agent_id=str(agent.id),
+            snapshot_reuse_enabled=settings.AGENT_PROMPT_RUN_CACHE_ENABLED,
+        )
+        prompt_run_cache_token = bind_prompt_run_cache(prompt_run_cache)
         for i in range(max_remaining):
             previous_planning_state = current_planning_state
             try:
@@ -6912,7 +6907,8 @@ def _run_agent_loop(
 
         return cumulative_token_usage
     finally:
-        reset_prompt_run_cache(prompt_run_cache_token)
+        if prompt_run_cache_token is not None:
+            reset_prompt_run_cache(prompt_run_cache_token)
         for routing_scope_token in reversed(routing_scope_tokens):
             reset_inbound_routing_scope(routing_scope_token)
         clear_runtime_tier_override(agent)

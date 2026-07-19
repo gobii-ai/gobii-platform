@@ -12,6 +12,7 @@ from api.agent.core import event_processing as ep
 from api.agent.comms.routing import (
     bind_inbound_routing_scope,
     capture_inbound_routing_scope,
+    get_bound_inbound_routing_scope,
     reset_inbound_routing_scope,
 )
 from api.agent.core.internal_reasoning import INTERNAL_REASONING_PREFIX
@@ -102,6 +103,13 @@ class ImpliedSendTests(TestCase):
                 "mobile_first_html": "<p>A natural, low-pressure note.</p>",
             },
         )
+
+    def test_run_setup_resets_inbound_scope_when_prompt_cache_setup_fails(self):
+        with patch.object(ep, "PromptRunCache", side_effect=RuntimeError("cache setup failed")), \
+             self.assertRaisesRegex(RuntimeError, "cache setup failed"):
+            ep._run_agent_loop(self.agent, is_first_run=False)
+
+        self.assertIsNone(get_bound_inbound_routing_scope(self.agent))
 
     def test_search_tools_is_a_discovery_barrier_for_same_batch_work(self):
         search_call = {"function": {"name": "search_tools", "arguments": '{"query":"meta gobii"}'}}

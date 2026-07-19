@@ -71,7 +71,7 @@ def _latest_inbound_message(
     )
     if exclude_webhooks:
         messages = messages.exclude(
-            conversation__channel=CommsChannel.OTHER, raw_payload__source_kind__iexact="webhook"
+            conversation__channel=CommsChannel.OTHER, raw_payload__source_kind="webhook"
         )
     return messages.select_related("conversation", "from_endpoint").order_by("-timestamp", "-seq").first()
 
