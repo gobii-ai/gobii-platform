@@ -1,3 +1,6 @@
+from decimal import Decimal
+from unittest.mock import patch
+
 from allauth.account.models import EmailAddress
 from django.contrib.auth import get_user_model
 from django.test import SimpleTestCase, TestCase, tag
@@ -15,6 +18,36 @@ from api.models import (
 
 @tag("batch_promptree")
 class PromptContextSqliteGuidanceTests(SimpleTestCase):
+    def test_sqlite_guidance_tracks_bounded_set_coverage(self):
+        guidance = prompt_context._get_sqlite_guidance()
+
+        self.assertIn("sizable domains as keyed entities/events/relations", guidance)
+        self.assertIn("coverage rows with status/fields/source", guidance)
+        self.assertIn("query unresolved rows before reporting", guidance)
+
+    def test_low_iteration_warning_keeps_unfinished_work_active(self):
+        collector = _NestedPromptSectionCollector()
+        with (
+            patch("api.agent.core.prompt_context.get_budget_context", return_value=None),
+            patch("api.agent.core.prompt_context.get_browser_daily_task_limit", return_value=None),
+            patch(
+                "api.agent.core.prompt_context.get_tool_cost_overview",
+                return_value=(Decimal("1"), {}),
+            ),
+        ):
+            added = prompt_context.add_budget_awareness_sections(
+                collector,
+                current_iteration=9,
+                max_iterations=10,
+            )
+
+        warning = collector.sections["iteration_warning"]
+        self.assertTrue(added)
+        self.assertIn("never false-complete", warning)
+        self.assertIn("remaining scope", warning)
+        self.assertIn("continue", warning)
+        self.assertNotIn("set a schedule", warning)
+
     def test_sqlite_retry_warning_flags_repeated_empty_probes(self):
         warning = prompt_context._build_sqlite_retry_warning(
             [
@@ -81,6 +114,11 @@ class _PromptSectionCollector:
 
     def section_text(self, name, text, **_kwargs):
         self.sections[name] = text
+
+
+class _NestedPromptSectionCollector(_PromptSectionCollector):
+    def group(self, *_args, **_kwargs):
+        return self
 
 
 class _NoopSpan:

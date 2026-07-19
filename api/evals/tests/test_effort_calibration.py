@@ -39,14 +39,24 @@ from api.evals.scenarios.monitor_pollution import BACKGROUND_DRAIN_TIMEOUT_SECON
 from api.evals.scenarios.sqlite_tool_results import (
     INVENTORY_URLS,
     LISTING_URLS,
+    PORTFOLIO_COMPANIES,
+    PORTFOLIO_DETAIL_URLS,
+    PORTFOLIO_INDEX_URL,
+    SOURCE_URLS,
+    SQLITE_BOUNDED_PORTFOLIO_REPORT,
     SQLITE_ITEM_LINK_REPORT,
+    SQLITE_NATURAL_RESULT_ACCESS,
     SQLITE_TOOL_RESULT_SCENARIO_SLUGS,
     SQLITE_TOOL_RESULT_SUITE_SLUG,
+    SqliteBoundedPortfolioReportScenario,
     SqliteDedupeRequeryScenario,
     SqliteIntermediateWorkingTableScenario,
     SqliteItemLinkReportScenario,
+    SqliteMultiResultWebSynthesisScenario,
+    SqliteNaturalResultAccessScenario,
     SqliteToolResultScenario,
     _decision_model_tables,
+    _portfolio_mock,
 )
 from api.evals.stop_policy import should_stop_for_eval_policy
 from api.evals.suites import SuiteRegistry
@@ -61,6 +71,16 @@ from api.models import (
     PersistentAgentStep,
     PersistentAgentToolCall,
 )
+
+
+def _eval_tool_call(tool_name, tool_params=None, *, step=None, result='{"status":"ok"}'):
+    return SimpleNamespace(
+        step=step or tool_name,
+        tool_name=tool_name,
+        tool_params=tool_params or {},
+        status="complete",
+        result=result,
+    )
 
 
 @tag("eval_sim")
@@ -83,6 +103,218 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
         self.assertIsNotNone(suite)
         self.assertEqual(suite.scenario_slugs, SQLITE_TOOL_RESULT_SCENARIO_SLUGS)
         self.assertIn(SQLITE_ITEM_LINK_REPORT, suite.scenario_slugs)
+        self.assertIn(SQLITE_NATURAL_RESULT_ACCESS, suite.scenario_slugs)
+        self.assertIn(SQLITE_BOUNDED_PORTFOLIO_REPORT, suite.scenario_slugs)
+
+    def test_trajectory_regression_prompts_do_not_prescribe_tools_or_format(self):
+        prompts = (
+            SqliteNaturalResultAccessScenario.prompt,
+            SqliteBoundedPortfolioReportScenario.prompt,
+        )
+
+        for prompt in prompts:
+            lowered = prompt.casefold()
+            for prescription in ("sqlite", "__tool_results", "read_file", "table", "markdown", "heading", "emoji"):
+                with self.subTest(prompt=prompt, prescription=prescription):
+                    self.assertNotIn(prescription, lowered)
+        rubric = SqliteBoundedPortfolioReportScenario._hierarchy_judge_question()
+        self.assertIn("one repetitive heading per company", rubric)
+        self.assertIn("Do not require a table, emoji", rubric)
+
+    def test_natural_result_access_requires_aggregate_sqlite_for_large_fixture(self):
+        scenario, recorded = SqliteNaturalResultAccessScenario(), []
+        scenario.record_task_result = lambda *args, **kwargs: recorded.append((args, kwargs))
+        calls = [
+            *[_eval_tool_call("mcp_brightdata_scrape_as_markdown", {"url": url}) for url in SOURCE_URLS],
+            _eval_tool_call("sqlite_batch", {"sql": (
+                "WITH pages AS (SELECT result_id, result_text FROM __tool_results "
+                "WHERE tool_name='mcp_brightdata_scrape_as_markdown') "
+                "SELECT result_id, substr(result_text, 30000, 4000) FROM pages ORDER BY result_id;"
+            )}),
+        ]
+        with patch("api.evals.scenarios.sqlite_tool_results._tool_calls_for_run", return_value=calls):
+            self.assertTrue(scenario._record_result_access(
+                "run", after=None,
+                task_name="verify_natural_result_access",
+                source_urls=SOURCE_URLS,
+            ))
+
+        calls.append(_eval_tool_call("read_file", {"path": "$[tool_results/abc/result_text]"}))
+        with patch("api.evals.scenarios.sqlite_tool_results._tool_calls_for_run", return_value=calls):
+            self.assertFalse(scenario._record_result_access(
+                "run", after=None,
+                task_name="verify_natural_result_access",
+                source_urls=SOURCE_URLS,
+            ))
+        self.assertIn("read_file used for web results", recorded[-1][1]["observed_summary"])
+
+        oversized_calls = calls[:-2] + [_eval_tool_call(
+            "sqlite_batch",
+            {"sql": "SELECT result_id, result_text FROM __tool_results ORDER BY result_id"},
+            result="x" * 40_000,
+        )]
+        with patch("api.evals.scenarios.sqlite_tool_results._tool_calls_for_run", return_value=oversized_calls):
+            self.assertFalse(scenario._record_result_access(
+                "run", after=None, task_name="verify_natural_result_access", source_urls=SOURCE_URLS,
+            ))
+        self.assertIn("oversized SQLite result", recorded[-1][1]["observed_summary"])
+
+    def test_portfolio_requires_complete_unique_research_and_terminal_report(self):
+        scenario, recorded = SqliteBoundedPortfolioReportScenario(), []
+        scenario.record_task_result = lambda *args, **kwargs: recorded.append((args, kwargs))
+        fetches = [
+            _eval_tool_call("mcp_brightdata_scrape_as_markdown", {"url": url})
+            for url in (PORTFOLIO_INDEX_URL, *PORTFOLIO_DETAIL_URLS)
+        ]
+        sqlite = _eval_tool_call("sqlite_batch", {"sql": (
+            "SELECT result_id, substr(result_text, 35000, 6000) FROM __tool_results "
+            "WHERE tool_name='mcp_brightdata_scrape_as_markdown' ORDER BY result_id"
+        )})
+        body = "\n".join(
+            f"{company}: {founder}. {background} [{company}]({url})"
+            for (_slug, company, founder, _background_term, background), url in zip(
+                PORTFOLIO_COMPANIES,
+                PORTFOLIO_DETAIL_URLS,
+            )
+        )
+        final = _eval_tool_call("send_chat_message", {"body": body, "will_continue_work": False})
+        calls = [*fetches, sqlite, final]
+        with patch("api.evals.scenarios.sqlite_tool_results._tool_calls_for_run", return_value=calls):
+            self.assertTrue(scenario._record_result_access(
+                "run", after=None, task_name="verify_result_access",
+                source_urls=(PORTFOLIO_INDEX_URL, *PORTFOLIO_DETAIL_URLS),
+                reject_duplicate_fetches=True,
+            ))
+            self.assertEqual(scenario._record_complete_terminal_report("run", after=None), body)
+        self.assertEqual(recorded[-1][0][2], EvalRunTask.Status.PASSED)
+
+        bad_calls = [*fetches[:-1], fetches[1], sqlite, _eval_tool_call(
+            "send_chat_message",
+            {"body": body.replace(PORTFOLIO_DETAIL_URLS[-1], "source pending"), "will_continue_work": False},
+        )]
+        with patch("api.evals.scenarios.sqlite_tool_results._tool_calls_for_run", return_value=bad_calls):
+            self.assertFalse(scenario._record_result_access(
+                "run", after=None, task_name="verify_result_access",
+                source_urls=(PORTFOLIO_INDEX_URL, *PORTFOLIO_DETAIL_URLS),
+                reject_duplicate_fetches=True,
+            ))
+            scenario._record_complete_terminal_report("run", after=None)
+        self.assertIn("Ternary Field:source", recorded[-1][1]["observed_summary"])
+
+    def test_portfolio_accepts_http_or_scrape_fetches_for_exact_urls(self):
+        scenario, recorded = SqliteBoundedPortfolioReportScenario(), []
+        scenario.record_task_result = lambda *args, **kwargs: recorded.append((args, kwargs))
+        body = "\n".join(
+            f"{company}: {founder}. {background} [{company}]({url})"
+            for (_slug, company, founder, _background_term, background), url in zip(
+                PORTFOLIO_COMPANIES,
+                PORTFOLIO_DETAIL_URLS,
+            )
+        )
+        calls = [
+            *[
+                _eval_tool_call("http_request", {"url": url})
+                for url in (PORTFOLIO_INDEX_URL, *PORTFOLIO_DETAIL_URLS)
+            ],
+            _eval_tool_call("send_chat_message", {"body": body, "will_continue_work": False}),
+        ]
+
+        with patch("api.evals.scenarios.sqlite_tool_results._tool_calls_for_run", return_value=calls):
+            self.assertTrue(scenario._record_result_access(
+                "run",
+                after=None,
+                task_name="verify_result_access",
+                source_urls=(PORTFOLIO_INDEX_URL, *PORTFOLIO_DETAIL_URLS),
+                reject_duplicate_fetches=True,
+            ))
+            self.assertEqual(scenario._record_complete_terminal_report("run", after=None), body)
+
+        mocks = _portfolio_mock()
+        self.assertIn("http_request", mocks)
+        self.assertIn("mcp_brightdata_scrape_as_markdown", mocks)
+
+    def test_portfolio_hierarchy_accepts_real_comparison_table_without_judge_variance(self):
+        scenario, recorded = SqliteBoundedPortfolioReportScenario(), []
+        scenario.record_task_result = lambda *args, **kwargs: recorded.append((args, kwargs))
+        scenario.llm_judge = lambda **kwargs: self.fail("A valid comparison table should not need an LLM judge")
+        rows = "\n".join(
+            f"| [{company}]({url}) | {founder} | {background} |"
+            for (_slug, company, founder, _term, background), url in zip(
+                PORTFOLIO_COMPANIES,
+                PORTFOLIO_DETAIL_URLS,
+            )
+        )
+        body = "Full coverage across all seven companies.\n\n| Company | Founder | Background |\n|---|---|---|\n" + rows
+
+        scenario._record_hierarchy_judgment("run", body)
+
+        self.assertEqual(recorded[-1][0][2], EvalRunTask.Status.PASSED)
+        self.assertIn("Deterministic structure check", recorded[-1][1]["observed_summary"])
+
+    def test_portfolio_hierarchy_still_judges_dummy_table(self):
+        scenario, recorded = SqliteBoundedPortfolioReportScenario(), []
+        scenario.record_task_result = lambda *args, **kwargs: recorded.append((args, kwargs))
+        scenario.llm_judge = lambda **kwargs: ("Fail", "Repetitive unsynthesized sections.")
+
+        dummy_rows = "\n".join(f"| Company {index} | Person {index} | Note {index} |" for index in range(7))
+        scenario._record_hierarchy_judgment(
+            "run",
+            "Coverage complete.\n\n| Company | Founder | Background |\n|---|---|---|\n" + dummy_rows,
+        )
+
+        self.assertEqual(recorded[-1][0][2], EvalRunTask.Status.FAILED)
+
+    def test_portfolio_rejects_shuffled_entity_associations(self):
+        scenario, recorded = SqliteBoundedPortfolioReportScenario(), []
+        scenario.record_task_result = lambda *args, **kwargs: recorded.append((args, kwargs))
+        shifted_details = (*PORTFOLIO_COMPANIES[1:], PORTFOLIO_COMPANIES[0])
+        shifted_urls = (*PORTFOLIO_DETAIL_URLS[1:], PORTFOLIO_DETAIL_URLS[0])
+        rows = "\n".join(
+            f"| {company} | {shifted[2]} | {shifted[4]} | {shifted_url} |"
+            for (_slug, company, *_rest), shifted, shifted_url in zip(
+                PORTFOLIO_COMPANIES,
+                shifted_details,
+                shifted_urls,
+            )
+        )
+        body = (
+            "Full coverage across all seven companies.\n\n"
+            "| Company | Founder | Background | Source |\n|---|---|---|---|\n"
+            + rows
+        )
+        fetches = [
+            _eval_tool_call("http_request", {"url": url})
+            for url in (PORTFOLIO_INDEX_URL, *PORTFOLIO_DETAIL_URLS)
+        ]
+        calls = [
+            *fetches,
+            _eval_tool_call("send_chat_message", {"body": body, "will_continue_work": False}),
+        ]
+
+        self.assertFalse(scenario._has_complete_comparison_table(body))
+        with patch("api.evals.scenarios.sqlite_tool_results._tool_calls_for_run", return_value=calls):
+            scenario._record_complete_terminal_report("run", after=None)
+
+        self.assertEqual(recorded[-1][0][2], EvalRunTask.Status.FAILED)
+        self.assertIn("Aster Forge:association", recorded[-1][1]["observed_summary"])
+
+    def test_portfolio_accepts_entity_blocks_with_nested_field_bullets(self):
+        scenario = SqliteBoundedPortfolioReportScenario()
+        body = "\n\n".join(
+            "\n".join((
+                f"- {company}",
+                f"  - Founder: {founder}",
+                f"  - Background: {background}",
+                f"  - [Source]({url})",
+            ))
+            for (_slug, company, founder, _term, background), url in zip(
+                PORTFOLIO_COMPANIES,
+                PORTFOLIO_DETAIL_URLS,
+            )
+        )
+
+        self.assertEqual(scenario._missing_portfolio_associations(body), [])
+        self.assertFalse(scenario._has_complete_comparison_table(body))
 
     def test_dedupe_requery_answer_assertion_does_not_force_specific_claim_category(self):
         self.assertEqual(SqliteDedupeRequeryScenario.required_terms, ())
@@ -291,6 +523,12 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
 
         for implementation_term in ("sqlite", "__tool_results", "json_extract", "create table", "sql"):
             self.assertNotIn(implementation_term, prompts)
+
+    def test_multi_result_scrape_prompt_uses_canonical_text_column(self):
+        prompt = SqliteMultiResultWebSynthesisScenario.prompt
+
+        self.assertIn("page markdown is in result_text", prompt)
+        self.assertNotIn("result_json", prompt)
 
     def test_monitor_pollution_allows_slow_background_browser_drain(self):
         self.assertGreaterEqual(BACKGROUND_DRAIN_TIMEOUT_SECONDS, 600)

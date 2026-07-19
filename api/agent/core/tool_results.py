@@ -213,19 +213,22 @@ def prepare_tool_results_for_prompt(
             is_fresh_tool_call=is_fresh_tool_call,
         )
 
+        is_scrape_markdown = _is_scrape_as_markdown_tool(record.tool_name)
         meta_text = _format_meta_text(
             result_id,
             meta,
-            analysis=analysis if is_analysis_eligible else None,
+            analysis=None if is_scrape_markdown else analysis if is_analysis_eligible else None,
             stored_in_db=stored_in_db,
             result_is_inline=is_inline,
             context_hint=context_hint,
+            allow_fallback_query_hints=not is_scrape_markdown,
         )
-        if _is_scrape_as_markdown_tool(record.tool_name) and stored_in_db:
+        if is_scrape_markdown and stored_in_db:
             meta_text += (
-                f"\nSCRAPE MARKDOWN: result_text already contains the plain markdown body."
-                f"\nIf you need the original MCP envelope field, use "
-                f"json_extract(result_json,'$.result') FROM __tool_results WHERE result_id='{result_id}'"
+                "\nSCRAPE MARKDOWN: result_text is the page text. For large pages, first query all needed rows with "
+                "both substr(result_text,1,500) AS head and substr(result_text,-1500) AS tail; facts may be at the end. "
+                "If that returns the facts, answer. Never read_file, inspect analysis_json/result_json, or fetch whole blobs; "
+                "use grep_context_all only for a missing named term."
             )
 
         prompt_info[record.step_id] = ToolResultPromptInfo(
@@ -749,11 +752,11 @@ def _build_prompt_preview(
             # SQLite result - just note truncation, no "use query" since this IS the query result
             preview_text = f"{preview_text}\n... [{truncated_bytes} more bytes truncated]"
         elif full_bytes >= HUGE_RESULT_THRESHOLD:
-            # Huge external data - strong guidance to use chunked extraction
+            # Huge external data - strong guidance to search or shape before extraction
             kb_size = full_bytes // 1024
             preview_text = (
                 f"{preview_text}\n"
-                f"... [{kb_size}KB total - USE substr(col,1,2000) to extract chunks]"
+                f"... [{kb_size}KB total - USE QUERY ABOVE to search or sample both ends]"
             )
         else:
             # External data - remind to use query
@@ -772,6 +775,7 @@ def _format_meta_text(
     stored_in_db: bool,
     result_is_inline: bool = False,
     context_hint: Optional[str] = None,
+    allow_fallback_query_hints: bool = True,
 ) -> str:
     """Format metadata and analysis into actionable text for the prompt.
 
@@ -811,7 +815,7 @@ def _format_meta_text(
     # is incomplete or absent. Inline results should be read directly.
     if analysis and analysis.compact_summary and show_query_hints:
         meta_line += "\n" + analysis.compact_summary
-    elif show_query_hints and meta["bytes"] > PREVIEW_TIERS_EXTERNAL[0]:
+    elif allow_fallback_query_hints and show_query_hints and meta["bytes"] > PREVIEW_TIERS_EXTERNAL[0]:
         # Fallback: basic query hints for large results without analysis
         if meta.get("is_json"):
             meta_line += (

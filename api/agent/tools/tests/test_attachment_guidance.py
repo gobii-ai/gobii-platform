@@ -80,15 +80,14 @@ class AttachmentGuidanceTests(SimpleTestCase):
         self.assertIn("styled tables or metric blocks", email_tool["function"]["parameters"]["properties"]["mobile_first_html"]["description"])
         self.assertIn("false when this email is the requested final delivery", email_tool["function"]["parameters"]["properties"]["will_continue_work"]["description"])
         self.assertIn("Do not use this to simulate or confirm an email/SMS delivery", chat_tool["function"]["description"])
-        self.assertIn("metric/status blocks", chat_guidance)
-        self.assertIn("Owner/creator reports", chat_guidance)
-        self.assertIn("even without a report label", chat_guidance)
-        self.assertIn("compact linked tables", chat_guidance)
-        self.assertIn("Address known recipients naturally once", chat_guidance)
+        self.assertIn("Start with the answer/main finding", chat_guidance)
+        self.assertIn("Address known recipients once", chat_guidance)
         self.assertIn("agent-name self-intros", chat_guidance)
-        self.assertIn("owners/creators", chat_tool["function"]["parameters"]["properties"]["body"]["description"])
-        self.assertIn("polished Markdown sections", chat_tool["function"]["parameters"]["properties"]["body"]["description"])
-        self.assertIn("tasteful visual cues", chat_tool["function"]["parameters"]["properties"]["body"]["description"])
+        body_guidance = chat_tool["function"]["parameters"]["properties"]["body"]["description"]
+        self.assertIn("Keep chat/outreach light", body_guidance)
+        self.assertIn("Reports comparing 4+ peers", body_guidance)
+        self.assertIn("one linked table", body_guidance)
+        self.assertIn("a detail URL per row unless incomparable", body_guidance)
 
     def test_create_file_tool_schema_requires_content_or_query(self):
         tool = get_create_file_tool()

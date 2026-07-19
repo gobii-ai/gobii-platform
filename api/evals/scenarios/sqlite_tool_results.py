@@ -26,11 +26,15 @@ SQLITE_MULTI_RESULT_WEB_SYNTHESIS = "sqlite_tool_results_multi_result_web_synthe
 SQLITE_INTERMEDIATE_WORKING_TABLE = "sqlite_tool_results_intermediate_working_table"
 SQLITE_DEDUPE_REQUERY = "sqlite_tool_results_dedupe_requery"
 SQLITE_ITEM_LINK_REPORT = "sqlite_tool_results_item_link_report"
+SQLITE_NATURAL_RESULT_ACCESS = "sqlite_tool_results_natural_result_access"
+SQLITE_BOUNDED_PORTFOLIO_REPORT = "sqlite_tool_results_bounded_portfolio_report"
 SQLITE_TOOL_RESULT_SCENARIO_SLUGS = [
     SQLITE_MULTI_RESULT_WEB_SYNTHESIS,
     SQLITE_INTERMEDIATE_WORKING_TABLE,
     SQLITE_DEDUPE_REQUERY,
     SQLITE_ITEM_LINK_REPORT,
+    SQLITE_NATURAL_RESULT_ACCESS,
+    SQLITE_BOUNDED_PORTFOLIO_REPORT,
 ]
 
 
@@ -43,6 +47,20 @@ LISTING_URLS = (
     "https://listings.example.test/tesla/model-y/vin-7say-003",
     "https://listings.example.test/tesla/model-y/vin-7say-004",
     "https://listings.example.test/tesla/model-y/vin-7say-005",
+)
+PORTFOLIO_INDEX_URL = "https://portfolio.example.test/arbor-seed"
+PORTFOLIO_COMPANIES = (
+    ("aster-forge", "Aster Forge", "Mina Patel", "reliability", "Previously led reliability engineering for a global payments network."),
+    ("bramble-health", "Bramble Health", "Jonah Reed", "clinical", "A physician-engineer whose prior work focused on clinical informatics."),
+    ("cinderline", "Cinderline", "Priya Nwosu", "streaming", "Built streaming infrastructure for high-volume logistics systems."),
+    ("driftwood-robotics", "Driftwood Robotics", "Leo Martin", "autonomy", "An autonomy researcher who worked on warehouse navigation."),
+    ("lattice-harbor", "Lattice Harbor", "Naomi Brooks", "security", "Previously ran security operations for a regional bank."),
+    ("quarry-labs", "Quarry Labs", "Evan Cho", "developer", "Created developer tooling for large distributed engineering teams."),
+    ("ternary-field", "Ternary Field", "Sofia Alvarez", "geospatial", "A geospatial modeling specialist from the climate-risk sector."),
+)
+PORTFOLIO_DETAIL_URLS = tuple(
+    f"{PORTFOLIO_INDEX_URL}/{slug}"
+    for slug, _company, _founder, _background_term, _background in PORTFOLIO_COMPANIES
 )
 
 UNIQUE_MODEL_INDEX_RE = re.compile(r'\bcreate\s+unique\s+index\b[^;]*?\bon\s+"?(?P<table>[a-z_]\w*)"?', re.I | re.S)
@@ -124,18 +142,56 @@ INVENTORY_ROWS = (
 )
 
 
-def _large_page(title: str, facts: Iterable[str]) -> str:
+def _large_page(title: str, facts: Iterable[str], *, facts_last: bool = False) -> str:
     body = "\n".join(f"- {fact}" for fact in facts)
+    if facts_last:
+        filler = "\n".join(
+            f"Appendix background {idx}. Routine implementation context covers support workflows and governance."
+            for idx in range(520)
+        )
+        return f"# {title}\n\n## Appendix\n{filler}\n\n## Current details\n{body}"
     filler = "\n".join(f"Appendix note {idx}: implementation details, onboarding checklist, controls, and support workflow context." for idx in range(520))
     return f"# {title}\n\n{body}\n\n## Appendix\n{filler}"
 
 
-def _web_mock() -> dict:
-    pages = {url: _large_page(title, facts) for url, (title, facts) in zip(SOURCE_URLS, WEB_SOURCE_FACTS)}
+def _web_mock(*, facts_last: bool = False) -> dict:
+    pages = {url: _large_page(title, facts, facts_last=facts_last) for url, (title, facts) in zip(SOURCE_URLS, WEB_SOURCE_FACTS)}
     return {
         "mcp_brightdata_search_engine": {"status": "ok", "results": [{"title": title, "url": url, "snippet": facts[1]} for url, (title, facts) in zip(SOURCE_URLS, WEB_SOURCE_FACTS)]},
         "mcp_brightdata_scrape_as_markdown": {"rules": [{"url_contains": url, "result": {"status": "ok", "url": url, "result": page}} for url, page in pages.items()], "default": {"status": "error", "message": "Unknown eval URL."}},
         "search_tools": {"status": "ok", "tools": [{"name": "mcp_brightdata_search_engine", "description": "Search deterministic eval web results."}, {"name": "mcp_brightdata_scrape_as_markdown", "description": "Scrape deterministic eval web pages."}]},
+    }
+
+
+def _portfolio_mock() -> dict:
+    pages = {}
+    for (_slug, company, founder, _background_term, background), url in zip(PORTFOLIO_COMPANIES, PORTFOLIO_DETAIL_URLS):
+        pages[url] = _large_page(f"{company} company profile", (
+                f"Company: {company}",
+                f"Founder: {founder}",
+                f"Background: {background}",
+                f"Source URL: {url}",
+        ), facts_last=True)
+
+    pages[PORTFOLIO_INDEX_URL] = "# Arbor Seed Ventures portfolio\n\n" + "\n".join(
+        f"- [{company}]({url})"
+        for (_slug, company, _founder, _term, _background), url in zip(PORTFOLIO_COMPANIES, PORTFOLIO_DETAIL_URLS)
+    )
+    return {
+        "http_request": {
+            "rules": [
+                {"url_contains": url, "result": {"status": "ok", "status_code": 200, "url": url, "content": page}}
+                for url, page in pages.items()
+            ],
+            "default": {"status": "error", "message": "Unknown eval URL."},
+        },
+        "mcp_brightdata_scrape_as_markdown": {
+            "rules": [
+                {"url_contains": url, "result": {"status": "ok", "url": url, "result": page}}
+                for url, page in pages.items()
+            ],
+            "default": {"status": "error", "message": "Unknown eval URL."},
+        },
     }
 
 
@@ -234,7 +290,19 @@ def _dedupe_mock() -> dict:
     }
 
 
-MOCK_BUILDERS = {"web": _web_mock, "product": _product_mock, "dedupe": _dedupe_mock, "inventory": _inventory_mock}
+MOCK_BUILDERS = {"web": _web_mock, "aged_web": lambda: _web_mock(facts_last=True), "product": _product_mock, "dedupe": _dedupe_mock, "inventory": _inventory_mock}
+
+
+def _source_fetch_counts(calls, *, tool_names: Iterable[str], source_urls: Iterable[str]) -> dict[str, int]:
+    expected = {url.rstrip("/"): 0 for url in source_urls}
+    allowed_tools = set(tool_names)
+    for call in calls:
+        if call.tool_name not in allowed_tools or str(getattr(call, "status", "complete")).lower() != "complete":
+            continue
+        actual_url = str((call.tool_params or {}).get("url") or "").rstrip("/")
+        if actual_url in expected:
+            expected[actual_url] += 1
+    return expected
 
 
 def _sqlite_calls_with_persisted_effects(calls):
@@ -331,6 +399,12 @@ class SqliteToolResultScenario(EvalScenario, ScenarioExecutionTools):
     prompt = ""; mock_kind = ""; verify_task_name = "verify_sqlite_usage"; require_working_table = False; max_relevant_tool_calls = 18; min_sources = 1
     max_single_result_filters = 1
     sourced_answer_task_name = "verify_sourced_answer"
+    result_access_source_urls: tuple[str, ...] = ()
+    reject_duplicate_fetches = False
+    max_result_access_sqlite_calls = 4
+    max_result_access_response_bytes = 32_000
+    result_access_fetch_tools = ("mcp_brightdata_scrape_as_markdown",)
+    require_result_access_sqlite = True
 
     def run(self, run_id: str, agent_id: str) -> None:
         self._ready_agent(agent_id)
@@ -338,7 +412,10 @@ class SqliteToolResultScenario(EvalScenario, ScenarioExecutionTools):
             if names:
                 self._enable_tools(agent_id, names, synthetic=synthetic)
         inbound = self._inject_and_wait(run_id, agent_id, self.prompt, MOCK_BUILDERS[self.mock_kind](), allowed_tool_names={*self.builtin_tools, *self.eval_synthetic_tools, "sqlite_batch", "update_plan", *MESSAGE_TOOL_NAMES, "search_tools"}, max_relevant_tool_calls=self.max_relevant_tool_calls)
-        self._record_sqlite_usage(run_id, after=inbound.timestamp, task_name=self.verify_task_name, require_working_table=self.require_working_table, max_direct_fetches=0, max_single_result_filters=self.max_single_result_filters)
+        if self.result_access_source_urls:
+            self._record_result_access(run_id, after=inbound.timestamp, task_name=self.verify_task_name, source_urls=self.result_access_source_urls, reject_duplicate_fetches=self.reject_duplicate_fetches)
+        else:
+            self._record_sqlite_usage(run_id, after=inbound.timestamp, task_name=self.verify_task_name, require_working_table=self.require_working_table, max_direct_fetches=0, max_single_result_filters=self.max_single_result_filters)
         self._record_sourced_answer(run_id, agent_id=agent_id, after=inbound.timestamp, task_name=self.sourced_answer_task_name, source_urls=self.answer_source_urls, required_terms=self.required_terms, min_sources=self.min_sources)
 
     def _ready_agent(self, agent_id: str) -> None:
@@ -386,6 +463,47 @@ class SqliteToolResultScenario(EvalScenario, ScenarioExecutionTools):
         self.record_task_result(run_id, None, status, task_name=task_name, observed_summary=observed, artifacts={"step": strategy_calls[0].step, "usage": usage} if strategy_calls else {})
         return not failures
 
+    def _record_result_access(self, run_id: str, *, after, task_name: str, source_urls: Iterable[str], reject_duplicate_fetches: bool = False) -> bool:
+        self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name=task_name)
+        calls = _tool_calls_for_run(run_id, after=after)
+        fetch_counts = _source_fetch_counts(calls, tool_names=self.result_access_fetch_tools, source_urls=source_urls)
+        successful_sqlite, strategy_calls = _sqlite_calls_with_persisted_effects([call for call in calls if call.tool_name == "sqlite_batch"])
+        summary = summarize_sqlite_tool_result_calls(strategy_calls)
+        missing = [url for url, count in fetch_counts.items() if count == 0]
+        duplicates = [url for url, count in fetch_counts.items() if count > 1]
+        read_file_calls = [call for call in calls if call.tool_name == "read_file"]
+        oversized_sqlite = [
+            len(str(call.result or "").encode("utf-8"))
+            for call in successful_sqlite
+            if len(str(call.result or "").encode("utf-8")) > self.max_result_access_response_bytes
+        ]
+        failures = [message for failed, message in (
+            (bool(missing), f"missing source fetches={missing}"),
+            (reject_duplicate_fetches and bool(duplicates), f"duplicate source fetches={duplicates}"),
+            (bool(read_file_calls), f"read_file used for web results {len(read_file_calls)} time(s)"),
+            (self.require_result_access_sqlite and not successful_sqlite, "no successful sqlite_batch call observed"),
+            (bool(successful_sqlite) and summary.aggregate_tool_result_queries < 1, "no aggregate __tool_results query observed"),
+            (
+                len(successful_sqlite) > self.max_result_access_sqlite_calls,
+                f"sqlite result-access probes {len(successful_sqlite)} > {self.max_result_access_sqlite_calls}",
+            ),
+            (bool(oversized_sqlite), f"oversized SQLite result bytes={oversized_sqlite}"),
+        ) if failed]
+        evidence = read_file_calls or successful_sqlite[-1:] or strategy_calls or calls
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.FAILED if failures else EvalRunTask.Status.PASSED,
+            task_name=task_name,
+            observed_summary=(
+                "; ".join(failures)
+                if failures
+                else "Fetched every source without file access or wasteful result probing."
+            ),
+            artifacts={"step": evidence[0].step, "fetch_counts": fetch_counts} if evidence else {},
+        )
+        return not failures
+
     def _record_sourced_answer(self, run_id: str, *, agent_id: str, after, task_name: str, source_urls: Iterable[str], required_terms: Iterable[str], min_sources: int) -> bool:
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name=task_name)
         outbound = _outbound_messages_after(agent_id, after)
@@ -426,12 +544,34 @@ class SqliteMultiResultWebSynthesisScenario(SqliteToolResultScenario):
     description = "Multi-result web research should synthesize prior tool outputs with one shaped SQLite query."
     tasks = [ScenarioTask(name="inject_prompt", assertion_type="agent_processing"), ScenarioTask(name="verify_smart_sqlite_synthesis", assertion_type="tool_call"), ScenarioTask(name="verify_sourced_answer", assertion_type="manual")]
     eval_synthetic_tools = ("mcp_brightdata_scrape_as_markdown",)
-    prompt = "Open exactly these support-automation pages with mcp_brightdata_scrape_as_markdown, then use one sqlite_batch CTE/IN/json_extract query over all prior scrape rows in __tool_results; markdown is at result_json $.result. Do not hand-build comparison rows. Recommend for enterprise, SMB, and regulated healthcare, citing URLs.\n\n" + "\n".join(f"- {url}" for url in SOURCE_URLS)
+    prompt = "Open exactly these support-automation pages with mcp_brightdata_scrape_as_markdown, then use one sqlite_batch CTE/IN query over all prior scrape rows in __tool_results; page markdown is in result_text. Do not hand-build comparison rows. Recommend for enterprise, SMB, and regulated healthcare, citing URLs.\n\n" + "\n".join(f"- {url}" for url in SOURCE_URLS)
     mock_kind = "web"
     verify_task_name = "verify_smart_sqlite_synthesis"
     answer_source_urls = SOURCE_URLS
     required_terms = ("enterprise", "SMB", "HIPAA")
     min_sources = 3
+
+
+@register_scenario
+class SqliteNaturalResultAccessScenario(SqliteToolResultScenario):
+    slug = SQLITE_NATURAL_RESULT_ACCESS
+    description = "Large web results should be fetched naturally and synthesized from SQLite without invented filespace paths."
+    tasks = [ScenarioTask(name="inject_prompt", assertion_type="agent_processing"), ScenarioTask(name="verify_natural_result_access", assertion_type="tool_call"), ScenarioTask(name="verify_sourced_answer", assertion_type="manual")]
+    builtin_tools = ("read_file",)
+    eval_synthetic_tools = ("mcp_brightdata_scrape_as_markdown",)
+    prompt = (
+        "Compare these support automation products. Which one best fits an enterprise team, a small team, and a "
+        "regulated healthcare team? Include the evidence and source links you relied on.\n\n"
+        + "\n".join(f"- {url}" for url in SOURCE_URLS)
+    )
+
+    mock_kind = "aged_web"
+    verify_task_name = "verify_natural_result_access"
+    result_access_source_urls = SOURCE_URLS
+    reject_duplicate_fetches = True
+    answer_source_urls = SOURCE_URLS
+    required_terms = ("99.95", "shared inbox", "PHI", "Shopify")
+    min_sources = 4
 
 
 @register_scenario
@@ -607,3 +747,201 @@ class SqliteItemLinkReportScenario(SqliteToolResultScenario):
     min_sources = 2
     max_single_result_filters = 2
     sourced_answer_task_name = "verify_listing_links_in_report"
+
+
+@register_scenario
+class SqliteBoundedPortfolioReportScenario(SqliteToolResultScenario):
+    slug = SQLITE_BOUNDED_PORTFOLIO_REPORT
+    description = "A bounded multi-entity research request should reconcile full source coverage and deliver a useful owner report."
+    cost_class = "medium"
+    tags = (*SqliteToolResultScenario.tags, "coverage", "message_quality", "llm_judge")
+    tasks = [ScenarioTask(name="inject_prompt", assertion_type="agent_processing"), ScenarioTask(name="verify_result_access", assertion_type="tool_call"), ScenarioTask(name="verify_complete_terminal_report", assertion_type="manual"), ScenarioTask(name="judge_report_hierarchy", assertion_type="llm_judge")]
+    prompt = f"Tell me about the founders of every company in Arbor Seed Ventures' current portfolio: {PORTFOLIO_INDEX_URL}"
+    result_access_fetch_tools = ("http_request", "mcp_brightdata_scrape_as_markdown")
+    require_result_access_sqlite = False
+
+    def run(self, run_id: str, agent_id: str) -> None:
+        self._ready_agent(agent_id)
+        self._enable_tools(agent_id, ("http_request", "read_file"))
+        self._enable_tools(agent_id, ("mcp_brightdata_scrape_as_markdown",), synthetic=True)
+        inbound = self._inject_and_wait(
+            run_id, agent_id, self.prompt, _portfolio_mock(),
+            allowed_tool_names={"http_request", "mcp_brightdata_scrape_as_markdown", "read_file", "search_tools", "sqlite_batch", "update_plan", *MESSAGE_TOOL_NAMES},
+            max_relevant_tool_calls=22,
+        )
+        self._record_result_access(run_id, after=inbound.timestamp, task_name="verify_result_access", source_urls=(PORTFOLIO_INDEX_URL, *PORTFOLIO_DETAIL_URLS), reject_duplicate_fetches=True)
+        final_body = self._record_complete_terminal_report(run_id, after=inbound.timestamp)
+        self._record_hierarchy_judgment(run_id, final_body)
+
+    def _record_complete_terminal_report(self, run_id: str, *, after) -> str:
+        task_name = "verify_complete_terminal_report"
+        self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name=task_name)
+        calls = _tool_calls_for_run(run_id, after=after)
+        terminal_calls = [
+            (index, call)
+            for index, call in enumerate(calls)
+            if call.tool_name == "send_chat_message"
+            and (call.tool_params or {}).get("will_continue_work") is False
+            and str(getattr(call, "status", "complete")).lower() == "complete"
+        ]
+        if len(terminal_calls) != 1:
+            self.record_task_result(
+                run_id,
+                None,
+                EvalRunTask.Status.FAILED,
+                task_name=task_name,
+                observed_summary=f"Expected one honest terminal report; found {len(terminal_calls)}.",
+                artifacts={"step": terminal_calls[0][1].step} if terminal_calls else {},
+            )
+            return ""
+
+        final_position, final_call = terminal_calls[0]
+        body = str((final_call.tool_params or {}).get("body") or "")
+        unsupported_unavailable = re.search(r"\b(?:unavailable|unknown|not (?:available|found|public))\b", body, re.I)
+        missing_associations = self._missing_portfolio_associations(body)
+
+        detail_positions = {
+            str((call.tool_params or {}).get("url") or "").rstrip("/"): index
+            for index, call in enumerate(calls)
+            if call.tool_name in self.result_access_fetch_tools
+            and str(getattr(call, "status", "complete")).lower() == "complete"
+        }
+        fetched_before_final = all(detail_positions.get(url, final_position + 1) < final_position for url in PORTFOLIO_DETAIL_URLS)
+        failures = [message for failed, message in (
+            (bool(missing_associations), f"final report missing/mismatched={missing_associations}"),
+            (bool(unsupported_unavailable), "report called researched founder data unavailable or unknown"),
+            (not fetched_before_final, "terminal report was sent before all detail evidence was fetched"),
+        ) if failed]
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.FAILED if failures else EvalRunTask.Status.PASSED,
+            task_name=task_name,
+            observed_summary=(
+                "; ".join(failures)
+                if failures
+                else "Terminal report covered all 7 companies, founders, backgrounds, and item-level sources."
+            ),
+            artifacts={"step": final_call.step, "body_preview": body[:1600]},
+        )
+        return body
+
+    @staticmethod
+    def _portfolio_entity_blocks(body: str) -> list[str]:
+        lines = body.splitlines()
+        blocks = [line for line in lines if line.strip()]
+        blocks.extend(block for block in re.split(r"\n\s*\n", body) if block.strip())
+
+        heading_starts = [
+            index
+            for index, line in enumerate(lines)
+            if re.match(r"^\s{0,3}#{1,6}\s+", line)
+        ]
+        list_starts = []
+        for index, line in enumerate(lines):
+            match = re.match(r"^(?P<indent>\s*)(?:[-*+]|\d+[.)])\s+", line)
+            if match:
+                list_starts.append((index, len(match.group("indent"))))
+
+        for position, start in enumerate(heading_starts):
+            end = heading_starts[position + 1] if position + 1 < len(heading_starts) else len(lines)
+            blocks.append("\n".join(lines[start:end]))
+        for position, (start, indent) in enumerate(list_starts):
+            end = len(lines)
+            for next_start, next_indent in list_starts[position + 1:]:
+                if next_indent <= indent:
+                    end = next_start
+                    break
+            blocks.append("\n".join(lines[start:end]))
+
+        distinct_blocks = dict.fromkeys(block.strip() for block in blocks if block.strip())
+        return [
+            block
+            for block in distinct_blocks
+            if sum(company.casefold() in block.casefold() for _slug, company, *_rest in PORTFOLIO_COMPANIES) == 1
+        ]
+
+    @classmethod
+    def _missing_portfolio_associations(cls, body: str) -> list[str]:
+        folded = body.casefold()
+        blocks = cls._portfolio_entity_blocks(body)
+        missing = []
+        for (_slug, company, founder, background_term, _background), url in zip(
+            PORTFOLIO_COMPANIES,
+            PORTFOLIO_DETAIL_URLS,
+        ):
+            expected = (
+                ("company", company),
+                ("founder", founder),
+                ("background", background_term),
+                ("source", url),
+            )
+            if any(all(value.casefold() in block.casefold() for _label, value in expected) for block in blocks):
+                continue
+            absent = [label for label, value in expected if value.casefold() not in folded]
+            missing.append(f"{company}:{','.join(absent) if absent else 'association'}")
+        return missing
+
+    @staticmethod
+    def _hierarchy_judge_question() -> str:
+        return (
+            "Does this owner-facing seven-company research report use useful, proportionate visual hierarchy? "
+            "Pass only if it leads with the main finding or coverage state and makes peer companies easy to compare "
+            "through a compact linked comparison or sensible grouping. Fail a plain fact wall, one repetitive heading "
+            "per company, repeated labels with no synthesis, or decorative/template-heavy formatting. Do not require "
+            "a table, emoji, or any one Markdown construct."
+        )
+
+    def _record_hierarchy_judgment(self, run_id: str, body: str) -> None:
+        self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="judge_report_hierarchy")
+        choice, reasoning = ("Fail", "No complete terminal report was available to judge.")
+        if self._has_complete_comparison_table(body):
+            choice, reasoning = (
+                "Pass",
+                "Deterministic structure check: one compact Markdown comparison table covers the full bounded set.",
+            )
+        elif body:
+            choice, reasoning = self.llm_judge(
+                question=self._hierarchy_judge_question(),
+                context=f"User request:\n{self.prompt}\n\nDelivered report:\n{body}",
+                options=("Pass", "Fail"),
+            )
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED if choice == "Pass" else EvalRunTask.Status.FAILED,
+            task_name="judge_report_hierarchy",
+            expected_summary="Report should expose coverage and make seven peer entities easy to scan without becoming a catalog wall.",
+            observed_summary=f"LLM judge: {choice}. Reasoning: {reasoning}",
+        )
+
+    @staticmethod
+    def _has_complete_comparison_table(body: str) -> bool:
+        lines = body.splitlines()
+        for separator_index, line in enumerate(lines):
+            if not re.fullmatch(r"\s*\|(?:\s*:?-{3,}:?\s*\|){2,}\s*", line):
+                continue
+            if separator_index == 0 or not lines[separator_index - 1].strip().startswith("|"):
+                continue
+            data_rows = []
+            for row in lines[separator_index + 1:]:
+                stripped = row.strip()
+                if not stripped.startswith("|") or not stripped.endswith("|"):
+                    break
+                data_rows.append(stripped)
+            has_full_evidence = all(
+                any(
+                    company.casefold() in row.casefold()
+                    and founder.casefold() in row.casefold()
+                    and background_term.casefold() in row.casefold()
+                    and url.casefold() in row.casefold()
+                    for row in data_rows
+                )
+                for (_slug, company, founder, background_term, _background), url in zip(
+                    PORTFOLIO_COMPANIES,
+                    PORTFOLIO_DETAIL_URLS,
+                )
+            )
+            if has_full_evidence and "\n".join(lines[:separator_index - 1]).strip():
+                return True
+        return False
