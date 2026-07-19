@@ -123,6 +123,9 @@ class HubSpotNativeScenarioTests(SimpleTestCase):
     def test_response_term_matching_accepts_currency_formatting(self):
         self.assertTrue(response_contains_term("Amount is now $25,000.", "25000"))
 
+    def test_response_term_matching_ignores_markdown_emphasis(self):
+        self.assertTrue(response_contains_term("Only **2** qualify.", "only 2"))
+
     def test_expected_http_request_can_require_body_terms(self):
         create_case = next(case for case in HUBSPOT_NATIVE_CASES if case.slug == HUBSPOT_NATIVE_CREATE_CONTACT)
         expectation = create_case.expected_http_requests[0]

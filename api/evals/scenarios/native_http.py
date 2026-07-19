@@ -116,6 +116,11 @@ def response_contains_term(body: str, term: str) -> bool:
     if term_lower in body_lower:
         return True
 
+    plain_body = re.sub(r"[*_`]", "", body_lower)
+    plain_term = re.sub(r"[*_`]", "", term_lower)
+    if plain_term in plain_body:
+        return True
+
     compact_term = re.sub(r"[$,\s]", "", term_lower)
     if compact_term.isdigit():
         compact_body = re.sub(r"[$,\s]", "", body_lower)
