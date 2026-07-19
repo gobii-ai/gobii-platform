@@ -91,6 +91,11 @@ class RecruitmentSourcingScenarioTests(SimpleTestCase):
         self.assertIn("request_human_input", policy["allowed_tool_names"])
         self.assertTrue(policy["stop_on_human_input_request"])
 
+    def test_intake_response_accepts_must_have_skills_wording(self):
+        case = next(case for case in RECRUITMENT_SOURCING_CASES if case.slug == RECRUITMENT_SOURCING_INTAKE_GATES_SOURCING)
+
+        self.assertIn("must-have skills", case.response_term_groups[0])
+
     def test_criteria_case_includes_decoys_and_requires_exclusion_language(self):
         case = next(case for case in RECRUITMENT_SOURCING_CASES if case.slug == RECRUITMENT_SOURCING_CRITERIA_FIDELITY)
         people_result = case.mock_config["mcp_brightdata_web_data_linkedin_people_search"]["content"]
