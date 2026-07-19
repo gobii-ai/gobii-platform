@@ -854,10 +854,10 @@ class FailedEmailDeliveryRecoveryScenario(EvalScenario, ScenarioExecutionTools):
                 "did not send",
                 "didn't send",
                 "failed to send",
-                "not delivered",
+                "not delivered", "nothing was delivered",
                 "not sent",
                 "provider rejected",
-                "was rejected",
+                "was rejected", "got rejected",
             )
         )
 

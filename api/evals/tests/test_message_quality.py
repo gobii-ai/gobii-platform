@@ -77,7 +77,7 @@ class MessageQualityScenarioTests(SimpleTestCase):
     def test_failed_delivery_notice_requires_clear_non_delivery_language(self):
         self.assertTrue(
             FailedEmailDeliveryRecoveryScenario._notice_reports_failure(
-                "The provider rejected the email, so it was not delivered."
+                "The email got rejected by the provider. Nothing was delivered."
             )
         )
         self.assertFalse(
