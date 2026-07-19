@@ -443,9 +443,8 @@ def get_create_image_tool() -> Dict[str, Any]:
                     "prompt": {
                         "type": "string",
                         "description": (
-                            "Natural-language image prompt describing the desired output. Include enough concrete "
-                            "visual detail for a new asset, edit, style transfer, or art direction. Quote required "
-                            "in-image text, require verbatim rendering, and prohibit extra text."
+                            "Describe the desired image with concrete detail. For required in-image text, quote it, "
+                            "require verbatim rendering, and prohibit extra text."
                         ),
                     },
                     "file_path": {
