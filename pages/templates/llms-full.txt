@@ -15,7 +15,7 @@ Recruiting operations are a major Gobii solution: users enter a role, and Gobii 
 - Gobii home: {{ base_url }}/
 - Teams: {{ base_url }}/teams/
 - Solutions: {{ base_url }}/solutions/
-- API: {{ base_url }}/solutions/engineering/ — Create long-lived AI employees, schedule work, connect tools, send messages, inspect timelines, and manage their lifecycle.
+- Agent API: {{ base_url }}/agent-api/ — Delegate browser work, research, data collection, and multi-step workflows to supervised agents while managing their lifecycle and activity.
 - Documentation: https://docs.gobii.ai/
 - Pricing: {{ base_url }}/pricing/
 - Terms of service: {{ base_url }}/tos/

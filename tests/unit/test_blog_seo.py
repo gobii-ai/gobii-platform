@@ -266,6 +266,93 @@ class BlogSeoTests(TestCase):
         self.assertContains(response, faq_page["mainEntity"][0]["acceptedAnswer"]["text"])
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_what_is_agentic_api_blog_post_renders_cluster_metadata_and_schema(self):
+        response = self.client.get("/blog/what-is-an-agentic-api/")
+
+        self.assertEqual(response.status_code, 200)
+        soup = BeautifulSoup(response.content, "html.parser")
+        expected_title = "What Is an Agentic API? Definition and Examples | Gobii"
+        expected_description = (
+            "What is an agentic API? Learn how 3 core components manage multi-step work, "
+            "use tools, preserve state, and stay under human supervision in production."
+        )
+
+        self.assertEqual(soup.find("title").get_text(strip=True), expected_title)
+        self.assertEqual(
+            soup.find("meta", attrs={"name": "description"})["content"],
+            expected_description,
+        )
+        self.assertEqual(
+            soup.find("link", rel="canonical")["href"],
+            "http://testserver/blog/what-is-an-agentic-api/",
+        )
+        og_image = soup.find("meta", property="og:image")["content"]
+        self.assertTrue(
+            og_image.endswith("/static/images/blog/what-is-an-agentic-api.webp")
+        )
+        self.assertEqual(
+            soup.find("meta", property="og:image:type")["content"],
+            "image/webp",
+        )
+        self.assertEqual(soup.find("meta", property="og:image:width")["content"], "1200")
+        self.assertEqual(soup.find("meta", property="og:image:height")["content"], "630")
+        self.assertEqual(
+            soup.find("h1").get_text(" ", strip=True),
+            "What Is an Agentic API? Definition and Examples",
+        )
+        self.assertContains(response, "Matt Greathouse")
+        self.assertContains(response, "Last reviewed July 18, 2026")
+
+        article = soup.select_one(".prose")
+        rendered_hrefs = {
+            link.get("href")
+            for link in article.find_all("a")
+            if link.get("href")
+        }
+        self.assertIn("/agent-api/", rendered_hrefs)
+        self.assertIn("/solutions/engineering/", rendered_hrefs)
+        self.assertIn(
+            "https://docs.gobii.ai/developers/developer-agents",
+            rendered_hrefs,
+        )
+        self.assertNotIn("/blog/agentic-api-examples/", rendered_hrefs)
+
+        images = article.find_all("img")
+        self.assertEqual(len(images), 2)
+        self.assertEqual((images[0]["width"], images[0]["height"]), ("1200", "630"))
+        self.assertEqual((images[1]["width"], images[1]["height"]), ("1200", "675"))
+
+        structured_data = json.loads(
+            soup.find("script", type="application/ld+json").string
+        )
+        nodes = {node["@type"]: node for node in structured_data["@graph"]}
+        self.assertEqual(
+            set(nodes),
+            {
+                "BlogPosting",
+                "Person",
+                "Organization",
+                "ImageObject",
+                "BreadcrumbList",
+                "FAQPage",
+            },
+        )
+        self.assertEqual(nodes["Person"]["name"], "Matt Greathouse")
+        self.assertEqual(nodes["Person"]["jobTitle"], "Full-stack Engineer")
+        self.assertEqual(nodes["Person"]["email"], "mailto:matt@gobii.ai")
+        self.assertTrue(nodes["Person"]["image"].endswith("/static/images/matt.jpg"))
+        self.assertTrue(nodes["Person"]["url"].endswith("/team/#matt-greathouse"))
+        self.assertEqual(nodes["Person"]["@id"], nodes["Person"]["url"])
+        self.assertEqual(len(nodes["FAQPage"]["mainEntity"]), 4)
+        self.assertIn("what is an agentic api", nodes["BlogPosting"]["keywords"])
+
+        sitemap_response = self.client.get("/sitemap.xml")
+        self.assertContains(
+            sitemap_response,
+            "http://example.com/blog/what-is-an-agentic-api/",
+        )
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_best_ai_employees_blog_post_renders_seo_and_required_links(self):
         response = self.client.get("/blog/best-ai-employees/")
 

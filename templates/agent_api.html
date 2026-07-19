@@ -1,0 +1,520 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}{{ agent_api_seo_title }}{% endblock %}
+
+{% block head_extras %}
+{{ block.super }}
+<meta name="description" content="{{ agent_api_seo_description }}">
+<meta property="og:type" content="website">
+<meta property="og:title" content="{{ agent_api_seo_title }}">
+<meta property="og:description" content="{{ agent_api_seo_description }}">
+<meta property="og:url" content="{{ canonical_url }}">
+<meta property="og:site_name" content="Gobii">
+<meta property="og:image" content="{{ agent_api_social_image_url }}">
+<meta property="og:image:alt" content="{{ agent_api_social_image_alt }}">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="{{ agent_api_seo_title }}">
+<meta name="twitter:description" content="{{ agent_api_seo_description }}">
+<meta name="twitter:image" content="{{ agent_api_social_image_url }}">
+<meta name="twitter:image:alt" content="{{ agent_api_social_image_alt }}">
+<script type="application/ld+json">{{ agent_api_structured_data_json }}</script>
+{% endblock %}
+
+{% block content %}
+<section class="relative isolate overflow-hidden bg-slate-950 text-white">
+  <picture class="absolute inset-0 -z-10 h-full w-full">
+    <source
+      type="image/webp"
+      srcset="{% static 'images/solutions/engineering-hero-640.webp' %} 640w,
+              {% static 'images/solutions/engineering-hero-960.webp' %} 960w,
+              {% static 'images/solutions/engineering-hero-1280.webp' %} 1280w,
+              {% static 'images/solutions/engineering-hero-1920.webp' %} 1920w"
+      sizes="100vw"
+    >
+    <img
+      src="{% static 'images/solutions/engineering-hero-1280.jpg' %}"
+      srcset="{% static 'images/solutions/engineering-hero-640.jpg' %} 640w,
+              {% static 'images/solutions/engineering-hero-960.jpg' %} 960w,
+              {% static 'images/solutions/engineering-hero-1280.jpg' %} 1280w,
+              {% static 'images/solutions/engineering-hero-1920.jpg' %} 1920w"
+      sizes="100vw"
+      alt=""
+      class="h-full w-full object-cover object-center opacity-30"
+      width="1280"
+      height="543"
+      loading="eager"
+      fetchpriority="high"
+      decoding="async"
+    >
+  </picture>
+  <div class="absolute inset-0 -z-10 bg-slate-950/75"></div>
+  <div class="absolute inset-x-0 bottom-0 -z-10 h-48 bg-gradient-to-t from-slate-950 to-slate-950/0"></div>
+
+  <div class="mx-auto max-w-7xl px-6 pb-16 pt-5 sm:px-8 lg:px-12 lg:pb-20">
+    <nav class="flex items-center gap-2 text-sm text-indigo-100" aria-label="Breadcrumb">
+      <a href="{% url 'pages:home' %}" class="font-medium text-white hover:text-emerald-200">Gobii</a>
+      <i data-lucide="chevron-right" class="h-4 w-4 text-indigo-200"></i>
+      <span>Agent API</span>
+    </nav>
+
+    <div class="mt-20 max-w-5xl lg:mt-28">
+      <p class="text-sm font-semibold uppercase tracking-[0.18em] text-emerald-300">Agentic API for real workflows</p>
+      <h1 class="mt-5 max-w-5xl text-4xl font-light leading-[1.05] tracking-tight sm:text-5xl lg:text-7xl">
+        Agent API: Outsource Multi-Step Work to AI Agents
+      </h1>
+      <p class="mt-6 max-w-3xl text-lg leading-8 text-indigo-50 sm:text-xl">
+        Gobii gives your product an API for delegating browser work, research, data collection, and recurring operational workflows to supervised AI agents. Define the responsibility once, trigger work when it is needed, and inspect what the agent did.
+      </p>
+
+      <div class="mt-9 flex flex-col gap-3 sm:flex-row">
+        <form method="post" action="{% url 'pages:engineering_pro_signup' %}" class="w-full sm:w-auto" data-analytics-cta-id="agent_api_hero" data-analytics-placement="hero" data-analytics-intent="get_api_keys">
+          {% csrf_token %}
+          <input type="hidden" name="source_page" value="agent_api_hero">
+          <input type="hidden" name="trial_onboarding" value="1">
+          <input type="hidden" name="trial_onboarding_target" value="api_keys">
+          <button type="submit" class="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-white px-6 py-3 text-sm font-semibold text-slate-950 transition hover:bg-indigo-50">
+            {% if user.is_authenticated %}Get API keys{% else %}Start free trial{% endif %}
+            <i data-lucide="arrow-right" class="h-4 w-4"></i>
+          </button>
+        </form>
+        <a href="{{ agent_api_docs_url }}" class="inline-flex items-center justify-center gap-2 rounded-lg border border-white/25 px-6 py-3 text-sm font-semibold text-white transition hover:bg-white/10">
+          Read Agent API docs
+          <i data-lucide="external-link" class="h-4 w-4"></i>
+        </a>
+      </div>
+
+      <nav class="mt-8 flex max-w-4xl flex-wrap gap-6 gap-y-3 text-sm" aria-label="Agent API page sections">
+        <a href="#definition" class="font-medium text-indigo-100 hover:text-white">Definition</a>
+        <a href="#difference" class="font-medium text-indigo-100 hover:text-white">How it differs</a>
+        <a href="#workflows" class="font-medium text-indigo-100 hover:text-white">Workflows</a>
+        <a href="#controls" class="font-medium text-indigo-100 hover:text-white">Controls</a>
+        <a href="#quickstart" class="font-medium text-indigo-100 hover:text-white">Quickstart</a>
+        <a href="#faq" class="font-medium text-indigo-100 hover:text-white">FAQ</a>
+      </nav>
+
+      <dl class="mt-12 grid max-w-5xl gap-3 sm:grid-cols-3">
+        <div class="rounded-lg border border-white/15 bg-white/10 p-4 backdrop-blur">
+          <dt class="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-200">Delegate a goal</dt>
+          <dd class="mt-2 text-sm leading-6 text-indigo-50">Give a persistent agent a charter, optional schedule, and the context for one defined responsibility.</dd>
+        </div>
+        <div class="rounded-lg border border-white/15 bg-white/10 p-4 backdrop-blur">
+          <dt class="text-xs font-semibold uppercase tracking-[0.14em] text-sky-200">Let it execute</dt>
+          <dd class="mt-2 text-sm leading-6 text-indigo-50">The agent can work across multiple steps and use configured browser or tool capabilities where available.</dd>
+        </div>
+        <div class="rounded-lg border border-white/15 bg-white/10 p-4 backdrop-blur">
+          <dt class="text-xs font-semibold uppercase tracking-[0.14em] text-amber-200">Keep control</dt>
+          <dd class="mt-2 text-sm leading-6 text-indigo-50">Inspect the timeline and processing state, update instructions, or deactivate the agent without deleting it.</dd>
+        </div>
+      </dl>
+    </div>
+  </div>
+</section>
+
+<section id="definition" class="bg-white py-16 scroll-mt-20">
+  <div class="mx-auto grid max-w-7xl gap-10 px-6 sm:px-8 lg:grid-cols-[0.86fr_1.14fr] lg:gap-16 lg:px-12">
+    <div>
+      <p class="text-sm font-semibold uppercase tracking-[0.18em] text-indigo-700">Definition</p>
+      <h2 class="mt-4 text-3xl font-light tracking-tight text-slate-950 sm:text-4xl">What is an agentic API?</h2>
+      <p class="mt-5 text-base leading-7 text-slate-700">
+        An agentic API is a programming interface for delegating a goal to an AI agent that can decide how to move through a bounded series of steps. Instead of asking only for a generated answer, your application can create or address an agent, give it instructions, let it use approved capabilities, and inspect the work that follows.
+      </p>
+      <p class="mt-4 text-base leading-7 text-slate-700">
+        That runtime is what makes an <strong>agentic AI API</strong> useful for operational work. The job may outlive one request. It may need a schedule, persistent configuration, a browser session, several tools, or a human decision before the next step. The API must therefore manage more than model input and output.
+      </p>
+      <p class="mt-4 text-base leading-7 text-slate-700">
+        Gobii's API resource is a persistent agent. Developers can create it with a name, charter, and optional schedule, then update, message, inspect, pause, reactivate, or delete that same resource as the responsibility changes.
+      </p>
+    </div>
+
+    <div class="grid gap-4 sm:grid-cols-2">
+      <article class="rounded-lg border border-indigo-200 bg-indigo-50 p-5">
+        <i data-lucide="clipboard-list" class="h-5 w-5 text-indigo-700"></i>
+        <h3 class="mt-4 text-lg font-semibold text-slate-950">Charter</h3>
+        <p class="mt-3 text-sm leading-6 text-slate-700">The agent has standing instructions that define the responsibility, useful context, boundaries, and desired handoff.</p>
+      </article>
+      <article class="rounded-lg border border-emerald-200 bg-emerald-50 p-5">
+        <i data-lucide="route" class="h-5 w-5 text-emerald-700"></i>
+        <h3 class="mt-4 text-lg font-semibold text-slate-950">Multi-step execution</h3>
+        <p class="mt-3 text-sm leading-6 text-slate-700">The agent can plan and work through intermediate steps instead of treating each call as an isolated answer.</p>
+      </article>
+      <article class="rounded-lg border border-sky-200 bg-sky-50 p-5">
+        <i data-lucide="calendar-clock" class="h-5 w-5 text-sky-700"></i>
+        <h3 class="mt-4 text-lg font-semibold text-slate-950">Lifecycle and triggers</h3>
+        <p class="mt-3 text-sm leading-6 text-slate-700">Schedules and inbound messages can start work again while the application keeps one stable agent resource.</p>
+      </article>
+      <article class="rounded-lg border border-amber-200 bg-amber-50 p-5">
+        <i data-lucide="scan-eye" class="h-5 w-5 text-amber-700"></i>
+        <h3 class="mt-4 text-lg font-semibold text-slate-950">Observable activity</h3>
+        <p class="mt-3 text-sm leading-6 text-slate-700">Your application can inspect processing state, timeline events, and recent browser tasks instead of guessing what happened.</p>
+      </article>
+    </div>
+  </div>
+</section>
+
+<section id="difference" class="bg-slate-950 py-16 text-white scroll-mt-20">
+  <div class="mx-auto max-w-7xl px-6 sm:px-8 lg:px-12">
+    <div class="grid gap-10 lg:grid-cols-[0.82fr_1.18fr] lg:gap-16">
+      <div>
+        <p class="text-sm font-semibold uppercase tracking-[0.18em] text-emerald-300">The practical difference</p>
+        <h2 class="mt-4 text-3xl font-light tracking-tight sm:text-4xl">Agent API vs a normal AI API</h2>
+        <p class="mt-5 text-base leading-7 text-indigo-100">
+          Both can use AI models. The difference is the unit of work. A normal AI API usually gives your application a response. An AI agent API gives your application a durable agent resource that can be triggered, configured, observed, and reused.
+        </p>
+        <p class="mt-4 text-base leading-7 text-indigo-100">
+          Use a model API when your code already owns the workflow and needs generation, extraction, classification, or reasoning at one known step. Use an Agent API when you want to hand off more of the navigation between steps while keeping explicit boundaries and inspection points.
+        </p>
+      </div>
+
+      <div class="overflow-hidden rounded-lg border border-white/15">
+        <div class="grid grid-cols-[0.3fr_0.35fr_0.35fr] bg-white/10 px-4 py-3 text-xs font-semibold uppercase tracking-[0.12em] text-indigo-100 sm:px-5">
+          <span>Decision</span>
+          <span>Normal AI API</span>
+          <span>Agent API</span>
+        </div>
+        <div class="divide-y divide-white/15">
+          <div class="grid grid-cols-[0.3fr_0.35fr_0.35fr] gap-3 px-4 py-4 text-sm leading-6 sm:px-5">
+            <h3 class="font-semibold text-white">Primary object</h3>
+            <p class="text-indigo-100">A request and response</p>
+            <p class="text-indigo-100">A persistent agent with lifecycle state</p>
+          </div>
+          <div class="grid grid-cols-[0.3fr_0.35fr_0.35fr] gap-3 px-4 py-4 text-sm leading-6 sm:px-5">
+            <h3 class="font-semibold text-white">Workflow owner</h3>
+            <p class="text-indigo-100">Your code sequences every step</p>
+            <p class="text-indigo-100">The agent navigates bounded steps within its charter</p>
+          </div>
+          <div class="grid grid-cols-[0.3fr_0.35fr_0.35fr] gap-3 px-4 py-4 text-sm leading-6 sm:px-5">
+            <h3 class="font-semibold text-white">Time horizon</h3>
+            <p class="text-indigo-100">Usually one synchronous or asynchronous call</p>
+            <p class="text-indigo-100">Repeated work across messages, events, or schedules</p>
+          </div>
+          <div class="grid grid-cols-[0.3fr_0.35fr_0.35fr] gap-3 px-4 py-4 text-sm leading-6 sm:px-5">
+            <h3 class="font-semibold text-white">Tool use</h3>
+            <p class="text-indigo-100">Your application calls tools around the model</p>
+            <p class="text-indigo-100">The agent can use configured capabilities during execution</p>
+          </div>
+          <div class="grid grid-cols-[0.3fr_0.35fr_0.35fr] gap-3 px-4 py-4 text-sm leading-6 sm:px-5">
+            <h3 class="font-semibold text-white">Oversight</h3>
+            <p class="text-indigo-100">Logs and controls are built by your application</p>
+            <p class="text-indigo-100">The agent exposes state and timeline activity through the platform</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="workflows" class="bg-white py-16 scroll-mt-20">
+  <div class="mx-auto max-w-7xl px-6 sm:px-8 lg:px-12">
+    <div class="grid gap-8 lg:grid-cols-[0.82fr_1.18fr] lg:gap-16">
+      <div>
+        <p class="text-sm font-semibold uppercase tracking-[0.18em] text-indigo-700">Agent API examples</p>
+        <h2 class="mt-4 text-3xl font-light tracking-tight text-slate-950 sm:text-4xl">What work can Gobii agents take off your plate?</h2>
+      </div>
+      <div>
+        <p class="text-base leading-7 text-slate-700">
+          Start with busywork that is valuable but slow because someone must move between websites, records, files, and review queues. The workflow should have a concrete finish line: a researched list, a change report, a set of completed fields, a QA queue, or a source-linked brief.
+        </p>
+        <p class="mt-4 text-base leading-7 text-slate-700">
+          An <strong>API for AI agents</strong> is most credible when it makes the handoff visible. Define where the agent may look, what it may change, which fields it must return, how it should surface uncertainty, and where a person must decide.
+        </p>
+      </div>
+    </div>
+
+    <div class="mt-10 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+      {% for item in agent_api_workflow_items %}
+        <article class="rounded-lg border border-slate-200 bg-white p-5">
+          <i data-lucide="{% cycle 'search' 'table-properties' 'radar' 'badge-check' 'webhook' 'package-check' %}" class="h-5 w-5 text-indigo-700"></i>
+          <h3 class="mt-4 text-lg font-semibold text-slate-950">{{ item.name }}</h3>
+          <p class="mt-3 text-sm leading-6 text-slate-700">{{ item.description }}</p>
+        </article>
+      {% endfor %}
+    </div>
+
+    <div class="mt-12 grid gap-8 lg:grid-cols-3">
+      <div class="lg:col-span-1">
+        <h3 class="text-xl font-semibold text-slate-950">A good first workflow</h3>
+        <p class="mt-3 text-sm leading-6 text-slate-700">Choose work with enough repetition to matter and enough structure to review. The agent should not need to invent the business policy as it goes.</p>
+      </div>
+      <dl class="grid gap-x-10 gap-y-7 sm:grid-cols-2 lg:col-span-2">
+        <div>
+          <dt class="text-sm font-semibold text-slate-950">Known inputs</dt>
+          <dd class="mt-2 text-sm leading-6 text-slate-700">A charter, source list, event payload, file, record set, or standing schedule gives the agent a clear place to begin.</dd>
+        </div>
+        <div>
+          <dt class="text-sm font-semibold text-slate-950">Allowed capabilities</dt>
+          <dd class="mt-2 text-sm leading-6 text-slate-700">Only connect the browsers, MCP servers, apps, files, and channels the responsibility requires.</dd>
+        </div>
+        <div>
+          <dt class="text-sm font-semibold text-slate-950">Reviewable output</dt>
+          <dd class="mt-2 text-sm leading-6 text-slate-700">Ask for source links, filled fields, exceptions, or a structured deliverable that a person can check quickly.</dd>
+        </div>
+        <div>
+          <dt class="text-sm font-semibold text-slate-950">Named escalation point</dt>
+          <dd class="mt-2 text-sm leading-6 text-slate-700">Write down what the agent should not decide and what must be returned to a human owner.</dd>
+        </div>
+      </dl>
+    </div>
+  </div>
+</section>
+
+<section class="bg-indigo-50 py-16">
+  <div class="mx-auto grid max-w-7xl gap-10 px-6 sm:px-8 lg:grid-cols-[0.82fr_1.18fr] lg:gap-16 lg:px-12">
+    <div>
+      <p class="text-sm font-semibold uppercase tracking-[0.18em] text-indigo-700">How Gobii executes</p>
+      <h2 class="mt-4 text-3xl font-light tracking-tight text-slate-950 sm:text-4xl">From one API resource to ongoing work</h2>
+      <p class="mt-5 text-base leading-7 text-slate-700">
+        Gobii treats the agent as a long-lived resource rather than a disposable run. That gives your application one place to manage instructions and lifecycle while the agent handles recurring or event-driven work.
+      </p>
+    </div>
+
+    <ol class="grid gap-4 sm:grid-cols-2">
+      <li class="rounded-lg border border-indigo-200 bg-white p-5">
+        <span class="text-xs font-semibold uppercase tracking-[0.14em] text-indigo-700">1. Create</span>
+        <h3 class="mt-3 text-lg font-semibold text-slate-950">Define the responsibility</h3>
+        <p class="mt-3 text-sm leading-6 text-slate-700">Create an agent with a unique name, a charter that explains the work, and an optional cron-like schedule.</p>
+      </li>
+      <li class="rounded-lg border border-emerald-200 bg-white p-5">
+        <span class="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-700">2. Configure</span>
+        <h3 class="mt-3 text-lg font-semibold text-slate-950">Attach the right capabilities</h3>
+        <p class="mt-3 text-sm leading-6 text-slate-700">Configure contact policy, tools, MCP servers, and other supported settings according to the agent's scope and owner.</p>
+      </li>
+      <li class="rounded-lg border border-sky-200 bg-white p-5">
+        <span class="text-xs font-semibold uppercase tracking-[0.14em] text-sky-700">3. Trigger</span>
+        <h3 class="mt-3 text-lg font-semibold text-slate-950">Start work on a schedule or message</h3>
+        <p class="mt-3 text-sm leading-6 text-slate-700">Let a schedule wake the agent or inject an inbound message into its conversation when your application has new work.</p>
+      </li>
+      <li class="rounded-lg border border-amber-200 bg-white p-5">
+        <span class="text-xs font-semibold uppercase tracking-[0.14em] text-amber-700">4. Inspect</span>
+        <h3 class="mt-3 text-lg font-semibold text-slate-950">Read state and activity</h3>
+        <p class="mt-3 text-sm leading-6 text-slate-700">Fetch processing status, timeline events, and recent browser tasks when your application needs to show or evaluate progress.</p>
+      </li>
+      <li class="rounded-lg border border-violet-200 bg-white p-5 sm:col-span-2">
+        <span class="text-xs font-semibold uppercase tracking-[0.14em] text-violet-700">5. Adjust</span>
+        <h3 class="mt-3 text-lg font-semibold text-slate-950">Update, pause, or retire the agent</h3>
+        <p class="mt-3 text-sm leading-6 text-slate-700">Change the charter or schedule as the process matures. Deactivate the agent without losing its configuration, reactivate it later, or delete it when the responsibility ends.</p>
+      </li>
+    </ol>
+  </div>
+</section>
+
+<section id="controls" class="bg-white py-16 scroll-mt-20">
+  <div class="mx-auto max-w-7xl px-6 sm:px-8 lg:px-12">
+    <div class="grid gap-10 lg:grid-cols-[0.82fr_1.18fr] lg:gap-16">
+      <div>
+        <p class="text-sm font-semibold uppercase tracking-[0.18em] text-indigo-700">Supervised autonomy</p>
+        <h2 class="mt-4 text-3xl font-light tracking-tight text-slate-950 sm:text-4xl">Autonomous work with explicit boundaries</h2>
+        <p class="mt-5 text-base leading-7 text-slate-700">
+          An <strong>autonomous agent API</strong> should not force a choice between useful execution and human control. Gobii lets teams narrow the responsibility at several layers: the charter, available tools, trigger conditions, contact policy, schedule, and review instructions.
+        </p>
+        <p class="mt-4 text-base leading-7 text-slate-700">
+          The API also exposes operating state. Your application can check whether the agent is processing, read timeline events, inspect recent browser tasks, change configuration, or pause the resource. Those controls do not guarantee correct output, but they make supervision part of the system instead of an afterthought.
+        </p>
+      </div>
+
+      <div class="grid gap-x-12 gap-y-9 sm:grid-cols-2">
+        <div class="flex items-start gap-4">
+          <i data-lucide="brackets" class="mt-0.5 h-5 w-5 flex-none text-indigo-700"></i>
+          <div>
+            <h3 class="text-sm font-semibold text-slate-950">Scope the charter</h3>
+            <p class="mt-2 text-sm leading-6 text-slate-700">State the goal, allowed sources, expected output, and decisions that remain with a person.</p>
+          </div>
+        </div>
+        <div class="flex items-start gap-4">
+          <i data-lucide="plug-zap" class="mt-0.5 h-5 w-5 flex-none text-emerald-700"></i>
+          <div>
+            <h3 class="text-sm font-semibold text-slate-950">Limit connected tools</h3>
+            <p class="mt-2 text-sm leading-6 text-slate-700">Configure only the browser, apps, MCP servers, or channels required for the assigned workflow.</p>
+          </div>
+        </div>
+        <div class="flex items-start gap-4">
+          <i data-lucide="messages-square" class="mt-0.5 h-5 w-5 flex-none text-sky-700"></i>
+          <div>
+            <h3 class="text-sm font-semibold text-slate-950">Make escalation explicit</h3>
+            <p class="mt-2 text-sm leading-6 text-slate-700">Tell the agent when to stop, ask, flag uncertainty, or prepare a draft instead of taking an external action.</p>
+          </div>
+        </div>
+        <div class="flex items-start gap-4">
+          <i data-lucide="list-tree" class="mt-0.5 h-5 w-5 flex-none text-amber-700"></i>
+          <div>
+            <h3 class="text-sm font-semibold text-slate-950">Inspect the timeline</h3>
+            <p class="mt-2 text-sm leading-6 text-slate-700">Use the timeline and processing state to show what the application knows about current and recent activity.</p>
+          </div>
+        </div>
+        <div class="flex items-start gap-4 sm:col-span-2">
+          <i data-lucide="circle-pause" class="mt-0.5 h-5 w-5 flex-none text-violet-700"></i>
+          <div>
+            <h3 class="text-sm font-semibold text-slate-950">Pause without rebuilding</h3>
+            <p class="mt-2 text-sm leading-6 text-slate-700">Deactivate an agent when a workflow, credential, or policy needs review. Reactivation preserves the stable resource and its configuration.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="quickstart" class="bg-slate-950 py-16 text-white scroll-mt-20">
+  <div class="mx-auto grid max-w-7xl gap-10 px-6 sm:px-8 lg:grid-cols-[0.78fr_1.22fr] lg:gap-16 lg:px-12">
+    <div>
+      <p class="text-sm font-semibold uppercase tracking-[0.18em] text-emerald-300">Quickstart</p>
+      <h2 class="mt-4 text-3xl font-light tracking-tight sm:text-4xl">Create a persistent agent with one request</h2>
+      <p class="mt-5 text-base leading-7 text-indigo-100">
+        Authenticate with your Gobii API key and post a name, charter, and optional schedule to the agents endpoint. The response gives your application the stable agent ID it will use for later lifecycle and inspection calls.
+      </p>
+      <p class="mt-4 text-sm leading-6 text-indigo-100">
+        This example shows the public resource shape, not a complete production workflow. Read the current documentation before relying on optional fields, tool configuration, or event behavior.
+      </p>
+      <div class="mt-7 flex flex-col gap-3 sm:flex-row lg:flex-col lg:items-start">
+        <a href="{{ agent_api_docs_url }}" class="inline-flex items-center justify-center gap-2 rounded-lg bg-white px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-indigo-50">
+          Open Agent API documentation
+          <i data-lucide="external-link" class="h-4 w-4"></i>
+        </a>
+        <a href="{% url 'pages:solution' slug='engineering' %}" class="inline-flex items-center gap-2 text-sm font-semibold text-emerald-200 hover:text-white">
+          Explore the developer-focused API page
+          <i data-lucide="arrow-right" class="h-4 w-4"></i>
+        </a>
+      </div>
+    </div>
+
+    <div class="overflow-hidden rounded-lg border border-white/15 bg-black/20 font-mono text-sm">
+      <div class="flex items-center justify-between border-b border-white/10 px-4 py-3 text-xs text-indigo-200">
+        <span>create-agent.sh</span>
+        <span>REST</span>
+      </div>
+      <pre class="overflow-x-auto p-5 leading-7 text-indigo-50"><code><span class="text-violet-300">curl</span> -X POST \
+  -H <span class="text-emerald-300">"Content-Type: application/json"</span> \
+  -H <span class="text-emerald-300">"X-Api-Key: $GOBII_API_KEY"</span> \
+  -d <span class="text-emerald-300">'{
+    "name": "Market Monitor",
+    "charter": "Check approved sources and brief us on material changes.",
+    "schedule": "@daily"
+  }'</span> \
+  https://gobii.ai/api/v1/agents/</code></pre>
+    </div>
+  </div>
+</section>
+
+<section class="bg-white py-16">
+  <div class="mx-auto max-w-7xl px-6 sm:px-8 lg:px-12">
+    <div class="grid gap-8 lg:grid-cols-[0.82fr_1.18fr] lg:gap-16">
+      <div>
+        <p class="text-sm font-semibold uppercase tracking-[0.18em] text-indigo-700">Choose the right surface</p>
+        <h2 class="mt-4 text-3xl font-light tracking-tight text-slate-950 sm:text-4xl">When should you use Gobii's Agent API?</h2>
+      </div>
+      <p class="text-base leading-7 text-slate-700">
+        Use the Agent API when the responsibility belongs to a persistent agent that your product needs to create, configure, trigger, observe, and manage over time. If you need only one isolated model response, a model API is usually simpler. If you need one ad hoc browser job without a persistent agent lifecycle, use Gobii's documented legacy browser task surface instead.
+      </p>
+    </div>
+
+    <div class="mt-10 grid gap-4 md:grid-cols-3">
+      <article class="rounded-lg border border-emerald-200 bg-emerald-50 p-5">
+        <p class="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-800">Use Agent API</p>
+        <h3 class="mt-3 text-lg font-semibold text-slate-950">The work repeats or persists</h3>
+        <p class="mt-3 text-sm leading-6 text-slate-700">You want one stable agent resource for scheduled responsibilities, event-driven operations, or ongoing conversations.</p>
+      </article>
+      <article class="rounded-lg border border-sky-200 bg-sky-50 p-5">
+        <p class="text-xs font-semibold uppercase tracking-[0.14em] text-sky-800">Use a model API</p>
+        <h3 class="mt-3 text-lg font-semibold text-slate-950">Your code owns every step</h3>
+        <p class="mt-3 text-sm leading-6 text-slate-700">You need generation or reasoning inside a workflow that your application already orchestrates and observes.</p>
+      </article>
+      <article class="rounded-lg border border-amber-200 bg-amber-50 p-5">
+        <p class="text-xs font-semibold uppercase tracking-[0.14em] text-amber-800">Use a browser task</p>
+        <h3 class="mt-3 text-lg font-semibold text-slate-950">The job is truly one-off</h3>
+        <p class="mt-3 text-sm leading-6 text-slate-700">You need a single ad hoc browser-use task and do not need a durable agent, timeline, charter, or schedule.</p>
+      </article>
+    </div>
+  </div>
+</section>
+
+<section class="bg-indigo-50 py-16">
+  <div class="mx-auto max-w-7xl px-6 sm:px-8 lg:px-12">
+    <div class="grid gap-8 lg:grid-cols-[0.82fr_1.18fr] lg:gap-16">
+      <div>
+        <p class="text-sm font-semibold uppercase tracking-[0.18em] text-indigo-700">Agent API learning path</p>
+        <h2 class="mt-4 text-3xl font-light tracking-tight text-slate-950 sm:text-4xl">Explore the Agent API cluster</h2>
+      </div>
+      <div>
+        <p class="text-base leading-7 text-slate-700">
+          The pages below are the planned guides for this topic cluster. They will separate category questions, implementation examples, orchestration patterns, and execution APIs so each resource can stay concrete.
+        </p>
+        <p class="mt-3 text-sm leading-6 text-slate-600">Published resources link to live documentation. Planned guides will become links as they are released in later tranches.</p>
+      </div>
+    </div>
+
+    <div class="mt-10 grid gap-4 md:grid-cols-2">
+      {% for group in agent_api_cluster_groups %}
+        <article class="rounded-lg border border-indigo-200 bg-white p-5">
+          <h3 class="text-lg font-semibold text-slate-950">{{ group.title }}</h3>
+          <p class="mt-2 text-sm leading-6 text-slate-700">{{ group.description }}</p>
+          <ul class="mt-5 space-y-3">
+            {% for link in group.links %}
+              <li>
+                {% if link.status == "live" %}
+                  <a href="{{ link.url }}" class="group inline-flex items-start gap-2 text-sm font-semibold text-indigo-700 hover:text-indigo-900">
+                    <i data-lucide="arrow-up-right" class="mt-0.5 h-4 w-4 flex-none transition group-hover:-translate-y-0.5 group-hover:translate-x-0.5"></i>
+                    <span>{{ link.anchor }}</span>
+                  </a>
+                {% else %}
+                  <span class="inline-flex items-start gap-2 text-sm font-semibold text-slate-600">
+                    <i data-lucide="clock-3" class="mt-0.5 h-4 w-4 flex-none text-slate-400"></i>
+                    <span>{{ link.anchor }} <span class="ml-1 text-xs font-medium uppercase tracking-wide text-slate-500">Planned</span></span>
+                  </span>
+                {% endif %}
+              </li>
+            {% endfor %}
+          </ul>
+        </article>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+
+<section id="faq" class="bg-white py-16 scroll-mt-20">
+  <div class="mx-auto grid max-w-7xl gap-10 px-6 sm:px-8 lg:grid-cols-[0.82fr_1.18fr] lg:gap-16 lg:px-12">
+    <div>
+      <p class="text-sm font-semibold uppercase tracking-[0.18em] text-indigo-700">FAQ</p>
+      <h2 class="mt-4 text-3xl font-light tracking-tight text-slate-950 sm:text-4xl">Agentic API FAQs</h2>
+      <p class="mt-5 text-base leading-7 text-slate-700">
+        These are the practical questions teams ask when deciding whether to keep orchestration in application code or delegate a bounded responsibility to an agent.
+      </p>
+    </div>
+
+    <div class="space-y-3">
+      {% for item in agent_api_faq_items %}
+        <details class="group rounded-lg border border-slate-200 bg-white p-5"{% if forloop.first %} open{% endif %}>
+          <summary class="flex cursor-pointer list-none items-start justify-between gap-6">
+            <span class="text-base font-semibold text-slate-950">{{ item.question }}</span>
+            <i data-lucide="plus" class="mt-0.5 h-5 w-5 flex-none text-slate-500 transition group-open:rotate-45"></i>
+          </summary>
+          <p class="mt-4 text-sm leading-6 text-slate-700">{{ item.answer }}</p>
+        </details>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+
+<section class="bg-slate-950 py-16 text-white">
+  <div class="mx-auto max-w-4xl px-6 text-center sm:px-8 lg:px-12">
+    <p class="text-sm font-semibold uppercase tracking-[0.18em] text-emerald-300">Ready to delegate a real workflow?</p>
+    <h2 class="mt-4 text-3xl font-light tracking-tight sm:text-4xl">Give one supervised agent one concrete responsibility</h2>
+    <p class="mx-auto mt-5 max-w-2xl text-base leading-7 text-indigo-100">
+      Start with a workflow your team already knows how to review. Define the charter and boundaries, connect only the capabilities it needs, and use the Agent API to manage the resource from your product.
+    </p>
+    <div class="mt-8 flex flex-col justify-center gap-3 sm:flex-row">
+      <form method="post" action="{% url 'pages:engineering_pro_signup' %}" data-analytics-cta-id="agent_api_final" data-analytics-placement="final" data-analytics-intent="get_api_keys">
+        {% csrf_token %}
+        <input type="hidden" name="source_page" value="agent_api_final">
+        <input type="hidden" name="trial_onboarding" value="1">
+        <input type="hidden" name="trial_onboarding_target" value="api_keys">
+        <button type="submit" class="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-white px-6 py-3 text-sm font-semibold text-slate-950 transition hover:bg-indigo-50">
+          {% if user.is_authenticated %}Get API keys{% else %}Start free trial{% endif %}
+          <i data-lucide="arrow-right" class="h-4 w-4"></i>
+        </button>
+      </form>
+      <a href="{{ agent_api_docs_url }}" class="inline-flex items-center justify-center gap-2 rounded-lg border border-white/25 px-6 py-3 text-sm font-semibold text-white transition hover:bg-white/10">
+        Read the documentation
+      </a>
+    </div>
+  </div>
+</section>
+{% endblock %}
