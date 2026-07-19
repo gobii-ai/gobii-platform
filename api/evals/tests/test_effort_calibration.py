@@ -45,6 +45,7 @@ from api.evals.scenarios.sqlite_tool_results import (
     SqliteIntermediateWorkingTableScenario,
     SqliteItemLinkReportScenario,
     SqliteToolResultScenario,
+    _decision_model_tables,
 )
 from api.evals.stop_policy import should_stop_for_eval_policy
 from api.evals.suites import SuiteRegistry
@@ -451,6 +452,59 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
         self.assertEqual(recorded[-1][0][2], EvalRunTask.Status.PASSED)
         self.assertEqual(set(model_tables), {"vendors", "plans"})
 
+    def test_sqlite_domain_model_reuses_downstream_shaped_table(self):
+        scenario, recorded = SqliteIntermediateWorkingTableScenario(), []
+        scenario.record_task_result = lambda *args, **kwargs: recorded.append((args, kwargs))
+        initial_calls = [
+            SimpleNamespace(
+                step="initial",
+                status="error",
+                result='{"status":"error","message":"Query 4 failed: no such column"}',
+                tool_name="sqlite_batch",
+                tool_params={"sql": """
+                    CREATE TABLE raw_plans AS
+                    SELECT json_extract(result_json, '$.content.vendor') AS vendor,
+                           child.value AS plan_json,
+                           json_extract(result_json, '$.content.source_url') AS source_url
+                    FROM __tool_results JOIN json_each(result_json, '$.content.plans') child;
+                    CREATE TABLE plans(vendor TEXT, plan TEXT, price INTEGER, source_url TEXT,
+                                       PRIMARY KEY(vendor, plan));
+                    INSERT INTO plans
+                    SELECT vendor, json_extract(plan_json, '$.plan'),
+                           json_extract(plan_json, '$.monthly_price_usd'), source_url
+                    FROM raw_plans;
+                    SELECT missing_column FROM plans;
+                """},
+            ),
+            SimpleNamespace(
+                step="recovery",
+                status="complete",
+                result='{"status":"ok"}',
+                tool_name="sqlite_batch",
+                tool_params={"sql": """
+                    SELECT vendor, plan FROM plans WHERE price <= 900 ORDER BY price;
+                """},
+            )
+        ]
+        with patch("api.evals.scenarios.sqlite_tool_results._tool_calls_for_run", return_value=initial_calls):
+            model_tables = scenario._record_domain_model("run", after=None)
+
+        self.assertEqual(model_tables, ("plans",))
+        self.assertEqual(recorded[-1][0][2], EvalRunTask.Status.PASSED)
+
+        followup_calls = [
+            SimpleNamespace(
+                step="followup",
+                status="complete",
+                tool_name="sqlite_batch",
+                tool_params={"sql": "SELECT vendor, plan FROM plans WHERE price <= 1600 ORDER BY price;"},
+            )
+        ]
+        with patch("api.evals.scenarios.sqlite_tool_results._tool_calls_for_run", return_value=followup_calls):
+            scenario._record_model_reuse("run", after=None, model_tables=model_tables)
+
+        self.assertEqual(recorded[-1][0][2], EvalRunTask.Status.PASSED)
+
     def test_sqlite_domain_model_rejects_per_result_tables(self):
         scenario, recorded = SqliteIntermediateWorkingTableScenario(), []
         scenario.record_task_result = lambda *args, **kwargs: recorded.append((args, kwargs))
@@ -524,7 +578,9 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
                     "sql": """
                     SELECT json_extract(result_json, '$.content.vendor') FROM __tool_results;
                     CREATE TABLE catalog(vendor TEXT, plan TEXT, source_url TEXT);
-                    SELECT vendor, plan FROM catalog WHERE vendor IS NOT NULL ORDER BY plan;
+                    SELECT c.vendor, c.plan FROM catalog c
+                    JOIN raw_plans r ON r.vendor = c.vendor
+                    WHERE c.vendor IS NOT NULL ORDER BY c.plan;
                     """
                 },
             )
@@ -535,6 +591,53 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
         self.assertEqual(model_tables, ())
         self.assertEqual(recorded[-1][0][2], EvalRunTask.Status.FAILED)
         self.assertIn("no reusable domain table", recorded[-1][1]["observed_summary"])
+
+    def test_sqlite_domain_model_requires_identity_on_the_decision_table(self):
+        scenario, recorded = SqliteIntermediateWorkingTableScenario(), []
+        scenario.record_task_result = lambda *args, **kwargs: recorded.append((args, kwargs))
+        calls = [
+            SimpleNamespace(
+                step="step",
+                status="complete",
+                tool_name="sqlite_batch",
+                tool_params={"sql": """
+                    CREATE TABLE identity_decoy(id TEXT PRIMARY KEY);
+                    CREATE TABLE raw_plans(vendor TEXT, plan_json TEXT, source_url TEXT,
+                                           PRIMARY KEY(vendor, plan_json));
+                    INSERT INTO raw_plans
+                    SELECT json_extract(result_json, '$.content.vendor'), child.value,
+                           json_extract(result_json, '$.content.source_url')
+                    FROM __tool_results JOIN json_each(result_json, '$.content.plans') child;
+                    CREATE TABLE catalog AS
+                    SELECT vendor, json_extract(plan_json, '$.plan') AS plan,
+                           source_url, 'not a key' AS "unique"
+                    FROM raw_plans;
+                    SELECT vendor, plan FROM catalog WHERE vendor IS NOT NULL ORDER BY plan;
+                """},
+            )
+        ]
+        with patch("api.evals.scenarios.sqlite_tool_results._tool_calls_for_run", return_value=calls):
+            model_tables = scenario._record_domain_model("run", after=None)
+
+        self.assertEqual(model_tables, ("raw_plans",))
+        self.assertEqual(recorded[-1][0][2], EvalRunTask.Status.FAILED)
+        self.assertIn("stable identity", recorded[-1][1]["observed_summary"])
+
+    def test_sqlite_decision_tables_require_a_ranked_select(self):
+        self.assertEqual(
+            _decision_model_tables(
+                "DELETE FROM plans WHERE price > 900 ORDER BY price LIMIT 1;",
+                ("plans",),
+            ),
+            (),
+        )
+        self.assertEqual(
+            _decision_model_tables(
+                "SELECT * FROM plans WHERE price <= 900 ORDER BY price;",
+                ("plans",),
+            ),
+            ("plans",),
+        )
 
     def test_sqlite_domain_model_rejects_unexpanded_child_array(self):
         scenario, recorded = SqliteIntermediateWorkingTableScenario(), []

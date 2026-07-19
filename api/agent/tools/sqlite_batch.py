@@ -1889,15 +1889,10 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
         "function": {
             "name": "sqlite_batch",
             "description": (
-                "SQLite memory and logic. Model reusable domains in shared entity/event/relationship "
-                "tables; separate repeating parents/children with PRIMARY KEY/UNIQUE identity and provenance. Use joins/CTEs/"
-                "windows/aggregates; return only needed rows. Load all relevant __tool_results with one "
-                "INSERT ... SELECT/json_each query and an IN/tool_name filter; http_request payloads are under "
-                "result_json $.content. Never use per-result tables or hand-copy tool rows into VALUES. CTAS suits "
-                "extracts. For large/repetitive imports or API fan-out, prefer a custom tool writing to SQLite; no "
-                "ATTACH. Reusable pattern: CREATE TABLE with PRIMARY KEY/UNIQUE, then aggregate INSERT; CTAS only for "
-                "disposable extracts. `sql` is one semicolon-separated string; escape apostrophes as 'O''Brien'. "
-                "grep_context_all/split_sections arrays use json_each and ctx.value, not json_extract."
+                "SQLite memory and logic. Reusable domains MUST use explicit CREATE TABLE with stable PRIMARY KEY/UNIQUE identity and provenance, then one aggregate INSERT; CTAS is disposable only. Model shared entity/event/relationship "
+                "tables and separate repeating parents/children. Use joins/CTEs/windows/aggregates; return only needed rows. Load all relevant __tool_results with one "
+                "INSERT ... SELECT/json_each query and an IN/tool_name filter; http_request payloads are under result_json $.content. Never use per-result tables or hand-copy tool rows into VALUES. For large/repetitive imports or API fan-out, prefer a custom tool writing to SQLite; no "
+                "ATTACH. `sql` is one semicolon-separated string; escape apostrophes as 'O''Brien'. grep_context_all/split_sections arrays use json_each and ctx.value, not json_extract."
             ),
             "parameters": {
                 "type": "object",

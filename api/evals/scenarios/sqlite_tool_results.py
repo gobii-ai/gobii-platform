@@ -1,8 +1,17 @@
 import re
 from typing import Iterable
 
+import sqlparse
+
 from api.agent.tools.eval_synthetic_tools import EVAL_SYNTHETIC_TOOL_SERVER
-from api.agent.tools.sqlite_query_quality import summarize_sqlite_tool_result_calls
+from api.agent.tools.sqlite_query_quality import (
+    CREATE_TABLE_AS_RE,
+    _created_table_name,
+    _inserted_table_name,
+    _reads_table,
+    _structural_sql,
+    summarize_sqlite_tool_result_calls,
+)
 from api.agent.tools.tool_manager import mark_tool_enabled_without_discovery
 from api.agent.tools.web_chat_sender import _looks_like_routine_progress_message
 from api.evals.base import EvalScenario, ScenarioTask
@@ -35,6 +44,10 @@ LISTING_URLS = (
     "https://listings.example.test/tesla/model-y/vin-7say-004",
     "https://listings.example.test/tesla/model-y/vin-7say-005",
 )
+
+UNIQUE_MODEL_INDEX_RE = re.compile(r'\bcreate\s+unique\s+index\b[^;]*?\bon\s+"?(?P<table>[a-z_]\w*)"?', re.I | re.S)
+STABLE_IDENTITY_RE = re.compile(r'\bprimary\s+key\b|(?<!["\'`\[])\bunique\b(?!["\'`\]])', re.I)
+
 WEB_SOURCE_FACTS = (
     ("AxonFlow support automation", ("Vendor: AxonFlow", "Best fit: enterprise support teams with strict audit needs.", "Strengths: SOC 2 controls, workflow analytics, Salesforce integration, and 99.95% SLA.", "Tradeoff: higher implementation effort and annual pricing.")),
     ("BrightSupport", ("Vendor: BrightSupport", "Best fit: SMB teams that need fast deployment and low administration overhead.", "Strengths: shared inbox automation, simple knowledge-base answers, and transparent monthly pricing.", "Tradeoff: fewer governance controls than enterprise suites.")),
@@ -232,6 +245,9 @@ def _sqlite_calls_with_persisted_effects(calls):
     successful_sql = "\n".join(
         str((call.tool_params or {}).get("sql") or "") for call in successful_calls
     )
+    successful_statements = [
+        _structural_sql(statement) for statement in sqlparse.split(successful_sql) if statement.strip()
+    ]
     strategy_calls = []
     for call in calls:
         if call in successful_calls:
@@ -241,11 +257,66 @@ def _sqlite_calls_with_persisted_effects(calls):
             continue
         failed_summary = summarize_sqlite_tool_result_calls([call])
         if any(
-            re.search(rf'\b(?:from|join)\s+"?{re.escape(table)}"?\b', successful_sql, re.I)
-            for table in failed_summary.derived_working_table_names
+            _reads_table(statement, table)
+            for table in failed_summary.working_table_names
+            for statement in successful_statements
         ):
             strategy_calls.append(call)
     return successful_calls, strategy_calls
+
+
+def _domain_model_lineage(
+    sql: str,
+    *,
+    direct_tables: Iterable[str],
+    row_direct_tables: Iterable[str],
+    candidate_tables: Iterable[str],
+) -> tuple[tuple[str, ...], tuple[str, ...], set[str]]:
+    candidates = tuple(dict.fromkeys(table.casefold() for table in candidate_tables))
+    modeled = {table.casefold() for table in direct_tables if table.casefold() in candidates}
+    row_modeled = {table.casefold() for table in row_direct_tables if table.casefold() in modeled}
+    statements = [_structural_sql(statement) for statement in sqlparse.split(sql or "") if statement.strip()]
+
+    changed = True
+    while changed:
+        changed = False
+        for statement in statements:
+            target = _created_table_name(statement) or _inserted_table_name(statement) or ""
+            if target not in candidates:
+                continue
+            source_tables = {source for source in modeled if _reads_table(statement, source)}
+            if source_tables:
+                if target not in modeled:
+                    modeled.add(target)
+                    changed = True
+                if source_tables.intersection(row_modeled) and target not in row_modeled:
+                    row_modeled.add(target)
+                    changed = True
+
+    identity_tables = set()
+    for statement in statements:
+        created_table = _created_table_name(statement)
+        if created_table and not CREATE_TABLE_AS_RE.search(statement) and STABLE_IDENTITY_RE.search(statement):
+            identity_tables.add(created_table)
+        if index_match := UNIQUE_MODEL_INDEX_RE.search(statement):
+            identity_tables.add(index_match.group("table").casefold())
+    return (
+        tuple(table for table in candidates if table in modeled),
+        tuple(table for table in candidates if table in row_modeled),
+        identity_tables,
+    )
+
+
+def _decision_model_tables(sql: str, model_tables: Iterable[str]) -> tuple[str, ...]:
+    tables = tuple(model_tables)
+    decisions = set()
+    for statement in (_structural_sql(part) for part in sqlparse.split(sql or "") if part.strip()):
+        parsed = sqlparse.parse(statement)
+        if not parsed or parsed[0].get_type() != "SELECT":
+            continue
+        if re.search(r"\bwhere\b", statement, re.I) and re.search(r"\border\s+by\b", statement, re.I):
+            decisions.update(table for table in tables if _reads_table(statement, table))
+    return tuple(table for table in tables if table in decisions)
 
 
 class SqliteToolResultScenario(EvalScenario, ScenarioExecutionTools):
@@ -437,24 +508,19 @@ class SqliteIntermediateWorkingTableScenario(SqliteToolResultScenario):
         calls = _tool_calls_for_run(run_id, after=after, tool_names={"sqlite_batch"})
         successful_calls, strategy_calls = _sqlite_calls_with_persisted_effects(calls)
         summary = summarize_sqlite_tool_result_calls(strategy_calls)
-        successful_summary = summarize_sqlite_tool_result_calls(successful_calls)
         successful_sql = "\n".join(str((call.tool_params or {}).get("sql") or "") for call in successful_calls)
         strategy_sql = "\n".join(str((call.tool_params or {}).get("sql") or "") for call in strategy_calls)
-        model_tables = tuple(
-            table
-            for table in summary.derived_working_table_names
-            if table in successful_summary.derived_working_table_names
-            or re.search(rf'\b(?:from|join)\s+"?{re.escape(table)}"?\b', successful_sql, re.I)
+        direct_tables = summary.derived_working_table_names
+        model_tables, row_model_tables, identity_tables = _domain_model_lineage(
+            strategy_sql,
+            direct_tables=direct_tables,
+            row_direct_tables=summary.row_derived_working_table_names,
+            candidate_tables=summary.working_table_names,
         )
-        read_tables = [
-            table
-            for table in model_tables
-            if re.search(rf'\b(?:from|join)\s+"?{re.escape(table)}"?\b', successful_sql, re.I)
-        ]
-        has_stable_identity = bool(
-            re.search(r"\b(?:primary\s+key|unique)\b", strategy_sql, re.I)
-        )
-        row_derived_model_tables = set(summary.row_derived_working_table_names).intersection(model_tables)
+        read_tables = _decision_model_tables(successful_sql, model_tables)
+        has_stable_identity = bool(read_tables) and set(read_tables).issubset(identity_tables)
+        reusable_tables = tuple(table for table in model_tables if table in identity_tables)
+        row_derived_model_tables = set(read_tables).intersection(row_model_tables)
         manually_populated_model_tables = set(summary.manual_values_table_names).intersection(model_tables)
         failures = [message for failed, message in (
             (not successful_calls, "no successful sqlite_batch call observed"),
@@ -479,10 +545,10 @@ class SqliteIntermediateWorkingTableScenario(SqliteToolResultScenario):
             None,
             EvalRunTask.Status.FAILED if failures else EvalRunTask.Status.PASSED,
             task_name="verify_domain_model",
-            observed_summary="; ".join(failures) if failures else f"Modeled and queried reusable domain tables: {model_tables}.",
-            artifacts={"step": successful_calls[0].step, "model_tables": model_tables} if successful_calls else {},
+            observed_summary="; ".join(failures) if failures else f"Modeled and queried reusable domain tables: {reusable_tables}.",
+            artifacts={"step": successful_calls[0].step, "model_tables": model_tables, "decision_tables": read_tables} if successful_calls else {},
         )
-        return model_tables
+        return reusable_tables
 
     def _record_model_reuse(self, run_id: str, *, after, model_tables: Iterable[str]) -> None:
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="verify_model_reuse")
@@ -490,18 +556,17 @@ class SqliteIntermediateWorkingTableScenario(SqliteToolResultScenario):
         http_calls = [call for call in calls if call.tool_name == "http_request"]
         sqlite_calls = [call for call in calls if call.tool_name == "sqlite_batch" and call.status == "complete"]
         sql = "\n".join(str((call.tool_params or {}).get("sql") or "") for call in sqlite_calls)
-        read_tables = [
-            table
-            for table in model_tables
-            if re.search(rf'\b(?:from|join)\s+"?{re.escape(table)}"?\b', sql, re.I)
-        ]
+        structural_sql = "\n".join(
+            _structural_sql(statement) for statement in sqlparse.split(sql) if statement.strip()
+        )
+        read_tables = _decision_model_tables(structural_sql, model_tables)
         failures = [message for failed, message in (
             (bool(http_calls), f"follow-up refetched {len(http_calls)} source(s)"),
             (not sqlite_calls, "follow-up did not query SQLite"),
-            ("__tool_results" in sql.casefold(), "follow-up reread raw tool results instead of the domain model"),
+            ("__tool_results" in structural_sql.casefold(), "follow-up reread raw tool results instead of the domain model"),
             (not read_tables, f"follow-up did not read the reusable domain model: {read_tables}"),
-            (not re.search(r"\bwhere\b", sql, re.I), "follow-up did not apply decision filters in SQL"),
-            (not re.search(r"\border\s+by\b", sql, re.I), "follow-up did not rank candidates in SQL"),
+            (not re.search(r"\bwhere\b", structural_sql, re.I), "follow-up did not apply decision filters in SQL"),
+            (not re.search(r"\border\s+by\b", structural_sql, re.I), "follow-up did not rank candidates in SQL"),
         ) if failed]
         self.record_task_result(
             run_id,

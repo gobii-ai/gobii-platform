@@ -248,10 +248,110 @@ class SqliteBatchToolTests(TestCase):
         self.assertIn("shared entity/event/relationship tables", description)
         self.assertIn("separate repeating parents/children", description)
         self.assertIn("PRIMARY KEY/UNIQUE identity and provenance", description)
+        self.assertIn("MUST use explicit CREATE TABLE", description)
+        self.assertIn("CTAS is disposable only", description)
         self.assertIn("all relevant __tool_results", description)
         self.assertIn("one INSERT ... SELECT/json_each query", description)
         self.assertIn("prefer a custom tool writing to SQLite", description)
         self.assertIn("no ATTACH", description)
+
+    def test_tool_result_ctas_warns_that_identity_is_disposable(self):
+        with self._with_temp_db() as (db_path, _token, _tmp):
+            conn = sqlite3.connect(db_path)
+            try:
+                conn.execute("CREATE TABLE __tool_results (result_id TEXT PRIMARY KEY, result_json TEXT)")
+                conn.executemany(
+                    "INSERT INTO __tool_results VALUES (?, ?)",
+                    [("r1", '{"items":[1]}'), ("r2", '{"items":[2]}')],
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            out = execute_sqlite_batch(
+                self.agent,
+                {
+                    "sql": "CREATE TABLE vendors AS SELECT result_json FROM __tool_results",
+                    "will_continue_work": True,
+                },
+            )
+
+            self.assertEqual(out.get("status"), "warning")
+            self.assertEqual(out.get("advisories", [{}])[0].get("code"), "tool_result_ctas")
+            self.assertIn("PRIMARY KEY/UNIQUE", out.get("message", ""))
+
+            disposable = execute_sqlite_batch(
+                self.agent,
+                {
+                    "sql": (
+                        "CREATE TEMP TABLE scratch(value INTEGER);"
+                        "INSERT INTO scratch SELECT p.value FROM __tool_results "
+                        "JOIN json_each(result_json, '$.items') p;"
+                    ),
+                    "will_continue_work": True,
+                },
+            )
+            self.assertEqual(disposable.get("status"), "ok")
+            self.assertNotIn("advisories", disposable)
+
+    def test_reusable_tool_result_table_requires_its_own_identity(self):
+        with self._with_temp_db() as (db_path, _token, _tmp):
+            conn = sqlite3.connect(db_path)
+            try:
+                conn.execute("CREATE TABLE __tool_results (result_id TEXT PRIMARY KEY, result_json TEXT)")
+                conn.executemany(
+                    "INSERT INTO __tool_results VALUES (?, ?)",
+                    [("r1", '{"plans":[{"vendor":"A"}]}'), ("r2", '{"plans":[{"vendor":"B"}]}')],
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            unkeyed = execute_sqlite_batch(
+                self.agent,
+                {
+                    "sql": (
+                        'CREATE TABLE decoy(id TEXT PRIMARY KEY);'
+                        'CREATE TABLE vendors(vendor TEXT, "unique" TEXT);'
+                        "INSERT INTO vendors(vendor) SELECT json_extract(p.value, '$.vendor') "
+                        "FROM __tool_results JOIN json_each(result_json, '$.plans') p;"
+                    ),
+                    "will_continue_work": True,
+                },
+            )
+            self.assertEqual(unkeyed.get("status"), "error")
+            self.assertEqual(unkeyed.get("advisories", [{}])[0].get("code"), "reusable_model_missing_identity")
+
+            keyed = execute_sqlite_batch(
+                self.agent,
+                {
+                    "sql": (
+                        "CREATE TABLE vendors(vendor TEXT PRIMARY KEY);"
+                        "INSERT OR IGNORE INTO vendors SELECT json_extract(p.value, '$.vendor') "
+                        "FROM __tool_results JOIN json_each(result_json, '$.plans') p;"
+                    ),
+                    "will_continue_work": True,
+                },
+            )
+            self.assertEqual(keyed.get("status"), "ok")
+            self.assertNotIn("advisories", keyed)
+
+            one_result_unkeyed = build_tool_result_query_advisories(
+                [
+                    "CREATE TABLE plans(plan TEXT);"
+                    "INSERT INTO plans SELECT p.value FROM __tool_results "
+                    "JOIN json_each(result_json, '$.plans') p;"
+                ],
+                available_tool_result_rows=1,
+            )
+            self.assertTrue(one_result_unkeyed[0].blocking)
+            self.assertEqual(one_result_unkeyed[0].code, "reusable_model_missing_identity")
+
+            one_result_ctas = build_tool_result_query_advisories(
+                ["CREATE TABLE plans AS SELECT result_json FROM __tool_results"],
+                available_tool_result_rows=1,
+            )
+            self.assertEqual(one_result_ctas[0].code, "tool_result_ctas")
 
     def test_single_tool_result_blob_fetch_returns_efficiency_advisory(self):
         with self._with_temp_db() as (db_path, _token, _tmp):

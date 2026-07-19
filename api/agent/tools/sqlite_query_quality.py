@@ -13,10 +13,12 @@ RESULT_ID_EQ_RE = re.compile(r"\b(?:[a-z_]\w*\.)?result_id\s*=\s*(['\"])(?P<id>[
 RESULT_ID_IN_RE = re.compile(r"\b(?:[a-z_]\w*\.)?result_id\s+in\s*\((?P<values>[^)]*)\)", re.I | re.S)
 RESULT_ID_IN_VALUE_RE = re.compile(r"(?:'(?:''|[^'])*'|\"(?:\"\"|[^\"])*\"|\?|[:@$][a-z_]\w*)", re.I)
 CREATE_TABLE_RE = re.compile(r'\bcreate\s+(?:temp(?:orary)?\s+)?table\s+(?:if\s+not\s+exists\s+)?"?(?P<name>[a-z_]\w*)"?', re.I)
+CREATE_TABLE_AS_RE = re.compile(r'\bcreate\s+table\b[^;]*?\bas\s+(?:with|select)\b', re.I | re.S)
+CREATE_TEMP_TABLE_RE = re.compile(r'\bcreate\s+temp(?:orary)?\s+table\b', re.I)
+CREATE_UNIQUE_INDEX_RE = re.compile(r'\bcreate\s+unique\s+index\b[^;]*?\bon\s+"?(?P<name>[a-z_]\w*)"?', re.I | re.S)
+TABLE_IDENTITY_RE = re.compile(r'\bprimary\s+key\b|(?<!["\'`\[])\bunique\b(?!["\'`\]])', re.I)
 INSERT_INTO_RE = re.compile(r'\binsert\s+(?:or\s+\w+\s+)?into\s+"?(?P<name>[a-z_]\w*)"?', re.I)
-MANUAL_INSERT_VALUES_RE = re.compile(
-    r'\binsert\s+(?:or\s+\w+\s+)?into\s+"?(?P<name>[a-z_]\w*)"?\s*(?:\(\s*"?[a-z_]\w*"?(?:\s*,\s*"?[a-z_]\w*"?)*\s*\)\s*)?values\b', re.I
-)
+MANUAL_INSERT_VALUES_RE = re.compile(r'\binsert\s+(?:or\s+\w+\s+)?into\s+"?(?P<name>[a-z_]\w*)"?\s*(?:\(\s*"?[a-z_]\w*"?(?:\s*,\s*"?[a-z_]\w*"?)*\s*\)\s*)?values\b', re.I)
 JSON_FUNCTION_RE = re.compile(r"\bjson_(?:extract|each)\s*\(", re.I)
 JSON_EACH_RE = re.compile(r"\bjson_each\s*\(", re.I)
 URL_RE = re.compile(r"https?://[^\s'\",)]+", re.I)
@@ -35,7 +37,7 @@ ROW_LOOP_MESSAGE = (
 )
 MANUAL_COPY_MESSAGE = (
     "This builds a VALUES table while multiple tool results exist. If those rows came from tool outputs, do not "
-    "continue: rebuild directly from all relevant __tool_results with json_extract/json_each or CTAS."
+    "continue: rebuild from all relevant __tool_results with one aggregate INSERT ... SELECT/json_each query."
 )
 SINGLE_IMPORT_MESSAGE = (
     "This imports one result_id while sibling tool results exist. If they share a dataset, replace separate imports "
@@ -46,7 +48,7 @@ COUNT_FIELDS = (
     "statement_count", "tool_result_statement_count", "single_result_id_filters", "single_tool_result_imports",
     "direct_result_text_fetches", "aggregate_tool_result_queries", "smart_tool_result_queries",
     "uses_json_functions", "uses_cte", "uses_join", "uses_group_by", "uses_window",
-    "uses_order_by", "creates_working_table", "reads_working_table",
+    "uses_order_by", "creates_working_table", "reads_working_table", "tool_result_ctas",
 )
 USER_TABLE_PREFIXES = ("__", "sqlite_")
 
@@ -69,6 +71,7 @@ def summarize_sqlite_tool_result_sql(sql_values: Iterable[str], *, sqlite_call_c
     created_tables: list[str] = []
     working_sources: set[str] = set()
     row_derived_sources: set[str] = set()
+    explicit_table_identity: dict[str, bool] = {}
     manual_value_tables: list[str] = []
     manual_value_rows = 0
     direct_fetch_keys: list[str] = []
@@ -103,14 +106,19 @@ def summarize_sqlite_tool_result_sql(sql_values: Iterable[str], *, sqlite_call_c
         counts["direct_result_text_fetches"] += int(direct_fetch)
         counts["aggregate_tool_result_queries"] += int(aggregate)
         counts["smart_tool_result_queries"] += int(aggregate and any(flags.values()))
+        counts["tool_result_ctas"] += int(mentions and bool(CREATE_TABLE_AS_RE.search(statement)))
         for key, enabled in flags.items():
             counts[key] += int(enabled)
         if direct_fetch:
             direct_fetch_keys.append(_direct_fetch_key(statement))
         if created_table:
             created_tables.append(created_table)
+            if not CREATE_TABLE_AS_RE.search(statement) and not CREATE_TEMP_TABLE_RE.search(statement):
+                explicit_table_identity[created_table] = bool(TABLE_IDENTITY_RE.search(statement))
             if mentions:
                 working_sources.add(created_table)
+        if index_match := CREATE_UNIQUE_INDEX_RE.search(statement):
+            explicit_table_identity[index_match.group("name").casefold()] = True
         if table := _manual_values_table_name(statement):
             manual_value_tables.append(table)
             manual_value_rows += _manual_values_row_count(statement)
@@ -122,11 +130,7 @@ def summarize_sqlite_tool_result_sql(sql_values: Iterable[str], *, sqlite_call_c
     created_unique = tuple(dict.fromkeys(created_tables))
     manual_values_unique = tuple(dict.fromkeys(manual_value_tables))
     counts["creates_working_table"] = sum(1 for table in created_unique if table in working_sources)
-    counts["reads_working_table"] = sum(
-        1
-        for table in created_unique
-        if table in working_sources and any(_reads_table(stmt, table) for stmt in statements)
-    )
+    counts["reads_working_table"] = sum(1 for table in created_unique if table in working_sources and any(_reads_table(stmt, table) for stmt in statements))
     duplicate_fetches = sum(count - 1 for count in Counter(direct_fetch_keys).values() if count > 1)
     return SimpleNamespace(
         sqlite_call_count=sqlite_call_count if sqlite_call_count is not None else len(sql_list),
@@ -137,36 +141,37 @@ def summarize_sqlite_tool_result_sql(sql_values: Iterable[str], *, sqlite_call_c
         manual_values_table_names=manual_values_unique,
         manual_values_rows=manual_value_rows,
         manual_values_working_tables=sum(1 for table in manual_values_unique if table in created_unique),
+        unkeyed_explicit_table_names=tuple(table for table, keyed in explicit_table_identity.items() if not keyed),
         **{field: counts[field] for field in COUNT_FIELDS},
     )
 
 
-def build_tool_result_query_advisories(
-    sql_values: Iterable[str], *, available_tool_result_rows: int, tool_result_payloads: Iterable[str] = ()
-) -> list[SimpleNamespace]:
-    if available_tool_result_rows < 2:
-        return []
+def build_tool_result_query_advisories(sql_values: Iterable[str], *, available_tool_result_rows: int, tool_result_payloads: Iterable[str] = ()) -> list[SimpleNamespace]:
+    if available_tool_result_rows < 1: return []
     sql_values = [str(sql or "") for sql in sql_values]
     advisories = []
     summary = summarize_sqlite_tool_result_sql(sql_values)
+    unkeyed_models = set(summary.unkeyed_explicit_table_names).intersection(summary.row_derived_working_table_names)
+    if unkeyed_models:
+        advisories.append(_advisory("reusable_model_missing_identity", f"Query not executed: reusable table(s) {', '.join(sorted(unkeyed_models))} derive repeating tool-result rows without stable identity. Add PRIMARY KEY/UNIQUE to CREATE TABLE; use TEMP CTAS only for a disposable extract.", blocking=True))
+    if summary.tool_result_ctas:
+        advisories.append(_advisory("tool_result_ctas", "CTAS has no stable identity. Use it only for a disposable extract; reusable models need explicit CREATE TABLE with PRIMARY KEY/UNIQUE, then aggregate INSERT."))
+    if available_tool_result_rows < 2: return advisories
+    model_advisories, advisories = advisories, []
     copied_provenance_urls = _matching_provenance_urls(sql_values, tool_result_payloads)
     if summary.manual_values_rows >= BULK_MANUAL_VALUES_ROW_LIMIT and len(copied_provenance_urls) >= 2:
-        advisories.append(_advisory(
-            "bulk_manual_working_table_from_visible_results", BULK_COPY_MESSAGE, blocking=True
-        ))
+        advisories.append(_advisory("bulk_manual_working_table_from_visible_results", BULK_COPY_MESSAGE, blocking=True))
     elif summary.manual_values_working_tables:
         advisories.append(_advisory("manual_working_table_from_visible_results", MANUAL_COPY_MESSAGE))
     if summary.direct_result_text_fetches >= 2 or summary.duplicate_direct_fetches:
         advisories.append(_advisory("tool_result_blob_fetch_loop", BLOB_LOOP_MESSAGE, blocking=True))
     elif summary.direct_result_text_fetches:
-        advisories.append(
-            _advisory("single_tool_result_blob_fetch", "This fetched one full result_text blob while multiple tool results are available. For multi-source synthesis, query the needed rows together; use substr(result_text,1,N) only for previews.")
-        )
+        advisories.append(_advisory("single_tool_result_blob_fetch", "This fetched one full result_text blob while multiple tool results are available. For multi-source synthesis, query the needed rows together; use substr(result_text,1,N) only for previews."))
     if summary.single_result_id_filters >= 2 and summary.direct_result_text_fetches < 2:
         advisories.append(_advisory("tool_result_row_loop", ROW_LOOP_MESSAGE, blocking=True))
     elif summary.single_tool_result_imports:
         advisories.append(_advisory("single_tool_result_import", SINGLE_IMPORT_MESSAGE))
-    return advisories
+    return advisories + model_advisories
 
 
 def _advisory(code: str, message: str, *, blocking: bool = False) -> SimpleNamespace:

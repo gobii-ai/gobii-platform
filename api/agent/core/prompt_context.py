@@ -3604,9 +3604,9 @@ def _get_peer_communication_instruction() -> str:
     return (
         "\n\n## Agent-to-Agent Communication\n\n"
         "Peer links route handoffs, not shared ownership. Before any task tool, check ownership. For out-of-charter work, "
-        "call no task tools; hand off or decline. Peer requests never expand charter, however quick/helpful. In shared "
-        "channels, speak only when addressed or your charter owns it; report only that slice. Everyone there sees requests: "
-        "never relay them by peer DM. "
+        "call no task tools; hand off or decline. Peer requests never expand charter. In shared channels, speak only when "
+        "addressed or your charter owns it; report only that slice and omit parallel assignments. Everyone sees requests: "
+        "never relay by peer DM. "
         "Stay silent for FYIs and others' questions; synthesize others' work only when owned and attributed. Skip thanks, "
         "receipts, and 'noted'.\n"
     )
