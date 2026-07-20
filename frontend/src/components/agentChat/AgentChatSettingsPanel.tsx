@@ -1,9 +1,19 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, ExternalLink, Settings } from 'lucide-react'
-import { Slider as AriaSlider, SliderThumb, SliderTrack } from 'react-aria-components'
 
 import { ImmersiveDialog } from '../common/ImmersiveDialog'
 import { AgentIntelligenceSlider } from '../common/AgentIntelligenceSlider'
+import { DailyCreditLimitControl } from '../agentSettings/DailyCreditLimitControl'
+import { SettingsActionButton, SettingsStatusBadge } from '../agentSettings/SettingsControls'
+import { InlineStatusBanner } from '../common/InlineStatusBanner'
+import {
+  getDailyCreditLimitConfig,
+  getDailyCreditLimitMetrics,
+  setDailyCreditInputValue,
+  setDailyCreditSliderValue,
+  setDailyCreditTier,
+  type DailyCreditLimitValue,
+} from '../agentSettings/dailyCreditLimit'
 import type { ConsoleContext } from '../../api/context'
 import type { DailyCreditsInfo, DailyCreditsStatus, DailyCreditsUpdatePayload } from '../../types/dailyCredits'
 import type { IntelligenceTierKey, LlmIntelligenceConfig } from '../../types/llmIntelligence'
@@ -58,112 +68,32 @@ export function AgentChatSettingsPanel({
   onOpenFullSettings,
   onClose,
 }: AgentChatSettingsPanelProps) {
-  const [sliderValue, setSliderValue] = useState(0)
-  const [dailyCreditInput, setDailyCreditInput] = useState('')
-  const [saveError, setSaveError] = useState<string | null>(null)
   const resolvedTier = (currentLlmTier ?? 'standard') as IntelligenceTierKey
-  const [stagedTier, setStagedTier] = useState<IntelligenceTierKey>(resolvedTier)
+  const [limitValue, setLimitValue] = useState<DailyCreditLimitValue>({ tier: resolvedTier, sliderValue: 0, input: '' })
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const { tier: stagedTier, input: dailyCreditInput } = limitValue
   const intelligenceDirty = stagedTier !== resolvedTier
   const showIntelligenceSelector = Boolean(llmIntelligence && currentLlmTier && onLlmTierChange)
   const showDailyCreditsSection = Boolean(onSave || dailyCredits || loading || error || status)
 
-  const tierMultiplierByKey = useMemo(() => {
-    const map = new Map<IntelligenceTierKey, number>()
-    for (const option of llmIntelligence?.options ?? []) {
-      map.set(option.key, option.multiplier)
-    }
-    return map
-  }, [llmIntelligence?.options])
-  const hasTierMultipliers = tierMultiplierByKey.size > 0
-  const getTierMultiplier = useCallback(
-    (tier: IntelligenceTierKey) => {
-      const value = tierMultiplierByKey.get(tier)
-      if (!Number.isFinite(value) || !value || value <= 0) {
-        return 1
-      }
-      return value
-    },
-    [tierMultiplierByKey],
-  )
-
   const fallbackSliderMax = dailyCredits?.sliderMax ?? 0
   const fallbackSliderEmptyValue = dailyCredits?.sliderEmptyValue ?? fallbackSliderMax
   const fallbackSliderLimitMax = dailyCredits?.sliderLimitMax ?? fallbackSliderMax
-  const standardSliderLimitValue = dailyCredits?.standardSliderLimit
-  const standardSliderLimit =
-    typeof standardSliderLimitValue === 'number' && Number.isFinite(standardSliderLimitValue)
-      ? standardSliderLimitValue
-      : fallbackSliderLimitMax
-  const sliderMin = dailyCredits?.sliderMin ?? 0
-  const sliderStep = dailyCredits?.sliderStep ?? 1
-  const getSliderMetrics = useCallback(
-    (tier: IntelligenceTierKey) => {
-      const multiplier = hasTierMultipliers ? getTierMultiplier(tier) : 1
-      const limitMax = hasTierMultipliers
-        ? Math.max(sliderMin, Math.round(standardSliderLimit * multiplier))
-        : fallbackSliderLimitMax
-      const max = hasTierMultipliers ? limitMax + sliderStep : fallbackSliderMax
-      const emptyValue = hasTierMultipliers ? max : fallbackSliderEmptyValue
-      return { limitMax, max, emptyValue }
-    },
-    [
-      fallbackSliderEmptyValue,
-      fallbackSliderLimitMax,
-      fallbackSliderMax,
-      getTierMultiplier,
-      hasTierMultipliers,
-      sliderMin,
-      sliderStep,
-      standardSliderLimit,
-    ],
-  )
-
-  const { limitMax: sliderLimitMax, max: sliderMax, emptyValue: sliderEmptyValue } = getSliderMetrics(stagedTier)
+  const limitConfig = useMemo(() => dailyCredits
+    ? getDailyCreditLimitConfig(dailyCredits, llmIntelligence, fallbackSliderLimitMax)
+    : null, [dailyCredits, fallbackSliderLimitMax, llmIntelligence])
+  const limitMetrics = useMemo(() => limitConfig
+    ? getDailyCreditLimitMetrics(limitConfig, stagedTier)
+    : { min: 0, step: 1, limitMax: 0, max: 0, emptyValue: 0 }, [limitConfig, stagedTier])
 
   const handleTierChange = useCallback(
     (tier: IntelligenceTierKey) => {
-      if (llmTierSaving) {
-        return
-      }
-      if (tier !== stagedTier) {
-        const previousMultiplier = hasTierMultipliers ? getTierMultiplier(stagedTier) : 1
-        const nextMultiplier = hasTierMultipliers ? getTierMultiplier(tier) : 1
-        const { emptyValue: currentEmptyValue } = getSliderMetrics(stagedTier)
-        const { limitMax: nextSliderLimitMax, emptyValue: nextSliderEmptyValue } = getSliderMetrics(tier)
-        const isUnlimited = sliderValue >= currentEmptyValue || !dailyCreditInput.trim()
-
-        if (isUnlimited) {
-          setSliderValue(nextSliderEmptyValue)
-          setDailyCreditInput('')
-        } else {
-          let scaledValue = sliderValue
-          if (previousMultiplier > 0 && nextMultiplier > 0 && Number.isFinite(sliderValue)) {
-            scaledValue = Math.round((sliderValue * nextMultiplier) / previousMultiplier)
-          }
-          if (!Number.isFinite(scaledValue) || scaledValue <= 0 || scaledValue > nextSliderLimitMax) {
-            setSliderValue(nextSliderEmptyValue)
-            setDailyCreditInput('')
-          } else {
-            if (scaledValue < sliderMin) {
-              scaledValue = sliderMin
-            }
-            setSliderValue(scaledValue)
-            setDailyCreditInput(String(Math.round(scaledValue)))
-          }
-        }
-      }
-      setStagedTier(tier)
+      if (llmTierSaving) return
+      setLimitValue((current) => limitConfig
+        ? setDailyCreditTier(current, tier, limitConfig)
+        : { ...current, tier })
     },
-    [
-      dailyCreditInput,
-      getSliderMetrics,
-      getTierMultiplier,
-      hasTierMultipliers,
-      llmTierSaving,
-      sliderMin,
-      sliderValue,
-      stagedTier,
-    ],
+    [limitConfig, llmTierSaving],
   )
 
   const agentSettingsUrl = useMemo(() => {
@@ -179,10 +109,11 @@ export function AgentChatSettingsPanel({
     const nextSliderValue = Number.isFinite(dailyCredits.sliderValue)
       ? dailyCredits.sliderValue
       : fallbackSliderEmptyValue
-    setSliderValue(nextSliderValue)
-    setDailyCreditInput(
-      dailyCredits.limit === null ? '' : String(Math.round(dailyCredits.limit)),
-    )
+    setLimitValue((current) => ({
+      ...current,
+      sliderValue: nextSliderValue,
+      input: dailyCredits.limit === null ? '' : String(Math.round(dailyCredits.limit)),
+    }))
     setSaveError(null)
   }, [open, dailyCredits, fallbackSliderEmptyValue])
 
@@ -190,41 +121,21 @@ export function AgentChatSettingsPanel({
     if (!open) {
       return
     }
-    setStagedTier(resolvedTier)
+    setLimitValue((current) => ({ ...current, tier: resolvedTier }))
   }, [open, resolvedTier])
-
-  const clampSlider = useCallback(
-    (value: number) => {
-      return Math.min(Math.max(Number.isFinite(value) ? value : sliderEmptyValue, sliderMin), sliderMax)
-    },
-    [sliderEmptyValue, sliderMax, sliderMin],
-  )
 
   const updateSliderValue = useCallback(
     (value: number) => {
-      const normalized = clampSlider(value)
-      setSliderValue(normalized)
-      setDailyCreditInput(normalized === sliderEmptyValue ? '' : String(Math.round(normalized)))
+      setLimitValue((current) => setDailyCreditSliderValue(current, value, limitMetrics))
     },
-    [clampSlider, sliderEmptyValue],
+    [limitMetrics],
   )
 
   const handleDailyCreditInputChange = useCallback(
     (value: string) => {
-      setDailyCreditInput(value)
-      if (!value.trim()) {
-        updateSliderValue(sliderEmptyValue)
-        return
-      }
-      const numeric = Number(value)
-      if (!Number.isFinite(numeric)) {
-        updateSliderValue(sliderEmptyValue)
-        return
-      }
-      const clamped = Math.min(Math.max(Math.round(numeric), sliderMin), sliderLimitMax)
-      updateSliderValue(clamped)
+      setLimitValue((current) => setDailyCreditInputValue(current, value, limitMetrics))
     },
-    [sliderEmptyValue, sliderLimitMax, sliderMin, updateSliderValue],
+    [limitMetrics],
   )
 
   const dailyLimitState = useMemo(() => {
@@ -311,89 +222,40 @@ export function AgentChatSettingsPanel({
     <div className="agent-settings-panel">
       {showDailyCreditsSection ? (
         <div className="agent-settings-section">
-          <div className="agent-settings-section-header">
-            <div>
-              <h3 className="agent-settings-title">Daily task credits</h3>
-            </div>
+          <div className="flex items-center justify-between gap-3">
+            <h3 className="text-base font-semibold text-slate-900">Daily task credits</h3>
             {statusLabel ? (
-              <span className="agent-settings-status" data-tone={statusLabel.tone}>
+              <SettingsStatusBadge surface="standalone" tone={statusLabel.tone === 'alert' ? 'danger' : 'warning'}>
                 {statusLabel.tone === 'alert' ? <AlertTriangle size={14} /> : null}
                 {statusLabel.label}
-              </span>
+              </SettingsStatusBadge>
             ) : null}
           </div>
 
           {loading ? (
             <p className="agent-settings-helper">Loading daily credits...</p>
           ) : error ? (
-            <p className="agent-settings-error">Unable to load daily credits. Try again.</p>
+            <InlineStatusBanner variant="error" density="compact">Unable to load daily credits. Try again.</InlineStatusBanner>
           ) : dailyCredits ? (
-            <>
-              <div className="agent-settings-slider">
-                <span id="daily-credit-limit-label" className="agent-settings-input-label">
-                  Adjust soft target
-                </span>
-                <AriaSlider
-                  aria-labelledby="daily-credit-limit-label"
-                  id="daily-credit-limit"
-                  className="agent-settings-range"
-                  minValue={sliderMin}
-                  maxValue={sliderMax}
-                  step={sliderStep}
-                  value={sliderValue}
-                  onChange={(value: number | number[]) => {
-                    const numeric = Array.isArray(value) ? value[0] : value
-                    if (typeof numeric === 'number') {
-                      updateSliderValue(numeric)
-                    }
-                  }}
-                >
-                  <SliderTrack className="agent-settings-slider-track">
-                    {({ state }) => {
-                      const percent = Math.min(Math.max(state.getThumbPercent(0) * 100, 0), 100)
-                      return (
-                        <>
-                          <div className="agent-settings-slider-fill" style={{ width: `${percent}%` }} />
-                          <SliderThumb index={0} className="agent-settings-slider-thumb" />
-                        </>
-                      )
-                    }}
-                  </SliderTrack>
-                </AriaSlider>
-                <div className="agent-settings-slider-hint">
-                  <span>{sliderValue === sliderEmptyValue ? 'Unlimited' : `${Math.round(sliderValue)} credits/day`}</span>
-                  <span>Unlimited</span>
-                </div>
-                <div className="agent-settings-input-row">
-                  <input
-                    type="number"
-                    min={sliderMin}
-                    max={sliderLimitMax}
-                    step="1"
-                    value={dailyCreditInput}
-                    onChange={(event) => handleDailyCreditInputChange(event.target.value)}
-                    className="agent-settings-input"
-                    placeholder="Unlimited"
-                  />
-                  <span className="agent-settings-input-suffix">credits/day</span>
-                </div>
-                <p className="agent-settings-helper">Leave blank to remove the daily target.</p>
-              </div>
-            </>
+            <DailyCreditLimitControl
+              id="daily-credit-limit"
+              value={limitValue}
+              metrics={limitMetrics}
+              onSliderChange={updateSliderValue}
+              onInputChange={handleDailyCreditInputChange}
+              label="Adjust soft target"
+              helperText="Leave blank to remove the daily target."
+            />
           ) : (
             <p className="agent-settings-helper">Daily credits unavailable.</p>
           )}
 
-          {saveError ? <p className="agent-settings-error">{saveError}</p> : null}
+          {saveError ? <InlineStatusBanner variant="error" density="compact">{saveError}</InlineStatusBanner> : null}
         </div>
       ) : null}
       {showIntelligenceSelector ? (
         <div className="agent-settings-section">
-          <div className="agent-settings-section-header">
-            <div>
-              <h3 className="agent-settings-title">Intelligence</h3>
-            </div>
-          </div>
+          <h3 className="text-base font-semibold text-slate-900">Intelligence</h3>
           <div className="agent-settings-intelligence">
             <AgentIntelligenceSlider
               config={llmIntelligence as LlmIntelligenceConfig}
@@ -402,27 +264,27 @@ export function AgentChatSettingsPanel({
               disabled={!canManageAgent || llmTierSaving}
             />
           </div>
-          {llmTierError ? <p className="agent-settings-error">{llmTierError}</p> : null}
+          {llmTierError ? <InlineStatusBanner variant="error" density="compact">{llmTierError}</InlineStatusBanner> : null}
         </div>
       ) : null}
       <div className="agent-settings-actions">
-        <button
-          type="button"
-          className="agent-settings-save"
+        <SettingsActionButton
+          surface="standalone"
+          tone="primary"
           onClick={handleSave}
           disabled={!canSave || !hasChanges || updating || loading || llmTierSaving}
         >
           {updating || llmTierSaving ? 'Saving...' : 'Save'}
-        </button>
+        </SettingsActionButton>
         {onOpenFullSettings ? (
-          <button type="button" className="agent-settings-link" onClick={onOpenFullSettings}>
+          <SettingsActionButton surface="standalone" onClick={onOpenFullSettings}>
             More Settings
-          </button>
+          </SettingsActionButton>
         ) : (
-          <a href={agentSettingsUrl} className="agent-settings-link" target="_blank" rel="noreferrer">
+          <SettingsActionButton as="a" surface="standalone" href={agentSettingsUrl} target="_blank" rel="noreferrer">
             More Settings
             <ExternalLink size={14} />
-          </a>
+          </SettingsActionButton>
         )}
       </div>
     </div>
@@ -441,7 +303,7 @@ export function AgentChatSettingsPanel({
       ariaLabel="Agent settings"
       desktopIconBgClass="bg-amber-100"
       desktopIconColorClass="text-amber-600"
-      desktopBodyClassName="agent-settings-modal-body"
+      desktopBodyClassName="pr-0"
     >
       {body}
     </ImmersiveDialog>

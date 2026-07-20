@@ -247,7 +247,7 @@ from console.views import _track_org_event_for_console, _mcp_server_event_proper
 from api.views import PersistentAgentViewSet, cancel_browser_use_task
 from api.services.sandbox_compute import SANDBOX_COMPUTE_WAFFLE_FLAG, SandboxComputeService, SandboxComputeUnavailable
 from waffle import flag_is_active
-from console.llm_serializers import build_llm_overview
+from console.llm_serializers import build_llm_overview, serialize_intelligence_tier
 import litellm
 
 from api.agent.core.llm_config import invalidate_llm_bootstrap_cache
@@ -6027,78 +6027,111 @@ class PersistentEndpointDetailAPIView(SystemAdminAPIView):
         return _json_ok()
 
 
-class PersistentTokenRangeListCreateAPIView(SystemAdminAPIView):
+def _parse_token_range_values(payload, *, current=None, default_min_tokens=None):
+    name = (payload.get("name", current.name if current else "") or "").strip()
+    if not name:
+        return None, HttpResponseBadRequest("name is required")
+    try:
+        min_tokens = int(payload.get("min_tokens", current.min_tokens if current else default_min_tokens))
+    except (TypeError, ValueError):
+        return None, HttpResponseBadRequest("min_tokens must be an integer")
+    raw_max_tokens = payload.get("max_tokens", current.max_tokens if current else None)
+    try:
+        max_tokens = None if raw_max_tokens in (None, "") else int(raw_max_tokens)
+    except (TypeError, ValueError):
+        return None, HttpResponseBadRequest("max_tokens must be an integer or null")
+    if max_tokens is not None and max_tokens <= min_tokens:
+        return None, HttpResponseBadRequest("max_tokens must be greater than min_tokens")
+    return {"name": name, "min_tokens": min_tokens, "max_tokens": max_tokens}, None
+
+
+class _TokenRangeListCreateAPIView(SystemAdminAPIView):
     http_method_names = ["post"]
+    range_model = None
+    parent_model = None
+    parent_kwarg = ""
+    parent_field = ""
+    response_id_key = "range_id"
+    default_min_tokens = None
+    invalidate = staticmethod(lambda: None)
+
+    def _parent(self, kwargs):
+        if not self.parent_model:
+            return None
+        return get_object_or_404(self.parent_model, pk=kwargs[self.parent_kwarg])
+
+    def get(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        parent = self._parent(kwargs)
+        ranges = self.range_model.objects.filter(**{self.parent_field: parent}).order_by("min_tokens")
+        return JsonResponse({
+            "ranges": [
+                {"id": str(item.id), "name": item.name, "min_tokens": item.min_tokens, "max_tokens": item.max_tokens}
+                for item in ranges
+            ]
+        })
 
     def post(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        parent = self._parent(kwargs)
         if isinstance(payload := _json_payload_or_bad_request(request), HttpResponseBadRequest):
             return payload
-
-        name = (payload.get("name") or "").strip()
-        if not name:
-            return HttpResponseBadRequest("name is required")
-        min_tokens = payload.get("min_tokens")
-        max_tokens = payload.get("max_tokens")
-        try:
-            min_tokens_int = int(min_tokens)
-        except (TypeError, ValueError):
-            return HttpResponseBadRequest("min_tokens must be an integer")
-        max_tokens_int = None
-        if max_tokens not in (None, ""):
-            try:
-                max_tokens_int = int(max_tokens)
-            except (TypeError, ValueError):
-                return HttpResponseBadRequest("max_tokens must be an integer or null")
-            if max_tokens_int <= min_tokens_int:
-                return HttpResponseBadRequest("max_tokens must be greater than min_tokens")
-
-        token_range = PersistentTokenRange.objects.create(
-            name=name,
-            min_tokens=min_tokens_int,
-            max_tokens=max_tokens_int,
-        )
-        invalidate_llm_bootstrap_cache()
-        return _json_ok(token_range_id=str(token_range.id))
+        values, error = _parse_token_range_values(payload, default_min_tokens=self.default_min_tokens)
+        if error:
+            return error
+        if parent:
+            values[self.parent_field] = parent
+        token_range = self.range_model.objects.create(**values)
+        self.invalidate()
+        return _json_ok(**{self.response_id_key: str(token_range.id)})
 
 
-class PersistentTokenRangeDetailAPIView(SystemAdminAPIView):
+class _TokenRangeDetailAPIView(SystemAdminAPIView):
     http_method_names = ["patch", "delete"]
+    range_model = None
+    response_id_key = "range_id"
+    invalidate = staticmethod(lambda: None)
 
     def patch(self, request: HttpRequest, range_id: str, *args: Any, **kwargs: Any):
-        token_range = get_object_or_404(PersistentTokenRange, pk=range_id)
+        token_range = get_object_or_404(self.range_model, pk=range_id)
         if isinstance(payload := _json_payload_or_bad_request(request), HttpResponseBadRequest):
             return payload
-
-        if "name" in payload:
-            name = (payload.get("name") or "").strip()
-            if name:
-                token_range.name = name
-        if "min_tokens" in payload:
-            try:
-                token_range.min_tokens = int(payload.get("min_tokens"))
-            except (TypeError, ValueError):
-                return HttpResponseBadRequest("min_tokens must be an integer")
-        if "max_tokens" in payload:
-            max_tokens = payload.get("max_tokens")
-            if max_tokens in (None, ""):
-                token_range.max_tokens = None
-            else:
-                try:
-                    token_range.max_tokens = int(max_tokens)
-                except (TypeError, ValueError):
-                    return HttpResponseBadRequest("max_tokens must be an integer")
-        if token_range.max_tokens is not None and token_range.max_tokens <= token_range.min_tokens:
-            return HttpResponseBadRequest("max_tokens must be greater than min_tokens")
-
+        values, error = _parse_token_range_values(payload, current=token_range)
+        if error:
+            return error
+        for field, value in values.items():
+            setattr(token_range, field, value)
         token_range.save()
-        invalidate_llm_bootstrap_cache()
-        return _json_ok(token_range_id=str(token_range.id))
+        self.invalidate()
+        return _json_ok(**{self.response_id_key: str(token_range.id)})
 
     def delete(self, request: HttpRequest, range_id: str, *args: Any, **kwargs: Any):
-        token_range = get_object_or_404(PersistentTokenRange, pk=range_id)
-        token_range.delete()
-        invalidate_llm_bootstrap_cache()
+        get_object_or_404(self.range_model, pk=range_id).delete()
+        self.invalidate()
         return _json_ok()
+
+
+class PersistentTokenRangeListCreateAPIView(_TokenRangeListCreateAPIView):
+    range_model = PersistentTokenRange
+    response_id_key = "token_range_id"
+    invalidate = staticmethod(invalidate_llm_bootstrap_cache)
+
+
+class PersistentTokenRangeDetailAPIView(_TokenRangeDetailAPIView):
+    range_model = PersistentTokenRange
+    response_id_key = "token_range_id"
+    invalidate = staticmethod(invalidate_llm_bootstrap_cache)
+
+
+class ProfileTokenRangeListCreateAPIView(_TokenRangeListCreateAPIView):
+    http_method_names = ["get", "post"]
+    range_model = ProfileTokenRange
+    parent_model = LLMRoutingProfile
+    parent_kwarg = "profile_id"
+    parent_field = "profile"
+    default_min_tokens = 0
+
+
+class ProfileTokenRangeDetailAPIView(_TokenRangeDetailAPIView):
+    range_model = ProfileTokenRange
 
 
 class _LLMTierListCreateAPIView(SystemAdminAPIView):
@@ -6108,25 +6141,57 @@ class _LLMTierListCreateAPIView(SystemAdminAPIView):
     parent_kwarg = ""
     parent_field = ""
     next_order_fn = None
+    order_by = ("order",)
+    include_intelligence_tier = True
+    auto_append_order = False
     invalidate = staticmethod(lambda: None)
 
     def _get_parent(self, kwargs):
         return get_object_or_404(self.parent_model, pk=kwargs[self.parent_kwarg])
 
+    def _tier_payload(self, tier):
+        payload = {"id": str(tier.id), "order": tier.order, "description": tier.description}
+        if self.include_intelligence_tier:
+            payload["intelligence_tier"] = serialize_intelligence_tier(tier.intelligence_tier)
+        return payload
+
+    def get(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        parent = self._get_parent(kwargs)
+        tiers = self.tier_model.objects.filter(**{self.parent_field: parent}).order_by(*self.order_by)
+        return JsonResponse({"tiers": [self._tier_payload(tier) for tier in tiers]})
+
+    def _create_order(self, payload, parent, intelligence_tier):
+        if self.next_order_fn:
+            return self.next_order_fn(parent, intelligence_tier), None
+        try:
+            order = int(payload["order"]) if payload.get("order") is not None else None
+        except (TypeError, ValueError):
+            return None, HttpResponseBadRequest("order must be an integer")
+        if self.auto_append_order:
+            filters = {self.parent_field: parent, "intelligence_tier": intelligence_tier}
+            if order is None or order <= 0 or self.tier_model.objects.filter(**filters, order=order).exists():
+                order = _next_profile_tier_order(self.tier_model, **filters)
+        return order or 0, None
+
     def post(self, request: HttpRequest, *args: Any, **kwargs: Any):
         parent = self._get_parent(kwargs)
         if isinstance(payload := _json_payload_or_bad_request(request), HttpResponseBadRequest):
             return payload
-        try:
-            intelligence_tier = _resolve_intelligence_tier_from_payload(payload)
-        except ValueError as exc:
-            return HttpResponseBadRequest(str(exc))
-        tier = self.tier_model.objects.create(
-            **{self.parent_field: parent},
-            order=self.next_order_fn(parent, intelligence_tier),
-            description=(payload.get("description") or "").strip(),
-            intelligence_tier=intelligence_tier,
-        )
+        create_kwargs = {
+            self.parent_field: parent,
+            "description": (payload.get("description") or "").strip(),
+        }
+        intelligence_tier = None
+        if self.include_intelligence_tier:
+            try:
+                intelligence_tier = _resolve_intelligence_tier_from_payload(payload)
+            except ValueError as exc:
+                return HttpResponseBadRequest(str(exc))
+            create_kwargs["intelligence_tier"] = intelligence_tier
+        order, error = self._create_order(payload, parent, intelligence_tier)
+        if error:
+            return error
+        tier = self.tier_model.objects.create(order=order, **create_kwargs)
         self.invalidate()
         return _json_ok(tier_id=str(tier.id))
 
@@ -6135,6 +6200,8 @@ class _LLMTierDetailAPIView(SystemAdminAPIView):
     http_method_names = ["patch", "delete"]
     tier_model = None
     sibling_filter_fields = ()
+    allow_order_update = False
+    allow_intelligence_update = False
     invalidate = staticmethod(lambda: None)
 
     def patch(self, request: HttpRequest, tier_id: str, *args: Any, **kwargs: Any):
@@ -6153,6 +6220,18 @@ class _LLMTierDetailAPIView(SystemAdminAPIView):
             )
             if not _swap_orders(sibling_qs, tier, direction):
                 return HttpResponseBadRequest("Unable to move tier in that direction")
+        if self.allow_order_update and "order" in payload:
+            try:
+                tier.order = int(payload["order"])
+            except (TypeError, ValueError):
+                return HttpResponseBadRequest("order must be an integer")
+        if self.allow_intelligence_update and any(
+            key in payload for key in ("intelligence_tier", "is_premium", "is_max")
+        ):
+            try:
+                tier.intelligence_tier = _resolve_intelligence_tier_from_payload(payload)
+            except ValueError as exc:
+                return HttpResponseBadRequest(str(exc))
         tier.save()
         self.invalidate()
         return _json_ok(tier_id=str(tier.id))
@@ -6170,15 +6249,54 @@ class _LLMTierEndpointListCreateAPIView(SystemAdminAPIView):
     tier_endpoint_model = None
     allow_reasoning_override = False
     allow_extraction_endpoint = False
+    endpoint_model_attr = "litellm_model"
+    require_endpoint_id = False
+    reject_duplicates = True
     invalidate = staticmethod(lambda: None)
+
+    def _endpoint_label(self, endpoint) -> str:
+        provider = endpoint.provider.display_name if endpoint.provider else "Unlinked"
+        return f"{provider} · {getattr(endpoint, self.endpoint_model_attr)}"
+
+    def _payload(self, tier_endpoint):
+        payload = {
+            "id": str(tier_endpoint.id),
+            "endpoint_id": str(tier_endpoint.endpoint_id),
+            "label": self._endpoint_label(tier_endpoint.endpoint),
+            "weight": float(tier_endpoint.weight),
+        }
+        if self.allow_reasoning_override:
+            payload.update(
+                reasoning_effort_override=tier_endpoint.reasoning_effort_override,
+                supports_reasoning=tier_endpoint.endpoint.supports_reasoning,
+                endpoint_reasoning_effort=tier_endpoint.endpoint.reasoning_effort,
+            )
+        if self.allow_extraction_endpoint:
+            extraction = tier_endpoint.extraction_endpoint
+            payload.update(
+                extraction_endpoint_id=str(tier_endpoint.extraction_endpoint_id) if extraction else None,
+                extraction_label=self._endpoint_label(extraction) if extraction else None,
+            )
+        return payload
+
+    def get(self, request: HttpRequest, tier_id: str, *args: Any, **kwargs: Any):
+        tier = get_object_or_404(self.tier_model, pk=tier_id)
+        select_related = ["endpoint__provider"]
+        if self.allow_extraction_endpoint:
+            select_related.append("extraction_endpoint__provider")
+        endpoints = self.tier_endpoint_model.objects.filter(tier=tier).select_related(*select_related)
+        return JsonResponse({"endpoints": [self._payload(endpoint) for endpoint in endpoints]})
 
     def post(self, request: HttpRequest, tier_id: str, *args: Any, **kwargs: Any):
         tier = get_object_or_404(self.tier_model, pk=tier_id)
         if isinstance(payload := _json_payload_or_bad_request(request), HttpResponseBadRequest):
             return payload
 
-        endpoint = get_object_or_404(self.endpoint_model, pk=payload.get("endpoint_id"))
-        if tier.tier_endpoints.filter(endpoint=endpoint).exists():
+        endpoint_id = payload.get("endpoint_id")
+        if self.require_endpoint_id and not endpoint_id:
+            return HttpResponseBadRequest("endpoint_id is required")
+        endpoint = get_object_or_404(self.endpoint_model, pk=endpoint_id)
+        if self.reject_duplicates and tier.tier_endpoints.filter(endpoint=endpoint).exists():
             return HttpResponseBadRequest("Endpoint already exists in tier")
         weight = _parse_weight(payload, default=1)
         if isinstance(weight, HttpResponseBadRequest):
@@ -6788,15 +6906,6 @@ class LLMRoutingProfileCloneAPIView(SystemAdminAPIView):
 
 # Profile nested config management (token ranges, tiers, tier endpoints)
 
-def _serialize_profile_intelligence_tier(tier: IntelligenceTier) -> dict[str, Any]:
-    return {
-        "key": tier.key,
-        "display_name": tier.display_name,
-        "rank": tier.rank,
-        "credit_multiplier": str(tier.credit_multiplier),
-    }
-
-
 def _parse_weight(payload: dict[str, Any], default: float = 1.0) -> float | HttpResponseBadRequest:
     try:
         weight = float(payload.get("weight", default))
@@ -6811,256 +6920,15 @@ def _next_profile_tier_order(model, **filters) -> int:
     return (model.objects.filter(**filters).aggregate(max_order=Max("order")).get("max_order") or 0) + 1
 
 
-class ProfileTokenRangeListCreateAPIView(SystemAdminAPIView):
-    http_method_names = ["get", "post"]
-
-    def get(self, request: HttpRequest, profile_id: str, *args: Any, **kwargs: Any):
-        profile = get_object_or_404(LLMRoutingProfile, pk=profile_id)
-        ranges = ProfileTokenRange.objects.filter(profile=profile).order_by("min_tokens")
-        return JsonResponse({
-            "ranges": [
-                {"id": str(r.id), "name": r.name, "min_tokens": r.min_tokens, "max_tokens": r.max_tokens}
-                for r in ranges
-            ]
-        })
-
-    def post(self, request: HttpRequest, profile_id: str, *args: Any, **kwargs: Any):
-        profile = get_object_or_404(LLMRoutingProfile, pk=profile_id)
-        if isinstance(payload := _json_payload_or_bad_request(request), HttpResponseBadRequest):
-            return payload
-        name = (payload.get("name") or "").strip()
-        if not name:
-            return HttpResponseBadRequest("name is required")
-        token_range = ProfileTokenRange.objects.create(
-            profile=profile,
-            name=name,
-            min_tokens=payload.get("min_tokens", 0),
-            max_tokens=payload.get("max_tokens"),
-        )
-        return _json_ok(range_id=str(token_range.id))
-
-
-class ProfileTokenRangeDetailAPIView(SystemAdminAPIView):
-    http_method_names = ["patch", "delete"]
-
-    def patch(self, request: HttpRequest, range_id: str, *args: Any, **kwargs: Any):
-        token_range = get_object_or_404(ProfileTokenRange, pk=range_id)
-        if isinstance(payload := _json_payload_or_bad_request(request), HttpResponseBadRequest):
-            return payload
-        for field in ("name", "min_tokens", "max_tokens"):
-            if field in payload:
-                value = (payload.get(field) or "").strip() if field == "name" else payload.get(field, 0)
-                setattr(token_range, field, value)
-        token_range.save()
-        return _json_ok(range_id=str(token_range.id))
-
-    def delete(self, request: HttpRequest, range_id: str, *args: Any, **kwargs: Any):
-        get_object_or_404(ProfileTokenRange, pk=range_id).delete()
-        return _json_ok()
-
-
-class _ProfileTierListCreateAPIView(SystemAdminAPIView):
-    http_method_names = ["get", "post"]
-    tier_model = None
-    parent_model = None
-    parent_kwarg = ""
-    parent_field = ""
-    order_by = ("order",)
-    include_intelligence_tier = False
-    auto_append_order = False
-
-    def _parent(self, kwargs):
-        return get_object_or_404(self.parent_model, pk=kwargs[self.parent_kwarg])
-
-    def _tier_payload(self, tier):
-        payload = {"id": str(tier.id), "order": tier.order, "description": tier.description}
-        if self.include_intelligence_tier:
-            payload["intelligence_tier"] = _serialize_profile_intelligence_tier(tier.intelligence_tier)
-        return payload
-
-    def get(self, request: HttpRequest, *args: Any, **kwargs: Any):
-        parent = self._parent(kwargs)
-        tiers = self.tier_model.objects.filter(**{self.parent_field: parent}).order_by(*self.order_by)
-        return JsonResponse({"tiers": [self._tier_payload(tier) for tier in tiers]})
-
-    def _create_order(self, payload: dict[str, Any], parent, intelligence_tier):
-        if not self.auto_append_order:
-            return payload.get("order", 0), None
-        try:
-            order = int(payload["order"]) if payload.get("order") is not None else None
-        except (TypeError, ValueError):
-            return None, HttpResponseBadRequest("order must be an integer")
-        filters = {self.parent_field: parent, "intelligence_tier": intelligence_tier}
-        if order is None or order <= 0 or self.tier_model.objects.filter(**filters, order=order).exists():
-            order = _next_profile_tier_order(self.tier_model, **filters)
-        return order, None
-
-    def post(self, request: HttpRequest, *args: Any, **kwargs: Any):
-        parent = self._parent(kwargs)
-        if isinstance(payload := _json_payload_or_bad_request(request), HttpResponseBadRequest):
-            return payload
-        create_kwargs: dict[str, Any] = {self.parent_field: parent, "description": (payload.get("description") or "").strip()}
-        intelligence_tier = None
-        if self.include_intelligence_tier:
-            try:
-                intelligence_tier = _resolve_intelligence_tier_from_payload(payload)
-            except ValueError as exc:
-                return HttpResponseBadRequest(str(exc))
-            create_kwargs["intelligence_tier"] = intelligence_tier
-        order, error = self._create_order(payload, parent, intelligence_tier)
-        if error:
-            return error
-        create_kwargs["order"] = order
-        tier = self.tier_model.objects.create(**create_kwargs)
-        return _json_ok(tier_id=str(tier.id))
-
-
-class _ProfileTierDetailAPIView(SystemAdminAPIView):
-    http_method_names = ["patch", "delete"]
-    tier_model = None
-    move_scope_fields: tuple[str, ...] = ()
-    include_intelligence_tier = False
-
-    def patch(self, request: HttpRequest, tier_id: str, *args: Any, **kwargs: Any):
-        tier = get_object_or_404(self.tier_model, pk=tier_id)
-        if isinstance(payload := _json_payload_or_bad_request(request), HttpResponseBadRequest):
-            return payload
-        if self.move_scope_fields and "move" in payload:
-            direction = (payload.get("move") or "").lower()
-            if direction not in {"up", "down"}:
-                return HttpResponseBadRequest("direction must be 'up' or 'down'")
-            siblings = self.tier_model.objects.filter(**{field: getattr(tier, field) for field in self.move_scope_fields})
-            if not _swap_orders(siblings, tier, direction):
-                return HttpResponseBadRequest("Unable to move tier in that direction")
-        if "order" in payload:
-            tier.order = payload.get("order", 0)
-        if "description" in payload:
-            tier.description = (payload.get("description") or "").strip()
-        if self.include_intelligence_tier and any(key in payload for key in ("intelligence_tier", "is_premium", "is_max")):
-            try:
-                tier.intelligence_tier = _resolve_intelligence_tier_from_payload(payload)
-            except ValueError as exc:
-                return HttpResponseBadRequest(str(exc))
-        tier.save()
-        return _json_ok(tier_id=str(tier.id))
-
-    def delete(self, request: HttpRequest, tier_id: str, *args: Any, **kwargs: Any):
-        get_object_or_404(self.tier_model, pk=tier_id).delete()
-        return _json_ok()
-
-
-class _ProfileTierEndpointListCreateAPIView(SystemAdminAPIView):
-    http_method_names = ["get", "post"]
-    tier_model = None
-    tier_endpoint_model = None
-    endpoint_model = None
-    endpoint_model_attr = "litellm_model"
-    allow_reasoning_override = False
-    allow_extraction_endpoint = False
-    unlinked_provider_label = False
-
-    def _endpoint_label(self, endpoint) -> str:
-        provider = endpoint.provider.display_name if endpoint.provider else "Unlinked"
-        return f"{provider} · {getattr(endpoint, self.endpoint_model_attr)}"
-
-    def _payload(self, tier_endpoint):
-        payload = {
-            "id": str(tier_endpoint.id),
-            "endpoint_id": str(tier_endpoint.endpoint_id),
-            "label": self._endpoint_label(tier_endpoint.endpoint),
-            "weight": float(tier_endpoint.weight),
-        }
-        if self.allow_reasoning_override:
-            payload.update(
-                reasoning_effort_override=tier_endpoint.reasoning_effort_override,
-                supports_reasoning=tier_endpoint.endpoint.supports_reasoning,
-                endpoint_reasoning_effort=tier_endpoint.endpoint.reasoning_effort,
-            )
-        if self.allow_extraction_endpoint:
-            extraction = tier_endpoint.extraction_endpoint
-            payload.update(
-                extraction_endpoint_id=str(tier_endpoint.extraction_endpoint_id) if extraction else None,
-                extraction_label=self._endpoint_label(extraction) if extraction else None,
-            )
-        return payload
-
-    def get(self, request: HttpRequest, tier_id: str, *args: Any, **kwargs: Any):
-        tier = get_object_or_404(self.tier_model, pk=tier_id)
-        select_related = ["endpoint__provider"]
-        if self.allow_extraction_endpoint:
-            select_related.append("extraction_endpoint__provider")
-        endpoints = self.tier_endpoint_model.objects.filter(tier=tier).select_related(*select_related)
-        return JsonResponse({"endpoints": [self._payload(te) for te in endpoints]})
-
-    def post(self, request: HttpRequest, tier_id: str, *args: Any, **kwargs: Any):
-        tier = get_object_or_404(self.tier_model, pk=tier_id)
-        if isinstance(payload := _json_payload_or_bad_request(request), HttpResponseBadRequest):
-            return payload
-        endpoint_id = payload.get("endpoint_id")
-        if not endpoint_id:
-            return HttpResponseBadRequest("endpoint_id is required")
-        endpoint = get_object_or_404(self.endpoint_model, pk=endpoint_id)
-        weight = _parse_weight(payload)
-        if isinstance(weight, HttpResponseBadRequest):
-            return weight
-        create_kwargs = {"tier": tier, "endpoint": endpoint, "weight": weight}
-        if self.allow_reasoning_override:
-            try:
-                create_kwargs["reasoning_effort_override"] = _validate_reasoning_override(endpoint, payload.get("reasoning_effort_override"))
-            except ValueError as exc:
-                return HttpResponseBadRequest(str(exc))
-        if self.allow_extraction_endpoint:
-            extraction_endpoint_id = payload.get("extraction_endpoint_id")
-            create_kwargs["extraction_endpoint"] = (
-                get_object_or_404(self.endpoint_model, pk=extraction_endpoint_id)
-                if extraction_endpoint_id
-                else None
-            )
-        tier_endpoint = self.tier_endpoint_model.objects.create(**create_kwargs)
-        return _json_ok(tier_endpoint_id=str(tier_endpoint.id))
-
-
-class _ProfileTierEndpointDetailAPIView(SystemAdminAPIView):
-    http_method_names = ["patch", "delete"]
-    tier_endpoint_model = None
-    endpoint_model = None
-    allow_reasoning_override = False
-    allow_extraction_endpoint = False
-
-    def patch(self, request: HttpRequest, tier_endpoint_id: str, *args: Any, **kwargs: Any):
-        tier_endpoint = get_object_or_404(self.tier_endpoint_model, pk=tier_endpoint_id)
-        if isinstance(payload := _json_payload_or_bad_request(request), HttpResponseBadRequest):
-            return payload
-        if "weight" in payload:
-            weight = _parse_weight(payload, default=None)
-            if isinstance(weight, HttpResponseBadRequest):
-                return weight
-            tier_endpoint.weight = weight
-        if self.allow_reasoning_override and "reasoning_effort_override" in payload:
-            try:
-                tier_endpoint.reasoning_effort_override = _validate_reasoning_override(tier_endpoint.endpoint, payload.get("reasoning_effort_override"))
-            except ValueError as exc:
-                return HttpResponseBadRequest(str(exc))
-        if self.allow_extraction_endpoint and "extraction_endpoint_id" in payload:
-            endpoint_id = payload.get("extraction_endpoint_id")
-            tier_endpoint.extraction_endpoint = get_object_or_404(self.endpoint_model, pk=endpoint_id) if endpoint_id else None
-        tier_endpoint.save()
-        return _json_ok(tier_endpoint_id=str(tier_endpoint.id))
-
-    def delete(self, request: HttpRequest, tier_endpoint_id: str, *args: Any, **kwargs: Any):
-        get_object_or_404(self.tier_endpoint_model, pk=tier_endpoint_id).delete()
-        return _json_ok()
-
-
 for _name, _tier_model, _tier_endpoint_model, _endpoint_model, _list_attrs, _detail_attrs, _endpoint_attrs in (
-    ("Persistent", ProfilePersistentTier, ProfilePersistentTierEndpoint, PersistentModelEndpoint, {"parent_model": ProfileTokenRange, "parent_kwarg": "range_id", "parent_field": "token_range", "order_by": ("intelligence_tier__rank", "order"), "include_intelligence_tier": True}, {"move_scope_fields": ("token_range", "intelligence_tier"), "include_intelligence_tier": True}, {"allow_reasoning_override": True}),
-    ("Browser", ProfileBrowserTier, ProfileBrowserTierEndpoint, BrowserModelEndpoint, {"parent_model": LLMRoutingProfile, "parent_kwarg": "profile_id", "parent_field": "profile", "order_by": ("intelligence_tier__rank", "order"), "include_intelligence_tier": True, "auto_append_order": True}, {"move_scope_fields": ("profile", "intelligence_tier"), "include_intelligence_tier": True}, {"endpoint_model_attr": "browser_model", "allow_extraction_endpoint": True}),
-    ("Embeddings", ProfileEmbeddingsTier, ProfileEmbeddingsTierEndpoint, EmbeddingsModelEndpoint, {"parent_model": LLMRoutingProfile, "parent_kwarg": "profile_id", "parent_field": "profile"}, {}, {}),
+    ("Persistent", ProfilePersistentTier, ProfilePersistentTierEndpoint, PersistentModelEndpoint, {"parent_model": ProfileTokenRange, "parent_kwarg": "range_id", "parent_field": "token_range", "order_by": ("intelligence_tier__rank", "order")}, {"sibling_filter_fields": ("token_range", "intelligence_tier"), "allow_order_update": True, "allow_intelligence_update": True}, {"allow_reasoning_override": True}),
+    ("Browser", ProfileBrowserTier, ProfileBrowserTierEndpoint, BrowserModelEndpoint, {"parent_model": LLMRoutingProfile, "parent_kwarg": "profile_id", "parent_field": "profile", "order_by": ("intelligence_tier__rank", "order"), "auto_append_order": True}, {"sibling_filter_fields": ("profile", "intelligence_tier"), "allow_order_update": True, "allow_intelligence_update": True}, {"endpoint_model_attr": "browser_model", "allow_extraction_endpoint": True}),
+    ("Embeddings", ProfileEmbeddingsTier, ProfileEmbeddingsTierEndpoint, EmbeddingsModelEndpoint, {"parent_model": LLMRoutingProfile, "parent_kwarg": "profile_id", "parent_field": "profile", "include_intelligence_tier": False}, {"sibling_filter_fields": ("profile",), "allow_order_update": True}, {}),
 ):
-    globals()[f"Profile{_name}TierListCreateAPIView"] = type(f"Profile{_name}TierListCreateAPIView", (_ProfileTierListCreateAPIView,), {"__module__": __name__, "tier_model": _tier_model, **_list_attrs})
-    globals()[f"Profile{_name}TierDetailAPIView"] = type(f"Profile{_name}TierDetailAPIView", (_ProfileTierDetailAPIView,), {"__module__": __name__, "tier_model": _tier_model, **_detail_attrs})
-    globals()[f"Profile{_name}TierEndpointListCreateAPIView"] = type(f"Profile{_name}TierEndpointListCreateAPIView", (_ProfileTierEndpointListCreateAPIView,), {"__module__": __name__, "tier_model": _tier_model, "tier_endpoint_model": _tier_endpoint_model, "endpoint_model": _endpoint_model, **_endpoint_attrs})
-    globals()[f"Profile{_name}TierEndpointDetailAPIView"] = type(f"Profile{_name}TierEndpointDetailAPIView", (_ProfileTierEndpointDetailAPIView,), {"__module__": __name__, "tier_endpoint_model": _tier_endpoint_model, "endpoint_model": _endpoint_model, **_endpoint_attrs})
+    globals()[f"Profile{_name}TierListCreateAPIView"] = type(f"Profile{_name}TierListCreateAPIView", (_LLMTierListCreateAPIView,), {"__module__": __name__, "http_method_names": ["get", "post"], "tier_model": _tier_model, **_list_attrs})
+    globals()[f"Profile{_name}TierDetailAPIView"] = type(f"Profile{_name}TierDetailAPIView", (_LLMTierDetailAPIView,), {"__module__": __name__, "tier_model": _tier_model, **_detail_attrs})
+    globals()[f"Profile{_name}TierEndpointListCreateAPIView"] = type(f"Profile{_name}TierEndpointListCreateAPIView", (_LLMTierEndpointListCreateAPIView,), {"__module__": __name__, "http_method_names": ["get", "post"], "tier_model": _tier_model, "tier_endpoint_model": _tier_endpoint_model, "endpoint_model": _endpoint_model, "require_endpoint_id": True, "reject_duplicates": False, **_endpoint_attrs})
+    globals()[f"Profile{_name}TierEndpointDetailAPIView"] = type(f"Profile{_name}TierEndpointDetailAPIView", (_LLMTierEndpointDetailAPIView,), {"__module__": __name__, "tier_endpoint_model": _tier_endpoint_model, "endpoint_model": _endpoint_model, **_endpoint_attrs})
 del _name, _tier_model, _tier_endpoint_model, _endpoint_model, _list_attrs, _detail_attrs, _endpoint_attrs
 
 

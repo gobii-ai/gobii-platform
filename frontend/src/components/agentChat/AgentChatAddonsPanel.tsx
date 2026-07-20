@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ExternalLink, PlusSquare, ShieldAlert } from 'lucide-react'
 
 import { ImmersiveDialog } from '../common/ImmersiveDialog'
+import { InlineStatusBanner } from '../common/InlineStatusBanner'
+import { SettingsActionButton } from '../agentSettings/SettingsControls'
 import { ConfirmDialog } from '../../screens/billing/ConfirmDialog'
 import type { AddonPackOption, ContactCapInfo, TrialInfo } from '../../types/agentAddons'
 
@@ -256,7 +258,7 @@ export function AgentChatAddonsPanel({
             )
           })}
         </div>
-        {packError ? <p className="agent-settings-error">{packError}</p> : null}
+        {packError ? <InlineStatusBanner variant="error" density="compact">{packError}</InlineStatusBanner> : null}
         <div className="agent-settings-metrics">
           <div>
             <span className="agent-settings-metric-label">Pack price</span>
@@ -266,24 +268,25 @@ export function AgentChatAddonsPanel({
           </div>
         </div>
         <div className="agent-settings-actions">
-          <button
-            type="button"
-            className="agent-settings-save"
+          <SettingsActionButton
+            surface="standalone"
+            tone="primary"
             onClick={handlePackSave}
             disabled={!canUpdatePacks || !packHasChanges || packUpdating}
           >
             {packUpdating ? 'Updating...' : 'Update Subscription'}
-          </button>
+          </SettingsActionButton>
           {manageBillingUrl ? (
-            <a
-              className="agent-settings-link"
+            <SettingsActionButton
+              as="a"
+              surface="standalone"
               href={manageBillingUrl}
               target="_blank"
               rel="noreferrer"
             >
               Manage
               <ExternalLink size={14} />
-            </a>
+            </SettingsActionButton>
           ) : null}
         </div>
       </div>

@@ -30,6 +30,96 @@ class ConsoleProfilePersistentTierTests(TestCase):
         self.client = Client()
         self.client.force_login(self.admin)
 
+    def test_system_and_profile_token_ranges_share_validation_and_response_contracts(self):
+        profile = LLMRoutingProfile.objects.create(name="range-validation", display_name="Range Validation")
+        cases = (
+            (reverse("console_llm_ranges"), "token_range_id"),
+            (reverse("console_llm_profile_token_ranges", args=[profile.id]), "range_id"),
+        )
+
+        for url, response_key in cases:
+            with self.subTest(url=url):
+                invalid = self.client.post(
+                    url,
+                    data='{"name": "invalid", "min_tokens": 100, "max_tokens": 50}',
+                    content_type="application/json",
+                )
+                self.assertEqual(invalid.status_code, 400, invalid.content)
+                self.assertIn("max_tokens must be greater than min_tokens", invalid.content.decode())
+
+                valid = self.client.post(
+                    url,
+                    data='{"name": "valid", "min_tokens": 0, "max_tokens": 100}',
+                    content_type="application/json",
+                )
+                self.assertEqual(valid.status_code, 200, valid.content)
+                self.assertIn(response_key, valid.json())
+
+    def test_system_and_profile_persistent_endpoint_mutations_have_parity(self):
+        provider = LLMProvider.objects.create(key="parity", display_name="Parity", enabled=True)
+        endpoint = PersistentModelEndpoint.objects.create(
+            provider=provider,
+            key="reasoning-model",
+            litellm_model="reasoning-model",
+            supports_reasoning=True,
+            enabled=True,
+        )
+        intelligence_tier = get_intelligence_tier("standard")
+        system_range = PersistentTokenRange.objects.create(name="system", min_tokens=0)
+        system_tier = PersistentLLMTier.objects.create(
+            token_range=system_range,
+            order=1,
+            intelligence_tier=intelligence_tier,
+        )
+        profile = LLMRoutingProfile.objects.create(name="endpoint-parity", display_name="Endpoint Parity")
+        profile_range = ProfileTokenRange.objects.create(profile=profile, name="profile", min_tokens=0)
+        profile_tier = ProfilePersistentTier.objects.create(
+            token_range=profile_range,
+            order=1,
+            intelligence_tier=intelligence_tier,
+        )
+
+        cases = (
+            (
+                reverse("console_llm_tier_endpoints", args=[system_tier.id]),
+                "console_llm_tier_endpoint_detail",
+                PersistentTierEndpoint,
+            ),
+            (
+                reverse("console_llm_profile_persistent_tier_endpoints", args=[profile_tier.id]),
+                "console_llm_profile_persistent_tier_endpoint_detail",
+                ProfilePersistentTierEndpoint,
+            ),
+        )
+        for create_url, detail_name, model in cases:
+            with self.subTest(create_url=create_url):
+                invalid = self.client.post(
+                    create_url,
+                    data=f'{{"endpoint_id": "{endpoint.id}", "weight": 0}}',
+                    content_type="application/json",
+                )
+                self.assertEqual(invalid.status_code, 400, invalid.content)
+
+                created = self.client.post(
+                    create_url,
+                    data=f'{{"endpoint_id": "{endpoint.id}", "weight": 1}}',
+                    content_type="application/json",
+                )
+                self.assertEqual(created.status_code, 200, created.content)
+                tier_endpoint = model.objects.get(id=created.json()["tier_endpoint_id"])
+                detail_url = reverse(detail_name, args=[tier_endpoint.id])
+                updated = self.client.patch(
+                    detail_url,
+                    data='{"weight": 2, "reasoning_effort_override": "high"}',
+                    content_type="application/json",
+                )
+                self.assertEqual(updated.status_code, 200, updated.content)
+                tier_endpoint.refresh_from_db()
+                self.assertEqual(float(tier_endpoint.weight), 2)
+                self.assertEqual(tier_endpoint.reasoning_effort_override, "high")
+                self.assertEqual(self.client.delete(detail_url).status_code, 200)
+                self.assertFalse(model.objects.filter(id=tier_endpoint.id).exists())
+
     def test_move_profile_persistent_tier_swaps_order(self):
         profile = LLMRoutingProfile.objects.create(name="persist-move", display_name="Persist Move")
         token_range = ProfileTokenRange.objects.create(profile=profile, name="default", min_tokens=0)

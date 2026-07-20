@@ -6,6 +6,8 @@ import { SecretTable } from '../components/secrets/SecretTable'
 import { SecretSecurityNotice } from '../components/secrets/SecretSecurityNotice'
 import { useSecretCrud } from '../components/secrets/useSecretCrud'
 import { SettingsBanner } from '../components/agentSettings/SettingsBanner'
+import { SettingsActionButton } from '../components/agentSettings/SettingsControls'
+import { InlineStatusBanner } from '../components/common/InlineStatusBanner'
 
 type GlobalSecretsScreenProps = {
   listUrl: string
@@ -55,14 +57,10 @@ export function GlobalSecretsScreen({ listUrl, ownerScope }: GlobalSecretsScreen
         title="Secrets"
         subtitle={description}
         actions={(
-          <button
-            type="button"
-            onClick={handleCreate}
-            className="inline-flex w-full items-center justify-center gap-x-2 rounded-lg border border-blue-300/40 bg-blue-950/20 px-4 py-2 text-sm font-medium text-blue-100 transition-colors hover:border-blue-200 hover:bg-blue-900/30 focus:outline-none sm:w-auto"
-          >
+          <SettingsActionButton tone="primary" responsive onClick={handleCreate}>
             <Plus className="w-4 h-4" />
             Add Secret
-          </button>
+          </SettingsActionButton>
         )}
       />
 
@@ -72,14 +70,10 @@ export function GlobalSecretsScreen({ listUrl, ownerScope }: GlobalSecretsScreen
       </SecretSecurityNotice>
 
       {banner && (
-        <div className="rounded-lg border border-green-300/30 bg-green-950/20 px-4 py-3 text-sm text-green-100">
-          {banner}
-        </div>
+        <InlineStatusBanner variant="success" surface="embedded">{banner}</InlineStatusBanner>
       )}
       {(errorBanner || listError) && (
-        <div className="rounded-lg border border-red-300/30 bg-red-950/20 px-4 py-3 text-sm text-red-100">
-          {errorBanner || listError}
-        </div>
+        <InlineStatusBanner variant="error" surface="embedded">{errorBanner || listError}</InlineStatusBanner>
       )}
 
       {isLoading && (

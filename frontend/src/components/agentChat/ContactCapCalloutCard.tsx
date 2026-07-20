@@ -1,9 +1,6 @@
-import { useCallback } from 'react'
-import { AlertTriangle, Users, X, Zap } from 'lucide-react'
+import { Users, Zap } from 'lucide-react'
 
-import { ensureAuthenticated, subscriptionActions } from '../../store/subscriptionSlice'
-import { useAppDispatch } from '../../store/hooks'
-import { AgentChatSectionCard } from './uiPrimitives'
+import { LimitCalloutActions, LimitCalloutButton, LimitCalloutCard, useAuthenticatedUpgrade } from './LimitCalloutCard'
 
 type ContactCapCalloutCardProps = {
   onOpenPacks?: () => void
@@ -16,45 +13,24 @@ export function ContactCapCalloutCard({
   showUpgrade = false,
   onDismiss,
 }: ContactCapCalloutCardProps) {
-  const dispatch = useAppDispatch()
   const canShowUpgrade = Boolean(showUpgrade)
   const showActions = Boolean(onOpenPacks || canShowUpgrade)
-  const handleUpgradeClick = useCallback(async () => {
-    const authenticated = await dispatch(ensureAuthenticated()).unwrap()
-    if (!authenticated) {
-      return
-    }
-    dispatch(subscriptionActions.openUpgradeModal({ source: 'contact_cap_callout' }))
-  }, [dispatch])
+  const handleUpgradeClick = useAuthenticatedUpgrade('contact_cap_callout')
 
   return (
-    <AgentChatSectionCard className="timeline-event hard-limit-callout" tone="warning">
-      {onDismiss ? (
-        <button
-          type="button"
-          className="hard-limit-callout-dismiss"
-          onClick={onDismiss}
-          aria-label="Dismiss contact limit warning"
-        >
-          <X size={16} />
-        </button>
-      ) : null}
-      <div className="hard-limit-callout-header">
-        <span className="hard-limit-callout-icon" aria-hidden="true">
-          <AlertTriangle size={16} />
-        </span>
-        <div>
-          <p className="hard-limit-callout-title">Contact limit reached</p>
-          <p className="hard-limit-callout-subtitle">This agent has hit its contact cap for the current cycle.</p>
-        </div>
-      </div>
+    <LimitCalloutCard
+      title="Contact limit reached"
+      subtitle="This agent has hit its contact cap for the current cycle."
+      onDismiss={onDismiss}
+      dismissLabel="Dismiss contact limit warning"
+    >
       {showActions ? (
-        <div className="hard-limit-callout-actions">
+        <LimitCalloutActions>
           {onOpenPacks ? (
-            <button type="button" className="hard-limit-callout-button" onClick={onOpenPacks}>
+            <LimitCalloutButton onClick={onOpenPacks}>
               <Users size={16} />
               Open add-ons
-            </button>
+            </LimitCalloutButton>
           ) : null}
           {canShowUpgrade ? (
             <div className="hard-limit-callout-upsell">
@@ -65,8 +41,8 @@ export function ContactCapCalloutCard({
               </button>
             </div>
           ) : null}
-        </div>
+        </LimitCalloutActions>
       ) : null}
-    </AgentChatSectionCard>
+    </LimitCalloutCard>
   )
 }

@@ -240,7 +240,7 @@ export function deleteTokenRange(rangeId: string) {
 }
 
 type TierCreatePayload = Record<string, unknown>
-type TierEndpointCreatePayload = { endpoint_id: string; weight: number; extraction_endpoint_id?: string | null }
+export type TierEndpointCreatePayload = { endpoint_id: string; weight: number; extraction_endpoint_id?: string | null }
 
 function createTier(path: string, payload: TierCreatePayload) {
   return jsonRequest(path, withCsrf(payload))
@@ -293,152 +293,39 @@ const tierPaths = {
   },
 } as const
 
-export function createPersistentTier(rangeId: string, payload: { intelligence_tier: string; description?: string }) {
-  return createTier(`${base}/persistent/ranges/${rangeId}/tiers/`, payload)
+export type TierClient = {
+  create: (parentId: string | null, payload: TierCreatePayload) => Promise<unknown>
+  update: (tierId: string, payload: Record<string, unknown>) => Promise<unknown>
+  remove: (tierId: string) => Promise<unknown>
+  addEndpoint: (tierId: string, payload: TierEndpointCreatePayload) => Promise<{ tier_endpoint_id?: string }>
+  updateEndpoint: (tierEndpointId: string, payload: Record<string, unknown>) => Promise<unknown>
+  removeEndpoint: (tierEndpointId: string) => Promise<unknown>
 }
 
-export function updatePersistentTier(tierId: string, payload: Record<string, unknown>) {
-  return updateTier(tierPaths.persistent.tiers, tierId, payload)
+function makeTierClient(
+  paths: { tiers: string; tierEndpoints: string },
+  createPath: string | ((parentId: string | null) => string) = paths.tiers,
+): TierClient {
+  return {
+    create: (parentId, payload) => createTier(
+      typeof createPath === 'function' ? createPath(parentId) : createPath,
+      payload,
+    ),
+    update: (tierId, payload) => updateTier(paths.tiers, tierId, payload),
+    remove: (tierId) => deleteTier(paths.tiers, tierId),
+    addEndpoint: (tierId, payload) => addTierEndpoint(paths.tiers, tierId, payload) as Promise<{ tier_endpoint_id?: string }>,
+    updateEndpoint: (tierEndpointId, payload) => updateTierEndpoint(paths.tierEndpoints, tierEndpointId, payload),
+    removeEndpoint: (tierEndpointId) => deleteTierEndpoint(paths.tierEndpoints, tierEndpointId),
+  }
 }
 
-export function deletePersistentTier(tierId: string) {
-  return deleteTier(tierPaths.persistent.tiers, tierId)
-}
-
-export function addPersistentTierEndpoint(tierId: string, payload: { endpoint_id: string; weight: number }) {
-  return addTierEndpoint(tierPaths.persistent.tiers, tierId, payload)
-}
-
-export function updatePersistentTierEndpoint(tierEndpointId: string, payload: Record<string, unknown>) {
-  return updateTierEndpoint(tierPaths.persistent.tierEndpoints, tierEndpointId, payload)
-}
-
-export function deletePersistentTierEndpoint(tierEndpointId: string) {
-  return deleteTierEndpoint(tierPaths.persistent.tierEndpoints, tierEndpointId)
-}
-
-export function createBrowserTier(payload: { intelligence_tier: string; description?: string }) {
-  return createTier(tierPaths.browser.tiers, payload)
-}
-
-export function updateBrowserTier(tierId: string, payload: Record<string, unknown>) {
-  return updateTier(tierPaths.browser.tiers, tierId, payload)
-}
-
-export function deleteBrowserTier(tierId: string) {
-  return deleteTier(tierPaths.browser.tiers, tierId)
-}
-
-export function addBrowserTierEndpoint(
-  tierId: string,
-  payload: { endpoint_id: string; weight: number; extraction_endpoint_id?: string | null },
-) {
-  return addTierEndpoint(tierPaths.browser.tiers, tierId, payload)
-}
-
-export function updateBrowserTierEndpoint(tierEndpointId: string, payload: Record<string, unknown>) {
-  return updateTierEndpoint(tierPaths.browser.tierEndpoints, tierEndpointId, payload)
-}
-
-export function deleteBrowserTierEndpoint(tierEndpointId: string) {
-  return deleteTierEndpoint(tierPaths.browser.tierEndpoints, tierEndpointId)
-}
-
-export function createEmbeddingTier(payload: { description?: string }) {
-  return createTier(tierPaths.embedding.tiers, payload)
-}
-
-export function updateEmbeddingTier(tierId: string, payload: Record<string, unknown>) {
-  return updateTier(tierPaths.embedding.tiers, tierId, payload)
-}
-
-export function deleteEmbeddingTier(tierId: string) {
-  return deleteTier(tierPaths.embedding.tiers, tierId)
-}
-
-export function addEmbeddingTierEndpoint(tierId: string, payload: { endpoint_id: string; weight: number }) {
-  return addTierEndpoint(tierPaths.embedding.tiers, tierId, payload)
-}
-
-export function updateEmbeddingTierEndpoint(tierEndpointId: string, payload: Record<string, unknown>) {
-  return updateTierEndpoint(tierPaths.embedding.tierEndpoints, tierEndpointId, payload)
-}
-
-export function deleteEmbeddingTierEndpoint(tierEndpointId: string) {
-  return deleteTierEndpoint(tierPaths.embedding.tierEndpoints, tierEndpointId)
-}
-
-export function createFileHandlerTier(payload: { description?: string }) {
-  return createTier(tierPaths.file_handler.tiers, payload)
-}
-
-export function updateFileHandlerTier(tierId: string, payload: Record<string, unknown>) {
-  return updateTier(tierPaths.file_handler.tiers, tierId, payload)
-}
-
-export function deleteFileHandlerTier(tierId: string) {
-  return deleteTier(tierPaths.file_handler.tiers, tierId)
-}
-
-export function addFileHandlerTierEndpoint(tierId: string, payload: { endpoint_id: string; weight: number }) {
-  return addTierEndpoint(tierPaths.file_handler.tiers, tierId, payload)
-}
-
-export function updateFileHandlerTierEndpoint(tierEndpointId: string, payload: Record<string, unknown>) {
-  return updateTierEndpoint(tierPaths.file_handler.tierEndpoints, tierEndpointId, payload)
-}
-
-export function deleteFileHandlerTierEndpoint(tierEndpointId: string) {
-  return deleteTierEndpoint(tierPaths.file_handler.tierEndpoints, tierEndpointId)
-}
-
-export function createImageGenerationTier(payload: { description?: string; use_case?: 'create_image' | 'avatar' }) {
-  return createTier(tierPaths.image_generation.tiers, payload)
-}
-
-export function updateImageGenerationTier(tierId: string, payload: Record<string, unknown>) {
-  return updateTier(tierPaths.image_generation.tiers, tierId, payload)
-}
-
-export function deleteImageGenerationTier(tierId: string) {
-  return deleteTier(tierPaths.image_generation.tiers, tierId)
-}
-
-export function addImageGenerationTierEndpoint(tierId: string, payload: { endpoint_id: string; weight: number }) {
-  return addTierEndpoint(tierPaths.image_generation.tiers, tierId, payload)
-}
-
-export function updateImageGenerationTierEndpoint(tierEndpointId: string, payload: Record<string, unknown>) {
-  return updateTierEndpoint(tierPaths.image_generation.tierEndpoints, tierEndpointId, payload)
-}
-
-export function deleteImageGenerationTierEndpoint(tierEndpointId: string) {
-  return deleteTierEndpoint(tierPaths.image_generation.tierEndpoints, tierEndpointId)
-}
-
-export function createVideoGenerationTier(payload: { description?: string; use_case?: 'create_video' }) {
-  return createTier(tierPaths.video_generation.tiers, payload)
-}
-
-export function updateVideoGenerationTier(tierId: string, payload: Record<string, unknown>) {
-  return updateTier(tierPaths.video_generation.tiers, tierId, payload)
-}
-
-export function deleteVideoGenerationTier(tierId: string) {
-  return deleteTier(tierPaths.video_generation.tiers, tierId)
-}
-
-export function addVideoGenerationTierEndpoint(tierId: string, payload: { endpoint_id: string; weight: number }) {
-  return addTierEndpoint(tierPaths.video_generation.tiers, tierId, payload)
-}
-
-export function updateVideoGenerationTierEndpoint(tierEndpointId: string, payload: Record<string, unknown>) {
-  return updateTierEndpoint(tierPaths.video_generation.tierEndpoints, tierEndpointId, payload)
-}
-
-export function deleteVideoGenerationTierEndpoint(tierEndpointId: string) {
-  return deleteTierEndpoint(tierPaths.video_generation.tierEndpoints, tierEndpointId)
-}
+export type SystemTierScope = keyof typeof tierPaths
+export const systemTierClients: Record<SystemTierScope, TierClient> = Object.fromEntries(
+  Object.entries(tierPaths).map(([scope, paths]) => [
+    scope,
+    makeTierClient(paths, scope === 'persistent' ? (rangeId) => `${base}/persistent/ranges/${rangeId}/tiers/` : paths.tiers),
+  ]),
+) as Record<SystemTierScope, TierClient>
 
 export type EndpointTestResponse = {
   ok: boolean
@@ -480,36 +367,13 @@ export type EvalJudgeEndpoint = {
   model: string
 }
 
-export type ProfilePersistentTier = {
-  id: string
-  order: number
-  description: string
-  intelligence_tier: IntelligenceTier
-  endpoints: TierEndpoint[]
-}
+export type ProfilePersistentTier = PersistentTier
 
-export type ProfileTokenRange = {
-  id: string
-  name: string
-  min_tokens: number
-  max_tokens: number | null
-  tiers: ProfilePersistentTier[]
-}
+export type ProfileTokenRange = TokenRange
 
-export type ProfileBrowserTier = {
-  id: string
-  order: number
-  description: string
-  intelligence_tier: IntelligenceTier
-  endpoints: TierEndpoint[]
-}
+export type ProfileBrowserTier = BrowserTier
 
-export type ProfileEmbeddingTier = {
-  id: string
-  order: number
-  description: string
-  endpoints: TierEndpoint[]
-}
+export type ProfileEmbeddingTier = EmbeddingTier
 
 export type RoutingProfileDetail = {
   id: string
@@ -572,7 +436,6 @@ export function cloneRoutingProfile(profileId: string, payload?: {
   return jsonRequest(`${base}/routing-profiles/${profileId}/clone/`, withCsrf(payload ?? {}))
 }
 
-// Profile-specific tier management
 const profileBase = `${base}/routing-profiles`
 const profileTierPaths = {
   persistent: {
@@ -589,89 +452,46 @@ const profileTierPaths = {
   },
 } as const
 
-export function createProfileTokenRange(profileId: string, payload: { name: string; min_tokens: number; max_tokens: number | null }) {
-  return jsonRequest(`${profileBase}/${profileId}/token-ranges/`, withCsrf(payload))
+export type RoutingTierScope = keyof typeof profileTierPaths
+export type TokenRangeClient = {
+  create: (payload: { name: string; min_tokens: number; max_tokens: number | null }) => Promise<unknown>
+  update: (rangeId: string, payload: Record<string, unknown>) => Promise<unknown>
+  remove: (rangeId: string) => Promise<unknown>
+}
+export type RoutingConfigClient = {
+  isProfile: boolean
+  ranges: TokenRangeClient
+  tiers: Record<RoutingTierScope, TierClient>
 }
 
-export function updateProfileTokenRange(rangeId: string, payload: Record<string, unknown>) {
-  return jsonRequest(`${profileBase}/token-ranges/${rangeId}/`, withCsrf(payload, 'PATCH'))
-}
+export function createRoutingConfigClient(profileId: string | null): RoutingConfigClient {
+  if (!profileId) {
+    return {
+      isProfile: false,
+      ranges: { create: createTokenRange, update: updateTokenRange, remove: deleteTokenRange },
+      tiers: {
+        persistent: systemTierClients.persistent,
+        browser: systemTierClients.browser,
+        embedding: systemTierClients.embedding,
+      },
+    }
+  }
 
-export function deleteProfileTokenRange(rangeId: string) {
-  return jsonRequest(`${profileBase}/token-ranges/${rangeId}/`, withCsrf(undefined, 'DELETE'))
-}
-
-export function createProfilePersistentTier(rangeId: string, payload: { intelligence_tier: string; description?: string }) {
-  return createTier(`${profileBase}/token-ranges/${rangeId}/tiers/`, payload)
-}
-
-export function updateProfilePersistentTier(tierId: string, payload: Record<string, unknown>) {
-  return updateTier(profileTierPaths.persistent.tiers, tierId, payload)
-}
-
-export function deleteProfilePersistentTier(tierId: string) {
-  return deleteTier(profileTierPaths.persistent.tiers, tierId)
-}
-
-export function addProfilePersistentTierEndpoint(tierId: string, payload: { endpoint_id: string; weight: number }) {
-  return addTierEndpoint(profileTierPaths.persistent.tiers, tierId, payload)
-}
-
-export function updateProfilePersistentTierEndpoint(tierEndpointId: string, payload: Record<string, unknown>) {
-  return updateTierEndpoint(profileTierPaths.persistent.tierEndpoints, tierEndpointId, payload)
-}
-
-export function deleteProfilePersistentTierEndpoint(tierEndpointId: string) {
-  return deleteTierEndpoint(profileTierPaths.persistent.tierEndpoints, tierEndpointId)
-}
-
-export function createProfileBrowserTier(profileId: string, payload: { intelligence_tier: string; description?: string }) {
-  return createTier(`${profileBase}/${profileId}/browser-tiers/`, payload)
-}
-
-export function updateProfileBrowserTier(tierId: string, payload: Record<string, unknown>) {
-  return updateTier(profileTierPaths.browser.tiers, tierId, payload)
-}
-
-export function deleteProfileBrowserTier(tierId: string) {
-  return deleteTier(profileTierPaths.browser.tiers, tierId)
-}
-
-export function addProfileBrowserTierEndpoint(
-  tierId: string,
-  payload: { endpoint_id: string; weight: number; extraction_endpoint_id?: string | null },
-) {
-  return addTierEndpoint(profileTierPaths.browser.tiers, tierId, payload)
-}
-
-export function updateProfileBrowserTierEndpoint(tierEndpointId: string, payload: Record<string, unknown>) {
-  return updateTierEndpoint(profileTierPaths.browser.tierEndpoints, tierEndpointId, payload)
-}
-
-export function deleteProfileBrowserTierEndpoint(tierEndpointId: string) {
-  return deleteTierEndpoint(profileTierPaths.browser.tierEndpoints, tierEndpointId)
-}
-
-export function createProfileEmbeddingTier(profileId: string, payload: { description?: string }) {
-  return createTier(`${profileBase}/${profileId}/embeddings-tiers/`, payload)
-}
-
-export function updateProfileEmbeddingTier(tierId: string, payload: Record<string, unknown>) {
-  return updateTier(profileTierPaths.embedding.tiers, tierId, payload)
-}
-
-export function deleteProfileEmbeddingTier(tierId: string) {
-  return deleteTier(profileTierPaths.embedding.tiers, tierId)
-}
-
-export function addProfileEmbeddingTierEndpoint(tierId: string, payload: { endpoint_id: string; weight: number }) {
-  return addTierEndpoint(profileTierPaths.embedding.tiers, tierId, payload)
-}
-
-export function updateProfileEmbeddingTierEndpoint(tierEndpointId: string, payload: Record<string, unknown>) {
-  return updateTierEndpoint(profileTierPaths.embedding.tierEndpoints, tierEndpointId, payload)
-}
-
-export function deleteProfileEmbeddingTierEndpoint(tierEndpointId: string) {
-  return deleteTierEndpoint(profileTierPaths.embedding.tierEndpoints, tierEndpointId)
+  const tiers = {
+    persistent: makeTierClient(
+      profileTierPaths.persistent,
+      (rangeId) => `${profileBase}/token-ranges/${rangeId}/tiers/`,
+    ),
+    browser: makeTierClient(profileTierPaths.browser, `${profileBase}/${profileId}/browser-tiers/`),
+    embedding: makeTierClient(profileTierPaths.embedding, `${profileBase}/${profileId}/embeddings-tiers/`),
+  }
+  return {
+    isProfile: true,
+    ranges: {
+      create: (payload) => jsonRequest(`${profileBase}/${profileId}/token-ranges/`, withCsrf(payload)),
+      update: (rangeId, payload) => jsonRequest(`${profileBase}/token-ranges/${rangeId}/`, withCsrf(payload, 'PATCH')),
+      remove: (rangeId) => jsonRequest(`${profileBase}/token-ranges/${rangeId}/`, withCsrf(undefined, 'DELETE')),
+    },
+    tiers,
+  }
 }
