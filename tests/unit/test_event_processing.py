@@ -1,4 +1,5 @@
 import json
+import os
 import re
 import sqlite3
 import shutil
@@ -5851,7 +5852,7 @@ class EventProcessingDeletedAgentAbortTests(TestCase):
     @patch("api.agent.core.event_processing._attempt_cycle_close_for_sleep")
     @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
     @patch("api.agent.core.event_processing.execute_enabled_tool")
-    @patch("api.agent.core.event_processing.apply_sqlite_agent_config_updates", return_value=MagicMock(errors=[]))
+    @patch("api.agent.core.event_processing.apply_sqlite_agent_config_updates", return_value=MagicMock(errors={}))
     @patch("api.agent.core.event_processing.seed_sqlite_agent_config", return_value=None)
     @patch("api.agent.core.event_processing._enforce_tool_rate_limit", return_value=True)
     @patch("api.agent.core.event_processing.extract_reasoning_content", return_value=None)
@@ -5863,10 +5864,10 @@ class EventProcessingDeletedAgentAbortTests(TestCase):
         _mock_prompt,
         _mock_failover,
         _mock_tools,
+        _mock_reasoning,
         _mock_rate,
         _mock_seed_config,
-        _mock_apply_config,
-        _mock_reasoning,
+        mock_apply_config,
         mock_execute_tool,
         _mock_credit,
         mock_close_cycle,
@@ -5901,22 +5902,35 @@ class EventProcessingDeletedAgentAbortTests(TestCase):
 
         mock_execute_tool.side_effect = _first_call_deletes_agent
 
-        with patch("api.agent.core.event_processing._completion_with_failover", return_value=(response, token_usage)):
-            from api.agent.core import event_processing as ep
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            token = set_sqlite_db_path(os.path.join(tmp_dir, "state.db"))
+            try:
+                with patch(
+                    "api.agent.core.event_processing.apply_sqlite_skill_updates",
+                    return_value=SimpleNamespace(errors=[], changed=False),
+                ) as mock_apply_skills, patch(
+                    "api.agent.core.event_processing._completion_with_failover",
+                    return_value=(response, token_usage),
+                ):
+                    from api.agent.core import event_processing as ep
 
-            with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1):
-                usage = _run_agent_loop(self.agent, is_first_run=False)
+                    with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1):
+                        usage = _run_agent_loop(self.agent, is_first_run=False)
+            finally:
+                reset_sqlite_db_path(token)
 
         self.agent.refresh_from_db()
         self.assertTrue(self.agent.is_deleted)
         self.assertEqual(mock_execute_tool.call_count, 1)
+        mock_apply_config.assert_not_called()
+        mock_apply_skills.assert_not_called()
         mock_close_cycle.assert_called_once()
         self.assertEqual(usage.get("total_tokens"), 10)
 
     @patch("api.agent.core.event_processing._attempt_cycle_close_for_sleep")
     @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
     @patch("api.agent.core.event_processing.execute_enabled_tool")
-    @patch("api.agent.core.event_processing.apply_sqlite_agent_config_updates", return_value=MagicMock(errors=[]))
+    @patch("api.agent.core.event_processing.apply_sqlite_agent_config_updates", return_value=MagicMock(errors={}))
     @patch("api.agent.core.event_processing.seed_sqlite_agent_config", return_value=None)
     @patch("api.agent.core.event_processing._enforce_tool_rate_limit", return_value=True)
     @patch("api.agent.core.event_processing.extract_reasoning_content", return_value=None)
@@ -5928,10 +5942,10 @@ class EventProcessingDeletedAgentAbortTests(TestCase):
         _mock_prompt,
         _mock_failover,
         _mock_tools,
+        _mock_reasoning,
         _mock_rate,
         _mock_seed_config,
-        _mock_apply_config,
-        _mock_reasoning,
+        mock_apply_config,
         mock_execute_tool,
         _mock_credit,
         mock_close_cycle,
@@ -5966,15 +5980,28 @@ class EventProcessingDeletedAgentAbortTests(TestCase):
 
         mock_execute_tool.side_effect = _first_call_deactivates_agent
 
-        with patch("api.agent.core.event_processing._completion_with_failover", return_value=(response, token_usage)):
-            from api.agent.core import event_processing as ep
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            token = set_sqlite_db_path(os.path.join(tmp_dir, "state.db"))
+            try:
+                with patch(
+                    "api.agent.core.event_processing.apply_sqlite_skill_updates",
+                    return_value=SimpleNamespace(errors=[], changed=False),
+                ) as mock_apply_skills, patch(
+                    "api.agent.core.event_processing._completion_with_failover",
+                    return_value=(response, token_usage),
+                ):
+                    from api.agent.core import event_processing as ep
 
-            with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1):
-                usage = _run_agent_loop(self.agent, is_first_run=False)
+                    with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1):
+                        usage = _run_agent_loop(self.agent, is_first_run=False)
+            finally:
+                reset_sqlite_db_path(token)
 
         self.agent.refresh_from_db()
         self.assertFalse(self.agent.is_active)
         self.assertEqual(mock_execute_tool.call_count, 1)
+        mock_apply_config.assert_not_called()
+        mock_apply_skills.assert_not_called()
         mock_close_cycle.assert_called_once()
         self.assertEqual(usage.get("total_tokens"), 10)
 
@@ -6037,9 +6064,8 @@ class EventProcessingStopRequestTests(TestCase):
     @patch("api.agent.core.event_processing._attempt_cycle_close_for_sleep")
     @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
     @patch("api.agent.core.event_processing.execute_enabled_tool")
-    @patch("api.agent.core.event_processing.apply_sqlite_agent_config_updates", return_value=MagicMock(errors=[]))
+    @patch("api.agent.core.event_processing.apply_sqlite_skill_updates", return_value=SimpleNamespace(errors=[], changed=False))
     @patch("api.agent.core.event_processing.seed_sqlite_skills", return_value=None)
-    @patch("api.agent.core.event_processing.seed_sqlite_agent_config", return_value=None)
     @patch("api.agent.core.event_processing._enforce_tool_rate_limit", return_value=True)
     @patch("api.agent.core.event_processing.extract_reasoning_content", return_value=None)
     @patch("api.agent.core.event_processing.get_agent_tools", return_value=[{"type": "function", "function": {"name": "sqlite_batch", "parameters": {"type": "object", "properties": {}}}}])
@@ -6050,18 +6076,20 @@ class EventProcessingStopRequestTests(TestCase):
         _mock_prompt,
         _mock_failover,
         _mock_tools,
-        _mock_rate,
-        _mock_seed_config,
-        _mock_seed_skills,
-        _mock_apply_config,
         _mock_reasoning,
+        _mock_rate,
+        _mock_seed_skills,
+        _mock_apply_skills,
         mock_execute_tool,
         _mock_credit,
         mock_close_cycle,
     ):
         tool_call_one = {
             "id": "call-1",
-            "function": {"name": "sqlite_batch", "arguments": '{"sql":"SELECT 1","will_continue_work":true}'},
+            "function": {
+                "name": "sqlite_batch",
+                "arguments": '{"sql":"UPDATE __agent_config SET charter = \'Updated before stop\' WHERE id = 1","will_continue_work":true}',
+            },
         }
         tool_call_two = {
             "id": "call-2",
@@ -6083,22 +6111,37 @@ class EventProcessingStopRequestTests(TestCase):
             "cached_tokens": 0,
         }
 
-        def _first_call_requests_stop(*_args, **_kwargs):
+        def _first_call_requests_stop(*_args, **kwargs):
+            conn = sqlite3.connect(kwargs["current_sqlite_db_path"])
+            try:
+                conn.execute(
+                    "UPDATE __agent_config SET charter = 'Updated before stop' WHERE id = 1"
+                )
+                conn.commit()
+            finally:
+                conn.close()
             set_processing_stop_requested(self.agent.id)
             return {"status": "ok"}
 
         mock_execute_tool.side_effect = _first_call_requests_stop
 
-        with patch("api.agent.core.event_processing._completion_with_failover", return_value=(response, token_usage)):
-            from api.agent.core import event_processing as ep
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            token = set_sqlite_db_path(os.path.join(tmp_dir, "state.db"))
+            try:
+                with patch("api.agent.core.event_processing._completion_with_failover", return_value=(response, token_usage)):
+                    from api.agent.core import event_processing as ep
 
-            with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1):
-                usage = _run_agent_loop(self.agent, is_first_run=False)
+                    with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1):
+                        usage = _run_agent_loop(self.agent, is_first_run=False)
+            finally:
+                reset_sqlite_db_path(token)
 
         self.assertEqual(mock_execute_tool.call_count, 1)
         mock_close_cycle.assert_called_once()
         self.assertFalse(is_processing_stop_requested(self.agent.id))
         self.assertEqual(usage.get("total_tokens"), 10)
+        self.agent.refresh_from_db()
+        self.assertEqual(self.agent.charter, "Updated before stop")
 
 
 @tag("batch_event_processing")

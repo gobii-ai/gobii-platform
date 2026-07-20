@@ -70,16 +70,25 @@ class SqliteGuardrailsMaintenanceTests(SimpleTestCase):
         self.assertEqual(appended, "Research leads. Send daily.\nKeep outreach natural.")
         self.assertEqual(duplicate, appended)
 
-    def test_patch_text_appends_when_replacement_target_is_missing(self):
+    def test_patch_text_rejects_missing_replacement_target(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             conn = open_guarded_sqlite_connection(os.path.join(tmp_dir, "state.db"))
             try:
-                patched = conn.execute("SELECT patch_text('Keep A.', 'Missing B.', 'Use C.')").fetchone()[0]
+                with self.assertRaises(sqlite3.OperationalError):
+                    conn.execute("SELECT patch_text('Keep A.', 'Missing B.', 'Use C.')")
             finally:
                 clear_guarded_connection(conn)
                 conn.close()
 
-        self.assertEqual(patched, "Keep A.\nUse C.")
+    def test_patch_text_rejects_ambiguous_replacement_target(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            conn = open_guarded_sqlite_connection(os.path.join(tmp_dir, "state.db"))
+            try:
+                with self.assertRaises(sqlite3.OperationalError):
+                    conn.execute("SELECT patch_text('Keep A. Keep A.', 'Keep A.', 'Use B.')")
+            finally:
+                clear_guarded_connection(conn)
+                conn.close()
 
     def test_statistical_aggregates_match_sample_and_population_semantics(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

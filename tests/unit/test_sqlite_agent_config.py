@@ -1,6 +1,7 @@
 import os
 import sqlite3
 import tempfile
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase, tag
@@ -9,6 +10,7 @@ from api.agent.tools.sqlite_agent_config import (
     apply_sqlite_agent_config_updates,
     seed_sqlite_agent_config,
 )
+from api.agent.tools.sqlite_guardrails import clear_guarded_connection, open_guarded_sqlite_connection
 from api.agent.tools.sqlite_state import AGENT_CONFIG_TABLE, reset_sqlite_db_path, set_sqlite_db_path
 from api.models import BrowserUseAgent, PersistentAgent
 
@@ -107,4 +109,62 @@ class SqliteAgentConfigTests(TestCase):
         self.assertIn("charter", result.updated_fields)
         self.assertNotIn("schedule", result.updated_fields)
         self.assertEqual(len(result.errors), 1)
-        self.assertIn("planning mode", result.errors[0].lower())
+        self.assertIn("planning mode", result.errors["schedule"].lower())
+
+    def test_sqlite_agent_config_reports_attempted_noop(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            db_path = os.path.join(tmp_dir, "state.db")
+            token = set_sqlite_db_path(db_path)
+            try:
+                snapshot = seed_sqlite_agent_config(self.agent)
+                conn = sqlite3.connect(db_path)
+                try:
+                    conn.execute(
+                        f'UPDATE "{AGENT_CONFIG_TABLE}" SET charter = charter WHERE id = 1;'
+                    )
+                    conn.commit()
+                finally:
+                    conn.close()
+
+                result = apply_sqlite_agent_config_updates(
+                    self.agent,
+                    snapshot,
+                )
+            finally:
+                reset_sqlite_db_path(token)
+
+        self.assertFalse(result.updated_fields)
+        self.assertFalse(result.errors)
+
+    def test_failed_patch_does_not_persist_or_schedule_charter_update(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            db_path = os.path.join(tmp_dir, "state.db")
+            token = set_sqlite_db_path(db_path)
+            try:
+                snapshot = seed_sqlite_agent_config(self.agent)
+                conn = open_guarded_sqlite_connection(db_path)
+                try:
+                    with self.assertRaises(sqlite3.OperationalError):
+                        conn.execute(
+                            f'''UPDATE "{AGENT_CONFIG_TABLE}"
+                                SET charter = patch_text(charter, 'Missing clause', 'New clause')
+                                WHERE id = 1;'''
+                        )
+                    conn.rollback()
+                finally:
+                    clear_guarded_connection(conn)
+                    conn.close()
+
+                with patch("api.agent.tools.sqlite_agent_config.execute_update_charter") as update_charter:
+                    result = apply_sqlite_agent_config_updates(
+                        self.agent,
+                        snapshot,
+                    )
+            finally:
+                reset_sqlite_db_path(token)
+
+        update_charter.assert_not_called()
+        self.agent.refresh_from_db()
+        self.assertEqual(self.agent.charter, "Original charter")
+        self.assertFalse(result.updated_fields)
+        self.assertFalse(result.errors)

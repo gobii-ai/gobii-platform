@@ -2,7 +2,9 @@
 Tests for guarded parallel execution of safe tool batches.
 """
 import json
+import os
 import threading
+import tempfile
 import time
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -105,6 +107,59 @@ class TestParallelToolCallsExecution(TestCase):
             mock_completion.return_value = _completion_response(tool_calls)
             with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1):
                 return ep._run_agent_loop(self.agent, is_first_run=False)
+
+    def _run_single_iteration_with_sqlite(self, tool_calls: list[dict]):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            token = set_sqlite_db_path(os.path.join(tmp_dir, "state.db"))
+            try:
+                return self._run_single_iteration(tool_calls)
+            finally:
+                reset_sqlite_db_path(token)
+
+    def test_noop_agent_config_update_is_persisted_in_tool_result(self):
+        self._run_single_iteration_with_sqlite([
+            _tool_call(
+                "sqlite_batch",
+                '{"sql": "UPDATE __agent_config SET charter = charter WHERE id = 1"}',
+            ),
+        ])
+
+        result = json.loads(PersistentAgentToolCall.objects.get(step__agent=self.agent).result)
+        self.assertEqual(
+            result["agent_config_update"],
+            {
+                "updated_fields": [],
+                "unchanged_fields": ["charter"],
+                "errors": {},
+            },
+        )
+
+    def test_config_reconciliation_is_aggregated_with_field_errors(self):
+        self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
+        self.agent.schedule = "0 9 * * *"
+        self.agent.save(update_fields=["planning_state", "schedule", "updated_at"])
+
+        self._run_single_iteration_with_sqlite([
+            _tool_call(
+                "sqlite_batch",
+                '{"sql": "UPDATE __agent_config SET charter = \'Updated charter\' WHERE id = 1"}',
+            ),
+            _tool_call(
+                "sqlite_batch",
+                '{"sql": "UPDATE __agent_config SET schedule = \'0 10 * * *\' WHERE id = 1"}',
+            ),
+        ])
+
+        tool_calls = list(
+            PersistentAgentToolCall.objects.filter(step__agent=self.agent).order_by("step__created_at")
+        )
+        first_result, second_result = (json.loads(call.result) for call in tool_calls)
+        self.assertNotIn("agent_config_update", first_result)
+        reconciliation = second_result["agent_config_update"]
+        self.assertEqual(reconciliation["updated_fields"], ["charter"])
+        self.assertEqual(reconciliation["unchanged_fields"], ["schedule"])
+        self.assertEqual(set(reconciliation["errors"]), {"schedule"})
+        self.assertIn("planning mode", reconciliation["errors"]["schedule"].lower())
 
     @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
     @patch("api.agent.core.event_processing.execute_send_sms", return_value={"status": "success", "auto_sleep_ok": True})
@@ -627,7 +682,7 @@ class TestParallelToolCallsExecution(TestCase):
         self.assertEqual(mock_execute_enabled.call_count, 2)
         self.assertTrue(all(not call.kwargs.get("isolated_mcp", False) for call in mock_execute_enabled.call_args_list))
 
-    @patch("api.agent.core.event_processing.apply_sqlite_agent_config_updates", return_value=SimpleNamespace(errors=[]))
+    @patch("api.agent.core.event_processing.apply_sqlite_agent_config_updates", return_value=SimpleNamespace(errors={}))
     @patch("api.agent.core.event_processing.apply_sqlite_skill_updates", return_value=SimpleNamespace(errors=[], changed=False))
     @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
     @patch("api.agent.core.event_processing.execute_enabled_tool")

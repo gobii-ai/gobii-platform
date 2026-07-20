@@ -669,8 +669,9 @@ def _get_sqlite_guidance() -> str:
         "* __contacts: channel, address, normalized_address, display_name, status, allow_inbound, allow_outbound, can_configure, "
         "relevance_at. Safe outbound requires status='allowed' and allow_outbound=1; never infer "
         "permission from lead state or an empty request queue.\n\n"
-        "SQLite provides csv_headers/csv_parse, patch_text(text,old,new), extraction/cleaning helpers, and standard JSON/window "
-        "functions; use names shown by schema/results. A browser task completion wakes you and adds its result; do "
+        "SQLite provides csv_headers/csv_parse, extraction/cleaning helpers, and standard JSON/window functions; use names shown by schema/results. "
+        "For patch_text(text,old,new), old='' appends; otherwise old must match exactly once. "
+        "A browser task completion wakes you and adds its result; do "
         "not poll snapshots while it runs. Facts and URLs must come from evidence, not search terms."
     )
 
