@@ -15,6 +15,10 @@ from api.evals.scenarios.hubspot_native import HUBSPOT_NATIVE_SCENARIO_SLUGS, HU
 from api.evals.scenarios.discord_native import DISCORD_NATIVE_SCENARIO_SLUGS, DISCORD_NATIVE_SUITE_SLUG
 from api.evals.scenarios.image_generation import IMAGE_GENERATION_SCENARIO_SLUGS, IMAGE_GENERATION_SUITE_SLUG
 from api.evals.scenarios.responsibility_boundaries import RESPONSIBILITY_BOUNDARY_SCENARIO_SLUGS, RESPONSIBILITY_BOUNDARY_SUITE_SLUG
+from api.evals.scenarios.outreach_campaign_safety import (
+    OUTREACH_CAMPAIGN_SAFETY_SCENARIO_SLUGS,
+    OUTREACH_CAMPAIGN_SAFETY_SUITE_SLUG,
+)
 from api.evals.scenarios.hallucinated_links import HALLUCINATED_LINK_SCENARIO_SLUGS, HALLUCINATED_LINKS_SUITE_SLUG
 from api.evals.scenarios.agent_scheduling import AGENT_SCHEDULING_SCENARIO_SLUGS, AGENT_SCHEDULING_SUITE_SLUG
 from api.evals.scenarios.agent_appearance import AGENT_APPEARANCE_SCENARIO_SLUGS, AGENT_APPEARANCE_SUITE_SLUG
@@ -130,6 +134,11 @@ register_builtin_suites(
             slug=RESPONSIBILITY_BOUNDARY_SUITE_SLUG,
             description="Connected-agent ownership, handoff, and shared-channel responsibility regressions.",
             scenario_slugs=RESPONSIBILITY_BOUNDARY_SCENARIO_SLUGS,
+        ),
+        EvalSuite(
+            slug=OUTREACH_CAMPAIGN_SAFETY_SUITE_SLUG,
+            description="Outreach campaign approval, QA, activation, and state-reporting safety regressions.",
+            scenario_slugs=OUTREACH_CAMPAIGN_SAFETY_SCENARIO_SLUGS,
         ),
         EvalSuite(
             slug=HALLUCINATED_LINKS_SUITE_SLUG,

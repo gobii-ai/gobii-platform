@@ -84,6 +84,12 @@ from .responsibility_boundaries import (
     RESPONSIBILITY_BOUNDARY_SUITE_SLUG,
     ResponsibilityBoundaryScenario,
 )
+from .outreach_campaign_safety import (
+    OUTREACH_CAMPAIGN_SAFETY_SCENARIO_SLUGS,
+    OUTREACH_CAMPAIGN_SAFETY_SUITE_SLUG,
+    OutreachCampaignActivationReadbackScenario,
+    OutreachCampaignPreflightRequiresReviewScenario,
+)
 from .hallucinated_links import (
     HALLUCINATED_LINK_SCENARIO_SLUGS,
     HALLUCINATED_LINKS_SUITE_SLUG,
