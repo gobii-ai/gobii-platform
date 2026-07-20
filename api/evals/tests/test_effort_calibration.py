@@ -667,6 +667,14 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
             self.assertFalse(scenario._record_sqlite_usage("run", after=None, task_name="verify"))
         self.assertIn("hand-built with CASE result_id", recorded[-1][1]["observed_summary"])
 
+        second_statement_case_sql = aggregate_sql + "; SELECT CASE result_id WHEN 'r1' THEN 'AxonFlow' END"
+        with patch(
+            "api.evals.scenarios.sqlite_tool_results._tool_calls_for_run",
+            return_value=[_eval_tool_call("sqlite_batch", {"sql": second_statement_case_sql})],
+        ):
+            self.assertFalse(scenario._record_sqlite_usage("run", after=None, task_name="verify"))
+        self.assertIn("hand-built with CASE result_id", recorded[-1][1]["observed_summary"])
+
         unrelated_case_sql = (
             "SELECT CASE status WHEN 'ok' THEN 1 ELSE 0 END FROM checks; "
             "SELECT result_id, count(*) FROM __tool_results GROUP BY result_id"

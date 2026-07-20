@@ -505,10 +505,13 @@ class SqliteToolResultScenario(EvalScenario, ScenarioExecutionTools):
         summary = summarize_sqlite_tool_result_calls(strategy_calls)
         result_id_case_calls = [
             call for call in successful_calls
-            if re.search(
-                r'\bcase\s+(?:(?:\(\s*)?(?:\w+\.)?"?\bresult_id\b"?(?:\s*\))?\s+when\b|when\b(?:(?!\bend\b).)*(?:\w+\.)?"?\bresult_id\b"?)',
-                _structural_sql(str((call.tool_params or {}).get("sql") or "")),
-                re.I | re.S,
+            if any(
+                re.search(
+                    r'\bcase\s+(?:(?:\(\s*)?(?:\w+\.)?"?\bresult_id\b"?(?:\s*\))?\s+when\b|when\b(?:(?!\bend\b).)*(?:\w+\.)?"?\bresult_id\b"?)',
+                    _structural_sql(statement),
+                    re.I | re.S,
+                )
+                for statement in sqlparse.split(str((call.tool_params or {}).get("sql") or ""))
             )
         ]
         failures = [msg for bad, msg in (
