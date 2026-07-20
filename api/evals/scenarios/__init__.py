@@ -32,6 +32,10 @@ from .behavior_micro import (
     ToolChoicePdfDeliverableUsesCreatePdfScenario,
     ToolChoiceMissingRecipientUsesHumanInputScenario,
 )
+from .github_credential_retention import (
+    CharterJudgePreservesCliGithubSecretWorkflowScenario,
+    CharterRecordsCliGithubSecretsCorrectionScenario,
+)
 from .effort_calibration import (
     EFFORT_CALIBRATION_SCENARIO_SLUGS,
     EffortTrivialAnswerStopsScenario,

@@ -57,6 +57,8 @@ CHARTER_IGNORES_ONE_OFF_PREFERENCE = "charter_ignores_one_off_preference"
 CHARTER_ADDS_FEEDBACK_RULE_FROM_CORRECTION = "charter_adds_feedback_rule_from_correction"
 CHARTER_ADDS_PLAIN_PREFERENCE_WITHOUT_SAVE_WORD = "charter_adds_plain_preference_without_save_word"
 CHARTER_PATCHES_DIRECT_STYLE_CORRECTION = "charter_patches_direct_style_correction"
+CHARTER_RECORDS_CLI_GITHUB_SECRETS_CORRECTION = "charter_records_cli_github_secrets_correction"
+CHARTER_JUDGE_PRESERVES_CLI_GITHUB_SECRET_WORKFLOW = "charter_judge_preserves_cli_github_secret_workflow"
 
 TOOL_CHOICE_EXACT_JSON_URL_USES_HTTP_REQUEST = "tool_choice_exact_json_url_uses_http_request"
 TOOL_CHOICE_CSV_DELIVERABLE_USES_CREATE_CSV = "tool_choice_csv_deliverable_uses_create_csv"
@@ -361,6 +363,8 @@ CHARTER_MEMORY_MICRO_SCENARIO_SLUGS = [
     CHARTER_ADDS_FEEDBACK_RULE_FROM_CORRECTION,
     CHARTER_ADDS_PLAIN_PREFERENCE_WITHOUT_SAVE_WORD,
     CHARTER_PATCHES_DIRECT_STYLE_CORRECTION,
+    CHARTER_RECORDS_CLI_GITHUB_SECRETS_CORRECTION,
+    CHARTER_JUDGE_PRESERVES_CLI_GITHUB_SECRET_WORKFLOW,
 ]
 
 TOOL_CHOICE_MICRO_SCENARIO_SLUGS = [
@@ -1842,6 +1846,9 @@ class CharterMemoryScenario(BehaviorMicroScenario):
     def _charter_check(self, agent, mutation_calls):
         raise NotImplementedError
 
+    def _additional_charter_check(self, agent, run_id, inbound):
+        return True, ""
+
     def run(self, run_id, agent_id):
         self._seed_charter_agent(agent_id)
         inbound = self._inject_charter_prompt(run_id, agent_id)
@@ -1855,6 +1862,10 @@ class CharterMemoryScenario(BehaviorMicroScenario):
         mutation_calls = self._mutation_calls_for_verification(run_id, inbound)
         agent = PersistentAgent.objects.get(id=agent_id)
         passed, failure_detail = self._charter_check(agent, mutation_calls)
+        additional_passed, additional_detail = self._additional_charter_check(agent, run_id, inbound)
+        passed = passed and additional_passed
+        if additional_detail:
+            failure_detail = "; ".join(detail for detail in (failure_detail, additional_detail) if detail)
         if passed:
             artifacts = {"step": mutation_calls[0].step} if mutation_calls else {}
             self.record_task_result(
