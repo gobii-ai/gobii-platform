@@ -6,23 +6,23 @@
     "limits": {
       "normal_explicit_send": {
         "fitted_tokens": 6805,
-        "system_bytes": 21762,
+        "system_bytes": 21749,
         "tools_bytes": 21246,
-        "total_bytes": 53420,
+        "total_bytes": 53407,
         "user_bytes": 10412
       },
       "planning_first_run": {
         "fitted_tokens": 8121,
-        "system_bytes": 28729,
+        "system_bytes": 28716,
         "tools_bytes": 12240,
-        "total_bytes": 51134,
+        "total_bytes": 51121,
         "user_bytes": 10165
       },
       "web_chat_implied_send": {
         "fitted_tokens": 6960,
-        "system_bytes": 22262,
+        "system_bytes": 22249,
         "tools_bytes": 21246,
-        "total_bytes": 53923,
+        "total_bytes": 53910,
         "user_bytes": 10415
       }
     },
