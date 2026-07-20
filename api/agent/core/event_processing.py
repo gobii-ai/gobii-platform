@@ -115,6 +115,7 @@ from ..tools.custom_tool_names import CREATE_CUSTOM_TOOL_NAME
 from ..tools.plan import build_plan_snapshot, build_redundant_research_plan_skip_result, execute_update_plan
 from ..tools.planning import execute_end_planning
 from ..tools.runtime_execution_context import tool_execution_context
+from ..tools.sqlite_query_quality import summarize_sqlite_tool_result_sql
 from ..tools.sqlite_state import agent_sqlite_db, get_sqlite_db_path
 from ..tools.secure_credentials_request import execute_secure_credentials_request
 from ..tools.request_contact_permission import execute_request_contact_permission
@@ -2309,6 +2310,22 @@ def _sqlite_batch_statements(tool_params: Dict[str, Any]) -> list[str]:
     return statements
 
 
+def _sqlite_single_result_read_call_count(tool_calls: list[Any]) -> int:
+    count = 0
+    for call in tool_calls:
+        if _get_tool_call_name(call) != "sqlite_batch":
+            continue
+        try:
+            _raw_args, tool_params = _parse_tool_call_params(_get_tool_call_arguments(call))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        if isinstance(tool_params, dict) and summarize_sqlite_tool_result_sql(
+            _sqlite_batch_statements(tool_params)
+        ).single_result_id_filters:
+            count += 1
+    return count
+
+
 def _sqlite_batch_is_only_agent_config_mutation(tool_params: Dict[str, Any]) -> bool:
     statements = _sqlite_batch_statements(tool_params)
     return bool(statements) and any(
@@ -2803,10 +2820,20 @@ def _prepare_tool_batch_impl(
             deep_work_update_reason,
         )
         return _PreparedToolBatch([], True, False, False, "deep_work_update_gate")
-    batch_has_human_input_request = any(
-        _get_tool_call_name(call) == "request_human_input"
-        for call in tool_calls
-    )
+    single_result_reads = _sqlite_single_result_read_call_count(tool_calls)
+    if single_result_reads >= 2:
+        step_kwargs = {
+            "agent": agent,
+            "description": (
+                f"Tool policy: held {single_result_reads} sibling sqlite_batch calls that read __tool_results one "
+                "result_id at a time. Retry with one shaped query over result_id IN (...) or tool_name; do not resend "
+                "separate reads."
+            ),
+        }
+        attach_completion(step_kwargs)
+        step = PersistentAgentStep.objects.create(**step_kwargs)
+        attach_prompt_archive(step)
+        return _PreparedToolBatch([], True, False, False, "sqlite_result_fanout_gate")
     batch_has_planning_gate = any(_get_tool_call_name(call) in {"end_planning", "request_human_input"} for call in tool_calls)
     batch_has_terminal_message = any(_tool_call_likely_terminal_message(call) for call in tool_calls)
     skipped_plan_requested_sleep = False

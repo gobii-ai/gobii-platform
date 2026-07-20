@@ -299,6 +299,96 @@ class TestParallelToolCallsExecution(TestCase):
         self.assertEqual(batch.checked_names, {"read_file"})
         fallback.assert_not_called()
 
+    def test_prepare_tool_batch_holds_sibling_single_result_reads(self):
+        from api.agent.core import event_processing as ep
+
+        calls = [
+            _tool_call(
+                "sqlite_batch",
+                json.dumps(
+                    {
+                        "sql": (
+                            "SELECT substr(result_text, 1, 3000) FROM __tool_results "
+                            f"WHERE result_id='result-{index}'"
+                        )
+                    }
+                ),
+            )
+            for index in range(4)
+        ]
+        with patch.object(ep, "_enforce_tool_rate_limit", return_value=True) as mock_rate_limit, patch.object(
+            ep,
+            "_ensure_credit_for_tool",
+            return_value={"cost": None, "credit": None},
+        ) as mock_credit:
+            prepared = ep._prepare_tool_batch(
+                self.agent,
+                tool_calls=calls,
+                budget_ctx=None,
+                eval_run_id=None,
+                heartbeat=None,
+                lock_extender=None,
+                credit_snapshot={},
+                allow_inferred_message_continue=True,
+                has_non_sleep_calls=True,
+                has_user_facing_message=False,
+                attach_completion=lambda step_kwargs: None,
+                attach_prompt_archive=lambda step: None,
+            )
+
+        self.assertEqual(prepared.prepared_calls, [])
+        self.assertTrue(prepared.followup_required)
+        self.assertEqual(prepared.parallel_ineligible_reason, "sqlite_result_fanout_gate")
+        mock_rate_limit.assert_not_called()
+        mock_credit.assert_not_called()
+        self.assertFalse(PersistentAgentToolCall.objects.filter(step__agent=self.agent).exists())
+        correction = PersistentAgentStep.objects.get(agent=self.agent, description__startswith="Tool policy: held 4")
+        self.assertIn("one shaped query", correction.description)
+
+    def test_sqlite_single_result_read_call_count_boundaries(self):
+        from api.agent.core import event_processing as ep
+
+        def calls(*statements):
+            return [
+                _tool_call("sqlite_batch", json.dumps({"sql": statement}))
+                for statement in statements
+            ]
+
+        cases = (
+            (
+                calls(
+                    "SELECT result_text FROM __tool_results WHERE result_id='one'",
+                    "SELECT count(*) FROM domain_entities",
+                ),
+                1,
+            ),
+            (
+                calls(
+                    "SELECT result_text FROM __tool_results WHERE result_id IN ('one', 'two')",
+                    "SELECT count(*) FROM __tool_results WHERE tool_name='http_request'",
+                ),
+                0,
+            ),
+            (
+                calls(
+                    "SELECT result_id FROM local_results WHERE result_id='one'",
+                    "SELECT 1 /* __tool_results WHERE result_id='two' */",
+                ),
+                0,
+            ),
+            (
+                calls(
+                    "SELECT result_json FROM __tool_results WHERE result_id IN ('one')",
+                    "SELECT result_json FROM __tool_results WHERE result_id IN ('two')",
+                ),
+                2,
+            ),
+        )
+
+        for tool_calls, expected in cases:
+            with self.subTest(tool_calls=tool_calls):
+                self.assertEqual(ep._sqlite_single_result_read_call_count(tool_calls), expected)
+
     @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
     @patch("api.agent.core.event_processing.execute_enabled_tool")
     def test_native_brightdata_tool_batch_executes_in_parallel(self, mock_execute_enabled, _mock_credit):
