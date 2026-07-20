@@ -151,6 +151,10 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
                 "verify_judge_guidance_preserved_cli",
             ],
         )
+        self.assertEqual(
+            charter_scenario._eval_stop_policy()["stop_on_tool_names"],
+            ["request_human_input", "secure_credentials_request"],
+        )
 
     def test_common_use_case_micro_evals_are_complete_and_registered(self):
         registered = ScenarioRegistry.list_all()

@@ -1,8 +1,11 @@
 import json
+from unittest.mock import patch
 
 from api.agent.core.agent_judge import build_manual_judge_trigger, run_manual_agent_judge
+from api.agent.core.llm_config import get_agent_judge_llm_config
 from api.agent.tools.run_command import get_run_command_tool
 from api.evals.base import ScenarioTask
+from api.evals.execution import get_current_eval_routing_profile
 from api.evals.registry import register_scenario
 from api.evals.scenarios.behavior_micro import (
     CHARTER_JUDGE_PRESERVES_CLI_GITHUB_SECRET_WORKFLOW,
@@ -202,6 +205,11 @@ class CharterRecordsCliGithubSecretsCorrectionScenario(CharterMemoryScenario):
     success_summary = "Agent saved the configured GitHub App secret route without weakening the existing PR workflow."
     failure_summary = "Expected one targeted charter patch preserving the docs workflow and recording CLI secret access"
 
+    def _eval_stop_policy(self):
+        policy = super()._eval_stop_policy()
+        policy["stop_on_tool_names"] = ["request_human_input", "secure_credentials_request"]
+        return policy
+
     def _seed_charter_agent(self, agent_id):
         super()._seed_charter_agent(agent_id)
         seed_github_app_env_var_secrets(agent_id)
@@ -396,7 +404,12 @@ class CharterJudgePreservesCliGithubSecretWorkflowScenario(CharterMemoryScenario
         )
 
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="run_manual_judge")
-        judge_result = run_manual_agent_judge(agent, tools=tools)
+        routing_profile = get_current_eval_routing_profile()
+        with patch(
+            "api.agent.core.agent_judge.get_agent_judge_llm_config",
+            side_effect=lambda: get_agent_judge_llm_config(routing_profile=routing_profile),
+        ):
+            judge_result = run_manual_agent_judge(agent, tools=tools)
         judge_ran = bool(judge_result.get("ran")) and judge_result.get("status") == "completed"
         sanitized_result = self._sanitized_judge_result(judge_result)
         self.record_task_result(
