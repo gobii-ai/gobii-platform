@@ -14,6 +14,11 @@ _HTTP_URL_RE = re.compile(r'''https?://[^\s<>"'`\[\]\\]+''', re.IGNORECASE)
 _LINK_REFERENCE_RE = re.compile(r"\$\[link:([^\]]*)\]", re.IGNORECASE)
 _LINK_REFERENCE_PREFIX_RE = re.compile(r"\$\[link:", re.IGNORECASE)
 _PUBLIC_ID_RE = re.compile(r"L[0123456789ABCDEFGHJKMNPQRSTVWXYZ]{16}", re.IGNORECASE)
+_NAKED_REFERENCE_DESTINATION_RE = re.compile(
+    r"(?:\]\(\s*|href\s*=\s*['\"]\s*)(L[0123456789ABCDEFGHJKMNPQRSTVWXYZ]{16})"
+    r"(?=\s*(?:\)|['\"]))",
+    re.IGNORECASE,
+)
 _TRAILING_PUNCTUATION = ".,;:!?"
 _RENDERED_REFERENCE_PATH_RE = re.compile(
     r"/(L[0123456789ABCDEFGHJKMNPQRSTVWXYZ]{16})/?$",
@@ -140,6 +145,33 @@ def rewrite_prompt_urls(
     return _HTTP_URL_RE.sub(replace, text)
 
 
+def register_prompt_urls(
+    text: str,
+    agent,
+    *,
+    source_kind: str,
+    source_object_id: str = "",
+) -> None:
+    """Register trusted source URLs without changing the inspectable source text."""
+    urls = extract_http_urls(text)
+    if not urls:
+        return
+    try:
+        _reference_map(
+            agent,
+            urls,
+            create=True,
+            source_kind=source_kind,
+            source_object_id=source_object_id,
+        )
+    except DatabaseError:
+        logger.warning(
+            "Failed to register link references for agent %s",
+            getattr(agent, "id", None),
+            exc_info=True,
+        )
+
+
 def _rendered_reference_id(url: str) -> str | None:
     parsed = urlsplit(url)
     public_site = urlsplit(settings.PUBLIC_SITE_URL)
@@ -152,6 +184,12 @@ def _rendered_reference_id(url: str) -> str | None:
 
 
 def resolve_link_references(text: str, agent) -> str:
+    naked_match = _NAKED_REFERENCE_DESTINATION_RE.search(text or "")
+    if naked_match:
+        public_id = naked_match.group(1).upper()
+        raise LinkReferenceResolutionError(
+            f"A link reference is malformed. Use $[link:{public_id}] as the complete destination."
+        )
     matches = list(_LINK_REFERENCE_RE.finditer(text or ""))
     if len(matches) != len(_LINK_REFERENCE_PREFIX_RE.findall(text or "")):
         raise LinkReferenceResolutionError(

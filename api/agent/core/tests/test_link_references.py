@@ -16,7 +16,13 @@ from api.agent.core.link_references import (
     resolve_link_references,
     rewrite_prompt_urls,
 )
-from api.agent.core.event_processing import _execute_tool_call_runtime, _prepare_tool_batch
+from api.agent.core.event_processing import (
+    _execute_tool_call_runtime,
+    _finalize_tool_batch,
+    _PreparedToolExecution,
+    _prepare_tool_batch,
+    _ToolExecutionOutcome,
+)
 from api.agent.core.prompt_context import _get_system_instruction, build_prompt_context
 from api.agent.core.tool_results import ToolCallResultRecord, prepare_tool_results_for_prompt
 from api.agent.tools.agent_variables import (
@@ -25,6 +31,7 @@ from api.agent.tools.agent_variables import (
     substitute_variables_with_filespace,
 )
 from api.agent.tools.email_sender import execute_send_email
+from api.agent.tools.http_request import get_http_request_tool
 from api.agent.tools.peer_dm import execute_send_agent_message
 from api.agent.tools.send_discord_message import execute_send_discord_message
 from api.agent.tools.sms_sender import execute_send_sms
@@ -37,6 +44,7 @@ from api.models import (
     PersistentAgentCommsEndpoint,
     PersistentAgentLinkReference,
     PersistentAgentMessage,
+    PersistentAgentToolCall,
 )
 from util.text_sanitizer import strip_markdown_for_sms
 
@@ -256,6 +264,24 @@ class LinkReferenceTests(TestCase):
             with self.subTest(value=value), self.assertRaises(LinkReferenceResolutionError):
                 resolve_link_references(value, self.agent)
 
+    def test_naked_reference_ids_in_destinations_fail_with_exact_retry_syntax(self):
+        token = rewrite_prompt_urls(
+            "https://files.example.test/board-pack.pdf",
+            self.agent,
+            create=True,
+            source_kind="tool_result",
+            source_object_id="source-step",
+        )
+        public_id = token.removeprefix("$[link:").removesuffix("]")
+
+        for body in (f"[Download]({public_id})", f"<a href='{public_id}'>Download</a>"):
+            with self.subTest(body=body), self.assertRaises(LinkReferenceResolutionError) as raised:
+                resolve_link_references(body, self.agent)
+            self.assertIn(token, str(raised.exception))
+
+        plain_text = f"Reference ID: {public_id}"
+        self.assertEqual(resolve_link_references(plain_text, self.agent), plain_text)
+
     def test_all_human_message_senders_return_retryable_reference_errors(self):
         malformed = "$[link:not-a-uuid]"
         with patch("api.agent.tools.email_sender.can_bypass_email_verification_for_signup_preview_first_email", return_value=True):
@@ -369,6 +395,57 @@ class LinkReferenceTests(TestCase):
         self.assertIn(token, prompt_info.preview_text)
         self.assertEqual(record.result_text, raw_result)
 
+    def test_full_source_result_registers_deep_urls_before_preview_truncation(self):
+        deep_url = "https://profiles.example.test/deep-record?view=full#bio"
+        prepared = _PreparedToolExecution(
+            idx=0,
+            tool_name="http_request",
+            tool_params={"url": "https://api.example.test/records", "will_continue_work": True},
+            exec_params={"url": "https://api.example.test/records", "will_continue_work": True},
+            pending_step=None,
+            credits_consumed=None,
+            consumed_credit=None,
+            call_id="call-source",
+            explicit_continue=True,
+            inferred_continue=False,
+            parallel_safe=False,
+            parallel_ineligible_reason=None,
+        )
+        _finalize_tool_batch(
+            self.agent,
+            [
+                _ToolExecutionOutcome(
+                    prepared=prepared,
+                    result={"status": "ok", "content": f"{'x' * 50_000}\nprofile_url={deep_url}"},
+                    duration_ms=1,
+                    updated_tools=None,
+                    variable_map={},
+                )
+            ],
+            attach_completion=lambda _kwargs: None,
+            attach_prompt_archive=lambda _step: None,
+        )
+
+        reference = PersistentAgentLinkReference.objects.get(agent=self.agent, url=deep_url)
+        token = f"$[link:{reference.public_id}]"
+        stored = PersistentAgentToolCall.objects.get(step__agent=self.agent)
+        self.assertIn(deep_url, stored.result)
+        self.assertNotIn(token, stored.result)
+
+        derived_record = ToolCallResultRecord(
+            step_id="00000000-0000-4000-8000-000000000011",
+            tool_name="sqlite_batch",
+            created_at=datetime.now(timezone.utc),
+            result_text=f'{{"profile_url":"{deep_url}"}}',
+        )
+        prompt_info = prepare_tool_results_for_prompt(
+            [derived_record],
+            recency_positions={derived_record.step_id: 0},
+            fresh_tool_call_step_ids={derived_record.step_id},
+            url_rewriter=lambda text, _item: rewrite_prompt_urls(text, self.agent, create=False),
+        )[derived_record.step_id]
+        self.assertIn(token, prompt_info.preview_text)
+
     def test_inbound_prompt_url_becomes_reference_and_raw_message_stays_inspectable(self):
         url = "https://vendors.example.test/acme?plan=pro#pricing"
         agent_endpoint = PersistentAgentCommsEndpoint.objects.create(
@@ -430,9 +507,16 @@ class LinkReferenceTests(TestCase):
     def test_system_prompt_has_one_reference_rule(self):
         prompt = _get_system_instruction(self.agent, is_first_run=False)
 
-        self.assertEqual(prompt.count("Provided link-reference tokens are destinations"), 1)
-        self.assertIn("No token means no entity link", prompt)
+        self.assertEqual(prompt.count("Each provided `$[link:id]` token is a complete URL"), 1)
+        self.assertIn("Without one, omit the entity link", prompt)
         self.assertNotIn("Message delivery blocked", prompt)
+
+    def test_http_request_url_schema_accepts_link_references(self):
+        description = get_http_request_tool()["function"]["parameters"]["properties"]["url"][
+            "description"
+        ]
+
+        self.assertIn("$[link:id]", description)
 
     def test_sqlite_rows_make_item_link_availability_explicit(self):
         url = "https://console.example.test/services/svc_1?region=east#status"

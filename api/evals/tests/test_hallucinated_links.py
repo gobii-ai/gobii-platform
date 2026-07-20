@@ -128,6 +128,28 @@ class HallucinatedLinkScenarioTests(SimpleTestCase):
 
         self.assertEqual(extract_http_urls(f"Fetched `{url}` successfully."), (url,))
 
+    def test_provenance_rejects_url_with_html_encoded_scheme_separator(self):
+        constructed = (
+            "https://console.ops.example.test/services/svc_orion_worker_357"
+            "?region=us-east-1&view=handoff"
+        )
+        body = (
+            "Console: https&#58;//console.ops.example.test/services/svc_orion_worker_357"
+            "?region=us-east-1&amp;view=handoff"
+        )
+
+        failures, unexpected, missing = provenance_failures(
+            body,
+            allowed_urls=(),
+            required_urls=(),
+        )
+
+        self.assertEqual(extract_http_urls(body), (constructed,))
+        self.assertEqual(unexpected, (constructed,))
+        self.assertEqual(missing, ())
+        self.assertEqual(len(failures), 1)
+        self.assertIn("absent from supplied context", failures[0])
+
     def test_provenance_accepts_only_supplied_required_urls(self):
         required = (
             "https://profiles.example.test/alice?view=public",
@@ -182,6 +204,7 @@ class HallucinatedLinkScenarioTests(SimpleTestCase):
         self.assertEqual(cases["short"].pattern.context_source, "tool")
         self.assertTrue(cases["short"].pattern.fixture_url)
         self.assertTrue(cases["short"].pattern.history_messages_are_outbound)
+        self.assertIn("available profile links", cases["short"].pattern.prompt)
         self.assertEqual(len(cases["long"].context_messages()), 1)
         self.assertEqual(
             set(extract_http_urls(cases["long"].tool_payload())),
@@ -193,7 +216,17 @@ class HallucinatedLinkScenarioTests(SimpleTestCase):
         self.assertIn("mcp_brightdata_search_engine", config)
         self.assertIn("mcp_brightdata_scrape_as_markdown", config)
 
-    def test_bare_domain_paths_are_recorded_as_diagnostics_only(self):
+    def test_long_tool_payloads_delimit_expected_urls_from_filler(self):
+        for case in HALLUCINATED_LINK_CASES:
+            if not case.is_long or case.pattern.context_source != "tool":
+                continue
+            payload = case.tool_payload()
+            for url in case.required_urls:
+                suffix = payload.partition(url)[2]
+                self.assertTrue(suffix)
+                self.assertFalse(suffix[0].isalnum(), msg=f"{case.slug}: {url}{suffix[:20]}")
+
+    def test_bare_domain_paths_fail_provenance(self):
         text = (
             "Profile: linkedin.com/in/alice-romero. "
             "Source: https://linkedin.com/in/ben-okafor and alice@example.com."
@@ -203,6 +236,15 @@ class HallucinatedLinkScenarioTests(SimpleTestCase):
             extract_bare_link_like_destinations(text),
             ("linkedin.com/in/alice-romero",),
         )
+        failures, unexpected, missing = provenance_failures(
+            text,
+            allowed_urls=("https://linkedin.com/in/ben-okafor",),
+            required_urls=("https://linkedin.com/in/ben-okafor",),
+        )
+        self.assertEqual(len(failures), 1)
+        self.assertIn("without an HTTP(S) scheme", failures[0])
+        self.assertEqual(unexpected, ())
+        self.assertEqual(missing, ())
 
     def test_wait_for_idle_context_exposes_success_and_timeout_state(self):
         listener = MagicMock()
