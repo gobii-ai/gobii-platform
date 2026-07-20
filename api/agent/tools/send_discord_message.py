@@ -35,7 +35,7 @@ def get_send_discord_message_tool() -> Dict[str, Any]:
                     },
                     "message": {
                         "type": "string",
-                        "description": "Message body to send. Optional when attachments are provided. For reports, use Markdown sections, bullets/tables, status labels, tasteful emoji labels. "
+                        "description": "Message body to send. Optional when attachments are provided. For reports, use Markdown sections, bullets/tables, status labels, tasteful emoji labels. Make provided item/detail link references clickable in row labels or a Link column; source/feed links do not substitute, and rows without an item link stay unlinked. "
                                        "Do not pass tool-call/XML syntax; it is sent literally.",
                     },
                     "attachments": {

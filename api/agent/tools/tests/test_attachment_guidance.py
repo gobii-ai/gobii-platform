@@ -6,6 +6,9 @@ from django.test import SimpleTestCase, tag
 from api.agent.tools.create_csv import execute_create_csv
 from api.agent.tools.create_file import execute_create_file, get_create_file_tool
 from api.agent.tools.email_sender import get_send_email_tool
+from api.agent.tools.peer_dm import get_send_agent_message_tool
+from api.agent.tools.send_discord_message import get_send_discord_message_tool
+from api.agent.tools.sms_sender import get_send_sms_tool
 from api.agent.tools.web_chat_sender import get_send_chat_tool
 from api.agent.core.prompt_context import (
     _get_email_formatting_guidance,
@@ -72,12 +75,16 @@ class AttachmentGuidanceTests(SimpleTestCase):
     def test_report_message_guidance_names_visual_quality_without_eval_prompting(self):
         email_tool = get_send_email_tool()
         chat_tool = get_send_chat_tool()
+        discord_tool = get_send_discord_message_tool()
+        peer_tool = get_send_agent_message_tool()
+        sms_tool = get_send_sms_tool()
         email_guidance = _get_email_formatting_guidance()
         chat_guidance = _get_web_chat_formatting_guidance()
 
         self.assertIn("reports/dashboards", email_guidance)
         self.assertIn("Never leave metrics in plain lists", email_tool["function"]["description"])
         self.assertIn("styled tables or metric blocks", email_tool["function"]["parameters"]["properties"]["mobile_first_html"]["description"])
+        self.assertIn("source/feed links do not substitute", email_tool["function"]["parameters"]["properties"]["mobile_first_html"]["description"])
         self.assertIn("false when this email is the requested final delivery", email_tool["function"]["parameters"]["properties"]["will_continue_work"]["description"])
         self.assertIn("Do not use this to simulate or confirm an email/SMS delivery", chat_tool["function"]["description"])
         self.assertIn("Start with the answer/main finding", chat_guidance)
@@ -86,8 +93,11 @@ class AttachmentGuidanceTests(SimpleTestCase):
         body_guidance = chat_tool["function"]["parameters"]["properties"]["body"]["description"]
         self.assertIn("Keep chat/outreach light", body_guidance)
         self.assertIn("Reports comparing 4+ peers", body_guidance)
-        self.assertIn("use one table", body_guidance)
-        self.assertIn("with available links", body_guidance)
+        self.assertIn("use one linked table", body_guidance)
+        self.assertIn("provided item/detail links", body_guidance)
+        self.assertIn("source/feed links do not substitute", discord_tool["function"]["parameters"]["properties"]["message"]["description"])
+        self.assertIn("provided link references unchanged", peer_tool["function"]["parameters"]["properties"]["message"]["description"])
+        self.assertIn("provided link references unchanged", sms_tool["function"]["parameters"]["properties"]["body"]["description"])
 
     def test_create_file_tool_schema_requires_content_or_query(self):
         tool = get_create_file_tool()

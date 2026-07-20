@@ -1203,7 +1203,7 @@ def _build_agent_settings_section(agent: PersistentAgent, *, plan_id: str | None
         f"Agent secrets: usernames/passwords for services. Manage secrets at {secrets_url}.",
         "Active status, daily task credit target, dedicated IP assignment.",
         f"Custom email settings: manage at {email_settings_url}.",
-        "Contact endpoints/allowlist. Add or remove contacts that the agent can reach out to.",
+        "Contact endpoints/allowlist. Add or remove contacts that the agent can reach out to. Route note: The agent settings UI is a single page. Do not invent subpage links for secrets, webhooks, MCP servers, peer links, intelligence, task credits, or other settings sections. Only use explicitly listed destinations such as secrets, contact requests, or email settings; otherwise send the main agent settings page.",
         f"Contact requests: user can view pending requests at {contact_requests_url}.",
         "MCP servers, peer links, inbound/outbound webhooks.",
         "Agent transfer and permanent deletion.",
@@ -3224,7 +3224,7 @@ def _get_formatting_guidance() -> str:
 
     return (
         "Formatting guidance:\n"
-        "Use the matching delivery surface; be scannable, direct, sourced, and no longer than needed.\n\n"
+        "Use the matching delivery surface; be scannable, direct, sourced, and no longer than needed. Preserve provided item/detail link references in reports; make the row label clickable or add a Link column. Source/feed links do not substitute for item links, and entities without item links stay unlinked.\n\n"
         "<web_chat>\n"
         f"{_get_web_chat_formatting_guidance()}\n"
         "</web_chat>\n\n"
@@ -3755,7 +3755,7 @@ def _get_system_instruction(
         "Do not invent work, results, preferences, or personal experiences.\n\n"
 
         "## Output Rules\n\n"
-        "Keep chat/outreach light. Owner reports on 4+ peers need resolved/total and one table with requested fields and available source links. Link names only with provided item/detail links. For finite sets, grouped discovery isn't coverage: resolve/source each requested field. Label blockers partial; separate sourced unavailability from research gaps. Ground facts, numbers, units, and URLs in tool results; never relabel/convert units unless asked. Present requested data directly; omit unrelated/unavailable fields and follow-up offers after simple facts, prices, statuses, or lookups. "
+        "Keep chat/outreach light. Owner reports on 4+ peers need resolved/total and one table with requested fields plus provided item/detail links where available; keep other rows unlinked. Source/feed links do not substitute for item links. For finite sets, grouped discovery isn't coverage: resolve/source each requested field. Label blockers partial; separate sourced unavailability from research gaps. Ground facts, numbers, units, and URLs in tool results; never relabel/convert units unless asked. Present requested data directly; omit unrelated/unavailable fields and follow-up offers after simple facts, prices, statuses, or lookups. "
         "`$[link:id]` is an exact URL placeholder. When links are requested, include every relevant provided token unchanged; never transform it or mention the syntax. Keep entities without item tokens unlinked; omit host/path/slug/ID fragments. "
         "Charts: create only when requested/materially useful. "
         "Paste create_chart result.inline/result.inline_html in the message; do not attach/read charts or invent paths, hashes, image tags, or <img> URLs. "
@@ -3766,7 +3766,7 @@ def _get_system_instruction(
         f"File uploads are {'' if settings.ALLOW_FILE_UPLOAD else 'not'} supported. "
         "Do not download or upload files unless absolutely necessary or explicitly requested by the user. "
 
-        "## Tool Rules\n\n```\n"
+        "## Tool Rules\n\n```\nopaque identifiers -> copy exposed tool names and supplied endpoints/paths/IDs/placeholders/link references character-for-character; never shorten or normalize\n"
         "small_result_answers -> answer directly\n"
         "provided exact URL -> use it directly; do not search for it\n"
         "public exact URL + http/scrape tool callable -> http_request or scrape directly; spawn_web_task only after access/render/login blockage\n"
@@ -3970,7 +3970,7 @@ SMS guidelines:
 Keep messages concise—under 160 characters when possible, though longer is fine when needed.
 No markdown formatting. Easy on the emojis and special characters.
 Avoid sending duplicates or messaging too frequently.
-Keep content appropriate and carrier-compliant (no hate speech, SHAFT content, or profanity—censor if needed: f***, s***).
+Keep content appropriate and carrier-compliant (no hate speech, SHAFT content, or profanity—censor if needed: f***, s***).\nLinks must use complete URLs already provided or exact $[link:id] tokens; never construct one.
              """)
     return ""
 

@@ -56,13 +56,15 @@ class PromptContextSqlitePlacementTests(TestCase):
         self.assertIn("Never filter one result_id at a time, make a table per result", sqlite_guidance)
         self.assertIn("Keep chat/outreach light. Owner reports on 4+ peers", system_message["content"])
         self.assertIn(
-            "need resolved/total and one table with requested fields and available source links",
+            "need resolved/total and one table with requested fields plus provided item/detail links",
             system_message["content"],
         )
-        self.assertIn("Link names only with provided item/detail links", system_message["content"])
+        self.assertIn("Source/feed links do not substitute for item links", system_message["content"])
         self.assertIn("resolve/source each requested field", system_message["content"])
         self.assertIn("grouped discovery isn't coverage", system_message["content"])
         self.assertIn("separate sourced unavailability from research gaps", system_message["content"])
+        self.assertIn("The agent settings UI is a single page", all_contents)
+        self.assertIn("Do not invent subpage links", all_contents)
         self.assertIn("asks except finite sets", system_message["content"])
         self.assertIn("deep/exhaustive research and finite-set coverage", system_message["content"])
         self.assertIn("batch gaps, follow up misses, and reconcile coverage", system_message["content"])
