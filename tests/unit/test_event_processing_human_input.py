@@ -178,21 +178,6 @@ class EventProcessingHumanInputTests(TestCase):
             )
         )
 
-    @patch("api.agent.core.event_processing._latest_inbound_message_needs_reply", return_value=True)
-    def test_external_human_input_request_does_not_answer_inbound_message(self, _mock_needs_reply):
-        finalized = ep._FinalizedToolBatch(
-            executed_calls=1,
-            followup_required=False,
-            message_delivery_ok=False,
-            last_explicit_continue=False,
-            inferred_message_continue_this_iteration=False,
-            executed_non_message_action=True,
-            human_input_request_ok=True,
-            human_input_request_requires_delivery=True,
-        )
-
-        self.assertTrue(ep._should_continue_for_unanswered_inbound_after_tools(self.agent, finalized))
-
     @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
     @patch("api.agent.core.event_processing.execute_send_chat_message", return_value={"status": "ok", "auto_sleep_ok": True})
     @patch("api.agent.core.event_processing.execute_request_human_input")
@@ -259,14 +244,16 @@ class EventProcessingHumanInputTests(TestCase):
 
     @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
     @patch("api.agent.core.event_processing.execute_send_email", return_value={"status": "ok", "auto_sleep_ok": True})
+    @patch("api.agent.core.event_processing.execute_send_chat_message", return_value={"status": "ok", "auto_sleep_ok": True})
     @patch("api.agent.core.event_processing.execute_request_human_input")
     @patch("api.agent.core.event_processing.build_prompt_context")
     @patch("api.agent.core.event_processing._completion_with_failover")
-    def test_request_human_input_external_request_still_answers_inbound_channel(
+    def test_external_human_input_is_delivered_after_same_batch_chat_message(
         self,
         mock_completion,
         mock_build_prompt,
         mock_request_human_input,
+        mock_send_chat_message,
         mock_send_email,
         _mock_credit,
     ):
@@ -308,6 +295,11 @@ class EventProcessingHumanInputTests(TestCase):
                 '"will_continue_work": false}'
             ),
         )
+        progress_call = self._tool_completion(
+            "send_chat_message",
+            '{"body": "I need one answer before continuing.", "will_continue_work": false}',
+        ).choices[0].message.tool_calls[0]
+        first_response.choices[0].message.tool_calls.insert(0, progress_call)
         second_response = self._tool_completion(
             "send_email",
             '{"to_address": "person@example.com", "subject": "Quick question", '
@@ -324,11 +316,7 @@ class EventProcessingHumanInputTests(TestCase):
             ),
         ]
 
-        with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 2), patch.object(
-            ep,
-            "_latest_inbound_message_needs_reply",
-            return_value=True,
-        ):
+        with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 2):
             ep._run_agent_loop(self.agent, is_first_run=False)
 
         self.assertEqual(mock_completion.call_count, 2)
@@ -340,10 +328,11 @@ class EventProcessingHumanInputTests(TestCase):
                 "will_continue_work": False,
             },
         )
+        mock_send_chat_message.assert_called_once()
         mock_send_email.assert_called_once()
         self.assertEqual(
             list(PersistentAgentToolCall.objects.order_by("step__created_at").values_list("tool_name", flat=True)),
-            ["request_human_input", "send_email"],
+            ["send_chat_message", "request_human_input", "send_email"],
         )
 
     @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})

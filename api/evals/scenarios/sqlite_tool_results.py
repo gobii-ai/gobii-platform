@@ -506,8 +506,8 @@ class SqliteToolResultScenario(EvalScenario, ScenarioExecutionTools):
         result_id_case_calls = [
             call for call in successful_calls
             if re.search(
-                r"\bcase\s+(?:(?:\(\s*)?(?:\w+\.)?result_id(?:\s*\))?\s+when\b|when\b(?:(?!\bend\b).)*\b(?:\w+\.)?result_id\b)",
-                str((call.tool_params or {}).get("sql") or ""),
+                r'\bcase\s+(?:(?:\(\s*)?(?:\w+\.)?"?\bresult_id\b"?(?:\s*\))?\s+when\b|when\b(?:(?!\bend\b).)*(?:\w+\.)?"?\bresult_id\b"?)',
+                _structural_sql(str((call.tool_params or {}).get("sql") or "")),
                 re.I | re.S,
             )
         ]
