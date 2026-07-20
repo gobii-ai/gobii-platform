@@ -127,6 +127,9 @@ class ImpliedSendTests(TestCase):
         self.assertTrue(ep._user_text_is_direct_correction("Lowercase is too informal."))
         self.assertTrue(ep._user_text_is_direct_correction("No more em dashes."))
         self.assertTrue(ep._user_text_is_direct_correction("Don't use em dashes."))
+        self.assertTrue(ep._user_text_is_direct_correction("Please stop - writing like a template."))
+        self.assertTrue(ep._user_text_is_direct_correction("Please stop always writing like a template."))
+        self.assertTrue(ep._user_text_is_direct_correction("Stop repeatedly sending generic replies."))
         self.assertFalse(ep._user_text_is_direct_correction("For this response, don't use headings."))
         self.assertFalse(ep._user_text_is_direct_correction("Don't browse. Just answer the question."))
         self.assertFalse(
@@ -232,6 +235,28 @@ class ImpliedSendTests(TestCase):
             from_endpoint=initial.from_endpoint,
             conversation=initial.conversation,
             body="You sound robotic.",
+        )
+
+        self.assertTrue(ep._should_require_direct_correction_patch(self.agent))
+
+    def test_direct_correction_patch_uses_seq_to_break_timestamp_ties(self):
+        initial = self._add_inbound_web_message("Initial request")
+        outbound = self._add_outbound_web_message(initial.conversation)
+        correction = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            is_outbound=False,
+            from_endpoint=initial.from_endpoint,
+            conversation=initial.conversation,
+            body="You sound robotic.",
+        )
+        shared_timestamp = timezone.now()
+        PersistentAgentMessage.objects.filter(id=outbound.id).update(
+            timestamp=shared_timestamp,
+            seq="01AAAAAAAAAAAAAAAAAAAAAAAA",
+        )
+        PersistentAgentMessage.objects.filter(id=correction.id).update(
+            timestamp=shared_timestamp,
+            seq="01BBBBBBBBBBBBBBBBBBBBBBBB",
         )
 
         self.assertTrue(ep._should_require_direct_correction_patch(self.agent))

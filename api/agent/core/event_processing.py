@@ -31,7 +31,7 @@ from redis.exceptions import RedisError
 from django.apps import apps
 from django.conf import settings as django_settings
 from django.db import DatabaseError, transaction, close_old_connections
-from django.db.models import Count
+from django.db.models import Count, Q
 from django.db.utils import OperationalError
 from django.utils import timezone as dj_timezone
 
@@ -215,7 +215,8 @@ TRANSIENT_CONFIG_SCOPE_RE = re.compile(
     re.IGNORECASE,
 )
 DIRECT_USER_CORRECTION_RE = re.compile(
-    r"\b(?:stop|quit)\s+(?:writ\w*|say\w*|send\w*|sound\w*|use(?:d|s|ing)?|"
+    r"\b(?:stop|quit)[\s,:;-]+(?:(?:always|automatically|constantly|continually|continuously|frequently|"
+    r"just|regularly|repeatedly|routinely)[\s,:;-]+){0,2}(?:writ\w*|say\w*|send\w*|sound\w*|use(?:d|s|ing)?|"
     r"includ\w*|format\w*|reply\w*|respond\w*|messag\w*|introduc\w*)\b|"
     r"\b(?:sound(?:s|ed)?|reads?|feels?|looks?)\b.{0,60}\b(?:automated|templated|robotic|generic|formal|"
     r"informal|spammy|salesy|corporate|product[ -]?y)\b|"
@@ -2403,7 +2404,7 @@ def _should_require_direct_correction_patch(agent: PersistentAgent) -> bool:
     latest_inbound = (
         PersistentAgentMessage.objects.filter(owner_agent=agent, is_outbound=False)
         .order_by("-timestamp", "-seq")
-        .values("timestamp", "body")
+        .values("timestamp", "seq", "body")
         .first()
     )
     if latest_inbound is None or not _user_text_is_direct_correction(latest_inbound["body"]):
@@ -2412,7 +2413,9 @@ def _should_require_direct_correction_patch(agent: PersistentAgent) -> bool:
     return PersistentAgentMessage.objects.filter(
         owner_agent=agent,
         is_outbound=True,
-        timestamp__lt=latest_inbound["timestamp"],
+    ).filter(
+        Q(timestamp__lt=latest_inbound["timestamp"])
+        | Q(timestamp=latest_inbound["timestamp"], seq__lt=latest_inbound["seq"])
     ).exists()
 
 
