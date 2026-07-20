@@ -5864,10 +5864,10 @@ class EventProcessingDeletedAgentAbortTests(TestCase):
         _mock_prompt,
         _mock_failover,
         _mock_tools,
+        _mock_reasoning,
         _mock_rate,
         _mock_seed_config,
-        _mock_apply_config,
-        _mock_reasoning,
+        mock_apply_config,
         mock_execute_tool,
         _mock_credit,
         mock_close_cycle,
@@ -5902,15 +5902,28 @@ class EventProcessingDeletedAgentAbortTests(TestCase):
 
         mock_execute_tool.side_effect = _first_call_deletes_agent
 
-        with patch("api.agent.core.event_processing._completion_with_failover", return_value=(response, token_usage)):
-            from api.agent.core import event_processing as ep
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            token = set_sqlite_db_path(os.path.join(tmp_dir, "state.db"))
+            try:
+                with patch(
+                    "api.agent.core.event_processing.apply_sqlite_skill_updates",
+                    return_value=SimpleNamespace(errors=[], changed=False),
+                ) as mock_apply_skills, patch(
+                    "api.agent.core.event_processing._completion_with_failover",
+                    return_value=(response, token_usage),
+                ):
+                    from api.agent.core import event_processing as ep
 
-            with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1):
-                usage = _run_agent_loop(self.agent, is_first_run=False)
+                    with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1):
+                        usage = _run_agent_loop(self.agent, is_first_run=False)
+            finally:
+                reset_sqlite_db_path(token)
 
         self.agent.refresh_from_db()
         self.assertTrue(self.agent.is_deleted)
         self.assertEqual(mock_execute_tool.call_count, 1)
+        mock_apply_config.assert_not_called()
+        mock_apply_skills.assert_not_called()
         mock_close_cycle.assert_called_once()
         self.assertEqual(usage.get("total_tokens"), 10)
 
@@ -5929,10 +5942,10 @@ class EventProcessingDeletedAgentAbortTests(TestCase):
         _mock_prompt,
         _mock_failover,
         _mock_tools,
+        _mock_reasoning,
         _mock_rate,
         _mock_seed_config,
-        _mock_apply_config,
-        _mock_reasoning,
+        mock_apply_config,
         mock_execute_tool,
         _mock_credit,
         mock_close_cycle,
@@ -5967,15 +5980,28 @@ class EventProcessingDeletedAgentAbortTests(TestCase):
 
         mock_execute_tool.side_effect = _first_call_deactivates_agent
 
-        with patch("api.agent.core.event_processing._completion_with_failover", return_value=(response, token_usage)):
-            from api.agent.core import event_processing as ep
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            token = set_sqlite_db_path(os.path.join(tmp_dir, "state.db"))
+            try:
+                with patch(
+                    "api.agent.core.event_processing.apply_sqlite_skill_updates",
+                    return_value=SimpleNamespace(errors=[], changed=False),
+                ) as mock_apply_skills, patch(
+                    "api.agent.core.event_processing._completion_with_failover",
+                    return_value=(response, token_usage),
+                ):
+                    from api.agent.core import event_processing as ep
 
-            with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1):
-                usage = _run_agent_loop(self.agent, is_first_run=False)
+                    with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1):
+                        usage = _run_agent_loop(self.agent, is_first_run=False)
+            finally:
+                reset_sqlite_db_path(token)
 
         self.agent.refresh_from_db()
         self.assertFalse(self.agent.is_active)
         self.assertEqual(mock_execute_tool.call_count, 1)
+        mock_apply_config.assert_not_called()
+        mock_apply_skills.assert_not_called()
         mock_close_cycle.assert_called_once()
         self.assertEqual(usage.get("total_tokens"), 10)
 

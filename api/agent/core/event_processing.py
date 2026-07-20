@@ -6351,7 +6351,6 @@ def _run_agent_loop(
                     if heartbeat:
                         heartbeat.touch("llm_response")
 
-                    # Accumulate token usage
                     if token_usage:
                         cumulative_token_usage["prompt_tokens"] += token_usage.get("prompt_tokens", 0)
                         cumulative_token_usage["completion_tokens"] += token_usage.get("completion_tokens", 0)
@@ -6781,11 +6780,12 @@ def _run_agent_loop(
                 )
                 tools = executed_batch.tools
 
-                runtime_errors, config_apply = _apply_runtime_updates()
-                _annotate_agent_config_update_result(
-                    executed_batch.execution_outcomes,
-                    config_apply,
-                )
+                if not executed_batch.abort_after_execution or _get_processing_abort_reason(agent.id) is None:
+                    runtime_errors, config_apply = _apply_runtime_updates()
+                    _annotate_agent_config_update_result(
+                        executed_batch.execution_outcomes,
+                        config_apply,
+                    )
 
                 finalized_batch = _finalize_tool_batch(
                     agent,
