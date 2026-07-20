@@ -823,7 +823,7 @@ def _steps_queryset(agent: PersistentAgent, direction: TimelineDirection, cursor
     limit = MAX_PAGE_SIZE * 3
     qs = (
         PersistentAgentStep.objects.filter(agent=agent, tool_call__isnull=False)
-        .select_related("tool_call")
+        .select_related("tool_call", "agent")
         .prefetch_related("human_input_requests")
         .order_by("-created_at", "-id")
     )

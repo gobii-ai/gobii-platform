@@ -1,5 +1,4 @@
 import hashlib
-import json
 import logging
 import re
 from collections.abc import Iterable
@@ -34,8 +33,9 @@ def _split_url_suffix(raw_url: str) -> tuple[str, str]:
     for opening, closing in (("(", ")"), ("[", "]"), ("{", "}")):
         while url.endswith(closing) and url.count(closing) > url.count(opening):
             url = url[:-1]
+    suffix = raw_url[len(url):]
     url = re.sub(r"&amp;", "&", url, flags=re.IGNORECASE)
-    return url, raw_url[len(url):]
+    return url, suffix
 
 
 def extract_http_urls(text: str) -> tuple[str, ...]:
@@ -137,17 +137,17 @@ def resolve_link_references(text: str, agent) -> str:
 
 
 def resolve_link_references_for_display(value, agent):
-    if not isinstance(value, (str, dict, list)):
-        return value
-    structured, text = not isinstance(value, str), json.dumps(value) if not isinstance(value, str) else value
-    if not _contains_reference_syntax(text):
+    if isinstance(value, dict):
+        return {key: resolve_link_references_for_display(item, agent) for key, item in value.items()}
+    if isinstance(value, list):
+        return [resolve_link_references_for_display(item, agent) for item in value]
+    if not isinstance(value, str) or not _contains_reference_syntax(value):
         return value
     try:
-        resolved = resolve_link_references(text, agent)
+        return resolve_link_references(value, agent)
     except LinkReferenceResolutionError:
-        resolved = re.sub(r"\$\[link:[^\]\s]*(?:\]|$)", "Link unavailable", text, flags=re.IGNORECASE)
-        resolved = _HTTP_URL_RE.sub(lambda match: "Link unavailable" if _rendered_reference_id(_split_url_suffix(match.group())[0]) else match.group(), resolved)
-    return json.loads(resolved) if structured else resolved
+        resolved = re.sub(r"\$\[link:[^\]\s]*(?:\]|$)", "Link unavailable", value, flags=re.IGNORECASE)
+        return _HTTP_URL_RE.sub(lambda match: "Link unavailable" if _rendered_reference_id(_split_url_suffix(match.group())[0]) else match.group(), resolved)
 
 
 def _contains_reference_syntax(value: str) -> bool:

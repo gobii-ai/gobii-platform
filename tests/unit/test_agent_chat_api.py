@@ -13,8 +13,9 @@ from django.contrib.auth import get_user_model
 from django.core import mail
 from django.core.files.base import ContentFile
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.db import DatabaseError
+from django.db import DatabaseError, connection
 from django.test import Client, TestCase, override_settings, tag
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils import timezone
 from waffle.testutils import override_flag, override_switch
@@ -81,7 +82,7 @@ from api.services.web_sessions import heartbeat_web_session, start_web_session
 from config.redis_client import get_redis_client
 from console.agent_chat.plan_events import persist_plan_event
 from console.agent_chat.timeline import build_processing_snapshot, build_tool_cluster_from_steps
-from console.agent_chat.timeline import fetch_timeline_window
+from console.agent_chat.timeline import _steps_queryset, fetch_timeline_window
 from console.agent_chat.timeline import serialize_plan_event
 from util.onboarding import (
     TRIAL_ONBOARDING_PENDING_SESSION_KEY,
@@ -1053,6 +1054,23 @@ class AgentChatAPITests(TestCase):
         self.assertNotIn("$[link:", json.dumps(entry))
         self.assertIn("Link unavailable", entry["caption"])
         self.assertEqual(entry["parameters"]["url"], "Link unavailable")
+
+    @tag("batch_agent_chat")
+    def test_timeline_steps_load_agent_without_per_entry_queries(self):
+        for index in range(3):
+            step = PersistentAgentStep.objects.create(agent=self.agent, description=f"Step {index}")
+            PersistentAgentToolCall.objects.create(
+                step=step,
+                tool_name="http_request",
+                tool_params={"url": f"https://example.com/{index}"},
+                result=json.dumps({"status": "ok"}),
+            )
+
+        steps = _steps_queryset(self.agent, "initial", None)
+        with CaptureQueriesContext(connection) as queries:
+            self.assertTrue(all(step.agent is self.agent or step.agent_id == self.agent.id for step in steps))
+
+        self.assertEqual(len(queries), 0)
 
     @tag("batch_agent_chat")
     def test_timeline_preserves_empty_assignment_display_snapshot(self):

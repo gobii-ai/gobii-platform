@@ -16,6 +16,7 @@ from api.agent.core.link_references import (
     is_source_bearing_tool,
     resolve_link_reference_params,
     resolve_link_references,
+    resolve_link_references_for_display,
     rewrite_prompt_urls,
 )
 from api.agent.core.event_processing import (
@@ -88,7 +89,6 @@ class LinkReferenceTests(TestCase):
             "<a href='https://two.example.test/b'>Two</a> "
             "https://three.example.test/c."
         )
-
         self.assertEqual(
             extract_http_urls(text),
             (
@@ -96,6 +96,42 @@ class LinkReferenceTests(TestCase):
                 "https://two.example.test/b",
                 "https://three.example.test/c",
             ),
+        )
+
+    def test_html_escaped_query_preserves_only_the_original_suffix(self):
+        raw_url = "https://items.example.test/42?first=one&amp;second=two#details"
+
+        rendered = rewrite_prompt_urls(
+            f"Open {raw_url}.",
+            self.agent,
+            create=True,
+            source_kind="tool_result",
+            source_object_id="step-html",
+        )
+
+        reference = PersistentAgentLinkReference.objects.get(agent=self.agent)
+        self.assertEqual(reference.url, "https://items.example.test/42?first=one&second=two#details")
+        self.assertEqual(rendered, f"Open $[link:{reference.public_id}].")
+
+    def test_display_resolution_recurses_without_json_round_trip(self):
+        url = 'https://items.example.test/search?q="quoted"&path=C:\\reports'
+        reference = PersistentAgentLinkReference.objects.create(
+            agent=self.agent,
+            url=url,
+            source_kind=PersistentAgentLinkReference.SourceKind.TOOL_RESULT,
+        )
+        token = f"$[link:{reference.public_id}]"
+        value = {
+            "nested": [f"Open {token}", {"url": token}],
+            "count": 2,
+        }
+
+        self.assertEqual(
+            resolve_link_references_for_display(value, self.agent),
+            {
+                "nested": [f"Open {url}", {"url": url}],
+                "count": 2,
+            },
         )
 
     def test_registration_deduplicates_and_preserves_exact_url_and_first_source(self):
