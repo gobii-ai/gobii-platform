@@ -6,7 +6,7 @@ from typing import Iterable
 
 import sqlparse
 from sqlparse import tokens as sql_tokens
-from sqlparse.sql import Parenthesis, Values
+from sqlparse.sql import Function, Parenthesis, Values
 
 
 TOOL_RESULTS_RE = re.compile(r'\b(?:from|join)\s+"?__tool_results"?\b', re.I)
@@ -48,7 +48,7 @@ SINGLE_IMPORT_MESSAGE = (
 COUNT_FIELDS = (
     "statement_count", "tool_result_statement_count", "single_result_id_filters", "single_tool_result_imports",
     "direct_result_text_fetches", "aggregate_tool_result_queries", "smart_tool_result_queries",
-    "uses_json_functions", "uses_cte", "uses_join", "uses_group_by", "uses_window",
+    "uses_json_functions", "uses_bounded_text_projection", "uses_cte", "uses_join", "uses_group_by", "uses_window",
     "uses_order_by", "creates_working_table", "reads_working_table", "tool_result_ctas",
 )
 USER_TABLE_PREFIXES = ("__", "sqlite_")
@@ -95,6 +95,8 @@ def summarize_sqlite_tool_result_sql(sql_values: Iterable[str], *, sqlite_call_c
         aggregate = mentions and not direct_fetch and not single_result_filter
         flags = {
             "uses_json_functions": bool(JSON_FUNCTION_RE.search(statement)),
+            "uses_bounded_text_projection": _has_bounded_result_text_projection(statement)
+            and not _directly_selects_result_text(statement),
             "uses_cte": lowered.startswith("with ") or " with " in lowered,
             "uses_join": " join " in lowered,
             "uses_group_by": " group by " in lowered,
@@ -275,6 +277,29 @@ def _directly_selects_result_text(statement: str) -> bool:
         ):
             return True
     return False
+
+
+def _has_bounded_result_text_projection(statement: str) -> bool:
+    parsed = sqlparse.parse(statement or "")
+    if not parsed:
+        return False
+    for function in _nested_functions(parsed[0]):
+        params = list(function.get_parameters())
+        if (
+            str(function.get_name() or "").casefold() in {"substr", "substring"}
+            and params
+            and re.fullmatch(r'(?:[a-z_]\w*\.)?"?result_text"?', str(params[0]).strip(), re.I)
+            and (len(params) == 3 or (len(params) == 2 and re.fullmatch(r"-\s*\d+", str(params[1]).strip())))
+        ):
+            return True
+    return False
+
+
+def _nested_functions(token):
+    for child in getattr(token, "tokens", ()):
+        if isinstance(child, Function):
+            yield child
+        yield from _nested_functions(child)
 
 
 def _created_table_name(statement: str) -> str | None: return _matched_user_table(CREATE_TABLE_RE, statement)

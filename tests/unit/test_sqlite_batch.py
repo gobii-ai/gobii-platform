@@ -833,6 +833,40 @@ class SqliteBatchToolTests(TestCase):
         self.assertEqual(summary.statement_count, 2)
         self.assertEqual(summary.smart_tool_result_queries, 1)
 
+    def test_bounded_aggregate_text_projection_counts_as_smart(self):
+        bounded = summarize_sqlite_tool_result_sql(
+            [
+                "SELECT result_id, substr(result_text, 1, 2000) AS head, "
+                "substr(result_text, -2000) AS tail FROM __tool_results "
+                "WHERE result_id IN ('r1', 'r2')"
+            ]
+        )
+        bounded_suffix = summarize_sqlite_tool_result_sql(
+            [
+                "SELECT substring(t.result_text, -500) FROM __tool_results t "
+                "WHERE t.tool_name='http_request'"
+            ]
+        )
+        non_smart_sql = (
+            "SELECT result_id, result_text FROM __tool_results WHERE tool_name='http_request'",
+            "SELECT substr(result_text, 1) FROM __tool_results WHERE tool_name='http_request'",
+            "SELECT substr(result_text, 1, 2000, 1) FROM __tool_results WHERE tool_name='http_request'",
+            "SELECT result_text, substr(result_text, 1, 2000) FROM __tool_results WHERE tool_name='http_request'",
+            "SELECT substr(result_text, 1, 2000) FROM __tool_results WHERE result_id='r1'",
+            "SELECT 'substr(result_text, 1, 2000)' FROM __tool_results WHERE tool_name='http_request'",
+            "SELECT result_id FROM __tool_results WHERE tool_name='http_request' -- substr(result_text, 1, 2000)",
+        )
+
+        self.assertEqual(bounded.uses_bounded_text_projection, 1)
+        self.assertEqual(bounded.smart_tool_result_queries, 1)
+        self.assertEqual(bounded_suffix.smart_tool_result_queries, 1)
+        for sql in non_smart_sql:
+            with self.subTest(sql=sql):
+                self.assertEqual(
+                    summarize_sqlite_tool_result_sql([sql]).smart_tool_result_queries,
+                    0,
+                )
+
     def test_attach_database_is_blocked(self):
         with self._with_temp_db() as (_db_path, _token, tmp):
             escape_path = os.path.join(tmp.name, "escape.db")
