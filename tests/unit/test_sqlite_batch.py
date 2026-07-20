@@ -497,11 +497,16 @@ class SqliteBatchToolTests(TestCase):
                 for index in range(12)
             ]
             union_rows = " UNION ALL ".join(rows)
+            json_a = json.dumps([{"id": index} for index in range(3)])
+            json_b = json.dumps([{"id": index} for index in range(3, 6)])
             queries = (
                 f"CREATE TABLE copied_rows(id INTEGER, label TEXT); INSERT INTO copied_rows {union_rows};",
                 "CREATE TABLE copied_rows(id INTEGER, label TEXT);"
                 + ";".join(f"INSERT INTO copied_rows {row}" for row in rows),
                 f"CREATE TABLE copied_rows AS {union_rows};",
+                "CREATE TABLE copied_rows(id INTEGER, label TEXT);"
+                f"INSERT INTO copied_rows SELECT json_extract(value, '$.id'), 'https://source.example.test/a' FROM json_each('{json_a}');"
+                f"INSERT INTO copied_rows SELECT json_extract(value, '$.id'), 'https://source.example.test/b' FROM json_each('{json_b}');",
             )
             for sql in queries:
                 with self.subTest(sql=sql[:80]):
@@ -581,6 +586,21 @@ class SqliteBatchToolTests(TestCase):
             self.assertEqual(literal_out.get("status"), "ok")
             self.assertEqual(literal_out["results"][-1]["result"], [{"count": 12}])
 
+            json_rows = json.dumps([{"month": index} for index in range(1, 13)])
+            json_out = execute_sqlite_batch(
+                self.agent,
+                {
+                    "sql": (
+                        "CREATE TABLE json_months AS SELECT json_extract(value, '$.month') AS month "
+                        f"FROM json_each('{json_rows}'); SELECT COUNT(*) AS count FROM json_months;"
+                        "-- unrelated notes https://source.example.test/a https://source.example.test/b"
+                    ),
+                    "will_continue_work": True,
+                },
+            )
+            self.assertEqual(json_out.get("status"), "ok")
+            self.assertEqual(json_out["results"][-1]["result"], [{"count": 12}])
+
     def test_derived_union_is_not_treated_as_literal_copy(self):
         sql = " UNION ALL ".join(
             f"SELECT id, 'https://source.example.test/{'a' if index % 2 else 'b'}' FROM local_source"
@@ -599,6 +619,42 @@ class SqliteBatchToolTests(TestCase):
             "bulk_manual_working_table_from_visible_results",
             {advisory.code for advisory in advisories},
         )
+
+    def test_literal_json_copy_boundaries(self):
+        payloads = (
+            "source https://source.example.test/a",
+            "source https://source.example.test/b",
+        )
+        json_a = json.dumps([{"id": index} for index in range(2)])
+        json_b = json.dumps([{"id": index} for index in range(2, 5)])
+        fake_json = json.dumps([{"id": index} for index in range(12)])
+        allowed_sql = (
+            "CREATE TABLE copied_rows(id INTEGER, source_url TEXT);"
+            f"INSERT INTO copied_rows SELECT value, 'https://source.example.test/a' FROM json_each('{json_a}');"
+            f"INSERT INTO copied_rows SELECT value, 'https://source.example.test/b' FROM json_each('{json_b}');",
+            "INSERT INTO copied_rows "
+            "SELECT value, 'https://source.example.test/a', 'https://source.example.test/b' "
+            "FROM __tool_results, json_each(result_json);",
+            "INSERT INTO copied_rows /* json_each('"
+            + fake_json
+            + "') */ SELECT 1, 'https://source.example.test/a', 'https://source.example.test/b';",
+            "INSERT INTO copied_rows SELECT 1, 'https://source.example.test/a', "
+            "'https://source.example.test/b', 'json_each(''"
+            + fake_json
+            + "'')';",
+        )
+
+        for sql in allowed_sql:
+            with self.subTest(sql=sql[:100]):
+                advisories = build_tool_result_query_advisories(
+                    [sql],
+                    available_tool_result_rows=2,
+                    tool_result_payloads=payloads,
+                )
+                self.assertNotIn(
+                    "bulk_manual_working_table_from_visible_results",
+                    {advisory.code for advisory in advisories},
+                )
 
     def test_per_result_import_loop_is_rejected_before_execution(self):
         with self._with_temp_db() as (db_path, _token, _tmp):

@@ -1,3 +1,4 @@
+import json
 import re
 from collections import Counter
 from types import SimpleNamespace
@@ -216,6 +217,7 @@ def _manual_import_evidence(sql_values: Iterable[str], tool_result_payloads: Ite
             literal_rows = 0 if not target or re.search(r"\bfrom\b", structural, re.I) else sum(
                 token.match(sql_tokens.Keyword.DML, "SELECT") for token in statement.tokens
             )
+            literal_rows += _literal_json_row_count(statement) if target else 0
             literal_select_rows += literal_rows
             groups = [group for group in statement.tokens if isinstance(group, Values)]
             if literal_rows:
@@ -226,6 +228,21 @@ def _manual_import_evidence(sql_values: Iterable[str], tool_result_payloads: Ite
                         query_urls.update(URL_RE.findall(token.value))
     payload_text = "\n".join(str(payload or "") for payload in tool_result_payloads)
     return literal_select_rows, {url for url in query_urls if url in payload_text}
+
+
+def _literal_json_row_count(statement) -> int:
+    tokens = [token for token in statement.flatten() if not token.is_whitespace and token.ttype not in sql_tokens.Comment]
+    rows = 0
+    for name, opening, literal in zip(tokens, tokens[1:], tokens[2:]):
+        if name.value.casefold() != "json_each" or opening.value != "(" or literal.ttype != sql_tokens.Literal.String.Single:
+            continue
+        try:
+            value = json.loads(literal.value[1:-1].replace("''", "'"))
+        except json.JSONDecodeError:
+            continue
+        if isinstance(value, (list, dict)):
+            rows += len(value)
+    return rows
 
 
 def _result_id_in_count(statement: str) -> int:
