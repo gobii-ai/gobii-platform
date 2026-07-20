@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from django.test import SimpleTestCase, tag
 
@@ -168,3 +169,20 @@ class ImageGenerationScenarioTests(SimpleTestCase):
         ]
 
         self.assertEqual(scenario._prompt_contract_errors(calls), [])
+
+    def test_source_edit_seeds_its_declared_filespace_image(self):
+        scenario = ScenarioRegistry.get(IMAGE_GENERATION_SOURCE_EDIT)
+        agent = SimpleNamespace()
+
+        with patch(
+            "api.evals.scenarios.image_generation.write_bytes_to_dir",
+            return_value={"status": "ok", "path": "/Inbox/product.png"},
+        ) as write_file:
+            scenario._seed_source_images(agent)
+
+        write_file.assert_called_once()
+        args, kwargs = write_file.call_args
+        self.assertIs(args[0], agent)
+        self.assertTrue(args[1].startswith(b"\x89PNG\r\n\x1a\n"))
+        self.assertEqual(args[2:5], ("/Inbox/product.png", "image/png"))
+        self.assertEqual(kwargs, {"extension": ".png", "overwrite": True})

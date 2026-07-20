@@ -14,6 +14,7 @@ from api.agent.tools.web_chat_sender import WEB_CHAT_UNAVAILABLE_MESSAGE
 from api.evals.base import EvalScenario, ScenarioTask
 from api.evals.execution import ScenarioExecutionTools
 from api.evals.registry import ScenarioRegistry, register_scenario
+from api.evals.tool_params import resolved_tool_param
 from api.models import (
     AgentCollaborator,
     CommsAllowlistEntry,
@@ -517,7 +518,7 @@ class MessageQualityScenario(EvalScenario, ScenarioExecutionTools):
         queryset = PersistentAgentToolCall.objects.filter(step__eval_run_id=run_id)
         if after is not None:
             queryset = queryset.filter(step__created_at__gte=after)
-        return list(queryset.select_related("step").order_by("step__created_at", "step__id"))
+        return list(queryset.select_related("step", "step__agent").order_by("step__created_at", "step__id"))
 
     def _record_formatting_basics(
         self,
@@ -527,7 +528,8 @@ class MessageQualityScenario(EvalScenario, ScenarioExecutionTools):
         body: str,
     ) -> bool:
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="verify_formatting_basics")
-        params = self._tool_params(send_call)
+        params = dict(self._tool_params(send_call))
+        params["mobile_first_html" if case.channel == "email" else "body"] = body
         failures = self._formatting_failures(case, params, body, send_call=send_call)
         sent_message = self._sent_message_for_call(send_call)
         if not failures:
@@ -565,7 +567,8 @@ class MessageQualityScenario(EvalScenario, ScenarioExecutionTools):
         body: str,
     ) -> None:
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="judge_message_quality")
-        params = self._tool_params(send_call)
+        params = dict(self._tool_params(send_call))
+        params["mobile_first_html" if case.channel == "email" else "body"] = body
         sent_message = self._sent_message_for_call(send_call)
         choice, reasoning = self.llm_judge(
             question=self._judge_question(case),
@@ -724,10 +727,9 @@ class MessageQualityScenario(EvalScenario, ScenarioExecutionTools):
         return {}
 
     def _message_body(self, case: MessageQualityCase, send_call: PersistentAgentToolCall) -> str:
-        params = self._tool_params(send_call)
         if case.channel == "email":
-            return str(params.get("mobile_first_html") or "")
-        return str(params.get("body") or "")
+            return str(resolved_tool_param(send_call, "mobile_first_html") or "")
+        return str(resolved_tool_param(send_call, "body") or "")
 
     @staticmethod
     def _sent_message_for_call(send_call: PersistentAgentToolCall) -> PersistentAgentMessage | None:
@@ -760,7 +762,7 @@ class MessageQualityScenario(EvalScenario, ScenarioExecutionTools):
         params = MessageQualityScenario._tool_params(send_call)
         to_address = str(params.get("to_address") or "").strip().lower()
         subject = str(params.get("subject") or "").strip()
-        body = str(params.get("mobile_first_html") or "").strip()
+        body = str(resolved_tool_param(send_call, "mobile_first_html") or "").strip()
         if not to_address or not subject or not body:
             return None
 

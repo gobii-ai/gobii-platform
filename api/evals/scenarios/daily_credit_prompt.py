@@ -231,6 +231,7 @@ class DailyCreditPromptScenario(EvalScenario, ScenarioExecutionTools):
         archives = PersistentAgentPromptArchive.objects.filter(
             agent_id=agent_id,
             rendered_at__gte=after,
+            step__isnull=False,
         ).order_by("rendered_at")
         for archive in archives:
             try:
