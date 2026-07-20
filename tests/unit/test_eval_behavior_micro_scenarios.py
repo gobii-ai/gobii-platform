@@ -1,4 +1,5 @@
 import json
+from copy import deepcopy
 from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -29,8 +30,10 @@ from api.evals.scenarios.behavior_micro import (
     CHARTER_PATCHES_DIRECT_STYLE_CORRECTION,
     CHARTER_EXPANDS_SPARSE_CHARTER_WITH_DETAIL,
     CHARTER_IGNORES_ONE_OFF_PREFERENCE,
+    CHARTER_JUDGE_PRESERVES_CLI_GITHUB_SECRET_WORKFLOW,
     CHARTER_MEMORY_MICRO_SCENARIO_SLUGS,
     CHARTER_NARROWS_SCOPE_PRESERVING_UNRELATED_GUIDANCE,
+    CHARTER_RECORDS_CLI_GITHUB_SECRETS_CORRECTION,
     CommonUseCaseEvalDefinition,
     CommonUseCaseToolChoiceScenario,
     COMMON_USE_CASE_EVAL_CASES,
@@ -57,6 +60,15 @@ from api.evals.scenarios.behavior_micro import (
     tool_call_is_plan_activity,
 )
 from api.evals.scenarios.effort_calibration import _hierarchical_report_shape
+from api.evals.scenarios.github_credential_retention import (
+    GITHUB_APP_ENV_KEYS,
+    GITHUB_APP_ENV_SECRET_FIXTURES,
+    GITHUB_DOCS_CORRECTED_CHARTER,
+    judge_github_secret_context_check,
+    judge_guidance_preserves_cli_github_path,
+    sanitized_github_secret_metadata,
+    seed_github_app_env_var_secrets,
+)
 from api.evals.scenarios.monitor_pollution import (
     MonitorPollutionScenario,
     _charter_mentions_pollution_monitoring,
@@ -84,6 +96,7 @@ from api.models import (
     PersistentAgentEnabledTool,
     PersistentAgentHumanInputRequest,
     PersistentAgentMessage,
+    PersistentAgentSecret,
     PersistentAgentStep,
     PersistentAgentSystemStep,
     PersistentAgentToolCall,
@@ -118,6 +131,30 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
         self.assertIn(CHARTER_ADDS_FEEDBACK_RULE_FROM_CORRECTION, charter_memory_suite.scenario_slugs)
         self.assertIn(CHARTER_ADDS_PLAIN_PREFERENCE_WITHOUT_SAVE_WORD, charter_memory_suite.scenario_slugs)
         self.assertIn(CHARTER_PATCHES_DIRECT_STYLE_CORRECTION, charter_memory_suite.scenario_slugs)
+        self.assertIn(CHARTER_RECORDS_CLI_GITHUB_SECRETS_CORRECTION, charter_memory_suite.scenario_slugs)
+        self.assertIn(CHARTER_JUDGE_PRESERVES_CLI_GITHUB_SECRET_WORKFLOW, charter_memory_suite.scenario_slugs)
+
+    def test_github_credential_retention_scenarios_expose_diagnostic_tasks(self):
+        charter_scenario = ScenarioRegistry.get(CHARTER_RECORDS_CLI_GITHUB_SECRETS_CORRECTION)
+        judge_scenario = ScenarioRegistry.get(CHARTER_JUDGE_PRESERVES_CLI_GITHUB_SECRET_WORKFLOW)
+
+        self.assertEqual(
+            [task.name for task in charter_scenario.tasks],
+            ["inject_prompt", "verify_cli_secret_workflow_saved"],
+        )
+        self.assertEqual(
+            [task.name for task in judge_scenario.tasks],
+            [
+                "seed_judge_trajectory",
+                "verify_judge_secret_capability_context",
+                "run_manual_judge",
+                "verify_judge_guidance_preserved_cli",
+            ],
+        )
+        self.assertEqual(
+            charter_scenario._eval_stop_policy()["stop_on_tool_names"],
+            ["request_human_input", "secure_credentials_request"],
+        )
 
     def test_common_use_case_micro_evals_are_complete_and_registered(self):
         registered = ScenarioRegistry.list_all()
@@ -695,6 +732,101 @@ class BehaviorMicroHelperTests(TestCase):
             options_json=[{"key": "yes", "title": "Yes"}],
             requested_via_channel=CommsChannel.WEB,
         )
+
+    def test_github_secret_fixture_metadata_exposes_names_and_status_without_values(self):
+        seed_github_app_env_var_secrets(self.agent.id)
+
+        metadata = sanitized_github_secret_metadata(self.agent.id)
+        serialized_metadata = json.dumps(metadata, sort_keys=True)
+
+        self.assertEqual([entry["key"] for entry in metadata], list(GITHUB_APP_ENV_KEYS))
+        self.assertTrue(all(entry["secret_type"] == PersistentAgentSecret.SecretType.ENV_VAR for entry in metadata))
+        self.assertTrue(all(entry["status"] == "available" for entry in metadata))
+        self.assertTrue(all("value" not in entry for entry in metadata))
+        for fixture in GITHUB_APP_ENV_SECRET_FIXTURES:
+            self.assertNotIn(fixture["value"], serialized_metadata)
+
+    def test_judge_secret_context_check_requires_keys_and_rejects_values(self):
+        safe_context = {
+            "current_context": {
+                "secrets": [
+                    {"key": key, "secret_type": "env_var", "status": "available"}
+                    for key in GITHUB_APP_ENV_KEYS
+                ]
+            }
+        }
+        safe, safe_detail = judge_github_secret_context_check(safe_context)
+        missing, missing_detail = judge_github_secret_context_check({"current_context": {}})
+        leaked_context = deepcopy(safe_context)
+        leaked_context["current_context"]["secrets"][0]["value"] = GITHUB_APP_ENV_SECRET_FIXTURES[0]["value"]
+        leaked, leaked_detail = judge_github_secret_context_check(leaked_context)
+
+        self.assertTrue(safe, safe_detail)
+        self.assertFalse(missing, missing_detail)
+        self.assertFalse(leaked, leaked_detail)
+
+    def test_judge_guidance_scoring_rejects_observed_reconnect_only_directive(self):
+        harmful = {
+            "ran": True,
+            "status": "completed",
+            "suggestion_type": "strategy_shift",
+            "suggestion": {
+                "message": "Adjust strategy",
+                "agentDirective": (
+                    "Update your charter/config with this GitHub fallback: after an authorization-required "
+                    "result, do not use local tokens, scripts, or gh; send one reconnect request, then sleep."
+                ),
+            },
+        }
+
+        passed, detail = judge_guidance_preserves_cli_github_path(harmful)
+
+        self.assertFalse(passed, detail)
+
+    def test_judge_guidance_scoring_accepts_no_action_and_cli_preserving_guidance(self):
+        no_action = {
+            "ran": True,
+            "status": "completed",
+            "suggestion_type": "no_action",
+            "suggestion": None,
+        }
+        cli_guidance = {
+            "ran": True,
+            "status": "completed",
+            "suggestion_type": "strategy_shift",
+            "suggestion": {
+                "message": "Use the configured authentication path.",
+                "agentDirective": (
+                    "Continue the GitHub workflow through run_command with the available GitHub App "
+                    "environment variables, while preserving the no-merge rule."
+                ),
+            },
+        }
+
+        no_action_passed, no_action_detail = judge_guidance_preserves_cli_github_path(no_action)
+        cli_passed, cli_detail = judge_guidance_preserves_cli_github_path(cli_guidance)
+
+        self.assertTrue(no_action_passed, no_action_detail)
+        self.assertTrue(cli_passed, cli_detail)
+
+    def test_cli_secret_charter_check_requires_one_patch_and_preserves_workflow(self):
+        scenario = ScenarioRegistry.get(CHARTER_RECORDS_CLI_GITHUB_SECRETS_CORRECTION)
+        agent = SimpleNamespace(charter=GITHUB_DOCS_CORRECTED_CHARTER)
+        patch_call = SimpleNamespace(tool_params={"operations": [{"op": "patch_text"}]})
+
+        passed, detail = scenario._charter_check(agent, [patch_call])
+        no_patch_passed, no_patch_detail = scenario._charter_check(agent, [])
+        harmful_agent = SimpleNamespace(
+            charter=(
+                f"{GITHUB_DOCS_CORRECTED_CHARTER} Do not use local tokens or CLI; "
+                "send one reconnect request and wait for authorization."
+            )
+        )
+        harmful_passed, harmful_detail = scenario._charter_check(harmful_agent, [patch_call])
+
+        self.assertTrue(passed, detail)
+        self.assertFalse(no_patch_passed, no_patch_detail)
+        self.assertFalse(harmful_passed, harmful_detail)
 
     def test_eval_synthetic_tools_are_catalog_backed_for_eval_agents(self):
         self.agent.execution_environment = "eval"

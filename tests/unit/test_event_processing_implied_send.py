@@ -127,11 +127,32 @@ class ImpliedSendTests(TestCase):
         self.assertTrue(ep._user_text_is_direct_correction("Lowercase is too informal."))
         self.assertTrue(ep._user_text_is_direct_correction("No more em dashes."))
         self.assertTrue(ep._user_text_is_direct_correction("Don't use em dashes."))
+        self.assertTrue(
+            ep._user_text_is_direct_correction(
+                "you should have github secrets that allow you to use github."
+            )
+        )
+        self.assertTrue(
+            ep._user_text_is_direct_correction(
+                "You already have credentials for that command-line workflow."
+            )
+        )
+        self.assertTrue(
+            ep._user_text_is_direct_correction(
+                "The agent should be able to use the configured environment variables."
+            )
+        )
         self.assertTrue(ep._user_text_is_direct_correction("Please stop - writing like a template."))
         self.assertTrue(ep._user_text_is_direct_correction("Please stop always writing like a template."))
         self.assertTrue(ep._user_text_is_direct_correction("Stop repeatedly sending generic replies."))
         self.assertFalse(ep._user_text_is_direct_correction("For this response, don't use headings."))
         self.assertFalse(ep._user_text_is_direct_correction("Don't browse. Just answer the question."))
+        self.assertFalse(ep._user_text_is_direct_correction("You should have a nice day."))
+        self.assertFalse(
+            ep._user_text_is_direct_correction(
+                "You should have access to the CRM tools; export the leads."
+            )
+        )
         self.assertFalse(
             ep._user_text_is_direct_correction(
                 "Continue daily sourcing until the recruiter instructs you to pause, stop, "

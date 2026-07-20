@@ -38,6 +38,10 @@ from api.services.sandbox_compute import sandbox_compute_enabled_for_agent
 from api.services.user_timezone import is_offpeak_hour, resolve_user_local_time, resolve_user_timezone
 from api.services.agent_owner_custom_instructions import get_custom_instructions_for_organization_id, get_custom_instructions_for_user_id
 from api.services.prompt_archives import archive_agent_prompt
+from api.services.persistent_agent_secrets import (
+    build_secret_capability_inventory,
+    global_secrets_queryset_for_agent,
+)
 
 from ...models import (
     AgentCommPeerState,
@@ -4903,165 +4907,63 @@ def _build_browser_tasks_sections(agent: PersistentAgent, tasks_group) -> None:
             non_shrinkable=True
         )
 
-def _format_credential_secrets(secrets_qs, is_pending: bool) -> list[str]:
-    """Format domain-scoped credential secrets for prompt context."""
-    def _display_domain_pattern(domain_pattern: str) -> str:
-        # Wildcard host patterns are stored with an implicit https:// prefix for
-        # validation consistency, but the agent-facing prompt is easier to scan
-        # when it shows the original host wildcard form.
-        if domain_pattern.startswith("https://*."):
-            return domain_pattern.removeprefix("https://")
-        return domain_pattern
 
-    secret_lines: list[str] = []
-    current_domain: str | None = None
-    for secret in secrets_qs:
-        # Group by domain pattern
-        if secret.domain_pattern != current_domain:
-            if current_domain is not None:
-                secret_lines.append("")  # blank line between domains
-            secret_lines.append(f"Domain: {_display_domain_pattern(secret.domain_pattern)}")
-            current_domain = secret.domain_pattern
-
-        # Format secret info
-        parts = [f"  - Name: {secret.name}"]
-        if secret.description:
-            parts.append(f"Description: {secret.description}")
-        if is_pending:
-            parts.append("Status: awaiting user input")
-        parts.append(f"Key: {secret.key}")
-        secret_lines.append(", ".join(parts))
-    return secret_lines
-
-
-def _format_env_var_secrets(secrets_qs, is_pending: bool) -> list[str]:
-    """Format global env-var secrets for prompt context."""
-    secret_lines: list[str] = []
-    for secret in secrets_qs:
-        parts = [f"  - Name: {secret.name}"]
-        if secret.description:
-            parts.append(f"Description: {secret.description}")
-        if is_pending:
-            parts.append("Status: awaiting user input")
-        parts.append(f"Env Key: {secret.key}")
-        secret_lines.append(", ".join(parts))
-    return secret_lines
-
-
-def _get_global_secrets_for_agent(agent: PersistentAgent):
-    """Return the global secrets queryset for an agent's owner (user or org)."""
-    if agent.organization_id:
-        owner_filter = Q(organization=agent.organization)
-    else:
-        owner_filter = Q(user=agent.user, organization__isnull=True)
-    return GlobalSecret.objects.filter(owner_filter)
+def _format_secret_capability(capability: Mapping[str, str]) -> str:
+    parts = [
+        capability["availability"],
+        capability["secret_type"],
+        f"scope={capability['scope']}",
+        f"name={capability['name']}",
+        f"key={capability['key']}",
+    ]
+    domain_pattern = capability.get("domain_pattern")
+    if domain_pattern:
+        display_domain = (
+            domain_pattern.removeprefix("https://")
+            if domain_pattern.startswith("https://*.")
+            else domain_pattern
+        )
+        parts.append(f"domain={display_domain}")
+    if capability["secret_type"] == "env_var":
+        parts.append("sandbox=os.environ")
+    return "- " + " | ".join(parts)
 
 
 def _get_secrets_block(agent: PersistentAgent) -> str:
-    """Return a formatted list of available secrets for this agent.
-    The caller is responsible for adding any surrounding instructional text and for
-    wrapping the section with <secrets> tags via Prompt.section_text().
-    """
-    available_credentials = (
-        PersistentAgentSecret.objects.filter(
-            agent=agent,
-            requested=False,
-            secret_type=PersistentAgentSecret.SecretType.CREDENTIAL,
-        ).order_by('domain_pattern', 'name')
+    """Return compact secret capability metadata without exposing values."""
+    capabilities = build_secret_capability_inventory(agent)
+    integrations = list(
+        global_secrets_queryset_for_agent(agent).filter(
+            secret_type=GlobalSecret.SecretType.INTEGRATION,
+        ).order_by("name")
     )
-    pending_credentials = (
-        PersistentAgentSecret.objects.filter(
-            agent=agent,
-            requested=True,
-            secret_type=PersistentAgentSecret.SecretType.CREDENTIAL,
-        ).order_by('domain_pattern', 'name')
-    )
-    available_env_vars = (
-        PersistentAgentSecret.objects.filter(
-            agent=agent,
-            requested=False,
-            secret_type=PersistentAgentSecret.SecretType.ENV_VAR,
-        ).order_by('name')
-    )
-    pending_env_vars = (
-        PersistentAgentSecret.objects.filter(
-            agent=agent,
-            requested=True,
-            secret_type=PersistentAgentSecret.SecretType.ENV_VAR,
-        ).order_by('name')
-    )
-
-    global_qs = _get_global_secrets_for_agent(agent)
-    global_credentials = global_qs.filter(
-        secret_type=GlobalSecret.SecretType.CREDENTIAL,
-    ).order_by('domain_pattern', 'name')
-    global_env_vars = global_qs.filter(
-        secret_type=GlobalSecret.SecretType.ENV_VAR,
-    ).order_by('name')
-    global_integrations = global_qs.filter(
-        secret_type=GlobalSecret.SecretType.INTEGRATION,
-    ).order_by('name')
-
-    has_any = (
-        available_credentials or pending_credentials
-        or available_env_vars or pending_env_vars
-        or global_credentials or global_env_vars
-        or global_integrations
-    )
-    if not has_any:
+    if not capabilities and not integrations:
         return "No secrets configured."
 
+    available = [capability for capability in capabilities if capability["availability"] == "available"]
+    pending = [capability for capability in capabilities if capability["availability"] == "pending"]
+
     lines: list[str] = []
+    if available:
+        lines.append("Available secret capabilities:")
+        lines.extend(_format_secret_capability(capability) for capability in available)
 
-    # Global secrets (shared across all agents for this user/org)
-    if global_credentials or global_env_vars:
-        lines.append("Global secrets (shared across all your agents):")
-        if global_credentials:
-            lines.append("  Domain-scoped credential secrets (placeholders/web auth only):")
-            lines.extend(_format_credential_secrets(global_credentials, is_pending=False))
-        if global_env_vars:
-            lines.append("  Sandbox environment variable secrets (readable via os.environ):")
-            lines.extend(_format_env_var_secrets(global_env_vars, is_pending=False))
-
-    if global_integrations:
+    if integrations:
         if lines:
             lines.append("")
         lines.append("Native integration auth (enable tools/skills before use):")
-        for secret in global_integrations:
+        for integration in integrations:
             lines.append(
-                f"  - {secret.name}: auth exists, but auth is not a tool; if the native skill/tool is not enabled, "
-                f"call `search_tools('{secret.name}')` first. Native auth applies automatically when supported."
+                f"- {integration.name}: auth exists, but auth is not a tool; if the native skill/tool is not "
+                f"enabled, call `search_tools('{integration.name}')` first. Native auth applies automatically."
             )
 
-    # Agent-specific secrets (override globals on key conflict)
-    if available_credentials:
-        if lines:
-            lines.append("")
-        lines.append("Agent-specific domain-scoped credential secrets (placeholders/web auth only; not readable via os.environ in sandbox code):")
-        lines.extend(_format_credential_secrets(available_credentials, is_pending=False))
-
-    if available_env_vars:
-        if lines:
-            lines.append("")
-        lines.append("Agent-specific sandbox environment variable secrets (these ARE readable via os.environ in sandbox code):")
-        lines.extend(_format_env_var_secrets(available_env_vars, is_pending=False))
-
-    if pending_credentials or pending_env_vars:
+    if pending:
         if lines:
             lines.append("")
         lines.append("Pending credential requests (user has not provided these yet):")
-        if pending_credentials:
-            lines.append("Pending domain-scoped credentials (placeholders/web auth only; not readable via os.environ in sandbox code):")
-            lines.extend(_format_credential_secrets(pending_credentials, is_pending=True))
-        if pending_env_vars:
-            if pending_credentials:
-                lines.append("")
-            lines.append("Pending sandbox environment variables (these will be readable via os.environ in sandbox code):")
-            lines.extend(_format_env_var_secrets(pending_env_vars, is_pending=True))
-        lines.append("")
-        lines.append(
-            "If you just requested these, follow up with the user through the appropriate communication channel."
-        )
+        lines.extend(_format_secret_capability(capability) for capability in pending)
+        lines.append("These were already requested; do not request them again; follow up only when needed.")
 
     return "\n".join(lines)
 
