@@ -217,6 +217,7 @@ class GetSecretsBlockTests(TestCase):
             inventory,
         )
         serialized = json.dumps(inventory)
+        self.assertTrue(all(type(capability["secret_type"]) is str for capability in inventory))
         self.assertNotIn("agent-env-secret-value", serialized)
         self.assertNotIn("global-env-secret-value", serialized)
 

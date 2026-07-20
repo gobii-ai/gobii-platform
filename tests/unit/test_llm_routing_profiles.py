@@ -519,6 +519,23 @@ class LLMRoutingProfileApiTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("Invalid agent judge endpoint ID", response.content.decode("utf-8"))
 
+    def test_move_embeddings_tier_does_not_cross_profiles(self):
+        other_profile = LLMRoutingProfile.objects.create(
+            name="other-embeddings-profile",
+            display_name="Other Embeddings Profile",
+        )
+        other_tier = ProfileEmbeddingsTier.objects.create(profile=other_profile, order=1)
+        tier = ProfileEmbeddingsTier.objects.create(profile=self.profile, order=2)
+        url = reverse("console_llm_profile_embeddings_tier_detail", args=[tier.id])
+
+        response = self.client.patch(url, data='{"move": "up"}', content_type="application/json")
+
+        self.assertEqual(response.status_code, 400, response.content)
+        tier.refresh_from_db()
+        other_tier.refresh_from_db()
+        self.assertEqual(tier.order, 2)
+        self.assertEqual(other_tier.order, 1)
+
     def test_patch_rejects_invalid_summarization_endpoint(self):
         url = reverse("console_llm_routing_profile_detail", kwargs={"profile_id": str(self.profile.id)})
         response = self.client.patch(

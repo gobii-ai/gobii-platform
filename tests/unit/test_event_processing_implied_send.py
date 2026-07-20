@@ -142,9 +142,23 @@ class ImpliedSendTests(TestCase):
                 "The agent should be able to use the configured environment variables."
             )
         )
+        self.assertTrue(ep._user_text_is_direct_correction("Please stop - writing like a template."))
+        self.assertTrue(ep._user_text_is_direct_correction("Please stop always writing like a template."))
+        self.assertTrue(ep._user_text_is_direct_correction("Stop repeatedly sending generic replies."))
         self.assertFalse(ep._user_text_is_direct_correction("For this response, don't use headings."))
         self.assertFalse(ep._user_text_is_direct_correction("Don't browse. Just answer the question."))
         self.assertFalse(ep._user_text_is_direct_correction("You should have a nice day."))
+        self.assertFalse(
+            ep._user_text_is_direct_correction(
+                "You should have access to the CRM tools; export the leads."
+            )
+        )
+        self.assertFalse(
+            ep._user_text_is_direct_correction(
+                "Continue daily sourcing until the recruiter instructs you to pause, stop, "
+                "change search criteria, change format, or close the role."
+            )
+        )
         self.assertFalse(
             ep._user_text_is_direct_correction(
                 "Constraint: do not imply a prior relationship or make unsupported claims. Send the email now."
@@ -197,6 +211,76 @@ class ImpliedSendTests(TestCase):
             conversation=conversation,
             body=body,
         )
+
+    def _add_outbound_web_message(self, conversation, body="Previous agent reply"):
+        agent_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.WEB,
+            address=build_web_agent_address(self.agent.id),
+            is_primary=True,
+        )
+        return PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            is_outbound=True,
+            from_endpoint=agent_endpoint,
+            conversation=conversation,
+            body=body,
+        )
+
+    def test_direct_correction_patch_requires_prior_outbound_message(self):
+        self._add_inbound_web_message("You sound robotic.")
+
+        self.assertFalse(ep._should_require_direct_correction_patch(self.agent))
+
+    def test_direct_correction_patch_is_disabled_in_planning_mode(self):
+        initial = self._add_inbound_web_message("Initial request")
+        self._add_outbound_web_message(initial.conversation)
+        PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            is_outbound=False,
+            from_endpoint=initial.from_endpoint,
+            conversation=initial.conversation,
+            body="You sound robotic.",
+        )
+        self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
+        self.agent.save(update_fields=["planning_state", "updated_at"])
+
+        self.assertFalse(ep._should_require_direct_correction_patch(self.agent))
+
+    def test_direct_correction_patch_is_required_for_followup_feedback(self):
+        initial = self._add_inbound_web_message("Initial request")
+        self._add_outbound_web_message(initial.conversation)
+        PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            is_outbound=False,
+            from_endpoint=initial.from_endpoint,
+            conversation=initial.conversation,
+            body="You sound robotic.",
+        )
+
+        self.assertTrue(ep._should_require_direct_correction_patch(self.agent))
+
+    def test_direct_correction_patch_uses_seq_to_break_timestamp_ties(self):
+        initial = self._add_inbound_web_message("Initial request")
+        outbound = self._add_outbound_web_message(initial.conversation)
+        correction = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            is_outbound=False,
+            from_endpoint=initial.from_endpoint,
+            conversation=initial.conversation,
+            body="You sound robotic.",
+        )
+        shared_timestamp = timezone.now()
+        PersistentAgentMessage.objects.filter(id=outbound.id).update(
+            timestamp=shared_timestamp,
+            seq="01AAAAAAAAAAAAAAAAAAAAAAAA",
+        )
+        PersistentAgentMessage.objects.filter(id=correction.id).update(
+            timestamp=shared_timestamp,
+            seq="01BBBBBBBBBBBBBBBBBBBBBBBB",
+        )
+
+        self.assertTrue(ep._should_require_direct_correction_patch(self.agent))
 
     def test_eval_mock_result_supports_url_rules(self):
         mock_config = {

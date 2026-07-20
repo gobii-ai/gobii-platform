@@ -5,7 +5,6 @@ import {
   ArrowUpFromLine,
   Check,
   CheckCircle2,
-  ChevronDown,
   CircleHelp,
   Copy,
   Folder,
@@ -21,7 +20,7 @@ import {
   XCircle,
   Zap,
 } from 'lucide-react'
-import { Slider as AriaSlider, SliderThumb, SliderTrack, Switch as AriaSwitch, type SwitchProps } from 'react-aria-components'
+import { Switch as AriaSwitch, type SwitchProps } from 'react-aria-components'
 import { AsyncActionConfirmDialog } from '../components/common/ActionConfirmDialog'
 import { CheckboxField, FormField, SelectInput, TextInput } from '../components/common/FormControls'
 import { ModalForm } from '../components/common/ModalForm'
@@ -30,10 +29,26 @@ import { EmbeddedAgentShellBackButton } from '../components/agentChat/EmbeddedAg
 import { SettingsBanner } from '../components/agentSettings/SettingsBanner'
 import { getSettingsSurfaceClassName } from '../components/common/SettingsSurface'
 import { AgentIntelligenceSlider } from '../components/common/AgentIntelligenceSlider'
+import { InlineStatusBanner } from '../components/common/InlineStatusBanner'
 import { SaveBar } from '../components/common/SaveBar'
 import { AddContactModal, EditContactModal } from '../components/agentSettings/AddContactModal'
 import { AllowlistContactsTable } from '../components/agentSettings/AllowlistContactsTable'
 import { CollaboratorsTable } from '../components/agentSettings/CollaboratorsTable'
+import { CollapsibleSettingsSection } from '../components/agentSettings/CollapsibleSettingsSection'
+import { DailyCreditLimitControl } from '../components/agentSettings/DailyCreditLimitControl'
+import {
+  getSettingsActionButtonClassName,
+  getSettingsStatusBadgeClassName,
+  SettingsActionButton,
+} from '../components/agentSettings/SettingsControls'
+import {
+  getDailyCreditLimitConfig,
+  getDailyCreditLimitMetrics,
+  setDailyCreditInputValue,
+  setDailyCreditSliderValue,
+  setDailyCreditTier,
+  type DailyCreditLimitValue,
+} from '../components/agentSettings/dailyCreditLimit'
 import type { AllowlistInput, AllowlistTableRow, CollaboratorTableRow, PendingAllowlistAction, PendingCollaboratorAction } from '../components/agentSettings/contactTypes'
 import { useModal } from '../hooks/useModal'
 import { HttpError } from '../api/http'
@@ -135,6 +150,14 @@ type FormState = {
   dedicatedProxyId: string
   preferredTier: IntelligenceTierKey
   contactApprovalMode: ContactApprovalMode
+}
+
+function transitionDailyCreditState(
+  state: FormState,
+  transition: (value: DailyCreditLimitValue) => DailyCreditLimitValue,
+): FormState {
+  const next = transition({ tier: state.preferredTier, sliderValue: state.sliderValue, input: state.dailyCreditInput })
+  return { ...state, preferredTier: next.tier, sliderValue: next.sliderValue, dailyCreditInput: next.input }
 }
 
 const CONTACT_APPROVAL_OPTIONS = [
@@ -442,12 +465,10 @@ export function AgentSettingsWorkspace({
 }: AgentSettingsWorkspaceProps) {
   const fallbackSliderMax = initialData.dailyCredits.sliderMax
   const fallbackSliderEmptyValue = initialData.dailyCredits.sliderEmptyValue ?? fallbackSliderMax
-  const fallbackSliderLimitMax = initialData.dailyCredits.sliderLimitMax ?? fallbackSliderMax
-  const sliderMin = initialData.dailyCredits.sliderMin
-  const sliderStep = initialData.dailyCredits.sliderStep
-  const standardSliderLimit = Number.isFinite(initialData.dailyCredits.standardSliderLimit)
-    ? initialData.dailyCredits.standardSliderLimit
-    : 20
+  const dailyCreditConfig = useMemo(
+    () => getDailyCreditLimitConfig(initialData.dailyCredits, initialData.llmIntelligence, 20),
+    [initialData.dailyCredits, initialData.llmIntelligence],
+  )
 
   const initialFormState = useMemo<FormState>(
     () => ({
@@ -525,48 +546,16 @@ export function AgentSettingsWorkspace({
   const [reassigning, setReassigning] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const [modal, showModal] = useModal()
-  const tierMultiplierByKey = useMemo(() => {
-    const map = new Map<IntelligenceTierKey, number>()
-    for (const option of initialData.llmIntelligence?.options ?? []) {
-      map.set(option.key, option.multiplier)
-    }
-    return map
-  }, [initialData.llmIntelligence?.options])
-  const hasTierMultipliers = tierMultiplierByKey.size > 0
-  const getTierMultiplier = useCallback(
-    (tier: IntelligenceTierKey) => {
-      const value = tierMultiplierByKey.get(tier)
-      if (!Number.isFinite(value) || !value || value <= 0) {
-        return 1
-      }
-      return value
-    },
-    [tierMultiplierByKey],
+  const dailyCreditValue = useMemo(() => ({
+    tier: formState.preferredTier,
+    sliderValue: formState.sliderValue,
+    input: formState.dailyCreditInput,
+  }), [formState.dailyCreditInput, formState.preferredTier, formState.sliderValue])
+  const dailyCreditMetrics = useMemo(
+    () => getDailyCreditLimitMetrics(dailyCreditConfig, formState.preferredTier),
+    [dailyCreditConfig, formState.preferredTier],
   )
-  const getSliderMetrics = useCallback(
-    (tier: IntelligenceTierKey) => {
-      const multiplier = hasTierMultipliers ? getTierMultiplier(tier) : 1
-      const limitMax = hasTierMultipliers
-        ? Math.max(sliderMin, Math.round(standardSliderLimit * multiplier))
-        : fallbackSliderLimitMax
-      const max = hasTierMultipliers ? limitMax + sliderStep : fallbackSliderMax
-      const emptyValue = hasTierMultipliers ? max : fallbackSliderEmptyValue
-      return { limitMax, max, emptyValue }
-    },
-    [
-      fallbackSliderEmptyValue,
-      fallbackSliderLimitMax,
-      fallbackSliderMax,
-      getTierMultiplier,
-      hasTierMultipliers,
-      sliderMin,
-      sliderStep,
-      standardSliderLimit,
-    ],
-  )
-  const { limitMax: sliderLimitMax, max: sliderMax, emptyValue: sliderEmptyValue } = getSliderMetrics(
-    formState.preferredTier,
-  )
+  const sliderEmptyValue = dailyCreditMetrics.emptyValue
 
   const clearAvatarPreviewUrl = useCallback(() => {
     if (avatarPreviewObjectUrlRef.current) {
@@ -1241,7 +1230,7 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
           const serverTier = serverTierRaw as IntelligenceTierKey
           if (serverTier !== nextFormState.preferredTier) {
             const wasUnlimited = nextFormState.sliderValue === sliderEmptyValue
-            const { max: nextMax, emptyValue: nextEmptyValue } = getSliderMetrics(serverTier)
+            const { max: nextMax, emptyValue: nextEmptyValue } = getDailyCreditLimitMetrics(dailyCreditConfig, serverTier)
             nextFormState.preferredTier = serverTier
             nextFormState.sliderValue = wasUnlimited ? nextEmptyValue : Math.min(nextFormState.sliderValue, nextMax)
           }
@@ -1339,7 +1328,7 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
     formState,
     generalFormRef,
     generalHasChanges,
-    getSliderMetrics,
+    dailyCreditConfig,
     hasAnyChanges,
     initialData.llmIntelligence?.options,
     mcpHasChanges,
@@ -1368,96 +1357,28 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
     [showModal],
   )
 
-  const clampSlider = useCallback(
-    (value: number) => {
-      return Math.min(Math.max(Number.isFinite(value) ? value : sliderEmptyValue, sliderMin), sliderMax)
-    },
-    [sliderEmptyValue, sliderMax, sliderMin],
-  )
-
   const updateSliderValue = useCallback(
     (value: number) => {
-      const normalized = clampSlider(value)
-      setFormState((prev) => ({
-        ...prev,
-        sliderValue: normalized,
-        dailyCreditInput: normalized === sliderEmptyValue ? '' : String(Math.round(normalized)),
-      }))
+      setFormState((prev) => transitionDailyCreditState(prev, (current) =>
+        setDailyCreditSliderValue(current, value, getDailyCreditLimitMetrics(dailyCreditConfig, current.tier))))
     },
-    [clampSlider, sliderEmptyValue],
+    [dailyCreditConfig],
   )
 
   const handleTierChange = useCallback(
     (tier: IntelligenceTierKey) => {
-      setFormState((prev) => {
-        if (tier === prev.preferredTier) {
-          return prev
-        }
-        const previousMultiplier = hasTierMultipliers ? getTierMultiplier(prev.preferredTier) : 1
-        const nextMultiplier = hasTierMultipliers ? getTierMultiplier(tier) : 1
-        const { emptyValue: currentEmptyValue } = getSliderMetrics(prev.preferredTier)
-        const { limitMax: nextSliderLimitMax, emptyValue: nextSliderEmptyValue } = getSliderMetrics(tier)
-        const isUnlimited = prev.sliderValue >= currentEmptyValue || !prev.dailyCreditInput.trim()
-
-        if (isUnlimited) {
-          return {
-            ...prev,
-            preferredTier: tier,
-            sliderValue: nextSliderEmptyValue,
-            dailyCreditInput: '',
-          }
-        }
-
-        let scaledValue = prev.sliderValue
-        if (previousMultiplier > 0 && nextMultiplier > 0 && Number.isFinite(prev.sliderValue)) {
-          scaledValue = Math.round((prev.sliderValue * nextMultiplier) / previousMultiplier)
-        }
-
-        if (!Number.isFinite(scaledValue) || scaledValue <= 0 || scaledValue > nextSliderLimitMax) {
-          return {
-            ...prev,
-            preferredTier: tier,
-            sliderValue: nextSliderEmptyValue,
-            dailyCreditInput: '',
-          }
-        }
-
-        if (scaledValue < sliderMin) {
-          scaledValue = sliderMin
-        }
-
-        return {
-          ...prev,
-          preferredTier: tier,
-          sliderValue: scaledValue,
-          dailyCreditInput: String(Math.round(scaledValue)),
-        }
-      })
+      setFormState((prev) => transitionDailyCreditState(prev, (current) =>
+        setDailyCreditTier(current, tier, dailyCreditConfig)))
     },
-    [
-      getSliderMetrics,
-      getTierMultiplier,
-      hasTierMultipliers,
-      sliderMin,
-    ],
+    [dailyCreditConfig],
   )
 
   const handleDailyCreditInputChange = useCallback(
     (value: string) => {
-      setFormState((prev) => ({ ...prev, dailyCreditInput: value }))
-      if (!value.trim()) {
-        updateSliderValue(sliderEmptyValue)
-        return
-      }
-      const numeric = Number(value)
-      if (!Number.isFinite(numeric)) {
-        updateSliderValue(sliderEmptyValue)
-        return
-      }
-      const clamped = Math.min(Math.max(Math.round(numeric), sliderMin), sliderLimitMax)
-      updateSliderValue(clamped)
+      setFormState((prev) => transitionDailyCreditState(prev, (current) =>
+        setDailyCreditInputValue(current, value, getDailyCreditLimitMetrics(dailyCreditConfig, current.tier))))
     },
-    [sliderEmptyValue, sliderLimitMax, sliderMin, updateSliderValue],
+    [dailyCreditConfig],
   )
 
   const formatNumber = useCallback((value: number | null, fractionDigits = 0) => {
@@ -1864,68 +1785,40 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
     [peerLinkCandidates, peerLinkDefaults, showModal, stagePeerLinkCreate, stagePeerLinkUpdate],
   )
 
-  const sectionClassName = getSettingsSurfaceClassName({ variant: 'embedded', shadowClassName: 'shadow-none', className: 'group' })
-  const sectionSummaryClassName = 'flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4'
-  const sectionBodyClassName = 'border-t border-slate-200/15 px-5 py-5'
-  const stackedSectionBodyClassName = 'border-t border-slate-200/15 px-5 py-5 space-y-6'
-  const embeddedUtilityLinkClassName = 'inline-flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200/25 bg-slate-900/35 px-3 py-2 text-sm font-medium text-slate-100 transition-colors hover:border-slate-100/35 hover:bg-slate-900/55 hover:text-white sm:w-auto'
-  const embeddedNeutralButtonClassName = 'inline-flex items-center gap-2 rounded-lg border border-slate-200/25 bg-slate-900/35 px-3 py-2 text-sm font-semibold text-slate-100 transition-colors hover:border-slate-100/35 hover:bg-slate-900/55 hover:text-white'
-  const embeddedDestructiveButtonClassName = 'inline-flex items-center gap-2 rounded-lg border border-rose-300/25 bg-rose-950/35 px-3 py-2 text-sm font-semibold text-rose-200 transition-colors hover:border-rose-200/40 hover:bg-rose-900/50'
   const embeddedHeaderActions = (
     <>
       {onOpenSecrets ? (
-        <button
-          type="button"
-          onClick={onOpenSecrets}
-          className={embeddedUtilityLinkClassName}
-        >
+        <SettingsActionButton onClick={onOpenSecrets} responsive>
           <KeyRound className="h-4 w-4" aria-hidden="true" />
           Secrets
-        </button>
+        </SettingsActionButton>
       ) : (
-        <a
-          href={initialData.urls.secrets}
-          className={embeddedUtilityLinkClassName}
-        >
+        <SettingsActionButton as="a" href={initialData.urls.secrets} responsive>
           <KeyRound className="h-4 w-4" aria-hidden="true" />
           Secrets
-        </a>
+        </SettingsActionButton>
       )}
       {onOpenEmailSettings ? (
-        <button
-          type="button"
-          onClick={onOpenEmailSettings}
-          className={embeddedUtilityLinkClassName}
-        >
+        <SettingsActionButton onClick={onOpenEmailSettings} responsive>
           <Mail className="h-4 w-4" aria-hidden="true" />
           Email Settings
-        </button>
+        </SettingsActionButton>
       ) : (
-        <a
-          href={initialData.urls.emailSettings}
-          className={embeddedUtilityLinkClassName}
-        >
+        <SettingsActionButton as="a" href={initialData.urls.emailSettings} responsive>
           <Mail className="h-4 w-4" aria-hidden="true" />
           Email Settings
-        </a>
+        </SettingsActionButton>
       )}
       {onOpenFiles ? (
-        <button
-          type="button"
-          onClick={onOpenFiles}
-          className={embeddedUtilityLinkClassName}
-        >
+        <SettingsActionButton onClick={onOpenFiles} responsive>
           <Folder className="h-4 w-4" aria-hidden="true" />
           Manage Files
-        </button>
+        </SettingsActionButton>
       ) : (
-        <a
-          href={initialData.urls.manageFiles}
-          className={embeddedUtilityLinkClassName}
-        >
+        <SettingsActionButton as="a" href={initialData.urls.manageFiles} responsive>
           <Folder className="h-4 w-4" aria-hidden="true" />
           Manage Files
-        </a>
+        </SettingsActionButton>
       )}
     </>
   )
@@ -1942,33 +1835,31 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
       />
 
       {initialData.agent.pendingTransfer && (
-        <div className="bg-amber-50 border border-amber-200 text-amber-900 rounded-xl shadow-md px-5 py-4 flex flex-col gap-2">
+        <InlineStatusBanner variant="warning" surface="embedded" icon={Info}>
           <div className="flex items-center gap-2 text-sm font-semibold">
-            <Info className="w-4 h-4" aria-hidden="true" />
             Transfer pending
           </div>
           <p className="text-sm leading-5">
             This agent is awaiting acceptance from <strong>{initialData.agent.pendingTransfer.toEmail}</strong> (sent {initialData.agent.pendingTransfer.createdAtDisplay}).
             You can continue editing settings, but keep in mind the new owner will take control once they accept.
           </p>
-        </div>
+        </InlineStatusBanner>
       )}
 
       {saveNotice && (
-        <div className="bg-amber-50 border border-amber-200 text-amber-900 rounded-xl px-5 py-4 flex items-start justify-between gap-4">
-          <div className="flex items-start gap-3">
-            <AlertTriangle className="w-5 h-5 mt-0.5" aria-hidden="true" />
+        <InlineStatusBanner variant="warning" surface="embedded" icon={AlertTriangle}>
+          <div className="flex items-start justify-between gap-4">
             <div className="text-sm leading-5">{saveNotice}</div>
+            <button
+              type="button"
+              onClick={() => setSaveNotice(null)}
+              className="shrink-0 rounded-lg p-1 text-amber-100 transition hover:bg-amber-900/40"
+              aria-label="Dismiss notice"
+            >
+              <XCircle className="w-5 h-5" aria-hidden="true" />
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={() => setSaveNotice(null)}
-            className="shrink-0 inline-flex items-center justify-center rounded-lg border border-amber-200 bg-white px-2 py-2 text-amber-900 hover:bg-amber-100/40 transition-colors"
-            aria-label="Dismiss notice"
-          >
-            <XCircle className="w-5 h-5" aria-hidden="true" />
-          </button>
-        </div>
+        </InlineStatusBanner>
       )}
 
       <form
@@ -1996,15 +1887,11 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
         <input type="hidden" name="whitelist_policy" value={initialData.agent.whitelistPolicy} />
       )}
       <input type="hidden" name="contact_approval_mode" value={formState.contactApprovalMode} />
-        <details className={sectionClassName} id="agent-identity">
-          <summary className={sectionSummaryClassName}>
-            <div>
-              <h2 className="text-lg font-semibold text-gray-800">General Settings</h2>
-              <p className="text-sm text-gray-500">Core configuration and runtime controls.</p>
-            </div>
-            <ChevronDown className="w-4 h-4 text-gray-500 transition-transform duration-200 group-open:-rotate-180" aria-hidden="true" />
-          </summary>
-          <div className={sectionBodyClassName}>
+        <CollapsibleSettingsSection
+          id="agent-identity"
+          title="General Settings"
+          subtitle="Core configuration and runtime controls."
+        >
             <div className="grid sm:grid-cols-12 gap-4 sm:gap-6">
               <div className="sm:col-span-3">
                 <label htmlFor="agent-name" className="inline-block text-sm font-medium text-gray-800 mt-2.5">
@@ -2043,23 +1930,15 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
                   </div>
                   <div className="flex flex-col gap-2">
                     <div className="flex flex-wrap items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => avatarInputRef.current?.click()}
-                        className={embeddedNeutralButtonClassName}
-                      >
+                      <SettingsActionButton onClick={() => avatarInputRef.current?.click()}>
                         <ArrowUpFromLine className="h-4 w-4" aria-hidden="true" />
                         Upload
-                      </button>
+                      </SettingsActionButton>
                       {(avatarPreviewUrl || savedAvatarUrl || avatarFile) && (
-                        <button
-                          type="button"
-                          onClick={handleAvatarRemove}
-                          className={embeddedDestructiveButtonClassName}
-                        >
+                        <SettingsActionButton tone="danger" onClick={handleAvatarRemove}>
                           <Trash2 className="h-4 w-4" aria-hidden="true" />
                           Remove
-                        </button>
+                        </SettingsActionButton>
                       )}
                     </div>
                     <p className="text-xs text-gray-500">Use a square image (PNG, JPG, WebP, or GIF). Max 5 MB.</p>
@@ -2193,66 +2072,18 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
               <div className="sm:col-span-9 space-y-4">
                 <DailyCreditSummary dailyCredits={initialData.dailyCredits} formatNumber={formatNumber} />
                 <div className="grid gap-4 sm:grid-cols-2">
-                  <div className="space-y-3">
-                    <label htmlFor="daily-credit-limit-slider" className="inline-block text-sm font-medium text-gray-700">
-                      Soft target (credits/day)
-                    </label>
-                    <input type="hidden" name="daily_credit_limit_slider" value={formState.sliderValue} />
-                    <AriaSlider
-                      aria-label="Soft target slider"
-                      id="daily-credit-limit-slider"
-                      className="mt-2 space-y-3"
-                      minValue={sliderMin}
-                      maxValue={sliderMax}
-                      step={sliderStep}
-                      value={formState.sliderValue}
-                      onChange={(value: number | number[]) => {
-                        const numeric = Array.isArray(value) ? value[0] : value
-                        if (typeof numeric === 'number') {
-                          updateSliderValue(numeric)
-                        }
-                      }}
-                    >
-                      <SliderTrack className="relative h-2 rounded-full bg-gray-200">
-                        {({ state }) => {
-                          const percent = Math.min(Math.max(state.getThumbPercent(0) * 100, 0), 100)
-                          return (
-                            <>
-                              <div className="absolute inset-y-0 left-0 rounded-full bg-indigo-500" style={{ width: `${percent}%` }} />
-                              <SliderThumb
-                                index={0}
-                                className="absolute top-1/2 h-5 w-5 -translate-y-1/2 rounded-full border-2 border-white bg-indigo-600 shadow transition focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 data-[dragging]:scale-105"
-                              />
-                            </>
-                          )
-                        }}
-                      </SliderTrack>
-                    </AriaSlider>
-                    <div className="flex items-center justify-between text-xs font-medium text-gray-600">
-                      <span>
-                        {formState.sliderValue === sliderEmptyValue
-                          ? 'Unlimited'
-                          : `${Math.round(formState.sliderValue).toLocaleString()} credits/day`}
-                      </span>
-                      <span>Unlimited</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <input
-                        id="daily-credit-limit-input"
-                        name="daily_credit_limit"
-                        type="number"
-                        step="1"
-                        min={sliderMin}
-                        max={sliderLimitMax}
-                        value={formState.dailyCreditInput}
-                        onChange={(event) => handleDailyCreditInputChange(event.target.value)}
-                        className="py-2 px-3 block w-full border-gray-200 shadow-sm rounded-lg text-sm focus:border-blue-500 focus:ring-blue-500"
-                        placeholder="Unlimited"
-                      />
-                      <span className="text-sm text-gray-500">credits/day</span>
-                    </div>
-                    <p className="mt-1 text-xs text-gray-500">Soft target controls pacing for this agent. Leave the number blank for unlimited.</p>
-                  </div>
+                  <DailyCreditLimitControl
+                    id="daily-credit-limit-slider"
+                    value={dailyCreditValue}
+                    metrics={dailyCreditMetrics}
+                    onSliderChange={updateSliderValue}
+                    onInputChange={handleDailyCreditInputChange}
+                    surface="embedded"
+                    label="Soft target (credits/day)"
+                    helperText="Soft target controls pacing for this agent. Leave the number blank for unlimited."
+                    inputName="daily_credit_limit"
+                    sliderInputName="daily_credit_limit_slider"
+                  />
                 </div>
               </div>
 
@@ -2275,19 +2106,15 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
                 <div className="py-2 px-3 text-sm text-gray-600">{initialData.agent.createdAtDisplay}</div>
               </div>
             </div>
-          </div>
-        </details>
+        </CollapsibleSettingsSection>
       </form>
 
-      <details className={sectionClassName} id="agent-contact-controls">
-        <summary className={sectionSummaryClassName}>
-          <div>
-            <h2 className="text-lg font-semibold text-gray-800">Contacts &amp; Access</h2>
-            <p className="text-sm text-gray-500">Contact endpoints and allowlist management.</p>
-          </div>
-          <ChevronDown className="w-4 h-4 text-gray-500 transition-transform duration-200 group-open:-rotate-180" aria-hidden="true" />
-        </summary>
-        <div className={stackedSectionBodyClassName}>
+      <CollapsibleSettingsSection
+        id="agent-contact-controls"
+        title="Contacts & Access"
+        subtitle="Contact endpoints and allowlist management."
+        bodyClassName="space-y-6 px-5 py-5"
+      >
           <PrimaryContacts
             primaryEmail={initialData.primaryEmail}
             primarySms={initialData.primarySms}
@@ -2328,8 +2155,7 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
             onRemove={stageCollaboratorRemove}
             onConfirmAction={openConfirmAction}
           />
-        </div>
-      </details>
+      </CollapsibleSettingsSection>
 
       <IntegrationsSection
         mcpServers={initialData.mcpServers}
@@ -2602,7 +2428,7 @@ function AllowlistManager({
   const embeddedInfoBannerClassName = 'flex items-start gap-2 rounded-lg border border-amber-300/20 bg-amber-950/30 px-4 py-3'
   const embeddedInfoCardClassName = 'rounded-xl border border-slate-200/20 bg-slate-950/35 px-4 py-4'
   const embeddedInfoIconClassName = 'flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200/20 bg-slate-900/45 text-slate-300'
-  const embeddedPrimaryActionClassName = 'inline-flex items-center gap-2 rounded-lg border border-sky-300/25 bg-sky-900/55 px-4 py-2 text-sm font-semibold text-sky-50 transition-colors hover:border-sky-200/40 hover:bg-sky-900/75 disabled:opacity-50'
+  const embeddedPrimaryActionClassName = getSettingsActionButtonClassName({ tone: 'primary' })
 
   return (
     <div className="space-y-5">
@@ -2774,7 +2600,7 @@ type CollaboratorManagerProps = {
 function CollaboratorManager({ state, rows, projectedTotalCount, error, busy, onAdd, onRemove, onConfirmAction }: CollaboratorManagerProps) {
   const canManage = state.canManage
   const totalLimit = state.maxContacts ?? 'Unlimited'
-  const embeddedPrimaryActionClassName = 'rounded-lg border border-emerald-300/25 bg-emerald-900/50 px-4 py-2 text-sm font-semibold text-emerald-50 transition-colors hover:border-emerald-200/40 hover:bg-emerald-900/70 disabled:opacity-50'
+  const embeddedPrimaryActionClassName = getSettingsActionButtonClassName({ tone: 'success' })
 
   return (
     <div className="space-y-5">
@@ -2884,33 +2710,27 @@ function IntegrationsSection({
   onInboundWebhookCopy,
   onConfirmAction,
 }: IntegrationsSectionProps) {
-  const sectionClassName = getSettingsSurfaceClassName({ variant: 'embedded', shadowClassName: 'shadow-none', className: 'group' })
-  const summaryClassName = 'flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4'
-  const wrapperClassName = 'divide-y divide-slate-200/15 border-t border-slate-200/15'
   const sectionBodyClassName = 'space-y-6 px-5 py-5'
   const cardClassName = getSettingsSurfaceClassName({ variant: 'embedded', shadowClassName: 'shadow-none', className: 'p-4 space-y-4' })
   const tableWrapperClassName = getSettingsSurfaceClassName({ variant: 'embedded', shadowClassName: 'shadow-none' })
   const tableHeadClassName = 'bg-slate-950/45'
   const tableBodyClassName = 'bg-transparent divide-y divide-slate-200/15'
-  const primaryActionButtonClassName = 'inline-flex items-center gap-2 rounded-lg border border-sky-300/25 bg-sky-900/55 px-4 py-2 text-sm font-medium text-sky-50 transition-colors hover:border-sky-200/40 hover:bg-sky-900/75 disabled:opacity-50'
-  const neutralButtonClassName = 'inline-flex items-center gap-2 rounded-md border border-slate-200/25 bg-slate-900/35 px-3 py-1.5 text-xs font-medium text-slate-100 transition-colors hover:border-slate-100/35 hover:bg-slate-900/55 disabled:opacity-50'
-  const destructiveButtonClassName = 'inline-flex items-center gap-1.5 rounded-md border border-rose-300/25 bg-rose-950/35 px-3 py-1.5 text-xs font-medium text-rose-200 transition-colors hover:border-rose-200/40 hover:bg-rose-900/50'
-  const warningButtonClassName = 'inline-flex items-center gap-1.5 rounded-md border border-amber-300/25 bg-amber-950/30 px-3 py-1.5 text-xs font-medium text-amber-200 transition-colors hover:border-amber-200/40 hover:bg-amber-900/45 disabled:opacity-50'
-  const pendingBadgeClassName = 'inline-flex rounded-full border border-amber-300/20 bg-amber-950/35 px-2 py-0.5 text-[11px] font-medium text-amber-200'
-  const activeStatusClassName = 'inline-flex rounded-full border border-emerald-300/20 bg-emerald-950/35 px-2 py-0.5 text-[11px] font-medium text-emerald-200'
-  const inactiveStatusClassName = 'inline-flex rounded-full border border-slate-300/20 bg-slate-900/35 px-2 py-0.5 text-[11px] font-medium text-slate-300'
+  const primaryActionButtonClassName = getSettingsActionButtonClassName({ tone: 'primary' })
+  const neutralButtonClassName = getSettingsActionButtonClassName({ size: 'sm' })
+  const destructiveButtonClassName = getSettingsActionButtonClassName({ tone: 'danger', size: 'sm' })
+  const warningButtonClassName = getSettingsActionButtonClassName({ tone: 'warning', size: 'sm' })
+  const pendingBadgeClassName = getSettingsStatusBadgeClassName({ tone: 'warning', className: 'px-2 py-0.5 text-[11px]' })
+  const activeStatusClassName = getSettingsStatusBadgeClassName({ tone: 'success', className: 'px-2 py-0.5 text-[11px]' })
+  const inactiveStatusClassName = getSettingsStatusBadgeClassName({ className: 'px-2 py-0.5 text-[11px]' })
   const emptyStateClassName = 'rounded-xl border border-dashed border-slate-200/25 bg-slate-950/20 px-4 py-4 text-sm text-slate-300'
 
   return (
-    <details className={sectionClassName} id="agent-integrations">
-      <summary className={summaryClassName}>
-        <div>
-          <h2 className="text-lg font-semibold text-gray-800">Integrations</h2>
-          <p className="text-sm text-gray-500">MCP servers, peer links, and webhooks.</p>
-        </div>
-        <ChevronDown className="w-4 h-4 text-gray-500 transition-transform duration-200 group-open:-rotate-180" aria-hidden="true" />
-      </summary>
-      <div className={wrapperClassName}>
+    <CollapsibleSettingsSection
+      id="agent-integrations"
+      title="Integrations"
+      subtitle="MCP servers, peer links, and webhooks."
+      bodyClassName="divide-y divide-slate-200/15 p-0"
+    >
         <section className={sectionBodyClassName}>
         <div>
           <h3 className="text-base font-semibold text-gray-800">MCP Servers</h3>
@@ -2990,13 +2810,13 @@ function IntegrationsSection({
                 </div>
                 {mcpServers.canManage && mcpServers.manageUrl && (
                   <div className="flex justify-end">
-                    <a
+                    <SettingsActionButton
+                      as="a"
                       href={mcpServers.manageUrl}
-                      className="inline-flex items-center gap-2 rounded-lg border border-slate-200/25 bg-slate-900/35 px-3 py-2 text-sm font-medium text-slate-100 transition-colors hover:border-slate-100/35 hover:bg-slate-900/55 hover:text-white"
                     >
                       <ServerCog className="h-4 w-4" aria-hidden="true" />
                       Manage All Servers
-                    </a>
+                    </SettingsActionButton>
                   </div>
                 )}
               </div>
@@ -3332,8 +3152,7 @@ function IntegrationsSection({
             </div>
           )}
         </section>
-      </div>
-    </details>
+    </CollapsibleSettingsSection>
   )
 }
 
@@ -3588,21 +3407,15 @@ function ActionsSection({
   onDeleteAgent,
   deleteError,
 }: ActionsSectionProps) {
-  const sectionClassName = getSettingsSurfaceClassName({ variant: 'embedded', shadowClassName: 'shadow-none', className: 'group' })
-  const summaryClassName = 'flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4'
-  const wrapperClassName = 'divide-y divide-slate-200/15 border-t border-slate-200/15'
   const sectionBodyClassName = 'space-y-4 px-5 py-5'
 
   return (
-    <details className={sectionClassName} id="agent-ownership">
-      <summary className={summaryClassName}>
-        <div>
-          <h2 className="text-lg font-semibold text-gray-800">Actions</h2>
-          <p className="text-sm text-gray-500">Ownership, transfer, and deletion tools.</p>
-        </div>
-        <ChevronDown className="w-4 h-4 text-gray-500 transition-transform duration-200 group-open:-rotate-180" aria-hidden="true" />
-      </summary>
-      <div className={wrapperClassName}>
+    <CollapsibleSettingsSection
+      id="agent-ownership"
+      title="Actions"
+      subtitle="Ownership, transfer, and deletion tools."
+      bodyClassName="divide-y divide-slate-200/15 p-0"
+    >
         {features.organizations && reassignment.enabled && (
           <section className={sectionBodyClassName}>
             <div>
@@ -3615,14 +3428,12 @@ function ActionsSection({
                   <span className="text-sm text-gray-700">
                     Currently assigned to <strong>{agent.organization.name}</strong>
                   </span>
-                  <button
-                    type="button"
+                  <SettingsActionButton
                     onClick={() => onReassign(null)}
-                    className="px-3 py-1.5 text-sm bg-gray-600 text-white rounded-lg hover:bg-gray-700 disabled:opacity-50"
                     disabled={reassigning}
                   >
                     Move to Personal
-                  </button>
+                  </SettingsActionButton>
                 </div>
               </div>
             ) : (
@@ -3641,19 +3452,18 @@ function ActionsSection({
                       </option>
                     ))}
                   </select>
-                  <button
-                    type="button"
+                  <SettingsActionButton
+                    tone="primary"
                     onClick={() => onReassign(selectedOrgId || null)}
-                    className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
                     disabled={!selectedOrgId || reassigning}
                   >
                     Assign to Team
-                  </button>
+                  </SettingsActionButton>
                 </div>
                 <p className="text-xs text-gray-500">Name must be unique within the selected team.</p>
               </div>
             )}
-            {reassignError && <div className="text-xs text-red-600">{reassignError}</div>}
+            {reassignError ? <InlineStatusBanner variant="error" surface="embedded" density="compact">{reassignError}</InlineStatusBanner> : null}
           </section>
         )}
 
@@ -3674,9 +3484,9 @@ function ActionsSection({
               <form method="post" action={urls.detail} className="flex" onSubmit={onSubmitTransferForm}>
                 <input type="hidden" name="csrfmiddlewaretoken" value={csrfToken} />
                 <input type="hidden" name="action" value="cancel_transfer_invite" />
-                <button type="submit" className="inline-flex items-center gap-2 rounded-lg border border-slate-200/25 bg-slate-900/35 px-4 py-2 text-sm font-medium text-slate-100 transition-colors hover:border-slate-100/35 hover:bg-slate-900/55">
+                <SettingsActionButton type="submit">
                   Cancel Invitation
-                </button>
+                </SettingsActionButton>
               </form>
             </div>
           ) : (
@@ -3709,9 +3519,9 @@ function ActionsSection({
                 />
               </div>
               <div className="flex justify-end">
-                <button type="submit" className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2">
+                <SettingsActionButton type="submit" tone="primary">
                   Send Transfer Invite
-                </button>
+                </SettingsActionButton>
               </div>
             </form>
           )}
@@ -3729,20 +3539,18 @@ function ActionsSection({
                 <h3 className="text-lg font-bold text-red-800">Danger Zone</h3>
                 <p className="text-sm text-red-700">Permanently delete this agent and all of its data. This action cannot be undone and will immediately stop any running tasks.</p>
               </div>
-              <button
-                type="button"
+              <SettingsActionButton
+                tone="danger"
                 onClick={onDeleteAgent}
-                className="inline-flex items-center gap-x-2 rounded-lg border border-rose-300/25 bg-rose-950/35 px-4 py-2 text-sm font-medium text-rose-200 transition-colors hover:border-rose-200/40 hover:bg-rose-900/50 focus:outline-none focus:ring-2 focus:ring-rose-400/60 focus:ring-offset-0"
               >
                 <Trash2 className="w-4 h-4" aria-hidden="true" />
                 Delete Agent
-              </button>
-              {deleteError && <p className="text-sm text-red-600">{deleteError}</p>}
+              </SettingsActionButton>
+              {deleteError ? <InlineStatusBanner variant="error" surface="embedded" density="compact">{deleteError}</InlineStatusBanner> : null}
             </div>
           </div>
         </section>
-      </div>
-    </details>
+    </CollapsibleSettingsSection>
   )
 }
 

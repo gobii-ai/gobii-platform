@@ -4924,7 +4924,7 @@ def _format_secret_capability(capability: Mapping[str, str]) -> str:
             else domain_pattern
         )
         parts.append(f"domain={display_domain}")
-    if capability["secret_type"] == PersistentAgentSecret.SecretType.ENV_VAR:
+    if capability["secret_type"] == "env_var":
         parts.append("sandbox=os.environ")
     return "- " + " | ".join(parts)
 

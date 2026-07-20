@@ -31,7 +31,7 @@ from redis.exceptions import RedisError
 from django.apps import apps
 from django.conf import settings as django_settings
 from django.db import DatabaseError, transaction, close_old_connections
-from django.db.models import Count
+from django.db.models import Count, Q
 from django.db.utils import OperationalError
 from django.utils import timezone as dj_timezone
 
@@ -215,7 +215,8 @@ TRANSIENT_CONFIG_SCOPE_RE = re.compile(
     re.IGNORECASE,
 )
 DIRECT_USER_CORRECTION_RE = re.compile(
-    r"\b(?:stop|quit)\b[^.!?]{0,100}\b(?:writ\w*|say\w*|send\w*|sound\w*|use(?:d|s|ing)?|"
+    r"\b(?:stop|quit)[\s,:;-]+(?:(?:always|automatically|constantly|continually|continuously|frequently|"
+    r"just|regularly|repeatedly|routinely)[\s,:;-]+){0,2}(?:writ\w*|say\w*|send\w*|sound\w*|use(?:d|s|ing)?|"
     r"includ\w*|format\w*|reply\w*|respond\w*|messag\w*|introduc\w*)\b|"
     r"\b(?:sound(?:s|ed)?|reads?|feels?|looks?)\b.{0,60}\b(?:automated|templated|robotic|generic|formal|"
     r"informal|spammy|salesy|corporate|product[ -]?y)\b|"
@@ -225,10 +226,11 @@ DIRECT_USER_CORRECTION_RE = re.compile(
     re.IGNORECASE,
 )
 OPERATIONAL_CAPABILITY_CORRECTION_RE = re.compile(
-    r"\b(?:you|the agent)\s+(?:already\s+|do\s+|should\s+)?"
-    r"(?:have|has|can\s+use|can\s+access|should\s+be\s+able\s+to\s+use)\b"
-    r"[^.!?]{0,120}\b(?:access|credentials?|secrets?|tools?|integrations?|permissions?|"
-    r"environment variables?|env vars?)\b",
+    r"\b(?:you|the agent)\s+(?:already\s+|do\s+)"
+    r"(?:have|has|can\s+use|can\s+access)\b[^.!?]{0,120}"
+    r"\b(?:access|credentials?|secrets?|tools?|integrations?|permissions?|environment variables?|env vars?)\b|"
+    r"\b(?:you|the agent)\s+(?:should\s+have|have|has|should\s+be\s+able\s+to\s+use)\b"
+    r"[^.!?]{0,120}\b(?:credentials?|secrets?|integrations?|permissions?|environment variables?|env vars?)\b",
     re.IGNORECASE,
 )
 STRONG_DURABLE_CONFIG_INTENT_RE = re.compile(
@@ -2404,6 +2406,28 @@ def _user_text_is_direct_correction(text: str) -> bool:
             or OPERATIONAL_CAPABILITY_CORRECTION_RE.search(normalized)
         )
     )
+
+
+def _should_require_direct_correction_patch(agent: PersistentAgent) -> bool:
+    if agent.planning_state == PersistentAgent.PlanningState.PLANNING:
+        return False
+
+    latest_inbound = (
+        PersistentAgentMessage.objects.filter(owner_agent=agent, is_outbound=False)
+        .order_by("-timestamp", "-seq")
+        .values("timestamp", "seq", "body")
+        .first()
+    )
+    if latest_inbound is None or not _user_text_is_direct_correction(latest_inbound["body"]):
+        return False
+
+    return PersistentAgentMessage.objects.filter(
+        owner_agent=agent,
+        is_outbound=True,
+    ).filter(
+        Q(timestamp__lt=latest_inbound["timestamp"])
+        | Q(timestamp=latest_inbound["timestamp"], seq__lt=latest_inbound["seq"])
+    ).exists()
 
 
 def _tool_calls_patch_correction_before_reply(tool_calls: list[Any]) -> bool:
@@ -6533,7 +6557,7 @@ def _run_agent_loop(
                 direct_correction_patch_this_response = False
                 direct_correction_pending = (
                     not direct_correction_patch_seen
-                    and _user_text_is_direct_correction(_latest_inbound_message_text(agent))
+                    and _should_require_direct_correction_patch(agent)
                 )
                 if direct_correction_pending:
                     direct_correction_patch_this_response = _tool_calls_patch_correction_before_reply(raw_tool_calls)

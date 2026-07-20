@@ -1,6 +1,10 @@
 import type { ReactNode } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import { Trash2 } from 'lucide-react'
+import {
+  getSettingsActionButtonClassName,
+  SettingsStatusBadge,
+} from './SettingsControls'
 
 export const embeddedTableWrapperClassName = 'overflow-hidden rounded-xl border border-slate-200/20 bg-slate-950/35'
 export const embeddedTableClassName = 'min-w-full divide-y divide-slate-200/15'
@@ -10,23 +14,17 @@ export const embeddedTableRowClassName = 'hover:bg-slate-900/30'
 export const embeddedTableHeaderCellClassName = 'px-6 py-3 text-left text-xs font-semibold uppercase text-slate-300'
 export const embeddedTableCellClassName = 'px-6 py-4 text-sm text-slate-300'
 export const embeddedSecondaryActionButtonClassName =
-  'inline-flex items-center gap-1 rounded border border-slate-300/70 bg-transparent px-2 py-1 text-xs font-medium text-slate-100 transition-colors hover:border-slate-200 hover:text-white disabled:opacity-50'
+  getSettingsActionButtonClassName({ size: 'sm', className: 'px-2 py-1' })
 export const embeddedDestructiveButtonClassName =
-  'inline-flex items-center gap-2 rounded-lg border border-rose-300/25 bg-rose-950/35 px-3 py-1.5 text-xs font-semibold text-rose-200 transition-colors hover:border-rose-200/40 hover:bg-rose-900/50 disabled:opacity-50'
+  getSettingsActionButtonClassName({ tone: 'danger', size: 'sm' })
 export const embeddedCompactDestructiveButtonClassName =
-  'inline-flex items-center gap-1 rounded border border-rose-300/40 bg-rose-950/20 px-2 py-1 text-xs font-medium text-rose-100 transition-colors hover:border-rose-200 hover:bg-rose-900/30'
+  getSettingsActionButtonClassName({ tone: 'danger', size: 'sm', className: 'px-2 py-1' })
 export const embeddedPromoteActionButtonClassName =
-  'inline-flex items-center gap-1 rounded border border-blue-300/40 bg-blue-950/20 px-2 py-1 text-xs font-medium text-blue-100 transition-colors hover:border-blue-200 hover:bg-blue-900/30'
+  getSettingsActionButtonClassName({ tone: 'primary', size: 'sm', className: 'px-2 py-1' })
 export const embeddedBulkBannerClassName =
   'flex flex-col gap-3 rounded-xl border border-sky-300/20 bg-sky-950/30 px-4 py-3 sm:flex-row sm:items-center sm:justify-between'
 export const embeddedBulkButtonClassName =
-  'inline-flex items-center justify-center gap-2 rounded-lg border border-sky-300/25 bg-sky-900/55 px-3 py-2 text-sm font-semibold text-sky-100 transition-colors hover:border-sky-200/40 hover:bg-sky-900/75 disabled:opacity-50'
-
-const statusClassNames = {
-  active: 'inline-flex rounded-full border border-emerald-300/20 bg-emerald-950/35 px-2.5 py-1 text-xs font-semibold text-emerald-200',
-  pending: 'inline-flex items-center gap-1 rounded-full border border-amber-300/20 bg-amber-950/35 px-2.5 py-1 text-xs font-semibold text-amber-200',
-  danger: 'inline-flex rounded-full border border-rose-300/20 bg-rose-950/35 px-2.5 py-1 text-xs font-semibold text-rose-200',
-}
+  getSettingsActionButtonClassName({ tone: 'primary' })
 
 export function EmbeddedTableFrame({
   children,
@@ -50,10 +48,11 @@ export function EmbeddedStatusBadge({
   tone,
   children,
 }: {
-  tone: keyof typeof statusClassNames
+  tone: 'active' | 'pending' | 'danger'
   children: ReactNode
 }) {
-  return <span className={statusClassNames[tone]}>{children}</span>
+  const settingsTone = tone === 'active' ? 'success' : tone === 'pending' ? 'warning' : 'danger'
+  return <SettingsStatusBadge tone={settingsTone}>{children}</SettingsStatusBadge>
 }
 
 export function EmbeddedRemoveButton({

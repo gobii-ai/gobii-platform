@@ -3,6 +3,7 @@ import type { KeyboardEvent } from 'react'
 import { FolderPlus, RefreshCw, Trash2, UploadCloud } from 'lucide-react'
 import { EmbeddedAgentShellBackButton } from '../agentChat/EmbeddedAgentShellBackButton'
 import { SettingsBanner } from '../agentSettings/SettingsBanner'
+import { getSettingsActionButtonClassName } from '../agentSettings/SettingsControls'
 
 type FileManagerHeaderProps = {
   agentName: string
@@ -46,10 +47,10 @@ export function FileManagerHeader({
     }
   }
 
-  const uploadButtonClassName = `inline-flex w-full items-center justify-center gap-2 rounded-lg border border-blue-300/40 bg-blue-950/20 px-3 py-2 text-sm font-semibold text-blue-100 transition sm:w-auto ${isBusy ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:border-blue-200 hover:bg-blue-900/30'}`
-  const folderButtonClassName = 'inline-flex w-full items-center justify-center gap-2 rounded-lg border border-emerald-300/40 bg-emerald-950/20 px-3 py-2 text-sm font-semibold text-emerald-100 transition hover:border-emerald-200 hover:bg-emerald-900/30 disabled:opacity-60 sm:w-auto'
-  const deleteButtonClassName = 'inline-flex w-full items-center justify-center gap-2 rounded-lg border border-rose-300/40 bg-rose-950/20 px-3 py-2 text-sm font-semibold text-rose-100 transition hover:border-rose-200 hover:bg-rose-900/30 disabled:opacity-60 sm:w-auto'
-  const refreshButtonClassName = 'inline-flex w-full items-center justify-center gap-2 rounded-lg border border-slate-300/70 bg-slate-900/40 px-3 py-2 text-sm font-medium text-slate-100 transition hover:border-slate-200 hover:bg-slate-900/60 disabled:opacity-60 sm:w-auto'
+  const uploadButtonClassName = getSettingsActionButtonClassName({ tone: 'primary', responsive: true, className: isBusy ? 'cursor-not-allowed opacity-60' : 'cursor-pointer' })
+  const folderButtonClassName = getSettingsActionButtonClassName({ tone: 'success', responsive: true })
+  const deleteButtonClassName = getSettingsActionButtonClassName({ tone: 'danger', responsive: true })
+  const refreshButtonClassName = getSettingsActionButtonClassName({ responsive: true })
 
   return (
     <SettingsBanner

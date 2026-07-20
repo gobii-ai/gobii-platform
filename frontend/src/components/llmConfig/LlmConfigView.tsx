@@ -203,7 +203,7 @@ export function LlmConfigView({ controller }: { controller: LlmConfigController 
           title="Token-based failover tiers"
           description={selectedProfile ? `Editing profile: ${selectedProfile.display_name || selectedProfile.name}` : 'Manage token ranges, tier ordering, and weighted endpoints.'}
           actions={
-            <button type="button" className={button.primary} onClick={selectedProfile ? routing.handleProfileRangeAdd : routing.handleAddRange}>
+            <button type="button" className={button.primary} onClick={routing.handleAddRange}>
               <PlusCircle className="size-4" /> Add range
             </button>
           }
@@ -215,15 +215,15 @@ export function LlmConfigView({ controller }: { controller: LlmConfigController 
                 range={range}
                 tiers={data.persistentStructures.tiers.filter((tier) => tier.rangeId === range.id)}
                 intelligenceTiers={data.intelligenceTiers}
-                onAddTier={(tierKey) => selectedProfile ? routing.handleProfileTierAdd(range.id, tierKey) : routing.handleTierAdd(range.id, tierKey)}
-                onUpdate={(field, value) => selectedProfile ? routing.handleProfileRangeUpdate(range.id, field, value) : routing.handleRangeUpdate(range.id, field, value)}
-                onRemove={() => selectedProfile ? routing.handleProfileRangeRemove(range) : routing.handleRangeRemove(range)}
-                onMoveTier={(tierId, direction) => selectedProfile ? routing.handleProfileTierMove(range.id, tierId, direction) : routing.handleTierMove(range.id, tierId, direction)}
-                onRemoveTier={selectedProfile ? routing.handleProfileTierRemove : routing.handleTierRemove}
+                onAddTier={(tierKey) => routing.handleTierAdd(range.id, tierKey)}
+                onUpdate={(field, value) => routing.handleRangeUpdate(range.id, field, value)}
+                onRemove={() => routing.handleRangeRemove(range)}
+                onMoveTier={(tierId, direction) => routing.handleTierMove(range.id, tierId, direction)}
+                onRemoveTier={routing.handleTierRemove}
                 onAddEndpoint={(tier) => routing.handleTierEndpointAdd(tier, 'persistent')}
                 onStageEndpointWeight={routing.stageTierEndpointWeight}
-                onCommitEndpointWeights={(tier) => selectedProfile ? routing.commitProfileTierEndpointWeights(tier, 'persistent') : routing.commitTierEndpointWeights(tier, 'persistent')}
-                onRemoveEndpoint={(tier, endpoint) => selectedProfile ? routing.handleProfileTierEndpointRemove(tier, endpoint, 'persistent') : routing.handleTierEndpointRemove(tier, endpoint, 'persistent')}
+                onCommitEndpointWeights={(tier) => routing.commitTierEndpointWeights(tier, 'persistent')}
+                onRemoveEndpoint={(tier, endpoint) => routing.handleTierEndpointRemove(tier, endpoint, 'persistent')}
                 onUpdateEndpointReasoning={routing.handleTierEndpointReasoning}
                 pendingWeights={routing.pendingWeights}
                 savingTierIds={routing.savingTierIds}
@@ -257,18 +257,14 @@ export function LlmConfigView({ controller }: { controller: LlmConfigController 
                 pendingWeights={routing.pendingWeights}
                 savingTierIds={routing.savingTierIds}
                 dirtyTierIds={routing.dirtyTierIds}
-                onAddTier={(tierKey) => selectedProfile ? routing.handleProfileBrowserTierAdd(tierKey) : routing.handleBrowserTierAdd(tierKey)}
-                onMoveTier={(tierId, direction) => selectedProfile ? routing.handleProfileBrowserTierMove(tierId, direction) : routing.handleBrowserTierMove(tierId, direction)}
-                onRemoveTier={selectedProfile ? routing.handleProfileBrowserTierRemove : routing.handleBrowserTierRemove}
+                onAddTier={routing.handleBrowserTierAdd}
+                onMoveTier={routing.handleBrowserTierMove}
+                onRemoveTier={routing.handleBrowserTierRemove}
                 onAddEndpoint={(tier) => routing.handleTierEndpointAdd(tier, 'browser')}
                 onStageEndpointWeight={routing.stageTierEndpointWeight}
-                onCommitEndpointWeights={(tier) => selectedProfile ? routing.commitProfileTierEndpointWeights(tier, 'browser') : routing.commitTierEndpointWeights(tier, 'browser')}
-                onRemoveEndpoint={(tier, endpoint) => selectedProfile ? routing.handleProfileTierEndpointRemove(tier, endpoint, 'browser') : routing.handleTierEndpointRemove(tier, endpoint, 'browser')}
-                onUpdateExtraction={(tier, endpoint, extractionId) =>
-                  selectedProfile
-                    ? routing.handleProfileTierEndpointExtraction(tier, endpoint, extractionId, 'browser')
-                    : routing.handleTierEndpointExtraction(tier, endpoint, extractionId, 'browser')
-                }
+                onCommitEndpointWeights={(tier) => routing.commitTierEndpointWeights(tier, 'browser')}
+                onRemoveEndpoint={(tier, endpoint) => routing.handleTierEndpointRemove(tier, endpoint, 'browser')}
+                onUpdateExtraction={(tier, endpoint, extractionId) => routing.handleTierEndpointExtraction(tier, endpoint, extractionId, 'browser')}
                 browserChoices={data.endpointChoices.browser_endpoints}
                 isActionBusy={feedback.isBusy}
               />
@@ -425,7 +421,7 @@ export function LlmConfigView({ controller }: { controller: LlmConfigController 
                     <p className="text-sm text-slate-600">Fallback order for generating embeddings.</p>
                   </div>
                 </div>
-                <button type="button" className={button.secondary} onClick={selectedProfile ? routing.handleProfileEmbeddingTierAdd : routing.handleEmbeddingTierAdd}>
+                <button type="button" className={button.secondary} onClick={routing.handleEmbeddingTierAdd}>
                   <PlusCircle className="size-4" /> Add tier
                 </button>
               </div>
@@ -441,12 +437,12 @@ export function LlmConfigView({ controller }: { controller: LlmConfigController 
                   canMoveDown={index < lastIndex}
                   isDirty={routing.dirtyTierIds.has(`embedding:${tier.id}`)}
                   isSaving={routing.savingTierIds.has(`embedding:${tier.id}`)}
-                  onMove={(direction) => selectedProfile ? routing.handleProfileEmbeddingTierMove(tier.id, direction) : routing.handleEmbeddingTierMove(tier.id, direction)}
-                  onRemove={selectedProfile ? routing.handleProfileEmbeddingTierRemove : routing.handleEmbeddingTierRemove}
+                  onMove={(direction) => routing.handleEmbeddingTierMove(tier.id, direction)}
+                  onRemove={routing.handleEmbeddingTierRemove}
                   onAddEndpoint={() => routing.handleTierEndpointAdd(tier, 'embedding')}
                   onStageEndpointWeight={(currentTier, tierEndpointId, weight) => routing.stageTierEndpointWeight(currentTier, tierEndpointId, weight, 'embedding')}
-                  onCommitEndpointWeights={(currentTier) => selectedProfile ? routing.commitProfileTierEndpointWeights(currentTier, 'embedding') : routing.commitTierEndpointWeights(currentTier, 'embedding')}
-                  onRemoveEndpoint={(currentTier, endpoint) => selectedProfile ? routing.handleProfileTierEndpointRemove(currentTier, endpoint, 'embedding') : routing.handleTierEndpointRemove(currentTier, endpoint, 'embedding')}
+                  onCommitEndpointWeights={(currentTier) => routing.commitTierEndpointWeights(currentTier, 'embedding')}
+                  onRemoveEndpoint={(currentTier, endpoint) => routing.handleTierEndpointRemove(currentTier, endpoint, 'embedding')}
                   isActionBusy={feedback.isBusy}
                 />
                 )

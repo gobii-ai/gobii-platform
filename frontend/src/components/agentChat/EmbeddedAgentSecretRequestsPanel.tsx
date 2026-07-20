@@ -1,15 +1,22 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, Check, EyeOff, Globe, Inbox, KeyRound, Loader2, ShieldCheck, Trash2 } from 'lucide-react'
+import { AlertTriangle, Check, EyeOff, Globe, KeyRound, Loader2, Trash2 } from 'lucide-react'
 
 import { fulfillRequestedSecrets, removeRequestedSecrets } from '../../api/agentChat'
 import { HttpError } from '../../api/http'
 import { fetchAgentSecrets, type AgentSecretListResponse, type RequestedSecretDTO } from '../../api/secrets'
 import { SettingsBanner } from '../agentSettings/SettingsBanner'
+import { getSettingsActionButtonClassName } from '../agentSettings/SettingsControls'
 import { InlineStatusBanner } from '../common/InlineStatusBanner'
 import { getSettingsSurfaceClassName } from '../common/SettingsSurface'
 import { EmbeddedAgentShellBackButton } from './EmbeddedAgentShellBackButton'
 import { EmbeddedAgentShellPanel } from './EmbeddedAgentShellPanel'
+import {
+  EmbeddedPendingRequestState,
+  EmbeddedPendingRequestSummary,
+  formatPendingRequestDate,
+  usePendingRequestSelection,
+} from './PendingRequestPanelParts'
 
 type EmbeddedAgentSecretRequestsPanelProps = {
   agentId: string
@@ -32,22 +39,6 @@ function formatSecretScope(secret: RequestedSecretDTO): string {
     return 'Environment variable'
   }
   return `Credential for ${secret.domain_pattern}`
-}
-
-function formatDate(value?: string | null): string | null {
-  if (!value) {
-    return null
-  }
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) {
-    return null
-  }
-  return new Intl.DateTimeFormat(undefined, {
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  }).format(date)
 }
 
 function readBodyObject(body: unknown): Record<string, unknown> | null {
@@ -113,7 +104,6 @@ export function EmbeddedAgentSecretRequestsPanel({
   const queryClient = useQueryClient()
   const queryKey = useMemo(() => ['agent-secrets', agentId] as const, [agentId])
   const [secretValues, setSecretValues] = useState<Record<string, string>>({})
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [makeGlobal, setMakeGlobal] = useState(false)
   const [busyAction, setBusyAction] = useState<'save' | 'remove' | null>(null)
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
@@ -127,15 +117,18 @@ export function EmbeddedAgentSecretRequestsPanel({
   })
 
   const requests = data?.requested_secrets ?? EMPTY_REQUESTS
-  const selectedRequests = useMemo(
-    () => requests.filter((request) => selectedIds.has(request.id)),
-    [requests, selectedIds],
-  )
-  const allSelected = requests.length > 0 && selectedIds.size === requests.length
+  const {
+    selectedIds,
+    selectedItems: selectedRequests,
+    allSelected,
+    toggleSelected,
+    selectAll,
+    clearSelected,
+    removeSelected,
+  } = usePendingRequestSelection(requests)
   const busy = busyAction !== null
 
   useEffect(() => {
-    const requestIds = new Set(requests.map((request) => request.id))
     setSecretValues((current) => {
       const nextValues: Record<string, string> = {}
       requests.forEach((request) => {
@@ -143,7 +136,6 @@ export function EmbeddedAgentSecretRequestsPanel({
       })
       return nextValues
     })
-    setSelectedIds((current) => new Set([...current].filter((requestId) => requestIds.has(requestId))))
   }, [requests])
 
   const refreshAfterMutation = useCallback(async () => {
@@ -163,26 +155,6 @@ export function EmbeddedAgentSecretRequestsPanel({
       delete fieldErrors[secretId]
       return { ...current, fieldErrors }
     })
-  }, [])
-
-  const toggleSelected = useCallback((secretId: string, selected: boolean) => {
-    setSelectedIds((current) => {
-      const next = new Set(current)
-      if (selected) {
-        next.add(secretId)
-      } else {
-        next.delete(secretId)
-      }
-      return next
-    })
-  }, [])
-
-  const handleSelectAll = useCallback(() => {
-    setSelectedIds(new Set(requests.map((request) => request.id)))
-  }, [requests])
-
-  const handleClearSelected = useCallback(() => {
-    setSelectedIds(new Set())
   }, [])
 
   const handleSave = useCallback(async () => {
@@ -233,7 +205,7 @@ export function EmbeddedAgentSecretRequestsPanel({
       } else {
         await removeRequestedSecrets(agentId, { secret_ids: secretIds })
       }
-      setSelectedIds((current) => new Set([...current].filter((secretId) => !secretIds.includes(secretId))))
+      removeSelected(secretIds)
       setSuccessMessage(secretIds.length === 1 ? 'Secret request removed.' : 'Secret requests removed.')
       await refreshAfterMutation()
     } catch (err) {
@@ -241,7 +213,7 @@ export function EmbeddedAgentSecretRequestsPanel({
     } finally {
       setBusyAction(null)
     }
-  }, [agentId, busy, onRemoveRequestedSecrets, refreshAfterMutation])
+  }, [agentId, busy, onRemoveRequestedSecrets, refreshAfterMutation, removeSelected])
 
   return (
     <EmbeddedAgentShellPanel>
@@ -266,64 +238,38 @@ export function EmbeddedAgentSecretRequestsPanel({
           </InlineStatusBanner>
         ) : null}
 
-        {isLoading ? (
-          <div className="flex min-h-[18rem] items-center justify-center text-sm text-slate-200/80">
-            <div className="flex flex-col items-center gap-3 text-center">
-              <Loader2 className="h-6 w-6 animate-spin text-slate-300/70" aria-hidden="true" />
-              <p>Loading secret requests...</p>
+        <EmbeddedPendingRequestState
+          isLoading={isLoading}
+          error={error}
+          isEmpty={requests.length === 0}
+          loadingLabel="Loading secret requests..."
+          errorTitle="Unable to load secret requests."
+          emptyTitle="No pending secret requests"
+          emptyDescription="New requests will appear here when this agent needs a credential or environment variable."
+          emptyAction={onOpenSecrets ? (
+            <div className="flex flex-wrap justify-center gap-2">
+              <button
+                type="button"
+                onClick={onOpenSecrets}
+                className={getSettingsActionButtonClassName({ tone: 'primary' })}
+              >
+                Manage secrets
+              </button>
             </div>
-          </div>
-        ) : error ? (
-          <InlineStatusBanner variant="error" surface="embedded">
-            <p className="font-medium">Unable to load secret requests.</p>
-            <p className="mt-1 text-rose-100/75">Try opening this agent again.</p>
-          </InlineStatusBanner>
-        ) : requests.length === 0 ? (
-          <div className={getSettingsSurfaceClassName({ variant: 'embedded', shadowClassName: 'shadow-none', className: 'flex min-h-[18rem] items-center justify-center px-6 py-10 text-center' })}>
-            <div className="max-w-sm space-y-4">
-              <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl border border-slate-200/20 bg-slate-900/45 text-slate-200">
-                <Inbox className="h-5 w-5" aria-hidden="true" />
-              </span>
-              <div>
-                <p className="text-sm font-semibold text-slate-100">No pending secret requests</p>
-                <p className="mt-1 text-sm text-slate-300">New requests will appear here when this agent needs a credential or environment variable.</p>
-              </div>
-              {onOpenSecrets ? (
-                <div className="flex flex-wrap justify-center gap-2">
-                  <button
-                    type="button"
-                    onClick={onOpenSecrets}
-                    className="rounded-lg border border-blue-300/35 bg-blue-950/35 px-3 py-2 text-sm font-semibold text-blue-100 transition-colors hover:border-blue-200/50 hover:bg-blue-900/45"
-                  >
-                    Manage secrets
-                  </button>
-                </div>
-              ) : null}
-            </div>
-          </div>
-        ) : (
+          ) : null}
+        >
           <>
-            <div className={getSettingsSurfaceClassName({ variant: 'embedded', shadowClassName: 'shadow-none', className: 'px-4 py-4 text-slate-100' })}>
-              <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-                <div className="flex min-w-0 items-start gap-3">
-                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-slate-200/20 bg-slate-900/45 text-slate-200">
-                    <ShieldCheck className="h-5 w-5" aria-hidden="true" />
-                  </span>
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold text-slate-100">
-                      {requests.length} pending secret request{requests.length === 1 ? '' : 's'}
-                    </p>
-                    <p className="mt-1 text-sm text-slate-400">
-                      Fill one or more values, then save. Blank rows stay pending.
-                    </p>
-                  </div>
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
+            <EmbeddedPendingRequestSummary
+              count={requests.length}
+              noun="secret"
+              description="Fill one or more values, then save. Blank rows stay pending."
+              actions={(
+                <>
                   <button
                     type="button"
-                    onClick={allSelected ? handleClearSelected : handleSelectAll}
+                    onClick={allSelected ? clearSelected : selectAll}
                     disabled={busy}
-                    className="rounded-lg border border-slate-200/25 bg-slate-900/35 px-3 py-2 text-sm font-medium text-slate-100 transition-colors hover:border-slate-100/35 hover:bg-slate-900/55 disabled:cursor-not-allowed disabled:opacity-50"
+                    className={getSettingsActionButtonClassName()}
                   >
                     {allSelected ? 'Clear all' : 'Select all'}
                   </button>
@@ -331,7 +277,7 @@ export function EmbeddedAgentSecretRequestsPanel({
                     type="button"
                     onClick={() => void handleRemove(selectedRequests.map((request) => request.id))}
                     disabled={busy || selectedRequests.length === 0}
-                    className="inline-flex items-center gap-2 rounded-lg border border-rose-300/25 bg-rose-950/35 px-3 py-2 text-sm font-semibold text-rose-100 transition-colors hover:border-rose-200/40 hover:bg-rose-900/50 disabled:cursor-not-allowed disabled:opacity-50"
+                    className={getSettingsActionButtonClassName({ tone: 'danger' })}
                   >
                     <Trash2 className="h-4 w-4" aria-hidden="true" />
                     {busyAction === 'remove' ? 'Removing...' : `Remove selected${selectedRequests.length ? ` (${selectedRequests.length})` : ''}`}
@@ -340,31 +286,31 @@ export function EmbeddedAgentSecretRequestsPanel({
                     type="button"
                     onClick={() => void handleSave()}
                     disabled={busy}
-                    className="inline-flex items-center gap-2 rounded-lg border border-emerald-300/25 bg-emerald-900/50 px-3 py-2 text-sm font-semibold text-emerald-50 transition-colors hover:border-emerald-200/40 hover:bg-emerald-900/70 disabled:cursor-not-allowed disabled:opacity-50"
+                    className={getSettingsActionButtonClassName({ tone: 'success' })}
                   >
                     {busyAction === 'save' ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Check className="h-4 w-4" aria-hidden="true" />}
                     {busyAction === 'save' ? 'Saving...' : 'Save values'}
                   </button>
-                </div>
-              </div>
-              <label className="mt-4 flex items-start gap-3 rounded-xl border border-slate-200/15 bg-slate-900/25 px-3 py-3 text-sm text-slate-200">
-                <input
-                  type="checkbox"
-                  checked={makeGlobal}
-                  onChange={(event) => setMakeGlobal(event.currentTarget.checked)}
-                  disabled={busy}
-                  className="mt-0.5 h-4 w-4 rounded border-slate-400 bg-slate-950 text-sky-500 focus:ring-sky-400"
-                />
-                <Globe className="mt-0.5 h-4 w-4 shrink-0 text-sky-300" aria-hidden="true" />
-                <span>
-                  Save as global secrets for this context so other agents can reuse matching keys.
-                </span>
-              </label>
-            </div>
+                </>
+              )}
+              footer={(
+                <label className="mt-4 flex items-start gap-3 rounded-xl border border-slate-200/15 bg-slate-900/25 px-3 py-3 text-sm text-slate-200">
+                  <input
+                    type="checkbox"
+                    checked={makeGlobal}
+                    onChange={(event) => setMakeGlobal(event.currentTarget.checked)}
+                    disabled={busy}
+                    className="mt-0.5 h-4 w-4 rounded border-slate-400 bg-slate-950 text-sky-500 focus:ring-sky-400"
+                  />
+                  <Globe className="mt-0.5 h-4 w-4 shrink-0 text-sky-300" aria-hidden="true" />
+                  <span>Save as global secrets for this context so other agents can reuse matching keys.</span>
+                </label>
+              )}
+            />
 
             <div className="space-y-3">
               {requests.map((request) => {
-                const requestedAt = formatDate(request.created_at)
+                const requestedAt = formatPendingRequestDate(request.created_at)
                 const selected = selectedIds.has(request.id)
                 const fieldError = requestErrors.fieldErrors[request.id]
 
@@ -405,7 +351,7 @@ export function EmbeddedAgentSecretRequestsPanel({
                             type="button"
                             onClick={() => void handleRemove([request.id])}
                             disabled={busy}
-                            className="inline-flex shrink-0 items-center gap-2 rounded-lg border border-rose-300/25 bg-rose-950/35 px-3 py-2 text-sm font-semibold text-rose-100 transition-colors hover:border-rose-200/40 hover:bg-rose-900/50 disabled:cursor-not-allowed disabled:opacity-50"
+                            className={getSettingsActionButtonClassName({ tone: 'danger', className: 'shrink-0' })}
                           >
                             <Trash2 className="h-4 w-4" aria-hidden="true" />
                             Remove
@@ -439,7 +385,7 @@ export function EmbeddedAgentSecretRequestsPanel({
               })}
             </div>
           </>
-        )}
+        </EmbeddedPendingRequestState>
       </div>
     </EmbeddedAgentShellPanel>
   )

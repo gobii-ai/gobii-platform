@@ -1,9 +1,9 @@
-import { AlertTriangle, ExternalLink, Settings, Zap } from 'lucide-react'
+import { ExternalLink, Settings, Zap } from 'lucide-react'
 
 import { track } from '../../util/analytics'
 import { AnalyticsEvent } from '../../constants/analyticsEvents'
 import { appendReturnTo } from '../../util/returnTo'
-import { AgentChatSectionCard } from './uiPrimitives'
+import { LimitCalloutActions, LimitCalloutButton, LimitCalloutCard } from './LimitCalloutCard'
 
 type HardLimitCalloutCardProps = {
   onOpenSettings: () => void
@@ -25,32 +25,25 @@ export function HardLimitCalloutCard({
   const upgradeHref = upgradeUrl ? appendReturnTo(upgradeUrl) : null
 
   return (
-    <AgentChatSectionCard className="timeline-event hard-limit-callout" tone="warning">
-      <div className="hard-limit-callout-header">
-        <span className="hard-limit-callout-icon" aria-hidden="true">
-          <AlertTriangle size={16} />
-        </span>
-        <div>
-          <p className="hard-limit-callout-title">Daily task limit reached</p>
-          <p className="hard-limit-callout-subtitle">Adjust the daily task limit to keep this agent running.</p>
-        </div>
-      </div>
-      <div className="hard-limit-callout-actions">
+    <LimitCalloutCard
+      title="Daily task limit reached"
+      subtitle="Adjust the daily task limit to keep this agent running."
+    >
+      <LimitCalloutActions>
         {onQuickIncrease ? (
-          <button
-            type="button"
-            className="hard-limit-callout-button hard-limit-callout-button--secondary"
+          <LimitCalloutButton
+            variant="secondary"
             onClick={onQuickIncrease}
             disabled={quickIncreaseBusy}
           >
             <Zap size={16} />
             {quickIncreaseBusy ? 'Increasing…' : quickIncreaseLabel}
-          </button>
+          </LimitCalloutButton>
         ) : null}
-        <button type="button" className="hard-limit-callout-button" onClick={onOpenSettings}>
+        <LimitCalloutButton onClick={onOpenSettings}>
           <Settings size={16} />
           Open settings
-        </button>
+        </LimitCalloutButton>
         {showUpsell ? (
           <div className="hard-limit-callout-upsell">
             <span>Running out of credits? Upgrade to allow your agents to do more work for you.</span>
@@ -72,7 +65,7 @@ export function HardLimitCalloutCard({
             ) : null}
           </div>
         ) : null}
-      </div>
-    </AgentChatSectionCard>
+      </LimitCalloutActions>
+    </LimitCalloutCard>
   )
 }

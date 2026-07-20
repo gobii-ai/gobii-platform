@@ -132,7 +132,7 @@ def build_secret_capability_inventory(agent: PersistentAgent) -> list[dict[str, 
         capability = {
             "name": secret.name,
             "key": secret.key,
-            "secret_type": secret.secret_type,
+            "secret_type": str(secret.secret_type),
             "availability": "available",
             "scope": "global",
         }
@@ -149,7 +149,7 @@ def build_secret_capability_inventory(agent: PersistentAgent) -> list[dict[str, 
         capability = {
             "name": secret.name,
             "key": secret.key,
-            "secret_type": secret.secret_type,
+            "secret_type": str(secret.secret_type),
             "availability": "pending" if secret.requested else "available",
             "scope": "agent",
         }
