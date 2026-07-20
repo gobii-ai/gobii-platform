@@ -49,11 +49,14 @@ class PromptContextSqlitePlacementTests(TestCase):
         self.assertIn("Only sourced blockers are unresolved", sqlite_guidance)
         self.assertIn("return only needed rows to context", sqlite_guidance)
         self.assertIn("never filter one result_id at a time, make a table per result", sqlite_guidance)
+        self.assertIn("For multi-fetch work, extract fields in SQL", sqlite_guidance)
         self.assertIn("Keep chat/outreach light. Owner reports on 4+ peers", system_message["content"])
-        self.assertIn("resolved/total and one table with requested fields", system_message["content"])
-        self.assertIn("source URL per row", system_message["content"])
+        self.assertIn(
+            "need resolved/total and one table with requested fields plus a source URL per row",
+            system_message["content"],
+        )
         self.assertIn("In record lists, link each name to its item/detail URL", system_message["content"])
-        self.assertIn("resolve/source each field", system_message["content"])
+        self.assertIn("resolve/source each requested field", system_message["content"])
         self.assertIn("grouped discovery isn't coverage", system_message["content"])
         self.assertIn("separate sourced unavailability from research gaps", system_message["content"])
         self.assertIn("asks except finite sets", system_message["content"])
