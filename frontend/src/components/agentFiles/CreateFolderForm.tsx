@@ -1,6 +1,7 @@
 import type { FormEvent } from 'react'
 
 import { FolderPlus } from 'lucide-react'
+import { SettingsActionButton } from '../agentSettings/SettingsControls'
 
 type CreateFolderFormProps = {
   folderName: string
@@ -29,13 +30,13 @@ export function CreateFolderForm({
           placeholder="New folder name"
         />
       </div>
-      <button
+      <SettingsActionButton
         type="submit"
-        className="inline-flex items-center gap-2 rounded-lg border border-emerald-300/40 bg-emerald-950/20 px-3 py-2 text-sm font-semibold text-emerald-100 transition hover:border-emerald-200 hover:bg-emerald-900/30 disabled:opacity-60"
+        tone="success"
         disabled={isBusy}
       >
         Create folder
-      </button>
+      </SettingsActionButton>
     </form>
   )
 }

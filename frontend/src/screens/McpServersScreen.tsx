@@ -10,6 +10,7 @@ import { McpServerTestModal } from '../components/mcp/McpServerTestModal'
 import { PipedreamAppsPanel } from '../components/mcp/PipedreamAppsPanel'
 import { useModal } from '../hooks/useModal'
 import { SettingsBanner } from '../components/agentSettings/SettingsBanner'
+import { getSettingsActionButtonClassName, getSettingsStatusBadgeClassName } from '../components/agentSettings/SettingsControls'
 import { InlineStatusBanner } from '../components/common/InlineStatusBanner'
 import { SurfaceHeader, getSettingsSurfaceClassName } from '../components/common/SettingsSurface'
 
@@ -212,9 +213,8 @@ export function McpServersScreen({
     : 'gobii-card-base'
   const headingClassName = isEmbedded ? 'text-2xl font-semibold text-slate-50' : 'text-2xl font-semibold text-gray-800'
   const descriptionClassName = isEmbedded ? 'text-sm text-slate-400' : 'text-sm text-gray-600'
-  const primaryButtonClassName = isEmbedded
-    ? 'inline-flex items-center justify-center gap-2 rounded-lg border border-sky-300/25 bg-sky-900/55 px-4 py-2 text-sm font-semibold text-sky-50 transition hover:border-sky-200/40 hover:bg-sky-900/75'
-    : 'inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow transition hover:bg-blue-700'
+  const controlSurface = isEmbedded ? 'embedded' : 'standalone'
+  const primaryButtonClassName = getSettingsActionButtonClassName({ surface: controlSurface, tone: 'primary' })
   const tableClassName = isEmbedded ? 'w-full' : 'w-full divide-y divide-gray-200/70'
   const tableHeadClassName = isEmbedded ? 'bg-slate-950/40' : 'bg-gray-50/50'
   const tableBodyClassName = isEmbedded ? 'divide-y divide-slate-200/10' : 'divide-y divide-gray-200/70'
@@ -233,18 +233,10 @@ export function McpServersScreen({
   const secondaryTextClassName = isEmbedded ? 'text-sm text-slate-300' : 'text-sm text-gray-700'
   const dateClassName = isEmbedded ? 'px-3 md:px-6 py-4 align-top text-sm text-slate-400' : 'px-3 md:px-6 py-4 align-top text-sm text-gray-600'
   const timeClassName = isEmbedded ? 'text-xs text-slate-500' : 'text-xs text-gray-400'
-  const assignButtonClassName = isEmbedded
-    ? 'inline-flex items-center justify-center rounded-lg border border-sky-300/25 bg-sky-950/20 px-3 py-2 text-sm font-medium text-sky-100 transition hover:border-sky-200/40 hover:bg-sky-900/40'
-    : 'inline-flex items-center justify-center rounded-lg border border-indigo-200 px-3 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-50'
-  const editButtonClassName = isEmbedded
-    ? 'inline-flex items-center justify-center rounded-lg border border-slate-200/20 bg-slate-950/20 px-3 py-2 text-sm font-medium text-slate-200 transition hover:border-slate-100/35 hover:bg-slate-900/40'
-    : 'inline-flex items-center justify-center rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50'
-  const testButtonClassName = isEmbedded
-    ? 'inline-flex items-center justify-center gap-1.5 rounded-lg border border-emerald-300/25 bg-emerald-950/20 px-3 py-2 text-sm font-medium text-emerald-100 transition hover:border-emerald-200/40 hover:bg-emerald-900/35 disabled:cursor-not-allowed disabled:opacity-50'
-    : 'inline-flex items-center justify-center gap-1.5 rounded-lg border border-emerald-200 px-3 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-50'
-  const deleteButtonClassName = isEmbedded
-    ? 'inline-flex items-center justify-center rounded-lg border border-rose-300/25 bg-rose-950/20 px-3 py-2 text-sm font-medium text-rose-200 transition hover:border-rose-200/40 hover:bg-rose-900/35'
-    : 'inline-flex items-center justify-center rounded-lg border border-red-200 px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50'
+  const assignButtonClassName = getSettingsActionButtonClassName({ surface: controlSurface, tone: 'primary' })
+  const editButtonClassName = getSettingsActionButtonClassName({ surface: controlSurface })
+  const testButtonClassName = getSettingsActionButtonClassName({ surface: controlSurface, tone: 'success' })
+  const deleteButtonClassName = getSettingsActionButtonClassName({ surface: controlSurface, tone: 'danger' })
 
   return (
     <div className={rootClassName}>
@@ -295,17 +287,11 @@ export function McpServersScreen({
           </button>
           )}
         />
-        {listError && (
-          isEmbedded ? (
-            <div className="mx-6 mb-4">
-              <InlineStatusBanner variant="error" surface="embedded">
-                Failed to load servers. {listError}
-              </InlineStatusBanner>
-            </div>
-          ) : (
-            <div className="border-b border-red-200 bg-red-50 px-6 py-3 text-sm text-red-700">Failed to load servers. {listError}</div>
-          )
-        )}
+        {listError ? (
+          <div className={isEmbedded ? 'mx-6 mb-4' : 'mb-4'}>
+            <InlineStatusBanner variant="error" surface={controlSurface}>Failed to load servers. {listError}</InlineStatusBanner>
+          </div>
+        ) : null}
         <div className="overflow-x-auto">
           <table className={tableClassName}>
             <thead className={tableHeadClassName}>
@@ -458,12 +444,9 @@ function buildUrl(template: string, id: string): string {
 }
 
 function renderConnection(server: McpServer, embedded = false) {
-  const commandBadgeClassName = embedded
-    ? 'inline-flex items-center gap-1 rounded-full border border-slate-200/20 bg-slate-900/45 px-2 py-0.5 text-xs font-semibold text-slate-200'
-    : 'inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-700'
-  const urlBadgeClassName = embedded
-    ? 'inline-flex items-center gap-1 rounded-full border border-sky-300/25 bg-sky-950/45 px-2 py-0.5 text-xs font-semibold text-sky-100'
-    : 'inline-flex items-center gap-1 rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-semibold text-indigo-700'
+  const surface = embedded ? 'embedded' : 'standalone'
+  const commandBadgeClassName = getSettingsStatusBadgeClassName({ surface, className: 'px-2 py-0.5' })
+  const urlBadgeClassName = getSettingsStatusBadgeClassName({ surface, tone: 'primary', className: 'px-2 py-0.5' })
   const monoTextClassName = embedded ? 'break-all font-mono text-xs text-slate-400' : 'break-all font-mono text-xs text-gray-600'
   const monoMutedClassName = embedded ? 'break-all font-mono text-xs text-slate-500' : 'break-all font-mono text-xs text-gray-500'
   const emptyClassName = embedded ? 'inline-flex items-center gap-2 text-xs text-slate-500' : 'inline-flex items-center gap-2 text-xs text-gray-500'

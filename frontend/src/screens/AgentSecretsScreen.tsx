@@ -8,6 +8,8 @@ import { useSecretCrud } from '../components/secrets/useSecretCrud'
 import { SettingsBanner } from '../components/agentSettings/SettingsBanner'
 import { getSettingsSurfaceClassName } from '../components/common/SettingsSurface'
 import { EmbeddedAgentShellBackButton } from '../components/agentChat/EmbeddedAgentShellBackButton'
+import { SettingsActionButton } from '../components/agentSettings/SettingsControls'
+import { InlineStatusBanner } from '../components/common/InlineStatusBanner'
 
 type AgentSecretsScreenProps = {
   agentId: string
@@ -94,14 +96,10 @@ export function AgentSecretsScreen({
         eyebrow="Agent secrets"
         title={agentName}
         actions={(
-          <button
-            type="button"
-            onClick={handleCreate}
-            className="inline-flex w-full items-center justify-center gap-x-2 rounded-lg border border-blue-300/40 bg-blue-950/20 px-4 py-2 text-sm font-medium text-blue-100 transition-colors hover:border-blue-200 hover:bg-blue-900/30 focus:outline-none sm:w-auto"
-          >
+          <SettingsActionButton tone="primary" responsive onClick={handleCreate}>
             <Plus className="w-4 h-4" />
             Add Secret
-          </button>
+          </SettingsActionButton>
         )}
       />
 
@@ -112,14 +110,10 @@ export function AgentSecretsScreen({
 
       {/* Banners */}
       {banner && (
-        <div className="rounded-lg border border-green-300/30 bg-green-950/20 px-4 py-3 text-sm text-green-100">
-          {banner}
-        </div>
+        <InlineStatusBanner variant="success" surface="embedded">{banner}</InlineStatusBanner>
       )}
       {(errorBanner || listError) && (
-        <div className="rounded-lg border border-red-300/30 bg-red-950/20 px-4 py-3 text-sm text-red-100">
-          {errorBanner || listError}
-        </div>
+        <InlineStatusBanner variant="error" surface="embedded">{errorBanner || listError}</InlineStatusBanner>
       )}
 
       {/* Loading */}
@@ -173,20 +167,21 @@ export function AgentSecretsScreen({
                   </p>
                 </div>
                 {onOpenRequests ? (
-                  <button
+                  <SettingsActionButton
                     type="button"
                     onClick={onOpenRequests}
-                    className="inline-flex items-center gap-x-2 rounded-lg border border-indigo-300/40 bg-indigo-950/20 px-3 py-2 text-sm font-medium text-indigo-100 hover:border-indigo-200 hover:bg-indigo-900/30"
+                    tone="primary"
                   >
                     Provide Values
-                  </button>
+                  </SettingsActionButton>
                 ) : (
-                  <a
+                  <SettingsActionButton
+                    as="a"
                     href={requestUrl}
-                    className="inline-flex items-center gap-x-2 rounded-lg border border-indigo-300/40 bg-indigo-950/20 px-3 py-2 text-sm font-medium text-indigo-100 hover:border-indigo-200 hover:bg-indigo-900/30"
+                    tone="primary"
                   >
                     Provide Values
-                  </a>
+                  </SettingsActionButton>
                 )}
               </div>
               <div className="divide-y divide-slate-200/15">

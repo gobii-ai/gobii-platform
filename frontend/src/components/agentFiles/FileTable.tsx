@@ -5,6 +5,7 @@ import { type ColumnDef, type OnChangeFn, type RowSelectionState, getCoreRowMode
 import { ArrowDownToLine, ArrowUp, ChevronRight, FileText, Folder, Trash2, UploadCloud } from 'lucide-react'
 
 import { TanStackTableShell, type TanStackTableBodyMessage } from '../common/TanStackTableShell'
+import { getSettingsActionButtonClassName } from '../agentSettings/SettingsControls'
 import type { FileDragAndDropHandlers } from './useFileDragAndDrop'
 import type { AgentFsNode } from './types'
 import { formatBytes, formatTimestamp } from './utils'
@@ -94,9 +95,9 @@ export function FileTable({
   const tableTextMutedClassName = 'text-slate-300'
   const folderBadgeClassName = 'border border-blue-300/20 bg-blue-950/30 text-blue-200'
   const fileBadgeClassName = 'border border-emerald-300/20 bg-emerald-950/30 text-emerald-200'
-  const folderUploadButtonClassName = `inline-flex items-center gap-2 rounded-lg border border-blue-300/40 bg-blue-950/20 px-3 py-1.5 text-xs font-semibold text-blue-100 transition ${isBusy ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:border-blue-200 hover:bg-blue-900/30'}`
-  const downloadButtonClassName = 'inline-flex items-center gap-2 rounded-lg border border-blue-300/40 bg-blue-950/20 px-3 py-1.5 text-xs font-semibold text-blue-100 transition hover:border-blue-200 hover:bg-blue-900/30'
-  const deleteButtonClassName = 'inline-flex items-center gap-2 rounded-lg border border-rose-300/40 bg-rose-950/20 px-3 py-1.5 text-xs font-semibold text-rose-100 transition hover:border-rose-200 hover:bg-rose-900/30'
+  const folderUploadButtonClassName = getSettingsActionButtonClassName({ tone: 'primary', size: 'sm', className: isBusy ? 'cursor-not-allowed opacity-60' : 'cursor-pointer' })
+  const downloadButtonClassName = getSettingsActionButtonClassName({ tone: 'primary', size: 'sm' })
+  const deleteButtonClassName = getSettingsActionButtonClassName({ tone: 'danger', size: 'sm' })
   const columns = useMemo<ColumnDef<AgentFsNode>[]>(() => {
     const baseColumns: ColumnDef<AgentFsNode>[] = []
     if (showSelection) {

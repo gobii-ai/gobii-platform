@@ -16,6 +16,7 @@ import {
   embeddedTableRowClassName,
 } from '../components/agentSettings/embeddedTablePrimitives'
 import { SettingsBanner } from '../components/agentSettings/SettingsBanner'
+import { SettingsActionButton, SettingsStatusBadge } from '../components/agentSettings/SettingsControls'
 import { AsyncActionConfirmDialog } from '../components/common/ActionConfirmDialog'
 import { FormField, TextInput } from '../components/common/FormControls'
 import { InlineStatusBanner } from '../components/common/InlineStatusBanner'
@@ -119,13 +120,9 @@ function CreatedApiKeyModal({
   }
 
   const footer = (
-    <button
-      type="button"
-      className="inline-flex w-full justify-center rounded-md border border-transparent bg-blue-600 px-4 py-2 text-base font-medium text-white shadow-sm transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 sm:w-auto sm:text-sm"
-      onClick={onClose}
-    >
+    <SettingsActionButton surface="standalone" tone="primary" responsive onClick={onClose}>
       Done
-    </button>
+    </SettingsActionButton>
   )
 
   return (
@@ -144,14 +141,14 @@ function CreatedApiKeyModal({
         <div className="rounded-lg border border-slate-200 bg-slate-950 p-3">
           <code className="block break-all font-mono text-sm text-slate-100">{created.rawKey}</code>
         </div>
-        <button
-          type="button"
+        <SettingsActionButton
+          surface="standalone"
+          tone="primary"
           onClick={handleCopy}
-          className="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-700 transition hover:bg-blue-100"
         >
           {copied ? <Check className="h-4 w-4" /> : <Clipboard className="h-4 w-4" />}
           {copied ? 'Copied' : 'Copy Key'}
-        </button>
+        </SettingsActionButton>
       </div>
     </Modal>
   )
@@ -254,14 +251,10 @@ export function ApiKeysScreen() {
         title="API Keys"
         subtitle={subtitle}
         actions={canManage && emailVerified ? (
-          <button
-            type="button"
-            onClick={openCreateModal}
-            className="inline-flex w-full items-center justify-center gap-x-2 rounded-lg border border-blue-300/40 bg-blue-950/20 px-4 py-2 text-sm font-medium text-blue-100 transition-colors hover:border-blue-200 hover:bg-blue-900/30 focus:outline-none sm:w-auto"
-          >
+          <SettingsActionButton tone="primary" responsive onClick={openCreateModal}>
             <Plus className="h-4 w-4" />
             Create New Key
-          </button>
+          </SettingsActionButton>
         ) : null}
       />
 
@@ -331,12 +324,9 @@ export function ApiKeysScreen() {
                     <td className={embeddedTableCellClassName}>{formatDate(apiKey.created_at)}</td>
                     <td className={embeddedTableCellClassName}>{formatDate(apiKey.last_used_at)}</td>
                     <td className={embeddedTableCellClassName}>
-                      <span className={apiKey.is_active
-                        ? 'inline-flex rounded-full border border-green-300/30 bg-green-950/20 px-2 py-0.5 text-xs font-medium text-green-100'
-                        : 'inline-flex rounded-full border border-red-300/30 bg-red-950/20 px-2 py-0.5 text-xs font-medium text-red-100'}
-                      >
+                      <SettingsStatusBadge tone={apiKey.is_active ? 'success' : 'danger'} className="px-2 py-0.5">
                         {apiKey.is_active ? 'Active' : 'Revoked'}
-                      </span>
+                      </SettingsStatusBadge>
                     </td>
                     {canManage ? (
                       <td className={`${embeddedTableCellClassName} text-right`}>

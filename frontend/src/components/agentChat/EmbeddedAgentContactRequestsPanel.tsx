@@ -4,6 +4,7 @@ import { AlertTriangle, Check, Mail, Phone, X } from 'lucide-react'
 
 import { fetchContactRequests, resolveContactRequests, type PendingActionMutationResult } from '../../api/agentChat'
 import { SettingsBanner } from '../agentSettings/SettingsBanner'
+import { getSettingsActionButtonClassName } from '../agentSettings/SettingsControls'
 import { InlineStatusBanner } from '../common/InlineStatusBanner'
 import { getSettingsSurfaceClassName } from '../common/SettingsSurface'
 import type { PendingContactRequest } from '../../types/agentChat'
@@ -197,7 +198,7 @@ export function EmbeddedAgentContactRequestsPanel({
                 <button
                   type="button"
                   onClick={allSelected ? clearSelected : selectAll}
-                  className="rounded-lg border border-slate-200/25 bg-slate-900/35 px-3 py-2 text-sm font-medium text-slate-100 transition-colors hover:border-slate-100/35 hover:bg-slate-900/55"
+                  className={getSettingsActionButtonClassName()}
                 >
                   {allSelected ? 'Clear all' : 'Select all'}
                 </button>
@@ -205,7 +206,7 @@ export function EmbeddedAgentContactRequestsPanel({
                   type="button"
                   onClick={() => void resolveRequests('decline', selectedRequests)}
                   disabled={busy || selectedRequests.length === 0}
-                  className="inline-flex items-center gap-2 rounded-lg border border-rose-300/25 bg-rose-950/35 px-3 py-2 text-sm font-semibold text-rose-100 transition-colors hover:border-rose-200/40 hover:bg-rose-900/50 disabled:cursor-not-allowed disabled:opacity-50"
+                  className={getSettingsActionButtonClassName({ tone: 'danger' })}
                 >
                   <X className="h-4 w-4" aria-hidden="true" />
                   Deny selected
@@ -214,7 +215,7 @@ export function EmbeddedAgentContactRequestsPanel({
                   type="button"
                   onClick={() => void resolveRequests('approve', selectedRequests)}
                   disabled={busy || selectedRequests.length === 0 || selectedApprovalBlocked}
-                  className="inline-flex items-center gap-2 rounded-lg border border-emerald-300/25 bg-emerald-900/50 px-3 py-2 text-sm font-semibold text-emerald-50 transition-colors hover:border-emerald-200/40 hover:bg-emerald-900/70 disabled:cursor-not-allowed disabled:opacity-50"
+                  className={getSettingsActionButtonClassName({ tone: 'success' })}
                 >
                   <Check className="h-4 w-4" aria-hidden="true" />
                   Approve selected
@@ -274,7 +275,7 @@ export function EmbeddedAgentContactRequestsPanel({
                               type="button"
                               onClick={() => void resolveRequests('decline', [request])}
                               disabled={busy}
-                              className="inline-flex items-center gap-2 rounded-lg border border-rose-300/25 bg-rose-950/35 px-3 py-2 text-sm font-semibold text-rose-100 transition-colors hover:border-rose-200/40 hover:bg-rose-900/50 disabled:cursor-not-allowed disabled:opacity-50"
+                              className={getSettingsActionButtonClassName({ tone: 'danger' })}
                             >
                               <X className="h-4 w-4" aria-hidden="true" />
                               Deny
@@ -283,7 +284,7 @@ export function EmbeddedAgentContactRequestsPanel({
                               type="button"
                               onClick={() => void resolveRequests('approve', [request])}
                               disabled={busy || smsApprovalBlocked}
-                              className="inline-flex items-center gap-2 rounded-lg border border-emerald-300/25 bg-emerald-900/50 px-3 py-2 text-sm font-semibold text-emerald-50 transition-colors hover:border-emerald-200/40 hover:bg-emerald-900/70 disabled:cursor-not-allowed disabled:opacity-50"
+                              className={getSettingsActionButtonClassName({ tone: 'success' })}
                             >
                               <Check className="h-4 w-4" aria-hidden="true" />
                               Approve

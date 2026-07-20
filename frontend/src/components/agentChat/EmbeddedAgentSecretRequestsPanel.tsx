@@ -6,6 +6,7 @@ import { fulfillRequestedSecrets, removeRequestedSecrets } from '../../api/agent
 import { HttpError } from '../../api/http'
 import { fetchAgentSecrets, type AgentSecretListResponse, type RequestedSecretDTO } from '../../api/secrets'
 import { SettingsBanner } from '../agentSettings/SettingsBanner'
+import { getSettingsActionButtonClassName } from '../agentSettings/SettingsControls'
 import { InlineStatusBanner } from '../common/InlineStatusBanner'
 import { getSettingsSurfaceClassName } from '../common/SettingsSurface'
 import { EmbeddedAgentShellBackButton } from './EmbeddedAgentShellBackButton'
@@ -250,7 +251,7 @@ export function EmbeddedAgentSecretRequestsPanel({
               <button
                 type="button"
                 onClick={onOpenSecrets}
-                className="rounded-lg border border-blue-300/35 bg-blue-950/35 px-3 py-2 text-sm font-semibold text-blue-100 transition-colors hover:border-blue-200/50 hover:bg-blue-900/45"
+                className={getSettingsActionButtonClassName({ tone: 'primary' })}
               >
                 Manage secrets
               </button>
@@ -268,7 +269,7 @@ export function EmbeddedAgentSecretRequestsPanel({
                     type="button"
                     onClick={allSelected ? clearSelected : selectAll}
                     disabled={busy}
-                    className="rounded-lg border border-slate-200/25 bg-slate-900/35 px-3 py-2 text-sm font-medium text-slate-100 transition-colors hover:border-slate-100/35 hover:bg-slate-900/55 disabled:cursor-not-allowed disabled:opacity-50"
+                    className={getSettingsActionButtonClassName()}
                   >
                     {allSelected ? 'Clear all' : 'Select all'}
                   </button>
@@ -276,7 +277,7 @@ export function EmbeddedAgentSecretRequestsPanel({
                     type="button"
                     onClick={() => void handleRemove(selectedRequests.map((request) => request.id))}
                     disabled={busy || selectedRequests.length === 0}
-                    className="inline-flex items-center gap-2 rounded-lg border border-rose-300/25 bg-rose-950/35 px-3 py-2 text-sm font-semibold text-rose-100 transition-colors hover:border-rose-200/40 hover:bg-rose-900/50 disabled:cursor-not-allowed disabled:opacity-50"
+                    className={getSettingsActionButtonClassName({ tone: 'danger' })}
                   >
                     <Trash2 className="h-4 w-4" aria-hidden="true" />
                     {busyAction === 'remove' ? 'Removing...' : `Remove selected${selectedRequests.length ? ` (${selectedRequests.length})` : ''}`}
@@ -285,7 +286,7 @@ export function EmbeddedAgentSecretRequestsPanel({
                     type="button"
                     onClick={() => void handleSave()}
                     disabled={busy}
-                    className="inline-flex items-center gap-2 rounded-lg border border-emerald-300/25 bg-emerald-900/50 px-3 py-2 text-sm font-semibold text-emerald-50 transition-colors hover:border-emerald-200/40 hover:bg-emerald-900/70 disabled:cursor-not-allowed disabled:opacity-50"
+                    className={getSettingsActionButtonClassName({ tone: 'success' })}
                   >
                     {busyAction === 'save' ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Check className="h-4 w-4" aria-hidden="true" />}
                     {busyAction === 'save' ? 'Saving...' : 'Save values'}
@@ -350,7 +351,7 @@ export function EmbeddedAgentSecretRequestsPanel({
                             type="button"
                             onClick={() => void handleRemove([request.id])}
                             disabled={busy}
-                            className="inline-flex shrink-0 items-center gap-2 rounded-lg border border-rose-300/25 bg-rose-950/35 px-3 py-2 text-sm font-semibold text-rose-100 transition-colors hover:border-rose-200/40 hover:bg-rose-900/50 disabled:cursor-not-allowed disabled:opacity-50"
+                            className={getSettingsActionButtonClassName({ tone: 'danger', className: 'shrink-0' })}
                           >
                             <Trash2 className="h-4 w-4" aria-hidden="true" />
                             Remove
