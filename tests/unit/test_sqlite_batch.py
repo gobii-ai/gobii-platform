@@ -250,8 +250,9 @@ class SqliteBatchToolTests(TestCase):
         self.assertIn("PRIMARY KEY/UNIQUE identity and provenance", description)
         self.assertIn("MUST use explicit CREATE TABLE", description)
         self.assertIn("CTAS is disposable only", description)
-        self.assertIn("all relevant __tool_results", description)
-        self.assertIn("one INSERT ... SELECT/json_each query", description)
+        self.assertIn("For 2+ relevant __tool_results, query together via IN/tool_name", description)
+        self.assertIn("never call sqlite_batch once per result_id", description)
+        self.assertIn("Model with INSERT ... SELECT/json_each, not copied rows", description)
         self.assertIn("prefer a custom tool writing to SQLite", description)
         self.assertIn("no ATTACH", description)
 
@@ -450,7 +451,7 @@ class SqliteBatchToolTests(TestCase):
 
             rows = ",".join(
                 f"({index}, 'https://source.example.test/{'a' if index % 2 else 'b'}')"
-                for index in range(12)
+                for index in range(4)
             )
             out = execute_sqlite_batch(
                 self.agent,
@@ -466,6 +467,60 @@ class SqliteBatchToolTests(TestCase):
                 out.get("advisories", [{}])[0].get("code"),
                 "bulk_manual_working_table_from_visible_results",
             )
+            conn = sqlite3.connect(db_path)
+            try:
+                table = conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name='copied_rows'"
+                ).fetchone()
+            finally:
+                conn.close()
+            self.assertIsNone(table)
+
+    def test_bulk_manual_tool_result_select_copy_is_rejected_before_execution(self):
+        with self._with_temp_db() as (db_path, _token, _tmp):
+            conn = sqlite3.connect(db_path)
+            try:
+                conn.execute("CREATE TABLE __tool_results (result_id TEXT PRIMARY KEY, result_text TEXT)")
+                conn.executemany(
+                    "INSERT INTO __tool_results (result_id, result_text) VALUES (?, ?)",
+                    [
+                        ("r1", "source https://source.example.test/a"),
+                        ("r2", "source https://source.example.test/b"),
+                    ],
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            rows = [
+                f"SELECT {index}, 'https://source.example.test/{'a' if index % 2 else 'b'}'"
+                for index in range(12)
+            ]
+            union_rows = " UNION ALL ".join(rows)
+            json_a = json.dumps([{"id": index} for index in range(2)])
+            json_b = json.dumps([{"id": index} for index in range(2, 4)])
+            queries = (
+                f"CREATE TABLE copied_rows(id INTEGER, label TEXT); INSERT INTO copied_rows {union_rows};",
+                "CREATE TABLE copied_rows(id INTEGER, label TEXT);"
+                + ";".join(f"INSERT INTO copied_rows {row}" for row in rows),
+                f"CREATE TABLE copied_rows AS {union_rows};",
+                "CREATE TABLE copied_rows(id INTEGER, label TEXT);"
+                f"INSERT INTO copied_rows SELECT json_extract(value, '$.id'), 'https://source.example.test/a' FROM json_each('{json_a}');"
+                f"INSERT INTO copied_rows SELECT json_extract(value, '$.id'), 'https://source.example.test/b' FROM json_each('{json_b}');",
+            )
+            for sql in queries:
+                with self.subTest(sql=sql[:80]):
+                    out = execute_sqlite_batch(
+                        self.agent,
+                        {"sql": sql, "will_continue_work": True},
+                    )
+                    self.assertEqual(out.get("status"), "error")
+                    self.assertTrue(out.get("retryable"))
+                    self.assertEqual(
+                        out.get("advisories", [{}])[0].get("code"),
+                        "bulk_manual_working_table_from_visible_results",
+                    )
+
             conn = sqlite3.connect(db_path)
             try:
                 table = conn.execute(
@@ -514,6 +569,98 @@ class SqliteBatchToolTests(TestCase):
                 "bulk_manual_working_table_from_visible_results",
             )
 
+            literal_rows = " UNION ALL ".join(
+                f"SELECT {index}, 'month-{index}'" for index in range(1, 13)
+            )
+            literal_out = execute_sqlite_batch(
+                self.agent,
+                {
+                    "sql": (
+                        f"CREATE TABLE literal_months AS {literal_rows};"
+                        "SELECT COUNT(*) AS count FROM literal_months;"
+                        "-- unrelated notes https://source.example.test/a https://source.example.test/b"
+                    ),
+                    "will_continue_work": True,
+                },
+            )
+            self.assertEqual(literal_out.get("status"), "ok")
+            self.assertEqual(literal_out["results"][-1]["result"], [{"count": 12}])
+
+            json_rows = json.dumps([{"month": index} for index in range(1, 13)])
+            json_out = execute_sqlite_batch(
+                self.agent,
+                {
+                    "sql": (
+                        "CREATE TABLE json_months AS SELECT json_extract(value, '$.month') AS month "
+                        f"FROM json_each('{json_rows}'); SELECT COUNT(*) AS count FROM json_months;"
+                        "-- unrelated notes https://source.example.test/a https://source.example.test/b"
+                    ),
+                    "will_continue_work": True,
+                },
+            )
+            self.assertEqual(json_out.get("status"), "ok")
+            self.assertEqual(json_out["results"][-1]["result"], [{"count": 12}])
+
+    def test_derived_union_is_not_treated_as_literal_copy(self):
+        sql = " UNION ALL ".join(
+            f"SELECT id, 'https://source.example.test/{'a' if index % 2 else 'b'}' FROM local_source"
+            for index in range(6)
+        )
+        advisories = build_tool_result_query_advisories(
+            [f"INSERT INTO copied_rows {sql}"],
+            available_tool_result_rows=2,
+            tool_result_payloads=(
+                "source https://source.example.test/a",
+                "source https://source.example.test/b",
+            ),
+        )
+
+        self.assertNotIn(
+            "bulk_manual_working_table_from_visible_results",
+            {advisory.code for advisory in advisories},
+        )
+
+    def test_literal_json_copy_boundaries(self):
+        payloads = (
+            "source https://source.example.test/a",
+            "source https://source.example.test/b",
+        )
+        json_a = json.dumps([{"id": index} for index in range(1)])
+        json_b = json.dumps([{"id": index} for index in range(1, 3)])
+        fake_json = json.dumps([{"id": index} for index in range(12)])
+        allowed_sql = (
+            "CREATE TABLE copied_rows(id INTEGER, source_url TEXT);"
+            "INSERT INTO copied_rows VALUES "
+            "(1, 'https://source.example.test/a'),"
+            "(2, 'https://source.example.test/b'),"
+            "(3, 'https://source.example.test/a');",
+            "CREATE TABLE copied_rows(id INTEGER, source_url TEXT);"
+            f"INSERT INTO copied_rows SELECT value, 'https://source.example.test/a' FROM json_each('{json_a}');"
+            f"INSERT INTO copied_rows SELECT value, 'https://source.example.test/b' FROM json_each('{json_b}');",
+            "INSERT INTO copied_rows "
+            "SELECT value, 'https://source.example.test/a', 'https://source.example.test/b' "
+            "FROM __tool_results, json_each(result_json);",
+            "INSERT INTO copied_rows /* json_each('"
+            + fake_json
+            + "') */ SELECT 1, 'https://source.example.test/a', 'https://source.example.test/b';",
+            "INSERT INTO copied_rows SELECT 1, 'https://source.example.test/a', "
+            "'https://source.example.test/b', 'json_each(''"
+            + fake_json
+            + "'')';",
+        )
+
+        for sql in allowed_sql:
+            with self.subTest(sql=sql[:100]):
+                advisories = build_tool_result_query_advisories(
+                    [sql],
+                    available_tool_result_rows=2,
+                    tool_result_payloads=payloads,
+                )
+                self.assertNotIn(
+                    "bulk_manual_working_table_from_visible_results",
+                    {advisory.code for advisory in advisories},
+                )
+
     def test_per_result_import_loop_is_rejected_before_execution(self):
         with self._with_temp_db() as (db_path, _token, _tmp):
             conn = sqlite3.connect(db_path)
@@ -554,6 +701,103 @@ class SqliteBatchToolTests(TestCase):
             finally:
                 conn.close()
             self.assertIsNone(table)
+
+    def test_derived_result_loop_is_rejected_before_execution(self):
+        with self._with_temp_db() as (db_path, _token, _tmp):
+            conn = sqlite3.connect(db_path)
+            try:
+                conn.execute(
+                    "CREATE TABLE __tool_results (result_id TEXT PRIMARY KEY, result_text TEXT)"
+                )
+                conn.executemany(
+                    "INSERT INTO __tool_results (result_id, result_text) VALUES (?, ?)",
+                    [(f"r{index}", f"page {index}") for index in range(1, 5)],
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            out = execute_sqlite_batch(
+                self.agent,
+                {
+                    "sql": (
+                        "CREATE TABLE product_pages AS SELECT result_id, result_text FROM __tool_results "
+                        "WHERE result_id IN ('r1','r2','r3','r4');"
+                        + ";".join(
+                            "SELECT substr(result_text,1,2000) FROM product_pages "
+                            f"WHERE result_id='r{index}'"
+                            for index in range(1, 5)
+                        )
+                    ),
+                    "will_continue_work": True,
+                },
+            )
+
+            self.assertEqual(out.get("status"), "error")
+            self.assertTrue(out.get("retryable"))
+            self.assertEqual(out.get("advisories", [{}])[0].get("code"), "tool_result_row_loop")
+            conn = sqlite3.connect(db_path)
+            try:
+                table = conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name='product_pages'"
+                ).fetchone()
+            finally:
+                conn.close()
+            self.assertIsNone(table)
+
+    def test_derived_result_loop_boundaries(self):
+        derived = (
+            "CREATE TABLE product_pages AS SELECT result_id, result_text FROM __tool_results "
+            "WHERE tool_name='http_request';"
+        )
+        allowed_sql = (
+            "SELECT result_text FROM product_pages WHERE result_id='r1';"
+            "SELECT result_text FROM product_pages WHERE result_id='r2';"
+            + derived,
+            derived + "SELECT result_text FROM product_pages WHERE result_id='r1';",
+            derived + "SELECT result_text FROM product_pages WHERE result_id IN ('r1','r2');",
+            derived
+            + "SELECT * FROM unrelated WHERE result_id='r1';"
+            + "SELECT * FROM unrelated WHERE result_id='r2';",
+            derived
+            + "SELECT * FROM product_pages WHERE entity_id='one';"
+            + "SELECT * FROM product_pages WHERE entity_id='two';",
+        )
+        blocked_sql = (
+            derived
+            + "SELECT result_text FROM product_pages WHERE result_id='r1';"
+            + "SELECT result_text FROM product_pages WHERE result_id='r2';",
+            derived
+            + "SELECT result_text FROM product_pages WHERE result_id IN ('r1');"
+            + "SELECT result_text FROM product_pages WHERE result_id IN ('r2');",
+        )
+
+        for sql in allowed_sql:
+            with self.subTest(kind="allowed", sql=sql):
+                summary = summarize_sqlite_tool_result_sql([sql])
+                self.assertLess(summary.single_derived_result_filters, 2)
+                self.assertFalse(
+                    any(
+                        advisory.blocking and advisory.code == "tool_result_row_loop"
+                        for advisory in build_tool_result_query_advisories(
+                            [sql],
+                            available_tool_result_rows=4,
+                        )
+                    )
+                )
+        for sql in blocked_sql:
+            with self.subTest(kind="blocked", sql=sql):
+                summary = summarize_sqlite_tool_result_sql([sql])
+                self.assertEqual(summary.single_derived_result_filters, 2)
+                self.assertTrue(
+                    any(
+                        advisory.blocking and advisory.code == "tool_result_row_loop"
+                        for advisory in build_tool_result_query_advisories(
+                            [sql],
+                            available_tool_result_rows=4,
+                        )
+                    )
+                )
 
     def test_single_result_import_warns_and_comments_do_not_trigger_guard(self):
         one_import = build_tool_result_query_advisories(
@@ -690,6 +934,40 @@ class SqliteBatchToolTests(TestCase):
         self.assertEqual(summary.sqlite_call_count, 1)
         self.assertEqual(summary.statement_count, 2)
         self.assertEqual(summary.smart_tool_result_queries, 1)
+
+    def test_bounded_aggregate_text_projection_counts_as_smart(self):
+        bounded = summarize_sqlite_tool_result_sql(
+            [
+                "SELECT result_id, substr(result_text, 1, 2000) AS head, "
+                "substr(result_text, -2000) AS tail FROM __tool_results "
+                "WHERE result_id IN ('r1', 'r2')"
+            ]
+        )
+        bounded_suffix = summarize_sqlite_tool_result_sql(
+            [
+                "SELECT substring(t.result_text, -500) FROM __tool_results t "
+                "WHERE t.tool_name='http_request'"
+            ]
+        )
+        non_smart_sql = (
+            "SELECT result_id, result_text FROM __tool_results WHERE tool_name='http_request'",
+            "SELECT substr(result_text, 1) FROM __tool_results WHERE tool_name='http_request'",
+            "SELECT substr(result_text, 1, 2000, 1) FROM __tool_results WHERE tool_name='http_request'",
+            "SELECT result_text, substr(result_text, 1, 2000) FROM __tool_results WHERE tool_name='http_request'",
+            "SELECT substr(result_text, 1, 2000) FROM __tool_results WHERE result_id='r1'",
+            "SELECT 'substr(result_text, 1, 2000)' FROM __tool_results WHERE tool_name='http_request'",
+            "SELECT result_id FROM __tool_results WHERE tool_name='http_request' -- substr(result_text, 1, 2000)",
+        )
+
+        self.assertEqual(bounded.uses_bounded_text_projection, 1)
+        self.assertEqual(bounded.smart_tool_result_queries, 1)
+        self.assertEqual(bounded_suffix.smart_tool_result_queries, 1)
+        for sql in non_smart_sql:
+            with self.subTest(sql=sql):
+                self.assertEqual(
+                    summarize_sqlite_tool_result_sql([sql]).smart_tool_result_queries,
+                    0,
+                )
 
     def test_attach_database_is_blocked(self):
         with self._with_temp_db() as (_db_path, _token, tmp):

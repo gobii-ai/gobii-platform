@@ -575,48 +575,6 @@ def has_single_recipient_request(requests):
     return any(term in question for term in ("email", "address", "recipient", "client", "contact"))
 
 
-def _delivered_tool_result(call):
-    result = call.result
-    if isinstance(result, dict):
-        payload = result
-    elif isinstance(result, str):
-        try:
-            payload = json.loads(result or "{}")
-        except json.JSONDecodeError:
-            return False
-    else:
-        return False
-    return isinstance(payload, dict) and payload.get("status") in {"ok", "sent", "success"}
-
-
-def _tool_call_body(call):
-    params = call.tool_params or {}
-    return str(params.get("body") or "")
-
-
-def _is_bounded_planning_chat_question(call):
-    if call.tool_name != "send_chat_message" or not _delivered_tool_result(call):
-        return False
-    body = _tool_call_body(call)
-    question_count = body.count("?")
-    if not 1 <= question_count <= 3:
-        return False
-    lowered = body.lower()
-    return any(
-        term in lowered
-        for term in (
-            "competitor",
-            "industry",
-            "space",
-            "updates",
-            "track",
-            "monitor",
-            "scope",
-            "business",
-        )
-    )
-
-
 class BehaviorMicroScenario(EvalScenario, ScenarioExecutionTools):
     tier = "core"
     category = "agent_behavior"
@@ -827,14 +785,25 @@ class BehaviorMicroScenario(EvalScenario, ScenarioExecutionTools):
 @register_scenario
 class PlanningFirstTurnAsksBoundedQuestionsScenario(BehaviorMicroScenario):
     slug = PLANNING_FIRST_TURN_ASKS_BOUNDED_QUESTIONS
-    description = "Planning mode should ask 1-3 tracked questions, using options when choices are real, and not start work."
+    description = (
+        "Planning mode should ask 1-3 tracked questions, leave them pending for an answer, and not start work."
+    )
     category = "planning"
     tags = ("agent_behavior", "micro", "planning", "human_input")
     tasks = [
         ScenarioTask(name="inject_prompt", assertion_type="manual"),
         ScenarioTask(name="verify_bounded_questions", assertion_type="manual"),
+        ScenarioTask(name="verify_questions_remain_pending", assertion_type="manual"),
         ScenarioTask(name="verify_no_substantive_work", assertion_type="manual"),
     ]
+
+    @staticmethod
+    def _eval_stop_policy():
+        return {
+            "ignore_sqlite_agent_config_mutations": False,
+            "stop_on_tool_names": list(SUBSTANTIVE_WORK_TOOL_NAMES | PLANNING_MUTATION_TOOL_NAMES),
+            "stop_on_sqlite_agent_config_mutation": True,
+        }
 
     def run(self, run_id, agent_id):
         self._set_planning_state(agent_id, PersistentAgent.PlanningState.PLANNING)
@@ -850,12 +819,7 @@ class PlanningFirstTurnAsksBoundedQuestionsScenario(BehaviorMicroScenario):
                 trigger_processing=True,
                 eval_run_id=run_id,
                 mock_config=self._planning_guardrail_mocks(),
-                eval_stop_policy={
-                    "ignore_sqlite_agent_config_mutations": False,
-                    "stop_on_human_input_request": True,
-                    "stop_on_tool_names": list(SUBSTANTIVE_WORK_TOOL_NAMES | PLANNING_MUTATION_TOOL_NAMES),
-                    "stop_on_sqlite_agent_config_mutation": True,
-                },
+                eval_stop_policy=self._eval_stop_policy(),
             )
         self.record_task_result(
             run_id,
@@ -868,11 +832,6 @@ class PlanningFirstTurnAsksBoundedQuestionsScenario(BehaviorMicroScenario):
 
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="verify_bounded_questions")
         requests = get_pending_human_input_requests(agent_id, run_id, after=inbound.timestamp)
-        chat_question_calls = [
-            call
-            for call in get_tool_calls_for_run(run_id, after=inbound.timestamp, tool_names={"send_chat_message"})
-            if _is_bounded_planning_chat_question(call)
-        ]
         if planning_requests_are_bounded(requests):
             self.record_task_result(
                 run_id,
@@ -881,15 +840,6 @@ class PlanningFirstTurnAsksBoundedQuestionsScenario(BehaviorMicroScenario):
                 task_name="verify_bounded_questions",
                 observed_summary=f"Agent asked {len(requests)} bounded tracked planning question(s).",
             )
-        elif len(chat_question_calls) == 1:
-            self.record_task_result(
-                run_id,
-                None,
-                EvalRunTask.Status.PASSED,
-                task_name="verify_bounded_questions",
-                observed_summary="Agent asked a bounded planning clarification in chat.",
-                artifacts={"step": chat_question_calls[0].step},
-            )
         else:
             self.record_task_result(
                 run_id,
@@ -897,9 +847,50 @@ class PlanningFirstTurnAsksBoundedQuestionsScenario(BehaviorMicroScenario):
                 EvalRunTask.Status.FAILED,
                 task_name="verify_bounded_questions",
                 observed_summary=(
-                    f"Expected 1-3 bounded planning requests or one bounded chat clarification; "
-                    f"found {len(requests)} pending request(s) with bounded_modes={planning_requests_are_bounded(requests)} "
-                    f"and {len(chat_question_calls)} bounded chat clarification(s)."
+                    f"Expected 1-3 bounded tracked planning requests to remain pending; "
+                    f"found {len(requests)} with bounded_modes={planning_requests_are_bounded(requests)}."
+                ),
+            )
+
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.RUNNING,
+            task_name="verify_questions_remain_pending",
+        )
+        agent = PersistentAgent.objects.get(id=agent_id)
+        all_requests = list(
+            PersistentAgentHumanInputRequest.objects.filter(
+                agent_id=agent_id,
+                originating_step__eval_run_id=run_id,
+                created_at__gte=inbound.timestamp,
+            ).order_by("created_at", "id")
+        )
+        statuses = [request.status for request in all_requests]
+        if (
+            all_requests
+            and all(status == PersistentAgentHumanInputRequest.Status.PENDING for status in statuses)
+            and all(not request.is_expired() for request in all_requests)
+            and agent.planning_state == PersistentAgent.PlanningState.PLANNING
+        ):
+            self.record_task_result(
+                run_id,
+                None,
+                EvalRunTask.Status.PASSED,
+                task_name="verify_questions_remain_pending",
+                observed_summary=(
+                    f"All {len(all_requests)} planning question(s) remained pending after processing stopped."
+                ),
+            )
+        else:
+            self.record_task_result(
+                run_id,
+                None,
+                EvalRunTask.Status.FAILED,
+                task_name="verify_questions_remain_pending",
+                observed_summary=(
+                    "Planning questions did not remain answerable after the normal processing lifecycle; "
+                    f"planning_state={agent.planning_state}, request_statuses={statuses}."
                 ),
             )
 

@@ -656,17 +656,11 @@ def _get_sqlite_guidance() -> str:
     """Return the compact contract for data retrieval, storage, and analysis."""
     return (
         "## SQLite Data\n\n"
-        "Fetch new data with its source tool and answer small results directly. Use sqlite_batch for data already in "
-        "SQLite when large/truncated or needing filtering, joins, aggregation, charts, reuse, or domain logic. Model "
-        "sizable domains as keyed entities/events/relations; named sets keep coverage rows with status/fields/source; query "
-        "unresolved rows before reporting. Normalize parent/child data "
-        "(vendors/plans, accounts/events) with PRIMARY KEY/UNIQUE identity, useful indexes, and source provenance; put "
-        "logic in SQL and return only needed rows to context. Populate them from all relevant __tool_results rows with one "
-        "shaped INSERT ... SELECT/json_each query and an IN/tool_name filter; never filter result_id one at a time; never "
-        "make a table per result, copy visible tool rows into VALUES, or loop over result blobs. Use CTAS for one-off extracts; "
-        "named tables survive calls, TEMP tables do not. Copy identifiers, JSON paths, values, and URLs from schema, hints, "
-        "or results; inspect unknown structure once instead of inventing it. Use analysis_json/top_keys to locate payloads; "
-        "http_request JSON is under result_json $.content. Prefer result_json when its path is known, otherwise result_text.\n\n"
+        "Fetch new data with its source tool and answer small results directly. Use sqlite_batch for data already in SQLite when large/truncated or needing filtering, joins, aggregation, charts, reuse, or domain logic. Model "
+        "sizable domains and multi-fetch finite sets as keyed entities/events/relations with fields/status/source; query gaps before reporting. Only sourced blockers are unresolved. Normalize parent/child data "
+        "(vendors/plans, accounts/events) with PRIMARY KEY/UNIQUE identity, useful indexes, and source provenance; put logic in SQL and return only needed rows to context. Populate all relevant __tool_results via one shaped INSERT ... SELECT/json_each filtered by IN/tool_name; "
+        "extract fields in SQL, not literals. Never filter one result_id at a time, make a table per result, or loop over blobs. Use CTAS for one-off extracts; "
+        "named tables survive calls, TEMP tables do not. Copy identifiers, JSON paths, values, and URLs from schema, hints, or results; inspect unknown structure once instead of inventing it. Use analysis_json/top_keys to locate payloads; http_request JSON is under result_json $.content. Prefer result_json when its path is known, otherwise result_text.\n\n"
         "Snapshots:\n"
         "* __tool_results: result_id, tool_name, created_at, result_json, result_text, analysis_json, is_truncated, top_keys.\n"
         "* __messages: message_id, seq, timestamp, channel, is_outbound, from_address, to_address, subject, body, "
@@ -3108,7 +3102,7 @@ def add_budget_awareness_sections(
                 sections.append(
                     (
                         "iteration_warning",
-                        "Low iterations: never false-complete. Preserve work; name remaining scope and continue.",
+                        "Low iterations: never false-complete; carry unfinished scope into the next cycle.",
                         2,
                         True,
                     )
@@ -3766,7 +3760,7 @@ def _get_system_instruction(
         "Do not invent work, results, preferences, or personal experiences.\n\n"
 
         "## Output Rules\n\n"
-        "Keep chat/outreach light; give reports proportionate hierarchy. Reports comparing 4+ peers use one linked table with a detail URL per row unless incomparable. Bounded named sets: source every item; mark unresearched items unresolved. If blocked, label partial and name remaining scope. Ground facts, numbers, units, and URLs in tool results; never relabel/convert units unless asked. In record lists, link each name to its item/detail URL; feed/source-only links are insufficient. Present requested data directly; omit unrelated/unavailable fields and follow-up offers after simple facts, prices, statuses, or lookups. "
+        "Keep chat/outreach light. Owner reports on 4+ peers need resolved/total and one table with requested fields plus a source URL per row. In record lists, link each name to its item/detail URL; feed/source-only links are insufficient. For finite sets, grouped discovery isn't coverage: resolve/source each requested field. Label blockers partial; separate sourced unavailability from research gaps. Ground facts, numbers, units, and URLs in tool results; never relabel/convert units unless asked. Present requested data directly; omit unrelated/unavailable fields and follow-up offers after simple facts, prices, statuses, or lookups. "
         "Charts: create only when requested/materially useful. "
         "Paste create_chart result.inline/result.inline_html in the message; do not attach/read charts or invent paths, hashes, image tags, or <img> URLs. "
         "Use create_csv for tabular exports, create_pdf for PDFs, and create_file for other text/doc formats; create_file query mode must return exactly one row and one column.\n\n"
@@ -3820,10 +3814,10 @@ def _get_system_instruction(
         "Show requested detail, summarize overflow, and for multi-step research investigate only leads needed to satisfy the stated scope.\n\n"
 
         "## Bounded Current Research (CRITICAL)\n\n"
-        "For one-off latest/current company/batch/funding/pricing/product/news/status asks: use bounded research mode. Do one focused search or structured lookup; scrape 1-3 top sources if snippets are insufficient; then send one answer with takeaways and cite at least two distinct source URLs in a compact Sources section. After one result set plus 1-2 strong pages, final answer is next, not another query. Use at most one web search query unless empty/contradictory. Do not run alternate query variants, call update_plan, send progress-only messages, create files/charts, build SQLite, or keep searching once sources can answer. Escalate only for explicit deep/exhaustive work, market maps, exports, list-all, outreach, monitoring, or scope that truly needs it.\n\n"
+        "For one-off latest/current company/batch/funding/pricing/product/news/status asks except finite sets: use bounded research mode. Do one focused search or structured lookup; scrape 1-3 top sources if snippets are insufficient; then send one answer with takeaways and cite at least two distinct source URLs compactly. After one result set plus 1-2 strong pages, final answer is next, not another query. Use at most one web search query unless empty/contradictory. Do not run alternate query variants, call update_plan, send progress-only messages, create files/charts, build SQLite, or keep searching once sources can answer. Escalate only for explicit deep/exhaustive work, market maps, exports, list-all, outreach, monitoring, or scope that truly needs it.\n\n"
 
         "## Deep Research Source Budget (CRITICAL)\n\n"
-        "For explicit deep/exhaustive research, do not finalize from search results alone: after discovery, scrape/open at least 4 promising result URLs (or all useful URLs if fewer), then synthesize. Search snippets are leads, not citable sources. Start with one broad search, two if it misses an angle. For named sets, batch unresolved items when possible and reconcile coverage; scrape top pages, never repeat completed queries; stay in scope. If scrapes support the memo, final next with literal URLs; keep chat deep memos under about 5,000 chars unless asked otherwise.\n\n"
+        "For explicit deep/exhaustive research and finite-set coverage, do not finalize from search results: after discovery, scrape/open at least 4 promising URLs (or every useful URL if fewer), then synthesize. Snippets are leads, not sources. Start with one broad search, two if it misses an angle. For named sets, batch gaps, follow up misses, and reconcile coverage; never repeat a successful URL/query. If sources support the memo, final next with linked evidence; keep chat deep memos under about 5,000 chars unless asked otherwise.\n\n"
 
         "## Configuration Discipline (CRITICAL)\n\n"
         "Finished answers/briefings/charts/lookups/one-off research are not charter changes; never store transient facts, results, or guesses in __agent_config. "

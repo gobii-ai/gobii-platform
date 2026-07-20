@@ -115,6 +115,7 @@ from ..tools.custom_tool_names import CREATE_CUSTOM_TOOL_NAME
 from ..tools.plan import build_plan_snapshot, build_redundant_research_plan_skip_result, execute_update_plan
 from ..tools.planning import execute_end_planning
 from ..tools.runtime_execution_context import tool_execution_context
+from ..tools.sqlite_query_quality import summarize_sqlite_tool_result_sql
 from ..tools.sqlite_state import agent_sqlite_db, get_sqlite_db_path
 from ..tools.secure_credentials_request import execute_secure_credentials_request
 from ..tools.request_contact_permission import execute_request_contact_permission
@@ -1977,9 +1978,9 @@ def _should_skip_stale_planning_mode_after_terminal_delivery(
 ) -> bool:
     return (
         agent.planning_state == PersistentAgent.PlanningState.PLANNING
-        and not followup_required
-        and finalized_batch.terminal_message_delivery_ok
+        and not followup_required and finalized_batch.terminal_message_delivery_ok
         and not finalized_batch.human_input_request_ok
+        and not agent.human_input_requests.filter(status="pending").exclude(expires_at__lte=dj_timezone.now()).exists()
     )
 
 
@@ -2044,7 +2045,7 @@ def _should_continue_for_unanswered_inbound_after_tools(
         not finalized_batch.followup_required
         and finalized_batch.last_explicit_continue is False
         and finalized_batch.executed_non_message_action
-        and not finalized_batch.message_delivery_ok
+        and not (finalized_batch.message_delivery_ok or finalized_batch.human_input_request_ok)
         and _latest_inbound_message_needs_reply(agent)
     )
 
@@ -2307,6 +2308,22 @@ def _sqlite_batch_statements(tool_params: Dict[str, Any]) -> list[str]:
             continue
         statements.extend(statement.strip() for statement in sqlparse.split(raw_item) if statement.strip())
     return statements
+
+
+def _sqlite_single_result_read_call_count(tool_calls: list[Any]) -> int:
+    count = 0
+    for call in tool_calls:
+        if _get_tool_call_name(call) != "sqlite_batch":
+            continue
+        try:
+            _raw_args, tool_params = _parse_tool_call_params(_get_tool_call_arguments(call))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        if isinstance(tool_params, dict) and summarize_sqlite_tool_result_sql(
+            _sqlite_batch_statements(tool_params)
+        ).single_result_id_filters:
+            count += 1
+    return count
 
 
 def _sqlite_batch_is_only_agent_config_mutation(tool_params: Dict[str, Any]) -> bool:
@@ -2803,10 +2820,20 @@ def _prepare_tool_batch_impl(
             deep_work_update_reason,
         )
         return _PreparedToolBatch([], True, False, False, "deep_work_update_gate")
-    batch_has_human_input_request = any(
-        _get_tool_call_name(call) == "request_human_input"
-        for call in tool_calls
-    )
+    single_result_reads = _sqlite_single_result_read_call_count(tool_calls)
+    if single_result_reads >= 2:
+        step_kwargs = {
+            "agent": agent,
+            "description": (
+                f"Tool policy: held {single_result_reads} sibling sqlite_batch calls that read __tool_results one "
+                "result_id at a time. Retry with one shaped query over result_id IN (...) or tool_name; do not resend "
+                "separate reads."
+            ),
+        }
+        attach_completion(step_kwargs)
+        step = PersistentAgentStep.objects.create(**step_kwargs)
+        attach_prompt_archive(step)
+        return _PreparedToolBatch([], True, False, False, "sqlite_result_fanout_gate")
     batch_has_planning_gate = any(_get_tool_call_name(call) in {"end_planning", "request_human_input"} for call in tool_calls)
     batch_has_terminal_message = any(_tool_call_likely_terminal_message(call) for call in tool_calls)
     skipped_plan_requested_sleep = False
@@ -3388,6 +3415,7 @@ def _finalize_tool_batch(
     progress_message_delivery_ok = False
     terminal_message_delivery_ok = False
     human_input_request_ok = False
+    successful_message_tools, human_input_delivery_tools = set(), set()
 
     for outcome in sorted(execution_outcomes, key=lambda item: item.prepared.idx):
         prepared = outcome.prepared
@@ -3438,6 +3466,7 @@ def _finalize_tool_batch(
             status_label = str(status or "").lower()
             if status_label in MESSAGE_SUCCESS_STATUSES:
                 message_delivery_ok = True
+                successful_message_tools.add(tool_name)
                 if _message_tool_has_progress_intent(tool_name, prepared.tool_params):
                     progress_message_delivery_ok = True
                 else:
@@ -3482,6 +3511,9 @@ def _finalize_tool_batch(
             )
         elif tool_name == "request_human_input":
             human_input_request_ok = True
+            suggestion = result.get("next_message_suggestion") if isinstance(result, dict) else None
+            if isinstance(suggestion, dict) and (send_tool := suggestion.get("send_tool")):
+                human_input_delivery_tools.add(str(send_tool))
         if tool_name == "request_human_input" and isinstance(result, dict):
             attach_originating_step_from_result(step, result)
 
@@ -3519,6 +3551,8 @@ def _finalize_tool_batch(
         executed_calls += 1
         if tool_name not in MESSAGE_TOOL_NAMES and tool_name != "sleep_until_next_trigger":
             executed_non_message_action = True
+
+    followup_required = followup_required or bool(human_input_delivery_tools - successful_message_tools)
 
     if (
         agent.planning_state != PersistentAgent.PlanningState.PLANNING
