@@ -6221,7 +6221,10 @@ class _LLMTierDetailAPIView(SystemAdminAPIView):
             if not _swap_orders(sibling_qs, tier, direction):
                 return HttpResponseBadRequest("Unable to move tier in that direction")
         if self.allow_order_update and "order" in payload:
-            tier.order = payload.get("order", 0)
+            try:
+                tier.order = int(payload["order"])
+            except (TypeError, ValueError):
+                return HttpResponseBadRequest("order must be an integer")
         if self.allow_intelligence_update and any(
             key in payload for key in ("intelligence_tier", "is_premium", "is_max")
         ):
@@ -6920,7 +6923,7 @@ def _next_profile_tier_order(model, **filters) -> int:
 for _name, _tier_model, _tier_endpoint_model, _endpoint_model, _list_attrs, _detail_attrs, _endpoint_attrs in (
     ("Persistent", ProfilePersistentTier, ProfilePersistentTierEndpoint, PersistentModelEndpoint, {"parent_model": ProfileTokenRange, "parent_kwarg": "range_id", "parent_field": "token_range", "order_by": ("intelligence_tier__rank", "order")}, {"sibling_filter_fields": ("token_range", "intelligence_tier"), "allow_order_update": True, "allow_intelligence_update": True}, {"allow_reasoning_override": True}),
     ("Browser", ProfileBrowserTier, ProfileBrowserTierEndpoint, BrowserModelEndpoint, {"parent_model": LLMRoutingProfile, "parent_kwarg": "profile_id", "parent_field": "profile", "order_by": ("intelligence_tier__rank", "order"), "auto_append_order": True}, {"sibling_filter_fields": ("profile", "intelligence_tier"), "allow_order_update": True, "allow_intelligence_update": True}, {"endpoint_model_attr": "browser_model", "allow_extraction_endpoint": True}),
-    ("Embeddings", ProfileEmbeddingsTier, ProfileEmbeddingsTierEndpoint, EmbeddingsModelEndpoint, {"parent_model": LLMRoutingProfile, "parent_kwarg": "profile_id", "parent_field": "profile", "include_intelligence_tier": False}, {"allow_order_update": True}, {}),
+    ("Embeddings", ProfileEmbeddingsTier, ProfileEmbeddingsTierEndpoint, EmbeddingsModelEndpoint, {"parent_model": LLMRoutingProfile, "parent_kwarg": "profile_id", "parent_field": "profile", "include_intelligence_tier": False}, {"sibling_filter_fields": ("profile",), "allow_order_update": True}, {}),
 ):
     globals()[f"Profile{_name}TierListCreateAPIView"] = type(f"Profile{_name}TierListCreateAPIView", (_LLMTierListCreateAPIView,), {"__module__": __name__, "http_method_names": ["get", "post"], "tier_model": _tier_model, **_list_attrs})
     globals()[f"Profile{_name}TierDetailAPIView"] = type(f"Profile{_name}TierDetailAPIView", (_LLMTierDetailAPIView,), {"__module__": __name__, "tier_model": _tier_model, **_detail_attrs})

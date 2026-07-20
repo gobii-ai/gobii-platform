@@ -88,7 +88,10 @@ export function AgentChatSettingsPanel({
 
   const handleTierChange = useCallback(
     (tier: IntelligenceTierKey) => {
-      if (!llmTierSaving && limitConfig) setLimitValue((current) => setDailyCreditTier(current, tier, limitConfig))
+      if (llmTierSaving) return
+      setLimitValue((current) => limitConfig
+        ? setDailyCreditTier(current, tier, limitConfig)
+        : { ...current, tier })
     },
     [limitConfig, llmTierSaving],
   )

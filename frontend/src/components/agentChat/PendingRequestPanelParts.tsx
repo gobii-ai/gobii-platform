@@ -21,7 +21,10 @@ export function usePendingRequestSelection<T extends { id: string }>(items: T[])
 
   useEffect(() => {
     const itemIds = new Set(items.map((item) => item.id))
-    setSelectedIds((current) => new Set([...current].filter((id) => itemIds.has(id))))
+    setSelectedIds((current) => {
+      const next = new Set([...current].filter((id) => itemIds.has(id)))
+      return next.size === current.size ? current : next
+    })
   }, [items])
 
   const selectedItems = useMemo(

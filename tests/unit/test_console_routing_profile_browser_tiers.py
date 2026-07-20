@@ -92,6 +92,24 @@ class ConsoleRoutingProfileBrowserTierTests(TestCase):
         self.assertEqual(tier1.order, 1)
         self.assertEqual(tier2.order, 2)
 
+    def test_update_browser_tier_rejects_invalid_order(self):
+        profile = LLMRoutingProfile.objects.create(name="browser-order", display_name="Browser Order")
+        tier = ProfileBrowserTier.objects.create(
+            profile=profile,
+            order=1,
+            intelligence_tier=get_intelligence_tier("standard"),
+        )
+        url = reverse("console_llm_profile_browser_tier_detail", args=[tier.id])
+
+        for payload in ('{"order": "invalid"}', '{"order": null}'):
+            with self.subTest(payload=payload):
+                response = self.client.patch(url, data=payload, content_type="application/json")
+                self.assertEqual(response.status_code, 400, response.content)
+                self.assertIn("order must be an integer", response.content.decode())
+
+        tier.refresh_from_db()
+        self.assertEqual(tier.order, 1)
+
     def test_system_and_profile_browser_endpoint_mutations_have_parity(self):
         provider = LLMProvider.objects.create(key="browser-parity", display_name="Browser Parity", enabled=True)
         endpoint = BrowserModelEndpoint.objects.create(
