@@ -1,4 +1,5 @@
 import hashlib
+import json
 import logging
 import re
 from collections.abc import Iterable
@@ -19,19 +20,9 @@ _PUBLIC_ID_RE = re.compile(_PUBLIC_ID_PATTERN, re.IGNORECASE)
 _NAKED_DESTINATION_RE = re.compile(rf"(?:\]\(\s*|href\s*=\s*['\"]\s*)({_PUBLIC_ID_PATTERN})(?=\s*(?:\)|['\"]))", re.IGNORECASE)
 _RENDERED_PATH_RE = re.compile(rf"/({_PUBLIC_ID_PATTERN})(?:/[^/]*)?/?$", re.IGNORECASE)
 _TRAILING_PUNCTUATION = ".,;:!?"
-_EMBEDDED_FIELDS = {
-    "create_csv": "csv_text", "create_pdf": "html", "send_agent_message": "message",
-    "send_chat_message": "body", "send_discord_message": "message", "send_email": "mobile_first_html",
-    "send_sms": "body",
-}
-_DOCUMENT_MIME_TYPES = {
-    "application/json", "application/ld+json", "application/xml", "application/yaml",
-    "text/html", "text/markdown", "text/plain", "text/xml", "text/yaml",
-}
-_STRICT_TOOLS = set(_EMBEDDED_FIELDS) | {
-    "apply_patch", "create_chart", "create_custom_tool", "create_file", "create_image", "create_video",
-    "search_tools", "send_webhook_event", "sqlite_batch", "update_charter", "update_plan", "update_schedule",
-}
+_EMBEDDED_FIELDS = {"create_csv": "csv_text", "create_pdf": "html", "send_agent_message": "message", "send_chat_message": "body", "send_discord_message": "message", "send_email": "mobile_first_html", "send_sms": "body"}
+_DOCUMENT_MIME_TYPES = {"application/json", "application/ld+json", "application/xml", "application/yaml", "text/html", "text/markdown", "text/plain", "text/xml", "text/yaml"}
+_STRICT_TOOLS = set(_EMBEDDED_FIELDS) | {"apply_patch", "create_chart", "create_custom_tool", "create_file", "create_image", "create_video", "search_tools", "send_webhook_event", "sqlite_batch", "update_charter", "update_plan", "update_schedule"}
 
 
 class LinkReferenceResolutionError(ValueError):
@@ -143,6 +134,20 @@ def resolve_link_references(text: str, agent) -> str:
             return references.get(rendered.get(url), url) + suffix
         resolved = _HTTP_URL_RE.sub(replace_rendered, resolved)
     return resolved
+
+
+def resolve_link_references_for_display(value, agent):
+    if not isinstance(value, (str, dict, list)):
+        return value
+    structured, text = not isinstance(value, str), json.dumps(value) if not isinstance(value, str) else value
+    if not _contains_reference_syntax(text):
+        return value
+    try:
+        resolved = resolve_link_references(text, agent)
+    except LinkReferenceResolutionError:
+        resolved = re.sub(r"\$\[link:[^\]\s]*(?:\]|$)", "Link unavailable", text, flags=re.IGNORECASE)
+        resolved = _HTTP_URL_RE.sub(lambda match: "Link unavailable" if _rendered_reference_id(_split_url_suffix(match.group())[0]) else match.group(), resolved)
+    return json.loads(resolved) if structured else resolved
 
 
 def _contains_reference_syntax(value: str) -> bool:

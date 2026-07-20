@@ -446,10 +446,9 @@ def execute_send_chat_message(agent: PersistentAgent, params: Dict[str, Any]) ->
                 will_continue=will_continue,
             )
 
-        # If the user has other communication channels, we want to ensure we're sending to an active chat session
-        # If the user does not have other communication channels, pass through to web because it's our only choice
         if (
-            get_deliverable_web_session(agent, recipient_user) is None
+            not is_current_requester
+            and get_deliverable_web_session(agent, recipient_user) is None
             and has_other_contact_channel(agent, recipient_user)
         ):
             return _web_unavailable_result(

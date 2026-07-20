@@ -23,6 +23,7 @@ from api.agent.core.processing_flags import (
     is_processing_queued,
     processing_lock_storage_keys,
 )
+from api.agent.core.link_references import resolve_link_references_for_display
 from api.agent.core.schedule_parser import ScheduleParser
 from api.agent.comms.chat_email_display_cache import get_cached_chat_body_html, normalize_explicit_email_html, render_chat_email_body_html, sanitize_chat_email_html
 from api.agent.comms.email_forwarding import is_forward_like
@@ -584,13 +585,13 @@ def _serialize_message(
 
 def _serialize_thinking(env: ThinkingEnvelope) -> dict:
     completion = env.completion
-    return {
+    return resolve_link_references_for_display({
         "kind": "thinking",
         "cursor": env.cursor.encode(),
         "timestamp": _format_timestamp(completion.created_at),
         "reasoning": env.reasoning,
         "completionId": str(completion.id),
-    }
+    }, completion.agent)
 
 
 def _viewer_can_see_manager_action_metadata(
@@ -770,7 +771,7 @@ def _serialize_step_entry(env: StepEnvelope, labels: Mapping[str, str]) -> dict:
             entry["createImageUrl"] = preview_url
         elif lowered_tool_name == "create_video":
             entry["createVideoUrl"] = preview_url
-    return entry
+    return resolve_link_references_for_display(entry, step.agent)
 
 
 def _build_cluster(entries: Sequence[StepEnvelope], labels: Mapping[str, str]) -> dict:
