@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 520" role="img" aria-labelledby="title desc">
+  <title id="title">Six-step AI agent workflow blueprint</title>
+  <desc id="desc">A connected sequence moves from trigger to context, tools, decision, human review, and delivery.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#090611"/>
+      <stop offset="1" stop-color="#1f0b39"/>
+    </linearGradient>
+    <linearGradient id="card" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2b1550"/>
+      <stop offset="1" stop-color="#160d2b"/>
+    </linearGradient>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#b98cff"/>
+    </marker>
+  </defs>
+  <rect width="1200" height="520" rx="28" fill="url(#background)"/>
+  <text x="70" y="82" fill="#ffffff" font-family="Inter, Arial, sans-serif" font-size="34" font-weight="800">A reliable agent workflow has six explicit handoffs</text>
+  <text x="70" y="122" fill="#c9b7e8" font-family="Inter, Arial, sans-serif" font-size="18">Define where work begins, what the agent may use, and when a person takes control.</text>
+  <g fill="none" stroke="#b98cff" stroke-width="5" marker-end="url(#arrow)">
+    <path d="M 230 290 H 256"/>
+    <path d="M 416 290 H 442"/>
+    <path d="M 602 290 H 628"/>
+    <path d="M 788 290 H 814"/>
+    <path d="M 974 290 H 1000"/>
+  </g>
+  <g font-family="Inter, Arial, sans-serif">
+    <g transform="translate(70 190)">
+      <rect width="160" height="200" rx="22" fill="url(#card)" stroke="#7c3aed" stroke-width="2"/>
+      <circle cx="80" cy="54" r="25" fill="#7c3aed"/>
+      <path d="M80 34v20l14 9" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round"/>
+      <text x="80" y="112" fill="#fff" font-size="21" font-weight="800" text-anchor="middle">1. TRIGGER</text>
+      <text x="80" y="146" fill="#c9b7e8" font-size="15" text-anchor="middle">Schedule, event,</text>
+      <text x="80" y="169" fill="#c9b7e8" font-size="15" text-anchor="middle">or request</text>
+    </g>
+    <g transform="translate(256 190)">
+      <rect width="160" height="200" rx="22" fill="url(#card)" stroke="#7c3aed" stroke-width="2"/>
+      <circle cx="80" cy="54" r="25" fill="#7c3aed"/>
+      <path d="M67 42h26v25H67z M72 48h16 M72 55h16 M72 62h10" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"/>
+      <text x="80" y="112" fill="#fff" font-size="21" font-weight="800" text-anchor="middle">2. CONTEXT</text>
+      <text x="80" y="146" fill="#c9b7e8" font-size="15" text-anchor="middle">Memory, files,</text>
+      <text x="80" y="169" fill="#c9b7e8" font-size="15" text-anchor="middle">and records</text>
+    </g>
+    <g transform="translate(442 190)">
+      <rect width="160" height="200" rx="22" fill="url(#card)" stroke="#7c3aed" stroke-width="2"/>
+      <circle cx="80" cy="54" r="25" fill="#7c3aed"/>
+      <path d="M68 42h24v24H68z M62 48h6 M92 48h6 M62 60h6 M92 60h6" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"/>
+      <text x="80" y="112" fill="#fff" font-size="21" font-weight="800" text-anchor="middle">3. TOOLS</text>
+      <text x="80" y="146" fill="#c9b7e8" font-size="15" text-anchor="middle">Apps, browser,</text>
+      <text x="80" y="169" fill="#c9b7e8" font-size="15" text-anchor="middle">and APIs</text>
+    </g>
+    <g transform="translate(628 190)">
+      <rect width="160" height="200" rx="22" fill="url(#card)" stroke="#7c3aed" stroke-width="2"/>
+      <circle cx="80" cy="54" r="25" fill="#7c3aed"/>
+      <path d="M68 45h24 M68 54h14 M68 63h20" fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round"/>
+      <text x="80" y="112" fill="#fff" font-size="21" font-weight="800" text-anchor="middle">4. DECIDE</text>
+      <text x="80" y="146" fill="#c9b7e8" font-size="15" text-anchor="middle">Rules, checks,</text>
+      <text x="80" y="169" fill="#c9b7e8" font-size="15" text-anchor="middle">and limits</text>
+    </g>
+    <g transform="translate(814 190)">
+      <rect width="160" height="200" rx="22" fill="url(#card)" stroke="#22d3ee" stroke-width="3"/>
+      <circle cx="80" cy="54" r="25" fill="#0891b2"/>
+      <path d="M66 55l9 9 20-23" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+      <text x="80" y="112" fill="#fff" font-size="21" font-weight="800" text-anchor="middle">5. REVIEW</text>
+      <text x="80" y="146" fill="#c9b7e8" font-size="15" text-anchor="middle">Approve, edit,</text>
+      <text x="80" y="169" fill="#c9b7e8" font-size="15" text-anchor="middle">or stop</text>
+    </g>
+    <g transform="translate(1000 190)">
+      <rect width="160" height="200" rx="22" fill="url(#card)" stroke="#7c3aed" stroke-width="2"/>
+      <circle cx="80" cy="54" r="25" fill="#7c3aed"/>
+      <path d="M65 44h30v22H65z M65 44l15 13 15-13" fill="none" stroke="#fff" stroke-width="3" stroke-linejoin="round"/>
+      <text x="80" y="112" fill="#fff" font-size="21" font-weight="800" text-anchor="middle">6. DELIVER</text>
+      <text x="80" y="146" fill="#c9b7e8" font-size="15" text-anchor="middle">Report, alert,</text>
+      <text x="80" y="169" fill="#c9b7e8" font-size="15" text-anchor="middle">or update</text>
+    </g>
+  </g>
+  <text x="600" y="462" fill="#22d3ee" font-family="Inter, Arial, sans-serif" font-size="20" font-weight="700" text-anchor="middle">The agent handles the loop. A person owns the outcome.</text>
+</svg>
