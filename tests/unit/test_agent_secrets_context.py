@@ -6,6 +6,7 @@ Tests the core logic around:
 2. secure_credentials_request tool execution
 3. Proper filtering of requested vs fulfilled secrets
 """
+import json
 from unittest.mock import Mock, patch
 from django.test import TestCase, tag
 from django.contrib.auth import get_user_model
@@ -21,6 +22,7 @@ from api.agent.tools.secure_credentials_request import (
     execute_secure_credentials_request,
     get_secure_credentials_request_tool,
 )
+from api.services.persistent_agent_secrets import build_secret_capability_inventory
 
 User = get_user_model()
 
@@ -100,7 +102,7 @@ class GetSecretsBlockTests(TestCase):
 
         # Verify requested secrets are surfaced as pending (not as available)
         self.assertIn("Pending credential requests", result)
-        self.assertIn("follow up with the user", result)
+        self.assertIn("already requested; do not request them again", result)
         self.assertIn("pending_secret", result)
         self.assertIn("waiting_secret", result)
         self.assertIn("https://pending.example.com", result)
@@ -150,16 +152,73 @@ class GetSecretsBlockTests(TestCase):
 
         result = _get_secrets_block(self.agent)
 
-        self.assertIn("Agent-specific domain-scoped credential secrets", result)
-        self.assertIn("not readable via os.environ", result)
-        self.assertIn("Agent-specific sandbox environment variable secrets", result)
-        self.assertIn("ARE readable via os.environ", result)
-        self.assertIn("Pending domain-scoped credentials", result)
-        self.assertIn("Pending sandbox environment variables", result)
-        self.assertIn("Key: api_credential", result)
-        self.assertIn("Env Key: SANDBOX_TOKEN", result)
+        self.assertIn("Available secret capabilities", result)
+        self.assertIn("available | credential | scope=agent", result)
+        self.assertIn("available | env_var | scope=agent", result)
+        self.assertIn("pending | credential | scope=agent", result)
+        self.assertIn("pending | env_var | scope=agent", result)
+        self.assertIn("key=api_credential", result)
+        self.assertIn("key=SANDBOX_TOKEN", result)
+        self.assertIn("sandbox=os.environ", result)
         self.assertNotIn("credential-secret-value", result)
         self.assertNotIn("env-var-secret-value", result)
+
+    def test_secret_capability_inventory_exposes_status_without_values(self):
+        agent_env = PersistentAgentSecret(
+            agent=self.agent,
+            secret_type=PersistentAgentSecret.SecretType.ENV_VAR,
+            domain_pattern=PersistentAgentSecret.ENV_VAR_DOMAIN_SENTINEL,
+            name="GitHub App ID",
+            key="GITHUB_APP_ID",
+            requested=False,
+        )
+        agent_env.set_value("agent-env-secret-value")
+        agent_env.save()
+        PersistentAgentSecret.objects.create(
+            agent=self.agent,
+            secret_type=PersistentAgentSecret.SecretType.CREDENTIAL,
+            domain_pattern="https://api.example.com",
+            name="Pending API Key",
+            key="pending_api_key",
+            requested=True,
+            encrypted_value=b"",
+        )
+        global_env = GlobalSecret(
+            user=self.user,
+            secret_type=GlobalSecret.SecretType.ENV_VAR,
+            domain_pattern=GlobalSecret.ENV_VAR_DOMAIN_SENTINEL,
+            name="Shared Token",
+            key="SHARED_TOKEN",
+        )
+        global_env.set_value("global-env-secret-value")
+        global_env.save()
+
+        inventory = build_secret_capability_inventory(self.agent)
+
+        self.assertIn(
+            {
+                "name": "GitHub App ID",
+                "key": "GITHUB_APP_ID",
+                "secret_type": "env_var",
+                "availability": "available",
+                "scope": "agent",
+            },
+            inventory,
+        )
+        self.assertIn(
+            {
+                "name": "Pending API Key",
+                "key": "pending_api_key",
+                "secret_type": "credential",
+                "availability": "pending",
+                "scope": "agent",
+                "domain_pattern": "https://api.example.com",
+            },
+            inventory,
+        )
+        serialized = json.dumps(inventory)
+        self.assertNotIn("agent-env-secret-value", serialized)
+        self.assertNotIn("global-env-secret-value", serialized)
 
     def test_no_secrets_returns_empty_message(self):
         """Test that when no fulfilled secrets exist, appropriate message is returned."""
@@ -212,23 +271,20 @@ class GetSecretsBlockTests(TestCase):
         result = _get_secrets_block(self.agent)
 
         # Check structure
-        self.assertIn("Domain: *.github.com", result)
-        self.assertIn("Domain: *.google.com", result)
+        self.assertIn("domain=*.github.com", result)
+        self.assertIn("domain=*.google.com", result)
 
         # Check that all secrets are present
         self.assertIn("google_api_key", result)
         self.assertIn("google_secret", result)
         self.assertIn("github_token", result)
 
-        # Verify ordering - domains should be alphabetically sorted
+        # Verify ordering - credential capability rows should be alphabetically sorted by domain.
         lines = result.split('\n')
-        # Find domain lines
-        domain_lines = [i for i, line in enumerate(lines) if "Domain:" in line]
-        self.assertEqual(len(domain_lines), 2)
-
-        # GitHub should come before Google alphabetically
-        self.assertIn("*.github.com", lines[domain_lines[0]])
-        self.assertIn("*.google.com", lines[domain_lines[1]])
+        github_line = next(i for i, line in enumerate(lines) if "key=github_token" in line)
+        google_lines = [i for i, line in enumerate(lines) if "domain=*.google.com" in line]
+        self.assertTrue(google_lines)
+        self.assertLess(github_line, min(google_lines))
 
     def test_mixed_requested_and_fulfilled_secrets(self):
         """Test filtering when both requested and fulfilled secrets exist."""

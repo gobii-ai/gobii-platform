@@ -224,6 +224,13 @@ DIRECT_USER_CORRECTION_RE = re.compile(
     r"(?:dashes|hyphens)\b",
     re.IGNORECASE,
 )
+OPERATIONAL_CAPABILITY_CORRECTION_RE = re.compile(
+    r"\b(?:you|the agent)\s+(?:already\s+|do\s+|should\s+)?"
+    r"(?:have|has|can\s+use|can\s+access|should\s+be\s+able\s+to\s+use)\b"
+    r"[^.!?]{0,120}\b(?:access|credentials?|secrets?|tools?|integrations?|permissions?|"
+    r"environment variables?|env vars?)\b",
+    re.IGNORECASE,
+)
 STRONG_DURABLE_CONFIG_INTENT_RE = re.compile(
     r"\b(?:going forward|from now on|in the future|next time|always|never|remember|"
     r"(?:my |this )?feedback:|each time|every time|make (?:that|this|it) a rule|should(?:n'?t| not) have to|"
@@ -2392,7 +2399,10 @@ def _user_text_is_direct_correction(text: str) -> bool:
     return bool(
         normalized
         and not TRANSIENT_CONFIG_SCOPE_RE.search(normalized)
-        and DIRECT_USER_CORRECTION_RE.search(normalized)
+        and (
+            DIRECT_USER_CORRECTION_RE.search(normalized)
+            or OPERATIONAL_CAPABILITY_CORRECTION_RE.search(normalized)
+        )
     )
 
 

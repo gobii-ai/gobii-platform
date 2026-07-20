@@ -121,6 +121,45 @@ def global_secrets_queryset_for_agent(agent: PersistentAgent):
     return GlobalSecret.objects.filter(user=owner_user, organization__isnull=True)
 
 
+def build_secret_capability_inventory(agent: PersistentAgent) -> list[dict[str, str]]:
+    """Return secret metadata that is safe to expose to prompts and diagnostics."""
+
+    capabilities: list[dict[str, str]] = []
+
+    for secret in global_secrets_queryset_for_agent(agent).filter(
+        secret_type__in=(GlobalSecret.SecretType.CREDENTIAL, GlobalSecret.SecretType.ENV_VAR),
+    ).order_by("secret_type", "domain_pattern", "name"):
+        capability = {
+            "name": secret.name,
+            "key": secret.key,
+            "secret_type": secret.secret_type,
+            "availability": "available",
+            "scope": "global",
+        }
+        if secret.secret_type == GlobalSecret.SecretType.CREDENTIAL:
+            capability["domain_pattern"] = secret.domain_pattern
+        capabilities.append(capability)
+
+    for secret in PersistentAgentSecret.objects.filter(agent=agent).order_by(
+        "requested",
+        "secret_type",
+        "domain_pattern",
+        "name",
+    ):
+        capability = {
+            "name": secret.name,
+            "key": secret.key,
+            "secret_type": secret.secret_type,
+            "availability": "pending" if secret.requested else "available",
+            "scope": "agent",
+        }
+        if secret.secret_type == PersistentAgentSecret.SecretType.CREDENTIAL:
+            capability["domain_pattern"] = secret.domain_pattern
+        capabilities.append(capability)
+
+    return capabilities
+
+
 def ensure_global_secret_capacity_for_agent(agent: PersistentAgent, additional_count: int = 1) -> None:
     if additional_count <= 0:
         return

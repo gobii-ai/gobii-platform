@@ -36,6 +36,7 @@ from api.models import (
     PersistentAgentCustomTool,
     PersistentAgentJudgeSuggestion,
     PersistentAgentMessage,
+    PersistentAgentSecret,
     PersistentAgentSkill,
     PersistentAgentStep,
     PersistentAgentSystemSkillState,
@@ -522,6 +523,51 @@ class AgentJudgeTests(TestCase):
             trajectory["recent_trajectory"]["system_directives"][-1]["source_type"],
             "system_directive",
         )
+
+    def test_judge_context_includes_secret_capabilities_without_values(self):
+        secret = PersistentAgentSecret(
+            agent=self.agent,
+            name="GitHub App ID",
+            key="GITHUB_APP_ID",
+            secret_type=PersistentAgentSecret.SecretType.ENV_VAR,
+            domain_pattern=PersistentAgentSecret.ENV_VAR_DOMAIN_SENTINEL,
+            requested=False,
+        )
+        secret.set_value("judge-fixture-secret-value")
+        secret.save()
+
+        trigger = build_manual_judge_trigger(self.agent, tools=[])
+
+        capabilities = trigger.trajectory["current_context"]["secret_capabilities"]
+        self.assertIn(
+            {
+                "name": "GitHub App ID",
+                "key": "GITHUB_APP_ID",
+                "secret_type": "env_var",
+                "availability": "available",
+                "scope": "agent",
+            },
+            capabilities,
+        )
+        self.assertNotIn("judge-fixture-secret-value", json.dumps(capabilities))
+        with patch(
+            "api.agent.core.agent_judge._create_token_estimator",
+            return_value=lambda text: len(text.split()),
+        ):
+            messages = _build_judge_messages(
+                trigger.trajectory,
+                model="test-model",
+                prompt_limits=JudgePromptLimits(
+                    prompt_token_budget=5_000,
+                    message_history_limit=2,
+                    tool_call_history_limit=2,
+                    skill_prompt_limit=1,
+                    enabled_tool_limit=1,
+                ),
+            )
+        self.assertIn("secret_capabilities", messages[1]["content"])
+        self.assertIn("GITHUB_APP_ID", messages[1]["content"])
+        self.assertNotIn("judge-fixture-secret-value", messages[1]["content"])
 
     def test_judge_trajectory_uses_prompt_config_ultra_max_limits(self):
         config, _ = PromptConfig.objects.get_or_create(singleton_id=1)

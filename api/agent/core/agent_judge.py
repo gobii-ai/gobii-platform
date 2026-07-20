@@ -19,6 +19,7 @@ from api.agent.core.promptree import Prompt
 from api.agent.core.token_usage import log_agent_completion
 from api.agent.tools.plan import build_plan_snapshot
 from api.services.prompt_settings import get_prompt_settings
+from api.services.persistent_agent_secrets import build_secret_capability_inventory
 from api.models import (
     LLMRoutingProfile,
     PersistentAgent,
@@ -902,6 +903,7 @@ def _build_current_context_snapshot(
     return {
         "skills": _skill_context(agent, prompt_limits),
         "custom_tool_sources": _custom_tool_sources_context(agent, recent_tool_calls or []),
+        "secret_capabilities": build_secret_capability_inventory(agent),
         "sqlite": _sqlite_context_snapshot(),
     }
 
@@ -1276,6 +1278,11 @@ def _build_judge_user_prompt(
         "capability_manifest",
         _json_section(trajectory.get("capability_manifest") or []),
         weight=2,
+    )
+    medium_priority.section_text(
+        "secret_capabilities",
+        _json_section(current_context.get("secret_capabilities") or []),
+        weight=5,
     )
 
     low_priority = prompt.group("low_priority", weight=2)
