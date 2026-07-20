@@ -142,13 +142,7 @@ class RedditContentQualityScenario(EvalScenario, ScenarioExecutionTools):
                 trigger_processing=True,
                 eval_run_id=run_id,
                 mock_config=self._mock_config(case),
-                eval_stop_policy={
-                    "stop_on_tool_names_after_execution": [case.expected_tool],
-                    "stop_on_unexpected_relevant_tool": True,
-                    "allowed_tool_names": ["update_plan", case.expected_tool],
-                    "ignored_tool_names": ["update_plan"],
-                    "max_relevant_tool_calls": 3,
-                },
+                eval_stop_policy=self._eval_stop_policy(case),
             )
         self.record_task_result(
             run_id,
@@ -217,6 +211,16 @@ class RedditContentQualityScenario(EvalScenario, ScenarioExecutionTools):
                 "message": f"Mocked Reddit {case.action} publication for content-quality eval.",
                 "url": case.target_url or f"https://www.reddit.com/r/{case.subreddit}/comments/eval_post/",
             }
+        }
+
+    @staticmethod
+    def _eval_stop_policy(case: RedditContentQualityCase) -> dict[str, Any]:
+        return {
+            "stop_on_tool_names_after_execution": [case.expected_tool],
+            "stop_on_unexpected_relevant_tool": True,
+            "allowed_tool_names": ["send_chat_message", "update_plan", case.expected_tool],
+            "ignored_tool_names": ["send_chat_message", "update_plan"],
+            "max_relevant_tool_calls": 3,
         }
 
     def _record_reddit_write(
@@ -333,13 +337,22 @@ class RedditContentQualityScenario(EvalScenario, ScenarioExecutionTools):
 
     @staticmethod
     def _judge_question(case: RedditContentQualityCase) -> str:
+        action_guidance = (
+            "For this brief comment, fail a canned opener or needless recap, headings or a multi-step framework, "
+            "or expansion of one useful point into a mini-article. "
+            if case.action == "comment"
+            else "For this post, fail invented project features, architecture, usage, implementation details, or "
+            "performative disclosure of facts that the source merely marks unknown. "
+        )
         return (
             f"Would this Reddit {case.action} be a worthwhile, credible contribution to the specific discussion or "
             "community? Pass only if it is grounded in the supplied context, directly relevant, appropriately "
             "specific, and written like a person participating in the thread. Fail invented firsthand experience, "
             "identity, affiliation, metrics, deployments, outcomes, or certainty; unsupported factual claims; generic "
             "praise or restatement; canned social-media voice; engagement bait; or forced promotion. Do not fail it "
-            "for punctuation, headings, length, or informality alone. "
+            "for punctuation, headings, length, or informality alone. Treat quantitative benchmarks, thresholds, "
+            "rules of thumb, and concrete examples absent from the source as unsupported, not harmless elaboration. "
+            f"{action_guidance}"
             f"{case.judge_focus}"
         )
 

@@ -55,7 +55,13 @@ class RedditContentQualityScenarioTests(SimpleTestCase):
             self.assertIn("invented firsthand experience", question)
             self.assertIn("generic praise or restatement", question)
             self.assertIn("engagement bait", question)
+            self.assertIn("quantitative benchmarks, thresholds, rules of thumb", question)
             self.assertIn(case.judge_focus.lower(), question)
+
+        comment_question = RedditContentQualityScenario._judge_question(REDDIT_CONTENT_QUALITY_CASES[0]).lower()
+        post_question = RedditContentQualityScenario._judge_question(REDDIT_CONTENT_QUALITY_CASES[-1]).lower()
+        self.assertIn("expansion of one useful point into a mini-article", comment_question)
+        self.assertIn("performative disclosure", post_question)
 
     def test_reddit_synthetic_tools_capture_final_copy(self):
         reply = EVAL_SYNTHETIC_TOOL_DEFINITIONS[REDDIT_REPLY_TOOL]
@@ -65,6 +71,15 @@ class RedditContentQualityScenarioTests(SimpleTestCase):
         self.assertEqual(create_post["parameters"]["required"], ["subreddit", "title", "body"])
         self.assertIn("published as written", reply["description"])
         self.assertIn("published as written", create_post["description"])
+
+    def test_stop_policy_allows_required_progress_updates(self):
+        case = REDDIT_CONTENT_QUALITY_CASES[0]
+
+        policy = RedditContentQualityScenario._eval_stop_policy(case)
+
+        self.assertIn("send_chat_message", policy["allowed_tool_names"])
+        self.assertIn("send_chat_message", policy["ignored_tool_names"])
+        self.assertEqual(policy["stop_on_tool_names_after_execution"], [case.expected_tool])
 
     def test_comment_basics_require_body_and_exact_target(self):
         case = next(case for case in REDDIT_CONTENT_QUALITY_CASES if case.action == "comment")

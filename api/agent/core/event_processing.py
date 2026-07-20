@@ -245,7 +245,7 @@ PLANNING_EXECUTE_NOW_RE = re.compile(
 PLANNING_READY_WITHOUT_GATE_RE = re.compile(r"\b(?:plan(?:'s| is) clear|scope(?:'s| is) clear|task(?:'s| is) clear|lock it in|get (?:this )?rolling)\b", re.IGNORECASE)
 SUBSTANTIAL_WORK_RE = re.compile(
     r"\b(?:deep|exhaustive|comprehensive|thorough|extensive|large[- ]batch|multi[- ]phase|end[- ]to[- ]end|"
-    r"market map|implementation|deploy(?:ment|ing)?|migration|audit)\b",
+    r"market map|implementation|deploy(?:ing|ment(?!\s+history))?|migration(?!\s+(?:documentation|docs)\b)|audit)\b",
     re.IGNORECASE,
 )
 NON_SUBSTANTIAL_WORK_RE = re.compile(

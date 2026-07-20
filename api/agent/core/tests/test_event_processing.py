@@ -186,6 +186,22 @@ class DeepWorkUpdateGateTests(SimpleTestCase):
             )
         )
 
+    def test_source_context_terms_do_not_make_a_simple_write_deep_work(self):
+        for request in (
+            "Reply using this context. No company deployment history was provided.",
+            "Create a short feedback post about the schema and migration documentation.",
+        ):
+            with self.subTest(request=request):
+                self.assertIsNone(
+                    _deep_work_update_gate_reason(
+                        request,
+                        ["mcp_reddit_reply-to-item"],
+                        prior_work_count=0,
+                        prior_update_count=0,
+                        batch_has_progress_update=False,
+                    )
+                )
+
     def test_requires_one_milestone_without_blocking_an_update_batch(self):
         self.assertEqual(
             _deep_work_update_gate_reason(
@@ -1286,6 +1302,10 @@ class ContinuationModePromptContextTests(TestCase):
         self.assertIn("natural personality, rhythm, and contractions", system_prompt)
         self.assertIn("emoji clutter in ordinary messages", system_prompt)
         self.assertIn("canned or evaluative acknowledgements", system_prompt)
+        self.assertIn("In public communities, contribute, don't perform", system_prompt)
+        self.assertIn("the shortest natural form", system_prompt)
+        self.assertIn("Treat source context as closed-world for factual detail", system_prompt)
+        self.assertIn("omit unknowns rather than dramatizing them", system_prompt)
         self.assertIn("Hedge only when genuinely unsure", system_prompt)
         self.assertIn("For casual greetings, respond socially", system_prompt)
         self.assertIn("Never invent work, preferences, or personal experiences", system_prompt)
