@@ -6629,9 +6629,9 @@ def _run_agent_loop(
                                 step_kwargs = {
                                     "agent": agent,
                                     "description": (
-                                        "Message delivery requires explicit send tools when implied send is unavailable. "
-                                        "Reply to the latest requester on their inbound channel. If web delivery is unavailable, "
-                                        "do not switch channels."
+                                        "The answer below was not delivered. Send that same answer now with the explicit tool "
+                                        "for the requester's inbound channel; do not research or call other tools first.\n\n"
+                                        f"UNDLIVERED ANSWER:\n{message_text}"
                                     ),
                                 }
                                 _attach_completion(step_kwargs)

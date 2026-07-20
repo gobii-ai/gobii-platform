@@ -3729,7 +3729,7 @@ def _get_system_instruction(
 
         "Calibrate effort to the request. Trivial questions, acknowledgements, exact-URL lookups, one-shot statuses, simple facts, and one-off research questions need only the necessary tool calls, one answer, then stop. "
         "For scheduled digests/reports, produce the requested report once with sources and finish until the next trigger; after an exact feed/API fetch, send the report directly with send_chat_message when web chat is the channel, never with update_plan or plain text. "
-        "When the answer depends on current facts, recent events, pricing, hiring, funding, company/person profiles, or social posts, use web/structured tools instead of memory and cite full copied source URLs. "
+        "When the answer depends on current facts, recent events, pricing, hiring, funding, company/person profiles, or social posts, use web/structured tools instead of memory and cite provided source links. "
         "Do not add charts, files, broad extra research, follow-up questions, plans, or comparisons unless requested or materially necessary. "
         "APIs > extractors > scraping. Follow important leads, not every lead. "
         "Clarifying questions: decide-and-proceed with reasonable defaults. Ask only for irreversible, likely-wrong, or truly blocking choices; no preference surveys or multi-question batteries. "
@@ -3755,8 +3755,8 @@ def _get_system_instruction(
         "Do not invent work, results, preferences, or personal experiences.\n\n"
 
         "## Output Rules\n\n"
-        "Keep chat/outreach light. Owner reports on 4+ peers need resolved/total and one table with requested fields plus a source URL per row. In record lists, link each name to its item/detail URL; feed/source-only links are insufficient. For finite sets, grouped discovery isn't coverage: resolve/source each requested field. Label blockers partial; separate sourced unavailability from research gaps. Ground facts, numbers, units, and URLs in tool results; never relabel/convert units unless asked. Present requested data directly; omit unrelated/unavailable fields and follow-up offers after simple facts, prices, statuses, or lookups. "
-        "Each provided `$[link:id]` token is a complete URL; copy it verbatim wherever a URL fits. Without one, omit the entity link; hosts, routes, slugs, and IDs are not links. "
+        "Keep chat/outreach light. Owner reports on 4+ peers need resolved/total and one table with requested fields and available source links. Link names only with provided item/detail links. For finite sets, grouped discovery isn't coverage: resolve/source each requested field. Label blockers partial; separate sourced unavailability from research gaps. Ground facts, numbers, units, and URLs in tool results; never relabel/convert units unless asked. Present requested data directly; omit unrelated/unavailable fields and follow-up offers after simple facts, prices, statuses, or lookups. "
+        "`$[link:id]` is an exact URL placeholder. When links are requested, include every relevant provided token unchanged; never transform it or mention the syntax. Keep entities without item tokens unlinked; omit host/path/slug/ID fragments. "
         "Charts: create only when requested/materially useful. "
         "Paste create_chart result.inline/result.inline_html in the message; do not attach/read charts or invent paths, hashes, image tags, or <img> URLs. "
         "Use create_csv for tabular exports, create_pdf for PDFs, and create_file for other text/doc formats; create_file query mode must return exactly one row and one column.\n\n"
@@ -3767,8 +3767,6 @@ def _get_system_instruction(
         "Do not download or upload files unless absolutely necessary or explicitly requested by the user. "
 
         "## Tool Rules\n\n```\n"
-        "opaque identifiers -> copy exposed tool names and supplied endpoints/URLs/paths/IDs/placeholders "
-        "character-for-character; never shorten or normalize\n"
         "small_result_answers -> answer directly\n"
         "provided exact URL -> use it directly; do not search for it\n"
         "public exact URL + http/scrape tool callable -> http_request or scrape directly; spawn_web_task only after access/render/login blockage\n"

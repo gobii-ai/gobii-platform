@@ -689,6 +689,26 @@ class BarbellFocusTests(SimpleTestCase):
 
         self.assertIsNone(hint)
 
+    def test_large_json_text_hint_keeps_entity_context_for_urls(self):
+        filler = "Archive note without a source link.\n" * 500
+        content = (
+            f"{filler}name: Alice Romero\nrole: Finance lead\norganization: Northstar Bank\n"
+            "directory_slug: alice-romero\nprofile_id: p_7f2c91\nlinkedin_public_identifier: alice-romero-7f2c91\n"
+            "directory_status: active\n"
+            f"profile_url: https://www.linkedin.com/in/alice-romero-7f2c91?r=finance\n{filler}"
+        )
+
+        hint = extract_context_hint(
+            "http_request",
+            {"status": "ok", "content": content},
+            allow_barbell=True,
+            allow_goldilocks=True,
+            payload_bytes=len(content.encode("utf-8")),
+        )
+
+        self.assertIn("Alice Romero", hint)
+        self.assertIn("https://www.linkedin.com/in/alice-romero-7f2c91?r=finance", hint)
+
     def test_scrape_as_markdown_barbell_fallback(self):
         payload = {
             "result": "Intro text " * 200 + "middle text " * 200 + "ending text " * 200,

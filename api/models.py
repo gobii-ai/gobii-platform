@@ -10702,17 +10702,8 @@ class PersistentAgentLinkReference(models.Model):
         TOOL_RESULT = "tool_result", "Tool result"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    public_id = models.CharField(
-        max_length=17,
-        unique=True,
-        default=generate_link_reference_public_id,
-        editable=False,
-    )
-    agent = models.ForeignKey(
-        "PersistentAgent",
-        on_delete=models.CASCADE,
-        related_name="link_references",
-    )
+    public_id = models.CharField(max_length=17, unique=True, default=generate_link_reference_public_id, editable=False)
+    agent = models.ForeignKey("PersistentAgent", on_delete=models.CASCADE, related_name="link_references")
     url = models.TextField()
     url_hash = models.CharField(max_length=64, editable=False)
     source_kind = models.CharField(max_length=32, choices=SourceKind.choices)
@@ -10721,12 +10712,7 @@ class PersistentAgentLinkReference(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        constraints = [
-            models.UniqueConstraint(
-                fields=["agent", "url_hash"],
-                name="unique_agent_link_url_hash",
-            ),
-        ]
+        constraints = [models.UniqueConstraint(fields=["agent", "url_hash"], name="unique_agent_link_url_hash")]
 
     def save(self, *args, **kwargs):
         self.url_hash = hashlib.sha256(self.url.encode("utf-8")).hexdigest()

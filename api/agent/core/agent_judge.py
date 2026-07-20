@@ -862,6 +862,11 @@ def _build_trajectory_packet(
             ),
             "If the current approach is failing, suggest a concrete strategy shift grounded in available tools.",
             (
+                "Never recommend constructing URLs from fields or fetching $[link:id] references merely to resolve "
+                "them. They are delivery-ready; use visible FOCUS facts directly, link only their associated entity, "
+                "and leave other entities unlinked."
+            ),
+            (
                 "When custom tool source, parameters, results, or recent calls show a tool should be created "
                 "or updated, use a strategy_shift directive that tells the agent exactly what custom tool "
                 "change to make."

@@ -86,8 +86,8 @@ class AttachmentGuidanceTests(SimpleTestCase):
         body_guidance = chat_tool["function"]["parameters"]["properties"]["body"]["description"]
         self.assertIn("Keep chat/outreach light", body_guidance)
         self.assertIn("Reports comparing 4+ peers", body_guidance)
-        self.assertIn("one linked table", body_guidance)
-        self.assertIn("a detail URL per row unless incomparable", body_guidance)
+        self.assertIn("use one table", body_guidance)
+        self.assertIn("with available links", body_guidance)
 
     def test_create_file_tool_schema_requires_content_or_query(self):
         tool = get_create_file_tool()

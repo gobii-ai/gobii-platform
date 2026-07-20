@@ -1371,7 +1371,6 @@ def _execute_with_autocorrections(
                 rows = [dict(zip(columns, row)) for row in cur.fetchall()]
                 original_count = len(rows)
                 rows, limit_warning = _enforce_result_limits(rows, current_query)
-                _annotate_item_links(rows)
                 reporting_note = _row_url_reporting_note(rows)
                 result_entry: Dict[str, Any] = {
                     "result": rows,
@@ -1499,42 +1498,7 @@ def _enforce_result_limits(rows: List[Dict[str, Any]], query: str) -> tuple[List
     return rows, warning
 
 
-_ITEM_URL_FIELD_NAMES = {"url", "link", "listing_url", "detail_url", "item_url"}
 _NON_ITEM_URL_FIELD_NAMES = {"source_url", "feed_url", "page_url", "origin_url"}
-
-
-def _is_item_url_field(key: object) -> bool:
-    key_lower = str(key or "").strip().lower()
-    return key_lower not in _NON_ITEM_URL_FIELD_NAMES and (
-        key_lower in _ITEM_URL_FIELD_NAMES
-        or key_lower.endswith(("_url", "_link"))
-    )
-
-
-def _annotate_item_links(rows: List[Dict[str, Any]]) -> None:
-    """Add an output-only item_link value when query rows expose item URL columns."""
-    link_fields = {
-        str(key)
-        for row in rows
-        for key in row
-        if _is_item_url_field(key) and str(key).lower() != "item_link"
-    }
-    if not link_fields:
-        return
-
-    for row in rows:
-        if "item_link" in row:
-            continue
-        row["item_link"] = next(
-            (
-                value.strip()
-                for key, value in row.items()
-                if key in link_fields
-                and isinstance(value, str)
-                and re.match(r"^https?://[^\s]+$", value.strip(), re.IGNORECASE)
-            ),
-            "none",
-        )
 
 
 def _row_url_reporting_note(rows: List[Dict[str, Any]]) -> str:
@@ -1549,7 +1513,9 @@ def _row_url_reporting_note(rows: List[Dict[str, Any]]) -> str:
             key_lower = key_text.lower()
             if key_lower in _NON_ITEM_URL_FIELD_NAMES:
                 continue
-            if not _is_item_url_field(key):
+            if key_lower not in {"url", "link", "listing_url", "detail_url", "item_url"} and not key_lower.endswith(
+                ("_listing_url", "_detail_url", "_item_url", "_link")
+            ):
                 continue
             if isinstance(value, str) and re.match(r"^https?://[^\s]+$", value.strip(), re.IGNORECASE):
                 url_fields.add(key_text)
@@ -1558,8 +1524,7 @@ def _row_url_reporting_note(rows: List[Dict[str, Any]]) -> str:
         return ""
 
     return (
-        " [!] REPORTING: use item_link exactly as returned; item_link=none stays unlinked. "
-        "Host, route, slug, and ID fields are not links."
+        " [!] REPORTING: use returned item URLs exactly; records without one stay unlinked."
     )
 
 
@@ -1942,7 +1907,7 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
                     },
                     "will_continue_work": {
                         "type": "boolean",
-                        "description": "REQUIRED. true if another action/reply follows; false if this completes the turn.",
+                        "description": "REQUIRED. SQLite cannot deliver; use true so a reply/action follows.",
                     },
                 },
                 "required": ["sql", "will_continue_work"],

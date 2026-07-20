@@ -35,7 +35,6 @@ from api.agent.tools.http_request import get_http_request_tool
 from api.agent.tools.peer_dm import execute_send_agent_message
 from api.agent.tools.send_discord_message import execute_send_discord_message
 from api.agent.tools.sms_sender import execute_send_sms
-from api.agent.tools.sqlite_batch import _annotate_item_links, _row_url_reporting_note
 from api.agent.tools.web_chat_sender import execute_send_chat_message
 from api.models import (
     BrowserUseAgent,
@@ -175,7 +174,8 @@ class LinkReferenceTests(TestCase):
             f"[Profile](https://gobii.example.test/link/{reference_id}) "
             f"<a href='https://gobii.example.test/app/file/{reference_id}'>HTML</a> "
             f"Download: https://gobii.example.test/dl/{reference_id} "
-            f"API: https://gobii.example.test/api/links/{reference_id}"
+            f"API: https://gobii.example.test/api/links/{reference_id} "
+            f"Named: https://gobii.example.test/api/link/{reference_id}/report.pdf"
         )
 
         self.assertEqual(
@@ -183,7 +183,7 @@ class LinkReferenceTests(TestCase):
             (
                 f"[Profile]({url}) <a href='{url}'>HTML</a> "
                 f"Download: {url} "
-                f"API: {url}"
+                f"API: {url} Named: {url}"
             ),
         )
 
@@ -263,6 +263,17 @@ class LinkReferenceTests(TestCase):
         for value in (foreign, missing, "$[link:not-a-uuid]", "$[link:missing"):
             with self.subTest(value=value), self.assertRaises(LinkReferenceResolutionError):
                 resolve_link_references(value, self.agent)
+
+        valid = rewrite_prompt_urls(
+            "https://profiles.example.test/valid",
+            self.agent,
+            create=True,
+            source_kind="tool_result",
+        )
+        with self.assertRaises(LinkReferenceResolutionError) as raised:
+            resolve_link_references(f"{valid} {missing}", self.agent)
+        self.assertIn("L0000000000000000", str(raised.exception))
+        self.assertIn("other references remain usable", str(raised.exception))
 
     def test_naked_reference_ids_in_destinations_fail_with_exact_retry_syntax(self):
         token = rewrite_prompt_urls(
@@ -391,9 +402,105 @@ class LinkReferenceTests(TestCase):
         token = f"$[link:{reference.public_id}]"
         self.assertIn("Avery Chen", prompt_info.meta)
         self.assertIn(token, prompt_info.meta)
+        self.assertIn("records without one stay unlinked", prompt_info.preview_text)
         self.assertNotIn(url, prompt_info.meta)
         self.assertIn(token, prompt_info.preview_text)
         self.assertEqual(record.result_text, raw_result)
+
+    def test_source_result_marks_sparse_item_link_field_as_not_provided(self):
+        raw_result = (
+            "name=Linked | console_url=https://console.example.test/linked\n"
+            "name=Unlinked | console_host=console.example.test | console_route=/unlinked"
+        )
+        record = ToolCallResultRecord(
+            step_id="00000000-0000-4000-8000-000000000012",
+            tool_name="http_request",
+            created_at=datetime.now(timezone.utc),
+            result_text=raw_result,
+        )
+
+        prompt_info = prepare_tool_results_for_prompt(
+            [record],
+            recency_positions={record.step_id: 0},
+            fresh_tool_call_step_ids={record.step_id},
+            url_rewriter=lambda text, item: rewrite_prompt_urls(
+                text,
+                self.agent,
+                create=is_source_bearing_tool(item.tool_name),
+                source_kind="tool_result",
+                source_object_id=item.step_id,
+            ),
+        )[record.step_id]
+
+        self.assertIn(
+            "name=Unlinked | console_host=[omitted: no item link] | console_route=[omitted: no item link] | console_url= [not provided]",
+            prompt_info.preview_text,
+        )
+        self.assertNotIn("console_host=console.example.test", prompt_info.meta)
+        self.assertEqual(record.result_text, raw_result)
+
+    def test_large_source_focus_replaces_misleading_prefix_and_query_hint(self):
+        url = "https://profiles.example.test/alice"
+        content = (
+            ("Archive note, routine approvals, no source.\n" * 6_000)
+            + f"name: Alice\nrole: Controller\nprofile_url: {url}\n"
+            + ("Archive note, routine approvals, no source.\n" * 6_000)
+        )
+        record = ToolCallResultRecord(
+            step_id="00000000-0000-4000-8000-000000000014",
+            tool_name="http_request",
+            created_at=datetime.now(timezone.utc),
+            result_text=json.dumps({"status": "ok", "content": content}),
+        )
+
+        prompt_info = prepare_tool_results_for_prompt(
+            [record],
+            recency_positions={record.step_id: 0},
+            fresh_tool_call_step_ids={record.step_id},
+            url_rewriter=lambda text, item: rewrite_prompt_urls(
+                text,
+                self.agent,
+                create=is_source_bearing_tool(item.tool_name),
+                source_kind="tool_result",
+                source_object_id=item.step_id,
+            ),
+        )[record.step_id]
+
+        self.assertIn("FOCUS:", prompt_info.meta)
+        self.assertIn("name: Alice", prompt_info.meta)
+        self.assertNotIn("CSV DATA", prompt_info.meta)
+        self.assertNotIn("Archive note, routine", prompt_info.preview_text)
+        self.assertIn("LINK OUTPUT", prompt_info.preview_text)
+
+    def test_lookup_result_masks_url_parts_inside_escaped_json(self):
+        raw_result = json.dumps({
+            "result_text": (
+                "name=Linked | console_url=https://console.example.test/linked\\n"
+                "name=Unlinked | console_host=console.example.test | console_route=/unlinked"
+            )
+        })
+        reference = PersistentAgentLinkReference.objects.create(
+            agent=self.agent,
+            url="https://console.example.test/linked",
+            source_kind=PersistentAgentLinkReference.SourceKind.TOOL_RESULT,
+        )
+        record = ToolCallResultRecord(
+            step_id="00000000-0000-4000-8000-000000000013",
+            tool_name="sqlite_batch",
+            created_at=datetime.now(timezone.utc),
+            result_text=raw_result,
+        )
+
+        prompt_info = prepare_tool_results_for_prompt(
+            [record],
+            recency_positions={record.step_id: 0},
+            fresh_tool_call_step_ids={record.step_id},
+            url_rewriter=lambda text, item: rewrite_prompt_urls(text, self.agent, create=False),
+        )[record.step_id]
+
+        self.assertIn(f"$[link:{reference.public_id}]", prompt_info.preview_text)
+        self.assertNotIn("console.example.test |", prompt_info.preview_text)
+        self.assertNotIn("console_route=/unlinked", prompt_info.preview_text)
 
     def test_full_source_result_registers_deep_urls_before_preview_truncation(self):
         deep_url = "https://profiles.example.test/deep-record?view=full#bio"
@@ -507,8 +614,9 @@ class LinkReferenceTests(TestCase):
     def test_system_prompt_has_one_reference_rule(self):
         prompt = _get_system_instruction(self.agent, is_first_run=False)
 
-        self.assertEqual(prompt.count("Each provided `$[link:id]` token is a complete URL"), 1)
-        self.assertIn("Without one, omit the entity link", prompt)
+        self.assertEqual(prompt.count("`$[link:id]` is an exact URL placeholder"), 1)
+        self.assertIn("include every relevant provided token unchanged", prompt)
+        self.assertIn("entities without item tokens unlinked", prompt)
         self.assertNotIn("Message delivery blocked", prompt)
 
     def test_http_request_url_schema_accepts_link_references(self):
@@ -517,26 +625,6 @@ class LinkReferenceTests(TestCase):
         ]
 
         self.assertIn("$[link:id]", description)
-
-    def test_sqlite_rows_make_item_link_availability_explicit(self):
-        url = "https://console.example.test/services/svc_1?region=east#status"
-        rows = [
-            {"name": "Linked", "console_url": url, "service_id": "svc_1"},
-            {
-                "name": "Unlinked",
-                "console_url": None,
-                "console_host": "console.example.test",
-                "console_route": "/services/svc_2",
-            },
-        ]
-
-        _annotate_item_links(rows)
-
-        self.assertEqual(rows[0]["item_link"], url)
-        self.assertEqual(rows[1]["item_link"], "none")
-        note = _row_url_reporting_note(rows)
-        self.assertIn("item_link=none stays unlinked", note)
-        self.assertIn("Host, route, slug, and ID fields are not links", note)
 
     def test_raw_urls_are_not_blocked_at_delivery_preparation(self):
         raw_url = "https://unseen.example.test/items/42"
