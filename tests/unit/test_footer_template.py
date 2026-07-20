@@ -1,3 +1,6 @@
+from types import SimpleNamespace
+
+from bs4 import BeautifulSoup
 from django.conf import settings
 from django.template.loader import render_to_string
 from django.test import SimpleTestCase, override_settings, tag
@@ -38,3 +41,35 @@ class FooterTemplateSocialLinkTests(SimpleTestCase):
         self.assertIn("Follow us on LinkedIn", html)
         self.assertIn('href="https://medium.com/example-ai"', html)
         self.assertIn("Read our Medium blog", html)
+
+
+@tag("oss_readiness_batch")
+class FooterTemplateNavigationTests(SimpleTestCase):
+    def _render_agents_link(self, *, is_authenticated):
+        html = render_to_string(
+            "includes/_footer.html",
+            {
+                "settings": settings,
+                "request": SimpleNamespace(
+                    user=SimpleNamespace(is_authenticated=is_authenticated),
+                ),
+            },
+        )
+        soup = BeautifulSoup(html, "html.parser")
+        return next(
+            anchor
+            for anchor in soup.find_all("a", href=True)
+            if anchor.get_text(" ", strip=True) == "My Agents"
+        )
+
+    def test_anonymous_agents_link_points_directly_to_login(self):
+        agents_link = self._render_agents_link(is_authenticated=False)
+
+        self.assertEqual(agents_link["href"], "/accounts/login/?next=/app/agents")
+        self.assertEqual(agents_link.get("rel"), ["nofollow"])
+
+    def test_authenticated_agents_link_points_directly_to_app(self):
+        agents_link = self._render_agents_link(is_authenticated=True)
+
+        self.assertEqual(agents_link["href"], "/app/agents")
+        self.assertIsNone(agents_link.get("rel"))

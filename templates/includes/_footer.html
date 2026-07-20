@@ -9,7 +9,11 @@
           <li><a href="{% url 'proprietary:teams' %}" class="text-slate-700 hover:text-blue-600">Teams</a></li>
           <li><a href="{% url 'proprietary:pricing' %}" class="text-slate-700 hover:text-blue-600">Pricing</a></li>
         {% endif %}
-        <li><a href="{% url 'agents' %}" class="text-slate-700 hover:text-blue-600">My Agents</a></li>
+        {% if request.user.is_authenticated %}
+          <li><a href="/app/agents" class="text-slate-700 hover:text-blue-600">My Agents</a></li>
+        {% else %}
+          <li><a href="{% url 'account_login' %}?next=/app/agents" rel="nofollow" class="text-slate-700 hover:text-blue-600">My Agents</a></li>
+        {% endif %}
         <li><a href="https://github.com/gobii-ai/gobii-platform" class="text-slate-700 hover:text-blue-600" title="Self-Host Gobii">Self-Host</a></li>
         {% if settings.GOBII_PROPRIETARY_MODE and settings.REWARDFUL_AFFILIATE_LINK %}
           <li><a href="{{ settings.REWARDFUL_AFFILIATE_LINK }}" class="text-slate-700 hover:text-blue-600" title="Gobii Affiliate Program" target="_blank" rel="noopener">Affiliate Program</a></li>

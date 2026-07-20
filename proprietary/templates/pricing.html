@@ -135,7 +135,7 @@
               data-analytics-placement="pricing_grid"
               data-analytics-intent="{{ plan.analytics_intent|default:'select_plan' }}"
               data-analytics-label="{{ plan.cta }}"
-              {% if plan.external %}target="_blank" rel="noopener noreferrer"{% endif %}
+              {% if plan.external %}target="_blank" rel="noopener noreferrer"{% elif plan.nofollow %}rel="nofollow"{% endif %}
               class="plan-cta mt-auto inline-flex min-h-12 items-center justify-center gap-2 rounded-lg px-5 py-3 text-sm font-semibold transition
               {% if plan.cta_variant == 'primary' %}
               bg-gradient-to-r from-violet-600 via-indigo-600 to-purple-600 text-white shadow-[0_12px_28px_rgba(124,58,237,0.25)] hover:from-violet-700 hover:via-indigo-700 hover:to-purple-700

@@ -30,7 +30,7 @@
     <p class="mt-4 text-base text-slate-500 max-w-xl mx-auto leading-relaxed">Humans and AI agents, working together &mdash; each doing what they do best. Gobii is the platform that makes that&nbsp;real.</p>
     <div class="mt-8">
       {% if user.is_authenticated and account.usage.agents_unlimited is not True and account.usage.agents_available <= 0 %}
-      <a href="{% url 'proprietary:startup_checkout' %}" class="inline-flex items-center justify-center gap-x-2 bg-gradient-to-r from-violet-600 to-purple-500 hover:from-violet-700 hover:to-purple-600 border border-transparent text-white text-sm font-semibold rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 py-3 px-6 shadow-lg hover:shadow-xl transition-all duration-300">
+      <a href="{% url 'proprietary:startup_checkout' %}" rel="nofollow" class="inline-flex items-center justify-center gap-x-2 bg-gradient-to-r from-violet-600 to-purple-500 hover:from-violet-700 hover:to-purple-600 border border-transparent text-white text-sm font-semibold rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 py-3 px-6 shadow-lg hover:shadow-xl transition-all duration-300">
         Upgrade Your Plan
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
       </a>

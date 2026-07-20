@@ -496,6 +496,7 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
                 "features": startup_features,
                 "cta": startup_cta_text,
                 "cta_url": reverse("proprietary:startup_checkout") if not startup_cta_disabled else "",
+                "nofollow": True,
                 "cta_variant": "primary",
             },
             {
@@ -520,6 +521,7 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
                 "features": scale_features,
                 "cta": scale_cta_text,
                 "cta_url": reverse("proprietary:scale_checkout") if not scale_cta_disabled else "",
+                "nofollow": True,
                 "cta_variant": "primary",
                 "disabled": False,
             },

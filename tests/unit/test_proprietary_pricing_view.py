@@ -4,6 +4,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from bs4 import BeautifulSoup
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings, tag
@@ -266,8 +267,22 @@ class PricingPageCtaCopyTests(TestCase):
         self.assertEqual(plans[1]["cta_url"], reverse("proprietary:startup_checkout"))
         self.assertEqual(plans[2]["cta_url"], reverse("proprietary:scale_checkout"))
         self.assertEqual(plans[3]["cta_url"], "/app/team")
+        self.assertTrue(plans[1]["nofollow"])
+        self.assertTrue(plans[2]["nofollow"])
+        self.assertNotIn("nofollow", plans[3])
 
         content = response.content.decode()
+        soup = BeautifulSoup(content, "html.parser")
+        startup_anchor = soup.find("a", href=reverse("proprietary:startup_checkout"))
+        scale_anchor = soup.find("a", href=reverse("proprietary:scale_checkout"))
+        team_anchor = soup.find("a", href="/app/team")
+        self.assertIsNotNone(startup_anchor)
+        self.assertIsNotNone(scale_anchor)
+        self.assertIsNotNone(team_anchor)
+        self.assertEqual(startup_anchor.get("rel"), ["nofollow"])
+        self.assertEqual(scale_anchor.get("rel"), ["nofollow"])
+        self.assertNotIn("nofollow", team_anchor.get("rel", []))
+
         analytics_pos = content.index('data-analytics-cta-id="pricing_free_oss_plan"')
         anchor_start = content.rfind("<a ", 0, analytics_pos)
         anchor_end = content.index("</a>", analytics_pos)
