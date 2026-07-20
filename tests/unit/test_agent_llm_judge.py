@@ -115,16 +115,19 @@ class AgentJudgeTests(TestCase):
                 description=f"Step {index}",
             )
 
-    def _add_error_tool_call(self, index: int, *, tool_name: str = "read_file") -> None:
+    def _add_error_tool_call(self, index: int, *, tool_name: str = "read_file", retryable: bool = False) -> None:
         step = PersistentAgentStep.objects.create(
             agent=self.agent,
             description=f"Tool error {index}",
         )
+        result = {"status": "error", "message": "failed"}
+        if retryable:
+            result["retryable"] = True
         PersistentAgentToolCall.objects.create(
             step=step,
             tool_name=tool_name,
             tool_params={"path": f"/tmp/{index}"},
-            result='{"status":"error","message":"failed"}',
+            result=json.dumps(result),
             status="error",
         )
 
@@ -178,6 +181,34 @@ class AgentJudgeTests(TestCase):
         trigger = build_judge_trigger(self.agent, tools=[])
 
         self.assertIsNone(trigger)
+
+    def test_retryable_tool_errors_do_not_count_toward_failure_threshold(self):
+        for index in range(3):
+            self._add_error_tool_call(index, retryable=True)
+        PersistentAgentStep.objects.create(agent=self.agent, description="Retry succeeded")
+
+        self.assertIsNone(build_judge_trigger(self.agent, tools=[]))
+
+    def test_latest_retryable_tool_call_suppresses_other_automatic_triggers(self):
+        self._add_error_tool_call(0, retryable=True)
+
+        trigger = build_judge_trigger(
+            self.agent,
+            tools=[],
+            extra_trigger_reasons=["burn_rate_tier_step_down"],
+        )
+
+        self.assertIsNone(trigger)
+
+    def test_older_retryable_error_does_not_suppress_nonretryable_failure_trigger(self):
+        self._add_error_tool_call(0, retryable=True)
+        for index in range(1, 4):
+            self._add_error_tool_call(index)
+
+        trigger = build_judge_trigger(self.agent, tools=[])
+
+        self.assertIsNotNone(trigger)
+        self.assertIn("failed_tool_calls", trigger.reasons)
 
     def test_negative_language_trigger_only_checks_latest_user_message(self):
         self._add_steps(1)

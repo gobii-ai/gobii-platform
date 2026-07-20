@@ -84,7 +84,7 @@ def execute_create_csv(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
     except LinkReferenceResolutionError as exc:
         return link_reference_error_response(exc)
     output = io.StringIO()
-    csv.writer(output).writerows(table)
+    csv.writer(output, lineterminator="\n").writerows(table)
 
     return write_agent_export(
         agent=agent,
