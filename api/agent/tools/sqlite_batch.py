@@ -1890,8 +1890,8 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
             "name": "sqlite_batch",
             "description": (
                 "SQLite memory and logic. Reusable domains MUST use explicit CREATE TABLE with stable PRIMARY KEY/UNIQUE identity and provenance, then one aggregate INSERT; CTAS is disposable only. Model shared entity/event/relationship "
-                "tables and separate repeating parents/children. Use joins/CTEs/windows/aggregates; return only needed rows. Load all relevant __tool_results with one "
-                "INSERT ... SELECT/json_each query and an IN/tool_name filter; http_request payloads are under result_json $.content. Never use per-result tables or hand-copy tool rows into VALUES. For large/repetitive imports or API fan-out, prefer a custom tool writing to SQLite; no "
+                "tables and separate repeating parents/children. Use joins/CTEs/windows/aggregates; return only needed rows. For 2+ relevant __tool_results, query together via IN/tool_name; never call sqlite_batch once per result_id. "
+                "Model with INSERT ... SELECT/json_each, not copied rows; http_request JSON is under result_json $.content. For large/repetitive imports or API fan-out, prefer a custom tool writing to SQLite; no "
                 "ATTACH. `sql` is one semicolon-separated string; escape apostrophes as 'O''Brien'. grep_context_all/split_sections arrays use json_each and ctx.value, not json_extract."
             ),
             "parameters": {

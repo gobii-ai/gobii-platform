@@ -250,8 +250,9 @@ class SqliteBatchToolTests(TestCase):
         self.assertIn("PRIMARY KEY/UNIQUE identity and provenance", description)
         self.assertIn("MUST use explicit CREATE TABLE", description)
         self.assertIn("CTAS is disposable only", description)
-        self.assertIn("all relevant __tool_results", description)
-        self.assertIn("one INSERT ... SELECT/json_each query", description)
+        self.assertIn("For 2+ relevant __tool_results, query together via IN/tool_name", description)
+        self.assertIn("never call sqlite_batch once per result_id", description)
+        self.assertIn("Model with INSERT ... SELECT/json_each, not copied rows", description)
         self.assertIn("prefer a custom tool writing to SQLite", description)
         self.assertIn("no ATTACH", description)
 
