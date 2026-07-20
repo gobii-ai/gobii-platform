@@ -1,5 +1,6 @@
 import json
 from datetime import timedelta
+from decimal import Decimal
 from io import BytesIO
 from unittest.mock import patch
 
@@ -8,7 +9,10 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase, tag
 from django.utils import timezone
 
-from api.evals.scenarios.daily_credit_prompt import DailyCreditPromptNotNearLimitScenario
+from api.evals.scenarios.daily_credit_prompt import (
+    DailyCreditPromptNotNearLimitScenario,
+    DailyCreditPromptOneToolLeftScenario,
+)
 from api.models import BrowserUseAgent, PersistentAgent, PersistentAgentPromptArchive, PersistentAgentStep
 
 
@@ -73,3 +77,10 @@ class DailyCreditPromptArchiveTests(TestCase):
         self.assertEqual(archive, agent_archive)
         self.assertIn("Daily limit progress: 50 / 100", content)
         storage_open.assert_called_once_with("agent.zst", "rb")
+
+    @patch("api.evals.scenarios.daily_credit_prompt.get_default_task_credit_cost", return_value=Decimal("0.125"))
+    def test_one_tool_left_usage_tracks_default_tool_cost(self, _default_cost):
+        scenario = DailyCreditPromptOneToolLeftScenario()
+
+        self.assertEqual(scenario.usage_today, Decimal("99.875"))
+        self.assertIn("99.875", scenario.required_prompt_snippets(str(self.agent.id)))
