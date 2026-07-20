@@ -1977,9 +1977,9 @@ def _should_skip_stale_planning_mode_after_terminal_delivery(
 ) -> bool:
     return (
         agent.planning_state == PersistentAgent.PlanningState.PLANNING
-        and not followup_required
-        and finalized_batch.terminal_message_delivery_ok
+        and not followup_required and finalized_batch.terminal_message_delivery_ok
         and not finalized_batch.human_input_request_ok
+        and not agent.human_input_requests.filter(status="pending").exclude(expires_at__lte=dj_timezone.now()).exists()
     )
 
 
@@ -2044,7 +2044,7 @@ def _should_continue_for_unanswered_inbound_after_tools(
         not finalized_batch.followup_required
         and finalized_batch.last_explicit_continue is False
         and finalized_batch.executed_non_message_action
-        and not finalized_batch.message_delivery_ok
+        and not (finalized_batch.message_delivery_ok or finalized_batch.human_input_request_ok)
         and _latest_inbound_message_needs_reply(agent)
     )
 

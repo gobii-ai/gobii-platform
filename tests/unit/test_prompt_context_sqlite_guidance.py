@@ -21,9 +21,10 @@ class PromptContextSqliteGuidanceTests(SimpleTestCase):
     def test_sqlite_guidance_tracks_bounded_set_coverage(self):
         guidance = prompt_context._get_sqlite_guidance()
 
-        self.assertIn("sizable domains as keyed entities/events/relations", guidance)
-        self.assertIn("coverage rows with status/fields/source", guidance)
-        self.assertIn("query unresolved rows before reporting", guidance)
+        self.assertIn("sizable domains and multi-fetch finite sets as keyed entities/events/relations", guidance)
+        self.assertIn("with fields/status/source", guidance)
+        self.assertIn("query gaps before reporting", guidance)
+        self.assertIn("Only sourced blockers are unresolved", guidance)
 
     def test_low_iteration_warning_keeps_unfinished_work_active(self):
         collector = _NestedPromptSectionCollector()
@@ -44,8 +45,8 @@ class PromptContextSqliteGuidanceTests(SimpleTestCase):
         warning = collector.sections["iteration_warning"]
         self.assertTrue(added)
         self.assertIn("never false-complete", warning)
-        self.assertIn("remaining scope", warning)
-        self.assertIn("continue", warning)
+        self.assertIn("unfinished scope", warning)
+        self.assertIn("next cycle", warning)
         self.assertNotIn("set a schedule", warning)
 
     def test_sqlite_retry_warning_flags_repeated_empty_probes(self):

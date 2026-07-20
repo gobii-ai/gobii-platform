@@ -13,6 +13,7 @@ from api.evals.registry import ScenarioRegistry
 from api.evals.scenarios.behavior_micro import (
     BEHAVIOR_MICRO_SCENARIO_SLUGS,
     COMMON_USE_CASE_EVAL_CASES,
+    PLANNING_FIRST_TURN_ASKS_BOUNDED_QUESTIONS,
     PLANNING_INTEGRATION_SETUP_SEARCHES_BEFORE_QUESTION,
     PLANNING_MICRO_SCENARIO_SLUGS,
     TOOL_CHOICE_MICRO_SCENARIO_SLUGS,
@@ -27,6 +28,16 @@ SQLITE_EXPORT_QUERY_CSV = "common_use_case_086_sqlite_export_query_csv"
 
 @tag("eval_sim")
 class BehaviorMicroScenarioTests(SimpleTestCase):
+    def test_planning_questions_eval_exercises_normal_wait_lifecycle(self):
+        scenario = ScenarioRegistry.get(PLANNING_FIRST_TURN_ASKS_BOUNDED_QUESTIONS)
+        policy = scenario._eval_stop_policy()
+
+        self.assertNotIn("stop_on_human_input_request", policy)
+        self.assertIn(
+            "verify_questions_remain_pending",
+            [task.name for task in scenario.tasks],
+        )
+
     def test_sqlite_export_case_seeds_exact_lead_fixture(self):
         scenario = ScenarioRegistry.get(SQLITE_EXPORT_QUERY_CSV)
 

@@ -1,13 +1,18 @@
 import uuid
+from datetime import timedelta
 from unittest.mock import MagicMock, patch
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings, tag
+from django.utils import timezone
 
 from api.agent.core import event_processing as ep
 from api.models import (
     BrowserUseAgent,
+    CommsChannel,
     PersistentAgent,
+    PersistentAgentConversation,
+    PersistentAgentHumanInputRequest,
     PersistentAgentToolCall,
     UserQuota,
 )
@@ -104,13 +109,18 @@ class EventProcessingHumanInputTests(TestCase):
                 "request_human_input",
                 (
                     '{"question": "What should I do next?", '
-                    '"options": [{"title": "Proceed", "description": "Continue with this option."}]}'
+                    '"options": [{"title": "Proceed", "description": "Continue with this option."}], '
+                    '"will_continue_work": false}'
                 ),
             ),
             {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15, "model": "m", "provider": "p"},
         )
 
-        with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 2):
+        with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 2), patch.object(
+            ep,
+            "_latest_inbound_message_needs_reply",
+            return_value=True,
+        ):
             ep._run_agent_loop(self.agent, is_first_run=False)
 
         self.assertEqual(mock_completion.call_count, 1)
@@ -118,6 +128,54 @@ class EventProcessingHumanInputTests(TestCase):
         self.assertEqual(
             list(PersistentAgentToolCall.objects.values_list("tool_name", flat=True)),
             ["request_human_input"],
+        )
+
+    def test_terminal_planning_cleanup_preserves_active_human_input_request(self):
+        self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
+        self.agent.save(update_fields=["planning_state", "updated_at"])
+        conversation = PersistentAgentConversation.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.WEB,
+            address=f"web://user/{self.user.id}/agent/{self.agent.id}",
+        )
+        request_obj = PersistentAgentHumanInputRequest.objects.create(
+            agent=self.agent,
+            conversation=conversation,
+            question="Which market should I prioritize?",
+            requested_via_channel=CommsChannel.WEB,
+            expires_at=timezone.now() + timedelta(hours=1),
+        )
+        finalized = ep._FinalizedToolBatch(
+            executed_calls=1,
+            followup_required=False,
+            message_delivery_ok=True,
+            last_explicit_continue=False,
+            inferred_message_continue_this_iteration=False,
+            executed_non_message_action=False,
+            terminal_message_delivery_ok=True,
+        )
+
+        self.assertFalse(
+            ep._should_skip_stale_planning_mode_after_terminal_delivery(
+                self.agent,
+                finalized,
+                followup_required=False,
+            )
+        )
+
+        self.agent.refresh_from_db()
+        request_obj.refresh_from_db()
+        self.assertEqual(self.agent.planning_state, PersistentAgent.PlanningState.PLANNING)
+        self.assertEqual(request_obj.status, PersistentAgentHumanInputRequest.Status.PENDING)
+
+        request_obj.expires_at = timezone.now() - timedelta(seconds=1)
+        request_obj.save(update_fields=["expires_at", "updated_at"])
+        self.assertTrue(
+            ep._should_skip_stale_planning_mode_after_terminal_delivery(
+                self.agent,
+                finalized,
+                followup_required=False,
+            )
         )
 
     @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})

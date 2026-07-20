@@ -54,8 +54,6 @@ from api.evals.scenarios.behavior_micro import (
     get_plan_activity_calls_for_run,
     get_pending_human_input_requests,
     get_planning_mutation_calls_before_end_planning,
-    _delivered_tool_result,
-    _is_bounded_planning_chat_question,
     tool_call_is_plan_activity,
 )
 from api.evals.scenarios.effort_calibration import _hierarchical_report_shape
@@ -1285,26 +1283,6 @@ class BehaviorMicroHelperTests(TestCase):
         self.assertEqual(expected_url_result["status"], "ok")
         self.assertEqual(expected_url_result["content"], {"ok": True})
 
-    def test_planning_first_turn_accepts_bounded_chat_clarification(self):
-        call = self._add_tool_call(
-            "send_chat_message",
-            {
-                "body": (
-                    "A couple things would help me scope competitor monitoring:\n\n"
-                    "1. What industry or space are you in?\n"
-                    "2. What kinds of updates matter most?"
-                )
-            },
-        )
-        call.result = '{"status": "ok"}'
-
-        self.assertTrue(_is_bounded_planning_chat_question(call))
-
-    def test_delivered_tool_result_accepts_preparsed_dict_payload(self):
-        call = SimpleNamespace(result={"status": "sent"})
-
-        self.assertTrue(_delivered_tool_result(call))
-
     def test_attachment_email_case_seeds_real_filespace_file(self):
         by_slug = {case.slug: case for case in COMMON_USE_CASE_EVAL_CASES}
         scenario = CommonUseCaseToolChoiceScenario()
@@ -1321,20 +1299,6 @@ class BehaviorMicroHelperTests(TestCase):
                 size_bytes__gt=0,
             ).exists()
         )
-
-    def test_planning_first_turn_rejects_unbounded_chat_clarification(self):
-        call = self._add_tool_call(
-            "send_chat_message",
-            {
-                "body": (
-                    "What industry are you in? Which competitors? Which geographies? "
-                    "Which update types? What format? What cadence?"
-                )
-            },
-        )
-        call.result = '{"status": "ok"}'
-
-        self.assertFalse(_is_bounded_planning_chat_question(call))
 
     def test_plan_activity_only_includes_update_plan(self):
         read = self._add_tool_call("sqlite_batch", {"sql": "SELECT * FROM __agent_config"})
