@@ -603,16 +603,20 @@ class SqliteToolResultScenario(EvalScenario, ScenarioExecutionTools):
 @register_scenario
 class SqliteMultiResultWebSynthesisScenario(SqliteToolResultScenario):
     slug = SQLITE_MULTI_RESULT_WEB_SYNTHESIS
-    description = "Multi-result web research should synthesize prior tool outputs with one shaped SQLite query."
+    description = "Multi-result web research should synthesize prior tool outputs with efficient shaped SQLite queries."
     tasks = [ScenarioTask(name="inject_prompt", assertion_type="agent_processing"), ScenarioTask(name="verify_smart_sqlite_synthesis", assertion_type="tool_call"), ScenarioTask(name="verify_sourced_answer", assertion_type="manual")]
     eval_synthetic_tools = ("mcp_brightdata_scrape_as_markdown",)
-    prompt = "Open exactly these support-automation pages with mcp_brightdata_scrape_as_markdown, then use one sqlite_batch CTE/IN query over all prior scrape rows in __tool_results; page markdown is in result_text. Do not hand-build comparison rows. Recommend for enterprise, SMB, and regulated healthcare, citing URLs.\n\n" + "\n".join(f"- {url}" for url in SOURCE_URLS)
+    prompt = (
+        "Compare these support automation products for an enterprise team, a small team, and a regulated healthcare "
+        "team. Include the evidence and source links you relied on.\n\n"
+        + "\n".join(f"- {url}" for url in SOURCE_URLS)
+    )
     mock_kind = "web"
     verify_task_name = "verify_smart_sqlite_synthesis"
     answer_source_urls = SOURCE_URLS
     required_terms = ("enterprise", "SMB", "HIPAA")
     min_sources = 3
-    max_sqlite_usage_calls = 1
+    max_sqlite_usage_calls = 2
     reject_result_id_case_rows = True
 
 

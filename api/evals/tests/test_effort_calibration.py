@@ -110,6 +110,7 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
 
     def test_trajectory_regression_prompts_do_not_prescribe_tools_or_format(self):
         prompts = (
+            SqliteMultiResultWebSynthesisScenario.prompt,
             SqliteNaturalResultAccessScenario.prompt,
             SqliteBoundedPortfolioReportScenario.prompt,
         )
@@ -617,12 +618,6 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
         for implementation_term in ("sqlite", "__tool_results", "json_extract", "create table", "sql"):
             self.assertNotIn(implementation_term, prompts)
 
-    def test_multi_result_scrape_prompt_uses_canonical_text_column(self):
-        prompt = SqliteMultiResultWebSynthesisScenario.prompt
-
-        self.assertIn("page markdown is in result_text", prompt)
-        self.assertNotIn("result_json", prompt)
-
     def test_multi_result_sqlite_scorer_rejects_extra_or_hand_built_queries(self):
         scenario, recorded = SqliteMultiResultWebSynthesisScenario(), []
         scenario.record_task_result = lambda *args, **kwargs: recorded.append((args, kwargs))
@@ -636,10 +631,11 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
             return_value=[
                 _eval_tool_call("sqlite_batch", {"sql": aggregate_sql}),
                 _eval_tool_call("sqlite_batch", {"sql": aggregate_sql}),
+                _eval_tool_call("sqlite_batch", {"sql": aggregate_sql}),
             ],
         ):
             self.assertFalse(scenario._record_sqlite_usage("run", after=None, task_name="verify"))
-        self.assertIn("sqlite_batch calls 2 > 1", recorded[-1][1]["observed_summary"])
+        self.assertIn("sqlite_batch calls 3 > 2", recorded[-1][1]["observed_summary"])
 
         hand_built_sql = aggregate_sql.replace(
             "result_id, count(*)",
