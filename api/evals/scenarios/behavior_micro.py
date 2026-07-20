@@ -14,6 +14,7 @@ from api.agent.tools.tool_manager import mark_tool_enabled_without_discovery
 from api.evals.base import EvalScenario, ScenarioTask
 from api.evals.execution import ScenarioExecutionTools
 from api.evals.registry import ScenarioRegistry, register_scenario
+from api.evals.tool_params import resolved_tool_param
 from api.evals.stop_policy import (
     sqlite_batch_is_only_eval_bookkeeping_read,
     sqlite_batch_is_only_planning_state_read,
@@ -446,7 +447,7 @@ def get_tool_calls_for_run(run_id, *, after=None, tool_names=None):
         queryset = queryset.filter(step__created_at__gte=after)
     if tool_names is not None:
         queryset = queryset.filter(tool_name__in=list(tool_names))
-    return list(queryset.select_related("step").order_by("step__created_at", "step__id"))
+    return list(queryset.select_related("step", "step__agent").order_by("step__created_at", "step__id"))
 
 
 def get_first_relevant_tool_call(run_id, *, after=None, ignored_tool_names=None):
@@ -2199,7 +2200,7 @@ class ToolChoiceExactJsonUrlUsesHttpRequestScenario(BehaviorMicroScenario):
         http_calls = get_tool_calls_for_run(run_id, after=inbound.timestamp, tool_names={"http_request"})
         matching = [
             call for call in http_calls
-            if (call.tool_params or {}).get("url") == target_url
+            if resolved_tool_param(call, "url") == target_url
         ]
         if matching:
             self.record_task_result(
@@ -2211,7 +2212,7 @@ class ToolChoiceExactJsonUrlUsesHttpRequestScenario(BehaviorMicroScenario):
                 artifacts={"step": matching[0].step},
             )
         else:
-            seen_urls = [(call.tool_params or {}).get("url") for call in http_calls]
+            seen_urls = [resolved_tool_param(call, "url") for call in http_calls]
             self.record_task_result(
                 run_id,
                 None,
@@ -3094,8 +3095,7 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
         if not expected_params:
             return True
         for call in calls:
-            params = call.tool_params or {}
-            if all(params.get(key) == value for key, value in expected_params.items()):
+            if all(resolved_tool_param(call, key) == value for key, value in expected_params.items()):
                 return True
         return False
 

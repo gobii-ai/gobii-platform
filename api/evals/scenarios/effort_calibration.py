@@ -12,6 +12,7 @@ from api.agent.tools.web_chat_sender import _looks_like_routine_progress_message
 from api.evals.base import EvalScenario, ScenarioTask
 from api.evals.execution import ScenarioExecutionTools
 from api.evals.registry import register_scenario
+from api.evals.tool_params import resolved_tool_param
 from api.evals.stop_policy import (
     split_sql_statements,
     sqlite_batch_is_only_eval_bookkeeping_read,
@@ -247,7 +248,7 @@ def _tool_calls_for_run(run_id: str, *, after=None, tool_names: Iterable[str] | 
         queryset = queryset.filter(step__created_at__gte=after)
     if tool_names is not None:
         queryset = queryset.filter(tool_name__in=list(tool_names))
-    return list(queryset.select_related("step").order_by("step__created_at", "step__id"))
+    return list(queryset.select_related("step", "step__agent").order_by("step__created_at", "step__id"))
 
 
 def _relevant_tool_calls_for_run(
@@ -1134,7 +1135,7 @@ class EffortSimpleLookupBoundedToolsScenario(EffortCalibrationScenario):
 
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="verify_exact_fetch_once")
         http_calls = _tool_calls_for_run(run_id, after=inbound.timestamp, tool_names={"http_request"})
-        exact_calls = [call for call in http_calls if (call.tool_params or {}).get("url") == target_url]
+        exact_calls = [call for call in http_calls if resolved_tool_param(call, "url") == target_url]
         if len(exact_calls) == 1 and len(http_calls) == 1:
             self.record_task_result(
                 run_id,
@@ -1150,7 +1151,7 @@ class EffortSimpleLookupBoundedToolsScenario(EffortCalibrationScenario):
                 None,
                 EvalRunTask.Status.FAILED,
                 task_name="verify_exact_fetch_once",
-                observed_summary=f"Expected one exact http_request; saw URLs {[(c.tool_params or {}).get('url') for c in http_calls]}.",
+                observed_summary=f"Expected one exact http_request; saw URLs {[resolved_tool_param(c, 'url') for c in http_calls]}.",
                 artifacts={"step": http_calls[0].step} if http_calls else {},
             )
 
@@ -1369,7 +1370,7 @@ class EffortScheduledBriefingFinishesScenario(EffortCalibrationScenario):
 
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="verify_bounded_run")
         http_calls = _tool_calls_for_run(run_id, after=cron_step.created_at, tool_names={"http_request"})
-        exact_http_calls = [call for call in http_calls if (call.tool_params or {}).get("url") == briefing_url]
+        exact_http_calls = [call for call in http_calls if resolved_tool_param(call, "url") == briefing_url]
         orchestrator_count = _orchestrator_completion_count(run_id)
         if len(exact_http_calls) == 1 and len(http_calls) == 1 and orchestrator_count <= 4:
             self.record_task_result(
@@ -1391,7 +1392,7 @@ class EffortScheduledBriefingFinishesScenario(EffortCalibrationScenario):
                 task_name="verify_bounded_run",
                 observed_summary=(
                     f"Expected one exact fetch and <=4 completions; "
-                    f"http_urls={[(c.tool_params or {}).get('url') for c in http_calls]}, "
+                    f"http_urls={[resolved_tool_param(c, 'url') for c in http_calls]}, "
                     f"orchestrator_count={orchestrator_count}."
                 ),
                 artifacts={"step": http_calls[0].step} if http_calls else {},

@@ -11,6 +11,7 @@ from api.agent.tools.tool_manager import mark_tool_enabled_without_discovery
 from api.evals.base import EvalScenario, ScenarioTask
 from api.evals.execution import ScenarioExecutionTools
 from api.evals.registry import ScenarioRegistry
+from api.evals.tool_params import resolved_tool_param
 from api.models import (
     AgentPeerLink,
     BrowserUseAgent,
@@ -377,7 +378,7 @@ class ResponsibilityBoundaryScenario(EvalScenario, ScenarioExecutionTools):
         fetched_summary = (
             len(http_calls) == 1
             and self._call_succeeded(http_calls[0])
-            and "customer-signals-summary.json" in str((http_calls[0].tool_params or {}).get("url") or "")
+            and "customer-signals-summary.json" in str(resolved_tool_param(http_calls[0], "url") or "")
         )
         self.record_task_result(
             run_id,

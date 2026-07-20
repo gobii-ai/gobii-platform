@@ -3,6 +3,7 @@ from urllib.parse import parse_qs, urlparse
 from api.evals.base import EvalScenario, ScenarioTask
 from api.evals.registry import register_scenario
 from api.evals.execution import ScenarioExecutionTools
+from api.evals.tool_params import resolved_tool_param
 from api.agent.tools.tool_manager import mark_tool_enabled_without_discovery
 from api.models import EvalRunTask, PersistentAgent, PersistentAgentMessage, PersistentAgentToolCall
 
@@ -225,7 +226,7 @@ class WeatherLookupScenario(EvalScenario, ScenarioExecutionTools):
             step__agent_id=agent_id,
             step__created_at__gte=msg.timestamp,
             tool_name='http_request'
-        )
+        ).select_related("step", "step__agent")
 
         spawn_calls = PersistentAgentToolCall.objects.filter(
             step__agent_id=agent_id,
@@ -238,7 +239,7 @@ class WeatherLookupScenario(EvalScenario, ScenarioExecutionTools):
             valid_call = None
             valid_reason = ""
             for http_call in http_calls.order_by("step__created_at", "step__id"):
-                params = http_call.tool_params or {}
+                params = {**(http_call.tool_params or {}), "url": resolved_tool_param(http_call, "url")}
                 valid_request, reason = _is_free_weather_request(params)
                 checked_requests.append({"params": params, "reason": reason})
                 if valid_request:

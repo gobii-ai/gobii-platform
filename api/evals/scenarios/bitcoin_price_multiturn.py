@@ -4,6 +4,7 @@ from urllib.parse import parse_qs, urlparse
 from api.evals.base import EvalScenario, ScenarioTask
 from api.evals.registry import register_scenario
 from api.evals.execution import ScenarioExecutionTools
+from api.evals.tool_params import resolved_tool_param
 from api.models import EvalRunTask, PersistentAgentToolCall, PersistentAgentMessage
 
 
@@ -52,7 +53,7 @@ def is_supported_bitcoin_price_api_url(url: str) -> bool:
 
 def bitcoin_tool_calls_include_supported_price_api(calls) -> bool:
     return any(
-        is_supported_bitcoin_price_api_url((getattr(call, "tool_params", None) or {}).get("url", ""))
+        is_supported_bitcoin_price_api_url(resolved_tool_param(call, "url") or "")
         for call in calls
     )
 
@@ -281,9 +282,9 @@ class BitcoinPriceMultiturnScenario(EvalScenario, ScenarioExecutionTools):
             )
         else:
             seen_urls = [
-                (call.tool_params or {}).get("url", "")
+                resolved_tool_param(call, "url")
                 for call in http_calls
-                if (call.tool_params or {}).get("url", "")
+                if resolved_tool_param(call, "url")
             ]
             self.record_task_result(
                 run_id, None, EvalRunTask.Status.FAILED, task_name="verify_http_request_after_search",
