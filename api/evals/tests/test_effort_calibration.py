@@ -853,10 +853,11 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
             SimpleNamespace(
                 step="rejected",
                 status="error",
+                result='{"status":"error","message":"Query not executed: link references are unsupported","retryable":true}',
                 tool_name="sqlite_batch",
                 tool_params={
-                    "sql": "CREATE TABLE rejected(vendor TEXT, plan TEXT); "
-                    "INSERT INTO rejected VALUES ('CareMesh', 'Clinic');"
+                    "sql": "CREATE TABLE plans(vendor TEXT, plan TEXT); "
+                    "INSERT INTO plans VALUES ('CareMesh', 'Clinic');"
                 },
             ),
             SimpleNamespace(

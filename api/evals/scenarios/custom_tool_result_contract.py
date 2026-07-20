@@ -251,6 +251,7 @@ class CustomToolResultContractScenario(EvalScenario, ScenarioExecutionTools):
 
         tool_calls = self._tool_calls_for_run(run_id, after=inbound.timestamp)
         create_calls = [call for call in tool_calls if call.tool_name == "create_custom_tool"]
+        successful_create_calls = self._successful_create_calls(create_calls)
         self.record_task_result(
             run_id,
             None,
@@ -258,13 +259,13 @@ class CustomToolResultContractScenario(EvalScenario, ScenarioExecutionTools):
             task_name="propose_result_contract",
             expected_summary="Agent should create a custom tool with useful params, batching, and result contract.",
         )
-        if not create_calls:
+        if not successful_create_calls:
             self.record_task_result(
                 run_id,
                 None,
                 EvalRunTask.Status.FAILED,
                 task_name="propose_result_contract",
-                observed_summary="Agent did not call create_custom_tool.",
+                observed_summary="Agent did not successfully call create_custom_tool.",
             )
             self.record_task_result(
                 run_id,
@@ -282,15 +283,15 @@ class CustomToolResultContractScenario(EvalScenario, ScenarioExecutionTools):
             )
             return
 
-        if len(create_calls) > 1:
+        if len(successful_create_calls) > 1:
             self.record_task_result(
                 run_id,
                 None,
                 EvalRunTask.Status.FAILED,
                 task_name="propose_result_contract",
                 observed_summary=(
-                    "Agent called create_custom_tool more than once "
-                    f"({len(create_calls)} calls). Custom tool creation must succeed on the first attempt."
+                    "Agent successfully called create_custom_tool more than once "
+                    f"({len(successful_create_calls)} successful calls)."
                 ),
                 artifacts={
                     "create_tool_call_count": len(create_calls),
@@ -309,18 +310,18 @@ class CustomToolResultContractScenario(EvalScenario, ScenarioExecutionTools):
                 None,
                 EvalRunTask.Status.SKIPPED,
                 task_name="invoke_custom_tool",
-                observed_summary="Skipped because create_custom_tool was called more than once.",
+                observed_summary="Skipped because create_custom_tool succeeded more than once.",
             )
             self.record_task_result(
                 run_id,
                 None,
                 EvalRunTask.Status.SKIPPED,
                 task_name="judge_result_helpfulness",
-                observed_summary="Skipped because repeated create_custom_tool calls fail the eval.",
+                observed_summary="Skipped because repeated successful create_custom_tool calls fail the eval.",
             )
             return
 
-        create_call = create_calls[-1]
+        create_call = successful_create_calls[-1]
         create_source_code = self._source_code_for_create_call(tool_calls, create_call)
         local_pass, local_reason = self._local_create_tool_check(
             case,
@@ -328,21 +329,6 @@ class CustomToolResultContractScenario(EvalScenario, ScenarioExecutionTools):
             custom_tool_name,
             source_code_override=create_source_code,
         )
-        for candidate_call in reversed(create_calls):
-            candidate_source_code = self._source_code_for_create_call(tool_calls, candidate_call)
-            candidate_pass, candidate_reason = self._local_create_tool_check(
-                case,
-                candidate_call,
-                custom_tool_name,
-                source_code_override=candidate_source_code,
-            )
-            if candidate_pass:
-                create_call = candidate_call
-                create_source_code = candidate_source_code
-                local_pass = candidate_pass
-                local_reason = candidate_reason
-                break
-
         proposal_status = EvalRunTask.Status.PASSED if local_pass else EvalRunTask.Status.FAILED
         self.record_task_result(
             run_id,
@@ -528,6 +514,15 @@ class CustomToolResultContractScenario(EvalScenario, ScenarioExecutionTools):
             except json.JSONDecodeError:
                 return value
         return value
+
+    @classmethod
+    def _successful_create_calls(cls, calls):
+        return [
+            call for call in calls
+            if call.status == "complete"
+            and isinstance(result := cls._decoded_tool_result(call.result), dict)
+            and str(result.get("status") or "").lower() in {"ok", "success"}
+        ]
 
     @staticmethod
     def _source_code_origin(create_call: PersistentAgentToolCall, source_code: str | None) -> str:

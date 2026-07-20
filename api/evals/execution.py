@@ -504,10 +504,7 @@ class ScenarioExecutionTools:
             
         task_obj.save()
 
-        # Attempt to aggregate cost/usage metrics for this task and its parent run.
-        # We call aggregate_run_metrics, which will:
-        # 1. Sum total costs for the run from all AgentCompletions/Steps.
-        # 2. Re-distribute those costs to tasks based on time windows.
+        # Keep task and run metrics current for developer-mode inspection.
         try:
             aggregate_run_metrics(task_obj.run)
             broadcast_run_update(task_obj.run)
@@ -688,6 +685,10 @@ class ScenarioExecutionTools:
                         params=params,
                         options=options,
                     )
+                if isinstance(exc, (json.JSONDecodeError, TypeError, ValueError)):
+                    return self._run_unstructured_judge_completion(
+                        model=model, prompt=prompt, params=params, options=options,
+                    )
                 last_error = exc
                 if delay_seconds is None:
                     raise
@@ -740,7 +741,7 @@ class ScenarioExecutionTools:
                 choice, reasoning = self._extract_unstructured_judgment(response)
                 if choice not in options:
                     raise ValueError(f"LLM judge returned invalid choice {choice!r}: {reasoning}")
-                return choice, f"Structured judge fallback used after provider grammar error. {reasoning}"
+                return choice, f"Structured judge fallback used after structured-output failure. {reasoning}"
             except _JUDGE_RETRYABLE_ERRORS as exc:
                 last_error = exc
                 if delay_seconds is None:

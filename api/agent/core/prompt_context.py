@@ -660,7 +660,7 @@ def _get_sqlite_guidance() -> str:
         "Fetch new data with its source tool and answer small results directly. Use sqlite_batch for data already in SQLite when large/truncated or needing filtering, joins, aggregation, charts, reuse, or domain logic. Model "
         "sizable domains and multi-fetch finite sets as keyed entities/events/relations with fields/status/source; query gaps before reporting. Only sourced blockers are unresolved. Normalize parent/child data "
         "(vendors/plans, accounts/events) with PRIMARY KEY/UNIQUE identity, useful indexes, and source provenance; put logic in SQL and return only needed rows to context. Populate all relevant __tool_results via one shaped INSERT ... SELECT/json_each filtered by IN/tool_name; "
-        "extract fields in SQL, not literals. Never filter one result_id at a time, make a table per result, or loop over blobs. Use CTAS for one-off extracts; "
+        "extract fields/URLs in SQL, not prompt tokens. Never filter one result_id at a time, make a table per result, or loop over blobs. Use CTAS for one-off extracts; "
         "named tables survive calls, TEMP tables do not. Copy identifiers, JSON paths, values, and URLs from schema, hints, or results; inspect unknown structure once instead of inventing it. Use analysis_json/top_keys to locate payloads; http_request JSON is under result_json $.content. Prefer result_json when its path is known, otherwise result_text.\n\n"
         "Snapshots:\n"
         "* __tool_results: result_id, tool_name, created_at, result_json, result_text, analysis_json, is_truncated, top_keys.\n"
@@ -3756,7 +3756,7 @@ def _get_system_instruction(
 
         "## Output Rules\n\n"
         "Keep chat/outreach light. Owner reports on 4+ peers need resolved/total and one table with requested fields plus provided item/detail links where available; keep other rows unlinked. Source/feed links do not substitute for item links. For finite sets, grouped discovery isn't coverage: resolve/source each requested field. Label blockers partial; separate sourced unavailability from research gaps. Ground facts, numbers, units, and URLs in tool results; never relabel/convert units unless asked. Present requested data directly; omit unrelated/unavailable fields and follow-up offers after simple facts, prices, statuses, or lookups. "
-        "`$[link:id]` is an exact URL placeholder. When links are requested, include every relevant provided token unchanged; never transform it or mention the syntax. Keep entities without item tokens unlinked; omit host/path/slug/ID fragments. "
+        "`$[link:id]` is the exact URL. For requested links, use each relevant token unchanged in URL fields (tool/message); never search/resolve/alter/expose it. Unlinked entities stay unlinked; omit host/path/slug/ID fragments. "
         "Charts: create only when requested/materially useful. "
         "Paste create_chart result.inline/result.inline_html in the message; do not attach/read charts or invent paths, hashes, image tags, or <img> URLs. "
         "Use create_csv for tabular exports, create_pdf for PDFs, and create_file for other text/doc formats; create_file query mode must return exactly one row and one column.\n\n"
@@ -3767,8 +3767,7 @@ def _get_system_instruction(
         "Do not download or upload files unless absolutely necessary or explicitly requested by the user. "
 
         "## Tool Rules\n\n```\nopaque identifiers -> copy exposed tool names and supplied endpoints/paths/IDs/placeholders/link references character-for-character; never shorten or normalize\n"
-        "small_result_answers -> answer directly\n"
-        "provided exact URL -> use it directly; do not search for it\n"
+        "small result -> answer; exact URL -> requested tool; custom-tool URLs -> runtime params, no prefetch\n"
         "public exact URL + http/scrape tool callable -> http_request or scrape directly; spawn_web_task only after access/render/login blockage\n"
         "exact docs/blog/changelog/release-notes URL -> scrape_as_markdown or http_request first; never spawn_web_task first just because it is a webpage or app URL\n"
         "explicit SQLite/database request and sqlite_batch is callable -> use sqlite_batch directly; do not search for a SQLite/database tool\n"

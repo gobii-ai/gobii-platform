@@ -199,7 +199,7 @@ def prepare_tool_results_for_prompt(
                     context_hint = extract_context_hint(
                         record.tool_name,
                         payload,
-                        allow_barbell=is_fresh_tool_call,
+                        allow_barbell=recency_position is not None,
                         allow_goldilocks=is_fresh_tool_call,
                         payload_bytes=meta.get("bytes"),
                     )

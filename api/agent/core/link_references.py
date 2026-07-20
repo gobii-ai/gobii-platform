@@ -184,7 +184,9 @@ def resolve_link_reference_params(value, agent, *, tool_name: str = "", _path=()
         return value[: len(value) - len(value.lstrip())] + resolved + value[len(value.rstrip()):]
     if tool_name and _contains_reference_syntax(value):
         location = f"{tool_name}.{_param_path(_path)}" if tool_name else _param_path(_path) or "this value"
-        raise LinkReferenceResolutionError(f"Link references are unsupported in {location}. Use a standalone token only where URL input is supported, move it to supported message/document content, or omit it.")
+        guidance = "Select raw values/URLs from __tool_results result_json/result_text; never replace tokens with literals." if tool_name == "sqlite_batch" else "Use a standalone token only where URL input is supported, move it to supported message/document content, or omit it."
+        raise LinkReferenceResolutionError(
+            f"Query not executed: link references are unsupported in {location}. {guidance}")
     return value
 
 

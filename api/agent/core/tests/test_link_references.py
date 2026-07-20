@@ -326,6 +326,10 @@ class LinkReferenceTests(TestCase):
                     self.assertEqual(result["status"], "error")
                     self.assertTrue(result["retryable"])
                     self.assertIn(path, result["message"])
+                    self.assertIn("Query not executed", result["message"])
+                    if tool_name == "sqlite_batch":
+                        self.assertIn("Select raw values/URLs from __tool_results", result["message"])
+                        self.assertIn("never replace tokens with literals", result["message"])
 
         enabled.assert_not_called()
         apply_patch_mock.assert_not_called()
@@ -697,6 +701,14 @@ class LinkReferenceTests(TestCase):
         self.assertNotIn("Archive note, routine", prompt_info.preview_text)
         self.assertIn("LINK OUTPUT", prompt_info.preview_text)
 
+        later_prompt_info = prepare_tool_results_for_prompt(
+            [record],
+            recency_positions={record.step_id: 0},
+            url_rewriter=lambda text, item: rewrite_prompt_urls(text, self.agent, create=False),
+        )[record.step_id]
+        self.assertIn("FOCUS:", later_prompt_info.meta)
+        self.assertIn("name: Alice", later_prompt_info.meta)
+
     def test_lookup_result_masks_url_parts_inside_escaped_json(self):
         raw_result = json.dumps({
             "result_text": (
@@ -839,9 +851,11 @@ class LinkReferenceTests(TestCase):
     def test_system_prompt_has_one_reference_rule(self):
         prompt = _get_system_instruction(self.agent, is_first_run=False)
 
-        self.assertEqual(prompt.count("`$[link:id]` is an exact URL placeholder"), 1)
-        self.assertIn("include every relevant provided token unchanged", prompt)
-        self.assertIn("entities without item tokens unlinked", prompt)
+        self.assertEqual(prompt.count("`$[link:id]` is the exact URL"), 1)
+        self.assertIn("use each relevant token unchanged in URL fields (tool/message)", prompt)
+        self.assertIn("never search/resolve/alter/expose it", prompt)
+        self.assertIn("Unlinked entities stay unlinked", prompt)
+        self.assertIn("exact URL -> requested tool; custom-tool URLs -> runtime params, no prefetch", prompt)
         self.assertNotIn("Message delivery blocked", prompt)
 
     def test_http_request_url_schema_accepts_link_references(self):
