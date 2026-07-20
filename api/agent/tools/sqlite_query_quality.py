@@ -23,9 +23,9 @@ MANUAL_INSERT_VALUES_RE = re.compile(r'\binsert\s+(?:or\s+\w+\s+)?into\s+"?(?P<n
 JSON_FUNCTION_RE = re.compile(r"\bjson_(?:extract|each)\s*\(", re.I)
 JSON_EACH_RE = re.compile(r"\bjson_each\s*\(", re.I)
 URL_RE = re.compile(r"https?://[^\s'\",)]+", re.I)
-BULK_MANUAL_VALUES_ROW_LIMIT = 6
+BULK_MANUAL_VALUES_ROW_LIMIT = 4
 BULK_COPY_MESSAGE = (
-    "Query not executed: a large literal-row import while tool results exist is unreliable. Do not copy rows from visible "
+    "Query not executed: a literal-row import copied from tool results is unreliable. Do not copy rows from visible "
     "output; derive them from all relevant __tool_results rows in one INSERT ... SELECT/json_each query."
 )
 BLOB_LOOP_MESSAGE = (
@@ -33,8 +33,8 @@ BLOB_LOOP_MESSAGE = (
     "using tool_name or result_id IN (...), plus CTEs/json_extract/json_each as needed."
 )
 ROW_LOOP_MESSAGE = (
-    "Query not executed: do not use per-result filters or tables. Replace them with one shaped INSERT ... SELECT/"
-    "json_each into a shared table over tool_name or result_id IN (...)."
+    "Query not executed: do not read __tool_results or a staging table derived from it one result_id at a time. "
+    "Use one shaped INSERT ... SELECT/json_each or query over tool_name or result_id IN (...)."
 )
 MANUAL_COPY_MESSAGE = (
     "This builds a VALUES table while multiple tool results exist. If those rows came from tool outputs, do not "
@@ -46,7 +46,7 @@ SINGLE_IMPORT_MESSAGE = (
 )
 
 COUNT_FIELDS = (
-    "statement_count", "tool_result_statement_count", "single_result_id_filters", "single_tool_result_imports",
+    "statement_count", "tool_result_statement_count", "single_result_id_filters", "single_derived_result_filters", "single_tool_result_imports",
     "direct_result_text_fetches", "aggregate_tool_result_queries", "smart_tool_result_queries",
     "uses_json_functions", "uses_bounded_text_projection", "uses_cte", "uses_join", "uses_group_by", "uses_window",
     "uses_order_by", "creates_working_table", "reads_working_table", "tool_result_ctas",
@@ -83,11 +83,10 @@ def summarize_sqlite_tool_result_sql(sql_values: Iterable[str], *, sqlite_call_c
             continue
         counts["statement_count"] += 1
         mentions = bool(TOOL_RESULTS_RE.search(statement))
-        eq_count = len(RESULT_ID_EQ_RE.findall(statement))
-        in_count = _result_id_in_count(statement)
-        single_result_filter = mentions and (
-            (eq_count == 1 and in_count == 0)
-            or (eq_count == 0 and in_count == 1)
+        single_id_filter = _has_single_result_id_filter(statement)
+        single_result_filter = mentions and single_id_filter
+        single_derived_result_filter = single_id_filter and any(
+            _reads_table(statement, table) for table in working_sources
         )
         created_table = _created_table_name(statement)
         inserted_table = _inserted_table_name(statement)
@@ -104,7 +103,8 @@ def summarize_sqlite_tool_result_sql(sql_values: Iterable[str], *, sqlite_call_c
             "uses_order_by": " order by " in lowered,
         }
         counts["tool_result_statement_count"] += int(mentions)
-        counts["single_result_id_filters"] += int(single_result_filter)
+        counts["single_result_id_filters"] += int(single_result_filter or single_derived_result_filter)
+        counts["single_derived_result_filters"] += int(single_derived_result_filter)
         counts["single_tool_result_imports"] += int(single_result_filter and bool(created_table or inserted_table))
         counts["direct_result_text_fetches"] += int(direct_fetch)
         counts["aggregate_tool_result_queries"] += int(aggregate)
@@ -254,6 +254,12 @@ def _result_id_in_count(statement: str) -> int:
         valid_literals = values and all(RESULT_ID_IN_VALUE_RE.fullmatch(value) for value in values)
         counts.append(len(values) if valid_literals else 2)
     return max(counts or [0])
+
+
+def _has_single_result_id_filter(statement: str) -> bool:
+    eq_count = len(RESULT_ID_EQ_RE.findall(statement or ""))
+    in_count = _result_id_in_count(statement)
+    return (eq_count == 1 and in_count == 0) or (eq_count == 0 and in_count == 1)
 
 
 def _manual_values_row_count(statement: str) -> int:

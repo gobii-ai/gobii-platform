@@ -451,7 +451,7 @@ class SqliteBatchToolTests(TestCase):
 
             rows = ",".join(
                 f"({index}, 'https://source.example.test/{'a' if index % 2 else 'b'}')"
-                for index in range(12)
+                for index in range(4)
             )
             out = execute_sqlite_batch(
                 self.agent,
@@ -497,8 +497,8 @@ class SqliteBatchToolTests(TestCase):
                 for index in range(12)
             ]
             union_rows = " UNION ALL ".join(rows)
-            json_a = json.dumps([{"id": index} for index in range(3)])
-            json_b = json.dumps([{"id": index} for index in range(3, 6)])
+            json_a = json.dumps([{"id": index} for index in range(2)])
+            json_b = json.dumps([{"id": index} for index in range(2, 4)])
             queries = (
                 f"CREATE TABLE copied_rows(id INTEGER, label TEXT); INSERT INTO copied_rows {union_rows};",
                 "CREATE TABLE copied_rows(id INTEGER, label TEXT);"
@@ -625,10 +625,15 @@ class SqliteBatchToolTests(TestCase):
             "source https://source.example.test/a",
             "source https://source.example.test/b",
         )
-        json_a = json.dumps([{"id": index} for index in range(2)])
-        json_b = json.dumps([{"id": index} for index in range(2, 5)])
+        json_a = json.dumps([{"id": index} for index in range(1)])
+        json_b = json.dumps([{"id": index} for index in range(1, 3)])
         fake_json = json.dumps([{"id": index} for index in range(12)])
         allowed_sql = (
+            "CREATE TABLE copied_rows(id INTEGER, source_url TEXT);"
+            "INSERT INTO copied_rows VALUES "
+            "(1, 'https://source.example.test/a'),"
+            "(2, 'https://source.example.test/b'),"
+            "(3, 'https://source.example.test/a');",
             "CREATE TABLE copied_rows(id INTEGER, source_url TEXT);"
             f"INSERT INTO copied_rows SELECT value, 'https://source.example.test/a' FROM json_each('{json_a}');"
             f"INSERT INTO copied_rows SELECT value, 'https://source.example.test/b' FROM json_each('{json_b}');",
@@ -696,6 +701,103 @@ class SqliteBatchToolTests(TestCase):
             finally:
                 conn.close()
             self.assertIsNone(table)
+
+    def test_derived_result_loop_is_rejected_before_execution(self):
+        with self._with_temp_db() as (db_path, _token, _tmp):
+            conn = sqlite3.connect(db_path)
+            try:
+                conn.execute(
+                    "CREATE TABLE __tool_results (result_id TEXT PRIMARY KEY, result_text TEXT)"
+                )
+                conn.executemany(
+                    "INSERT INTO __tool_results (result_id, result_text) VALUES (?, ?)",
+                    [(f"r{index}", f"page {index}") for index in range(1, 5)],
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            out = execute_sqlite_batch(
+                self.agent,
+                {
+                    "sql": (
+                        "CREATE TABLE product_pages AS SELECT result_id, result_text FROM __tool_results "
+                        "WHERE result_id IN ('r1','r2','r3','r4');"
+                        + ";".join(
+                            "SELECT substr(result_text,1,2000) FROM product_pages "
+                            f"WHERE result_id='r{index}'"
+                            for index in range(1, 5)
+                        )
+                    ),
+                    "will_continue_work": True,
+                },
+            )
+
+            self.assertEqual(out.get("status"), "error")
+            self.assertTrue(out.get("retryable"))
+            self.assertEqual(out.get("advisories", [{}])[0].get("code"), "tool_result_row_loop")
+            conn = sqlite3.connect(db_path)
+            try:
+                table = conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name='product_pages'"
+                ).fetchone()
+            finally:
+                conn.close()
+            self.assertIsNone(table)
+
+    def test_derived_result_loop_boundaries(self):
+        derived = (
+            "CREATE TABLE product_pages AS SELECT result_id, result_text FROM __tool_results "
+            "WHERE tool_name='http_request';"
+        )
+        allowed_sql = (
+            "SELECT result_text FROM product_pages WHERE result_id='r1';"
+            "SELECT result_text FROM product_pages WHERE result_id='r2';"
+            + derived,
+            derived + "SELECT result_text FROM product_pages WHERE result_id='r1';",
+            derived + "SELECT result_text FROM product_pages WHERE result_id IN ('r1','r2');",
+            derived
+            + "SELECT * FROM unrelated WHERE result_id='r1';"
+            + "SELECT * FROM unrelated WHERE result_id='r2';",
+            derived
+            + "SELECT * FROM product_pages WHERE entity_id='one';"
+            + "SELECT * FROM product_pages WHERE entity_id='two';",
+        )
+        blocked_sql = (
+            derived
+            + "SELECT result_text FROM product_pages WHERE result_id='r1';"
+            + "SELECT result_text FROM product_pages WHERE result_id='r2';",
+            derived
+            + "SELECT result_text FROM product_pages WHERE result_id IN ('r1');"
+            + "SELECT result_text FROM product_pages WHERE result_id IN ('r2');",
+        )
+
+        for sql in allowed_sql:
+            with self.subTest(kind="allowed", sql=sql):
+                summary = summarize_sqlite_tool_result_sql([sql])
+                self.assertLess(summary.single_derived_result_filters, 2)
+                self.assertFalse(
+                    any(
+                        advisory.blocking and advisory.code == "tool_result_row_loop"
+                        for advisory in build_tool_result_query_advisories(
+                            [sql],
+                            available_tool_result_rows=4,
+                        )
+                    )
+                )
+        for sql in blocked_sql:
+            with self.subTest(kind="blocked", sql=sql):
+                summary = summarize_sqlite_tool_result_sql([sql])
+                self.assertEqual(summary.single_derived_result_filters, 2)
+                self.assertTrue(
+                    any(
+                        advisory.blocking and advisory.code == "tool_result_row_loop"
+                        for advisory in build_tool_result_query_advisories(
+                            [sql],
+                            available_tool_result_rows=4,
+                        )
+                    )
+                )
 
     def test_single_result_import_warns_and_comments_do_not_trigger_guard(self):
         one_import = build_tool_result_query_advisories(
