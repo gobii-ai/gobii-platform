@@ -57,6 +57,33 @@ class TextSanitizationTests(TestCase):
             '<p>Daily update, everything landed.</p>',
         )
 
+    def test_humanized_message_style_preserves_boundary_before_inline_html(self):
+        text = (
+            "<p>Here's your sourced prospect list — "
+            "<strong style='color: #1a73e8;'>22 qualified individuals</strong>"
+            " in sales leadership.</p>"
+        )
+
+        self.assertEqual(
+            normalize_humanized_message_style(text),
+            "<p>Here's your sourced prospect list, "
+            "<strong style='color: #1a73e8;'>22 qualified individuals</strong>"
+            " in sales leadership.</p>",
+        )
+
+        edge_cases = (
+            ("<p><strong>Update —</strong></p>", "<p><strong>Update</strong></p>"),
+            ("<p><strong>— update</strong></p>", "<p><strong>update</strong></p>"),
+            ("<p>Done — <span></span></p>", "<p>Done<span></span></p>"),
+            (
+                "<p>Nested — <span><strong>22 qualified</strong></span></p>",
+                "<p>Nested, <span><strong>22 qualified</strong></span></p>",
+            ),
+        )
+        for rich_html, expected in edge_cases:
+            with self.subTest(rich_html=rich_html):
+                self.assertEqual(normalize_humanized_message_style(rich_html), expected)
+
     def test_strip_control_chars_removes_disallowed_characters(self):
         dirty = "Hello\x00World\u0019"
 

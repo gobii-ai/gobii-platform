@@ -40,27 +40,27 @@ _FORBIDDEN_DASH_RE = re.compile(
     r"(?:[ \t]*(?:[\u2012\u2013\u2014\u2015\u2e3a\u2e3b]+|--+|&(?:mdash|ndash|#8211|#8212|#x2013|#x2014);)[ \t]*|[ \t]+-[ \t]+)",
     re.IGNORECASE,
 )
+_OPENING_INLINE_HTML_TEXT_RE = re.compile(r"(?:<(?:a|b|em|i|span|strong)\b[^>]*>\s*)+[^<\s]", re.IGNORECASE)
 
 
 def normalize_humanized_message_style(value: str | None) -> str:
     text = value or ""
 
-    def normalize_prose(prose: str) -> str:
+    def normalize_prose(prose: str, offset: int) -> str:
         def punctuate(match):
             before = prose[:match.start()].rstrip(" \t")
             after = prose[match.end():].lstrip(" \t")
-            if not before or not after or before.endswith("\n") or after.startswith("\n"):
-                return ""
-            return ", "
+            visible_after = bool(after) or bool(_OPENING_INLINE_HTML_TEXT_RE.match(text[offset + match.end():]))
+            return ", " if before and visible_after and not (before.endswith("\n") or after.startswith("\n")) else ""
 
         return _FORBIDDEN_DASH_RE.sub(punctuate, prose)
 
     parts = []
     cursor = 0
     for match in _NON_PROSE_RE.finditer(text):
-        parts.extend((normalize_prose(text[cursor:match.start()]), match.group(0)))
+        parts.extend((normalize_prose(text[cursor:match.start()], cursor), match.group(0)))
         cursor = match.end()
-    parts.append(normalize_prose(text[cursor:]))
+    parts.append(normalize_prose(text[cursor:], cursor))
     return "".join(parts)
 
 
