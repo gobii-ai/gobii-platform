@@ -164,7 +164,7 @@ def _serialize_weighted_endpoint_reference(endpoint, tier_endpoint) -> dict[str,
     }
 
 
-def _serialize_intelligence_tier(tier: IntelligenceTier) -> dict[str, Any]:
+def serialize_intelligence_tier(tier: IntelligenceTier) -> dict[str, Any]:
     return {
         "key": tier.key,
         "display_name": tier.display_name,
@@ -212,7 +212,7 @@ def _serialize_intelligence_tiers(tiers, endpoint_serializer) -> list[dict[str, 
             "id": str(tier.id),
             "order": tier.order,
             "description": tier.description,
-            "intelligence_tier": _serialize_intelligence_tier(tier.intelligence_tier),
+            "intelligence_tier": serialize_intelligence_tier(tier.intelligence_tier),
             "endpoints": [endpoint_serializer(te) for te in tier.tier_endpoints.all()],
         }
         for tier in tiers
@@ -444,7 +444,7 @@ def build_llm_overview() -> dict[str, Any]:
         "browser_endpoints": BrowserModelEndpoint.objects.filter(enabled=True).count(),
         "premium_persistent_tiers": PersistentLLMTier.objects.filter(intelligence_tier__key="premium").count(),
     }
-    intelligence_tiers = [_serialize_intelligence_tier(tier) for tier in IntelligenceTier.objects.order_by("rank")]
+    intelligence_tiers = [serialize_intelligence_tier(tier) for tier in IntelligenceTier.objects.order_by("rank")]
 
     return {
         "stats": stats,

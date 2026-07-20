@@ -1,6 +1,7 @@
-import { Inbox, Send, ShieldCheck } from 'lucide-react'
+import { Inbox, Send } from 'lucide-react'
 
 import type { PendingContactRequestsAction } from '../../types/agentChat'
+import { PendingRequestReviewFooter } from './PendingRequestPanelParts'
 
 export type PendingContactDraft = {
   allowInbound: boolean
@@ -45,44 +46,6 @@ export function PendingContactRequestsPanel({
   const smsApprovalBlocked = (
     activeRequest.channel === 'sms'
     && !draft.smsContactPermissionAttested
-  )
-
-  const actionRow = (
-    <div className="space-y-2">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        {showReviewSummary ? (
-          <div className="hidden min-w-0 items-center gap-3 sm:flex">
-            <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-violet-100 text-violet-700">
-              <ShieldCheck className="h-4 w-4" aria-hidden="true" />
-            </span>
-            <div className="min-w-0">
-              <p className="text-sm font-semibold text-slate-900">Reviewing this request</p>
-              <p className="text-sm text-slate-600">You're allowing this contact to message your team.</p>
-            </div>
-          </div>
-        ) : null}
-        <div className="flex flex-col-reverse gap-2 sm:ml-auto sm:flex-row sm:justify-end">
-          <button
-            type="button"
-            disabled={disabled || busy}
-            className="inline-flex w-full items-center justify-center rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-60 sm:w-32"
-            onClick={() => void onSubmit('decline', activeRequest.id)}
-          >
-            {busy ? 'Saving...' : 'Deny'}
-          </button>
-          <button
-            type="button"
-            disabled={disabled || busy || smsApprovalBlocked}
-            className="inline-flex w-full items-center justify-center rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-60 sm:w-32"
-            onClick={() => void onSubmit('approve', activeRequest.id)}
-          >
-            {busy ? 'Saving...' : 'Approve'}
-          </button>
-        </div>
-      </div>
-      {error ? <p className="text-sm text-rose-600 sm:text-right">{error}</p> : null}
-      {notice && !error ? <p className="text-sm text-amber-700 sm:text-right">{notice}</p> : null}
-    </div>
   )
 
   return (
@@ -154,7 +117,22 @@ export function PendingContactRequestsPanel({
         </div>
       </div>
 
-      {actionRow}
+      <PendingRequestReviewFooter
+        description="You're allowing this contact to message your team."
+        showSummary={showReviewSummary}
+        disabled={disabled}
+        busy={busy}
+        secondaryLabel="Deny"
+        secondaryBusyLabel="Saving..."
+        primaryLabel="Approve"
+        primaryBusyLabel="Saving..."
+        primaryDisabled={smsApprovalBlocked}
+        theme="contact"
+        error={error}
+        notice={notice}
+        onSecondary={() => void onSubmit('decline', activeRequest.id)}
+        onPrimary={() => void onSubmit('approve', activeRequest.id)}
+      />
     </div>
   )
 }

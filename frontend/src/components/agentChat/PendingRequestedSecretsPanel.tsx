@@ -1,7 +1,8 @@
-import { Globe, ShieldCheck } from 'lucide-react'
+import { Globe } from 'lucide-react'
 
 import type { PendingRequestedSecretsAction } from '../../types/agentChat'
 import { HoverInfoButton } from './InlineInfoTooltipButton'
+import { PendingRequestReviewFooter } from './PendingRequestPanelParts'
 
 type PendingRequestedSecretsPanelProps = {
   action: PendingRequestedSecretsAction
@@ -35,43 +36,6 @@ export function PendingRequestedSecretsPanel({
   if (!secret) {
     return null
   }
-
-  const actionRow = (
-    <div className="space-y-2">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        {showReviewSummary ? (
-          <div className="hidden min-w-0 items-center gap-3 sm:flex">
-            <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-violet-100 text-violet-700">
-              <ShieldCheck className="h-4 w-4" aria-hidden="true" />
-            </span>
-            <div className="min-w-0">
-              <p className="text-sm font-semibold text-slate-900">Reviewing this request</p>
-              <p className="text-sm text-slate-600">You're allowing this agent to use this credential.</p>
-            </div>
-          </div>
-        ) : null}
-        <div className="flex flex-col-reverse gap-2 sm:ml-auto sm:flex-row sm:justify-end">
-          <button
-            type="button"
-            disabled={disabled || busyAction !== null}
-            className="inline-flex w-full items-center justify-center rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-60 sm:w-32"
-            onClick={() => void onRemove()}
-          >
-            {busyAction === 'remove' ? 'Removing...' : 'Remove'}
-          </button>
-          <button
-            type="button"
-            disabled={disabled || busyAction !== null}
-            className="inline-flex w-full items-center justify-center rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-60 sm:w-32"
-            onClick={() => void onSave()}
-          >
-            {busyAction === 'save' ? 'Saving...' : 'Save'}
-          </button>
-        </div>
-      </div>
-      {error ? <p className="text-sm text-rose-600 sm:text-right">{error}</p> : null}
-    </div>
-  )
 
   return (
     <div className="w-full space-y-3">
@@ -120,7 +84,20 @@ export function PendingRequestedSecretsPanel({
         </div>
       </div>
 
-      {actionRow}
+      <PendingRequestReviewFooter
+        description="You're allowing this agent to use this credential."
+        showSummary={showReviewSummary}
+        disabled={disabled}
+        busy={busyAction !== null}
+        secondaryLabel="Remove"
+        secondaryBusyLabel={busyAction === 'remove' ? 'Removing...' : 'Remove'}
+        primaryLabel="Save"
+        primaryBusyLabel={busyAction === 'save' ? 'Saving...' : 'Save'}
+        theme="secret"
+        error={error}
+        onSecondary={() => void onRemove()}
+        onPrimary={() => void onSave()}
+      />
     </div>
   )
 }

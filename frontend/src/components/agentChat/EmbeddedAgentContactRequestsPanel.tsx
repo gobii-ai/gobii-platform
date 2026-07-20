@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { AlertTriangle, Check, Inbox, Loader2, Mail, Phone, X } from 'lucide-react'
+import { AlertTriangle, Check, Mail, Phone, X } from 'lucide-react'
 
 import { fetchContactRequests, resolveContactRequests, type PendingActionMutationResult } from '../../api/agentChat'
 import { SettingsBanner } from '../agentSettings/SettingsBanner'
@@ -10,6 +10,12 @@ import type { PendingContactRequest } from '../../types/agentChat'
 import { EmbeddedAgentShellBackButton } from './EmbeddedAgentShellBackButton'
 import { EmbeddedAgentShellPanel } from './EmbeddedAgentShellPanel'
 import type { PendingContactDraft } from './PendingContactRequestsPanel'
+import {
+  EmbeddedPendingRequestState,
+  EmbeddedPendingRequestSummary,
+  formatPendingRequestDate,
+  usePendingRequestSelection,
+} from './PendingRequestPanelParts'
 
 type ContactRequestResolution = {
   requestId: string
@@ -36,22 +42,6 @@ function makeContactDraft(request: PendingContactRequest): PendingContactDraft {
   }
 }
 
-function formatDateTime(value?: string | null): string | null {
-  if (!value) {
-    return null
-  }
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) {
-    return null
-  }
-  return new Intl.DateTimeFormat(undefined, {
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  }).format(date)
-}
-
 function formatChannel(channel: string): string {
   return channel.toLowerCase() === 'sms' ? 'SMS' : channel.charAt(0).toUpperCase() + channel.slice(1)
 }
@@ -67,7 +57,6 @@ export function EmbeddedAgentContactRequestsPanel({
   onResolveContactRequests,
 }: EmbeddedAgentContactRequestsPanelProps) {
   const [drafts, setDrafts] = useState<Record<string, PendingContactDraft>>({})
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [busyAction, setBusyAction] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
@@ -80,6 +69,15 @@ export function EmbeddedAgentContactRequestsPanel({
   })
 
   const requests = data?.requests ?? EMPTY_CONTACT_REQUESTS
+  const {
+    selectedIds,
+    selectedItems: selectedRequests,
+    allSelected,
+    toggleSelected,
+    selectAll,
+    clearSelected,
+    removeSelected,
+  } = usePendingRequestSelection(requests)
 
   useEffect(() => {
     setDrafts((current) => {
@@ -89,35 +87,14 @@ export function EmbeddedAgentContactRequestsPanel({
       })
       return nextDrafts
     })
-    setSelectedIds((current) => {
-      const requestIds = new Set(requests.map((request) => request.id))
-      return new Set([...current].filter((requestId) => requestIds.has(requestId)))
-    })
   }, [requests])
 
-  const selectedRequests = useMemo(
-    () => requests.filter((request) => selectedIds.has(request.id)),
-    [requests, selectedIds],
-  )
   const selectedApprovalBlocked = selectedRequests.some((request) => (
     contactRequiresSmsAttestation(request, drafts[request.id] ?? makeContactDraft(request))
   ))
-  const allSelected = requests.length > 0 && selectedIds.size === requests.length
 
   const updateDraft = useCallback((requestId: string, nextDraft: PendingContactDraft) => {
     setDrafts((current) => ({ ...current, [requestId]: nextDraft }))
-  }, [])
-
-  const toggleSelected = useCallback((requestId: string, selected: boolean) => {
-    setSelectedIds((current) => {
-      const next = new Set(current)
-      if (selected) {
-        next.add(requestId)
-      } else {
-        next.delete(requestId)
-      }
-      return next
-    })
   }, [])
 
   const resolveRequests = useCallback(async (
@@ -167,25 +144,14 @@ export function EmbeddedAgentContactRequestsPanel({
         })
       }
       setStatusMessage(result?.message ?? null)
-      setSelectedIds((current) => {
-        const resolvedIds = new Set(targetRequests.map((request) => request.id))
-        return new Set([...current].filter((requestId) => !resolvedIds.has(requestId)))
-      })
+      removeSelected(targetRequests.map((request) => request.id))
       await refetch()
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : 'Unable to update contact requests.')
     } finally {
       setBusyAction(null)
     }
-  }, [agentId, busyAction, drafts, onResolveContactRequests, refetch])
-
-  const handleSelectAll = useCallback(() => {
-    setSelectedIds(new Set(requests.map((request) => request.id)))
-  }, [requests])
-
-  const handleClearSelected = useCallback(() => {
-    setSelectedIds(new Set())
-  }, [])
+  }, [agentId, busyAction, drafts, onResolveContactRequests, refetch, removeSelected])
 
   const busy = busyAction !== null
 
@@ -211,45 +177,26 @@ export function EmbeddedAgentContactRequestsPanel({
           </InlineStatusBanner>
         ) : null}
 
-        {isLoading ? (
-          <div className="flex min-h-[18rem] items-center justify-center text-sm text-slate-200/80">
-            <div className="flex flex-col items-center gap-3 text-center">
-              <Loader2 className="h-6 w-6 animate-spin text-slate-300/70" aria-hidden="true" />
-              <p>Loading contact requests...</p>
-            </div>
-          </div>
-        ) : error ? (
-          <InlineStatusBanner variant="error" surface="embedded">
-            <p className="font-medium">Unable to load contact requests.</p>
-            <p className="mt-1 text-rose-100/75">Try opening this agent again.</p>
-          </InlineStatusBanner>
-        ) : requests.length === 0 ? (
-          <div className={getSettingsSurfaceClassName({ variant: 'embedded', shadowClassName: 'shadow-none', className: 'flex min-h-[18rem] items-center justify-center px-6 py-10 text-center' })}>
-            <div className="max-w-sm space-y-4">
-              <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl border border-slate-200/20 bg-slate-900/45 text-slate-200">
-                <Inbox className="h-5 w-5" aria-hidden="true" />
-              </span>
-              <div>
-                <p className="text-sm font-semibold text-slate-100">No pending contact requests</p>
-                <p className="mt-1 text-sm text-slate-300">New requests will appear here when this agent asks to contact someone.</p>
-              </div>
-            </div>
-          </div>
-        ) : (
+        <EmbeddedPendingRequestState
+          isLoading={isLoading}
+          error={error}
+          isEmpty={requests.length === 0}
+          loadingLabel="Loading contact requests..."
+          errorTitle="Unable to load contact requests."
+          emptyTitle="No pending contact requests"
+          emptyDescription="New requests will appear here when this agent asks to contact someone."
+        >
           <>
-            <div className={getSettingsSurfaceClassName({ variant: 'embedded', shadowClassName: 'shadow-none', className: 'flex flex-col gap-3 px-4 py-4 text-slate-100 sm:flex-row sm:items-center sm:justify-between' })}>
-              <div>
-                <p className="text-sm font-semibold text-slate-100">
-                  {requests.length} pending contact request{requests.length === 1 ? '' : 's'}
-                </p>
-                <p className="mt-1 text-xs text-slate-400">
-                  {selectedIds.size} selected
-                </p>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
+            <EmbeddedPendingRequestSummary
+              count={requests.length}
+              noun="contact"
+              description={`${selectedIds.size} selected`}
+              compact
+              actions={(
+                <>
                 <button
                   type="button"
-                  onClick={allSelected ? handleClearSelected : handleSelectAll}
+                  onClick={allSelected ? clearSelected : selectAll}
                   className="rounded-lg border border-slate-200/25 bg-slate-900/35 px-3 py-2 text-sm font-medium text-slate-100 transition-colors hover:border-slate-100/35 hover:bg-slate-900/55"
                 >
                   {allSelected ? 'Clear all' : 'Select all'}
@@ -272,15 +219,16 @@ export function EmbeddedAgentContactRequestsPanel({
                   <Check className="h-4 w-4" aria-hidden="true" />
                   Approve selected
                 </button>
-              </div>
-            </div>
+                </>
+              )}
+            />
 
             <div className="space-y-3">
               {requests.map((request) => {
                 const draft = drafts[request.id] ?? makeContactDraft(request)
                 const smsApprovalBlocked = contactRequiresSmsAttestation(request, draft)
-                const requestedAt = formatDateTime(request.requestedAt)
-                const expiresAt = formatDateTime(request.expiresAt)
+                const requestedAt = formatPendingRequestDate(request.requestedAt)
+                const expiresAt = formatPendingRequestDate(request.expiresAt)
                 const heading = request.name || request.address
                 const selected = selectedIds.has(request.id)
                 const ChannelIcon = request.channel === 'sms' ? Phone : Mail
@@ -401,7 +349,7 @@ export function EmbeddedAgentContactRequestsPanel({
               })}
             </div>
           </>
-        )}
+        </EmbeddedPendingRequestState>
       </div>
     </EmbeddedAgentShellPanel>
   )

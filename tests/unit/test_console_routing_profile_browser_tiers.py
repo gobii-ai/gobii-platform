@@ -92,6 +92,79 @@ class ConsoleRoutingProfileBrowserTierTests(TestCase):
         self.assertEqual(tier1.order, 1)
         self.assertEqual(tier2.order, 2)
 
+    def test_system_and_profile_browser_endpoint_mutations_have_parity(self):
+        provider = LLMProvider.objects.create(key="browser-parity", display_name="Browser Parity", enabled=True)
+        endpoint = BrowserModelEndpoint.objects.create(
+            provider=provider,
+            key="browser-primary",
+            browser_model="browser-primary",
+            enabled=True,
+        )
+        extraction = BrowserModelEndpoint.objects.create(
+            provider=provider,
+            key="browser-extraction",
+            browser_model="browser-extraction",
+            enabled=True,
+        )
+        intelligence_tier = get_intelligence_tier("standard")
+        policy = BrowserLLMPolicy.objects.create(name="Parity", is_active=True)
+        system_tier = BrowserLLMTier.objects.create(
+            policy=policy,
+            order=1,
+            intelligence_tier=intelligence_tier,
+        )
+        profile = LLMRoutingProfile.objects.create(name="browser-parity", display_name="Browser Parity")
+        profile_tier = ProfileBrowserTier.objects.create(
+            profile=profile,
+            order=1,
+            intelligence_tier=intelligence_tier,
+        )
+
+        cases = (
+            (
+                reverse("console_llm_browser_tier_endpoints", args=[system_tier.id]),
+                "console_llm_browser_tier_endpoint_detail",
+                BrowserTierEndpoint,
+            ),
+            (
+                reverse("console_llm_profile_browser_tier_endpoints", args=[profile_tier.id]),
+                "console_llm_profile_browser_tier_endpoint_detail",
+                ProfileBrowserTierEndpoint,
+            ),
+        )
+        for create_url, detail_name, model in cases:
+            with self.subTest(create_url=create_url):
+                created = self.client.post(
+                    create_url,
+                    data=(
+                        f'{{"endpoint_id": "{endpoint.id}", "extraction_endpoint_id": '
+                        f'"{extraction.id}", "weight": 1}}'
+                    ),
+                    content_type="application/json",
+                )
+                self.assertEqual(created.status_code, 200, created.content)
+                tier_endpoint = model.objects.get(id=created.json()["tier_endpoint_id"])
+                self.assertEqual(tier_endpoint.extraction_endpoint_id, extraction.id)
+
+                detail_url = reverse(detail_name, args=[tier_endpoint.id])
+                invalid = self.client.patch(
+                    detail_url,
+                    data='{"weight": -1}',
+                    content_type="application/json",
+                )
+                self.assertEqual(invalid.status_code, 400, invalid.content)
+                updated = self.client.patch(
+                    detail_url,
+                    data='{"weight": 2, "extraction_endpoint_id": null}',
+                    content_type="application/json",
+                )
+                self.assertEqual(updated.status_code, 200, updated.content)
+                tier_endpoint.refresh_from_db()
+                self.assertEqual(float(tier_endpoint.weight), 2)
+                self.assertIsNone(tier_endpoint.extraction_endpoint_id)
+                self.assertEqual(self.client.delete(detail_url).status_code, 200)
+                self.assertFalse(model.objects.filter(id=tier_endpoint.id).exists())
+
     def test_browser_endpoint_delete_reports_tier_usage_and_force_detaches(self):
         provider = LLMProvider.objects.create(key="provider", display_name="Provider", enabled=True)
         endpoint = BrowserModelEndpoint.objects.create(

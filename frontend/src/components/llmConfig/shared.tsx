@@ -171,11 +171,9 @@ export type ProviderCardData = {
 
 export type ImageGenerationUseCase = 'create_image' | 'avatar'
 export type VideoGenerationUseCase = 'create_video'
-export type TierScope = 'persistent' | 'browser' | 'embedding' | 'file_handler' | 'image_generation' | 'video_generation'
-export type ProfileTierScope = Exclude<TierScope, 'file_handler' | 'image_generation' | 'video_generation'>
+export type TierScope = llmApi.SystemTierScope
+export type ProfileTierScope = llmApi.RoutingTierScope
 export type EndpointKind = Extract<llmApi.ProviderEndpoint['type'], TierScope>
-export type TierEndpointWeightPayload = { weight: number }
-export type TierEndpointCreatePayload = { endpoint_id: string; weight: number }
 
 export const ENDPOINT_KIND_MAP: Record<llmApi.ProviderEndpoint['type'], EndpointKind> = {
   persistent: 'persistent',
@@ -187,75 +185,6 @@ export const ENDPOINT_KIND_MAP: Record<llmApi.ProviderEndpoint['type'], Endpoint
 }
 
 export const endpointKindFromType = (type: llmApi.ProviderEndpoint['type']): EndpointKind => ENDPOINT_KIND_MAP[type]
-
-export const updateTierEndpointByScope: Record<TierScope, (tierEndpointId: string, payload: TierEndpointWeightPayload) => Promise<unknown>> = {
-  persistent: (tierEndpointId, payload) => llmApi.updatePersistentTierEndpoint(tierEndpointId, payload),
-  browser: (tierEndpointId, payload) => llmApi.updateBrowserTierEndpoint(tierEndpointId, payload),
-  embedding: (tierEndpointId, payload) => llmApi.updateEmbeddingTierEndpoint(tierEndpointId, payload),
-  file_handler: (tierEndpointId, payload) => llmApi.updateFileHandlerTierEndpoint(tierEndpointId, payload),
-  image_generation: (tierEndpointId, payload) => llmApi.updateImageGenerationTierEndpoint(tierEndpointId, payload),
-  video_generation: (tierEndpointId, payload) => llmApi.updateVideoGenerationTierEndpoint(tierEndpointId, payload),
-}
-
-export const deleteTierEndpointByScope: Record<TierScope, (tierEndpointId: string) => Promise<unknown>> = {
-  persistent: (tierEndpointId) => llmApi.deletePersistentTierEndpoint(tierEndpointId),
-  browser: (tierEndpointId) => llmApi.deleteBrowserTierEndpoint(tierEndpointId),
-  embedding: (tierEndpointId) => llmApi.deleteEmbeddingTierEndpoint(tierEndpointId),
-  file_handler: (tierEndpointId) => llmApi.deleteFileHandlerTierEndpoint(tierEndpointId),
-  image_generation: (tierEndpointId) => llmApi.deleteImageGenerationTierEndpoint(tierEndpointId),
-  video_generation: (tierEndpointId) => llmApi.deleteVideoGenerationTierEndpoint(tierEndpointId),
-}
-
-export const addTierEndpointByScope: Record<TierScope, (
-  tierId: string,
-  payload: TierEndpointCreatePayload,
-  extractionEndpointId?: string | null,
-) => Promise<{ tier_endpoint_id?: string }>> = {
-  persistent: async (tierId, payload) => llmApi.addPersistentTierEndpoint(tierId, payload) as { tier_endpoint_id?: string },
-  browser: async (tierId, payload, extractionEndpointId) => {
-    const browserPayload: { endpoint_id: string; weight: number; extraction_endpoint_id?: string | null } = {
-      ...payload,
-    }
-    if (typeof extractionEndpointId !== 'undefined') {
-      browserPayload.extraction_endpoint_id = extractionEndpointId || null
-    }
-    return llmApi.addBrowserTierEndpoint(tierId, browserPayload) as { tier_endpoint_id?: string }
-  },
-  embedding: async (tierId, payload) => llmApi.addEmbeddingTierEndpoint(tierId, payload) as { tier_endpoint_id?: string },
-  file_handler: async (tierId, payload) => llmApi.addFileHandlerTierEndpoint(tierId, payload) as { tier_endpoint_id?: string },
-  image_generation: async (tierId, payload) => llmApi.addImageGenerationTierEndpoint(tierId, payload) as { tier_endpoint_id?: string },
-  video_generation: async (tierId, payload) => llmApi.addVideoGenerationTierEndpoint(tierId, payload) as { tier_endpoint_id?: string },
-}
-
-export const updateProfileTierEndpointByScope: Record<ProfileTierScope, (tierEndpointId: string, payload: TierEndpointWeightPayload) => Promise<unknown>> = {
-  persistent: (tierEndpointId, payload) => llmApi.updateProfilePersistentTierEndpoint(tierEndpointId, payload),
-  browser: (tierEndpointId, payload) => llmApi.updateProfileBrowserTierEndpoint(tierEndpointId, payload),
-  embedding: (tierEndpointId, payload) => llmApi.updateProfileEmbeddingTierEndpoint(tierEndpointId, payload),
-}
-
-export const deleteProfileTierEndpointByScope: Record<ProfileTierScope, (tierEndpointId: string) => Promise<unknown>> = {
-  persistent: (tierEndpointId) => llmApi.deleteProfilePersistentTierEndpoint(tierEndpointId),
-  browser: (tierEndpointId) => llmApi.deleteProfileBrowserTierEndpoint(tierEndpointId),
-  embedding: (tierEndpointId) => llmApi.deleteProfileEmbeddingTierEndpoint(tierEndpointId),
-}
-
-export const addProfileTierEndpointByScope: Record<ProfileTierScope, (
-  tierId: string,
-  payload: TierEndpointCreatePayload,
-  extractionEndpointId?: string | null,
-) => Promise<{ tier_endpoint_id?: string }>> = {
-  persistent: async (tierId, payload) => llmApi.addProfilePersistentTierEndpoint(tierId, payload) as { tier_endpoint_id?: string },
-  browser: async (tierId, payload, extractionEndpointId) => {
-    const browserPayload: { endpoint_id: string; weight: number; extraction_endpoint_id?: string | null } = {
-      ...payload,
-    }
-    if (typeof extractionEndpointId !== 'undefined') {
-      browserPayload.extraction_endpoint_id = extractionEndpointId || null
-    }
-    return llmApi.addProfileBrowserTierEndpoint(tierId, browserPayload) as { tier_endpoint_id?: string }
-  },
-  embedding: async (tierId, payload) => llmApi.addProfileEmbeddingTierEndpoint(tierId, payload) as { tier_endpoint_id?: string },
-}
 
 export const getTierStyle = (tierKey?: string | null) => TIER_STYLE_MAP[tierKey ?? 'standard'] ?? TIER_STYLE_MAP.standard
 
