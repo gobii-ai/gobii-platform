@@ -505,7 +505,11 @@ class SqliteToolResultScenario(EvalScenario, ScenarioExecutionTools):
         summary = summarize_sqlite_tool_result_calls(strategy_calls)
         result_id_case_calls = [
             call for call in successful_calls
-            if re.search(r"\bcase\s+(?:\w+\.)?result_id\s+when\b", str((call.tool_params or {}).get("sql") or ""), re.I)
+            if re.search(
+                r"\bcase\s+(?:(?:\(\s*)?(?:\w+\.)?result_id(?:\s*\))?\s+when\b|when\b(?:(?!\bend\b).)*\b(?:\w+\.)?result_id\b)",
+                str((call.tool_params or {}).get("sql") or ""),
+                re.I | re.S,
+            )
         ]
         failures = [msg for bad, msg in (
             (not successful_calls, "no successful sqlite_batch call observed"),
@@ -1016,7 +1020,11 @@ class SqliteBoundedPortfolioReportScenario(SqliteToolResultScenario):
             re.search(r"\b(?:7\s*/\s*8|(?:7|seven)\s+of\s+(?:the\s+)?(?:8|eight))\b", body, re.I)
             or (
                 re.search(r"\b(?:7|seven)\b", body, re.I)
-                and re.search(r"\b(?:1|one)\b.*\b(?:nondisclos|undisclos|unavailable|unresolved|block)", body, re.I)
+                and re.search(
+                    r"\b(?:1|one)\b.*\b(?:nondisclos|undisclos|unavailable|unresolved|block)",
+                    body,
+                    re.I | re.S,
+                )
             )
         )
         return bool(mentions_founders and partial_coverage)

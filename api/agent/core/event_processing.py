@@ -1940,6 +1940,7 @@ class _FinalizedToolBatch:
     progress_message_delivery_ok: bool = False
     terminal_message_delivery_ok: bool = False
     human_input_request_ok: bool = False
+    human_input_request_requires_delivery: bool = False
 
 
 def _plan_has_unfinished_items(agent: PersistentAgent) -> bool:
@@ -2044,7 +2045,8 @@ def _should_continue_for_unanswered_inbound_after_tools(
         not finalized_batch.followup_required
         and finalized_batch.last_explicit_continue is False
         and finalized_batch.executed_non_message_action
-        and not (finalized_batch.message_delivery_ok or finalized_batch.human_input_request_ok)
+        and not finalized_batch.message_delivery_ok
+        and not (finalized_batch.human_input_request_ok and not finalized_batch.human_input_request_requires_delivery)
         and _latest_inbound_message_needs_reply(agent)
     )
 
@@ -3388,6 +3390,7 @@ def _finalize_tool_batch(
     progress_message_delivery_ok = False
     terminal_message_delivery_ok = False
     human_input_request_ok = False
+    human_input_request_requires_delivery = False
 
     for outcome in sorted(execution_outcomes, key=lambda item: item.prepared.idx):
         prepared = outcome.prepared
@@ -3482,6 +3485,7 @@ def _finalize_tool_batch(
             )
         elif tool_name == "request_human_input":
             human_input_request_ok = True
+            human_input_request_requires_delivery |= bool(isinstance(result, dict) and result.get("next_message_suggestion"))
         if tool_name == "request_human_input" and isinstance(result, dict):
             attach_originating_step_from_result(step, result)
 
@@ -3544,6 +3548,7 @@ def _finalize_tool_batch(
         progress_message_delivery_ok=progress_message_delivery_ok,
         terminal_message_delivery_ok=terminal_message_delivery_ok,
         human_input_request_ok=human_input_request_ok,
+        human_input_request_requires_delivery=human_input_request_requires_delivery,
     )
 
 

@@ -261,6 +261,14 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
                 )
             )
         )
+        self.assertTrue(
+            scenario._has_complete_comparison_table(
+                body.replace(
+                    "7 founders identified; 1 evidence-backed nondisclosure.",
+                    "Seven founders identified.\nOne company has an evidence-backed nondisclosure.",
+                )
+            )
+        )
         self.assertFalse(
             scenario._has_complete_comparison_table(
                 body.replace("7 founders identified; 1 evidence-backed nondisclosure.", "Here you go.")
@@ -647,6 +655,27 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
         ):
             self.assertFalse(scenario._record_sqlite_usage("run", after=None, task_name="verify"))
         self.assertIn("hand-built with CASE result_id", recorded[-1][1]["observed_summary"])
+
+        searched_case_sql = aggregate_sql.replace(
+            "result_id, count(*)",
+            "CASE WHEN result_id = 'r1' THEN 'AxonFlow' ELSE result_id END, count(*)",
+        )
+        with patch(
+            "api.evals.scenarios.sqlite_tool_results._tool_calls_for_run",
+            return_value=[_eval_tool_call("sqlite_batch", {"sql": searched_case_sql})],
+        ):
+            self.assertFalse(scenario._record_sqlite_usage("run", after=None, task_name="verify"))
+        self.assertIn("hand-built with CASE result_id", recorded[-1][1]["observed_summary"])
+
+        unrelated_case_sql = (
+            "SELECT CASE status WHEN 'ok' THEN 1 ELSE 0 END FROM checks; "
+            "SELECT result_id, count(*) FROM __tool_results GROUP BY result_id"
+        )
+        with patch(
+            "api.evals.scenarios.sqlite_tool_results._tool_calls_for_run",
+            return_value=[_eval_tool_call("sqlite_batch", {"sql": unrelated_case_sql})],
+        ):
+            self.assertTrue(scenario._record_sqlite_usage("run", after=None, task_name="verify"))
 
     def test_monitor_pollution_allows_slow_background_browser_drain(self):
         self.assertGreaterEqual(BACKGROUND_DRAIN_TIMEOUT_SECONDS, 600)
