@@ -1,4 +1,6 @@
 import json
+import csv
+import io
 from datetime import datetime, timezone
 from decimal import Decimal
 from types import SimpleNamespace
@@ -31,6 +33,9 @@ from api.agent.tools.agent_variables import (
     substitute_variables_with_filespace,
 )
 from api.agent.tools.email_sender import execute_send_email
+from api.agent.tools.create_csv import execute_create_csv
+from api.agent.tools.create_file import execute_create_file
+from api.agent.tools.create_pdf import execute_create_pdf
 from api.agent.tools.http_request import get_http_request_tool
 from api.agent.tools.peer_dm import execute_send_agent_message
 from api.agent.tools.send_discord_message import execute_send_discord_message
@@ -249,6 +254,190 @@ class LinkReferenceTests(TestCase):
         )
 
         self.assertEqual(result, mock_result)
+
+    def test_runtime_rejects_references_in_unsupported_tool_fields_before_execution(self):
+        token = rewrite_prompt_urls(
+            "https://profiles.example.test/avery?view=full",
+            self.agent,
+            create=True,
+            source_kind="tool_result",
+        )
+        cases = (
+            ("create_image", {"prompt": f"Render {token}", "file_path": "/exports/a.png"}, "create_image.prompt"),
+            ("create_video", {"prompt": token, "file_path": "/exports/a.mp4"}, "create_video.prompt"),
+            ("sqlite_batch", {"queries": [{"sql": f"SELECT '{token}'"}]}, "sqlite_batch.queries[0].sql"),
+            ("apply_patch", {"patch": f"+ {token}"}, "apply_patch.patch"),
+            ("send_email", {"subject": token, "mobile_first_html": "Body"}, "send_email.subject"),
+            ("send_webhook_event", {"payload": {"item": {"url": token}}}, "send_webhook_event.payload.item.url"),
+        )
+
+        with patch("api.agent.core.event_processing.execute_enabled_tool") as enabled, patch(
+            "api.agent.core.event_processing.execute_apply_patch"
+        ) as apply_patch_mock, patch(
+            "api.agent.core.event_processing.execute_send_email"
+        ) as email_mock, patch(
+            "api.agent.core.event_processing.execute_send_webhook_event"
+        ) as webhook_mock:
+            for tool_name, params, path in cases:
+                with self.subTest(tool_name=tool_name):
+                    result, _ = _execute_tool_call_runtime(
+                        self.agent,
+                        tool_name=tool_name,
+                        exec_params=params,
+                        budget_ctx=None,
+                        eval_run_id=None,
+                    )
+                    self.assertEqual(result["status"], "error")
+                    self.assertTrue(result["retryable"])
+                    self.assertIn(path, result["message"])
+
+        enabled.assert_not_called()
+        apply_patch_mock.assert_not_called()
+        email_mock.assert_not_called()
+        webhook_mock.assert_not_called()
+
+    def test_runtime_allows_embedded_references_only_in_supported_content_fields(self):
+        token = rewrite_prompt_urls(
+            "https://profiles.example.test/avery",
+            self.agent,
+            create=True,
+            source_kind="tool_result",
+        )
+        cases = (
+            ("create_csv", {"csv_text": f"name,url\nAvery,{token}", "file_path": "/exports/a.csv"}),
+            ("create_file", {"content": f"Avery: {token}", "mime_type": "text/markdown", "file_path": "/exports/a.md"}),
+            ("create_pdf", {"html": f"<a href='{token}'>Avery</a>", "file_path": "/exports/a.pdf"}),
+            ("send_chat_message", {"body": f"[Avery]({token})", "will_continue_work": False}),
+        )
+
+        for tool_name, params in cases:
+            with self.subTest(tool_name=tool_name):
+                self.assertEqual(
+                    resolve_link_reference_params(params, self.agent, tool_name=tool_name),
+                    params,
+                )
+
+        with self.assertRaises(LinkReferenceResolutionError) as raised:
+            resolve_link_reference_params(
+                {"content": token, "mime_type": "text/x-python"},
+                self.agent,
+                tool_name="create_file",
+            )
+        self.assertIn("create_file.content", str(raised.exception))
+
+    def test_create_csv_resolves_raw_and_query_cells_without_breaking_url_commas(self):
+        url = "https://profiles.example.test/avery,chen?view=full#bio"
+        token = rewrite_prompt_urls(url, self.agent, create=True, source_kind="tool_result")
+
+        for params, query_rows in (
+            ({"csv_text": f'name,profile\nAvery,"[Open]({token})"\n', "file_path": "/exports/raw.csv"}, None),
+            ({"query": "SELECT name, profile FROM people", "file_path": "/exports/query.csv"}, [{"name": "Avery", "profile": token}]),
+        ):
+            with self.subTest(file_path=params["file_path"]), patch(
+                "api.agent.tools.create_csv.run_sqlite_select",
+                return_value=(query_rows, ["name", "profile"], None),
+            ), patch(
+                "api.agent.tools.create_csv.write_agent_export", return_value={"status": "ok"}
+            ) as write_mock:
+                self.assertEqual(execute_create_csv(self.agent, params), {"status": "ok"})
+                rows = list(csv.reader(io.StringIO(write_mock.call_args.kwargs["content_bytes"].decode())))
+                expected = f"[Open]({url})" if query_rows is None else url
+                self.assertEqual(rows, [["name", "profile"], ["Avery", expected]])
+
+    def test_create_file_resolves_supported_raw_and_query_documents_and_rejects_code(self):
+        url = "https://profiles.example.test/avery?view=full#bio"
+        token = rewrite_prompt_urls(url, self.agent, create=True, source_kind="tool_result")
+        supported = (
+            "text/plain", "text/markdown", "text/html", "application/json", "application/ld+json",
+            "application/xml", "text/xml", "application/yaml", "text/yaml",
+        )
+
+        for mime_type in supported:
+            with self.subTest(mime_type=mime_type), patch(
+                "api.agent.tools.create_file.write_agent_export", return_value={"status": "ok"}
+            ) as write_mock:
+                result = execute_create_file(self.agent, {
+                    "content": f"Profile: {token}",
+                    "file_path": "/exports/report.txt",
+                    "mime_type": f"{mime_type}; charset=utf-8",
+                })
+                self.assertEqual(result, {"status": "ok"})
+                self.assertEqual(write_mock.call_args.kwargs["content_bytes"].decode(), f"Profile: {url}")
+
+        with patch(
+            "api.agent.tools.create_file.run_sqlite_select",
+            return_value=([{"body": f"Profile: {token}"}], ["body"], None),
+        ), patch(
+            "api.agent.tools.create_file.write_agent_export", return_value={"status": "ok"}
+        ) as write_mock:
+            result = execute_create_file(self.agent, {
+                "query": "SELECT body FROM report",
+                "file_path": "/exports/report.md",
+                "mime_type": "text/markdown",
+            })
+            self.assertEqual(result, {"status": "ok"})
+            self.assertEqual(write_mock.call_args.kwargs["content_bytes"].decode(), f"Profile: {url}")
+
+        for mime_type in ("text/x-python", "application/javascript", "application/octet-stream"):
+            with self.subTest(mime_type=mime_type), patch(
+                "api.agent.tools.create_file.write_agent_export"
+            ) as write_mock:
+                result = execute_create_file(self.agent, {
+                    "content": f"value = '{token}'",
+                    "file_path": "/exports/source.txt",
+                    "mime_type": mime_type,
+                })
+                self.assertEqual(result["status"], "error")
+                self.assertTrue(result["retryable"])
+                self.assertIn("create_file.content", result["message"])
+                write_mock.assert_not_called()
+
+    @patch("api.agent.tools.create_pdf.get_max_file_size", return_value=None)
+    def test_create_pdf_resolves_clickable_and_plain_references_but_blocks_assets(self, _get_max_size):
+        url = "https://profiles.example.test/avery?view=full#bio"
+        token = rewrite_prompt_urls(url, self.agent, create=True, source_kind="tool_result")
+        html = f"<a href='{token}'>Avery</a><p>{token}</p>"
+
+        with patch("weasyprint.HTML") as html_mock, patch(
+            "api.agent.tools.create_pdf.write_agent_export", return_value={"status": "ok"}
+        ):
+            html_mock.return_value.write_pdf.return_value = b"%PDF"
+            self.assertEqual(
+                execute_create_pdf(self.agent, {"html": html, "file_path": "/exports/report.pdf"}),
+                {"status": "ok"},
+            )
+            rendered = html_mock.call_args.kwargs["string"]
+            self.assertIn(f"<a href='{url}'>Avery</a>", rendered)
+            self.assertIn(f"<p>{url}</p>", rendered)
+
+        with patch("weasyprint.HTML") as html_mock:
+            result = execute_create_pdf(self.agent, {
+                "html": f"<img src='{token}'>",
+                "file_path": "/exports/report.pdf",
+            })
+            self.assertEqual(result["status"], "error")
+            self.assertIn("external or local asset", result["message"])
+            html_mock.assert_not_called()
+
+    def test_artifact_tools_return_retryable_missing_malformed_and_foreign_reference_errors(self):
+        foreign = rewrite_prompt_urls(
+            "https://other.example.test/item",
+            self.other_agent,
+            create=True,
+            source_kind="tool_result",
+        )
+        cases = (
+            (execute_create_csv, {"csv_text": "name,url\nMissing,$[link:L0000000000000000]", "file_path": "/exports/a.csv"}),
+            (execute_create_file, {"content": f"Foreign: {foreign}", "mime_type": "text/plain", "file_path": "/exports/a.txt"}),
+            (execute_create_pdf, {"html": "<a href='$[link:broken]'>Broken</a>", "file_path": "/exports/a.pdf"}),
+        )
+
+        for executor, params in cases:
+            with self.subTest(tool=executor.__name__):
+                result = executor(self.agent, params)
+                self.assertEqual(result["status"], "error")
+                self.assertTrue(result["retryable"])
+                self.assertTrue("unavailable" in result["message"] or "malformed" in result["message"])
 
     def test_missing_malformed_and_foreign_references_fail_retryably(self):
         foreign = rewrite_prompt_urls(

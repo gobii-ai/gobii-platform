@@ -2657,16 +2657,6 @@ _REFRESHING_TOOL_EXECUTORS: Dict[str, _ToolExecutorResolver] = {
     "end_planning": lambda: execute_end_planning,
 }
 
-_LINK_REFERENCE_SENDER_TOOLS = {
-    "send_agent_message",
-    "send_chat_message",
-    "send_discord_message",
-    "send_email",
-    "send_sms",
-    "send_webhook_event",
-}
-
-
 def _execute_tool_call_runtime(
     agent: PersistentAgent,
     *,
@@ -2678,11 +2668,10 @@ def _execute_tool_call_runtime(
     resolved_entry: Optional[ToolCatalogEntry] = None,
 ) -> tuple[Any, Optional[List[dict]]]:
     updated_tools: Optional[List[dict]] = None
-    if tool_name not in _LINK_REFERENCE_SENDER_TOOLS:
-        try:
-            exec_params = resolve_link_reference_params(exec_params, agent)
-        except LinkReferenceResolutionError as exc:
-            return link_reference_error_response(exc), updated_tools
+    try:
+        exec_params = resolve_link_reference_params(exec_params, agent, tool_name=tool_name)
+    except LinkReferenceResolutionError as exc:
+        return link_reference_error_response(exc), updated_tools
     mock_config = getattr(budget_ctx, "mock_config", None) if budget_ctx else None
     mock_result = _resolve_eval_mock_result(mock_config, tool_name, exec_params)
     if planning_mode_disallows_tool(agent, tool_name):

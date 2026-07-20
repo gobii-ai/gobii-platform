@@ -57,6 +57,18 @@ class ImageEmbeddingHelperTests(SimpleTestCase):
         self.assertIn("src=\"$[/charts/foo.svg]\"", result)
         self.assertIn("alt=\"Sales\"", result)
 
+    def test_pdf_allows_navigation_links_but_not_fetchable_urls(self):
+        self.assertFalse(create_pdf._contains_blocked_asset_references("<a href='https://example.com/a'>Open</a>"))
+        for html in (
+            "<img src='https://example.com/a.png'>",
+            "<link href='https://example.com/a.css' rel='stylesheet'>",
+            "<script src='https://example.com/a.js'></script>",
+            "<form action='https://example.com/submit'></form>",
+            "<svg><use href='https://example.com/icons.svg#item'></use></svg>",
+        ):
+            with self.subTest(html=html):
+                self.assertTrue(create_pdf._contains_blocked_asset_references(html))
+
     def test_escaped_pdf_markup_is_normalized_to_raw_html(self):
         cases = [
             ("&lt;h1&gt;Title&lt;/h1&gt;&lt;p&gt;Body&lt;/p&gt;", "<h1>Title</h1><p>Body</p>"),
@@ -106,7 +118,7 @@ class ImageEmbeddingHelperTests(SimpleTestCase):
             {
                 "status": "error",
                 "message": (
-                    "HTML contains external or local asset references (URLs are not allowed). "
+                    "HTML contains external or local asset references (navigation links are allowed). "
                     "To embed charts: use <img src='$[/charts/...]'> with the $[path] from create_chart's inline_html field. "
                     "The $[path] syntax is required—it gets replaced with embedded data."
                 ),

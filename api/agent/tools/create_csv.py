@@ -2,6 +2,7 @@ import csv
 import io
 from typing import Any, Dict
 
+from api.agent.core.link_references import LinkReferenceResolutionError, link_reference_error_response, resolve_link_references
 from api.models import PersistentAgent
 from api.agent.tools.file_export_helpers import resolve_export_target, write_agent_export
 from .sqlite_query_runner import run_sqlite_select
@@ -73,21 +74,21 @@ def execute_create_csv(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
                 "status": "error",
                 "message": f"Result has {len(rows)} rows; capped at {MAX_EXPORT_ROWS}. Add LIMIT to your query.",
             }
-        output = io.StringIO()
-        writer = csv.writer(output)
-        if include_headers and columns:
-            writer.writerow(columns)
-        for row in rows:
-            writer.writerow([row.get(col) for col in columns or []])
-        csv_text_to_write = output.getvalue()
+        table = ([columns] if include_headers and columns else []) + [[row.get(col) for col in columns or []] for row in rows]
     else:
         if not isinstance(csv_text, str) or not csv_text.strip():
             return {"status": "error", "message": "Missing required parameter: csv_text"}
-        csv_text_to_write = csv_text
+        table = csv.reader(io.StringIO(csv_text))
+    try:
+        table = [[resolve_link_references(value, agent) if isinstance(value, str) else value for value in row] for row in table]
+    except LinkReferenceResolutionError as exc:
+        return link_reference_error_response(exc)
+    output = io.StringIO()
+    csv.writer(output).writerows(table)
 
     return write_agent_export(
         agent=agent,
-        content_bytes=csv_text_to_write.encode("utf-8"),
+        content_bytes=output.getvalue().encode("utf-8"),
         extension=".csv",
         mime_type="text/csv",
         path=path,
