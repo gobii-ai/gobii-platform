@@ -24,7 +24,7 @@ JSON_EACH_RE = re.compile(r"\bjson_each\s*\(", re.I)
 URL_RE = re.compile(r"https?://[^\s'\",)]+", re.I)
 BULK_MANUAL_VALUES_ROW_LIMIT = 6
 BULK_COPY_MESSAGE = (
-    "Query not executed: a large VALUES import while tool results exist is unreliable. Do not copy rows from visible "
+    "Query not executed: a large literal-row import while tool results exist is unreliable. Do not copy rows from visible "
     "output; derive them from all relevant __tool_results rows in one INSERT ... SELECT/json_each query."
 )
 BLOB_LOOP_MESSAGE = (
@@ -158,8 +158,8 @@ def build_tool_result_query_advisories(sql_values: Iterable[str], *, available_t
         advisories.append(_advisory("tool_result_ctas", "CTAS has no stable identity. Use it only for a disposable extract; reusable models need explicit CREATE TABLE with PRIMARY KEY/UNIQUE, then aggregate INSERT."))
     if available_tool_result_rows < 2: return advisories
     model_advisories, advisories = advisories, []
-    copied_provenance_urls = _matching_provenance_urls(sql_values, tool_result_payloads)
-    if summary.manual_values_rows >= BULK_MANUAL_VALUES_ROW_LIMIT and len(copied_provenance_urls) >= 2:
+    literal_select_rows, copied_provenance_urls = _manual_import_evidence(sql_values, tool_result_payloads)
+    if summary.manual_values_rows + literal_select_rows >= BULK_MANUAL_VALUES_ROW_LIMIT and len(copied_provenance_urls) >= 2:
         advisories.append(_advisory("bulk_manual_working_table_from_visible_results", BULK_COPY_MESSAGE, blocking=True))
     elif summary.manual_values_working_tables:
         advisories.append(_advisory("manual_working_table_from_visible_results", MANUAL_COPY_MESSAGE))
@@ -207,25 +207,25 @@ def _structural_sql(statement: str) -> str:
     return "".join(parts)
 
 
-def _matching_provenance_urls(sql_values: Iterable[str], tool_result_payloads: Iterable[str]) -> set[str]:
-    query_urls = {
-        url
-        for sql in sql_values
-        for statement in sqlparse.parse(str(sql or ""))
-        for values_group in statement.tokens
-        if isinstance(values_group, Values)
-        for url in URL_RE.findall(
-            "".join(
-                token.value
-                for token in values_group.flatten()
-                if token.ttype not in sql_tokens.Comment
+def _manual_import_evidence(sql_values: Iterable[str], tool_result_payloads: Iterable[str]) -> tuple[int, set[str]]:
+    literal_select_rows, query_urls = 0, set()
+    for sql in sql_values:
+        for statement in sqlparse.parse(str(sql or "")):
+            structural = _structural_sql(str(statement))
+            target = _inserted_table_name(structural) or (CREATE_TABLE_AS_RE.search(structural) and _created_table_name(structural))
+            literal_rows = 0 if not target or re.search(r"\bfrom\b", structural, re.I) else sum(
+                token.match(sql_tokens.Keyword.DML, "SELECT") for token in statement.tokens
             )
-        )
-    }
-    if len(query_urls) < 2:
-        return set()
+            literal_select_rows += literal_rows
+            groups = [group for group in statement.tokens if isinstance(group, Values)]
+            if literal_rows:
+                groups.append(statement)
+            for group in groups:
+                for token in group.flatten():
+                    if token.ttype not in sql_tokens.Comment and (isinstance(group, Values) or token.ttype in sql_tokens.Literal.String):
+                        query_urls.update(URL_RE.findall(token.value))
     payload_text = "\n".join(str(payload or "") for payload in tool_result_payloads)
-    return {url for url in query_urls if url in payload_text}
+    return literal_select_rows, {url for url in query_urls if url in payload_text}
 
 
 def _result_id_in_count(statement: str) -> int:

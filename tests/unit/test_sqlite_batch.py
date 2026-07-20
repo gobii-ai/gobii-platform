@@ -475,6 +475,55 @@ class SqliteBatchToolTests(TestCase):
                 conn.close()
             self.assertIsNone(table)
 
+    def test_bulk_manual_tool_result_select_copy_is_rejected_before_execution(self):
+        with self._with_temp_db() as (db_path, _token, _tmp):
+            conn = sqlite3.connect(db_path)
+            try:
+                conn.execute("CREATE TABLE __tool_results (result_id TEXT PRIMARY KEY, result_text TEXT)")
+                conn.executemany(
+                    "INSERT INTO __tool_results (result_id, result_text) VALUES (?, ?)",
+                    [
+                        ("r1", "source https://source.example.test/a"),
+                        ("r2", "source https://source.example.test/b"),
+                    ],
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            rows = [
+                f"SELECT {index}, 'https://source.example.test/{'a' if index % 2 else 'b'}'"
+                for index in range(12)
+            ]
+            union_rows = " UNION ALL ".join(rows)
+            queries = (
+                f"CREATE TABLE copied_rows(id INTEGER, label TEXT); INSERT INTO copied_rows {union_rows};",
+                "CREATE TABLE copied_rows(id INTEGER, label TEXT);"
+                + ";".join(f"INSERT INTO copied_rows {row}" for row in rows),
+                f"CREATE TABLE copied_rows AS {union_rows};",
+            )
+            for sql in queries:
+                with self.subTest(sql=sql[:80]):
+                    out = execute_sqlite_batch(
+                        self.agent,
+                        {"sql": sql, "will_continue_work": True},
+                    )
+                    self.assertEqual(out.get("status"), "error")
+                    self.assertTrue(out.get("retryable"))
+                    self.assertEqual(
+                        out.get("advisories", [{}])[0].get("code"),
+                        "bulk_manual_working_table_from_visible_results",
+                    )
+
+            conn = sqlite3.connect(db_path)
+            try:
+                table = conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name='copied_rows'"
+                ).fetchone()
+            finally:
+                conn.close()
+            self.assertIsNone(table)
+
     def test_bulk_manual_constants_are_not_blocked_by_unrelated_tool_results(self):
         with self._with_temp_db() as (db_path, _token, _tmp):
             conn = sqlite3.connect(db_path)
@@ -513,6 +562,42 @@ class SqliteBatchToolTests(TestCase):
                 out.get("advisories", [{}])[0].get("code"),
                 "bulk_manual_working_table_from_visible_results",
             )
+
+            literal_rows = " UNION ALL ".join(
+                f"SELECT {index}, 'month-{index}'" for index in range(1, 13)
+            )
+            literal_out = execute_sqlite_batch(
+                self.agent,
+                {
+                    "sql": (
+                        f"CREATE TABLE literal_months AS {literal_rows};"
+                        "SELECT COUNT(*) AS count FROM literal_months;"
+                        "-- unrelated notes https://source.example.test/a https://source.example.test/b"
+                    ),
+                    "will_continue_work": True,
+                },
+            )
+            self.assertEqual(literal_out.get("status"), "ok")
+            self.assertEqual(literal_out["results"][-1]["result"], [{"count": 12}])
+
+    def test_derived_union_is_not_treated_as_literal_copy(self):
+        sql = " UNION ALL ".join(
+            f"SELECT id, 'https://source.example.test/{'a' if index % 2 else 'b'}' FROM local_source"
+            for index in range(6)
+        )
+        advisories = build_tool_result_query_advisories(
+            [f"INSERT INTO copied_rows {sql}"],
+            available_tool_result_rows=2,
+            tool_result_payloads=(
+                "source https://source.example.test/a",
+                "source https://source.example.test/b",
+            ),
+        )
+
+        self.assertNotIn(
+            "bulk_manual_working_table_from_visible_results",
+            {advisory.code for advisory in advisories},
+        )
 
     def test_per_result_import_loop_is_rejected_before_execution(self):
         with self._with_temp_db() as (db_path, _token, _tmp):
