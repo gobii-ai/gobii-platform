@@ -48,8 +48,12 @@ class PromptContextSqlitePlacementTests(TestCase):
         self.assertIn("query gaps before reporting", sqlite_guidance)
         self.assertIn("Only sourced blockers are unresolved", sqlite_guidance)
         self.assertIn("return only needed rows to context", sqlite_guidance)
-        self.assertIn("never filter one result_id at a time, make a table per result", sqlite_guidance)
-        self.assertIn("For multi-fetch work, extract fields in SQL", sqlite_guidance)
+        self.assertIn(
+            "one shaped INSERT ... SELECT/json_each filtered by IN/tool_name",
+            sqlite_guidance,
+        )
+        self.assertIn("extract fields in SQL, not literals", sqlite_guidance)
+        self.assertIn("Never filter one result_id at a time, make a table per result", sqlite_guidance)
         self.assertIn("Keep chat/outreach light. Owner reports on 4+ peers", system_message["content"])
         self.assertIn(
             "need resolved/total and one table with requested fields plus a source URL per row",
