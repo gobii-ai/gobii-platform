@@ -19,6 +19,7 @@ from api.evals.scenarios.effort_calibration import (
     ARTIFACT_TOOL_NAMES,
     EFFORT_CALIBRATION_SCENARIO_SLUGS,
     EFFORT_EXPLICIT_DEEP_RESEARCH_REMAINS_CAPABLE,
+    EFFORT_ORDINARY_CONTINUATION_AVOIDS_CORRECTIVE_CHURN,
     EFFORT_OVERWORK_TOOL_NAMES,
     EFFORT_PARTIAL_SOURCE_BLOCK_REPORTS_AND_RESUMES,
     RESEARCH_TOOL_NAMES,
@@ -27,6 +28,7 @@ from api.evals.scenarios.effort_calibration import (
     EFFORT_TOOL_WAIT_NEXT_SCHEDULE_REQUIRES_SCHEDULE,
     EFFORT_UNSCHEDULED_REMAINING_WORK_SETS_RESUME,
     EffortCalibrationScenario,
+    EffortOrdinaryContinuationAvoidsCorrectiveChurnScenario,
     EffortSimpleCurrentCompanyReportScenario,
     EffortTrivialAnswerStopsScenario,
     _find_near_duplicate_texts,
@@ -111,6 +113,7 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
         self.assertEqual(suite.scenario_slugs, EFFORT_CALIBRATION_SCENARIO_SLUGS)
         self.assertIn(EFFORT_SIMPLE_CURRENT_YC_BATCH_REPORT, suite.scenario_slugs)
         self.assertIn(EFFORT_SIMPLE_CURRENT_COMPANY_REPORT, suite.scenario_slugs)
+        self.assertIn(EFFORT_ORDINARY_CONTINUATION_AVOIDS_CORRECTIVE_CHURN, suite.scenario_slugs)
         self.assertIn(EFFORT_EXPLICIT_DEEP_RESEARCH_REMAINS_CAPABLE, suite.scenario_slugs)
         self.assertIn(EFFORT_UNSCHEDULED_REMAINING_WORK_SETS_RESUME, suite.scenario_slugs)
         self.assertIn(EFFORT_PARTIAL_SOURCE_BLOCK_REPORTS_AND_RESUMES, suite.scenario_slugs)
@@ -1307,6 +1310,13 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
         self.assertTrue(passed, recorded[-1][1]["observed_summary"])
         self.assertIn("one before work and one after a material phase", recorded[-1][1]["observed_summary"])
 
+    def test_ordinary_continuation_prompt_does_not_prescribe_retry_internals(self):
+        prompt = EffortOrdinaryContinuationAvoidsCorrectiveChurnScenario.prompt.casefold()
+
+        for implementation_term in ("correction", "deep work", "milestone", "reasoning", "retry", "thinking"):
+            with self.subTest(implementation_term=implementation_term):
+                self.assertNotIn(implementation_term, prompt)
+
     def test_question_count_ignores_source_url_query_strings(self):
         self.assertEqual(
             _question_count("Sources: https://www.ycombinator.com/companies?batch=Winter%202026"),
@@ -2090,9 +2100,9 @@ class FirstRunPromptCalibrationTests(TestCase):
         self.assertIn("Finished answers/briefings/charts/lookups/one-off research are not charter changes", system_prompt)
         self.assertIn("Email/SMS imperatives map directly to send_email/send_sms", system_prompt)
         self.assertIn("Do not downgrade requested email/SMS delivery to chat", system_prompt)
-        self.assertIn("After any update result, do not repeat or paraphrase it", system_prompt)
+        self.assertIn("After an update, don't repeat it", system_prompt)
         self.assertIn("each later update must state a concrete new finding", system_prompt)
-        self.assertIn("must not reuse kickoff text", system_prompt)
+        self.assertIn("never kickoff text", system_prompt)
         self.assertIn("first use one direct sqlite_batch update to save the cursor", system_prompt)
         self.assertIn("do not SELECT or read_file first", system_prompt)
         self.assertIn("Append new resume state with `charter = charter || '...'`", system_prompt)

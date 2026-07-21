@@ -309,7 +309,8 @@ def _deep_work_update_gate_reason(
     prior_update_count: int,
     batch_has_progress_update: bool,
     prior_has_midwork_update: bool = False,
-    prior_correction_count: int = 0,
+    prior_kickoff_correction: bool = False,
+    prior_milestone_correction: bool = False,
 ) -> str | None:
     work_names = [
         name
@@ -323,14 +324,15 @@ def _deep_work_update_gate_reason(
         SUBSTANTIAL_WORK_RE.search(latest_user_text or "")
         and not NON_SUBSTANTIAL_WORK_RE.search(latest_user_text or "")
     )
-    if prior_update_count == 0 and prior_work_count == 0 and substantial_start and prior_correction_count < 4:
+    if prior_update_count == 0 and prior_work_count == 0 and substantial_start and not prior_kickoff_correction:
         return "kickoff"
     if (
-        prior_update_count >= 1
+        substantial_start
+        and prior_update_count >= 1
         and prior_work_count > 0
         and not prior_has_midwork_update
         and prior_work_count + len(work_names) >= 6
-        and prior_correction_count < 6
+        and not prior_milestone_correction
     ):
         return "milestone"
     return None
@@ -397,11 +399,13 @@ def _deep_work_update_gate_context(
         tool_name__in=MESSAGE_TOOL_NAMES | {"sleep_until_next_trigger", "request_human_input", "update_plan"}
     )
     first_work_at = prior_work_calls.order_by("step__created_at").values_list("step__created_at", flat=True).first()
-    prior_correction_count = PersistentAgentStep.objects.filter(
-        agent=agent,
-        created_at__gt=latest_inbound.timestamp,
-        description__startswith=DEEP_WORK_UPDATE_CORRECTION_PREFIX,
-    ).count()
+    prior_correction_descriptions = list(
+        PersistentAgentStep.objects.filter(
+            agent=agent,
+            created_at__gt=latest_inbound.timestamp,
+            description__startswith=DEEP_WORK_UPDATE_CORRECTION_PREFIX,
+        ).values_list("description", flat=True)
+    )
     return _deep_work_update_gate_reason(
         latest_inbound.body or "",
         [_get_tool_call_name(call) or "" for call in tool_calls],
@@ -413,7 +417,14 @@ def _deep_work_update_gate_context(
         batch_has_progress_update=bool(
             tool_calls and _tool_call_is_progress_update(tool_calls[0], expected_message_tool)
         ),
-        prior_correction_count=prior_correction_count,
+        prior_kickoff_correction=any(
+            description.startswith(f"{DEEP_WORK_UPDATE_CORRECTION_PREFIX} kickoff:")
+            for description in prior_correction_descriptions
+        ),
+        prior_milestone_correction=any(
+            description.startswith(f"{DEEP_WORK_UPDATE_CORRECTION_PREFIX} milestone:")
+            for description in prior_correction_descriptions
+        ),
     )
 
 
@@ -426,17 +437,21 @@ def _record_deep_work_update_correction(
 ) -> None:
     if reason == "kickoff":
         instruction = (
-            "The task calls were held because this substantial request needs a kickoff. Repeat them in your next "
-            "response, adding the same-channel send tool as the first call with will_continue_work=true. Briefly "
-            "name the outcome and when the requester will hear a substantive finding, without listing methods."
+            "The task calls were held once because this substantial request needs a kickoff. In your next response, "
+            "first use the same-channel send tool with will_continue_work=true, then reissue the intended task calls. "
+            "Briefly name the outcome and when the requester will hear a substantive finding, without listing methods. "
+            "After the first evidence batch, share the strongest concrete finding, not task status like 'sources scraped.'"
         )
     else:
         instruction = (
-            "The task calls were held because substantial work needs a milestone update. Repeat them in your next "
-            "response, adding the same-channel send tool as the first call with will_continue_work=true. Its body "
-            "must give the strongest concrete finding so far, not say what you are about to do or name mechanics."
+            "The task calls were held once because substantial work needs a milestone update. In your next response, "
+            "first use the same-channel send tool with will_continue_work=true, then reissue the intended task calls. "
+            "Its body must give the strongest concrete finding so far, not say what you are about to do or name mechanics."
         )
-    step_kwargs = {"agent": agent, "description": f"{DEEP_WORK_UPDATE_CORRECTION_PREFIX} {instruction}"}
+    step_kwargs = {
+        "agent": agent,
+        "description": f"{DEEP_WORK_UPDATE_CORRECTION_PREFIX} {reason}: {instruction}",
+    }
     attach_completion(step_kwargs)
     step = PersistentAgentStep.objects.create(**step_kwargs)
     attach_prompt_archive(step)

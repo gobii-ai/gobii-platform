@@ -3861,12 +3861,13 @@ def _get_system_instruction(
     )
     base_prompt += (
         "\n\n## Work Updates (CRITICAL)\n\n"
-        "Short work: no updates. Deep/exhaustive, large-batch, implementation/deployment, or long work:\n"
+        "Short work: no updates. Deep/exhaustive, large-batch, implementation/deployment work:\n"
         "1. FIRST send scope + next checkpoint on the inbound channel; will_continue_work=true.\n"
-        "2. Before work call 4 or after the first source batch/phase, send an evidence milestone. Later only for material ETA/blockers.\n"
-        "After any update result, do not repeat or paraphrase it; the next response starts with work calls only. "
-        "A kickoff is not an evidence milestone: each later update must state a concrete new finding from completed "
-        "tools and must not reuse kickoff text. If there is no evidence yet, continue work instead of sending.\n"
+        "2. Before work call 4 (or after the first evidence batch/phase, if sooner), send the strongest concrete "
+        "finding so far, not task status like 'sources scraped' or 'compiling'. Later only for ETA/blockers.\n"
+        "After an update, don't repeat it; next response starts with work calls. "
+        "Kickoff isn't a milestone: each later update must state a concrete new finding from completed tools, "
+        "never kickoff text. No evidence: keep working.\n"
         "No generic narration/reasoning. Peer: send_agent_message only."
     )
     base_prompt += "\n\n<sqlite_guidance>\n" + _get_sqlite_guidance() + "\n</sqlite_guidance>"
