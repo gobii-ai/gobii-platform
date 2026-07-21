@@ -14,6 +14,23 @@ import api.evals.loader # noqa: F401
 logger = logging.getLogger(__name__)
 
 
+def _suite_run_code_mismatch(suite, run) -> str:
+    launch_config = getattr(suite, "launch_config", None) or {}
+    expected_version = str(launch_config.get("launcher_code_version") or "")
+    actual_version = str(getattr(run, "code_version", "") or "")
+    if not expected_version or not actual_version or expected_version == actual_version:
+        return ""
+
+    expected_branch = str(launch_config.get("launcher_code_branch") or "")
+    actual_branch = str(getattr(run, "code_branch", "") or "")
+    return (
+        "Eval worker code mismatch: "
+        f"launcher={expected_branch or 'unknown'}@{expected_version}, "
+        f"worker={actual_branch or 'unknown'}@{actual_version}. "
+        "Restart stale workers or rerun with --sync."
+    )
+
+
 def _update_suite_state(suite_run_id) -> None:
     if not suite_run_id:
         return
@@ -27,6 +44,18 @@ def _update_suite_state(suite_run_id) -> None:
         return
 
     runs = list(suite.runs.all())
+    for run in runs:
+        mismatch = _suite_run_code_mismatch(suite, run)
+        if not mismatch or run.status != EvalRun.Status.COMPLETED:
+            continue
+        run.status = EvalRun.Status.ERRORED
+        run.notes = f"{run.notes.rstrip()}\n\n{mismatch}" if run.notes else mismatch
+        run.save(update_fields=["status", "notes", "updated_at"])
+        try:
+            broadcast_run_update(run, include_tasks=True)
+        except Exception:
+            logger.debug("Broadcast run update failed after eval code mismatch", exc_info=True)
+
     started_at_values = [r.started_at for r in runs if r.started_at]
     finished_at_values = [r.finished_at for r in runs if r.finished_at]
 
@@ -102,6 +131,7 @@ class EvalRunner:
 
         # Resolve the routing profile from the suite run (if set)
         routing_profile = None
+        suite = None
         if self.run.suite_run_id:
             try:
                 suite = EvalSuiteRun.objects.select_related("llm_routing_profile").get(
@@ -132,6 +162,10 @@ class EvalRunner:
         _update_suite_state(self.run.suite_run_id)
 
         try:
+            mismatch = _suite_run_code_mismatch(suite, self.run)
+            if mismatch:
+                raise RuntimeError(mismatch)
+
             # Pre-create tasks for visibility
             # We wipe existing tasks if this is a re-run to avoid duplicates
             self.run.tasks.all().delete()

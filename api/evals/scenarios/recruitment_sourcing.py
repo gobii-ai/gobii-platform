@@ -177,7 +177,7 @@ RECRUITMENT_SOURCING_CASES = (
         prompt=(
             "Please start sourcing today for a Litigation Paralegal at Northlake Legal Group in Denver. "
             "It is onsite and Sara owns the role. I do not have the job posting, intake notes, required skills, "
-            "or dealbreakers ready yet."
+            "or dealbreakers ready yet, and I want to align on screening criteria before candidate research begins."
         ),
         mock_config={},
         forbidden_tool_names=SOURCING_TOOL_NAMES,

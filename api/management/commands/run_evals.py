@@ -11,6 +11,7 @@ from django.utils import timezone
 
 import api.evals.loader  # noqa: F401 - registers canonical scenarios and suites
 from api.evals.catalog import ScenarioCatalogFilters, filter_scenario_slugs, get_scenario_metadata, normalized_filter_values, scenario_to_suite_slugs
+from api.evals.fingerprint import get_code_branch, get_code_version
 from api.evals.local_setup import ensure_eval_local_setup, get_eval_local_routing_profile_seeds
 from api.evals.owner import ensure_eval_runner_user_and_owner
 from api.evals.registry import ScenarioRegistry
@@ -615,6 +616,8 @@ class Command(BaseCommand):
 
         suite_runs = []
         run_ids = []
+        launcher_code_version = get_code_version()
+        launcher_code_branch = get_code_branch()
 
         for source_routing_profile in routing_profile_matrix:
             profile_name = source_routing_profile.name if source_routing_profile else "active-default"
@@ -624,7 +627,10 @@ class Command(BaseCommand):
                 profile_snapshot = None
                 if source_routing_profile:
                     profile_snapshot = create_eval_profile_snapshot(source_routing_profile, str(suite_run_id))
-                launch_config = {}
+                launch_config = {
+                    "launcher_code_version": launcher_code_version,
+                    "launcher_code_branch": launcher_code_branch,
+                }
                 if simulated:
                     launch_config["mode"] = "simulated"
                 if filter_text:

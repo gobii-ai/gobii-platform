@@ -52,7 +52,7 @@ class PromptContextSqlitePlacementTests(TestCase):
             "one shaped INSERT ... SELECT/json_each filtered by IN/tool_name",
             sqlite_guidance,
         )
-        self.assertIn("extract fields in SQL, not literals", sqlite_guidance)
+        self.assertIn("extract fields and raw URLs in SQL from result_json", sqlite_guidance)
         self.assertIn("Never filter one result_id at a time, make a table per result", sqlite_guidance)
         self.assertIn("Keep chat/outreach light. Owner reports on 4+ peers", system_message["content"])
         self.assertIn(
@@ -60,8 +60,8 @@ class PromptContextSqlitePlacementTests(TestCase):
             system_message["content"],
         )
         self.assertIn("## Link References (CRITICAL)", system_message["content"])
-        self.assertIn("An item without its own token stays unlinked", system_message["content"])
-        self.assertIn("a source/feed token links only that source/feed", system_message["content"])
+        self.assertIn("An item lacking its token stays unlinked", system_message["content"])
+        self.assertIn("a source/feed token links only itself", system_message["content"])
         self.assertIn("resolve/source each requested field", system_message["content"])
         self.assertIn("grouped discovery isn't coverage", system_message["content"])
         self.assertIn("separate sourced unavailability from research gaps", system_message["content"])

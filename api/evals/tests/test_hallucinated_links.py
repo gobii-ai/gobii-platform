@@ -293,3 +293,38 @@ class HallucinatedLinkScenarioTests(SimpleTestCase):
 
         self.assertEqual(suite.status, EvalSuiteRun.Status.RUNNING)
         self.assertIsNone(suite.finished_at)
+
+    def test_suite_marks_terminal_run_errored_when_worker_commit_differs(self):
+        finished = datetime(2026, 7, 18, tzinfo=timezone.utc)
+        run = SimpleNamespace(
+            status=EvalRun.Status.COMPLETED,
+            started_at=finished,
+            finished_at=finished,
+            code_version="old-commit",
+            code_branch="main",
+            notes="",
+            save=MagicMock(),
+        )
+        suite = SimpleNamespace(
+            runs=SimpleNamespace(all=lambda: [run]),
+            launch_config={
+                "launcher_code_version": "new-commit",
+                "launcher_code_branch": "feature",
+            },
+            status=EvalSuiteRun.Status.COMPLETED,
+            started_at=finished,
+            finished_at=finished,
+            save=MagicMock(),
+        )
+        manager = MagicMock()
+        manager.select_related.return_value.prefetch_related.return_value.get.return_value = suite
+
+        with patch("api.evals.runner.EvalSuiteRun.objects", manager), patch(
+            "api.evals.runner.broadcast_run_update"
+        ), patch("api.evals.runner.broadcast_suite_update"):
+            _update_suite_state("suite-1")
+
+        self.assertEqual(run.status, EvalRun.Status.ERRORED)
+        self.assertIn("launcher=feature@new-commit", run.notes)
+        self.assertIn("worker=main@old-commit", run.notes)
+        self.assertEqual(suite.status, EvalSuiteRun.Status.ERRORED)

@@ -24,6 +24,7 @@ from api.evals.suites import SuiteRegistry
 APOLLO_CONNECT_SEARCH = "common_use_case_136_apollo_connect_tool_search"
 SLACK_CONNECT_SEARCH = "common_use_case_137_slack_connect_tool_search"
 SQLITE_EXPORT_QUERY_CSV = "common_use_case_086_sqlite_export_query_csv"
+MONITORING_SCOPE_QUESTION = "common_use_case_099_request_monitoring_scope"
 
 
 @tag("eval_sim")
@@ -107,6 +108,19 @@ class BehaviorMicroScenarioTests(SimpleTestCase):
         self.assertTrue(scenario._call_satisfies_expected_tool(successful_csv, "create_csv"))
         self.assertFalse(scenario._call_satisfies_expected_tool(failed_sqlite, "sqlite_batch"))
         self.assertFalse(scenario._call_satisfies_expected_tool(incomplete_csv, "create_csv"))
+
+    def test_monitoring_scope_chat_alternative_is_relevant_and_satisfies_expectation(self):
+        scenario = ScenarioRegistry.get(MONITORING_SCOPE_QUESTION)
+        chat_call = SimpleNamespace(
+            tool_name="send_chat_message",
+            tool_params={"body": "Which competitors and update types should I monitor?"},
+        )
+
+        self.assertTrue(scenario._call_satisfies_expected_tool(chat_call, "request_human_input"))
+        self.assertNotIn("send_chat_message", scenario._build_eval_stop_policy()["ignored_tool_names"])
+
+        chat_call.tool_params = {"body": ""}
+        self.assertFalse(scenario._call_satisfies_expected_tool(chat_call, "request_human_input"))
 
     def test_integration_discovery_scenarios_are_registered_in_expected_suites(self):
         planning_suite = SuiteRegistry.get("planning_micro")

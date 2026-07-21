@@ -1600,7 +1600,9 @@ class MetaGobiiLocalEvalSetupTests(TestCase):
 
         suite_run = EvalSuiteRun.objects.latest("created_at")
         self.assertEqual(suite_run.suite_slug, "meta_gobii")
-        self.assertEqual(suite_run.launch_config, {"mode": "simulated"})
+        self.assertEqual(suite_run.launch_config["mode"], "simulated")
+        self.assertTrue(suite_run.launch_config["launcher_code_version"])
+        self.assertIn("launcher_code_branch", suite_run.launch_config)
         self.assertEqual(suite_run.runs.count(), len(META_GOBII_EVAL_SCENARIO_SLUGS))
         self.assertTrue(
             suite_run.runs.filter(
@@ -1630,7 +1632,9 @@ class MetaGobiiLocalEvalSetupTests(TestCase):
 
         suite_run = EvalSuiteRun.objects.latest("created_at")
         self.assertEqual(suite_run.suite_slug, "single::meta_gobii_negative_content_task")
-        self.assertEqual(suite_run.launch_config, {"mode": "simulated"})
+        self.assertEqual(suite_run.launch_config["mode"], "simulated")
+        self.assertTrue(suite_run.launch_config["launcher_code_version"])
+        self.assertIn("launcher_code_branch", suite_run.launch_config)
         self.assertEqual(suite_run.runs.count(), 1)
         run = suite_run.runs.select_related("agent__organization", "agent__user").first()
         self.assertEqual(run.scenario_slug, "meta_gobii_negative_content_task")

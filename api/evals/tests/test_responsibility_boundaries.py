@@ -1,5 +1,6 @@
 import json
 from types import SimpleNamespace
+from unittest.mock import MagicMock, call, patch
 
 from django.test import SimpleTestCase, tag
 
@@ -122,8 +123,9 @@ class ResponsibilityBoundaryScenarioTests(SimpleTestCase):
             result=json.dumps({"status": "success"}),
             step="discord-step",
         )
+        sqlite_call = SimpleNamespace(tool_name="sqlite_batch")
 
-        scenario._verify_owned_request("run", inbound, [http_call, discord_call])
+        scenario._verify_owned_request("run", inbound, [http_call, sqlite_call, discord_call])
         self.assertEqual(recorded[-1][0][2], EvalRunTask.Status.PASSED)
 
         discord_call.tool_params["message"] += " Engineering is checking the empty-CSV root cause."
@@ -133,3 +135,67 @@ class ResponsibilityBoundaryScenarioTests(SimpleTestCase):
         discord_call.tool_params["message"] += " I'll investigate that too."
         scenario._verify_owned_request("run", inbound, [http_call, discord_call])
         self.assertEqual(recorded[-1][0][2], EvalRunTask.Status.FAILED)
+
+    def test_owned_reply_accepts_scrape_fetch_for_opaque_json_link(self):
+        case = next(case for case in RESPONSIBILITY_BOUNDARY_CASES if case.event_kind == "shared_channel_owned")
+        scenario = ResponsibilityBoundaryScenario(case)
+        recorded = []
+        scenario.record_task_result = lambda *args, **kwargs: recorded.append((args, kwargs))
+        inbound = SimpleNamespace(raw_payload={"discord_channel_id": "channel-1"})
+        scrape_call = SimpleNamespace(
+            tool_name="mcp_brightdata_scrape_as_markdown",
+            tool_params={"url": "https://api.example.test/customer-signals-summary.json"},
+            status="complete",
+            result=json.dumps({"status": "success"}),
+            step="scrape-step",
+        )
+        discord_call = SimpleNamespace(
+            tool_name="send_discord_message",
+            tool_params={
+                "channel_id": "channel-1",
+                "message": "Top confirmed theme: Export reliability, with three confirmed reports.",
+                "will_continue_work": False,
+            },
+            status="complete",
+            result=json.dumps({"status": "success"}),
+            step="discord-step",
+        )
+
+        scenario._verify_owned_request("run", inbound, [scrape_call, discord_call])
+
+        self.assertEqual(recorded[-2][0][2], EvalRunTask.Status.PASSED)
+        self.assertEqual(recorded[-1][0][2], EvalRunTask.Status.PASSED)
+
+    @patch("api.evals.scenarios.responsibility_boundaries.PersistentAgentEnabledTool.objects")
+    @patch("api.evals.scenarios.responsibility_boundaries.PersistentAgent.objects")
+    @patch.object(ResponsibilityBoundaryScenario, "_seed_prior_run")
+    @patch("api.evals.scenarios.responsibility_boundaries.mark_tool_enabled_without_discovery")
+    def test_prepare_agent_exposes_both_owned_request_fetch_tools(
+        self,
+        mark_enabled,
+        _seed_prior_run,
+        agent_objects,
+        enabled_tool_objects,
+    ):
+        case = next(case for case in RESPONSIBILITY_BOUNDARY_CASES if case.event_kind == "shared_channel_owned")
+        scenario = ResponsibilityBoundaryScenario(case)
+        agent = MagicMock()
+        agent_objects.select_related.return_value.get.return_value = agent
+
+        scenario._prepare_agent("agent-1")
+
+        self.assertEqual(
+            mark_enabled.call_args_list,
+            [
+                call(agent, "http_request"),
+                call(agent, "mcp_brightdata_scrape_as_markdown"),
+            ],
+        )
+        enabled_tool_objects.filter.assert_called_once_with(
+            agent=agent,
+            tool_full_name="mcp_brightdata_scrape_as_markdown",
+        )
+        enabled_tool_objects.filter.return_value.update.assert_called_once_with(
+            tool_server="eval",
+            tool_name="mcp_brightdata_scrape_as_markdown",
+        )
