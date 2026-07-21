@@ -103,6 +103,7 @@ export function useTimelineScrollController({
     }
     programmaticScrollUntilRef.current = Date.now() + PROGRAMMATIC_SCROLL_MS
     container.scrollTop = container.scrollHeight
+    lastScrollTopRef.current = container.scrollTop
     setIsNearBottom(true)
   }, [])
 
@@ -309,15 +310,20 @@ export function useTimelineScrollController({
         suspendAutoFollow()
       }
 
+      const distance = bottomDistance(container)
+      // A bottom-follow write cannot leave the viewport beyond the live-edge threshold.
+      const movedAwayFromLiveEdge = meaningfulScrollUp && distance > NEAR_BOTTOM_PX
       if (
-        Date.now() < programmaticScrollUntilRef.current
+        (
+          Date.now() < programmaticScrollUntilRef.current
+          && !movedAwayFromLiveEdge
+        )
         || Date.now() < ignorePinUntilRef.current
         || prependAnchorRef.current
       ) {
         return
       }
 
-      const distance = bottomDistance(container)
       if (meaningfulScrollUp) {
         suspendAutoFollow()
       } else if (scrollingDown && distance <= NEAR_BOTTOM_PX) {
