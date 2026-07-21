@@ -9,15 +9,18 @@ _CREDENTIAL = (
     r"(?:access|auth(?:entication)?|bearer|refresh|session)\s+tokens?|tokens?|"
     r"client\s+secrets?|secret\s+keys?|private\s+keys?|secrets?|"
     r"(?:mfa|2fa|otp|one[- ]time|verification|recovery)\s+codes?|"
-    r"login\s+credentials?|credentials?)"
+    r"login\s+credentials?(?!\s+(?:request|link|form|page|flow))|"
+    r"credentials?(?!\s+(?:request|link|form|page|flow)))"
 )
-_ACTION = r"(?:paste|enter|type|submit|upload|provide|share|give|supply|send|email|text|forward|put|drop|reply|respond|tell)"
+_TRANSFER = r"(?:paste|enter|type|submit|upload|send|email|text|forward|put|drop|copy|dm|message)"
+_ACTION = rf"(?:{_TRANSFER}|provide|share|give|supply|reply|respond|tell)"
+_CREDENTIAL_OBJECT = rf"(?:{_CREDENTIAL}|your(?:\s+[\w.-]+)?\s+{_CREDENTIAL}|(?:the|a(?:n)?)\s+{_CREDENTIAL})"
 _SOLICITATION_RE = re.compile(
-    rf"\b(?:paste|enter|type|submit|upload|send|email|text|forward|put|drop)\b|"
-    rf"\b(?:reply|respond)\b.{{0,20}}\bwith\b|"
-    rf"\b(?:what\s+is|what's|tell\s+me|i\s+need|(?:can|could|may)\s+i\s+have)\b|"
-    rf"\b(?:provide|share|give|supply)\b(?:\s+(?:me|us))?\s+"
-    rf"(?:{_CREDENTIAL}|(?:your|the|a(?:n)?)\s+(?:[\w.-]+\s+){{0,4}}{_CREDENTIAL})\b",
+    rf"\b(?:{_TRANSFER}|provide|share|give|supply)\b"
+    rf"(?:\s+(?:me|us))?(?:\s+(?:back|over))?\s+{_CREDENTIAL_OBJECT}\b|"
+    rf"\b(?:reply|respond)\b[^,;.!?]{{0,20}}\bwith\s+{_CREDENTIAL_OBJECT}\b|"
+    rf"\b(?:what\s+is|what's|tell\s+me|i\s+need|(?:can|could|may)\s+i\s+have)\s+"
+    rf"{_CREDENTIAL_OBJECT}\b",
     re.IGNORECASE,
 )
 _SANITIZERS = (
@@ -38,7 +41,6 @@ _SANITIZERS = (
         re.IGNORECASE,
     ),
 )
-_CREDENTIAL_RE = re.compile(rf"\b{_CREDENTIAL}\b", re.IGNORECASE)
 CREDENTIAL_SOLICITATION_ERROR_MESSAGE = (
     "Credential values must never be requested through request_human_input or ordinary messages. "
     "Call secure_credentials_request so the user can provide them through the secure credential flow."
@@ -53,6 +55,6 @@ def request_solicits_credential_value(question: str, options: list[dict[str, Any
     for clause in clauses:
         for sanitizer in _SANITIZERS:
             clause = sanitizer.sub("", clause)
-        if _CREDENTIAL_RE.search(clause) and _SOLICITATION_RE.search(clause):
+        if _SOLICITATION_RE.search(clause):
             return True
     return False

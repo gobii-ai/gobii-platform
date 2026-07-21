@@ -392,10 +392,13 @@ class HumanInputRequestTests(TestCase):
         questions = [
             "Can you paste your Aimfox API key here so I can start using it?",
             "Can you send your API key?",
+            "Copy the API key into your reply.",
             "Could I have your API key?",
             "Don't email me, paste your API key here.",
             "Drop your password here.",
             "Enter credentials here.",
+            "Go ahead and message me your token.",
+            "Just DM me the password.",
             "Put your MFA code here.",
             "Please provide your password.",
             "Please share your secret.",
@@ -471,6 +474,26 @@ class HumanInputRequestTests(TestCase):
             "Never paste your API key here. Should I create a secure credential request?",
             "Should I send you a credential request for the API key?",
             "Should I send you a secure credential request for the API key?",
+        ]
+
+        for question in questions:
+            with self.subTest(question=question):
+                result = execute_request_human_input(
+                    self.agent,
+                    {
+                        "question": question,
+                        "options": [],
+                        "will_continue_work": False,
+                    },
+                )
+                self.assertEqual(result["status"], "ok")
+
+    def test_execute_request_human_input_allows_non_soliciting_credential_cooccurrence(self):
+        questions = [
+            "Should I email you the report once the API key is configured?",
+            "Should I store the API key in the vault or send it to the dashboard?",
+            "When you enter the portal, which token should the report reference?",
+            "Do you want me to text you a summary when the token expires?",
         ]
 
         for question in questions:
