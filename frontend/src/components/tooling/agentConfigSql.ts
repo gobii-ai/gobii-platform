@@ -72,6 +72,10 @@ function decodeSqlLiteral(value: string): string | null | undefined {
   return undefined
 }
 
+function normalizeEscapedNewlinesForDisplay(value: string | null): string | null {
+  return value?.replace(/\\r\\n|\\n|\\r/g, '\n') ?? null
+}
+
 function parseInsertValueAssignment(
   statement: string,
   field: string,
@@ -139,12 +143,15 @@ function parsePatchTextAssignment(statement: string): AgentConfigCharterChange |
     return null
   }
 
-  const previousText = decodeSqlLiteral(match[2] ?? '')
-  const replacementText = decodeSqlLiteral(match[3] ?? '')
-  if (previousText === undefined || replacementText === undefined) {
+  const decodedPreviousText = decodeSqlLiteral(match[2] ?? '')
+  const decodedReplacementText = decodeSqlLiteral(match[3] ?? '')
+  if (decodedPreviousText === undefined || decodedReplacementText === undefined) {
     return null
   }
-  return { previousText, replacementText }
+  return {
+    previousText: normalizeEscapedNewlinesForDisplay(decodedPreviousText),
+    replacementText: normalizeEscapedNewlinesForDisplay(decodedReplacementText),
+  }
 }
 
 function hasAssignment(statement: string, field: string): boolean {
