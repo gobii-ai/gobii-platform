@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 
 import type { TimelineResponse } from '../api/agentChat'
-import { chatActions, normalizeProcessingUpdate } from '../store/chatSlice'
+import { chatActions } from '../store/chatSlice'
 import { useAppDispatch } from '../store/hooks'
 import type { PlanningState, SignupPreviewState } from '../types/agentRoster'
 
@@ -17,7 +17,7 @@ function normalizePlanningState(value: unknown): PlanningState {
     : 'skipped'
 }
 
-export function usePendingActionsBridge(
+export function useTimelineMetadataBridge(
   activeAgentId: string | null,
   initialPageResponse: TimelineResponse | null,
 ) {
@@ -26,15 +26,6 @@ export function usePendingActionsBridge(
   useEffect(() => {
     if (!initialPageResponse || !activeAgentId) {
       return
-    }
-
-    const snapshot = initialPageResponse.processing_snapshot
-    const processingActive = snapshot?.active ?? initialPageResponse.processing_active
-    if (processingActive !== undefined) {
-      dispatch(chatActions.processingUpdated({
-        agentId: activeAgentId,
-        snapshot: normalizeProcessingUpdate(snapshot ?? { active: processingActive, webTasks: [] }),
-      }))
     }
 
     const name = initialPageResponse.agent_name ?? null

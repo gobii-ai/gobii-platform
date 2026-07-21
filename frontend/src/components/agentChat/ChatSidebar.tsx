@@ -4,7 +4,7 @@ import { ArrowLeftRight, Bell, BellOff, Check, LayoutGrid, List, PanelLeft, Pane
 
 import type { ConsoleContext } from '../../api/context'
 import { useAppSelector } from '../../store/hooks'
-import { selectImmersiveShellActiveAgentId } from '../../store/immersiveShellSlice'
+import { selectActiveChatAgentId } from '../../store/chatSlice'
 import type { AgentRosterEntry, AgentRosterSortMode, AgentSidebarInvite } from '../../types/agentRoster'
 import { buildAgentSearchBlob } from '../../util/agentCards'
 import { ActionConfirmDialog } from '../common/ActionConfirmDialog'
@@ -113,8 +113,8 @@ export const ChatSidebar = memo(function ChatSidebar({
   scrollToAgentId = null,
   onScrolledToAgent,
 }: ChatSidebarProps) {
-  const shellActiveAgentId = useAppSelector(selectImmersiveShellActiveAgentId)
-  const activeAgentId = activeAgentIdOverride !== undefined ? activeAgentIdOverride : shellActiveAgentId
+  const storeActiveAgentId = useAppSelector(selectActiveChatAgentId)
+  const activeAgentId = activeAgentIdOverride !== undefined ? activeAgentIdOverride : storeActiveAgentId
   const sidebarRootRef = useRef<HTMLElement | null>(null)
   const setSidebarRootRef = useCallback((node: HTMLElement | null) => {
     sidebarRootRef.current = node

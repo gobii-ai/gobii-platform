@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { ComponentProps } from 'react'
 
 import { AgentChatPage } from './AgentChatPage'
@@ -26,6 +26,7 @@ const {
   createSystemMessageMock,
   updateAgentMock,
   fetchAgentSpawnIntentMock,
+  fetchProcessingStatusMock,
   updateUserPreferencesMock,
   useQuickSettingsMock,
   useAddonsMock,
@@ -43,6 +44,7 @@ const {
   createSystemMessageMock: vi.fn(),
   updateAgentMock: vi.fn(),
   fetchAgentSpawnIntentMock: vi.fn(),
+  fetchProcessingStatusMock: vi.fn(),
   updateUserPreferencesMock: vi.fn(),
   useQuickSettingsMock: vi.fn(),
   useAddonsMock: vi.fn(),
@@ -138,6 +140,7 @@ vi.mock('../api/agentSpawnIntent', () => ({
 
 vi.mock('../api/agentChat', () => ({
   dismissHumanInputRequest: vi.fn(),
+  fetchProcessingStatus: fetchProcessingStatusMock,
   fulfillRequestedSecrets: vi.fn(),
   removeRequestedSecrets: vi.fn(),
   resolveContactRequests: vi.fn(),
@@ -253,6 +256,9 @@ vi.mock('../components/agentChat/AgentChatLayout', async () => {
       const enabledIntegrationTabs = mockedUseAppSelector((state) => (
         agentId ? state.chat.sessionsByAgentId[agentId]?.identity.enabledIntegrationTabs ?? emptyEnabledIntegrationTabs : emptyEnabledIntegrationTabs
       ))
+      const runtimeProcessingActive = mockedUseAppSelector((state) => (
+        agentId ? state.chat.sessionsByAgentId[agentId]?.processing.processingActive ?? false : false
+      ))
       const configureTarget = sidebar?.agents?.find((agent) => agent.id !== agentId) ?? sidebar?.agents?.[0] ?? null
       const sidebarNotificationsEnabled = sidebar?.settings?.notificationsEnabled
       const hasAgentReply = events?.some((event) => event.kind === 'message' && event.message?.status !== 'sending') ?? false
@@ -268,6 +274,7 @@ vi.mock('../components/agentChat/AgentChatLayout', async () => {
           <div data-testid="spawn-intent-loading">{String(Boolean(spawnIntentLoading))}</div>
           <div data-testid="signup-preview-state">{signupPreviewState ?? ''}</div>
           <div data-testid="active-agent-id">{agentId ?? ''}</div>
+          <div data-testid="working-state">{String(runtimeProcessingActive)}</div>
           <div data-testid="embedded-settings-open">{String(Boolean(sidebar?.showEmbeddedSettings))}</div>
           <div data-testid="notifications-enabled">{String(Boolean(sidebarNotificationsEnabled))}</div>
           <div data-testid="notification-status">{sidebar?.settings?.notificationStatus ?? ''}</div>
@@ -334,7 +341,7 @@ vi.mock('../components/agentChat/AgentChatLayout', async () => {
           </button>
           <button
             type="button"
-            onClick={() => sidebar?.settings?.onNotificationsEnabledChange?.(!Boolean(sidebarNotificationsEnabled))}
+            onClick={() => sidebar?.settings?.onNotificationsEnabledChange?.(!sidebarNotificationsEnabled)}
           >
             Toggle notifications
           </button>
@@ -497,8 +504,14 @@ vi.mock('../hooks/useAgentTimeline', () => ({
 }))
 
 vi.mock('../hooks/useTimelineCacheInjector', () => ({
+  flushPendingEventsToCache: vi.fn((_queryClient, _agentId, events: unknown[]) => {
+    timelineState.flatEvents = [...timelineState.flatEvents, ...events]
+  }),
+  injectRealtimeEventIntoCache: vi.fn(),
   refreshTimelineLatestInCache: vi.fn(async () => undefined),
   replacePendingActionRequestsInCache: vi.fn(),
+  updateOptimisticEventInCache: vi.fn(),
+  updateRosterProcessingInCache: vi.fn(),
   DEFAULT_CONTIGUOUS_BACKFILL_MAX_PAGES: 3,
 }))
 
@@ -631,6 +644,11 @@ describe('AgentChatPage trial onboarding', () => {
     })
     updateAgentMock.mockReset()
     fetchAgentSpawnIntentMock.mockReset()
+    fetchProcessingStatusMock.mockReset()
+    fetchProcessingStatusMock.mockResolvedValue({
+      processing_active: false,
+      processing_snapshot: { active: false, webTasks: [] },
+    })
     updateUserPreferencesMock.mockReset()
     updateUserPreferencesMock.mockResolvedValue({ preferences: {} })
     useQuickSettingsMock.mockClear()
@@ -671,6 +689,36 @@ describe('AgentChatPage trial onboarding', () => {
 
   afterEach(() => {
     window.history.pushState({}, '', '/')
+  })
+
+  it('keeps the selected agent working when stale timeline metadata reports idle during a switch', async () => {
+    window.history.pushState({}, '', '/app/agents/agent-2')
+    appStore.dispatch(chatActions.agentSelected({
+      agentId: 'agent-1',
+      options: { processingActive: false },
+    }))
+    rosterState.agents = [
+      buildRosterAgent('agent-1', 'First Agent'),
+      { ...buildRosterAgent('agent-2', 'Second Agent'), processingActive: true },
+    ]
+    timelineState.initialPageResponse = {
+      processing_active: false,
+      processing_snapshot: { active: false, webTasks: [] },
+      pending_action_requests: [],
+    }
+    fetchProcessingStatusMock.mockResolvedValue({
+      processing_active: true,
+      processing_snapshot: { active: true, webTasks: [] },
+    })
+
+    renderAgentChatPage({ agentId: 'agent-2' })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('active-agent-id')).toHaveTextContent('agent-2')
+      expect(screen.getByTestId('working-state')).toHaveTextContent('true')
+    })
+    expect(appStore.getState().chat.sessionsByAgentId['agent-1'].processing.processingActive).toBe(false)
+    expect(appStore.getState().chat.sessionsByAgentId['agent-2'].processing.processingActive).toBe(true)
   })
 
   it('opens the non-dismissible upgrade modal when the spawn intent requires plan selection', async () => {
@@ -990,12 +1038,18 @@ describe('AgentChatPage trial onboarding', () => {
     }
 
     window.history.pushState({}, '', '/app/agents/agent-1')
+    appStore.dispatch(chatActions.agentSelected({ agentId: 'agent-1' }))
     renderAgentChatPage({ agentId: 'agent-1' })
-    appStore.dispatch(chatActions.autoScrollPinnedSet({ agentId: 'agent-1', pinned: false }))
-    appStore.dispatch(chatActions.realtimeEventReceived({
-      agentId: 'agent-1',
-      event: pendingEvent,
-    }))
+    await waitFor(() => {
+      expect(screen.getByTestId('active-agent-id')).toHaveTextContent('agent-1')
+    })
+    act(() => {
+      appStore.dispatch(chatActions.autoScrollPinnedSet({ agentId: 'agent-1', pinned: false }))
+      appStore.dispatch(chatActions.realtimeEventReceived({
+        agentId: 'agent-1',
+        event: pendingEvent,
+      }))
+    })
 
     await waitFor(() => {
       expect(screen.getByTestId('timeline-event-count')).toHaveTextContent('2')

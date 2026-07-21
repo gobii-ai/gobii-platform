@@ -19,7 +19,6 @@ export type ImmersiveShellConnectionState = {
 }
 
 export type ImmersiveShellState = {
-  activeAgentId: string | null
   shellPathname: string
   shellSubview: AgentChatShellSubview
   sidebarMode: AgentChatSidebarMode
@@ -28,7 +27,6 @@ export type ImmersiveShellState = {
 }
 
 const initialState: ImmersiveShellState = {
-  activeAgentId: null,
   shellPathname: '',
   shellSubview: 'chat',
   sidebarMode: 'list',
@@ -48,9 +46,6 @@ const immersiveShellSlice = createSlice({
   name: 'immersiveShell',
   initialState,
   reducers: {
-    setActiveAgentId(state, action: PayloadAction<string | null>) {
-      state.activeAgentId = action.payload
-    },
     setShellPathname(state, action: PayloadAction<string>) {
       state.shellPathname = action.payload
     },
@@ -73,7 +68,6 @@ export const immersiveShellActions = immersiveShellSlice.actions
 export const immersiveShellReducer = immersiveShellSlice.reducer
 
 export const selectImmersiveShellState = (state: RootState): ImmersiveShellState => state.immersiveShell
-export const selectImmersiveShellActiveAgentId = (state: RootState): string | null => state.immersiveShell.activeAgentId
 export const selectImmersiveShellViewer = (state: RootState): ImmersiveShellViewerState => state.immersiveShell.viewer
 export const selectImmersiveShellConnection = (state: RootState): ImmersiveShellConnectionState => state.immersiveShell.connection
 export const selectImmersiveSidebarMode = (state: RootState): AgentChatSidebarMode => state.immersiveShell.sidebarMode

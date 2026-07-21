@@ -4,7 +4,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { scheduleLoginRedirect } from '../api/http'
 import type { AgentMessageNotification } from '../types/agentChat'
 import { useAppDispatch } from '../store/hooks'
-import { chatActions, receiveRealtimeEvent, receiveStreamEvent, updateActiveProcessing } from '../store/chatSlice'
+import { chatActions, receiveRealtimeEvent, receiveStreamEvent, updateRealtimeProcessing } from '../store/chatSlice'
 import { refreshTimelineLatestInCache } from './useTimelineCacheInjector'
 import { usePageLifecycle, type PageLifecycleResumeReason, type PageLifecycleSuspendReason } from './usePageLifecycle'
 import { TIMELINE_STALE_TIME_MS, timelineQueryKey } from './useAgentTimeline'
@@ -86,11 +86,11 @@ export function useAgentChatSocket(
     () => normalizeAgentChatSocketSubscriptions(desiredSubscriptionsInput),
     [desiredSubscriptionsInput],
   )
-  const receiveEventRef = useRef((event: Parameters<typeof receiveRealtimeEvent>[0]) => {
-    dispatch(receiveRealtimeEvent(event))
+  const receiveEventRef = useRef((agentId: string, event: Parameters<typeof receiveRealtimeEvent>[1]) => {
+    dispatch(receiveRealtimeEvent(agentId, event))
   })
-  const updateProcessingRef = useRef((snapshot: Parameters<typeof updateActiveProcessing>[0]) => {
-    dispatch(updateActiveProcessing(snapshot))
+  const updateProcessingRef = useRef((agentId: string, snapshot: Parameters<typeof updateRealtimeProcessing>[1]) => {
+    dispatch(updateRealtimeProcessing(agentId, snapshot))
   })
   const updateAgentIdentityRef = useRef((update: Parameters<typeof chatActions.agentIdentityUpdated>[0]) => {
     dispatch(chatActions.agentIdentityUpdated(update))
@@ -98,8 +98,8 @@ export function useAgentChatSocket(
   const updateUsageInsightRef = useRef((agentId: string, metadata: Parameters<typeof chatActions.usageInsightUpdated>[0]['metadata']) => {
     dispatch(chatActions.usageInsightUpdated({ agentId, metadata }))
   })
-  const receiveStreamRef = useRef((payload: Parameters<typeof receiveStreamEvent>[0]) => {
-    dispatch(receiveStreamEvent(payload))
+  const receiveStreamRef = useRef((agentId: string, payload: Parameters<typeof receiveStreamEvent>[1]) => {
+    dispatch(receiveStreamEvent(agentId, payload))
   })
   const replacePendingActionsRef = useRef((agentId: string, pendingActions: Parameters<typeof chatActions.pendingActionsReplaced>[0]['pendingActions']) => {
     dispatch(chatActions.pendingActionsReplaced({ agentId, pendingActions }))
@@ -112,11 +112,11 @@ export function useAgentChatSocket(
   const developerUpdateRef = useRef<typeof options.onDeveloperUpdate | null>(options.onDeveloperUpdate ?? null)
 
   useEffect(() => {
-    receiveEventRef.current = (event) => {
-      dispatch(receiveRealtimeEvent(event))
+    receiveEventRef.current = (agentId, event) => {
+      dispatch(receiveRealtimeEvent(agentId, event))
     }
-    updateProcessingRef.current = (snapshot) => {
-      dispatch(updateActiveProcessing(snapshot))
+    updateProcessingRef.current = (agentId, snapshot) => {
+      dispatch(updateRealtimeProcessing(agentId, snapshot))
     }
     updateAgentIdentityRef.current = (update) => {
       dispatch(chatActions.agentIdentityUpdated(update))
@@ -124,8 +124,8 @@ export function useAgentChatSocket(
     updateUsageInsightRef.current = (agentId, metadata) => {
       dispatch(chatActions.usageInsightUpdated({ agentId, metadata }))
     }
-    receiveStreamRef.current = (payload) => {
-      dispatch(receiveStreamEvent(payload))
+    receiveStreamRef.current = (agentId, payload) => {
+      dispatch(receiveStreamEvent(agentId, payload))
     }
   }, [dispatch])
 
@@ -154,11 +154,11 @@ export function useAgentChatSocket(
   const staffContextOverrideRef = useRef<StaffViewContext | null | undefined>(options.staffContextOverride)
   const activeAgentIdRef = useRef<string | null>(findActiveAgentChatSocketId(desiredSubscriptions))
   const subscribedAgentsRef = useRef<Map<string, AgentChatSocketSubscription['mode']>>(new Map())
-  const [snapshot, setSnapshot] = useState<AgentChatSocketSnapshot>({
-    status: 'idle',
-    lastConnectedAt: null,
-    lastError: null,
-  })
+  const [snapshot, setSnapshot] = useState<AgentChatSocketSnapshot>(() => (
+    typeof navigator !== 'undefined' && navigator.onLine === false
+      ? { status: 'offline', lastConnectedAt: null, lastError: 'Network connection lost.' }
+      : { status: 'idle', lastConnectedAt: null, lastError: null }
+  ))
 
   useEffect(() => {
     desiredSubscriptionsRef.current = desiredSubscriptions
@@ -529,7 +529,6 @@ export function useAgentChatSocket(
     pauseReasonRef.current = null
     if (typeof navigator !== 'undefined' && navigator.onLine === false) {
       pauseReasonRef.current = 'offline'
-      updateSnapshot({ status: 'offline', lastError: 'Network connection lost.' })
     } else if (pauseReasonRef.current === null) {
       scheduleConnect(0)
     }
@@ -562,6 +561,7 @@ export function useAgentChatSocket(
   }, [
     clearConnectTimeout,
     markActivity,
+    queryClient,
     startPingLoop,
     stopPingLoop,
     syncNow,

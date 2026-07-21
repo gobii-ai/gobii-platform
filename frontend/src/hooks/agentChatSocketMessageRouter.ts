@@ -5,10 +5,8 @@ import type { AgentMessageNotification, PendingActionRequest, ProcessingSnapshot
 import type { PlanningState, SignupPreviewState } from '../types/agentRoster'
 import type { BurnRateMetadata, UsageInsightUpdatePayload } from '../types/insight'
 import {
-  injectRealtimeEventIntoCache,
   replacePendingActionRequestsInCache,
   replacePendingHumanInputRequestsInCache,
-  replaceProcessingSnapshotInCache,
   updateAgentIdentityInCache,
 } from './useTimelineCacheInjector'
 import { extractAgentChatSocketEnvelopeAgentId } from './agentChatSocketProtocol'
@@ -89,11 +87,11 @@ export function routeAgentChatSocketMessage({
   payload: unknown
   queryClient: QueryClient
   activeAgentId: string | null
-  receiveRealtimeEvent: (event: TimelineEvent) => void
-  updateProcessing: (snapshot: ProcessingSnapshot) => void
+  receiveRealtimeEvent: (agentId: string, event: TimelineEvent) => void
+  updateProcessing: (agentId: string, snapshot: ProcessingSnapshot) => void
   updateAgentIdentity: (update: AgentIdentityUpdate) => void
   updateUsageInsight: (agentId: string, metadata: BurnRateMetadata) => void
-  receiveStreamEvent: (payload: StreamEventPayload) => void
+  receiveStreamEvent: (agentId: string, payload: StreamEventPayload) => void
   replacePendingActions?: ((agentId: string, pendingActions: PendingActionRequest[]) => void) | null
   onCreditEvent?: ((payload: Record<string, unknown>) => void) | null
   onAgentProfileEvent?: ((payload: Record<string, unknown>) => void) | null
@@ -121,10 +119,8 @@ export function routeAgentChatSocketMessage({
 
   if (messageType === 'timeline.event' && message.payload) {
     const payloadAgentId = extractAgentChatSocketEnvelopeAgentId(message)
-    if (payloadAgentId === activeAgentId) {
-      receiveRealtimeEvent(message.payload as TimelineEvent)
-    } else if (payloadAgentId) {
-      injectRealtimeEventIntoCache(queryClient, payloadAgentId, message.payload as TimelineEvent)
+    if (payloadAgentId) {
+      receiveRealtimeEvent(payloadAgentId, message.payload as TimelineEvent)
     }
     return { type: 'handled' }
   }
@@ -140,10 +136,9 @@ export function routeAgentChatSocketMessage({
     const processingRecord = message.payload as Record<string, unknown>
     const processingPayload = message.payload as ProcessingSnapshot
     if (payloadAgentId) {
-      replaceProcessingSnapshotInCache(queryClient, payloadAgentId, processingPayload)
+      updateProcessing(payloadAgentId, processingPayload)
     }
     if (payloadAgentId === activeAgentId) {
-      updateProcessing(processingPayload)
       if (Object.prototype.hasOwnProperty.call(processingRecord, 'agent_next_scheduled_at')) {
         updateAgentIdentity({
           agentId: payloadAgentId,
@@ -157,8 +152,9 @@ export function routeAgentChatSocketMessage({
   }
 
   if (messageType === 'stream.event' && message.payload) {
-    if (extractAgentChatSocketEnvelopeAgentId(message) === activeAgentId) {
-      receiveStreamEvent(message.payload as StreamEventPayload)
+    const payloadAgentId = extractAgentChatSocketEnvelopeAgentId(message)
+    if (payloadAgentId) {
+      receiveStreamEvent(payloadAgentId, message.payload as StreamEventPayload)
     }
     return { type: 'handled' }
   }
