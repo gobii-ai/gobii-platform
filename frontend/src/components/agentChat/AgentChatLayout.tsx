@@ -1428,6 +1428,7 @@ export function AgentChatLayout({
           showPurchaseSeatsButton={showPurchaseSeatsPrompt}
           onPurchaseSeats={handlePurchaseSeats}
           onSettingsOpen={canOpenQuickSettings ? handleSettingsOpen : undefined}
+          onIdentitySettingsOpen={onOpenFullSettings}
           settingsDisabled={previewActionsDisabled}
           settingsDisabledReason={previewActionsDisabledReason}
           onBlockedSettingsClick={onBlockedSettingsClick}
