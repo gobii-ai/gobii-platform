@@ -86,6 +86,7 @@ def _eval_tool_call(tool_name, tool_params=None, *, step=None, result='{"status"
     )
 
 
+@tag("eval_sim")
 class ResumeStateHeuristicTests(SimpleTestCase):
     def test_patch_text_cursor_with_pending_count_is_persisted_resume_state(self):
         call = _eval_tool_call(
