@@ -74,7 +74,7 @@ export function updateAgentIntelligenceTier({
       void extra?.queryClient?.invalidateQueries({ queryKey: ['agent-roster'], exact: false })
       void extra?.queryClient?.invalidateQueries({ queryKey: ['agent-quick-settings', agentId], exact: true })
       void refetchQuickSettings?.()
-      void dispatch(refreshProcessing())
+      void dispatch(refreshProcessing({ agentId }))
       return true
     } catch {
       dispatch(agentSettingsActions.tierOverrideSet({ agentId, tier: previousTier }))

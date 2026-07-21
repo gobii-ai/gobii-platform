@@ -1,17 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { sendAgentMessage } from '../api/agentChat'
+import { fetchProcessingStatus, sendAgentMessage } from '../api/agentChat'
 import { fetchAgentSpawnIntent, type AgentSpawnIntent } from '../api/agentSpawnIntent'
 import type { TimelineEvent } from '../types/agentChat'
 import { createAppStore } from './appStore'
 import {
   chatActions,
   loadAgentSpawnIntent,
+  refreshProcessing,
   selectActiveChatAgentId,
   selectActiveChatSession,
   selectCreateAgentWorkflow,
+  receiveRealtimeEvent,
   sendMessage,
   setAutoScrollPinned,
+  updateRealtimeProcessing,
 } from './chatSlice'
 
 vi.mock('../api/agentChat', () => ({
@@ -234,5 +237,99 @@ describe('chatSlice workflow state', () => {
     await firstRequest.unwrap()
 
     expect(selectCreateAgentWorkflow(store.getState()).spawnIntent?.charter).toBe('Second intent')
+  })
+})
+
+describe('chatSlice processing state', () => {
+  it('updates the addressed agent when another agent is active', () => {
+    const store = createAppStore()
+    store.dispatch(chatActions.agentSelected({ agentId: 'agent-1' }))
+
+    store.dispatch(updateRealtimeProcessing('agent-2', { active: true, webTasks: [] }))
+
+    expect(selectActiveChatAgentId(store.getState())).toBe('agent-1')
+    expect(store.getState().chat.sessionsByAgentId['agent-1'].processing.processingActive).toBe(false)
+    expect(store.getState().chat.sessionsByAgentId['agent-2'].processing.processingActive).toBe(true)
+  })
+
+  it('retains background timeline updates when the addressed agent is selected again', () => {
+    const store = createAppStore()
+    const event: TimelineEvent = {
+      kind: 'message',
+      cursor: 'background-event',
+      message: {
+        id: 'background-event',
+        bodyText: 'Background update',
+        isOutbound: true,
+        channel: 'web',
+        timestamp: '2026-07-21T12:00:00Z',
+        relativeTimestamp: null,
+      },
+    }
+    store.dispatch(chatActions.agentSelected({ agentId: 'agent-2' }))
+    store.dispatch(chatActions.autoScrollPinnedSet({ agentId: 'agent-2', pinned: false }))
+    store.dispatch(chatActions.agentSelected({ agentId: 'agent-1' }))
+
+    store.dispatch(receiveRealtimeEvent('agent-2', event))
+    store.dispatch(chatActions.agentSelected({ agentId: 'agent-2' }))
+
+    expect(store.getState().chat.sessionsByAgentId['agent-2'].timelineUi.pendingEvents).toEqual([
+      expect.objectContaining({ cursor: event.cursor }),
+    ])
+  })
+
+  it('does not let a stale status response overwrite newer realtime state', async () => {
+    const now = vi.spyOn(Date, 'now').mockReturnValue(100)
+    const store = createAppStore()
+    let resolveStatus: (value: Awaited<ReturnType<typeof fetchProcessingStatus>>) => void = () => {}
+    vi.mocked(fetchProcessingStatus).mockReturnValue(new Promise((resolve) => {
+      resolveStatus = resolve
+    }))
+
+    const request = store.dispatch(refreshProcessing({ agentId: 'agent-2' }))
+    now.mockReturnValue(200)
+    store.dispatch(updateRealtimeProcessing('agent-2', { active: true, webTasks: [] }))
+    resolveStatus({ processing_active: false, processing_snapshot: { active: false, webTasks: [] } })
+    await request.unwrap()
+
+    expect(store.getState().chat.sessionsByAgentId['agent-2'].processing).toMatchObject({
+      processingActive: true,
+      processingSource: 'realtime',
+    })
+    now.mockRestore()
+  })
+
+  it('does not let roster bootstrap overwrite authoritative processing state', () => {
+    const store = createAppStore()
+    store.dispatch(updateRealtimeProcessing('agent-2', { active: true, webTasks: [] }))
+
+    store.dispatch(chatActions.agentSelected({
+      agentId: 'agent-2',
+      options: { processingActive: false },
+    }))
+
+    expect(store.getState().chat.sessionsByAgentId['agent-2'].processing).toMatchObject({
+      processingActive: true,
+      processingSource: 'realtime',
+    })
+  })
+
+  it('allows a later status refresh to reconcile realtime state', async () => {
+    const now = vi.spyOn(Date, 'now').mockReturnValue(100)
+    const store = createAppStore()
+    store.dispatch(updateRealtimeProcessing('agent-2', { active: true, webTasks: [] }))
+    now.mockReturnValue(200)
+    vi.mocked(fetchProcessingStatus).mockResolvedValue({
+      processing_active: false,
+      processing_snapshot: { active: false, webTasks: [] },
+    })
+
+    await store.dispatch(refreshProcessing({ agentId: 'agent-2' })).unwrap()
+
+    expect(store.getState().chat.sessionsByAgentId['agent-2'].processing).toMatchObject({
+      processingActive: false,
+      processingSource: 'status',
+    })
+    now.mockRestore()
   })
 })

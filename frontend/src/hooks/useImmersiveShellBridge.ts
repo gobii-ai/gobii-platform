@@ -1,4 +1,4 @@
-import { useEffect, useRef, type Dispatch, type MutableRefObject, type SetStateAction } from 'react'
+import { useEffect, useRef, type Dispatch, type SetStateAction } from 'react'
 
 import { getInitialAgentChatSidebarMode } from '../components/agentChat/sidebarMode'
 import { IMMERSIVE_SIDEBAR_MODE_STORAGE_KEY, immersiveShellActions, selectImmersiveShellSubview, selectImmersiveSidebarMode } from '../store/immersiveShellSlice'
@@ -7,12 +7,9 @@ import type { AgentChatSidebarMode, SelectionShellPage } from '../types/immersiv
 import { extractAgentChatShellAgentId, getAgentChatShellSubview } from '../util/agentChatShellRoutes'
 
 type UseImmersiveShellBridgeOptions = {
-  activeAgentId: string | null
-  activeAgentIdRef: MutableRefObject<string | null>
   agentId?: string | null
   selectionPage: SelectionShellPage
   resetManualContextForExternalAgent: (agentId: string | null) => void
-  setActiveAgentId: Dispatch<SetStateAction<string | null>>
   setShellPathname: Dispatch<SetStateAction<string>>
   setSwitchingAgentId: (agentId: string | null) => void
   shellPathname: string
@@ -34,12 +31,9 @@ function readSelectionSidebarModePreference(): AgentChatSidebarMode | null {
 }
 
 export function useImmersiveShellBridge({
-  activeAgentId,
-  activeAgentIdRef,
   agentId,
   selectionPage,
   resetManualContextForExternalAgent,
-  setActiveAgentId,
   setShellPathname,
   setSwitchingAgentId,
   shellPathname,
@@ -52,16 +46,7 @@ export function useImmersiveShellBridge({
   useEffect(() => {
     resetManualContextForExternalAgent(agentId ?? null)
     setShellPathname(typeof window === 'undefined' ? '' : window.location.pathname)
-    setActiveAgentId(agentId ?? null)
-  }, [agentId, resetManualContextForExternalAgent, setActiveAgentId, setShellPathname])
-
-  useEffect(() => {
-    activeAgentIdRef.current = activeAgentId
-  }, [activeAgentId, activeAgentIdRef])
-
-  useEffect(() => {
-    dispatch(immersiveShellActions.setActiveAgentId(activeAgentId))
-  }, [activeAgentId, dispatch])
+  }, [agentId, resetManualContextForExternalAgent, setShellPathname])
 
   useEffect(() => {
     dispatch(immersiveShellActions.setShellPathname(shellPathname))
@@ -102,16 +87,13 @@ export function useImmersiveShellBridge({
       const nextPathname = window.location.pathname
       setShellPathname(nextPathname)
       const nextAgentId = extractAgentChatShellAgentId(nextPathname)
-      if (nextAgentId !== activeAgentIdRef.current) {
-        resetManualContextForExternalAgent(nextAgentId)
-        setSwitchingAgentId(null)
-        setActiveAgentId(nextAgentId)
-      }
+      resetManualContextForExternalAgent(nextAgentId)
+      setSwitchingAgentId(null)
     }
 
     window.addEventListener('popstate', handleShellLocationChange)
     return () => window.removeEventListener('popstate', handleShellLocationChange)
-  }, [activeAgentIdRef, resetManualContextForExternalAgent, setActiveAgentId, setShellPathname, setSwitchingAgentId])
+  }, [resetManualContextForExternalAgent, setShellPathname, setSwitchingAgentId])
 
   return {
     selectionSidebarMode,

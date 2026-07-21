@@ -104,9 +104,7 @@ export function flattenTimelinePages(data: InfiniteData<TimelinePage> | undefine
   return merged
 }
 
-/**
- * Get the initial page's raw response (for processing snapshot, agent metadata etc.)
- */
+/** Get the initial page's raw response for timeline metadata. */
 export function getInitialPageResponse(data: InfiniteData<TimelinePage> | undefined): TimelineResponse | null {
   if (!data?.pages?.length) {
     return null

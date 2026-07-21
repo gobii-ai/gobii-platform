@@ -2,7 +2,7 @@ import { createAsyncThunk, createSlice, type PayloadAction } from '@reduxjs/tool
 import type { InfiniteData, QueryClient } from '@tanstack/react-query'
 
 import { sendAgentMessage, fetchProcessingStatus } from '../api/agentChat'
-import { flushPendingEventsToCache, injectRealtimeEventIntoCache, refreshTimelineLatestInCache, updateOptimisticEventInCache } from '../hooks/useTimelineCacheInjector'
+import { flushPendingEventsToCache, injectRealtimeEventIntoCache, refreshTimelineLatestInCache, updateOptimisticEventInCache, updateRosterProcessingInCache } from '../hooks/useTimelineCacheInjector'
 import { timelineQueryKey, type TimelinePage } from '../hooks/useAgentTimeline'
 import { mergeTimelineEvents, normalizeTimelineEvent } from '../stores/agentChatTimeline'
 import type { AgentMessage, PendingActionRequest, ProcessingSnapshot, ProcessingWebTask, StreamEventPayload, StreamState, ThinkingEvent, TimelineEvent } from '../types/agentChat'
@@ -42,6 +42,9 @@ export type AgentChatIdentityState = {
 export type AgentChatProcessingState = {
   processingActive: boolean
   processingStartedAt: number | null
+  processingSource: 'none' | 'roster' | 'status' | 'realtime'
+  processingLastRealtimeAt: number | null
+  processingStatusRequestId: string | null
   awaitingResponse: boolean
   processingWebTasks: ProcessingWebTask[]
   nextScheduledAt: string | null
@@ -157,6 +160,9 @@ export function createInitialSession(): AgentChatSession {
     processing: {
       processingActive: false,
       processingStartedAt: null,
+      processingSource: 'none',
+      processingLastRealtimeAt: null,
+      processingStatusRequestId: null,
       awaitingResponse: false,
       processingWebTasks: [],
       nextScheduledAt: null,
@@ -512,11 +518,11 @@ function applyProcessingUpdate(session: AgentChatSession, snapshot: ProcessingSn
   session.processing.awaitingResponse = snapshot.active ? false : session.processing.awaitingResponse
 }
 
-export const refreshProcessing = createAsyncThunk<void, void, { state: RootState }>(
+export const refreshProcessing = createAsyncThunk<void, { agentId: string }, { state: RootState; extra: { queryClient: QueryClient | null } }>(
   'chat/refreshProcessing',
-  async (_, { dispatch, getState }) => {
-    const agentId = getState().chat.activeAgentId
-    if (!agentId) return
+  async ({ agentId }, { dispatch, getState, extra, requestId }) => {
+    const requestedAt = Date.now()
+    dispatch(chatActions.processingStatusRequested({ agentId, requestId }))
     try {
       const status = await fetchProcessingStatus(agentId)
       const {
@@ -527,7 +533,19 @@ export const refreshProcessing = createAsyncThunk<void, void, { state: RootState
       } = status
       const snapshot = normalizeProcessingUpdate(processing_snapshot ?? { active: processing_active, webTasks: [] })
       const hasNextScheduledAt = Object.prototype.hasOwnProperty.call(status, 'agent_next_scheduled_at')
-      dispatch(chatActions.processingUpdated({ agentId, snapshot }))
+      const lastRealtimeAt = getState().chat.sessionsByAgentId[agentId]?.processing.processingLastRealtimeAt ?? null
+      const latestRequestId = getState().chat.sessionsByAgentId[agentId]?.processing.processingStatusRequestId ?? null
+      if (latestRequestId === requestId && (lastRealtimeAt === null || lastRealtimeAt <= requestedAt)) {
+        dispatch(chatActions.processingStatusUpdated({
+          agentId,
+          snapshot,
+          requestedAt,
+          requestId,
+        }))
+        if (extra.queryClient) {
+          updateRosterProcessingInCache(extra.queryClient, agentId, snapshot.active)
+        }
+      }
       dispatch(chatActions.agentIdentityUpdated({
         agentId,
         ...(hasNextScheduledAt ? { agentNextScheduledAt: status.agent_next_scheduled_at ?? null } : {}),
@@ -540,14 +558,15 @@ export const refreshProcessing = createAsyncThunk<void, void, { state: RootState
   },
 )
 
-export const updateActiveProcessing = (
+export const updateRealtimeProcessing = (
+  agentId: string,
   snapshotInput: ProcessingUpdateInput,
-) => (dispatch: AppDispatch, getState: () => RootState) => {
-  const agentId = getState().chat.activeAgentId
-  if (!agentId) {
-    return
+) => (dispatch: AppDispatch, _getState: () => RootState, extra?: { queryClient?: QueryClient | null }) => {
+  const snapshot = normalizeProcessingUpdate(snapshotInput)
+  dispatch(chatActions.processingRealtimeUpdated({ agentId, snapshot, receivedAt: Date.now() }))
+  if (extra?.queryClient) {
+    updateRosterProcessingInCache(extra.queryClient, agentId, snapshot.active)
   }
-  dispatch(chatActions.processingUpdated({ agentId, snapshot: normalizeProcessingUpdate(snapshotInput) }))
 }
 
 export const suppressActiveAutoScrollPin = (
@@ -561,14 +580,10 @@ export const suppressActiveAutoScrollPin = (
 }
 
 export const receiveRealtimeEvent = (
+  agentId: string,
   event: TimelineEvent,
-  agentIdOverride?: string | null,
 ) => (dispatch: AppDispatch, getState: () => RootState, extra?: { queryClient?: QueryClient | null }) => {
   const normalized = normalizeTimelineEvent(event)
-  const agentId = agentIdOverride ?? getState().chat.activeAgentId
-  if (!agentId) {
-    return
-  }
   if (normalized.kind === 'message' && !normalized.message.isOutbound && normalized.message.status !== 'sending') {
     removeOptimisticMatchFromCache(extra?.queryClient, agentId, buildMessageSignature(normalized.message))
   }
@@ -581,10 +596,10 @@ export const receiveRealtimeEvent = (
 }
 
 export const receiveStreamEvent = (
+  agentId: string,
   payload: StreamEventPayload,
 ) => (dispatch: AppDispatch, getState: () => RootState, extra?: { queryClient?: QueryClient | null }) => {
-  const agentId = getState().chat.activeAgentId
-  if (!agentId || !payload?.stream_id) {
+  if (!payload?.stream_id) {
     return
   }
   const result = reduceStreamEvent(getState().chat.sessionsByAgentId[agentId] ?? createInitialSession(), payload)
@@ -608,13 +623,12 @@ export const setAutoScrollPinned = (
   dispatch(chatActions.autoScrollPinnedSet({ agentId, pinned }))
 }
 
-export const persistPendingEventsToCache = () => (
+export const persistPendingEventsToCache = (agentId: string) => (
   dispatch: AppDispatch,
   getState: () => RootState,
   extra?: { queryClient?: QueryClient | null },
 ) => {
-  const agentId = getState().chat.activeAgentId
-  if (!agentId || !extra?.queryClient) {
+  if (!extra?.queryClient) {
     return
   }
   const pendingEvents = getState().chat.sessionsByAgentId[agentId]?.timelineUi.pendingEvents ?? []
@@ -652,11 +666,11 @@ export const sendMessage = createAsyncThunk<
     }
     dispatch(chatActions.optimisticMessageRetryStarted({ agentId, clientId }))
   } else {
-    dispatch(receiveRealtimeEvent(event, agentId))
+    dispatch(receiveRealtimeEvent(agentId, event))
   }
   try {
     const serverEvent = await sendAgentMessage(agentId, trimmed, attachments)
-    dispatch(receiveRealtimeEvent(serverEvent, agentId))
+    dispatch(receiveRealtimeEvent(agentId, serverEvent))
     return { clientId }
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to send message'
@@ -785,26 +799,51 @@ const chatSlice = createSlice({
       const session = ensureSession(state, agentId)
       if (selectionChanged) {
         session.timelineUi.hasUnseenActivity = false
-        session.timelineUi.pendingEvents = []
-        session.timelineUi.realtimeEventCursorIds = {}
-        session.timelineUi.autoScrollPinned = true
-        session.timelineUi.autoScrollPinSuppressedUntil = null
       }
       if (options?.processingActive !== undefined) {
-        const processingActive = Boolean(options.processingActive)
-        if (processingActive && !session.processing.processingActive) {
-          session.processing.processingStartedAt = session.processing.processingStartedAt ?? Date.now()
-        } else if (!processingActive) {
-          session.processing.processingStartedAt = session.processing.awaitingResponse
-            ? session.processing.processingStartedAt
-            : null
+        if (session.processing.processingSource === 'none' || session.processing.processingSource === 'roster') {
+          applyProcessingUpdate(session, normalizeProcessingUpdate({
+            active: Boolean(options.processingActive),
+            webTasks: session.processing.processingWebTasks,
+            nextScheduledAt: session.processing.nextScheduledAt,
+          }))
+          session.processing.processingSource = 'roster'
         }
-        session.processing.processingActive = processingActive
       }
       applyIdentityUpdate(session, options)
     },
-    processingUpdated(state, action: PayloadAction<{ agentId: string; snapshot: ProcessingSnapshot }>) {
-      applyProcessingUpdate(ensureSession(state, action.payload.agentId), action.payload.snapshot)
+    processingStatusUpdated(state, action: PayloadAction<{
+      agentId: string
+      snapshot: ProcessingSnapshot
+      requestedAt: number
+      requestId: string
+    }>) {
+      const session = ensureSession(state, action.payload.agentId)
+      if (
+        session.processing.processingStatusRequestId !== action.payload.requestId
+        || (
+          session.processing.processingLastRealtimeAt !== null
+          && session.processing.processingLastRealtimeAt > action.payload.requestedAt
+        )
+      ) {
+        return
+      }
+      applyProcessingUpdate(session, action.payload.snapshot)
+      session.processing.processingSource = 'status'
+    },
+    processingStatusRequested(state, action: PayloadAction<{ agentId: string; requestId: string }>) {
+      ensureSession(state, action.payload.agentId).processing.processingStatusRequestId = action.payload.requestId
+    },
+    processingRealtimeUpdated(state, action: PayloadAction<{
+      agentId: string
+      snapshot: ProcessingSnapshot
+      receivedAt: number
+    }>) {
+      const session = ensureSession(state, action.payload.agentId)
+      applyProcessingUpdate(session, action.payload.snapshot)
+      session.processing.processingSource = 'realtime'
+      session.processing.processingLastRealtimeAt = action.payload.receivedAt
+      session.processing.processingStatusRequestId = null
     },
     stopProcessingStateUpdated(
       state,

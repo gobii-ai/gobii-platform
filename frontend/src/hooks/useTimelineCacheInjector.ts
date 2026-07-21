@@ -2,7 +2,7 @@ import type { QueryClient, InfiniteData } from '@tanstack/react-query'
 
 import { fetchAgentTimeline, type TimelineResponse } from '../api/agentChat'
 import type { StaffViewContext } from '../api/context'
-import type { PendingActionRequest, PendingHumanInputAction, PendingHumanInputRequest, ProcessingSnapshot, TimelineEvent } from '../types/agentChat'
+import type { PendingActionRequest, PendingHumanInputAction, PendingHumanInputRequest, TimelineEvent } from '../types/agentChat'
 import type { AgentRosterEntry } from '../types/agentRoster'
 import { compareTimelineCursors } from '../util/timelineCursor'
 import { mergeTimelineEvents } from '../stores/agentChatTimeline'
@@ -194,6 +194,30 @@ function updateRosterPendingActionCountInCache(
   )
 }
 
+export function updateRosterProcessingInCache(
+  queryClient: QueryClient,
+  agentId: string,
+  processingActive: boolean,
+) {
+  queryClient.setQueriesData<AgentRosterQueryData>(
+    { queryKey: ['agent-roster'] },
+    (current) => {
+      if (!current?.agents?.length) {
+        return current
+      }
+      let changed = false
+      const nextAgents = current.agents.map((agent) => {
+        if (agent.id !== agentId || agent.processingActive === processingActive) {
+          return agent
+        }
+        changed = true
+        return { ...agent, processingActive }
+      })
+      return changed ? { ...current, agents: nextAgents } : current
+    },
+  )
+}
+
 function updateLatestTimelineRawInCache(
   queryClient: QueryClient,
   agentId: string,
@@ -223,27 +247,6 @@ function updateLatestTimelineRawInCache(
       pages,
     }
   })
-}
-
-export function replaceProcessingSnapshotInCache(
-  queryClient: QueryClient,
-  agentId: string,
-  processingSnapshot: ProcessingSnapshot,
-) {
-  const processingPayload = processingSnapshot as ProcessingSnapshot & Record<string, unknown>
-  const hasNextScheduledAt = Object.prototype.hasOwnProperty.call(processingPayload, 'agent_next_scheduled_at')
-  updateLatestTimelineRawInCache(queryClient, agentId, (current) => ({
-    ...current,
-    processing_active: processingSnapshot.active,
-    processing_snapshot: processingSnapshot,
-    ...(hasNextScheduledAt
-      ? {
-          agent_next_scheduled_at: typeof processingPayload.agent_next_scheduled_at === 'string'
-            ? processingPayload.agent_next_scheduled_at
-            : null,
-        }
-      : {}),
-  }))
 }
 
 export function updateAgentIdentityInCache(

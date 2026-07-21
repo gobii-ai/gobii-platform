@@ -38,8 +38,8 @@ import type { StatusExpansionTargets } from './statusExpansion'
 import { addInferredPlanFiles, filterChangedPlanSnapshot, hasCompletedPlanDeliverables } from './planSnapshotUtils'
 import type { AgentChatShellSubview } from '../../util/agentChatShellRoutes'
 import { useAppDispatch, useAppSelector } from '../../store/hooks'
-import { selectActiveChatAgentId, selectActiveChatSession } from '../../store/chatSlice'
-import { immersiveShellActions, selectImmersiveShellActiveAgentId, selectImmersiveShellViewer, selectImmersiveSidebarMode } from '../../store/immersiveShellSlice'
+import { selectActiveChatSession } from '../../store/chatSlice'
+import { immersiveShellActions, selectImmersiveShellViewer, selectImmersiveSidebarMode } from '../../store/immersiveShellSlice'
 
 type TaskQuotaInfo = {
   available: number
@@ -459,11 +459,9 @@ export function AgentChatLayout({
   const sidebarNotificationsEnabled = sidebarSettingsConfig?.notificationsEnabled ?? true
   const sidebarNotificationStatus = sidebarSettingsConfig?.notificationStatus ?? 'off'
   const onSidebarNotificationsEnabledChange = sidebarSettingsConfig?.onNotificationsEnabledChange
-  const runtimeAgentId = useAppSelector(selectActiveChatAgentId)
   const runtimeSession = useAppSelector(selectActiveChatSession)
-  const shellActiveAgentId = useAppSelector(selectImmersiveShellActiveAgentId)
   const shellViewer = useAppSelector(selectImmersiveShellViewer)
-  const activeAgentId = agentId === null ? null : (shellActiveAgentId ?? agentId ?? null)
+  const activeAgentId = agentId ?? null
   const runtimeAgentName = runtimeSession.identity.agentName
   const runtimeAgentIsOrgOwned = runtimeSession.identity.agentIsOrgOwned
   const runtimeCanManageAgent = runtimeSession.identity.canManageAgent
@@ -490,23 +488,21 @@ export function AgentChatLayout({
     () => new Set(Object.keys(runtimeSession.insights.dismissedInsightIds)),
     [runtimeSession.insights.dismissedInsightIds],
   )
-  const expectedRuntimeAgentId = activeAgentId ?? agentId ?? null
-  const runtimeSynced = runtimeAgentId === expectedRuntimeAgentId
-  const processingActive = runtimeSynced ? runtimeProcessingActive : false
-  const awaitingResponse = runtimeSynced ? runtimeAwaitingResponse : false
-  const processingWebTasks = runtimeSynced ? runtimeProcessingWebTasks : []
-  const nextScheduledAt = runtimeSynced ? runtimeNextScheduledAt : null
-  const stopProcessingRequested = runtimeSynced ? runtimeStopProcessingRequested : false
-  const skipPlanningBusy = runtimeSynced ? runtimeSkipPlanningBusy : false
-  const streaming = runtimeSynced ? runtimeStreaming : null
-  const autoScrollPinned = runtimeSynced ? runtimeAutoScrollPinned : true
-  const hasUnseenActivity = runtimeSynced ? runtimeHasUnseenActivity : false
-  const planningState = runtimeSynced ? runtimePlanningState : 'skipped'
-  const storeSignupPreviewState = runtimeSynced ? runtimeSignupPreviewState : 'none'
-  const agentName = runtimeSynced ? (runtimeAgentName ?? bannerAgentName) : bannerAgentName
-  const agentIsOrgOwned = runtimeSynced ? runtimeAgentIsOrgOwned : false
-  const canManageAgent = runtimeSynced ? runtimeCanManageAgent : true
-  const isCollaborator = runtimeSynced ? runtimeIsCollaborator : false
+  const processingActive = runtimeProcessingActive
+  const awaitingResponse = runtimeAwaitingResponse
+  const processingWebTasks = runtimeProcessingWebTasks
+  const nextScheduledAt = runtimeNextScheduledAt
+  const stopProcessingRequested = runtimeStopProcessingRequested
+  const skipPlanningBusy = runtimeSkipPlanningBusy
+  const streaming = runtimeStreaming
+  const autoScrollPinned = runtimeAutoScrollPinned
+  const hasUnseenActivity = runtimeHasUnseenActivity
+  const planningState = runtimePlanningState
+  const storeSignupPreviewState = runtimeSignupPreviewState
+  const agentName = runtimeAgentName ?? bannerAgentName
+  const agentIsOrgOwned = runtimeAgentIsOrgOwned
+  const canManageAgent = runtimeCanManageAgent
+  const isCollaborator = runtimeIsCollaborator
   const viewerEmail = shellViewer.email
   const hasAgentReply = useMemo(() => hasAgentResponse(timelineRenderEvents), [timelineRenderEvents])
   const signupPreviewState = useMemo<SignupPreviewState>(() => {
@@ -521,11 +517,8 @@ export function AgentChatLayout({
     return storeSignupPreviewState
   }, [awaitingResponse, hasAgentReply, initialLoading, processingActive, storeSignupPreviewState])
   const availableInsights = useMemo(() => {
-    if (!runtimeSynced) {
-      return []
-    }
     return runtimeInsights.filter((insight) => !runtimeDismissedInsightIds.has(insight.insightId))
-  }, [runtimeDismissedInsightIds, runtimeInsights, runtimeSynced])
+  }, [runtimeDismissedInsightIds, runtimeInsights])
   const effectiveInsightsLoading = insightsLoading && availableInsights.length === 0
   const useContinuationUpgradeTitle = (
     ctaPickAPlan

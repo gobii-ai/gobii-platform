@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps, type CSSProperties, type FormEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type CSSProperties, type FormEvent, type ReactNode } from 'react'
 import { useQuery, useQueryClient, type InfiniteData } from '@tanstack/react-query'
 import { AlertTriangle, Building2, Plus } from 'lucide-react'
 import noiseDarkTextureUrl from '../assets/textures/noise-dark.png'
@@ -61,7 +61,7 @@ import { useConsoleContextSwitcher } from '../hooks/useConsoleContextSwitcher'
 import { useCreateAgentWorkflow } from '../hooks/useCreateAgentWorkflow'
 import { useCreatedAgentProfileRefresh } from '../hooks/useCreatedAgentProfileRefresh'
 import { useImmersiveShellBridge } from '../hooks/useImmersiveShellBridge'
-import { usePendingActionsBridge } from '../hooks/usePendingActionsBridge'
+import { useTimelineMetadataBridge } from '../hooks/useTimelineMetadataBridge'
 import { useRosterPreferencesBridge } from '../hooks/useRosterPreferencesBridge'
 import { useAppDispatch, useAppSelector } from '../store/hooks'
 import {
@@ -924,8 +924,9 @@ export function AgentChatPage({
   const [shellPathname, setShellPathname] = useState(() => (
     typeof window === 'undefined' ? '' : window.location.pathname
   ))
-  const [activeAgentId, setActiveAgentId] = useState<string | null>(agentId ?? null)
+  const activeAgentId = useAppSelector(selectActiveChatAgentId)
   const activeAgentIdRef = useRef<string | null>(activeAgentId)
+  activeAgentIdRef.current = activeAgentId
   const [transientBannerAgentName, setTransientBannerAgentName] = useState<string | null>(null)
   const retryPayloadsRef = useRef<Map<string, { body: string; attachments: File[] }>>(new Map())
   const routeAgentId = typeof agentId === 'string' ? agentId : null
@@ -1011,12 +1012,9 @@ export function AgentChatPage({
     selectionSidebarMode,
     shellSubview,
   } = useImmersiveShellBridge({
-    activeAgentId,
-    activeAgentIdRef,
     agentId,
     resetManualContextForExternalAgent,
     selectionPage,
-    setActiveAgentId,
     setShellPathname,
     setSwitchingAgentId,
     shellPathname,
@@ -1090,10 +1088,10 @@ export function AgentChatPage({
     () => initialPageResponse?.pending_action_requests ?? [],
     [initialPageResponse],
   )
-  usePendingActionsBridge(activeAgentId, initialPageResponse)
+  useTimelineMetadataBridge(activeAgentId, initialPageResponse)
 
-  const storeAgentId = useAppSelector(selectActiveChatAgentId)
   const activeChatSession = useAppSelector(selectActiveChatSession)
+  const chatSessionsByAgentId = useAppSelector((state) => state.chat.sessionsByAgentId)
   const storedAgentName = activeChatSession.identity.agentName
   const storedAgentAvatarUrl = activeChatSession.identity.agentAvatarUrl
   const signupPreviewState = activeChatSession.identity.signupPreviewState
@@ -1114,11 +1112,11 @@ export function AgentChatPage({
     [dispatch],
   )
 
-  useEffect(() => {
-    if (isNewAgent) {
-      setAgentId(null)
-    }
-  }, [isNewAgent, setAgentId])
+  useLayoutEffect(() => {
+    const routeAgentId = agentId ?? null
+    activeAgentIdRef.current = routeAgentId
+    setAgentId(routeAgentId)
+  }, [agentId, setAgentId])
 
   const sendMessage = useCallback(
     async (body: string, attachments: File[] = [], options?: { clientId?: string; retry?: boolean }) => {
@@ -1143,21 +1141,26 @@ export function AgentChatPage({
     [dispatch],
   )
   const receiveRealtimeEvent = useCallback(
-    (event: TimelineEvent) => dispatch(receiveRealtimeEventThunk(event)),
-    [dispatch],
+    (event: TimelineEvent) => {
+      if (!activeAgentId) {
+        return
+      }
+      dispatch(receiveRealtimeEventThunk(activeAgentId, event))
+    },
+    [activeAgentId, dispatch],
   )
   const finalizeStreaming = useCallback(
     () => dispatch(chatActions.streamingFinalized()),
     [dispatch],
   )
   const refreshProcessing = useCallback(
-    async () => {
-      await dispatch(refreshProcessingThunk()).unwrap()
+    async (agentIdToRefresh: string) => {
+      await dispatch(refreshProcessingThunk({ agentId: agentIdToRefresh })).unwrap()
     },
     [dispatch],
   )
   const persistPendingEventsToCache = useCallback(
-    () => dispatch(persistPendingEventsToCacheThunk()),
+    (agentIdToPersist: string) => dispatch(persistPendingEventsToCacheThunk(agentIdToPersist)),
     [dispatch],
   )
   const setInsightsForAgent = useCallback(
@@ -1174,14 +1177,13 @@ export function AgentChatPage({
   useEffect(() => {
     const previousAgentId = previousViewedAgentIdRef.current
     if (previousAgentId && previousAgentId !== activeAgentId) {
-      persistPendingEventsToCache()
+      persistPendingEventsToCache(previousAgentId)
     }
     previousViewedAgentIdRef.current = activeAgentId
   }, [activeAgentId, persistPendingEventsToCache])
 
   // Derive timeline state from react-query
-  const isStoreSynced = storeAgentId === activeAgentId
-  const pendingActionRequests = !isNewAgent && isStoreSynced ? storePendingActionRequests : timelinePendingActionRequests
+  const pendingActionRequests = !isNewAgent ? storePendingActionRequests : timelinePendingActionRequests
   const hasMoreOlder = timelineQuery.hasPreviousPage ?? false
   const hasMoreNewer = timelineQuery.hasNextPage ?? false
   const timelineEvents = useMemo(() => {
@@ -1191,18 +1193,18 @@ export function AgentChatPage({
     if (developerModeEnabled) {
       return flatEvents
     }
-    if (!isStoreSynced || pendingEvents.length === 0) {
+    if (pendingEvents.length === 0) {
       return flatEvents
     }
     return mergeTimelineEvents(flatEvents, pendingEvents)
-  }, [developerModeEnabled, flatEvents, isNewAgent, isStoreSynced, pendingEvents])
+  }, [developerModeEnabled, flatEvents, isNewAgent, pendingEvents])
   const timelineHasMoreOlder = !isNewAgent ? hasMoreOlder : false
   const timelineHasMoreNewer = !isNewAgent ? hasMoreNewer : false
-  const timelineHasUnseenActivity = !isNewAgent && isStoreSynced ? hasUnseenActivity : false
-  const timelineProcessingActive = !isNewAgent && isStoreSynced ? processingActive : false
+  const timelineHasUnseenActivity = !isNewAgent ? hasUnseenActivity : false
+  const timelineProcessingActive = !isNewAgent ? processingActive : false
   const developerActions = useDeveloperModeActions(activeAgentId, timelineProcessingActive)
-  const timelineAwaitingResponse = !isNewAgent && isStoreSynced ? awaitingResponse : false
-  const timelineStreaming = !isNewAgent && isStoreSynced ? streaming : null
+  const timelineAwaitingResponse = !isNewAgent ? awaitingResponse : false
+  const timelineStreaming = !isNewAgent ? streaming : null
   const timelineLoadingOlder = !isNewAgent ? timelineQuery.isFetchingPreviousPage : false
   const timelineLoadingNewer = !isNewAgent ? timelineQuery.isFetchingNextPage : false
   const initialLoading = !isNewAgent && timelineQuery.isLoading
@@ -1559,6 +1561,7 @@ export function AgentChatPage({
     if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
       return
     }
+    void refreshProcessing(currentAgentId)
     if (resumeBackfillInFlightRef.current) {
       return
     }
@@ -1580,7 +1583,7 @@ export function AgentChatPage({
     })
 
     resumeBackfillInFlightRef.current = inFlight
-  }, [syncLatestTimeline])
+  }, [refreshProcessing, syncLatestTimeline])
 
   usePageLifecycle(
     {
@@ -1599,10 +1602,24 @@ export function AgentChatPage({
       && rosterQuery.data?.context
       && !sameConsoleContext(rosterQuery.data.context, effectiveContext),
   )
-  const rosterAgents = useMemo(
-    () => (contextReady && !rosterContextMismatch ? rosterQuery.data?.agents ?? [] : []),
-    [contextReady, rosterContextMismatch, rosterQuery.data?.agents],
-  )
+  const rosterAgents = useMemo(() => {
+    const agents = contextReady && !rosterContextMismatch ? rosterQuery.data?.agents ?? [] : []
+    let changed = false
+    const reconciledAgents = agents.map((agent) => {
+      const processing = chatSessionsByAgentId[agent.id]?.processing
+      if (
+        !processing
+        || processing.processingSource === 'none'
+        || processing.processingSource === 'roster'
+        || processing.processingActive === agent.processingActive
+      ) {
+        return agent
+      }
+      changed = true
+      return { ...agent, processingActive: processing.processingActive }
+    })
+    return changed ? reconciledAgents : agents
+  }, [chatSessionsByAgentId, contextReady, rosterContextMismatch, rosterQuery.data?.agents])
   const activeRosterMeta = useMemo(
     () => rosterAgents.find((agent) => agent.id === activeAgentId) ?? null,
     [activeAgentId, rosterAgents],
@@ -1685,10 +1702,16 @@ export function AgentChatPage({
       }
       locallySelectedAgentIdsRef.current.add(nextAgentId)
       setSwitchingAgentId(nextAgentId)
-      setActiveAgentId(nextAgentId)
+      setAgentId(nextAgentId, {
+        agentName: pendingAgentMetaRef.current.agentName,
+        agentAvatarUrl: pendingAgentMetaRef.current.agentAvatarUrl,
+        processingActive: pendingAgentMetaRef.current.processingActive,
+        signupPreviewState: pendingAgentMetaRef.current.signupPreviewState,
+        planningState: pendingAgentMetaRef.current.planningState,
+      })
       navigateToAgentChat(nextAgentId)
     },
-    [rosterAgents],
+    [rosterAgents, setAgentId],
   )
   const {
     notificationPermission,
@@ -1829,6 +1852,7 @@ export function AgentChatPage({
   useEffect(() => {
     if (!agentContextReady) return
     if (!activeAgentId) return
+    if (activeAgentIdRef.current !== activeAgentId) return
     const pendingMeta = pendingAgentMetaRef.current
     const resolvedPendingMeta = pendingMeta && pendingMeta.agentId === activeAgentId ? pendingMeta : null
     const activeRosterSignupPreviewState = activeRosterMeta?.signupPreviewState ?? 'none'
@@ -1859,8 +1883,8 @@ export function AgentChatPage({
     setAgentId,
     agentContextReady,
   ])
-  const storeAgentName = isStoreSynced ? storedAgentName : null
-  const storeResolvedAvatarUrl = isStoreSynced ? storedAgentAvatarUrl : null
+  const storeAgentName = storedAgentName
+  const storeResolvedAvatarUrl = storedAgentAvatarUrl
   const resolvedAgentName = storeAgentName ?? activeRosterMeta?.name ?? agentName ?? null
   const resolvedAvatarUrl = hasActiveRosterMeta
     ? activeRosterAvatarUrl ?? null
@@ -1877,10 +1901,10 @@ export function AgentChatPage({
   const hasAgentReply = useMemo(() => hasAgentResponse(timelineEvents), [timelineEvents])
 
   useEffect(() => {
-    if (!isNewAgent && activeAgentId && transientBannerAgentName && isStoreSynced && storedAgentName?.trim()) {
+    if (!isNewAgent && activeAgentId && transientBannerAgentName && storedAgentName?.trim()) {
       setTransientBannerAgentName(null)
     }
-  }, [activeAgentId, isNewAgent, isStoreSynced, storedAgentName, transientBannerAgentName])
+  }, [activeAgentId, isNewAgent, storedAgentName, transientBannerAgentName])
 
   const effectiveSignupPreviewState = useMemo<SignupPreviewState>(() => {
     if (
@@ -1996,6 +2020,15 @@ export function AgentChatPage({
   useEffect(() => {
     allowAgentRefreshRef.current = allowAgentRefresh
   }, [allowAgentRefresh])
+  useEffect(() => {
+    if (!allowAgentRefresh || !activeAgentId) {
+      return
+    }
+    if (activeAgentIdRef.current !== activeAgentId) {
+      return
+    }
+    void refreshProcessing(activeAgentId)
+  }, [activeAgentId, allowAgentRefresh, refreshProcessing, socketSnapshot.lastConnectedAt])
   const rosterLoading = rosterQuery.isLoading || !agentContextReady || rosterContextMismatch
   const { allowAgentPanelRequests } = useAgentPanelRequestsEnabled({
     activeAgentId,
@@ -2448,11 +2481,11 @@ export function AgentChatPage({
     setShellPathname(nextPath)
     if (typeof nextAgentId !== 'undefined' && nextAgentId !== activeAgentIdRef.current) {
       setSwitchingAgentId(null)
-      setActiveAgentId(nextAgentId)
+      setAgentId(nextAgentId)
     }
     window.history.pushState({ agentId: nextAgentId ?? null }, '', nextUrl)
     window.dispatchEvent(new PopStateEvent('popstate'))
-  }, [])
+  }, [setAgentId])
 
   const navigateToShellSubview = useCallback((subview: AgentChatShellSubview, nextAgentId?: string | null) => {
     const resolvedAgentId = nextAgentId ?? activeAgentIdRef.current
@@ -2476,10 +2509,16 @@ export function AgentChatPage({
     locallySelectedAgentIdsRef.current.add(agent.id)
     if (agent.id !== activeAgentIdRef.current) {
       setSwitchingAgentId(agent.id)
-      setActiveAgentId(agent.id)
+      setAgentId(agent.id, {
+        agentName: agent.name,
+        agentAvatarUrl: agent.avatarUrl,
+        processingActive: agent.processingActive,
+        signupPreviewState: agent.signupPreviewState ?? 'none',
+        planningState: agent.planningState ?? 'skipped',
+      })
     }
     navigateToShellSubview('settings', agent.id)
-  }, [navigateToShellSubview])
+  }, [navigateToShellSubview, setAgentId])
 
   const handleSelectAgent = useCallback(
     (agent: AgentRosterEntry) => {
@@ -2785,7 +2824,7 @@ export function AgentChatPage({
     dispatch(chatActions.sendMessageErrorSet({ agentId: activeAgentId, message: null }))
     try {
       await stopAgentProcessing(activeAgentId)
-      void refreshProcessing()
+      void refreshProcessing(activeAgentId)
       void queryClient.invalidateQueries({ queryKey: ['agent-roster'], exact: false })
     } catch (error) {
       dispatch(chatActions.stopProcessingStateUpdated({
@@ -2916,11 +2955,11 @@ export function AgentChatPage({
     dispatch(chatActions.skipPlanningBusySet({ agentId: activeAgentId, busy: false }))
   }, [activeAgentId, dispatch])
   useEffect(() => {
-    if (!activeAgentId || storeAgentId !== activeAgentId || !insightsQuery.data) {
+    if (!activeAgentId || !insightsQuery.data) {
       return
     }
     setInsightsForAgent(activeAgentId, insightsQuery.data.insights)
-  }, [activeAgentId, insightsQuery.data, insightsQuery.dataUpdatedAt, setInsightsForAgent, storeAgentId])
+  }, [activeAgentId, insightsQuery.data, insightsQuery.dataUpdatedAt, setInsightsForAgent])
   useEffect(() => {
     setIdleInsightsAgentId(null)
     const hasFreshInsights = Boolean(insightsQuery.data && !insightsQuery.isStale)
@@ -2964,10 +3003,12 @@ export function AgentChatPage({
       return () => undefined
     }
     const interval = window.setInterval(() => {
-      void refreshProcessing()
+      if (activeAgentId) {
+        void refreshProcessing(activeAgentId)
+      }
     }, STREAMING_REFRESH_INTERVAL_MS)
     return () => window.clearInterval(interval)
-  }, [allowAgentRefresh, refreshProcessing, timelineStreaming])
+  }, [activeAgentId, allowAgentRefresh, refreshProcessing, timelineStreaming])
 
   useEffect(() => {
     if (!allowAgentRefresh || !timelineStreaming || timelineStreaming.done) {
@@ -3036,9 +3077,11 @@ export function AgentChatPage({
   const handleUpdateDailyCredits = useCallback(
     async (payload: DailyCreditsUpdatePayload) => {
       await updateQuickSettings({ dailyCredits: payload })
-      void refreshProcessing()
+      if (activeAgentId) {
+        void refreshProcessing(activeAgentId)
+      }
     },
-    [refreshProcessing, updateQuickSettings],
+    [activeAgentId, refreshProcessing, updateQuickSettings],
   )
   const handleUpdateContactPacks = useCallback(
     async (quantities: Record<string, number>) => {
@@ -3494,7 +3537,7 @@ export function AgentChatPage({
         try {
           const refreshed = await refetchBurnRateSummary()
           burnRatePayload = refreshed.data
-        } catch (err) {
+        } catch {
           burnRatePayload = undefined
         }
       }
@@ -4093,7 +4136,7 @@ export function AgentChatPage({
   const timelineErrorMessage = timelineQuery.error
     ? safeErrorMessage(timelineQuery.error, 'Unable to load agent timeline right now.')
     : null
-  const topLevelError = (isStoreSynced ? timelineErrorMessage : null) || (sessionStatus === 'error' ? sessionError : null)
+  const topLevelError = timelineErrorMessage || (sessionStatus === 'error' ? sessionError : null)
 
   if (isSelectionView) {
     if (!contextReady || rosterLoading) {
