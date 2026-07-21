@@ -2804,7 +2804,7 @@ class EffortOrdinaryContinuationAvoidsCorrectiveChurnScenario(EffortCalibrationS
         "A casual continuation request after useful outreach work should make progress without a deep-work "
         "communication correction loop."
     )
-    prompt = "Those were good. You can send a few more today; Lisa should have another batch ready later."
+    prompt = "Those were good. You can send a few more today; a sourcing teammate should have another batch later."
     tasks = [
         ScenarioTask(name="inject_prompt", assertion_type="manual"),
         ScenarioTask(name="verify_outreach_progress", assertion_type="manual"),
@@ -2853,9 +2853,9 @@ class EffortOrdinaryContinuationAvoidsCorrectiveChurnScenario(EffortCalibrationS
         )
         work_context = (
             ("sqlite_batch", {"sql": "SELECT 3 AS approved_count"}, "Three approved prospects are ready."),
-            ("mcp_brightdata_search_engine", {"query": "Tyler Scott REsimpli AI"}, "Tyler verified."),
-            ("mcp_brightdata_search_engine", {"query": "Maya Chen LatticeFox revenue"}, "Maya verified."),
-            ("mcp_brightdata_search_engine", {"query": "Luis Romero ParcelPilot GTM"}, "Luis verified."),
+            ("mcp_brightdata_search_engine", {"query": "Avery Park Northstar Testworks AI"}, "Avery verified."),
+            ("mcp_brightdata_search_engine", {"query": "Mina Sol Quillstone Labs revenue"}, "Mina verified."),
+            ("mcp_brightdata_search_engine", {"query": "Jules Rivera Parcelcraft GTM"}, "Jules verified."),
             ("sqlite_batch", {"sql": "SELECT 'send' AS next_action"}, "Send the approved batch."),
         )
         for tool_name, tool_params, summary in work_context:
