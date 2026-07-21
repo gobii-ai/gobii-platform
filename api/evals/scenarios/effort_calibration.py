@@ -102,7 +102,11 @@ _SQL_TOOL_RESULT_TEXT_RE = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 _SQL_RESULT_ID_RE = re.compile(r"\bresult_id\s*=\s*['\"]([^'\"]+)['\"]", re.IGNORECASE)
-_HEADING_RE = re.compile(r"(?im)^\s{0,3}#{1,4}\s+\S|^\s*\*\*[^*\n]{3,80}\*\*(?::|,)?(?:\s+\S.*)?$|<h[1-4]\b")
+_HEADING_RE = re.compile(
+    r"(?im)^\s{0,3}#{1,4}\s+\S"
+    r"|^\s*(?:[^\w\s*]{1,3}\s+)?\*\*[^*\n]{3,80}\*\*(?::|,)?(?:\s+\S.*)?$"
+    r"|<h[1-4]\b"
+)
 _LIST_OR_TABLE_RE = re.compile(
     r"(?im)^\s*(?:[-*]|\d+[.)])\s+\S|^\s*\*\*\d+[.)]\s+\S|^\s*\|.+\|\s*$|<\s*(?:ul|ol|li|table)\b"
 )
@@ -138,7 +142,8 @@ def _near_duplicate_text(first: str, second: str) -> bool:
     union = len(first_tokens | second_tokens)
     containment = overlap / min(len(first_tokens), len(second_tokens))
     jaccard = overlap / union if union else 0
-    return containment >= 0.9 or jaccard >= 0.82
+    length_ratio = min(len(first_tokens), len(second_tokens)) / max(len(first_tokens), len(second_tokens))
+    return (containment >= 0.9 and length_ratio >= 0.8) or jaccard >= 0.82
 
 
 def _find_near_duplicate_texts(values: Iterable[str]) -> list[tuple[str, str]]:
@@ -290,12 +295,14 @@ def _sqlite_call_persists_resume_state(call: PersistentAgentToolCall) -> bool:
 
     sql = sqlite_batch_sql(call).lower()
     has_remaining_state = "remaining_work" in sql or bool(
-        re.search(r"(?:\b\d+\s+remaining\b|\bremaining\D{0,20}\d+\b)", sql)
+        re.search(r"(?:\b\d+\s+(?:remaining|pending)\b|\b(?:remaining|pending)\D{0,20}\d+\b)", sql)
     )
     if not has_remaining_state or ("next_cursor" not in sql and "cursor" not in sql):
         return False
 
-    return any(keyword in sql for keyword in ("insert", "update", "replace", "create table"))
+    return "patch_text(" in sql or any(
+        keyword in sql for keyword in ("insert", "update", "replace", "create table")
+    )
 
 
 def _human_input_requests_for_run(run_id: str, *, after=None):
@@ -1867,7 +1874,9 @@ class EffortUnscheduledRemainingWorkSetsResumeScenario(EffortCalibrationScenario
                     "Continue in bounded batches or set a resume schedule before pausing; "
                     "do not abandon the remaining queue."
                 ),
-                "verification": "Read the leads table to verify sent counts before any later batch.",
+                "verification": (
+                    "This batch result is the authoritative sent-count receipt; no separate leads table is exposed."
+                ),
             }
         }
 
@@ -2017,13 +2026,18 @@ class EffortPartialSourceBlockReportsAndResumesScenario(EffortCalibrationScenari
                 mock_config=mock_config,
                 eval_stop_policy={
                     "stop_on_tool_names": list(
-                        (EFFORT_OVERWORK_TOOL_NAMES - {"update_plan"})
+                        (EFFORT_OVERWORK_TOOL_NAMES - {"search_tools", "update_plan"})
                         | ARTIFACT_TOOL_NAMES
                         | RESEARCH_TOOL_NAMES
                     ),
                     "stop_on_human_input_request": True,
                     "stop_on_unexpected_relevant_tool": True,
-                    "allowed_tool_names": ["eval_verify_candidate_batch", "sqlite_batch", "update_plan"],
+                    "allowed_tool_names": [
+                        "eval_verify_candidate_batch",
+                        "search_tools",
+                        "sqlite_batch",
+                        "update_plan",
+                    ],
                     "max_relevant_tool_calls": 6,
                     "ignored_tool_names": list(MESSAGE_TOOL_NAMES | STOP_TOOL_NAMES),
                 },
@@ -2063,7 +2077,9 @@ class EffortPartialSourceBlockReportsAndResumesScenario(EffortCalibrationScenari
             run_id,
             after=inbound.timestamp,
             task_name="verify_no_overwork_tools",
-            forbidden_tool_names=EFFORT_OVERWORK_TOOL_NAMES | ARTIFACT_TOOL_NAMES | RESEARCH_TOOL_NAMES,
+            forbidden_tool_names=(EFFORT_OVERWORK_TOOL_NAMES - {"search_tools"})
+            | ARTIFACT_TOOL_NAMES
+            | RESEARCH_TOOL_NAMES,
         )
         self._record_orchestrator_budget(run_id, task_name="verify_turn_budget", max_completions=6)
 
@@ -2102,7 +2118,9 @@ class EffortToolWaitNextScheduleRequiresScheduleScenario(EffortCalibrationScenar
                 "remaining_work": 75,
                 "next_cursor": "lead-025",
                 "next_action": "Wait for next scheduled run; do not repeat manually.",
-                "verification": "Read prepared_batches before sending another batch.",
+                "verification": (
+                    "This result is the authoritative prepared-count receipt; no prepared_batches table is exposed."
+                ),
             }
         }
 

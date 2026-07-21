@@ -123,6 +123,11 @@ class HallucinatedLinkScenarioTests(SimpleTestCase):
 
         self.assertEqual(extract_http_urls(f"{url}\n[{url}]({url})"), (url,))
 
+    def test_url_extraction_recovers_exact_url_repeated_inside_brackets(self):
+        url = "https://docs.example.test/download/obj-7c91f2?disposition=inline#document"
+
+        self.assertEqual(extract_http_urls(f"[{url}({url})]"), (url,))
+
     def test_url_extraction_stops_at_inline_code_delimiters(self):
         url = "https://api.example.test/evals/candidate-shortlist.json"
 

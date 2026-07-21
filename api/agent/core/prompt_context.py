@@ -128,20 +128,18 @@ SQLITE_MESSAGES_SNAPSHOT_MAX_RECORDS = 10_000
 CONTACT_PROMPT_INLINE_LIMIT = 25
 CONTACT_PROMPT_SAMPLE_LIMIT = 10
 LINK_REFERENCE_PROMPT_NOTE = (
-    "LINK OUTPUT CONTRACT for every `$[link:L…]` token above: the token is already the complete "
-    "destination. When links, sources, or citations are requested, copy each included item's/source's "
-    "exact token unchanged as `[human label]($[link:LITEM])`. The token never belongs inside the "
-    "visible-label brackets. RIGHT: `[Harbor report]($[link:LITEM])`. WRONG: "
-    "`[$[link:LITEM]](https://host/path)` or `[$[link:LITEM]]($[link:LSOURCE])`. Never replace it "
-    "with, guess, or construct an "
-    "HTTP URL, host, route, slug, or ID—even when a neighboring pattern makes the destination seem "
-    "known. An item without a token gets no link/destination field. Only an explicit written URL "
-    "template in the source authorizes construction; inference from other items does not. A collection, "
-    "request, source, or feed token cites that source only and is never an item's destination. Keep tokens attached "
-    "through filtering/aggregation. Tokens are output-only: never put them in tool inputs (including SQL); transform "
-    "non-link fields and attach tokens only in the final outgoing message. A requested-link response is incomplete "
-    "if an included token-backed item is left unlinked. Before sending, verify every destination copied from these "
-    "results is an exact supplied token."
+    "## Link References (CRITICAL)\n\n"
+    "`$[link:L…]` is an opaque stand-in for one complete URL: the token itself is the URL, not an ID or suffix. "
+    "It is safe and required to copy the token unchanged into outgoing content. To open it, use the exact whole token "
+    "as a tool's `url` argument. To cite or deliver it, put that same exact token directly in the Markdown destination "
+    "inside the send tool body: `[Atlas launch]($[link:LEXACT])`. Never replace it with a source name, placeholder, "
+    "known or guessed raw URL, or a host/path containing the token ID. Never decode, edit, shorten, combine, or "
+    "construct a neighboring URL. Copy/paste the case-sensitive token from the prompt or result rather than retyping "
+    "it. An item without its own token stays unlinked; a source/feed token links only that source/feed. Never put a "
+    "token in SQL or search text. If a token fails, compare it with the original and retry only a corrected value. "
+    "When sources are requested, link every included token-backed source and reserve room for those links before "
+    "other detail. A bare source name, `(source)`, or other visible placeholder is not a citation. Verify the outgoing "
+    "body contains the exact tokens before sending; without them, the answer is unfinished."
 )
 SQLITE_EFFICIENCY_WARNING = (
     "SQLite efficiency warning: you've been handling __tool_results one result_id at a time. "
@@ -1706,14 +1704,6 @@ def _render_prompt_context_once(
             "recent_contacts",
             recent_contacts_text,
             weight=1,
-        )
-
-    if has_link_references:
-        critical_group.section_text(
-            "link_reference_note",
-            LINK_REFERENCE_PROMPT_NOTE,
-            weight=10,
-            non_shrinkable=True,
         )
 
     has_peer_links = AgentPeerLink.objects.filter(is_enabled=True).filter(
@@ -3829,6 +3819,13 @@ def _get_system_instruction(
         "Do not use sqlite_batch to reread __tool_results, create a temporary table, or parse a small result unless you need SQL for real filtering, joining, aggregation, or chart input. "
         "Show requested detail, summarize overflow, and for multi-step research investigate only leads needed to satisfy the stated scope.\n\n"
 
+        "A final send ends the work cycle. If a result reports `remaining_work`/`next_cursor` and the user asked to "
+        "preserve or continue it: first use one direct sqlite_batch update to save the cursor and follow any "
+        "resume-schedule direction; the current config is already in the prompt, so do not SELECT or read_file first. "
+        "Append new resume state with `charter = charter || '...'`; use patch_text only to replace an exact existing "
+        "phrase. After that update succeeds, the next call must send the report; do not inspect files, messages, or "
+        "config first. Never send 'I'll save/update it' with will_continue_work=false; do it first.\n\n"
+        f"{LINK_REFERENCE_PROMPT_NOTE}\n\n"
         "## Bounded Current Research (CRITICAL)\n\n"
         "For one-off latest/current company/batch/funding/pricing/product/news/status asks except finite sets: use bounded research mode. Do one focused search or structured lookup; scrape 1-3 top sources if snippets are insufficient; then send one answer with takeaways and cite at least two distinct source URLs compactly. After one result set plus 1-2 strong pages, final answer is next, not another query. Use at most one web search query unless empty/contradictory. Do not run alternate query variants, call update_plan, send progress-only messages, create files/charts, build SQLite, or keep searching once sources can answer. Escalate only for explicit deep/exhaustive work, market maps, exports, list-all, outreach, monitoring, or scope that truly needs it.\n\n"
 
@@ -3863,6 +3860,9 @@ def _get_system_instruction(
         "Short work: no updates. Deep/exhaustive, large-batch, implementation/deployment, or long work:\n"
         "1. FIRST send scope + next checkpoint on the inbound channel; will_continue_work=true.\n"
         "2. Before work call 4 or after the first source batch/phase, send an evidence milestone. Later only for material ETA/blockers.\n"
+        "After any update result, do not repeat or paraphrase it; the next response starts with work calls only. "
+        "A kickoff is not an evidence milestone: each later update must state a concrete new finding from completed "
+        "tools and must not reuse kickoff text. If there is no evidence yet, continue work instead of sending.\n"
         "No generic narration/reasoning. Peer: send_agent_message only."
     )
     base_prompt += "\n\n<sqlite_guidance>\n" + _get_sqlite_guidance() + "\n</sqlite_guidance>"

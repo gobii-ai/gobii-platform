@@ -56,10 +56,12 @@ class PromptContextSqlitePlacementTests(TestCase):
         self.assertIn("Never filter one result_id at a time, make a table per result", sqlite_guidance)
         self.assertIn("Keep chat/outreach light. Owner reports on 4+ peers", system_message["content"])
         self.assertIn(
-            "need resolved/total and one table with requested fields plus provided item/detail links",
+            "need resolved/total and one table with requested fields",
             system_message["content"],
         )
-        self.assertIn("Source/feed links do not substitute for item links", system_message["content"])
+        self.assertIn("## Link References (CRITICAL)", system_message["content"])
+        self.assertIn("An item without its own token stays unlinked", system_message["content"])
+        self.assertIn("a source/feed token links only that source/feed", system_message["content"])
         self.assertIn("resolve/source each requested field", system_message["content"])
         self.assertIn("grouped discovery isn't coverage", system_message["content"])
         self.assertIn("separate sourced unavailability from research gaps", system_message["content"])

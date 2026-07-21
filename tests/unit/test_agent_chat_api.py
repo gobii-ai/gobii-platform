@@ -1021,7 +1021,6 @@ class AgentChatAPITests(TestCase):
         reference = PersistentAgentLinkReference.objects.create(
             agent=self.agent,
             url="https://example.com/report?id=7#team",
-            source_kind=PersistentAgentLinkReference.SourceKind.TOOL_RESULT,
         )
         token = f"$[link:{reference.public_id}]"
         step = PersistentAgentStep.objects.create(agent=self.agent, description=f"Browse {token}")
@@ -1886,7 +1885,6 @@ class AgentChatAPITests(TestCase):
         reference = PersistentAgentLinkReference.objects.create(
             agent=self.agent,
             url="https://example.com/reasoning-source",
-            source_kind=PersistentAgentLinkReference.SourceKind.TOOL_RESULT,
         )
         completion = PersistentAgentCompletion.objects.create(
             agent=self.agent,

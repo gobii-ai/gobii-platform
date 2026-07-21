@@ -692,6 +692,10 @@ def _position_index(position: str, length: int) -> int:
 
 def _trim_url(raw_url: str) -> str:
     url = html.unescape(raw_url).rstrip(_TRAILING_PUNCTUATION)
+    for duplicate_start in (match.start() for match in re.finditer(r"\(https?://", url, re.IGNORECASE)):
+        if url.endswith(")") and url[duplicate_start + 1 : -1] == url[:duplicate_start]:
+            url = url[:duplicate_start]
+            break
     pairs = (("(", ")"), ("[", "]"), ("{", "}"))
     for emphasis in ("**", "__", "*", "_"):
         candidate = url[:-len(emphasis)] if url.endswith(emphasis) else ""
