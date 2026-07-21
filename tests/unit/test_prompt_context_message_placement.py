@@ -52,7 +52,7 @@ class PromptContextSqlitePlacementTests(TestCase):
             "one shaped INSERT ... SELECT/json_each filtered by IN/tool_name",
             sqlite_guidance,
         )
-        self.assertIn("extract fields in SQL, not literals", sqlite_guidance)
+        self.assertIn("extract fields and raw URLs in SQL from result_json", sqlite_guidance)
         self.assertIn("Never filter one result_id at a time, make a table per result", sqlite_guidance)
         self.assertIn("Keep chat/outreach light. Owner reports on 4+ peers", system_message["content"])
         self.assertIn(

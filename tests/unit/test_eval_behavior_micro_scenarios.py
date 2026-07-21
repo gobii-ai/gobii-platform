@@ -270,9 +270,15 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
         self.assertIn("beta launched", by_slug["common_use_case_073_create_status_pdf"].prompt)
         self.assertIn("site plan", by_slug["common_use_case_074_create_permit_pdf"].prompt)
         self.assertIn("populated SQLite leads table", by_slug["common_use_case_086_sqlite_export_query_csv"].prompt)
+        self.assertIn("alex@example.test", by_slug["common_use_case_082_sqlite_insert_rows"].prompt)
+        self.assertIn("nina@example.test", by_slug["common_use_case_082_sqlite_insert_rows"].prompt)
         self.assertIn("https://status.example.test/support", by_slug["common_use_case_092_schedule_hourly_monitor"].prompt)
         self.assertIn("BTC-USD", by_slug["common_use_case_096_schedule_price_alert"].prompt)
         self.assertIn("https://borough.example.test/permits/decks", by_slug["common_use_case_097_schedule_permit_check"].prompt)
+        self.assertEqual(
+            by_slug["common_use_case_099_request_monitoring_scope"].accepted_tool_alternatives,
+            {"request_human_input": ("send_chat_message",)},
+        )
         self.assertEqual(by_slug["common_use_case_089_sqlite_database_setup"].expected_tools, ("sqlite_batch",))
         self.assertFalse(by_slug["common_use_case_031_linkedin_person_profile"].plan_expected)
         self.assertEqual(
@@ -373,6 +379,14 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
             by_slug["common_use_case_122_custom_tool_bulk_api_sqlite"].expected_tools,
             ("create_custom_tool",),
         )
+        self.assertEqual(
+            by_slug["common_use_case_122_custom_tool_bulk_api_sqlite"].allowed_preamble_tools,
+            ("http_request", "search_tools"),
+        )
+        self.assertEqual(
+            by_slug["common_use_case_123_custom_tool_partial_retry"].allowed_preamble_tools,
+            ("http_request", "search_tools"),
+        )
         self.assertIn(
             "request_human_input",
             by_slug["common_use_case_116_maps_default_city_reviews"].forbidden_tools,
@@ -423,7 +437,12 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
         )
         self.assertEqual(
             by_slug["common_use_case_132_sheets_blank_due_bulk_update"].accepted_tool_alternatives,
-            {"google_sheets-read-rows": ("google_sheets-get-values-in-range",)},
+            {
+                "google_sheets-read-rows": (
+                    "google_sheets-get-values-in-range",
+                    "google_sheets-get-spreadsheet-by-id",
+                )
+            },
         )
         self.assertEqual(
             by_slug["common_use_case_060_sheets_append_rows"].accepted_tool_alternatives,

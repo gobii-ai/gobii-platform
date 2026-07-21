@@ -269,7 +269,7 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
         scenario._record_report_hierarchy("run", body)
 
         self.assertEqual(recorded[-1][0][2], EvalRunTask.Status.PASSED)
-        self.assertIn("complete comparison table", recorded[-1][1]["observed_summary"])
+        self.assertIn("complete structured comparison", recorded[-1][1]["observed_summary"])
         self.assertTrue(
             scenario._has_complete_comparison_table(
                 body.replace(
@@ -286,7 +286,7 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
                 )
             )
         )
-        self.assertFalse(
+        self.assertTrue(
             scenario._has_complete_comparison_table(
                 body.replace("7 founders identified; 1 evidence-backed nondisclosure.", "Here you go.")
             )
@@ -369,7 +369,7 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
 
     def test_portfolio_accepts_entity_blocks_with_nested_field_bullets(self):
         scenario = SqliteBoundedPortfolioReportScenario()
-        body = "\n\n".join(
+        body = "Seven of eight companies have named founders; one has a sourced nondisclosure.\n\n" + "\n\n".join(
             "\n".join((
                 f"- {company}",
                 f"  - Founder: {founder}",
@@ -384,6 +384,20 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
 
         self.assertEqual(scenario._missing_portfolio_associations(body), [])
         self.assertFalse(scenario._has_complete_comparison_table(body))
+        self.assertTrue(scenario._has_complete_structured_report(body))
+
+    def test_portfolio_accepts_complete_prose_listing_with_disclosure_blocker(self):
+        scenario = SqliteBoundedPortfolioReportScenario()
+        body = "Founders of the current portfolio companies:\n\n" + "\n\n".join(
+            f"**{company}**, {founder}. {background} [{url}]"
+            for (_slug, company, founder, _term, background), url in zip(
+                PORTFOLIO_COMPANIES,
+                PORTFOLIO_SOURCE_URLS,
+            )
+        )
+
+        self.assertEqual(scenario._missing_portfolio_associations(body), [])
+        self.assertTrue(scenario._has_complete_structured_report(body))
 
     def test_portfolio_fixture_exposes_direct_evidence_and_search_fallback(self):
         mocks = _portfolio_mock()
@@ -661,6 +675,7 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
     def test_sqlite_item_link_report_does_not_prescribe_its_implementation(self):
         prompt = SqliteItemLinkReportScenario.prompt.lower()
 
+        self.assertIn("listing links", prompt)
         self.assertNotIn("sqlite", prompt)
         self.assertNotIn("__tool_results", prompt)
         self.assertNotIn("json_extract", prompt)
@@ -2009,6 +2024,7 @@ class FirstRunPromptCalibrationTests(TestCase):
         self.assertIn("Do not validate, fetch, parse, or test provided URLs", system_prompt)
         self.assertIn("call end_planning in the same response as any welcome", system_prompt)
         self.assertIn("Do not say you will check, validate, test, fetch, or inspect a provided feed", system_prompt)
+        self.assertIn("options for decisions or uncertainty", system_prompt)
 
     def test_system_prompt_has_delivery_and_config_guardrails(self):
         User = get_user_model()

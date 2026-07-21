@@ -815,7 +815,7 @@ class SqliteItemLinkReportScenario(SqliteToolResultScenario):
     description = "Reports over item records should preserve item-level listing URLs, not just source feed URLs."
     tasks = [ScenarioTask(name="inject_prompt", assertion_type="agent_processing"), ScenarioTask(name="verify_item_link_sqlite_usage", assertion_type="tool_call"), ScenarioTask(name="verify_listing_links_in_report", assertion_type="manual")]
     builtin_tools = ("http_request",)
-    prompt = "Fetch these vehicle inventory JSON feeds, compare 2023+ Tesla Model Y records within 50 miles, and send one concise initial report with the best batch. Do not browse or create files.\n\n" + "\n".join(f"- {url}" for url in INVENTORY_URLS)
+    prompt = "Fetch these vehicle inventory JSON feeds, compare 2023+ Tesla Model Y records within 50 miles, and send one concise initial report with the best batch and listing links for recommended vehicles. Do not browse or create files.\n\n" + "\n".join(f"- {url}" for url in INVENTORY_URLS)
     mock_kind = "inventory"
     verify_task_name = "verify_item_link_sqlite_usage"
     answer_source_urls = LISTING_URLS
@@ -832,7 +832,7 @@ class SqliteBoundedPortfolioReportScenario(SqliteToolResultScenario):
     cost_class = "medium"
     tags = (*SqliteToolResultScenario.tags, "coverage", "message_quality")
     tasks = [ScenarioTask(name="inject_prompt", assertion_type="agent_processing"), ScenarioTask(name="verify_result_access", assertion_type="tool_call"), ScenarioTask(name="verify_complete_terminal_report", assertion_type="manual"), ScenarioTask(name="verify_report_hierarchy", assertion_type="manual")]
-    prompt = f"Tell me about the founders of Arbor Seed Ventures' current portfolio companies: {PORTFOLIO_INDEX_URL}"
+    prompt = f"Tell me about the founders of Arbor Seed Ventures' current portfolio companies, with a source link for each profile: {PORTFOLIO_INDEX_URL}"
     result_access_fetch_tools = ("http_request", "mcp_brightdata_scrape_as_markdown")
     require_result_access_sqlite = False
 
@@ -974,21 +974,25 @@ class SqliteBoundedPortfolioReportScenario(SqliteToolResultScenario):
     def _record_report_hierarchy(self, run_id: str, body: str) -> None:
         task_name = "verify_report_hierarchy"
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name=task_name)
-        passed = self._has_complete_comparison_table(body)
+        passed = self._has_complete_structured_report(body)
         self.record_task_result(
             run_id,
             None,
             EvalRunTask.Status.PASSED if passed else EvalRunTask.Status.FAILED,
             task_name=task_name,
             expected_summary=(
-                "Report should state meaningful coverage and compare all eight peers in one table."
+                "Report should state meaningful coverage and compare all eight peers in one structured report."
             ),
             observed_summary=(
-                "One complete comparison table covers the full bounded set with a meaningful coverage summary."
+                "One complete structured comparison covers the full bounded set with a meaningful coverage summary."
                 if passed
-                else "Missing meaningful coverage or one complete comparison table."
+                else "Missing meaningful coverage or one complete structured comparison."
             ),
         )
+
+    @classmethod
+    def _has_complete_structured_report(cls, body: str) -> bool:
+        return not cls._missing_portfolio_associations(body) and cls._has_coverage_summary(body)
 
     @staticmethod
     def _has_complete_comparison_table(body: str) -> bool:
@@ -1031,4 +1035,14 @@ class SqliteBoundedPortfolioReportScenario(SqliteToolResultScenario):
                 )
             )
         )
-        return bool(mentions_founders and partial_coverage)
+        incorrect_coverage = re.search(
+            r"\b(?:(?:[0-6]|zero|one|two|three|four|five|six)\s+founders?|all\s+(?:8|eight)\s+founders?)\s+(?:were\s+)?identified\b",
+            body,
+            re.I,
+        )
+        complete_listing_with_blocker = (
+            all(company.casefold() in body.casefold() for _slug, company, *_rest in PORTFOLIO_COMPANIES)
+            and re.search(r"\b(?:not publicly disclosed|undisclosed|nondisclos)", body, re.I)
+            and not incorrect_coverage
+        )
+        return bool(mentions_founders and (partial_coverage or complete_listing_with_blocker))
