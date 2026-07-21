@@ -72,8 +72,11 @@ export function useTimelineScrollController({
   const fetchOlderInFlightRef = useRef(false)
   const scrollFrameRef = useRef<number | null>(null)
   const acrossFramesRafRef = useRef<number | null>(null)
+  const contentLayoutGuardRafRef = useRef<number | null>(null)
   const followupScrollFramesRef = useRef(0)
   const programmaticScrollUntilRef = useRef(0)
+  const contentLayoutChangingRef = useRef(false)
+  const previousContentVersionRef = useRef(contentVersion)
   const prependAnchorRef = useRef<PrependAnchor | null>(null)
   const ignorePinUntilRef = useRef(0)
   const lastScrollTopRef = useRef(0)
@@ -136,6 +139,17 @@ export function useTimelineScrollController({
       window.cancelAnimationFrame(acrossFramesRafRef.current)
       acrossFramesRafRef.current = null
     }
+  }, [])
+
+  const guardContentLayoutChange = useCallback(() => {
+    contentLayoutChangingRef.current = true
+    if (contentLayoutGuardRafRef.current !== null) {
+      window.cancelAnimationFrame(contentLayoutGuardRafRef.current)
+    }
+    contentLayoutGuardRafRef.current = window.requestAnimationFrame(() => {
+      contentLayoutGuardRafRef.current = null
+      contentLayoutChangingRef.current = false
+    })
   }, [])
 
   const suspendAutoFollow = useCallback(() => {
@@ -346,9 +360,9 @@ export function useTimelineScrollController({
         return
       }
 
-      // Layout changes can move scrollTop upward without user input. Wheel, touch,
-      // pointer, and keyboard handlers above own the decision to stop following.
-      if (scrollingDown && distance <= NEAR_BOTTOM_PX) {
+      if (meaningfulScrollUp && !contentLayoutChangingRef.current) {
+        suspendAutoFollow()
+      } else if (scrollingDown && distance <= NEAR_BOTTOM_PX) {
         setPinned(true)
       }
 
@@ -399,6 +413,16 @@ export function useTimelineScrollController({
     syncMeasurements,
     timelineNode,
   ])
+
+  useLayoutEffect(() => {
+    if (previousContentVersionRef.current === contentVersion) {
+      return
+    }
+    previousContentVersionRef.current = contentVersion
+    // React content replacement can move scrollTop without user input. Keep
+    // native scroll detection enabled again once the committed layout settles.
+    guardContentLayoutChange()
+  }, [contentVersion, guardContentLayoutChange])
 
   useLayoutEffect(() => {
     const anchor = prependAnchorRef.current
@@ -482,6 +506,7 @@ export function useTimelineScrollController({
     }
 
     const observer = new ResizeObserver(() => {
+      guardContentLayoutChange()
       syncMeasurements(container)
       updateComposerHeight()
       if (pinnedRef.current && !prependAnchorRef.current) {
@@ -501,7 +526,7 @@ export function useTimelineScrollController({
       document.documentElement.style.removeProperty('--composer-height')
       document.getElementById('jump-to-latest')?.style.removeProperty('--composer-height')
     }
-  }, [composerNode, contentNode, scrollToBottomAcrossFrames, syncMeasurements, timelineNode])
+  }, [composerNode, contentNode, guardContentLayoutChange, scrollToBottomAcrossFrames, syncMeasurements, timelineNode])
 
   useEffect(() => () => {
     if (scrollFrameRef.current !== null) {
@@ -510,6 +535,10 @@ export function useTimelineScrollController({
     if (acrossFramesRafRef.current !== null) {
       window.cancelAnimationFrame(acrossFramesRafRef.current)
     }
+    if (contentLayoutGuardRafRef.current !== null) {
+      window.cancelAnimationFrame(contentLayoutGuardRafRef.current)
+    }
+    contentLayoutChangingRef.current = false
     followupScrollFramesRef.current = 0
   }, [])
 
