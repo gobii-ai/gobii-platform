@@ -2044,7 +2044,7 @@ class FirstRunPromptCalibrationTests(TestCase):
         self.assertIn("Do not validate, fetch, parse, or test provided URLs", system_prompt)
         self.assertIn("call end_planning in the same response as any welcome", system_prompt)
         self.assertIn("Do not say you will check, validate, test, fetch, or inspect a provided feed", system_prompt)
-        self.assertIn("options for decisions or uncertainty", system_prompt)
+        self.assertIn("Prefer options", system_prompt)
 
     def test_system_prompt_has_delivery_and_config_guardrails(self):
         User = get_user_model()

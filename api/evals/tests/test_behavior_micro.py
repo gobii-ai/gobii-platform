@@ -16,6 +16,7 @@ from api.evals.scenarios.behavior_micro import (
     PLANNING_FIRST_TURN_ASKS_BOUNDED_QUESTIONS,
     PLANNING_INTEGRATION_SETUP_SEARCHES_BEFORE_QUESTION,
     PLANNING_MICRO_SCENARIO_SLUGS,
+    PLANNING_SECURE_CREDENTIAL_REQUEST,
     TOOL_CHOICE_MICRO_SCENARIO_SLUGS,
 )
 from api.evals.suites import SuiteRegistry
@@ -136,6 +137,14 @@ class BehaviorMicroScenarioTests(SimpleTestCase):
         self.assertIn(PLANNING_INTEGRATION_SETUP_SEARCHES_BEFORE_QUESTION, BEHAVIOR_MICRO_SCENARIO_SLUGS)
         self.assertIn(APOLLO_CONNECT_SEARCH, behavior_suite.scenario_slugs)
         self.assertIn(SLACK_CONNECT_SEARCH, behavior_suite.scenario_slugs)
+
+    def test_planning_secure_credential_scenario_is_registered(self):
+        scenario = ScenarioRegistry.get(PLANNING_SECURE_CREDENTIAL_REQUEST)
+        planning_suite = SuiteRegistry.get("planning_micro")
+
+        self.assertIn(PLANNING_SECURE_CREDENTIAL_REQUEST, planning_suite.scenario_slugs)
+        self.assertIn("credentials", scenario.tags)
+        self.assertEqual(scenario._eval_stop_policy()["stop_on_tool_names"], ["request_human_input"])
 
     def test_planning_integration_discovery_metadata_and_stop_policy(self):
         scenario = ScenarioRegistry.get(PLANNING_INTEGRATION_SETUP_SEARCHES_BEFORE_QUESTION)

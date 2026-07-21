@@ -42,6 +42,7 @@ from api.evals.scenarios.behavior_micro import (
     IGNORED_FIRST_ACTION_TOOL_NAMES,
     PLANNING_MICRO_SCENARIO_SLUGS,
     PLANNING_DISMISS_AFTER_GREETING_DOES_NOT_RESUME,
+    PLANNING_SECURE_CREDENTIAL_REQUEST,
     TOOL_CHOICE_MICRO_SCENARIO_SLUGS,
     UPDATE_PLAN_POLICIES,
     UPDATE_PLAN_POLICY_EXPECT,
@@ -154,6 +155,27 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
         self.assertEqual(
             charter_scenario._eval_stop_policy()["stop_on_tool_names"],
             ["request_human_input", "secure_credentials_request"],
+        )
+
+    def test_planning_secure_credential_scenario_uses_real_secure_flow(self):
+        scenario = ScenarioRegistry.get(PLANNING_SECURE_CREDENTIAL_REQUEST)
+        planning_suite = SuiteRegistry.get("planning_micro")
+        policy = scenario._eval_stop_policy()
+
+        self.assertIn(PLANNING_SECURE_CREDENTIAL_REQUEST, planning_suite.scenario_slugs)
+        self.assertEqual(
+            [task.name for task in scenario.tasks],
+            [
+                "inject_prompt",
+                "verify_secure_credential_request",
+                "verify_no_human_input_request",
+            ],
+        )
+        self.assertEqual(policy["allowed_tool_names"], ["secure_credentials_request"])
+        self.assertEqual(policy["stop_on_tool_names"], ["request_human_input"])
+        self.assertEqual(
+            policy["stop_when_all_seen"],
+            [{"tool_name": "secure_credentials_request", "after_execution": True}],
         )
 
     def test_common_use_case_micro_evals_are_complete_and_registered(self):

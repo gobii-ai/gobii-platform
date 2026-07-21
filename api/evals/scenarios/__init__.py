@@ -27,6 +27,7 @@ from .behavior_micro import (
     PlanningFinalReportCompletesVisiblePlanScenario,
     PlanningIntegrationSetupSearchesBeforeQuestionScenario,
     PlanningNoDirectScheduleOrConfigUpdatesScenario,
+    PlanningSecureCredentialRequestScenario,
     ToolChoiceExactJsonUrlUsesHttpRequestScenario,
     ToolChoiceCsvDeliverableUsesCreateCsvScenario,
     ToolChoicePdfDeliverableUsesCreatePdfScenario,
