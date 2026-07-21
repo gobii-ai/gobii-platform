@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase, override_settings, tag
+from django.test import TestCase, tag
 
 import api.evals.loader  # noqa: F401 - registers scenarios and suites
 from api.evals.registry import ScenarioRegistry
@@ -77,14 +77,13 @@ class ResolvedToolParamTests(TestCase):
 
         self.assertTrue(bitcoin_tool_calls_include_supported_price_api([call]))
 
-    @override_settings(PUBLIC_SITE_URL="https://app.example.test")
-    def test_resolves_rendered_reference_url(self):
+    def test_does_not_resolve_reference_id_embedded_in_raw_url(self):
         url = "https://sources.example.test/items/2"
         call = self._reference_call(url)
         public_id = call.tool_params["url"].removeprefix("$[link:").removesuffix("]")
         call.tool_params["url"] = f"https://app.example.test/{public_id}"
 
-        self.assertEqual(resolved_tool_param(call, "url"), url)
+        self.assertEqual(resolved_tool_param(call, "url"), call.tool_params["url"])
 
     def test_raw_and_malformed_values_remain_strict(self):
         raw_url = "https://api.example.test/raw.json"

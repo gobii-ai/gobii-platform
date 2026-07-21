@@ -2,9 +2,7 @@ import hashlib
 import logging
 import re
 from collections.abc import Iterable
-from urllib.parse import urlsplit
 
-from django.conf import settings
 from django.db import DatabaseError
 
 from api.models import PersistentAgentLinkReference
@@ -17,7 +15,6 @@ _REFERENCE_PREFIX_RE = re.compile(r"\$\[link:", re.IGNORECASE)
 _PUBLIC_ID_PATTERN = r"L[0123456789ABCDEFGHJKMNPQRSTVWXYZ]{16}"
 _PUBLIC_ID_RE = re.compile(_PUBLIC_ID_PATTERN, re.IGNORECASE)
 _NAKED_DESTINATION_RE = re.compile(rf"(?:\]\(\s*|href\s*=\s*['\"]\s*)({_PUBLIC_ID_PATTERN})(?=\s*(?:\)|['\"]))", re.IGNORECASE)
-_RENDERED_PATH_RE = re.compile(rf"/({_PUBLIC_ID_PATTERN})(?:/[^/]*)?/?$", re.IGNORECASE)
 _TRAILING_PUNCTUATION = ".,;:!?"
 _EMBEDDED_FIELDS = {"create_csv": "csv_text", "create_pdf": "html", "http_request": "body", "send_agent_message": "message", "send_chat_message": "body", "send_discord_message": "message", "send_email": "mobile_first_html", "send_sms": "body"}
 _DOCUMENT_MIME_TYPES = {"application/json", "application/ld+json", "application/xml", "application/yaml", "text/html", "text/markdown", "text/plain", "text/xml", "text/yaml"}
@@ -86,14 +83,6 @@ def register_prompt_urls(text: str, agent, *, source_kind: str, source_object_id
     rewrite_prompt_urls(text, agent, create=True, source_kind=source_kind, source_object_id=source_object_id)
 
 
-def _rendered_reference_id(url: str) -> str | None:
-    parsed = urlsplit(url)
-    match = _RENDERED_PATH_RE.search(parsed.path)
-    if parsed.scheme.lower() not in {"http", "https"} or not match or parsed.query or parsed.fragment:
-        return None
-    return match.group(1).upper()
-
-
 def resolve_link_references(text: str, agent) -> str:
     text = text or ""
     if naked := _NAKED_DESTINATION_RE.search(text):
@@ -102,20 +91,17 @@ def resolve_link_references(text: str, agent) -> str:
     matches = list(_REFERENCE_RE.finditer(text))
     if len(matches) != len(_REFERENCE_PREFIX_RE.findall(text)):
         raise LinkReferenceResolutionError("A link reference is malformed. Reuse a provided $[link:id] value or omit the link.")
-    rendered = {url: public_id for url in extract_http_urls(text) if (public_id := _rendered_reference_id(url)) is not None}
-    if not matches and not rendered:
+    if not matches:
         return text
     reference_ids = {match.group(1).upper() for match in matches}
     if any(not _PUBLIC_ID_RE.fullmatch(public_id) for public_id in reference_ids):
         raise LinkReferenceResolutionError("A link reference is malformed. Reuse a provided $[link:id] value or omit the link.")
-    lookup_ids = reference_ids | set(rendered.values())
-    required_ids = reference_ids | {public_id for url, public_id in rendered.items() if urlsplit(url).netloc.lower() == urlsplit(settings.PUBLIC_SITE_URL).netloc.lower()}
     try:
-        references = {ref.public_id: ref.url for ref in PersistentAgentLinkReference.objects.filter(agent=agent, public_id__in=lookup_ids)}
+        references = {ref.public_id: ref.url for ref in PersistentAgentLinkReference.objects.filter(agent=agent, public_id__in=reference_ids)}
     except DatabaseError as exc:
         raise LinkReferenceResolutionError("Link references are temporarily unavailable. Retry the same message.") from exc
-    if not required_ids.issubset(references):
-        missing = ", ".join(sorted(required_ids - references.keys()))
+    if not reference_ids.issubset(references):
+        missing = ", ".join(sorted(reference_ids - references.keys()))
         raise LinkReferenceResolutionError(f"Link reference {missing} is unavailable. Recopy that provided token exactly; other references remain usable.")
     for match in matches:
         before, after = (text[match.start() - 1] if match.start() else ""), (text[match.end()] if match.end() < len(text) else "")
@@ -124,13 +110,7 @@ def resolve_link_references(text: str, agent) -> str:
                 f"Link reference {match.group(1).upper()} must be the whole URL. "
                 "Use it directly, for example [label]($[link:id]), without adding a host, slash, path, query, or fragment."
             )
-    resolved = _REFERENCE_RE.sub(lambda match: references[match.group(1).upper()], text)
-    if rendered:
-        def replace_rendered(match: re.Match) -> str:
-            url, suffix = _split_url_suffix(match.group())
-            return references.get(rendered.get(url), url) + suffix
-        resolved = _HTTP_URL_RE.sub(replace_rendered, resolved)
-    return resolved
+    return _REFERENCE_RE.sub(lambda match: references[match.group(1).upper()], text)
 
 
 def resolve_link_references_for_display(value, agent):
@@ -143,13 +123,11 @@ def resolve_link_references_for_display(value, agent):
     try:
         return resolve_link_references(value, agent)
     except LinkReferenceResolutionError:
-        resolved = re.sub(r"\$\[link:[^\]\s]*(?:\]|$)", "Link unavailable", value, flags=re.IGNORECASE)
-        return _HTTP_URL_RE.sub(lambda match: "Link unavailable" if _rendered_reference_id(_split_url_suffix(match.group())[0]) else match.group(), resolved)
+        return re.sub(r"\$\[link:[^\]\s]*(?:\]|$)", "Link unavailable", value, flags=re.IGNORECASE)
 
 
 def _contains_reference_syntax(value: str) -> bool:
-    return bool(_REFERENCE_PREFIX_RE.search(value) or _NAKED_DESTINATION_RE.search(value)
-                or any(_rendered_reference_id(url) for url in extract_http_urls(value)))
+    return bool(_REFERENCE_PREFIX_RE.search(value) or _NAKED_DESTINATION_RE.search(value))
 
 
 def _param_path(path: tuple[object, ...]) -> str:
@@ -177,7 +155,7 @@ def resolve_link_reference_params(value, agent, *, tool_name: str = "", _path=()
             return resolve_link_references(value, agent)
         return value
     stripped = value.strip()
-    exact = _REFERENCE_RE.fullmatch(stripped) or _rendered_reference_id(stripped)
+    exact = _REFERENCE_RE.fullmatch(stripped)
     if exact and tool_name not in _STRICT_TOOLS:
         resolved = resolve_link_references(stripped, agent)
         return value[: len(value) - len(value.lstrip())] + resolved + value[len(value.rstrip()):]

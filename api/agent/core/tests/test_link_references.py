@@ -200,42 +200,7 @@ class LinkReferenceTests(TestCase):
             f"Profile ({url})",
         )
 
-    @override_settings(PUBLIC_SITE_URL="https://gobii.example.test")
-    def test_model_rendered_reference_routes_resolve_for_any_same_origin_path(self):
-        url = "https://profiles.example.test/avery?campaign=q3#experience"
-        token = rewrite_prompt_urls(
-            url,
-            self.agent,
-            create=True,
-            source_kind="tool_result",
-            source_object_id="step-1",
-        )
-        reference_id = token.removeprefix("$[link:").removesuffix("]")
-        body = (
-            f"[Profile](https://gobii.example.test/link/{reference_id}) "
-            f"<a href='https://gobii.example.test/app/file/{reference_id}'>HTML</a> "
-            f"Download: https://gobii.example.test/dl/{reference_id} "
-            f"API: https://gobii.example.test/api/links/{reference_id} "
-            f"Named: https://gobii.example.test/api/link/{reference_id}/report.pdf"
-        )
-
-        self.assertEqual(
-            resolve_link_references(body, self.agent),
-            (
-                f"[Profile]({url}) <a href='{url}'>HTML</a> "
-                f"Download: {url} "
-                f"API: {url} Named: {url}"
-            ),
-        )
-
-        with self.assertRaises(LinkReferenceResolutionError):
-            resolve_link_references(
-                "https://gobii.example.test/api/links/L0000000000000000",
-                self.agent,
-            )
-
-    @override_settings(PUBLIC_SITE_URL="https://gobii.example.test")
-    def test_tool_params_resolve_only_complete_reference_values_recursively(self):
+    def test_tool_params_resolve_only_literal_complete_reference_values_recursively(self):
         url = "https://profiles.example.test/avery?campaign=q3#experience"
         token = rewrite_prompt_urls(
             url,
@@ -256,7 +221,7 @@ class LinkReferenceTests(TestCase):
             resolve_link_reference_params(params, self.agent),
             {
                 "url": url,
-                "related": [url],
+                "related": [f"https://gobii.example.test/api/links/{reference_id}"],
                 "query": f"Compare {token} with the other result",
                 "file": "$[/reports/summary.pdf]",
             },
@@ -395,10 +360,8 @@ class LinkReferenceTests(TestCase):
             with self.subTest(body=body), self.assertRaises(LinkReferenceResolutionError):
                 resolve_link_references(body, self.agent)
 
-        self.assertEqual(
-            resolve_link_references(f"[Profile](https://api.example.test/profiles/{public_id})", self.agent),
-            "[Profile](https://profiles.example.test/avery)",
-        )
+        raw_url = f"https://api.example.test/profiles/{public_id}"
+        self.assertEqual(resolve_link_references(f"[Profile]({raw_url})", self.agent), f"[Profile]({raw_url})")
         foreign = "https://api.example.test/profiles/L0000000000000000"
         self.assertEqual(resolve_link_references(foreign, self.agent), foreign)
 
