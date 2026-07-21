@@ -3883,9 +3883,6 @@
     outline: 2px solid rgba(37, 99, 235, 0.4);
     outline-offset: 1px;
 }
-.tool-cluster-live-preview__entry[data-new="true"] {
-    animation: tool-cluster-live-new-entry 0.8s ease-out;
-}
 .tool-cluster-live-preview__entry[data-active="true"] {
     border-color: rgba(14, 116, 144, 0.32);
     background: rgba(224, 242, 254, 0.88);
@@ -4850,16 +4847,6 @@
         box-shadow: inset 0 0 0 1px rgba(14, 116, 144, 0.2);
     }
 }
-@keyframes tool-cluster-live-new-entry {
-    0% {
-        transform: translateY(5px);
-        opacity: 0.4;
-    }
-    100% {
-        transform: translateY(0);
-        opacity: 1;
-    }
-}
 @keyframes tool-chip-spin {
     to {
         transform: rotate(360deg);
@@ -4911,7 +4898,6 @@
         transition: none;
     }
     .tool-cluster-live-preview__entry[data-active="true"],
-    .tool-cluster-live-preview__entry[data-new="true"],
     .tool-chip-spinner {
         animation: none;
     }
