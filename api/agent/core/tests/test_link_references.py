@@ -9,11 +9,13 @@ from unittest.mock import patch
 from django.contrib.auth import get_user_model
 from django.db import DatabaseError
 from django.test import TestCase, override_settings, tag
+from django.utils import timezone as django_timezone
 
 from api.agent.core.link_references import (
     LinkReferenceResolutionError,
     extract_http_urls,
     is_source_bearing_tool,
+    pair_prompt_urls,
     resolve_link_reference_params,
     resolve_link_references,
     resolve_link_references_for_display,
@@ -46,6 +48,7 @@ from api.models import (
     BrowserUseAgent,
     CommsChannel,
     PersistentAgent,
+    PersistentAgentCommsSnapshot,
     PersistentAgentCommsEndpoint,
     PersistentAgentLinkReference,
     PersistentAgentMessage,
@@ -152,12 +155,42 @@ class LinkReferenceTests(TestCase):
         self.assertEqual(first, f"[Item]({token})")
         self.assertEqual(second, f"<a href='{token}'>Item</a>")
 
+    def test_pairing_keeps_similar_raw_urls_attached_to_distinct_references(self):
+        first_url = "https://items.example.test/id/1?view=full#details"
+        second_url = "https://items.example.test/id/2?view=full#details"
+
+        rendered = pair_prompt_urls(
+            f"First: {first_url}\nSecond: {second_url}",
+            self.agent,
+            create=True,
+        )
+
+        references = {
+            reference.url: f"$[link:{reference.public_id}]"
+            for reference in PersistentAgentLinkReference.objects.filter(agent=self.agent)
+        }
+        self.assertEqual(len(references), 2)
+        self.assertIn(f"{first_url} [link_ref: {references[first_url]}]", rendered)
+        self.assertIn(f"{second_url} [link_ref: {references[second_url]}]", rendered)
+        self.assertEqual(pair_prompt_urls(rendered, self.agent, create=False), rendered)
+
+    def test_pairing_keeps_markdown_destination_valid(self):
+        url = "https://items.example.test/id/7?view=full#details"
+
+        rendered = pair_prompt_urls(f"[Item]({url}).", self.agent, create=True)
+
+        reference = PersistentAgentLinkReference.objects.get(agent=self.agent)
+        token = f"$[link:{reference.public_id}]"
+        self.assertEqual(rendered, f"[Item]({url}) [link_ref: {token}].")
+        self.assertEqual(pair_prompt_urls(rendered, self.agent, create=False), rendered)
+
     def test_lookup_only_does_not_create_provenance(self):
         url = "https://derived.example.test/records/9"
         self.assertEqual(
             rewrite_prompt_urls(url, self.agent, create=False),
             url,
         )
+        self.assertEqual(pair_prompt_urls(url, self.agent, create=False), url)
         self.assertFalse(PersistentAgentLinkReference.objects.exists())
 
         registered = rewrite_prompt_urls(
@@ -166,6 +199,7 @@ class LinkReferenceTests(TestCase):
             create=True,
         )
         self.assertEqual(rewrite_prompt_urls(url, self.agent, create=False), registered)
+        self.assertIn(registered, pair_prompt_urls(url, self.agent, create=False))
 
     def test_reference_resolves_across_calls_in_markdown_html_and_plain_text(self):
         url = "https://profiles.example.test/avery?campaign=q3#experience"
@@ -571,7 +605,7 @@ class LinkReferenceTests(TestCase):
             "api.agent.core.link_references.PersistentAgentLinkReference.objects.filter",
             side_effect=DatabaseError("unavailable"),
         ):
-            rendered = rewrite_prompt_urls(
+            rendered = pair_prompt_urls(
                 url,
                 self.agent,
                 create=True,
@@ -587,7 +621,7 @@ class LinkReferenceTests(TestCase):
         self.assertFalse(is_source_bearing_tool("sqlite_batch"))
         self.assertFalse(is_source_bearing_tool("python_exec"))
 
-    def test_source_result_preview_uses_reference_without_mutating_raw_result(self):
+    def test_source_result_preview_pairs_raw_url_with_reference_without_mutating_result(self):
         url = "https://profiles.example.test/avery?view=full#bio"
         raw_result = f'{{"results":[{{"name":"Avery Chen","profile_url":"{url}"}}]}}'
         record = ToolCallResultRecord(
@@ -606,15 +640,40 @@ class LinkReferenceTests(TestCase):
                 self.agent,
                 create=is_source_bearing_tool(item.tool_name),
             ),
+            paired_url_rewriter=lambda text, item: pair_prompt_urls(
+                text,
+                self.agent,
+                create=is_source_bearing_tool(item.tool_name),
+            ),
+            paired_url_step_ids={record.step_id},
         )[record.step_id]
 
         reference = PersistentAgentLinkReference.objects.get(agent=self.agent)
         token = f"$[link:{reference.public_id}]"
         self.assertIn("Avery Chen", prompt_info.meta)
         self.assertIn(token, prompt_info.meta)
-        self.assertNotIn(url, prompt_info.meta)
+        self.assertIn(f"{url} [link_ref: {token}]", prompt_info.meta)
+        self.assertIn(f"{url} [link_ref: {token}]", prompt_info.preview_text)
         self.assertIn(token, prompt_info.preview_text)
         self.assertEqual(record.result_text, raw_result)
+
+        older_prompt_info = prepare_tool_results_for_prompt(
+            [record],
+            recency_positions={},
+            url_rewriter=lambda text, item: rewrite_prompt_urls(
+                text,
+                self.agent,
+                create=is_source_bearing_tool(item.tool_name),
+            ),
+            paired_url_rewriter=lambda text, item: pair_prompt_urls(
+                text,
+                self.agent,
+                create=is_source_bearing_tool(item.tool_name),
+            ),
+            paired_url_step_ids=set(),
+        )[record.step_id]
+        self.assertIn(token, older_prompt_info.preview_text)
+        self.assertNotIn(url, older_prompt_info.preview_text)
 
     def test_source_result_marks_sparse_item_link_field_as_not_provided(self):
         raw_result = (
@@ -637,6 +696,12 @@ class LinkReferenceTests(TestCase):
                 self.agent,
                 create=is_source_bearing_tool(item.tool_name),
             ),
+            paired_url_rewriter=lambda text, item: pair_prompt_urls(
+                text,
+                self.agent,
+                create=is_source_bearing_tool(item.tool_name),
+            ),
+            paired_url_step_ids={record.step_id},
         )[record.step_id]
 
         self.assertIn(
@@ -669,10 +734,19 @@ class LinkReferenceTests(TestCase):
                 self.agent,
                 create=is_source_bearing_tool(item.tool_name),
             ),
+            paired_url_rewriter=lambda text, item: pair_prompt_urls(
+                text,
+                self.agent,
+                create=is_source_bearing_tool(item.tool_name),
+            ),
+            paired_url_step_ids={record.step_id},
         )[record.step_id]
 
+        reference = PersistentAgentLinkReference.objects.get(agent=self.agent, url=url)
+        token = f"$[link:{reference.public_id}]"
         self.assertIn("FOCUS:", prompt_info.meta)
         self.assertIn("name: Alice", prompt_info.meta)
+        self.assertIn(f"{url} [link_ref: {token}]", prompt_info.meta)
         self.assertNotIn("CSV DATA", prompt_info.meta)
         self.assertNotIn("Archive note, routine", prompt_info.preview_text)
         self.assertNotIn("LINK OUTPUT", prompt_info.preview_text)
@@ -684,6 +758,8 @@ class LinkReferenceTests(TestCase):
         )[record.step_id]
         self.assertIn("FOCUS:", later_prompt_info.meta)
         self.assertIn("name: Alice", later_prompt_info.meta)
+        self.assertIn(token, later_prompt_info.meta)
+        self.assertNotIn(url, later_prompt_info.meta)
 
     def test_lookup_result_masks_url_parts_inside_escaped_json(self):
         raw_result = json.dumps({
@@ -762,7 +838,10 @@ class LinkReferenceTests(TestCase):
             recency_positions={derived_record.step_id: 0},
             fresh_tool_call_step_ids={derived_record.step_id},
             url_rewriter=lambda text, _item: rewrite_prompt_urls(text, self.agent, create=False),
+            paired_url_rewriter=lambda text, _item: pair_prompt_urls(text, self.agent, create=False),
+            paired_url_step_ids={derived_record.step_id},
         )[derived_record.step_id]
+        self.assertIn(deep_url, prompt_info.preview_text)
         self.assertIn(token, prompt_info.preview_text)
 
     def test_inbound_prompt_url_becomes_reference_and_raw_message_stays_inspectable(self):
@@ -797,28 +876,52 @@ class LinkReferenceTests(TestCase):
             )
 
         reference = PersistentAgentLinkReference.objects.get(agent=self.agent)
+        token = f"$[link:{reference.public_id}]"
         system_prompt = next(item["content"] for item in messages if item["role"] == "system")
         user_prompt = next(item["content"] for item in messages if item["role"] == "user")
-        self.assertIn(f"Compare Acme: $[link:{reference.public_id}]", user_prompt)
+        self.assertIn(f"Compare Acme: {url} [link_ref: {token}]", user_prompt)
         self.assertEqual(system_prompt.count("## Link References (CRITICAL)"), 1)
         self.assertNotIn("## Link References (CRITICAL)", user_prompt)
-        self.assertIn("one whole URL, not an ID/instruction", system_prompt)
-        self.assertIn("`https://host/a` != `https://host`", system_prompt)
-        self.assertIn("changes no action/tool", system_prompt)
-        self.assertIn("Open it as the whole `url`", system_prompt)
+        self.assertIn("the raw URL identifies that exact item", system_prompt)
+        self.assertIn("adjacent token is the only user-visible link or URL-tool destination", system_prompt)
+        self.assertIn("Keep pairs attached", system_prompt)
         self.assertIn("delivery resolves it only after call", system_prompt)
-        self.assertIn("Copy the source value character-for-character", system_prompt)
+        self.assertIn("Copy it character-for-character", system_prompt)
         self.assertIn("`[Atlas launch]($[link:LEXACT])`", system_prompt)
-        self.assertIn("Wrong: `[Atlas launch](https://host)`", system_prompt)
-        self.assertIn("if unavailable, omit the link", system_prompt)
-        self.assertIn("Never substitute a source name", system_prompt)
-        self.assertIn("never decode, edit", system_prompt)
+        self.assertIn("Wrong: `[Atlas launch](https://host/a)`", system_prompt)
+        self.assertIn("If missing, omit the link", system_prompt)
+        self.assertIn("Never reassign a token, derive a sibling URL", system_prompt)
         self.assertIn("An item lacking its token stays unlinked", system_prompt)
         self.assertIn("Never put tokens in SQL or search text", system_prompt)
         self.assertIn("A bare source name or `(source)`", system_prompt)
         self.assertIn("body must contain the exact tokens", system_prompt)
         message.refresh_from_db()
         self.assertEqual(message.body, f"Compare Acme: {url}")
+
+    def test_compacted_history_uses_registered_reference_without_raw_url(self):
+        url = "https://vendors.example.test/acme/history"
+        token = rewrite_prompt_urls(url, self.agent, create=True)
+        PersistentAgentCommsSnapshot.objects.create(
+            agent=self.agent,
+            snapshot_until=django_timezone.now(),
+            summary=f"Previously reviewed Acme at {url}",
+        )
+
+        with patch("api.agent.core.prompt_context.ensure_steps_compacted"), patch(
+            "api.agent.core.prompt_context.ensure_comms_compacted"
+        ), patch(
+            "api.agent.core.prompt_context.get_llm_config_with_failover",
+            return_value=[("endpoint", "openai/gpt-4o-mini", {})],
+        ):
+            messages, _, _ = build_prompt_context(
+                self.agent,
+                daily_credit_state={},
+                task_credit_available=Decimal("0"),
+            )
+
+        prompt = "\n".join(item["content"] for item in messages)
+        self.assertIn(f"Previously reviewed Acme at {token}", prompt)
+        self.assertNotIn(url, prompt)
 
     def test_prompt_reference_is_stable_across_renders(self):
         url = "https://profiles.example.test/avery?view=full#bio"

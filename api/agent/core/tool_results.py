@@ -53,7 +53,11 @@ BARBELL_TEXT_FORMATS = frozenset({"html", "markdown", "plain", "log"})
 _UUID_RESULT_ID_RE = re.compile(
     r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
 )
-_LINK_FIELD_RE = re.compile(r"\b([A-Za-z_][\w-]*(?:url|link|href))\s*([:=])\s*\$\[link:", re.IGNORECASE)
+_LINK_FIELD_RE = re.compile(
+    r"\b([A-Za-z_][\w-]*(?:url|link|href))\s*([:=])\s*"
+    r"(?:https?://\S+\s+\[link_ref:\s*)?\$\[link:",
+    re.IGNORECASE,
+)
 _URL_PART_FIELD_RE = re.compile(
     r"(\b[\w-]*(?:host|path|route|slug|public_identifier|profile_id)\s*[:=]\s*)([^|\n]*?\S)(?=\s*(?:\||\\n|$))",
     re.IGNORECASE,
@@ -149,6 +153,8 @@ def prepare_tool_results_for_prompt(
     fresh_tool_call_step_id: Optional[str] = None,
     fresh_tool_call_step_ids: Optional[Set[str]] = None,
     url_rewriter: Optional[Callable[[str, ToolCallResultRecord], str]] = None,
+    paired_url_rewriter: Optional[Callable[[str, ToolCallResultRecord], str]] = None,
+    paired_url_step_ids: Optional[Set[str]] = None,
 ) -> Dict[str, ToolResultPromptInfo]:
     prompt_info: Dict[str, ToolResultPromptInfo] = {}
     rows: List[Tuple] = []
@@ -156,6 +162,7 @@ def prepare_tool_results_for_prompt(
     fresh_step_ids = set(fresh_tool_call_step_ids or ())
     if fresh_tool_call_step_id:
         fresh_step_ids.add(fresh_tool_call_step_id)
+    paired_step_ids = set(paired_url_step_ids or ())
     short_id_map = _build_short_result_id_map(
         [
             record.step_id
@@ -225,11 +232,16 @@ def prepare_tool_results_for_prompt(
         has_focus = "\nFOCUS:\n" in (context_hint or "")
         if has_focus and not is_inline:
             preview_text = None
-        if url_rewriter:
+        active_url_rewriter = (
+            paired_url_rewriter
+            if paired_url_rewriter and record.step_id in paired_step_ids
+            else url_rewriter
+        )
+        if active_url_rewriter:
             if context_hint:
-                context_hint = url_rewriter(context_hint, record)
+                context_hint = active_url_rewriter(context_hint, record)
             if preview_text:
-                preview_text = url_rewriter(preview_text, record)
+                preview_text = active_url_rewriter(preview_text, record)
         if "$[link:" in f"{context_hint or ''}{preview_text or ''}":
             context_hint = _mark_missing_item_links(context_hint or "") or None
             preview_text = _mark_missing_item_links(preview_text or "")

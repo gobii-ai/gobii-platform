@@ -67,7 +67,7 @@ def _reference_map(agent, urls: Iterable[str], *, create: bool) -> dict[str, str
     return {ref.url: f"$[link:{ref.public_id}]" for ref in references if urls_by_hash.get(ref.url_hash) == ref.url}
 
 
-def rewrite_prompt_urls(text: str, agent, *, create: bool) -> str:
+def _render_prompt_urls(text: str, agent, *, create: bool, include_raw: bool) -> str:
     urls = extract_http_urls(text)
     if not urls:
         return text
@@ -79,9 +79,27 @@ def rewrite_prompt_urls(text: str, agent, *, create: bool) -> str:
 
     def replace(match: re.Match) -> str:
         url, suffix = _split_url_suffix(match.group())
-        return references.get(url, url) + suffix
+        reference = references.get(url)
+        if not reference:
+            return url + suffix
+        if not include_raw:
+            return reference + suffix
+        paired_suffix = f" [link_ref: {reference}]"
+        if text[match.end():].startswith(paired_suffix):
+            return match.group()
+        if match.start() >= 2 and text[match.start() - 2:match.start()] == "](" and suffix.startswith(")"):
+            return f"{url}){paired_suffix}{suffix[1:]}"
+        return f"{url}{paired_suffix}{suffix}"
 
     return _HTTP_URL_RE.sub(replace, text)
+
+
+def rewrite_prompt_urls(text: str, agent, *, create: bool) -> str:
+    return _render_prompt_urls(text, agent, create=create, include_raw=False)
+
+
+def pair_prompt_urls(text: str, agent, *, create: bool) -> str:
+    return _render_prompt_urls(text, agent, create=create, include_raw=True)
 
 
 def resolve_link_references(text: str, agent) -> str:
