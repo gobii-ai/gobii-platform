@@ -1,14 +1,20 @@
+import hashlib
 from datetime import timedelta
 from unittest.mock import patch
 
 from allauth.account.models import EmailAddress
 from django.contrib.auth import get_user_model
+from django.core.files.base import ContentFile
 from django.test import TestCase, tag
 from django.urls import reverse
 from django.utils import timezone
 from waffle.testutils import override_flag
 
-from api.agent.comms.outbound_delivery import deliver_agent_email
+from api.agent.comms.outbound_delivery import (
+    _claim_email_for_delivery,
+    _prepare_email_attachments,
+    deliver_agent_email,
+)
 from api.agent.tools.email_sender import execute_send_email
 from api.models import (
     AgentCollaborator,
@@ -23,6 +29,7 @@ from api.models import (
     PersistentAgent,
     PersistentAgentCommsEndpoint,
     PersistentAgentMessage,
+    PersistentAgentMessageAttachment,
     PersistentAgentUserActionEvent,
     UserPreference,
 )
@@ -40,6 +47,7 @@ from api.services.outbound_email_review import (
     retry_review,
     update_pending_review_message,
 )
+from api.services.persistent_agents import PersistentAgentProvisioningService
 from api.tasks.outbox import reconcile_approved_outbox_emails
 from console.outbox_api_views import serialize_outbox_review
 from constants.feature_flags import EMAIL_REVIEW_OUTBOX
@@ -93,6 +101,33 @@ class EmailReviewOutboxTests(TestCase):
             raw_payload={"subject": "Review me"},
         )
 
+    def _approved_message_with_attachment(self, content=b"approved attachment"):
+        recipient = "attachment-recipient@example.com"
+        CommsAllowlistEntry.objects.create(
+            agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address=recipient,
+            is_active=True,
+            allow_outbound=True,
+        )
+        message = self._message(recipient)
+        attachment = PersistentAgentMessageAttachment.objects.create(
+            message=message,
+            file=ContentFile(content, name="reviewed.txt"),
+            content_type="text/plain",
+            file_size=len(content),
+            filename="reviewed.txt",
+            content_sha256=hashlib.sha256(content).hexdigest(),
+        )
+        review = queue_message_for_review(message)
+        review.status = OutboundEmailReview.Status.APPROVED
+        review.approved_version = review.content_version
+        review.approved_content_hash = review.content_hash
+        review.save(update_fields=["status", "approved_version", "approved_content_hash"])
+        message.latest_status = DeliveryStatus.QUEUED
+        message.save(update_fields=["latest_status"])
+        return message, review, attachment
+
     @override_flag(EMAIL_REVIEW_OUTBOX, active=True)
     @patch("django.db.close_old_connections")
     @patch("api.agent.tools.email_sender.deliver_agent_email")
@@ -133,6 +168,38 @@ class EmailReviewOutboxTests(TestCase):
 
         self.assertEqual(result["status"], "ok")
         self.assertFalse(OutboundEmailReview.objects.exists())
+        deliver_mock.assert_called_once()
+
+    @override_flag(EMAIL_REVIEW_OUTBOX, active=True)
+    @patch("django.db.close_old_connections")
+    @patch("api.agent.tools.email_sender.deliver_agent_email")
+    def test_verified_alternate_owner_address_sends_without_allowlist_entry(self, deliver_mock, close_mock):
+        alternate_address = "alternate-owner@example.com"
+        EmailAddress.objects.create(
+            user=self.owner,
+            email=alternate_address,
+            verified=True,
+        )
+
+        result = execute_send_email(
+            self.agent,
+            {
+                "to_address": alternate_address,
+                "subject": "Internal alternate address",
+                "mobile_first_html": "<p>Hello owner</p>",
+                "will_continue_work": False,
+            },
+        )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertFalse(OutboundEmailReview.objects.exists())
+        self.assertFalse(
+            CommsAllowlistEntry.objects.filter(
+                agent=self.agent,
+                channel=CommsChannel.EMAIL,
+                address=alternate_address,
+            ).exists()
+        )
         deliver_mock.assert_called_once()
 
     @override_flag(EMAIL_REVIEW_OUTBOX, active=True)
@@ -286,6 +353,36 @@ class EmailReviewOutboxTests(TestCase):
         self.assertEqual(message.latest_status, DeliveryStatus.QUEUED)
         delay_mock.assert_called_once_with(str(review.id))
 
+    @override_flag(EMAIL_REVIEW_OUTBOX, active=True)
+    def test_low_level_delivery_denies_changed_attachment_blob(self):
+        message, review, attachment = self._approved_message_with_attachment()
+        with attachment.file.storage.open(attachment.file.name, "wb") as stored_file:
+            stored_file.write(b"tampered attachment")
+
+        deliver_agent_email(message)
+
+        message.refresh_from_db()
+        review.refresh_from_db()
+        self.assertEqual(message.latest_status, DeliveryStatus.FAILED)
+        self.assertEqual(message.latest_error_code, "outbox_attachment_invalid")
+        self.assertIn("changed after it was queued", message.latest_error_message)
+        self.assertFalse(OutboundMessageAttempt.objects.filter(message=message).exists())
+        self.assertFalse(serialize_outbox_review(review)["allowedActions"]["retry"])
+
+    @override_flag(EMAIL_REVIEW_OUTBOX, active=True)
+    def test_delivery_uses_attachment_bytes_verified_during_claim(self):
+        approved_content = b"approved attachment"
+        message, _, attachment = self._approved_message_with_attachment(approved_content)
+
+        self.assertTrue(_claim_email_for_delivery(message))
+        with attachment.file.storage.open(attachment.file.name, "wb") as stored_file:
+            stored_file.write(b"changed after claim")
+
+        prepared, _ = _prepare_email_attachments(message, "<p>Hello</p>")
+
+        self.assertEqual(len(prepared), 1)
+        self.assertEqual(prepared[0].content, approved_content)
+
     def test_editing_primary_recipient_rethreads_and_clears_reply_parent(self):
         message = self._message("first@example.com")
         message.parent = self._message("first@example.com")
@@ -347,6 +444,24 @@ class EmailReviewOutboxTests(TestCase):
             PersistentAgent.EmailSendingMode.REVIEW_NEW_CONTACTS,
         )
 
+    @override_flag(EMAIL_REVIEW_OUTBOX, active=False)
+    @patch("api.services.persistent_agents.AgentService.has_agents_available", return_value=True)
+    def test_agent_provisioned_before_outbox_rollout_dual_writes_legacy_mode(self, _has_capacity_mock):
+        result = PersistentAgentProvisioningService.provision(
+            user=self.owner,
+            name="Flag-off Outbox Agent",
+            charter="Preserve legacy email behavior.",
+        )
+
+        self.assertEqual(
+            result.agent.contact_approval_mode,
+            PersistentAgent.ContactApprovalMode.REQUIRE_APPROVAL,
+        )
+        self.assertEqual(
+            result.agent.email_sending_mode,
+            PersistentAgent.EmailSendingMode.REVIEW_NEW_CONTACTS,
+        )
+
     @override_flag(EMAIL_REVIEW_OUTBOX, active=True)
     def test_review_new_contacts_and_automatic_modes_classify_deterministically(self):
         CommsAllowlistEntry.objects.create(
@@ -404,6 +519,42 @@ class EmailReviewOutboxTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200, response.content.decode())
+        organization.refresh_from_db()
+        self.assertEqual(
+            organization.org_settings["minimum_email_sending_mode"],
+            PersistentAgent.EmailSendingMode.REVIEW_ALL_EXTERNAL,
+        )
+
+    def test_invalid_org_minimum_is_rejected_without_clearing_existing_minimum(self):
+        organization = Organization.objects.create(
+            name="Outbox invalid policy org",
+            slug="outbox-invalid-policy-org",
+            created_by=self.owner,
+            org_settings={
+                "default_email_sending_mode": PersistentAgent.EmailSendingMode.REVIEW_NEW_CONTACTS,
+                "minimum_email_sending_mode": PersistentAgent.EmailSendingMode.REVIEW_ALL_EXTERNAL,
+            },
+        )
+        OrganizationMembership.objects.create(
+            org=organization,
+            user=self.owner,
+            role=OrganizationMembership.OrgRole.OWNER,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        )
+        session = self.client.session
+        session["context_type"] = "organization"
+        session["context_id"] = str(organization.id)
+        session.save()
+        self.client.force_login(self.owner)
+
+        response = self.client.patch(
+            reverse("console_email_sending_policy"),
+            data={"minimumMode": "review_all_externl"},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400, response.content.decode())
+        self.assertEqual(response.json()["error"], "Invalid minimum email sending mode.")
         organization.refresh_from_db()
         self.assertEqual(
             organization.org_settings["minimum_email_sending_mode"],
