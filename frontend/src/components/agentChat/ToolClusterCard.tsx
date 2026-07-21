@@ -21,6 +21,7 @@ type ToolClusterCardProps = {
   suppressedThinkingCursor?: string | null
   statusExpansionTargets?: StatusExpansionTargets
   animateIncoming?: boolean
+  forceActive?: boolean
   onIncomingAnimationConsumed?: (cursor: string) => void
 }
 
@@ -30,6 +31,7 @@ export const ToolClusterCard = memo(function ToolClusterCard({
   suppressedThinkingCursor,
   statusExpansionTargets,
   animateIncoming = false,
+  forceActive = false,
   onIncomingAnimationConsumed,
 }: ToolClusterCardProps) {
   const scheduleTimeZone = useAppSelector(selectImmersiveShellViewer).timeZone
@@ -215,6 +217,7 @@ export const ToolClusterCard = memo(function ToolClusterCard({
                   cluster={segmentCluster}
                   isLatestEvent={isLatestEvent && segment.isTrailing}
                   animateIncoming={animateIncoming && segment.isTrailing}
+                  forceActive={forceActive && segment.isTrailing}
                   previewEntryLimit={segment.entries.length}
                   onOpenTimeline={handleToggleCluster}
                   onSelectEntry={handlePreviewEntrySelect}
