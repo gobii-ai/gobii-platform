@@ -99,6 +99,23 @@ class GoogleSheetsNativeScenarioTests(SimpleTestCase):
         self.assertIn("after a successful `batchUpdate`", instructions)
         self.assertIn("instead of doing extra readback verification", instructions)
 
+    def test_existing_format_mock_returns_one_reply_per_request(self):
+        case = next(
+            case
+            for case in GOOGLE_SHEETS_NATIVE_CASES
+            if case.slug == GOOGLE_SHEETS_NATIVE_FORMAT_EXISTING_IDEMPOTENT
+        )
+        batch_rule = next(
+            rule
+            for rule in case.mock_config()["http_request"]["rules"]
+            if ":batchUpdate" in str(rule.get("url_contains"))
+        )
+
+        self.assertEqual(
+            batch_rule["result"]["content"]["replies"],
+            [{}, {"repeatCell": {}}, {"autoResizeDimensions": {}}],
+        )
+
     def test_known_id_cases_allow_drive_preflight(self):
         known_id_cases = {
             case.slug: case

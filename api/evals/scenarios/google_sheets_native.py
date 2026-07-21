@@ -525,7 +525,10 @@ GOOGLE_SHEETS_NATIVE_CASES = (
                 **_method_equals("POST"),
                 "result": _http_result(
                     f"https://sheets.googleapis.com/v4/spreadsheets/{GENERIC_TRACKER_ID}:batchUpdate",
-                    {"spreadsheetId": GENERIC_TRACKER_ID, "replies": [{"repeatCell": {}}, {"autoResizeDimensions": {}}]},
+                    {
+                        "spreadsheetId": GENERIC_TRACKER_ID,
+                        "replies": [{}, {"repeatCell": {}}, {"autoResizeDimensions": {}}],
+                    },
                 ),
             },
         ),
