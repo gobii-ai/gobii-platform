@@ -324,6 +324,26 @@ export function SidebarSettingsMenu({
                 </a>
               )
             ) : null}
+            {canShowUsage && !canShowTaskCredits ? (
+              onOpenUsage ? (
+                <button
+                  type="button"
+                  className="sidebar-settings__link"
+                  onClick={() => {
+                    handleOpenChange(false)
+                    onOpenUsage()
+                  }}
+                >
+                  <ClipboardList className="sidebar-settings__link-icon" aria-hidden="true" />
+                  <span>Usage</span>
+                </button>
+              ) : (
+                <a className="sidebar-settings__link" href={usageUrl ?? undefined} target="_blank" rel="noreferrer">
+                  <ClipboardList className="sidebar-settings__link-icon" aria-hidden="true" />
+                  <span>Usage</span>
+                </a>
+              )
+            ) : null}
             {canShowSecrets ? (
               onOpenSecrets ? (
                 <button
