@@ -200,6 +200,7 @@ def get_send_email_tool() -> Dict[str, Any]:
                         "type": "string",
                         "description": (
                             "HTML body only; no <html>/<head>/<body>. Single-quoted attrs. "
+                            "Inline closing tags do not create whitespace: when prose continues after bold text, write '</strong> text', not '</strong>text'. "
                             "Reports/dashboards should style section headers, tables/cells, key numbers/statuses/changes with visible colors/badges/icons; use styled tables or metric blocks. "
                             "Tool-call/XML is literal. Inline images: attach file + <img src='cid:filename'>."
                         ),

@@ -21,6 +21,30 @@ class EmailBodyRenderingTestCase(TestCase):
         self.assertIn("Thanks", plaintext)
 
     @tag("batch_email_body")
+    def test_html_adds_missing_space_after_inline_bold_before_prose(self):
+        body = (
+            "<ul>"
+            "<li><strong>Three-person core team</strong>lean, experienced.</li>"
+            "<li><strong>NSA lineage</strong>Andrew's decade building infrastructure.</li>"
+            "</ul>"
+        )
+
+        html_snippet, plaintext = convert_body_to_html_and_plaintext(body)
+
+        self.assertIn("<strong>Three-person core team</strong> lean", html_snippet)
+        self.assertIn("<strong>NSA lineage</strong> Andrew's", html_snippet)
+        self.assertIn("NSA lineage Andrew's", plaintext)
+
+    @tag("batch_email_body")
+    def test_html_does_not_add_space_after_inline_bold_before_punctuation(self):
+        body = "<p><strong>Important</strong>: review this.</p>"
+
+        html_snippet, plaintext = convert_body_to_html_and_plaintext(body)
+
+        self.assertIn("<strong>Important</strong>: review this.", html_snippet)
+        self.assertIn("Important: review this.", plaintext)
+
+    @tag("batch_email_body")
     def test_html_table_followed_by_paragraph_does_not_gain_breaks(self):
         body = (
             "<div style='margin-bottom: 25px;'>\n"

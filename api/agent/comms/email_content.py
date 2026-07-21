@@ -102,6 +102,10 @@ INLINE_BOLD_UNDER_RE = re.compile(r"__(.+?)__")
 INLINE_ITALIC_STAR_RE = re.compile(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)")
 INLINE_ITALIC_UNDER_RE = re.compile(r"(?<!_)_(?!_)(.+?)(?<!_)_(?!_)")
 TABLE_CLOSE_RE = re.compile(r"</table>", re.IGNORECASE)
+INLINE_BOLD_WORD_JOIN_RE = re.compile(
+    r"(</(?:strong|b)\s*>)(?=[^\W_])",
+    re.IGNORECASE,
+)
 
 
 def _add_table_styles(html_content: str) -> str:
@@ -318,6 +322,11 @@ def _replace_horizontal_rules(html_content: str) -> str:
     return HR_RE.sub("<br /><br />", html_content)
 
 
+def _add_spacing_after_inline_bold(html_content: str) -> str:
+    """Keep adjacent prose from visually joining agent-authored bold text."""
+    return INLINE_BOLD_WORD_JOIN_RE.sub(r"\1 ", html_content)
+
+
 def convert_body_to_html_and_plaintext(body: str, *, emit_logs: bool = True) -> Tuple[str, str]:
     """Return (html_snippet, plaintext) derived from ``body``.
 
@@ -374,6 +383,7 @@ def convert_body_to_html_and_plaintext(body: str, *, emit_logs: bool = True) -> 
     if has_html and not has_markdown:
         html_snippet = _normalize_html_tag_line_indentation(normalized_body)
         html_snippet = _add_table_styles(html_snippet)
+        html_snippet = _add_spacing_after_inline_bold(html_snippet)
         plaintext = get_text(html_snippet, config).strip()
         _log(
             "Email content conversion complete. HTML length: %d, plaintext length: %d",
@@ -389,6 +399,7 @@ def convert_body_to_html_and_plaintext(body: str, *, emit_logs: bool = True) -> 
         html_snippet = _replace_horizontal_rules(repaired)
         html_snippet = _add_table_styles(html_snippet)
         html_snippet = _add_spacing_after_tables(html_snippet)
+        html_snippet = _add_spacing_after_inline_bold(html_snippet)
         plaintext = get_text(html_snippet, config).strip()
         _log(
             "Rich content processing complete. HTML length: %d, plaintext length: %d.",
