@@ -8,6 +8,10 @@ from api.models import (
     get_agent_contact_counts,
 )
 from util.subscription_helper import get_user_max_contacts_per_agent
+from api.services.outbound_email_policy import (
+    email_review_outbox_enabled,
+    get_effective_email_sending_mode,
+)
 
 
 class AutomaticContactAuthorizationError(Exception):
@@ -36,7 +40,14 @@ def authorize_email_contacts(agent: PersistentAgent, addresses) -> None:
     with transaction.atomic():
         # PostgreSQL cannot lock the nullable side of the organization outer join.
         locked_agent = PersistentAgent.objects.select_for_update().get(pk=agent.pk)
-        if locked_agent.contact_approval_mode != PersistentAgent.ContactApprovalMode.AUTO_APPROVE_EMAIL:
+        automatically_authorized = (
+            get_effective_email_sending_mode(locked_agent)
+            == PersistentAgent.EmailSendingMode.SEND_AUTOMATICALLY
+            if email_review_outbox_enabled()
+            else locked_agent.contact_approval_mode
+            == PersistentAgent.ContactApprovalMode.AUTO_APPROVE_EMAIL
+        )
+        if not automatically_authorized:
             raise AutomaticContactAuthorizationError(
                 "This agent requires approval before adding new email contacts."
             )

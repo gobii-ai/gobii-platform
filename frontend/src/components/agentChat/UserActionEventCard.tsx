@@ -1,5 +1,5 @@
 import { memo } from 'react'
-import { KeyRound, MessageSquareQuote, UserCheck, Users } from 'lucide-react'
+import { KeyRound, MailCheck, MessageSquareQuote, UserCheck, Users } from 'lucide-react'
 import type { UserActionEvent } from '../../types/agentChat'
 import { useRelativeTimestamp } from '../../hooks/useRelativeTimestamp'
 
@@ -20,6 +20,9 @@ function actionIcon(actionType: string) {
   }
   if (actionType.startsWith('contacts_')) {
     return actionType === 'contacts_approved' ? UserCheck : Users
+  }
+  if (actionType.startsWith('outbox_')) {
+    return MailCheck
   }
   return MessageSquareQuote
 }
@@ -67,6 +70,10 @@ const SUMMARY_COPY: Record<string, [verb: string, singular: string, plural?: str
   contacts_approved: ['approved', 'contact'],
   contacts_declined: ['declined', 'contact'],
   contacts_resolved: ['resolved', 'contact request'],
+  outbox_edited: ['edited', 'Outbox email'],
+  outbox_approved: ['approved', 'Outbox email'],
+  outbox_discarded: ['discarded', 'Outbox email'],
+  outbox_retried: ['retried', 'Outbox email'],
 }
 
 function buildActionSummary(event: UserActionEvent): string {
@@ -79,6 +86,12 @@ function buildActionSummary(event: UserActionEvent): string {
 }
 
 function buildTitle(event: UserActionEvent, viewerUserId?: number | null): string {
+  if (event.action.actionType === 'outbox_expired') {
+    return 'An Outbox email expired'
+  }
+  if (event.action.actionType === 'outbox_failed') {
+    return 'An approved email failed to send'
+  }
   const actor = actorLabel(event, viewerUserId)
   return `${actor} ${buildActionSummary(event)}`
 }
@@ -108,6 +121,18 @@ function buildActionDetail(event: UserActionEvent): string {
     const approvedPhrase = `${approvedCount} ${pluralize(approvedCount, 'contact')} ${pluralize(approvedCount, 'was', 'were')} approved`
     const declinedPhrase = `${declinedCount} ${pluralize(declinedCount, 'contact')} ${pluralize(declinedCount, 'was', 'were')} declined`
     detail = contactLabels ? `${contactLabels}.` : `${approvedPhrase} and ${declinedPhrase}.`
+  } else if (actionType === 'outbox_edited') {
+    detail = 'The exact version awaiting approval was updated.'
+  } else if (actionType === 'outbox_approved') {
+    detail = 'The reviewed version was approved and queued for delivery.'
+  } else if (actionType === 'outbox_discarded') {
+    detail = 'The email was discarded without being sent.'
+  } else if (actionType === 'outbox_expired') {
+    detail = 'The email was not sent and can no longer be approved.'
+  } else if (actionType === 'outbox_failed') {
+    detail = 'Delivery failed. A manager can retry the unchanged approved version from Outbox.'
+  } else if (actionType === 'outbox_retried') {
+    detail = 'The unchanged approved version was queued for another delivery attempt.'
   }
 
   if (skippedCount > 0 && detail) {

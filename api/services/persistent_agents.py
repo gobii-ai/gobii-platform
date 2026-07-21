@@ -21,6 +21,10 @@ from api.services.agent_planning import schedule_planning_timeout_processing
 from api.services.agent_schedules import create_default_onboarding_schedule
 from api.services.daily_credit_limits import calculate_default_daily_credit_limit, calculate_daily_credit_slider_bounds, get_tier_credit_multiplier
 from api.services.daily_credit_settings import get_daily_credit_settings_for_owner
+from api.services.outbound_email_policy import (
+    email_review_outbox_enabled,
+    get_workspace_default_email_sending_mode,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -135,6 +139,11 @@ class PersistentAgentProvisioningService:
                 preferred_llm_tier=computed_tier,
                 planning_state=resolved_planning_state,
             )
+            if email_review_outbox_enabled():
+                persistent_agent.email_sending_mode = get_workspace_default_email_sending_mode(
+                    user=user,
+                    organization=organization,
+                )
 
             if life_state:
                 persistent_agent.life_state = life_state

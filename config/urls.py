@@ -149,6 +149,15 @@ from console.discord_api import (
 )
 from console.usage_views import UsageSummaryAPIView, UsageBurnRateSnapshotAPIView, UsageTrendAPIView, UsageAgentLeaderboardAPIView, UsageAgentsAPIView
 from console.insight_views import AgentInsightsAPIView
+from console.outbox_api_views import (
+    EmailSendingPolicyAPIView,
+    OutboxApproveAPIView,
+    OutboxBulkDiscardAPIView,
+    OutboxDetailAPIView,
+    OutboxDiscardAPIView,
+    OutboxListAPIView,
+    OutboxRetryAPIView,
+)
 from console.legacy_redirects import LegacyConsoleRedirectView
 from console.views import (
     BillingPortalView,
@@ -310,6 +319,13 @@ urlpatterns = [
     path("console/agents/<uuid:pk>/avatar/", AgentAvatarProxyView.as_view(), name="agent_avatar"),
     path("public/agents/<uuid:pk>/avatar/thumb/", PublicAgentAvatarThumbnailView.as_view(), name="agent_avatar_public_thumbnail"),
     path("console/api/agents/roster/", AgentChatRosterAPIView.as_view(), name="console_agent_roster"),
+    path("console/api/outbox/", OutboxListAPIView.as_view(), name="console_outbox_list"),
+    path("console/api/outbox/bulk-discard/", OutboxBulkDiscardAPIView.as_view(), name="console_outbox_bulk_discard"),
+    path("console/api/outbox/<uuid:outbox_id>/", OutboxDetailAPIView.as_view(), name="console_outbox_detail"),
+    path("console/api/outbox/<uuid:outbox_id>/approve/", OutboxApproveAPIView.as_view(), name="console_outbox_approve"),
+    path("console/api/outbox/<uuid:outbox_id>/discard/", OutboxDiscardAPIView.as_view(), name="console_outbox_discard"),
+    path("console/api/outbox/<uuid:outbox_id>/retry/", OutboxRetryAPIView.as_view(), name="console_outbox_retry"),
+    path("console/api/email-sending-policy/", EmailSendingPolicyAPIView.as_view(), name="console_email_sending_policy"),
     path("console/api/agents/create/", AgentQuickCreateAPIView.as_view(), name="console_agent_quick_create"),
     path("console/api/agents/spawn-intent/", AgentSpawnIntentAPIView.as_view(), name="console_agent_spawn_intent"),
     path("console/api/agents/<uuid:agent_id>/timeline/", AgentTimelineAPIView.as_view(), name="console_agent_timeline"),

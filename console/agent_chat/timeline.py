@@ -11,6 +11,7 @@ from typing import Iterable, Literal, Sequence, Mapping
 
 import redis
 from django.conf import settings
+from django.core.exceptions import ObjectDoesNotExist
 from django.contrib.auth import get_user_model
 from django.contrib.humanize.templatetags.humanize import naturaltime
 from django.db.models import Q
@@ -560,6 +561,16 @@ def _serialize_message(
 
     body_html = _message_body_html(message, channel, attachments)
     subject = _message_subject(message, channel)
+    outbox_review = None
+    try:
+        review = message.outbound_email_review
+        outbox_review = {
+            "id": str(review.id),
+            "status": review.status,
+            "version": review.content_version,
+        }
+    except ObjectDoesNotExist:
+        pass
 
     return {
         "kind": "message",
@@ -588,6 +599,8 @@ def _serialize_message(
             "channelLabel": discord_channel_label or None,
             "webhookMeta": webhook_meta,
             "viewerFeedback": feedback_lookup.get(message.id) if feedback_lookup else None,
+            "deliveryStatus": message.latest_status,
+            "outboxReview": outbox_review,
         },
     }
 
@@ -813,6 +826,7 @@ def _messages_queryset(agent: PersistentAgent, direction: TimelineDirection, cur
             "conversation__peer_link",
             "peer_agent",
             "owner_agent",
+            "outbound_email_review",
         )
         .prefetch_related("attachments__filespace_node")
         .order_by("-timestamp", "-seq")

@@ -153,7 +153,19 @@ export const MessageEventCard = memo(function MessageEventCard({
   const liveRelativeLabel = useRelativeTimestamp(message.timestamp)
   const relativeLabel = liveRelativeLabel || message.relativeTimestamp || ''
   const status = message.status
-  const statusLabel = status === 'sending' ? 'Sending...' : status === 'failed' ? 'Failed to send' : null
+  const statusLabel = message.deliveryStatus === 'pending_approval'
+    ? message.outboxReview?.status === 'discarded'
+      ? 'Discarded from Outbox'
+      : message.outboxReview?.status === 'expired'
+        ? 'Outbox approval expired'
+        : 'Awaiting approval in Outbox'
+    : message.deliveryStatus === 'failed'
+      ? 'Failed to send'
+      : status === 'sending'
+        ? 'Sending...'
+        : status === 'failed'
+          ? 'Failed to send'
+          : null
   const metaLabel = statusLabel || relativeLabel || message.timestamp || ''
   const metaTitle = message.error || message.timestamp || undefined
   const webhookMeta = isWebhook ? message.webhookMeta : null
