@@ -835,10 +835,11 @@ class LinkReferenceTests(TestCase):
         self.assertEqual(first, second)
         self.assertRegex(first, r"^\$\[link:L[0123456789ABCDEFGHJKMNPQRSTVWXYZ]{16}\]$")
 
-    def test_system_prompt_does_not_duplicate_contextual_reference_rule(self):
+    def test_system_prompt_contains_one_canonical_reference_rule(self):
         prompt = _get_system_instruction(self.agent, is_first_run=False)
 
-        self.assertNotIn("$[link:L…]", prompt)
+        self.assertEqual(prompt.count("## Link References (CRITICAL)"), 1)
+        self.assertEqual(prompt.count("$[link:L…]"), 1)
         self.assertNotIn("LINK OUTPUT CONTRACT", prompt)
         self.assertIn("exact URL -> requested tool; custom-tool URLs -> runtime params, no prefetch", prompt)
         self.assertNotIn("Message delivery blocked", prompt)
