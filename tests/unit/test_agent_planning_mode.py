@@ -22,6 +22,7 @@ from api.models import (
     PersistentAgentCommsEndpoint,
     PersistentAgentConversation,
     PersistentAgentHumanInputRequest,
+    PersistentAgentSecret,
     build_web_agent_address,
     build_web_user_address,
 )
@@ -100,6 +101,7 @@ class PersistentAgentPlanningModeTests(TestCase):
 
         self.assertIn("end_planning", names)
         self.assertIn("request_human_input", names)
+        self.assertIn("secure_credentials_request", names)
         self.assertIn("search_tools", names)
         self.assertNotIn("spawn_web_task", names)
         self.assertIn("send_chat_message", names)
@@ -166,6 +168,36 @@ class PersistentAgentPlanningModeTests(TestCase):
             self.assertEqual(result["status"], "error")
             self.assertIn("planning mode", result["message"])
 
+    def test_planning_runtime_allows_secure_credential_requests(self):
+        self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
+        self.agent.save(update_fields=["planning_state", "updated_at"])
+
+        result, updated_tools = execute_runtime_tool_call(
+            self.agent,
+            tool_name="secure_credentials_request",
+            exec_params={
+                "credentials": [
+                    {
+                        "name": "Aimfox API Key",
+                        "description": "API key for managing Aimfox avatars.",
+                        "key": "aimfox_api_key",
+                        "secret_type": "credential",
+                        "domain_pattern": "aimfox.com",
+                    }
+                ]
+            },
+        )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertIsNone(updated_tools)
+        self.assertTrue(
+            PersistentAgentSecret.objects.filter(
+                agent=self.agent,
+                key="aimfox_api_key",
+                requested=True,
+            ).exists()
+        )
+
     def test_end_planning_replaces_charter_and_removes_planning_tool(self):
         self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
         self.agent.save(update_fields=["planning_state", "updated_at"])
@@ -201,6 +233,8 @@ class PersistentAgentPlanningModeTests(TestCase):
         self.assertNotIn("Start your response with a brief welcome message to Matt", prompt)
         self.assertIn("end_planning", prompt)
         self.assertIn("request_human_input", prompt)
+        self.assertIn("Credential values are never planning questions", prompt)
+        self.assertIn("secure_credentials_request directly", prompt)
         self.assertIn("For clear requests other than named integration setup/use", prompt)
         self.assertIn("before end_planning or asking how to connect, call search_tools(provider)", prompt)
         self.assertNotIn("spawn_agent", prompt)

@@ -359,6 +359,8 @@ class SecureCredentialsRequestToolTests(TestCase):
 
         self.assertEqual(tool_def["type"], "function")
         self.assertEqual(tool_def["function"]["name"], "secure_credentials_request")
+        self.assertIn("Never ask the user to paste", tool_def["function"]["description"])
+        self.assertIn("including in Planning Mode", tool_def["function"]["description"])
         self.assertIn("custom tool script", tool_def["function"]["description"])
         self.assertIn("os.environ", tool_def["function"]["description"])
         self.assertIn("ALWAYS set secret_type='env_var'", tool_def["function"]["description"])

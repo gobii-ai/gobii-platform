@@ -284,6 +284,7 @@ def get_send_chat_tool() -> Dict[str, Any]:
             "name": "send_chat_message",
             "description": (
                 "Send web chat for user-facing content. "
+                "Never ask a recipient to paste, send, or otherwise provide credential values; call secure_credentials_request and send only its secure entry URL. "
                 "Deep/exhaustive, large-batch, large implementation/deployment, or explicitly long work only: send scope + next checkpoint FIRST with will_continue_work=true, then one material milestone. "
                 "Do not use this to simulate or confirm an email/SMS delivery; if the user asked to email or text and the send_email/send_sms tool is available, call that tool instead. "
                 "No generic or internal progress."

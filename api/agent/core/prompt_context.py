@@ -1492,6 +1492,8 @@ def _render_prompt_context_once(
     important_group.section_text(
         "secrets_note",
         (
+            "Never ask anyone to paste, send, email, text, or otherwise provide passwords, API keys, tokens, secrets, MFA codes, or other credential values through messages or `request_human_input`; "
+            "call `secure_credentials_request` so they use the secure credential flow, including while Planning Mode is active. "
             "Request credentials only when you'll use them immediately: use domain-scoped credentials for `http_request`, "
             "login credentials for `spawn_web_task`, and `secret_type='env_var'` for custom tools, `python_exec`, `run_command`, "
             "or MCP servers that read secrets from `os.environ`."
@@ -3517,6 +3519,7 @@ def _get_planning_mode_prompt_block() -> str:
         "- Treat named local time zones such as ET as sufficiently clear; handle DST and UTC conversion as "
         "implementation details instead of asking the user.\n"
         "- Do not ask planning questions about communication channels, delivery methods, integrations, accounts, or implementation approach unless the user explicitly asks to configure or choose them. Keep the conversation focused on the user's need, scope, and desired outcome. If goal/source/cadence/output are clear, call end_planning and use current conversation/contact setup.\n"
+        "- Credential values are never planning questions. Never request passwords, API keys, tokens, secrets, MFA codes, or other credential values through request_human_input, chat, email, or SMS. Call secure_credentials_request directly; it is available in Planning Mode.\n"
         "- request_human_input for tracked blockers/resume; use options for decisions or uncertainty, free text only when choices would mislead. Send tools for ordinary questions/status/policy answers.\n"
         "- Once request_human_input succeeds, questions are visible in web chat. Do not repeat them; an optional chat message may only frame why you asked or reference pending questions.\n"
         "- Each planning question must be its own request item. If asking multiple questions, prefer one request_human_input call with the `requests` parameter, where each item contains exactly one question; top-level `question` is fine for one.\n"

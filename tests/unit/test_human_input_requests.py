@@ -299,6 +299,8 @@ class HumanInputRequestTests(TestCase):
         tool = get_request_human_input_tool()
         function = tool["function"]
         self.assertEqual(function["name"], "request_human_input")
+        self.assertIn("Never use this tool to request passwords", function["description"])
+        self.assertIn("secure_credentials_request", function["description"])
         self.assertNotIn("title", function["parameters"]["properties"])
         self.assertIn("options", function["parameters"]["properties"])
         self.assertIn("requests", function["parameters"]["properties"])
@@ -385,6 +387,93 @@ class HumanInputRequestTests(TestCase):
         self.assertEqual(result["status"], "ok")
         request_obj = PersistentAgentHumanInputRequest.objects.get(agent=self.agent)
         self.assertEqual(request_obj.input_mode, PersistentAgentHumanInputRequest.InputMode.FREE_TEXT_ONLY)
+
+    def test_execute_request_human_input_rejects_direct_credential_solicitation(self):
+        questions = [
+            "Can you paste your Aimfox API key here so I can start using it?",
+            "Can you send your API key?",
+            "Enter credentials here.",
+            "Please provide your password.",
+            "Please share your secret.",
+            "Reply with your access token.",
+            "What is your MFA code?",
+        ]
+
+        for question in questions:
+            with self.subTest(question=question):
+                result = execute_request_human_input(
+                    self.agent,
+                    {
+                        "question": question,
+                        "will_continue_work": False,
+                    },
+                )
+
+                self.assertEqual(result["status"], "error")
+                self.assertIn("secure_credentials_request", result["message"])
+
+        self.assertFalse(PersistentAgentHumanInputRequest.objects.filter(agent=self.agent).exists())
+
+    def test_execute_request_human_input_rejects_credential_solicitation_in_options(self):
+        result = execute_request_human_input(
+            self.agent,
+            {
+                "question": "How should we continue with the integration?",
+                "options": [
+                    {
+                        "title": "Paste your API key here",
+                        "description": "Provide the credential in your reply.",
+                    },
+                    {
+                        "title": "Pause",
+                        "description": "Wait until later.",
+                    },
+                ],
+                "will_continue_work": False,
+            },
+        )
+
+        self.assertEqual(result["status"], "error")
+        self.assertFalse(PersistentAgentHumanInputRequest.objects.filter(agent=self.agent).exists())
+
+    def test_execute_request_human_input_rejects_entire_batch_with_credential_solicitation(self):
+        result = execute_request_human_input(
+            self.agent,
+            {
+                "requests": [
+                    {
+                        "question": "Which workspace should I use?",
+                        "options": [],
+                    },
+                    {
+                        "question": "Email me your client secret so I can connect the account.",
+                        "options": [],
+                    },
+                ],
+                "will_continue_work": False,
+            },
+        )
+
+        self.assertEqual(result["status"], "error")
+        self.assertFalse(PersistentAgentHumanInputRequest.objects.filter(agent=self.agent).exists())
+
+    def test_execute_request_human_input_allows_safe_credential_policy_questions(self):
+        questions = [
+            "Should API keys always be collected through secure credential requests?",
+            "Never paste your API key here. Should I create a secure credential request?",
+        ]
+
+        for question in questions:
+            with self.subTest(question=question):
+                result = execute_request_human_input(
+                    self.agent,
+                    {
+                        "question": question,
+                        "options": [],
+                        "will_continue_work": False,
+                    },
+                )
+                self.assertEqual(result["status"], "ok")
 
     def test_execute_request_human_input_accepts_batch_missing_options_as_free_text_only(self):
         result = execute_request_human_input(

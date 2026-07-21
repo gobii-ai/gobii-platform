@@ -4,6 +4,7 @@ from typing import Any
 
 from api.agent.comms.human_input_requests import MAX_HUMAN_INPUT_QUESTION_LENGTH, MAX_OPTION_COUNT, create_human_input_request, create_human_input_requests_batch
 from api.models import CommsChannel, PersistentAgent
+from .credential_solicitation import CREDENTIAL_SOLICITATION_ERROR_MESSAGE, request_solicits_credential_value
 
 
 def _coerce_optional_bool(raw: Any) -> bool | None:
@@ -75,6 +76,7 @@ def get_request_human_input_tool() -> dict[str, Any]:
             "name": "request_human_input",
             "description": (
                 "Create tracked human input; it appears in web chat and does not send email/SMS. "
+                "Never use this tool to request passwords, API keys, tokens, secrets, MFA codes, or other credential values; use secure_credentials_request, including in Planning Mode. "
                 "Use options for concrete decisions; omit options for free-text-only blocking questions. "
                 "Use send_chat_message/send_email/send_sms/send_agent_message for non-blocking questions or capability/status/policy answers. "
                 "Include an Other / I'll explain option when choices are useful but not exhaustive. "
@@ -228,6 +230,12 @@ def execute_request_human_input(agent: PersistentAgent, params: dict[str, Any]) 
                 }
             )
 
+        if any(
+            request_solicits_credential_value(request["question"], request["options"])
+            for request in requests
+        ):
+            return {"status": "error", "message": CREDENTIAL_SOLICITATION_ERROR_MESSAGE}
+
         omitted_request_count = 0
         if agent.planning_state == PersistentAgent.PlanningState.PLANNING and len(requests) > 3:
             omitted_request_count = len(requests) - 3
@@ -254,6 +262,9 @@ def execute_request_human_input(agent: PersistentAgent, params: dict[str, Any]) 
     options, error = _normalize_request_options(params.get("options"))
     if error:
         return error
+
+    if request_solicits_credential_value(question, options):
+        return {"status": "error", "message": CREDENTIAL_SOLICITATION_ERROR_MESSAGE}
 
     if agent.planning_state != PersistentAgent.PlanningState.PLANNING and options and len(options) > 3:
         return {
