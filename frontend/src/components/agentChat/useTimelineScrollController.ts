@@ -35,6 +35,15 @@ function canScrollUp(container: HTMLElement): boolean {
   return canScroll(container) && container.scrollTop > 0
 }
 
+function isEditableTarget(target: EventTarget | null): boolean {
+  return target instanceof HTMLElement && (
+    target.isContentEditable
+    || target instanceof HTMLInputElement
+    || target instanceof HTMLTextAreaElement
+    || target instanceof HTMLSelectElement
+  )
+}
+
 type PrependAnchor = {
   element: HTMLElement | null
   offsetTop: number
@@ -63,8 +72,11 @@ export function useTimelineScrollController({
   const fetchOlderInFlightRef = useRef(false)
   const scrollFrameRef = useRef<number | null>(null)
   const acrossFramesRafRef = useRef<number | null>(null)
+  const contentLayoutGuardRafRef = useRef<number | null>(null)
   const followupScrollFramesRef = useRef(0)
   const programmaticScrollUntilRef = useRef(0)
+  const contentLayoutChangingRef = useRef(false)
+  const previousContentVersionRef = useRef(contentVersion)
   const prependAnchorRef = useRef<PrependAnchor | null>(null)
   const ignorePinUntilRef = useRef(0)
   const lastScrollTopRef = useRef(0)
@@ -127,6 +139,17 @@ export function useTimelineScrollController({
       window.cancelAnimationFrame(acrossFramesRafRef.current)
       acrossFramesRafRef.current = null
     }
+  }, [])
+
+  const guardContentLayoutChange = useCallback(() => {
+    contentLayoutChangingRef.current = true
+    if (contentLayoutGuardRafRef.current !== null) {
+      window.cancelAnimationFrame(contentLayoutGuardRafRef.current)
+    }
+    contentLayoutGuardRafRef.current = window.requestAnimationFrame(() => {
+      contentLayoutGuardRafRef.current = null
+      contentLayoutChangingRef.current = false
+    })
   }, [])
 
   const suspendAutoFollow = useCallback(() => {
@@ -297,6 +320,19 @@ export function useTimelineScrollController({
       pointerActiveRef.current = false
     }
 
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (isEditableTarget(event.target) || !canScrollUp(container)) {
+        return
+      }
+      const scrollsUp = event.key === 'ArrowUp'
+        || event.key === 'PageUp'
+        || event.key === 'Home'
+        || (event.key === ' ' && event.shiftKey)
+      if (scrollsUp) {
+        suspendAutoFollow()
+      }
+    }
+
     const handleScroll = () => {
       const previousScrollTop = lastScrollTopRef.current
       const nextScrollTop = container.scrollTop
@@ -324,7 +360,7 @@ export function useTimelineScrollController({
         return
       }
 
-      if (meaningfulScrollUp) {
+      if (meaningfulScrollUp && !contentLayoutChangingRef.current) {
         suspendAutoFollow()
       } else if (scrollingDown && distance <= NEAR_BOTTOM_PX) {
         setPinned(true)
@@ -351,6 +387,7 @@ export function useTimelineScrollController({
     container.addEventListener('touchcancel', handleTouchEnd, { passive: true })
     container.addEventListener('pointerdown', handlePointerDown, { passive: true })
     container.addEventListener('scroll', handleScroll, { passive: true })
+    window.addEventListener('keydown', handleKeyDown)
     window.addEventListener('pointerup', handlePointerEnd, { passive: true })
     window.addEventListener('pointercancel', handlePointerEnd, { passive: true })
     return () => {
@@ -361,6 +398,7 @@ export function useTimelineScrollController({
       container.removeEventListener('touchcancel', handleTouchEnd)
       container.removeEventListener('pointerdown', handlePointerDown)
       container.removeEventListener('scroll', handleScroll)
+      window.removeEventListener('keydown', handleKeyDown)
       window.removeEventListener('pointerup', handlePointerEnd)
       window.removeEventListener('pointercancel', handlePointerEnd)
     }
@@ -375,6 +413,16 @@ export function useTimelineScrollController({
     syncMeasurements,
     timelineNode,
   ])
+
+  useLayoutEffect(() => {
+    if (previousContentVersionRef.current === contentVersion) {
+      return
+    }
+    previousContentVersionRef.current = contentVersion
+    // React content replacement can move scrollTop without user input. Keep
+    // native scroll detection enabled again once the committed layout settles.
+    guardContentLayoutChange()
+  }, [contentVersion, guardContentLayoutChange])
 
   useLayoutEffect(() => {
     const anchor = prependAnchorRef.current
@@ -458,6 +506,7 @@ export function useTimelineScrollController({
     }
 
     const observer = new ResizeObserver(() => {
+      guardContentLayoutChange()
       syncMeasurements(container)
       updateComposerHeight()
       if (pinnedRef.current && !prependAnchorRef.current) {
@@ -477,7 +526,7 @@ export function useTimelineScrollController({
       document.documentElement.style.removeProperty('--composer-height')
       document.getElementById('jump-to-latest')?.style.removeProperty('--composer-height')
     }
-  }, [composerNode, contentNode, scrollToBottomAcrossFrames, syncMeasurements, timelineNode])
+  }, [composerNode, contentNode, guardContentLayoutChange, scrollToBottomAcrossFrames, syncMeasurements, timelineNode])
 
   useEffect(() => () => {
     if (scrollFrameRef.current !== null) {
@@ -486,6 +535,10 @@ export function useTimelineScrollController({
     if (acrossFramesRafRef.current !== null) {
       window.cancelAnimationFrame(acrossFramesRafRef.current)
     }
+    if (contentLayoutGuardRafRef.current !== null) {
+      window.cancelAnimationFrame(contentLayoutGuardRafRef.current)
+    }
+    contentLayoutChangingRef.current = false
     followupScrollFramesRef.current = 0
   }, [])
 

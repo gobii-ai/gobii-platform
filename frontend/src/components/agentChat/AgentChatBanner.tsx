@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
-import { Code2, CreditCard, EllipsisVertical, ListTodo, Settings, Share2, UserPlus, X, Zap } from 'lucide-react'
+import { Code2, CreditCard, EllipsisVertical, ListTodo, Mail, Phone, Settings, Share2, UserPlus, X, Zap } from 'lucide-react'
 import { Button, Dialog, DialogTrigger, Popover } from 'react-aria-components'
 
 import { ensureAuthenticated, selectSubscriptionState, subscriptionActions } from '../../store/subscriptionSlice'
@@ -32,6 +32,7 @@ type AgentChatBannerProps = {
   showPurchaseSeatsButton?: boolean
   onPurchaseSeats?: () => void
   onSettingsOpen?: () => void
+  onIdentitySettingsOpen?: () => void
   settingsDisabled?: boolean
   settingsDisabledReason?: string | null
   onBlockedSettingsClick?: (location: 'banner_desktop' | 'banner_mobile') => void
@@ -61,6 +62,7 @@ export const AgentChatBanner = memo(function AgentChatBanner({
   showPurchaseSeatsButton = false,
   onPurchaseSeats,
   onSettingsOpen,
+  onIdentitySettingsOpen,
   settingsDisabled = false,
   settingsDisabledReason = null,
   onBlockedSettingsClick,
@@ -85,6 +87,8 @@ export const AgentChatBanner = memo(function AgentChatBanner({
   const agentName = agentNameOverride ?? activeSession.identity.agentName
   const agentAvatarUrl = activeSession.identity.agentAvatarUrl
   const agentMiniDescription = activeSession.identity.agentMiniDescription
+  const agentEmail = activeSession.identity.agentEmail?.trim() || ''
+  const agentSms = activeSession.identity.agentSms?.trim() || ''
   const isOrgOwned = activeSession.identity.agentIsOrgOwned
   const canManageAgent = activeSession.identity.canManageAgent
   const isCollaborator = activeSession.identity.isCollaborator
@@ -181,6 +185,7 @@ export const AgentChatBanner = memo(function AgentChatBanner({
   const hardLimitReached = Boolean(dailyCreditsStatus?.hardLimitReached || dailyCreditsStatus?.hardLimitBlocked)
   const softTargetExceeded = Boolean(dailyCreditsStatus?.softTargetExceeded)
   const showSettingsButton = canShowBannerActions && Boolean(onSettingsOpen)
+  const showIdentitySettingsButton = Boolean(onIdentitySettingsOpen)
   const showShareButton = canShowBannerActions && Boolean(onShare)
   const showPublicShareButton = canShowBannerActions && Boolean(onPublicShare)
   const showAttentionDot = softTargetExceeded || hardLimitReached
@@ -196,6 +201,7 @@ export const AgentChatBanner = memo(function AgentChatBanner({
   const trackableShareDisabled = shareDisabled && Boolean(onBlockedShareClick)
   const trackableSettingsDisabled = settingsDisabled && Boolean(onBlockedSettingsClick)
   const previewAnalyticsEnabled = signupPreviewState !== 'none'
+  const identitySettingsDisabled = settingsDisabled && !trackableSettingsDisabled
 
   const handleShareClick = useCallback((location: 'banner_desktop' | 'banner_mobile') => {
     if (shareDisabled && onBlockedShareClick) {
@@ -220,6 +226,14 @@ export const AgentChatBanner = memo(function AgentChatBanner({
     onSettingsOpen?.()
   }, [onBlockedSettingsClick, onSettingsOpen, settingsDisabled])
 
+  const handleIdentitySettingsClick = useCallback(() => {
+    if (settingsDisabled && onBlockedSettingsClick) {
+      onBlockedSettingsClick('banner_desktop')
+      return
+    }
+    onIdentitySettingsOpen?.()
+  }, [onBlockedSettingsClick, onIdentitySettingsOpen, settingsDisabled])
+
   const handleCloseClick = useCallback(() => {
     if (previewAnalyticsEnabled) {
       track(AnalyticsEvent.SIGNUP_PREVIEW_CLOSED, {
@@ -240,16 +254,73 @@ export const AgentChatBanner = memo(function AgentChatBanner({
       >
         {/* Left: Avatar + Info */}
         <div className="banner-left">
-          <AgentChatAvatar
-            name={trimmedName}
-            avatarUrl={agentAvatarUrl}
-            className="banner-avatar"
-            imageClassName="banner-avatar-image"
-            textClassName="banner-avatar-text"
-          />
+          {showIdentitySettingsButton ? (
+            <button
+              type="button"
+              className="banner-identity-button banner-avatar-button"
+              onClick={handleIdentitySettingsClick}
+              disabled={identitySettingsDisabled}
+              aria-disabled={settingsDisabled ? 'true' : undefined}
+              aria-label={resolvedSettingsLabel}
+              title={resolvedSettingsLabel}
+            >
+              <AgentChatAvatar
+                name={trimmedName}
+                avatarUrl={agentAvatarUrl}
+                className="banner-avatar"
+                imageClassName="banner-avatar-image"
+                textClassName="banner-avatar-text"
+              />
+            </button>
+          ) : (
+            <AgentChatAvatar
+              name={trimmedName}
+              avatarUrl={agentAvatarUrl}
+              className="banner-avatar"
+              imageClassName="banner-avatar-image"
+              textClassName="banner-avatar-text"
+            />
+          )}
           <div className="banner-info">
             <div className="banner-top-row">
-              <span className="banner-name">{trimmedName}</span>
+              {showIdentitySettingsButton ? (
+                <button
+                  type="button"
+                  className="banner-identity-button banner-name-button"
+                  onClick={handleIdentitySettingsClick}
+                  disabled={identitySettingsDisabled}
+                  aria-disabled={settingsDisabled ? 'true' : undefined}
+                  title={resolvedSettingsLabel}
+                >
+                  <span className="banner-name">{trimmedName}</span>
+                </button>
+              ) : (
+                <span className="banner-name">{trimmedName}</span>
+              )}
+              {agentEmail || agentSms ? (
+                <span className="banner-contact-links">
+                  {agentEmail ? (
+                    <a
+                      className="banner-contact-link"
+                      href={`mailto:${agentEmail}`}
+                      aria-label={`Email ${trimmedName} at ${agentEmail}`}
+                      title={agentEmail}
+                    >
+                      <Mail size={13} strokeWidth={2} aria-hidden="true" />
+                    </a>
+                  ) : null}
+                  {agentSms ? (
+                    <a
+                      className="banner-contact-link"
+                      href={`sms:${agentSms}`}
+                      aria-label={`Text ${trimmedName} at ${agentSms}`}
+                      title={agentSms}
+                    >
+                      <Phone size={13} strokeWidth={2} aria-hidden="true" />
+                    </a>
+                  ) : null}
+                </span>
+              ) : null}
             </div>
             {hasPlan && currentTask ? (
               <div className={`banner-task ${animate ? 'banner-task--animate' : ''}`}>

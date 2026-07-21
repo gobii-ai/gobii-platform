@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
-import { BarChart3, Bell, Building2, ChevronDown, CircleHelp, ClipboardList, CreditCard, KeyRound, LockKeyhole, ServerCog, Settings, User, UserRound } from 'lucide-react'
+import { Bell, Building2, ChevronDown, CircleHelp, ClipboardList, CreditCard, KeyRound, LockKeyhole, ServerCog, Settings, User, UserRound } from 'lucide-react'
 import { Button, Dialog, Popover } from 'react-aria-components'
 
 import type { ConsoleContext } from '../../api/context'
@@ -324,7 +324,7 @@ export function SidebarSettingsMenu({
                 </a>
               )
             ) : null}
-            {canShowUsage ? (
+            {canShowUsage && !canShowTaskCredits ? (
               onOpenUsage ? (
                 <button
                   type="button"
@@ -334,12 +334,12 @@ export function SidebarSettingsMenu({
                     onOpenUsage()
                   }}
                 >
-                  <BarChart3 className="sidebar-settings__link-icon" aria-hidden="true" />
+                  <ClipboardList className="sidebar-settings__link-icon" aria-hidden="true" />
                   <span>Usage</span>
                 </button>
               ) : (
                 <a className="sidebar-settings__link" href={usageUrl ?? undefined} target="_blank" rel="noreferrer">
-                  <BarChart3 className="sidebar-settings__link-icon" aria-hidden="true" />
+                  <ClipboardList className="sidebar-settings__link-icon" aria-hidden="true" />
                   <span>Usage</span>
                 </a>
               )
@@ -426,20 +426,46 @@ export function SidebarSettingsMenu({
                 />
               </button>
               {creditsOpen ? (
-                <dl className="sidebar-settings__credits-list">
-                  <div className="sidebar-settings__credits-row">
-                    <dt>Used Today</dt>
-                    <dd>{formatCreditValue(taskCredits?.usedToday)}</dd>
-                  </div>
-                  <div className="sidebar-settings__credits-row">
-                    <dt>Remaining This Month</dt>
-                    <dd>{remainingLabel}</dd>
-                  </div>
-                  <div className="sidebar-settings__credits-row">
-                    <dt>Resets On</dt>
-                    <dd>{formatDateValue(taskCredits?.resetOn)}</dd>
-                  </div>
-                </dl>
+                <div className="sidebar-settings__credits-details">
+                  <dl className="sidebar-settings__credits-list">
+                    <div className="sidebar-settings__credits-row">
+                      <dt>Used Today</dt>
+                      <dd>{formatCreditValue(taskCredits?.usedToday)}</dd>
+                    </div>
+                    <div className="sidebar-settings__credits-row">
+                      <dt>Remaining This Month</dt>
+                      <dd>{remainingLabel}</dd>
+                    </div>
+                    <div className="sidebar-settings__credits-row">
+                      <dt>Resets On</dt>
+                      <dd>{formatDateValue(taskCredits?.resetOn)}</dd>
+                    </div>
+                  </dl>
+                  {canShowUsage ? (
+                    onOpenUsage ? (
+                      <button
+                        type="button"
+                        className="sidebar-settings__credits-view"
+                        onClick={() => {
+                          handleOpenChange(false)
+                          onOpenUsage()
+                        }}
+                      >
+                        View
+                      </button>
+                    ) : (
+                      <a
+                        className="sidebar-settings__credits-view"
+                        href={usageUrl ?? undefined}
+                        target="_blank"
+                        rel="noreferrer"
+                        onClick={() => handleOpenChange(false)}
+                      >
+                        View
+                      </a>
+                    )
+                  ) : null}
+                </div>
               ) : null}
             </div>
           ) : null}

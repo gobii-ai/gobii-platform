@@ -638,6 +638,34 @@
     min-width: 0;
     flex: 1;
 }
+.banner-identity-button {
+    display: inline-flex;
+    min-width: 0;
+    align-items: center;
+    padding: 0;
+    border: 0;
+    border-radius: 0.375rem;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+.banner-identity-button:focus-visible,
+.banner-contact-link:focus-visible {
+    outline: 2px solid rgba(99, 102, 241, 0.55);
+    outline-offset: 2px;
+}
+.banner-identity-button:disabled {
+    cursor: default;
+}
+.banner-avatar-button {
+    flex: 0 0 auto;
+    border-radius: 999px;
+}
+.banner-avatar-button:not(:disabled):hover .banner-avatar {
+    box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.28);
+}
 .banner-avatar {
     width: 2.25rem;
     height: 2.25rem;
@@ -667,7 +695,34 @@
 .banner-top-row {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: 0.375rem;
+    min-width: 0;
+}
+.banner-name-button {
+    overflow: hidden;
+}
+.banner-name-button:not(:disabled):hover .banner-name {
+    color: #4f46e5;
+}
+.banner-contact-links {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 0.125rem;
+}
+.banner-contact-link {
+    display: inline-flex;
+    width: 1.25rem;
+    height: 1.25rem;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    color: #75678f;
+    transition: color 0.15s ease, background-color 0.15s ease;
+}
+.banner-contact-link:hover {
+    background: rgba(99, 102, 241, 0.1);
+    color: #4f46e5;
 }
 .banner-overflow-popover {
     z-index: 50;
@@ -894,10 +949,15 @@
     display: none;
 }
 .banner-name {
+    display: block;
+    overflow: hidden;
     font-size: 0.875rem;
     font-weight: 600;
     color: #1e1145;
     line-height: 1.25;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    transition: color 0.15s ease;
 }
 .banner-mini-description {
     display: block;
@@ -3883,9 +3943,6 @@
     outline: 2px solid rgba(37, 99, 235, 0.4);
     outline-offset: 1px;
 }
-.tool-cluster-live-preview__entry[data-new="true"] {
-    animation: tool-cluster-live-new-entry 0.8s ease-out;
-}
 .tool-cluster-live-preview__entry[data-active="true"] {
     border-color: rgba(14, 116, 144, 0.32);
     background: rgba(224, 242, 254, 0.88);
@@ -4850,16 +4907,6 @@
         box-shadow: inset 0 0 0 1px rgba(14, 116, 144, 0.2);
     }
 }
-@keyframes tool-cluster-live-new-entry {
-    0% {
-        transform: translateY(5px);
-        opacity: 0.4;
-    }
-    100% {
-        transform: translateY(0);
-        opacity: 1;
-    }
-}
 @keyframes tool-chip-spin {
     to {
         transform: rotate(360deg);
@@ -4911,7 +4958,6 @@
         transition: none;
     }
     .tool-cluster-live-preview__entry[data-active="true"],
-    .tool-cluster-live-preview__entry[data-new="true"],
     .tool-chip-spinner {
         animation: none;
     }
@@ -7177,7 +7223,7 @@
     flex-direction: column;
     gap: 0.35rem;
     margin: 0.2rem 0 0;
-    padding: 0.25rem 0.5rem 0.45rem;
+    padding: 0.25rem 0.5rem 0;
 }
 .sidebar-settings__credits-row {
     display: flex;
@@ -7198,6 +7244,32 @@
     flex-shrink: 0;
     color: #ffffff;
     font-weight: 750;
+}
+.sidebar-settings__credits-view {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: calc(100% - 1rem);
+    min-height: 1.9rem;
+    margin: 0.55rem 0.5rem 0.45rem;
+    border: 1px solid rgba(221, 214, 254, 0.2);
+    border-radius: 0.45rem;
+    background: rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.9);
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-decoration: none;
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.sidebar-settings__credits-view:hover {
+    border-color: rgba(221, 214, 254, 0.32);
+    background: rgba(255, 255, 255, 0.13);
+    color: #ffffff;
+}
+.sidebar-settings__credits-view:focus-visible {
+    outline: 2px solid rgba(221, 214, 254, 0.36);
+    outline-offset: 1px;
 }
 .chat-sidebar--collapsed .chat-sidebar-section {
     overflow: visible;

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { ExternalLink, Search, ShieldCheck, Wand2 } from 'lucide-react'
 import { selectActiveChatSession } from '../../store/chatSlice'
@@ -1081,9 +1081,6 @@ export function ToolClusterLivePreview({
   const reduceMotion = useReducedMotion()
   const shouldAnimateIncoming = !reduceMotion && animateIncoming
   const processingActive = useAppSelector(selectActiveChatSession).processing.processingActive
-  const [newEntryIds, setNewEntryIds] = useState<string[]>([])
-  const previousEntryIdsRef = useRef<string[] | null>(null)
-  const newEntryTimeoutRef = useRef<number | null>(null)
   const previewableEntries = useMemo(
     () => cluster.entries.filter((entry) => !entry.separateFromPreview),
     [cluster.entries],
@@ -1105,10 +1102,6 @@ export function ToolClusterLivePreview({
     [previewEntryLimit, previewableEntries],
   )
 
-  const pendingCount = useMemo(
-    () => previewableEntries.filter((entry) => entry.status === 'pending' || entry.toolName === 'thinking').length,
-    [previewableEntries],
-  )
   const hasActiveProcessing = forceActive || (processingActive && isLatestEvent)
   const activePreviewEntry = useMemo<PreviewEntry | null>(() => {
     const reversedEntries = [...previewEntries].reverse()
@@ -1117,26 +1110,6 @@ export function ToolClusterLivePreview({
   }, [forceActive, previewEntries])
   const previewState = derivePreviewState(activePreviewEntry?.entry ?? null, hasActiveProcessing)
   const activeEntryId = activePreviewEntry?.entry.id ?? null
-  const newEntryIdSet = useMemo(() => new Set(newEntryIds), [newEntryIds])
-
-  useEffect(() => {
-    const currentEntryIds = previewableEntries.map((entry) => entry.id)
-    const previousEntryIds = previousEntryIdsRef.current
-    if (previousEntryIds === null) {
-      previousEntryIdsRef.current = currentEntryIds
-      if (animateIncoming) {
-        setNewEntryIds(currentEntryIds.slice(-previewEntryLimit))
-      }
-      return
-    }
-
-    const addedEntryIds = currentEntryIds.filter((id) => !previousEntryIds.includes(id))
-    if (animateIncoming && (addedEntryIds.length > 0 || (pendingCount > 0 && hasActiveProcessing))) {
-      setNewEntryIds((addedEntryIds.length ? addedEntryIds : currentEntryIds).slice(-previewEntryLimit))
-    }
-
-    previousEntryIdsRef.current = currentEntryIds
-  }, [animateIncoming, hasActiveProcessing, pendingCount, previewEntryLimit, previewableEntries])
 
   useEffect(() => {
     if (!animateIncoming) {
@@ -1151,24 +1124,6 @@ export function ToolClusterLivePreview({
     }
   }, [animateIncoming, cluster.cursor, onIncomingAnimationConsumed])
 
-  useEffect(() => {
-    if (newEntryIds.length === 0) {
-      return
-    }
-    if (newEntryTimeoutRef.current !== null) {
-      window.clearTimeout(newEntryTimeoutRef.current)
-    }
-    newEntryTimeoutRef.current = window.setTimeout(() => {
-      setNewEntryIds([])
-      newEntryTimeoutRef.current = null
-    }, 500)
-    return () => {
-      if (newEntryTimeoutRef.current !== null) {
-        window.clearTimeout(newEntryTimeoutRef.current)
-        newEntryTimeoutRef.current = null
-      }
-    }
-  }, [newEntryIds])
   const hiddenEntryCount = Math.max(previewableEntries.length - previewEntries.length, 0)
 
   if (!previewEntries.length) {
@@ -1201,7 +1156,6 @@ export function ToolClusterLivePreview({
             const { entry, visual } = item
             const isActive = entry.id === activeEntryId
             const isHighlighted = isActive && previewState === 'active'
-            const isNew = newEntryIdSet.has(entry.id)
             const showSearchSweep = !reduceMotion && isHighlighted && item.activity.kind === 'search'
             const detailText = item.activity.detail
             const liveThinkingText = forceActive && item.activity.kind === 'thinking' && typeof entry.result === 'string'
@@ -1322,7 +1276,6 @@ export function ToolClusterLivePreview({
                 data-kind={item.activity.kind}
                 data-has-results={searchItems.length > 0 ? 'true' : 'false'}
                 data-has-tools={hasCapabilityCards ? 'true' : 'false'}
-                data-new={isNew ? 'true' : 'false'}
                 data-profile-card={linkedInProfile ? 'true' : 'false'}
                 data-live-thinking={liveThinkingText ? 'true' : 'false'}
                 role="button"
