@@ -63,11 +63,10 @@ def get_secure_credentials_request_tool() -> dict:
         "function": {
             "name": "secure_credentials_request",
             "description": (
-                "Request credentials only for immediate http_request/API, spawn_web_task login, or sandbox-code use. Do not use for MCP OAuth; call the MCP tool and surface its auth link. "
-                "Never ask the user to paste, send, email, text, or otherwise provide a credential value through an ordinary message or request_human_input; use this tool, including in Planning Mode. "
+                "Planning-safe credential collection for immediate use; never request values through messages or request_human_input. For MCP OAuth, call its tool and surface the auth link. "
                 "Use secret_type='credential' with domain_pattern for website placeholders. "
                 "If a custom tool script, python_exec, run_command, or MCP server reads os.environ, ALWAYS set secret_type='env_var' and omit domain_pattern. "
-                "Broad domains are usually better, e.g. *.google.com. Send the returned credential-entry/update URL to the user."
+                "Prefer broad domains, e.g. *.google.com. Send the returned secure-entry URL."
             ),
             "parameters": {
                 "type": "object",

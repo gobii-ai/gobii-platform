@@ -47,10 +47,7 @@ def get_send_sms_tool() -> Dict[str, Any]:
         "type": "function",
         "function": {
             "name": "send_sms",
-            "description": (
-                "Sends an SMS message to a recipient or group. "
-                "Never ask a recipient to text, paste, send, or otherwise provide credential values; call secure_credentials_request and send only its secure entry URL."
-            ),
+            "description": "Sends an SMS message to a recipient or group.",
             "parameters": {
                 "type": "object",
                 "properties": {

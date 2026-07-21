@@ -299,7 +299,7 @@ class HumanInputRequestTests(TestCase):
         tool = get_request_human_input_tool()
         function = tool["function"]
         self.assertEqual(function["name"], "request_human_input")
-        self.assertIn("Never use this tool to request passwords", function["description"])
+        self.assertIn("non-credential", function["description"])
         self.assertIn("secure_credentials_request", function["description"])
         self.assertNotIn("title", function["parameters"]["properties"])
         self.assertIn("options", function["parameters"]["properties"])
@@ -392,9 +392,15 @@ class HumanInputRequestTests(TestCase):
         questions = [
             "Can you paste your Aimfox API key here so I can start using it?",
             "Can you send your API key?",
+            "Could I have your API key?",
+            "Don't email me, paste your API key here.",
+            "Drop your password here.",
             "Enter credentials here.",
+            "Put your MFA code here.",
             "Please provide your password.",
             "Please share your secret.",
+            "Never paste your API key and send your access token instead.",
+            "Supply the access token.",
             "Reply with your access token.",
             "What is your MFA code?",
         ]
@@ -459,8 +465,12 @@ class HumanInputRequestTests(TestCase):
 
     def test_execute_request_human_input_allows_safe_credential_policy_questions(self):
         questions = [
+            "Can you provide documentation for API key rotation?",
+            "Please provide the API key name, not its value.",
             "Should API keys always be collected through secure credential requests?",
             "Never paste your API key here. Should I create a secure credential request?",
+            "Should I send you a credential request for the API key?",
+            "Should I send you a secure credential request for the API key?",
         ]
 
         for question in questions:

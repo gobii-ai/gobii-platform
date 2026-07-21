@@ -75,8 +75,8 @@ def get_request_human_input_tool() -> dict[str, Any]:
         "function": {
             "name": "request_human_input",
             "description": (
-                "Create tracked human input; it appears in web chat and does not send email/SMS. "
-                "Never use this tool to request passwords, API keys, tokens, secrets, MFA codes, or other credential values; use secure_credentials_request, including in Planning Mode. "
+                "Create tracked non-credential web-chat input; no email/SMS. "
+                "Use secure_credentials_request for credentials. "
                 "Use options for concrete decisions; omit options for free-text-only blocking questions. "
                 "Use send_chat_message/send_email/send_sms/send_agent_message for non-blocking questions or capability/status/policy answers. "
                 "Include an Other / I'll explain option when choices are useful but not exhaustive. "

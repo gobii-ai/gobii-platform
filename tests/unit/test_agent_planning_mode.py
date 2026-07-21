@@ -233,8 +233,10 @@ class PersistentAgentPlanningModeTests(TestCase):
         self.assertNotIn("Start your response with a brief welcome message to Matt", prompt)
         self.assertIn("end_planning", prompt)
         self.assertIn("request_human_input", prompt)
-        self.assertIn("Credential values are never planning questions", prompt)
-        self.assertIn("secure_credentials_request directly", prompt)
+        self.assertIn(
+            "use secure_credentials_request for credentials, including in Planning Mode",
+            prompt,
+        )
         self.assertIn("For clear requests other than named integration setup/use", prompt)
         self.assertIn("before end_planning or asking how to connect, call search_tools(provider)", prompt)
         self.assertNotIn("spawn_agent", prompt)

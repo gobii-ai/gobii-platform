@@ -173,7 +173,6 @@ def get_send_email_tool() -> Dict[str, Any]:
         "function": {
             "name": "send_email",
             "description": (
-                "Never ask a recipient to email, paste, send, or otherwise provide credential values; call secure_credentials_request and send only its secure entry URL. "
                 "Body-only HTML: omit <html>/<head>/<body>, Markdown, and em/en/double dashes. "
                 "No <style> blocks/classes; inline CSS only. "
                 "Report emails need distinct styled sections/tables and highlighted values, plus a tasteful icon marker and obvious inline-styled badge for key status/value. Never leave metrics in plain lists or use Markdown pipe tables."
