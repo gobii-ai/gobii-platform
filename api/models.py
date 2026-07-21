@@ -10684,6 +10684,34 @@ class PersistentAgentSmsEndpoint(models.Model):
         return f"SmsEndpoint<{self.endpoint.address}>"
 
 
+LINK_REFERENCE_PUBLIC_ID_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+
+
+def generate_link_reference_public_id() -> str:
+    value = secrets.randbits(80)
+    encoded = []
+    for _ in range(16):
+        value, index = divmod(value, len(LINK_REFERENCE_PUBLIC_ID_ALPHABET))
+        encoded.append(LINK_REFERENCE_PUBLIC_ID_ALPHABET[index])
+    return f"L{''.join(reversed(encoded))}"
+
+
+class PersistentAgentLinkReference(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    public_id = models.CharField(max_length=17, unique=True, default=generate_link_reference_public_id, editable=False)
+    agent = models.ForeignKey("PersistentAgent", on_delete=models.CASCADE, related_name="link_references")
+    url = models.TextField()
+    url_hash = models.CharField(max_length=64, editable=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["agent", "url_hash"], name="unique_agent_link_url_hash")]
+
+    def save(self, *args, **kwargs):
+        self.url_hash = hashlib.sha256(self.url.encode("utf-8")).hexdigest()
+        return super().save(*args, **kwargs)
+
+
 class PersistentAgentConversation(models.Model):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)

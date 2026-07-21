@@ -32,6 +32,7 @@ from api.evals.scenarios.effort_calibration import (
     _find_near_duplicate_texts,
     _hierarchical_report_shape,
     _question_count,
+    _sqlite_call_persists_resume_state,
     _sqlite_result_text_reads,
     _web_query_value,
 )
@@ -83,6 +84,22 @@ def _eval_tool_call(tool_name, tool_params=None, *, step=None, result='{"status"
         status="complete",
         result=result,
     )
+
+
+@tag("eval_sim")
+class ResumeStateHeuristicTests(SimpleTestCase):
+    def test_patch_text_cursor_with_pending_count_is_persisted_resume_state(self):
+        call = _eval_tool_call(
+            "sqlite_batch",
+            {
+                "sql": (
+                    "UPDATE __agent_config SET charter = patch_text(charter, 'old', "
+                    "'Cursor: candidate-offset-3, pending: 12.') WHERE id = 1;"
+                )
+            },
+        )
+
+        self.assertTrue(_sqlite_call_persists_resume_state(call))
 
 
 @tag("eval_sim")
@@ -440,6 +457,16 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
             ],
         )
 
+    def test_near_duplicate_query_detector_allows_a_distinct_research_angle(self):
+        duplicates = _find_near_duplicate_texts(
+            [
+                "Northstar Robotics warehouse automation",
+                "Northstar Robotics competitors warehouse automation market",
+            ]
+        )
+
+        self.assertEqual(duplicates, [])
+
     def test_web_query_value_collapses_aliases_per_tool_call(self):
         self.assertEqual(
             _web_query_value(
@@ -480,6 +507,28 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
                 "| Product | Atlas reduces aisle congestion. |\n\n"
                 "Sources: https://northstar.example.test/blog/atlas-launch and "
                 "https://news.example.test/northstar-series-b"
+            ),
+            source_urls=[
+                "https://northstar.example.test/blog/atlas-launch",
+                "https://news.example.test/northstar-series-b",
+            ],
+            min_source_count=2,
+            min_chars=150,
+            max_chars=1000,
+            required_any_groups=(("Northstar Robotics",),),
+        )
+
+        self.assertTrue(ok, summary)
+
+    def test_hierarchical_report_shape_accepts_bold_lead_in_sections(self):
+        ok, summary = _hierarchical_report_shape(
+            (
+                "Here's what's new with Northstar Robotics right now:\n\n"
+                "🚀 **Atlas Routing System Launch**, Atlas coordinates warehouse robots from multiple vendors. "
+                "Source: https://northstar.example.test/blog/atlas-launch\n\n"
+                "💰 **$42M Series B**, the funding supports deployments in food and pharma logistics. "
+                "Source: https://news.example.test/northstar-series-b\n\n"
+                "📊 **Early Customer Results**, a regional distributor improved pick-pack cycles by 18 percent."
             ),
             source_urls=[
                 "https://northstar.example.test/blog/atlas-launch",
@@ -853,10 +902,11 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
             SimpleNamespace(
                 step="rejected",
                 status="error",
+                result='{"status":"error","message":"Query not executed: link references are unsupported","retryable":true}',
                 tool_name="sqlite_batch",
                 tool_params={
-                    "sql": "CREATE TABLE rejected(vendor TEXT, plan TEXT); "
-                    "INSERT INTO rejected VALUES ('CareMesh', 'Clinic');"
+                    "sql": "CREATE TABLE plans(vendor TEXT, plan TEXT); "
+                    "INSERT INTO plans VALUES ('CareMesh', 'Clinic');"
                 },
             ),
             SimpleNamespace(
@@ -1566,6 +1616,53 @@ class EffortCalibrationHarnessTests(TestCase):
             EvalRunTask.Status.PASSED,
         )
 
+    def test_future_work_preserved_accepts_patch_text_cursor_and_remaining_count_in_charter(self):
+        User = get_user_model()
+        user = User.objects.create_user(username="future_work_charter_resume_user")
+        browser_agent = BrowserUseAgent.objects.create(user=user, name="Future Work Charter Resume Browser")
+        agent = PersistentAgent.objects.create(
+            name="Future Work Charter Resume Agent",
+            user=user,
+            browser_use_agent=browser_agent,
+            execution_environment="eval",
+            charter="Test agent.",
+            schedule="",
+        )
+        run = EvalRun.objects.create(
+            scenario_slug="future_work_charter_resume_test",
+            scenario_version="1.0.0",
+            agent=agent,
+            initiated_by=user,
+        )
+        EvalRunTask.objects.create(run=run, name="verify_future_work_preserved", sequence=1)
+        sqlite_step = PersistentAgentStep.objects.create(agent=agent, eval_run=run)
+        PersistentAgentToolCall.objects.create(
+            step=sqlite_step,
+            tool_name="sqlite_batch",
+            tool_params={
+                "sql": (
+                    "SELECT patch_text(charter, 'Test agent.', "
+                    "'Test agent. 12 remaining candidates. Next cursor: candidate-offset-3.') "
+                    "FROM __agent_config WHERE id = 1;"
+                )
+            },
+            result='{"status":"ok"}',
+        )
+
+        passed = EffortCalibrationScenario()._record_future_work_preserved(
+            str(run.id),
+            agent_id=str(agent.id),
+            after=agent.created_at,
+            task_name="verify_future_work_preserved",
+            work_tool_names={"eval_verify_candidate_batch"},
+        )
+
+        self.assertTrue(passed)
+        self.assertEqual(
+            run.tasks.get(name="verify_future_work_preserved").status,
+            EvalRunTask.Status.PASSED,
+        )
+
     def test_future_work_preserved_rejects_single_unscheduled_batch(self):
         User = get_user_model()
         user = User.objects.create_user(username="future_work_missing_schedule_user")
@@ -1960,9 +2057,17 @@ class FirstRunPromptCalibrationTests(TestCase):
         self.assertIn("spawn_web_task only after access/render/login blockage", system_prompt)
         self.assertIn("exact docs/blog/changelog/release-notes URL", system_prompt)
         self.assertIn("opaque identifiers", system_prompt)
-        self.assertIn("character-for-character; never shorten or normalize", system_prompt)
+        self.assertIn("supplied endpoints/paths/IDs/placeholders character-for-character", system_prompt)
         self.assertIn("structured rows repeat with no next page", system_prompt)
         self.assertIn("Charts: create only when requested/materially useful", system_prompt)
         self.assertIn("Finished answers/briefings/charts/lookups/one-off research are not charter changes", system_prompt)
         self.assertIn("Email/SMS imperatives map directly to send_email/send_sms", system_prompt)
         self.assertIn("Do not downgrade requested email/SMS delivery to chat", system_prompt)
+        self.assertIn("After any update result, do not repeat or paraphrase it", system_prompt)
+        self.assertIn("each later update must state a concrete new finding", system_prompt)
+        self.assertIn("must not reuse kickoff text", system_prompt)
+        self.assertIn("first use one direct sqlite_batch update to save the cursor", system_prompt)
+        self.assertIn("do not SELECT or read_file first", system_prompt)
+        self.assertIn("Append new resume state with `charter = charter || '...'`", system_prompt)
+        self.assertIn("the next call must send the report", system_prompt)
+        self.assertIn("Never send 'I'll save/update it' with will_continue_work=false", system_prompt)

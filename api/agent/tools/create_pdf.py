@@ -6,6 +6,7 @@ from html.parser import HTMLParser
 from typing import Any, Dict
 from urllib.parse import unquote_to_bytes
 
+from api.agent.core.link_references import handle_link_reference_errors, resolve_link_references
 from api.models import PersistentAgent
 from api.agent.tools.file_export_helpers import resolve_export_target, write_agent_export
 from api.agent.tools.agent_variables import substitute_variables_as_data_uris
@@ -231,14 +232,9 @@ MARKDOWN_IMAGE_RE = re.compile(
 
 
 def _secure_url_fetcher(url, timeout=10, ssl_context=None):
-    """
-    Security layer: Only allow data: URIs, block all external/local resources.
-    This is a second layer of defense after the HTML scanner.
-    """
     if url.startswith('data:'):
         from weasyprint import default_url_fetcher
         return default_url_fetcher(url, timeout, ssl_context)
-    # Block everything else - external URLs, file://, etc.
     raise ValueError(f"External resources not allowed: {url}")
 
 
@@ -397,6 +393,8 @@ class _AssetScanParser(HTMLParser):
             if not value:
                 continue
             key = key.lower()
+            if tag.lower() == "a" and key == "href" and value.lower().startswith(("http://", "https://")):
+                continue
             if key in URL_ATTRS and not _is_allowed_asset_url(value):
                 self.blocked = True
                 return
@@ -461,19 +459,16 @@ def _inject_print_css(html: str) -> str:
     """Inject default print CSS for clean page breaks."""
     style_tag = f"<style>{DEFAULT_PRINT_CSS}</style>"
 
-    # Try to inject into <head>
     head_match = re.search(r"<head[^>]*>", html, re.IGNORECASE)
     if head_match:
         insert_pos = head_match.end()
         return html[:insert_pos] + style_tag + html[insert_pos:]
 
-    # No <head>, try after <html>
     html_match = re.search(r"<html[^>]*>", html, re.IGNORECASE)
     if html_match:
         insert_pos = html_match.end()
         return html[:insert_pos] + f"<head>{style_tag}</head>" + html[insert_pos:]
 
-    # No structure at all, wrap it
     return f"<html><head>{style_tag}</head><body>{html}</body></html>"
 
 
@@ -518,6 +513,7 @@ def get_create_pdf_tool() -> Dict[str, Any]:
     }
 
 
+@handle_link_reference_errors
 def execute_create_pdf(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str, Any]:
     html = params.get("html")
     if not isinstance(html, str) or not html.strip():
@@ -533,7 +529,8 @@ def execute_create_pdf(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
 
     html = _coerce_markdown_images_to_html(html)
 
-    # Substitute $[path] variables with data URIs (PDF needs embedded content, not URLs)
+    html = resolve_link_references(html, agent)
+
     html = substitute_variables_as_data_uris(html, agent)
 
     max_size = get_max_file_size()
@@ -551,7 +548,7 @@ def execute_create_pdf(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
         return {
             "status": "error",
             "message": (
-                "HTML contains external or local asset references (URLs are not allowed). "
+                "HTML contains external or local asset references (navigation links are allowed). "
                 "To embed charts: use <img src='$[/charts/...]'> with the $[path] from create_chart's inline_html field. "
                 "The $[path] syntax is required—it gets replaced with embedded data."
             ),
@@ -561,14 +558,12 @@ def execute_create_pdf(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
     if error:
         return error
 
-    # Inject default print CSS for clean page breaks
     html = _inject_print_css(html)
 
     try:
         from weasyprint import HTML
         pdf_bytes = HTML(string=html, url_fetcher=_secure_url_fetcher).write_pdf()
     except ValueError as exc:
-        # Raised by _secure_url_fetcher for blocked resources
         logger.warning("Blocked resource access during PDF generation: %s", exc)
         return {
             "status": "error",

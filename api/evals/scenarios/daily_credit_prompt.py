@@ -17,6 +17,7 @@ from api.models import EvalRunTask, Organization, PersistentAgent, PersistentAge
 from api.services.daily_credit_settings import DailyCreditSettings
 from constants.grant_types import GrantTypeChoices
 from constants.plans import PlanNames
+from util.tool_costs import get_default_task_credit_cost
 from util.urls import build_agent_detail_url, build_site_url
 
 _daily_credit_settings_override = ContextVar("daily_credit_settings_override", default=None)
@@ -231,6 +232,7 @@ class DailyCreditPromptScenario(EvalScenario, ScenarioExecutionTools):
         archives = PersistentAgentPromptArchive.objects.filter(
             agent_id=agent_id,
             rendered_at__gte=after,
+            step__isnull=False,
         ).order_by("rendered_at")
         for archive in archives:
             try:
@@ -326,17 +328,18 @@ class DailyCreditPromptSoftTargetDistinctScenario(DailyCreditPromptScenario):
 @register_scenario
 class DailyCreditPromptOneToolLeftScenario(DailyCreditPromptScenario):
     slug = DAILY_CREDIT_PROMPT_ONE_TOOL_LEFT
-    description = (
-        "When only the default task cost remains, the audited prompt should use the stronger "
-        "one-tool-left warning."
-    )
-    usage_today = Decimal("99.6")
+    description = "When one default task cost remains, the prompt should use the one-tool-left warning."
+
+    @property
+    def usage_today(self) -> Decimal:
+        return self.daily_credit_limit - get_default_task_credit_cost()
+
     user_prompt = (
         "Please turn the notes so far into a final concise handoff I can use before we pause work for today."
     )
 
     def required_prompt_snippets(self, agent_id: str) -> tuple[str, ...]:
-        return ("Daily limit progress:", "99.6", "Almost out of energy", "one tool call left")
+        return ("Daily limit progress:", str(self.usage_today), "Almost out of energy", "one tool call left")
 
     def forbidden_prompt_snippets(self) -> tuple[str, ...]:
         return ("Getting tired", "DAILY HARD LIMIT MODE", "Soft target progress")

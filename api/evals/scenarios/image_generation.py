@@ -1,6 +1,8 @@
+import base64
 from dataclasses import dataclass, field
 from typing import Any
 
+from api.agent.files.filespace_service import write_bytes_to_dir
 from api.agent.tools.eval_synthetic_tools import EVAL_SYNTHETIC_TOOL_SERVER
 from api.agent.tools.tool_manager import mark_tool_enabled_without_discovery
 from api.evals.base import EvalScenario, ScenarioTask
@@ -33,6 +35,10 @@ IMAGE_GENERATION_SCENARIO_SLUGS = (
     IMAGE_GENERATION_EXACT_TEXT,
     IMAGE_GENERATION_MULTI_ASSET,
     IMAGE_GENERATION_AVOIDS_ANALYSIS,
+)
+
+_EVAL_SOURCE_PNG = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
 )
 
 MESSAGE_TOOL_NAMES = ("send_chat_message", "send_email", "send_sms")
@@ -308,6 +314,7 @@ class ImageGenerationScenario(EvalScenario, ScenarioExecutionTools):
         PersistentAgent.objects.filter(id=agent_id).update(planning_state=PersistentAgent.PlanningState.SKIPPED)
         self._seed_prior_processing_run(agent_id)
         agent = PersistentAgent.objects.get(id=agent_id)
+        self._seed_source_images(agent)
         result = mark_tool_enabled_without_discovery(agent, "create_image")
         if result.get("status") != "success":
             raise ValueError(f"Could not enable eval create_image tool: {result}")
@@ -321,6 +328,19 @@ class ImageGenerationScenario(EvalScenario, ScenarioExecutionTools):
             is_enabled=True,
         ).exists():
             raise ValueError("Image generation system skill was not enabled with create_image.")
+
+    def _seed_source_images(self, agent: PersistentAgent) -> None:
+        for path in self._case().required_source_images:
+            result = write_bytes_to_dir(
+                agent,
+                _EVAL_SOURCE_PNG,
+                path,
+                "image/png",
+                extension=".png",
+                overwrite=True,
+            )
+            if result.get("status") != "ok":
+                raise ValueError(f"Failed to seed image-generation eval source {path}: {result}")
 
     def _record_tool_calls(self, run_id: str, inbound) -> None:
         case = self._case()

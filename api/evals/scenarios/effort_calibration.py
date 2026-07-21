@@ -12,6 +12,7 @@ from api.agent.tools.web_chat_sender import _looks_like_routine_progress_message
 from api.evals.base import EvalScenario, ScenarioTask
 from api.evals.execution import ScenarioExecutionTools
 from api.evals.registry import register_scenario
+from api.evals.tool_params import resolved_tool_param
 from api.evals.stop_policy import (
     split_sql_statements,
     sqlite_batch_is_only_eval_bookkeeping_read,
@@ -101,7 +102,11 @@ _SQL_TOOL_RESULT_TEXT_RE = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 _SQL_RESULT_ID_RE = re.compile(r"\bresult_id\s*=\s*['\"]([^'\"]+)['\"]", re.IGNORECASE)
-_HEADING_RE = re.compile(r"(?im)^\s{0,3}#{1,4}\s+\S|^\s*\*\*[^*\n]{3,80}\*\*:?\s*$|<h[1-4]\b")
+_HEADING_RE = re.compile(
+    r"(?im)^\s{0,3}#{1,4}\s+\S"
+    r"|^\s*(?:[^\w\s*]{1,3}\s+)?\*\*[^*\n]{3,80}\*\*(?::|,)?(?:\s+\S.*)?$"
+    r"|<h[1-4]\b"
+)
 _LIST_OR_TABLE_RE = re.compile(
     r"(?im)^\s*(?:[-*]|\d+[.)])\s+\S|^\s*\*\*\d+[.)]\s+\S|^\s*\|.+\|\s*$|<\s*(?:ul|ol|li|table)\b"
 )
@@ -137,7 +142,8 @@ def _near_duplicate_text(first: str, second: str) -> bool:
     union = len(first_tokens | second_tokens)
     containment = overlap / min(len(first_tokens), len(second_tokens))
     jaccard = overlap / union if union else 0
-    return containment >= 0.9 or jaccard >= 0.82
+    length_ratio = min(len(first_tokens), len(second_tokens)) / max(len(first_tokens), len(second_tokens))
+    return (containment >= 0.9 and length_ratio >= 0.8) or jaccard >= 0.82
 
 
 def _find_near_duplicate_texts(values: Iterable[str]) -> list[tuple[str, str]]:
@@ -247,7 +253,7 @@ def _tool_calls_for_run(run_id: str, *, after=None, tool_names: Iterable[str] | 
         queryset = queryset.filter(step__created_at__gte=after)
     if tool_names is not None:
         queryset = queryset.filter(tool_name__in=list(tool_names))
-    return list(queryset.select_related("step").order_by("step__created_at", "step__id"))
+    return list(queryset.select_related("step", "step__agent").order_by("step__created_at", "step__id"))
 
 
 def _relevant_tool_calls_for_run(
@@ -288,10 +294,15 @@ def _sqlite_call_persists_resume_state(call: PersistentAgentToolCall) -> bool:
         return False
 
     sql = sqlite_batch_sql(call).lower()
-    if "remaining_work" not in sql or ("next_cursor" not in sql and "cursor" not in sql):
+    has_remaining_state = "remaining_work" in sql or bool(
+        re.search(r"(?:\b\d+\s+(?:remaining|pending)\b|\b(?:remaining|pending)\D{0,20}\d+\b)", sql)
+    )
+    if not has_remaining_state or ("next_cursor" not in sql and "cursor" not in sql):
         return False
 
-    return any(keyword in sql for keyword in ("insert", "update", "replace", "create table"))
+    return "patch_text(" in sql or any(
+        keyword in sql for keyword in ("insert", "update", "replace", "create table")
+    )
 
 
 def _human_input_requests_for_run(run_id: str, *, after=None):
@@ -1134,7 +1145,7 @@ class EffortSimpleLookupBoundedToolsScenario(EffortCalibrationScenario):
 
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="verify_exact_fetch_once")
         http_calls = _tool_calls_for_run(run_id, after=inbound.timestamp, tool_names={"http_request"})
-        exact_calls = [call for call in http_calls if (call.tool_params or {}).get("url") == target_url]
+        exact_calls = [call for call in http_calls if resolved_tool_param(call, "url") == target_url]
         if len(exact_calls) == 1 and len(http_calls) == 1:
             self.record_task_result(
                 run_id,
@@ -1150,7 +1161,7 @@ class EffortSimpleLookupBoundedToolsScenario(EffortCalibrationScenario):
                 None,
                 EvalRunTask.Status.FAILED,
                 task_name="verify_exact_fetch_once",
-                observed_summary=f"Expected one exact http_request; saw URLs {[(c.tool_params or {}).get('url') for c in http_calls]}.",
+                observed_summary=f"Expected one exact http_request; saw URLs {[resolved_tool_param(c, 'url') for c in http_calls]}.",
                 artifacts={"step": http_calls[0].step} if http_calls else {},
             )
 
@@ -1369,7 +1380,7 @@ class EffortScheduledBriefingFinishesScenario(EffortCalibrationScenario):
 
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="verify_bounded_run")
         http_calls = _tool_calls_for_run(run_id, after=cron_step.created_at, tool_names={"http_request"})
-        exact_http_calls = [call for call in http_calls if (call.tool_params or {}).get("url") == briefing_url]
+        exact_http_calls = [call for call in http_calls if resolved_tool_param(call, "url") == briefing_url]
         orchestrator_count = _orchestrator_completion_count(run_id)
         if len(exact_http_calls) == 1 and len(http_calls) == 1 and orchestrator_count <= 4:
             self.record_task_result(
@@ -1391,7 +1402,7 @@ class EffortScheduledBriefingFinishesScenario(EffortCalibrationScenario):
                 task_name="verify_bounded_run",
                 observed_summary=(
                     f"Expected one exact fetch and <=4 completions; "
-                    f"http_urls={[(c.tool_params or {}).get('url') for c in http_calls]}, "
+                    f"http_urls={[resolved_tool_param(c, 'url') for c in http_calls]}, "
                     f"orchestrator_count={orchestrator_count}."
                 ),
                 artifacts={"step": http_calls[0].step} if http_calls else {},
@@ -1863,7 +1874,9 @@ class EffortUnscheduledRemainingWorkSetsResumeScenario(EffortCalibrationScenario
                     "Continue in bounded batches or set a resume schedule before pausing; "
                     "do not abandon the remaining queue."
                 ),
-                "verification": "Read the leads table to verify sent counts before any later batch.",
+                "verification": (
+                    "This batch result is the authoritative sent-count receipt; no separate leads table is exposed."
+                ),
             }
         }
 
@@ -1992,8 +2005,8 @@ class EffortPartialSourceBlockReportsAndResumesScenario(EffortCalibrationScenari
                 "remaining_work": 12,
                 "next_cursor": "candidate-offset-3",
                 "next_action": (
-                    "Report the verified partial set with the source limitation, then continue bounded "
-                    "verification or set a resume schedule."
+                    "Report the verified partial set with the source limitation, then schedule a resume "
+                    "from next_cursor. Retrying this batch now cannot expose additional tenure evidence."
                 ),
             }
         }
@@ -2013,13 +2026,18 @@ class EffortPartialSourceBlockReportsAndResumesScenario(EffortCalibrationScenari
                 mock_config=mock_config,
                 eval_stop_policy={
                     "stop_on_tool_names": list(
-                        (EFFORT_OVERWORK_TOOL_NAMES - {"update_plan"})
+                        (EFFORT_OVERWORK_TOOL_NAMES - {"search_tools", "update_plan"})
                         | ARTIFACT_TOOL_NAMES
                         | RESEARCH_TOOL_NAMES
                     ),
                     "stop_on_human_input_request": True,
                     "stop_on_unexpected_relevant_tool": True,
-                    "allowed_tool_names": ["eval_verify_candidate_batch", "sqlite_batch", "update_plan"],
+                    "allowed_tool_names": [
+                        "eval_verify_candidate_batch",
+                        "search_tools",
+                        "sqlite_batch",
+                        "update_plan",
+                    ],
                     "max_relevant_tool_calls": 6,
                     "ignored_tool_names": list(MESSAGE_TOOL_NAMES | STOP_TOOL_NAMES),
                 },
@@ -2059,7 +2077,9 @@ class EffortPartialSourceBlockReportsAndResumesScenario(EffortCalibrationScenari
             run_id,
             after=inbound.timestamp,
             task_name="verify_no_overwork_tools",
-            forbidden_tool_names=EFFORT_OVERWORK_TOOL_NAMES | ARTIFACT_TOOL_NAMES | RESEARCH_TOOL_NAMES,
+            forbidden_tool_names=(EFFORT_OVERWORK_TOOL_NAMES - {"search_tools"})
+            | ARTIFACT_TOOL_NAMES
+            | RESEARCH_TOOL_NAMES,
         )
         self._record_orchestrator_budget(run_id, task_name="verify_turn_budget", max_completions=6)
 
@@ -2098,7 +2118,9 @@ class EffortToolWaitNextScheduleRequiresScheduleScenario(EffortCalibrationScenar
                 "remaining_work": 75,
                 "next_cursor": "lead-025",
                 "next_action": "Wait for next scheduled run; do not repeat manually.",
-                "verification": "Read prepared_batches before sending another batch.",
+                "verification": (
+                    "This result is the authoritative prepared-count receipt; no prepared_batches table is exposed."
+                ),
             }
         }
 

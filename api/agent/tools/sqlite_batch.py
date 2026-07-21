@@ -1498,7 +1498,6 @@ def _enforce_result_limits(rows: List[Dict[str, Any]], query: str) -> tuple[List
     return rows, warning
 
 
-_ITEM_URL_FIELD_NAMES = {"url", "link", "listing_url", "detail_url", "item_url"}
 _NON_ITEM_URL_FIELD_NAMES = {"source_url", "feed_url", "page_url", "origin_url"}
 
 
@@ -1514,22 +1513,18 @@ def _row_url_reporting_note(rows: List[Dict[str, Any]]) -> str:
             key_lower = key_text.lower()
             if key_lower in _NON_ITEM_URL_FIELD_NAMES:
                 continue
-            if key_lower not in _ITEM_URL_FIELD_NAMES and not key_lower.endswith(
+            if key_lower not in {"url", "link", "listing_url", "detail_url", "item_url"} and not key_lower.endswith(
                 ("_listing_url", "_detail_url", "_item_url", "_link")
             ):
                 continue
-            if isinstance(value, str) and value.strip():
+            if isinstance(value, str) and re.match(r"^https?://[^\s]+$", value.strip(), re.IGNORECASE):
                 url_fields.add(key_text)
 
     if not url_fields:
         return ""
 
-    fields = ", ".join(sorted(url_fields)[:4])
-    return (
-        f" [!] REPORTING: rows include item URL field(s) {fields}; "
-        "include these row links in reports/tables (click row label or add Link column). "
-        "Feed/source URLs are not item links."
-    )
+    field_names = ", ".join(sorted(url_fields)[:4])
+    return f" [!] Item URL column(s): {field_names}."
 
 
 def _clean_statement(statement: str) -> Optional[str]:
@@ -1911,7 +1906,7 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
                     },
                     "will_continue_work": {
                         "type": "boolean",
-                        "description": "REQUIRED. true if another action/reply follows; false if this completes the turn.",
+                        "description": "REQUIRED. SQLite cannot deliver; use true so a reply/action follows.",
                     },
                 },
                 "required": ["sql", "will_continue_work"],

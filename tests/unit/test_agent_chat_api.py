@@ -13,8 +13,9 @@ from django.contrib.auth import get_user_model
 from django.core import mail
 from django.core.files.base import ContentFile
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.db import DatabaseError
+from django.db import DatabaseError, connection
 from django.test import Client, TestCase, override_settings, tag
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils import timezone
 from waffle.testutils import override_flag, override_switch
@@ -44,6 +45,7 @@ from api.models import (
     PersistentAgent,
     PersistentAgentKanbanCard,
     PersistentAgentKanbanEvent,
+    PersistentAgentLinkReference,
     PersistentAgentCompletion,
     PersistentAgentCommsEndpoint,
     PersistentAgentConversation,
@@ -80,7 +82,7 @@ from api.services.web_sessions import heartbeat_web_session, start_web_session
 from config.redis_client import get_redis_client
 from console.agent_chat.plan_events import persist_plan_event
 from console.agent_chat.timeline import build_processing_snapshot, build_tool_cluster_from_steps
-from console.agent_chat.timeline import fetch_timeline_window
+from console.agent_chat.timeline import _steps_queryset, fetch_timeline_window
 from console.agent_chat.timeline import serialize_plan_event
 from util.onboarding import (
     TRIAL_ONBOARDING_PENDING_SESSION_KEY,
@@ -1015,6 +1017,61 @@ class AgentChatAPITests(TestCase):
         self.assertEqual(realtime_entry["charterText"], "Full updated assignment")
 
     @tag("batch_agent_chat")
+    def test_timeline_resolves_link_references_without_exposing_tokens(self):
+        reference = PersistentAgentLinkReference.objects.create(
+            agent=self.agent,
+            url="https://example.com/report?id=7#team",
+        )
+        token = f"$[link:{reference.public_id}]"
+        step = PersistentAgentStep.objects.create(agent=self.agent, description=f"Browse {token}")
+        PersistentAgentToolCall.objects.create(
+            step=step,
+            tool_name="mcp_brightdata_scrape_as_markdown",
+            tool_params={"url": token},
+            result=json.dumps({"status": "ok"}),
+        )
+
+        entry = build_tool_cluster_from_steps([step])["entries"][0]
+
+        self.assertEqual(entry["caption"], "Browse https://example.com/report?id=7#team")
+        self.assertEqual(entry["parameters"]["url"], "https://example.com/report?id=7#team")
+        self.assertNotIn("$[link:", json.dumps(entry))
+
+    @tag("batch_agent_chat")
+    def test_timeline_hides_unavailable_link_references(self):
+        token = "$[link:L0000000000000000]"
+        step = PersistentAgentStep.objects.create(agent=self.agent, description=f"Browse {token}")
+        PersistentAgentToolCall.objects.create(
+            step=step,
+            tool_name="mcp_brightdata_scrape_as_markdown",
+            tool_params={"url": token},
+            result=json.dumps({"status": "error", "message": token}),
+        )
+
+        entry = build_tool_cluster_from_steps([step])["entries"][0]
+
+        self.assertNotIn("$[link:", json.dumps(entry))
+        self.assertIn("Link unavailable", entry["caption"])
+        self.assertEqual(entry["parameters"]["url"], "Link unavailable")
+
+    @tag("batch_agent_chat")
+    def test_timeline_steps_load_agent_without_per_entry_queries(self):
+        for index in range(3):
+            step = PersistentAgentStep.objects.create(agent=self.agent, description=f"Step {index}")
+            PersistentAgentToolCall.objects.create(
+                step=step,
+                tool_name="http_request",
+                tool_params={"url": f"https://example.com/{index}"},
+                result=json.dumps({"status": "ok"}),
+            )
+
+        steps = _steps_queryset(self.agent, "initial", None)
+        with CaptureQueriesContext(connection) as queries:
+            self.assertTrue(all(step.agent is self.agent or step.agent_id == self.agent.id for step in steps))
+
+        self.assertEqual(len(queries), 0)
+
+    @tag("batch_agent_chat")
     def test_timeline_preserves_empty_assignment_display_snapshot(self):
         step = PersistentAgentStep.objects.create(agent=self.agent, description="Clear assignment")
         PersistentAgentToolCall.objects.create(
@@ -1825,10 +1882,14 @@ class AgentChatAPITests(TestCase):
 
     @tag("batch_agent_chat")
     def test_timeline_includes_thinking_events(self):
+        reference = PersistentAgentLinkReference.objects.create(
+            agent=self.agent,
+            url="https://example.com/reasoning-source",
+        )
         completion = PersistentAgentCompletion.objects.create(
             agent=self.agent,
             completion_type=PersistentAgentCompletion.CompletionType.ORCHESTRATOR,
-            thinking_content="Reasoned path",
+            thinking_content=f"Reasoned from $[link:{reference.public_id}]",
         )
 
         response = self.client.get(f"/console/api/agents/{self.agent.id}/timeline/")
@@ -1837,7 +1898,7 @@ class AgentChatAPITests(TestCase):
         events = payload.get("events", [])
         thinking_event = next(event for event in events if event.get("kind") == "thinking")
 
-        self.assertEqual(thinking_event.get("reasoning"), "Reasoned path")
+        self.assertEqual(thinking_event.get("reasoning"), "Reasoned from https://example.com/reasoning-source")
         self.assertEqual(thinking_event.get("completionId"), str(completion.id))
 
     @tag("batch_agent_chat")
@@ -3850,7 +3911,7 @@ class AgentChatAPITests(TestCase):
 
 
     @tag("batch_agent_chat")
-    def test_web_chat_tool_requires_active_session(self):
+    def test_web_chat_tool_persists_current_reply_without_active_session(self):
         EmailAddress.objects.create(
             user=self.user,
             email=self.user.email,
@@ -3867,24 +3928,21 @@ class AgentChatAPITests(TestCase):
             self.agent,
             {"body": "Ping", "to_address": self.user_address},
         )
-        self.assertEqual(result["status"], "error")
-        self.assertIn("No active web chat session", result["message"])
-        self.assertIn("Do not move this reply", result["message"])
-        self.assertIs(result["retryable"], False)
-        self.assertIs(result["terminal_error"], True)
+        self.assertEqual(result["status"], "ok")
+        explicit_message = PersistentAgentMessage.objects.get(id=result["message_id"])
+        self.assertEqual(explicit_message.body, "Ping")
+        self.assertEqual(explicit_message.conversation, self.conversation)
+        self.assertEqual(explicit_message.to_endpoint.address, self.user_address)
 
-        progress = execute_send_chat_message(
+        implicit = execute_send_chat_message(
             self.agent,
-            {"body": "I am still working on this.", "will_continue_work": True},
+            {"body": "Report complete", "will_continue_work": False},
         )
-        self.assertIs(progress["terminal_error"], False)
-
-        start_web_session(self.agent, self.user)
-        success = execute_send_chat_message(
-            self.agent,
-            {"body": "Ping", "to_address": self.user_address},
-        )
-        self.assertEqual(success["status"], "ok")
+        self.assertEqual(implicit["status"], "ok")
+        implicit_message = PersistentAgentMessage.objects.get(id=implicit["message_id"])
+        self.assertEqual(implicit_message.body, "Report complete")
+        self.assertEqual(implicit_message.conversation, self.conversation)
+        self.assertEqual(implicit_message.to_endpoint.address, self.user_address)
 
         markdown_body = "# Heading\n\n- Item"
         PersistentAgentMessage.objects.create(
@@ -3973,7 +4031,7 @@ class AgentChatAPITests(TestCase):
         self.assertEqual(success["status"], "ok")
 
     @tag("batch_agent_chat")
-    def test_web_chat_tool_rejects_after_visibility_grace_when_other_channels_exist(self):
+    def test_web_chat_tool_persists_current_reply_after_visibility_grace(self):
         EmailAddress.objects.create(
             user=self.user,
             email=self.user.email,
@@ -3993,15 +4051,14 @@ class AgentChatAPITests(TestCase):
             last_visible_at=timezone.now() - timedelta(seconds=61),
         )
 
-        rejected = execute_send_chat_message(
+        allowed = execute_send_chat_message(
             self.agent,
             {"body": "Still here", "to_address": self.user_address},
         )
-        self.assertEqual(rejected["status"], "error")
-        self.assertIn("No active web chat session", rejected["message"])
-        self.assertIn("Do not move this reply", rejected["message"])
-        self.assertIs(rejected["retryable"], False)
-        self.assertIs(rejected["terminal_error"], True)
+        self.assertEqual(allowed["status"], "ok")
+        message = PersistentAgentMessage.objects.get(id=allowed["message_id"])
+        self.assertEqual(message.body, "Still here")
+        self.assertEqual(message.conversation, self.conversation)
 
     @tag("batch_agent_chat")
     def test_web_chat_tool_allows_after_visibility_grace_when_web_is_only_channel(self):

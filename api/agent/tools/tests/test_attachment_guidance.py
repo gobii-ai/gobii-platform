@@ -6,6 +6,9 @@ from django.test import SimpleTestCase, tag
 from api.agent.tools.create_csv import execute_create_csv
 from api.agent.tools.create_file import execute_create_file, get_create_file_tool
 from api.agent.tools.email_sender import get_send_email_tool
+from api.agent.tools.peer_dm import get_send_agent_message_tool
+from api.agent.tools.send_discord_message import get_send_discord_message_tool
+from api.agent.tools.sms_sender import get_send_sms_tool
 from api.agent.tools.web_chat_sender import get_send_chat_tool
 from api.agent.core.prompt_context import (
     _get_email_formatting_guidance,
@@ -72,6 +75,9 @@ class AttachmentGuidanceTests(SimpleTestCase):
     def test_report_message_guidance_names_visual_quality_without_eval_prompting(self):
         email_tool = get_send_email_tool()
         chat_tool = get_send_chat_tool()
+        discord_tool = get_send_discord_message_tool()
+        peer_tool = get_send_agent_message_tool()
+        sms_tool = get_send_sms_tool()
         email_guidance = _get_email_formatting_guidance()
         chat_guidance = _get_web_chat_formatting_guidance()
 
@@ -86,8 +92,18 @@ class AttachmentGuidanceTests(SimpleTestCase):
         body_guidance = chat_tool["function"]["parameters"]["properties"]["body"]["description"]
         self.assertIn("Keep chat/outreach light", body_guidance)
         self.assertIn("Reports comparing 4+ peers", body_guidance)
-        self.assertIn("one linked table", body_guidance)
-        self.assertIn("a detail URL per row unless incomparable", body_guidance)
+        self.assertIn("use one table", body_guidance)
+        delivery_fields = (
+            email_tool["function"]["parameters"]["properties"]["mobile_first_html"]["description"],
+            body_guidance,
+            discord_tool["function"]["parameters"]["properties"]["message"]["description"],
+            peer_tool["function"]["parameters"]["properties"]["message"]["description"],
+            sms_tool["function"]["parameters"]["properties"]["body"]["description"],
+        )
+        for description in delivery_fields:
+            self.assertNotIn("link reference", description.lower())
+            self.assertNotIn("item/detail", description.lower())
+            self.assertNotIn("source/feed", description.lower())
 
     def test_create_file_tool_schema_requires_content_or_query(self):
         tool = get_create_file_tool()

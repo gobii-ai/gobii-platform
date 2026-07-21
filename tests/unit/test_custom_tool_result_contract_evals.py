@@ -77,7 +77,8 @@ def _create_call(case, *, schema=None, source_code=None, name=None):
     return SimpleNamespace(
         tool_name="create_custom_tool",
         tool_params=params,
-        result={"status": "created"},
+        status="complete",
+        result={"status": "ok", "created": True},
         step=None,
     )
 

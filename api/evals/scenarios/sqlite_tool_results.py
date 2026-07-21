@@ -17,6 +17,7 @@ from api.agent.tools.web_chat_sender import _looks_like_routine_progress_message
 from api.evals.base import EvalScenario, ScenarioTask
 from api.evals.execution import ScenarioExecutionTools
 from api.evals.registry import register_scenario
+from api.evals.tool_params import resolved_tool_param
 from api.evals.scenarios.effort_calibration import MESSAGE_TOOL_NAMES, STOP_TOOL_NAMES, _outbound_messages_after, _tool_calls_for_run
 from api.models import EvalRunTask, PersistentAgent, PersistentAgentEnabledTool, PersistentAgentStep, PersistentAgentSystemStep
 
@@ -353,7 +354,7 @@ def _source_fetch_counts(calls, *, tool_names: Iterable[str], source_urls: Itera
     for call in calls:
         if call.tool_name not in allowed_tools or str(getattr(call, "status", "complete")).lower() != "complete":
             continue
-        actual_url = str((call.tool_params or {}).get("url") or "").rstrip("/")
+        actual_url = str(resolved_tool_param(call, "url") or "").rstrip("/")
         if actual_url in expected:
             expected[actual_url] += 1
     return expected
@@ -875,11 +876,11 @@ class SqliteBoundedPortfolioReportScenario(SqliteToolResultScenario):
             return ""
 
         final_position, final_call = terminal_calls[0]
-        body = str((final_call.tool_params or {}).get("body") or "")
+        body = str(resolved_tool_param(final_call, "body") or "")
         missing_associations = self._missing_portfolio_associations(body)
 
         detail_positions = {
-            str((call.tool_params or {}).get("url") or "").rstrip("/"): index
+            str(resolved_tool_param(call, "url") or "").rstrip("/"): index
             for index, call in enumerate(calls)
             if call.tool_name in self.result_access_fetch_tools
             and str(getattr(call, "status", "complete")).lower() == "complete"

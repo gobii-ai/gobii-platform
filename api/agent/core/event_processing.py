@@ -96,7 +96,13 @@ from .prompt_run_cache import (
     bind_prompt_run_cache,
     reset_prompt_run_cache,
 )
-
+from .link_references import (
+    LinkReferenceResolutionError,
+    is_source_bearing_tool,
+    link_reference_error_response,
+    resolve_link_reference_params,
+    rewrite_prompt_urls,
+)
 from ..tools.apply_patch import execute_apply_patch
 from ..tools.charter_updater import execute_update_charter
 from ..tools.email_sender import execute_send_email
@@ -2685,7 +2691,6 @@ _REFRESHING_TOOL_EXECUTORS: Dict[str, _ToolExecutorResolver] = {
     "end_planning": lambda: execute_end_planning,
 }
 
-
 def _execute_tool_call_runtime(
     agent: PersistentAgent,
     *,
@@ -2697,6 +2702,10 @@ def _execute_tool_call_runtime(
     resolved_entry: Optional[ToolCatalogEntry] = None,
 ) -> tuple[Any, Optional[List[dict]]]:
     updated_tools: Optional[List[dict]] = None
+    try:
+        exec_params = resolve_link_reference_params(exec_params, agent, tool_name=tool_name)
+    except LinkReferenceResolutionError as exc:
+        return link_reference_error_response(exc), updated_tools
     mock_config = getattr(budget_ctx, "mock_config", None) if budget_ctx else None
     mock_result = _resolve_eval_mock_result(mock_config, tool_name, exec_params)
     if planning_mode_disallows_tool(agent, tool_name):
@@ -3574,6 +3583,8 @@ def _finalize_tool_batch(
                 attach_prompt_archive=attach_prompt_archive,
                 display_metadata=outcome.display_metadata,
             )
+        if not is_error_status and is_source_bearing_tool(tool_name):
+            rewrite_prompt_urls(result_content, agent, create=True)
         if is_error_status:
             _refund_tool_credit_on_error_if_configured(
                 agent=agent,
@@ -6636,9 +6647,9 @@ def _run_agent_loop(
                                 step_kwargs = {
                                     "agent": agent,
                                     "description": (
-                                        "Message delivery requires explicit send tools when implied send is unavailable. "
-                                        "Reply to the latest requester on their inbound channel. If web delivery is unavailable, "
-                                        "do not switch channels."
+                                        "The answer below was not delivered. Send that same answer now with the explicit tool "
+                                        "for the requester's inbound channel; do not research or call other tools first.\n\n"
+                                        f"UNDLIVERED ANSWER:\n{message_text}"
                                     ),
                                 }
                                 _attach_completion(step_kwargs)

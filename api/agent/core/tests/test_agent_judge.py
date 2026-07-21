@@ -57,3 +57,4 @@ class AgentJudgeTrajectoryPacketTests(TestCase):
         policy_text = "\n".join(packet["policy_excerpts"])
         self.assertIn("appropriate responsible participant, manager, peer agent, or user", policy_text)
         self.assertIn("do not assume the account owner or user is always the right recipient", policy_text)
+        self.assertIn("fetching $[link:id] references merely to resolve them", policy_text)

@@ -15,6 +15,7 @@ from ..files.attachment_helpers import AttachmentResolutionError, create_message
 from ..files.filespace_service import broadcast_message_attachment_update
 from util.text_sanitizer import normalize_llm_output
 from .agent_variables import substitute_variables_with_filespace
+from api.agent.core.link_references import handle_link_reference_errors
 from .attachment_guidance import SEND_TOOL_ATTACHMENTS_DESCRIPTION
 from ...models import (
     PersistentAgent,
@@ -50,7 +51,7 @@ _PROGRESS_PREFIX_RE = re.compile(
     re.IGNORECASE,
 )
 _INTERNAL_PROGRESS_RE = re.compile(
-    r"\b(?:the user|already greeted|actual research|tool|tools|parallel|compile the results|extract the data|"
+    r"\b(?:the user|already greeted|actual research|parallel|compile the results|extract the data|"
     r"mark the plan complete|plan complete|delivered message|wrap up|left the last cycle mid-stream|"
     r"deliver the final report now|want to verify|actually scraping|scrape results|inspect the actual|"
     r"real data is coming back|got what i need|let'?s (?:dig up|fetch|find|get|grab|look up|pull|research|search)|let me (?:also |now |actually |just |quickly |then )?(?:grab|fetch|find|investigate|check|pull|get|look|search|research|query|verify|analy[sz]e|compile|process|inspect|fix|patch|clean(?: up)?|seed|register|do (?:a |the |thorough |proper |additional |more |some |a few |new )?(?:search(?:es)?|queries|lookups?|cleanup|clean up))|let me send it over|let me end planning|"
@@ -293,8 +294,8 @@ def get_send_chat_tool() -> Dict[str, Any]:
                     "body": {
                         "type": "string",
                         "description": (
-                            "Natural recipient text; no dash punctuation between phrases. Keep chat/outreach light. Reports comparing 4+ peers use one linked table with a detail URL per row unless incomparable. "
-                            "Do not pass placeholders or tool-call/XML syntax; it is sent literally."
+                            "Natural recipient text; no dash punctuation between phrases. Keep chat/outreach light. Reports comparing 4+ peers use one table. "
+                            "Do not pass tool-call/XML syntax; it is sent literally."
                         ),
                     },
                     "to_address": {
@@ -319,6 +320,7 @@ def get_send_chat_tool() -> Dict[str, Any]:
     }
 
 
+@handle_link_reference_errors
 def execute_send_chat_message(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str, Any]:
     """Persist an outbound web chat message for an agent."""
 
@@ -442,10 +444,9 @@ def execute_send_chat_message(agent: PersistentAgent, params: Dict[str, Any]) ->
                 will_continue=will_continue,
             )
 
-        # If the user has other communication channels, we want to ensure we're sending to an active chat session
-        # If the user does not have other communication channels, pass through to web because it's our only choice
         if (
-            get_deliverable_web_session(agent, recipient_user) is None
+            not is_current_requester
+            and get_deliverable_web_session(agent, recipient_user) is None
             and has_other_contact_channel(agent, recipient_user)
         ):
             return _web_unavailable_result(

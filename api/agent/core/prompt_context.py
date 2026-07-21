@@ -102,6 +102,7 @@ from ..tools.sqlite_skills import format_recent_skills_for_prompt
 from ..tools.tool_manager import ensure_default_tools_enabled, ensure_skill_tools_enabled, get_enabled_tool_definitions
 from ..system_skills.discovery import format_system_skill_discovery_prompt
 from .tool_results import PREVIEW_TIER_COUNT, SPAWN_WEB_TASK_RESULT_TOOL_NAME, ToolCallResultRecord, ToolResultPromptInfo, prepare_tool_results_for_prompt
+from .link_references import is_source_bearing_tool, rewrite_prompt_urls
 from .daily_limit_mode import (
     CREDIT_MESSAGE_ONLY_ALLOWED_TOOL_NAMES_TEXT,
     is_credit_message_only_mode,
@@ -130,6 +131,20 @@ SQLITE_MESSAGES_SNAPSHOT_MAX_BYTES = 5_000_000
 SQLITE_MESSAGES_SNAPSHOT_MAX_RECORDS = 10_000
 CONTACT_PROMPT_INLINE_LIMIT = 25
 CONTACT_PROMPT_SAMPLE_LIMIT = 10
+LINK_REFERENCE_PROMPT_NOTE = (
+    "## Link References (CRITICAL)\n\n"
+    "`$[link:L…]` is an opaque stand-in for one complete URL: the token itself is the URL, not an ID or suffix. "
+    "It is safe and required to copy the token unchanged into outgoing content. To open it, use the exact whole token "
+    "as a tool's `url` argument. To cite or deliver it, put that same exact token directly in the Markdown destination "
+    "inside the send tool body: `[Atlas launch]($[link:LEXACT])`. Never replace it with a source name, placeholder, "
+    "known or guessed raw URL, or a host/path containing the token ID. Never decode, edit, shorten, combine, or "
+    "construct a neighboring URL. Copy/paste the case-sensitive token from the prompt or result rather than retyping "
+    "it. An item without its own token stays unlinked; a source/feed token links only that source/feed. Never put a "
+    "token in SQL or search text. If a token fails, compare it with the original and retry only a corrected value. "
+    "When sources are requested, link every included token-backed source and reserve room for those links before "
+    "other detail. A bare source name, `(source)`, or other visible placeholder is not a citation. Verify the outgoing "
+    "body contains the exact tokens before sending; without them, the answer is unfinished."
+)
 SQLITE_EFFICIENCY_WARNING = (
     "SQLite efficiency warning: you've been handling __tool_results one result_id at a time. "
     "Stop fetching by single result_id; run one shaped query across all needed rows using IN/CTEs/"
@@ -663,7 +678,7 @@ def _get_sqlite_guidance() -> str:
         "Fetch new data with its source tool and answer small results directly. Use sqlite_batch for data already in SQLite when large/truncated or needing filtering, joins, aggregation, charts, reuse, or domain logic. Model "
         "sizable domains and multi-fetch finite sets as keyed entities/events/relations with fields/status/source; query gaps before reporting. Only sourced blockers are unresolved. Normalize parent/child data "
         "(vendors/plans, accounts/events) with PRIMARY KEY/UNIQUE identity, useful indexes, and source provenance; put logic in SQL and return only needed rows to context. Populate all relevant __tool_results via one shaped INSERT ... SELECT/json_each filtered by IN/tool_name; "
-        "extract fields in SQL, not literals. Never filter one result_id at a time, make a table per result, or loop over blobs. Use CTAS for one-off extracts; "
+        "extract fields in SQL, not literals/prompt tokens. Never filter one result_id at a time, make a table per result, or loop over blobs. Use CTAS for one-off extracts; "
         "named tables survive calls, TEMP tables do not. Copy identifiers, JSON paths, values, and URLs from schema, hints, or results; inspect unknown structure once instead of inventing it. Use analysis_json/top_keys to locate payloads; http_request JSON is under result_json $.content. Prefer result_json when its path is known, otherwise result_text.\n\n"
         "Snapshots:\n"
         "* __tool_results: result_id, tool_name, created_at, result_json, result_text, analysis_json, is_truncated, top_keys.\n"
@@ -1206,13 +1221,7 @@ def _build_agent_settings_section(agent: PersistentAgent, *, plan_id: str | None
         f"Agent secrets: usernames/passwords for services. Manage secrets at {secrets_url}.",
         "Active status, daily task credit target, dedicated IP assignment.",
         f"Custom email settings: manage at {email_settings_url}.",
-        "Contact endpoints/allowlist. Add or remove contacts that the agent can reach out to.",
-        (
-            "Route note: The agent settings UI is a single page. Do not invent subpage links for secrets, "
-            "webhooks, MCP servers, peer links, intelligence, task credits, or other settings sections. "
-            "Only use explicitly listed URLs such as secrets, contact requests, or email settings; otherwise send the "
-            "main agent settings page."
-        ),
+        "Contact endpoints/allowlist. Add or remove contacts that the agent can reach out to. Route note: The agent settings UI is a single page. Do not invent subpage links for secrets, webhooks, MCP servers, peer links, intelligence, task credits, or other settings sections. Only use explicitly listed destinations such as secrets, contact requests, or email settings; otherwise send the main agent settings page.",
         f"Contact requests: user can view pending requests at {contact_requests_url}.",
         "MCP servers, peer links, inbound/outbound webhooks.",
         "Agent transfer and permanent deletion.",
@@ -1561,7 +1570,7 @@ def _render_prompt_context_once(
 
     # Unified history follows the important context (order within user prompt: important -> unified_history -> critical)
     unified_history_group = prompt.group("unified_history", weight=3)
-    fresh_tool_call_step_ids = _get_unified_history_prompt(
+    fresh_tool_call_step_ids, has_link_references = _get_unified_history_prompt(
         agent,
         unified_history_group,
         config_authority,
@@ -3233,8 +3242,7 @@ def _get_formatting_guidance() -> str:
 
     return (
         "Formatting guidance:\n"
-        "Use the matching delivery surface; be scannable, direct, sourced, and no longer than needed. "
-        "Preserve row/entity item URLs from url/link/listing_url/detail_url fields in reports; in tables make the row label clickable or add a Link column. Source/feed URLs do not substitute for item links.\n\n"
+        "Use the matching surface; be direct and sourced.\n\n"
         "<web_chat>\n"
         f"{_get_web_chat_formatting_guidance()}\n"
         "</web_chat>\n\n"
@@ -3739,7 +3747,7 @@ def _get_system_instruction(
 
         "Calibrate effort to the request. Trivial questions, acknowledgements, exact-URL lookups, one-shot statuses, simple facts, and one-off research questions need only the necessary tool calls, one answer, then stop. "
         "For scheduled digests/reports, produce the requested report once with sources and finish until the next trigger; after an exact feed/API fetch, send the report directly with send_chat_message when web chat is the channel, never with update_plan or plain text. "
-        "When the answer depends on current facts, recent events, pricing, hiring, funding, company/person profiles, or social posts, use web/structured tools instead of memory and cite full copied source URLs. "
+        "When the answer depends on current facts, recent events, pricing, hiring, funding, company/person profiles, or social posts, use web/structured tools instead of memory and cite provided source links. "
         "Do not add charts, files, broad extra research, follow-up questions, plans, or comparisons unless requested or materially necessary. "
         "APIs > extractors > scraping. Follow important leads, not every lead. "
         "Clarifying questions: decide-and-proceed with reasonable defaults. Ask only for irreversible, likely-wrong, or truly blocking choices; no preference surveys or multi-question batteries. "
@@ -3765,7 +3773,7 @@ def _get_system_instruction(
         "Do not invent work, results, preferences, or personal experiences.\n\n"
 
         "## Output Rules\n\n"
-        "Keep chat/outreach light. Owner reports on 4+ peers need resolved/total and one table with requested fields plus a source URL per row. In record lists, link each name to its item/detail URL; feed/source-only links are insufficient. For finite sets, grouped discovery isn't coverage: resolve/source each requested field. Label blockers partial; separate sourced unavailability from research gaps. Ground facts, numbers, units, and URLs in tool results; never relabel/convert units unless asked. Present requested data directly; omit unrelated/unavailable fields and follow-up offers after simple facts, prices, statuses, or lookups. "
+        "Keep chat/outreach light. Owner reports on 4+ peers need resolved/total and one table with requested fields. For finite sets, grouped discovery isn't coverage: resolve/source each requested field. Label blockers partial; separate sourced unavailability from research gaps. Ground facts, numbers, units, and URLs in tool results; never relabel/convert units unless asked. Present requested data directly; omit unrelated/unavailable fields and follow-up offers after simple facts, prices, statuses, or lookups. "
         "Charts: create only when requested/materially useful. "
         "Paste create_chart result.inline/result.inline_html in the message; do not attach/read charts or invent paths, hashes, image tags, or <img> URLs. "
         "Use create_csv for tabular exports, create_pdf for PDFs, and create_file for other text/doc formats; create_file query mode must return exactly one row and one column.\n\n"
@@ -3775,11 +3783,8 @@ def _get_system_instruction(
         f"File uploads are {'' if settings.ALLOW_FILE_UPLOAD else 'not'} supported. "
         "Do not download or upload files unless absolutely necessary or explicitly requested by the user. "
 
-        "## Tool Rules\n\n```\n"
-        "opaque identifiers -> copy exposed tool names and supplied endpoints/URLs/paths/IDs/placeholders "
-        "character-for-character; never shorten or normalize\n"
-        "small_result_answers -> answer directly\n"
-        "provided exact URL -> use it directly; do not search for it\n"
+        "## Tool Rules\n\n```\nopaque identifiers -> copy exposed tool names and supplied endpoints/paths/IDs/placeholders character-for-character; never shorten or normalize\n"
+        "small result -> answer; exact URL -> requested tool; custom-tool URLs -> runtime params, no prefetch\n"
         "public exact URL + http/scrape tool callable -> http_request or scrape directly; spawn_web_task only after access/render/login blockage\n"
         "exact docs/blog/changelog/release-notes URL -> scrape_as_markdown or http_request first; never spawn_web_task first just because it is a webpage or app URL\n"
         "explicit SQLite/database request and sqlite_batch is callable -> use sqlite_batch directly; do not search for a SQLite/database tool\n"
@@ -3818,6 +3823,13 @@ def _get_system_instruction(
         "Do not use sqlite_batch to reread __tool_results, create a temporary table, or parse a small result unless you need SQL for real filtering, joining, aggregation, or chart input. "
         "Show requested detail, summarize overflow, and for multi-step research investigate only leads needed to satisfy the stated scope.\n\n"
 
+        "A final send ends the work cycle. If a result reports `remaining_work`/`next_cursor` and the user asked to "
+        "preserve or continue it: first use one direct sqlite_batch update to save the cursor and follow any "
+        "resume-schedule direction; the current config is already in the prompt, so do not SELECT or read_file first. "
+        "Append new resume state with `charter = charter || '...'`; use patch_text only to replace an exact existing "
+        "phrase. After that update succeeds, the next call must send the report; do not inspect files, messages, or "
+        "config first. Never send 'I'll save/update it' with will_continue_work=false; do it first.\n\n"
+        f"{LINK_REFERENCE_PROMPT_NOTE}\n\n"
         "## Bounded Current Research (CRITICAL)\n\n"
         "For one-off latest/current company/batch/funding/pricing/product/news/status asks except finite sets: use bounded research mode. Do one focused search or structured lookup; scrape 1-3 top sources if snippets are insufficient; then send one answer with takeaways and cite at least two distinct source URLs compactly. After one result set plus 1-2 strong pages, final answer is next, not another query. Use at most one web search query unless empty/contradictory. Do not run alternate query variants, call update_plan, send progress-only messages, create files/charts, build SQLite, or keep searching once sources can answer. Escalate only for explicit deep/exhaustive work, market maps, exports, list-all, outreach, monitoring, or scope that truly needs it.\n\n"
 
@@ -3852,6 +3864,9 @@ def _get_system_instruction(
         "Short work: no updates. Deep/exhaustive, large-batch, implementation/deployment, or long work:\n"
         "1. FIRST send scope + next checkpoint on the inbound channel; will_continue_work=true.\n"
         "2. Before work call 4 or after the first source batch/phase, send an evidence milestone. Later only for material ETA/blockers.\n"
+        "After any update result, do not repeat or paraphrase it; the next response starts with work calls only. "
+        "A kickoff is not an evidence milestone: each later update must state a concrete new finding from completed "
+        "tools and must not reuse kickoff text. If there is no evidence yet, continue work instead of sending.\n"
         "No generic narration/reasoning. Peer: send_agent_message only."
     )
     base_prompt += "\n\n<sqlite_guidance>\n" + _get_sqlite_guidance() + "\n</sqlite_guidance>"
@@ -3982,7 +3997,6 @@ Keep messages concise—under 160 characters when possible, though longer is fin
 No markdown formatting. Easy on the emojis and special characters.
 Avoid sending duplicates or messaging too frequently.
 Keep content appropriate and carrier-compliant (no hate speech, SHAFT content, or profanity—censor if needed: f***, s***).
-URLs must be accurate and complete—never fabricated.
              """)
     return ""
 
@@ -4282,7 +4296,7 @@ def _get_unified_history_prompt(
     config_authority: _ConfigAuthorityResolver,
     *,
     run_cache: PromptRunCache | None = None,
-) -> Set[str]:
+) -> Tuple[Set[str], bool]:
     """Add summaries + interleaved recent steps & messages to the provided promptree group."""
     epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
     unified_limit, unified_hysteresis = _get_unified_history_limits(agent)
@@ -4483,6 +4497,11 @@ def _get_unified_history_prompt(
         tool_call_records,
         recency_positions=recency_positions,
         fresh_tool_call_step_ids=fresh_tool_call_step_ids,
+        url_rewriter=lambda text, record: rewrite_prompt_urls(
+            text,
+            agent,
+            create=is_source_bearing_tool(record.tool_name),
+        ),
     )
 
     # format steps (group meta/params/result components together)
@@ -4495,7 +4514,11 @@ def _get_unified_history_prompt(
 
             components = {
                 "meta": f"[{s.created_at.isoformat()}] Tool {tc.tool_name} called.",
-                "params": json.dumps(tc.tool_params)
+                "params": rewrite_prompt_urls(
+                    json.dumps(tc.tool_params),
+                    agent,
+                    create=False,
+                ),
             }
             parent_tool_call_id = tool_call_parent_ids.get(str(s.id))
             parent_result_info = tool_result_prompt_info.get(parent_tool_call_id) if parent_tool_call_id else None
@@ -4569,6 +4592,11 @@ def _get_unified_history_prompt(
 
         channel = m.from_endpoint.channel
         body = _redact_signed_filespace_urls(m.body or "", agent)
+        body = rewrite_prompt_urls(
+            body,
+            agent,
+            create=not m.is_outbound,
+        )
         subject = ""
         raw_payload = m.raw_payload if isinstance(m.raw_payload, dict) else {}
         if raw_payload:
@@ -4706,7 +4734,7 @@ def _get_unified_history_prompt(
         files = _browser_task_files_payload(t)
         components = {
             "meta": f"[{t.updated_at.isoformat()}] Browser task completed with status '{t.status}' (id={t.id}).",
-            "prompt": t.prompt or "",
+            "prompt": rewrite_prompt_urls(t.prompt or "", agent, create=False),
         }
         result_info = tool_result_prompt_info.get(
             browser_task_result_record_ids.get(str(t.id), "")
@@ -4722,7 +4750,11 @@ def _get_unified_history_prompt(
             elif not result_summary and t.status == BrowserUseAgentTask.StatusChoices.CANCELLED:
                 result_summary = "Browser task was cancelled."
             if result_summary:
-                components["result_summary"] = result_summary
+                components["result_summary"] = rewrite_prompt_urls(
+                    result_summary,
+                    agent,
+                    create=True,
+                )
             if (
                 result_info.preview_text
                 and not files
@@ -4734,7 +4766,15 @@ def _get_unified_history_prompt(
         structured_events.append((t.updated_at, "browser_task", components))
 
     # Create structured promptree groups for each event
+    has_link_references = False
     if structured_events:
+        has_link_references = any(
+            "$[link:L" in component
+            for _timestamp, _event_type, components in structured_events
+            for component in components.values()
+            if isinstance(component, str)
+        )
+
         structured_events.sort(key=lambda e: e[0])  # chronological order
 
         if len(structured_events) > unified_limit + unified_hysteresis:
@@ -4827,7 +4867,7 @@ def _get_unified_history_prompt(
                     non_shrinkable=non_shrinkable,
                 )
 
-    return fresh_tool_call_step_ids
+    return fresh_tool_call_step_ids, has_link_references
 
 
 def get_agent_tools(agent: PersistentAgent = None) -> List[dict]:

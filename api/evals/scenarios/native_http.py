@@ -11,6 +11,7 @@ from api.agent.system_skills.service import enable_system_skills
 from api.evals.base import EvalScenario
 from api.evals.execution import ScenarioExecutionTools
 from api.evals.registry import ScenarioRegistry
+from api.evals.tool_params import resolved_tool_param
 from api.models import EvalRunTask, PersistentAgent, PersistentAgentMessage, PersistentAgentSystemStep, PersistentAgentStep, PersistentAgentToolCall
 from api.services.native_integrations import get_native_integration_provider, save_native_integration_credentials
 from api.services.persistent_agent_secrets import resolve_global_secret_owner_for_agent
@@ -61,16 +62,15 @@ def tool_calls_for_run(run_id: str, *, after=None, tool_names=None):
         queryset = queryset.filter(step__created_at__gte=after)
     if tool_names is not None:
         queryset = queryset.filter(tool_name__in=list(tool_names))
-    return list(queryset.select_related("step").order_by("step__created_at", "step__id"))
+    return list(queryset.select_related("step", "step__agent").order_by("step__created_at", "step__id"))
 
 
 def decoded_url(call: PersistentAgentToolCall) -> str:
-    params = call.tool_params or {}
-    return unquote_plus(str(params.get("url") or "")).lower()
+    return unquote_plus(str(resolved_tool_param(call, "url") or "")).lower()
 
 
 def query_value(call: PersistentAgentToolCall, key: str) -> str:
-    raw_url = str((call.tool_params or {}).get("url") or "")
+    raw_url = str(resolved_tool_param(call, "url") or "")
     values = parse_qs(urlparse(raw_url).query).get(key) or []
     if not values:
         return ""
@@ -251,7 +251,7 @@ class NativeHttpScenarioBase(EvalScenario, ScenarioExecutionTools):
         seen = [
             {
                 "method": request_method(call),
-                "url": (call.tool_params or {}).get("url"),
+                "url": resolved_tool_param(call, "url"),
                 "body": request_body(call)[:500],
             }
             for call in http_calls
@@ -295,7 +295,7 @@ class NativeHttpScenarioBase(EvalScenario, ScenarioExecutionTools):
                 task_name="verify_no_forbidden_tools",
                 observed_summary=(
                     "Agent used forbidden tool or URL: "
-                    f"{[(call.tool_name, (call.tool_params or {}).get('url')) for call in bad_calls]}."
+                    f"{[(call.tool_name, resolved_tool_param(call, 'url')) for call in bad_calls]}."
                 ),
                 artifacts={"step": bad_calls[0].step},
             )

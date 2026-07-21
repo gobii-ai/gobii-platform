@@ -1,3 +1,6 @@
+from types import SimpleNamespace
+from unittest.mock import patch
+
 from django.test import SimpleTestCase, tag
 
 import api.evals.loader  # noqa: F401 - registers scenarios and suites
@@ -248,6 +251,41 @@ class MessageQualityScenarioTests(SimpleTestCase):
         )
 
         self.assertEqual(failures, ["Message body was empty."])
+
+    @patch(
+        "api.evals.scenarios.message_quality.resolved_tool_param",
+        return_value="<a href='https://downloads.example.test/report.csv'>Download</a>",
+    )
+    def test_message_body_uses_resolved_link_references(self, resolve_param):
+        case = next(case for case in MESSAGE_QUALITY_CASES if case.channel == "email")
+        call = SimpleNamespace(tool_params={"mobile_first_html": "<a href='$[link:LTEST]'>Download</a>"})
+
+        body = MessageQualityScenario()._message_body(case, call)
+
+        self.assertEqual(body, "<a href='https://downloads.example.test/report.csv'>Download</a>")
+        resolve_param.assert_called_once_with(call, "mobile_first_html")
+
+    def test_quality_judge_context_uses_resolved_body_in_tool_params(self):
+        case = next(case for case in MESSAGE_QUALITY_CASES if case.channel == "email")
+        call = SimpleNamespace(
+            result=None,
+            step="send-step",
+            tool_params={"mobile_first_html": "<a href='$[link:LTEST]'>Download</a>"},
+        )
+        scenario = MessageQualityScenario()
+        contexts = []
+        scenario.record_task_result = lambda *args, **kwargs: None
+        scenario.llm_judge = lambda *, context, **kwargs: (
+            contexts.append(context) or "Pass",
+            "The email contains a concrete resolved download link and clear visual structure.",
+        )
+        resolved_body = "<a href='https://downloads.example.test/report.csv'>Download</a>"
+
+        scenario._record_quality_judgment("run", case, call, resolved_body)
+
+        self.assertEqual(len(contexts), 1)
+        self.assertNotIn("$[link:", contexts[0])
+        self.assertIn("https://downloads.example.test/report.csv", contexts[0])
 
     def test_delivery_basics_reject_ai_dash_tells(self):
         case = HUMAN_MESSAGE_QUALITY_CASES[0]

@@ -20,6 +20,7 @@ from ..comms.outbound_delivery import deliver_agent_sms
 from .outbound_duplicate_guard import detect_recent_duplicate_message
 from util.text_sanitizer import decode_unicode_escapes, strip_control_chars, strip_markdown_for_sms
 from .agent_variables import substitute_variables_with_filespace
+from api.agent.core.link_references import handle_link_reference_errors
 from ..files.attachment_helpers import AttachmentResolutionError, build_signed_filespace_download_url, create_message_attachments, resolve_filespace_attachments
 from ..files.filespace_service import broadcast_message_attachment_update
 from ...models import CommsChannel, PersistentAgent, PersistentAgentCommsEndpoint, PersistentAgentMessage, LinkShortener
@@ -58,7 +59,10 @@ def get_send_sms_tool() -> Dict[str, Any]:
                         },
                         "description": "Additional E.164 phone numbers for group SMS (optional)"
                     },
-                    "body": {"type": "string", "description": "SMS content."},
+                    "body": {
+                        "type": "string",
+                        "description": "SMS content.",
+                    },
                     "attachments": {
                         "type": "array",
                         "items": {"type": "string"},
@@ -76,6 +80,7 @@ def get_send_sms_tool() -> Dict[str, Any]:
 
 
 @tracer.start_as_current_span("SMS Sender - execute_send_sms")
+@handle_link_reference_errors
 def execute_send_sms(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str, Any]:
     """Execute SMS sending for a persistent agent."""
     try:
@@ -87,12 +92,11 @@ def execute_send_sms(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str
         return {"status": "error", "message": "SMS sending is disabled for this agent."}
 
     to_number = params.get("to_number")
-    # Clean body: decode escapes, strip control chars, then strip markdown formatting
+    # Resolve references before stripping Markdown so link destinations survive conversion.
     body = decode_unicode_escapes(params.get("body"))
     body = strip_control_chars(body)
-    body = strip_markdown_for_sms(body)
-    # Substitute $[var] placeholders with actual values (e.g., $[/charts/...]).
     body = substitute_variables_with_filespace(body, agent)
+    body = strip_markdown_for_sms(body)
     cc_numbers = params.get("cc_numbers", [])  # Optional list for group SMS
     will_continue = _should_continue_work(params)
     attachment_paths = params.get("attachments")

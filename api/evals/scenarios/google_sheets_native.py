@@ -12,6 +12,7 @@ from api.evals.scenarios.native_http import (
     register_native_http_scenarios,
     tool_calls_for_run as _tool_calls_for_run,
 )
+from api.evals.tool_params import resolved_tool_param
 from api.models import EvalRunTask, PersistentAgentToolCall
 
 
@@ -690,7 +691,7 @@ class GoogleSheetsNativeScenario(NativeHttpScenarioBase):
                 task_name="verify_no_partial_drive_queries",
                 observed_summary=(
                     "Agent made partial Google Drive q filter request(s): "
-                    f"{[(call.tool_params or {}).get('url') for call in bad_calls]}."
+                    f"{[resolved_tool_param(call, 'url') for call in bad_calls]}."
                 ),
                 artifacts={"step": bad_calls[0].step},
             )

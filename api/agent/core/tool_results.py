@@ -3,9 +3,9 @@ import logging
 import re
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Dict, List, Optional, Sequence, Set, Tuple
+from typing import Callable, Dict, List, Optional, Sequence, Set, Tuple
 
-from ..tools.context_hints import extract_context_hint, hint_from_unstructured_text
+from ..tools.context_hints import URL_FIELD_PRIORITY, extract_context_hint, hint_from_unstructured_text
 from ..tools.sqlite_guardrails import clear_guarded_connection, open_guarded_sqlite_connection
 from ..tools.sqlite_state import TOOL_RESULTS_TABLE, get_sqlite_db_path
 from ..tools.tool_manager import SQLITE_TOOL_NAME
@@ -13,44 +13,28 @@ from .result_analysis import ResultAnalysis, analyze_result, analysis_to_dict, _
 
 logger = logging.getLogger(__name__)
 
-# Tiered preview system for EXTERNAL data (http_request, mcp_* tools)
-# These are structure hints only - agent must use SQLite to extract data.
-# Position 0: structure hint (active result)
-# Position 1-2: brief structure hint
-# Position 3+: meta only (query via sqlite)
 PREVIEW_TIERS_EXTERNAL = [
     512,    # Position 0: 512B - Structure hint only
     256,    # Position 1: 256B - Brief hint
     256,    # Position 2: 256B - Brief hint
-    # Position 3+: None (meta only - use query)
 ]
 
-# For large external results, reduce preview but keep enough to show structure
 LARGE_RESULT_THRESHOLD = 15_000   # 15KB - start capping here
 LARGE_RESULT_PREVIEW_CAP = 1500   # 1.5KB - enough for first array item structure
 
-# For very large results, still show meaningful structure
 HUGE_RESULT_THRESHOLD = 50_000    # 50KB - truly large results
 HUGE_RESULT_PREVIEW_CAP = 800     # 800 bytes - still shows keys and sample values
 
-# For fresh (most recent) tool call results, inline if under this threshold
-# to avoid requiring a separate inspection step. ~10K tokens ≈ 40KB.
 FRESH_RESULT_INLINE_THRESHOLD = 40_000  # 40KB - inline fresh results under this
 
-# Small results are ALWAYS inlined regardless of recency position.
-# Critical for tools like create_chart where the result (a path) is essential
-# and tiny, but may fall outside the recency window if many tool calls follow.
 SMALL_RESULT_ALWAYS_INLINE = 2048  # 2KB - always show these in full
 
-# SQLite results get MUCH more generous previews - this IS the extracted data
-# the agent needs to work with. Show full results up to reasonable limits.
 PREVIEW_TIERS_SQLITE = [
     16384,  # Position 0: 16KB - Show full query result
     8192,   # Position 1: 8KB - Recent query results
     4096,   # Position 2: 4KB - Older query results
     2048,   # Position 3: 2KB
     1024,   # Position 4: 1KB
-    # Position 5+: None (very old)
 ]
 
 PREVIEW_TIER_COUNT = max(len(PREVIEW_TIERS_EXTERNAL), len(PREVIEW_TIERS_SQLITE))
@@ -61,7 +45,6 @@ MAX_TOP_KEYS = 20
 EXCLUDED_TOOL_NAMES = {SQLITE_TOOL_NAME, "sqlite_query"}
 SPAWN_WEB_TASK_RESULT_TOOL_NAME = "spawn_web_task_result"
 
-# Tools that fetch external data with unknown structure - schema generation helps agent query it
 SCHEMA_ELIGIBLE_TOOL_PREFIXES = ("http_request", "mcp_")
 
 _BASE64_RE = re.compile(r"base64,", re.IGNORECASE)
@@ -70,6 +53,11 @@ BARBELL_TEXT_FORMATS = frozenset({"html", "markdown", "plain", "log"})
 _UUID_RESULT_ID_RE = re.compile(
     r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
 )
+_LINK_FIELD_RE = re.compile(r"\b([A-Za-z_][\w-]*(?:url|link|href))\s*([:=])\s*\$\[link:", re.IGNORECASE)
+_URL_PART_FIELD_RE = re.compile(
+    r"(\b[\w-]*(?:host|path|route|slug|public_identifier|profile_id)\s*[:=]\s*)([^|\n]*?\S)(?=\s*(?:\||\\n|$))",
+    re.IGNORECASE,
+)
 
 SHORT_RESULT_ID_MIN_LEN = 6
 SHORT_RESULT_ID_MAX_LEN = 12
@@ -77,6 +65,30 @@ SHORT_RESULT_ID_MAX_LEN = 12
 
 def _is_scrape_as_markdown_tool(tool_name: str) -> bool:
     return tool_name.endswith("scrape_as_markdown")
+
+
+def _mark_missing_item_links(text: str) -> str:
+    text = _URL_PART_FIELD_RE.sub(r"\1[omitted: no item link]", text)
+    matches = {match.group(1).lower(): match.group(2) for match in _LINK_FIELD_RE.finditer(text)}
+    field = next((candidate for candidate in URL_FIELD_PRIORITY if candidate in matches), None) or next(
+        (candidate for candidate in matches if not any(part in candidate for part in ("source", "feed", "page", "origin"))),
+        None,
+    )
+    if not field:
+        return text
+    marker = f"{field}{matches[field]} [not provided]"
+
+    def mark(record: str) -> str:
+        if re.search(rf"\b{re.escape(field)}\s*[:=]", record, re.IGNORECASE):
+            return record
+        return f"{record}\n{marker}" if "\n" in record else f"{record} | {marker}"
+
+    if "\n---\n" in text:
+        return "\n---\n".join(mark(block) for block in text.split("\n---\n"))
+    return "\n".join(
+        mark(line) if " | " in line else line
+        for line in text.splitlines()
+    )
 
 
 @dataclass(frozen=True)
@@ -136,6 +148,7 @@ def prepare_tool_results_for_prompt(
     recency_positions: Dict[str, int],
     fresh_tool_call_step_id: Optional[str] = None,
     fresh_tool_call_step_ids: Optional[Set[str]] = None,
+    url_rewriter: Optional[Callable[[str, ToolCallResultRecord], str]] = None,
 ) -> Dict[str, ToolResultPromptInfo]:
     prompt_info: Dict[str, ToolResultPromptInfo] = {}
     rows: List[Tuple] = []
@@ -167,14 +180,11 @@ def prepare_tool_results_for_prompt(
 
         meta, stored_json, stored_text, analysis = _summarize_result(result_text, result_id, record.tool_name)
         stored_in_db = record.tool_name not in EXCLUDED_TOOL_NAMES
-        # Only show rich analysis for tools that fetch external data with unknown structure
         is_analysis_eligible = record.tool_name.startswith(SCHEMA_ELIGIBLE_TOOL_PREFIXES)
 
         recency_position = recency_positions.get(record.step_id)
         is_fresh_tool_call = record.step_id in fresh_step_ids
 
-        # Extract context hint for lightning-fast agent decisions
-        # This is optimistic - if extraction fails, we just skip it
         context_hint = None
         if is_analysis_eligible and (stored_json or (is_fresh_tool_call and meta.get("is_json"))):
             payload = _load_json_payload(stored_json, analysis)
@@ -189,7 +199,7 @@ def prepare_tool_results_for_prompt(
                     context_hint = extract_context_hint(
                         record.tool_name,
                         payload,
-                        allow_barbell=is_fresh_tool_call,
+                        allow_barbell=recency_position is not None,
                         allow_goldilocks=is_fresh_tool_call,
                         payload_bytes=meta.get("bytes"),
                     )
@@ -212,6 +222,17 @@ def prepare_tool_results_for_prompt(
             tool_name=record.tool_name,
             is_fresh_tool_call=is_fresh_tool_call,
         )
+        has_focus = "\nFOCUS:\n" in (context_hint or "")
+        if has_focus and not is_inline:
+            preview_text = None
+        if url_rewriter:
+            if context_hint:
+                context_hint = url_rewriter(context_hint, record)
+            if preview_text:
+                preview_text = url_rewriter(preview_text, record)
+        if "$[link:" in f"{context_hint or ''}{preview_text or ''}":
+            context_hint = _mark_missing_item_links(context_hint or "") or None
+            preview_text = _mark_missing_item_links(preview_text or "")
 
         is_scrape_markdown = _is_scrape_as_markdown_tool(record.tool_name)
         meta_text = _format_meta_text(
@@ -219,7 +240,7 @@ def prepare_tool_results_for_prompt(
             meta,
             analysis=None if is_scrape_markdown else analysis if is_analysis_eligible else None,
             stored_in_db=stored_in_db,
-            result_is_inline=is_inline,
+            result_is_inline=is_inline or has_focus,
             context_hint=context_hint,
             allow_fallback_query_hints=not is_scrape_markdown,
         )
@@ -240,7 +261,6 @@ def prepare_tool_results_for_prompt(
         )
 
         if stored_in_db:
-            # Serialize analysis for storage
             analysis_json_str = None
             if analysis:
                 try:
@@ -274,7 +294,6 @@ def prepare_tool_results_for_prompt(
                 )
             )
 
-            # Collect CSV candidates for auto-loading
             if analysis and is_analysis_eligible:
                 csv_info = None
                 if analysis.text_analysis and analysis.text_analysis.csv_info:
@@ -284,7 +303,6 @@ def prepare_tool_results_for_prompt(
 
     _store_tool_results(rows)
 
-    # Auto-load CSV data into tables when safe
     if csv_candidates:
         _auto_load_csv_tables(csv_candidates)
 
@@ -410,41 +428,32 @@ def _ensure_tool_results_columns(conn) -> None:
             f"PRAGMA table_info('{TOOL_RESULTS_TABLE}')"
         )
     }
-    # Migration: add legacy_result_id column if missing
     if "legacy_result_id" not in existing:
         conn.execute(
             f'ALTER TABLE "{TOOL_RESULTS_TABLE}" ADD COLUMN legacy_result_id TEXT;'
         )
-    # Migration: add analysis_json column if missing
     if "analysis_json" not in existing:
         conn.execute(
             f'ALTER TABLE "{TOOL_RESULTS_TABLE}" ADD COLUMN analysis_json TEXT;'
         )
 
 
-# CSV auto-loading constants
 CSV_AUTO_LOAD_MAX_BYTES = 5_000_000  # 5MB
 CSV_AUTO_LOAD_MAX_ROWS = 10_000
 CSV_AUTO_LOAD_MAX_COLUMNS = 100
 
 
 def _sanitize_column_name(col: str) -> str:
-    """Sanitize column name for use as SQL identifier."""
-    # Replace special characters with underscores
     sanitized = re.sub(r'[.\s\[\]\'"$,;:!@#%^&*()\-+=<>?/\\|`~{}]', '_', col)
-    # Collapse multiple underscores
     sanitized = re.sub(r'_+', '_', sanitized).strip('_')
-    # Ensure it's not empty
     if not sanitized:
         return 'col'
-    # Ensure it doesn't start with a digit
     if sanitized[0].isdigit():
         sanitized = 'col_' + sanitized
     return sanitized
 
 
 def _dedupe_column_names(columns: List[str]) -> List[str]:
-    """Deduplicate column names by appending numeric suffixes."""
     seen: Dict[str, int] = {}
     deduped: List[str] = []
     for col in columns:
@@ -460,14 +469,6 @@ def _dedupe_column_names(columns: List[str]) -> List[str]:
 def _auto_load_csv_tables(
     csv_candidates: List[Tuple[str, str, ResultAnalysis]],
 ) -> Dict[str, str]:
-    """Auto-load CSV data into SQLite tables when safe.
-
-    Args:
-        csv_candidates: List of (result_id, result_text, analysis) tuples
-
-    Returns:
-        Dict mapping result_id to auto-loaded table name
-    """
     if not csv_candidates:
         return {}
 
@@ -507,8 +508,6 @@ def _maybe_auto_load_csv(
     result_text: str,
     analysis: ResultAnalysis,
 ) -> Optional[str]:
-    """Auto-load CSV into SQLite table if safe. Returns table name or None."""
-    # Check if this is eligible CSV data
     csv_info = None
     if analysis.text_analysis and analysis.text_analysis.csv_info:
         csv_info = analysis.text_analysis.csv_info
@@ -526,28 +525,23 @@ def _maybe_auto_load_csv(
     if len(csv_info.columns) > CSV_AUTO_LOAD_MAX_COLUMNS:
         return None
 
-    # Generate table name from short result_id
     short_id = result_id[:6]
     table_name = f"_csv_{short_id}"
 
-    # Check if table already exists
     cur = conn.cursor()
     cur.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table_name,))
     if cur.fetchone():
         return None
 
-    # Sanitize and dedupe column names
     sanitized_cols = [_sanitize_column_name(c) for c in csv_info.columns]
     deduped_cols = _dedupe_column_names(sanitized_cols)
 
-    # Infer SQL types from column_types
     col_types = csv_info.column_types or []
     sql_types: List[str] = []
     for i in range(len(deduped_cols)):
         ctype = col_types[i] if i < len(col_types) else "text"
         sql_types.append("REAL" if ctype in ("int", "float") else "TEXT")
 
-    # Build CREATE TABLE AS SELECT
     extracts = ", ".join(
         f"CAST(r.value->>'{_safe_json_path(orig)}' AS {stype}) AS \"{san}\""
         for orig, san, stype in zip(csv_info.columns, deduped_cols, sql_types)
@@ -574,12 +568,6 @@ def _summarize_result(
     result_id: str,
     tool_name: str = "",
 ) -> Tuple[Dict[str, object], Optional[str], Optional[str], Optional[ResultAnalysis]]:
-    """Summarize a tool result and perform rich analysis.
-
-    Returns:
-        Tuple of (meta dict, result_json for storage, result_text for storage, analysis)
-    """
-    # Perform rich analysis
     analysis: Optional[ResultAnalysis] = None
     try:
         analysis = analyze_result(result_text, result_id)
@@ -595,7 +583,6 @@ def _summarize_result(
     has_images = bool(_IMAGE_RE.search(analysis_text))
     has_base64 = bool(_BASE64_RE.search(result_text))
 
-    # Extract basic JSON info
     is_json = analysis.is_json if analysis else False
     json_type = ""
     top_keys: List[str] = []
@@ -603,7 +590,6 @@ def _summarize_result(
     if analysis and analysis.json_analysis:
         ja = analysis.json_analysis
         json_type = ja.pattern
-        # Get top keys from primary array or field types
         if ja.primary_array and ja.primary_array.item_fields:
             top_keys = ja.primary_array.item_fields[:MAX_TOP_KEYS]
         elif ja.primary_array and ja.primary_array.table_info and ja.primary_array.table_info.columns:
@@ -611,7 +597,6 @@ def _summarize_result(
         elif ja.field_types:
             top_keys = [ft.name for ft in ja.field_types[:MAX_TOP_KEYS]]
     elif is_json:
-        # Fallback: parse and extract basic info
         try:
             parsed = json.loads(result_text)
             json_type = _json_type(parsed)
@@ -627,14 +612,9 @@ def _summarize_result(
     truncated_text, truncated_bytes = _truncate_to_bytes(storage_text, MAX_TOOL_RESULT_BYTES)
     is_truncated = truncated_bytes > 0
 
-    # Always store result_text for robustness - agent can always query it
-    # Additionally store result_json when applicable for json_extract() etc.
     result_json = truncated_text if is_json and not is_truncated else None
     result_text_store = truncated_text  # Always set for robust querying
 
-    # Flatten common wrapper fields into result_text when the useful payload is a
-    # text body nested inside a JSON envelope. Keep result_json intact so agents
-    # can still access the original structured result when needed.
     if is_json and not is_truncated:
         try:
             parsed = json.loads(truncated_text)
@@ -675,11 +655,6 @@ def _summarize_result(
 
 
 def _wrap_as_sqlite_result(result_text: str, full_bytes: int) -> str:
-    """Wrap result as if it came from a SQLite inspection query.
-
-    This primes the agent's mental model that the inspection step is already
-    done, avoiding a redundant query for reasonable-sized results.
-    """
     return (
         f"[FULL RESULT ({full_bytes} chars) - ONE-TIME VIEW. "
         f"Use this visible result now. If it answers the request, reply directly in the next message. "
@@ -698,68 +673,41 @@ def _build_prompt_preview(
     tool_name: str,
     is_fresh_tool_call: bool = False,
 ) -> Tuple[Optional[str], bool]:
-    """Build a preview for the prompt.
-
-    For external data (http_request, mcp_*): small structure hints only.
-    For sqlite results: generous preview since this IS the extracted data.
-    For fresh (most recent) tool calls under threshold: full inline to skip inspection.
-    For small results (≤2KB): always inline regardless of recency.
-
-    Returns (preview_text, is_inline) where:
-    - preview_text is a sample of the result
-    - is_inline is True only for small results that fit entirely
-    """
-    # Small results are ALWAYS inlined - critical for tools like create_chart
-    # where the result contains essential data (paths) that the agent needs
-    # even if many subsequent tool calls push it outside the recency window.
     if full_bytes <= SMALL_RESULT_ALWAYS_INLINE:
         return result_text, True
 
-    # Determine which tier system to use
     is_sqlite = tool_name in EXCLUDED_TOOL_NAMES or tool_name.startswith("sqlite")
     tiers = PREVIEW_TIERS_SQLITE if is_sqlite else PREVIEW_TIERS_EXTERNAL
     tier_count = len(tiers)
 
-    # For fresh tool calls under ~10K tokens, return full result inline
-    # wrapped as a "pre-executed" SQLite query result to prime the agent's
-    # mental model that inspection is already done
     if is_fresh_tool_call and full_bytes <= FRESH_RESULT_INLINE_THRESHOLD:
         return _wrap_as_sqlite_result(result_text, full_bytes), True
 
-    # No position means meta only (old result beyond tier range)
     if recency_position is None or recency_position >= tier_count:
         return None, False
 
     max_bytes = tiers[recency_position]
 
-    # For large EXTERNAL results, cap preview to force query usage
-    # (Don't cap sqlite results - agent needs to see query output)
     if not is_sqlite:
         if full_bytes >= HUGE_RESULT_THRESHOLD:
-            # Very large result - minimal preview, rely on analysis hints
             max_bytes = min(max_bytes, HUGE_RESULT_PREVIEW_CAP)
         elif full_bytes >= LARGE_RESULT_THRESHOLD:
             max_bytes = min(max_bytes, LARGE_RESULT_PREVIEW_CAP)
 
-    # If result fits within tier limit, show full (inline)
     if full_bytes <= max_bytes:
         return result_text, True
 
-    # Truncate with appropriate guidance
     preview_text, truncated_bytes = _truncate_to_bytes(result_text, max_bytes)
     if truncated_bytes > 0:
         if is_sqlite:
-            # SQLite result - just note truncation, no "use query" since this IS the query result
             preview_text = f"{preview_text}\n... [{truncated_bytes} more bytes truncated]"
         elif full_bytes >= HUGE_RESULT_THRESHOLD:
-            # Huge external data - strong guidance to search or shape before extraction
             kb_size = full_bytes // 1024
             preview_text = (
                 f"{preview_text}\n"
                 f"... [{kb_size}KB total - USE QUERY ABOVE to search or sample both ends]"
             )
         else:
-            # External data - remind to use query
             preview_text = (
                 f"{preview_text}\n"
                 f"... [{truncated_bytes} more bytes - USE QUERY ABOVE to access full data]"
@@ -777,19 +725,12 @@ def _format_meta_text(
     context_hint: Optional[str] = None,
     allow_fallback_query_hints: bool = True,
 ) -> str:
-    """Format metadata and analysis into actionable text for the prompt.
-
-    When analysis is available, uses the compact summary with ready-to-use
-    query patterns. Falls back to basic meta info otherwise.
-    """
-    # Basic meta line (always present)
     parts = [
         f"result_id={result_id}",
         f"in_db={1 if stored_in_db else 0}",
         f"bytes={meta['bytes']}",
     ]
 
-    # Add binary/image flags only if present
     if meta.get("is_binary"):
         parts.append("is_binary=1")
     if meta.get("has_images"):
@@ -811,12 +752,9 @@ def _format_meta_text(
 
     show_query_hints = stored_in_db and not result_is_inline
 
-    # If we have rich analysis, use the compact summary when the visible result
-    # is incomplete or absent. Inline results should be read directly.
     if analysis and analysis.compact_summary and show_query_hints:
         meta_line += "\n" + analysis.compact_summary
     elif allow_fallback_query_hints and show_query_hints and meta["bytes"] > PREVIEW_TIERS_EXTERNAL[0]:
-        # Fallback: basic query hints for large results without analysis
         if meta.get("is_json"):
             meta_line += (
                 f"\n[JSON: {meta.get('json_type', 'unknown')}]"
@@ -835,10 +773,8 @@ def _format_meta_text(
                 f"\n-> FROM __tool_results WHERE result_id='{result_id}'"
             )
 
-    # Append context hint if available (optimistic - only when extraction succeeded)
-    # This gives the agent immediate actionable info without extra extraction steps
     if context_hint:
-        meta_line += f"\n{context_hint}"
+        meta_line += f"\nUse visible FOCUS directly when it covers the request; query only missing facts.\n{context_hint}"
 
     return meta_line
 

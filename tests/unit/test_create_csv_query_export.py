@@ -71,7 +71,7 @@ class CreateCsvQueryExportTests(TestCase):
             node = AgentFsNode.objects.get(created_by_agent=self.agent, path="/exports/report.csv")
             with node.content.open("rb") as handle:
                 csv_bytes = handle.read()
-            self.assertEqual(csv_bytes, b"a,b\r\n1,x\r\n2,y\r\n")
+            self.assertEqual(csv_bytes, b"a,b\n1,x\n2,y\n")
 
     def test_rejects_non_select(self):
         with self._with_temp_db():
@@ -81,4 +81,3 @@ class CreateCsvQueryExportTests(TestCase):
             )
             self.assertEqual(result.get("status"), "error")
             self.assertIn("SELECT", result.get("message", "").upper())
-

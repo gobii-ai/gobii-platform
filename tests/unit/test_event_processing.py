@@ -2291,11 +2291,11 @@ class PromptContextBuilderTests(TestCase):
         )
         large_step = PersistentAgentStep.objects.create(
             agent=self.agent,
-            description="Tool call: http_request",
+            description="Tool call: large_result_tool",
         )
         parent_call = PersistentAgentToolCall.objects.create(
             step=large_step,
-            tool_name="http_request",
+            tool_name="large_result_tool",
             tool_params={"url": "https://example.test/data"},
             result=json.dumps({"content": "large-preview-result " * 3000}),
         )
@@ -2409,7 +2409,11 @@ class PromptContextBuilderTests(TestCase):
             )
 
         content_before = self._build_user_prompt_content()
-        self.assertIn(task_prompts[0], content_before)
+        link_match = re.search(r"\$\[link:[A-Z0-9]+\]", content_before)
+        self.assertIsNotNone(link_match)
+        link_reference = link_match.group(0)
+        self.assertIn(f"Open {link_reference} and report the page title only.", content_before)
+        self.assertNotIn("https://example.com", content_before)
 
         for idx in range(2):
             self._create_history_step(
@@ -2418,7 +2422,7 @@ class PromptContextBuilderTests(TestCase):
             )
 
         content_after = self._build_user_prompt_content()
-        self.assertIn(task_prompts[0], content_after)
+        self.assertIn(f"Open {link_reference} and report the page title only.", content_after)
         self.assertIn(task_prompts[3], content_after)
 
     def test_unified_history_hysteresis_drops_oldest_events_from_merged_stream(self):

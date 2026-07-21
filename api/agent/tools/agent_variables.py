@@ -1,35 +1,4 @@
-"""
-Agent variable system for placeholder substitution.
-
-Allows tools to set variables (e.g., file URLs) that the LLM can reference
-using $[var_name] placeholders in messages. Placeholders are substituted with
-actual values before sending.
-
-Variable names are file paths (e.g., "/charts/sales_q4.svg"). This ensures
-uniqueness—creating multiple files won't cause collisions. The path is
-human-readable and matches what the agent sees in tool results.
-
-The $[...] syntax is designed for LLM compatibility:
-- ASCII-only characters for reliable tokenization (even small LLMs handle it)
-- $ universally signals "variable/substitution" in code
-- Square brackets provide clear delimiters
-- Unlikely to appear in real-world data (not a standard syntax in any language)
-- Easy to type on any keyboard
-
-The LLM never sees actual URLs, forcing it to use variables and preventing
-corruption of signed URLs or hallucinated paths.
-
-Usage:
-    # In a tool (using path as variable name):
-    set_agent_variable("/charts/sales_q4.svg", signed_url)
-
-    # In LLM output:
-    "Here's the chart: ![]($[/charts/sales_q4.svg])"
-
-    # Before sending:
-    body = substitute_variables(body)
-    # Result: "Here's the chart: ![](https://...actual-signed-url...)"
-"""
+"""Resolve opaque agent variables without exposing their stored values to the LLM."""
 import logging
 import re
 from contextvars import ContextVar
@@ -39,11 +8,7 @@ from .attachment_guidance import AGENT_VARIABLES_ATTACHMENT_NOTE
 
 logger = logging.getLogger(__name__)
 
-# Store for agent variables - persists across tool calls within a session
 _agent_variables: ContextVar[Dict[str, str]] = ContextVar("agent_variables", default={})
-
-# Pattern for $[var_name] placeholders (ASCII, LLM-friendly)
-# Matches paths like /charts/sales.svg as well as simple names
 _PLACEHOLDER_PATTERN = re.compile(r'\$\[([^\]]+)\]')
 _MARKDOWN_IMAGE_PATTERN = re.compile(
     r"!\[(?P<alt>[^\]]*)\]\(\s*(?P<url><[^>]+>|[^)\s]+)(?:\s+['\"][^'\"]*['\"])?\s*\)"
@@ -58,10 +23,8 @@ def _normalize_filespace_path(raw: str) -> Optional[str]:
     if not raw:
         return None
     value = raw.strip()
-    # Strip $[...] wrapper if present
     if value.startswith("$[") and value.endswith("]"):
         value = value[2:-1].strip()
-    # Also handle angle brackets from markdown links
     if value.startswith("<") and value.endswith(">"):
         value = value[1:-1].strip()
     if not value:
@@ -80,11 +43,6 @@ def _normalize_filespace_path(raw: str) -> Optional[str]:
 
 
 def set_agent_variable(name: str, value: str) -> None:
-    """Set a variable that can be referenced in messages as $[name].
-
-    Convention: Use file paths as variable names (e.g., "/charts/sales.svg").
-    This ensures uniqueness when multiple files are created.
-    """
     current = _agent_variables.get({}).copy()
     current[name] = value
     _agent_variables.set(current)
@@ -92,31 +50,22 @@ def set_agent_variable(name: str, value: str) -> None:
 
 
 def get_agent_variable(name: str) -> Optional[str]:
-    """Get a variable value by name."""
     return _agent_variables.get({}).get(name)
 
 
 def get_all_variables() -> Dict[str, str]:
-    """Get all current variables (for debugging/context)."""
     return _agent_variables.get({}).copy()
 
 
 def replace_all_variables(variables: Dict[str, str]) -> None:
-    """Replace the current variable map with a provided snapshot."""
     _agent_variables.set(dict(variables or {}))
 
 
 def clear_variables() -> None:
-    """Clear all variables (typically at session start)."""
     _agent_variables.set({})
 
 
 def substitute_variables(text: str) -> str:
-    """Replace $[var_name] placeholders with actual values.
-
-    If a variable is not found, the placeholder is left unchanged
-    (allows LLM to see it wasn't substituted).
-    """
     if not text or '$[' not in text:
         return text
 
@@ -128,7 +77,6 @@ def substitute_variables(text: str) -> str:
         var_name = match.group(1)
         if var_name in variables:
             return variables[var_name]
-        # Keep original placeholder if variable not found
         logger.debug("Variable $[%s] not found, keeping placeholder", var_name)
         return match.group(0)
 
@@ -136,13 +84,12 @@ def substitute_variables(text: str) -> str:
 
 
 def substitute_variables_with_filespace(text: str, agent) -> str:
-    """Replace $[var_name] placeholders with actual values or filespace URLs.
-
-    Falls back to signed filespace URLs when a placeholder looks like a filespace
-    path (e.g., $[/charts/q4.svg]) but no in-memory variable is present.
-    """
     if not text:
         return text
+
+    from api.agent.core.link_references import resolve_link_references
+
+    text = resolve_link_references(text, agent)
 
     variables = _agent_variables.get({})
     filespace = None
@@ -234,31 +181,18 @@ def substitute_variables_with_filespace(text: str, agent) -> str:
 
 
 def format_variables_for_prompt() -> str:
-    """Format current variables for inclusion in agent prompt context.
-
-    Shows the agent what variables are available and their placeholders.
-    Does NOT show actual values (URLs, paths) to prevent copying.
-    """
     variables = _agent_variables.get({})
     if not variables:
         return ""
 
     lines = [AGENT_VARIABLES_ATTACHMENT_NOTE]
     for name in variables.keys():
-        # Don't show value - just the variable name. This prevents LLM from copying URLs.
         lines.append(f"  $[{name}]")
 
     return "\n".join(lines)
 
 
 def substitute_variables_as_data_uris(text: str, agent) -> str:
-    """Replace $[path] placeholders with base64 data URIs.
-
-    Used by tools like create_pdf that need embedded content instead of URLs.
-    Looks up files in the agent's filespace and converts to data URIs.
-
-    Falls back to regular substitution (signed URLs) if file lookup fails.
-    """
     import base64
     from api.models import AgentFsNode
     from api.agent.files.filespace_service import get_or_create_default_filespace
@@ -268,7 +202,6 @@ def substitute_variables_as_data_uris(text: str, agent) -> str:
 
     variables = _agent_variables.get({})
 
-    # Get agent's filespace for file lookups
     filespace = None
     try:
         filespace = get_or_create_default_filespace(agent)
@@ -295,7 +228,7 @@ def substitute_variables_as_data_uris(text: str, agent) -> str:
 
             if node and node.content:
                 content_bytes = node.content.read()
-                node.content.seek(0)  # Reset for potential re-reads
+                node.content.seek(0)
                 mime_type = node.mime_type or "application/octet-stream"
                 b64 = base64.b64encode(content_bytes).decode("ascii")
                 data_uri = f"data:{mime_type};base64,{b64}"

@@ -779,6 +779,14 @@ class WebChatProgressSuppressionTests(SimpleTestCase):
         for update in updates:
             self.assertFalse(_looks_like_routine_progress_message(update))
 
+    def test_allows_substantive_report_that_mentions_a_tool_limitation(self):
+        self.assertFalse(
+            _looks_like_routine_progress_message(
+                "Here's what I found. Three candidates are verified with LinkedIn sources. "
+                "The verification tool hit a ceiling because the remaining profiles do not expose tenure, "
+                "so this is the complete verifiable set for now."
+            )
+        )
 
 
 @tag("batch_event_processing")
@@ -1296,7 +1304,6 @@ class ContinuationModePromptContextTests(TestCase):
         self.assertIn("send an evidence milestone", system_prompt)
         self.assertIn("No generic narration/reasoning", system_prompt)
         self.assertIn("Peer: send_agent_message only", system_prompt)
-        self.assertIn("In record lists, link each name to its item/detail URL", system_prompt)
 
 
 @tag("batch_event_processing")

@@ -29,7 +29,6 @@ from api.services.agent_planning import (
     is_planning_timeout_expired,
     schedule_planning_timeout_processing,
 )
-from api.services.web_sessions import start_web_session
 
 
 @tag("batch_agent_chat")
@@ -228,9 +227,16 @@ class UnseenWebChatFollowupTests(TestCase):
         )
 
     @patch("api.agent.tasks.process_events.schedule_unseen_web_chat_followup")
-    def test_send_chat_message_schedules_unseen_followup_check(self, schedule_mock):
+    def test_inactive_current_reply_schedules_unseen_followup_check(self, schedule_mock):
         self._add_email_followup_channel()
-        start_web_session(self.agent, self.user)
+        PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            is_outbound=False,
+            from_endpoint=self.user_web_endpoint,
+            to_endpoint=self.agent_web_endpoint,
+            conversation=self.web_conversation,
+            body="Please prepare the report",
+        )
 
         result = execute_send_chat_message(
             self.agent,

@@ -1608,11 +1608,11 @@ class ImpliedSendTests(TestCase):
         self.assertFalse(mock_send_chat.called)
         correction_step = PersistentAgentStep.objects.filter(
             agent=self.agent,
-            description__startswith="Message delivery requires explicit send tools",
+            description__startswith="The answer below was not delivered.",
         ).first()
         self.assertIsNotNone(correction_step)
         self.assertIn(
-            "do not switch channels",
+            "requester's inbound channel",
             correction_step.description,
         )
 
@@ -1677,7 +1677,7 @@ class ImpliedSendTests(TestCase):
         self.assertFalse(mock_send_chat.called)
         correction_step = PersistentAgentStep.objects.filter(
             agent=self.agent,
-            description__startswith="Message delivery requires explicit send tools",
+            description__startswith="The answer below was not delivered.",
         ).first()
         self.assertIsNotNone(correction_step)
 
@@ -1720,7 +1720,7 @@ class ImpliedSendTests(TestCase):
         self.assertFalse(mock_send_chat.called)
         correction_step = PersistentAgentStep.objects.filter(
             agent=self.agent,
-            description__startswith="Message delivery requires explicit send tools",
+            description__startswith="The answer below was not delivered.",
         ).first()
         self.assertIsNotNone(correction_step)
 
@@ -3256,7 +3256,7 @@ class DailyLimitMessageOnlyModeTests(TestCase):
         self.assertFalse(mock_send_email.called)
         correction_step = PersistentAgentStep.objects.filter(
             agent=self.agent,
-            description__startswith="Message delivery requires explicit send tools",
+            description__startswith="The answer below was not delivered.",
         ).first()
         self.assertIsNotNone(correction_step)
 
@@ -3306,7 +3306,7 @@ class DailyLimitMessageOnlyModeTests(TestCase):
 
         correction_step = PersistentAgentStep.objects.filter(
             agent=self.agent,
-            description__startswith="Message delivery requires explicit send tools",
+            description__startswith="The answer below was not delivered.",
         ).first()
         self.assertIsNotNone(correction_step)
         self.assertFalse(mock_send_email.called)
@@ -3359,7 +3359,7 @@ class DailyLimitMessageOnlyModeTests(TestCase):
 
         correction_step = PersistentAgentStep.objects.filter(
             agent=self.agent,
-            description__startswith="Message delivery requires explicit send tools",
+            description__startswith="The answer below was not delivered.",
         ).first()
         self.assertIsNone(correction_step)
 
@@ -3423,7 +3423,7 @@ class DailyLimitMessageOnlyModeTests(TestCase):
         # The correction step should exist (notifying agent that message was dropped)
         correction_step = PersistentAgentStep.objects.filter(
             agent=self.agent,
-            description__startswith="Message delivery requires explicit send tools",
+            description__startswith="The answer below was not delivered.",
         ).first()
         self.assertIsNotNone(correction_step)
 
@@ -3532,7 +3532,7 @@ class DailyLimitMessageOnlyModeTests(TestCase):
         self.assertFalse(mock_send_chat.called)
         correction_step = PersistentAgentStep.objects.filter(
             agent=self.agent,
-            description__startswith="Message delivery requires explicit send tools",
+            description__startswith="The answer below was not delivered.",
         ).first()
         self.assertIsNotNone(correction_step)
 
@@ -3623,7 +3623,7 @@ class DailyLimitMessageOnlyModeTests(TestCase):
         self.assertFalse(mock_send_chat.called)
         correction_step = PersistentAgentStep.objects.filter(
             agent=self.agent,
-            description__startswith="Message delivery requires explicit send tools",
+            description__startswith="The answer below was not delivered.",
         ).first()
         self.assertIsNotNone(correction_step)
 

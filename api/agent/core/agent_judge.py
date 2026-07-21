@@ -283,6 +283,8 @@ def build_judge_trigger(
     prompt_limits = _judge_prompt_limits()
     recent_messages = _recent_messages(agent, prompt_limits)
     recent_tool_calls = _recent_tool_calls(agent, prompt_limits)
+    if recent_tool_calls and _is_retryable_tool_call(recent_tool_calls[0]):
+        return None
     reasons = _merge_trigger_reasons(
         _trigger_reasons(recent_messages, recent_tool_calls),
         extra_trigger_reasons or [],
@@ -715,6 +717,7 @@ def _trigger_reasons(
         for call in trigger_tool_calls
         if (call.status or "").lower() == "error"
         and (call.tool_name or "") not in JUDGE_FAILED_TOOL_TRIGGER_IGNORED_TOOL_NAMES
+        and not _is_retryable_tool_call(call)
     ]
     if len(recent_errors) >= JUDGE_FAILED_TOOL_THRESHOLD:
         reasons.append("failed_tool_calls")
@@ -729,21 +732,20 @@ def _trigger_reasons(
 
 
 def _recent_messages(agent: PersistentAgent, prompt_limits: JudgePromptLimits) -> list[PersistentAgentMessage]:
-    limit = prompt_limits.message_history_limit
-    return list(
-        PersistentAgentMessage.objects.filter(owner_agent=agent)
-        .select_related("conversation", "from_endpoint")
-        .order_by("-timestamp", "-seq")[:limit]
-    )
+    query = PersistentAgentMessage.objects.filter(owner_agent=agent).select_related("conversation", "from_endpoint")
+    return list(query.order_by("-timestamp", "-seq")[:prompt_limits.message_history_limit])
 
 
 def _recent_tool_calls(agent: PersistentAgent, prompt_limits: JudgePromptLimits) -> list[PersistentAgentToolCall]:
-    limit = prompt_limits.tool_call_history_limit
-    return list(
-        PersistentAgentToolCall.objects.filter(step__agent=agent)
-        .select_related("step")
-        .order_by("-step__created_at")[:limit]
-    )
+    query = PersistentAgentToolCall.objects.filter(step__agent=agent).select_related("step")
+    return list(query.order_by("-step__created_at")[:prompt_limits.tool_call_history_limit])
+
+
+def _is_retryable_tool_call(call: PersistentAgentToolCall) -> bool:
+    try:
+        return json.loads(call.result or "{}").get("retryable") is True
+    except (AttributeError, json.JSONDecodeError, TypeError):
+        return False
 
 
 def _has_negative_user_language(messages: list[PersistentAgentMessage]) -> bool:
@@ -862,6 +864,11 @@ def _build_trajectory_packet(
                 "credentials, destructive action, or legal/policy judgment."
             ),
             "If the current approach is failing, suggest a concrete strategy shift grounded in available tools.",
+            (
+                "Never recommend constructing URLs from fields or fetching $[link:id] references merely to resolve "
+                "them. They are delivery-ready; use visible FOCUS facts directly, link only their associated entity, "
+                "and leave other entities unlinked."
+            ),
             (
                 "When custom tool source, parameters, results, or recent calls show a tool should be created "
                 "or updated, use a strategy_shift directive that tells the agent exactly what custom tool "

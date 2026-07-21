@@ -2,6 +2,12 @@ import mimetypes
 import os
 from typing import Any, Dict
 
+from api.agent.core.link_references import (
+    DOCUMENT_MIME_TYPES,
+    handle_link_reference_errors,
+    resolve_link_reference_params,
+    resolve_link_references,
+)
 from api.models import PersistentAgent
 from api.agent.tools.file_export_helpers import resolve_export_target, write_agent_export
 from api.agent.tools.sqlite_query_runner import run_sqlite_select
@@ -13,12 +19,7 @@ DISALLOWED_EXPORT_HINTS = {
 
 
 def _normalize_mime_type(value: object) -> str | None:
-    if not isinstance(value, str):
-        return None
-    cleaned = value.strip()
-    if not cleaned:
-        return None
-    return cleaned
+    return value.strip() if isinstance(value, str) and value.strip() else None
 
 
 def _mime_type_base(mime_type: str) -> str:
@@ -26,22 +27,15 @@ def _mime_type_base(mime_type: str) -> str:
 
 
 def _infer_extension(file_path: str, mime_type: str) -> str:
-    extension = os.path.splitext(file_path)[1].lower()
-    if extension:
-        return extension
-    guessed = mimetypes.guess_extension(mime_type) or ""
-    return guessed.lower()
+    return (os.path.splitext(file_path)[1] or mimetypes.guess_extension(mime_type) or "").lower()
 
 
 def _blocked_export_hint(file_path: str, mime_type: str) -> str | None:
     extension = os.path.splitext(file_path)[1].lower()
     if extension in (".csv", ".pdf"):
         return DISALLOWED_EXPORT_HINTS.get(extension.lstrip("."))
-    if "csv" in mime_type:
-        return DISALLOWED_EXPORT_HINTS["csv"]
-    if "pdf" in mime_type:
-        return DISALLOWED_EXPORT_HINTS["pdf"]
-    return None
+    kind = next((name for name in DISALLOWED_EXPORT_HINTS if name in mime_type), None)
+    return DISALLOWED_EXPORT_HINTS.get(kind)
 
 
 def _coerce_query_scalar(value: object) -> str:
@@ -109,6 +103,7 @@ def get_create_file_tool() -> Dict[str, Any]:
     }
 
 
+@handle_link_reference_errors
 def execute_create_file(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str, Any]:
     content = params.get("content")
     query = params.get("query")
@@ -150,6 +145,11 @@ def execute_create_file(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[
             return {"status": "error", "message": str(exc)}
     else:
         content_to_write = content
+
+    if mime_type in DOCUMENT_MIME_TYPES:
+        content_to_write = resolve_link_references(content_to_write, agent)
+    else:
+        resolve_link_reference_params({"content": content_to_write, "mime_type": mime_type}, agent, tool_name="create_file")
 
     extension = _infer_extension(path, mime_type)
     result = write_agent_export(

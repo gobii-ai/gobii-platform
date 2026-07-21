@@ -153,9 +153,9 @@ class SqliteBatchToolTests(TestCase):
 
             self.assertEqual(out.get("status"), "ok", out.get("message"))
             result = out["results"][-1]
-            self.assertIn("REPORTING", result["message"])
+            self.assertIn("[!] Item URL column(s): listing_url", result["message"])
             self.assertIn("listing_url", result["message"])
-            self.assertIn("Link column", result["reporting_note"])
+            self.assertEqual(result["reporting_note"], "[!] Item URL column(s): listing_url.")
 
     def test_result_with_suffixed_item_link_adds_reporting_note(self):
         with self._with_temp_db():
@@ -171,7 +171,7 @@ class SqliteBatchToolTests(TestCase):
 
             self.assertEqual(out.get("status"), "ok", out.get("message"))
             result = out["results"][0]
-            self.assertIn("REPORTING", result["message"])
+            self.assertIn("[!] Item URL column(s): listing_link", result["message"])
             self.assertIn("listing_link", result["message"])
 
     def test_source_url_only_does_not_add_item_link_reporting_note(self):
@@ -184,7 +184,7 @@ class SqliteBatchToolTests(TestCase):
             self.assertEqual(out.get("status"), "ok", out.get("message"))
             result = out["results"][0]
             self.assertNotIn("reporting_note", result)
-            self.assertNotIn("REPORTING", result["message"])
+            self.assertNotIn("Item URL column(s)", result["message"])
 
     def test_splits_multi_statement_string(self):
         with self._with_temp_db():

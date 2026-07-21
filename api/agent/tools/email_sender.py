@@ -29,6 +29,7 @@ from .outbound_duplicate_guard import detect_recent_duplicate_message
 from util.integrations import postmark_status
 from util.text_sanitizer import decode_unicode_escapes, strip_control_chars
 from .agent_variables import substitute_variables_with_filespace
+from api.agent.core.link_references import handle_link_reference_errors
 from ..files.attachment_helpers import AttachmentResolutionError, create_message_attachments, resolve_filespace_attachments
 from ..files.filespace_service import broadcast_message_attachment_update
 from api.services.email_verification import require_verified_email, EmailVerificationError
@@ -199,7 +200,7 @@ def get_send_email_tool() -> Dict[str, Any]:
                         "type": "string",
                         "description": (
                             "HTML body only; no <html>/<head>/<body>. Single-quoted attrs. "
-                            "Reports/dashboards should style section headers, tables/cells, key numbers/statuses/changes with visible colors/badges/icons; use styled tables or metric blocks and preserve url/link/listing_url/detail_url item fields as clickable row labels or a Link column; source/feed URLs do not substitute for item links. "
+                            "Reports/dashboards should style section headers, tables/cells, key numbers/statuses/changes with visible colors/badges/icons; use styled tables or metric blocks. "
                             "Tool-call/XML is literal. Inline images: attach file + <img src='cid:filename'>."
                         ),
                     },
@@ -222,6 +223,7 @@ def get_send_email_tool() -> Dict[str, Any]:
     }
 
 
+@handle_link_reference_errors
 def execute_send_email(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str, Any]:
     """Execute the send_email tool for a persistent agent."""
     if not can_bypass_email_verification_for_signup_preview_first_email(agent):

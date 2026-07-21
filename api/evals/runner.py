@@ -35,15 +35,19 @@ def _update_suite_state(suite_run_id) -> None:
         started_at = suite.started_at or timezone.now()
         finished_at = timezone.now()
     else:
-        if any(r.status == EvalRun.Status.ERRORED for r in runs):
-            status = EvalSuiteRun.Status.ERRORED
-        elif any(r.status in (EvalRun.Status.PENDING, EvalRun.Status.RUNNING) for r in runs):
+        if any(r.status in (EvalRun.Status.PENDING, EvalRun.Status.RUNNING) for r in runs):
             status = EvalSuiteRun.Status.RUNNING
+        elif any(r.status == EvalRun.Status.ERRORED for r in runs):
+            status = EvalSuiteRun.Status.ERRORED
         else:
             status = EvalSuiteRun.Status.COMPLETED
 
         started_at = min(started_at_values) if started_at_values else suite.started_at
-        finished_at = max(finished_at_values) if finished_at_values else suite.finished_at
+        finished_at = (
+            max(finished_at_values)
+            if status in (EvalSuiteRun.Status.COMPLETED, EvalSuiteRun.Status.ERRORED) and finished_at_values
+            else None
+        )
 
     suite.status = status
     suite.started_at = started_at

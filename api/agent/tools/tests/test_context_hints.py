@@ -62,6 +62,73 @@ class LinkedInSchemaTests(SimpleTestCase):
         # Should show multiple people
         self.assertIn('Will Bonde', hint)
 
+    def test_url_pairs_preserve_entity_and_complete_url(self):
+        url = 'https://profiles.example.test/avery?campaign=q3#experience'
+        payload = {
+            'result': [
+                {'name': 'Avery Chen', 'subtitle': 'Controller', 'profile_url': url},
+                {
+                    'name': 'Jordan Lee',
+                    'subtitle': 'Finance Director',
+                    'console_host': 'profiles.example.test',
+                    'console_route': '/jordan-lee',
+                },
+            ],
+        }
+
+        hint = extract_context_hint('mcp_example_people_search', payload)
+
+        self.assertIn(f'Avery Chen: Controller | item_link={url}', hint)
+        self.assertIn('Jordan Lee: Finance Director | item_link=none', hint)
+        self.assertNotIn('https://profiles.example.test/jordan-lee', hint)
+
+    def test_entity_specific_url_takes_priority_over_generic_url(self):
+        profile_url = 'https://profiles.example.test/avery'
+        payload = {
+            'result': [{
+                'name': 'Avery Chen',
+                'subtitle': 'Controller',
+                'url': 'https://search.example.test/result/1',
+                'profile_url': profile_url,
+            }],
+        }
+
+        hint = extract_context_hint('mcp_example_people_search', payload)
+
+        self.assertIn(profile_url, hint)
+        self.assertNotIn('https://search.example.test/result/1', hint)
+
+    def test_custom_item_url_field_is_explicit_and_components_are_not_links(self):
+        url = 'https://console.example.test/services/svc_1?region=east'
+        payload = {
+            'result': [
+                {'name': 'Linked Service', 'console_url': url},
+                {
+                    'name': 'Unlinked Service',
+                    'console_host': 'console.example.test',
+                    'console_route': '/services/svc_2',
+                },
+            ],
+        }
+
+        hint = extract_context_hint('mcp_example_services', payload)
+
+        self.assertIn(f'Linked Service | item_link={url}', hint)
+        self.assertIn('Unlinked Service | item_link=none', hint)
+
+    def test_byte_cap_omits_oversized_url_instead_of_truncating_it(self):
+        oversized_url = f"https://profiles.example.test/{'segment/' * 100}?view=full#bio"
+        payload = {
+            'result': [
+                {'name': 'Avery Chen', 'subtitle': 'Controller', 'profile_url': oversized_url},
+            ],
+        }
+
+        hint = extract_context_hint('mcp_example_people_search', payload)
+
+        self.assertIn('Avery Chen', hint)
+        self.assertNotIn('https://profiles.example.test/', hint)
+
     def test_linkedin_person_profile(self):
         """LinkedIn person profile: single object with name, headline, experience."""
         payload = {
@@ -210,6 +277,23 @@ class SerpHintTests(SimpleTestCase):
         self.assertIsNotNone(hint)
         self.assertIn('northstar.example.test', hint)
         self.assertIn('https://northstar.example.test/blog/atlas-launch', hint)
+
+    def test_serp_preserves_urls_longer_than_200_characters(self):
+        url = f"https://northstar.example.test/items/{'segment-' * 28}?view=full#details"
+        payload = {
+            'results': [{'title': 'Northstar item', 'url': url}],
+        }
+
+        hint = hint_from_serp(payload)
+
+        self.assertIn(url, hint)
+
+    def test_serp_preserves_long_bare_urls(self):
+        url = f"https://northstar.example.test/items/{'segment-' * 28}?view=full#details"
+
+        hint = hint_from_serp({'result': f'Search result: {url}'})
+
+        self.assertIn(url, hint)
 
     def test_serp_raw_markdown(self):
         """Test extraction from raw markdown."""
@@ -604,6 +688,26 @@ class BarbellFocusTests(SimpleTestCase):
         hint = hint_from_unstructured_text("Alpha", max_bytes=4)
 
         self.assertIsNone(hint)
+
+    def test_large_json_text_hint_keeps_entity_context_for_urls(self):
+        filler = "Archive note without a source link.\n" * 500
+        content = (
+            f"{filler}name: Alice Romero\nrole: Finance lead\norganization: Northstar Bank\n"
+            "directory_slug: alice-romero\nprofile_id: p_7f2c91\nlinkedin_public_identifier: alice-romero-7f2c91\n"
+            "directory_status: active\n"
+            f"profile_url: https://www.linkedin.com/in/alice-romero-7f2c91?r=finance\n{filler}"
+        )
+
+        hint = extract_context_hint(
+            "http_request",
+            {"status": "ok", "content": content},
+            allow_barbell=True,
+            allow_goldilocks=True,
+            payload_bytes=len(content.encode("utf-8")),
+        )
+
+        self.assertIn("Alice Romero", hint)
+        self.assertIn("https://www.linkedin.com/in/alice-romero-7f2c91?r=finance", hint)
 
     def test_scrape_as_markdown_barbell_fallback(self):
         payload = {

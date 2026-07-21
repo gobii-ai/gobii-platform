@@ -10,6 +10,8 @@ from ..files.attachment_helpers import AttachmentResolutionError, resolve_filesp
 from .attachment_guidance import SEND_TOOL_ATTACHMENTS_DESCRIPTION
 from ..peer_comm import PeerMessagingDuplicateError, PeerMessagingError, PeerMessagingService
 from ...models import PersistentAgent, PersistentAgentMessage
+from .agent_variables import substitute_variables_with_filespace
+from api.agent.core.link_references import handle_link_reference_errors
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +111,7 @@ def get_send_agent_message_tool() -> Dict[str, Any]:
     }
 
 
+@handle_link_reference_errors
 def execute_send_agent_message(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str, Any]:
     """Execute the peer messaging tool for the active agent."""
     peer_agent_id_raw = params.get("peer_agent_id")
@@ -121,6 +124,8 @@ def execute_send_agent_message(agent: PersistentAgent, params: Dict[str, Any]) -
             "status": "error",
             "message": "Parameters 'peer_agent_id' and 'message' are required.",
         }
+
+    message = substitute_variables_with_filespace(str(message), agent)
 
     try:
         peer_agent_uuid = UUID(str(peer_agent_id_raw))

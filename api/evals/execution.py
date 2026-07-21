@@ -504,10 +504,7 @@ class ScenarioExecutionTools:
             
         task_obj.save()
 
-        # Attempt to aggregate cost/usage metrics for this task and its parent run.
-        # We call aggregate_run_metrics, which will:
-        # 1. Sum total costs for the run from all AgentCompletions/Steps.
-        # 2. Re-distribute those costs to tasks based on time windows.
+        # Keep task and run metrics current for developer-mode inspection.
         try:
             aggregate_run_metrics(task_obj.run)
             broadcast_run_update(task_obj.run)
@@ -688,6 +685,10 @@ class ScenarioExecutionTools:
                         params=params,
                         options=options,
                     )
+                if isinstance(exc, (json.JSONDecodeError, TypeError, ValueError)):
+                    return self._run_unstructured_judge_completion(
+                        model=model, prompt=prompt, params=params, options=options,
+                    )
                 last_error = exc
                 if delay_seconds is None:
                     raise
@@ -740,7 +741,7 @@ class ScenarioExecutionTools:
                 choice, reasoning = self._extract_unstructured_judgment(response)
                 if choice not in options:
                     raise ValueError(f"LLM judge returned invalid choice {choice!r}: {reasoning}")
-                return choice, f"Structured judge fallback used after provider grammar error. {reasoning}"
+                return choice, f"Structured judge fallback used after structured-output failure. {reasoning}"
             except _JUDGE_RETRYABLE_ERRORS as exc:
                 last_error = exc
                 if delay_seconds is None:
@@ -835,6 +836,8 @@ class WaitForIdleContext:
         self.agent_id = agent_id
         self.timeout = timeout
         self.listener: Optional[AgentEventListener] = None
+        self.idle = False
+        self.timed_out = False
 
     def __enter__(self):
         self.listener = AgentEventListener(self.agent_id, start_time=time.time())
@@ -855,8 +858,10 @@ class WaitForIdleContext:
                 break
             outstanding = int((event.get("payload") or {}).get("outstanding_tasks", 0) or 0)
             if outstanding == 0:
+                self.idle = True
                 return True  # Success
             remaining = max(0, deadline - time.time())
 
+        self.timed_out = True
         logger.warning(f"Timeout waiting for agent {self.agent_id} to go idle.")
         return False # Do not suppress exceptions, but flow continues if no exception
