@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, Beaker, Loader2, RefreshCcw, ArrowLeft, Clock, HelpCircle, ChevronDown, ChevronRight, Cpu, BarChart3, Stethoscope } from 'lucide-react'
 
 import {
@@ -18,6 +18,11 @@ import {
 } from '../api/evals'
 import { RunTypeBadge, StatusBadge } from '../components/evals/Badges'
 import { CompareModal, CompareResultsView, type CompareConfig } from '../components/evals'
+import {
+  FailureSummary,
+  type EvalFailureGroup,
+  type EvalFailureTarget,
+} from '../components/evals/FailureSummary'
 
 const formatCurrency = (value?: number | null, digits = 4) => {
   if (value == null) return '—'
@@ -60,6 +65,9 @@ const formatDuration = (start: string | null, end: string | null) => {
   return (ms / 1000).toFixed(1) + 's'
 }
 
+const runAnchorId = (runId: string) => `eval-run-${runId}`
+const taskAnchorId = (taskId: number) => `eval-task-${taskId}`
+
 type PassStats = { passRate: number | null; completed: number; total: number }
 
 export type EvalsDetailScreenProps = { suiteRunId: string; isStaff?: boolean }
@@ -70,6 +78,7 @@ export function EvalsDetailScreen({ suiteRunId, isStaff = false }: EvalsDetailSc
   const [error, setError] = useState<string | null>(null)
   const [updatingRunType, setUpdatingRunType] = useState(false)
   const [viewRunIndex, setViewRunIndex] = useState(0)
+  const [failureTarget, setFailureTarget] = useState<EvalFailureTarget | null>(null)
 
   // Comparison state
   const [showCompareModal, setShowCompareModal] = useState(false)
@@ -101,6 +110,35 @@ export function EvalsDetailScreen({ suiteRunId, isStaff = false }: EvalsDetailSc
     if (Object.keys(groupedRuns).length === 0) return 1
     return Math.max(...Object.values(groupedRuns).map((r) => r.length))
   }, [groupedRuns])
+
+  const failureGroups = useMemo<EvalFailureGroup[]>(() => {
+    return Object.entries(groupedRuns).flatMap(([scenarioSlug, runs]) => (
+      runs.flatMap((run, runIndex) => {
+        const failedTasks = (run.tasks || [])
+          .filter((task) => task.status === 'failed' || task.status === 'errored')
+          .sort((left, right) => left.sequence - right.sequence)
+          .map((task) => ({
+            id: task.id,
+            name: task.name,
+            sequence: task.sequence,
+            status: task.status,
+            targetId: taskAnchorId(task.id),
+          }))
+        const isRunError = run.status === 'errored'
+        if (!isRunError && failedTasks.length === 0) return []
+        return [{
+          runId: run.id,
+          runIndex,
+          scenarioSlug,
+          runTargetId: runAnchorId(run.id),
+          isRunError,
+          tasks: failedTasks,
+        }]
+      })
+    ))
+  }, [groupedRuns])
+
+  const clearFailureTarget = useCallback(() => setFailureTarget(null), [])
 
   const passStats = useMemo<PassStats>(() => {
     if (!suite) return { passRate: null, completed: 0, total: 0 }
@@ -316,15 +354,7 @@ export function EvalsDetailScreen({ suiteRunId, isStaff = false }: EvalsDetailSc
         // If we got run/task updates, patch in-place to avoid re-fetches
         setSuite((prev) => {
           if (!prev) return prev
-          // Run update
-          if (payload.run_id || payload.scenario_slug || payload.status) {
-            const runId = payload.id || payload.run_id
-            const updatedRuns = (prev.runs || []).map((run) =>
-              run.id === runId ? { ...run, ...payload } : run,
-            )
-            return { ...prev, runs: updatedRuns }
-          }
-          // Task update
+          // Task payloads also carry status, so they must be handled before generic run updates.
           if (payload.sequence !== undefined && payload.run_id) {
             const updatedRuns = (prev.runs || []).map((run) => {
               if (run.id !== payload.run_id) return run
@@ -335,6 +365,13 @@ export function EvalsDetailScreen({ suiteRunId, isStaff = false }: EvalsDetailSc
                 : [...tasks, payload as EvalTask]
               return { ...run, tasks: nextTasks }
             })
+            return { ...prev, runs: updatedRuns }
+          }
+          if (payload.run_id || payload.scenario_slug || payload.status) {
+            const runId = payload.id || payload.run_id
+            const updatedRuns = (prev.runs || []).map((run) =>
+              run.id === runId ? { ...run, ...payload } : run,
+            )
             return { ...prev, runs: updatedRuns }
           }
           return prev
@@ -463,7 +500,16 @@ export function EvalsDetailScreen({ suiteRunId, isStaff = false }: EvalsDetailSc
 
       {suite && !comparisonData && (
         <>
-          <section className="card overflow-hidden" style={{ padding: 0 }}>
+          <FailureSummary
+            groups={failureGroups}
+            showSuccess={suite.status === 'completed'}
+            onNavigate={(target) => {
+              setViewRunIndex(target.runIndex)
+              setFailureTarget(target)
+            }}
+          />
+
+          <section className="card overflow-hidden" style={{ padding: 0, gap: 0 }}>
             <div className="bg-gradient-to-r from-blue-50/80 to-indigo-50/80 border-b border-blue-100 px-6 py-4">
               <h2 className="text-base font-bold text-slate-900 uppercase tracking-wide">Overview</h2>
             </div>
@@ -579,18 +625,20 @@ export function EvalsDetailScreen({ suiteRunId, isStaff = false }: EvalsDetailSc
           )}
 
           {/* Scenarios section */}
-          <section className="card overflow-hidden" style={{ padding: 0 }}>
+          <section className="card overflow-hidden" style={{ padding: 0, gap: 0 }}>
             <div className="bg-gradient-to-r from-blue-50/80 to-indigo-50/80 border-b border-blue-100 px-6 py-4 flex items-center justify-between">
               <h2 className="text-base font-bold text-slate-900 uppercase tracking-wide">Scenarios</h2>
               
               {/* Global Run Switcher */}
               {maxRunCount > 1 && (
-                <div className="flex items-center gap-1 bg-white rounded-lg p-1 shadow-sm border border-blue-100">
+                <div className="flex items-center gap-1 bg-white rounded-lg p-1 shadow-sm border border-blue-100" role="group" aria-label="Select repetition">
                   {Array.from({ length: maxRunCount }).map((_, idx) => {
                     const isSelected = idx === viewRunIndex
                     return (
                       <button
                         key={idx}
+                        type="button"
+                        aria-pressed={isSelected}
                         onClick={() => setViewRunIndex(idx)}
                         className={`
                           px-3 py-1 text-xs font-bold uppercase tracking-wide rounded transition-all
@@ -616,6 +664,8 @@ export function EvalsDetailScreen({ suiteRunId, isStaff = false }: EvalsDetailSc
                   index={viewRunIndex}
                   onCompare={openScenarioCompareModal}
                   isStaff={isStaff}
+                  scrollTargetId={failureTarget?.runId === runs[viewRunIndex]?.id ? failureTarget.targetId : null}
+                  onScrollTargetHandled={clearFailureTarget}
                 />
               ))}
               {!hasRuns && (
@@ -697,50 +747,82 @@ function ScenarioGroup({
   index,
   onCompare,
   isStaff,
+  scrollTargetId,
+  onScrollTargetHandled,
 }: {
   scenarioSlug: string
   run?: EvalRun
   index: number
   onCompare: (runId: string) => void
   isStaff: boolean
+  scrollTargetId: string | null
+  onScrollTargetHandled: () => void
 }) {
   const [expanded, setExpanded] = useState(true)
 
   const isCompleted = run?.status === 'completed'
   const isRunning = run?.status === 'running'
+  const isErrored = run?.status === 'errored'
   const isMissing = !run
   const runCost = run?.total_cost ?? null
   const runCredits = run?.credits_cost ?? null
+  const contentId = run ? `eval-run-content-${run.id}` : `eval-run-content-${scenarioSlug}-${index}`
+
+  useEffect(() => {
+    if (scrollTargetId) setExpanded(true)
+  }, [scrollTargetId])
+
+  useEffect(() => {
+    if (!scrollTargetId || !expanded) return
+    const frame = window.requestAnimationFrame(() => {
+      const target = document.getElementById(scrollTargetId)
+      if (!target) return
+      target.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      target.focus({ preventScroll: true })
+      onScrollTargetHandled()
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [expanded, onScrollTargetHandled, run?.id, scrollTargetId])
 
   return (
-    <div className="bg-white transition-colors hover:bg-slate-50 group">
-       <div
-        className="flex flex-wrap items-center justify-between gap-4 p-6 cursor-pointer"
-        onClick={() => setExpanded(!expanded)}
-      >
-        <div className="flex items-center gap-4">
-           <div className={`w-3 h-3 rounded-full shadow-sm shrink-0
-             ${isMissing ? 'bg-slate-200' : isCompleted ? 'bg-emerald-500' : isRunning ? 'bg-blue-500' : 'bg-slate-300'}`}
-           />
-           <div>
-              <h3 className="text-base font-bold text-slate-900 group-hover:text-blue-700 transition-colors">{scenarioSlug}</h3>
-              <div className="text-xs text-slate-500 mt-1 flex flex-wrap items-center gap-2">
-                <span className="bg-white px-1.5 py-0.5 rounded border border-slate-200 font-medium text-slate-600">
-                  Run #{index + 1}
-                </span>
-                {run && (
-                  <span className="flex items-center gap-2">
-                    Agent:
-                    {run.agent_id ? (
-                      <span className="font-mono text-slate-600 bg-slate-100 px-1.5 rounded ring-1 ring-slate-200">{run.agent_id}</span>
-                    ) : (
-                      <span className="font-mono text-slate-600 bg-slate-100 px-1.5 rounded ring-1 ring-slate-200">ephemeral</span>
-                    )}
+    <div
+      id={run ? runAnchorId(run.id) : undefined}
+      tabIndex={-1}
+      className="scroll-mt-6 bg-white transition-colors hover:bg-blue-50/30 group focus:outline-none focus:ring-2 focus:ring-inset focus:ring-rose-400"
+    >
+      <div className="flex flex-wrap items-center justify-between gap-4 p-6">
+        <button
+          type="button"
+          className="flex min-w-0 flex-1 items-center gap-3 rounded-lg text-left focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+          onClick={() => setExpanded(!expanded)}
+          aria-expanded={expanded}
+          aria-controls={contentId}
+        >
+          {expanded ? (
+            <ChevronDown className="h-5 w-5 shrink-0 text-slate-400" />
+          ) : (
+            <ChevronRight className="h-5 w-5 shrink-0 text-slate-400" />
+          )}
+          <div className={`h-3 w-3 shrink-0 rounded-full shadow-sm
+            ${isMissing ? 'bg-slate-200' : isErrored ? 'bg-rose-500' : isCompleted ? 'bg-emerald-500' : isRunning ? 'bg-blue-500' : 'bg-slate-300'}`}
+          />
+          <div className="min-w-0">
+            <h3 className="truncate text-base font-bold text-slate-900 transition-colors group-hover:text-blue-700">{scenarioSlug}</h3>
+            <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+              <span className="rounded border border-slate-200 bg-white px-1.5 py-0.5 font-medium text-slate-600">
+                Run #{index + 1}
+              </span>
+              {run ? (
+                <span className="flex items-center gap-2">
+                  Agent:
+                  <span className="rounded bg-slate-100 px-1.5 font-mono text-slate-600 ring-1 ring-slate-200">
+                    {run.agent_id || 'ephemeral'}
                   </span>
-                )}
-              </div>
-           </div>
-        </div>
+                </span>
+              ) : null}
+            </div>
+          </div>
+        </button>
         <div className="flex items-center gap-4">
           {run && (
             <div className="flex items-center gap-2 text-xs text-slate-600">
@@ -764,7 +846,6 @@ function ScenarioGroup({
             {run?.developer_live_chat_url && isStaff ? (
               <a
                 href={run.developer_live_chat_url}
-                onClick={(e) => e.stopPropagation()}
                 className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-amber-800 bg-amber-50 border border-amber-200 rounded hover:bg-amber-100 transition-colors"
                 title="Open developer live chat"
               >
@@ -775,10 +856,7 @@ function ScenarioGroup({
             {isCompleted && (
               <button
                 type="button"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  onCompare(run!.id)
-                }}
+                onClick={() => onCompare(run!.id)}
                 className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-indigo-700 bg-indigo-50 border border-indigo-200 rounded hover:bg-indigo-100 transition-colors"
                 title="Compare this scenario"
               >
@@ -792,7 +870,7 @@ function ScenarioGroup({
       </div>
 
       {expanded && (
-        <div className="border-t border-slate-100 px-6 py-6">
+        <div id={contentId} className="border-t border-slate-100 px-6 py-6">
           {!run ? (
              <div className="flex flex-col items-center justify-center py-8 text-slate-400 gap-2">
                <HelpCircle className="w-8 h-8 text-slate-200" />
@@ -813,7 +891,7 @@ function ScenarioGroup({
               {(run.tasks || []).length > 0 ? (
                 <div className="space-y-3">
                   {run.tasks?.map((task) => (
-                    <TaskRow key={task.id} task={task} />
+                    <TaskRow key={task.id} task={task} anchorId={taskAnchorId(task.id)} />
                   ))}
                 </div>
               ) : (
@@ -829,7 +907,7 @@ function ScenarioGroup({
   )
 }
 
-function TaskRow({ task }: { task: EvalTask }) {
+function TaskRow({ task, anchorId }: { task: EvalTask; anchorId: string }) {
   const isPass = task.status === 'passed'
   const isFail = task.status === 'failed' || task.status === 'errored'
   const costChip = task.total_cost != null ? formatCurrency(task.total_cost, 4) : '—'
@@ -839,8 +917,9 @@ function TaskRow({ task }: { task: EvalTask }) {
   const hasDebugContext = debugEntries.length > 0 || task.llm_question || task.llm_answer || artifactLinks.developer_live_chat_url
 
   return (
-    <div className={`
+    <div id={anchorId} tabIndex={-1} className={`
       group flex items-start gap-3 rounded-lg p-4 text-sm transition-all
+      scroll-mt-6 focus:outline-none focus:ring-2 focus:ring-rose-400
       ${isPass ? 'ring-1 ring-inset ring-emerald-200 bg-white' : ''}
       ${isFail ? 'ring-1 ring-inset ring-rose-200 bg-white' : ''}
       ${!isPass && !isFail ? 'ring-1 ring-inset ring-slate-200 bg-white' : ''}
@@ -930,7 +1009,7 @@ function LLMProfileSection({ profile }: { profile: LLMRoutingProfileSnapshot }) 
   const browserTierCount = profile.browser?.tiers?.length || 0
 
   return (
-    <section className="card overflow-hidden" style={{ padding: 0 }}>
+    <section className="card overflow-hidden" style={{ padding: 0, gap: 0 }}>
       <div
         className="bg-gradient-to-r from-purple-50/80 to-indigo-50/80 border-b border-purple-100 px-6 py-4 cursor-pointer flex items-center justify-between"
         onClick={() => setExpanded(!expanded)}

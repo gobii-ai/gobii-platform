@@ -1,171 +1,152 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, Beaker, ChevronDown, Loader2, Play, RefreshCcw, CheckSquare, Minus, Plus, Search, Tags } from 'lucide-react'
+import { AlertTriangle, Beaker, CheckCircle2, Loader2, Play, RefreshCcw, Search } from 'lucide-react'
+import { Button as AriaButton, Input, SearchField } from 'react-aria-components'
 
 import {
-  createGlobalSkillEvalRun,
   createSuiteRuns,
-  fetchGlobalSkillEvalLauncher,
   fetchSuiteRuns,
   fetchSuites,
   type EvalScenario,
   type EvalSuite,
   type EvalSuiteRun,
-  type GlobalSkillEvalSkill,
 } from '../api/evals'
 import { fetchRoutingProfiles, type RoutingProfileListItem } from '../api/llmConfig'
-import { RunTypeBadge, StatusBadge } from '../components/evals/Badges'
+import { EvalSelect, type EvalSelectOption } from '../components/evals/EvalSelect'
+import {
+  RecentActivityTable,
+  ScenarioCatalogTable,
+  SuiteSelectionTable,
+  type EvalCatalogStatus,
+} from '../components/evals/EvalTables'
+import {
+  EvalProfileSelector,
+  type EvalProfileStatus,
+} from '../components/evals/EvalProfileSelector'
+import { EvalRunCountField } from '../components/evals/EvalRunCountField'
 
-const formatTs = (value: string | null | undefined) => {
-  if (!value) return '—'
-  try {
-    const date = new Date(value)
-    return `${date.toLocaleDateString()} ${date.toLocaleTimeString()}`
-  } catch {
-    return value
-  }
-}
+type RunTypeFilter = 'all' | EvalSuiteRun['run_type']
+type LaunchResult = { source: 'suite' | 'scenario'; suiteRuns: EvalSuiteRun[] }
+type LaunchError = { source: LaunchResult['source']; message: string }
 
-const pluralize = (count: number, word: string) => `${count} ${count === 1 ? word : `${word}s`}`
-const formatPassRate = (taskTotals: EvalSuiteRun['task_totals'] | null | undefined) => {
-  if (!taskTotals || taskTotals.pass_rate == null) return '—'
-  return `${Math.round(taskTotals.pass_rate * 100)}%`
-}
+const runTypeFilterOptions: { value: RunTypeFilter; label: string }[] = [
+  { value: 'all', label: 'All runs' },
+  { value: 'official', label: 'Official' },
+  { value: 'one_off', label: 'One-off' },
+]
+
+const clampRunCount = (value: number) => Math.max(1, Math.min(10, value))
 
 export function EvalsScreen() {
   const [suites, setSuites] = useState<EvalSuite[]>([])
   const [scenarios, setScenarios] = useState<EvalScenario[]>([])
   const [suiteRuns, setSuiteRuns] = useState<EvalSuiteRun[]>([])
-  const [globalSkills, setGlobalSkills] = useState<GlobalSkillEvalSkill[]>([])
-  const [globalSecretsUrl, setGlobalSecretsUrl] = useState<string>('/app/secrets')
-  const [rubricVersion, setRubricVersion] = useState<string>('v1')
   const [selectedSuites, setSelectedSuites] = useState<Set<string>>(new Set())
-  const [selectedGlobalSkillId, setSelectedGlobalSkillId] = useState<string>('')
-  const [globalSkillTaskPrompt, setGlobalSkillTaskPrompt] = useState<string>('')
-  const [runTypeFilter, setRunTypeFilter] = useState<'all' | EvalSuiteRun['run_type']>('all')
-  const [suiteRunCount, setSuiteRunCount] = useState<number>(3)
-  const [skillEvalRunCount, setSkillEvalRunCount] = useState<number>(1)
+  const [runTypeFilter, setRunTypeFilter] = useState<RunTypeFilter>('all')
+  const [suiteRunCount, setSuiteRunCount] = useState(1)
+  const [catalogStatus, setCatalogStatus] = useState<EvalCatalogStatus>('loading')
   const [loadingRuns, setLoadingRuns] = useState(false)
   const [launching, setLaunching] = useState(false)
-  const [launchingGlobalSkillEval, setLaunchingGlobalSkillEval] = useState(false)
-  const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [recentRunsError, setRecentRunsError] = useState<string | null>(null)
+  const [launchError, setLaunchError] = useState<LaunchError | null>(null)
+  const [launchResult, setLaunchResult] = useState<LaunchResult | null>(null)
   const [routingProfiles, setRoutingProfiles] = useState<RoutingProfileListItem[]>([])
-  const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null)
+  const [selectedProfileId, setSelectedProfileId] = useState<string>('')
+  const [profileStatus, setProfileStatus] = useState<EvalProfileStatus>('loading')
   const [scenarioQuery, setScenarioQuery] = useState('')
   const [scenarioTierFilter, setScenarioTierFilter] = useState('all')
   const [scenarioCategoryFilter, setScenarioCategoryFilter] = useState('all')
   const [scenarioCostFilter, setScenarioCostFilter] = useState('all')
   const [launchingScenarioSlug, setLaunchingScenarioSlug] = useState<string | null>(null)
-
-  const listRefreshInFlight = useRef(false)
-  const runTypeFilterOptions: { value: 'all' | EvalSuiteRun['run_type']; label: string }[] = [
-    { value: 'all', label: 'All runs' },
-    { value: 'official', label: 'Official' },
-    { value: 'one_off', label: 'One-off' },
-  ]
-  const clampRunCount = useCallback((value: number) => Math.max(1, Math.min(10, value)), [])
+  const suiteRunsRequestId = useRef(0)
 
   const loadSuites = useCallback(async () => {
+    setCatalogStatus('loading')
     try {
       const result = await fetchSuites()
       setSuites(result.suites)
       setScenarios(result.scenarios || [])
+      setCatalogStatus('ready')
     } catch (error) {
       console.error(error)
-      setErrorMessage('Unable to load suites right now.')
-    }
-  }, [selectedSuites.size])
-
-  const loadGlobalSkills = useCallback(async () => {
-    try {
-      const result = await fetchGlobalSkillEvalLauncher()
-      setGlobalSkills(result.global_skills)
-      setGlobalSecretsUrl(result.global_secrets_url)
-      setRubricVersion(result.rubric_version)
-      setSelectedGlobalSkillId((prev) => {
-        if (prev && result.global_skills.some((skill) => skill.id === prev)) return prev
-        return result.global_skills[0]?.id || ''
-      })
-    } catch (error) {
-      console.error(error)
-      setErrorMessage('Unable to load global skill eval options right now.')
+      setCatalogStatus('error')
     }
   }, [])
 
   const loadRoutingProfiles = useCallback(async () => {
+    setProfileStatus('loading')
     try {
       const result = await fetchRoutingProfiles()
       setRoutingProfiles(result.profiles)
-      // Default to the active profile
-      const activeProfile = result.profiles.find((p) => p.is_active)
-      if (activeProfile && !selectedProfileId) {
-        setSelectedProfileId(activeProfile.id)
-      }
+      setSelectedProfileId((current) => current || result.profiles.find((profile) => profile.is_active)?.id || '')
+      setProfileStatus('ready')
     } catch (error) {
       console.error(error)
-      // Non-fatal - profiles are optional
+      setRoutingProfiles([])
+      setSelectedProfileId('')
+      setProfileStatus('error')
     }
-  }, [selectedProfileId])
+  }, [])
 
   const loadSuiteRuns = useCallback(async () => {
-    if (listRefreshInFlight.current) return
-    listRefreshInFlight.current = true
+    const requestId = ++suiteRunsRequestId.current
     setLoadingRuns(true)
+    setRecentRunsError(null)
     try {
       const result = await fetchSuiteRuns({
         limit: 25,
         ...(runTypeFilter === 'all' ? {} : { run_type: runTypeFilter }),
       })
+      if (requestId !== suiteRunsRequestId.current) return
       setSuiteRuns(result.suite_runs)
     } catch (error) {
+      if (requestId !== suiteRunsRequestId.current) return
       console.error(error)
-      setErrorMessage('Unable to load suite runs right now.')
+      setRecentRunsError('Unable to refresh recent activity right now.')
     } finally {
-      setLoadingRuns(false)
-      listRefreshInFlight.current = false
+      if (requestId === suiteRunsRequestId.current) setLoadingRuns(false)
     }
   }, [runTypeFilter])
 
   useEffect(() => {
-    loadSuites()
-    loadGlobalSkills()
-    loadSuiteRuns()
-    loadRoutingProfiles()
-  }, [loadSuites, loadGlobalSkills, loadSuiteRuns, loadRoutingProfiles])
+    void loadSuites()
+    void loadRoutingProfiles()
+  }, [loadRoutingProfiles, loadSuites])
 
-  const toggleSuiteSelection = (slug: string) => {
-    setSelectedSuites((prev) => {
-      const next = new Set(prev)
-      if (next.has(slug)) {
-        next.delete(slug)
-      } else {
-        next.add(slug)
-      }
-      return next
-    })
-  }
+  useEffect(() => {
+    void loadSuiteRuns()
+  }, [loadSuiteRuns])
 
-  const toggleAllSuites = () => {
-    if (selectedSuites.size === suites.length) {
-      setSelectedSuites(new Set())
-    } else {
-      setSelectedSuites(new Set(suites.map((s) => s.slug)))
-    }
-  }
+  const profileOptions = useMemo<EvalSelectOption[]>(() => {
+    if (profileStatus === 'loading') return [{ value: '', label: 'Loading profiles…' }]
+    if (profileStatus === 'error') return [{ value: '', label: 'Default routing' }]
+    return [
+      { value: '', label: 'No profile' },
+      ...routingProfiles.map((profile) => ({
+        value: profile.id,
+        label: `${profile.display_name || profile.name}${profile.is_active ? ' (active)' : ''}`,
+      })),
+    ]
+  }, [profileStatus, routingProfiles])
 
-  const selectedGlobalSkill = globalSkills.find((skill) => skill.id === selectedGlobalSkillId) || null
-  const hasMissingGlobalSkillSecrets = Boolean(selectedGlobalSkill?.missing_required_secrets.length)
+  const selectedProfileLabel = useMemo(() => {
+    if (profileStatus === 'loading') return 'Loading routing profiles…'
+    if (profileStatus === 'error') return 'Default routing (profile list unavailable)'
+    return profileOptions.find((option) => option.value === selectedProfileId)?.label || 'No profile'
+  }, [profileOptions, profileStatus, selectedProfileId])
+
   const scenarioTierOptions = useMemo(
-    () => Array.from(new Set(scenarios.map((scenario) => scenario.metadata.tier).filter(Boolean))).sort(),
+    () => buildFilterOptions('All tiers', scenarios.map((scenario) => scenario.metadata.tier)),
     [scenarios],
   )
   const scenarioCategoryOptions = useMemo(
-    () => Array.from(new Set(scenarios.map((scenario) => scenario.metadata.category).filter(Boolean))).sort(),
+    () => buildFilterOptions('All categories', scenarios.map((scenario) => scenario.metadata.category)),
     [scenarios],
   )
   const scenarioCostOptions = useMemo(
-    () => Array.from(new Set(scenarios.map((scenario) => scenario.metadata.cost_class).filter(Boolean))).sort(),
+    () => buildFilterOptions('All costs', scenarios.map((scenario) => scenario.metadata.cost_class)),
     [scenarios],
   )
+
   const filteredScenarios = useMemo(() => {
     const query = scenarioQuery.trim().toLowerCase()
     return scenarios.filter((scenario) => {
@@ -174,7 +155,7 @@ export function EvalsScreen() {
       if (scenarioCategoryFilter !== 'all' && metadata.category !== scenarioCategoryFilter) return false
       if (scenarioCostFilter !== 'all' && metadata.cost_class !== scenarioCostFilter) return false
       if (!query) return true
-      const haystack = [
+      return [
         scenario.slug,
         scenario.description,
         metadata.category,
@@ -185,640 +166,228 @@ export function EvalsScreen() {
         metadata.area,
         ...metadata.tags,
         ...scenario.suite_slugs,
-      ].join(' ').toLowerCase()
-      return haystack.includes(query)
+      ].join(' ').toLowerCase().includes(query)
     })
   }, [scenarios, scenarioQuery, scenarioTierFilter, scenarioCategoryFilter, scenarioCostFilter])
-  const visibleScenarios = filteredScenarios.slice(0, 18)
+
+  const scenarioFilterKey = [scenarioQuery, scenarioTierFilter, scenarioCategoryFilter, scenarioCostFilter].join('|')
 
   const handleLaunch = async () => {
+    if (selectedSuites.size === 0 || profileStatus === 'loading' || catalogStatus !== 'ready') return
     setLaunching(true)
-    setErrorMessage(null)
+    setLaunchError(null)
+    setLaunchResult(null)
     try {
-      const suite_slugs = selectedSuites.size ? Array.from(selectedSuites) : ['all']
-      await createSuiteRuns({
-        suite_slugs,
+      const result = await createSuiteRuns({
+        suite_slugs: Array.from(selectedSuites),
         agent_strategy: 'ephemeral_per_scenario',
         n_runs: clampRunCount(suiteRunCount),
-        llm_routing_profile_id: selectedProfileId,
+        llm_routing_profile_id: selectedProfileId || null,
       })
+      setLaunchResult({ source: 'suite', suiteRuns: result.suite_runs })
       await loadSuiteRuns()
     } catch (error) {
       console.error(error)
-      setErrorMessage('Failed to launch evals.')
+      setLaunchError({ source: 'suite', message: 'Failed to launch the selected suites. Review the configuration and try again.' })
     } finally {
       setLaunching(false)
     }
   }
 
-  const handleScenarioLaunch = async (scenario: EvalScenario) => {
+  const handleScenarioLaunch = useCallback(async (scenario: EvalScenario) => {
+    if (profileStatus === 'loading' || catalogStatus !== 'ready') return
     setLaunchingScenarioSlug(scenario.slug)
-    setErrorMessage(null)
+    setLaunchError(null)
+    setLaunchResult(null)
     try {
-      await createSuiteRuns({
+      const result = await createSuiteRuns({
         scenario_slugs: [scenario.slug],
         agent_strategy: 'ephemeral_per_scenario',
-        n_runs: clampRunCount(1),
-        llm_routing_profile_id: selectedProfileId,
+        n_runs: 1,
+        llm_routing_profile_id: selectedProfileId || null,
       })
+      setLaunchResult({ source: 'scenario', suiteRuns: result.suite_runs })
       await loadSuiteRuns()
     } catch (error) {
       console.error(error)
-      setErrorMessage('Failed to launch scenario eval.')
+      setLaunchError({ source: 'scenario', message: `Failed to launch ${scenario.slug}. Try again from its Run action.` })
     } finally {
       setLaunchingScenarioSlug(null)
     }
-  }
-
-  const handleGlobalSkillEvalLaunch = async () => {
-    if (!selectedGlobalSkill) return
-    setLaunchingGlobalSkillEval(true)
-    setErrorMessage(null)
-    try {
-      await createGlobalSkillEvalRun({
-        global_skill_id: selectedGlobalSkill.id,
-        task_prompt: globalSkillTaskPrompt.trim(),
-        n_runs: clampRunCount(skillEvalRunCount),
-        llm_routing_profile_id: selectedProfileId,
-      })
-      await loadSuiteRuns()
-      await loadGlobalSkills()
-    } catch (error) {
-      console.error(error)
-      setErrorMessage('Failed to launch global skill eval.')
-    } finally {
-      setLaunchingGlobalSkillEval(false)
-    }
-  }
+  }, [catalogStatus, loadSuiteRuns, profileStatus, selectedProfileId])
 
   return (
     <div className="app-shell">
       <div className="card card--header">
-        <div className="card__body card__body--header flex flex-col sm:flex-row sm:items-center justify-between gap-4 py-4 sm:py-3">
+        <div className="card__body card__body--header flex items-center gap-4 py-4 sm:py-3">
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-white/90 rounded-xl shadow-sm text-blue-700">
-              <Beaker className="w-6 h-6" />
+            <div className="rounded-xl bg-white/90 p-2 text-blue-700 shadow-sm">
+              <Beaker className="h-6 w-6" />
             </div>
             <div>
-              <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Evals</h1>
-              <p className="text-slate-600 font-medium">
-                Validate agent performance with concurrent test suites.
-              </p>
+              <h1 className="text-2xl font-bold tracking-tight text-slate-900">Evals</h1>
+              <p className="font-medium text-slate-600">Validate agent performance with concurrent test suites.</p>
             </div>
-          </div>
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-              onClick={loadSuiteRuns}
-              disabled={loadingRuns}
-              title="Refresh list"
-            >
-              <RefreshCcw className={`w-5 h-5 ${loadingRuns ? 'animate-spin' : ''}`} />
-            </button>
-
-            <div className="h-6 w-px bg-slate-200 mx-1" />
-
-            {routingProfiles.length > 0 && (
-              <div className="relative">
-                <select
-                  value={selectedProfileId || ''}
-                  onChange={(e) => setSelectedProfileId(e.target.value || null)}
-                  className="appearance-none bg-slate-100 border border-slate-200 rounded-lg px-3 py-1.5 pr-8 text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
-                >
-                  <option value="">No profile</option>
-                  {routingProfiles.map((profile) => (
-                    <option key={profile.id} value={profile.id}>
-                      {profile.display_name || profile.name}
-                      {profile.is_active ? ' (active)' : ''}
-                    </option>
-                  ))}
-                </select>
-                <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-500 pointer-events-none" />
-              </div>
-            )}
-
-            <div className="flex items-center gap-1.5 p-1 bg-slate-100 rounded-lg border border-slate-200">
-              <span className="text-xs font-bold text-slate-500 uppercase tracking-wider px-2">Runs</span>
-              <button
-                type="button"
-                className="w-6 h-6 flex items-center justify-center rounded bg-white text-slate-600 shadow-sm hover:text-blue-600 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
-                onClick={() => setSuiteRunCount((prev) => clampRunCount(prev - 1))}
-                disabled={suiteRunCount <= 1}
-              >
-                <Minus className="w-3 h-3" strokeWidth={3} />
-              </button>
-              <div className="w-6 text-center text-sm font-bold text-slate-700 tabular-nums">
-                {suiteRunCount}
-              </div>
-              <button
-                type="button"
-                className="w-6 h-6 flex items-center justify-center rounded bg-white text-slate-600 shadow-sm hover:text-blue-600 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
-                onClick={() => setSuiteRunCount((prev) => clampRunCount(prev + 1))}
-                disabled={suiteRunCount >= 10}
-              >
-                <Plus className="w-3 h-3" strokeWidth={3} />
-              </button>
-            </div>
-
-            <button
-              type="button"
-              className="inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-bold text-white bg-blue-600 rounded-lg shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-              onClick={handleLaunch}
-              disabled={launching || (selectedSuites.size === 0 && suites.length > 0)}
-            >
-              {launching ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4 fill-current" />}
-              Launch
-            </button>
           </div>
         </div>
       </div>
 
-      {errorMessage && (
-        <div className="rounded-lg bg-red-50 p-4 text-red-700 shadow-sm ring-1 ring-red-200">
-          <div className="flex items-start gap-3">
-            <AlertTriangle className="w-5 h-5 mt-0.5 shrink-0" />
-            <div className="text-sm font-medium">{errorMessage}</div>
-          </div>
+      <section className="card overflow-hidden" style={{ padding: 0, gap: 0 }}>
+        <div className="border-b border-blue-100 bg-blue-50/60 px-5 py-3.5">
+          <h2 className="text-sm font-bold uppercase tracking-wide text-slate-900">Select Suites</h2>
+          <p className="mt-0.5 text-xs text-slate-500">Choose the suites and launch configuration.</p>
         </div>
-      )}
-
-      <section className="card overflow-hidden" style={{ padding: 0 }}>
-        <div className="bg-gradient-to-r from-blue-50/80 to-indigo-50/80 border-b border-blue-100 px-6 py-4 flex items-center justify-between">
-          <div>
-            <h2 className="text-base font-bold text-slate-900 uppercase tracking-wide">Select Suites</h2>
-            <p className="text-xs text-slate-500 mt-0.5">Choose which test suites to run against your agents.</p>
-          </div>
-          {suites.length > 0 && (
-            <button
-              type="button"
-              onClick={toggleAllSuites}
-              className="text-sm font-medium text-blue-600 hover:text-blue-700 hover:underline"
-            >
-              {selectedSuites.size === suites.length ? 'Deselect All' : 'Select All'}
-            </button>
-          )}
+        <div className="flex flex-wrap items-end gap-3 border-b border-blue-100 bg-white px-4 py-3">
+          <EvalProfileSelector
+            label="Routing profile for all launches"
+            value={selectedProfileId}
+            options={profileOptions}
+            status={profileStatus}
+            onChange={setSelectedProfileId}
+            onRetry={() => void loadRoutingProfiles()}
+          />
+          <EvalRunCountField
+            value={suiteRunCount}
+            onChange={(value) => setSuiteRunCount(clampRunCount(value))}
+          />
+          <AriaButton
+            className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-blue-600 bg-blue-600 px-4 text-sm font-semibold text-white transition-colors hover:border-blue-700 hover:bg-blue-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/30 disabled:cursor-not-allowed disabled:opacity-50"
+            onPress={() => void handleLaunch()}
+            isDisabled={launching || selectedSuites.size === 0 || profileStatus === 'loading' || catalogStatus !== 'ready'}
+          >
+            {launching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4 fill-current" />}
+            {launching
+              ? 'Launching…'
+              : selectedSuites.size
+                ? `Launch ${selectedSuites.size} ${selectedSuites.size === 1 ? 'suite' : 'suites'} · ${suiteRunCount} ${suiteRunCount === 1 ? 'run' : 'runs'}/scenario`
+                : 'Select a suite'}
+          </AriaButton>
         </div>
-        <div className="divide-y divide-slate-100">
-          {suites.map((suite) => {
-            const checked = selectedSuites.has(suite.slug)
-            return (
-              <div
-                key={suite.slug}
-                onClick={() => toggleSuiteSelection(suite.slug)}
-                className="flex items-start gap-4 p-6 cursor-pointer group bg-white"
-                role="checkbox"
-                aria-checked={checked}
-                tabIndex={0}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault()
-                    toggleSuiteSelection(suite.slug)
-                  }
-                }}
-              >
-                <div className="pt-1">
-                  <div 
-                    className={`
-                      w-5 h-5 rounded border flex items-center justify-center transition-all
-                      ${checked 
-                        ? 'bg-blue-600 border-blue-600 text-white' 
-                        : 'bg-white border-slate-300 text-transparent group-hover:border-blue-400'
-                      }
-                    `}
-                  >
-                    <CheckSquare className="w-3.5 h-3.5" strokeWidth={3} />
-                  </div>
-                </div>
-                
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-3 mb-1">
-                    <span className={`text-sm font-bold ${checked ? 'text-blue-900' : 'text-slate-900'}`}>
-                      {suite.slug}
-                    </span>
-                    <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
-                      {pluralize(suite.scenario_slugs.length, 'scenario')}
-                    </span>
-                  </div>
-                  <p className="text-sm text-slate-500 leading-relaxed max-w-3xl">
-                    {suite.description || 'No description provided.'}
-                  </p>
-                </div>
-              </div>
-            )
-          })}
-          {!suites.length && (
-            <div className="p-12 text-center text-slate-500">
-              <p className="text-sm font-medium">No suites registered.</p>
-            </div>
-          )}
-        </div>
+        {launchError?.source === 'suite' ? <SectionErrorNotice message={launchError.message} /> : null}
+        {launchResult?.source === 'suite' ? <LaunchSuccessNotice suiteRuns={launchResult.suiteRuns} /> : null}
+        <SuiteSelectionTable
+          suites={suites}
+          selectedSuites={selectedSuites}
+          status={catalogStatus}
+          onSelectionChange={setSelectedSuites}
+          onRetry={() => void loadSuites()}
+        />
       </section>
 
-      <section className="card overflow-hidden" style={{ padding: 0 }}>
-        <div className="bg-gradient-to-r from-sky-50/90 to-teal-50/90 border-b border-sky-100 px-6 py-4">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <h2 className="text-base font-bold text-slate-900 uppercase tracking-wide">Scenario Catalog</h2>
-              <p className="text-xs text-slate-500 mt-0.5">Find and launch one focused eval without running a whole suite.</p>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="relative">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                <input
-                  type="search"
-                  value={scenarioQuery}
-                  onChange={(event) => setScenarioQuery(event.target.value)}
-                  placeholder="Search scenarios"
-                  className="w-56 rounded-lg border border-sky-100 bg-white pl-9 pr-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-sky-500"
-                />
-              </div>
-              <CatalogSelect value={scenarioTierFilter} onChange={setScenarioTierFilter} options={scenarioTierOptions} label="Tier" />
-              <CatalogSelect value={scenarioCategoryFilter} onChange={setScenarioCategoryFilter} options={scenarioCategoryOptions} label="Category" />
-              <CatalogSelect value={scenarioCostFilter} onChange={setScenarioCostFilter} options={scenarioCostOptions} label="Cost" />
-            </div>
-          </div>
-        </div>
-        <div className="divide-y divide-sky-50">
-          {visibleScenarios.map((scenario) => {
-            const metadata = scenario.metadata
-            const isLaunching = launchingScenarioSlug === scenario.slug
-            return (
-              <div key={scenario.slug} className="flex flex-col gap-4 bg-white p-5 lg:flex-row lg:items-center lg:justify-between">
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-mono text-sm font-bold text-slate-900">{scenario.slug}</span>
-                    <CatalogChip tone="blue">{metadata.tier}</CatalogChip>
-                    <CatalogChip tone="teal">{metadata.category}</CatalogChip>
-                    <CatalogChip tone={metadata.cost_class === 'high' ? 'amber' : 'slate'}>{`${metadata.cost_class} cost`}</CatalogChip>
-                    {metadata.supports_simulation ? <CatalogChip tone="emerald">simulated</CatalogChip> : null}
-                  </div>
-                  <p className="mt-2 max-w-4xl text-sm leading-relaxed text-slate-600">
-                    {scenario.description || 'No description provided.'}
-                  </p>
-                  <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-500">
-                    <span>{pluralize(scenario.task_count, 'task')}</span>
-                    <span>Runtime {metadata.expected_runtime}</span>
-                    {scenario.suite_slugs.length ? <span>Suites: {scenario.suite_slugs.slice(0, 3).join(', ')}</span> : null}
-                    {metadata.tags.length ? (
-                      <span className="inline-flex items-center gap-1">
-                        <Tags className="h-3 w-3" />
-                        {metadata.tags.slice(0, 5).join(', ')}
-                      </span>
-                    ) : null}
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  className="inline-flex items-center justify-center gap-2 self-start rounded-lg bg-slate-900 px-3 py-2 text-xs font-bold text-white shadow-sm transition-colors hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:ring-offset-2 disabled:opacity-50"
-                  onClick={() => handleScenarioLaunch(scenario)}
-                  disabled={Boolean(launchingScenarioSlug)}
-                >
-                  {isLaunching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4 fill-current" />}
-                  Run Scenario
-                </button>
-              </div>
-            )
-          })}
-          {!visibleScenarios.length && (
-            <div className="bg-white p-10 text-center text-sm font-medium text-slate-500">
-              No scenarios match the current filters.
-            </div>
-          )}
-          {filteredScenarios.length > visibleScenarios.length ? (
-            <div className="bg-white px-6 py-3 text-xs font-medium text-slate-500">
-              Showing {visibleScenarios.length} of {filteredScenarios.length} matching scenarios. Narrow the filters to launch a specific one.
-            </div>
-          ) : null}
-        </div>
-      </section>
-
-      <section className="card overflow-hidden" style={{ padding: 0 }}>
-        <div className="bg-gradient-to-r from-emerald-50/90 to-cyan-50/90 border-b border-emerald-100 px-6 py-4">
-          <h2 className="text-base font-bold text-slate-900 uppercase tracking-wide">Global Skill Eval</h2>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Launch an ad hoc eval that asks an ephemeral agent to enable and use one global skill.
+      <section className="card overflow-hidden" style={{ padding: 0, gap: 0 }}>
+        <div className="border-b border-sky-100 bg-sky-50/60 px-5 py-3.5">
+          <h2 className="text-sm font-bold uppercase tracking-wide text-slate-900">Scenario Catalog</h2>
+          <p className="mt-0.5 text-xs text-slate-500">
+            Find and launch one focused eval. One-off runs use <span className="font-semibold text-slate-700">{selectedProfileLabel}</span>.
           </p>
         </div>
-        <div className="grid gap-6 p-6 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <label className="text-xs font-bold uppercase tracking-wider text-slate-500">Global Skill</label>
-              <div className="relative">
-                <select
-                  value={selectedGlobalSkillId}
-                  onChange={(e) => setSelectedGlobalSkillId(e.target.value)}
-                  className="w-full appearance-none rounded-xl border border-slate-200 bg-white px-4 py-3 pr-10 text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                >
-                  {globalSkills.map((skill) => (
-                    <option key={skill.id} value={skill.id}>
-                      {skill.name}
-                    </option>
-                  ))}
-                  {!globalSkills.length && <option value="">No active global skills</option>}
-                </select>
-                <ChevronDown className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500 pointer-events-none" />
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-xs font-bold uppercase tracking-wider text-slate-500">Task Prompt</label>
-              <textarea
-                value={globalSkillTaskPrompt}
-                onChange={(e) => setGlobalSkillTaskPrompt(e.target.value)}
-                rows={5}
-                placeholder="Ask the agent to complete a task that should require this skill."
-                className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-              />
-            </div>
-
-            <div className="flex flex-wrap items-center gap-3">
-              <div className="inline-flex items-center rounded-lg bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-200">
-                Judge rubric: built-in {rubricVersion}
-              </div>
-              <div className="flex items-center gap-1.5 rounded-lg bg-white px-2 py-1.5 text-xs font-semibold text-slate-600 ring-1 ring-slate-200">
-                <span className="px-1 text-slate-500 uppercase tracking-wider">Runs</span>
-                <button
-                  type="button"
-                  className="flex h-6 w-6 items-center justify-center rounded bg-slate-100 text-slate-600 shadow-sm hover:text-emerald-600 focus:outline-none focus:ring-1 focus:ring-emerald-500 disabled:opacity-50"
-                  onClick={() => setSkillEvalRunCount((prev) => clampRunCount(prev - 1))}
-                  disabled={skillEvalRunCount <= 1}
-                >
-                  <Minus className="h-3 w-3" strokeWidth={3} />
-                </button>
-                <div className="w-6 text-center text-sm font-bold tabular-nums text-slate-800">
-                  {skillEvalRunCount}
-                </div>
-                <button
-                  type="button"
-                  className="flex h-6 w-6 items-center justify-center rounded bg-slate-100 text-slate-600 shadow-sm hover:text-emerald-600 focus:outline-none focus:ring-1 focus:ring-emerald-500 disabled:opacity-50"
-                  onClick={() => setSkillEvalRunCount((prev) => clampRunCount(prev + 1))}
-                  disabled={skillEvalRunCount >= 10}
-                >
-                  <Plus className="h-3 w-3" strokeWidth={3} />
-                </button>
-              </div>
-              <button
-                type="button"
-                className="inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-bold text-white shadow-sm transition-all hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                onClick={handleGlobalSkillEvalLaunch}
-                disabled={
-                  launchingGlobalSkillEval
-                  || !selectedGlobalSkill
-                  || !globalSkillTaskPrompt.trim()
-                  || hasMissingGlobalSkillSecrets
-                }
-              >
-                {launchingGlobalSkillEval ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4 fill-current" />}
-                Launch Skill Eval
-              </button>
-            </div>
-          </div>
-
-          <div className="rounded-2xl bg-slate-900 px-5 py-5 text-slate-100">
-            {selectedGlobalSkill ? (
-              <div className="space-y-4">
-                <div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-lg font-bold tracking-tight">{selectedGlobalSkill.name}</span>
-                    <span
-                      className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-bold uppercase tracking-wider ${
-                        selectedGlobalSkill.launchable
-                          ? 'bg-emerald-400/15 text-emerald-200 ring-1 ring-emerald-300/30'
-                          : 'bg-amber-400/15 text-amber-200 ring-1 ring-amber-300/30'
-                      }`}
-                    >
-                      {selectedGlobalSkill.launchable ? 'Launchable' : 'Needs Secrets'}
-                    </span>
-                  </div>
-                  <p className="mt-2 text-sm leading-relaxed text-slate-300">
-                    {selectedGlobalSkill.description || 'No description provided.'}
-                  </p>
-                </div>
-
-                <div>
-                  <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-slate-400">Effective Tools</p>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {selectedGlobalSkill.effective_tool_ids.length ? selectedGlobalSkill.effective_tool_ids.map((toolId) => (
-                      <span key={toolId} className="inline-flex items-center rounded-full bg-white/10 px-2.5 py-1 text-xs font-medium text-slate-100 ring-1 ring-white/10">
-                        {toolId}
-                      </span>
-                    )) : (
-                      <span className="text-sm text-slate-400">No effective tools recorded.</span>
-                    )}
-                  </div>
-                </div>
-
-                <div>
-                  <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-slate-400">Required Secrets</p>
-                  <div className="mt-2 space-y-2">
-                    {selectedGlobalSkill.required_secret_status.length ? selectedGlobalSkill.required_secret_status.map((secret) => (
-                      <div key={secret.label} className="rounded-xl bg-white/5 px-3 py-3 ring-1 ring-white/10">
-                        <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <div className="text-sm font-semibold text-white">{secret.name}</div>
-                            <div className="mt-1 text-xs text-slate-400">{secret.label}</div>
-                          </div>
-                          <span
-                            className={`inline-flex items-center rounded-full px-2 py-1 text-[11px] font-bold uppercase tracking-wide ${
-                              secret.status === 'available'
-                                ? 'bg-emerald-400/15 text-emerald-200'
-                                : 'bg-amber-400/15 text-amber-200'
-                            }`}
-                          >
-                            {secret.status === 'available' ? 'Ready' : 'Missing'}
-                          </span>
-                        </div>
-                        {secret.description ? (
-                          <p className="mt-2 text-xs leading-relaxed text-slate-300">{secret.description}</p>
-                        ) : null}
-                      </div>
-                    )) : (
-                      <div className="rounded-xl bg-emerald-400/10 px-3 py-3 text-sm text-emerald-100 ring-1 ring-emerald-300/20">
-                        No secrets required.
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {hasMissingGlobalSkillSecrets ? (
-                  <div className="rounded-xl bg-amber-400/10 px-4 py-3 text-sm text-amber-100 ring-1 ring-amber-300/20">
-                    This eval is blocked until the required global secrets exist.
-                    <a href={globalSecretsUrl} className="ml-2 font-semibold text-white underline underline-offset-4">
-                      Manage global secrets
-                    </a>
-                  </div>
-                ) : null}
-              </div>
-            ) : (
-              <div className="text-sm text-slate-300">No active global skills are available for skill evals.</div>
-            )}
-          </div>
+        <div className="flex flex-wrap items-center gap-2 border-b border-sky-100 bg-white px-4 py-3" role="group" aria-label="Scenario catalog filters">
+          <SearchField
+            aria-label="Search scenarios"
+            value={scenarioQuery}
+            onChange={setScenarioQuery}
+            isDisabled={catalogStatus !== 'ready'}
+            className="relative"
+          >
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <Input
+              placeholder="Search scenarios"
+              className="h-10 w-60 rounded-lg border border-slate-300 bg-white pl-9 pr-3 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/25 disabled:cursor-not-allowed disabled:opacity-50"
+            />
+          </SearchField>
+          <EvalSelect ariaLabel="Scenario tier" value={scenarioTierFilter} options={scenarioTierOptions} onChange={setScenarioTierFilter} disabled={catalogStatus !== 'ready'} />
+          <EvalSelect ariaLabel="Scenario category" value={scenarioCategoryFilter} options={scenarioCategoryOptions} onChange={setScenarioCategoryFilter} disabled={catalogStatus !== 'ready'} />
+          <EvalSelect ariaLabel="Scenario cost" value={scenarioCostFilter} options={scenarioCostOptions} onChange={setScenarioCostFilter} disabled={catalogStatus !== 'ready'} />
         </div>
+        {launchError?.source === 'scenario' ? <SectionErrorNotice message={launchError.message} /> : null}
+        {launchResult?.source === 'scenario' ? <LaunchSuccessNotice suiteRuns={launchResult.suiteRuns} /> : null}
+        <ScenarioCatalogTable
+          scenarios={filteredScenarios}
+          filterKey={scenarioFilterKey}
+          status={catalogStatus}
+          launchingScenarioSlug={launchingScenarioSlug}
+          launchDisabled={profileStatus === 'loading' || catalogStatus !== 'ready'}
+          onLaunch={handleScenarioLaunch}
+          onRetry={() => void loadSuites()}
+        />
       </section>
 
-      <section className="card overflow-hidden" style={{ padding: 0 }}>
-        <div className="bg-gradient-to-r from-blue-50/80 to-indigo-50/80 border-b border-blue-100 px-6 py-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <h2 className="text-base font-bold text-slate-900 uppercase tracking-wide">Recent Activity</h2>
-          <div className="inline-flex items-center gap-1 rounded-lg bg-white/70 p-1 ring-1 ring-slate-200 shadow-sm">
-            {runTypeFilterOptions.map((option) => {
-              const active = runTypeFilter === option.value
-              return (
-                <button
+      <section className="card overflow-hidden" style={{ padding: 0, gap: 0 }}>
+        <div className="flex flex-col gap-3 border-b border-blue-100 bg-blue-50/60 px-5 py-3.5 sm:flex-row sm:items-center sm:justify-between">
+          <h2 className="text-sm font-bold uppercase tracking-wide text-slate-900">Recent Activity</h2>
+          <div className="flex items-center gap-2">
+            <div className="inline-flex items-center gap-1 rounded-lg border border-blue-100 bg-white p-1" role="group" aria-label="Filter recent eval activity">
+              {runTypeFilterOptions.map((option) => (
+                <AriaButton
                   key={option.value}
-                  type="button"
-                  onClick={() => setRunTypeFilter(option.value)}
-                  className={`
-                    px-3 py-1 text-xs font-semibold rounded-md transition-all
-                    ${active
-                      ? 'bg-slate-900 text-white shadow-sm ring-1 ring-slate-900/10'
-                      : 'text-slate-600 hover:text-slate-900'
-                    }
-                  `}
+                  aria-pressed={runTypeFilter === option.value}
+                  onPress={() => setRunTypeFilter(option.value)}
+                  className={`rounded-md px-3 py-1 text-xs font-semibold transition-colors ${
+                    runTypeFilter === option.value
+                      ? 'bg-slate-900 text-white'
+                      : 'text-slate-600 hover:bg-blue-50 hover:text-slate-900'
+                  }`}
                 >
                   {option.label}
-                </button>
-              )
-            })}
+                </AriaButton>
+              ))}
+            </div>
+            <AriaButton
+              className="rounded-lg border border-blue-100 bg-white p-2 text-slate-500 transition-colors hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700 disabled:opacity-50"
+              onPress={() => void loadSuiteRuns()}
+              isDisabled={loadingRuns}
+              aria-label="Refresh recent activity"
+            >
+              <RefreshCcw className={`h-4 w-4 ${loadingRuns ? 'animate-spin' : ''}`} />
+            </AriaButton>
           </div>
         </div>
-
-        <div>
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-slate-200 text-sm">
-              <thead className="bg-white text-left text-xs uppercase tracking-wider text-slate-500 font-bold">
-                <tr>
-                  <th className="px-6 py-4 bg-white border-b border-slate-100">Eval</th>
-                  <th className="px-6 py-4 bg-white border-b border-slate-100">Type</th>
-                  <th className="px-6 py-4 bg-white border-b border-slate-100">Status</th>
-                  <th className="px-6 py-4 bg-white border-b border-slate-100">Progress</th>
-                  <th className="px-6 py-4 bg-white border-b border-slate-100">Avg Pass</th>
-                  <th className="px-6 py-4 bg-white border-b border-slate-100">Started</th>
-                  <th className="px-6 py-4 bg-white border-b border-slate-100">Duration</th>
-                  <th className="px-6 py-4 bg-white border-b border-slate-100 text-right"></th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 bg-white">
-                {suiteRuns.map((suite) => {
-                  const duration = suite.finished_at && suite.started_at
-                    ? Math.round((new Date(suite.finished_at).getTime() - new Date(suite.started_at).getTime()) / 1000) + 's'
-                    : '—'
-                    
-                  return (
-                    <tr key={suite.id} className="group">
-                      <td className="px-6 py-4">
-                        <div className="flex items-center gap-2">
-                          <div className="font-semibold text-slate-900">{suite.display_name || suite.suite_slug}</div>
-                          {suite.launcher_type === 'global_skill' ? (
-                            <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide text-emerald-700 ring-1 ring-emerald-200">
-                              Skill Eval
-                            </span>
-                          ) : null}
-                        </div>
-                        {suite.launcher_type === 'global_skill' && suite.skill_eval?.task_prompt ? (
-                          <div className="mt-1 max-w-xl text-xs leading-relaxed text-slate-500">
-                            {suite.skill_eval.task_prompt}
-                          </div>
-                        ) : null}
-                        <div className="text-xs font-mono text-slate-400 mt-0.5">{suite.id.slice(0, 8)}</div>
-                      </td>
-                      <td className="px-6 py-4">
-                        <RunTypeBadge runType={suite.run_type} />
-                      </td>
-                      <td className="px-6 py-4">
-                        <StatusBadge status={suite.status || 'pending'} />
-                      </td>
-                      <td className="px-6 py-4 text-slate-700">
-                         {suite.run_totals ? (
-                           <div className="flex items-center gap-1.5 text-xs font-medium bg-slate-100 px-2 py-1 rounded-md w-fit">
-                             <span className="text-slate-900">{suite.run_totals.completed}</span>
-                             <span className="text-slate-400">/</span>
-                             <span className="text-slate-600">{suite.run_totals.total_runs}</span>
-                           </div>
-                         ) : '—'}
-                      </td>
-                      <td className="px-6 py-4 text-slate-700">
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm font-semibold text-slate-900">{formatPassRate(suite.task_totals || null)}</span>
-                          {suite.task_totals ? (
-                            <span className="text-xs text-slate-500">
-                              {(suite.task_totals.passed ?? 0)}/{suite.task_totals.completed ?? suite.task_totals.total}
-                            </span>
-                          ) : null}
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 text-slate-600 whitespace-nowrap">{formatTs(suite.started_at)}</td>
-                      <td className="px-6 py-4 text-slate-600 font-mono text-xs">{duration}</td>
-                      <td className="px-6 py-4 text-right">
-                        <a
-                          className="inline-flex items-center justify-center rounded-lg px-3 py-2 text-xs font-medium text-slate-700 ring-1 ring-slate-200 hover:bg-slate-100 transition-colors"
-                          href={`/evals/${suite.id}/`}
-                        >
-                          View
-                        </a>
-                      </td>
-                    </tr>
-                  )
-                })}
-                {!suiteRuns.length && (
-                  <tr>
-                    <td className="px-6 py-12 text-sm text-slate-500 text-center" colSpan={8}>
-                      No historical runs yet. Launch one above!
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
+        <RecentActivityTable
+          suiteRuns={suiteRuns}
+          loading={loadingRuns}
+          error={recentRunsError}
+          onRetry={() => void loadSuiteRuns()}
+        />
       </section>
-
     </div>
   )
 }
 
-function CatalogSelect({
-  value,
-  onChange,
-  options,
-  label,
-}: {
-  value: string
-  onChange: (value: string) => void
-  options: string[]
-  label: string
-}) {
+function buildFilterOptions(allLabel: string, values: string[]): EvalSelectOption[] {
+  const uniqueValues = Array.from(new Set(values.filter(Boolean))).sort()
+  return [
+    { value: 'all', label: allLabel },
+    ...uniqueValues.map((value) => ({ value, label: value })),
+  ]
+}
+
+function LaunchSuccessNotice({ suiteRuns }: { suiteRuns: EvalSuiteRun[] }) {
   return (
-    <div className="relative">
-      <select
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        className="appearance-none rounded-lg border border-sky-100 bg-white px-3 py-2 pr-8 text-sm font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-sky-500"
-        aria-label={label}
-      >
-        <option value="all">{label}</option>
-        {options.map((option) => (
-          <option key={option} value={option}>
-            {option}
-          </option>
+    <div role="status" className="flex flex-col gap-2 border-b border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900 sm:flex-row sm:items-center">
+      <span className="inline-flex items-center gap-2 font-semibold">
+        <CheckCircle2 className="h-4 w-4" />
+        {suiteRuns.length === 1 ? 'Eval run created.' : `${suiteRuns.length} eval runs created.`}
+      </span>
+      <div className="flex flex-wrap items-center gap-2">
+        {suiteRuns.map((suiteRun) => (
+          <a
+            key={suiteRun.id}
+            href={`/evals/${suiteRun.id}/`}
+            className="rounded-md bg-white px-2.5 py-1 text-xs font-bold text-emerald-800 ring-1 ring-emerald-200 hover:bg-emerald-100"
+          >
+            View {suiteRun.display_name || suiteRun.suite_slug}
+          </a>
         ))}
-      </select>
-      <ChevronDown className="pointer-events-none absolute right-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-500" />
+      </div>
     </div>
   )
 }
 
-function CatalogChip({ children, tone = 'slate' }: { children: string; tone?: 'slate' | 'blue' | 'teal' | 'emerald' | 'amber' }) {
-  const classes = {
-    slate: 'bg-white text-slate-700 ring-slate-200',
-    blue: 'bg-blue-50 text-blue-700 ring-blue-200',
-    teal: 'bg-teal-50 text-teal-700 ring-teal-200',
-    emerald: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
-    amber: 'bg-amber-50 text-amber-800 ring-amber-200',
-  }
+function SectionErrorNotice({ message }: { message: string }) {
   return (
-    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide ring-1 ${classes[tone]}`}>
-      {children}
-    </span>
+    <div role="alert" className="flex items-start gap-2 border-b border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-800">
+      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+      <span>{message}</span>
+    </div>
   )
 }

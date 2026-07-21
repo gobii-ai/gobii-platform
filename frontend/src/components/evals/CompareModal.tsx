@@ -3,6 +3,7 @@ import { GitBranch, Cpu, Settings, AlertTriangle, BarChart3 } from 'lucide-react
 
 import { Modal } from '../common/Modal'
 import type { ComparisonTier, ComparisonGroupBy, EvalRunType } from '../../api/evals'
+import { EvalSelect } from './EvalSelect'
 
 export type CompareConfig = {
   tier: ComparisonTier
@@ -57,6 +58,12 @@ const tierOptions: { value: ComparisonTier; label: string; description: string }
     label: 'Historical',
     description: 'Same scenario name (may include changed evals)',
   },
+]
+
+const runTypeOptions = [
+  { value: '', label: 'Any' },
+  { value: 'official', label: 'Official' },
+  { value: 'one_off', label: 'One-off' },
 ]
 
 export function CompareModal({
@@ -185,17 +192,15 @@ export function CompareModal({
           </div>
 
           {/* Run Type Filter */}
-          <div className="w-32">
+          <div className="w-40">
             <p className="text-xs font-semibold text-slate-600 uppercase tracking-wider mb-2">Run Type</p>
-            <select
+            <EvalSelect
+              ariaLabel="Comparison run type"
               value={runType || ''}
-              onChange={(e) => setRunType(e.target.value as EvalRunType || null)}
-              className="w-full px-2 py-1.5 text-xs border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            >
-              <option value="">Any</option>
-              <option value="official">Official</option>
-              <option value="one_off">One-off</option>
-            </select>
+              options={runTypeOptions}
+              onChange={(value) => setRunType(value ? value as EvalRunType : null)}
+              className="w-full text-xs"
+            />
           </div>
         </div>
 
