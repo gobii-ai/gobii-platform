@@ -189,7 +189,7 @@ class DeepWorkUpdateGateTests(SimpleTestCase):
     def test_requires_one_milestone_without_blocking_an_update_batch(self):
         self.assertEqual(
             _deep_work_update_gate_reason(
-                "Prepare the report.",
+                "Prepare a comprehensive report.",
                 ["scrape_one", "scrape_two", "scrape_three", "scrape_four"],
                 prior_work_count=2,
                 prior_update_count=1,
@@ -199,12 +199,56 @@ class DeepWorkUpdateGateTests(SimpleTestCase):
         )
         self.assertIsNone(
             _deep_work_update_gate_reason(
-                "Prepare the report.",
+                "Prepare a comprehensive report.",
                 ["send_chat_message", "scrape_one"],
                 prior_work_count=2,
                 prior_update_count=1,
                 batch_has_progress_update=True,
             )
+        )
+
+    def test_ordinary_continuing_acknowledgement_does_not_arm_a_milestone(self):
+        self.assertIsNone(
+            _deep_work_update_gate_reason(
+                "Gayle, you can send some more today. Lisa should send you some more today too.",
+                ["search_one", "search_two"],
+                prior_work_count=5,
+                prior_update_count=1,
+                batch_has_progress_update=False,
+            )
+        )
+
+    def test_each_checkpoint_fails_open_after_one_hold(self):
+        self.assertIsNone(
+            _deep_work_update_gate_reason(
+                "Do deep, exhaustive research on this market.",
+                ["search_one"],
+                prior_work_count=0,
+                prior_update_count=0,
+                batch_has_progress_update=False,
+                prior_kickoff_correction=True,
+            )
+        )
+        self.assertIsNone(
+            _deep_work_update_gate_reason(
+                "Do a comprehensive audit of these prospects.",
+                ["search_one", "search_two"],
+                prior_work_count=5,
+                prior_update_count=1,
+                batch_has_progress_update=False,
+                prior_milestone_correction=True,
+            )
+        )
+        self.assertEqual(
+            _deep_work_update_gate_reason(
+                "Do a comprehensive audit of these prospects.",
+                ["search_one", "search_two"],
+                prior_work_count=5,
+                prior_update_count=1,
+                batch_has_progress_update=False,
+                prior_kickoff_correction=True,
+            ),
+            "milestone",
         )
 
 
@@ -1300,8 +1344,9 @@ class ContinuationModePromptContextTests(TestCase):
         self.assertIn("## Work Updates (CRITICAL)", system_prompt)
         self.assertIn("Short work: no updates", system_prompt)
         self.assertIn("FIRST send scope + next checkpoint on the inbound channel", system_prompt)
-        self.assertIn("Before work call 4 or after the first source batch/phase", system_prompt)
-        self.assertIn("send an evidence milestone", system_prompt)
+        self.assertIn("Before work call 4 (or after the first evidence batch/phase, if sooner)", system_prompt)
+        self.assertIn("strongest concrete finding so far", system_prompt)
+        self.assertIn("not task status like 'sources scraped' or 'compiling'", system_prompt)
         self.assertIn("No generic narration/reasoning", system_prompt)
         self.assertIn("Peer: send_agent_message only", system_prompt)
 

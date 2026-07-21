@@ -43,10 +43,12 @@ EFFORT_PARTIAL_BRIEFING_REPORTS_WITHOUT_SURVEY = "effort_partial_briefing_report
 EFFORT_CHART_REQUESTED_SINGLE_ARTIFACT = "effort_chart_requested_single_artifact"
 EFFORT_SIMPLE_CURRENT_YC_BATCH_REPORT = "effort_simple_current_yc_batch_report"
 EFFORT_SIMPLE_CURRENT_COMPANY_REPORT = "effort_simple_current_company_report"
+EFFORT_ORDINARY_CONTINUATION_AVOIDS_CORRECTIVE_CHURN = "effort_ordinary_continuation_avoids_corrective_churn"
 EFFORT_EXPLICIT_DEEP_RESEARCH_REMAINS_CAPABLE = "effort_explicit_deep_research_remains_capable"
 EFFORT_UNSCHEDULED_REMAINING_WORK_SETS_RESUME = "effort_unscheduled_remaining_work_sets_resume"
 EFFORT_PARTIAL_SOURCE_BLOCK_REPORTS_AND_RESUMES = "effort_partial_source_block_reports_and_resumes"
 EFFORT_TOOL_WAIT_NEXT_SCHEDULE_REQUIRES_SCHEDULE = "effort_tool_wait_next_schedule_requires_schedule"
+DEEP_WORK_CORRECTION_STEP_PREFIX = "Deep-work communication correction:"
 
 EFFORT_CALIBRATION_SCENARIO_SLUGS = [
     EFFORT_TRIVIAL_ANSWER_STOPS,
@@ -57,6 +59,7 @@ EFFORT_CALIBRATION_SCENARIO_SLUGS = [
     EFFORT_CHART_REQUESTED_SINGLE_ARTIFACT,
     EFFORT_SIMPLE_CURRENT_YC_BATCH_REPORT,
     EFFORT_SIMPLE_CURRENT_COMPANY_REPORT,
+    EFFORT_ORDINARY_CONTINUATION_AVOIDS_CORRECTIVE_CHURN,
     EFFORT_EXPLICIT_DEEP_RESEARCH_REMAINS_CAPABLE,
     EFFORT_UNSCHEDULED_REMAINING_WORK_SETS_RESUME,
     EFFORT_PARTIAL_SOURCE_BLOCK_REPORTS_AND_RESUMES,
@@ -412,6 +415,25 @@ class EffortCalibrationScenario(EvalScenario, ScenarioExecutionTools):
             result=json.dumps(result or {"status": "ok"}),
         )
 
+    def _seed_prior_trajectory_tool_call(
+        self,
+        agent_id: str,
+        *,
+        tool_name: str,
+        tool_params: dict,
+        result: dict,
+    ) -> PersistentAgentToolCall:
+        step = PersistentAgentStep.objects.create(
+            agent_id=agent_id,
+            description=f"Trajectory fixture: completed {tool_name}",
+        )
+        return PersistentAgentToolCall.objects.create(
+            step=step,
+            tool_name=tool_name,
+            tool_params=tool_params,
+            result=json.dumps(result),
+        )
+
     def _send_simulated_web_report(self, agent_id: str, body: str) -> None:
         from api.agent.tools.web_chat_sender import execute_send_chat_message
 
@@ -750,6 +772,36 @@ class EffortCalibrationScenario(EvalScenario, ScenarioExecutionTools):
             ),
         )
         return False
+
+    def _record_deep_work_correction_budget(
+        self,
+        run_id: str,
+        *,
+        agent_id: str,
+        after,
+        task_name: str,
+        max_corrections: int,
+    ) -> bool:
+        self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name=task_name)
+        corrections = list(
+            PersistentAgentStep.objects.filter(
+                agent_id=agent_id,
+                created_at__gt=after,
+                description__startswith=DEEP_WORK_CORRECTION_STEP_PREFIX,
+            ).order_by("created_at", "id")
+        )
+        passed = len(corrections) <= max_corrections
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED if passed else EvalRunTask.Status.FAILED,
+            task_name=task_name,
+            observed_summary=(
+                f"Deep-work communication corrections were {len(corrections)}; budget is {max_corrections}."
+            ),
+            artifacts={"step": corrections[0]} if corrections and not passed else {},
+        )
+        return passed
 
     def _record_plan_update_budget(
         self,
@@ -2746,6 +2798,130 @@ class EffortSimpleCurrentCompanyReportScenario(EffortCalibrationScenario):
 
 
 @register_scenario
+class EffortOrdinaryContinuationAvoidsCorrectiveChurnScenario(EffortCalibrationScenario):
+    slug = EFFORT_ORDINARY_CONTINUATION_AVOIDS_CORRECTIVE_CHURN
+    description = (
+        "A casual continuation request after useful outreach work should make progress without a deep-work "
+        "communication correction loop."
+    )
+    prompt = "Those were good. You can send a few more today; Lisa should have another batch ready later."
+    tasks = [
+        ScenarioTask(name="inject_prompt", assertion_type="manual"),
+        ScenarioTask(name="verify_outreach_progress", assertion_type="manual"),
+        ScenarioTask(name="verify_no_correction_churn", assertion_type="manual"),
+        ScenarioTask(name="verify_turn_budget", assertion_type="manual"),
+    ]
+
+    def run(self, run_id: str, agent_id: str) -> None:
+        self._ready_agent(
+            agent_id,
+            charter=(
+                "Research and send small batches of personalized outreach from the approved queue. "
+                "Use the owner's positioning notes and report what was sent."
+            ),
+        )
+        self._enable_eval_synthetic_tools(agent_id, ["eval_send_outreach_batch"])
+        mock_config = {
+            "eval_send_outreach_batch": {
+                "status": "ok",
+                "summary": "Sent personalized outreach to the three approved prospects.",
+                "sent_count": 3,
+                "remaining_work": 0,
+            }
+        }
+
+        self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="inject_prompt")
+        inbound = self.inject_message(
+            agent_id,
+            self.prompt,
+            trigger_processing=False,
+            eval_run_id=run_id,
+        )
+
+        # Recreate the proven retry boundary while leaving the next decision to the real harness/model.
+        self._seed_prior_trajectory_tool_call(
+            agent_id,
+            tool_name="send_chat_message",
+            tool_params={
+                "body": (
+                    "Glad those landed. I have the positioning and approved names from the queue, "
+                    "so I can take the next batch from here."
+                ),
+                "will_continue_work": True,
+            },
+            result={"status": "ok"},
+        )
+        work_context = (
+            ("sqlite_batch", {"sql": "SELECT 3 AS approved_count"}, "Three approved prospects are ready."),
+            ("mcp_brightdata_search_engine", {"query": "Tyler Scott REsimpli AI"}, "Tyler verified."),
+            ("mcp_brightdata_search_engine", {"query": "Maya Chen LatticeFox revenue"}, "Maya verified."),
+            ("mcp_brightdata_search_engine", {"query": "Luis Romero ParcelPilot GTM"}, "Luis verified."),
+            ("sqlite_batch", {"sql": "SELECT 'send' AS next_action"}, "Send the approved batch."),
+        )
+        for tool_name, tool_params, summary in work_context:
+            self._seed_prior_trajectory_tool_call(
+                agent_id,
+                tool_name=tool_name,
+                tool_params=tool_params,
+                result={"status": "ok", "summary": summary},
+            )
+
+        with self.wait_for_agent_idle(agent_id, timeout=180):
+            self.trigger_processing(
+                agent_id,
+                eval_run_id=run_id,
+                mock_config=mock_config,
+                eval_stop_policy={
+                    "stop_on_tool_names_after_execution": ["eval_send_outreach_batch"],
+                    "stop_on_human_input_request": True,
+                    "stop_on_unexpected_relevant_tool": True,
+                    "allowed_tool_names": ["eval_send_outreach_batch", "sqlite_batch"],
+                    "max_relevant_tool_calls": 4,
+                    "ignored_tool_names": list(MESSAGE_TOOL_NAMES | STOP_TOOL_NAMES),
+                },
+            )
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED,
+            task_name="inject_prompt",
+            observed_summary="Casual continuation and prior trajectory context were processed.",
+            artifacts={"message": inbound},
+        )
+
+        self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="verify_outreach_progress")
+        outreach_call = next(
+            (
+                call for call in _tool_calls_for_run(
+                    run_id, after=inbound.timestamp, tool_names={"eval_send_outreach_batch"}
+                )
+                if str(call.status or "").lower() == "complete"
+            ),
+            None,
+        )
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED if outreach_call else EvalRunTask.Status.FAILED,
+            task_name="verify_outreach_progress",
+            observed_summary=(
+                "The approved outreach batch executed after the casual continuation."
+                if outreach_call else "No approved outreach batch executed after the continuation request."
+            ),
+            artifacts={"step": outreach_call.step} if outreach_call else {},
+        )
+
+        self._record_deep_work_correction_budget(
+            run_id,
+            agent_id=agent_id,
+            after=inbound.timestamp,
+            task_name="verify_no_correction_churn",
+            max_corrections=0,
+        )
+        self._record_orchestrator_budget(run_id, task_name="verify_turn_budget", max_completions=3)
+
+
+@register_scenario
 class EffortExplicitDeepResearchRemainsCapableScenario(EffortCalibrationScenario):
     slug = EFFORT_EXPLICIT_DEEP_RESEARCH_REMAINS_CAPABLE
     supports_simulation = True
@@ -2762,6 +2938,7 @@ class EffortExplicitDeepResearchRemainsCapableScenario(EffortCalibrationScenario
         ScenarioTask(name="verify_no_unrequested_artifacts_or_input", assertion_type="manual"),
         ScenarioTask(name="verify_no_query_or_sqlite_loops", assertion_type="manual"),
         ScenarioTask(name="verify_no_config_churn", assertion_type="manual"),
+        ScenarioTask(name="verify_correction_budget", assertion_type="manual"),
         ScenarioTask(name="verify_turn_budget", assertion_type="manual"),
     ]
 
@@ -3161,5 +3338,12 @@ class EffortExplicitDeepResearchRemainsCapableScenario(EffortCalibrationScenario
             run_id,
             after=inbound.timestamp,
             task_name="verify_no_config_churn",
+        )
+        self._record_deep_work_correction_budget(
+            run_id,
+            agent_id=agent_id,
+            after=inbound.timestamp,
+            task_name="verify_correction_budget",
+            max_corrections=2,
         )
         self._record_orchestrator_budget(run_id, task_name="verify_turn_budget", max_completions=11)

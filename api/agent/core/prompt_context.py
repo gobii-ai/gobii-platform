@@ -3863,9 +3863,10 @@ def _get_system_instruction(
         "\n\n## Work Updates (CRITICAL)\n\n"
         "Short work: no updates. Deep/exhaustive, large-batch, implementation/deployment, or long work:\n"
         "1. FIRST send scope + next checkpoint on the inbound channel; will_continue_work=true.\n"
-        "2. Before work call 4 or after the first source batch/phase, send an evidence milestone. Later only for material ETA/blockers.\n"
+        "2. Before work call 4 (or after the first evidence batch/phase, if sooner), send the strongest concrete "
+        "finding so far, not task status like 'sources scraped' or 'compiling'. Later only for material ETA/blockers.\n"
         "After any update result, do not repeat or paraphrase it; the next response starts with work calls only. "
-        "A kickoff is not an evidence milestone: each later update must state a concrete new finding from completed "
+        "A kickoff is not a milestone: each later update must state a concrete new finding from completed "
         "tools and must not reuse kickoff text. If there is no evidence yet, continue work instead of sending.\n"
         "No generic narration/reasoning. Peer: send_agent_message only."
     )
