@@ -757,6 +757,123 @@ class ImpliedSendTests(TestCase):
         mock_rate_limit.assert_called_once()
         mock_credit.assert_called_once()
 
+    def test_prepare_tool_batch_keeps_stateful_eval_read_after_prior_success(self):
+        trigger_step = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            description="Cron trigger: 0 9 * * *",
+        )
+        PersistentAgentCronTrigger.objects.create(step=trigger_step, cron_expression="0 9 * * *")
+        prior_step = PersistentAgentStep.objects.create(agent=self.agent, description="initial read")
+        PersistentAgentToolCall.objects.create(
+            step=prior_step,
+            tool_name="http_request",
+            tool_params={"method": "GET", "url": "https://api.example.test/campaign"},
+            result=json.dumps({"status": "ok", "status_code": 200, "content": {"status": 0}}),
+            status="complete",
+        )
+        budget_ctx = ep.BudgetContext(
+            agent_id=str(self.agent.id),
+            budget_id="eval-budget",
+            branch_id="eval-branch",
+            depth=0,
+            max_steps=10,
+            max_depth=1,
+            eval_run_id="eval-run",
+            mock_config={
+                "http_request": {
+                    "state": {
+                        "readback": {
+                            "status": "ok",
+                            "status_code": 200,
+                            "content": {"status": 0},
+                        }
+                    },
+                    "rules": [
+                        {
+                            "param_equals": {"method": "GET"},
+                            "url_contains": "/campaign",
+                            "result_from_state": "readback",
+                        }
+                    ],
+                }
+            },
+        )
+
+        with (
+            patch.object(ep, "_enforce_tool_rate_limit", return_value=True) as mock_rate_limit,
+            patch.object(
+                ep,
+                "_ensure_credit_for_tool",
+                return_value={"cost": None, "credit": None},
+            ) as mock_credit,
+        ):
+            prepared = ep._prepare_tool_batch(
+                self.agent,
+                tool_calls=[
+                    {
+                        "id": "call_readback",
+                        "function": {
+                            "name": "http_request",
+                            "arguments": json.dumps(
+                                {"method": "GET", "url": "https://api.example.test/campaign"}
+                            ),
+                        },
+                    }
+                ],
+                budget_ctx=budget_ctx,
+                eval_run_id=None,
+                heartbeat=None,
+                lock_extender=None,
+                credit_snapshot={},
+                allow_inferred_message_continue=True,
+                has_non_sleep_calls=True,
+                has_user_facing_message=False,
+                attach_completion=lambda step_kwargs: None,
+                attach_prompt_archive=lambda step: None,
+            )
+
+        self.assertEqual(len(prepared.prepared_calls), 1)
+        self.assertFalse(prepared.followup_required)
+        mock_rate_limit.assert_called_once()
+        mock_credit.assert_called_once()
+        self.assertFalse(
+            PersistentAgentStep.objects.filter(
+                agent=self.agent,
+                description__startswith="Skipped duplicate http_request",
+            ).exists()
+        )
+
+    def test_stateful_eval_http_writes_do_not_bypass_duplicate_suppression(self):
+        budget_ctx = ep.BudgetContext(
+            agent_id=str(self.agent.id),
+            budget_id="eval-budget",
+            branch_id="eval-branch",
+            depth=0,
+            max_steps=10,
+            max_depth=1,
+            eval_run_id="eval-run",
+            mock_config={
+                "http_request": {
+                    "state": {"readback": {"status": "ok"}},
+                    "rules": [
+                        {
+                            "param_equals": {"method": "POST"},
+                            "url_contains": "/activate",
+                            "set_state": {"readback": {"content": {"status": 1}}},
+                            "result": {"status": "ok"},
+                        }
+                    ],
+                }
+            },
+        )
+
+        self.assertFalse(
+            ep._stateful_eval_http_read_requires_fresh_result(
+                budget_ctx,
+                {"method": "POST", "url": "https://api.example.test/activate"},
+            )
+        )
+
     def test_invalid_custom_tool_json_correction_preserves_same_tool_retry(self):
         with (
             patch.object(ep, "_enforce_tool_rate_limit", return_value=True) as mock_rate_limit,

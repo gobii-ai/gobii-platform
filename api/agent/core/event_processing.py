@@ -12,6 +12,7 @@ import os
 import logging
 import re
 import time
+from copy import deepcopy
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import copy_context
 from dataclasses import dataclass, field
@@ -2400,6 +2401,67 @@ def _eval_mock_rule_matches(rule: Dict[str, Any], exec_params: Dict[str, Any]) -
     return True
 
 
+def _eval_mock_nested_value(value: Any, path: str) -> Any:
+    current = value
+    for part in path.split("."):
+        if not isinstance(current, dict) or part not in current:
+            return None
+        current = current[part]
+    return current
+
+
+def _eval_mock_set_nested_value(target: Dict[str, Any], path: str, value: Any) -> None:
+    parts = path.split(".")
+    current = target
+    for part in parts[:-1]:
+        child = current.get(part)
+        if not isinstance(child, dict):
+            child = {}
+            current[part] = child
+        current = child
+    current[parts[-1]] = deepcopy(value)
+
+
+def _eval_mock_deep_merge(target: Dict[str, Any], updates: Dict[str, Any]) -> None:
+    for key, value in updates.items():
+        if isinstance(value, dict) and isinstance(target.get(key), dict):
+            _eval_mock_deep_merge(target[key], value)
+        else:
+            target[key] = deepcopy(value)
+
+
+def _eval_mock_apply_state_updates(
+    state: Dict[str, Any],
+    rule: Dict[str, Any],
+    exec_params: Dict[str, Any],
+) -> None:
+    static_updates = rule.get("set_state")
+    if isinstance(static_updates, dict):
+        _eval_mock_deep_merge(state, static_updates)
+
+    for update in rule.get("state_updates_from_params") or []:
+        if not isinstance(update, dict):
+            continue
+        param_name = update.get("param")
+        source_path = update.get("source_path")
+        target_path = update.get("target_path")
+        if not all(
+            isinstance(value, str) and value
+            for value in (param_name, source_path, target_path)
+        ):
+            continue
+
+        source = exec_params.get(param_name)
+        if update.get("parse_json") and isinstance(source, str):
+            try:
+                source = json.loads(source)
+            except json.JSONDecodeError:
+                continue
+        value = _eval_mock_nested_value(source, source_path)
+        if value is not None:
+            _eval_mock_set_nested_value(state, target_path, value)
+
+
 def _resolve_eval_mock_result(
     mock_config: Optional[Dict[str, Any]],
     tool_name: str,
@@ -2414,8 +2476,14 @@ def _resolve_eval_mock_result(
     ):
         return mock_result
 
+    state = mock_result.get("state")
     for rule in mock_result.get("rules") or []:
         if _eval_mock_rule_matches(rule, exec_params):
+            if isinstance(state, dict):
+                _eval_mock_apply_state_updates(state, rule, exec_params)
+                result_state_path = rule.get("result_from_state")
+                if isinstance(result_state_path, str) and result_state_path:
+                    return deepcopy(_eval_mock_nested_value(state, result_state_path))
             return rule.get("result")
 
     return mock_result.get("default")
@@ -2960,6 +3028,49 @@ def _find_successful_duplicate_http_request(
         ):
             return prior_call
     return None
+
+
+def _stateful_eval_http_read_requires_fresh_result(
+    budget_ctx: Optional[BudgetContext],
+    exec_params: Dict[str, Any],
+) -> bool:
+    if not budget_ctx or not budget_ctx.eval_run_id:
+        return False
+    if str(exec_params.get("method") or "GET").upper() not in {"GET", "HEAD"}:
+        return False
+
+    mock_config = budget_ctx.mock_config
+    http_mock = mock_config.get("http_request") if isinstance(mock_config, dict) else None
+    if not isinstance(http_mock, dict) or not isinstance(http_mock.get("state"), dict):
+        return False
+
+    return any(
+        isinstance(rule, dict)
+        and isinstance(rule.get("result_from_state"), str)
+        and bool(rule["result_from_state"])
+        and _eval_mock_rule_matches(rule, exec_params)
+        for rule in http_mock.get("rules") or []
+    )
+
+
+def _record_duplicate_http_request_skip(
+    agent: PersistentAgent,
+    prior_call: PersistentAgentToolCall,
+    *,
+    attach_completion: Any,
+    attach_prompt_archive: Any,
+) -> None:
+    step_kwargs = {
+        "agent": agent,
+        "description": (
+            "Skipped duplicate http_request: this exact request already succeeded in this task. "
+            f"Use the prior tool result from step {prior_call.step_id}. "
+            "If it answers the request, send the final message next; do not refetch or inspect __tool_results just to reread it."
+        ),
+    }
+    attach_completion(step_kwargs)
+    step = PersistentAgentStep.objects.create(**step_kwargs)
+    attach_prompt_archive(step)
 
 
 _ToolExecutor = Callable[[PersistentAgent, Dict[str, Any]], Any]
@@ -3531,7 +3642,10 @@ def _prepare_tool_batch(
                 exec_params = dict(exec_params)
                 exec_params["_has_user_facing_message"] = has_user_facing_message
 
-            if tool_name == "http_request":
+            if tool_name == "http_request" and not _stateful_eval_http_read_requires_fresh_result(
+                budget_ctx,
+                exec_params,
+            ):
                 duplicate_call = _find_successful_duplicate_http_request(
                     agent,
                     tool_params,
