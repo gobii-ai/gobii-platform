@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefCallback } from 'react'
 
 const NEAR_BOTTOM_PX = 96
-const UNPIN_PX = 160
 const TOP_LOAD_PX = 160
 const PROGRAMMATIC_SCROLL_MS = 180
 const SCROLLABLE_EPSILON_PX = 1
 const PREPEND_RESTORE_GUARD_MS = 250
+const TOUCH_SCROLL_DELTA_PX = 2
 
 type TimelineScrollControllerOptions = {
   activeAgentId: string | null
@@ -64,6 +64,8 @@ export function useTimelineScrollController({
   const prependAnchorRef = useRef<PrependAnchor | null>(null)
   const ignorePinUntilRef = useRef(0)
   const lastScrollTopRef = useRef(0)
+  const pointerActiveRef = useRef(false)
+  const touchYRef = useRef<number | null>(null)
 
   const [timelineNode, setTimelineNode] = useState<HTMLDivElement | null>(null)
   const [contentNode, setContentNode] = useState<HTMLDivElement | null>(null)
@@ -121,6 +123,12 @@ export function useTimelineScrollController({
       acrossFramesRafRef.current = null
     }
   }, [])
+
+  const suspendAutoFollow = useCallback(() => {
+    programmaticScrollUntilRef.current = 0
+    cancelPendingBottomScroll()
+    setPinned(false)
+  }, [cancelPendingBottomScroll, setPinned])
 
   const scrollToBottomAcrossFrames = useCallback((frames: number) => {
     if (acrossFramesRafRef.current !== null) {
@@ -214,7 +222,6 @@ export function useTimelineScrollController({
     hasPreviousPage,
     isFetchPreviousPageError,
     isFetchingPreviousPage,
-    pageCount,
     cancelPendingBottomScroll,
     capturePrependAnchor,
     setPinned,
@@ -239,6 +246,8 @@ export function useTimelineScrollController({
     didInitialJumpRef.current = false
     fetchOlderInFlightRef.current = false
     prependAnchorRef.current = null
+    pointerActiveRef.current = false
+    touchYRef.current = null
   }, [activeAgentId])
 
   useEffect(() => {
@@ -247,11 +256,52 @@ export function useTimelineScrollController({
       return
     }
 
+    const handleWheel = (event: WheelEvent) => {
+      if (event.deltaY < 0) {
+        suspendAutoFollow()
+      }
+    }
+
+    const handleTouchStart = (event: TouchEvent) => {
+      touchYRef.current = event.touches[0]?.clientY ?? null
+    }
+
+    const handleTouchMove = (event: TouchEvent) => {
+      const nextTouchY = event.touches[0]?.clientY ?? null
+      const previousTouchY = touchYRef.current
+      touchYRef.current = nextTouchY
+      if (
+        nextTouchY !== null
+        && previousTouchY !== null
+        && nextTouchY > previousTouchY + TOUCH_SCROLL_DELTA_PX
+      ) {
+        suspendAutoFollow()
+      }
+    }
+
+    const handleTouchEnd = () => {
+      touchYRef.current = null
+    }
+
+    const handlePointerDown = () => {
+      pointerActiveRef.current = true
+    }
+
+    const handlePointerEnd = () => {
+      pointerActiveRef.current = false
+    }
+
     const handleScroll = () => {
       const previousScrollTop = lastScrollTopRef.current
       const nextScrollTop = container.scrollTop
+      const scrollingUp = nextScrollTop < previousScrollTop
+      const scrollingDown = nextScrollTop > previousScrollTop
       lastScrollTopRef.current = nextScrollTop
       syncMeasurements(container)
+
+      if (scrollingUp && pointerActiveRef.current) {
+        suspendAutoFollow()
+      }
 
       if (
         Date.now() < programmaticScrollUntilRef.current
@@ -262,10 +312,10 @@ export function useTimelineScrollController({
       }
 
       const distance = bottomDistance(container)
-      if (distance <= NEAR_BOTTOM_PX) {
+      if (scrollingUp) {
+        suspendAutoFollow()
+      } else if (scrollingDown && distance <= NEAR_BOTTOM_PX) {
         setPinned(true)
-      } else if (distance > UNPIN_PX && nextScrollTop < previousScrollTop - 2) {
-        setPinned(false)
       }
 
       if (
@@ -282,8 +332,26 @@ export function useTimelineScrollController({
     }
 
     syncMeasurements(container)
+    container.addEventListener('wheel', handleWheel, { passive: true })
+    container.addEventListener('touchstart', handleTouchStart, { passive: true })
+    container.addEventListener('touchmove', handleTouchMove, { passive: true })
+    container.addEventListener('touchend', handleTouchEnd, { passive: true })
+    container.addEventListener('touchcancel', handleTouchEnd, { passive: true })
+    container.addEventListener('pointerdown', handlePointerDown, { passive: true })
     container.addEventListener('scroll', handleScroll, { passive: true })
-    return () => container.removeEventListener('scroll', handleScroll)
+    window.addEventListener('pointerup', handlePointerEnd, { passive: true })
+    window.addEventListener('pointercancel', handlePointerEnd, { passive: true })
+    return () => {
+      container.removeEventListener('wheel', handleWheel)
+      container.removeEventListener('touchstart', handleTouchStart)
+      container.removeEventListener('touchmove', handleTouchMove)
+      container.removeEventListener('touchend', handleTouchEnd)
+      container.removeEventListener('touchcancel', handleTouchEnd)
+      container.removeEventListener('pointerdown', handlePointerDown)
+      container.removeEventListener('scroll', handleScroll)
+      window.removeEventListener('pointerup', handlePointerEnd)
+      window.removeEventListener('pointercancel', handlePointerEnd)
+    }
   }, [
     eventCount,
     initialLoading,
@@ -291,6 +359,7 @@ export function useTimelineScrollController({
     requestPreviousPage,
     setPinned,
     switchingAgentId,
+    suspendAutoFollow,
     syncMeasurements,
     timelineNode,
   ])

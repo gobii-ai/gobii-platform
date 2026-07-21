@@ -15,6 +15,7 @@ type ToolClusterLivePreviewProps = {
   cluster: ToolClusterTransform
   isLatestEvent: boolean
   animateIncoming?: boolean
+  forceActive?: boolean
   previewEntryLimit?: number
   onOpenTimeline: () => void
   onSelectEntry: (entry: ToolEntryDisplay) => void
@@ -1049,10 +1050,29 @@ function derivePreviewState(activeEntry: ToolEntryDisplay | null, hasActiveProce
   return 'complete'
 }
 
+function LiveThinkingStream({ content }: { content: string }) {
+  const viewportRef = useRef<HTMLSpanElement>(null)
+
+  useEffect(() => {
+    const viewport = viewportRef.current
+    if (viewport) {
+      viewport.scrollTop = viewport.scrollHeight
+    }
+  }, [content])
+
+  return (
+    <span ref={viewportRef} className="tool-cluster-live-preview__thinking-stream" aria-label="Live thinking">
+      {content}
+      <span className="tool-cluster-live-preview__thinking-cursor" aria-hidden="true" />
+    </span>
+  )
+}
+
 export function ToolClusterLivePreview({
   cluster,
   isLatestEvent,
   animateIncoming = false,
+  forceActive = false,
   previewEntryLimit = MAX_PREVIEW_ENTRIES,
   onOpenTimeline,
   onSelectEntry,
@@ -1089,10 +1109,12 @@ export function ToolClusterLivePreview({
     () => previewableEntries.filter((entry) => entry.status === 'pending' || entry.toolName === 'thinking').length,
     [previewableEntries],
   )
-  const hasActiveProcessing = processingActive && isLatestEvent
+  const hasActiveProcessing = forceActive || (processingActive && isLatestEvent)
   const activePreviewEntry = useMemo<PreviewEntry | null>(() => {
-    return [...previewEntries].reverse().find((item) => item.entry.status === 'pending') ?? null
-  }, [previewEntries])
+    const reversedEntries = [...previewEntries].reverse()
+    return reversedEntries.find((item) => item.entry.status === 'pending')
+      ?? (forceActive ? reversedEntries.find((item) => item.entry.toolName === 'thinking') ?? null : null)
+  }, [forceActive, previewEntries])
   const previewState = derivePreviewState(activePreviewEntry?.entry ?? null, hasActiveProcessing)
   const activeEntryId = activePreviewEntry?.entry.id ?? null
   const newEntryIdSet = useMemo(() => new Set(newEntryIds), [newEntryIds])
@@ -1182,6 +1204,9 @@ export function ToolClusterLivePreview({
             const isNew = newEntryIdSet.has(entry.id)
             const showSearchSweep = !reduceMotion && isHighlighted && item.activity.kind === 'search'
             const detailText = item.activity.detail
+            const liveThinkingText = forceActive && item.activity.kind === 'thinking' && typeof entry.result === 'string'
+              ? entry.result
+              : null
             const linkedInProfile = item.activity.kind === 'linkedin' ? visual.linkedInProfile : null
             const searchItems = item.activity.kind === 'search' ? visual.searchItems : []
             const hasCapabilityCards = visual.enabledToolInfos.length > 0 || visual.enabledSkillChips.length > 0
@@ -1299,6 +1324,7 @@ export function ToolClusterLivePreview({
                 data-has-tools={hasCapabilityCards ? 'true' : 'false'}
                 data-new={isNew ? 'true' : 'false'}
                 data-profile-card={linkedInProfile ? 'true' : 'false'}
+                data-live-thinking={liveThinkingText ? 'true' : 'false'}
                 role="button"
                 tabIndex={0}
                 initial={!shouldAnimateIncoming ? { opacity: 1, y: 0 } : { opacity: 0, y: 3 }}
@@ -1462,7 +1488,12 @@ export function ToolClusterLivePreview({
                       </motion.span>
                     ) : null}
                     <AnimatePresence initial={false} mode="wait">
-                      {linkedInProfile ? (
+                      {liveThinkingText ? (
+                        <LiveThinkingStream
+                          key={`${entry.id}-live-thinking`}
+                          content={liveThinkingText}
+                        />
+                      ) : linkedInProfile ? (
                         <motion.span
                           key={`${entry.id}-profile-subtitle-${linkedInProfile.subtitle ?? item.activity.label}`}
                           className="tool-cluster-live-preview__entry-caption"

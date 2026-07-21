@@ -54,6 +54,7 @@
   flex-direction: column;
   gap: 0.5rem;
   align-items: center;
+  width: 100%;
 }
 
 .collapsed-activity-cluster__body {

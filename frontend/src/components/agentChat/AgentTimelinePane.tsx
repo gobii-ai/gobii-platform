@@ -269,6 +269,7 @@ export function AgentTimelinePane({
 
               {showStreamingThinking ? (
                 <StreamingThinkingCard
+                  cursor={streaming?.cursor ?? streaming?.streamId ?? 'streaming-thinking'}
                   reasoning={streaming?.reasoning || ''}
                   isStreaming={isStreaming}
                 />

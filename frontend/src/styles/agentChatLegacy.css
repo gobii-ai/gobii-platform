@@ -4072,6 +4072,35 @@
     color: #0f4c81;
     line-height: 1.28;
 }
+.tool-cluster-live-preview__entry[data-live-thinking="true"] {
+    align-items: flex-start;
+}
+.tool-cluster-live-preview__entry[data-live-thinking="true"] .tool-cluster-live-preview__entry-icon {
+    margin-top: 0.08rem;
+}
+.tool-cluster-live-preview__thinking-stream {
+    display: block;
+    max-height: calc(1.35em * 3);
+    overflow: hidden;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    scrollbar-width: none;
+    color: #475569;
+    font-size: 0.62rem;
+    line-height: 1.35;
+}
+.tool-cluster-live-preview__thinking-stream::-webkit-scrollbar {
+    display: none;
+}
+.tool-cluster-live-preview__thinking-cursor {
+    display: inline-block;
+    width: 1.5px;
+    height: 0.9em;
+    margin-left: 2px;
+    vertical-align: -0.08em;
+    background: #6366f1;
+    animation: streamingCursor 1s ease-in-out infinite;
+}
 .tool-cluster-live-preview__entry-context {
     display: -webkit-box;
     -webkit-box-orient: vertical;
@@ -5109,59 +5138,8 @@
         opacity: 0.3;
     }
 }
-.streaming-thinking-card {
-    border-radius: 0.75rem;
-    background: rgba(250, 245, 255, 0.92);
-    border: 1px solid rgba(139, 92, 246, 0.22);
-    padding: 0.5rem 0.75rem;
-}
-.streaming-thinking-card__header {
-    display: flex;
-    align-items: center;
-    gap: 0.375rem;
-    margin-bottom: 0.25rem;
-}
-.streaming-thinking-card__pulse {
-    display: inline-block;
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: #8b5cf6;
-    flex-shrink: 0;
-}
-.streaming-thinking-card__label {
-    font-size: 0.6875rem;
-    font-weight: 600;
-    color: #7c3aed;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    line-height: 1;
-}
-.streaming-thinking-card__content {
-    font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', 'JetBrains Mono', ui-monospace, monospace;
-    font-size: 0.75rem;
-    line-height: 1.4;
-    color: #5b21b6;
-    max-height: calc(1.4em * 3);
-    overflow: hidden;
-    white-space: pre-wrap;
-    word-break: break-word;
-    scrollbar-width: none;
-}
-.streaming-thinking-card__content::-webkit-scrollbar {
-    display: none;
-}
-.streaming-thinking-card__cursor {
-    display: inline-block;
-    width: 2px;
-    height: 0.875em;
-    background: #8b5cf6;
-    vertical-align: text-bottom;
-    margin-left: 1px;
-    animation: streamingCursor 1s ease-in-out infinite;
-}
 @media (prefers-reduced-motion: reduce) {
-    .streaming-thinking-card__cursor {
+    .tool-cluster-live-preview__thinking-cursor {
         animation: none;
         opacity: 0.6;
     }
