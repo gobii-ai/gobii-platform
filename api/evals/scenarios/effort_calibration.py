@@ -289,7 +289,10 @@ def _sqlite_call_persists_resume_state(call: PersistentAgentToolCall) -> bool:
         return False
 
     sql = sqlite_batch_sql(call).lower()
-    if "remaining_work" not in sql or ("next_cursor" not in sql and "cursor" not in sql):
+    has_remaining_state = "remaining_work" in sql or bool(
+        re.search(r"(?:\b\d+\s+remaining\b|\bremaining\D{0,20}\d+\b)", sql)
+    )
+    if not has_remaining_state or ("next_cursor" not in sql and "cursor" not in sql):
         return False
 
     return any(keyword in sql for keyword in ("insert", "update", "replace", "create table"))
@@ -1993,8 +1996,8 @@ class EffortPartialSourceBlockReportsAndResumesScenario(EffortCalibrationScenari
                 "remaining_work": 12,
                 "next_cursor": "candidate-offset-3",
                 "next_action": (
-                    "Report the verified partial set with the source limitation, then continue bounded "
-                    "verification or set a resume schedule."
+                    "Report the verified partial set with the source limitation, then schedule a resume "
+                    "from next_cursor. Retrying this batch now cannot expose additional tenure evidence."
                 ),
             }
         }

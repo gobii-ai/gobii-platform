@@ -16,6 +16,10 @@ _REFERENCE_PREFIX_RE = re.compile(r"\$\[link:", re.IGNORECASE)
 _PUBLIC_ID_PATTERN = r"L[0123456789ABCDEFGHJKMNPQRSTVWXYZ]{16}"
 _PUBLIC_ID_RE = re.compile(_PUBLIC_ID_PATTERN, re.IGNORECASE)
 _NAKED_DESTINATION_RE = re.compile(rf"(?:\]\(\s*|href\s*=\s*['\"]\s*)({_PUBLIC_ID_PATTERN})(?=\s*(?:\)|['\"]))", re.IGNORECASE)
+_INVERTED_MARKDOWN_REFERENCE_RE = re.compile(
+    rf"\[(?P<reference>\$\[link:{_PUBLIC_ID_PATTERN}\])\]\([^)]*\)",
+    re.IGNORECASE,
+)
 _TRAILING_PUNCTUATION = ".,;:!?"
 _EMBEDDED_FIELDS = {"create_csv": "csv_text", "create_pdf": "html", "http_request": "body", "send_agent_message": "message", "send_chat_message": "body", "send_discord_message": "message", "send_email": "mobile_first_html", "send_sms": "body"}
 DOCUMENT_MIME_TYPES = {"application/json", "application/ld+json", "application/xml", "application/yaml", "text/html", "text/markdown", "text/plain", "text/xml", "text/yaml"}
@@ -82,6 +86,10 @@ def rewrite_prompt_urls(text: str, agent, *, create: bool) -> str:
 
 def resolve_link_references(text: str, agent) -> str:
     text = text or ""
+    text = _INVERTED_MARKDOWN_REFERENCE_RE.sub(
+        lambda match: f"[{match.group('reference')}]({match.group('reference')})",
+        text,
+    )
     if naked := _NAKED_DESTINATION_RE.search(text):
         public_id = naked.group(1).upper()
         raise LinkReferenceResolutionError(f"A link reference is malformed. Use $[link:{public_id}] as the complete destination.")

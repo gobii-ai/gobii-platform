@@ -345,6 +345,17 @@ class LinkReferenceTests(TestCase):
         foreign = "https://api.example.test/profiles/L0000000000000000"
         self.assertEqual(resolve_link_references(foreign, self.agent), foreign)
 
+    def test_repairs_reference_used_as_markdown_label(self):
+        url = "https://files.example.test/board-pack.pdf"
+        token = rewrite_prompt_urls(url, self.agent, create=True)
+
+        for destination in ("http://example.com", "$[link:L0000000000000000]"):
+            with self.subTest(destination=destination):
+                self.assertEqual(
+                    resolve_link_references(f"[{token}]({destination})", self.agent),
+                    f"[{url}]({url})",
+                )
+
     def test_create_csv_resolves_raw_and_query_cells_without_breaking_url_commas(self):
         url = "https://profiles.example.test/avery,chen?view=full#bio"
         token = rewrite_prompt_urls(url, self.agent, create=True)
@@ -601,7 +612,6 @@ class LinkReferenceTests(TestCase):
         token = f"$[link:{reference.public_id}]"
         self.assertIn("Avery Chen", prompt_info.meta)
         self.assertIn(token, prompt_info.meta)
-        self.assertIn("records without one stay unlinked", prompt_info.preview_text)
         self.assertNotIn(url, prompt_info.meta)
         self.assertIn(token, prompt_info.preview_text)
         self.assertEqual(record.result_text, raw_result)
@@ -787,8 +797,24 @@ class LinkReferenceTests(TestCase):
             )
 
         reference = PersistentAgentLinkReference.objects.get(agent=self.agent)
+        system_prompt = next(item["content"] for item in messages if item["role"] == "system")
         user_prompt = next(item["content"] for item in messages if item["role"] == "user")
         self.assertIn(f"Compare Acme: $[link:{reference.public_id}]", user_prompt)
+        self.assertNotIn("LINK OUTPUT CONTRACT", system_prompt)
+        self.assertEqual(user_prompt.count("LINK OUTPUT CONTRACT"), 1)
+        self.assertIn("token is already the complete destination", user_prompt)
+        self.assertIn("copy each included item's/source's exact token unchanged", user_prompt)
+        self.assertIn("`[human label]($[link:LITEM])`", user_prompt)
+        self.assertIn("token never belongs inside the visible-label brackets", user_prompt)
+        self.assertIn("`[$[link:LITEM]](https://host/path)`", user_prompt)
+        self.assertIn("`[$[link:LITEM]]($[link:LSOURCE])`", user_prompt)
+        self.assertIn("Never replace it with, guess, or construct an HTTP URL", user_prompt)
+        self.assertIn("neighboring pattern makes the destination seem known", user_prompt)
+        self.assertIn("An item without a token gets no link/destination field", user_prompt)
+        self.assertIn("inference from other items does not", user_prompt)
+        self.assertIn("source, or feed token cites that source only", user_prompt)
+        self.assertIn("never an item's destination", user_prompt)
+        self.assertIn("verify every destination copied from these results is an exact supplied token", user_prompt)
         message.refresh_from_db()
         self.assertEqual(message.body, f"Compare Acme: {url}")
 
@@ -809,19 +835,11 @@ class LinkReferenceTests(TestCase):
         self.assertEqual(first, second)
         self.assertRegex(first, r"^\$\[link:L[0123456789ABCDEFGHJKMNPQRSTVWXYZ]{16}\]$")
 
-    def test_system_prompt_has_one_reference_rule(self):
+    def test_system_prompt_does_not_duplicate_contextual_reference_rule(self):
         prompt = _get_system_instruction(self.agent, is_first_run=False)
 
-        self.assertEqual(prompt.count("Link references such as `$[link:L…]`"), 1)
-        self.assertIn("opaque, complete URL placeholders", prompt)
-        self.assertIn("runtime resolves after the tool call", prompt)
-        self.assertIn("copy it verbatim as the entire destination and make the item label clickable", prompt)
-        self.assertIn("Never extract the `L…` ID, prepend a domain, append a path/query", prompt)
-        self.assertIn("unless a tool result or API specification explicitly provides a URL template", prompt)
-        self.assertEqual(prompt.count("Source/feed links do not substitute for item/detail links"), 1)
-        self.assertIn("Requested links are required", prompt)
-        self.assertIn("keep each reference with its item", prompt)
-        self.assertIn("If an item has no link reference, leave it unlinked", prompt)
+        self.assertNotIn("$[link:L…]", prompt)
+        self.assertNotIn("LINK OUTPUT CONTRACT", prompt)
         self.assertIn("exact URL -> requested tool; custom-tool URLs -> runtime params, no prefetch", prompt)
         self.assertNotIn("Message delivery blocked", prompt)
 

@@ -1589,6 +1589,52 @@ class EffortCalibrationHarnessTests(TestCase):
             EvalRunTask.Status.PASSED,
         )
 
+    def test_future_work_preserved_accepts_cursor_and_remaining_count_in_charter(self):
+        User = get_user_model()
+        user = User.objects.create_user(username="future_work_charter_resume_user")
+        browser_agent = BrowserUseAgent.objects.create(user=user, name="Future Work Charter Resume Browser")
+        agent = PersistentAgent.objects.create(
+            name="Future Work Charter Resume Agent",
+            user=user,
+            browser_use_agent=browser_agent,
+            execution_environment="eval",
+            charter="Test agent.",
+            schedule="",
+        )
+        run = EvalRun.objects.create(
+            scenario_slug="future_work_charter_resume_test",
+            scenario_version="1.0.0",
+            agent=agent,
+            initiated_by=user,
+        )
+        EvalRunTask.objects.create(run=run, name="verify_future_work_preserved", sequence=1)
+        sqlite_step = PersistentAgentStep.objects.create(agent=agent, eval_run=run)
+        PersistentAgentToolCall.objects.create(
+            step=sqlite_step,
+            tool_name="sqlite_batch",
+            tool_params={
+                "sql": (
+                    "UPDATE __agent_config SET charter = "
+                    "'Resume from next_cursor=candidate-offset-3 (12 remaining).' WHERE id = 1;"
+                )
+            },
+            result='{"status":"ok"}',
+        )
+
+        passed = EffortCalibrationScenario()._record_future_work_preserved(
+            str(run.id),
+            agent_id=str(agent.id),
+            after=agent.created_at,
+            task_name="verify_future_work_preserved",
+            work_tool_names={"eval_verify_candidate_batch"},
+        )
+
+        self.assertTrue(passed)
+        self.assertEqual(
+            run.tasks.get(name="verify_future_work_preserved").status,
+            EvalRunTask.Status.PASSED,
+        )
+
     def test_future_work_preserved_rejects_single_unscheduled_batch(self):
         User = get_user_model()
         user = User.objects.create_user(username="future_work_missing_schedule_user")

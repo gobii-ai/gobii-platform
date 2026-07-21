@@ -127,6 +127,22 @@ SQLITE_MESSAGES_SNAPSHOT_MAX_BYTES = 5_000_000
 SQLITE_MESSAGES_SNAPSHOT_MAX_RECORDS = 10_000
 CONTACT_PROMPT_INLINE_LIMIT = 25
 CONTACT_PROMPT_SAMPLE_LIMIT = 10
+LINK_REFERENCE_PROMPT_NOTE = (
+    "LINK OUTPUT CONTRACT for every `$[link:L…]` token above: the token is already the complete "
+    "destination. When links, sources, or citations are requested, copy each included item's/source's "
+    "exact token unchanged as `[human label]($[link:LITEM])`. The token never belongs inside the "
+    "visible-label brackets. RIGHT: `[Harbor report]($[link:LITEM])`. WRONG: "
+    "`[$[link:LITEM]](https://host/path)` or `[$[link:LITEM]]($[link:LSOURCE])`. Never replace it "
+    "with, guess, or construct an "
+    "HTTP URL, host, route, slug, or ID—even when a neighboring pattern makes the destination seem "
+    "known. An item without a token gets no link/destination field. Only an explicit written URL "
+    "template in the source authorizes construction; inference from other items does not. A collection, "
+    "request, source, or feed token cites that source only and is never an item's destination. Keep tokens attached "
+    "through filtering/aggregation. Tokens are output-only: never put them in tool inputs (including SQL); transform "
+    "non-link fields and attach tokens only in the final outgoing message. A requested-link response is incomplete "
+    "if an included token-backed item is left unlinked. Before sending, verify every destination copied from these "
+    "results is an exact supplied token."
+)
 SQLITE_EFFICIENCY_WARNING = (
     "SQLite efficiency warning: you've been handling __tool_results one result_id at a time. "
     "Stop fetching by single result_id; run one shaped query across all needed rows using IN/CTEs/"
@@ -1552,7 +1568,7 @@ def _render_prompt_context_once(
 
     # Unified history follows the important context (order within user prompt: important -> unified_history -> critical)
     unified_history_group = prompt.group("unified_history", weight=3)
-    fresh_tool_call_step_ids = _get_unified_history_prompt(
+    fresh_tool_call_step_ids, has_link_references = _get_unified_history_prompt(
         agent,
         unified_history_group,
         config_authority,
@@ -1690,6 +1706,14 @@ def _render_prompt_context_once(
             "recent_contacts",
             recent_contacts_text,
             weight=1,
+        )
+
+    if has_link_references:
+        critical_group.section_text(
+            "link_reference_note",
+            LINK_REFERENCE_PROMPT_NOTE,
+            weight=10,
+            non_shrinkable=True,
         )
 
     has_peer_links = AgentPeerLink.objects.filter(is_enabled=True).filter(
@@ -3756,7 +3780,6 @@ def _get_system_instruction(
 
         "## Output Rules\n\n"
         "Keep chat/outreach light. Owner reports on 4+ peers need resolved/total and one table with requested fields. For finite sets, grouped discovery isn't coverage: resolve/source each requested field. Label blockers partial; separate sourced unavailability from research gaps. Ground facts, numbers, units, and URLs in tool results; never relabel/convert units unless asked. Present requested data directly; omit unrelated/unavailable fields and follow-up offers after simple facts, prices, statuses, or lookups. "
-        "Link references such as `$[link:L…]` are opaque, complete URL placeholders that the runtime resolves after the tool call. When one is supplied for an item, copy it verbatim as the entire destination and make the item label clickable: `[label]($[link:L…])`. Never extract the `L…` ID, prepend a domain, append a path/query, or replace the reference with a URL inferred from an item ID or slug. If an item has no link reference, leave it unlinked unless a tool result or API specification explicitly provides a URL template for constructing it. Source/feed links do not substitute for item/detail links. Requested links are required; through filtering/aggregation, keep each reference with its item. "
         "Charts: create only when requested/materially useful. "
         "Paste create_chart result.inline/result.inline_html in the message; do not attach/read charts or invent paths, hashes, image tags, or <img> URLs. "
         "Use create_csv for tabular exports, create_pdf for PDFs, and create_file for other text/doc formats; create_file query mode must return exactly one row and one column.\n\n"
@@ -4269,7 +4292,7 @@ def _get_unified_history_prompt(
     config_authority: _ConfigAuthorityResolver,
     *,
     run_cache: PromptRunCache | None = None,
-) -> Set[str]:
+) -> Tuple[Set[str], bool]:
     """Add summaries + interleaved recent steps & messages to the provided promptree group."""
     epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
     unified_limit, unified_hysteresis = _get_unified_history_limits(agent)
@@ -4739,7 +4762,15 @@ def _get_unified_history_prompt(
         structured_events.append((t.updated_at, "browser_task", components))
 
     # Create structured promptree groups for each event
+    has_link_references = False
     if structured_events:
+        has_link_references = any(
+            "$[link:L" in component
+            for _timestamp, _event_type, components in structured_events
+            for component in components.values()
+            if isinstance(component, str)
+        )
+
         structured_events.sort(key=lambda e: e[0])  # chronological order
 
         if len(structured_events) > unified_limit + unified_hysteresis:
@@ -4832,7 +4863,7 @@ def _get_unified_history_prompt(
                     non_shrinkable=non_shrinkable,
                 )
 
-    return fresh_tool_call_step_ids
+    return fresh_tool_call_step_ids, has_link_references
 
 
 def get_agent_tools(agent: PersistentAgent = None) -> List[dict]:
