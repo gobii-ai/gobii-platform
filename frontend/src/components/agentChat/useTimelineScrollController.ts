@@ -35,6 +35,15 @@ function canScrollUp(container: HTMLElement): boolean {
   return canScroll(container) && container.scrollTop > 0
 }
 
+function isEditableTarget(target: EventTarget | null): boolean {
+  return target instanceof HTMLElement && (
+    target.isContentEditable
+    || target instanceof HTMLInputElement
+    || target instanceof HTMLTextAreaElement
+    || target instanceof HTMLSelectElement
+  )
+}
+
 type PrependAnchor = {
   element: HTMLElement | null
   offsetTop: number
@@ -297,6 +306,19 @@ export function useTimelineScrollController({
       pointerActiveRef.current = false
     }
 
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (isEditableTarget(event.target) || !canScrollUp(container)) {
+        return
+      }
+      const scrollsUp = event.key === 'ArrowUp'
+        || event.key === 'PageUp'
+        || event.key === 'Home'
+        || (event.key === ' ' && event.shiftKey)
+      if (scrollsUp) {
+        suspendAutoFollow()
+      }
+    }
+
     const handleScroll = () => {
       const previousScrollTop = lastScrollTopRef.current
       const nextScrollTop = container.scrollTop
@@ -324,9 +346,9 @@ export function useTimelineScrollController({
         return
       }
 
-      if (meaningfulScrollUp) {
-        suspendAutoFollow()
-      } else if (scrollingDown && distance <= NEAR_BOTTOM_PX) {
+      // Layout changes can move scrollTop upward without user input. Wheel, touch,
+      // pointer, and keyboard handlers above own the decision to stop following.
+      if (scrollingDown && distance <= NEAR_BOTTOM_PX) {
         setPinned(true)
       }
 
@@ -351,6 +373,7 @@ export function useTimelineScrollController({
     container.addEventListener('touchcancel', handleTouchEnd, { passive: true })
     container.addEventListener('pointerdown', handlePointerDown, { passive: true })
     container.addEventListener('scroll', handleScroll, { passive: true })
+    window.addEventListener('keydown', handleKeyDown)
     window.addEventListener('pointerup', handlePointerEnd, { passive: true })
     window.addEventListener('pointercancel', handlePointerEnd, { passive: true })
     return () => {
@@ -361,6 +384,7 @@ export function useTimelineScrollController({
       container.removeEventListener('touchcancel', handleTouchEnd)
       container.removeEventListener('pointerdown', handlePointerDown)
       container.removeEventListener('scroll', handleScroll)
+      window.removeEventListener('keydown', handleKeyDown)
       window.removeEventListener('pointerup', handlePointerEnd)
       window.removeEventListener('pointercancel', handlePointerEnd)
     }

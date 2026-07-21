@@ -3615,6 +3615,7 @@ export function AgentChatPage({
         (current) => touchRosterEntryLastInteraction(current, activeAgentId, sentAt),
       )
     }
+    pinAndJumpToBottom()
     try {
       await sendMessage(body, attachments)
     } catch (error) {
@@ -3623,8 +3624,6 @@ export function AgentChatPage({
       }
       throw error
     }
-    if (!autoScrollPinnedRef.current) return
-    scrollToBottom()
   }, [
     activeAgentId,
     burnRateSummary,
@@ -3638,11 +3637,11 @@ export function AgentChatPage({
     llmIntelligence?.maxAllowedTier,
     llmIntelligence?.maxAllowedTierRank,
     llmIntelligence?.options,
+    pinAndJumpToBottom,
     queryClient,
     receiveRealtimeEvent,
     resolvedIntelligenceTier,
     refetchBurnRateSummary,
-    scrollToBottom,
     sendMessage,
     sendMessageDisabledReason,
     shouldFetchUsageBurnRate,
