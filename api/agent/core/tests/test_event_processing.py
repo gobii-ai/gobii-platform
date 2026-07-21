@@ -1344,9 +1344,9 @@ class ContinuationModePromptContextTests(TestCase):
         self.assertIn("## Work Updates (CRITICAL)", system_prompt)
         self.assertIn("Short work: no updates", system_prompt)
         self.assertIn("FIRST send scope + next checkpoint on the inbound channel", system_prompt)
-        self.assertIn("Before work call 4 (or after the first evidence batch/phase, if sooner)", system_prompt)
-        self.assertIn("strongest concrete finding so far", system_prompt)
-        self.assertIn("not task status like 'sources scraped' or 'compiling'", system_prompt)
+        self.assertIn("By work call 4 or the first evidence batch/phase, whichever comes first", system_prompt)
+        self.assertIn("strongest concrete finding", system_prompt)
+        self.assertIn("never task status ('sources scraped', 'compiling')", system_prompt)
         self.assertIn("No generic narration/reasoning", system_prompt)
         self.assertIn("Peer: send_agent_message only", system_prompt)
 
