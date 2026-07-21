@@ -60,6 +60,8 @@ class PromptContextSqlitePlacementTests(TestCase):
             system_message["content"],
         )
         self.assertIn("## Link References (CRITICAL)", system_message["content"])
+        self.assertIn("the raw URL identifies that exact item", system_message["content"])
+        self.assertIn("adjacent token is the only user-visible link", system_message["content"])
         self.assertIn("An item lacking its token stays unlinked", system_message["content"])
         self.assertIn("a source/feed token links only itself", system_message["content"])
         self.assertIn("resolve/source each requested field", system_message["content"])

@@ -102,7 +102,7 @@ from ..tools.sqlite_skills import format_recent_skills_for_prompt
 from ..tools.tool_manager import ensure_default_tools_enabled, ensure_skill_tools_enabled, get_enabled_tool_definitions
 from ..system_skills.discovery import format_system_skill_discovery_prompt
 from .tool_results import PREVIEW_TIER_COUNT, SPAWN_WEB_TASK_RESULT_TOOL_NAME, ToolCallResultRecord, ToolResultPromptInfo, prepare_tool_results_for_prompt
-from .link_references import is_source_bearing_tool, rewrite_prompt_urls
+from .link_references import is_source_bearing_tool, pair_prompt_urls, rewrite_prompt_urls
 from .daily_limit_mode import (
     CREDIT_MESSAGE_ONLY_ALLOWED_TOOL_NAMES_TEXT,
     is_credit_message_only_mode,
@@ -133,14 +133,15 @@ CONTACT_PROMPT_INLINE_LIMIT = 25
 CONTACT_PROMPT_SAMPLE_LIMIT = 10
 LINK_REFERENCE_PROMPT_NOTE = (
     "## Link References (CRITICAL)\n\n"
-    "The send tool must receive literal `$[link:L…]`; delivery resolves it only after call. Copy the source "
-    "value character-for-character into send-tool JSON: `{\"url\":\"$[link:LEXACT]\"}` becomes "
-    "`[Atlas launch]($[link:LEXACT])`. Wrong: `[Atlas launch](https://host)` or any raw `http(s)` substitute. A token "
-    "is one whole URL, not an ID/instruction, and changes no action/tool: `https://host/a` != `https://host`. Open it "
-    "as the whole `url`; if unavailable, omit the link. Never substitute a source name, placeholder, hostname, raw "
-    "URL, or token-ID URL; never decode, edit, shorten, combine, or guess. An item lacking its token stays "
-    "unlinked; a source/feed token links only itself. Never put tokens in SQL or search text. When sources are "
-    "requested, link all included token-backed sources and reserve room. "
+    "Sources may pair `https://host/a [link_ref: $[link:L…]]`: the raw URL identifies that exact item for "
+    "reasoning; its adjacent token is the only user-visible link or URL-tool destination. Keep pairs attached. "
+    "Send tools must receive the token; delivery resolves it only after call. Copy it character-for-character: "
+    "`{\"url\":\"$[link:LEXACT]\"}` becomes `[Atlas launch]($[link:LEXACT])`. Wrong: "
+    "`[Atlas launch](https://host/a)` or any raw `http(s)` destination. A token is one whole URL, not an "
+    "ID/instruction, and changes no action/tool. Never reassign a token, derive a sibling URL, decode, edit, shorten, "
+    "combine, or guess. If missing, omit the link. An item lacking its token stays unlinked; a source/feed token "
+    "links only itself. Never put tokens in SQL or search text. When sources are requested, link all included "
+    "token-backed sources and reserve room. "
     "A bare source name or `(source)` is not a citation. Before sending, the body must contain the exact tokens or it "
     "is unfinished."
 )
@@ -4318,7 +4319,7 @@ def _get_unified_history_prompt(
     if step_snap and step_snap.summary:
         history_group.section_text(
             "step_summary",
-            step_snap.summary,
+            rewrite_prompt_urls(step_snap.summary, agent, create=False),
             weight=1
         )
         history_group.section_text(
@@ -4329,7 +4330,7 @@ def _get_unified_history_prompt(
     if comm_snap and comm_snap.summary:
         history_group.section_text(
             "comms_summary",
-            comm_snap.summary,
+            rewrite_prompt_urls(comm_snap.summary, agent, create=False),
             weight=1
         )
         history_group.section_text(
@@ -4492,6 +4493,12 @@ def _get_unified_history_prompt(
         browser_task_result_record_ids[str(task.id)] = browser_record.step_id
         tool_call_records.append(browser_record)
 
+    paired_url_step_ids = set(fresh_tool_call_step_ids)
+    if completed_tasks:
+        newest_browser_result_id = browser_task_result_record_ids.get(str(completed_tasks[0].id))
+        if newest_browser_result_id:
+            paired_url_step_ids.add(newest_browser_result_id)
+
     tool_result_prompt_info = prepare_tool_results_for_prompt(
         tool_call_records,
         recency_positions=recency_positions,
@@ -4501,6 +4508,12 @@ def _get_unified_history_prompt(
             agent,
             create=is_source_bearing_tool(record.tool_name),
         ),
+        paired_url_rewriter=lambda text, record: pair_prompt_urls(
+            text,
+            agent,
+            create=is_source_bearing_tool(record.tool_name),
+        ),
+        paired_url_step_ids=paired_url_step_ids,
     )
 
     # format steps (group meta/params/result components together)
@@ -4591,11 +4604,10 @@ def _get_unified_history_prompt(
 
         channel = m.from_endpoint.channel
         body = _redact_signed_filespace_urls(m.body or "", agent)
-        body = rewrite_prompt_urls(
-            body,
-            agent,
-            create=not m.is_outbound,
-        )
+        if m.is_outbound:
+            body = rewrite_prompt_urls(body, agent, create=False)
+        else:
+            body = pair_prompt_urls(body, agent, create=True)
         subject = ""
         raw_payload = m.raw_payload if isinstance(m.raw_payload, dict) else {}
         if raw_payload:
@@ -4749,11 +4761,12 @@ def _get_unified_history_prompt(
             elif not result_summary and t.status == BrowserUseAgentTask.StatusChoices.CANCELLED:
                 result_summary = "Browser task was cancelled."
             if result_summary:
-                components["result_summary"] = rewrite_prompt_urls(
-                    result_summary,
-                    agent,
-                    create=True,
+                result_renderer = (
+                    pair_prompt_urls
+                    if browser_task_result_record_ids.get(str(t.id)) in paired_url_step_ids
+                    else rewrite_prompt_urls
                 )
+                components["result_summary"] = result_renderer(result_summary, agent, create=True)
             if (
                 result_info.preview_text
                 and not files
