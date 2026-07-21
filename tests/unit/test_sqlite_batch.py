@@ -36,6 +36,9 @@ from api.agent.tools.sqlite_batch import (
 )
 from api.agent.tools.sqlite_query_quality import (
     build_tool_result_query_advisories,
+    named_model_read_tables,
+    source_derived_model_mutation_tables,
+    source_derived_model_reconciled_tables,
     summarize_sqlite_tool_result_calls,
     summarize_sqlite_tool_result_sql,
 )
@@ -261,16 +264,15 @@ class SqliteBatchToolTests(TestCase):
         definition = get_sqlite_batch_tool()
         description = definition["function"]["description"]
 
-        self.assertIn("shared entity/event/relationship tables", description)
-        self.assertIn("separate repeating parents/children", description)
-        self.assertIn("PRIMARY KEY/UNIQUE identity and provenance", description)
-        self.assertIn("MUST use explicit CREATE TABLE", description)
-        self.assertIn("CTAS is disposable only", description)
-        self.assertIn("For 2+ relevant __tool_results, query together via IN/tool_name", description)
-        self.assertIn("never call sqlite_batch once per result_id", description)
-        self.assertIn("Model with INSERT ... SELECT/json_each, not copied rows", description)
-        self.assertIn("prefer a custom tool writing to SQLite", description)
-        self.assertIn("no ATTACH", description)
+        self.assertIn("SQLite world model + hard logic", description)
+        self.assertIn("Current complete rows are truth: answer without refetching sources", description)
+        self.assertIn("keyed rows/children belong in the model", description)
+        self.assertIn("Reconcile relations, evolve schema, then query", description)
+        self.assertIn("only unrelated one-offs bypass it", description)
+        self.assertIn("joins/set logic/counts/ranking", description)
+        self.assertIn("PRIMARY KEY/UNIQUE + provenance", description)
+        self.assertIn("Import tool output via INSERT ... SELECT/json_each", description)
+        self.assertIn("from __tool_results, never copied rows", description)
 
     def test_tool_result_ctas_warns_that_identity_is_disposable(self):
         with self._with_temp_db() as (db_path, _token, _tmp):
@@ -933,6 +935,8 @@ class SqliteBatchToolTests(TestCase):
             available_tool_result_rows=4,
         )
         self.assertEqual(advisories[0].code, "tool_result_row_loop")
+        self.assertIn("A one-item IN (...) is still one-at-a-time", advisories[0].message)
+        self.assertIn("every relevant sibling", advisories[0].message)
         self.assertIn("one shaped INSERT", advisories[0].message)
 
         calls = [
@@ -950,6 +954,147 @@ class SqliteBatchToolTests(TestCase):
         self.assertEqual(summary.sqlite_call_count, 1)
         self.assertEqual(summary.statement_count, 2)
         self.assertEqual(summary.smart_tool_result_queries, 1)
+
+    def test_model_query_classification_requires_same_statement_source_derivation(self):
+        copied_literals = [
+            "SELECT result_json FROM __tool_results WHERE result_id='r1'",
+            "UPDATE accounts SET stage='contracting' WHERE account_id='acct-1'",
+        ]
+        guarded_literal = [
+            "UPDATE accounts SET stage='contracting' WHERE EXISTS "
+            "(SELECT result_json FROM __tool_results WHERE result_id='r1')"
+        ]
+        derived_update = [
+            "UPDATE accounts SET stage=(SELECT json_extract(result_json, '$.stage') "
+            "FROM __tool_results WHERE result_id='r1') WHERE account_id='acct-1'"
+        ]
+        derived_insert = [
+            "INSERT INTO workstreams(workstream_id) SELECT json_extract(value, '$.id') "
+            "FROM __tool_results, json_each(result_json, '$.workstreams')"
+        ]
+
+        self.assertEqual(source_derived_model_mutation_tables(copied_literals), ())
+        self.assertEqual(source_derived_model_mutation_tables(guarded_literal), ())
+        self.assertEqual(source_derived_model_mutation_tables(derived_update), ("accounts",))
+        self.assertEqual(source_derived_model_mutation_tables(derived_insert), ("workstreams",))
+        self.assertEqual(
+            source_derived_model_reconciled_tables([
+                f"{derived_update[0]}; SELECT stage FROM accounts WHERE account_id='acct-1'"
+            ]),
+            ("accounts",),
+        )
+        self.assertEqual(source_derived_model_reconciled_tables(derived_update), ())
+        self.assertEqual(
+            source_derived_model_reconciled_tables([
+                "UPDATE accounts SET stage=(SELECT json_extract(result_json, '$.stage') "
+                "FROM __tool_results) WHERE account_id IN "
+                "(SELECT account_id FROM accounts WHERE stage='qualified')"
+            ]),
+            (),
+        )
+        self.assertEqual(
+            source_derived_model_reconciled_tables([
+                f"{derived_update[0]}; SELECT stage FROM accounts; {derived_update[0]}"
+            ]),
+            (),
+        )
+
+    def test_source_facts_copied_into_model_are_rejected(self):
+        payload = (
+            '{"account_id":"acct-1","stage":"contracting","next_action":"resolve redlines",'
+            '"source_url":"https://crm.example.test/acct-1"}'
+        )
+        copied = build_tool_result_query_advisories(
+            [
+                "UPDATE accounts SET stage='contracting', next_action='resolve redlines', "
+                "source_url='https://crm.example.test/acct-1' WHERE account_id='acct-1'"
+            ],
+            available_tool_result_rows=1,
+            tool_result_payloads=(payload,),
+        )
+        derived = build_tool_result_query_advisories(
+            [
+                "UPDATE accounts SET stage=(SELECT json_extract(result_json,'$.stage') "
+                "FROM __tool_results) WHERE account_id='acct-1'"
+            ],
+            available_tool_result_rows=1,
+            tool_result_payloads=(payload,),
+        )
+        unrelated = build_tool_result_query_advisories(
+            ["UPDATE accounts SET stage='reviewed' WHERE account_id='acct-1'"],
+            available_tool_result_rows=1,
+            tool_result_payloads=(payload,),
+        )
+        identity_predicate = build_tool_result_query_advisories(
+            [
+                "UPDATE accounts SET stage='reviewed' "
+                "WHERE source_url='https://crm.example.test/acct-1'",
+                "DELETE FROM accounts WHERE source_url='https://crm.example.test/acct-1'",
+                "UPDATE accounts SET stage=s.stage FROM staging_updates s JOIN refs r "
+                "ON r.url='https://crm.example.test/acct-1' WHERE accounts.account_id=s.account_id",
+            ],
+            available_tool_result_rows=1,
+            tool_result_payloads=(payload,),
+        )
+        partially_derived = build_tool_result_query_advisories(
+            [
+                "INSERT INTO accounts(account_id, stage, next_action, source_url) "
+                "SELECT json_extract(result_json, '$.account_id'), 'contracting', "
+                "'resolve redlines', json_extract(result_json, '$.source_url') "
+                "FROM __tool_results"
+            ],
+            available_tool_result_rows=1,
+            tool_result_payloads=(payload,),
+        )
+        single_normalization = build_tool_result_query_advisories(
+            [
+                "INSERT INTO accounts(account_id, stage) "
+                "SELECT json_extract(result_json, '$.account_id'), 'contracting' FROM __tool_results"
+            ],
+            available_tool_result_rows=1,
+            tool_result_payloads=(payload,),
+        )
+        arrow_derived = build_tool_result_query_advisories(
+            [
+                "INSERT INTO accounts(account_id, stage, next_action, source_url) "
+                "SELECT item.value ->> 'account_id', item.value ->> 'stage', "
+                "item.value ->> 'next_action', item.value ->> 'source_url' "
+                "FROM __tool_results, json_each(result_json, '$.content.accounts') item"
+            ],
+            available_tool_result_rows=1,
+            tool_result_payloads=(payload,),
+        )
+        self.assertEqual(copied[0].code, "source_facts_copied_into_model")
+        self.assertTrue(copied[0].blocking)
+        self.assertIn("copies source facts into SQL literals", copied[0].message)
+        self.assertIn("refresh every mutable/provenance field", copied[0].message)
+        self.assertIn("don't fetch/copy the blob", copied[0].message)
+        self.assertIn("nested arrays are under $.content", copied[0].message)
+        self.assertFalse(any(item.code == "source_facts_copied_into_model" for item in derived))
+        self.assertFalse(any(item.code == "source_facts_copied_into_model" for item in unrelated))
+        self.assertFalse(any(item.code == "source_facts_copied_into_model" for item in identity_predicate))
+        self.assertFalse(any(item.code == "source_facts_copied_into_model" for item in single_normalization))
+        self.assertFalse(any(item.code == "source_facts_copied_into_model" for item in arrow_derived))
+        self.assertTrue(any(item.code == "source_facts_copied_into_model" for item in partially_derived))
+
+    def test_model_read_classification_excludes_raw_results_and_staging(self):
+        self.assertEqual(
+            named_model_read_tables(["SELECT * FROM accounts WHERE account_id='acct-1'"]),
+            ("accounts",),
+        )
+        self.assertEqual(named_model_read_tables(["SELECT * FROM __tool_results"]), ())
+        self.assertEqual(named_model_read_tables(["SELECT * FROM _csv_abc123"]), ())
+        self.assertEqual(named_model_read_tables(["SELECT * FROM staging_accounts"]), ())
+        self.assertEqual(named_model_read_tables(["SELECT * FROM json_each('[1]')"]), ())
+        self.assertEqual(named_model_read_tables(["SELECT * FROM main.accounts"]), ("accounts",))
+        self.assertEqual(
+            named_model_read_tables(["SELECT a.* FROM accounts a JOIN __tool_results t ON 1=1"]),
+            ("accounts",),
+        )
+        self.assertEqual(
+            named_model_read_tables(["WITH current AS (SELECT * FROM accounts) SELECT * FROM current"]),
+            ("accounts",),
+        )
 
     def test_bounded_aggregate_text_projection_counts_as_smart(self):
         bounded = summarize_sqlite_tool_result_sql(

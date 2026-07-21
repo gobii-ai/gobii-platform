@@ -97,7 +97,13 @@ from ..tools.plan import format_current_plan_for_prompt
 from ..tools.spawn_web_task import get_browser_daily_task_limit
 from ..tools.static_tools import get_static_tool_definitions
 from ..tools.sqlite_state import AGENT_CONFIG_TABLE, AGENT_SKILLS_TABLE, CONTACTS_TABLE, FILES_TABLE, get_sqlite_digest_prompt, get_sqlite_schema_prompt
-from ..tools.sqlite_query_quality import summarize_sqlite_tool_result_sql
+from ..tools.sqlite_query_quality import (
+    ROW_LOOP_MESSAGE,
+    named_model_read_tables,
+    source_derived_model_mutation_tables,
+    source_derived_model_reconciled_tables,
+    summarize_sqlite_tool_result_sql,
+)
 from ..tools.sqlite_skills import format_recent_skills_for_prompt
 from ..tools.tool_manager import ensure_default_tools_enabled, ensure_skill_tools_enabled, get_enabled_tool_definitions
 from ..system_skills.discovery import format_system_skill_discovery_prompt
@@ -675,11 +681,12 @@ def _get_sqlite_guidance() -> str:
     """Return the compact contract for data retrieval, storage, and analysis."""
     return (
         "## SQLite Data\n\n"
-        "Fetch new data with its source tool and answer small results directly. Use sqlite_batch for data already in SQLite when large/truncated or needing filtering, joins, aggregation, charts, reuse, or domain logic. Model "
-        "sizable domains and multi-fetch finite sets as keyed entities/events/relations with fields/status/source; query gaps before reporting. Only sourced blockers are unresolved. Normalize parent/child data "
-        "(vendors/plans, accounts/events) with PRIMARY KEY/UNIQUE identity, useful indexes, and source provenance; put logic in SQL and return only needed rows to context. Populate all relevant __tool_results via one shaped INSERT ... SELECT/json_each filtered by IN/tool_name; "
-        "extract fields and raw URLs in SQL from result_json, not literals/prompt/link tokens. Never filter one result_id at a time, make a table per result, or loop over blobs. Use CTAS for one-off extracts; "
-        "named tables survive calls, TEMP tables do not. Copy identifiers, JSON paths, values, and URLs from schema, hints, or results; inspect unknown structure once instead of inventing it. Use analysis_json/top_keys to locate payloads; http_request JSON is under result_json $.content. Prefer result_json when its path is known, otherwise result_text.\n\n"
+        "Named tables are the world model; digest is partial. Read them before external refreshes/decisions, not memory. Current complete rows are truth; don't refetch them. "
+        "Tool output doesn't update it. Source rows sharing a stable ID or its children belong there even when small: reconcile entities/relations, evolve schema, then query before acting/reporting. Only unrelated one-offs bypass it. "
+        "Use stable keys. Upserts refresh every mutable/provenance field; inspect identity after wrong row counts; query gaps before reporting. Only sourced blockers are unresolved. "
+        "Normalize children with PRIMARY KEY/UNIQUE and indexes; use SQLite for exact set logic/counts/ranking; return needed rows. Import ordinary tool output via INSERT ... SELECT/json_each from __tool_results (batch siblings by IN/tool_name), never copied facts/URLs; custom tools can write keyed models directly. "
+        "Never query one result_id at a time, make per-result tables, or loop blobs. CTAS is one-off; named tables persist, TEMP do not. Copy names/paths/values/URLs from results; inspect unknown structure once. "
+        "Locate payloads with analysis_json/top_keys; http_request JSON is result_json $.content. Prefer result_json for known paths, else result_text.\n\n"
         "Snapshots:\n"
         "* __tool_results: result_id, tool_name, created_at, result_json, result_text, analysis_json, is_truncated, top_keys.\n"
         "* __messages: message_id, seq, timestamp, channel, is_outbound, from_address, to_address, subject, body, "
@@ -1686,6 +1693,15 @@ def _render_prompt_context_once(
         critical_group.section_text(
             "sqlite_retry_warning",
             sqlite_retry_warning,
+            weight=5,
+            non_shrinkable=True,
+        )
+
+    source_model_warning = _get_unreconciled_source_model_warning(agent)
+    if source_model_warning:
+        critical_group.section_text(
+            "source_model_warning",
+            source_model_warning,
             weight=5,
             non_shrinkable=True,
         )
@@ -3295,6 +3311,7 @@ def _build_sqlite_retry_warning(
     result_id_counts: Counter[str] = Counter()
     empty_counts: Counter[str] = Counter()
     sql_values: list[str] = []
+    row_loop_rejections = 0
 
     for params, result_text in recent_calls:
         if not isinstance(params, dict):
@@ -3303,6 +3320,8 @@ def _build_sqlite_retry_warning(
         if not sql:
             continue
         sql_values.append(sql)
+        if ROW_LOOP_MESSAGE.split(" A one-item", 1)[0] in (result_text or ""):
+            row_loop_rejections += 1
         result_ids = set(_SQLITE_RESULT_ID_RE.findall(sql))
         if not result_ids:
             continue
@@ -3313,6 +3332,12 @@ def _build_sqlite_retry_warning(
                 empty_counts[result_id] += 1
 
     summary = summarize_sqlite_tool_result_sql(sql_values)
+    if row_loop_rejections >= 2:
+        return (
+            "SQLite recovery: repeated singleton result queries were rejected. Do not retry that shape. Query all "
+            "relevant sibling results together by tool_name or a multi-item IN. If a reusable model applies, upsert "
+            "by stable key and query it; otherwise answer the shaped result. Refetch only if evidence is stale or missing."
+        )
     inefficient_result_loop = (
         summary.direct_result_text_fetches >= 2
         or summary.duplicate_direct_fetches
@@ -3350,6 +3375,92 @@ def _get_recent_sqlite_retry_warning(agent: PersistentAgent) -> str:
         .values_list("tool_params", "result")
     )
     return _build_sqlite_retry_warning(recent_calls)
+
+
+def _sqlite_sql_values(params: dict[str, Any] | None) -> list[str]:
+    if not isinstance(params, dict):
+        return []
+    value = params.get("sql") or params.get("queries") or params.get("query")
+    if isinstance(value, (list, tuple)):
+        return [str(item) for item in value if str(item or "").strip()]
+    return [str(value)] if value else []
+
+
+def _build_unreconciled_source_model_warning(
+    recent_calls: Sequence[Tuple[str, dict[str, Any] | None, str]],
+) -> str:
+    """Flag a fresh-source-to-stale-model read in the current work cycle."""
+
+    latest_source_index = -1
+    for index, (tool_name, _params, status) in enumerate(recent_calls):
+        if status == "complete" and is_source_bearing_tool(tool_name):
+            latest_source_index = index
+    if latest_source_index < 0:
+        return ""
+
+    sqlite_events: list[tuple[int, set[str], set[str], set[str]]] = []
+    for index, (tool_name, params, status) in enumerate(recent_calls):
+        if status != "complete" or tool_name != "sqlite_batch":
+            continue
+        sql_values = _sqlite_sql_values(params)
+        sqlite_events.append((
+            index,
+            set(named_model_read_tables(sql_values)),
+            set(source_derived_model_mutation_tables(sql_values)),
+            set(source_derived_model_reconciled_tables(sql_values)),
+        ))
+
+    read_tables = set().union(*(reads for _index, reads, _mutations, _reconciled in sqlite_events)) if sqlite_events else set()
+    latest_mutation_by_table = {
+        table: index
+        for index, _reads, targets, _reconciled in sqlite_events
+        if index > latest_source_index
+        for table in targets
+    }
+    relevant_targets = set(latest_mutation_by_table)
+    if read_tables:
+        relevant_targets.intersection_update(read_tables)
+    if relevant_targets and all(
+        any(
+            (index > latest_mutation_by_table[table] and table in reads)
+            or (index == latest_mutation_by_table[table] and table in reconciled)
+            for index, reads, _mutations, reconciled in sqlite_events
+        )
+        for table in relevant_targets
+    ):
+        return ""
+
+    if not read_tables and not latest_mutation_by_table:
+        return ""
+    return (
+        "Fresh source evidence from this work cycle is not yet reconciled with the named model you read. If it belongs "
+        "to that domain and is newer, upsert all changed/provenance fields by stable key from __tool_results, add relations, then answer "
+        "from a post-update query. If it is unrelated or no relevant model exists, answer the source directly. Do not refetch."
+    )
+
+
+def _get_unreconciled_source_model_warning(agent: PersistentAgent) -> str:
+    cycle_started_at = (
+        PersistentAgentSystemStep.objects.filter(
+            step__agent=agent,
+            code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
+        )
+        .order_by("-step__created_at")
+        .values_list("step__created_at", flat=True)
+        .first()
+    )
+    if cycle_started_at is None:
+        return ""
+
+    recent_calls = list(
+        PersistentAgentToolCall.objects.filter(
+            step__agent=agent,
+            step__created_at__gt=cycle_started_at,
+        )
+        .order_by("step__created_at", "step_id")
+        .values_list("tool_name", "tool_params", "status")
+    )
+    return _build_unreconciled_source_model_warning(recent_calls)
 
 
 def _format_system_directive_prompt_block(
