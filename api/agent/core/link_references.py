@@ -19,9 +19,9 @@ _PUBLIC_ID_RE = re.compile(_PUBLIC_ID_PATTERN, re.IGNORECASE)
 _NAKED_DESTINATION_RE = re.compile(rf"(?:\]\(\s*|href\s*=\s*['\"]\s*)({_PUBLIC_ID_PATTERN})(?=\s*(?:\)|['\"]))", re.IGNORECASE)
 _RENDERED_PATH_RE = re.compile(rf"/({_PUBLIC_ID_PATTERN})(?:/[^/]*)?/?$", re.IGNORECASE)
 _TRAILING_PUNCTUATION = ".,;:!?"
-_EMBEDDED_FIELDS = {"create_csv": "csv_text", "create_pdf": "html", "send_agent_message": "message", "send_chat_message": "body", "send_discord_message": "message", "send_email": "mobile_first_html", "send_sms": "body"}
+_EMBEDDED_FIELDS = {"create_csv": "csv_text", "create_pdf": "html", "http_request": "body", "send_agent_message": "message", "send_chat_message": "body", "send_discord_message": "message", "send_email": "mobile_first_html", "send_sms": "body"}
 _DOCUMENT_MIME_TYPES = {"application/json", "application/ld+json", "application/xml", "application/yaml", "text/html", "text/markdown", "text/plain", "text/xml", "text/yaml"}
-_STRICT_TOOLS = set(_EMBEDDED_FIELDS) | {"apply_patch", "create_chart", "create_custom_tool", "create_file", "create_image", "create_video", "search_tools", "send_webhook_event", "sqlite_batch", "update_charter", "update_plan", "update_schedule"}
+_STRICT_TOOLS = set(_EMBEDDED_FIELDS) - {"http_request"} | {"apply_patch", "create_chart", "create_custom_tool", "create_file", "create_image", "create_video", "search_tools", "send_webhook_event", "sqlite_batch", "update_charter", "update_plan", "update_schedule"}
 
 
 class LinkReferenceResolutionError(ValueError):
@@ -46,9 +46,7 @@ def is_source_bearing_tool(tool_name: str) -> bool:
     return tool_name in {"http_request", "spawn_web_task_result"} or tool_name.startswith("mcp_")
 
 
-def _reference_map(
-    agent, urls: Iterable[str], *, create: bool, source_kind: str = "", source_object_id: str = ""
-) -> dict[str, str]:
+def _reference_map(agent, urls: Iterable[str], *, create: bool, source_kind: str = "", source_object_id: str = "") -> dict[str, str]:
     urls_by_hash = {hashlib.sha256(url.encode()).hexdigest(): url for url in urls}
     if not urls_by_hash:
         return {}
@@ -57,8 +55,7 @@ def _reference_map(
         found = {reference.url_hash for reference in references}
         PersistentAgentLinkReference.objects.bulk_create(
             [
-                PersistentAgentLinkReference(agent=agent, url=url, url_hash=url_hash, source_kind=source_kind,
-                                             source_object_id=str(source_object_id or ""))
+                PersistentAgentLinkReference(agent=agent, url=url, url_hash=url_hash, source_kind=source_kind, source_object_id=str(source_object_id or ""))
                 for url_hash, url in urls_by_hash.items()
                 if url_hash not in found
             ],
@@ -68,9 +65,7 @@ def _reference_map(
     return {ref.url: f"$[link:{ref.public_id}]" for ref in references if urls_by_hash.get(ref.url_hash) == ref.url}
 
 
-def rewrite_prompt_urls(
-    text: str, agent, *, create: bool, source_kind: str = "", source_object_id: str = ""
-) -> str:
+def rewrite_prompt_urls(text: str, agent, *, create: bool, source_kind: str = "", source_object_id: str = "") -> str:
     urls = extract_http_urls(text)
     if not urls:
         return text
@@ -88,17 +83,13 @@ def rewrite_prompt_urls(
 
 
 def register_prompt_urls(text: str, agent, *, source_kind: str, source_object_id: str = "") -> None:
-    try:
-        _reference_map(agent, extract_http_urls(text), create=True, source_kind=source_kind, source_object_id=source_object_id)
-    except DatabaseError:
-        logger.warning("Failed to register link references for agent %s", getattr(agent, "id", None), exc_info=True)
+    rewrite_prompt_urls(text, agent, create=True, source_kind=source_kind, source_object_id=source_object_id)
 
 
 def _rendered_reference_id(url: str) -> str | None:
-    parsed, public_site = urlsplit(url), urlsplit(settings.PUBLIC_SITE_URL)
+    parsed = urlsplit(url)
     match = _RENDERED_PATH_RE.search(parsed.path)
-    if (parsed.scheme.lower() not in {"http", "https"} or parsed.netloc.lower() != public_site.netloc.lower()
-            or not match or parsed.query or parsed.fragment):
+    if parsed.scheme.lower() not in {"http", "https"} or not match or parsed.query or parsed.fragment:
         return None
     return match.group(1).upper()
 
@@ -111,22 +102,28 @@ def resolve_link_references(text: str, agent) -> str:
     matches = list(_REFERENCE_RE.finditer(text))
     if len(matches) != len(_REFERENCE_PREFIX_RE.findall(text)):
         raise LinkReferenceResolutionError("A link reference is malformed. Reuse a provided $[link:id] value or omit the link.")
-    rendered = {url: public_id for url in extract_http_urls(text)
-                if (public_id := _rendered_reference_id(url)) is not None}
+    rendered = {url: public_id for url in extract_http_urls(text) if (public_id := _rendered_reference_id(url)) is not None}
     if not matches and not rendered:
         return text
     reference_ids = {match.group(1).upper() for match in matches}
     if any(not _PUBLIC_ID_RE.fullmatch(public_id) for public_id in reference_ids):
         raise LinkReferenceResolutionError("A link reference is malformed. Reuse a provided $[link:id] value or omit the link.")
     lookup_ids = reference_ids | set(rendered.values())
+    required_ids = reference_ids | {public_id for url, public_id in rendered.items() if urlsplit(url).netloc.lower() == urlsplit(settings.PUBLIC_SITE_URL).netloc.lower()}
     try:
-        references = {ref.public_id: ref.url for ref in
-                      PersistentAgentLinkReference.objects.filter(agent=agent, public_id__in=lookup_ids)}
+        references = {ref.public_id: ref.url for ref in PersistentAgentLinkReference.objects.filter(agent=agent, public_id__in=lookup_ids)}
     except DatabaseError as exc:
         raise LinkReferenceResolutionError("Link references are temporarily unavailable. Retry the same message.") from exc
-    if not lookup_ids.issubset(references):
-        missing = ", ".join(sorted(lookup_ids - references.keys()))
+    if not required_ids.issubset(references):
+        missing = ", ".join(sorted(required_ids - references.keys()))
         raise LinkReferenceResolutionError(f"Link reference {missing} is unavailable. Recopy that provided token exactly; other references remain usable.")
+    for match in matches:
+        before, after = (text[match.start() - 1] if match.start() else ""), (text[match.end()] if match.end() < len(text) else "")
+        if (before and (before.isalnum() or before in "/?#&")) or (after and (after.isalnum() or after in "/?#&=")):
+            raise LinkReferenceResolutionError(
+                f"Link reference {match.group(1).upper()} must be the whole URL. "
+                "Use it directly, for example [label]($[link:id]), without adding a host, slash, path, query, or fragment."
+            )
     resolved = _REFERENCE_RE.sub(lambda match: references[match.group(1).upper()], text)
     if rendered:
         def replace_rendered(match: re.Match) -> str:
@@ -176,6 +173,8 @@ def resolve_link_reference_params(value, agent, *, tool_name: str = "", _path=()
     if not isinstance(value, str):
         return value
     if _path and _path[0] in _allowed:
+        if tool_name == "http_request":
+            return resolve_link_references(value, agent)
         return value
     stripped = value.strip()
     exact = _REFERENCE_RE.fullmatch(stripped) or _rendered_reference_id(stripped)

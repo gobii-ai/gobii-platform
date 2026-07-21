@@ -291,6 +291,19 @@ class LinkReferenceTests(TestCase):
 
         self.assertEqual(result, mock_result)
 
+    def test_http_request_body_resolves_embedded_references_before_execution(self):
+        url = "https://profiles.example.test/avery,chen?view=full#bio"
+        token = rewrite_prompt_urls(url, self.agent, create=True, source_kind="inbound_message")
+
+        self.assertEqual(
+            resolve_link_reference_params(
+                {"url": "https://sheets.googleapis.com/v4/spreadsheets/123/values/A1", "body": json.dumps({"values": [[token]]})},
+                self.agent,
+                tool_name="http_request",
+            ),
+            {"url": "https://sheets.googleapis.com/v4/spreadsheets/123/values/A1", "body": json.dumps({"values": [[url]]})},
+        )
+
     def test_runtime_rejects_references_in_unsupported_tool_fields_before_execution(self):
         token = rewrite_prompt_urls(
             "https://profiles.example.test/avery?view=full",
@@ -364,6 +377,30 @@ class LinkReferenceTests(TestCase):
                 tool_name="create_file",
             )
         self.assertIn("create_file.content", str(raised.exception))
+
+    def test_rejects_references_concatenated_into_urls(self):
+        token = rewrite_prompt_urls(
+            "https://profiles.example.test/avery",
+            self.agent,
+            create=True,
+            source_kind="tool_result",
+        )
+        public_id = token.removeprefix("$[link:").removesuffix("]")
+
+        for body in (
+            f"[Profile](/{token})",
+            f"[Profile](https://api.example.test/profiles/{token})",
+            f"[Profile]({token}/details)",
+        ):
+            with self.subTest(body=body), self.assertRaises(LinkReferenceResolutionError):
+                resolve_link_references(body, self.agent)
+
+        self.assertEqual(
+            resolve_link_references(f"[Profile](https://api.example.test/profiles/{public_id})", self.agent),
+            "[Profile](https://profiles.example.test/avery)",
+        )
+        foreign = "https://api.example.test/profiles/L0000000000000000"
+        self.assertEqual(resolve_link_references(foreign, self.agent), foreign)
 
     def test_create_csv_resolves_raw_and_query_cells_without_breaking_url_commas(self):
         url = "https://profiles.example.test/avery,chen?view=full#bio"
@@ -851,19 +888,20 @@ class LinkReferenceTests(TestCase):
     def test_system_prompt_has_one_reference_rule(self):
         prompt = _get_system_instruction(self.agent, is_first_run=False)
 
-        self.assertEqual(prompt.count("`$[link:id]` is the exact URL"), 1)
-        self.assertIn("use each relevant token unchanged in URL fields (tool/message)", prompt)
-        self.assertIn("never search/resolve/alter/expose it", prompt)
-        self.assertIn("Unlinked entities stay unlinked", prompt)
+        self.assertEqual(prompt.count("`$[link:id]` is the whole exact URL"), 1)
+        self.assertIn("whole exact URL, not a slug/file ID", prompt)
+        self.assertIn("Markdown: `[label]($[link:id])`", prompt)
+        self.assertIn("Requested links are required", prompt)
+        self.assertIn("keep each reference and link its item label", prompt)
+        self.assertIn("leave unlinked entities unlinked", prompt)
         self.assertIn("exact URL -> requested tool; custom-tool URLs -> runtime params, no prefetch", prompt)
         self.assertNotIn("Message delivery blocked", prompt)
 
     def test_http_request_url_schema_accepts_link_references(self):
-        description = get_http_request_tool()["function"]["parameters"]["properties"]["url"][
-            "description"
-        ]
+        properties = get_http_request_tool()["function"]["parameters"]["properties"]
 
-        self.assertIn("$[link:id]", description)
+        self.assertIn("$[link:id]", properties["url"]["description"])
+        self.assertIn("$[link:id]", properties["body"]["description"])
 
     def test_raw_urls_are_not_blocked_at_delivery_preparation(self):
         raw_url = "https://unseen.example.test/items/42"

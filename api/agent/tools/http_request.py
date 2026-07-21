@@ -370,7 +370,7 @@ def get_http_request_tool() -> Dict[str, Any]:
                     "method": {"type": "string", "description": "HTTP method e.g. GET, POST."},
                     "url": {"type": "string", "description": "URL or $[link:id] token."},
                     "headers": {"type": "object", "description": "Optional HTTP headers to include in the request."},
-                    "body": {"type": "string", "description": "Optional request body (for POST/PUT)."},
+                    "body": {"type": "string", "description": "Optional POST/PUT body; provided $[link:id] values are resolved before sending."},
                     "range": {"type": "string", "description": "Optional Range header value, e.g. 'bytes=0-1023'."},
                     "download": {
                         "type": "boolean",

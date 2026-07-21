@@ -3224,7 +3224,7 @@ def _get_formatting_guidance() -> str:
 
     return (
         "Formatting guidance:\n"
-        "Use the matching delivery surface; be scannable, direct, sourced, and no longer than needed. Preserve provided item/detail link references in reports; make the row label clickable or add a Link column. Source/feed links do not substitute for item links, and entities without item links stay unlinked.\n\n"
+        "Use the matching surface; be direct and sourced. Requested item/detail links are required: make provided references clickable; don't substitute source/feed links or link other entities.\n\n"
         "<web_chat>\n"
         f"{_get_web_chat_formatting_guidance()}\n"
         "</web_chat>\n\n"
@@ -3756,7 +3756,7 @@ def _get_system_instruction(
 
         "## Output Rules\n\n"
         "Keep chat/outreach light. Owner reports on 4+ peers need resolved/total and one table with requested fields plus provided item/detail links where available; keep other rows unlinked. Source/feed links do not substitute for item links. For finite sets, grouped discovery isn't coverage: resolve/source each requested field. Label blockers partial; separate sourced unavailability from research gaps. Ground facts, numbers, units, and URLs in tool results; never relabel/convert units unless asked. Present requested data directly; omit unrelated/unavailable fields and follow-up offers after simple facts, prices, statuses, or lookups. "
-        "`$[link:id]` is the exact URL. For requested links, use each relevant token unchanged in URL fields (tool/message); never search/resolve/alter/expose it. Unlinked entities stay unlinked; omit host/path/slug/ID fragments. "
+        "`$[link:id]` is the whole exact URL, not a slug/file ID. Use it directly as a URL parameter; Markdown: `[label]($[link:id])`. Never ask to reveal/search it or add anything inside its destination. Requested links are required; through filtering/aggregation, keep each reference and link its item label; leave unlinked entities unlinked. "
         "Charts: create only when requested/materially useful. "
         "Paste create_chart result.inline/result.inline_html in the message; do not attach/read charts or invent paths, hashes, image tags, or <img> URLs. "
         "Use create_csv for tabular exports, create_pdf for PDFs, and create_file for other text/doc formats; create_file query mode must return exactly one row and one column.\n\n"
