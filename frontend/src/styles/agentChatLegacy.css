@@ -7163,7 +7163,7 @@
     flex-direction: column;
     gap: 0.35rem;
     margin: 0.2rem 0 0;
-    padding: 0.25rem 0.5rem 0.45rem;
+    padding: 0.25rem 0.5rem 0;
 }
 .sidebar-settings__credits-row {
     display: flex;
@@ -7184,6 +7184,32 @@
     flex-shrink: 0;
     color: #ffffff;
     font-weight: 750;
+}
+.sidebar-settings__credits-view {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: calc(100% - 1rem);
+    min-height: 1.9rem;
+    margin: 0.55rem 0.5rem 0.45rem;
+    border: 1px solid rgba(221, 214, 254, 0.2);
+    border-radius: 0.45rem;
+    background: rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.9);
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-decoration: none;
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.sidebar-settings__credits-view:hover {
+    border-color: rgba(221, 214, 254, 0.32);
+    background: rgba(255, 255, 255, 0.13);
+    color: #ffffff;
+}
+.sidebar-settings__credits-view:focus-visible {
+    outline: 2px solid rgba(221, 214, 254, 0.36);
+    outline-offset: 1px;
 }
 .chat-sidebar--collapsed .chat-sidebar-section {
     overflow: visible;
