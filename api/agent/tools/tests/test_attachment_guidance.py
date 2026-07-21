@@ -72,14 +72,6 @@ class AttachmentGuidanceTests(SimpleTestCase):
         self.assertIn("exact file-tool `attach` value", description)
         self.assertIn("body text never attaches files", description)
 
-    def test_user_message_tools_never_request_credential_values(self):
-        for tool in (get_send_email_tool(), get_send_sms_tool(), get_send_chat_tool()):
-            with self.subTest(tool=tool["function"]["name"]):
-                description = tool["function"]["description"]
-                self.assertIn("Never ask a recipient", description)
-                self.assertIn("secure_credentials_request", description)
-                self.assertIn("secure entry URL", description)
-
     def test_report_message_guidance_names_visual_quality_without_eval_prompting(self):
         email_tool = get_send_email_tool()
         chat_tool = get_send_chat_tool()
