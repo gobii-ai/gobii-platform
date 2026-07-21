@@ -13,6 +13,7 @@ import type { AppDispatch, RootState } from './appStore'
 
 const EMPTY_PROCESSING_SNAPSHOT: ProcessingSnapshot = { active: false, webTasks: [], nextScheduledAt: null }
 const OPTIMISTIC_MATCH_WINDOW_MS = 120_000
+const PROCESSING_STATUS_MAX_ATTEMPTS = 2
 
 export type ProcessingUpdateInput = boolean | Partial<ProcessingSnapshot> | null | undefined
 
@@ -521,39 +522,51 @@ function applyProcessingUpdate(session: AgentChatSession, snapshot: ProcessingSn
 export const refreshProcessing = createAsyncThunk<void, { agentId: string }, { state: RootState; extra: { queryClient: QueryClient | null } }>(
   'chat/refreshProcessing',
   async ({ agentId }, { dispatch, getState, extra, requestId }) => {
-    const requestedAt = Date.now()
-    dispatch(chatActions.processingStatusRequested({ agentId, requestId }))
-    try {
-      const status = await fetchProcessingStatus(agentId)
-      const {
-        processing_active,
-        processing_snapshot,
-        signup_preview_state,
-        planning_state,
-      } = status
-      const snapshot = normalizeProcessingUpdate(processing_snapshot ?? { active: processing_active, webTasks: [] })
-      const hasNextScheduledAt = Object.prototype.hasOwnProperty.call(status, 'agent_next_scheduled_at')
-      const lastRealtimeAt = getState().chat.sessionsByAgentId[agentId]?.processing.processingLastRealtimeAt ?? null
-      const latestRequestId = getState().chat.sessionsByAgentId[agentId]?.processing.processingStatusRequestId ?? null
-      if (latestRequestId === requestId && (lastRealtimeAt === null || lastRealtimeAt <= requestedAt)) {
+    for (let attempt = 0; attempt < PROCESSING_STATUS_MAX_ATTEMPTS; attempt += 1) {
+      const requestedAt = Date.now()
+      dispatch(chatActions.processingStatusRequested({ agentId, requestId }))
+      try {
+        const status = await fetchProcessingStatus(agentId)
+        const {
+          processing_active,
+          processing_snapshot,
+          signup_preview_state,
+          planning_state,
+        } = status
+        const snapshot = normalizeProcessingUpdate(processing_snapshot ?? { active: processing_active, webTasks: [] })
+        const hasNextScheduledAt = Object.prototype.hasOwnProperty.call(status, 'agent_next_scheduled_at')
+        const processing = getState().chat.sessionsByAgentId[agentId]?.processing
+        const latestRequestId = processing?.processingStatusRequestId ?? null
+        const lastRealtimeAt = processing?.processingLastRealtimeAt ?? null
+        if (latestRequestId !== requestId || (lastRealtimeAt !== null && lastRealtimeAt > requestedAt)) {
+          const invalidatedByRealtime = latestRequestId === null && lastRealtimeAt !== null
+          if (invalidatedByRealtime && attempt + 1 < PROCESSING_STATUS_MAX_ATTEMPTS) {
+            // Without a server sequence number, refetching is the only safe way to distinguish
+            // a newer realtime state from a delayed frame that was already stale when received.
+            continue
+          }
+          return
+        }
         dispatch(chatActions.processingStatusUpdated({
           agentId,
           snapshot,
           requestedAt,
           requestId,
         }))
-        if (extra.queryClient) {
+        if (extra?.queryClient) {
           updateRosterProcessingInCache(extra.queryClient, agentId, snapshot.active)
         }
+        dispatch(chatActions.agentIdentityUpdated({
+          agentId,
+          ...(hasNextScheduledAt ? { agentNextScheduledAt: status.agent_next_scheduled_at ?? null } : {}),
+          signupPreviewState: signup_preview_state ?? undefined,
+          planningState: planning_state ?? undefined,
+        }))
+        return
+      } catch (error) {
+        console.error('Failed to refresh processing status:', error)
+        return
       }
-      dispatch(chatActions.agentIdentityUpdated({
-        agentId,
-        ...(hasNextScheduledAt ? { agentNextScheduledAt: status.agent_next_scheduled_at ?? null } : {}),
-        signupPreviewState: signup_preview_state ?? undefined,
-        planningState: planning_state ?? undefined,
-      }))
-    } catch (error) {
-      console.error('Failed to refresh processing status:', error)
     }
   },
 )

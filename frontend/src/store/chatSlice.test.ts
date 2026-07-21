@@ -241,6 +241,10 @@ describe('chatSlice workflow state', () => {
 })
 
 describe('chatSlice processing state', () => {
+  beforeEach(() => {
+    vi.mocked(fetchProcessingStatus).mockReset()
+  })
+
   it('updates the addressed agent when another agent is active', () => {
     const store = createAppStore()
     store.dispatch(chatActions.agentSelected({ agentId: 'agent-1' }))
@@ -282,9 +286,14 @@ describe('chatSlice processing state', () => {
     const now = vi.spyOn(Date, 'now').mockReturnValue(100)
     const store = createAppStore()
     let resolveStatus: (value: Awaited<ReturnType<typeof fetchProcessingStatus>>) => void = () => {}
-    vi.mocked(fetchProcessingStatus).mockReturnValue(new Promise((resolve) => {
-      resolveStatus = resolve
-    }))
+    vi.mocked(fetchProcessingStatus)
+      .mockReturnValueOnce(new Promise((resolve) => {
+        resolveStatus = resolve
+      }))
+      .mockResolvedValueOnce({
+        processing_active: true,
+        processing_snapshot: { active: true, webTasks: [] },
+      })
 
     const request = store.dispatch(refreshProcessing({ agentId: 'agent-2' }))
     now.mockReturnValue(200)
@@ -292,9 +301,37 @@ describe('chatSlice processing state', () => {
     resolveStatus({ processing_active: false, processing_snapshot: { active: false, webTasks: [] } })
     await request.unwrap()
 
+    expect(fetchProcessingStatus).toHaveBeenCalledTimes(2)
     expect(store.getState().chat.sessionsByAgentId['agent-2'].processing).toMatchObject({
       processingActive: true,
-      processingSource: 'realtime',
+      processingSource: 'status',
+    })
+    now.mockRestore()
+  })
+
+  it('rechecks status after a delayed realtime frame invalidates the first response', async () => {
+    const now = vi.spyOn(Date, 'now').mockReturnValue(100)
+    const store = createAppStore()
+    let resolveStatus: (value: Awaited<ReturnType<typeof fetchProcessingStatus>>) => void = () => {}
+    vi.mocked(fetchProcessingStatus)
+      .mockReturnValueOnce(new Promise((resolve) => {
+        resolveStatus = resolve
+      }))
+      .mockResolvedValueOnce({
+        processing_active: false,
+        processing_snapshot: { active: false, webTasks: [] },
+      })
+
+    const request = store.dispatch(refreshProcessing({ agentId: 'agent-2' }))
+    now.mockReturnValue(200)
+    store.dispatch(updateRealtimeProcessing('agent-2', { active: true, webTasks: [] }))
+    resolveStatus({ processing_active: false, processing_snapshot: { active: false, webTasks: [] } })
+    await request.unwrap()
+
+    expect(fetchProcessingStatus).toHaveBeenCalledTimes(2)
+    expect(store.getState().chat.sessionsByAgentId['agent-2'].processing).toMatchObject({
+      processingActive: false,
+      processingSource: 'status',
     })
     now.mockRestore()
   })

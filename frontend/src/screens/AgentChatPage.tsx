@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type CSSProperties, type FormEvent, type ReactNode } from 'react'
+import { shallowEqual } from 'react-redux'
 import { useQuery, useQueryClient, type InfiniteData } from '@tanstack/react-query'
 import { AlertTriangle, Building2, Plus } from 'lucide-react'
 import noiseDarkTextureUrl from '../assets/textures/noise-dark.png'
@@ -64,6 +65,7 @@ import { useImmersiveShellBridge } from '../hooks/useImmersiveShellBridge'
 import { useTimelineMetadataBridge } from '../hooks/useTimelineMetadataBridge'
 import { useRosterPreferencesBridge } from '../hooks/useRosterPreferencesBridge'
 import { useAppDispatch, useAppSelector } from '../store/hooks'
+import type { RootState } from '../store/appStore'
 import {
   chatActions,
   persistPendingEventsToCache as persistPendingEventsToCacheThunk,
@@ -118,6 +120,17 @@ import { appendReturnTo } from '../util/returnTo'
 const LOW_CREDIT_DAY_THRESHOLD = 2
 const ROSTER_REFRESH_INTERVAL_MS = 20_000
 const SIGNUP_PREVIEW_PANEL_SOURCE = 'signup_preview_panel'
+
+function selectAuthoritativeProcessingByAgentId(state: RootState): Record<string, boolean> {
+  const processingByAgentId: Record<string, boolean> = {}
+  for (const [agentId, session] of Object.entries(state.chat.sessionsByAgentId)) {
+    const processing = session.processing
+    if (processing.processingSource !== 'none' && processing.processingSource !== 'roster') {
+      processingByAgentId[agentId] = processing.processingActive
+    }
+  }
+  return processingByAgentId
+}
 
 function createOptimisticClientId(): string {
   const now = Date.now()
@@ -926,7 +939,9 @@ export function AgentChatPage({
   ))
   const activeAgentId = useAppSelector(selectActiveChatAgentId)
   const activeAgentIdRef = useRef<string | null>(activeAgentId)
-  activeAgentIdRef.current = activeAgentId
+  useLayoutEffect(() => {
+    activeAgentIdRef.current = activeAgentId
+  }, [activeAgentId])
   const [transientBannerAgentName, setTransientBannerAgentName] = useState<string | null>(null)
   const retryPayloadsRef = useRef<Map<string, { body: string; attachments: File[] }>>(new Map())
   const routeAgentId = typeof agentId === 'string' ? agentId : null
@@ -1091,7 +1106,10 @@ export function AgentChatPage({
   useTimelineMetadataBridge(activeAgentId, initialPageResponse)
 
   const activeChatSession = useAppSelector(selectActiveChatSession)
-  const chatSessionsByAgentId = useAppSelector((state) => state.chat.sessionsByAgentId)
+  const authoritativeProcessingByAgentId = useAppSelector(
+    selectAuthoritativeProcessingByAgentId,
+    shallowEqual,
+  )
   const storedAgentName = activeChatSession.identity.agentName
   const storedAgentAvatarUrl = activeChatSession.identity.agentAvatarUrl
   const signupPreviewState = activeChatSession.identity.signupPreviewState
@@ -1141,13 +1159,10 @@ export function AgentChatPage({
     [dispatch],
   )
   const receiveRealtimeEvent = useCallback(
-    (event: TimelineEvent) => {
-      if (!activeAgentId) {
-        return
-      }
-      dispatch(receiveRealtimeEventThunk(activeAgentId, event))
+    (targetAgentId: string, event: TimelineEvent) => {
+      dispatch(receiveRealtimeEventThunk(targetAgentId, event))
     },
-    [activeAgentId, dispatch],
+    [dispatch],
   )
   const finalizeStreaming = useCallback(
     () => dispatch(chatActions.streamingFinalized()),
@@ -1606,20 +1621,15 @@ export function AgentChatPage({
     const agents = contextReady && !rosterContextMismatch ? rosterQuery.data?.agents ?? [] : []
     let changed = false
     const reconciledAgents = agents.map((agent) => {
-      const processing = chatSessionsByAgentId[agent.id]?.processing
-      if (
-        !processing
-        || processing.processingSource === 'none'
-        || processing.processingSource === 'roster'
-        || processing.processingActive === agent.processingActive
-      ) {
+      const processingActive = authoritativeProcessingByAgentId[agent.id]
+      if (processingActive === undefined || processingActive === agent.processingActive) {
         return agent
       }
       changed = true
-      return { ...agent, processingActive: processing.processingActive }
+      return { ...agent, processingActive }
     })
     return changed ? reconciledAgents : agents
-  }, [chatSessionsByAgentId, contextReady, rosterContextMismatch, rosterQuery.data?.agents])
+  }, [authoritativeProcessingByAgentId, contextReady, rosterContextMismatch, rosterQuery.data?.agents])
   const activeRosterMeta = useMemo(
     () => rosterAgents.find((agent) => agent.id === activeAgentId) ?? null,
     [activeAgentId, rosterAgents],
@@ -3741,7 +3751,7 @@ export function AgentChatPage({
       const result = await respondToHumanInputRequestsBatch(activeAgentId, payload)
       replacePendingActionState(activeAgentId, result.pendingActionRequests)
       if (result.event) {
-        receiveRealtimeEvent(result.event)
+        receiveRealtimeEvent(activeAgentId, result.event)
       }
     } else if (response.selectedOptionKey) {
       const result = await respondToHumanInputRequest(activeAgentId, response.requestId, {
@@ -3749,7 +3759,7 @@ export function AgentChatPage({
       })
       replacePendingActionState(activeAgentId, result.pendingActionRequests)
       if (result.event) {
-        receiveRealtimeEvent(result.event)
+        receiveRealtimeEvent(activeAgentId, result.event)
       }
     } else if (response.freeText && response.freeText.trim().length > 0) {
       const result = await respondToHumanInputRequest(activeAgentId, response.requestId, {
@@ -3757,7 +3767,7 @@ export function AgentChatPage({
       })
       replacePendingActionState(activeAgentId, result.pendingActionRequests)
       if (result.event) {
-        receiveRealtimeEvent(result.event)
+        receiveRealtimeEvent(activeAgentId, result.event)
       }
     } else {
       return
@@ -3775,7 +3785,7 @@ export function AgentChatPage({
     const result = await dismissHumanInputRequest(activeAgentId, requestId)
     replacePendingActionState(activeAgentId, result.pendingActionRequests)
     if (result.event) {
-      receiveRealtimeEvent(result.event)
+      receiveRealtimeEvent(activeAgentId, result.event)
     }
     if (!autoScrollPinnedRef.current) {
       return
@@ -3807,7 +3817,7 @@ export function AgentChatPage({
     })
     replacePendingActionState(activeAgentId, result.pendingActionRequests)
     if (result.event) {
-      receiveRealtimeEvent(result.event)
+      receiveRealtimeEvent(activeAgentId, result.event)
     }
     void queryClient.invalidateQueries({ queryKey: ['agent-settings', activeAgentId], exact: true })
     void queryClient.invalidateQueries({ queryKey: ['agent-quick-settings', activeAgentId], exact: true })
@@ -3820,7 +3830,7 @@ export function AgentChatPage({
     const result = await removeRequestedSecrets(activeAgentId, { secret_ids: secretIds })
     replacePendingActionState(activeAgentId, result.pendingActionRequests)
     if (result.event) {
-      receiveRealtimeEvent(result.event)
+      receiveRealtimeEvent(activeAgentId, result.event)
     }
   }, [activeAgentId, receiveRealtimeEvent, replacePendingActionState])
 
@@ -3847,7 +3857,7 @@ export function AgentChatPage({
     })
     replacePendingActionState(activeAgentId, result.pendingActionRequests)
     if (result.event) {
-      receiveRealtimeEvent(result.event)
+      receiveRealtimeEvent(activeAgentId, result.event)
     }
     return result
   }, [activeAgentId, receiveRealtimeEvent, replacePendingActionState])
