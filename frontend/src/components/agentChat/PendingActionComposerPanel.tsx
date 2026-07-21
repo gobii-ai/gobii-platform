@@ -74,6 +74,8 @@ function actionHeading(action: PendingActionRequest): string {
       return action.secrets[0]?.name ?? 'Requested secret'
     case 'contact_requests':
       return action.requests[0]?.name || action.requests[0]?.address || 'Contact approval'
+    case 'outbox_reviews':
+      return action.items[0]?.subject || 'Email awaiting review'
     default:
       return 'Pending action'
   }
@@ -92,6 +94,8 @@ function actionMeta(action: PendingActionRequest): string | null {
       const address = request?.name ? (request?.address ?? null) : null
       return [address, request?.purpose].filter(Boolean).join(' · ') || null
     }
+    case 'outbox_reviews':
+      return action.items[0]?.recipient || null
     default:
       return null
   }
@@ -106,6 +110,8 @@ function actionIcon(action: PendingActionRequest) {
     case 'requested_secrets':
       return KeyRound
     case 'contact_requests':
+      return Mail
+    case 'outbox_reviews':
       return Mail
     default:
       return MessageSquareQuote
@@ -297,7 +303,8 @@ export function PendingActionComposerPanel({
     || activeAction.kind === 'spawn_request'
     || activeAction.kind === 'requested_secrets'
     || activeAction.kind === 'contact_requests'
-  const useApprovalInfoCard = activeAction.kind === 'requested_secrets' || activeAction.kind === 'contact_requests'
+    || activeAction.kind === 'outbox_reviews'
+  const useApprovalInfoCard = activeAction.kind === 'requested_secrets' || activeAction.kind === 'contact_requests' || activeAction.kind === 'outbox_reviews'
 
   return (
     <section
@@ -330,10 +337,18 @@ export function PendingActionComposerPanel({
               View all
             </button>
           ) : null}
+          {activeAction.kind === 'outbox_reviews' ? (
+            <a
+              href={activeAction.outboxUrl}
+              className="shrink-0 rounded-lg px-2 py-1 text-xs font-semibold text-blue-600 transition hover:bg-blue-50 hover:text-blue-800"
+            >
+              Review in Outbox
+            </a>
+          ) : null}
         </div>
 
         {hasActionBody ? (
-          <div className={`mt-3 ${activeAction.kind === 'requested_secrets' || activeAction.kind === 'contact_requests' ? 'sm:ml-10' : ''}`}>
+          <div className={`mt-3 ${activeAction.kind === 'requested_secrets' || activeAction.kind === 'contact_requests' || activeAction.kind === 'outbox_reviews' ? 'sm:ml-10' : ''}`}>
             {showHumanInputComposer && activeAction.kind === 'human_input' ? (
               <HumanInputComposerPanel
                 requests={activeAction.requests}
@@ -391,6 +406,11 @@ export function PendingActionComposerPanel({
                 }}
                 onSubmit={handleResolveContacts}
               />
+            ) : null}
+            {activeAction.kind === 'outbox_reviews' ? (
+              <p className="text-xs leading-5 text-slate-600">
+                The recipient has not received this email. Open Outbox to inspect the exact message, edit it, or approve and send it.
+              </p>
             ) : null}
           </div>
         ) : null}

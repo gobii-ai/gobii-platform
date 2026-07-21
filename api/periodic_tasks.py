@@ -65,6 +65,22 @@ def add_dynamic_schedules():
         "args": [],
     }
 
+    beat_schedule["outbox-approved-reconciliation"] = {
+        "task": "api.tasks.reconcile_approved_outbox_emails",
+        "schedule": crontab(minute="*/5"),
+        "args": [],
+    }
+    beat_schedule["outbox-expiry-sweep"] = {
+        "task": "api.tasks.expire_pending_outbox_emails",
+        "schedule": crontab(minute=17),
+        "args": [],
+    }
+    beat_schedule["outbox-review-digest"] = {
+        "task": "api.tasks.send_outbox_review_digests",
+        "schedule": crontab(hour=14, minute=7),
+        "args": [],
+    }
+
     # Hourly rollup of fractional task usage into Stripe meter events
     beat_schedule["meter-usage-rollup-daily"] = {
         "task": "gobii_platform.api.tasks.rollup_and_meter_usage",

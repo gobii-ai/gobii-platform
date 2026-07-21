@@ -5,6 +5,9 @@ ORGANIZATIONS = "organizations"
 # Controls whether users may opt agents into automatically allowing new email contacts.
 CONTACT_AUTO_APPROVE_EMAIL = "contact_auto_approve_email"
 
+# Deterministic human approval gate for Gobii-managed outbound email delivery.
+EMAIL_REVIEW_OUTBOX = "email_review_outbox"
+
 # Soft-expiration for free-plan agents that go inactive
 AGENT_SOFT_EXPIRATION = "agent_soft_expiration"
 
