@@ -59,6 +59,12 @@ export type AgentMessage = {
   channelLabel?: string | null
   webhookMeta?: WebhookMeta | null
   viewerFeedback?: AgentMessageFeedback | null
+  deliveryStatus?: 'pending_approval' | 'queued' | 'sending' | 'sent' | 'delivered' | 'failed'
+  outboxReview?: {
+    id: string
+    status: 'pending' | 'approved' | 'discarded' | 'expired'
+    version: number
+  } | null
 }
 
 export type ToolMeta = {
@@ -217,6 +223,20 @@ export type PendingContactRequestsAction = {
   resolveApiUrl?: string | null
 }
 
+export type PendingOutboxReviewsAction = {
+  id: string
+  kind: 'outbox_reviews'
+  count: number
+  items: Array<{
+    id: string
+    subject: string
+    recipient: string
+    queuedAt?: string | null
+    detailApiUrl?: string | null
+  }>
+  outboxUrl: string
+}
+
 export type PendingHumanInputAction = {
   id: string
   kind: 'human_input'
@@ -234,6 +254,7 @@ export type PendingActionRequest =
   | PendingSpawnRequestAction
   | PendingRequestedSecretsAction
   | PendingContactRequestsAction
+  | PendingOutboxReviewsAction
 
 export type MessageEvent = {
   kind: 'message'
@@ -257,6 +278,12 @@ export type UserActionType =
   | 'contacts_approved'
   | 'contacts_declined'
   | 'contacts_resolved'
+  | 'outbox_edited'
+  | 'outbox_approved'
+  | 'outbox_discarded'
+  | 'outbox_expired'
+  | 'outbox_failed'
+  | 'outbox_retried'
 
 export type UserAction = {
   id: string

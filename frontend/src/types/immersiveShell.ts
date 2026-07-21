@@ -4,4 +4,4 @@ export type AgentChatSidebarMode = 'collapsed' | 'list' | 'gallery'
 
 export type AgentDrawerViewMode = 'list' | 'gallery'
 
-export type SelectionShellPage = 'agents' | 'billing' | 'profile' | 'organization' | 'secrets' | 'usage' | 'integrations' | 'api-keys'
+export type SelectionShellPage = 'agents' | 'outbox' | 'billing' | 'profile' | 'organization' | 'secrets' | 'usage' | 'integrations' | 'api-keys'

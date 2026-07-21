@@ -8,12 +8,23 @@ from urllib.parse import unquote
 from django.core.mail import get_connection
 from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist
+from django.db import transaction
 from django.utils import timezone
 from waffle import switch_is_active
 from anymail.message import AnymailMessage
 from anymail.exceptions import AnymailAPIError
 
-from api.models import AgentEmailAccount, AgentFsNode, CommsChannel, DeliveryStatus, OutboundMessageAttempt, PersistentAgentEmailEndpoint, PersistentAgentMessage
+from api.models import AgentEmailAccount, AgentFsNode, CommsChannel, DeliveryStatus, OutboundEmailReview, OutboundMessageAttempt, PersistentAgentEmailEndpoint, PersistentAgentMessage
+from api.services.outbound_email_policy import classify_email_recipients, email_review_outbox_enabled
+from api.services.outbound_email_review import (
+    OUTBOX_APPROVAL_INVALID_ERROR_CODE,
+    OUTBOX_CONTACT_REVOKED_ERROR_CODE,
+    OutboundEmailReviewError,
+    compute_message_content_hash,
+    get_message_email_recipients,
+    track_outbox_bypass_denied,
+    validate_approved_external_contacts,
+)
 from api.services.system_settings import get_max_file_size
 from api.agent.files.attachment_helpers import track_file_send_failed, track_file_unsupported
 from opentelemetry.trace import get_current_span
@@ -730,6 +741,92 @@ def _attach_email_attachments(message: PersistentAgentMessage, msg: AnymailMessa
     return attached, rewritten_html_body
 
 
+def _deny_email_delivery(
+    message: PersistentAgentMessage,
+    *,
+    error_code: str,
+    error_message: str,
+) -> None:
+    message.latest_status = DeliveryStatus.FAILED
+    message.latest_error_code = error_code
+    message.latest_error_message = error_message
+    message.save(
+        update_fields=[
+            "latest_status",
+            "latest_error_code",
+            "latest_error_message",
+        ]
+    )
+
+
+def _claim_email_for_delivery(message: PersistentAgentMessage) -> bool:
+    with transaction.atomic():
+        locked = (
+            PersistentAgentMessage.objects.select_for_update()
+            .select_related("from_endpoint", "owner_agent", "owner_agent__organization")
+            .get(pk=message.pk)
+        )
+        if locked.latest_status != DeliveryStatus.QUEUED:
+            logger.info(
+                "Skipping email delivery for message %s because its status is '%s', not 'queued'.",
+                locked.id,
+                locked.latest_status,
+            )
+            return False
+
+        try:
+            review = locked.outbound_email_review
+        except OutboundEmailReview.DoesNotExist:
+            review = None
+
+        if review is not None:
+            current_hash = compute_message_content_hash(locked)
+            approved = (
+                review.status == OutboundEmailReview.Status.APPROVED
+                and review.approved_version == review.content_version
+                and review.approved_content_hash
+                and review.approved_content_hash == review.content_hash == current_hash
+            )
+            if not approved:
+                _deny_email_delivery(
+                    locked,
+                    error_code=OUTBOX_APPROVAL_INVALID_ERROR_CODE,
+                    error_message="Delivery blocked because the approved Outbox version does not match.",
+                )
+                logger.warning("Denied Outbox delivery for message %s due to invalid approval or content hash.", locked.id)
+                track_outbox_bypass_denied(locked, reason="invalid_approval_or_hash")
+                return False
+            try:
+                validate_approved_external_contacts(locked)
+            except OutboundEmailReviewError as exc:
+                _deny_email_delivery(
+                    locked,
+                    error_code=OUTBOX_CONTACT_REVOKED_ERROR_CODE,
+                    error_message=str(exc),
+                )
+                logger.warning("Denied Outbox delivery for message %s because contact access changed.", locked.id)
+                track_outbox_bypass_denied(locked, reason="contact_access_changed")
+                return False
+        elif email_review_outbox_enabled():
+            decision = classify_email_recipients(locked.owner_agent, get_message_email_recipients(locked))
+            if decision.blocked_recipients or decision.requires_review:
+                locked.latest_error_code = "outbox_review_required"
+                locked.latest_error_message = "Delivery blocked because this external email requires human review."
+                locked.save(update_fields=["latest_error_code", "latest_error_message"])
+                logger.warning("Denied unreviewed external email delivery for message %s.", locked.id)
+                track_outbox_bypass_denied(locked, reason="missing_required_review")
+                return False
+
+        locked.latest_status = DeliveryStatus.SENDING
+        locked.latest_error_code = ""
+        locked.latest_error_message = ""
+        locked.save(update_fields=["latest_status", "latest_error_code", "latest_error_message"])
+        message.latest_status = locked.latest_status
+        message.latest_error_code = ""
+        message.latest_error_message = ""
+        return True
+
+
 @tracer.start_as_current_span("AGENT - Deliver Agent Email")
 def deliver_agent_email(message: PersistentAgentMessage):
     """
@@ -744,12 +841,7 @@ def deliver_agent_email(message: PersistentAgentMessage):
         )
         return
 
-    if message.latest_status != DeliveryStatus.QUEUED:
-        logger.info(
-            "Skipping email delivery for message %s because its status is '%s', not 'queued'.",
-            message.id,
-            message.latest_status,
-        )
+    if not _claim_email_for_delivery(message):
         return
     subject = _normalized_email_subject(message)
     to_address = _get_email_primary_recipient(message)
@@ -773,10 +865,6 @@ def deliver_agent_email(message: PersistentAgentMessage):
             message.id,
             message.from_endpoint.address,
         )
-        # Mark sending and create attempt for SMTP
-        message.latest_status = DeliveryStatus.SENDING
-        message.save(update_fields=["latest_status"])
-
         attempt = OutboundMessageAttempt.objects.create(
             message=message,
             provider="smtp",
