@@ -22,6 +22,7 @@ from api.services.agent_schedules import create_default_onboarding_schedule
 from api.services.daily_credit_limits import calculate_default_daily_credit_limit, calculate_daily_credit_slider_bounds, get_tier_credit_multiplier
 from api.services.daily_credit_settings import get_daily_credit_settings_for_owner
 from api.services.outbound_email_policy import (
+    email_sending_mode_for_contact_approval_mode,
     email_review_outbox_enabled,
     get_workspace_default_email_sending_mode,
 )
@@ -143,6 +144,10 @@ class PersistentAgentProvisioningService:
                 persistent_agent.email_sending_mode = get_workspace_default_email_sending_mode(
                     user=user,
                     organization=organization,
+                )
+            else:
+                persistent_agent.email_sending_mode = email_sending_mode_for_contact_approval_mode(
+                    persistent_agent.contact_approval_mode
                 )
 
             if life_state:

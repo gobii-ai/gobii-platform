@@ -302,6 +302,8 @@ def execute_send_email(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
                 return {"status": "error", "message": str(exc)}
 
         for recipient in (() if requires_review else all_recipients):
+            if policy_decision and recipient in policy_decision.internal_recipients:
+                continue
             if not agent.is_recipient_whitelisted(CommsChannel.EMAIL, recipient):
                 if CommsAllowlistEntry.objects.filter(
                     agent=agent,

@@ -34,8 +34,14 @@ from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 OUTBOX_EXPIRY_DAYS = 7
 OUTBOX_STALE_AFTER_HOURS = 24
 OUTBOX_APPROVAL_INVALID_ERROR_CODE = "outbox_approval_invalid"
+OUTBOX_ATTACHMENT_INVALID_ERROR_CODE = "outbox_attachment_invalid"
 OUTBOX_CONTACT_REVOKED_ERROR_CODE = "outbox_contact_revoked"
-NON_RETRYABLE_OUTBOX_ERROR_CODES = frozenset({OUTBOX_APPROVAL_INVALID_ERROR_CODE})
+NON_RETRYABLE_OUTBOX_ERROR_CODES = frozenset(
+    {
+        OUTBOX_APPROVAL_INVALID_ERROR_CODE,
+        OUTBOX_ATTACHMENT_INVALID_ERROR_CODE,
+    }
+)
 
 
 class OutboundEmailReviewError(Exception):
@@ -119,17 +125,27 @@ def snapshot_message_attachments(message: PersistentAgentMessage) -> None:
         attachment.save(update_fields=["file", "file_size", "content_sha256"])
 
 
-def verify_snapshot_attachments(message: PersistentAgentMessage) -> None:
-    for attachment in message.attachments.all():
+def load_verified_snapshot_attachments(
+    message: PersistentAgentMessage,
+) -> tuple[tuple[PersistentAgentMessageAttachment, bytes], ...]:
+    verified: list[tuple[PersistentAgentMessageAttachment, bytes]] = []
+    for attachment in message.attachments.select_related("filespace_node").order_by("id"):
         if not attachment.file or not attachment.file.name or not attachment.content_sha256:
             raise OutboundEmailReviewError(f"Attachment '{attachment.filename}' is no longer available.")
         try:
             with attachment.file.storage.open(attachment.file.name, "rb") as stored_file:
-                actual_hash = hashlib.sha256(stored_file.read()).hexdigest()
+                content = stored_file.read()
         except OSError as exc:
             raise OutboundEmailReviewError(f"Attachment '{attachment.filename}' is no longer available.") from exc
+        actual_hash = hashlib.sha256(content).hexdigest()
         if actual_hash != attachment.content_sha256:
             raise OutboundEmailReviewError(f"Attachment '{attachment.filename}' changed after it was queued.")
+        verified.append((attachment, content))
+    return tuple(verified)
+
+
+def verify_snapshot_attachments(message: PersistentAgentMessage) -> None:
+    load_verified_snapshot_attachments(message)
 
 
 def _attachment_manifest(message: PersistentAgentMessage) -> list[dict[str, object]]:
