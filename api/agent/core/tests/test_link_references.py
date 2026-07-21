@@ -184,6 +184,19 @@ class LinkReferenceTests(TestCase):
         self.assertEqual(rendered, f"[Item]({url}) [link_ref: {token}].")
         self.assertEqual(pair_prompt_urls(rendered, self.agent, create=False), rendered)
 
+    def test_pairing_keeps_html_href_valid(self):
+        url = "https://items.example.test/id/7?view=full&amp;region=west#details"
+        for quote in ('"', "'", ""):
+            with self.subTest(quote=quote or "unquoted"):
+                source = f"<a class='item' href={quote}{url}{quote}>Item</a>."
+                rendered = pair_prompt_urls(source, self.agent, create=True)
+
+                reference = PersistentAgentLinkReference.objects.get(agent=self.agent)
+                token = f"$[link:{reference.public_id}]"
+                expected = f"<a class='item' href={quote}{url}{quote}> [link_ref: {token}]Item</a>."
+                self.assertEqual(rendered, expected)
+                self.assertEqual(pair_prompt_urls(rendered, self.agent, create=False), rendered)
+
     def test_lookup_only_does_not_create_provenance(self):
         url = "https://derived.example.test/records/9"
         self.assertEqual(

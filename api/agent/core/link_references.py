@@ -11,6 +11,10 @@ from api.models import PersistentAgentLinkReference
 logger = logging.getLogger(__name__)
 
 _HTTP_URL_RE = re.compile(r'''https?://[^\s<>"'`\[\]\\]+''', re.IGNORECASE)
+_HTML_HREF_TAG_RE = re.compile(
+    r'''<[^>]*\bhref\s*=\s*(?:(?P<quote>["'])(?P<quoted_url>https?://[^\s<>"'`\[\]\\]+)(?P=quote)|(?P<bare_url>https?://[^\s<>"'`\[\]\\]+))[^>]*>''',
+    re.IGNORECASE,
+)
 _REFERENCE_RE = re.compile(r"\$\[link:([^\]]*)\]", re.IGNORECASE)
 _REFERENCE_PREFIX_RE = re.compile(r"\$\[link:", re.IGNORECASE)
 _PUBLIC_ID_PATTERN = r"L[0123456789ABCDEFGHJKMNPQRSTVWXYZ]{16}"
@@ -42,6 +46,13 @@ def _split_url_suffix(raw_url: str) -> tuple[str, str]:
 
 def extract_http_urls(text: str) -> tuple[str, ...]:
     return tuple(dict.fromkeys(_split_url_suffix(match.group())[0] for match in _HTTP_URL_RE.finditer(text or "")))
+
+
+def _is_html_href_url(text: str, start: int) -> bool:
+    tag_start = text.rfind("<", 0, start)
+    if tag_start <= text.rfind(">", 0, start):
+        return False
+    return bool(re.search(r'''\bhref\s*=\s*["']?\s*$''', text[tag_start:start], re.IGNORECASE))
 
 
 def is_source_bearing_tool(tool_name: str) -> bool:
@@ -84,6 +95,8 @@ def _render_prompt_urls(text: str, agent, *, create: bool, include_raw: bool) ->
             return url + suffix
         if not include_raw:
             return reference + suffix
+        if _is_html_href_url(text, match.start()):
+            return match.group()
         paired_suffix = f" [link_ref: {reference}]"
         if text[match.end():].startswith(paired_suffix):
             return match.group()
@@ -91,7 +104,22 @@ def _render_prompt_urls(text: str, agent, *, create: bool, include_raw: bool) ->
             return f"{url}){paired_suffix}{suffix[1:]}"
         return f"{url}{paired_suffix}{suffix}"
 
-    return _HTTP_URL_RE.sub(replace, text)
+    rendered = _HTTP_URL_RE.sub(replace, text)
+    if not include_raw:
+        return rendered
+
+    def pair_html_href(match: re.Match) -> str:
+        raw_url = match.group("quoted_url") or match.group("bare_url")
+        url, _ = _split_url_suffix(raw_url)
+        reference = references.get(url)
+        if not reference:
+            return match.group()
+        paired_suffix = f" [link_ref: {reference}]"
+        if rendered[match.end():].startswith(paired_suffix):
+            return match.group()
+        return match.group() + paired_suffix
+
+    return _HTML_HREF_TAG_RE.sub(pair_html_href, rendered)
 
 
 def rewrite_prompt_urls(text: str, agent, *, create: bool) -> str:
