@@ -5,18 +5,22 @@ import requests
 from django.test import SimpleTestCase, override_settings, tag
 
 from api.services.sandbox_kubernetes import (
-    _container_resources_match,
-    _build_sandbox_service_manifest,
+    KubernetesApiError,
     KubernetesSandboxBackend,
     _build_egress_proxy_pod_manifest,
     _build_egress_proxy_service_manifest,
-    _build_proxy_env,
     _build_pod_manifest,
+    _build_proxy_env,
+    _build_sandbox_service_manifest,
+    _container_resources_match,
     _normalize_workspace_volume_mode,
-    _pod_readiness_summary,
     _pod_name,
+    _pod_readiness_summary,
 )
-from api.services.sandbox_compute import _SANDBOX_PROXY_CLEARED_ATTR
+from api.services.sandbox_compute import (
+    SandboxComputeUnavailable,
+    _SANDBOX_PROXY_CLEARED_ATTR,
+)
 
 SANDBOX_POD_RESOURCES = {
     "requests": {"cpu": "500m", "memory": "1Gi"},
@@ -372,19 +376,148 @@ class KubernetesSandboxMCPDiscoveryTests(SimpleTestCase):
                 },
             }
         )
-        backend._delete_pod = Mock()
+        backend._replace_pod = Mock(side_effect=lambda _pod_name, create_pod: create_pod())
         backend._create_egress_proxy_pod = Mock()
         backend._wait_for_pod_ready = Mock(return_value=True)
 
         service_name = backend._ensure_egress_proxy(agent, proxy_server)
 
         self.assertEqual(service_name, "sandbox-egress-agent-stale")
-        backend._delete_pod.assert_called_once_with("sandbox-egress-agent-stale")
+        backend._replace_pod.assert_called_once()
+        self.assertEqual(backend._replace_pod.call_args.args[0], "sandbox-egress-agent-stale")
         backend._create_egress_proxy_pod.assert_called_once_with(
             "sandbox-egress-agent-stale",
             agent_id="agent-stale",
             proxy_server=proxy_server,
         )
+
+    def test_compute_replacement_waits_for_deleted_pod_before_create(self):
+        backend = self._backend()
+        agent = SimpleNamespace(id="agent-terminating")
+        session = SimpleNamespace(proxy_server=None, workspace_snapshot=None)
+        existing_pod = _build_pod_manifest(
+            pod_name="sandbox-agent-agent-terminating",
+            pvc_name="sandbox-workspace-agent-terminating",
+            namespace="default",
+            image=backend._pod_image,
+            runtime_class=backend._pod_runtime_class,
+            service_account=backend._pod_service_account,
+            configmap_name=backend._pod_configmap,
+            secret_name=backend._pod_secret,
+            agent_id="agent-terminating",
+            resources=backend._pod_resources,
+            workspace_volume_mode=backend._workspace_volume_mode,
+        )
+        existing_pod["metadata"]["deletionTimestamp"] = "2026-07-21T12:00:00Z"
+        existing_pod["status"] = {"phase": "Running"}
+        backend._get_pod = Mock(return_value=existing_pod)
+        backend._create_service = Mock()
+        backend._create_pvc = Mock()
+        backend._wait_for_pod_ready = Mock(return_value=True)
+        events = []
+        deletion_reads = iter([existing_pod, None])
+
+        def request_json(method, _path, **_kwargs):
+            events.append(method)
+            if method == "DELETE":
+                return {}
+            return next(deletion_reads)
+
+        backend._client.request_json.side_effect = request_json
+        backend._create_pod = Mock(side_effect=lambda *_args, **_kwargs: events.append("CREATE"))
+
+        with patch("api.services.sandbox_kubernetes._resource_exists", side_effect=[True, True]), patch(
+            "api.services.sandbox_kubernetes.time.sleep",
+            return_value=None,
+        ):
+            result = backend.deploy_or_resume(agent, session)
+
+        self.assertEqual(result.state, "running")
+        self.assertEqual(events, ["DELETE", "GET", "GET", "CREATE"])
+
+    def test_egress_replacement_waits_for_deleted_pod_before_create(self):
+        backend = self._backend()
+        agent = SimpleNamespace(id="agent-egress-race")
+        proxy_server = SimpleNamespace(
+            id="proxy-race",
+            host="proxy.example",
+            port=8080,
+            proxy_type="HTTP",
+            username="",
+            password="",
+        )
+        stale_pod = {
+            "metadata": {"labels": {"proxy_id": "old-proxy"}},
+            "status": {"phase": "Running"},
+            "spec": {"containers": []},
+        }
+        backend._get_service = Mock(return_value={"metadata": {"name": "sandbox-egress-agent-egress-race"}})
+        backend._get_pod = Mock(return_value=stale_pod)
+        backend._wait_for_pod_ready = Mock(return_value=True)
+        events = []
+        deletion_reads = iter([stale_pod, None])
+
+        def request_json(method, _path, **_kwargs):
+            events.append(method)
+            if method == "DELETE":
+                return {}
+            return next(deletion_reads)
+
+        backend._client.request_json.side_effect = request_json
+        backend._create_egress_proxy_pod = Mock(
+            side_effect=lambda *_args, **_kwargs: events.append("CREATE")
+        )
+
+        with patch("api.services.sandbox_kubernetes.time.sleep", return_value=None):
+            service_name = backend._ensure_egress_proxy(agent, proxy_server)
+
+        self.assertEqual(service_name, "sandbox-egress-agent-egress-race")
+        self.assertEqual(events, ["DELETE", "GET", "GET", "CREATE"])
+
+    def test_create_conflict_with_terminating_pod_waits_and_retries(self):
+        backend = self._backend()
+        terminating_pod = {"metadata": {"deletionTimestamp": "2026-07-21T12:00:00Z"}}
+        backend._client.request_json.side_effect = [
+            KubernetesApiError(409, "already exists"),
+            terminating_pod,
+            terminating_pod,
+            None,
+            {},
+        ]
+
+        with patch("api.services.sandbox_kubernetes.time.sleep", return_value=None):
+            backend._create_named_pod("sandbox-agent-agent-conflict", {"kind": "Pod"})
+
+        methods = [call.args[0] for call in backend._client.request_json.call_args_list]
+        self.assertEqual(methods, ["POST", "GET", "GET", "GET", "POST"])
+
+    def test_create_conflict_with_live_pod_is_idempotent_success(self):
+        backend = self._backend()
+        backend._client.request_json.side_effect = [
+            KubernetesApiError(409, "already exists"),
+            {"metadata": {"name": "sandbox-agent-agent-live"}},
+        ]
+
+        backend._create_named_pod("sandbox-agent-agent-live", {"kind": "Pod"})
+
+        methods = [call.args[0] for call in backend._client.request_json.call_args_list]
+        self.assertEqual(methods, ["POST", "GET"])
+
+    def test_replacement_timeout_does_not_create_pod(self):
+        backend = self._backend()
+        backend._pod_ready_timeout = 0
+        terminating_pod = {"metadata": {"deletionTimestamp": "2026-07-21T12:00:00Z"}}
+        backend._client.request_json.side_effect = [{}, terminating_pod]
+        create_pod = Mock()
+
+        with self.assertRaises(SandboxComputeUnavailable) as raised:
+            backend._replace_pod("sandbox-agent-agent-timeout", create_pod)
+
+        self.assertIn("sandbox-agent-agent-timeout", str(raised.exception))
+        self.assertIn("0 seconds", str(raised.exception))
+        create_pod.assert_not_called()
+        methods = [call.args[0] for call in backend._client.request_json.call_args_list]
+        self.assertEqual(methods, ["DELETE", "GET"])
 
     def test_deploy_or_resume_creates_agent_service_when_missing(self):
         backend = self._backend()
@@ -475,7 +608,7 @@ class KubernetesSandboxMCPDiscoveryTests(SimpleTestCase):
                 },
             }
         )
-        backend._delete_pod = Mock()
+        backend._replace_pod = Mock(side_effect=lambda _pod_name, create_pod: create_pod())
         backend._create_pod = Mock()
         backend._wait_for_pod_ready = Mock(return_value=True)
 
@@ -484,7 +617,8 @@ class KubernetesSandboxMCPDiscoveryTests(SimpleTestCase):
 
         self.assertEqual(result.state, "running")
         self.assertTrue(result.workspace_reset)
-        backend._delete_pod.assert_called_once_with("sandbox-agent-agent-emptydir-recreate")
+        backend._replace_pod.assert_called_once()
+        self.assertEqual(backend._replace_pod.call_args.args[0], "sandbox-agent-agent-emptydir-recreate")
         backend._create_pod.assert_called_once()
 
     def test_deploy_or_resume_keeps_sandbox_service_separate_from_egress_service(self):
@@ -539,7 +673,7 @@ class KubernetesSandboxMCPDiscoveryTests(SimpleTestCase):
                 },
             }
         )
-        backend._delete_pod = Mock()
+        backend._replace_pod = Mock(side_effect=lambda _pod_name, create_pod: create_pod())
         backend._create_pod = Mock()
         backend._wait_for_pod_ready = Mock(return_value=True)
 
@@ -547,7 +681,8 @@ class KubernetesSandboxMCPDiscoveryTests(SimpleTestCase):
             result = backend.deploy_or_resume(agent, session)
 
         self.assertEqual(result.state, "running")
-        backend._delete_pod.assert_called_once_with("sandbox-agent-agent-stale-image")
+        backend._replace_pod.assert_called_once()
+        self.assertEqual(backend._replace_pod.call_args.args[0], "sandbox-agent-agent-stale-image")
         backend._create_pod.assert_called_once_with(
             "sandbox-agent-agent-stale-image",
             "sandbox-workspace-agent-stale-image",
@@ -591,7 +726,7 @@ class KubernetesSandboxMCPDiscoveryTests(SimpleTestCase):
                 },
             }
         )
-        backend._delete_pod = Mock()
+        backend._replace_pod = Mock(side_effect=lambda _pod_name, create_pod: create_pod())
         backend._create_pod = Mock()
         backend._wait_for_pod_ready = Mock(return_value=True)
 
@@ -599,7 +734,8 @@ class KubernetesSandboxMCPDiscoveryTests(SimpleTestCase):
             result = backend.deploy_or_resume(agent, session)
 
         self.assertEqual(result.state, "running")
-        backend._delete_pod.assert_called_once_with("sandbox-agent-agent-proxy-drift")
+        backend._replace_pod.assert_called_once()
+        self.assertEqual(backend._replace_pod.call_args.args[0], "sandbox-agent-agent-proxy-drift")
         backend._create_pod.assert_called_once_with(
             "sandbox-agent-agent-proxy-drift",
             "sandbox-workspace-agent-proxy-drift",
@@ -630,7 +766,7 @@ class KubernetesSandboxMCPDiscoveryTests(SimpleTestCase):
         backend._create_pvc = Mock()
         backend._create_service = Mock()
         backend._get_pod = Mock(return_value=existing_pod)
-        backend._delete_pod = Mock()
+        backend._replace_pod = Mock(side_effect=lambda _pod_name, create_pod: create_pod())
         backend._create_pod = Mock()
         backend._wait_for_pod_ready = Mock(return_value=True)
 
@@ -664,7 +800,7 @@ class KubernetesSandboxMCPDiscoveryTests(SimpleTestCase):
                 },
             }
         )
-        backend._delete_pod = Mock()
+        backend._replace_pod = Mock(side_effect=lambda _pod_name, create_pod: create_pod())
         backend._create_pod = Mock()
         backend._wait_for_pod_ready = Mock(return_value=True)
 
@@ -672,7 +808,8 @@ class KubernetesSandboxMCPDiscoveryTests(SimpleTestCase):
             result = backend.deploy_or_resume(agent, session)
 
         self.assertEqual(result.state, "running")
-        backend._delete_pod.assert_called_once_with("sandbox-agent-agent-resource-drift")
+        backend._replace_pod.assert_called_once()
+        self.assertEqual(backend._replace_pod.call_args.args[0], "sandbox-agent-agent-resource-drift")
         backend._create_pod.assert_called_once_with(
             "sandbox-agent-agent-resource-drift",
             "sandbox-workspace-agent-resource-drift",
@@ -874,6 +1011,31 @@ class KubernetesSandboxMCPDiscoveryTests(SimpleTestCase):
         self.assertEqual(len(pending_progress_logs), 2)
         self.assertIn("Unschedulable", pending_progress_logs[0].args[-1])
         self.assertIn("ContainerCreating", pending_progress_logs[1].args[-1])
+
+    def test_wait_for_pod_ready_rejects_terminating_running_pod(self):
+        backend = object.__new__(KubernetesSandboxBackend)
+        backend._pod_ready_timeout = 10
+        terminating_ready = {
+            "metadata": {"deletionTimestamp": "2026-07-21T12:00:00Z"},
+            "status": {
+                "phase": "Running",
+                "conditions": [{"type": "Ready", "status": "True"}],
+            },
+        }
+        replacement_ready = {
+            "metadata": {},
+            "status": {
+                "phase": "Running",
+                "conditions": [{"type": "Ready", "status": "True"}],
+            },
+        }
+        backend._get_pod = Mock(side_effect=[terminating_ready, replacement_ready])
+
+        with patch("api.services.sandbox_kubernetes.time.sleep", return_value=None):
+            result = backend._wait_for_pod_ready("sandbox-agent-agent-replaced")
+
+        self.assertTrue(result)
+        self.assertEqual(backend._get_pod.call_count, 2)
 
     @override_settings(
         SANDBOX_COMPUTE_API_TOKEN="test-token",

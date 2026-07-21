@@ -5,7 +5,7 @@ import re
 import time
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 from urllib.parse import quote
 
 import requests
@@ -306,35 +306,32 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
                 workspace_reset = workspace_reset or not self._uses_pvc_workspace()
             else:
                 phase = (pod.get("status") or {}).get("phase")
-                if not _sandbox_pod_matches(
-                    pod,
-                    image=self._pod_image,
-                    resources=self._pod_resources,
-                    workspace_volume_mode=self._workspace_volume_mode,
-                    pvc_name=pvc_name,
-                    emptydir_size_limit=self._workspace_emptydir_size,
-                    egress_service_name=egress_service_name,
-                    http_proxy_port=self._egress_proxy_service_port,
-                    socks_proxy_port=self._egress_proxy_socks_service_port,
-                    no_proxy=no_proxy,
-                ):
-                    self._delete_pod(pod_name)
-                    self._create_pod(
-                        pod_name,
-                        pvc_name,
-                        agent_id=str(agent.id),
+                needs_replacement = (
+                    _pod_is_terminating(pod)
+                    or phase not in {"Running", "Pending"}
+                    or not _sandbox_pod_matches(
+                        pod,
+                        image=self._pod_image,
+                        resources=self._pod_resources,
+                        workspace_volume_mode=self._workspace_volume_mode,
+                        pvc_name=pvc_name,
+                        emptydir_size_limit=self._workspace_emptydir_size,
                         egress_service_name=egress_service_name,
+                        http_proxy_port=self._egress_proxy_service_port,
+                        socks_proxy_port=self._egress_proxy_socks_service_port,
                         no_proxy=no_proxy,
                     )
-                    workspace_reset = workspace_reset or not self._uses_pvc_workspace()
-                elif phase not in {"Running", "Pending"}:
-                    self._delete_pod(pod_name)
-                    self._create_pod(
+                )
+                if needs_replacement:
+                    self._replace_pod(
                         pod_name,
-                        pvc_name,
-                        agent_id=str(agent.id),
-                        egress_service_name=egress_service_name,
-                        no_proxy=no_proxy,
+                        lambda: self._create_pod(
+                            pod_name,
+                            pvc_name,
+                            agent_id=str(agent.id),
+                            egress_service_name=egress_service_name,
+                            no_proxy=no_proxy,
+                        ),
                     )
                     workspace_reset = workspace_reset or not self._uses_pvc_workspace()
         except KubernetesApiError as exc:
@@ -707,10 +704,13 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
 
     def _get_pod(self, pod_name: str) -> Optional[Dict[str, Any]]:
         try:
-            return self._client.request_json("GET", _pod_path(self._namespace, pod_name), allow_404=True)
+            return self._read_pod(pod_name)
         except KubernetesApiError as exc:
             logger.warning("Failed to fetch pod %s: %s", pod_name, exc)
             return None
+
+    def _read_pod(self, pod_name: str) -> Optional[Dict[str, Any]]:
+        return self._client.request_json("GET", _pod_path(self._namespace, pod_name), allow_404=True)
 
     def _get_service(self, service_name: str) -> Optional[Dict[str, Any]]:
         try:
@@ -743,18 +743,26 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
                 self._create_egress_proxy_pod(pod_name, agent_id=str(agent.id), proxy_server=proxy_server)
             else:
                 phase = (pod.get("status") or {}).get("phase")
-                if not _egress_proxy_pod_matches(
-                    pod,
-                    proxy_server=proxy_server,
-                    resources=self._egress_proxy_resources,
-                    http_listen_port=self._egress_proxy_port,
-                    socks_listen_port=self._egress_proxy_socks_port,
-                ):
-                    self._delete_pod(pod_name)
-                    self._create_egress_proxy_pod(pod_name, agent_id=str(agent.id), proxy_server=proxy_server)
-                elif phase not in {"Running", "Pending"}:
-                    self._delete_pod(pod_name)
-                    self._create_egress_proxy_pod(pod_name, agent_id=str(agent.id), proxy_server=proxy_server)
+                needs_replacement = (
+                    _pod_is_terminating(pod)
+                    or phase not in {"Running", "Pending"}
+                    or not _egress_proxy_pod_matches(
+                        pod,
+                        proxy_server=proxy_server,
+                        resources=self._egress_proxy_resources,
+                        http_listen_port=self._egress_proxy_port,
+                        socks_listen_port=self._egress_proxy_socks_port,
+                    )
+                )
+                if needs_replacement:
+                    self._replace_pod(
+                        pod_name,
+                        lambda: self._create_egress_proxy_pod(
+                            pod_name,
+                            agent_id=str(agent.id),
+                            proxy_server=proxy_server,
+                        ),
+                    )
         except KubernetesApiError as exc:
             raise SandboxComputeUnavailable(f"Egress proxy provisioning failed: {exc}") from exc
 
@@ -790,11 +798,7 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
             socks_proxy_port=self._egress_proxy_socks_service_port,
             no_proxy=no_proxy,
         )
-        try:
-            self._client.request_json("POST", _pod_collection_path(self._namespace), json_body=body)
-        except KubernetesApiError as exc:
-            if exc.status_code != 409:
-                raise
+        self._create_named_pod(pod_name, body)
 
     def _create_egress_proxy_pod(self, pod_name: str, *, agent_id: str, proxy_server) -> None:
         body = _build_egress_proxy_pod_manifest(
@@ -809,11 +813,99 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
             http_listen_port=self._egress_proxy_port,
             socks_listen_port=self._egress_proxy_socks_port,
         )
-        try:
-            self._client.request_json("POST", _pod_collection_path(self._namespace), json_body=body)
-        except KubernetesApiError as exc:
-            if exc.status_code != 409:
-                raise
+        self._create_named_pod(pod_name, body)
+
+    def _create_named_pod(self, pod_name: str, body: Dict[str, Any]) -> None:
+        started_at = time.monotonic()
+        deadline = started_at + max(float(self._pod_ready_timeout), 0.0)
+        attempts = 0
+        while True:
+            attempts += 1
+            try:
+                self._client.request_json("POST", _pod_collection_path(self._namespace), json_body=body)
+                return
+            except KubernetesApiError as exc:
+                if exc.status_code != 409:
+                    raise
+
+            pod = self._read_pod(pod_name)
+            if pod and not _pod_is_terminating(pod):
+                logger.info(
+                    "Pod create conflict resolved by concurrent live pod pod=%s attempts=%s elapsed_ms=%s",
+                    pod_name,
+                    attempts,
+                    _elapsed_ms(started_at),
+                )
+                return
+
+            if pod:
+                logger.info(
+                    "Pod create conflict found terminating pod pod=%s attempts=%s elapsed_ms=%s",
+                    pod_name,
+                    attempts,
+                    _elapsed_ms(started_at),
+                )
+                self._wait_for_pod_absent(pod_name, deadline=deadline, started_at=started_at)
+                continue
+
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                self._raise_pod_deletion_timeout(pod_name, started_at)
+            time.sleep(min(2.0, remaining))
+
+    def _replace_pod(self, pod_name: str, create_pod: Callable[[], None]) -> None:
+        started_at = time.monotonic()
+        logger.info("Replacing sandbox pod pod=%s", pod_name)
+        self._client.request_json("DELETE", _pod_path(self._namespace, pod_name), allow_404=True)
+        self._wait_for_pod_absent(pod_name, started_at=started_at)
+        create_pod()
+        logger.info(
+            "Sandbox pod replacement submitted pod=%s elapsed_ms=%s",
+            pod_name,
+            _elapsed_ms(started_at),
+        )
+
+    def _wait_for_pod_absent(
+        self,
+        pod_name: str,
+        *,
+        deadline: Optional[float] = None,
+        started_at: Optional[float] = None,
+    ) -> None:
+        wait_started_at = time.monotonic() if started_at is None else started_at
+        wait_deadline = (
+            wait_started_at + max(float(self._pod_ready_timeout), 0.0)
+            if deadline is None
+            else deadline
+        )
+        attempts = 0
+        while True:
+            attempts += 1
+            if not self._read_pod(pod_name):
+                logger.info(
+                    "Sandbox pod deletion confirmed pod=%s attempts=%s elapsed_ms=%s",
+                    pod_name,
+                    attempts,
+                    _elapsed_ms(wait_started_at),
+                )
+                return
+
+            remaining = wait_deadline - time.monotonic()
+            if remaining <= 0:
+                self._raise_pod_deletion_timeout(pod_name, wait_started_at, attempts=attempts)
+            time.sleep(min(2.0, remaining))
+
+    def _raise_pod_deletion_timeout(self, pod_name: str, started_at: float, *, attempts: int = 0) -> None:
+        logger.warning(
+            "Sandbox pod deletion timeout pod=%s attempts=%s elapsed_ms=%s timeout_seconds=%s",
+            pod_name,
+            attempts,
+            _elapsed_ms(started_at),
+            self._pod_ready_timeout,
+        )
+        raise SandboxComputeUnavailable(
+            f"Kubernetes pod {pod_name} was not deleted within {self._pod_ready_timeout} seconds."
+        )
 
     def _create_egress_proxy_service(self, service_name: str, *, agent_id: str) -> None:
         body = _build_egress_proxy_service_manifest(
@@ -927,6 +1019,7 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
             summary = _pod_readiness_summary(pod)
             status = pod.get("status") or {}
             phase = status.get("phase")
+            terminating = _pod_is_terminating(pod)
             if phase != last_phase or summary != last_summary:
                 logger.info(
                     "Sandbox pod readiness progress pod=%s phase=%s attempts=%s elapsed_ms=%s summary=%s",
@@ -938,7 +1031,7 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
                 )
                 last_phase = phase
                 last_summary = summary
-            if phase == "Running":
+            if phase == "Running" and not terminating:
                 for condition in status.get("conditions", []):
                     if condition.get("type") == "Ready" and condition.get("status") == "True":
                         logger.info(
@@ -1022,9 +1115,15 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
         return False
 
 
+def _pod_is_terminating(pod: Dict[str, Any]) -> bool:
+    return bool((pod.get("metadata") or {}).get("deletionTimestamp"))
+
+
 def _pod_readiness_summary(pod: Dict[str, Any]) -> str:
     status = pod.get("status") or {}
     parts = [f"phase={status.get('phase') or 'unknown'}"]
+    if _pod_is_terminating(pod):
+        parts.append("terminating=true")
 
     conditions = []
     for condition in status.get("conditions") or []:
