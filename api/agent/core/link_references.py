@@ -2,6 +2,7 @@ import hashlib
 import logging
 import re
 from collections.abc import Iterable
+from functools import wraps
 
 from django.db import DatabaseError
 
@@ -17,7 +18,7 @@ _PUBLIC_ID_RE = re.compile(_PUBLIC_ID_PATTERN, re.IGNORECASE)
 _NAKED_DESTINATION_RE = re.compile(rf"(?:\]\(\s*|href\s*=\s*['\"]\s*)({_PUBLIC_ID_PATTERN})(?=\s*(?:\)|['\"]))", re.IGNORECASE)
 _TRAILING_PUNCTUATION = ".,;:!?"
 _EMBEDDED_FIELDS = {"create_csv": "csv_text", "create_pdf": "html", "http_request": "body", "send_agent_message": "message", "send_chat_message": "body", "send_discord_message": "message", "send_email": "mobile_first_html", "send_sms": "body"}
-_DOCUMENT_MIME_TYPES = {"application/json", "application/ld+json", "application/xml", "application/yaml", "text/html", "text/markdown", "text/plain", "text/xml", "text/yaml"}
+DOCUMENT_MIME_TYPES = {"application/json", "application/ld+json", "application/xml", "application/yaml", "text/html", "text/markdown", "text/plain", "text/xml", "text/yaml"}
 _STRICT_TOOLS = set(_EMBEDDED_FIELDS) - {"http_request"} | {"apply_patch", "create_chart", "create_custom_tool", "create_file", "create_image", "create_video", "search_tools", "send_webhook_event", "sqlite_batch", "update_charter", "update_plan", "update_schedule"}
 
 
@@ -43,7 +44,7 @@ def is_source_bearing_tool(tool_name: str) -> bool:
     return tool_name in {"http_request", "spawn_web_task_result"} or tool_name.startswith("mcp_")
 
 
-def _reference_map(agent, urls: Iterable[str], *, create: bool, source_kind: str = "", source_object_id: str = "") -> dict[str, str]:
+def _reference_map(agent, urls: Iterable[str], *, create: bool) -> dict[str, str]:
     urls_by_hash = {hashlib.sha256(url.encode()).hexdigest(): url for url in urls}
     if not urls_by_hash:
         return {}
@@ -52,7 +53,7 @@ def _reference_map(agent, urls: Iterable[str], *, create: bool, source_kind: str
         found = {reference.url_hash for reference in references}
         PersistentAgentLinkReference.objects.bulk_create(
             [
-                PersistentAgentLinkReference(agent=agent, url=url, url_hash=url_hash, source_kind=source_kind, source_object_id=str(source_object_id or ""))
+                PersistentAgentLinkReference(agent=agent, url=url, url_hash=url_hash)
                 for url_hash, url in urls_by_hash.items()
                 if url_hash not in found
             ],
@@ -62,12 +63,12 @@ def _reference_map(agent, urls: Iterable[str], *, create: bool, source_kind: str
     return {ref.url: f"$[link:{ref.public_id}]" for ref in references if urls_by_hash.get(ref.url_hash) == ref.url}
 
 
-def rewrite_prompt_urls(text: str, agent, *, create: bool, source_kind: str = "", source_object_id: str = "") -> str:
+def rewrite_prompt_urls(text: str, agent, *, create: bool) -> str:
     urls = extract_http_urls(text)
     if not urls:
         return text
     try:
-        references = _reference_map(agent, urls, create=create, source_kind=source_kind, source_object_id=source_object_id)
+        references = _reference_map(agent, urls, create=create)
     except DatabaseError:
         logger.warning("Failed to load link references for agent %s", getattr(agent, "id", None), exc_info=True)
         return text
@@ -77,10 +78,6 @@ def rewrite_prompt_urls(text: str, agent, *, create: bool, source_kind: str = ""
         return references.get(url, url) + suffix
 
     return _HTTP_URL_RE.sub(replace, text)
-
-
-def register_prompt_urls(text: str, agent, *, source_kind: str, source_object_id: str = "") -> None:
-    rewrite_prompt_urls(text, agent, create=True, source_kind=source_kind, source_object_id=source_object_id)
 
 
 def resolve_link_references(text: str, agent) -> str:
@@ -136,7 +133,7 @@ def _param_path(path: tuple[object, ...]) -> str:
 
 def _embedded_fields(tool_name: str, params) -> set[str]:
     fields = {_EMBEDDED_FIELDS[tool_name]} if tool_name in _EMBEDDED_FIELDS else set()
-    if tool_name == "create_file" and str(params.get("mime_type", "")).split(";", 1)[0].strip().lower() in _DOCUMENT_MIME_TYPES:
+    if tool_name == "create_file" and str(params.get("mime_type", "")).split(";", 1)[0].strip().lower() in DOCUMENT_MIME_TYPES:
         fields.add("content")
     return fields
 
@@ -167,9 +164,16 @@ def resolve_link_reference_params(value, agent, *, tool_name: str = "", _path=()
     return value
 
 
-def document_mime_supports_link_references(mime_type: str) -> bool:
-    return mime_type in _DOCUMENT_MIME_TYPES
-
-
 def link_reference_error_response(exc: LinkReferenceResolutionError) -> dict[str, object]:
     return {"status": "error", "message": str(exc), "retryable": True}
+
+
+def handle_link_reference_errors(executor):
+    @wraps(executor)
+    def wrapped(*args, **kwargs):
+        try:
+            return executor(*args, **kwargs)
+        except LinkReferenceResolutionError as exc:
+            return link_reference_error_response(exc)
+
+    return wrapped

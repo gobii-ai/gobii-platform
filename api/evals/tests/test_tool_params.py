@@ -38,7 +38,6 @@ class ResolvedToolParamTests(TestCase):
         reference = PersistentAgentLinkReference.objects.create(
             agent=owner,
             url=url,
-            source_kind=PersistentAgentLinkReference.SourceKind.INBOUND_MESSAGE,
         )
         call = SimpleNamespace(
             tool_name=tool_name,

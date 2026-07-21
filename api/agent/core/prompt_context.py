@@ -4474,8 +4474,6 @@ def _get_unified_history_prompt(
             text,
             agent,
             create=is_source_bearing_tool(record.tool_name),
-            source_kind="tool_result" if is_source_bearing_tool(record.tool_name) else "",
-            source_object_id=record.result_id or record.step_id,
         ),
     )
 
@@ -4571,8 +4569,6 @@ def _get_unified_history_prompt(
             body,
             agent,
             create=not m.is_outbound,
-            source_kind="inbound_message" if not m.is_outbound else "",
-            source_object_id=str(m.id),
         )
         subject = ""
         raw_payload = m.raw_payload if isinstance(m.raw_payload, dict) else {}
@@ -4731,8 +4727,6 @@ def _get_unified_history_prompt(
                     result_summary,
                     agent,
                     create=True,
-                    source_kind="tool_result",
-                    source_object_id=str(t.id),
                 )
             if (
                 result_info.preview_text

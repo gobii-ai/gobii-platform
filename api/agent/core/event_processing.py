@@ -100,8 +100,8 @@ from .link_references import (
     LinkReferenceResolutionError,
     is_source_bearing_tool,
     link_reference_error_response,
-    register_prompt_urls,
     resolve_link_reference_params,
+    rewrite_prompt_urls,
 )
 from ..tools.apply_patch import execute_apply_patch
 from ..tools.charter_updater import execute_update_charter
@@ -3550,12 +3550,7 @@ def _finalize_tool_batch(
                 display_metadata=outcome.display_metadata,
             )
         if not is_error_status and is_source_bearing_tool(tool_name):
-            register_prompt_urls(
-                result_content,
-                agent,
-                source_kind="tool_result",
-                source_object_id=str(getattr(step, "id", None) or prepared.call_id or ""),
-            )
+            rewrite_prompt_urls(result_content, agent, create=True)
         if is_error_status:
             _refund_tool_credit_on_error_if_configured(
                 agent=agent,

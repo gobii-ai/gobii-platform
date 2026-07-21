@@ -3,8 +3,10 @@ import os
 from typing import Any, Dict
 
 from api.agent.core.link_references import (
-    LinkReferenceResolutionError, document_mime_supports_link_references, link_reference_error_response,
-    resolve_link_reference_params, resolve_link_references,
+    DOCUMENT_MIME_TYPES,
+    handle_link_reference_errors,
+    resolve_link_reference_params,
+    resolve_link_references,
 )
 from api.models import PersistentAgent
 from api.agent.tools.file_export_helpers import resolve_export_target, write_agent_export
@@ -101,6 +103,7 @@ def get_create_file_tool() -> Dict[str, Any]:
     }
 
 
+@handle_link_reference_errors
 def execute_create_file(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str, Any]:
     content = params.get("content")
     query = params.get("query")
@@ -143,13 +146,10 @@ def execute_create_file(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[
     else:
         content_to_write = content
 
-    try:
-        if document_mime_supports_link_references(mime_type):
-            content_to_write = resolve_link_references(content_to_write, agent)
-        else:
-            resolve_link_reference_params({"content": content_to_write, "mime_type": mime_type}, agent, tool_name="create_file")
-    except LinkReferenceResolutionError as exc:
-        return link_reference_error_response(exc)
+    if mime_type in DOCUMENT_MIME_TYPES:
+        content_to_write = resolve_link_references(content_to_write, agent)
+    else:
+        resolve_link_reference_params({"content": content_to_write, "mime_type": mime_type}, agent, tool_name="create_file")
 
     extension = _infer_extension(path, mime_type)
     result = write_agent_export(

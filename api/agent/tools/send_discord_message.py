@@ -9,7 +9,7 @@ from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from api.agent.files.attachment_helpers import AttachmentResolutionError, resolve_filespace_attachments
 from api.agent.tools.attachment_guidance import SEND_TOOL_ATTACHMENTS_DESCRIPTION
 from api.agent.tools.agent_variables import substitute_variables_with_filespace
-from api.agent.core.link_references import LinkReferenceResolutionError, link_reference_error_response
+from api.agent.core.link_references import handle_link_reference_errors
 from api.models import PersistentAgent
 from api.services.discord_bot import DiscordBotIntegrationError, send_channel_message
 
@@ -54,16 +54,14 @@ def get_send_discord_message_tool() -> Dict[str, Any]:
     }
 
 
+@handle_link_reference_errors
 def execute_send_discord_message(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str, Any]:
     channel_id = str(params.get("channel_id") or "").strip()
     body = str(params.get("message") or "").strip()
     attachment_paths = params.get("attachments")
     if not channel_id:
         return {"status": "error", "message": "channel_id is required."}
-    try:
-        body = substitute_variables_with_filespace(body, agent)
-    except LinkReferenceResolutionError as exc:
-        return link_reference_error_response(exc)
+    body = substitute_variables_with_filespace(body, agent)
     try:
         resolved_attachments = resolve_filespace_attachments(agent, attachment_paths)
     except AttachmentResolutionError as exc:

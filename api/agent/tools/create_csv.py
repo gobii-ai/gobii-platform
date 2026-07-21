@@ -2,7 +2,7 @@ import csv
 import io
 from typing import Any, Dict
 
-from api.agent.core.link_references import LinkReferenceResolutionError, link_reference_error_response, resolve_link_references
+from api.agent.core.link_references import handle_link_reference_errors, resolve_link_references
 from api.models import PersistentAgent
 from api.agent.tools.file_export_helpers import resolve_export_target, write_agent_export
 from .sqlite_query_runner import run_sqlite_select
@@ -53,6 +53,7 @@ def get_create_csv_tool() -> Dict[str, Any]:
     }
 
 
+@handle_link_reference_errors
 def execute_create_csv(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str, Any]:
     csv_text = params.get("csv_text")
     query = params.get("query")
@@ -79,10 +80,7 @@ def execute_create_csv(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
         if not isinstance(csv_text, str) or not csv_text.strip():
             return {"status": "error", "message": "Missing required parameter: csv_text"}
         table = csv.reader(io.StringIO(csv_text))
-    try:
-        table = [[resolve_link_references(value, agent) if isinstance(value, str) else value for value in row] for row in table]
-    except LinkReferenceResolutionError as exc:
-        return link_reference_error_response(exc)
+    table = [[resolve_link_references(value, agent) if isinstance(value, str) else value for value in row] for row in table]
     output = io.StringIO()
     csv.writer(output, lineterminator="\n").writerows(table)
 

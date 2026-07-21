@@ -6,7 +6,7 @@ from html.parser import HTMLParser
 from typing import Any, Dict
 from urllib.parse import unquote_to_bytes
 
-from api.agent.core.link_references import LinkReferenceResolutionError, link_reference_error_response, resolve_link_references
+from api.agent.core.link_references import handle_link_reference_errors, resolve_link_references
 from api.models import PersistentAgent
 from api.agent.tools.file_export_helpers import resolve_export_target, write_agent_export
 from api.agent.tools.agent_variables import substitute_variables_as_data_uris
@@ -513,6 +513,7 @@ def get_create_pdf_tool() -> Dict[str, Any]:
     }
 
 
+@handle_link_reference_errors
 def execute_create_pdf(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str, Any]:
     html = params.get("html")
     if not isinstance(html, str) or not html.strip():
@@ -528,10 +529,7 @@ def execute_create_pdf(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
 
     html = _coerce_markdown_images_to_html(html)
 
-    try:
-        html = resolve_link_references(html, agent)
-    except LinkReferenceResolutionError as exc:
-        return link_reference_error_response(exc)
+    html = resolve_link_references(html, agent)
 
     html = substitute_variables_as_data_uris(html, agent)
 

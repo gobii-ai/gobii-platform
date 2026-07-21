@@ -105,8 +105,6 @@ class LinkReferenceTests(TestCase):
             f"Open {raw_url}.",
             self.agent,
             create=True,
-            source_kind="tool_result",
-            source_object_id="step-html",
         )
 
         reference = PersistentAgentLinkReference.objects.get(agent=self.agent)
@@ -118,7 +116,6 @@ class LinkReferenceTests(TestCase):
         reference = PersistentAgentLinkReference.objects.create(
             agent=self.agent,
             url=url,
-            source_kind=PersistentAgentLinkReference.SourceKind.TOOL_RESULT,
         )
         token = f"$[link:{reference.public_id}]"
         value = {
@@ -134,29 +131,23 @@ class LinkReferenceTests(TestCase):
             },
         )
 
-    def test_registration_deduplicates_and_preserves_exact_url_and_first_source(self):
+    def test_registration_deduplicates_and_preserves_exact_url(self):
         url = "https://items.example.test/42/path?view=full&region=west#details"
         first = rewrite_prompt_urls(
             f"[Item]({url})",
             self.agent,
             create=True,
-            source_kind="inbound_message",
-            source_object_id="message-1",
         )
         second = rewrite_prompt_urls(
             f"<a href='{url}'>Item</a>",
             self.agent,
             create=True,
-            source_kind="tool_result",
-            source_object_id="result-2",
         )
 
         reference = PersistentAgentLinkReference.objects.get(agent=self.agent)
         token = f"$[link:{reference.public_id}]"
         self.assertEqual(reference.url, url)
         self.assertRegex(reference.public_id, r"^L[0123456789ABCDEFGHJKMNPQRSTVWXYZ]{16}$")
-        self.assertEqual(reference.source_kind, "inbound_message")
-        self.assertEqual(reference.source_object_id, "message-1")
         self.assertEqual(PersistentAgentLinkReference.objects.count(), 1)
         self.assertEqual(first, f"[Item]({token})")
         self.assertEqual(second, f"<a href='{token}'>Item</a>")
@@ -173,8 +164,6 @@ class LinkReferenceTests(TestCase):
             url,
             self.agent,
             create=True,
-            source_kind="tool_result",
-            source_object_id="source-step",
         )
         self.assertEqual(rewrite_prompt_urls(url, self.agent, create=False), registered)
 
@@ -184,8 +173,6 @@ class LinkReferenceTests(TestCase):
             url,
             self.agent,
             create=True,
-            source_kind="tool_result",
-            source_object_id="step-1",
         )
 
         text = f"[Profile]({token}) <a href='{token}'>HTML</a> Plain: {token}"
@@ -206,8 +193,6 @@ class LinkReferenceTests(TestCase):
             url,
             self.agent,
             create=True,
-            source_kind="tool_result",
-            source_object_id="step-1",
         )
         reference_id = token.removeprefix("$[link:").removesuffix("]")
         params = {
@@ -233,8 +218,6 @@ class LinkReferenceTests(TestCase):
             url,
             self.agent,
             create=True,
-            source_kind="tool_result",
-            source_object_id="step-1",
         )
         mock_result = {"status": "ok", "profile": "Avery"}
         budget_ctx = SimpleNamespace(
@@ -258,7 +241,7 @@ class LinkReferenceTests(TestCase):
 
     def test_http_request_body_resolves_embedded_references_before_execution(self):
         url = "https://profiles.example.test/avery,chen?view=full#bio"
-        token = rewrite_prompt_urls(url, self.agent, create=True, source_kind="inbound_message")
+        token = rewrite_prompt_urls(url, self.agent, create=True)
 
         self.assertEqual(
             resolve_link_reference_params(
@@ -274,7 +257,6 @@ class LinkReferenceTests(TestCase):
             "https://profiles.example.test/avery?view=full",
             self.agent,
             create=True,
-            source_kind="tool_result",
         )
         cases = (
             ("create_image", {"prompt": f"Render {token}", "file_path": "/exports/a.png"}, "create_image.prompt"),
@@ -319,7 +301,6 @@ class LinkReferenceTests(TestCase):
             "https://profiles.example.test/avery",
             self.agent,
             create=True,
-            source_kind="tool_result",
         )
         cases = (
             ("create_csv", {"csv_text": f"name,url\nAvery,{token}", "file_path": "/exports/a.csv"}),
@@ -348,7 +329,6 @@ class LinkReferenceTests(TestCase):
             "https://profiles.example.test/avery",
             self.agent,
             create=True,
-            source_kind="tool_result",
         )
         public_id = token.removeprefix("$[link:").removesuffix("]")
 
@@ -367,7 +347,7 @@ class LinkReferenceTests(TestCase):
 
     def test_create_csv_resolves_raw_and_query_cells_without_breaking_url_commas(self):
         url = "https://profiles.example.test/avery,chen?view=full#bio"
-        token = rewrite_prompt_urls(url, self.agent, create=True, source_kind="tool_result")
+        token = rewrite_prompt_urls(url, self.agent, create=True)
 
         for params, query_rows in (
             ({"csv_text": f'name,profile\nAvery,"[Open]({token})"\n', "file_path": "/exports/raw.csv"}, None),
@@ -386,7 +366,7 @@ class LinkReferenceTests(TestCase):
 
     def test_create_file_resolves_supported_raw_and_query_documents_and_rejects_code(self):
         url = "https://profiles.example.test/avery?view=full#bio"
-        token = rewrite_prompt_urls(url, self.agent, create=True, source_kind="tool_result")
+        token = rewrite_prompt_urls(url, self.agent, create=True)
         supported = (
             "text/plain", "text/markdown", "text/html", "application/json", "application/ld+json",
             "application/xml", "text/xml", "application/yaml", "text/yaml",
@@ -435,7 +415,7 @@ class LinkReferenceTests(TestCase):
     @patch("api.agent.tools.create_pdf.get_max_file_size", return_value=None)
     def test_create_pdf_resolves_clickable_and_plain_references_but_blocks_assets(self, _get_max_size):
         url = "https://profiles.example.test/avery?view=full#bio"
-        token = rewrite_prompt_urls(url, self.agent, create=True, source_kind="tool_result")
+        token = rewrite_prompt_urls(url, self.agent, create=True)
         html = f"<a href='{token}'>Avery</a><p>{token}</p>"
 
         with patch("weasyprint.HTML") as html_mock, patch(
@@ -464,7 +444,6 @@ class LinkReferenceTests(TestCase):
             "https://other.example.test/item",
             self.other_agent,
             create=True,
-            source_kind="tool_result",
         )
         cases = (
             (execute_create_csv, {"csv_text": "name,url\nMissing,$[link:L0000000000000000]", "file_path": "/exports/a.csv"}),
@@ -484,8 +463,6 @@ class LinkReferenceTests(TestCase):
             "https://other.example.test/1",
             self.other_agent,
             create=True,
-            source_kind="inbound_message",
-            source_object_id="other-message",
         )
         missing = "$[link:L0000000000000000]"
 
@@ -497,7 +474,6 @@ class LinkReferenceTests(TestCase):
             "https://profiles.example.test/valid",
             self.agent,
             create=True,
-            source_kind="tool_result",
         )
         with self.assertRaises(LinkReferenceResolutionError) as raised:
             resolve_link_references(f"{valid} {missing}", self.agent)
@@ -509,8 +485,6 @@ class LinkReferenceTests(TestCase):
             "https://files.example.test/board-pack.pdf",
             self.agent,
             create=True,
-            source_kind="tool_result",
-            source_object_id="source-step",
         )
         public_id = token.removeprefix("$[link:").removesuffix("]")
 
@@ -590,8 +564,6 @@ class LinkReferenceTests(TestCase):
                 url,
                 self.agent,
                 create=True,
-                source_kind="inbound_message",
-                source_object_id="message-7",
             )
 
         self.assertEqual(rendered, url)
@@ -622,8 +594,6 @@ class LinkReferenceTests(TestCase):
                 text,
                 self.agent,
                 create=is_source_bearing_tool(item.tool_name),
-                source_kind="tool_result",
-                source_object_id=item.step_id,
             ),
         )[record.step_id]
 
@@ -656,8 +626,6 @@ class LinkReferenceTests(TestCase):
                 text,
                 self.agent,
                 create=is_source_bearing_tool(item.tool_name),
-                source_kind="tool_result",
-                source_object_id=item.step_id,
             ),
         )[record.step_id]
 
@@ -690,8 +658,6 @@ class LinkReferenceTests(TestCase):
                 text,
                 self.agent,
                 create=is_source_bearing_tool(item.tool_name),
-                source_kind="tool_result",
-                source_object_id=item.step_id,
             ),
         )[record.step_id]
 
@@ -719,7 +685,6 @@ class LinkReferenceTests(TestCase):
         reference = PersistentAgentLinkReference.objects.create(
             agent=self.agent,
             url="https://console.example.test/linked",
-            source_kind=PersistentAgentLinkReference.SourceKind.TOOL_RESULT,
         )
         record = ToolCallResultRecord(
             step_id="00000000-0000-4000-8000-000000000013",
@@ -834,15 +799,11 @@ class LinkReferenceTests(TestCase):
             url,
             self.agent,
             create=True,
-            source_kind="inbound_message",
-            source_object_id="message-1",
         )
         second = rewrite_prompt_urls(
             url,
             self.agent,
             create=True,
-            source_kind="tool_result",
-            source_object_id="result-2",
         )
 
         self.assertEqual(first, second)

@@ -15,7 +15,7 @@ from ..files.attachment_helpers import AttachmentResolutionError, create_message
 from ..files.filespace_service import broadcast_message_attachment_update
 from util.text_sanitizer import normalize_llm_output
 from .agent_variables import substitute_variables_with_filespace
-from api.agent.core.link_references import LinkReferenceResolutionError, link_reference_error_response
+from api.agent.core.link_references import handle_link_reference_errors
 from .attachment_guidance import SEND_TOOL_ATTACHMENTS_DESCRIPTION
 from ...models import (
     PersistentAgent,
@@ -320,6 +320,7 @@ def get_send_chat_tool() -> Dict[str, Any]:
     }
 
 
+@handle_link_reference_errors
 def execute_send_chat_message(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str, Any]:
     """Persist an outbound web chat message for an agent."""
 
@@ -327,10 +328,7 @@ def execute_send_chat_message(agent: PersistentAgent, params: Dict[str, Any]) ->
     # Normalize LLM output: decode escapes, strip control chars, normalize whitespace
     body = normalize_llm_output((raw_body or "").strip())
     # Substitute $[var] placeholders with actual values (e.g., $[/charts/...]).
-    try:
-        body = substitute_variables_with_filespace(body, agent)
-    except LinkReferenceResolutionError as exc:
-        return link_reference_error_response(exc)
+    body = substitute_variables_with_filespace(body, agent)
     if not body:
         return {"status": "error", "message": "Message body is required."}
     if _looks_like_placeholder_body(body):
