@@ -2291,11 +2291,11 @@ class PromptContextBuilderTests(TestCase):
         )
         large_step = PersistentAgentStep.objects.create(
             agent=self.agent,
-            description="Tool call: http_request",
+            description="Tool call: large_result_tool",
         )
         parent_call = PersistentAgentToolCall.objects.create(
             step=large_step,
-            tool_name="http_request",
+            tool_name="large_result_tool",
             tool_params={"url": "https://example.test/data"},
             result=json.dumps({"content": "large-preview-result " * 3000}),
         )
