@@ -4051,6 +4051,37 @@ def _get_message_attachment_paths(message: PersistentAgentMessage) -> List[str]:
     return paths
 
 
+def _format_discord_reply_context(raw_payload: Mapping[str, Any]) -> str:
+    reply_to = raw_payload.get("discord_reply_to")
+    if not isinstance(reply_to, Mapping):
+        return ""
+
+    message_id = str(reply_to.get("message_id") or "").strip()
+    if not message_id:
+        return ""
+    lines = [f"Message ID: {message_id}"]
+    author_name = str(reply_to.get("author_name") or "").strip()
+    if author_name:
+        lines.append(f"Author: {author_name}")
+    content = str(reply_to.get("content") or "").strip()
+    if content:
+        lines.extend(["Content:", content])
+    elif reply_to.get("unavailable"):
+        lines.append("Content: (referenced message is unavailable or deleted)")
+    else:
+        lines.append("Content: (no text content)")
+    attachment_filenames = reply_to.get("attachment_filenames")
+    if isinstance(attachment_filenames, list):
+        filenames = [
+            str(filename).strip()
+            for filename in attachment_filenames
+            if str(filename).strip()
+        ]
+        if filenames:
+            lines.append(f"Attachments: {', '.join(filenames)}")
+    return "\n".join(lines)
+
+
 def _extract_attachment_paths_from_raw_payload(raw_payload: object) -> List[str]:
     if not isinstance(raw_payload, dict):
         return []
@@ -4725,6 +4756,17 @@ def _get_unified_history_prompt(
                     content = f"{content}\n{trust_reminder}"
                 components["content"] = content
 
+            if channel == CommsChannel.DISCORD:
+                discord_channel_id = str(raw_payload.get("discord_channel_id") or "").strip()
+                if discord_channel_id:
+                    components["discord_channel_id"] = discord_channel_id
+                discord_message_id = str(raw_payload.get("discord_message_id") or "").strip()
+                if discord_message_id:
+                    components["discord_message_id"] = discord_message_id
+                discord_reply_context = _format_discord_reply_context(raw_payload)
+                if discord_reply_context:
+                    components["discord_reply_context"] = discord_reply_context
+
         if attachment_paths:
             components["attachments"] = "\n".join(f"- $[{path}]" for path in attachment_paths)
 
@@ -4833,6 +4875,9 @@ def _get_unified_history_prompt(
             "description": 2, # Medium priority for step descriptions
             "header": 3,      # High priority - message routing info
             "webhook_meta": 3, # High priority - webhook request metadata
+            "discord_channel_id": 3, # High priority - required to target Discord actions
+            "discord_message_id": 3, # High priority - required to target Discord reactions
+            "discord_reply_context": 2, # Medium priority - preserves the message a Discord reply references
             "reply_to_message_id": 2,  # Medium priority - needed for explicit email threading
             "subject": 2,     # Medium priority - email subject
             "body": 1,        # Low priority - email body (can be long and shrunk)

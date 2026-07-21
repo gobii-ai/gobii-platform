@@ -14,7 +14,9 @@ from django.urls import reverse
 from django.utils import timezone
 
 from api.agent.system_skills.registry import get_system_skill_definition
+from api.agent.core.prompt_context import _format_discord_reply_context, build_prompt_context
 from api.agent.files.attachment_helpers import ResolvedAttachment
+from api.agent.tools.add_discord_reaction import execute_add_discord_reaction
 from api.agent.tools.discord_channel_subscriptions import execute_discord_channel_subscriptions
 from api.agent.tools.send_discord_message import execute_send_discord_message
 from api.agent.files.filespace_service import write_bytes_to_dir
@@ -27,12 +29,14 @@ from api.models import (
     PersistentAgentDiscordOAuthSession,
     PersistentAgentDiscordWebhook,
     PersistentAgentDiscordWebhookEcho,
+    PersistentAgentEnabledTool,
     PersistentAgentMessage,
     PersistentAgentMessageAttachment,
     PersistentAgentSystemSkillState,
     PersistentAgentSystemStep,
 )
 from api.services.discord_bot import (
+    add_discord_reaction,
     DiscordBotIntegrationError,
     DiscordGatewayMessage,
     discover_channels,
@@ -133,7 +137,7 @@ class NativeDiscordBotTests(TestCase):
             auth_query["scope"],
             ["identify guilds bot applications.commands"],
         )
-        self.assertEqual(auth_query["permissions"], ["536939520"])
+        self.assertEqual(auth_query["permissions"], ["536939584"])
         self.assertEqual(auth_query["response_type"], ["code"])
         session = PersistentAgentDiscordOAuthSession.objects.get(agent=self.agent)
         post_mock.return_value = _response({"access_token": "oauth-token"})
@@ -393,6 +397,82 @@ class NativeDiscordBotTests(TestCase):
         self.assertEqual(gateway_message.embeds, [])
 
     @tag("batch_agent_webhooks")
+    def test_gateway_message_builder_captures_resolved_reply_context(self):
+        referenced = SimpleNamespace(
+            content="original <@123456789012345678>",
+            clean_content="original @Ada",
+            author=SimpleNamespace(id=301, display_name="Ada", name="ada"),
+            attachments=[SimpleNamespace(filename="brief.pdf")],
+        )
+        message = SimpleNamespace(
+            id=500,
+            channel=SimpleNamespace(id=10, name="general"),
+            guild=SimpleNamespace(id=100, name="Guild"),
+            author=SimpleNamespace(id=300, display_name="Human", name="human", bot=False),
+            content="this is my reply",
+            clean_content="this is my reply",
+            attachments=None,
+            embeds=None,
+            webhook_id=None,
+            type=SimpleNamespace(value=19),
+            reference=SimpleNamespace(
+                message_id=499,
+                channel_id=10,
+                guild_id=100,
+                resolved=referenced,
+                cached_message=None,
+            ),
+        )
+
+        gateway_message = build_gateway_message(message)
+
+        self.assertEqual(
+            gateway_message.reply_to,
+            {
+                "message_id": "499",
+                "channel_id": "10",
+                "guild_id": "100",
+                "author_id": "301",
+                "author_name": "Ada",
+                "content": "original @Ada",
+                "attachment_filenames": ["brief.pdf"],
+                "unavailable": False,
+            },
+        )
+        message.type = SimpleNamespace(value=0)
+        self.assertIsNone(build_gateway_message(message).reply_to)
+
+    @tag("batch_agent_webhooks")
+    def test_gateway_message_builder_preserves_unavailable_reply_id(self):
+        message = SimpleNamespace(
+            id=500,
+            channel=SimpleNamespace(id=10, name="general"),
+            guild=SimpleNamespace(id=100, name="Guild"),
+            author=SimpleNamespace(id=300, display_name="Human", name="human", bot=False),
+            content="reply to a deleted message",
+            clean_content="reply to a deleted message",
+            attachments=None,
+            embeds=None,
+            webhook_id=None,
+            type=SimpleNamespace(value=19),
+            reference=SimpleNamespace(
+                message_id=499,
+                channel_id=10,
+                guild_id=100,
+                resolved=None,
+                cached_message=None,
+            ),
+        )
+
+        gateway_message = build_gateway_message(message)
+
+        self.assertEqual(gateway_message.reply_to["message_id"], "499")
+        self.assertTrue(gateway_message.reply_to["unavailable"])
+        prompt_context = _format_discord_reply_context({"discord_reply_to": gateway_message.reply_to})
+        self.assertIn("Message ID: 499", prompt_context)
+        self.assertIn("referenced message is unavailable or deleted", prompt_context)
+
+    @tag("batch_agent_webhooks")
     @patch("api.services.discord_bot.schedule_discord_inbound_processing")
     def test_inbound_gateway_message_persists_clean_body_and_raw_discord_content(self, schedule_mock):
         guild = self._guild()
@@ -422,8 +502,64 @@ class NativeDiscordBotTests(TestCase):
         self.assertFalse(result["ignored"])
         stored = PersistentAgentMessage.objects.get(id=result["message_id"])
         self.assertEqual(stored.body, "please help @Ada")
+        self.assertEqual(stored.raw_payload["source_label"], "Human")
         self.assertEqual(stored.raw_payload["discord_content"], "please help @Ada")
         self.assertEqual(stored.raw_payload["discord_raw_content"], "please help <@123456789012345678>")
+
+    @tag("batch_agent_webhooks")
+    @patch("api.agent.core.prompt_context.ensure_steps_compacted")
+    @patch("api.agent.core.prompt_context.ensure_comms_compacted")
+    @patch("api.services.discord_bot.schedule_discord_inbound_processing")
+    def test_inbound_reply_context_is_persisted_and_rendered_for_agent(
+        self,
+        schedule_mock,
+        _comms_compacted_mock,
+        _steps_compacted_mock,
+    ):
+        guild = self._guild()
+        PersistentAgentDiscordChannelSubscription.objects.create(
+            agent=self.agent,
+            guild=guild,
+            channel_id="10",
+            channel_name="general",
+        )
+        schedule_mock.return_value = {"debounced": True, "debounce_seconds": 15}
+        message = DiscordGatewayMessage(
+            message_id="500",
+            channel_id="10",
+            channel_name="general",
+            guild_id="100",
+            guild_name="Guild",
+            author_id="300",
+            author_name="Human",
+            content="I agree with that",
+            attachments=[],
+            embeds=[],
+            reply_to={
+                "message_id": "499",
+                "channel_id": "10",
+                "guild_id": "100",
+                "author_id": "301",
+                "author_name": "Ada",
+                "content": "Ship the updated report",
+                "attachment_filenames": ["report.pdf"],
+                "unavailable": False,
+            },
+        )
+
+        result = ingest_gateway_message(message)
+        stored = PersistentAgentMessage.objects.get(id=result["message_id"])
+        self.assertEqual(stored.raw_payload["discord_reply_to"]["message_id"], "499")
+
+        context, _, _ = build_prompt_context(self.agent)
+        user_prompt = next(item["content"] for item in context if item["role"] == "user")
+        self.assertIn("<discord_message_id>500</discord_message_id>", user_prompt)
+        self.assertIn("<discord_channel_id>10</discord_channel_id>", user_prompt)
+        self.assertIn("<discord_reply_context>", user_prompt)
+        self.assertIn("Message ID: 499", user_prompt)
+        self.assertIn("Author: Ada", user_prompt)
+        self.assertIn("Ship the updated report", user_prompt)
+        self.assertIn("Attachments: report.pdf", user_prompt)
 
     @tag("batch_agent_webhooks")
     @patch("api.agent.comms.message_service.requests.head")
@@ -801,6 +937,159 @@ class NativeDiscordBotTests(TestCase):
         schedule_mock.assert_not_called()
 
     @tag("batch_agent_webhooks")
+    @patch("api.services.discord_bot.requests.put")
+    def test_add_discord_reaction_tool_encodes_unicode_and_custom_emoji(self, put_mock):
+        guild = self._guild()
+        PersistentAgentDiscordChannelSubscription.objects.create(
+            agent=self.agent,
+            guild=guild,
+            channel_id="10",
+            channel_name="general",
+        )
+        put_mock.return_value = _response(status_code=204)
+
+        unicode_result = execute_add_discord_reaction(
+            self.agent,
+            {
+                "channel_id": "10",
+                "message_id": "500",
+                "emoji": "👍",
+                "will_continue_work": False,
+            },
+        )
+        custom_result = execute_add_discord_reaction(
+            self.agent,
+            {
+                "channel_id": "10",
+                "message_id": "501",
+                "emoji": "<a:party:123>",
+                "will_continue_work": True,
+            },
+        )
+
+        self.assertEqual(unicode_result["status"], "success")
+        self.assertEqual(unicode_result["emoji"], "👍")
+        self.assertEqual(unicode_result["discord_message_id"], "500")
+        self.assertTrue(unicode_result["auto_sleep_ok"])
+        self.assertEqual(custom_result["status"], "success")
+        self.assertEqual(custom_result["emoji"], "party:123")
+        self.assertNotIn("auto_sleep_ok", custom_result)
+        self.assertIn(
+            "/channels/10/messages/500/reactions/%F0%9F%91%8D/@me",
+            put_mock.call_args_list[0].args[0],
+        )
+        self.assertIn(
+            "/channels/10/messages/501/reactions/party%3A123/@me",
+            put_mock.call_args_list[1].args[0],
+        )
+        self.assertEqual(
+            put_mock.call_args_list[0].kwargs["headers"]["Authorization"],
+            "Bot discord-bot-token",
+        )
+
+    @tag("batch_agent_webhooks")
+    @patch("api.services.discord_bot.requests.put")
+    def test_add_discord_reaction_requires_active_subscription(self, put_mock):
+        result = execute_add_discord_reaction(
+            self.agent,
+            {
+                "channel_id": "10",
+                "message_id": "500",
+                "emoji": "👍",
+                "will_continue_work": False,
+            },
+        )
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("No active native Discord subscription", result["message"])
+        put_mock.assert_not_called()
+
+    @tag("batch_agent_webhooks")
+    @patch("api.services.discord_bot.requests.put")
+    def test_add_discord_reaction_returns_permission_repair_guidance(self, put_mock):
+        guild = self._guild()
+        PersistentAgentDiscordChannelSubscription.objects.create(
+            agent=self.agent,
+            guild=guild,
+            channel_id="10",
+            channel_name="general",
+        )
+        put_mock.return_value = _response(status_code=403)
+
+        result = execute_add_discord_reaction(
+            self.agent,
+            {
+                "channel_id": "10",
+                "message_id": "500",
+                "emoji": "👍",
+                "will_continue_work": False,
+            },
+        )
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("Add Reactions and Read Message History", result["message"])
+        self.assertIn("reconnect Discord", result["message"])
+
+    @tag("batch_agent_webhooks")
+    @patch("api.services.discord_bot.requests.put")
+    def test_add_discord_reaction_reports_missing_message_and_rejected_emoji(self, put_mock):
+        guild = self._guild()
+        PersistentAgentDiscordChannelSubscription.objects.create(
+            agent=self.agent,
+            guild=guild,
+            channel_id="10",
+            channel_name="general",
+        )
+        put_mock.side_effect = [
+            _response(status_code=404),
+            _response(status_code=400),
+        ]
+
+        missing_result = execute_add_discord_reaction(
+            self.agent,
+            {
+                "channel_id": "10",
+                "message_id": "missing",
+                "emoji": "👍",
+                "will_continue_work": False,
+            },
+        )
+        invalid_result = execute_add_discord_reaction(
+            self.agent,
+            {
+                "channel_id": "10",
+                "message_id": "500",
+                "emoji": "not-an-emoji",
+                "will_continue_work": False,
+            },
+        )
+
+        self.assertEqual(missing_result["status"], "error")
+        self.assertIn("could not find that message", missing_result["message"])
+        self.assertEqual(invalid_result["status"], "error")
+        self.assertIn("rejected that emoji", invalid_result["message"])
+
+    @tag("batch_agent_webhooks")
+    @patch("api.services.discord_bot.requests.put")
+    def test_add_discord_reaction_rejects_malformed_custom_emoji(self, put_mock):
+        guild = self._guild()
+        PersistentAgentDiscordChannelSubscription.objects.create(
+            agent=self.agent,
+            guild=guild,
+            channel_id="10",
+            channel_name="general",
+        )
+
+        with self.assertRaisesRegex(ValueError, "Custom Discord emoji"):
+            add_discord_reaction(
+                self.agent,
+                channel_id="10",
+                message_id="500",
+                emoji="<:party:not-an-id>",
+            )
+        put_mock.assert_not_called()
+
+    @tag("batch_agent_webhooks")
     @patch.dict(os.environ, {"GOBII_ENCRYPTION_KEY": "native-discord-tests"}, clear=False)
     @patch("api.services.discord_bot.requests.get")
     @patch("api.services.discord_bot.requests.post")
@@ -1021,7 +1310,7 @@ class NativeDiscordBotTests(TestCase):
         self.assertIn("/console/api/discord/oauth/start/", result["connect_url"])
         self.assertEqual(
             result["bot_invite_url"],
-            "https://discord.com/oauth2/authorize?client_id=discord-client&scope=bot+applications.commands&permissions=536939520",
+            "https://discord.com/oauth2/authorize?client_id=discord-client&scope=bot+applications.commands&permissions=536939584",
         )
         self.assertTrue(result["auto_sleep_ok"])
 
@@ -1044,6 +1333,7 @@ class NativeDiscordBotTests(TestCase):
 
         self.assertIn("discord_channel_subscriptions", skill.tool_names)
         self.assertIn("send_discord_message", skill.tool_names)
+        self.assertIn("add_discord_reaction", skill.tool_names)
         self.assertNotIn("pipedream_trigger_subscriptions", skill.tool_names)
         self.assertIn("Use the native Gobii Discord bot tools", skill.prompt_instructions)
         self.assertIn("immediately call `discord_channel_subscriptions`", skill.prompt_instructions)
@@ -1054,6 +1344,7 @@ class NativeDiscordBotTests(TestCase):
         self.assertIn("To upload files", skill.prompt_instructions)
         self.assertIn("filespace paths or $[/path]", skill.prompt_instructions)
         self.assertIn("Body text never attaches files", skill.prompt_instructions)
+        self.assertIn("Use `add_discord_reaction`", skill.prompt_instructions)
 
     @tag("batch_agent_webhooks")
     def test_discord_app_api_returns_agent_state(self):
@@ -1280,6 +1571,35 @@ class NativeDiscordBotTests(TestCase):
         self.assertGreaterEqual(new_state.last_used_at, old_state.last_used_at)
 
     @tag("batch_agent_webhooks")
+    def test_discord_reaction_migration_backfills_enabled_skill_agents(self):
+        migration = importlib.import_module("api.migrations.0431_enable_discord_reaction_tool")
+        PersistentAgentSystemSkillState.objects.create(
+            agent=self.agent,
+            skill_key="discord_native",
+            is_enabled=True,
+        )
+
+        class Apps:
+            @staticmethod
+            def get_model(app_label, model_name):
+                self.assertEqual(app_label, "api")
+                models = {
+                    "PersistentAgentEnabledTool": PersistentAgentEnabledTool,
+                    "PersistentAgentSystemSkillState": PersistentAgentSystemSkillState,
+                }
+                return models[model_name]
+
+        migration.enable_discord_reaction_tool(Apps(), None)
+        migration.enable_discord_reaction_tool(Apps(), None)
+
+        enabled = PersistentAgentEnabledTool.objects.get(
+            agent=self.agent,
+            tool_full_name="add_discord_reaction",
+        )
+        self.assertEqual(enabled.tool_server, "builtin")
+        self.assertEqual(enabled.tool_name, "add_discord_reaction")
+
+    @tag("batch_agent_webhooks")
     @patch("api.services.discord_bot.requests.get")
     def test_discover_channels_returns_bot_invite_url_when_bot_cannot_list_channels(self, get_mock):
         self._guild()
@@ -1293,5 +1613,5 @@ class NativeDiscordBotTests(TestCase):
         self.assertIn("cannot list channels", result["message"])
         self.assertEqual(
             result["bot_invite_url"],
-            "https://discord.com/oauth2/authorize?client_id=discord-client&scope=bot+applications.commands&permissions=536939520",
+            "https://discord.com/oauth2/authorize?client_id=discord-client&scope=bot+applications.commands&permissions=536939584",
         )

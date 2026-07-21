@@ -357,9 +357,7 @@ def _build_viewer_message_feedback_lookup(
     )
 
 
-def _discord_outbound_channel_label(message: PersistentAgentMessage, conversation) -> str:
-    if not message.is_outbound:
-        return ""
+def _discord_channel_label(message: PersistentAgentMessage, conversation) -> str:
     payload = message.raw_payload if isinstance(message.raw_payload, Mapping) else {}
     channel_name = payload.get("discord_channel_name")
     if isinstance(channel_name, str) and channel_name.strip():
@@ -502,8 +500,11 @@ def _serialize_message(
     attachments = [_serialize_attachment(att, message.owner_agent_id) for att in message.attachments.all()]
     conversation = message.conversation
     source_kind, source_label = get_message_source_metadata(message.raw_payload)
-    if channel.lower() == CommsChannel.DISCORD.value and message.is_outbound and not source_label:
-        source_label = _discord_outbound_channel_label(message, conversation)
+    discord_channel_label = ""
+    if channel.lower() == CommsChannel.DISCORD.value:
+        discord_channel_label = _discord_channel_label(message, conversation)
+        if message.is_outbound and not source_label:
+            source_label = discord_channel_label
     webhook_meta = get_webhook_timeline_metadata(message.raw_payload)
     peer_link_id: str | None = None
     is_peer_dm = False
@@ -548,7 +549,13 @@ def _serialize_message(
         if not sender_name:
             sender_name = sender_address
     if source_label and not message.is_outbound:
-        sender_name = source_label
+        if channel.lower() == CommsChannel.DISCORD.value:
+            payload = message.raw_payload if isinstance(message.raw_payload, Mapping) else {}
+            sender_name = str(payload.get("discord_author_name") or "").strip()
+            if not sender_name:
+                sender_name = source_label.removesuffix(f" in {discord_channel_label}").strip()
+        else:
+            sender_name = source_label
 
     body_html = _message_body_html(message, channel, attachments)
     subject = _message_subject(message, channel)
@@ -577,6 +584,7 @@ def _serialize_message(
             "senderAddress": sender_address,
             "sourceKind": source_kind,
             "sourceLabel": source_label,
+            "channelLabel": discord_channel_label or None,
             "webhookMeta": webhook_meta,
             "viewerFeedback": feedback_lookup.get(message.id) if feedback_lookup else None,
         },

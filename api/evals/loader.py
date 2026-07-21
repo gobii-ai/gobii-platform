@@ -12,6 +12,7 @@ from api.evals.scenarios.google_sheets_native import GOOGLE_SHEETS_NATIVE_SCENAR
 from api.evals.scenarios.apollo_native import APOLLO_NATIVE_SCENARIO_SLUGS, APOLLO_NATIVE_SUITE_SLUG
 from api.evals.scenarios.recruitment_sourcing import RECRUITMENT_SOURCING_SCENARIO_SLUGS, RECRUITMENT_SOURCING_SUITE_SLUG
 from api.evals.scenarios.hubspot_native import HUBSPOT_NATIVE_SCENARIO_SLUGS, HUBSPOT_NATIVE_SUITE_SLUG
+from api.evals.scenarios.discord_native import DISCORD_NATIVE_SCENARIO_SLUGS, DISCORD_NATIVE_SUITE_SLUG
 from api.evals.scenarios.image_generation import IMAGE_GENERATION_SCENARIO_SLUGS, IMAGE_GENERATION_SUITE_SLUG
 from api.evals.scenarios.responsibility_boundaries import RESPONSIBILITY_BOUNDARY_SCENARIO_SLUGS, RESPONSIBILITY_BOUNDARY_SUITE_SLUG
 from api.evals.scenarios.hallucinated_links import HALLUCINATED_LINK_SCENARIO_SLUGS, HALLUCINATED_LINKS_SUITE_SLUG
@@ -106,6 +107,11 @@ register_builtin_suites(
             slug=HUBSPOT_NATIVE_SUITE_SLUG,
             description="Native HubSpot system-skill evals over mocked HubSpot REST APIs.",
             scenario_slugs=HUBSPOT_NATIVE_SCENARIO_SLUGS,
+        ),
+        EvalSuite(
+            slug=DISCORD_NATIVE_SUITE_SLUG,
+            description="Native Discord reply-context and reaction behavior over the real agent harness.",
+            scenario_slugs=DISCORD_NATIVE_SCENARIO_SLUGS,
         ),
         EvalSuite(
             slug=IMAGE_GENERATION_SUITE_SLUG,

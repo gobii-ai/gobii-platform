@@ -856,11 +856,12 @@ DISCORD_NATIVE_SYSTEM_SKILL = SystemSkillDefinition(
     skill_key=DISCORD_NATIVE_SYSTEM_SKILL_KEY,
     name="Discord",
     search_summary="Provision inbound Discord server/channel subscriptions through the native Gobii bot.",
-    tool_names=("discord_channel_subscriptions", "send_discord_message"),
+    tool_names=("discord_channel_subscriptions", "send_discord_message", "add_discord_reaction"),
     enables=(
         "receive Discord channel messages through the native Gobii Discord bot",
         "discover Discord guild channels claimed by the agent owner",
         "send Discord replies through Gobii bot webhooks using the agent name and avatar",
+        "add emoji reactions to Discord messages in subscribed channels",
         "inspect and disable Discord channel subscriptions",
         "turn selected Discord channels into agent conversations",
     ),
@@ -898,6 +899,9 @@ DISCORD_NATIVE_SYSTEM_SKILL = SystemSkillDefinition(
         "Use `send_discord_message` for outbound Discord replies to subscribed channels. Pass `channel_id`, `message`, and the correct `will_continue_work` value. "
         f"To upload files: {SEND_TOOL_ATTACHMENTS_DESCRIPTION} "
         "The backend sends through a channel webhook using the agent's name and avatar.\n"
+        "Use `add_discord_reaction` to react to a Discord message when a reaction is appropriate or explicitly requested. "
+        "Pass the subscribed `channel_id`, the message's `discord_message_id` as `message_id`, one Unicode or Discord custom emoji, and the correct `will_continue_work` value. "
+        "This tool only adds the Gobii bot's own reaction; it does not remove or manage other reactions.\n"
         "Use `list` before creating duplicates when the current subscription state is unclear. Use `disable` only when the user asks to stop receiving messages from a subscribed channel.\n"
         "If channel discovery says the Gobii bot cannot list channels, send the returned `bot_invite_url` as a fallback repair link and ask the user to install the bot in the target server before retrying discovery."
     ),
