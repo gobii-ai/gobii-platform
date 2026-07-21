@@ -51,7 +51,7 @@ _PROGRESS_PREFIX_RE = re.compile(
     re.IGNORECASE,
 )
 _INTERNAL_PROGRESS_RE = re.compile(
-    r"\b(?:the user|already greeted|actual research|tool|tools|parallel|compile the results|extract the data|"
+    r"\b(?:the user|already greeted|actual research|parallel|compile the results|extract the data|"
     r"mark the plan complete|plan complete|delivered message|wrap up|left the last cycle mid-stream|"
     r"deliver the final report now|want to verify|actually scraping|scrape results|inspect the actual|"
     r"real data is coming back|got what i need|let'?s (?:dig up|fetch|find|get|grab|look up|pull|research|search)|let me (?:also |now |actually |just |quickly |then )?(?:grab|fetch|find|investigate|check|pull|get|look|search|research|query|verify|analy[sz]e|compile|process|inspect|fix|patch|clean(?: up)?|seed|register|do (?:a |the |thorough |proper |additional |more |some |a few |new )?(?:search(?:es)?|queries|lookups?|cleanup|clean up))|let me send it over|let me end planning|"
@@ -294,7 +294,7 @@ def get_send_chat_tool() -> Dict[str, Any]:
                     "body": {
                         "type": "string",
                         "description": (
-                            "Natural recipient text; no dash punctuation between phrases. Keep chat/outreach light. Reports comparing 4+ peers use one linked table: hyperlink each row label with provided item/detail links; don't substitute source/feed links or link other rows. "
+                            "Natural recipient text; no dash punctuation between phrases. Keep chat/outreach light. Reports comparing 4+ peers use one table. "
                             "Do not pass tool-call/XML syntax; it is sent literally."
                         ),
                     },

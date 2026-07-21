@@ -233,8 +233,6 @@ def prepare_tool_results_for_prompt(
         if "$[link:" in f"{context_hint or ''}{preview_text or ''}":
             context_hint = _mark_missing_item_links(context_hint or "") or None
             preview_text = _mark_missing_item_links(preview_text or "")
-            link_note = "[LINK OUTPUT: Only adjacent `$[link:id]` values are usable URLs. Copy them exactly; records without one stay unlinked. Omit hosts, paths, slugs, and IDs.]"
-            preview_text = f"{preview_text}\n{link_note}" if preview_text else link_note
 
         is_scrape_markdown = _is_scrape_as_markdown_tool(record.tool_name)
         meta_text = _format_meta_text(

@@ -1524,7 +1524,7 @@ def _row_url_reporting_note(rows: List[Dict[str, Any]]) -> str:
         return ""
 
     field_names = ", ".join(sorted(url_fields)[:4])
-    return f" [!] REPORTING: Link column(s): {field_names}. Use returned item URLs exactly; records without one stay unlinked."
+    return f" [!] Item URL column(s): {field_names}."
 
 
 def _clean_statement(statement: str) -> Optional[str]:

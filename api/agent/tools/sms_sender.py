@@ -61,7 +61,7 @@ def get_send_sms_tool() -> Dict[str, Any]:
                     },
                     "body": {
                         "type": "string",
-                        "description": "SMS content. Use provided link references unchanged; leave items without one unlinked.",
+                        "description": "SMS content.",
                     },
                     "attachments": {
                         "type": "array",

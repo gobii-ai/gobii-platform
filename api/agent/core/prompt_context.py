@@ -3224,7 +3224,7 @@ def _get_formatting_guidance() -> str:
 
     return (
         "Formatting guidance:\n"
-        "Use the matching surface; be direct and sourced. Requested item/detail links are required: make provided references clickable; don't substitute source/feed links or link other entities.\n\n"
+        "Use the matching surface; be direct and sourced.\n\n"
         "<web_chat>\n"
         f"{_get_web_chat_formatting_guidance()}\n"
         "</web_chat>\n\n"
@@ -3755,8 +3755,8 @@ def _get_system_instruction(
         "Do not invent work, results, preferences, or personal experiences.\n\n"
 
         "## Output Rules\n\n"
-        "Keep chat/outreach light. Owner reports on 4+ peers need resolved/total and one table with requested fields plus provided item/detail links where available; keep other rows unlinked. Source/feed links do not substitute for item links. For finite sets, grouped discovery isn't coverage: resolve/source each requested field. Label blockers partial; separate sourced unavailability from research gaps. Ground facts, numbers, units, and URLs in tool results; never relabel/convert units unless asked. Present requested data directly; omit unrelated/unavailable fields and follow-up offers after simple facts, prices, statuses, or lookups. "
-        "`$[link:id]` is the whole exact URL, not a slug/file ID. Use it directly as a URL parameter; Markdown: `[label]($[link:id])`. Never ask to reveal/search it or add anything inside its destination. Requested links are required; through filtering/aggregation, keep each reference and link its item label; leave unlinked entities unlinked. "
+        "Keep chat/outreach light. Owner reports on 4+ peers need resolved/total and one table with requested fields. For finite sets, grouped discovery isn't coverage: resolve/source each requested field. Label blockers partial; separate sourced unavailability from research gaps. Ground facts, numbers, units, and URLs in tool results; never relabel/convert units unless asked. Present requested data directly; omit unrelated/unavailable fields and follow-up offers after simple facts, prices, statuses, or lookups. "
+        "Link references such as `$[link:L…]` are opaque, complete URL placeholders that the runtime resolves after the tool call. When one is supplied for an item, copy it verbatim as the entire destination and make the item label clickable: `[label]($[link:L…])`. Never extract the `L…` ID, prepend a domain, append a path/query, or replace the reference with a URL inferred from an item ID or slug. If an item has no link reference, leave it unlinked unless a tool result or API specification explicitly provides a URL template for constructing it. Source/feed links do not substitute for item/detail links. Requested links are required; through filtering/aggregation, keep each reference with its item. "
         "Charts: create only when requested/materially useful. "
         "Paste create_chart result.inline/result.inline_html in the message; do not attach/read charts or invent paths, hashes, image tags, or <img> URLs. "
         "Use create_csv for tabular exports, create_pdf for PDFs, and create_file for other text/doc formats; create_file query mode must return exactly one row and one column.\n\n"
@@ -3766,7 +3766,7 @@ def _get_system_instruction(
         f"File uploads are {'' if settings.ALLOW_FILE_UPLOAD else 'not'} supported. "
         "Do not download or upload files unless absolutely necessary or explicitly requested by the user. "
 
-        "## Tool Rules\n\n```\nopaque identifiers -> copy exposed tool names and supplied endpoints/paths/IDs/placeholders/link references character-for-character; never shorten or normalize\n"
+        "## Tool Rules\n\n```\nopaque identifiers -> copy exposed tool names and supplied endpoints/paths/IDs/placeholders character-for-character; never shorten or normalize\n"
         "small result -> answer; exact URL -> requested tool; custom-tool URLs -> runtime params, no prefetch\n"
         "public exact URL + http/scrape tool callable -> http_request or scrape directly; spawn_web_task only after access/render/login blockage\n"
         "exact docs/blog/changelog/release-notes URL -> scrape_as_markdown or http_request first; never spawn_web_task first just because it is a webpage or app URL\n"
@@ -3969,7 +3969,7 @@ SMS guidelines:
 Keep messages concise—under 160 characters when possible, though longer is fine when needed.
 No markdown formatting. Easy on the emojis and special characters.
 Avoid sending duplicates or messaging too frequently.
-Keep content appropriate and carrier-compliant (no hate speech, SHAFT content, or profanity—censor if needed: f***, s***).\nLinks must use complete URLs already provided or exact $[link:id] tokens; never construct one.
+Keep content appropriate and carrier-compliant (no hate speech, SHAFT content, or profanity—censor if needed: f***, s***).
              """)
     return ""
 

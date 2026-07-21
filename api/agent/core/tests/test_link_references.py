@@ -665,7 +665,7 @@ class LinkReferenceTests(TestCase):
         self.assertIn("name: Alice", prompt_info.meta)
         self.assertNotIn("CSV DATA", prompt_info.meta)
         self.assertNotIn("Archive note, routine", prompt_info.preview_text)
-        self.assertIn("LINK OUTPUT", prompt_info.preview_text)
+        self.assertNotIn("LINK OUTPUT", prompt_info.preview_text)
 
         later_prompt_info = prepare_tool_results_for_prompt(
             [record],
@@ -812,12 +812,16 @@ class LinkReferenceTests(TestCase):
     def test_system_prompt_has_one_reference_rule(self):
         prompt = _get_system_instruction(self.agent, is_first_run=False)
 
-        self.assertEqual(prompt.count("`$[link:id]` is the whole exact URL"), 1)
-        self.assertIn("whole exact URL, not a slug/file ID", prompt)
-        self.assertIn("Markdown: `[label]($[link:id])`", prompt)
+        self.assertEqual(prompt.count("Link references such as `$[link:L…]`"), 1)
+        self.assertIn("opaque, complete URL placeholders", prompt)
+        self.assertIn("runtime resolves after the tool call", prompt)
+        self.assertIn("copy it verbatim as the entire destination and make the item label clickable", prompt)
+        self.assertIn("Never extract the `L…` ID, prepend a domain, append a path/query", prompt)
+        self.assertIn("unless a tool result or API specification explicitly provides a URL template", prompt)
+        self.assertEqual(prompt.count("Source/feed links do not substitute for item/detail links"), 1)
         self.assertIn("Requested links are required", prompt)
-        self.assertIn("keep each reference and link its item label", prompt)
-        self.assertIn("leave unlinked entities unlinked", prompt)
+        self.assertIn("keep each reference with its item", prompt)
+        self.assertIn("If an item has no link reference, leave it unlinked", prompt)
         self.assertIn("exact URL -> requested tool; custom-tool URLs -> runtime params, no prefetch", prompt)
         self.assertNotIn("Message delivery blocked", prompt)
 

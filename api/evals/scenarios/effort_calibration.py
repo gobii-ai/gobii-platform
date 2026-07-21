@@ -102,7 +102,7 @@ _SQL_TOOL_RESULT_TEXT_RE = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 _SQL_RESULT_ID_RE = re.compile(r"\bresult_id\s*=\s*['\"]([^'\"]+)['\"]", re.IGNORECASE)
-_HEADING_RE = re.compile(r"(?im)^\s{0,3}#{1,4}\s+\S|^\s*\*\*[^*\n]{3,80}\*\*:?\s*$|<h[1-4]\b")
+_HEADING_RE = re.compile(r"(?im)^\s{0,3}#{1,4}\s+\S|^\s*\*\*[^*\n]{3,80}\*\*(?::|,)?(?:\s+\S.*)?$|<h[1-4]\b")
 _LIST_OR_TABLE_RE = re.compile(
     r"(?im)^\s*(?:[-*]|\d+[.)])\s+\S|^\s*\*\*\d+[.)]\s+\S|^\s*\|.+\|\s*$|<\s*(?:ul|ol|li|table)\b"
 )

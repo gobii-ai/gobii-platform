@@ -493,6 +493,28 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
 
         self.assertTrue(ok, summary)
 
+    def test_hierarchical_report_shape_accepts_bold_lead_in_sections(self):
+        ok, summary = _hierarchical_report_shape(
+            (
+                "Here's what's new with Northstar Robotics right now:\n\n"
+                "**Atlas Routing System Launch**, Atlas coordinates warehouse robots from multiple vendors. "
+                "Source: https://northstar.example.test/blog/atlas-launch\n\n"
+                "**$42M Series B**, the funding supports deployments in food and pharma logistics. "
+                "Source: https://news.example.test/northstar-series-b\n\n"
+                "**Early Customer Results**, a regional distributor improved pick-pack cycles by 18 percent."
+            ),
+            source_urls=[
+                "https://northstar.example.test/blog/atlas-launch",
+                "https://news.example.test/northstar-series-b",
+            ],
+            min_source_count=2,
+            min_chars=150,
+            max_chars=1000,
+            required_any_groups=(("Northstar Robotics",),),
+        )
+
+        self.assertTrue(ok, summary)
+
     def test_current_company_report_requires_product_funding_and_customer_result(self):
         groups = EffortSimpleCurrentCompanyReportScenario.required_concept_groups
         self.assertEqual(len(groups), 4)
