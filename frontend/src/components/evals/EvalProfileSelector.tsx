@@ -49,7 +49,7 @@ export function EvalProfileSelector({
         ) : null}
       </div>
       {status === 'error' ? (
-        <span className="text-xs font-medium text-rose-700" role="alert">Profile selection is unavailable. Launching is disabled.</span>
+        <span className="text-xs font-medium text-amber-700" role="status">Using default routing. Retry to choose a profile.</span>
       ) : null}
     </div>
   )

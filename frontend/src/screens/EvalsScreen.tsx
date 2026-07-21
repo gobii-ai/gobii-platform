@@ -81,6 +81,8 @@ export function EvalsScreen() {
       setProfileStatus('ready')
     } catch (error) {
       console.error(error)
+      setRoutingProfiles([])
+      setSelectedProfileId('')
       setProfileStatus('error')
     }
   }, [])
@@ -116,7 +118,7 @@ export function EvalsScreen() {
 
   const profileOptions = useMemo<EvalSelectOption[]>(() => {
     if (profileStatus === 'loading') return [{ value: '', label: 'Loading profiles…' }]
-    if (profileStatus === 'error') return [{ value: '', label: 'Profiles unavailable' }]
+    if (profileStatus === 'error') return [{ value: '', label: 'Default routing' }]
     return [
       { value: '', label: 'No profile' },
       ...routingProfiles.map((profile) => ({
@@ -128,7 +130,7 @@ export function EvalsScreen() {
 
   const selectedProfileLabel = useMemo(() => {
     if (profileStatus === 'loading') return 'Loading routing profiles…'
-    if (profileStatus === 'error') return 'Routing profile unavailable'
+    if (profileStatus === 'error') return 'Default routing (profile list unavailable)'
     return profileOptions.find((option) => option.value === selectedProfileId)?.label || 'No profile'
   }, [profileOptions, profileStatus, selectedProfileId])
 
@@ -171,7 +173,7 @@ export function EvalsScreen() {
   const scenarioFilterKey = [scenarioQuery, scenarioTierFilter, scenarioCategoryFilter, scenarioCostFilter].join('|')
 
   const handleLaunch = async () => {
-    if (selectedSuites.size === 0 || profileStatus !== 'ready' || catalogStatus !== 'ready') return
+    if (selectedSuites.size === 0 || profileStatus === 'loading' || catalogStatus !== 'ready') return
     setLaunching(true)
     setLaunchError(null)
     setLaunchResult(null)
@@ -193,7 +195,7 @@ export function EvalsScreen() {
   }
 
   const handleScenarioLaunch = useCallback(async (scenario: EvalScenario) => {
-    if (profileStatus !== 'ready' || catalogStatus !== 'ready') return
+    if (profileStatus === 'loading' || catalogStatus !== 'ready') return
     setLaunchingScenarioSlug(scenario.slug)
     setLaunchError(null)
     setLaunchResult(null)
@@ -251,7 +253,7 @@ export function EvalsScreen() {
           <AriaButton
             className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-blue-600 bg-blue-600 px-4 text-sm font-semibold text-white transition-colors hover:border-blue-700 hover:bg-blue-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/30 disabled:cursor-not-allowed disabled:opacity-50"
             onPress={() => void handleLaunch()}
-            isDisabled={launching || selectedSuites.size === 0 || profileStatus !== 'ready' || catalogStatus !== 'ready'}
+            isDisabled={launching || selectedSuites.size === 0 || profileStatus === 'loading' || catalogStatus !== 'ready'}
           >
             {launching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4 fill-current" />}
             {launching
@@ -304,7 +306,7 @@ export function EvalsScreen() {
           filterKey={scenarioFilterKey}
           status={catalogStatus}
           launchingScenarioSlug={launchingScenarioSlug}
-          launchDisabled={profileStatus !== 'ready' || catalogStatus !== 'ready'}
+          launchDisabled={profileStatus === 'loading' || catalogStatus !== 'ready'}
           onLaunch={handleScenarioLaunch}
           onRetry={() => void loadSuites()}
         />
