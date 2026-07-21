@@ -4756,6 +4756,9 @@ def _get_unified_history_prompt(
                 components["content"] = content
 
             if channel == CommsChannel.DISCORD:
+                discord_channel_id = str(raw_payload.get("discord_channel_id") or "").strip()
+                if discord_channel_id:
+                    components["discord_channel_id"] = discord_channel_id
                 discord_message_id = str(raw_payload.get("discord_message_id") or "").strip()
                 if discord_message_id:
                     components["discord_message_id"] = discord_message_id
@@ -4871,6 +4874,7 @@ def _get_unified_history_prompt(
             "description": 2, # Medium priority for step descriptions
             "header": 3,      # High priority - message routing info
             "webhook_meta": 3, # High priority - webhook request metadata
+            "discord_channel_id": 3, # High priority - required to target Discord actions
             "discord_message_id": 3, # High priority - required to target Discord reactions
             "discord_reply_context": 2, # Medium priority - preserves the message a Discord reply references
             "reply_to_message_id": 2,  # Medium priority - needed for explicit email threading

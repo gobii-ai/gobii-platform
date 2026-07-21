@@ -1016,7 +1016,6 @@ class AgentChatAPITests(TestCase):
             raw_payload={
                 "source_kind": "discord",
                 "source_label": "Doris Byrne in #general",
-                "discord_author_name": "Doris Byrne",
                 "discord_channel_id": channel_id,
                 "discord_channel_name": channel_name,
             },

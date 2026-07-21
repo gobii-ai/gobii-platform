@@ -372,24 +372,6 @@ def _discord_channel_label(message: PersistentAgentMessage, conversation) -> str
     return ""
 
 
-def _discord_sender_name(
-    message: PersistentAgentMessage,
-    source_label: str,
-    channel_label: str,
-) -> str:
-    payload = message.raw_payload if isinstance(message.raw_payload, Mapping) else {}
-    author_name = payload.get("discord_author_name")
-    if isinstance(author_name, str) and author_name.strip():
-        return author_name.strip()
-
-    channel_suffix = f" in {channel_label}" if channel_label else ""
-    if channel_suffix and source_label.endswith(channel_suffix):
-        legacy_author_name = source_label.removesuffix(channel_suffix).strip()
-        if legacy_author_name:
-            return legacy_author_name
-    return source_label
-
-
 def _format_timestamp(dt: datetime | None) -> str | None:
     if dt is None:
         return None
@@ -568,7 +550,10 @@ def _serialize_message(
             sender_name = sender_address
     if source_label and not message.is_outbound:
         if channel.lower() == CommsChannel.DISCORD.value:
-            sender_name = _discord_sender_name(message, source_label, discord_channel_label)
+            payload = message.raw_payload if isinstance(message.raw_payload, Mapping) else {}
+            sender_name = str(payload.get("discord_author_name") or "").strip()
+            if not sender_name:
+                sender_name = source_label.removesuffix(f" in {discord_channel_label}").strip()
         else:
             sender_name = source_label
 

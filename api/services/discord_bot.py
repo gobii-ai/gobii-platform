@@ -778,15 +778,7 @@ def _ingest_gateway_message_for_subscription(
 
     platform_channel_address = discord_channel_address(message.guild_id, message.channel_id)
     conversation_address = discord_conversation_address(agent.id, message.guild_id, message.channel_id)
-    source_label_parts = []
-    if message.author_name:
-        source_label_parts.append(message.author_name)
-    if message.channel_name:
-        source_label_parts.append(f"#{message.channel_name.lstrip('#')}")
-    source_label = " in ".join(source_label_parts) if source_label_parts else discord_channel_source_label(
-        message.channel_id,
-        message.channel_name,
-    )
+    source_label = message.author_name or discord_channel_source_label(message.channel_id, message.channel_name)
     raw_payload = {
         "source": "discord_bot",
         "source_kind": "discord",

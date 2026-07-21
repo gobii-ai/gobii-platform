@@ -414,6 +414,7 @@ class NativeDiscordBotTests(TestCase):
             attachments=None,
             embeds=None,
             webhook_id=None,
+            type=SimpleNamespace(value=19),
             reference=SimpleNamespace(
                 message_id=499,
                 channel_id=10,
@@ -438,6 +439,8 @@ class NativeDiscordBotTests(TestCase):
                 "unavailable": False,
             },
         )
+        message.type = SimpleNamespace(value=0)
+        self.assertIsNone(build_gateway_message(message).reply_to)
 
     @tag("batch_agent_webhooks")
     def test_gateway_message_builder_preserves_unavailable_reply_id(self):
@@ -451,6 +454,7 @@ class NativeDiscordBotTests(TestCase):
             attachments=None,
             embeds=None,
             webhook_id=None,
+            type=SimpleNamespace(value=19),
             reference=SimpleNamespace(
                 message_id=499,
                 channel_id=10,
@@ -498,6 +502,7 @@ class NativeDiscordBotTests(TestCase):
         self.assertFalse(result["ignored"])
         stored = PersistentAgentMessage.objects.get(id=result["message_id"])
         self.assertEqual(stored.body, "please help @Ada")
+        self.assertEqual(stored.raw_payload["source_label"], "Human")
         self.assertEqual(stored.raw_payload["discord_content"], "please help @Ada")
         self.assertEqual(stored.raw_payload["discord_raw_content"], "please help <@123456789012345678>")
 
@@ -549,6 +554,7 @@ class NativeDiscordBotTests(TestCase):
         context, _, _ = build_prompt_context(self.agent)
         user_prompt = next(item["content"] for item in context if item["role"] == "user")
         self.assertIn("<discord_message_id>500</discord_message_id>", user_prompt)
+        self.assertIn("<discord_channel_id>10</discord_channel_id>", user_prompt)
         self.assertIn("<discord_reply_context>", user_prompt)
         self.assertIn("Message ID: 499", user_prompt)
         self.assertIn("Author: Ada", user_prompt)

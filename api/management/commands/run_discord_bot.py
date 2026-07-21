@@ -10,6 +10,7 @@ from django.db import OperationalError, close_old_connections
 from api.services.discord_bot import DiscordGatewayMessage, ingest_gateway_message
 
 logger = logging.getLogger(__name__)
+DISCORD_REPLY_MESSAGE_TYPE = 19
 
 
 def _attachment_payload(attachment) -> dict[str, object]:
@@ -31,69 +32,68 @@ def _embed_payload(embed) -> dict[str, object]:
     return payload if isinstance(payload, dict) else {}
 
 
+def _message_author(message) -> tuple[str, str]:
+    author = getattr(message, "author", None)
+    author_id = str(getattr(author, "id", "") or "")
+    author_name = str(
+        getattr(author, "display_name", "")
+        or getattr(author, "name", "")
+        or author_id
+    )
+    return author_id, author_name
+
+
+def _message_content(message) -> tuple[str, str]:
+    raw_content = str(getattr(message, "content", "") or "")
+    return raw_content, str(getattr(message, "clean_content", "") or "") or raw_content
+
+
 def _reply_reference_payload(message) -> dict[str, object] | None:
+    message_type = getattr(getattr(message, "type", None), "value", None)
+    if message_type != DISCORD_REPLY_MESSAGE_TYPE:
+        return None
+
     reference = getattr(message, "reference", None)
     message_id = str(getattr(reference, "message_id", "") or "")
     if not reference or not message_id:
         return None
 
-    channel_id = str(getattr(reference, "channel_id", "") or "")
-    guild_id = str(getattr(reference, "guild_id", "") or "")
     resolved = getattr(reference, "resolved", None) or getattr(reference, "cached_message", None)
-    payload: dict[str, object] = {
+    unavailable = resolved is None or not hasattr(resolved, "content")
+    author_id, author_name = _message_author(resolved) if not unavailable else ("", "")
+    _raw_content, content = _message_content(resolved) if not unavailable else ("", "")
+    return {
         "message_id": message_id,
-        "channel_id": channel_id,
-        "guild_id": guild_id,
-        "author_id": "",
-        "author_name": "",
-        "content": "",
-        "attachment_filenames": [],
-        "unavailable": resolved is None or not hasattr(resolved, "content"),
+        "channel_id": str(getattr(reference, "channel_id", "") or ""),
+        "guild_id": str(getattr(reference, "guild_id", "") or ""),
+        "author_id": author_id,
+        "author_name": author_name,
+        "content": content,
+        "attachment_filenames": [
+            str(getattr(attachment, "filename", "") or "")
+            for attachment in (() if unavailable else (getattr(resolved, "attachments", None) or []))
+            if str(getattr(attachment, "filename", "") or "")
+        ],
+        "unavailable": unavailable,
     }
-    if resolved is None:
-        return payload
-
-    author = getattr(resolved, "author", None)
-    if author is not None:
-        payload["author_id"] = str(getattr(author, "id", "") or "")
-        payload["author_name"] = str(
-            getattr(author, "display_name", "")
-            or getattr(author, "name", "")
-            or getattr(author, "id", "")
-            or ""
-        )
-    raw_content = str(getattr(resolved, "content", "") or "")
-    clean_content = str(getattr(resolved, "clean_content", "") or "")
-    payload["content"] = clean_content or raw_content
-    payload["attachment_filenames"] = [
-        str(getattr(attachment, "filename", "") or "")
-        for attachment in (getattr(resolved, "attachments", None) or [])
-        if str(getattr(attachment, "filename", "") or "")
-    ]
-    return payload
 
 
 def build_gateway_message(message) -> DiscordGatewayMessage:
     channel = message.channel
     guild = message.guild
-    raw_content = str(getattr(message, "content", "") or "")
-    clean_content = str(getattr(message, "clean_content", "") or "")
+    raw_content, content = _message_content(message)
     attachments = getattr(message, "attachments", None) or []
     embeds = getattr(message, "embeds", None) or []
-    author_name = str(
-        getattr(message.author, "display_name", "")
-        or getattr(message.author, "name", "")
-        or getattr(message.author, "id", "")
-    )
+    author_id, author_name = _message_author(message)
     return DiscordGatewayMessage(
         message_id=str(message.id),
         channel_id=str(channel.id),
         channel_name=str(getattr(channel, "name", "") or ""),
         guild_id=str(guild.id),
         guild_name=str(getattr(guild, "name", "") or ""),
-        author_id=str(message.author.id),
+        author_id=author_id,
         author_name=author_name,
-        content=clean_content or raw_content,
+        content=content,
         raw_content=raw_content,
         attachments=[_attachment_payload(attachment) for attachment in attachments],
         embeds=[payload for payload in (_embed_payload(embed) for embed in embeds) if payload],

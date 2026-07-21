@@ -13,12 +13,6 @@ def enable_discord_reaction_tool(apps, schema_editor):
         skill_key=DISCORD_SKILL_KEY,
         is_enabled=True,
     ).values_list("agent_id", flat=True)
-    existing_agent_ids = set(
-        PersistentAgentEnabledTool.objects.filter(
-            agent_id__in=agent_ids,
-            tool_full_name=REACTION_TOOL_NAME,
-        ).values_list("agent_id", flat=True)
-    )
     PersistentAgentEnabledTool.objects.bulk_create(
         [
             PersistentAgentEnabledTool(
@@ -28,7 +22,6 @@ def enable_discord_reaction_tool(apps, schema_editor):
                 tool_name=REACTION_TOOL_NAME,
             )
             for agent_id in agent_ids
-            if agent_id not in existing_agent_ids
         ],
         ignore_conflicts=True,
     )
