@@ -3,12 +3,13 @@
 import json
 import hashlib
 import logging
+import re
 import secrets
 from contextlib import ExitStack
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any, Iterable, Mapping
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 import requests
 from django.conf import settings
@@ -65,6 +66,10 @@ class DiscordBotIntegrationError(RuntimeError):
     """Raised when native Discord bot setup or delivery cannot continue."""
 
 
+_DISCORD_CUSTOM_EMOJI_PATTERN = re.compile(r"^<a?:([A-Za-z0-9_]+):(\d+)>$")
+_DISCORD_CUSTOM_EMOJI_API_PATTERN = re.compile(r"^[A-Za-z0-9_]+:\d+$")
+
+
 @dataclass(frozen=True)
 class DiscordGuildClaimResult:
     claimed_count: int
@@ -88,6 +93,7 @@ class DiscordGatewayMessage:
     raw_content: str = ""
     author_is_bot: bool = False
     webhook_id: str = ""
+    reply_to: dict[str, Any] | None = None
 
 
 def _public_base_url() -> str:
@@ -126,6 +132,68 @@ def _raise_for_discord_status(response: requests.Response, *, action: str) -> No
         if response_text:
             message = f"{message} Response: {response_text}"
         raise DiscordBotIntegrationError(message) from exc
+
+
+def normalize_discord_reaction_emoji(emoji: str) -> str:
+    normalized = str(emoji or "").strip()
+    if not normalized:
+        raise ValueError("emoji is required.")
+
+    custom_match = _DISCORD_CUSTOM_EMOJI_PATTERN.fullmatch(normalized)
+    if custom_match:
+        return f"{custom_match.group(1)}:{custom_match.group(2)}"
+    if normalized.startswith("<:") or normalized.startswith("<a:"):
+        raise ValueError("Custom Discord emoji must use <:name:id>, <a:name:id>, or name:id format.")
+    if ":" in normalized and not _DISCORD_CUSTOM_EMOJI_API_PATTERN.fullmatch(normalized):
+        raise ValueError("Custom Discord emoji must use <:name:id>, <a:name:id>, or name:id format.")
+    return normalized
+
+
+def add_discord_reaction(
+    agent: PersistentAgent,
+    *,
+    channel_id: str,
+    message_id: str,
+    emoji: str,
+) -> str:
+    normalized_channel_id = str(channel_id or "").strip()
+    normalized_message_id = str(message_id or "").strip()
+    if not normalized_channel_id:
+        raise ValueError("channel_id is required.")
+    if not normalized_message_id:
+        raise ValueError("message_id is required.")
+    normalized_emoji = normalize_discord_reaction_emoji(emoji)
+
+    PersistentAgentDiscordChannelSubscription.objects.get(
+        agent=agent,
+        channel_id=normalized_channel_id,
+        status=PersistentAgentDiscordChannelSubscription.Status.ACTIVE,
+    )
+    encoded_emoji = quote(normalized_emoji, safe="")
+    reaction_url = (
+        f"{DISCORD_API_BASE}/channels/{normalized_channel_id}/messages/"
+        f"{normalized_message_id}/reactions/{encoded_emoji}/@me"
+    )
+    response = requests.put(
+        reaction_url,
+        headers=_discord_bot_headers(),
+        timeout=20,
+    )
+    if response.status_code == 400:
+        raise DiscordBotIntegrationError(
+            "Discord rejected that emoji. Use one Unicode emoji or a custom emoji in name:id format."
+        )
+    if response.status_code == 403:
+        raise DiscordBotIntegrationError(
+            "Discord denied the reaction. Grant the Gobii bot Add Reactions and Read Message History permissions "
+            "for this channel, or reconnect Discord to refresh its permissions."
+        )
+    if response.status_code == 404:
+        raise DiscordBotIntegrationError(
+            "Discord could not find that message in the subscribed channel. Check the channel_id and message_id."
+        )
+    _raise_for_discord_status(response, action="reaction creation")
+    return normalized_emoji
 
 
 def _oauth_redirect_uri() -> str:
@@ -739,6 +807,8 @@ def _ingest_gateway_message_for_subscription(
         "discord_conversation_address": conversation_address,
         "source_label": source_label,
     }
+    if message.reply_to:
+        raw_payload["discord_reply_to"] = dict(message.reply_to)
     parsed = ParsedMessage(
         sender=platform_channel_address,
         recipient=discord_agent_address(agent.id),

@@ -979,6 +979,7 @@ class ConnectedAppChannelsSystemSkillTests(TestCase):
             available_tool_names={
                 "discord_channel_subscriptions",
                 "send_discord_message",
+                "add_discord_reaction",
             },
         )
         self.assertEqual([match.skill_key for match in matches], ["discord_native"])
@@ -987,6 +988,7 @@ class ConnectedAppChannelsSystemSkillTests(TestCase):
             available_tool_names={
                 "discord_channel_subscriptions",
                 "send_discord_message",
+                "add_discord_reaction",
             },
         )
         self.assertEqual([match.skill_key for match in integration_matches], ["discord_native"])
@@ -1004,6 +1006,12 @@ class ConnectedAppChannelsSystemSkillTests(TestCase):
             PersistentAgentEnabledTool.objects.filter(
                 agent=agent,
                 tool_full_name="send_discord_message",
+            ).exists()
+        )
+        self.assertTrue(
+            PersistentAgentEnabledTool.objects.filter(
+                agent=agent,
+                tool_full_name="add_discord_reaction",
             ).exists()
         )
         self.assertFalse(
@@ -1024,6 +1032,7 @@ class ConnectedAppChannelsSystemSkillTests(TestCase):
         self.assertIn("action=\"discover_channels\"", instructions)
         self.assertIn("call `ensure` with the selected `guild_id`, `channel_id`, and `channel_name`", instructions)
         self.assertIn("Use `send_discord_message` for outbound Discord replies", instructions)
+        self.assertIn("Use `add_discord_reaction`", instructions)
         self.assertNotIn("legacy fallback", instructions)
         self.assertNotIn("pipedream_trigger_subscriptions", instructions)
         self.assertNotIn("avatarURL=\"https://gobii.ai/static/images/gobii_fish.png\"", instructions)

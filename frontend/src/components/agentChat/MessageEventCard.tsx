@@ -133,9 +133,11 @@ export const MessageEventCard = memo(function MessageEventCard({
   }
 
   let channelLabel = getChannelLabel(channel)
-  const discordOutboundChannelLabel = channel === 'discord' && isAgent ? message.sourceLabel?.trim() : ''
-  if (discordOutboundChannelLabel) {
-    channelLabel = discordOutboundChannelLabel
+  const discordChannelLabel = channel === 'discord'
+    ? message.channelLabel?.trim() || (isAgent ? message.sourceLabel?.trim() : '')
+    : ''
+  if (discordChannelLabel) {
+    channelLabel = discordChannelLabel
   }
   let showChannelTag = channel !== 'web'
   if (isWebhook) {
@@ -184,6 +186,14 @@ export const MessageEventCard = memo(function MessageEventCard({
     : isAgent
       ? `${channelTagBaseClass} border border-indigo-100 bg-indigo-50 text-indigo-600`
       : `${channelTagBaseClass} user-channel-badge`
+  const channelIcon = channel === 'discord' ? (
+    <img
+      src="/static/images/integrations/native/discord.svg"
+      alt=""
+      aria-hidden="true"
+      className="mr-1 h-3 w-3 shrink-0 object-contain"
+    />
+  ) : null
 
   const showMessageActions = isAgent && !isPeer
   const showRetryAction = status === 'failed' && isViewerSender && Boolean(message.clientId) && Boolean(onRetryMessage)
@@ -248,7 +258,7 @@ export const MessageEventCard = memo(function MessageEventCard({
             />
           ) : null}
           <span className="chat-author-name">{authorLabel}</span>
-          {showChannelTag ? <span className={channelTagClass}>{channelLabel}</span> : null}
+          {showChannelTag ? <span className={channelTagClass}>{channelIcon}{channelLabel}</span> : null}
           {emailSubject ? <span className="chat-email-subject-inline" title={emailSubject}>{emailSubject}</span> : null}
           <span className="chat-message-meta-slot">
             <span className="chat-timestamp" title={metaTitle}>{metaLabel}</span>

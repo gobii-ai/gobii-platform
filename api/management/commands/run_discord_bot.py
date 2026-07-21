@@ -31,6 +31,48 @@ def _embed_payload(embed) -> dict[str, object]:
     return payload if isinstance(payload, dict) else {}
 
 
+def _reply_reference_payload(message) -> dict[str, object] | None:
+    reference = getattr(message, "reference", None)
+    message_id = str(getattr(reference, "message_id", "") or "")
+    if not reference or not message_id:
+        return None
+
+    channel_id = str(getattr(reference, "channel_id", "") or "")
+    guild_id = str(getattr(reference, "guild_id", "") or "")
+    resolved = getattr(reference, "resolved", None) or getattr(reference, "cached_message", None)
+    payload: dict[str, object] = {
+        "message_id": message_id,
+        "channel_id": channel_id,
+        "guild_id": guild_id,
+        "author_id": "",
+        "author_name": "",
+        "content": "",
+        "attachment_filenames": [],
+        "unavailable": resolved is None or not hasattr(resolved, "content"),
+    }
+    if resolved is None:
+        return payload
+
+    author = getattr(resolved, "author", None)
+    if author is not None:
+        payload["author_id"] = str(getattr(author, "id", "") or "")
+        payload["author_name"] = str(
+            getattr(author, "display_name", "")
+            or getattr(author, "name", "")
+            or getattr(author, "id", "")
+            or ""
+        )
+    raw_content = str(getattr(resolved, "content", "") or "")
+    clean_content = str(getattr(resolved, "clean_content", "") or "")
+    payload["content"] = clean_content or raw_content
+    payload["attachment_filenames"] = [
+        str(getattr(attachment, "filename", "") or "")
+        for attachment in (getattr(resolved, "attachments", None) or [])
+        if str(getattr(attachment, "filename", "") or "")
+    ]
+    return payload
+
+
 def build_gateway_message(message) -> DiscordGatewayMessage:
     channel = message.channel
     guild = message.guild
@@ -57,6 +99,7 @@ def build_gateway_message(message) -> DiscordGatewayMessage:
         embeds=[payload for payload in (_embed_payload(embed) for embed in embeds) if payload],
         author_is_bot=bool(getattr(message.author, "bot", False)),
         webhook_id=str(getattr(message, "webhook_id", "") or ""),
+        reply_to=_reply_reference_payload(message),
     )
 
 

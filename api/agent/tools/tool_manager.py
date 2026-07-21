@@ -61,6 +61,7 @@ from .eval_synthetic_tools import EVAL_SYNTHETIC_TOOL_DEFINITIONS, EVAL_SYNTHETI
 from .python_exec import get_python_exec_tool
 from .run_command import get_run_command_tool, execute_run_command
 from .meta_ads import get_meta_ads_tool, execute_meta_ads
+from .add_discord_reaction import get_add_discord_reaction_tool, execute_add_discord_reaction
 from .discord_channel_subscriptions import get_discord_channel_subscriptions_tool, execute_discord_channel_subscriptions
 from .send_discord_message import get_send_discord_message_tool, execute_send_discord_message
 from api.agent.system_skills.defaults import DISCORD_NATIVE_SYSTEM_SKILL_KEY
@@ -86,6 +87,7 @@ PYTHON_EXEC_TOOL_NAME = "python_exec"
 RUN_COMMAND_TOOL_NAME = "run_command"
 META_ADS_TOOL_NAME = "meta_ads"
 DISCORD_CHANNEL_SUBSCRIPTIONS_TOOL_NAME = "discord_channel_subscriptions"
+DISCORD_ADD_REACTION_TOOL_NAME = "add_discord_reaction"
 DISCORD_SEND_MESSAGE_TOOL_NAME = "send_discord_message"
 PIPEDREAM_TOOL_SERVER_NAME = "pipedream"
 DEFAULT_BUILTIN_TOOLS = {
@@ -281,6 +283,12 @@ BUILTIN_TOOL_REGISTRY = {
     DISCORD_CHANNEL_SUBSCRIPTIONS_TOOL_NAME: {
         "definition": get_discord_channel_subscriptions_tool,
         "executor": execute_discord_channel_subscriptions,
+        "search_hidden": True,
+        "system_skill_key": DISCORD_NATIVE_SYSTEM_SKILL_KEY,
+    },
+    DISCORD_ADD_REACTION_TOOL_NAME: {
+        "definition": get_add_discord_reaction_tool,
+        "executor": execute_add_discord_reaction,
         "search_hidden": True,
         "system_skill_key": DISCORD_NATIVE_SYSTEM_SKILL_KEY,
     },

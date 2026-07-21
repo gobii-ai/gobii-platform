@@ -77,6 +77,13 @@ from api.agent.core.processing_flags import (
     processing_lock_storage_keys,
 )
 from api.agent.tools.web_chat_sender import execute_send_chat_message
+from api.services.discord_messages import (
+    create_discord_outbound_message,
+    discord_channel_address,
+    discord_conversation_address,
+    ensure_discord_conversation_participants,
+    get_or_create_discord_conversation,
+)
 from api.services.pipedream_apps import get_owner_apps_state
 from api.services.web_sessions import heartbeat_web_session, start_web_session
 from config.redis_client import get_redis_client
@@ -980,6 +987,60 @@ class AgentChatAPITests(TestCase):
         self.assertIn("accountPause", critical_status)
         self.assertIn("dailyCredits", critical_status)
         self.assertIn("contactCapStatus", critical_status)
+
+    @tag("batch_agent_chat")
+    def test_timeline_uses_discord_channel_label_for_inbound_and_outbound_messages(self):
+        guild_id = "guild-123"
+        channel_id = "channel-456"
+        channel_name = "general"
+        platform_channel_address = discord_channel_address(guild_id, channel_id)
+        conversation_address = discord_conversation_address(self.agent.id, guild_id, channel_id)
+        conversation = get_or_create_discord_conversation(
+            self.agent,
+            address=conversation_address,
+            channel_id=channel_id,
+            channel_name=channel_name,
+        )
+        agent_endpoint, channel_endpoint = ensure_discord_conversation_participants(
+            self.agent,
+            conversation,
+            platform_channel_address=platform_channel_address,
+        )
+        inbound = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=channel_endpoint,
+            to_endpoint=agent_endpoint,
+            conversation=conversation,
+            is_outbound=False,
+            body="Inbound Discord message",
+            raw_payload={
+                "source_kind": "discord",
+                "source_label": "Doris Byrne in #general",
+                "discord_author_name": "Doris Byrne",
+                "discord_channel_id": channel_id,
+                "discord_channel_name": channel_name,
+            },
+        )
+        outbound = create_discord_outbound_message(
+            self.agent,
+            channel_id=channel_id,
+            channel_name=channel_name,
+            body="Outbound Discord message",
+            conversation_address=conversation_address,
+            platform_channel_address=platform_channel_address,
+        )
+
+        response = self.client.get(f"/console/api/agents/{self.agent.id}/timeline/")
+
+        self.assertEqual(response.status_code, 200)
+        messages = {
+            event["message"]["id"]: event["message"]
+            for event in response.json()["events"]
+            if event["kind"] == "message"
+        }
+        self.assertEqual(messages[str(inbound.id)]["channelLabel"], "#general")
+        self.assertEqual(messages[str(outbound.id)]["channelLabel"], "#general")
+        self.assertEqual(messages[str(inbound.id)]["senderName"], "Doris Byrne")
 
     @tag("batch_agent_chat")
     def test_timeline_serializes_assignment_display_snapshot_for_pages_and_realtime(self):
