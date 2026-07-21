@@ -1,3 +1,7 @@
+import sqlite3
+import tempfile
+from contextlib import nullcontext
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -6,6 +10,7 @@ from django.contrib.auth import get_user_model
 from django.test import SimpleTestCase, TestCase, tag
 
 import api.evals.loader  # noqa: F401 - registers scenarios and suites
+from api.evals.scenarios import sqlite_tool_results as sqlite_evals
 from api.agent.core.event_processing import _get_completed_process_run_count, _resolve_eval_mock_result
 from api.agent.core.prompt_context import _get_system_instruction, build_prompt_context_preview
 from api.agent.core.tool_results import _wrap_as_sqlite_result
@@ -78,12 +83,12 @@ from api.models import (
 )
 
 
-def _eval_tool_call(tool_name, tool_params=None, *, step=None, result='{"status":"ok"}'):
+def _eval_tool_call(tool_name, tool_params=None, *, step=None, result='{"status":"ok"}', status="complete"):
     return SimpleNamespace(
         step=step or tool_name,
         tool_name=tool_name,
         tool_params=tool_params or {},
-        status="complete",
+        status=status,
         result=result,
     )
 
@@ -127,6 +132,8 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
         self.assertIn(SQLITE_ITEM_LINK_REPORT, suite.scenario_slugs)
         self.assertIn(SQLITE_NATURAL_RESULT_ACCESS, suite.scenario_slugs)
         self.assertIn(SQLITE_BOUNDED_PORTFOLIO_REPORT, suite.scenario_slugs)
+        self.assertIn(sqlite_evals.SQLITE_DOMAIN_TRUTH_OVER_STALE_HISTORY, suite.scenario_slugs)
+        self.assertIn(sqlite_evals.SQLITE_DOMAIN_MODEL_REFRESHES_AND_EVOLVES, suite.scenario_slugs)
 
     def test_trajectory_regression_prompts_do_not_prescribe_tools_or_format(self):
         prompts = (
@@ -689,19 +696,66 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
         prompt = SqliteItemLinkReportScenario.prompt.lower()
 
         self.assertIn("listing links", prompt)
+        self.assertIn("cheapest qualifying option", prompt)
         self.assertNotIn("sqlite", prompt)
         self.assertNotIn("__tool_results", prompt)
         self.assertNotIn("json_extract", prompt)
 
     def test_sqlite_domain_model_prompts_are_natural(self):
         prompts = (
-            SqliteIntermediateWorkingTableScenario.prompt
-            + " "
-            + SqliteIntermediateWorkingTableScenario.followup_prompt
-        ).lower()
+            SqliteIntermediateWorkingTableScenario.prompt + " " + SqliteIntermediateWorkingTableScenario.followup_prompt,
+            sqlite_evals.SqliteDomainTruthOverStaleHistoryScenario.prompt,
+            sqlite_evals.SqliteDomainModelRefreshesAndEvolvesScenario.prompt,
+        )
 
-        for implementation_term in ("sqlite", "__tool_results", "json_extract", "create table", "sql"):
-            self.assertNotIn(implementation_term, prompts)
+        for prompt in prompts:
+            for implementation_term in (
+                "sqlite", "__tool_results", "json_extract", "database", "table", "schema", "persist",
+            ):
+                self.assertNotIn(implementation_term, prompt.lower())
+
+    def test_domain_refresh_verifier_checks_persisted_rows(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "state.db"
+
+            with patch(
+                "api.evals.scenarios.sqlite_tool_results.agent_sqlite_db",
+                side_effect=lambda _agent_id: nullcontext(str(db_path)),
+            ):
+                sqlite_evals._seed_domain_account(
+                    "agent", sqlite_evals.DOMAIN_CURRENT, "2026-07-20T14:00:00Z", duplicate_name=True,
+                )
+                with sqlite3.connect(db_path) as conn:
+                    conn.execute(
+                        "UPDATE accounts SET stage=?, owner=?, next_action=?, source_url=?, observed_at=? WHERE account_id=?;",
+                        (*sqlite_evals.DOMAIN_REFRESH, sqlite_evals.DOMAIN_REFRESH_URL,
+                         sqlite_evals.DOMAIN_REFRESH_OBSERVED_AT, sqlite_evals.DOMAIN_ACCOUNT_ID),
+                    )
+                    conn.execute(
+                        "CREATE TABLE account_work (workstream_id TEXT PRIMARY KEY, account_id TEXT, name TEXT, "
+                        "status TEXT, owner TEXT, due_on TEXT, source_url TEXT, observed_at TEXT);"
+                    )
+                    conn.executemany(
+                        "INSERT INTO account_work VALUES (?, ?, ?, ?, ?, ?, ?, ?);",
+                        [(row[0], sqlite_evals.DOMAIN_ACCOUNT_ID, *row[1:], sqlite_evals.DOMAIN_REFRESH_URL,
+                          sqlite_evals.DOMAIN_REFRESH_OBSERVED_AT) for row in sqlite_evals.DOMAIN_WORKSTREAMS],
+                    )
+                self.assertEqual(sqlite_evals._domain_refresh_state_failures("agent"), [])
+                with sqlite3.connect(db_path) as conn:
+                    conn.execute("UPDATE account_work SET source_url='https://wrong.example.test';")
+                self.assertIn(
+                    "provenance", "; ".join(sqlite_evals._domain_refresh_state_failures("agent")),
+                )
+                with sqlite3.connect(db_path) as conn:
+                    conn.execute(
+                        "UPDATE account_work SET source_url=?;", (sqlite_evals.DOMAIN_REFRESH_URL,),
+                    )
+                    conn.execute(
+                        "UPDATE accounts SET owner='Maya Chen' WHERE name='Aster Labs';",
+                    )
+                self.assertIn(
+                    "different account", "; ".join(sqlite_evals._domain_refresh_state_failures("agent")),
+                )
 
     def test_multi_result_sqlite_scorer_rejects_extra_or_hand_built_queries(self):
         scenario, recorded = SqliteMultiResultWebSynthesisScenario(), []
@@ -721,6 +775,17 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
         ):
             self.assertFalse(scenario._record_sqlite_usage("run", after=None, task_name="verify"))
         self.assertIn("sqlite_batch calls 3 > 2", recorded[-1][1]["observed_summary"])
+
+        rejected = _eval_tool_call(
+            "sqlite_batch", {"sql": "SELECT result_json FROM __tool_results WHERE result_id IN ('r1')"},
+            result="Query not executed: one result_id at a time.", status="error",
+        )
+        with patch(
+            "api.evals.scenarios.sqlite_tool_results._tool_calls_for_run",
+            return_value=[rejected, rejected, rejected, _eval_tool_call("sqlite_batch", {"sql": aggregate_sql})],
+        ):
+            self.assertFalse(scenario._record_sqlite_usage("run", after=None, task_name="verify"))
+        self.assertIn("sqlite_batch attempts 4 > 3", recorded[-1][1]["observed_summary"])
 
         hand_built_sql = aggregate_sql.replace(
             "result_id, count(*)",
@@ -1407,9 +1472,11 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
     def test_fresh_full_tool_result_wrapper_discourages_redundant_sqlite_rereads(self):
         wrapped = _wrap_as_sqlite_result('{"answer": "ready"}', 19)
 
-        self.assertIn("reply directly in the next message", wrapped)
-        self.assertIn("Do not query __tool_results or sqlite_batch just to reread", wrapped)
-        self.assertIn("use SQL only for real filtering", wrapped)
+        self.assertIn("Reply directly for a simple answer", wrapped)
+        self.assertIn("unless it updates an established named domain model", wrapped)
+        self.assertIn("Use SQL to reconcile that model", wrapped)
+        self.assertIn("exact filtering/ranking across sizable or multiple results", wrapped)
+        self.assertIn("do not query merely to reread or parse", wrapped)
 
 
 @tag("eval_sim")

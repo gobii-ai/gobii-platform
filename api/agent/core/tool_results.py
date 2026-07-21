@@ -626,6 +626,7 @@ def _summarize_result(
 
     result_json = truncated_text if is_json and not is_truncated else None
     result_text_store = truncated_text  # Always set for robust querying
+    result_json_path = None
 
     if is_json and not is_truncated:
         try:
@@ -634,6 +635,7 @@ def _summarize_result(
             if isinstance(parsed, dict):
                 if tool_name == "http_request" and "content" in parsed:
                     content = parsed["content"]
+                    result_json_path = "$.content"
                 elif _is_scrape_as_markdown_tool(tool_name) and "result" in parsed:
                     content = parsed["result"]
 
@@ -655,6 +657,7 @@ def _summarize_result(
         "has_base64": has_base64,
         "is_truncated": is_truncated,
         "truncated_bytes": truncated_bytes,
+        "result_json_path": result_json_path,
     }
     if analysis and analysis.decode_info and analysis.decode_info.steps:
         meta["decoded_from"] = "+".join(analysis.decode_info.steps)
@@ -669,9 +672,8 @@ def _summarize_result(
 def _wrap_as_sqlite_result(result_text: str, full_bytes: int) -> str:
     return (
         f"[FULL RESULT ({full_bytes} chars) - ONE-TIME VIEW. "
-        f"Use this visible result now. If it answers the request, reply directly in the next message. "
-        f"Do not query __tool_results or sqlite_batch just to reread or parse this small result; "
-        f"use SQL only for real filtering, joining, aggregation, chart input, or truncated/too-large data. "
+        f"Use this visible result now. Reply directly for a simple answer unless it updates an established named domain model. "
+        f"Use SQL to reconcile that model or for exact filtering/ranking across sizable or multiple results, joins, aggregation, chart input, or truncated data; do not query merely to reread or parse. "
         f"Next turn shows only preview]\n"
         f"{result_text}"
     )
@@ -757,6 +759,8 @@ def _format_meta_text(
         parts.append(f"parsed_from={meta['parsed_from']}")
     if meta.get("parsed_with"):
         parts.append(f"parsed_with={meta['parsed_with']}")
+    if meta.get("result_json_path"):
+        parts.append(f"result_json_path={meta['result_json_path']}")
     if meta.get("is_truncated") and meta.get("truncated_bytes"):
         parts.append(f"truncated_bytes={meta['truncated_bytes']}")
 

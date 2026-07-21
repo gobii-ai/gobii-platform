@@ -2,16 +2,21 @@ import re
 from typing import Iterable
 
 import sqlparse
+from django.utils import timezone
 
 from api.agent.tools.eval_synthetic_tools import EVAL_SYNTHETIC_TOOL_SERVER
+from api.agent.tools.sqlite_guardrails import clear_guarded_connection, open_guarded_sqlite_connection
 from api.agent.tools.sqlite_query_quality import (
     CREATE_TABLE_AS_RE,
     _created_table_name,
     _inserted_table_name,
     _reads_table,
     _structural_sql,
+    source_derived_model_mutation_tables,
+    source_derived_model_reconciled_tables,
     summarize_sqlite_tool_result_calls,
 )
+from api.agent.tools.sqlite_state import agent_sqlite_db
 from api.agent.tools.tool_manager import mark_tool_enabled_without_discovery
 from api.agent.tools.web_chat_sender import _looks_like_routine_progress_message
 from api.evals.base import EvalScenario, ScenarioTask
@@ -29,6 +34,8 @@ SQLITE_DEDUPE_REQUERY = "sqlite_tool_results_dedupe_requery"
 SQLITE_ITEM_LINK_REPORT = "sqlite_tool_results_item_link_report"
 SQLITE_NATURAL_RESULT_ACCESS = "sqlite_tool_results_natural_result_access"
 SQLITE_BOUNDED_PORTFOLIO_REPORT = "sqlite_tool_results_bounded_portfolio_report"
+SQLITE_DOMAIN_TRUTH_OVER_STALE_HISTORY = "sqlite_domain_truth_over_stale_history"
+SQLITE_DOMAIN_MODEL_REFRESHES_AND_EVOLVES = "sqlite_domain_model_refreshes_and_evolves"
 SQLITE_TOOL_RESULT_SCENARIO_SLUGS = [
     SQLITE_MULTI_RESULT_WEB_SYNTHESIS,
     SQLITE_INTERMEDIATE_WORKING_TABLE,
@@ -36,6 +43,8 @@ SQLITE_TOOL_RESULT_SCENARIO_SLUGS = [
     SQLITE_ITEM_LINK_REPORT,
     SQLITE_NATURAL_RESULT_ACCESS,
     SQLITE_BOUNDED_PORTFOLIO_REPORT,
+    SQLITE_DOMAIN_TRUTH_OVER_STALE_HISTORY,
+    SQLITE_DOMAIN_MODEL_REFRESHES_AND_EVOLVES,
 ]
 
 
@@ -72,6 +81,21 @@ PORTFOLIO_DETAIL_URLS = (
 )
 PORTFOLIO_SOURCE_URLS = PORTFOLIO_DETAIL_URLS
 PORTFOLIO_FETCH_URLS = (PORTFOLIO_INDEX_URL, *PORTFOLIO_DETAIL_URLS)
+
+DOMAIN_ACCOUNT_ID, DOMAIN_ACCOUNT_NAME = "acct-aster-042", "Aster Labs"
+DOMAIN_CURRENT = ("legal_review", "Maya Chen", "send the SOC 2 packet")
+DOMAIN_REFRESH = ("contracting", "Maya Chen", "resolve contract redlines")
+DOMAIN_SOURCE_URL = "https://crm.example.test/accounts/aster-labs"
+DOMAIN_REFRESH_URL = "https://crm.example.test/snapshots/aster-labs.json"
+DOMAIN_REFRESH_OBSERVED_AT = "2026-07-21T14:30:00Z"
+DOMAIN_LEGACY_ACCOUNT = (
+    "acct-aster-legacy", DOMAIN_ACCOUNT_NAME, "archived", "Devon Price", "no action",
+    "https://crm.example.test/accounts/aster-legacy", "2026-06-10T12:00:00Z",
+)
+DOMAIN_WORKSTREAMS = (
+    ("ws-security-17", "Security packet", "complete", "Maya Chen", "2026-07-22"),
+    ("ws-legal-04", "Contract redlines", "open", "Noah Reed", "2026-07-24"),
+)
 
 UNIQUE_MODEL_INDEX_RE = re.compile(r'\bcreate\s+unique\s+index\b[^;]*?\bon\s+"?(?P<table>[a-z_]\w*)"?', re.I | re.S)
 STABLE_IDENTITY_RE = re.compile(r'\bprimary\s+key\b|(?<!["\'`\[])\bunique\b(?!["\'`\]])', re.I)
@@ -345,6 +369,35 @@ def _dedupe_mock() -> dict:
     }
 
 
+def _domain_refresh_mock() -> dict:
+    stage, owner, next_action = DOMAIN_REFRESH
+    payload = {
+        "observed_at": DOMAIN_REFRESH_OBSERVED_AT,
+        "source_url": DOMAIN_REFRESH_URL,
+        "accounts": [{
+            "account_id": DOMAIN_ACCOUNT_ID, "name": DOMAIN_ACCOUNT_NAME,
+            "stage": stage, "owner": owner, "next_action": next_action,
+            "source_url": DOMAIN_REFRESH_URL, "observed_at": DOMAIN_REFRESH_OBSERVED_AT,
+        }],
+        "workstreams": [
+            dict(zip(
+                ("workstream_id", "name", "status", "owner", "due_on"), row,
+            ), account_id=DOMAIN_ACCOUNT_ID, source_url=DOMAIN_REFRESH_URL,
+                observed_at=DOMAIN_REFRESH_OBSERVED_AT)
+            for row in DOMAIN_WORKSTREAMS
+        ],
+    }
+    return {
+        "http_request": {
+            "rules": [{
+                "url_contains": DOMAIN_REFRESH_URL,
+                "result": {"status": "ok", "status_code": 200, "url": DOMAIN_REFRESH_URL, "content": payload},
+            }],
+            "default": {"status": "error", "message": "Unknown eval URL."},
+        }
+    }
+
+
 MOCK_BUILDERS = {"web": _web_mock, "aged_web": lambda: _web_mock(facts_last=True), "product": _product_mock, "dedupe": _dedupe_mock, "inventory": _inventory_mock}
 
 
@@ -442,6 +495,122 @@ def _decision_model_tables(sql: str, model_tables: Iterable[str]) -> tuple[str, 
     return tuple(table for table in tables if table in decisions)
 
 
+def _seed_domain_account(
+    agent_id: str, state: tuple[str, str, str], observed_at: str, *, duplicate_name: bool = False,
+) -> None:
+    stage, owner, next_action = state
+    stages = ("qualification", "security_review", "legal_review", "contracting", "on_hold")
+    decoys = [
+        (
+            f"acct-decoy-{index:03d}",
+            f"Example Account {index:03d}",
+            stages[index % len(stages)],
+            f"Owner {index:03d}",
+            f"Review account note {index:03d}",
+            f"https://crm.example.test/accounts/example-{index:03d}",
+            f"2026-07-{(index % 9) + 10:02d}T12:00:00Z",
+        )
+        for index in range(32)
+    ]
+    target = (DOMAIN_ACCOUNT_ID, DOMAIN_ACCOUNT_NAME, stage, owner, next_action, DOMAIN_SOURCE_URL, observed_at)
+
+    with agent_sqlite_db(str(agent_id)) as db_path:
+        conn = open_guarded_sqlite_connection(db_path)
+        try:
+            conn.execute("DROP TABLE IF EXISTS accounts;")
+            conn.execute(
+                "CREATE TABLE accounts (account_id TEXT PRIMARY KEY, name TEXT NOT NULL, stage TEXT NOT NULL, "
+                "owner TEXT NOT NULL, next_action TEXT NOT NULL, source_url TEXT NOT NULL, observed_at TEXT NOT NULL);"
+            )
+            conn.executemany(
+                "INSERT INTO accounts (account_id, name, stage, owner, next_action, source_url, observed_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?);",
+                [*decoys[:16], target, *decoys[16:], *([DOMAIN_LEGACY_ACCOUNT] if duplicate_name else [])],
+            )
+            conn.commit()
+        finally:
+            clear_guarded_connection(conn)
+            conn.close()
+
+
+def _inspect_domain_refresh_state(agent_id: str) -> tuple[list[str], str | None]:
+    expected_ids = {row[0] for row in DOMAIN_WORKSTREAMS}
+    failures = []
+    child_table = None
+    with agent_sqlite_db(str(agent_id)) as db_path:
+        conn = open_guarded_sqlite_connection(db_path)
+        try:
+            account = conn.execute(
+                """
+                SELECT account_id, name, stage, owner, next_action, source_url, observed_at
+                FROM accounts WHERE account_id = ?;
+                """,
+                (DOMAIN_ACCOUNT_ID,),
+            ).fetchall()
+            current = [(DOMAIN_ACCOUNT_ID, DOMAIN_ACCOUNT_NAME, *DOMAIN_REFRESH, DOMAIN_REFRESH_URL, DOMAIN_REFRESH_OBSERVED_AT)]
+            if account != current:
+                failures.append("existing account was duplicated or retained stale values")
+            legacy = conn.execute(
+                "SELECT account_id, name, stage, owner, next_action, source_url, observed_at FROM accounts WHERE account_id=?;",
+                (DOMAIN_LEGACY_ACCOUNT[0],),
+            ).fetchall()
+            if legacy != [DOMAIN_LEGACY_ACCOUNT]:
+                failures.append("refresh changed a different account sharing the display name")
+
+            child = None
+            tables = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND substr(name, 1, 2) != '__';"
+            ).fetchall()
+            for (table_name,) in tables:
+                if table_name == "accounts":
+                    continue
+                quoted = '"' + table_name.replace('"', '""') + '"'
+                columns = conn.execute(f"PRAGMA table_info({quoted});").fetchall()
+                names = {column[1] for column in columns}
+                required = {
+                    "workstream_id", "account_id", "name", "status", "owner", "due_on",
+                    "source_url", "observed_at",
+                }
+                if not required.issubset(names):
+                    continue
+                rows = conn.execute(
+                    f"SELECT workstream_id, account_id, name, status, owner, due_on, source_url, observed_at "
+                    f"FROM {quoted} WHERE account_id = ?;",
+                    (DOMAIN_ACCOUNT_ID,),
+                ).fetchall()
+                if len(rows) != len(expected_ids) or {row[0] for row in rows} != expected_ids:
+                    continue
+                unique_indexes = [row[1] for row in conn.execute(f"PRAGMA index_list({quoted});") if row[2]]
+                keyed = any(row[1] == "workstream_id" and row[5] for row in columns) or any(
+                    "workstream_id" in {row[2] for row in conn.execute(f'PRAGMA index_info("{name}");')}
+                    for name in unique_indexes
+                )
+                expected_rows = {
+                    (workstream_id, DOMAIN_ACCOUNT_ID, name, status, owner, due_on,
+                     DOMAIN_REFRESH_URL, DOMAIN_REFRESH_OBSERVED_AT)
+                    for workstream_id, name, status, owner, due_on in DOMAIN_WORKSTREAMS
+                }
+                sourced = set(rows) == expected_rows
+                child = (table_name, keyed, sourced)
+                break
+            if child is None:
+                failures.append("new workstreams were not modeled as a related table")
+            else:
+                child_table = child[0]
+                if not child[1]:
+                    failures.append("workstream model lacked stable identity")
+                if not child[2]:
+                    failures.append("workstream model lacked complete facts, relationship, or provenance")
+        finally:
+            clear_guarded_connection(conn)
+            conn.close()
+    return failures, child_table
+
+
+def _domain_refresh_state_failures(agent_id: str) -> list[str]:
+    return _inspect_domain_refresh_state(agent_id)[0]
+
+
 class SqliteToolResultScenario(EvalScenario, ScenarioExecutionTools):
     tier = "core"
     category = "sqlite_tool_results"
@@ -454,6 +623,7 @@ class SqliteToolResultScenario(EvalScenario, ScenarioExecutionTools):
     prompt = ""; mock_kind = ""; verify_task_name = "verify_sqlite_usage"; require_working_table = False; max_relevant_tool_calls = 18; min_sources = 1
     max_single_result_filters = 1
     max_sqlite_usage_calls: int | None = None
+    max_sqlite_attempts: int | None = None
     reject_result_id_case_rows = False
     sourced_answer_task_name = "verify_sourced_answer"
     result_access_source_urls: tuple[str, ...] = ()
@@ -517,6 +687,7 @@ class SqliteToolResultScenario(EvalScenario, ScenarioExecutionTools):
         ]
         failures = [msg for bad, msg in (
             (not successful_calls, "no successful sqlite_batch call observed"),
+            (self.max_sqlite_attempts is not None and len(calls) > self.max_sqlite_attempts, f"sqlite_batch attempts {len(calls)} > {self.max_sqlite_attempts}"),
             (self.max_sqlite_usage_calls is not None and len(successful_calls) > self.max_sqlite_usage_calls, f"sqlite_batch calls {len(successful_calls)} > {self.max_sqlite_usage_calls}"),
             (summary.aggregate_tool_result_queries < 1, "no aggregate __tool_results query observed"),
             (summary.smart_tool_result_queries < 1, "no smart __tool_results query observed"),
@@ -625,6 +796,7 @@ class SqliteMultiResultWebSynthesisScenario(SqliteToolResultScenario):
     required_terms = ("enterprise", "SMB", "HIPAA")
     min_sources = 3
     max_sqlite_usage_calls = 2
+    max_sqlite_attempts = 3
     reject_result_id_case_rows = True
 
 
@@ -794,6 +966,129 @@ class SqliteIntermediateWorkingTableScenario(SqliteToolResultScenario):
         )
 
 
+class SqliteDomainModelScenario(SqliteToolResultScenario):
+    domain_charter = "Own current account and relationship operations for the sales team. Keep incoming evidence coherent and report precise, source-backed next actions."
+
+    def _prepare_domain_agent(
+        self, agent_id: str, state: tuple[str, str, str], observed_at: str, *, duplicate_name: bool = False,
+    ) -> None:
+        self._ready_agent(agent_id)
+        PersistentAgent.objects.filter(id=agent_id).update(charter=self.domain_charter)
+        _seed_domain_account(agent_id, state, observed_at, duplicate_name=duplicate_name)
+
+    def _record_check(self, run_id: str, task_name: str, failures: list[str], success: str) -> None:
+        self.record_task_result(
+            run_id, None, EvalRunTask.Status.FAILED if failures else EvalRunTask.Status.PASSED,
+            task_name=task_name,
+            observed_summary="; ".join(failures) if failures else success,
+            artifacts={},
+        )
+
+
+@register_scenario
+class SqliteDomainTruthOverStaleHistoryScenario(SqliteDomainModelScenario):
+    slug = SQLITE_DOMAIN_TRUTH_OVER_STALE_HISTORY
+    description = "An established domain model should beat stale conversation history."
+    expected_runtime = "short"
+    tasks = [ScenarioTask(name="inject_prompt", assertion_type="agent_processing"), ScenarioTask(name="verify_modeled_truth_read", assertion_type="tool_call"), ScenarioTask(name="verify_current_truth_answer", assertion_type="manual")]
+    prompt = "I'm picking up Aster Labs. Where does it actually stand now, who owns it, and what should happen next?"
+
+    def run(self, run_id: str, agent_id: str) -> None:
+        self._prepare_domain_agent(agent_id, DOMAIN_CURRENT, timezone.now().isoformat())
+        self.inject_message(
+            agent_id,
+            "Last week's note put Aster Labs in discovery with Devon Price, waiting until Friday.",
+            trigger_processing=False,
+            eval_run_id=run_id,
+        )
+        inbound = self._inject_and_wait(
+            run_id, agent_id, self.prompt, {},
+            allowed_tool_names={"sqlite_batch", "send_chat_message"}, max_relevant_tool_calls=4,
+        )
+        calls = _tool_calls_for_run(run_id, after=inbound.timestamp, tool_names={"sqlite_batch"})
+        successful = [call for call in calls if str(call.status).lower() == "complete"]
+        sql = "\n".join(str((call.tool_params or {}).get("sql") or "") for call in successful)
+        targeted = any(
+            _reads_table(statement, "accounts") and re.search(r"\bwhere\b", statement, re.I)
+            for call in successful
+            for statement in sqlparse.split(str((call.tool_params or {}).get("sql") or ""))
+        )
+        failures = [message for failed, message in (
+            (not successful, "existing account model was not queried"),
+            (not (re.search(r"\bselect\b", sql, re.I) and _reads_table(sql, "accounts")), "account truth was not selected from the model"),
+            (not targeted, "account model was not queried with a bounded filter"),
+            (len(successful) > 2, f"SQLite reads were not bounded: {len(successful)}"),
+        ) if failed]
+        self._record_check(
+            run_id, "verify_modeled_truth_read", failures,
+            "Read the existing account model before one terminal reply.",
+        )
+        self._record_sourced_answer(
+            run_id, agent_id=agent_id, after=inbound.timestamp, task_name="verify_current_truth_answer",
+            source_urls=(), required_terms=("Aster Labs", "legal", "Maya Chen", "SOC 2 packet"), min_sources=0,
+        )
+
+
+@register_scenario
+class SqliteDomainModelRefreshesAndEvolvesScenario(SqliteDomainModelScenario):
+    slug = SQLITE_DOMAIN_MODEL_REFRESHES_AND_EVOLVES
+    description = "Newer source evidence should refresh an entity and add a keyed, sourced child relation."
+    tasks = [ScenarioTask(name="inject_prompt", assertion_type="agent_processing"), ScenarioTask(name="verify_source_to_model_refresh", assertion_type="tool_call"), ScenarioTask(name="verify_persisted_domain_evolution", assertion_type="manual"), ScenarioTask(name="verify_refreshed_answer", assertion_type="manual")]
+    prompt = f"Review this latest CRM snapshot and give me the current Aster Labs picture, including anything still open: {DOMAIN_REFRESH_URL}"
+
+    def run(self, run_id: str, agent_id: str) -> None:
+        self._prepare_domain_agent(
+            agent_id, ("security_review", "Maya Chen", "wait for the security questionnaire"),
+            "2026-07-18T13:00:00Z", duplicate_name=True,
+        )
+        self._enable_tools(agent_id, ("http_request",))
+        inbound = self._inject_and_wait(
+            run_id, agent_id, self.prompt, _domain_refresh_mock(),
+            allowed_tool_names={"http_request", "sqlite_batch", "send_chat_message"}, max_relevant_tool_calls=8,
+        )
+        calls = _tool_calls_for_run(run_id, after=inbound.timestamp)
+        fetches = [
+            call for call in calls
+            if call.tool_name == "http_request" and str(call.status).lower() == "complete"
+            and str(resolved_tool_param(call, "url") or "").rstrip("/") == DOMAIN_REFRESH_URL.rstrip("/")
+        ]
+        sqlite_calls = [
+            call for call in calls if call.tool_name == "sqlite_batch" and str(call.status).lower() == "complete"
+        ]
+        sql_values = [str((call.tool_params or {}).get("sql") or "") for call in sqlite_calls]
+        source_mutations = set(source_derived_model_mutation_tables(sql_values))
+        reconciled_tables = set(source_derived_model_reconciled_tables(sql_values))
+        state_failures, child_table = _inspect_domain_refresh_state(agent_id)
+        expected_tables = {"accounts"}
+        if child_table:
+            expected_tables.add(child_table.casefold())
+        failures = [message for failed, message in (
+            (len(fetches) != 1, f"expected one source fetch, found {len(fetches)}"),
+            (not sqlite_calls, "new source evidence was not written to the model"),
+            (
+                not expected_tables.issubset(source_mutations),
+                f"expected source-derived writes to {sorted(expected_tables)}, found {sorted(source_mutations)}",
+            ),
+            (
+                not expected_tables.issubset(reconciled_tables),
+                f"updated model was not queried after reconciliation: {sorted(reconciled_tables)}",
+            ),
+            (len(sqlite_calls) > 4, f"SQLite refresh calls were not bounded: {len(sqlite_calls)}"),
+        ) if failed]
+        self._record_check(
+            run_id, "verify_source_to_model_refresh", failures,
+            "Fetched the newer snapshot once, ingested it, and then replied.",
+        )
+        self._record_check(
+            run_id, "verify_persisted_domain_evolution", state_failures,
+            "Refreshed one stable account and modeled keyed, sourced child rows.",
+        )
+        self._record_sourced_answer(
+            run_id, agent_id=agent_id, after=inbound.timestamp, task_name="verify_refreshed_answer",
+            source_urls=(), required_terms=("Aster Labs", "contracting", "redlines", "Noah Reed"), min_sources=0,
+        )
+
+
 @register_scenario
 class SqliteDedupeRequeryScenario(SqliteToolResultScenario):
     slug = SQLITE_DEDUPE_REQUERY
@@ -815,7 +1110,7 @@ class SqliteItemLinkReportScenario(SqliteToolResultScenario):
     description = "Reports over item records should preserve item-level listing URLs, not just source feed URLs."
     tasks = [ScenarioTask(name="inject_prompt", assertion_type="agent_processing"), ScenarioTask(name="verify_item_link_sqlite_usage", assertion_type="tool_call"), ScenarioTask(name="verify_listing_links_in_report", assertion_type="manual")]
     builtin_tools = ("http_request",)
-    prompt = "Fetch these vehicle inventory JSON feeds, compare 2023+ Tesla Model Y records within 50 miles, and send one concise initial report with the best batch and listing links for recommended vehicles. Do not browse or create files.\n\n" + "\n".join(f"- {url}" for url in INVENTORY_URLS)
+    prompt = "Fetch these vehicle inventory JSON feeds, compare 2023+ Tesla Model Y records within 50 miles, and send one concise initial report with the best batch, the cheapest qualifying option, and listing links for recommended vehicles. Do not browse or create files.\n\n" + "\n".join(f"- {url}" for url in INVENTORY_URLS)
     mock_kind = "inventory"
     verify_task_name = "verify_item_link_sqlite_usage"
     answer_source_urls = LISTING_URLS

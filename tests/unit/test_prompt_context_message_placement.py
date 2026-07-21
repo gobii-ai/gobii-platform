@@ -4,7 +4,13 @@ from unittest.mock import patch
 
 from api.agent.core import prompt_context
 from api.agent.core.prompt_context import build_prompt_context
-from api.models import BrowserUseAgent, PersistentAgent
+from api.models import (
+    BrowserUseAgent,
+    PersistentAgent,
+    PersistentAgentStep,
+    PersistentAgentSystemStep,
+    PersistentAgentToolCall,
+)
 
 User = get_user_model()
 
@@ -42,18 +48,9 @@ class PromptContextSqlitePlacementTests(TestCase):
         self.assertEqual(all_contents.count(sqlite_guidance), 1)
         self.assertIn("<sqlite_guidance>", system_message["content"])
         self.assertIn("</sqlite_guidance>", system_message["content"])
-        self.assertIn("keyed entities/events/relations", sqlite_guidance)
-        self.assertIn("multi-fetch finite sets as keyed", sqlite_guidance)
-        self.assertIn("with fields/status/source", sqlite_guidance)
-        self.assertIn("query gaps before reporting", sqlite_guidance)
-        self.assertIn("Only sourced blockers are unresolved", sqlite_guidance)
-        self.assertIn("return only needed rows to context", sqlite_guidance)
-        self.assertIn(
-            "one shaped INSERT ... SELECT/json_each filtered by IN/tool_name",
-            sqlite_guidance,
-        )
-        self.assertIn("extract fields and raw URLs in SQL from result_json", sqlite_guidance)
-        self.assertIn("Never filter one result_id at a time, make a table per result", sqlite_guidance)
+        self.assertIn("Named tables are the world model", sqlite_guidance)
+        self.assertIn("before external refreshes/decisions", sqlite_guidance)
+        self.assertIn("use SQLite for exact set logic/counts/ranking", sqlite_guidance)
         self.assertIn("Keep chat/outreach light. Owner reports on 4+ peers", system_message["content"])
         self.assertIn(
             "need resolved/total and one table with requested fields",
@@ -73,3 +70,69 @@ class PromptContextSqlitePlacementTests(TestCase):
         self.assertIn("deep/exhaustive research and finite-set coverage", system_message["content"])
         self.assertIn("batch gaps, follow up misses, and reconcile coverage", system_message["content"])
         self.assertIn("never repeat a successful URL/query", system_message["content"])
+
+    def test_source_model_warning_uses_only_latest_process_cycle(self):
+        old_cycle = PersistentAgentStep.objects.create(agent=self.agent, description="Process events")
+        PersistentAgentSystemStep.objects.create(
+            step=old_cycle,
+            code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
+        )
+        old_source = PersistentAgentStep.objects.create(agent=self.agent, description="old source")
+        PersistentAgentToolCall.objects.create(
+            step=old_source,
+            tool_name="http_request",
+            tool_params={"url": "https://old.example.test"},
+            status="complete",
+        )
+        current_cycle = PersistentAgentStep.objects.create(agent=self.agent, description="Process events")
+        PersistentAgentSystemStep.objects.create(
+            step=current_cycle,
+            code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
+        )
+
+        self.assertEqual(prompt_context._get_unreconciled_source_model_warning(self.agent), "")
+
+        source = PersistentAgentStep.objects.create(agent=self.agent, description="current source")
+        PersistentAgentToolCall.objects.create(
+            step=source,
+            tool_name="http_request",
+            tool_params={"url": "https://crm.example.test/account"},
+            status="complete",
+        )
+        model_read = PersistentAgentStep.objects.create(agent=self.agent, description="stale model read")
+        PersistentAgentToolCall.objects.create(
+            step=model_read,
+            tool_name="sqlite_batch",
+            tool_params={"sql": "SELECT * FROM accounts WHERE account_id='acct-1'"},
+            status="complete",
+        )
+
+        self.assertIn(
+            "not yet reconciled",
+            prompt_context._get_unreconciled_source_model_warning(self.agent),
+        )
+
+        reconcile = PersistentAgentStep.objects.create(agent=self.agent, description="model reconciliation")
+        PersistentAgentToolCall.objects.create(
+            step=reconcile,
+            tool_name="sqlite_batch",
+            tool_params={
+                "sql": "UPDATE accounts SET stage=(SELECT json_extract(result_json,'$.stage') "
+                "FROM __tool_results) WHERE account_id='acct-1'"
+            },
+            status="complete",
+        )
+
+        self.assertIn(
+            "post-update query",
+            prompt_context._get_unreconciled_source_model_warning(self.agent),
+        )
+        post_update_read = PersistentAgentStep.objects.create(agent=self.agent, description="fresh model read")
+        PersistentAgentToolCall.objects.create(
+            step=post_update_read,
+            tool_name="sqlite_batch",
+            tool_params={"sql": "SELECT stage FROM accounts WHERE account_id='acct-1'"},
+            status="complete",
+        )
+
+        self.assertEqual(prompt_context._get_unreconciled_source_model_warning(self.agent), "")

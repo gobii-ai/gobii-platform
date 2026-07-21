@@ -120,6 +120,7 @@ class ToolResultSchemaTests(SimpleTestCase):
         prompt_info = info.get("step-1")
         self.assertIsNotNone(prompt_info)
         self.assertIn("result_id=step-1", prompt_info.meta)
+        self.assertIn("result_json_path=$.content", prompt_info.meta)
         self.assertTrue(prompt_info.is_inline)
         self.assertIn("First", prompt_info.preview_text)
         self.assertNotIn("QUERY:", prompt_info.meta)
@@ -758,7 +759,7 @@ class PreviewByteLimitTests(SimpleTestCase):
         # Should be wrapped with one-time view warning
         self.assertIn("[FULL RESULT (30000 chars) - ONE-TIME VIEW", preview)
         self.assertIn("Use this visible result now", preview)
-        self.assertIn("Do not query __tool_results or sqlite_batch just to reread", preview)
+        self.assertIn("exact filtering/ranking across sizable or multiple results", preview)
         self.assertIn(medium_text, preview)
 
     def test_fresh_tool_call_over_threshold_truncated(self):
