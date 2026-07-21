@@ -1036,7 +1036,7 @@ class SqliteBoundedPortfolioReportScenario(SqliteToolResultScenario):
             )
         )
         incorrect_coverage = re.search(
-            r"\b(?:(?:[0-6]|zero|one|two|three|four|five|six)\s+founders?|all\s+(?:8|eight)\s+founders?)\s+(?:were\s+)?identified\b",
+            r"\b(?:[0-6]|8|zero|one|two|three|four|five|six|eight)\s+founders?\s+(?:were\s+)?identified\b",
             body,
             re.I,
         )

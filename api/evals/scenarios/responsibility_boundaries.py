@@ -7,6 +7,7 @@ from django.contrib.auth import get_user_model
 
 from api.agent.system_skills.defaults import DISCORD_NATIVE_SYSTEM_SKILL_KEY
 from api.agent.system_skills.service import enable_system_skills
+from api.agent.tools.eval_synthetic_tools import EVAL_SYNTHETIC_TOOL_SERVER
 from api.agent.tools.tool_manager import mark_tool_enabled_without_discovery
 from api.evals.base import EvalScenario, ScenarioTask
 from api.evals.execution import ScenarioExecutionTools
@@ -20,6 +21,7 @@ from api.models import (
     PersistentAgent,
     PersistentAgentCommsEndpoint,
     PersistentAgentConversation,
+    PersistentAgentEnabledTool,
     PersistentAgentMessage,
     PersistentAgentStep,
     PersistentAgentSystemStep,
@@ -155,6 +157,12 @@ class ResponsibilityBoundaryScenario(EvalScenario, ScenarioExecutionTools):
         self._seed_prior_run(agent_id)
         agent = PersistentAgent.objects.select_related("user", "organization").get(id=agent_id)
         mark_tool_enabled_without_discovery(agent, "http_request")
+        scrape_tool_name = "mcp_brightdata_scrape_as_markdown"
+        mark_tool_enabled_without_discovery(agent, scrape_tool_name)
+        PersistentAgentEnabledTool.objects.filter(
+            agent=agent,
+            tool_full_name=scrape_tool_name,
+        ).update(tool_server=EVAL_SYNTHETIC_TOOL_SERVER, tool_name=scrape_tool_name)
         return agent
 
     @staticmethod

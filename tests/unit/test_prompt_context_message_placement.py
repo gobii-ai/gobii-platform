@@ -60,8 +60,8 @@ class PromptContextSqlitePlacementTests(TestCase):
             system_message["content"],
         )
         self.assertIn("## Link References (CRITICAL)", system_message["content"])
-        self.assertIn("An item without its own token stays unlinked", system_message["content"])
-        self.assertIn("a source/feed token links only that source/feed", system_message["content"])
+        self.assertIn("An item lacking its token stays unlinked", system_message["content"])
+        self.assertIn("a source/feed token links only itself", system_message["content"])
         self.assertIn("resolve/source each requested field", system_message["content"])
         self.assertIn("grouped discovery isn't coverage", system_message["content"])
         self.assertIn("separate sourced unavailability from research gaps", system_message["content"])

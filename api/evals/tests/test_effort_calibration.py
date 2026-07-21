@@ -301,6 +301,16 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
                 body.replace("7 founders identified; 1 evidence-backed nondisclosure.", "All 8 founders identified.")
             )
         )
+        self.assertFalse(
+            scenario._has_complete_comparison_table(
+                body.replace("7 founders identified; 1 evidence-backed nondisclosure.", "8 founders identified.")
+            )
+        )
+        self.assertFalse(
+            scenario._has_complete_comparison_table(
+                body.replace("7 founders identified; 1 evidence-backed nondisclosure.", "Eight founders were identified.")
+            )
+        )
 
     def test_portfolio_hierarchy_rejects_dummy_table(self):
         scenario, recorded = SqliteBoundedPortfolioReportScenario(), []

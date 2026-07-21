@@ -158,7 +158,16 @@ class CommonUseCaseEvalDefinition:
         return list(self.forbidden_tools)
 
     def ignored_tool_names(self):
-        return list(dict.fromkeys([*IGNORED_FIRST_ACTION_TOOL_NAMES, *self.ignored_tools]))
+        accepted_tool_names = {
+            accepted_tool_name
+            for expected_tool_name in self.expected_tools
+            for accepted_tool_name in self.accepted_tool_names_for_expected_tool(expected_tool_name)
+        }
+        return [
+            tool_name
+            for tool_name in dict.fromkeys([*IGNORED_FIRST_ACTION_TOOL_NAMES, *self.ignored_tools])
+            if tool_name not in accepted_tool_names
+        ]
 
     def allowed_preamble_tool_names(self):
         category_defaults = []
@@ -3113,8 +3122,11 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
     def _call_satisfies_expected_tool(self, call, expected_tool_name):
         if call.tool_name not in self.case.accepted_tool_names_for_expected_tool(expected_tool_name):
             return False
-        if expected_tool_name == "request_human_input" and not self._request_human_input_call_has_options(call):
-            return False
+        if expected_tool_name == "request_human_input":
+            if call.tool_name == "request_human_input" and not self._request_human_input_call_has_options(call):
+                return False
+            if call.tool_name == "send_chat_message" and not str((call.tool_params or {}).get("body") or "").strip():
+                return False
         if (
             self.case.expected_params
             and len(self.case.expected_tools) == 1
