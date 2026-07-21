@@ -5,7 +5,7 @@ const TOP_LOAD_PX = 160
 const PROGRAMMATIC_SCROLL_MS = 180
 const SCROLLABLE_EPSILON_PX = 1
 const PREPEND_RESTORE_GUARD_MS = 250
-const TOUCH_SCROLL_DELTA_PX = 2
+const USER_SCROLL_DELTA_PX = 2
 
 type TimelineScrollControllerOptions = {
   activeAgentId: string | null
@@ -29,6 +29,10 @@ function bottomDistance(container: HTMLElement): number {
 
 function canScroll(container: HTMLElement | null): boolean {
   return Boolean(container && container.scrollHeight > container.clientHeight + SCROLLABLE_EPSILON_PX)
+}
+
+function canScrollUp(container: HTMLElement): boolean {
+  return canScroll(container) && container.scrollTop > 0
 }
 
 type PrependAnchor = {
@@ -257,7 +261,7 @@ export function useTimelineScrollController({
     }
 
     const handleWheel = (event: WheelEvent) => {
-      if (event.deltaY < 0) {
+      if (event.deltaY < 0 && canScrollUp(container)) {
         suspendAutoFollow()
       }
     }
@@ -273,7 +277,8 @@ export function useTimelineScrollController({
       if (
         nextTouchY !== null
         && previousTouchY !== null
-        && nextTouchY > previousTouchY + TOUCH_SCROLL_DELTA_PX
+        && nextTouchY > previousTouchY + USER_SCROLL_DELTA_PX
+        && canScrollUp(container)
       ) {
         suspendAutoFollow()
       }
@@ -295,6 +300,7 @@ export function useTimelineScrollController({
       const previousScrollTop = lastScrollTopRef.current
       const nextScrollTop = container.scrollTop
       const scrollingUp = nextScrollTop < previousScrollTop
+      const meaningfulScrollUp = nextScrollTop < previousScrollTop - USER_SCROLL_DELTA_PX
       const scrollingDown = nextScrollTop > previousScrollTop
       lastScrollTopRef.current = nextScrollTop
       syncMeasurements(container)
@@ -312,7 +318,7 @@ export function useTimelineScrollController({
       }
 
       const distance = bottomDistance(container)
-      if (scrollingUp) {
+      if (meaningfulScrollUp) {
         suspendAutoFollow()
       } else if (scrollingDown && distance <= NEAR_BOTTOM_PX) {
         setPinned(true)
