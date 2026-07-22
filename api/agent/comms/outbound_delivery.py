@@ -779,8 +779,9 @@ def _deny_email_delivery(
 
 def _claim_email_for_delivery(message: PersistentAgentMessage) -> bool:
     with transaction.atomic():
+        # Nullable policy joins cannot be FOR UPDATE targets in PostgreSQL.
         locked = (
-            PersistentAgentMessage.objects.select_for_update()
+            PersistentAgentMessage.objects.select_for_update(of=("self",))
             .select_related("from_endpoint", "owner_agent", "owner_agent__organization")
             .get(pk=message.pk)
         )
