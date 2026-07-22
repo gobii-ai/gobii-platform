@@ -6,9 +6,11 @@ from django.core.exceptions import PermissionDenied
 from django.db import transaction
 from django.db.models import Q
 from django.http import HttpRequest, JsonResponse
+from django.template.loader import render_to_string
 from django.utils import timezone
 from django.views import View
 
+from api.agent.comms.email_content import convert_body_to_html_and_plaintext
 from api.agent.comms.email_threading import get_message_contact_address
 from api.models import (
     DeliveryStatus,
@@ -44,7 +46,7 @@ from console.context_overrides import get_context_override
 
 PAGE_SIZE = 30
 MAX_PAGE_SIZE = 100
-EDITABLE_FIELDS = {"to", "cc", "subject", "body", "attachmentNodeIds"}
+REVIEW_CHANGE_FIELDS = {"to", "cc", "subject", "body", "attachmentNodeIds"}
 
 
 def _payload(request: HttpRequest) -> dict[str, Any]:
@@ -120,6 +122,11 @@ def _warnings(review: OutboundEmailReview) -> list[dict[str, str]]:
     return warnings
 
 
+def _render_outbox_body_html(body: str) -> str:
+    html_snippet, _ = convert_body_to_html_and_plaintext(body, emit_logs=False)
+    return render_to_string("emails/persistent_agent_email.html", {"body": html_snippet})
+
+
 def serialize_outbox_review(review: OutboundEmailReview, *, detail: bool = False) -> dict[str, Any]:
     expire_review_if_needed(review)
     message = review.message
@@ -170,7 +177,8 @@ def serialize_outbox_review(review: OutboundEmailReview, *, detail: bool = False
             ]
         payload.update(
             {
-                "bodyHtml": message.body,
+                "body": message.body or "",
+                "bodyHtml": _render_outbox_body_html(message.body or ""),
                 "attachments": [
                     {
                         "id": str(attachment.id),
@@ -319,7 +327,7 @@ class OutboxDetailAPIView(ApiLoginRequiredMixin, View):
                 return JsonResponse({"error": "Outbox item not found."}, status=404)
             payload = _payload(request)
             expected_version = int(payload.get("expectedVersion"))
-            changes = {key: value for key, value in payload.items() if key in EDITABLE_FIELDS}
+            changes = {key: value for key, value in payload.items() if key in REVIEW_CHANGE_FIELDS}
             if not changes:
                 raise OutboundEmailReviewError("No editable fields were provided.")
             review = update_pending_review_message(
@@ -346,7 +354,7 @@ class OutboxDecisionAPIView(ApiLoginRequiredMixin, View):
                 return JsonResponse({"error": "Outbox item not found."}, status=404)
             payload = _payload(request)
             if self.action == "approve":
-                changes = {key: value for key, value in payload.items() if key in EDITABLE_FIELDS}
+                changes = {key: value for key, value in payload.items() if key in REVIEW_CHANGE_FIELDS}
                 review = approve_review(
                     review,
                     actor=request.user,

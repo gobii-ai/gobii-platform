@@ -15,6 +15,7 @@ from api.agent.comms.outbound_delivery import (
     _prepare_email_attachments,
     deliver_agent_email,
 )
+from api.agent.comms.email_threading import get_message_contact_address
 from api.agent.tools.email_sender import execute_send_email
 from api.models import (
     AgentCollaborator,
@@ -383,23 +384,37 @@ class EmailReviewOutboxTests(TestCase):
         self.assertEqual(len(prepared), 1)
         self.assertEqual(prepared[0].content, approved_content)
 
-    def test_editing_primary_recipient_rethreads_and_clears_reply_parent(self):
+    def test_review_service_rejects_recipient_edits(self):
         message = self._message("first@example.com")
-        message.parent = self._message("first@example.com")
-        message.save(update_fields=["parent"])
         review = queue_message_for_review(message)
 
-        update_pending_review_message(
-            review,
-            actor=self.owner,
-            expected_version=1,
-            changes={"to": "second@example.com"},
-        )
+        for changes in ({"to": "second@example.com"}, {"cc": ["copy@example.com"]}):
+            with self.subTest(changes=changes):
+                with self.assertRaisesRegex(OutboundEmailReviewError, "recipients cannot be changed"):
+                    update_pending_review_message(
+                        review,
+                        actor=self.owner,
+                        expected_version=1,
+                        changes=changes,
+                    )
 
         message.refresh_from_db()
-        self.assertIsNone(message.to_endpoint_id)
-        self.assertEqual(message.conversation.address, "second@example.com")
-        self.assertIsNone(message.parent_id)
+        review.refresh_from_db()
+        self.assertEqual(get_message_contact_address(message), "first@example.com")
+        self.assertFalse(message.cc_endpoints.exists())
+        self.assertEqual(review.content_version, 1)
+
+    def test_outbox_detail_separates_raw_body_from_rendered_preview(self):
+        message = self._message()
+        message.body = "First line\nSecond & line"
+        message.save(update_fields=["body"])
+        review = queue_message_for_review(message)
+
+        payload = serialize_outbox_review(review, detail=True)
+
+        self.assertEqual(payload["body"], "First line\nSecond & line")
+        self.assertIn("<p>First line<br />Second &amp; line</p>", payload["bodyHtml"])
+        self.assertIn('class="email-body"', payload["bodyHtml"])
 
     def test_expiry_records_manager_visible_action(self):
         review = queue_message_for_review(self._message())
@@ -598,6 +613,36 @@ class EmailReviewOutboxTests(TestCase):
         contact = CommsAllowlistEntry.objects.get(agent=self.agent, address="new-contact@example.com")
         self.assertFalse(contact.allow_inbound)
         self.assertTrue(contact.allow_outbound)
+
+    @override_flag(EMAIL_REVIEW_OUTBOX, active=True)
+    @patch("api.tasks.outbox.dispatch_approved_outbox_email.delay")
+    def test_outbox_api_rejects_recipient_edits(self, delay_mock):
+        message = self._message("original@example.com")
+        review = queue_message_for_review(message)
+        self.client.force_login(self.owner)
+
+        edit_response = self.client.patch(
+            reverse("console_outbox_detail", kwargs={"outbox_id": review.id}),
+            data={"expectedVersion": 1, "to": "redirected@example.com"},
+            content_type="application/json",
+        )
+        approve_response = self.client.post(
+            reverse("console_outbox_approve", kwargs={"outbox_id": review.id}),
+            data={"expectedVersion": 1, "cc": ["additional@example.com"]},
+            content_type="application/json",
+        )
+
+        self.assertEqual(edit_response.status_code, 400, edit_response.content.decode())
+        self.assertIn("recipients cannot be changed", edit_response.json()["error"])
+        self.assertEqual(approve_response.status_code, 400, approve_response.content.decode())
+        self.assertIn("recipients cannot be changed", approve_response.json()["message"])
+        message.refresh_from_db()
+        review.refresh_from_db()
+        self.assertEqual(get_message_contact_address(message), "original@example.com")
+        self.assertFalse(message.cc_endpoints.exists())
+        self.assertEqual(review.status, OutboundEmailReview.Status.PENDING)
+        self.assertEqual(review.content_version, 1)
+        delay_mock.assert_not_called()
 
     @override_flag(EMAIL_REVIEW_OUTBOX, active=True)
     def test_collaborator_cannot_access_outbox_api(self):
