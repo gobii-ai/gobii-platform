@@ -12,13 +12,7 @@ from api.models import (
     OutboundEmailReviewNotificationState,
     UserPreference,
 )
-
-
-MANAGER_ROLES = {
-    OrganizationMembership.OrgRole.OWNER,
-    OrganizationMembership.OrgRole.ADMIN,
-    OrganizationMembership.OrgRole.SOLUTIONS_PARTNER,
-}
+from console.role_constants import MEMBER_MANAGE_ROLES
 
 
 def _workspace_filter(review: OutboundEmailReview) -> dict[str, object]:
@@ -43,7 +37,7 @@ def _reviewer_user_ids(review: OutboundEmailReview) -> list[int]:
             OrganizationMembership.objects.filter(
                 org_id=review.agent.organization_id,
                 status=OrganizationMembership.OrgStatus.ACTIVE,
-                role__in=MANAGER_ROLES,
+                role__in=MEMBER_MANAGE_ROLES,
             ).values_list("user_id", flat=True)
         )
     return [review.agent.user_id]
@@ -104,12 +98,10 @@ def sync_outbox_notification_cycle(review: OutboundEmailReview, *, allow_initial
         if pending_count == 0:
             if state.pending_cycle_started_at is not None:
                 state.pending_cycle_started_at = None
-                state.initial_notification_sent_at = None
                 state.last_digest_sent_at = None
                 state.save(
                     update_fields=[
                         "pending_cycle_started_at",
-                        "initial_notification_sent_at",
                         "last_digest_sent_at",
                         "updated_at",
                     ]
@@ -118,8 +110,7 @@ def sync_outbox_notification_cycle(review: OutboundEmailReview, *, allow_initial
         if not allow_initial or state.pending_cycle_started_at is not None:
             return
         state.pending_cycle_started_at = now
-        state.initial_notification_sent_at = now
-        state.save(update_fields=["pending_cycle_started_at", "initial_notification_sent_at", "updated_at"])
+        state.save(update_fields=["pending_cycle_started_at", "updated_at"])
     _send_notification(review, pending_count=pending_count, digest=False)
 
 

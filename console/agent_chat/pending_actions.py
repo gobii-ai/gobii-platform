@@ -258,8 +258,6 @@ def list_pending_action_requests(agent: PersistentAgent, viewer_user) -> list[di
                             if review.message.conversation_id
                             else review.message.to_endpoint.address
                         ),
-                        "queuedAt": review.queued_at.isoformat(),
-                        "detailApiUrl": reverse("console_outbox_detail", kwargs={"outbox_id": review.id}),
                     }
                     for review in outbox_qs[:10]
                 ],

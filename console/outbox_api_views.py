@@ -22,9 +22,9 @@ from api.models import (
 from api.services.outbound_email_policy import (
     classify_email_recipients,
     email_review_outbox_enabled,
-    get_effective_email_sending_mode,
     get_organization_minimum_email_sending_mode,
     get_workspace_default_email_sending_mode,
+    normalize_email_address,
     set_workspace_email_sending_policy,
 )
 from api.services.outbound_email_review import (
@@ -84,7 +84,6 @@ def _workspace_reviews(request: HttpRequest):
         "message__to_endpoint",
         "message__conversation",
         "decided_by",
-        "last_edited_by",
     ).prefetch_related("message__cc_endpoints", "message__attachments")
 
 
@@ -105,15 +104,12 @@ def _warnings(review: OutboundEmailReview) -> list[dict[str, str]]:
     warnings: list[dict[str, str]] = []
     message = review.message
     if review.status == OutboundEmailReview.Status.PENDING:
-        recipients = [get_message_contact_address(message), *message.cc_endpoints.values_list("address", flat=True)]
+        cc_addresses = list(message.cc_endpoints.values_list("address", flat=True))
+        recipients = [get_message_contact_address(message), *cc_addresses]
         decision = classify_email_recipients(review.agent, recipients)
         if decision.unknown_external_recipients:
             warnings.append({"code": "new_contact", "label": "New contact"})
-        cc_decision = classify_email_recipients(
-            review.agent,
-            message.cc_endpoints.values_list("address", flat=True),
-        )
-        if cc_decision.external_recipients:
+        if any(normalize_email_address(address) in decision.external_recipients for address in cc_addresses):
             warnings.append({"code": "external_cc", "label": "External CC"})
     if review_is_stale(review):
         warnings.append({"code": "stale", "label": "Stale"})
@@ -145,7 +141,6 @@ def serialize_outbox_review(review: OutboundEmailReview, *, detail: bool = False
     }
     payload: dict[str, Any] = {
         "id": str(review.id),
-        "messageId": str(message.id),
         "agent": {"id": str(review.agent_id), "name": review.agent.name},
         "sender": message.from_endpoint.address,
         "to": to_address,
@@ -154,11 +149,9 @@ def serialize_outbox_review(review: OutboundEmailReview, *, detail: bool = False
         "bodyPreview": (message.body or "")[:240],
         "status": _display_status(review),
         "reviewStatus": review.status,
-        "deliveryStatus": message.latest_status,
         "version": review.content_version,
         "queuedAt": review.queued_at.isoformat(),
         "expiresAt": review.expires_at.isoformat(),
-        "decidedAt": review.decided_at.isoformat() if review.decided_at else None,
         "warnings": _warnings(review),
         "allowedActions": allowed_actions,
         "lastError": message.latest_error_message or None,
@@ -184,15 +177,10 @@ def serialize_outbox_review(review: OutboundEmailReview, *, detail: bool = False
                         "id": str(attachment.id),
                         "nodeId": str(attachment.filespace_node_id) if attachment.filespace_node_id else None,
                         "filename": attachment.filename,
-                        "contentType": attachment.content_type,
-                        "size": attachment.file_size,
-                        "sha256": attachment.content_sha256,
                     }
                     for attachment in message.attachments.all()
                 ],
                 "threadContext": thread_messages,
-                "lastEditedAt": review.last_edited_at.isoformat() if review.last_edited_at else None,
-                "lastEditedBy": review.last_edited_by.get_full_name() if review.last_edited_by else None,
             }
         )
     return payload
@@ -422,7 +410,7 @@ class EmailSendingPolicyAPIView(ApiLoginRequiredMixin, View):
 
     def get(self, request: HttpRequest, *args: Any, **kwargs: Any):
         try:
-            context_info, organization, agents = _workspace(request)
+            context_info, organization, _ = _workspace(request)
         except OutboundEmailReviewError as exc:
             return JsonResponse({"error": str(exc)}, status=403)
         preferences = UserPreference.resolve_known_preferences(request.user)
@@ -432,15 +420,6 @@ class EmailSendingPolicyAPIView(ApiLoginRequiredMixin, View):
                 "minimumMode": get_organization_minimum_email_sending_mode(organization),
                 "canSetMinimum": organization is not None and context_info.can_manage_org_agents,
                 "emailNotificationsEnabled": preferences[UserPreference.KEY_OUTBOX_EMAIL_NOTIFICATIONS_ENABLED],
-                "agents": [
-                    {
-                        "id": str(agent.id),
-                        "name": agent.name,
-                        "requestedMode": agent.email_sending_mode,
-                        "effectiveMode": get_effective_email_sending_mode(agent),
-                    }
-                    for agent in agents.order_by("name")
-                ],
             }
         )
 

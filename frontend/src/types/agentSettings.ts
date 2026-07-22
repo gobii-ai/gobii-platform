@@ -1,3 +1,4 @@
+import type { EmailSendingMode } from '../constants/emailSendingModes'
 import type { LlmIntelligenceConfig } from './llmIntelligence'
 
 export type PrimaryEndpoint = {
@@ -16,7 +17,6 @@ export type AgentOrganization = {
 
 export type MiniDescriptionMode = 'auto' | 'manual'
 export type ContactApprovalMode = 'require_approval' | 'auto_approve_email'
-export type EmailSendingMode = 'review_all_external' | 'review_new_contacts' | 'send_automatically'
 
 export type AgentSummary = {
   id: string

@@ -841,9 +841,11 @@ def _claim_email_for_delivery(message: PersistentAgentMessage) -> bool:
         elif email_review_outbox_enabled():
             decision = classify_email_recipients(locked.owner_agent, get_message_email_recipients(locked))
             if decision.blocked_recipients or decision.requires_review:
-                locked.latest_error_code = "outbox_review_required"
-                locked.latest_error_message = "Delivery blocked because this external email requires human review."
-                locked.save(update_fields=["latest_error_code", "latest_error_message"])
+                _deny_email_delivery(
+                    locked,
+                    error_code="outbox_review_required",
+                    error_message="Delivery blocked because this external email requires human review.",
+                )
                 logger.warning("Denied unreviewed external email delivery for message %s.", locked.id)
                 track_outbox_bypass_denied(locked, reason="missing_required_review")
                 return False
@@ -873,6 +875,7 @@ def deliver_agent_email(message: PersistentAgentMessage):
         return
 
     if not _claim_email_for_delivery(message):
+        message.refresh_from_db(fields=["latest_status", "latest_error_code", "latest_error_message"])
         return
     subject = _normalized_email_subject(message)
     to_address = _get_email_primary_recipient(message)

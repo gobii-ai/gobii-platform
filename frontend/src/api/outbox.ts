@@ -1,19 +1,17 @@
+import type { EmailSendingMode } from '../constants/emailSendingModes'
 import { jsonFetch, jsonRequest } from './http'
 
 export type OutboxStatus = 'needs_review' | 'sending' | 'failed' | 'sent' | 'discarded' | 'expired'
-export type EmailSendingMode = 'review_all_external' | 'review_new_contacts' | 'send_automatically'
 
 export type OutboxAgentFile = {
   id: string
   name: string
   path: string
   nodeType: 'dir' | 'file'
-  sizeBytes: number | null
 }
 
 export type OutboxItem = {
   id: string
-  messageId: string
   agent: { id: string; name: string }
   sender: string
   to: string
@@ -24,11 +22,9 @@ export type OutboxItem = {
   bodyHtml?: string
   status: OutboxStatus
   reviewStatus: 'pending' | 'approved' | 'discarded' | 'expired'
-  deliveryStatus: string
   version: number
   queuedAt: string
   expiresAt: string
-  decidedAt?: string | null
   warnings: Array<{ code: string; label: string }>
   allowedActions: { edit: boolean; approve: boolean; discard: boolean; retry: boolean }
   lastError?: string | null
@@ -36,9 +32,6 @@ export type OutboxItem = {
     id: string
     nodeId?: string | null
     filename: string
-    contentType: string
-    size: number
-    sha256: string
   }>
   threadContext?: Array<{
     id: string
@@ -68,12 +61,6 @@ export type EmailSendingPolicy = {
   minimumMode: EmailSendingMode | null
   canSetMinimum: boolean
   emailNotificationsEnabled: boolean
-  agents: Array<{
-    id: string
-    name: string
-    requestedMode: EmailSendingMode
-    effectiveMode: EmailSendingMode
-  }>
 }
 
 export function fetchOutbox(status: string, search: string): Promise<OutboxListResponse> {
