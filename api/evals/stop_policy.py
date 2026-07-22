@@ -21,6 +21,7 @@ EVAL_BOOKKEEPING_TABLE_NAMES = {
     "__tool_results",
 }
 AGENT_CONFIG_FIELD_PATTERNS = {
+    "appearance": re.compile(r"\bappearance\b", re.IGNORECASE),
     "charter": re.compile(r"\bcharter\b", re.IGNORECASE),
     "schedule": re.compile(r"\bschedule\b", re.IGNORECASE),
 }
@@ -181,7 +182,9 @@ def _expected_condition_matches_call(
         return False
     if not _has_required_param_any(actual_params, condition.get("required_params_any")):
         return False
-    if condition.get("after_execution") and not _tool_call_has_succeeded(tool_call):
+    if condition.get("after_execution") and (
+        not _tool_call_has_succeeded(tool_call) or _tool_call_was_skipped(tool_call)
+    ):
         return False
     if condition.get("after_finish") and not _tool_call_has_finished(tool_call):
         return False

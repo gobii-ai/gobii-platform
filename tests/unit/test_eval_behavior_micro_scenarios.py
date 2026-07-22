@@ -1966,6 +1966,35 @@ class BehaviorMicroHelperTests(TestCase):
         self.assertTrue(should_stop)
         self.assertIn("finished", reason)
 
+    def test_eval_stop_policy_all_seen_ignores_skipped_message(self):
+        self._add_tool_call("sqlite_batch", {"sql": "UPDATE __agent_config SET appearance = 'new'"})
+        skipped_message = self._add_tool_call(
+            "send_chat_message",
+            {"body": "Working...", "will_continue_work": True},
+        )
+        skipped_message.result = json.dumps({"status": "ok", "skipped": True, "auto_sleep_ok": False})
+        skipped_message.save(update_fields=["result"])
+        policy = {
+            "ignore_sqlite_agent_config_mutations": False,
+            "stop_when_all_seen": [
+                {"tool_name": "sqlite_batch", "after_execution": True},
+                {"tool_name": "send_chat_message", "after_execution": True},
+            ]
+        }
+
+        should_stop, _reason = should_stop_for_eval_policy(str(self.run.id), policy)
+
+        self.assertFalse(should_stop)
+
+        self._add_tool_call(
+            "send_chat_message",
+            {"body": "Done", "will_continue_work": False},
+        )
+        should_stop, reason = should_stop_for_eval_policy(str(self.run.id), policy)
+
+        self.assertTrue(should_stop)
+        self.assertIn("all terminal expected", reason)
+
     def test_eval_stop_policy_stops_on_unexpected_relevant_tool(self):
         self._add_tool_call("send_chat_message")
         self._add_tool_call(

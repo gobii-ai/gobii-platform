@@ -157,6 +157,35 @@ class TestParallelToolCallsExecution(TestCase):
             },
         )
 
+    def test_appearance_update_is_persisted_and_annotated_in_tool_result(self):
+        self.agent.visual_description = "A generic professional portrait."
+        self.agent.save(update_fields=["visual_description"])
+
+        with patch("api.agent.tools.appearance_updater.maybe_schedule_agent_avatar"):
+            self._run_single_iteration_with_sqlite([
+                _tool_call(
+                    "sqlite_batch",
+                    json.dumps({
+                        "sql": (
+                            "UPDATE __agent_config SET appearance = "
+                            "'A distinctive researcher with black curls and round green glasses.' WHERE id = 1"
+                        ),
+                    }),
+                ),
+            ])
+
+        result = json.loads(PersistentAgentToolCall.objects.get(step__agent=self.agent).result)
+        self.agent.refresh_from_db()
+        self.assertIn("black curls", self.agent.visual_description)
+        self.assertEqual(
+            result["agent_config_update"],
+            {
+                "updated_fields": ["appearance"],
+                "unchanged_fields": [],
+                "errors": {},
+            },
+        )
+
     def test_cte_emotion_update_reports_direct_row_count_not_trigger_work(self):
         self._run_single_iteration_with_sqlite([
             _tool_call(

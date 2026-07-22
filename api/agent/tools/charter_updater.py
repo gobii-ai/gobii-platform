@@ -26,7 +26,12 @@ def _should_continue_work(params: Dict[str, Any]) -> bool:
     return bool(raw)
 
 
-def execute_update_charter(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str, Any]:
+def execute_update_charter(
+    agent: PersistentAgent,
+    params: Dict[str, Any],
+    *,
+    schedule_avatar: bool = True,
+) -> Dict[str, Any]:
     """Execute the update_charter tool for a persistent agent."""
     new_charter = params.get("new_charter")
     will_continue = _should_continue_work(params)
@@ -52,7 +57,8 @@ def execute_update_charter(agent: PersistentAgent, params: Dict[str, Any]) -> Di
         maybe_schedule_short_description(agent, routing_profile_id=routing_profile_id)
         maybe_schedule_mini_description(agent, routing_profile_id=routing_profile_id)
         maybe_schedule_agent_tags(agent, routing_profile_id=routing_profile_id)
-        maybe_schedule_agent_avatar(agent, routing_profile_id=routing_profile_id)
+        if schedule_avatar:
+            maybe_schedule_agent_avatar(agent, routing_profile_id=routing_profile_id)
         return {
             "status": "ok",
             "message": "Charter updated successfully.",

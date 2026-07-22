@@ -34,21 +34,36 @@ def _avatar_cooldown_cutoff(now=None):
 def _acquire_avatar_enqueue_slot(
     *,
     agent_id,
-    charter_hash: str,
+    avatar_revision: str,
     cooldown_cutoff,
+    allow_existing: bool = False,
+    expected_avatar_state: tuple[str | None, str, str] | None = None,
 ) -> bool:
     """Atomically claim avatar enqueue slot if cooldown permits and request is not already current."""
-    update_query = PersistentAgent.objects.filter(
-        id=agent_id,
-    ).filter(
-        Q(avatar__isnull=True) | Q(avatar="")
-    ).exclude(avatar_requested_hash=charter_hash)
+    update_query = PersistentAgent.objects.filter(id=agent_id).exclude(
+        avatar_requested_hash=avatar_revision,
+    ).exclude(
+        avatar_charter_hash=avatar_revision,
+    )
+    if not allow_existing:
+        update_query = update_query.filter(Q(avatar__isnull=True) | Q(avatar=""))
+    if expected_avatar_state is not None:
+        avatar_name, avatar_charter_hash, avatar_requested_hash = expected_avatar_state
+        update_query = update_query.filter(
+            avatar_charter_hash=avatar_charter_hash,
+            avatar_requested_hash=avatar_requested_hash,
+        )
+        update_query = (
+            update_query.filter(avatar=avatar_name)
+            if avatar_name
+            else update_query.filter(Q(avatar__isnull=True) | Q(avatar=""))
+        )
     if cooldown_cutoff is not None:
         update_query = update_query.filter(
             Q(avatar_last_generation_attempt_at__isnull=True)
             | Q(avatar_last_generation_attempt_at__lte=cooldown_cutoff)
         )
-    return bool(update_query.update(avatar_requested_hash=charter_hash))
+    return bool(update_query.update(avatar_requested_hash=avatar_revision))
 
 
 def prepare_visual_description(text: str, max_length: int = MAX_VISUAL_DESCRIPTION_LENGTH) -> str:
@@ -61,19 +76,26 @@ def prepare_visual_description(text: str, max_length: int = MAX_VISUAL_DESCRIPTI
     return normalized
 
 
+def compute_appearance_revision(charter: str, appearance: str) -> str:
+    """Return the render revision for a charter and normalized appearance."""
+    normalized_appearance = prepare_visual_description(appearance)
+    return compute_charter_hash(f"{(charter or '').strip()}\0{normalized_appearance}")
+
+
 def agent_needs_avatar_generation(
     *,
     agent: PersistentAgent,
-    charter_hash: str,
+    avatar_revision: str,
     visual_description: str,
+    appearance_changed: bool = False,
 ) -> bool:
     if not (agent.charter or "").strip():
         return False
-    if agent.has_avatar:
+    if agent.has_avatar and not appearance_changed:
         return False
     if not visual_description:
         return False
-    return (agent.avatar_charter_hash or "") != charter_hash
+    return (agent.avatar_charter_hash or "") != avatar_revision
 
 
 def build_avatar_prompt(*, agent: PersistentAgent, visual_description: str, charter: str) -> str:
@@ -111,6 +133,9 @@ def build_avatar_prompt(*, agent: PersistentAgent, visual_description: str, char
 def maybe_schedule_agent_avatar(
     agent: PersistentAgent,
     routing_profile_id: str | None = None,
+    *,
+    appearance_changed: bool = False,
+    expected_avatar_state: tuple[str | None, str, str] | None = None,
 ) -> bool:
     """Schedule visual-description/avatar generation as needed.
 
@@ -118,6 +143,8 @@ def maybe_schedule_agent_avatar(
     - If no visual description exists, queue generation for that first.
     - If visual description exists and charter hash differs from avatar hash,
       queue a new avatar render.
+    - An explicit appearance change may replace an existing avatar without the
+      ordinary missing-avatar cooldown.
     """
     if is_eval_agent(agent):
         return False
@@ -161,10 +188,16 @@ def maybe_schedule_agent_avatar(
             )
             return False
 
+    avatar_revision = (
+        compute_appearance_revision(charter, visual_description)
+        if appearance_changed
+        else charter_hash
+    )
     if not agent_needs_avatar_generation(
         agent=agent,
-        charter_hash=charter_hash,
+        avatar_revision=avatar_revision,
         visual_description=visual_description,
+        appearance_changed=appearance_changed,
     ):
         return False
 
@@ -179,26 +212,35 @@ def maybe_schedule_agent_avatar(
 
     if not _acquire_avatar_enqueue_slot(
         agent_id=agent.id,
-        charter_hash=charter_hash,
-        cooldown_cutoff=_avatar_cooldown_cutoff(),
+        avatar_revision=avatar_revision,
+        cooldown_cutoff=None if appearance_changed else _avatar_cooldown_cutoff(),
+        allow_existing=appearance_changed,
+        expected_avatar_state=expected_avatar_state,
     ):
         return False
 
     try:
         from api.agent.tasks.agent_avatar import generate_agent_avatar_task
 
-        generate_agent_avatar_task.delay(str(agent.id), charter_hash, routing_profile_id)
-        logger.debug("Queued avatar generation for agent %s (hash=%s)", agent.id, charter_hash)
+        task_args = [str(agent.id), charter_hash, routing_profile_id]
+        if appearance_changed:
+            task_args.append(avatar_revision)
+        generate_agent_avatar_task.delay(*task_args)
+        logger.debug("Queued avatar generation for agent %s (hash=%s)", agent.id, avatar_revision)
         return True
     except Exception:
         logger.exception("Failed to enqueue avatar generation for agent %s", agent.id)
-        PersistentAgent.objects.filter(id=agent.id).update(avatar_requested_hash="")
+        PersistentAgent.objects.filter(
+            id=agent.id,
+            avatar_requested_hash=avatar_revision,
+        ).update(avatar_requested_hash="")
         return False
 
 
 __all__ = [
     "agent_needs_avatar_generation",
     "build_avatar_prompt",
+    "compute_appearance_revision",
     "maybe_schedule_agent_avatar",
     "prepare_visual_description",
 ]

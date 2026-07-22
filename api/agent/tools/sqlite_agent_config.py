@@ -5,18 +5,20 @@ import math
 import re
 import sqlite3
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
 
+from ..avatar import prepare_visual_description
 from ..emotions import (
     MAX_EMOTION_LENGTH,
     MAX_EMOTION_TIMEOUT_SECONDS,
     normalize_emotion_update,
 )
+from .appearance_updater import execute_update_appearance, normalize_appearance
 from .charter_text import count_literal_newlines
 from .charter_updater import execute_update_charter
 from .schedule_updater import execute_update_schedule
@@ -71,6 +73,8 @@ class AgentScheduleSnapshot:
 class AgentConfigSnapshot:
     charter: str
     schedule: Optional[str]
+    appearance: str = ""
+    appearance_write_count: int = 0
     emotion: Optional[str] = None
     emotion_timeout_seconds: Optional[int] = None
     emotion_write_count: int = 0
@@ -82,6 +86,7 @@ class AgentConfigApplyResult:
     updated_fields: tuple[str, ...]
     errors: dict[str, str]
     schedules: tuple[AgentScheduleSnapshot, ...] = ()
+    warnings: dict[str, str] = field(default_factory=dict)
 
 
 class _ScheduleApplyError(Exception):
@@ -112,6 +117,9 @@ def seed_sqlite_agent_config(agent) -> Optional[AgentConfigSnapshot]:
                     id INTEGER PRIMARY KEY CHECK (id = 1),
                     charter TEXT,
                     schedule TEXT,
+                    appearance TEXT NOT NULL CHECK (length(appearance) <= 1800),
+                    _appearance_write_count INTEGER NOT NULL DEFAULT 0
+                        CHECK (_appearance_write_count >= 0),
                     emotion TEXT CHECK (
                         emotion IS NULL OR length(emotion) BETWEEN 1 AND {MAX_EMOTION_LENGTH}
                     ),
@@ -173,20 +181,31 @@ def seed_sqlite_agent_config(agent) -> Optional[AgentConfigSnapshot]:
             snapshot = AgentConfigSnapshot(
                 charter=agent.charter or "",
                 schedule=agent.schedule,
+                appearance=prepare_visual_description(agent.visual_description or ""),
                 emotion=active_emotion,
                 emotion_timeout_seconds=emotion_timeout_seconds,
                 schedules=schedules,
             )
             conn.execute(
                 f'''INSERT INTO "{AGENT_CONFIG_TABLE}"
-                    (id, charter, schedule, emotion, emotion_timeout_seconds)
-                    VALUES (1, ?, ?, ?, ?);''',
+                    (id, charter, schedule, appearance, emotion, emotion_timeout_seconds)
+                    VALUES (1, ?, ?, ?, ?, ?);''',
                 (
                     snapshot.charter,
                     snapshot.schedule,
+                    snapshot.appearance,
                     snapshot.emotion,
                     snapshot.emotion_timeout_seconds,
                 ),
+            )
+            conn.execute(
+                f'''CREATE TRIGGER "{AGENT_CONFIG_TABLE}_appearance_write"
+                    AFTER UPDATE OF appearance ON "{AGENT_CONFIG_TABLE}"
+                    BEGIN
+                        UPDATE "{AGENT_CONFIG_TABLE}"
+                        SET _appearance_write_count = _appearance_write_count + 1
+                        WHERE id = NEW.id;
+                    END;'''
             )
             conn.execute(
                 f'''CREATE TRIGGER "{AGENT_CONFIG_TABLE}_emotion_write"
@@ -229,6 +248,7 @@ def apply_sqlite_agent_config_updates(
     """Validate and persist configuration table changes, then drop the tables."""
     updated_fields: list[str] = []
     errors: dict[str, str] = {}
+    warnings: dict[str, str] = {}
     current = read_sqlite_agent_config_snapshot()
 
     if baseline is None:
@@ -242,6 +262,18 @@ def apply_sqlite_agent_config_updates(
             schedules=baseline.schedules,
         )
 
+    appearance = None
+    appearance_changed = (
+        current.appearance_write_count != baseline.appearance_write_count
+        or _normalize_appearance_for_comparison(current.appearance)
+        != _normalize_appearance_for_comparison(baseline.appearance)
+    )
+    if appearance_changed:
+        try:
+            appearance = normalize_appearance(current.appearance)
+        except ValidationError as exc:
+            errors["appearance"] = _validation_message(exc)
+
     normalized_current_charter = _normalize_charter(current.charter)
     normalized_baseline_charter = _normalize_charter(baseline.charter)
     if normalized_current_charter != normalized_baseline_charter:
@@ -253,7 +285,11 @@ def apply_sqlite_agent_config_updates(
                 "Use actual newline characters in charter Markdown."
             )
         else:
-            result = execute_update_charter(agent, {"new_charter": normalized_current_charter})
+            result = execute_update_charter(
+                agent,
+                {"new_charter": normalized_current_charter},
+                schedule_avatar=appearance is None,
+            )
             if isinstance(result, dict) and result.get("status") == "ok":
                 updated_fields.append("charter")
             else:
@@ -262,6 +298,19 @@ def apply_sqlite_agent_config_updates(
                     if isinstance(result, dict)
                     else "Charter update failed."
                 )
+
+    if appearance is not None:
+        result = execute_update_appearance(agent, {"appearance": appearance})
+        if isinstance(result, dict) and result.get("status") == "ok":
+            updated_fields.append("appearance")
+            if result.get("warning"):
+                warnings["appearance"] = result["warning"]
+        else:
+            errors["appearance"] = (
+                result.get("message", "Appearance update failed.")
+                if isinstance(result, dict)
+                else "Appearance update failed."
+            )
 
     if (
         current.emotion_write_count != baseline.emotion_write_count
@@ -318,6 +367,7 @@ def apply_sqlite_agent_config_updates(
         updated_fields=tuple(updated_fields),
         errors=errors,
         schedules=result_schedules,
+        warnings=warnings,
     )
 
 
@@ -329,13 +379,19 @@ def read_sqlite_agent_config_snapshot() -> Optional[AgentConfigSnapshot]:
     try:
         with _guarded_connection(db_path) as conn:
             config_row = conn.execute(
-                f'''SELECT charter, schedule, emotion, emotion_timeout_seconds, _emotion_write_count
+                f'''SELECT charter, schedule, appearance, _appearance_write_count,
+                           emotion, emotion_timeout_seconds, _emotion_write_count
                     FROM "{AGENT_CONFIG_TABLE}" WHERE id = 1;'''
             ).fetchone()
             if not config_row:
                 return None
-            emotion, emotion_timeout_seconds = _sqlite_emotion_value(config_row[2], config_row[3])
-            emotion_write_count = config_row[4]
+            if not isinstance(config_row[2], str):
+                raise ValueError("appearance has an invalid type")
+            appearance_write_count = config_row[3]
+            if type(appearance_write_count) is not int or appearance_write_count < 0:
+                raise ValueError("appearance write count is invalid")
+            emotion, emotion_timeout_seconds = _sqlite_emotion_value(config_row[4], config_row[5])
+            emotion_write_count = config_row[6]
             if type(emotion_write_count) is not int or emotion_write_count < 0:
                 raise ValueError("emotion write count is invalid")
             schedule_rows = conn.execute(
@@ -350,6 +406,8 @@ def read_sqlite_agent_config_snapshot() -> Optional[AgentConfigSnapshot]:
             return AgentConfigSnapshot(
                 charter=config_row[0] or "",
                 schedule=config_row[1],
+                appearance=config_row[2],
+                appearance_write_count=appearance_write_count,
                 emotion=emotion,
                 emotion_timeout_seconds=emotion_timeout_seconds,
                 emotion_write_count=emotion_write_count,
@@ -646,6 +704,10 @@ def _drop_agent_config_tables() -> None:
 
 def _normalize_charter(value: Optional[str]) -> str:
     return (value or "").strip()
+
+
+def _normalize_appearance_for_comparison(value: Optional[str]) -> str:
+    return normalize_appearance(value or "", allow_blank=True)
 
 
 def _normalize_schedule(value: Optional[str]) -> Optional[str]:
