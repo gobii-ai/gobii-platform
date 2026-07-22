@@ -2,7 +2,7 @@ import { QueryClient, type InfiniteData } from '@tanstack/react-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { TimelineResponse } from '../api/agentChat'
-import { refreshTimelineLatestInCache } from './useTimelineCacheInjector'
+import { injectRealtimeEventIntoCache, refreshLoadedTimelineVariantsInCache, refreshTimelineLatestInCache } from './useTimelineCacheInjector'
 import { timelineQueryKey, timelineResponseToPage, type TimelinePage } from './useAgentTimeline'
 
 const { fetchAgentTimelineMock } = vi.hoisted(() => ({
@@ -121,5 +121,70 @@ describe('refreshTimelineLatestInCache', () => {
     expect(queryClient.getQueryData<InfiniteData<TimelinePage>>(key)?.pages[0].events).toEqual([
       expect.objectContaining({ kind: 'developer_error', id: 'error-1' }),
     ])
+  })
+
+  it('injects finalized events into every loaded variant for the addressed agent', () => {
+    const standardKey = timelineQueryKey('agent-1')
+    const developerKey = timelineQueryKey('agent-1', true)
+    const staffKey = timelineQueryKey('agent-1', false, { type: 'organization', id: 'org-1' })
+    const otherAgentKey = timelineQueryKey('agent-2')
+    for (const key of [standardKey, developerKey, staffKey, otherAgentKey]) {
+      queryClient.setQueryData<InfiniteData<TimelinePage>>(key, {
+        pages: [timelineResponseToPage(emptyTimelineResponse)],
+        pageParams: [undefined],
+      })
+    }
+    const event = {
+      kind: 'steps' as const,
+      cursor: '100:step:config-step',
+      entryCount: 1,
+      collapsible: false,
+      collapseThreshold: 3,
+      entries: [{
+        id: 'config-step',
+        cursor: '100:step:config-step',
+        meta: { label: 'Database query' },
+        status: 'complete' as const,
+        charterText: 'Persisted assignment',
+      }],
+    }
+
+    injectRealtimeEventIntoCache(queryClient, 'agent-1', event)
+
+    for (const key of [standardKey, developerKey, staffKey]) {
+      expect(queryClient.getQueryData<InfiniteData<TimelinePage>>(key)?.pages[0].events).toEqual([
+        expect.objectContaining({ cursor: event.cursor }),
+      ])
+    }
+    expect(queryClient.getQueryData<InfiniteData<TimelinePage>>(otherAgentKey)?.pages[0].events).toEqual([])
+  })
+
+  it('refreshes every loaded timeline variant after processing completes', async () => {
+    const staffContext = { type: 'personal' as const, id: 'user-1' }
+    const agentKeys = [
+      timelineQueryKey('agent-1'),
+      timelineQueryKey('agent-1', true),
+      timelineQueryKey('agent-1', true, staffContext),
+    ]
+    const otherAgentKey = timelineQueryKey('agent-2')
+    const fetchedKeys: string[] = []
+    for (const key of [...agentKeys, otherAgentKey]) {
+      await queryClient.fetchInfiniteQuery({
+        queryKey: key,
+        queryFn: async () => {
+          fetchedKeys.push(JSON.stringify(key))
+          return timelineResponseToPage(emptyTimelineResponse)
+        },
+        initialPageParam: undefined,
+        getNextPageParam: () => undefined,
+      })
+    }
+    fetchedKeys.length = 0
+
+    await refreshLoadedTimelineVariantsInCache(queryClient, 'agent-1')
+
+    expect(fetchedKeys).toHaveLength(3)
+    expect(fetchedKeys).toEqual(expect.arrayContaining(agentKeys.map((key) => JSON.stringify(key))))
+    expect(fetchedKeys).not.toContain(JSON.stringify(otherAgentKey))
   })
 })

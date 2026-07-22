@@ -50,6 +50,11 @@ DEFAULT_SQLITE_BATCH_CPU_SECONDS = 30
 DEFAULT_SQLITE_BATCH_MEMORY_MB = 256
 DEFAULT_SQLITE_BATCH_TERMINATE_GRACE_SECONDS = 1.0
 DEFAULT_SQLITE_BATCH_KILL_GRACE_SECONDS = 1.0
+CONFIG_PATCH_NOT_PERSISTED_ERROR = "config_patch_not_persisted"
+CONFIG_PATCH_NOT_PERSISTED_MESSAGE = (
+    "Query not executed: SELECT patch_text(...) only computes a value and does not persist agent config. "
+    "Use UPDATE __agent_config SET charter=patch_text(charter, old, new) WHERE id=1."
+)
 
 
 @dataclass(frozen=True)
@@ -1717,6 +1722,31 @@ def _split_sqlite_statements(sql: str) -> List[str]:
     return statements
 
 
+def _non_persisting_agent_config_patch(queries: List[str]) -> Optional[str]:
+    for query in queries:
+        for statement in sqlparse.parse(query):
+            if not _statement_has_sql(statement):
+                continue
+            structural_sql = " ".join(
+                token.value
+                for token in statement.flatten()
+                if not token.is_whitespace
+                and token.ttype not in sql_tokens.Comment
+                and token.ttype not in sql_tokens.Literal.String.Single
+            )
+            if (
+                re.search(r"\bpatch_text\s*\(", structural_sql, re.IGNORECASE)
+                and re.search(r"\b__agent_config\b", structural_sql, re.IGNORECASE)
+                and not re.search(
+                    r"\bcharter\b\s*=\s*patch_text\s*\(",
+                    structural_sql,
+                    re.IGNORECASE,
+                )
+            ):
+                return str(statement).strip()
+    return None
+
+
 def _extract_sql_param(params: Dict[str, Any]) -> Any:
     for key in ("sql", "query", "queries"):
         if key in params:
@@ -1898,6 +1928,16 @@ def _execute_sqlite_batch_inner(
             cur.execute("PRAGMA busy_timeout = 2000;")
         except Exception:
             pass
+
+        if _non_persisting_agent_config_patch(queries):
+            return {
+                "status": "error",
+                "error_code": CONFIG_PATCH_NOT_PERSISTED_ERROR,
+                "results": [],
+                "db_size_mb": round(_get_db_size_mb(db_path), 2),
+                "message": CONFIG_PATCH_NOT_PERSISTED_MESSAGE,
+                "retryable": True,
+            }
 
         advisories = build_tool_result_query_advisories(
             queries,

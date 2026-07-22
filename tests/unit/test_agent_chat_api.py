@@ -1060,6 +1060,7 @@ class AgentChatAPITests(TestCase):
             display_metadata={
                 "agent_config": {
                     "charter": "Full updated assignment",
+                    "schedule": "0 9 * * *",
                 },
             },
         )
@@ -1075,6 +1076,8 @@ class AgentChatAPITests(TestCase):
 
         self.assertEqual(page_entry["charterText"], "Full updated assignment")
         self.assertEqual(realtime_entry["charterText"], "Full updated assignment")
+        self.assertEqual(page_entry["scheduleValue"], "0 9 * * *")
+        self.assertEqual(realtime_entry["scheduleValue"], "0 9 * * *")
 
     @tag("batch_agent_chat")
     def test_timeline_resolves_link_references_without_exposing_tokens(self):
@@ -1139,13 +1142,15 @@ class AgentChatAPITests(TestCase):
             tool_name="sqlite_batch",
             tool_params={"sql": "UPDATE __agent_config SET charter='' WHERE id=1"},
             result=json.dumps({"status": "ok"}),
-            display_metadata={"agent_config": {"charter": ""}},
+            display_metadata={"agent_config": {"charter": "", "schedule": None}},
         )
 
         entry = build_tool_cluster_from_steps([step])["entries"][0]
 
         self.assertIn("charterText", entry)
         self.assertEqual(entry["charterText"], "")
+        self.assertIn("scheduleValue", entry)
+        self.assertIsNone(entry["scheduleValue"])
 
     @tag("batch_agent_chat")
     def test_agent_profile_endpoint_returns_lightweight_roster_entry(self):

@@ -342,9 +342,9 @@ function injectEventsIntoCache(
   agentId: string,
   incoming: TimelineEvent[],
 ) {
-  const key = timelineQueryKey(agentId)
-
-  queryClient.setQueryData<InfiniteData<TimelinePage>>(key, (old) => {
+  queryClient.setQueriesData<InfiniteData<TimelinePage>>({
+    queryKey: ['agent-timeline', agentId],
+  }, (old) => {
     if (!old?.pages?.length) {
       return old
     }
@@ -645,4 +645,11 @@ export async function refreshTimelineLatestInCache(
       timelineRefreshesInFlight.delete(refreshKey)
     }
   })
+}
+
+export async function refreshLoadedTimelineVariantsInCache(
+  queryClient: QueryClient,
+  agentId: string,
+): Promise<void> {
+  await queryClient.refetchQueries({ queryKey: ['agent-timeline', agentId], type: 'all' })
 }

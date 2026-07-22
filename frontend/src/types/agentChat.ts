@@ -79,6 +79,7 @@ export type ToolCallEntry = {
   sqlStatements?: string[]
   result?: unknown
   charterText?: string | null
+  scheduleValue?: string | null
   status?: ToolCallStatus | null
   cursor?: string
   chartImageUrl?: string | null

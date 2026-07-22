@@ -115,9 +115,9 @@ from ..tools.sqlite_agent_config import (
     apply_sqlite_agent_config_updates,
     read_sqlite_agent_config_snapshot,
     seed_sqlite_agent_config,
-    sqlite_statement_assigns_agent_config_field,
     sqlite_statement_mutates_agent_schedules,
 )
+from ..tools.sqlite_config_statements import sqlite_statement_assigns_agent_config_field
 from ..tools.sqlite_skills import apply_sqlite_skill_updates, refresh_skills_for_tool, seed_sqlite_skills
 from ..tools.custom_tools import execute_create_custom_tool
 from ..tools.custom_tool_names import CREATE_CUSTOM_TOOL_NAME
@@ -2556,7 +2556,7 @@ def _annotate_agent_config_update_result(
 ) -> None:
     config_outcomes = []
     for outcome in outcomes:
-        if outcome.prepared.tool_name == "sqlite_batch":
+        if outcome.prepared.tool_name == "sqlite_batch" and _tool_result_is_success(outcome.result):
             fields = _sqlite_batch_agent_config_attempted_fields(outcome.prepared.exec_params)
             if fields:
                 config_outcomes.append((outcome, fields))
@@ -2567,7 +2567,8 @@ def _annotate_agent_config_update_result(
     attempted_fields = tuple(
         field for field in ("charter", "schedule", "schedules", "emotion") if field in attempted
     )
-    updated_fields = list(config_apply.updated_fields)
+    updated_fields = [field for field in config_apply.updated_fields if field in attempted]
+    errors = {field: message for field, message in config_apply.errors.items() if field in attempted}
     target = max(config_outcomes, key=lambda item: item[0].prepared.idx)[0]
     result = dict(target.result) if isinstance(target.result, dict) else {
         "status": "ok",
@@ -2575,10 +2576,30 @@ def _annotate_agent_config_update_result(
     }
     result["agent_config_update"] = {
         "updated_fields": updated_fields,
-        "unchanged_fields": [field for field in attempted_fields if field not in updated_fields],
-        "errors": config_apply.errors,
+        "unchanged_fields": [
+            field for field in attempted_fields
+            if field not in updated_fields
+        ],
+        "errors": errors,
     }
     target.result = result
+
+
+def _tool_result_confirms_charter_patch(result: Any) -> bool:
+    if not _tool_result_is_success(result) or not isinstance(result, dict):
+        return False
+    config_update = result.get("agent_config_update")
+    if not isinstance(config_update, dict):
+        return False
+    errors = config_update.get("errors")
+    if isinstance(errors, dict) and errors.get("charter"):
+        return False
+    confirmed_fields = {
+        str(field)
+        for key in ("updated_fields", "unchanged_fields")
+        for field in (config_update.get(key) or [])
+    }
+    return "charter" in confirmed_fields
 
 
 def _user_text_has_durable_config_intent(text: str) -> bool:
@@ -3043,7 +3064,7 @@ def _capture_tool_display_metadata(
     if (
         prepared.tool_name != "sqlite_batch"
         or not _tool_result_is_success(result)
-        or "charter" not in _sqlite_batch_agent_config_attempted_fields(prepared.exec_params)
+        or not _sqlite_batch_agent_config_attempted_fields(prepared.exec_params)
     ):
         return {}
 
@@ -3053,6 +3074,7 @@ def _capture_tool_display_metadata(
     return {
         "agent_config": {
             "charter": snapshot.charter,
+            "schedule": snapshot.schedule,
         },
     }
 
@@ -7153,15 +7175,16 @@ def _run_agent_loop(
 
                 if not executed_batch.abort_after_execution or _get_processing_abort_reason(agent.id) is None:
                     runtime_errors, config_apply = _apply_runtime_updates()
-                    if direct_correction_patch_this_response:
-                        direct_correction_reply_pending = not config_apply.errors and any(
-                            outcome.prepared.tool_name == "sqlite_batch" and _tool_result_is_success(outcome.result)
-                            for outcome in executed_batch.execution_outcomes
-                        )
                     _annotate_agent_config_update_result(
                         executed_batch.execution_outcomes,
                         config_apply,
                     )
+                    if direct_correction_patch_this_response:
+                        direct_correction_reply_pending = any(
+                            outcome.prepared.tool_name == "sqlite_batch"
+                            and _tool_result_confirms_charter_patch(outcome.result)
+                            for outcome in executed_batch.execution_outcomes
+                        )
 
                 finalized_batch = _finalize_tool_batch(
                     agent,

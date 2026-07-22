@@ -177,6 +177,15 @@ describe('collapseDetailedStatusRuns', () => {
     assignmentUpdate.entries[0].parameters = {
       sql: "UPDATE __agent_config SET charter=patch_text(charter, 'Old', 'New') WHERE id=1",
     }
+    assignmentUpdate.entries[0].result = {
+      status: 'ok',
+      agent_config_update: {
+        updated_fields: ['charter'],
+        unchanged_fields: [],
+        errors: {},
+      },
+    }
+    assignmentUpdate.entries[0].charterText = 'New'
     const result = collapseDetailedStatusRuns(
       [
         stepCluster('2:step:older', ['search_web']),

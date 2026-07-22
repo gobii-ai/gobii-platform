@@ -1,3 +1,4 @@
+import { QueryClient } from '@tanstack/react-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { fetchProcessingStatus, sendAgentMessage } from '../api/agentChat'
@@ -254,6 +255,22 @@ describe('chatSlice processing state', () => {
     expect(selectActiveChatAgentId(store.getState())).toBe('agent-1')
     expect(store.getState().chat.sessionsByAgentId['agent-1'].processing.processingActive).toBe(false)
     expect(store.getState().chat.sessionsByAgentId['agent-2'].processing.processingActive).toBe(true)
+  })
+
+  it('refreshes loaded timeline variants when realtime processing becomes inactive', async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const refetchQueries = vi.spyOn(queryClient, 'refetchQueries').mockResolvedValue(undefined)
+    const store = createAppStore({ queryClient })
+
+    store.dispatch(updateRealtimeProcessing('agent-1', { active: true, webTasks: [] }))
+    store.dispatch(updateRealtimeProcessing('agent-1', { active: false, webTasks: [] }))
+
+    await vi.waitFor(() => {
+      expect(refetchQueries).toHaveBeenCalledWith({
+        queryKey: ['agent-timeline', 'agent-1'],
+        type: 'all',
+      })
+    })
   })
 
   it('retains background timeline updates when the addressed agent is selected again', () => {

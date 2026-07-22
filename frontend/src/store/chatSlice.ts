@@ -2,7 +2,7 @@ import { createAsyncThunk, createSlice, type PayloadAction } from '@reduxjs/tool
 import type { InfiniteData, QueryClient } from '@tanstack/react-query'
 
 import { sendAgentMessage, fetchProcessingStatus } from '../api/agentChat'
-import { flushPendingEventsToCache, injectRealtimeEventIntoCache, refreshTimelineLatestInCache, updateOptimisticEventInCache, updateRosterProcessingInCache } from '../hooks/useTimelineCacheInjector'
+import { flushPendingEventsToCache, injectRealtimeEventIntoCache, refreshLoadedTimelineVariantsInCache, refreshTimelineLatestInCache, updateOptimisticEventInCache, updateRosterProcessingInCache } from '../hooks/useTimelineCacheInjector'
 import { timelineQueryKey, type TimelinePage } from '../hooks/useAgentTimeline'
 import { mergeTimelineEvents, normalizeTimelineEvent } from '../stores/agentChatTimeline'
 import type { AgentMessage, PendingActionRequest, ProcessingSnapshot, ProcessingWebTask, StreamEventPayload, StreamState, ThinkingEvent, TimelineEvent } from '../types/agentChat'
@@ -567,6 +567,9 @@ export const refreshProcessing = createAsyncThunk<void, { agentId: string }, { s
         }))
         if (extra?.queryClient) {
           updateRosterProcessingInCache(extra.queryClient, agentId, snapshot.active)
+          if (processing?.processingActive && !snapshot.active) {
+            void refreshLoadedTimelineVariantsInCache(extra.queryClient, agentId)
+          }
         }
         dispatch(chatActions.agentIdentityUpdated({
           agentId,
@@ -586,11 +589,15 @@ export const refreshProcessing = createAsyncThunk<void, { agentId: string }, { s
 export const updateRealtimeProcessing = (
   agentId: string,
   snapshotInput: ProcessingUpdateInput,
-) => (dispatch: AppDispatch, _getState: () => RootState, extra?: { queryClient?: QueryClient | null }) => {
+) => (dispatch: AppDispatch, getState: () => RootState, extra?: { queryClient?: QueryClient | null }) => {
   const snapshot = normalizeProcessingUpdate(snapshotInput)
+  const wasActive = getState().chat.sessionsByAgentId[agentId]?.processing.processingActive === true
   dispatch(chatActions.processingRealtimeUpdated({ agentId, snapshot, receivedAt: Date.now() }))
   if (extra?.queryClient) {
     updateRosterProcessingInCache(extra.queryClient, agentId, snapshot.active)
+    if (wasActive && !snapshot.active) {
+      void refreshLoadedTimelineVariantsInCache(extra.queryClient, agentId)
+    }
   }
 }
 

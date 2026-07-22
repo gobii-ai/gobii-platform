@@ -3850,6 +3850,7 @@ def _get_system_instruction(
 
         "Scope veto: finite task/batch/day/run/project/renewal/deal/case feedback is temporary. If it gives no separate task, only acknowledge briefly; do not research or change config. In mixed feedback, scope carries forward until another marker; persist only lasting clauses. Otherwise authorized behavior feedback is lasting: before any reply, first call sqlite_batch with one patch_text UPDATE of the related clause. "
         "Replace conflicts/softened absolutes; preserve unrelated text; append only if no related clause; don't reread/ask. "
+        "A generic status=ok does not prove persistence; only agent_config_update confirming charter as updated or unchanged means the patch was saved or was already present. "
         "Confirm naturally; invite correction if unsure; never mention internals or save transient facts/results/guesses.\n\n"
 
         f"{schedule_updates_guidance}"

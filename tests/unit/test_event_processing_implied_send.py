@@ -2850,6 +2850,66 @@ class ImpliedSendTests(TestCase):
         self.assertEqual(executed_tools, ["sqlite_batch", "send_chat_message"])
         self.assertEqual(completion.call_count, 2)
 
+    def test_charter_patch_requires_confirmed_config_result_before_replying(self):
+        tools = [
+            {"type": "function", "function": {"name": "sqlite_batch", "parameters": {"type": "object", "properties": {}}}},
+            {"type": "function", "function": {"name": "send_chat_message", "parameters": {"type": "object", "properties": {"body": {"type": "string"}, "will_continue_work": {"type": "boolean"}}}}},
+        ]
+        responses = [
+            self._tool_completion("sqlite_batch", {
+                "target_charter_text": "",
+                "replacement_charter_text": "Write naturally.",
+            }),
+            self._tool_completion("send_chat_message", {
+                "body": "Got it. I'll keep the writing natural.",
+                "will_continue_work": False,
+            }),
+        ]
+
+        completion, _build_prompt, executed_tools = self._run_feedback_flow(
+            "You sound robotic.",
+            responses,
+            tools,
+            config_apply=ep.AgentConfigApplyResult(
+                updated_fields=(),
+                errors={"charter": "Charter update failed."},
+            ),
+        )
+
+        self.assertEqual(executed_tools, ["sqlite_batch"])
+        self.assertEqual(completion.call_count, 2)
+
+    def test_charter_patch_confirmation_requires_agent_config_metadata(self):
+        self.assertFalse(ep._tool_result_confirms_charter_patch({"status": "ok"}))
+        self.assertFalse(ep._tool_result_confirms_charter_patch({
+            "status": "error",
+            "agent_config_update": {"unchanged_fields": ["charter"], "errors": {}},
+        }))
+        self.assertFalse(ep._tool_result_confirms_charter_patch({
+            "status": "ok",
+            "agent_config_update": {
+                "updated_fields": [],
+                "unchanged_fields": ["charter"],
+                "errors": {"charter": "Rejected"},
+            },
+        }))
+        self.assertTrue(ep._tool_result_confirms_charter_patch({
+            "status": "ok",
+            "agent_config_update": {
+                "updated_fields": ["charter"],
+                "unchanged_fields": [],
+                "errors": {},
+            },
+        }))
+        self.assertTrue(ep._tool_result_confirms_charter_patch({
+            "status": "ok",
+            "agent_config_update": {
+                "updated_fields": [],
+                "unchanged_fields": ["charter"],
+                "errors": {},
+            },
+        }))
+
     def test_run_loop_forces_only_sqlite_for_durable_feedback(self):
         completion_kwargs = self._run_loop_for_feedback_tool_choice("You sound robotic.")
 

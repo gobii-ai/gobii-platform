@@ -160,6 +160,7 @@ function mergeToolEntry(base: ToolCallEntry, incoming: ToolCallEntry): ToolCallE
     sqlStatements: pickNonEmptyArray(incoming.sqlStatements ?? undefined, base.sqlStatements ?? undefined),
     result: pickToolResult(incoming.result, base.result),
     charterText: pickNonEmptyString(incoming.charterText ?? undefined, base.charterText ?? undefined),
+    scheduleValue: incoming.scheduleValue !== undefined ? incoming.scheduleValue : base.scheduleValue,
     status: incoming.status ?? base.status,
     cursor: incoming.cursor ?? base.cursor,
     meta: incoming.meta ?? base.meta,
