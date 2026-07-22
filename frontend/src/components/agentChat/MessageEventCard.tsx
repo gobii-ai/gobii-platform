@@ -92,7 +92,6 @@ export const MessageEventCard = memo(function MessageEventCard({
   const channel = (message.channel || 'web').toLowerCase()
   const sourceKind = (message.sourceKind || '').toLowerCase()
   const isWebhook = sourceKind === 'webhook'
-  const isMcp = sourceKind === 'mcp'
   const hasPeerMetadata = Boolean(message.peerAgent || message.peerLinkId)
   const isPeer = Boolean(message.isPeer || hasPeerMetadata)
 
@@ -127,11 +126,8 @@ export const MessageEventCard = memo(function MessageEventCard({
       || isViewerEmailSender)
 
   let authorLabel = isAgent ? agentFirstName || 'Agent' : (isViewerSender ? 'You' : (message.senderName?.trim() || 'User'))
-  if (isWebhook) {
-    authorLabel = message.sourceLabel?.trim() || message.senderName?.trim() || 'Webhook'
-  }
-  if (isMcp) {
-    authorLabel = message.sourceLabel?.trim() || message.senderName?.trim() || 'Gobii MCP'
+  if (isWebhook || sourceKind === 'mcp') {
+    authorLabel = message.sourceLabel?.trim() || message.senderName?.trim() || (isWebhook ? 'Webhook' : 'Gobii MCP')
   }
   if (isPeer) {
     authorLabel = peerDirectionLabel
@@ -147,10 +143,6 @@ export const MessageEventCard = memo(function MessageEventCard({
   let showChannelTag = channel !== 'web'
   if (isWebhook) {
     channelLabel = 'Webhook'
-    showChannelTag = true
-  }
-  if (isMcp) {
-    channelLabel = 'MCP'
     showChannelTag = true
   }
   if (isPeer) {
