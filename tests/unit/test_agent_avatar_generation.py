@@ -7,7 +7,7 @@ from django.core.files.base import ContentFile
 from django.test import TestCase, override_settings, tag
 from django.utils import timezone
 
-from api.agent.avatar import maybe_schedule_agent_avatar
+from api.agent.avatar import compute_appearance_revision, maybe_schedule_agent_avatar
 from api.agent.short_description import compute_charter_hash
 from api.agent.tasks.agent_avatar import (
     AvatarGenerationResult,
@@ -159,6 +159,35 @@ class AgentAvatarGenerationTests(TestCase):
         self.assertEqual(agent.visual_description_charter_hash, charter_hash)
         self.assertEqual(agent.visual_description_requested_hash, "")
         mocked_schedule_avatar.assert_called_once_with(agent, routing_profile_id=None)
+
+    def test_visual_description_task_does_not_overwrite_owner_appearance_set_in_flight(self):
+        agent = self._create_agent()
+        charter_hash = compute_charter_hash(agent.charter)
+        agent.visual_description_requested_hash = charter_hash
+        agent.save(update_fields=["visual_description_requested_hash"])
+        owner_appearance = "A woman with silver curls, amber eyes, and a forest-green jacket."
+
+        def owner_updates_while_generation_runs(*_args):
+            PersistentAgent.objects.filter(id=agent.id).update(
+                visual_description=owner_appearance,
+                visual_description_charter_hash=charter_hash,
+                visual_description_requested_hash="",
+            )
+            return "A stale generated identity that must not win."
+
+        with patch(
+            "api.agent.tasks.agent_avatar._generate_visual_description_via_llm",
+            side_effect=owner_updates_while_generation_runs,
+        ), patch(
+            "api.agent.tasks.agent_avatar.maybe_schedule_agent_avatar",
+        ) as mocked_schedule_avatar:
+            generate_agent_visual_description_task.run(str(agent.id), charter_hash)
+
+        agent.refresh_from_db()
+        self.assertEqual(agent.visual_description, owner_appearance)
+        self.assertEqual(agent.visual_description_charter_hash, charter_hash)
+        self.assertEqual(agent.visual_description_requested_hash, "")
+        mocked_schedule_avatar.assert_not_called()
 
     def test_generate_visual_description_task_skips_eval_agent_and_clears_request(self):
         agent = self._create_agent(execution_environment="eval")
@@ -318,6 +347,87 @@ class AgentAvatarGenerationTests(TestCase):
         self.assertFalse(scheduled)
         mocked_delay.assert_not_called()
 
+    @override_settings(AGENT_AVATAR_GENERATION_COOLDOWN_HOURS=24)
+    def test_appearance_change_schedules_existing_avatar_despite_cooldown(self):
+        agent = self._prepare_visual_ready_agent()
+        agent.avatar.save("existing-avatar.png", ContentFile(b"avatar-bytes"), save=False)
+        agent.avatar_last_generation_attempt_at = timezone.now()
+        agent.save(update_fields=["avatar", "avatar_last_generation_attempt_at"])
+        revision = compute_appearance_revision(agent.charter, agent.visual_description)
+
+        with patch("api.agent.avatar.is_avatar_image_generation_configured", return_value=True), patch(
+            "api.agent.tasks.agent_avatar.generate_agent_avatar_task.delay"
+        ) as mocked_delay:
+            scheduled = maybe_schedule_agent_avatar(agent, appearance_changed=True)
+
+        self.assertTrue(scheduled)
+        mocked_delay.assert_called_once_with(
+            str(agent.id),
+            compute_charter_hash(agent.charter),
+            None,
+            revision,
+        )
+        agent.refresh_from_db()
+        self.assertEqual(agent.avatar_requested_hash, revision)
+
+    def test_appearance_change_deduplicates_current_pending_revision(self):
+        agent = self._prepare_visual_ready_agent()
+        agent.avatar.save("existing-avatar.png", ContentFile(b"avatar-bytes"), save=False)
+        agent.save(update_fields=["avatar"])
+
+        with patch("api.agent.avatar.is_avatar_image_generation_configured", return_value=True), patch(
+            "api.agent.tasks.agent_avatar.generate_agent_avatar_task.delay"
+        ) as mocked_delay:
+            first = maybe_schedule_agent_avatar(agent, appearance_changed=True)
+            second = maybe_schedule_agent_avatar(agent, appearance_changed=True)
+
+        self.assertTrue(first)
+        self.assertFalse(second)
+        mocked_delay.assert_called_once()
+
+    def test_appearance_change_does_not_override_newer_manual_avatar_state(self):
+        agent = self._prepare_visual_ready_agent()
+        agent.avatar.save("existing-avatar.png", ContentFile(b"old-avatar"), save=False)
+        agent.save(update_fields=["avatar"])
+        expected_state = (
+            agent.avatar.name,
+            agent.avatar_charter_hash,
+            agent.avatar_requested_hash,
+        )
+        manual_hash = compute_charter_hash(agent.charter)
+        PersistentAgent.objects.filter(id=agent.id).update(
+            avatar="agent_avatars/manual-avatar.png",
+            avatar_charter_hash=manual_hash,
+            avatar_requested_hash="",
+        )
+
+        with patch("api.agent.avatar.is_avatar_image_generation_configured", return_value=True), patch(
+            "api.agent.tasks.agent_avatar.generate_agent_avatar_task.delay"
+        ) as mocked_delay:
+            scheduled = maybe_schedule_agent_avatar(
+                agent,
+                appearance_changed=True,
+                expected_avatar_state=expected_state,
+            )
+
+        self.assertFalse(scheduled)
+        mocked_delay.assert_not_called()
+        agent.refresh_from_db()
+        self.assertEqual(agent.avatar.name, "agent_avatars/manual-avatar.png")
+        self.assertEqual(agent.avatar_requested_hash, "")
+
+    def test_appearance_revision_normalizes_whitespace_and_tracks_charter(self):
+        appearance = "A calm operator with dark curls and green eyes."
+
+        self.assertEqual(
+            compute_appearance_revision("  Coordinate operations  ", f" A calm  operator\nwith dark curls and green eyes. "),
+            compute_appearance_revision("Coordinate operations", appearance),
+        )
+        self.assertNotEqual(
+            compute_appearance_revision("Coordinate operations", appearance),
+            compute_appearance_revision("Lead customer success", appearance),
+        )
+
     def test_maybe_schedule_agent_avatar_skips_when_avatar_was_saved_after_agent_loaded(self):
         current_agent = self._prepare_visual_ready_agent()
         stale_agent = PersistentAgent.objects.get(id=current_agent.id)
@@ -347,6 +457,224 @@ class AgentAvatarGenerationTests(TestCase):
         mocked_delay.assert_called_once_with(str(agent.id), expected_hash, None)
         agent.refresh_from_db()
         self.assertEqual(agent.avatar_requested_hash, expected_hash)
+
+    def test_appearance_refresh_replaces_existing_avatar(self):
+        agent = self._prepare_visual_ready_agent()
+        agent.avatar.save("existing-avatar.png", ContentFile(b"old-avatar"), save=False)
+        revision = compute_appearance_revision(agent.charter, agent.visual_description)
+        agent.avatar_requested_hash = revision
+        agent.save(update_fields=["avatar", "avatar_requested_hash"])
+        old_avatar_name = agent.avatar.name
+
+        with patch(
+            "api.agent.tasks.agent_avatar._generate_avatar_image",
+            return_value=AvatarGenerationResult(
+                image_bytes=b"new-avatar",
+                mime_type="image/png",
+                endpoint_key="test-endpoint",
+                model="test-model",
+                error_detail=None,
+            ),
+        ):
+            generate_agent_avatar_task.run(
+                str(agent.id),
+                compute_charter_hash(agent.charter),
+                None,
+                revision,
+            )
+
+        agent.refresh_from_db()
+        self.assertTrue(agent.avatar)
+        self.assertNotEqual(agent.avatar.name, old_avatar_name)
+        self.assertEqual(agent.avatar_charter_hash, revision)
+        self.assertEqual(agent.avatar_requested_hash, "")
+
+    def test_failed_appearance_refresh_preserves_existing_avatar(self):
+        agent = self._prepare_visual_ready_agent()
+        agent.avatar.save("existing-avatar.png", ContentFile(b"old-avatar"), save=False)
+        revision = compute_appearance_revision(agent.charter, agent.visual_description)
+        agent.avatar_requested_hash = revision
+        agent.save(update_fields=["avatar", "avatar_requested_hash"])
+        old_avatar_name = agent.avatar.name
+
+        with patch(
+            "api.agent.tasks.agent_avatar._generate_avatar_image",
+            return_value=AvatarGenerationResult(
+                image_bytes=None,
+                mime_type=None,
+                endpoint_key=None,
+                model=None,
+                error_detail="generation failed",
+            ),
+        ):
+            generate_agent_avatar_task.run(
+                str(agent.id),
+                compute_charter_hash(agent.charter),
+                None,
+                revision,
+            )
+
+        agent.refresh_from_db()
+        self.assertEqual(agent.avatar.name, old_avatar_name)
+        self.assertEqual(agent.avatar_requested_hash, "")
+
+    def test_appearance_refresh_reschedules_when_charter_changed_before_task_start(self):
+        agent = self._prepare_visual_ready_agent()
+        agent.avatar.save("existing-avatar.png", ContentFile(b"old-avatar"), save=False)
+        old_charter_hash = compute_charter_hash(agent.charter)
+        revision = compute_appearance_revision(agent.charter, agent.visual_description)
+        agent.avatar_requested_hash = revision
+        agent.save(update_fields=["avatar", "avatar_requested_hash"])
+        old_avatar_name = agent.avatar.name
+        PersistentAgent.objects.filter(id=agent.id).update(charter="Lead customer research")
+
+        with patch(
+            "api.agent.tasks.agent_avatar.maybe_schedule_agent_avatar",
+        ) as mocked_schedule_avatar:
+            generate_agent_avatar_task.run(str(agent.id), old_charter_hash, None, revision)
+
+        agent.refresh_from_db()
+        self.assertEqual(agent.avatar.name, old_avatar_name)
+        self.assertEqual(agent.avatar_requested_hash, "")
+        self.assertEqual(mocked_schedule_avatar.call_count, 1)
+        rescheduled_agent = mocked_schedule_avatar.call_args.args[0]
+        self.assertEqual(rescheduled_agent.id, agent.id)
+        self.assertEqual(rescheduled_agent.charter, "Lead customer research")
+        self.assertTrue(mocked_schedule_avatar.call_args.kwargs["appearance_changed"])
+
+    def test_appearance_refresh_does_not_undo_manual_clear_during_charter_change(self):
+        agent = self._prepare_visual_ready_agent()
+        agent.avatar.save("existing-avatar.png", ContentFile(b"old-avatar"), save=False)
+        old_charter_hash = compute_charter_hash(agent.charter)
+        revision = compute_appearance_revision(agent.charter, agent.visual_description)
+        agent.avatar_requested_hash = revision
+        agent.save(update_fields=["avatar", "avatar_requested_hash"])
+
+        new_charter = "Lead customer research"
+        PersistentAgent.objects.filter(id=agent.id).update(
+            charter=new_charter,
+            avatar=None,
+            avatar_charter_hash=compute_charter_hash(new_charter),
+            avatar_requested_hash="",
+        )
+
+        with patch(
+            "api.agent.tasks.agent_avatar.maybe_schedule_agent_avatar",
+        ) as mocked_schedule_avatar:
+            generate_agent_avatar_task.run(str(agent.id), old_charter_hash, None, revision)
+
+        agent.refresh_from_db()
+        self.assertFalse(agent.avatar)
+        self.assertEqual(agent.avatar_charter_hash, compute_charter_hash(new_charter))
+        mocked_schedule_avatar.assert_not_called()
+
+    def test_appearance_refresh_reschedules_when_charter_changes_during_render(self):
+        agent = self._prepare_visual_ready_agent()
+        agent.avatar.save("existing-avatar.png", ContentFile(b"old-avatar"), save=False)
+        old_charter_hash = compute_charter_hash(agent.charter)
+        revision = compute_appearance_revision(agent.charter, agent.visual_description)
+        agent.avatar_requested_hash = revision
+        agent.save(update_fields=["avatar", "avatar_requested_hash"])
+        old_avatar_name = agent.avatar.name
+
+        def generate_after_charter_change(_agent, _prompt):
+            PersistentAgent.objects.filter(id=agent.id).update(charter="Lead customer research")
+            return AvatarGenerationResult(
+                image_bytes=b"stale-avatar",
+                mime_type="image/png",
+                endpoint_key="test-endpoint",
+                model="test-model",
+                error_detail=None,
+            )
+
+        with patch(
+            "api.agent.tasks.agent_avatar._generate_avatar_image",
+            side_effect=generate_after_charter_change,
+        ), patch(
+            "api.agent.tasks.agent_avatar.maybe_schedule_agent_avatar",
+        ) as mocked_schedule_avatar:
+            generate_agent_avatar_task.run(str(agent.id), old_charter_hash, None, revision)
+
+        agent.refresh_from_db()
+        self.assertEqual(agent.avatar.name, old_avatar_name)
+        self.assertEqual(agent.avatar_requested_hash, "")
+        self.assertEqual(mocked_schedule_avatar.call_count, 1)
+        self.assertEqual(mocked_schedule_avatar.call_args.args[0].charter, "Lead customer research")
+        self.assertTrue(mocked_schedule_avatar.call_args.kwargs["appearance_changed"])
+
+    def test_appearance_refresh_discards_result_after_newer_appearance(self):
+        agent = self._prepare_visual_ready_agent()
+        agent.avatar.save("existing-avatar.png", ContentFile(b"old-avatar"), save=False)
+        revision = compute_appearance_revision(agent.charter, agent.visual_description)
+        agent.avatar_requested_hash = revision
+        agent.save(update_fields=["avatar", "avatar_requested_hash"])
+        old_avatar_name = agent.avatar.name
+        newer_appearance = "A relaxed field researcher with silver hair and green eyes."
+        newer_revision = compute_appearance_revision(agent.charter, newer_appearance)
+
+        def generate_after_new_request(_agent, _prompt):
+            PersistentAgent.objects.filter(id=agent.id).update(
+                visual_description=newer_appearance,
+                avatar_requested_hash=newer_revision,
+            )
+            return AvatarGenerationResult(
+                image_bytes=b"stale-avatar",
+                mime_type="image/png",
+                endpoint_key="test-endpoint",
+                model="test-model",
+                error_detail=None,
+            )
+
+        with patch(
+            "api.agent.tasks.agent_avatar._generate_avatar_image",
+            side_effect=generate_after_new_request,
+        ):
+            generate_agent_avatar_task.run(
+                str(agent.id),
+                compute_charter_hash(agent.charter),
+                None,
+                revision,
+            )
+
+        agent.refresh_from_db()
+        self.assertEqual(agent.avatar.name, old_avatar_name)
+        self.assertEqual(agent.avatar_requested_hash, newer_revision)
+        self.assertEqual(agent.visual_description, newer_appearance)
+
+    def test_appearance_refresh_does_not_overwrite_later_manual_upload(self):
+        agent = self._prepare_visual_ready_agent()
+        agent.avatar.save("existing-avatar.png", ContentFile(b"old-avatar"), save=False)
+        revision = compute_appearance_revision(agent.charter, agent.visual_description)
+        agent.avatar_requested_hash = revision
+        agent.save(update_fields=["avatar", "avatar_requested_hash"])
+
+        def generate_after_manual_upload(_agent, _prompt):
+            current = PersistentAgent.objects.get(id=agent.id)
+            current.avatar.save("manual-avatar.png", ContentFile(b"manual-avatar"), save=False)
+            current.avatar_requested_hash = ""
+            current.save(update_fields=["avatar", "avatar_requested_hash"])
+            return AvatarGenerationResult(
+                image_bytes=b"generated-avatar",
+                mime_type="image/png",
+                endpoint_key="test-endpoint",
+                model="test-model",
+                error_detail=None,
+            )
+
+        with patch(
+            "api.agent.tasks.agent_avatar._generate_avatar_image",
+            side_effect=generate_after_manual_upload,
+        ):
+            generate_agent_avatar_task.run(
+                str(agent.id),
+                compute_charter_hash(agent.charter),
+                None,
+                revision,
+            )
+
+        agent.refresh_from_db()
+        self.assertIn("manual-avatar", agent.avatar.name)
+        self.assertEqual(agent.avatar_requested_hash, "")
 
     def test_generate_agent_avatar_task_records_attempt_and_logs_each_endpoint_attempt(self):
         agent = self._create_agent()

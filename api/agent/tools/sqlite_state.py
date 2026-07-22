@@ -54,7 +54,7 @@ EPHEMERAL_TABLES = {
 }
 BUILTIN_TABLE_NOTES = {
     TOOL_RESULTS_TABLE: "built-in, ephemeral (dropped before persistence)",
-    AGENT_CONFIG_TABLE: "built-in, ephemeral (reset every LLM call; charter/schedule and temporary emotion updates)",
+    AGENT_CONFIG_TABLE: "built-in, ephemeral (reset every LLM call; charter/schedule/appearance/emotion updates)",
     AGENT_SCHEDULES_TABLE: "built-in, ephemeral (reset every LLM call; recurring schedules and one-time triggers)",
     MESSAGES_TABLE: "built-in, ephemeral (recent messages snapshot for this cycle)",
     FILES_TABLE: "built-in, ephemeral (recent file index for this cycle; metadata only)",

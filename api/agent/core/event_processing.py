@@ -2533,7 +2533,7 @@ def _sqlite_batch_agent_config_attempted_fields(tool_params: Dict[str, Any]) -> 
     statements = _sqlite_batch_statements(tool_params)
     fields = [
         field
-        for field in ("charter", "schedule")
+        for field in ("charter", "schedule", "appearance")
         if any(
             sqlite_statement_assigns_agent_config_field(statement, field)
             for statement in statements
@@ -2565,7 +2565,7 @@ def _annotate_agent_config_update_result(
 
     attempted = {field for _outcome, fields in config_outcomes for field in fields}
     attempted_fields = tuple(
-        field for field in ("charter", "schedule", "schedules", "emotion") if field in attempted
+        field for field in ("charter", "schedule", "appearance", "schedules", "emotion") if field in attempted
     )
     updated_fields = [field for field in config_apply.updated_fields if field in attempted]
     errors = {field: message for field, message in config_apply.errors.items() if field in attempted}
@@ -2574,7 +2574,7 @@ def _annotate_agent_config_update_result(
         "status": "ok",
         "result": target.result,
     }
-    result["agent_config_update"] = {
+    config_update = {
         "updated_fields": updated_fields,
         "unchanged_fields": [
             field for field in attempted_fields
@@ -2582,6 +2582,10 @@ def _annotate_agent_config_update_result(
         ],
         "errors": errors,
     }
+    warnings = getattr(config_apply, "warnings", {})
+    if warnings:
+        config_update["warnings"] = warnings
+    result["agent_config_update"] = config_update
     target.result = result
 
 

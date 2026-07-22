@@ -10,7 +10,13 @@ from django.core.files.base import ContentFile
 from django.db import transaction
 from django.utils import timezone
 
-from api.agent.avatar import agent_needs_avatar_generation, build_avatar_prompt, maybe_schedule_agent_avatar, prepare_visual_description
+from api.agent.avatar import (
+    agent_needs_avatar_generation,
+    build_avatar_prompt,
+    compute_appearance_revision,
+    maybe_schedule_agent_avatar,
+    prepare_visual_description,
+)
 from api.agent.core.image_generation_config import get_avatar_image_generation_llm_configs
 from api.agent.core.llm_config import get_summarization_llm_config
 from api.agent.core.llm_utils import run_completion
@@ -66,6 +72,22 @@ def _clear_avatar_requested_hash(agent_id: str, expected_hash: str) -> None:
         id=agent_id,
         avatar_requested_hash=expected_hash,
     ).update(avatar_requested_hash="")
+
+
+def _reschedule_stale_appearance(agent_id: str, routing_profile_id: str | None) -> None:
+    """Render the current identity unless a later manual avatar decision already won."""
+    try:
+        agent = PersistentAgent.objects.get(id=agent_id)
+    except PersistentAgent.DoesNotExist:
+        return
+    current_charter_hash = compute_charter_hash((agent.charter or "").strip())
+    if agent.avatar_charter_hash == current_charter_hash:
+        return
+    maybe_schedule_agent_avatar(
+        agent,
+        routing_profile_id=routing_profile_id,
+        appearance_changed=True,
+    )
 
 
 def _load_routing_profile(routing_profile_id: str | None) -> Any:
@@ -349,11 +371,22 @@ def generate_agent_visual_description_task(
     if not prepared:
         prepared = prepare_visual_description(charter)
 
-    PersistentAgent.objects.filter(id=agent.id).update(
+    updated = PersistentAgent.objects.filter(
+        id=agent.id,
+        charter=agent.charter,
+        visual_description=agent.visual_description,
+        visual_description_requested_hash=charter_hash,
+    ).update(
         visual_description=prepared,
         visual_description_charter_hash=current_hash,
         visual_description_requested_hash="",
     )
+    if not updated:
+        logger.info(
+            "Discarding stale visual description for agent %s after identity changed",
+            agent.id,
+        )
+        return
     logger.info(
         "Persisted visual description for agent %s (length=%s)",
         agent.id,
@@ -378,27 +411,40 @@ def generate_agent_avatar_task(
     persistent_agent_id: str,
     charter_hash: str,
     routing_profile_id: str | None = None,
+    appearance_revision: str | None = None,
 ) -> None:
     """Generate and persist an avatar image for the given agent."""
+    request_hash = appearance_revision or charter_hash
     try:
         agent = PersistentAgent.objects.get(id=persistent_agent_id)
     except PersistentAgent.DoesNotExist:
         logger.info("Skipping avatar generation; agent %s no longer exists", persistent_agent_id)
         return
     if is_eval_agent(agent):
-        _clear_avatar_requested_hash(agent.id, charter_hash)
+        _clear_avatar_requested_hash(agent.id, request_hash)
         logger.debug("Skipping avatar generation for eval agent %s", agent.id)
+        return
+
+    if agent.avatar_requested_hash != request_hash:
+        logger.debug(
+            "Skipping stale avatar generation for agent %s (requested=%s task=%s)",
+            agent.id,
+            agent.avatar_requested_hash,
+            request_hash,
+        )
         return
 
     charter = (agent.charter or "").strip()
     if not charter:
-        _clear_avatar_requested_hash(agent.id, charter_hash)
+        _clear_avatar_requested_hash(agent.id, request_hash)
         logger.debug("Agent %s has no charter; skipping avatar generation", agent.id)
         return
 
     current_hash = compute_charter_hash(charter)
     if current_hash != charter_hash:
-        _clear_avatar_requested_hash(agent.id, charter_hash)
+        _clear_avatar_requested_hash(agent.id, request_hash)
+        if appearance_revision:
+            _reschedule_stale_appearance(str(agent.id), routing_profile_id)
         logger.debug(
             "Charter changed for agent %s before avatar generation; current=%s provided=%s",
             agent.id,
@@ -409,7 +455,7 @@ def generate_agent_avatar_task(
 
     visual_description = prepare_visual_description(agent.visual_description or "")
     if not visual_description:
-        _clear_avatar_requested_hash(agent.id, charter_hash)
+        _clear_avatar_requested_hash(agent.id, request_hash)
         maybe_schedule_agent_avatar(agent, routing_profile_id=routing_profile_id)
         logger.debug(
             "Agent %s missing visual description before avatar generation; queued prerequisite",
@@ -417,12 +463,21 @@ def generate_agent_avatar_task(
         )
         return
 
+    if appearance_revision and compute_appearance_revision(charter, visual_description) != appearance_revision:
+        _clear_avatar_requested_hash(agent.id, request_hash)
+        logger.debug(
+            "Appearance changed before avatar generation for agent %s; skipping stale revision",
+            agent.id,
+        )
+        return
+
     if not agent_needs_avatar_generation(
         agent=agent,
-        charter_hash=current_hash,
+        avatar_revision=request_hash,
         visual_description=visual_description,
+        appearance_changed=bool(appearance_revision),
     ):
-        _clear_avatar_requested_hash(agent.id, charter_hash)
+        _clear_avatar_requested_hash(agent.id, request_hash)
         logger.debug("Agent %s does not need avatar generation; skipping", agent.id)
         return
 
@@ -434,7 +489,7 @@ def generate_agent_avatar_task(
 
     result = _generate_avatar_image(agent, prompt)
     if not result.image_bytes or not result.mime_type:
-        _clear_avatar_requested_hash(agent.id, charter_hash)
+        _clear_avatar_requested_hash(agent.id, request_hash)
         logger.warning(
             "Avatar generation failed for agent %s (%s)",
             agent.id,
@@ -442,12 +497,49 @@ def generate_agent_avatar_task(
         )
         return
 
-    _save_agent_avatar(
-        agent,
-        image_bytes=result.image_bytes,
-        mime_type=result.mime_type,
-        charter_hash=current_hash,
-    )
+    stale_result = False
+    reschedule_appearance = False
+    with transaction.atomic():
+        locked_agent = PersistentAgent.objects.select_for_update().get(id=agent.id)
+        locked_charter = (locked_agent.charter or "").strip()
+        locked_visual_description = prepare_visual_description(locked_agent.visual_description or "")
+        request_is_current = locked_agent.avatar_requested_hash == request_hash
+        charter_is_current = compute_charter_hash(locked_charter) == charter_hash
+        appearance_is_current = (
+            not appearance_revision
+            or compute_appearance_revision(locked_charter, locked_visual_description) == appearance_revision
+        )
+        still_needs_avatar = agent_needs_avatar_generation(
+            agent=locked_agent,
+            avatar_revision=request_hash,
+            visual_description=locked_visual_description,
+            appearance_changed=bool(appearance_revision),
+        )
+        if not (request_is_current and charter_is_current and appearance_is_current and still_needs_avatar):
+            if request_is_current:
+                locked_agent.avatar_requested_hash = ""
+                locked_agent.save(update_fields=["avatar_requested_hash"])
+            stale_result = True
+            reschedule_appearance = bool(
+                appearance_revision
+                and request_is_current
+                and (not charter_is_current or not appearance_is_current)
+            )
+            logger.debug(
+                "Discarding stale avatar result for agent %s before save",
+                agent.id,
+            )
+        else:
+            _save_agent_avatar(
+                locked_agent,
+                image_bytes=result.image_bytes,
+                mime_type=result.mime_type,
+                charter_hash=request_hash,
+            )
+    if stale_result:
+        if reschedule_appearance:
+            _reschedule_stale_appearance(str(agent.id), routing_profile_id)
+        return
     logger.info(
         "Persisted avatar for agent %s (endpoint=%s model=%s)",
         agent.id,

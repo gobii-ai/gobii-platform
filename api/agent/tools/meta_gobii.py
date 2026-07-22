@@ -611,7 +611,7 @@ TOOL_DEFINITIONS: dict[str, dict[str, Any]] = {
                 "can_configure": {
                     "type": "boolean",
                     "default": False,
-                    "description": "Grant only to owner-approved contacts who may change charter or schedule.",
+                    "description": "Grant only to owner-approved contacts who may change durable configuration.",
                 },
                 "user_confirmed": {
                     "type": "boolean",

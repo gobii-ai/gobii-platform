@@ -98,3 +98,11 @@ from .agent_emotions import (
     AGENT_TEMPORARY_EMOTION_LIFECYCLE,
     AgentTemporaryEmotionLifecycleScenario,
 )
+from .agent_appearance import (
+    AGENT_APPEARANCE_SCENARIO_SLUGS,
+    AGENT_APPEARANCE_SUITE_SLUG,
+    AgentAppearanceScenario,
+    DelegatedAppearanceScenario,
+    OwnerDirectedAppearanceScenario,
+    UnauthorizedAppearanceScenario,
+)

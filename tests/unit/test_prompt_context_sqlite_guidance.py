@@ -332,7 +332,11 @@ class PromptContextContactsGuidanceTests(TestCase):
             context, _, _ = prompt_context.build_prompt_context(self.agent, is_first_run=False)
 
         content = "\n".join(message["content"] for message in context)
-        self.assertIn("patch_text for lasting owner behavior feedback only", content)
+        self.assertIn("patch_text=lasting owner rules", content)
+        self.assertIn(
+            "appearance=full person after authorized changes: age/skin/hair/eyes/style, not scene/vibe; preserve unspecified; confirm briefly",
+            content,
+        )
         self.assertIn("temporary feedback/ordinary tasks never config", content)
         self.assertIn("No schedule is set. Leave it NULL unless the user requests recurrence", content)
         self.assertNotIn("Without a schedule, you die", content)

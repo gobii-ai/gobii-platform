@@ -10,6 +10,7 @@ from django.core.exceptions import ValidationError
 from django.test import TestCase, tag
 from django.utils import timezone
 
+from api.agent.avatar import MAX_VISUAL_DESCRIPTION_LENGTH
 from api.agent.emotions import normalize_emotion_update
 from api.agent.tools.sqlite_agent_config import (
     apply_sqlite_agent_config_updates,
@@ -152,6 +153,158 @@ class SqliteAgentConfigTests(TestCase):
         self.assertFalse(result.updated_fields)
         self.assertFalse(result.errors)
 
+    def test_sqlite_agent_config_updates_appearance_without_touching_other_config(self):
+        original_appearance = "A thoughtful researcher with an auburn bob and navy blazer."
+        updated_appearance = (
+            "A thoughtful researcher with shoulder-length black curls, round green glasses, "
+            "warm brown eyes, and a mustard cardigan."
+        )
+        self.agent.visual_description = original_appearance
+        self.agent.emotion = "🙂"
+        self.agent.emotion_expires_at = timezone.now() + timedelta(hours=1)
+        self.agent.save(update_fields=["visual_description", "emotion", "emotion_expires_at"])
+
+        with self._sqlite_state() as db_path, patch(
+            "api.agent.tools.appearance_updater.maybe_schedule_agent_avatar"
+        ) as schedule_avatar:
+            snapshot = seed_sqlite_agent_config(self.agent)
+            with sqlite3.connect(db_path) as conn:
+                conn.execute(
+                    f'UPDATE "{AGENT_CONFIG_TABLE}" SET appearance = ? WHERE id = 1;',
+                    (updated_appearance,),
+                )
+            result = apply_sqlite_agent_config_updates(self.agent, snapshot)
+
+        self.agent.refresh_from_db()
+        self.assertEqual(self.agent.visual_description, updated_appearance)
+        self.assertEqual(self.agent.charter, "Original charter")
+        self.assertEqual(self.agent.schedule, "0 9 * * *")
+        self.assertEqual(self.agent.emotion, "🙂")
+        self.assertIn("appearance", result.updated_fields)
+        self.assertFalse(result.errors)
+        schedule_avatar.assert_called_once()
+        self.assertTrue(schedule_avatar.call_args.kwargs["appearance_changed"])
+        self.assertEqual(schedule_avatar.call_args.kwargs["expected_avatar_state"], ("", "", ""))
+
+    def test_seed_bounds_legacy_overlong_appearance_without_mutating_durable_value(self):
+        legacy_appearance = "x" * (MAX_VISUAL_DESCRIPTION_LENGTH + 200)
+        self.agent.visual_description = legacy_appearance
+        self.agent.save(update_fields=["visual_description"])
+
+        with self._sqlite_state() as db_path:
+            snapshot = seed_sqlite_agent_config(self.agent)
+            with sqlite3.connect(db_path) as conn:
+                stored_appearance = conn.execute(
+                    f'SELECT appearance FROM "{AGENT_CONFIG_TABLE}" WHERE id = 1;'
+                ).fetchone()[0]
+            result = apply_sqlite_agent_config_updates(self.agent, snapshot)
+
+        self.agent.refresh_from_db()
+        self.assertEqual(snapshot.appearance, legacy_appearance[:MAX_VISUAL_DESCRIPTION_LENGTH])
+        self.assertEqual(stored_appearance, snapshot.appearance)
+        self.assertEqual(self.agent.visual_description, legacy_appearance)
+        self.assertFalse(result.updated_fields)
+        self.assertFalse(result.errors)
+
+    def test_combined_charter_and_appearance_update_schedules_one_current_render(self):
+        self.agent.visual_description = "A reserved analyst with short brown hair."
+        self.agent.save(update_fields=["visual_description"])
+
+        with self._sqlite_state() as db_path, patch(
+            "api.agent.tools.charter_updater.maybe_schedule_agent_avatar"
+        ) as charter_avatar, patch(
+            "api.agent.tools.appearance_updater.maybe_schedule_agent_avatar"
+        ) as appearance_avatar:
+            snapshot = seed_sqlite_agent_config(self.agent)
+            with sqlite3.connect(db_path) as conn:
+                conn.execute(
+                    f'''UPDATE "{AGENT_CONFIG_TABLE}"
+                        SET charter = ?, appearance = ?
+                        WHERE id = 1;''',
+                    (
+                        "Research climate technology markets",
+                        "An energetic analyst with silver curls, amber glasses, and a green linen jacket.",
+                    ),
+                )
+            result = apply_sqlite_agent_config_updates(self.agent, snapshot)
+
+        self.agent.refresh_from_db()
+        self.assertEqual(self.agent.charter, "Research climate technology markets")
+        self.assertIn("silver curls", self.agent.visual_description)
+        self.assertEqual(set(result.updated_fields), {"charter", "appearance"})
+        self.assertFalse(result.errors)
+        charter_avatar.assert_not_called()
+        appearance_avatar.assert_called_once()
+        self.assertTrue(appearance_avatar.call_args.kwargs["appearance_changed"])
+        self.assertEqual(appearance_avatar.call_args.kwargs["expected_avatar_state"], ("", "", ""))
+
+    def test_reapplying_same_appearance_can_retry_avatar_refresh(self):
+        appearance = "A grounded operator with close-cropped dark hair and hazel eyes."
+        self.agent.visual_description = appearance
+        self.agent.save(update_fields=["visual_description"])
+
+        with self._sqlite_state() as db_path, patch(
+            "api.agent.tools.appearance_updater.maybe_schedule_agent_avatar"
+        ) as schedule_avatar:
+            snapshot = seed_sqlite_agent_config(self.agent)
+            with sqlite3.connect(db_path) as conn:
+                conn.execute(
+                    f'UPDATE "{AGENT_CONFIG_TABLE}" SET appearance = appearance WHERE id = 1;'
+                )
+            result = apply_sqlite_agent_config_updates(self.agent, snapshot)
+
+        self.assertEqual(result.updated_fields, ("appearance",))
+        self.assertFalse(result.errors)
+        schedule_avatar.assert_called_once()
+        self.assertTrue(schedule_avatar.call_args.kwargs["appearance_changed"])
+
+    def test_appearance_update_surfaces_avatar_refresh_warning(self):
+        self.agent.visual_description = "A grounded operator with close-cropped dark hair."
+        self.agent.save(update_fields=["visual_description"])
+
+        with self._sqlite_state() as db_path, patch(
+            "api.agent.tools.appearance_updater.maybe_schedule_agent_avatar",
+            return_value=False,
+        ):
+            snapshot = seed_sqlite_agent_config(self.agent)
+            with sqlite3.connect(db_path) as conn:
+                conn.execute(
+                    f'UPDATE "{AGENT_CONFIG_TABLE}" SET appearance = ? WHERE id = 1;',
+                    ("A grounded operator with silver curls and green eyes.",),
+                )
+            result = apply_sqlite_agent_config_updates(self.agent, snapshot)
+
+        self.assertEqual(result.updated_fields, ("appearance",))
+        self.assertIn("avatar refresh was not queued", result.warnings["appearance"])
+
+    def test_blank_or_oversized_appearance_is_rejected_without_mutation(self):
+        original_appearance = "A grounded operator with close-cropped dark hair."
+        self.agent.visual_description = original_appearance
+        self.agent.save(update_fields=["visual_description"])
+
+        with self._sqlite_state() as db_path, patch(
+            "api.agent.tools.appearance_updater.maybe_schedule_agent_avatar"
+        ) as schedule_avatar:
+            snapshot = seed_sqlite_agent_config(self.agent)
+            with sqlite3.connect(db_path) as conn:
+                with self.assertRaises(sqlite3.IntegrityError):
+                    conn.execute(
+                        f'UPDATE "{AGENT_CONFIG_TABLE}" SET appearance = ? WHERE id = 1;',
+                        ("x" * 1801,),
+                    )
+                conn.rollback()
+                conn.execute(
+                    f'UPDATE "{AGENT_CONFIG_TABLE}" SET appearance = ? WHERE id = 1;',
+                    ("   ",),
+                )
+            result = apply_sqlite_agent_config_updates(self.agent, snapshot)
+
+        self.agent.refresh_from_db()
+        self.assertEqual(self.agent.visual_description, original_appearance)
+        self.assertFalse(result.updated_fields)
+        self.assertIn("stable physical identity", result.errors["appearance"])
+        schedule_avatar.assert_not_called()
+
     def test_failed_patch_does_not_persist_or_schedule_charter_update(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             db_path = os.path.join(tmp_dir, "state.db")
@@ -271,6 +424,8 @@ class SqliteAgentConfigTests(TestCase):
         self.assertFalse(result.errors)
 
     def test_partial_replace_cannot_wipe_durable_config(self):
+        self.agent.visual_description = "A calm founder with round glasses."
+        self.agent.save(update_fields=["visual_description"])
         with self._sqlite_state() as db_path:
             snapshot = seed_sqlite_agent_config(self.agent)
             conn = sqlite3.connect(db_path)
@@ -292,6 +447,7 @@ class SqliteAgentConfigTests(TestCase):
         self.agent.refresh_from_db()
         self.assertEqual(self.agent.charter, "Original charter")
         self.assertEqual(self.agent.schedule, "0 9 * * *")
+        self.assertEqual(self.agent.visual_description, "A calm founder with round glasses.")
         self.assertEqual(self.agent.get_active_emotion_state(), (None, None))
         self.assertFalse(result.updated_fields)
         self.assertFalse(result.errors)
@@ -372,6 +528,12 @@ class SqliteAgentConfigTests(TestCase):
             sqlite_statement_assigns_agent_config_field(
                 "UPDATE notes SET body='emotion_timeout_seconds=60'",
                 "emotion_timeout_seconds",
+            )
+        )
+        self.assertTrue(
+            sqlite_statement_assigns_agent_config_field(
+                "UPDATE __agent_config SET appearance='short black curls' WHERE id=1",
+                "appearance",
             )
         )
 

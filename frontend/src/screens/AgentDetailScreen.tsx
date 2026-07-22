@@ -1941,7 +1941,9 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
                         </SettingsActionButton>
                       )}
                     </div>
-                    <p className="text-xs text-gray-500">Use a square image (PNG, JPG, WebP, or GIF). Max 5 MB.</p>
+                    <p className="text-xs text-gray-500">
+                      Upload a square PNG, JPG, WebP, or GIF (max 5 MB), or ask {formState.name.trim() || 'your agent'} in chat to change their appearance.
+                    </p>
                   </div>
                 </div>
               </div>
