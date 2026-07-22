@@ -51,6 +51,27 @@ function formatTimestamp(value?: string | null): string {
   return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value))
 }
 
+const EMAIL_PREVIEW_BASE_STYLE = `<style>
+  body {
+    font-family: 'Inter Variable', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+</style>`
+
+function buildEmailPreviewDocument(bodyHtml: string): string {
+  const headMatch = /<head(?:\s[^>]*)?>/i.exec(bodyHtml)
+  if (headMatch?.index !== undefined) {
+    const insertionPoint = headMatch.index + headMatch[0].length
+    return `${bodyHtml.slice(0, insertionPoint)}${EMAIL_PREVIEW_BASE_STYLE}${bodyHtml.slice(insertionPoint)}`
+  }
+
+  const bodyMatch = /<body(?:\s[^>]*)?>/i.exec(bodyHtml)
+  if (bodyMatch?.index !== undefined) {
+    return `${bodyHtml.slice(0, bodyMatch.index)}${EMAIL_PREVIEW_BASE_STYLE}${bodyHtml.slice(bodyMatch.index)}`
+  }
+
+  return `${EMAIL_PREVIEW_BASE_STYLE}${bodyHtml}`
+}
+
 function OutboxPolicyPanel({ enabled }: { enabled: boolean }) {
   const queryClient = useQueryClient()
   const policyQuery = useQuery({ queryKey: ['email-sending-policy'], queryFn: fetchEmailSendingPolicy, enabled })
@@ -114,7 +135,7 @@ function ReviewDetail({ itemId, onClose }: { itemId: string; onClose: () => void
   const detailQuery = useQuery({ queryKey: ['outbox-item', itemId], queryFn: () => fetchOutboxItem(itemId) })
   const item = detailQuery.data
   const [editing, setEditing] = useState(false)
-  const [draft, setDraft] = useState({ to: '', cc: '', subject: '', body: '', attachmentNodeIds: [] as string[] })
+  const [draft, setDraft] = useState({ subject: '', body: '', attachmentNodeIds: [] as string[] })
   const [attachmentsChanged, setAttachmentsChanged] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [threadAcknowledged, setThreadAcknowledged] = useState(false)
@@ -122,10 +143,8 @@ function ReviewDetail({ itemId, onClose }: { itemId: string; onClose: () => void
   useEffect(() => {
     if (!item) return
     setDraft({
-      to: item.to,
-      cc: item.cc.join(', '),
       subject: item.subject,
-      body: item.bodyHtml || '',
+      body: item.body || '',
       attachmentNodeIds: item.attachments?.flatMap((attachment) => attachment.nodeId ? [attachment.nodeId] : []) ?? [],
     })
     setAttachmentsChanged(false)
@@ -146,8 +165,6 @@ function ReviewDetail({ itemId, onClose }: { itemId: string; onClose: () => void
     mutationFn: async ({ action, saveOnly }: { action?: 'approve' | 'discard' | 'retry'; saveOnly?: boolean }) => {
       if (!item) throw new Error('Outbox item unavailable.')
       const edits: Record<string, unknown> = editing ? {
-          to: draft.to,
-          cc: draft.cc.split(',').map((value) => value.trim()).filter(Boolean),
           subject: draft.subject,
           body: draft.body,
         } : {}
@@ -194,12 +211,13 @@ function ReviewDetail({ itemId, onClose }: { itemId: string; onClose: () => void
       {error ? <p className="mt-4 rounded-lg border border-rose-400/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-100">{error}</p> : null}
       <div className="mt-5 grid gap-3 text-sm">
         <label className="grid gap-1 text-xs text-slate-400">From<input value={item.sender} readOnly className="rounded-lg border border-slate-700 bg-transparent px-3 py-2 text-sm text-slate-200" /></label>
-        <label className="grid gap-1 text-xs text-slate-400">To<input value={editing ? draft.to : item.to} readOnly={!editing} onChange={(event) => setDraft({ ...draft, to: event.target.value })} className="rounded-lg border border-slate-700 bg-transparent px-3 py-2 text-sm text-slate-100" /></label>
-        <label className="grid gap-1 text-xs text-slate-400">CC<input value={editing ? draft.cc : item.cc.join(', ')} readOnly={!editing} onChange={(event) => setDraft({ ...draft, cc: event.target.value })} className="rounded-lg border border-slate-700 bg-transparent px-3 py-2 text-sm text-slate-100" /></label>
+        <label className="grid gap-1 text-xs text-slate-400">To<input value={item.to} readOnly className="rounded-lg border border-slate-700 bg-transparent px-3 py-2 text-sm text-slate-200" /></label>
+        <label className="grid gap-1 text-xs text-slate-400">CC<input value={item.cc.join(', ')} readOnly className="rounded-lg border border-slate-700 bg-transparent px-3 py-2 text-sm text-slate-200" /></label>
+        <p className="text-xs text-slate-500">Recipients are locked to the email prepared by the agent.</p>
         {editing ? (
           <>
             <label className="grid gap-1 text-xs text-slate-400">Subject<input value={draft.subject} onChange={(event) => setDraft({ ...draft, subject: event.target.value })} className="rounded-lg border border-slate-700 bg-transparent px-3 py-2 text-sm text-slate-100" /></label>
-            <label className="grid gap-1 text-xs text-slate-400">HTML body<textarea value={draft.body} onChange={(event) => setDraft({ ...draft, body: event.target.value })} rows={14} className="rounded-lg border border-slate-700 bg-transparent px-3 py-2 font-mono text-sm text-slate-100" /></label>
+            <label className="grid gap-1 text-xs text-slate-400">Message body<textarea value={draft.body} onChange={(event) => setDraft({ ...draft, body: event.target.value })} rows={14} className="rounded-lg border border-slate-700 bg-transparent px-3 py-2 font-mono text-sm text-slate-100" /></label>
             <fieldset className="rounded-xl border border-slate-700 px-3 py-3">
               <legend className="px-1 text-xs font-medium text-slate-400">Attachments from agent files</legend>
               {filesQuery.isLoading ? <p className="text-xs text-slate-500">Loading files…</p> : null}
@@ -229,7 +247,7 @@ function ReviewDetail({ itemId, onClose }: { itemId: string; onClose: () => void
             </fieldset>
           </>
         ) : (
-          <iframe title="Email preview" sandbox="" srcDoc={item.bodyHtml || ''} className="min-h-96 w-full rounded-xl border border-slate-700 bg-white" />
+          <iframe title="Email preview" sandbox="" srcDoc={buildEmailPreviewDocument(item.bodyHtml || '')} className="min-h-96 w-full rounded-xl border border-slate-700 bg-white" />
         )}
       </div>
       {item.attachments?.length ? (
