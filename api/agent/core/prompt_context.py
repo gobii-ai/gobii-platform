@@ -17,7 +17,7 @@ from uuid import UUID
 from django.core.exceptions import ObjectDoesNotExist
 from django.contrib.auth import get_user_model
 from django.db import DatabaseError, transaction
-from django.db.models import Q, Prefetch, Sum
+from django.db.models import Exists, OuterRef, Q, Prefetch, Sum
 from django.urls import NoReverseMatch, reverse
 from django.utils import timezone as dj_timezone
 from litellm import token_counter
@@ -2442,11 +2442,27 @@ def _build_contacts_block(
 
     # User preferred contact endpoint (if configured)
     # Gather all user endpoints seen in conversations with this agent
+    mcp_sender_messages = PersistentAgentMessage.objects.filter(
+        owner_agent=agent,
+        from_endpoint_id=OuterRef("pk"),
+        raw_payload__source_kind="mcp",
+    )
+    non_mcp_sender_messages = PersistentAgentMessage.objects.filter(
+        owner_agent=agent,
+        from_endpoint_id=OuterRef("pk"),
+    ).filter(
+        Q(raw_payload__source_kind__isnull=True) | ~Q(raw_payload__source_kind="mcp")
+    )
     user_eps_qs = (
         PersistentAgentCommsEndpoint.objects.filter(
             conversation_memberships__conversation__owner_agent=agent
         )
         .exclude(owner_agent=agent)
+        .alias(
+            has_mcp_sender_message=Exists(mcp_sender_messages),
+            has_non_mcp_sender_message=Exists(non_mcp_sender_messages),
+        )
+        .exclude(channel=CommsChannel.WEB, has_mcp_sender_message=True, has_non_mcp_sender_message=False)
         .distinct()
         .order_by("channel", "address")
     )
@@ -4856,12 +4872,12 @@ def _get_unified_history_prompt(
                 "content": content,
             }
         else:
-            from_addr = m.from_endpoint.address
-            if channel == CommsChannel.WEB and m.from_endpoint_id:
-                from_addr = _format_web_party(from_addr, m.from_endpoint_id)
             source_kind, source_label = get_message_source_metadata(m.raw_payload)
-            is_webhook = channel == CommsChannel.OTHER and str(source_kind).strip().lower() == "webhook"
-            is_mcp = str(source_kind).strip().lower() == "mcp"
+            is_webhook = channel == CommsChannel.OTHER and source_kind == "webhook"
+            is_mcp = source_kind == "mcp"
+            from_addr = m.from_endpoint.address
+            if channel == CommsChannel.WEB and m.from_endpoint_id and not is_mcp:
+                from_addr = _format_web_party(from_addr, m.from_endpoint_id)
             if m.is_outbound:
                 to_addr = m.to_endpoint.address if m.to_endpoint else "N/A"
                 if channel == CommsChannel.EMAIL and m.conversation and m.conversation.address:

@@ -63,7 +63,11 @@ from api.agent.core.processing_flags import (
 from tests.utils.llm_seed import get_intelligence_tier
 from api.agent.comms.adapters import ParsedMessage
 from api.agent.comms.human_input_requests import submit_human_input_responses_batch
-from api.agent.comms.message_service import ingest_inbound_message, ingest_inbound_webhook_message
+from api.agent.comms.message_service import (
+    ingest_inbound_message,
+    ingest_inbound_webhook_message,
+    inject_internal_web_message,
+)
 from api.agent.peer_comm import PeerMessagingService
 from config.redis_client import get_redis_client
 from api.agent.core.internal_reasoning import (
@@ -1141,34 +1145,16 @@ class PromptContextBuilderTests(TestCase):
 
     def test_mcp_message_uses_mcp_identity_and_preserves_owner_authority(self):
         self._add_low_permission_contacts(self.agent)
-        agent_endpoint = PersistentAgentCommsEndpoint.objects.create(
-            owner_agent=self.agent,
-            channel=CommsChannel.WEB,
-            address=build_web_agent_address(self.agent.id),
+        message, _ = inject_internal_web_message(
+            self.agent.id,
+            "Run the authenticated MCP request.",
+            sender_user_id=self.user.id,
+            trigger_processing=False,
+            source="remote_mcp",
+            source_kind="mcp",
+            source_label="Gobii MCP",
         )
-        owner_address = build_web_user_address(self.user.id, self.agent.id)
-        owner_endpoint = PersistentAgentCommsEndpoint.objects.create(
-            channel=CommsChannel.WEB,
-            address=owner_address,
-        )
-        conversation = PersistentAgentConversation.objects.create(
-            owner_agent=self.agent,
-            channel=CommsChannel.WEB,
-            address=owner_address,
-        )
-        PersistentAgentMessage.objects.create(
-            owner_agent=self.agent,
-            from_endpoint=owner_endpoint,
-            to_endpoint=agent_endpoint,
-            conversation=conversation,
-            is_outbound=False,
-            body="Run the authenticated MCP request.",
-            raw_payload={
-                "source": "remote_mcp",
-                "source_kind": "mcp",
-                "source_label": "Gobii MCP",
-            },
-        )
+        owner_address = message.from_endpoint.address
 
         with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
              patch('api.agent.core.prompt_context.ensure_comms_compacted'):
