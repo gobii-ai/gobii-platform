@@ -4,6 +4,7 @@ import { fetchAgentTimeline, type TimelineResponse } from '../api/agentChat'
 import type { PlanSnapshot, TimelineEvent } from '../types/agentChat'
 import { mergeTimelineEvents, prepareTimelineEvents } from '../stores/agentChatTimeline'
 import type { StaffViewContext } from '../api/context'
+import { nextClientStateOrder } from '../util/clientStateOrder'
 
 export const TIMELINE_PAGE_SIZE = 50
 export const TIMELINE_STALE_TIME_MS = 5 * 60_000
@@ -16,9 +17,13 @@ export type TimelinePage = {
   hasMoreNewer: boolean
   raw: TimelineResponse
   currentPlan: PlanSnapshot | null
+  pendingActionsStateOrder: number
 }
 
-export function timelineResponseToPage(response: TimelineResponse): TimelinePage {
+export function timelineResponseToPage(
+  response: TimelineResponse,
+  requestStartedOrder = nextClientStateOrder(),
+): TimelinePage {
   const events = prepareTimelineEvents(response.events)
   return {
     events,
@@ -28,6 +33,7 @@ export function timelineResponseToPage(response: TimelineResponse): TimelinePage
     hasMoreNewer: response.has_more_newer,
     raw: response,
     currentPlan: response.current_plan ?? null,
+    pendingActionsStateOrder: requestStartedOrder,
   }
 }
 
@@ -52,20 +58,21 @@ export function useAgentTimeline(agentId: string | null, options?: { enabled?: b
       }
 
       const direction = pageParam?.direction ?? 'initial'
+      const requestStartedOrder = nextClientStateOrder()
 
       if (direction === 'initial') {
         const response = await fetchAgentTimeline(agentId, { direction: 'initial', limit: TIMELINE_PAGE_SIZE, signal, developerMode, staffContext: options?.staffContext })
-        return timelineResponseToPage(response)
+        return timelineResponseToPage(response, requestStartedOrder)
       }
 
       if (direction === 'older' && 'cursor' in pageParam!) {
         const response = await fetchAgentTimeline(agentId, { direction: 'older', cursor: pageParam.cursor, limit: TIMELINE_PAGE_SIZE, signal, developerMode, staffContext: options?.staffContext })
-        return timelineResponseToPage(response)
+        return timelineResponseToPage(response, requestStartedOrder)
       }
 
       if (direction === 'newer' && 'cursor' in pageParam!) {
         const response = await fetchAgentTimeline(agentId, { direction: 'newer', cursor: pageParam.cursor, limit: TIMELINE_PAGE_SIZE, signal, developerMode, staffContext: options?.staffContext })
-        return timelineResponseToPage(response)
+        return timelineResponseToPage(response, requestStartedOrder)
       }
 
       throw new Error(`Invalid page param direction: ${direction}`)
@@ -116,4 +123,13 @@ export function getInitialPageResponse(data: InfiniteData<TimelinePage> | undefi
   return criticalStatus && !lastPage.raw.critical_status
     ? { ...lastPage.raw, critical_status: criticalStatus }
     : lastPage.raw
+}
+
+export function getInitialPagePendingActionsStateOrder(
+  data: InfiniteData<TimelinePage> | undefined,
+): number {
+  if (!data?.pages?.length) {
+    return 0
+  }
+  return data.pages[data.pages.length - 1].pendingActionsStateOrder ?? 0
 }

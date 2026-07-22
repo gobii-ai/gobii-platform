@@ -97,15 +97,16 @@ import {
 } from '../store/agentSettingsSlice'
 import { mergeTimelineEvents } from '../stores/agentChatTimeline'
 import { ensureAuthenticated, selectSubscriptionState, subscriptionActions, type PlanTier } from '../store/subscriptionSlice'
-import { useAgentTimeline, flattenTimelinePages, getInitialPageResponse, timelineQueryKey, type TimelinePage } from '../hooks/useAgentTimeline'
+import { useAgentTimeline, flattenTimelinePages, getInitialPagePendingActionsStateOrder, getInitialPageResponse, timelineQueryKey, type TimelinePage } from '../hooks/useAgentTimeline'
 import { refreshTimelineLatestInCache, replacePendingActionRequestsInCache, DEFAULT_CONTIGUOUS_BACKFILL_MAX_PAGES } from '../hooks/useTimelineCacheInjector'
+import { nextClientStateOrder } from '../util/clientStateOrder'
 import { collapseDetailedStatusRuns } from '../hooks/useSimplifiedTimeline'
 import { usePageLifecycle } from '../hooks/usePageLifecycle'
 import { HttpError } from '../api/http'
 import { safeErrorMessage } from '../api/safeErrorMessage'
 import type { AgentRosterEntry, AgentRosterSortMode, AgentSidebarInvite, PlanningState, SignupPreviewState } from '../types/agentRoster'
 import type { BillingStatusInfo } from '../types/agentAddons'
-import type { AgentMessage, AgentMessageNotification, PendingActionRequest, PendingHumanInputRequest, PlanSnapshot, TimelineEvent } from '../types/agentChat'
+import type { AgentMessage, AgentMessageNotification, PendingActionRequest, PlanSnapshot, TimelineEvent } from '../types/agentChat'
 import type { DailyCreditsUpdatePayload } from '../types/dailyCredits'
 import type { UsageBurnRateResponse, UsageSummaryResponse } from '../components/usage'
 import type { InsightEvent } from '../types/insight'
@@ -1101,11 +1102,15 @@ export function AgentChatPage({
   }, [activeAgentId, developerModeEnabled, queryClient, staffContext])
   const flatEvents = useMemo(() => flattenTimelinePages(timelineQuery.data), [timelineQuery.data])
   const initialPageResponse = useMemo(() => getInitialPageResponse(timelineQuery.data), [timelineQuery.data])
+  const initialPagePendingActionsStateOrder = useMemo(
+    () => getInitialPagePendingActionsStateOrder(timelineQuery.data),
+    [timelineQuery.data],
+  )
   const timelinePendingActionRequests = useMemo<PendingActionRequest[]>(
     () => initialPageResponse?.pending_action_requests ?? [],
     [initialPageResponse],
   )
-  useTimelineMetadataBridge(activeAgentId, initialPageResponse)
+  useTimelineMetadataBridge(activeAgentId, initialPageResponse, initialPagePendingActionsStateOrder)
 
   const activeChatSession = useAppSelector(selectActiveChatSession)
   const authoritativeProcessingByAgentId = useAppSelector(
@@ -1880,6 +1885,7 @@ export function AgentChatPage({
   const socketSnapshot = useAgentChatSocket(desiredSocketSubscriptions, {
     contextOverride: contextReady ? effectiveContext : null,
     staffContextOverride: staffContext,
+    developerMode: developerModeEnabled,
     onCreditEvent: handleCreditEvent,
     onAgentProfileEvent: handleAgentProfileEvent,
     onMessageNotificationEvent: handleAgentMessageNotificationEvent,
@@ -2903,12 +2909,13 @@ export function AgentChatPage({
     targetAgentId: string,
     nextPlanningState: PlanningState,
     pendingActionRequests: PendingActionRequest[],
-    pendingHumanInputRequests: PendingHumanInputRequest[],
+    stateOrder: number,
   ) => {
-    replacePendingActionRequestsInCache(queryClient, targetAgentId, pendingActionRequests)
-    dispatch(chatActions.pendingActionsReplaced({
+    replacePendingActionRequestsInCache(queryClient, targetAgentId, pendingActionRequests, stateOrder)
+    dispatch(chatActions.pendingActionsSnapshotReceived({
       agentId: targetAgentId,
       pendingActions: pendingActionRequests,
+      stateOrder,
     }))
     dispatch(chatActions.agentIdentityUpdated({
       agentId: targetAgentId,
@@ -2927,8 +2934,6 @@ export function AgentChatPage({
             raw: {
               ...page.raw,
               planning_state: nextPlanningState,
-              pending_action_requests: pendingActionRequests,
-              pending_human_input_requests: pendingHumanInputRequests,
             },
           })),
         }
@@ -2958,13 +2963,14 @@ export function AgentChatPage({
     }
     dispatch(chatActions.skipPlanningBusySet({ agentId: activeAgentId, busy: true }))
     dispatch(chatActions.sendMessageErrorSet({ agentId: activeAgentId, message: null }))
+    const stateOrder = nextClientStateOrder()
     try {
       const result = await skipAgentPlanning(activeAgentId)
       applyPlanningMutationResult(
         activeAgentId,
         result.planningState,
         result.pendingActionRequests,
-        result.pendingHumanInputRequests,
+        stateOrder,
       )
     } catch (error) {
       dispatch(chatActions.sendMessageErrorSet({
@@ -3769,11 +3775,16 @@ export function AgentChatPage({
     }
   }, [activeAgentId, dispatch, sendMessage, sendMessageDisabledReason])
 
-  const replacePendingActionState = useCallback((targetAgentId: string, nextPendingActions: PendingActionRequest[]) => {
-    replacePendingActionRequestsInCache(queryClient, targetAgentId, nextPendingActions)
-    dispatch(chatActions.pendingActionsReplaced({
+  const replacePendingActionState = useCallback((
+    targetAgentId: string,
+    nextPendingActions: PendingActionRequest[],
+    stateOrder = nextClientStateOrder(),
+  ) => {
+    replacePendingActionRequestsInCache(queryClient, targetAgentId, nextPendingActions, stateOrder)
+    dispatch(chatActions.pendingActionsSnapshotReceived({
       agentId: targetAgentId,
       pendingActions: nextPendingActions,
+      stateOrder,
     }))
   }, [dispatch, queryClient])
 
@@ -3785,6 +3796,7 @@ export function AgentChatPage({
     if (!activeAgentId) {
       return
     }
+    const stateOrder = nextClientStateOrder()
     if ('responses' in response) {
       const payload = {
         responses: response.responses.map((item) => (
@@ -3794,7 +3806,7 @@ export function AgentChatPage({
         )),
       }
       const result = await respondToHumanInputRequestsBatch(activeAgentId, payload)
-      replacePendingActionState(activeAgentId, result.pendingActionRequests)
+      replacePendingActionState(activeAgentId, result.pendingActionRequests, stateOrder)
       if (result.event) {
         receiveRealtimeEvent(activeAgentId, result.event)
       }
@@ -3802,7 +3814,7 @@ export function AgentChatPage({
       const result = await respondToHumanInputRequest(activeAgentId, response.requestId, {
         selected_option_key: response.selectedOptionKey,
       })
-      replacePendingActionState(activeAgentId, result.pendingActionRequests)
+      replacePendingActionState(activeAgentId, result.pendingActionRequests, stateOrder)
       if (result.event) {
         receiveRealtimeEvent(activeAgentId, result.event)
       }
@@ -3810,7 +3822,7 @@ export function AgentChatPage({
       const result = await respondToHumanInputRequest(activeAgentId, response.requestId, {
         free_text: response.freeText.trim(),
       })
-      replacePendingActionState(activeAgentId, result.pendingActionRequests)
+      replacePendingActionState(activeAgentId, result.pendingActionRequests, stateOrder)
       if (result.event) {
         receiveRealtimeEvent(activeAgentId, result.event)
       }
@@ -3827,8 +3839,9 @@ export function AgentChatPage({
     if (!activeAgentId) {
       return
     }
+    const stateOrder = nextClientStateOrder()
     const result = await dismissHumanInputRequest(activeAgentId, requestId)
-    replacePendingActionState(activeAgentId, result.pendingActionRequests)
+    replacePendingActionState(activeAgentId, result.pendingActionRequests, stateOrder)
     if (result.event) {
       receiveRealtimeEvent(activeAgentId, result.event)
     }
@@ -3845,8 +3858,9 @@ export function AgentChatPage({
     if (!activeAgentId) {
       return
     }
+    const stateOrder = nextClientStateOrder()
     const result = await resolveSpawnRequest(decisionApiUrl, { decision })
-    replacePendingActionState(activeAgentId, result.pendingActionRequests)
+    replacePendingActionState(activeAgentId, result.pendingActionRequests, stateOrder)
   }, [activeAgentId, replacePendingActionState])
 
   const handleFulfillRequestedSecrets = useCallback(async (
@@ -3856,11 +3870,12 @@ export function AgentChatPage({
     if (!activeAgentId) {
       return
     }
+    const stateOrder = nextClientStateOrder()
     const result = await fulfillRequestedSecrets(activeAgentId, {
       values,
       make_global: makeGlobal,
     })
-    replacePendingActionState(activeAgentId, result.pendingActionRequests)
+    replacePendingActionState(activeAgentId, result.pendingActionRequests, stateOrder)
     if (result.event) {
       receiveRealtimeEvent(activeAgentId, result.event)
     }
@@ -3872,8 +3887,9 @@ export function AgentChatPage({
     if (!activeAgentId) {
       return
     }
+    const stateOrder = nextClientStateOrder()
     const result = await removeRequestedSecrets(activeAgentId, { secret_ids: secretIds })
-    replacePendingActionState(activeAgentId, result.pendingActionRequests)
+    replacePendingActionState(activeAgentId, result.pendingActionRequests, stateOrder)
     if (result.event) {
       receiveRealtimeEvent(activeAgentId, result.event)
     }
@@ -3891,6 +3907,7 @@ export function AgentChatPage({
     if (!activeAgentId) {
       return
     }
+    const stateOrder = nextClientStateOrder()
     const result = await resolveContactRequests(activeAgentId, {
       responses: responses.map((response) => ({
         request_id: response.requestId,
@@ -3900,7 +3917,7 @@ export function AgentChatPage({
         sms_contact_permission_attested: response.smsContactPermissionAttested ?? null,
       })),
     })
-    replacePendingActionState(activeAgentId, result.pendingActionRequests)
+    replacePendingActionState(activeAgentId, result.pendingActionRequests, stateOrder)
     if (result.event) {
       receiveRealtimeEvent(activeAgentId, result.event)
     }

@@ -10,6 +10,7 @@ import type { PlanningState, SignupPreviewState } from '../types/agentRoster'
 import type { BurnRateMetadata, InsightEvent } from '../types/insight'
 import { fetchAgentSpawnIntent, type AgentSpawnIntent } from '../api/agentSpawnIntent'
 import type { AppDispatch, RootState } from './appStore'
+import { nextClientStateOrder } from '../util/clientStateOrder'
 
 const EMPTY_PROCESSING_SNAPSHOT: ProcessingSnapshot = { active: false, webTasks: [], nextScheduledAt: null }
 const OPTIMISTIC_MATCH_WINDOW_MS = 120_000
@@ -82,6 +83,7 @@ export type AgentChatInsightsState = {
 export type AgentChatWorkflowState = {
   sendMessageError: string | null
   pendingActions: PendingActionRequest[]
+  pendingActionsStateOrder: number
 }
 
 export type AgentChatSession = {
@@ -200,6 +202,7 @@ export function createInitialSession(): AgentChatSession {
     workflow: {
       sendMessageError: null,
       pendingActions: [],
+      pendingActionsStateOrder: 0,
     },
   }
 }
@@ -535,7 +538,7 @@ export const refreshProcessing = createAsyncThunk<void, { agentId: string }, { s
   'chat/refreshProcessing',
   async ({ agentId }, { dispatch, getState, extra, requestId }) => {
     for (let attempt = 0; attempt < PROCESSING_STATUS_MAX_ATTEMPTS; attempt += 1) {
-      const requestedAt = Date.now()
+      const requestedAt = nextClientStateOrder()
       dispatch(chatActions.processingStatusRequested({ agentId, requestId }))
       try {
         const status = await fetchProcessingStatus(agentId)
@@ -592,7 +595,11 @@ export const updateRealtimeProcessing = (
 ) => (dispatch: AppDispatch, getState: () => RootState, extra?: { queryClient?: QueryClient | null }) => {
   const snapshot = normalizeProcessingUpdate(snapshotInput)
   const wasActive = getState().chat.sessionsByAgentId[agentId]?.processing.processingActive === true
-  dispatch(chatActions.processingRealtimeUpdated({ agentId, snapshot, receivedAt: Date.now() }))
+  dispatch(chatActions.processingRealtimeUpdated({
+    agentId,
+    snapshot,
+    receivedAt: nextClientStateOrder(),
+  }))
   if (extra?.queryClient) {
     updateRosterProcessingInCache(extra.queryClient, agentId, snapshot.active)
     if (wasActive && !snapshot.active) {
@@ -897,8 +904,17 @@ const chatSlice = createSlice({
       if (!agentId) return
       ensureSession(state, agentId).workflow.sendMessageError = action.payload.message
     },
-    pendingActionsReplaced(state, action: PayloadAction<{ agentId: string; pendingActions: PendingActionRequest[] }>) {
-      ensureSession(state, action.payload.agentId).workflow.pendingActions = action.payload.pendingActions
+    pendingActionsSnapshotReceived(state, action: PayloadAction<{
+      agentId: string
+      pendingActions: PendingActionRequest[]
+      stateOrder: number
+    }>) {
+      const workflow = ensureSession(state, action.payload.agentId).workflow
+      if (action.payload.stateOrder < workflow.pendingActionsStateOrder) {
+        return
+      }
+      workflow.pendingActions = action.payload.pendingActions
+      workflow.pendingActionsStateOrder = action.payload.stateOrder
     },
     createAgentErrorSet(state, action: PayloadAction<CreateAgentErrorState | null>) {
       state.createAgent.error = action.payload

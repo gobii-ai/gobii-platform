@@ -158,8 +158,9 @@ describe('chatSlice workflow state', () => {
     store.dispatch(chatActions.agentSelected({ agentId: 'agent-1' }))
 
     store.dispatch(chatActions.sendMessageErrorSet({ agentId: 'agent-1', message: 'Unable to send.' }))
-    store.dispatch(chatActions.pendingActionsReplaced({
+    store.dispatch(chatActions.pendingActionsSnapshotReceived({
       agentId: 'agent-1',
+      stateOrder: 1,
       pendingActions: [{
         id: 'action-1',
         kind: 'human_input',
@@ -175,6 +176,30 @@ describe('chatSlice workflow state', () => {
         kind: 'human_input',
       }],
     })
+  })
+
+  it('does not let an older pending-action snapshot replace newer realtime state', () => {
+    const store = createAppStore()
+    store.dispatch(chatActions.agentSelected({ agentId: 'agent-1' }))
+    store.dispatch(chatActions.pendingActionsSnapshotReceived({
+      agentId: 'agent-1',
+      stateOrder: 20,
+      pendingActions: [{
+        id: 'new-action',
+        kind: 'human_input',
+        count: 0,
+        requests: [],
+      }],
+    }))
+    store.dispatch(chatActions.pendingActionsSnapshotReceived({
+      agentId: 'agent-1',
+      stateOrder: 10,
+      pendingActions: [],
+    }))
+
+    expect(selectActiveChatTestSnapshot(store.getState()).pendingActions).toEqual([
+      expect.objectContaining({ id: 'new-action' }),
+    ])
   })
 
   it('loads spawn intent through the thunk and keeps create-agent workflow state serializable', async () => {

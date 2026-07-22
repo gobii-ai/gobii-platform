@@ -1,7 +1,7 @@
 import { QueryClient } from '@tanstack/react-query'
 import { describe, expect, it, vi } from 'vitest'
 
-import type { ProcessingSnapshot, StreamEventPayload, TimelineEvent } from '../types/agentChat'
+import type { PendingActionRequest, ProcessingSnapshot, StreamEventPayload, TimelineEvent } from '../types/agentChat'
 import { routeAgentChatSocketMessage } from './agentChatSocketMessageRouter'
 
 function createCallbacks() {
@@ -11,10 +11,51 @@ function createCallbacks() {
     updateAgentIdentity: vi.fn(),
     updateUsageInsight: vi.fn(),
     receiveStreamEvent: vi.fn<(agentId: string, payload: StreamEventPayload) => void>(),
+    replacePendingActions: vi.fn<(
+      agentId: string,
+      pendingActions: PendingActionRequest[],
+      stateOrder: number,
+    ) => void>(),
   }
 }
 
 describe('routeAgentChatSocketMessage', () => {
+  it('applies a ready snapshot and returns the confirmed subscription mode', () => {
+    const callbacks = createCallbacks()
+    const processingSnapshot = { active: true, webTasks: [], nextScheduledAt: null }
+    const outcome = routeAgentChatSocketMessage({
+      payload: {
+        type: 'subscription.ready',
+        agent_id: 'agent-2',
+        mode: 'background',
+        payload: {
+          processing_snapshot: processingSnapshot,
+          pending_action_requests: [{
+            id: 'spawn:request-1',
+            kind: 'spawn_request',
+            requestId: 'request-1',
+            requestedCharter: 'Research the market',
+          }],
+        },
+      },
+      queryClient: new QueryClient(),
+      activeAgentId: 'agent-1',
+      ...callbacks,
+    })
+
+    expect(outcome).toEqual({
+      type: 'subscription_ready',
+      agentId: 'agent-2',
+      mode: 'background',
+    })
+    expect(callbacks.updateProcessing).toHaveBeenCalledWith('agent-2', processingSnapshot)
+    expect(callbacks.replacePendingActions).toHaveBeenCalledWith(
+      'agent-2',
+      [expect.objectContaining({ id: 'spawn:request-1', kind: 'spawn_request' })],
+      expect.any(Number),
+    )
+  })
+
   it('keeps processing updates scoped to their envelope agent, including background agents', () => {
     const callbacks = createCallbacks()
     const snapshot = { active: true, webTasks: [] }
