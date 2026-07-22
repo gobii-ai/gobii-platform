@@ -18,6 +18,7 @@ from api.agent.tags import maybe_schedule_agent_tags
 from api.models import BrowserUseAgent, CommsChannel, IntelligenceTier, PersistentAgent, PersistentAgentCommsEndpoint, PersistentAgentEmailEndpoint
 from api.services.agent_email_aliases import get_default_agent_email_endpoint
 from api.services.agent_planning import schedule_planning_timeout_processing
+from api.services.agent_schedules import create_default_onboarding_schedule
 from api.services.daily_credit_limits import calculate_default_daily_credit_limit, calculate_daily_credit_slider_bounds, get_tier_credit_multiplier
 from api.services.daily_credit_settings import get_daily_credit_settings_for_owner
 
@@ -151,6 +152,7 @@ class PersistentAgentProvisioningService:
                 ) from exc
 
             persistent_agent.save()
+            create_default_onboarding_schedule(persistent_agent)
             schedule_planning_timeout_processing(persistent_agent)
 
             # Apply plan-specific default daily credit limits

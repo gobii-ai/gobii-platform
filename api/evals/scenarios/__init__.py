@@ -66,6 +66,7 @@ from .sqlite_tool_results import (
     SqliteIntermediateWorkingTableScenario,
     SqliteItemLinkReportScenario,
     SqliteMultiResultWebSynthesisScenario,
+    SqliteSourceArrayFirstWriteScenario,
 )
 from .message_quality import MESSAGE_QUALITY_SCENARIO_SLUGS, MESSAGE_QUALITY_SUITE_SLUG, MessageQualityScenario
 from .google_sheets_native import GOOGLE_SHEETS_NATIVE_SCENARIO_SLUGS, GOOGLE_SHEETS_NATIVE_SUITE_SLUG, GoogleSheetsNativeScenario
@@ -87,4 +88,9 @@ from .hallucinated_links import (
     HALLUCINATED_LINK_SCENARIO_SLUGS,
     HALLUCINATED_LINKS_SUITE_SLUG,
     HallucinatedLinkScenario,
+)
+from .agent_scheduling import (
+    AGENT_SCHEDULING_SCENARIO_SLUGS,
+    AGENT_SCHEDULING_SUITE_SLUG,
+    AgentSchedulingScenario,
 )

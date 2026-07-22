@@ -43,6 +43,7 @@ SQLITE_NATURAL_RESULT_ACCESS = "sqlite_tool_results_natural_result_access"
 SQLITE_BOUNDED_PORTFOLIO_REPORT = "sqlite_tool_results_bounded_portfolio_report"
 SQLITE_DOMAIN_TRUTH_OVER_STALE_HISTORY = "sqlite_domain_truth_over_stale_history"
 SQLITE_DOMAIN_MODEL_REFRESHES_AND_EVOLVES = "sqlite_domain_model_refreshes_and_evolves"
+SQLITE_SOURCE_ARRAY_FIRST_WRITE = "sqlite_source_array_first_write"
 SQLITE_TOOL_RESULT_SCENARIO_SLUGS = [
     SQLITE_MULTI_RESULT_WEB_SYNTHESIS,
     SQLITE_INTERMEDIATE_WORKING_TABLE,
@@ -52,6 +53,7 @@ SQLITE_TOOL_RESULT_SCENARIO_SLUGS = [
     SQLITE_BOUNDED_PORTFOLIO_REPORT,
     SQLITE_DOMAIN_TRUTH_OVER_STALE_HISTORY,
     SQLITE_DOMAIN_MODEL_REFRESHES_AND_EVOLVES,
+    SQLITE_SOURCE_ARRAY_FIRST_WRITE,
 ]
 
 
@@ -103,6 +105,14 @@ DOMAIN_WORKSTREAMS = (
     ("ws-security-17", "Security packet", "complete", "Maya Chen", "2026-07-22"),
     ("ws-legal-04", "Contract redlines", "open", "Noah Reed", "2026-07-24"),
 )
+RELEASE_CALENDAR_URL = "https://ops.example.test/releases/calendar.json"
+RELEASE_CALENDAR_OBSERVED_AT = "2026-07-22T14:15:00Z"
+RELEASE_EVENTS = (
+    ("rel-checkout-41", "Checkout API", "2026-07-23T15:30:17Z", "Priya Shah", "approved"),
+    ("rel-search-18", "Search index", "2026-07-23T17:00:43Z", "Mateo Ruiz", "blocked"),
+    ("rel-billing-09", "Billing worker", "2026-07-24T13:05:29Z", "Hana Lee", "approved"),
+    ("rel-mobile-27", "Mobile client", "2026-07-24T19:45:11Z", "Avery Cole", "canceled"),
+)
 
 
 _MUTATION_TARGET_RE = re.compile(
@@ -147,7 +157,7 @@ def _sqlite_attempt_failures(calls) -> list[str]:
     return _tool_attempt_failures(calls, "SQLite", reject_auto_correction=True)
 
 
-def _first_shot_source_phase_failures(calls) -> list[str]:
+def _first_shot_source_phase_failures(calls, *, expected_url=DOMAIN_REFRESH_URL) -> list[str]:
     calls = tuple(calls)
     fetches = [call for call in calls if call.tool_name == "http_request"]
     sqlite_calls = [call for call in calls if call.tool_name == "sqlite_batch"]
@@ -162,7 +172,7 @@ def _first_shot_source_phase_failures(calls) -> list[str]:
         (
             len(fetches) != 1
             or str(resolved_tool_param(fetches[0], "url") or "").rstrip("/")
-            != DOMAIN_REFRESH_URL.rstrip("/"),
+            != expected_url.rstrip("/"),
             "expected one exact CRM snapshot fetch",
         ),
         (len(sqlite_calls) != 1, f"expected one SQLite batch, found {len(sqlite_calls)}"),
@@ -580,7 +590,47 @@ def _domain_refresh_mock() -> dict:
     }
 
 
-MOCK_BUILDERS = {"web": _web_mock, "aged_web": lambda: _web_mock(facts_last=True), "product": _product_mock, "dedupe": _dedupe_mock, "inventory": _inventory_mock}
+def _release_calendar_mock() -> dict:
+    payload = {
+        "observed_at": RELEASE_CALENDAR_OBSERVED_AT,
+        "source_url": RELEASE_CALENDAR_URL,
+        "events": [
+            {
+                "release_id": release_id,
+                "service": service,
+                "starts_at": starts_at,
+                "owner": owner,
+                "status": status,
+                "source_url": RELEASE_CALENDAR_URL,
+                "observed_at": RELEASE_CALENDAR_OBSERVED_AT,
+            }
+            for release_id, service, starts_at, owner, status in RELEASE_EVENTS
+        ],
+    }
+    return {
+        "http_request": {
+            "rules": [{
+                "url_contains": RELEASE_CALENDAR_URL,
+                "result": {
+                    "status": "ok",
+                    "status_code": 200,
+                    "url": RELEASE_CALENDAR_URL,
+                    "content": payload,
+                },
+            }],
+            "default": {"status": "error", "message": "Unknown eval URL."},
+        }
+    }
+
+
+MOCK_BUILDERS = {
+    "web": _web_mock,
+    "aged_web": lambda: _web_mock(facts_last=True),
+    "product": _product_mock,
+    "dedupe": _dedupe_mock,
+    "inventory": _inventory_mock,
+    "release_calendar": _release_calendar_mock,
+}
 
 
 def _source_fetch_counts(calls, *, tool_names: Iterable[str], source_urls: Iterable[str]) -> dict[str, int]:
@@ -791,6 +841,105 @@ def _inspect_domain_refresh_state(agent_id: str) -> tuple[list[str], str | None]
 
 def _domain_refresh_state_failures(agent_id: str) -> list[str]:
     return _inspect_domain_refresh_state(agent_id)[0]
+
+
+def _inspect_release_model(agent_id: str) -> tuple[list[str], str | None]:
+    expected = {
+        (*row, RELEASE_CALENDAR_URL, RELEASE_CALENDAR_OBSERVED_AT)
+        for row in RELEASE_EVENTS
+    }
+    failures = []
+    model_table = None
+    with agent_sqlite_db(str(agent_id)) as db_path:
+        conn = open_guarded_sqlite_connection(db_path)
+        try:
+            tables = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' "
+                "AND name NOT LIKE 'sqlite_%' AND substr(name, 1, 2) != '__';"
+            ).fetchall()
+            for (table_name,) in tables:
+                quoted = '"' + table_name.replace('"', '""') + '"'
+                columns = conn.execute(f"PRAGMA table_info({quoted});").fetchall()
+                names = {column[1] for column in columns}
+                required = {
+                    "release_id", "service", "starts_at", "owner", "status",
+                    "source_url", "observed_at",
+                }
+                if not required.issubset(names):
+                    continue
+                rows = conn.execute(
+                    f"SELECT release_id, service, starts_at, owner, status, source_url, observed_at "
+                    f"FROM {quoted};"
+                ).fetchall()
+                unique_indexes = [
+                    row[1] for row in conn.execute(f"PRAGMA index_list({quoted});") if row[2]
+                ]
+                keyed = any(column[1] == "release_id" and column[5] for column in columns) or any(
+                    "release_id" in {
+                        row[2] for row in conn.execute(f'PRAGMA index_info("{name}");')
+                    }
+                    for name in unique_indexes
+                )
+                model_table = table_name
+                if not keyed:
+                    failures.append("release model lacked stable identity")
+                if set(rows) != expected:
+                    failures.append("release model omitted or altered source array rows")
+                break
+            if model_table is None:
+                failures.append("source array was not persisted as a release domain model")
+        finally:
+            clear_guarded_connection(conn)
+            conn.close()
+    return failures, model_table
+
+
+def _source_array_first_write_failures(sqlite_calls, model_table: str | None) -> list[str]:
+    calls = list(sqlite_calls)
+    if len(calls) != 1:
+        return [f"expected one first-shot SQLite batch, found {len(calls)} attempts"]
+    failures = _sqlite_attempt_failures(calls)
+    call = calls[0]
+    payload = _result_payload(call) or {}
+    if "Query not executed:" in str(call.result or "") or _contains_auto_correction(payload):
+        failures.append("source import depended on guard-error recovery")
+    if not model_table:
+        return failures
+
+    statements = [
+        statement for statement in sqlparse.split(str((call.tool_params or {}).get("sql") or ""))
+        if statement.strip()
+    ]
+    writes = []
+    for index, statement in enumerate(statements):
+        mutation = _MUTATION_TARGET_RE.search(statement)
+        if mutation and mutation.group("table").casefold() == model_table.casefold():
+            writes.append((index, statement))
+    if not writes:
+        failures.append("no source write targeted the persisted release model")
+        return failures
+
+    write_index, first_write = writes[0]
+    structural = _structural_sql(first_write)
+    source_derived = model_table.casefold() in source_derived_model_mutation_tables((first_write,))
+    if not (
+        re.search(r"\binsert\b[\s\S]*\bselect\b", structural, re.I)
+        and source_derived
+        and _reads_table(structural, "__tool_results")
+        and re.search(r"\bjson_each\s*\(", structural, re.I)
+        and not re.search(r"\bvalues\s*\(", structural, re.I)
+    ):
+        failures.append("first release write did not derive array rows directly from __tool_results")
+
+    queried_after_write = any(
+        index > write_index
+        and re.search(r"\bselect\b", statement, re.I)
+        and _reads_table(statement, model_table)
+        for index, statement in enumerate(statements)
+    )
+    if not queried_after_write:
+        failures.append("new release model was not queried after its first write")
+    return failures
 
 
 class SqliteToolResultScenario(EvalScenario, ScenarioExecutionTools):
@@ -1269,6 +1418,71 @@ class SqliteDomainModelRefreshesAndEvolvesScenario(SqliteDomainModelScenario):
         self._record_sourced_answer(
             run_id, agent_id=agent_id, after=inbound.timestamp, task_name="verify_refreshed_answer",
             source_urls=(), required_terms=("Aster Labs", "contracting", "redlines", "Noah Reed"), min_sources=0,
+        )
+
+
+@register_scenario
+class SqliteSourceArrayFirstWriteScenario(SqliteDomainModelScenario):
+    slug = SQLITE_SOURCE_ARRAY_FIRST_WRITE
+    description = "A new source-bearing array model should be populated directly on its first SQLite write."
+    expected_runtime = "short"
+    tasks = [
+        ScenarioTask(name="inject_prompt", assertion_type="agent_processing"),
+        ScenarioTask(name="verify_first_source_write", assertion_type="tool_call"),
+        ScenarioTask(name="verify_persisted_release_model", assertion_type="persisted_state"),
+        ScenarioTask(name="verify_release_answer", assertion_type="manual"),
+    ]
+    prompt = (
+        "Bring our current release calendar up to date from this feed; it is the operating roster we'll use for "
+        "release changes and follow-ups. Summarize what is scheduled and call out anything blocked or canceled "
+        f"with its owner. Include the source link: {RELEASE_CALENDAR_URL}"
+    )
+
+    def run(self, run_id: str, agent_id: str) -> None:
+        self._ready_agent(agent_id)
+        PersistentAgent.objects.filter(id=agent_id).update(
+            charter="Own release operations and keep the latest sourced schedule coherent."
+        )
+        self._enable_tools(agent_id, ("http_request",))
+        inbound = self._inject_and_wait(
+            run_id,
+            agent_id,
+            self.prompt,
+            _release_calendar_mock(),
+            allowed_tool_names={"http_request", "sqlite_batch", "send_chat_message"},
+            max_relevant_tool_calls=6,
+        )
+        calls = _tool_calls_for_run(run_id, after=inbound.timestamp)
+        sqlite_attempts = [call for call in calls if call.tool_name == "sqlite_batch"]
+        state_failures, model_table = _inspect_release_model(agent_id)
+        failures = _first_shot_source_phase_failures(
+            calls,
+            expected_url=RELEASE_CALENDAR_URL,
+        )
+        failures.extend(_source_array_first_write_failures(sqlite_attempts, model_table))
+        if model_table:
+            failures.extend(_source_write_effect_failures(sqlite_attempts, {model_table.casefold()}))
+        failures.extend(_orphan_completion_failures(run_id, inbound.timestamp))
+        self._record_check(
+            run_id,
+            "verify_first_source_write",
+            failures,
+            "Fetched once and created, populated, and queried the release model in one clean SQLite batch.",
+        )
+        self._record_check(
+            run_id,
+            "verify_persisted_release_model",
+            state_failures,
+            "Persisted every keyed release row with complete source provenance.",
+        )
+        self._record_sourced_answer(
+            run_id,
+            agent_id=agent_id,
+            after=inbound.timestamp,
+            task_name="verify_release_answer",
+            source_urls=(RELEASE_CALENDAR_URL,),
+            required_terms=("Search index", "blocked", "Mateo Ruiz", "Mobile client", "canceled"),
+            min_sources=1,
         )
 
 

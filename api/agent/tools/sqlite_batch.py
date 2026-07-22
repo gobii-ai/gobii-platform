@@ -1214,16 +1214,28 @@ def _table_row_count(conn: sqlite3.Connection, table_name: str) -> int:
         return 0
 
 
+def _table_has_stable_identity(conn: sqlite3.Connection, table_name: str) -> bool:
+    try:
+        quoted = table_name.replace('"', '""')
+        columns = conn.execute(f'PRAGMA table_info("{quoted}")').fetchall()
+        if any(int(column[5] or 0) > 0 for column in columns):
+            return True
+        indexes = conn.execute(f'PRAGMA index_list("{quoted}")').fetchall()
+        return any(bool(index[2]) for index in indexes)
+    except sqlite3.Error:
+        return False
+
+
 def _recent_tool_result_payloads(conn: sqlite3.Connection, *, limit: int = 12) -> list[str]:
     columns = [column for column in ("result_json", "result_text") if _table_has_column(conn, "__tool_results", column)]
     if not columns:
         return []
-    projection = " || char(10) || ".join(f"substr(coalesce({column}, ''), 1, 200000)" for column in columns)
+    projection = ", ".join(f"substr(coalesce({column}, ''), 1, 200000)" for column in columns)
     try:
         rows = conn.execute(
             f'SELECT {projection} FROM "__tool_results" ORDER BY rowid DESC LIMIT ?', (limit,)
         ).fetchall()
-        return [str(row[0] or "") for row in rows]
+        return [str(value) for row in rows for value in row if value]
     except sqlite3.Error:
         return []
 
@@ -1887,6 +1899,7 @@ def _execute_sqlite_batch_inner(
             queries,
             available_tool_result_rows=_table_row_count(conn, "__tool_results"),
             tool_result_payloads=_recent_tool_result_payloads(conn),
+            model_table_has_identity=lambda table: _table_has_stable_identity(conn, table),
         )
         preview = [q.strip()[:160] for q in queries[:5]]
         logger.info("Agent %s executing sqlite_batch: %s queries (preview=%s)", agent_id, len(queries), preview)

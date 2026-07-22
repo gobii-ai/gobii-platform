@@ -24,6 +24,7 @@ from api.evals.stop_policy import (
     sqlite_batch_is_only_planning_state_mutation,
     sqlite_batch_mutates_agent_config_field,
     sqlite_batch_mutates_planning_state,
+    sqlite_batch_mutates_schedule_state,
 )
 from api.models import (
     AgentFsNode,
@@ -2028,7 +2029,7 @@ class CharterMemoryScenario(BehaviorMicroScenario):
         schedule_mutations = [
             call
             for call in get_tool_calls_for_run(run_id, after=inbound.timestamp, tool_names={"sqlite_batch"})
-            if sqlite_batch_mutates_agent_config_field(call, "schedule")
+            if sqlite_batch_mutates_schedule_state(call)
         ]
         passed = passed and not schedule_mutations
         if schedule_mutations:
@@ -3709,6 +3710,8 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
             return False
         config_field = self._agent_config_field_for_expected_call(expected_tool_name)
         if config_field and call.tool_name == "sqlite_batch":
+            if config_field == "schedule":
+                return sqlite_batch_mutates_schedule_state(call)
             return sqlite_batch_mutates_agent_config_field(call, config_field)
         if self._uses_real_sqlite_export_tools():
             return self._real_sqlite_export_call_succeeded(call)
@@ -3761,6 +3764,7 @@ def _common_use_case_scenario_class(case):
             "common_use_case",
             case.category,
             "planning_expected" if case.plan_expected else "direct_tool",
+            *(("schedule",) if "schedule" in case.slug else ()),
         )
 
     _CommonUseCaseScenario.case = case

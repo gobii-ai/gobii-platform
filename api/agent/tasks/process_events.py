@@ -577,6 +577,69 @@ def _remove_orphaned_celery_beat_task(agent_id: str) -> None:
         )
 
 
+def _scheduled_execution_is_throttled(agent, schedule_expression: str) -> bool:
+    from api.services.cron_throttle import (
+        cron_throttle_footer_cooldown_key,
+        cron_throttle_gate_key,
+        cron_throttle_pending_footer_key,
+        evaluate_free_plan_cron_throttle,
+    )
+    from config.redis_client import get_redis_client
+    from constants.feature_flags import AGENT_CRON_THROTTLE
+
+    if not switch_is_active(AGENT_CRON_THROTTLE):
+        return False
+    decision = evaluate_free_plan_cron_throttle(agent, schedule_expression)
+    if not decision.throttling_applies:
+        return False
+
+    redis_client = get_redis_client()
+    ttl_seconds = max(1, int(decision.effective_interval_seconds))
+    try:
+        acquired = redis_client.set(
+            cron_throttle_gate_key(str(agent.id)),
+            "1",
+            ex=ttl_seconds,
+            nx=True,
+        )
+    except redis.RedisError:
+        logger.exception(
+            "Cron throttle redis gate failed for agent %s; allowing cron execution.",
+            agent.id,
+        )
+        acquired = True
+
+    if acquired:
+        return False
+
+    try:
+        cooldown_key = cron_throttle_footer_cooldown_key(str(agent.id))
+        if not redis_client.exists(cooldown_key):
+            pending_key = cron_throttle_pending_footer_key(str(agent.id))
+            pending_ttl_days = int(
+                getattr(settings, "AGENT_CRON_THROTTLE_MAX_INTERVAL_DAYS", 30)
+            )
+            redis_client.set(
+                pending_key,
+                "1",
+                ex=max(1, pending_ttl_days * 86400),
+                nx=True,
+            )
+    except redis.RedisError:
+        logger.debug(
+            "Failed to mark cron throttle footer pending for agent %s",
+            agent.id,
+            exc_info=True,
+        )
+    logger.info(
+        "Skipping scheduled trigger for agent %s due to free-plan throttling (stage=%s interval=%ss)",
+        agent.id,
+        decision.stage,
+        decision.effective_interval_seconds,
+    )
+    return True
+
+
 @shared_task(bind=True, name="api.agent.tasks.process_agent_cron_trigger")
 def process_agent_cron_trigger_task(self, persistent_agent_id: str, cron_expression: str) -> None:  # noqa: D401, ANN001
     """
@@ -597,10 +660,6 @@ def process_agent_cron_trigger_task(self, persistent_agent_id: str, cron_express
     baggage.set_baggage("persistent_agent.id", str(persistent_agent_id))
 
     try:
-        from constants.feature_flags import AGENT_CRON_THROTTLE
-        from config.redis_client import get_redis_client
-        from api.services.cron_throttle import cron_throttle_gate_key, cron_throttle_footer_cooldown_key, cron_throttle_pending_footer_key, evaluate_free_plan_cron_throttle
-
         agent = (
             PersistentAgent.objects.alive()
             .select_related(
@@ -624,51 +683,8 @@ def process_agent_cron_trigger_task(self, persistent_agent_id: str, cron_express
             )
             return
 
-        if switch_is_active(AGENT_CRON_THROTTLE):
-            decision = evaluate_free_plan_cron_throttle(agent, cron_expression)
-            if decision.throttling_applies:
-                redis_client = get_redis_client()
-                ttl_seconds = max(1, int(decision.effective_interval_seconds))
-                try:
-                    acquired = redis_client.set(
-                        cron_throttle_gate_key(str(agent.id)),
-                        "1",
-                        ex=ttl_seconds,
-                        nx=True,
-                    )
-                except Exception:
-                    logger.exception(
-                        "Cron throttle redis gate failed for agent %s; allowing cron execution.",
-                        agent.id,
-                    )
-                    acquired = True
-
-                if not acquired:
-                    try:
-                        cooldown_key = cron_throttle_footer_cooldown_key(str(agent.id))
-                        if not redis_client.exists(cooldown_key):
-                            pending_key = cron_throttle_pending_footer_key(str(agent.id))
-                            pending_ttl_days = int(getattr(settings, "AGENT_CRON_THROTTLE_MAX_INTERVAL_DAYS", 30))
-                            pending_ttl_seconds = max(1, pending_ttl_days * 86400)
-                            redis_client.set(
-                                pending_key,
-                                "1",
-                                ex=pending_ttl_seconds,
-                                nx=True,
-                            )
-                    except Exception:
-                        logger.debug(
-                            "Failed to mark cron throttle footer pending for agent %s",
-                            agent.id,
-                            exc_info=True,
-                        )
-                    logger.info(
-                        "Skipping cron trigger for agent %s due to free-plan throttling (stage=%s interval=%ss)",
-                        agent.id,
-                        decision.stage,
-                        decision.effective_interval_seconds,
-                    )
-                    return
+        if _scheduled_execution_is_throttled(agent, cron_expression):
+            return
 
         # Create the cron trigger record first
         with transaction.atomic():
@@ -713,3 +729,166 @@ def process_agent_cron_trigger_task(self, persistent_agent_id: str, cron_express
         )
         # Remove the orphaned beat task to prevent future recurring failures
         _remove_orphaned_celery_beat_task(persistent_agent_id) 
+
+
+@shared_task(
+    bind=True,
+    name="api.agent.tasks.process_agent_schedule_trigger",
+    acks_late=True,
+    reject_on_worker_lost=True,
+)
+def process_agent_schedule_trigger_task(
+    self,
+    persistent_agent_id: str,
+    schedule_id: str,
+    expected_revision: int,
+    scheduled_for: str,
+) -> None:  # noqa: D401, ANN001
+    """Claim and process one occurrence from an additional agent schedule."""
+    from api.models import PersistentAgent, PersistentAgentCronTrigger, PersistentAgentStep
+    from api.services.agent_schedules import (
+        claim_schedule_occurrence,
+        schedule_occurrence_key,
+    )
+
+    span = trace.get_current_span()
+    span.update_name("PROCESS Agent Schedule Trigger")
+    span.set_attribute("persistent_agent.id", str(persistent_agent_id))
+    span.set_attribute("agent.schedule.id", str(schedule_id))
+    span.set_attribute("agent.schedule.revision", int(expected_revision))
+    baggage.set_baggage("persistent_agent.id", str(persistent_agent_id))
+
+    should_process = False
+    try:
+        with transaction.atomic():
+            occurrence_key = schedule_occurrence_key(
+                schedule_id,
+                int(expected_revision),
+                scheduled_for,
+            )
+            occurrence_exists = PersistentAgentCronTrigger.objects.filter(
+                occurrence_key=occurrence_key
+            ).exists()
+            if occurrence_exists:
+                logger.info(
+                    "Resuming duplicate scheduled occurrence %s for agent %s.",
+                    occurrence_key,
+                    persistent_agent_id,
+                )
+                should_process = True
+            else:
+                claimed = claim_schedule_occurrence(
+                    persistent_agent_id,
+                    schedule_id,
+                    expected_revision,
+                    scheduled_for,
+                )
+                if claimed is None:
+                    # A concurrent delivery may have committed the event while
+                    # this task waited on the schedule row lock. Re-running the
+                    # idempotent event processor is the crash-recovery path.
+                    should_process = PersistentAgentCronTrigger.objects.filter(
+                        occurrence_key=occurrence_key
+                    ).exists()
+                    if not should_process:
+                        logger.info(
+                            "Ignoring stale or inactive schedule delivery for agent %s schedule %s revision %s.",
+                            persistent_agent_id,
+                            schedule_id,
+                            expected_revision,
+                        )
+                        return
+                else:
+                    agent = (
+                        PersistentAgent.objects.alive()
+                        .select_related(
+                            "organization",
+                            "organization__billing",
+                            "user",
+                            "user__billing",
+                            "preferred_contact_endpoint",
+                        )
+                        .get(id=persistent_agent_id)
+                    )
+                    owner = resolve_agent_owner(agent)
+                    if owner is not None and is_owner_execution_paused(owner):
+                        logger.info(
+                            "Skipping scheduled occurrence %s because owner execution is paused.",
+                            claimed.occurrence_key,
+                        )
+                        return
+
+                    if (
+                        claimed.kind == "recurring"
+                        and claimed.expression
+                        and _scheduled_execution_is_throttled(agent, claimed.expression)
+                    ):
+                        return
+
+                    try:
+                        with transaction.atomic():
+                            step = PersistentAgentStep.objects.create(
+                                agent=agent,
+                                description=(
+                                    f"Scheduled trigger: {claimed.name} [{claimed.schedule_key}]"
+                                ),
+                            )
+                            cron_expression = (
+                                claimed.expression
+                                or f"@once {claimed.scheduled_for.isoformat()}"
+                            )
+                            PersistentAgentCronTrigger.objects.create(
+                                step=step,
+                                cron_expression=cron_expression,
+                                schedule_id=claimed.schedule_id,
+                                schedule_key=claimed.schedule_key,
+                                schedule_name=claimed.name,
+                                schedule_instruction=claimed.instruction,
+                                scheduled_for=claimed.scheduled_for,
+                                occurrence_key=claimed.occurrence_key,
+                            )
+                    except ValidationError as exc:
+                        if not _is_task_quota_error(exc):
+                            raise
+                        log_task_quota_exceeded(
+                            persistent_agent_id,
+                            exc,
+                            source=(
+                                "api.agent.tasks.process_events."
+                                "process_agent_schedule_trigger_task"
+                            ),
+                            logger=logger,
+                            task_id=getattr(self.request, "id", None),
+                        )
+                        logger.info(
+                            "Skipping scheduled trigger for agent %s due to task quota: %s",
+                            persistent_agent_id,
+                            exc,
+                        )
+                        return
+                    should_process = True
+
+        if should_process:
+            process_agent_events(str(persistent_agent_id))
+    except ValidationError as exc:
+        if _is_task_quota_error(exc):
+            log_task_quota_exceeded(
+                persistent_agent_id,
+                exc,
+                source="api.agent.tasks.process_events.process_agent_schedule_trigger_task",
+                logger=logger,
+                task_id=getattr(self.request, "id", None),
+            )
+            logger.info(
+                "Skipping scheduled trigger for agent %s due to task quota: %s",
+                persistent_agent_id,
+                exc,
+            )
+            return
+        raise
+    except PersistentAgent.DoesNotExist:
+        logger.info(
+            "Ignoring scheduled delivery for missing agent %s schedule %s.",
+            persistent_agent_id,
+            schedule_id,
+        )

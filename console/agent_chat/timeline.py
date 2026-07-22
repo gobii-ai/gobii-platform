@@ -1343,7 +1343,15 @@ def compute_agent_schedule_next_run(
 ) -> datetime | None:
     if not agent.is_active or agent.life_state != PersistentAgent.LifeState.ACTIVE:
         return None
-    return _compute_next_scheduled_run_for_schedule(agent.schedule, now=now)
+    candidates = [
+        _compute_next_scheduled_run_for_schedule(agent.schedule, now=now),
+        agent.additional_schedules.filter(
+            enabled=True,
+            next_run_at__isnull=False,
+        ).order_by("next_run_at").values_list("next_run_at", flat=True).first(),
+    ]
+    known = [candidate for candidate in candidates if candidate is not None]
+    return min(known) if known else None
 
 
 def _compute_next_scheduled_run(agent: PersistentAgent, *, now: datetime | None = None) -> datetime | None:
