@@ -1,5 +1,5 @@
 import { memo } from 'react'
-import { ChevronRight, FileText, Lightbulb, Link2, ListChecks, X } from 'lucide-react'
+import { ChevronRight, FileText, Lightbulb, Link2, ListChecks } from 'lucide-react'
 import { AgentChatSectionCard } from './uiPrimitives'
 
 export type StarterPrompt = {
@@ -14,6 +14,7 @@ type StarterPromptSuggestionsProps = {
   loadingCount?: number
   disabled?: boolean
   onDismiss?: () => void
+  onTurnOff?: () => void
   onSelect?: (prompt: StarterPrompt, position: number) => void | Promise<void>
 }
 
@@ -36,6 +37,7 @@ export const StarterPromptSuggestions = memo(function StarterPromptSuggestions({
   loadingCount = 3,
   disabled = false,
   onDismiss,
+  onTurnOff,
   onSelect,
 }: StarterPromptSuggestionsProps) {
   if (!loading && !prompts.length) {
@@ -52,17 +54,6 @@ export const StarterPromptSuggestions = memo(function StarterPromptSuggestions({
     >
       <div className="starter-prompts-card__header">
         <h3 className="starter-prompts-card__title">Suggested follow-ups</h3>
-        {onDismiss ? (
-          <button
-            type="button"
-            className="starter-prompts-card__dismiss"
-            onClick={onDismiss}
-            aria-label="Dismiss suggested follow-ups"
-            title="Dismiss suggested follow-ups"
-          >
-            <X aria-hidden="true" />
-          </button>
-        ) : null}
       </div>
       <div className="starter-prompts-card__rows" role="list">
         {loading
@@ -106,6 +97,30 @@ export const StarterPromptSuggestions = memo(function StarterPromptSuggestions({
             )
           })}
       </div>
+      {onDismiss || onTurnOff ? (
+        <div className="starter-prompts-card__actions" role="group" aria-label="Suggestion display options">
+          {onDismiss ? (
+            <button
+              type="button"
+              className="starter-prompts-card__action"
+              onClick={onDismiss}
+              title="Hide this set until the agent replies or finishes new work"
+            >
+              Hide for now
+            </button>
+          ) : null}
+          {onTurnOff ? (
+            <button
+              type="button"
+              className="starter-prompts-card__action"
+              onClick={onTurnOff}
+              title="Hide future suggestions until you turn them back on in Settings"
+            >
+              Turn off suggestions
+            </button>
+          ) : null}
+        </div>
+      ) : null}
       {loading ? <span className="sr-only">Loading suggested follow-ups</span> : null}
     </AgentChatSectionCard>
   )

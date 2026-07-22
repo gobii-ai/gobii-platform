@@ -921,6 +921,9 @@ export function AgentChatLayout({
     promptCount: starterPromptCount,
     hasPendingHumanInput: pendingActionRequests.length > 0,
   })
+  const handleStarterPromptsTurnOff = useCallback(() => {
+    onSidebarSuggestionsEnabledChange?.(false)
+  }, [onSidebarSuggestionsEnabledChange])
   const hasTimelineEvents = timelineRenderEvents.length > 0
   const showJumpButton = !initialLoading
     && hasTimelineEvents
@@ -1535,6 +1538,7 @@ export function AgentChatLayout({
             onReportMessage={handleReportMessage}
             onRetryMessage={onRetryMessage}
             onStarterPromptDismiss={handleStarterPromptDismiss}
+            onStarterPromptsTurnOff={onSidebarSuggestionsEnabledChange ? handleStarterPromptsTurnOff : undefined}
             onStarterPromptSelect={handleStarterPromptSelect}
             onTaskCreditsDismiss={handleTaskCreditsDismiss}
             onTaskCreditsOpenPacks={taskPackCanManageBilling ? () => handleAddonsOpen('tasks') : undefined}
