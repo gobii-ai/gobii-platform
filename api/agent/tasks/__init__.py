@@ -9,6 +9,7 @@ by Celery autodiscovery when Django starts.
 from .process_events import (  # noqa: F401
     enqueue_interactive_process_agent_events,
     process_agent_cron_trigger_task,
+    process_agent_schedule_trigger_task,
     process_discord_inbound_debounce_task,
     process_agent_events_task,
     queue_agent_process_events_batch_task,

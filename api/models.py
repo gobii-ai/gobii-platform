@@ -10,6 +10,7 @@ from decimal import Decimal, ROUND_HALF_UP, ROUND_DOWN
 from functools import lru_cache
 from typing import Optional, Tuple
 from urllib.parse import urlparse
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import ulid
 from django.apps import apps
@@ -7190,6 +7191,7 @@ class PersistentAgent(models.Model):
 
         # For updates, we need to check if schedule-related fields have changed.
         sync_needed = False
+        additional_schedule_sync_needed = False
         shutdown_reasons: list[str] = []
         if not is_new:
             try:
@@ -7198,6 +7200,11 @@ class PersistentAgent(models.Model):
                 if (old_instance.schedule != self.schedule or
                     old_instance.is_active != self.is_active):
                     sync_needed = True
+                if (
+                    old_instance.is_active != self.is_active
+                    or old_instance.life_state != self.life_state
+                ):
+                    additional_schedule_sync_needed = True
 
                 consider_last_interaction = (
                     update_fields is None or "last_interaction_at" in update_fields
@@ -7250,6 +7257,16 @@ class PersistentAgent(models.Model):
         if is_new or sync_needed:
             transaction.on_commit(self._sync_celery_beat_task)
 
+        if additional_schedule_sync_needed:
+            agent_id = self.id
+
+            def _sync_additional_schedules():
+                from api.services.agent_schedules import sync_agent_schedules
+
+                sync_agent_schedules(agent_id)
+
+            transaction.on_commit(_sync_additional_schedules)
+
         if "PAUSE" in shutdown_reasons:
             def _clear_processing_state():
                 try:
@@ -7283,6 +7300,10 @@ class PersistentAgent(models.Model):
             transaction.on_commit(_enqueue_cleanup)
 
     def delete(self, *args, **kwargs):
+        agent_id = self.id
+        additional_schedule_ids = list(
+            self.additional_schedules.values_list("id", flat=True)
+        )
         browser_agent_id = getattr(self, "browser_use_agent_id", None)
         if browser_agent_id:
             browser_agent_exists = BrowserUseAgent.objects.filter(pk=browser_agent_id).exists()
@@ -7300,6 +7321,13 @@ class PersistentAgent(models.Model):
         # Schedule the removal of the Celery Beat task to happen only after
         # the database transaction that deletes this instance successfully commits.
         transaction.on_commit(self._remove_celery_beat_task)
+        if additional_schedule_ids:
+            def _remove_additional_schedules():
+                from api.services.agent_schedules import remove_agent_schedule_entries
+
+                remove_agent_schedule_entries(agent_id, additional_schedule_ids)
+
+            transaction.on_commit(_remove_additional_schedules)
         # Also enqueue centralized cleanup as a HARD_DELETE reason
         try:
             from api.services.agent_lifecycle import AgentLifecycleService, AgentShutdownReason
@@ -7320,6 +7348,127 @@ class PersistentAgent(models.Model):
                 exc_info=True,
             )
             return self.__class__.objects.filter(pk=self.pk).delete()
+
+
+class PersistentAgentSchedule(models.Model):
+    class Kind(models.TextChoices):
+        RECURRING = "recurring", "Recurring"
+        ONCE = "once", "One time"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    agent = models.ForeignKey(
+        PersistentAgent,
+        on_delete=models.CASCADE,
+        related_name="additional_schedules",
+    )
+    schedule_key = models.CharField(
+        max_length=64,
+        validators=[
+            RegexValidator(
+                regex=r"^[a-z0-9][a-z0-9_-]{0,63}$",
+                message="Use lowercase letters, numbers, underscores, or hyphens.",
+            )
+        ],
+        help_text="Stable agent-scoped identifier used when updating this schedule.",
+    )
+    name = models.CharField(max_length=120)
+    instruction = models.CharField(
+        max_length=500,
+        blank=True,
+        help_text="What the agent should do when this schedule fires.",
+    )
+    kind = models.CharField(max_length=16, choices=Kind.choices)
+    expression = models.CharField(
+        max_length=128,
+        null=True,
+        blank=True,
+        help_text="Cron or @every expression for a recurring schedule.",
+    )
+    timezone = models.CharField(
+        max_length=64,
+        default="UTC",
+        help_text="IANA timezone used to interpret recurring cron expressions.",
+    )
+    run_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Exact timezone-aware instant for a one-time schedule.",
+    )
+    enabled = models.BooleanField(default=True)
+    next_run_at = models.DateTimeField(null=True, blank=True)
+    last_fired_at = models.DateTimeField(null=True, blank=True)
+    revision = models.PositiveBigIntegerField(default=1)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["created_at", "schedule_key"]
+        constraints = [
+            UniqueConstraint(
+                fields=["agent", "schedule_key"],
+                name="unique_agent_schedule_key",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    Q(
+                        kind="recurring",
+                        expression__isnull=False,
+                        run_at__isnull=True,
+                    )
+                    | Q(
+                        kind="once",
+                        expression__isnull=True,
+                        run_at__isnull=False,
+                    )
+                ),
+                name="agent_schedule_kind_payload",
+            ),
+            models.CheckConstraint(
+                condition=~Q(schedule_key="primary"),
+                name="agent_schedule_key_not_primary",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["agent", "enabled", "next_run_at"],
+                name="pa_sched_agent_due_idx",
+            ),
+            models.Index(
+                fields=["enabled", "next_run_at"],
+                name="pa_sched_due_idx",
+            ),
+        ]
+
+    def clean(self):
+        super().clean()
+        if self.schedule_key == "primary":
+            raise ValidationError({"schedule_key": "'primary' is reserved for the legacy cadence."})
+        try:
+            ZoneInfo(self.timezone)
+        except (TypeError, ValueError, ZoneInfoNotFoundError):
+            raise ValidationError({"timezone": "Use a valid IANA timezone, such as America/New_York."})
+
+        if self.kind == self.Kind.RECURRING:
+            if not (self.expression or "").strip():
+                raise ValidationError({"expression": "A recurring schedule needs an expression."})
+            if self.run_at is not None:
+                raise ValidationError({"run_at": "A recurring schedule cannot have run_at."})
+            from api.agent.core.schedule_parser import ScheduleParser
+
+            try:
+                ScheduleParser.parse(self.expression)
+            except ValueError as exc:
+                raise ValidationError({"expression": str(exc)})
+        elif self.kind == self.Kind.ONCE:
+            if self.expression is not None:
+                raise ValidationError({"expression": "A one-time schedule cannot have an expression."})
+            if self.run_at is None:
+                raise ValidationError({"run_at": "A one-time schedule needs run_at."})
+            if timezone.is_naive(self.run_at):
+                raise ValidationError({"run_at": "run_at must include a timezone offset."})
+
+    def __str__(self):
+        return f"AgentSchedule<{self.agent_id}:{self.schedule_key}>"
 
 
 class PersistentAgentKanbanCard(models.Model):
@@ -11796,10 +11945,30 @@ class PersistentAgentCronTrigger(models.Model):
         help_text="Cron expression that scheduled this execution (captured at trigger time)",
     )
 
+    schedule = models.ForeignKey(
+        "PersistentAgentSchedule",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="trigger_events",
+    )
+    schedule_key = models.CharField(max_length=64, blank=True)
+    schedule_name = models.CharField(max_length=120, blank=True)
+    schedule_instruction = models.TextField(blank=True)
+    scheduled_for = models.DateTimeField(null=True, blank=True)
+    occurrence_key = models.CharField(
+        max_length=64,
+        null=True,
+        blank=True,
+        unique=True,
+        help_text="Idempotency key for a concrete scheduled occurrence.",
+    )
+
     class Meta:
         ordering = ["-step__created_at"]
         indexes = [
             models.Index(fields=["cron_expression"], name="pa_cron_expr_idx"),
+            models.Index(fields=["scheduled_for"], name="pa_cron_scheduled_idx"),
         ]
 
     def __str__(self):

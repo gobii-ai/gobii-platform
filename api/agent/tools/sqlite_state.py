@@ -36,6 +36,7 @@ _sqlite_db_path_var: contextvars.ContextVar[str] = contextvars.ContextVar("sqlit
 
 TOOL_RESULTS_TABLE = "__tool_results"
 AGENT_CONFIG_TABLE = "__agent_config"
+AGENT_SCHEDULES_TABLE = "__agent_schedules"
 LEGACY_PLAN_TABLE = "__kanban_cards"
 MESSAGES_TABLE = "__messages"
 FILES_TABLE = "__files"
@@ -44,6 +45,7 @@ AGENT_SKILLS_TABLE = "__agent_skills"
 EPHEMERAL_TABLES = {
     TOOL_RESULTS_TABLE,
     AGENT_CONFIG_TABLE,
+    AGENT_SCHEDULES_TABLE,
     LEGACY_PLAN_TABLE,
     MESSAGES_TABLE,
     FILES_TABLE,
@@ -53,6 +55,7 @@ EPHEMERAL_TABLES = {
 BUILTIN_TABLE_NOTES = {
     TOOL_RESULTS_TABLE: "built-in, ephemeral (dropped before persistence)",
     AGENT_CONFIG_TABLE: "built-in, ephemeral (reset every LLM call; charter/schedule/standing preference updates)",
+    AGENT_SCHEDULES_TABLE: "built-in, ephemeral (reset every LLM call; recurring schedules and one-time triggers)",
     MESSAGES_TABLE: "built-in, ephemeral (recent messages snapshot for this cycle)",
     FILES_TABLE: "built-in, ephemeral (recent file index for this cycle; metadata only)",
     CONTACTS_TABLE: "built-in, ephemeral (effective contacts and contact request state for this cycle)",

@@ -66,6 +66,11 @@ _URL_PART_FIELD_RE = re.compile(
 
 SHORT_RESULT_ID_MIN_LEN = 6
 SHORT_RESULT_ID_MAX_LEN = 12
+MAX_OPTIONAL_SOURCE_ARRAYS = 2
+MAX_OPTIONAL_SOURCE_PATH_CHARS = 160
+MAX_OPTIONAL_SOURCE_FIELDS = 6
+MAX_OPTIONAL_SOURCE_FIELD_CHARS = 48
+MAX_OPTIONAL_SOURCE_HINT_CHARS = 900
 
 
 def _is_scrape_as_markdown_tool(tool_name: str) -> bool:
@@ -144,6 +149,60 @@ def source_array_entity_groups(result_text: str, tool_name: str) -> tuple[set[st
             if any(_is_entity_key(field) for field in item.item_fields)
         },
     )
+
+
+def _optional_source_array_schemas(analysis: ResultAnalysis | None) -> tuple[tuple[str, str], ...]:
+    json_analysis = analysis.json_analysis if analysis else None
+    if not json_analysis:
+        return ()
+
+    ordered = (json_analysis.primary_array, *json_analysis.secondary_arrays)
+    schemas: list[tuple[str, str]] = []
+    seen_paths: set[str] = set()
+    for item in ordered:
+        if (
+            not item
+            or not item.item_fields
+            or item.path in seen_paths
+            or len(item.path) > MAX_OPTIONAL_SOURCE_PATH_CHARS
+        ):
+            continue
+        fields = [
+            field
+            for field in item.item_fields
+            if len(field) <= MAX_OPTIONAL_SOURCE_FIELD_CHARS
+        ][:MAX_OPTIONAL_SOURCE_FIELDS]
+        field_summary = ",".join(fields)
+        schemas.append((item.path, f"{item.path}({field_summary})"))
+        seen_paths.add(item.path)
+        if len(schemas) >= MAX_OPTIONAL_SOURCE_ARRAYS:
+            break
+    return tuple(schemas)
+
+
+def _build_optional_source_write_hint(
+    result_id: str,
+    tool_name: str,
+    analysis: ResultAnalysis | None,
+) -> str:
+    """Give safe first-write mechanics without requiring a model for one-off work."""
+    schemas = _optional_source_array_schemas(analysis)
+    if not schemas or len(tool_name) > 100:
+        return ""
+
+    first_path = schemas[0][0].replace("'", "''")
+    escaped_tool_name = tool_name.replace("'", "''")
+    short_result_id = str(result_id)[:32]
+    hint = (
+        f"[SOURCE WRITE HINT result_id={short_result_id}; exact stored arrays: "
+        f"{'; '.join(schema for _path, schema in schemas)}. "
+        "If modeling/persisting this evidence, derive the write from all relevant stored rows, never copied "
+        "visible literals: INSERT ... SELECT json_extract(j.value,'$.field') ... "
+        f"FROM __tool_results AS t, json_each(t.result_json,'{first_path}') AS j "
+        f"WHERE t.tool_name='{escaped_tool_name}'. Use each exact path above in the same batch and derive "
+        "stable keys and fields from j.value. For an ordinary one-off answer, use the visible evidence directly.]\n"
+    )
+    return hint if len(hint) <= MAX_OPTIONAL_SOURCE_HINT_CHARS else ""
 
 
 def build_short_result_id_map(result_ids: Sequence[str]) -> Dict[str, str]:
@@ -265,6 +324,7 @@ def prepare_tool_results_for_prompt(
             is_fresh_tool_call=is_fresh_tool_call,
         )
         source_import_prefix = ""
+        source_write_hint_prefix = ""
         keep_source_import_hint = is_source_bearing_tool(record.tool_name) and is_fresh_tool_call
         if keep_source_import_hint:
             arrays = _entity_arrays(analysis)
@@ -288,6 +348,12 @@ def prepare_tool_results_for_prompt(
                     "whole-table dumps. Derive all facts, URLs, and write keys from j.value. This ordinary evidence "
                     "task never changes __agent_config/__agent_skills. No pre-read, refetch, blob inspection, copied "
                     "literals, or splitting arrays across calls.]\n"
+                )
+            else:
+                source_write_hint_prefix = _build_optional_source_write_hint(
+                    result_id,
+                    record.tool_name,
+                    analysis,
                 )
         has_focus = "\nFOCUS:\n" in (context_hint or "")
         if has_focus and not is_inline:
@@ -314,13 +380,16 @@ def prepare_tool_results_for_prompt(
                 "'link/page', or related entity. No separate URL/link column unless requested. "
                 "For an owner report with 4+ items, say "
                 "Covered N/N and use one channel-appropriate table for every item/requested field. Say Not returned "
-                "where a requested URL is absent. Without a preceding SOURCE ARRAYS directive, use this visible "
-                "source directly rather than creating or querying SQLite. This link guidance does not change the "
+                "where a requested URL is absent. Follow any preceding source-write directive for persistence; "
+                "otherwise use this visible source directly rather than creating or querying SQLite. This link "
+                "guidance does not change the "
                 "requested audience or action.]\n"
                 f"{preview_text}"
             )
         if source_import_prefix:
             preview_text = f"{source_import_prefix}{preview_text or ''}"
+        elif source_write_hint_prefix:
+            preview_text = f"{source_write_hint_prefix}{preview_text or ''}"
 
         is_scrape_markdown = _is_scrape_as_markdown_tool(record.tool_name)
         meta_text = _format_meta_text(

@@ -2274,7 +2274,10 @@ class FirstRunPromptCalibrationTests(TestCase):
         self.assertIn("append only if no related clause", system_prompt)
         self.assertIn("finite task/batch/day/run/project/renewal/deal/case feedback is temporary", system_prompt)
         self.assertIn("Set false after delivery/config and no active work", system_prompt)
-        self.assertIn("Do not set a schedule merely to continue or remember a single research question", system_prompt)
+        self.assertIn(
+            "Do not schedule merely to continue or remember your own work; schedule only user-requested recurrence, reminders, or future triggers",
+            system_prompt,
+        )
         self.assertIn("explicit SQLite/database request and sqlite_batch is callable", system_prompt)
         self.assertIn("do not search for a SQLite/database tool", system_prompt)
         self.assertIn("enabled tool fits -> use directly", system_prompt)
@@ -2289,7 +2292,10 @@ class FirstRunPromptCalibrationTests(TestCase):
         self.assertIn("same URLs/items returned twice -> no new evidence", system_prompt)
         self.assertIn("Held/skipped/rejected means not run", system_prompt)
         self.assertIn("Charts: create only when requested/materially useful", system_prompt)
-        self.assertIn("Finished answers/briefings/charts/lookups/one-off research are not charter changes", system_prompt)
+        self.assertIn(
+            "Finished answers/briefings/charts/lookups/one-off research are not config changes",
+            system_prompt,
+        )
         self.assertIn("Email/SMS imperatives map directly to send_email/send_sms", system_prompt)
         self.assertIn("Do not downgrade requested email/SMS delivery to chat", system_prompt)
         self.assertIn("After an update, don't repeat it", system_prompt)

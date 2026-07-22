@@ -918,6 +918,29 @@ PERSISTENT_AGENT_PLANNING_TIMEOUT_SECONDS = env.int(
     default=3600,
 )
 
+# Multiple schedules are deliberately bounded. These caps prevent an agent from
+# turning a useful timer/cadence feature into an unbounded execution source.
+PERSISTENT_AGENT_SCHEDULE_MAX_ACTIVE = env.int(
+    "PERSISTENT_AGENT_SCHEDULE_MAX_ACTIVE",
+    default=12,
+)
+PERSISTENT_AGENT_SCHEDULE_MAX_TOTAL = env.int(
+    "PERSISTENT_AGENT_SCHEDULE_MAX_TOTAL",
+    default=40,
+)
+PERSISTENT_AGENT_SCHEDULE_MAX_RECURRING_RUNS_PER_DAY = env.int(
+    "PERSISTENT_AGENT_SCHEDULE_MAX_RECURRING_RUNS_PER_DAY",
+    default=96,
+)
+PERSISTENT_AGENT_SCHEDULE_MIN_ONCE_LEAD_SECONDS = env.int(
+    "PERSISTENT_AGENT_SCHEDULE_MIN_ONCE_LEAD_SECONDS",
+    default=5,
+)
+PERSISTENT_AGENT_DEFAULT_CHECKIN_DELAY_SECONDS = env.int(
+    "PERSISTENT_AGENT_DEFAULT_CHECKIN_DELAY_SECONDS",
+    default=24 * 60 * 60,
+)
+
 LANGUAGE_CODE = "en-us"
 TIME_ZONE = "UTC"
 USE_I18N = USE_TZ = True

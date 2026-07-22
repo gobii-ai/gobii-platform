@@ -1,8 +1,9 @@
 import json
 import re
 from collections import Counter
+from decimal import Decimal, InvalidOperation
 from types import SimpleNamespace
-from typing import Iterable
+from typing import Callable, Iterable
 
 import sqlparse
 from sqlparse import tokens as sql_tokens
@@ -68,6 +69,10 @@ SOURCE_LITERAL_COPY_MESSAGE = (
     "sourced field in the INSERT/UPDATE SELECT/json_each over all relevant __tool_results; only payload paths and "
     "current result_id/tool_name may be literals. Use stable keys, refresh provenance, omit unavailable URLs, then "
     "query the model."
+)
+GROUNDED_LITERAL_IMPORT_MESSAGE = (
+    "Executed this literal INSERT because every inserted value was found in recent stored tool results. Prefer one "
+    "INSERT ... SELECT/json_each next time to preserve row-level provenance and avoid copying source data into SQL."
 )
 COUNT_FIELDS = (
     "statement_count", "tool_result_statement_count", "single_result_id_filters", "single_derived_result_filters", "single_tool_result_imports",
@@ -178,25 +183,56 @@ def summarize_sqlite_tool_result_sql(sql_values: Iterable[str], *, sqlite_call_c
 def build_tool_result_query_advisories(
     sql_values: Iterable[str], *, available_tool_result_rows: int,
     tool_result_payloads: Iterable[str] = (),
+    model_table_has_identity: Callable[[str], bool] | None = None,
 ) -> list[SimpleNamespace]:
     if available_tool_result_rows < 1: return []
     sql_values = [str(sql or "") for sql in sql_values]
     tool_result_payloads = tuple(tool_result_payloads)
     advisories = []
     summary = summarize_sqlite_tool_result_sql(sql_values)
-    copied_model_tables = _source_literal_copy_tables(sql_values, tool_result_payloads)
+    copied_model_tables = set(_source_literal_copy_tables(sql_values, tool_result_payloads))
+    grounded_literal_tables = (
+        set(_grounded_literal_insert_tables(sql_values, tool_result_payloads))
+        if copied_model_tables
+        else set()
+    )
+    created_tables = set(summary.working_table_names)
+    grounded_literal_tables = {
+        table
+        for table in grounded_literal_tables
+        if (
+            (
+                table in created_tables
+                and table not in summary.unkeyed_explicit_table_names
+            )
+            or (
+                table not in created_tables
+                and model_table_has_identity is not None
+                and model_table_has_identity(table)
+            )
+        )
+    }
+    ungrounded_copied_tables = copied_model_tables - grounded_literal_tables
     unkeyed_models = set(summary.unkeyed_explicit_table_names).intersection(summary.row_derived_working_table_names)
     if unkeyed_models:
         advisories.append(_advisory("reusable_model_missing_identity", f"Query not executed: reusable table(s) {', '.join(sorted(unkeyed_models))} derive repeating tool-result rows without stable identity. Add PRIMARY KEY/UNIQUE to CREATE TABLE; use TEMP CTAS only for a disposable extract.", blocking=True))
     if summary.tool_result_ctas:
         advisories.append(_advisory("tool_result_ctas", "CTAS has no stable identity. Use it only for a disposable extract; reusable models need explicit CREATE TABLE with PRIMARY KEY/UNIQUE, then aggregate INSERT."))
     if available_tool_result_rows < 2:
-        if copied_model_tables:
+        if ungrounded_copied_tables:
             advisories.append(_advisory("source_facts_copied_into_model", SOURCE_LITERAL_COPY_MESSAGE, blocking=True))
+        if grounded_literal_tables:
+            advisories.append(_advisory("grounded_literal_model_import", GROUNDED_LITERAL_IMPORT_MESSAGE))
         return advisories
     model_advisories, advisories = advisories, []
     literal_select_rows, copied_provenance_urls = _manual_import_evidence(sql_values, tool_result_payloads)
-    if summary.manual_values_rows + literal_select_rows >= BULK_MANUAL_VALUES_ROW_LIMIT and len(copied_provenance_urls) >= 2:
+    manual_value_tables = set(summary.manual_values_table_names)
+    all_manual_values_grounded = bool(manual_value_tables) and manual_value_tables.issubset(grounded_literal_tables)
+    if (
+        summary.manual_values_rows + literal_select_rows >= BULK_MANUAL_VALUES_ROW_LIMIT
+        and len(copied_provenance_urls) >= 2
+        and not all_manual_values_grounded
+    ):
         advisories.append(_advisory("bulk_manual_working_table_from_visible_results", BULK_COPY_MESSAGE, blocking=True))
     elif summary.manual_values_working_tables:
         advisories.append(_advisory("manual_working_table_from_visible_results", MANUAL_COPY_MESSAGE))
@@ -214,8 +250,10 @@ def build_tool_result_query_advisories(
         advisories.append(_advisory("tool_result_row_loop", ROW_LOOP_MESSAGE, blocking=True))
     elif summary.single_tool_result_imports and not relation_import_batch:
         advisories.append(_advisory("single_tool_result_import", SINGLE_IMPORT_MESSAGE))
-    if copied_model_tables:
+    if ungrounded_copied_tables:
         advisories.append(_advisory("source_facts_copied_into_model", SOURCE_LITERAL_COPY_MESSAGE, blocking=True))
+    if grounded_literal_tables:
+        advisories.append(_advisory("grounded_literal_model_import", GROUNDED_LITERAL_IMPORT_MESSAGE))
     return advisories + model_advisories
 
 
@@ -409,6 +447,145 @@ def _source_literal_copy_tables(
             if copied_url or len(matched_literals) >= 2:
                 copied_tables.append(match.group("name").casefold())
     return tuple(dict.fromkeys(copied_tables))
+
+
+def _grounded_literal_insert_tables(
+    sql_values: Iterable[str], tool_result_payloads: Iterable[str],
+) -> tuple[str, ...]:
+    """Return copied INSERT targets whose complete rows map to single source entities."""
+
+    payloads = tuple(str(payload or "") for payload in tool_result_payloads if str(payload or "").strip())
+    entity_scalar_sets = _json_entity_scalar_sets(payloads)
+    if not entity_scalar_sets:
+        return ()
+
+    statement_grounding: dict[str, list[bool]] = {}
+    for sql in sql_values:
+        for statement in sqlparse.parse(str(sql or "")):
+            structural = _structural_sql(str(statement))
+            match = MODEL_MUTATION_RE.search(structural)
+            if not match or not _is_named_model_table(match.group("name")):
+                continue
+            table = match.group("name").casefold()
+            if table not in _source_literal_copy_tables((str(statement),), payloads):
+                continue
+            value_groups = [token for token in statement.tokens if isinstance(token, Values)]
+            rows = _literal_values_rows(value_groups) if value_groups else None
+            statement_grounding.setdefault(table, []).append(
+                bool(rows) and all(_row_matches_source_entity(row, entity_scalar_sets) for row in rows)
+            )
+    return tuple(table for table, checks in statement_grounding.items() if checks and all(checks))
+
+
+def _json_entity_scalar_sets(payloads: Iterable[str]) -> tuple[frozenset[tuple[str, object]], ...]:
+    entities: list[frozenset[tuple[str, object]]] = []
+
+    def visit(value, inherited: frozenset[tuple[str, object]] = frozenset()):
+        if isinstance(value, dict):
+            local = frozenset(
+                scalar
+                for child in value.values()
+                if not isinstance(child, (dict, list))
+                for scalar in (_json_scalar_key(child),)
+                if scalar is not None
+            )
+            current = inherited | local
+            if local:
+                entities.append(current)
+            for child in value.values():
+                if isinstance(child, (dict, list)):
+                    visit(child, current)
+        elif isinstance(value, list):
+            for child in value:
+                visit(child, inherited)
+
+    for payload in payloads:
+        try:
+            visit(json.loads(payload))
+        except (TypeError, ValueError):
+            continue
+    return tuple(dict.fromkeys(entities))
+
+
+def _json_scalar_key(value) -> tuple[str, object] | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return ("bool", value)
+    if isinstance(value, (int, float)):
+        return ("number", Decimal(str(value)))
+    if isinstance(value, str):
+        return ("string", value)
+    return None
+
+
+def _literal_values_rows(value_groups: Iterable[Values]) -> tuple[frozenset[tuple[str, object]], ...] | None:
+    rows: list[frozenset[tuple[str, object]]] = []
+    for group in value_groups:
+        depth = 0
+        current: set[tuple[str, object]] = set()
+        for token in group.flatten():
+            if token.is_whitespace or token.ttype in sql_tokens.Comment:
+                continue
+            if token.ttype is sql_tokens.Punctuation and token.value == "(":
+                depth += 1
+                if depth != 1:
+                    return None
+                current = set()
+                continue
+            if token.ttype is sql_tokens.Punctuation and token.value == ")":
+                if depth != 1 or not current:
+                    return None
+                rows.append(frozenset(current))
+                current = set()
+                depth = 0
+                continue
+            if depth == 0 and (
+                token.ttype is sql_tokens.Punctuation
+                or token.ttype in sql_tokens.Keyword and token.normalized == "VALUES"
+            ):
+                continue
+            if depth != 1:
+                return None
+            if token.ttype is sql_tokens.Punctuation and token.value == ",":
+                continue
+            if token.ttype in sql_tokens.Literal.String.Single:
+                current.add(("string", token.value[1:-1].replace("''", "'")))
+                continue
+            if token.ttype in sql_tokens.Literal.Number:
+                try:
+                    current.add(("number", Decimal(token.value)))
+                except InvalidOperation:
+                    return None
+                continue
+            if token.ttype in sql_tokens.Keyword and token.normalized in {"NULL", "TRUE", "FALSE"}:
+                if token.normalized != "NULL":
+                    current.add(("bool", token.normalized == "TRUE"))
+                continue
+            return None
+        if depth != 0:
+            return None
+    return tuple(rows)
+
+
+def _row_matches_source_entity(
+    row: frozenset[tuple[str, object]],
+    entity_scalar_sets: Iterable[frozenset[tuple[str, object]]],
+) -> bool:
+    row_urls = {
+        value for kind, value in row
+        if kind == "string" and isinstance(value, str) and URL_RE.fullmatch(value)
+    }
+    for entity in entity_scalar_sets:
+        if not row.issubset(entity):
+            continue
+        entity_urls = {
+            value for kind, value in entity
+            if kind == "string" and isinstance(value, str) and URL_RE.fullmatch(value)
+        }
+        if not entity_urls or row_urls.intersection(entity_urls):
+            return True
+    return False
 
 
 def _mutation_value_tokens(statement, operation: str):

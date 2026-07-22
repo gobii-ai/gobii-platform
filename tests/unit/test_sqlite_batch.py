@@ -506,7 +506,112 @@ class SqliteBatchToolTests(TestCase):
                 conn.close()
             self.assertIsNone(table)
 
-    def test_nested_http_rows_must_be_derived_and_can_reconcile_in_one_batch(self):
+    def test_fully_grounded_bulk_insert_executes_instead_of_rejecting_useful_work(self):
+        with self._with_temp_db() as (db_path, _token, _tmp):
+            rows = [
+                {
+                    "prospect_id": f"p{index}",
+                    "name": f"Prospect {index}",
+                    "url": f"https://source.example.test/p{index}",
+                }
+                for index in range(1, 5)
+            ]
+            payload = json.dumps({"status": "ok", "content": {"prospects": rows}})
+            with sqlite3.connect(db_path) as conn:
+                conn.execute(
+                    "CREATE TABLE __tool_results (result_id TEXT PRIMARY KEY, result_json TEXT, result_text TEXT)"
+                )
+                conn.execute("INSERT INTO __tool_results VALUES ('r1', ?, ?)", (payload, payload))
+
+            values = ",".join(
+                f"('{row['prospect_id']}','{row['name']}','{row['url']}')"
+                for row in rows
+            )
+            out = execute_sqlite_batch(
+                self.agent,
+                {
+                    "sql": (
+                        "CREATE TABLE prospects(prospect_id TEXT PRIMARY KEY, name TEXT, source_url TEXT);"
+                        f"INSERT INTO prospects VALUES {values};"
+                        "SELECT COUNT(*) AS count FROM prospects;"
+                    ),
+                    "will_continue_work": True,
+                },
+            )
+
+            self.assertEqual(out.get("status"), "warning")
+            self.assertEqual(out.get("advisories", [{}])[0].get("code"), "grounded_literal_model_import")
+            self.assertEqual(out.get("results", [])[-1].get("result"), [{"count": 4}])
+
+    def test_literal_insert_cannot_recombine_values_from_different_source_rows(self):
+        with self._with_temp_db() as (db_path, _token, _tmp):
+            payload = json.dumps({
+                "contacts": [
+                    {"name": "Alice Example", "role": "Chief Executive Officer"},
+                    {"name": "Bob Example", "role": "Chief Financial Officer"},
+                ]
+            })
+            with sqlite3.connect(db_path) as conn:
+                conn.execute(
+                    "CREATE TABLE __tool_results (result_id TEXT PRIMARY KEY, result_json TEXT, result_text TEXT)"
+                )
+                conn.execute("INSERT INTO __tool_results VALUES ('r1', ?, ?)", (payload, payload))
+
+            out = execute_sqlite_batch(
+                self.agent,
+                {
+                    "sql": (
+                        "CREATE TABLE contacts(name TEXT PRIMARY KEY, role TEXT);"
+                        "INSERT INTO contacts VALUES ('Alice Example', 'Chief Financial Officer');"
+                    ),
+                    "will_continue_work": True,
+                },
+            )
+
+            self.assertEqual(out.get("status"), "error")
+            self.assertEqual(out.get("advisories", [{}])[0].get("code"), "source_facts_copied_into_model")
+            with sqlite3.connect(db_path) as conn:
+                self.assertIsNone(
+                    conn.execute("SELECT name FROM sqlite_master WHERE name='contacts'").fetchone()
+                )
+
+    def test_grounded_literal_import_still_requires_stable_model_identity(self):
+        with self._with_temp_db() as (db_path, _token, _tmp):
+            payload = json.dumps({"contacts": [{"name": "Alice Example", "role": "Chief Executive Officer"}]})
+            with sqlite3.connect(db_path) as conn:
+                conn.execute(
+                    "CREATE TABLE __tool_results (result_id TEXT PRIMARY KEY, result_json TEXT, result_text TEXT)"
+                )
+                conn.execute("INSERT INTO __tool_results VALUES ('r1', ?, ?)", (payload, payload))
+
+            out = execute_sqlite_batch(
+                self.agent,
+                {
+                    "sql": (
+                        "CREATE TABLE contacts(name TEXT, role TEXT);"
+                        "INSERT INTO contacts VALUES ('Alice Example', 'Chief Executive Officer');"
+                    ),
+                    "will_continue_work": True,
+                },
+            )
+
+            self.assertEqual(out.get("status"), "error")
+            self.assertEqual(out.get("advisories", [{}])[0].get("code"), "source_facts_copied_into_model")
+
+            with sqlite3.connect(db_path) as conn:
+                conn.execute("CREATE TABLE contacts(name TEXT, role TEXT)")
+            out = execute_sqlite_batch(
+                self.agent,
+                {
+                    "sql": "INSERT INTO contacts VALUES ('Alice Example', 'Chief Executive Officer')",
+                    "will_continue_work": True,
+                },
+            )
+            self.assertEqual(out.get("status"), "error")
+            with sqlite3.connect(db_path) as conn:
+                self.assertEqual(conn.execute("SELECT COUNT(*) FROM contacts").fetchone(), (0,))
+
+    def test_grounded_literal_insert_executes_and_source_derived_batch_reconciles(self):
         with self._with_temp_db() as (db_path, _token, _tmp):
             payload = json.dumps({
                 "status": "ok",
@@ -538,8 +643,13 @@ class SqliteBatchToolTests(TestCase):
                 ),
                 "will_continue_work": True,
             })
-            self.assertEqual(copied.get("status"), "error")
-            self.assertEqual(copied.get("advisories", [{}])[0].get("code"), "source_facts_copied_into_model")
+            self.assertEqual(copied.get("status"), "warning")
+            self.assertEqual(copied.get("advisories", [{}])[0].get("code"), "grounded_literal_model_import")
+            with sqlite3.connect(db_path) as conn:
+                self.assertEqual(
+                    conn.execute("SELECT account_id, stage FROM accounts").fetchone(),
+                    ("acct-1", "contracting"),
+                )
 
             reconciled = execute_sqlite_batch(self.agent, {
                 "sql": (

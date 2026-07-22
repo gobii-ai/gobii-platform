@@ -116,6 +116,7 @@ from ..tools.sqlite_agent_config import (
     read_sqlite_agent_config_snapshot,
     seed_sqlite_agent_config,
     sqlite_statement_assigns_agent_config_field,
+    sqlite_statement_mutates_agent_schedules,
 )
 from ..tools.sqlite_skills import apply_sqlite_skill_updates, refresh_skills_for_tool, seed_sqlite_skills
 from ..tools.custom_tools import execute_create_custom_tool
@@ -2531,14 +2532,17 @@ def _sqlite_batch_is_only_agent_config_mutation(tool_params: Dict[str, Any]) -> 
 
 def _sqlite_batch_agent_config_attempted_fields(tool_params: Dict[str, Any]) -> tuple[str, ...]:
     statements = _sqlite_batch_statements(tool_params)
-    return tuple(
+    fields = [
         field
         for field in ("charter", "schedule")
         if any(
             sqlite_statement_assigns_agent_config_field(statement, field)
             for statement in statements
         )
-    )
+    ]
+    if any(sqlite_statement_mutates_agent_schedules(statement) for statement in statements):
+        fields.append("schedules")
+    return tuple(fields)
 
 
 def _annotate_agent_config_update_result(
@@ -2555,7 +2559,9 @@ def _annotate_agent_config_update_result(
         return
 
     attempted = {field for _outcome, fields in config_outcomes for field in fields}
-    attempted_fields = tuple(field for field in ("charter", "schedule") if field in attempted)
+    attempted_fields = tuple(
+        field for field in ("charter", "schedule", "schedules") if field in attempted
+    )
     updated_fields = list(config_apply.updated_fields)
     target = max(config_outcomes, key=lambda item: item[0].prepared.idx)[0]
     result = dict(target.result) if isinstance(target.result, dict) else {

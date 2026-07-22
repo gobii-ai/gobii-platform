@@ -703,6 +703,30 @@ def _get_sqlite_guidance() -> str:
     )
 
 
+def _format_agent_schedule_context(agent: PersistentAgent) -> str:
+    """Return a compact view of every active durable wake-up."""
+    lines: list[str] = []
+    if agent.schedule:
+        lines.append(f"primary | recurring | UTC | {agent.schedule}")
+
+    schedules = agent.additional_schedules.filter(enabled=True).order_by(
+        "next_run_at",
+        "schedule_key",
+    )[: settings.PERSISTENT_AGENT_SCHEDULE_MAX_ACTIVE]
+    for item in schedules:
+        timing = item.expression if item.kind == "recurring" else item.run_at.isoformat()
+        instruction = " ".join((item.instruction or "").split())
+        if len(instruction) > 180:
+            instruction = instruction[:177] + "..."
+        lines.append(
+            f"{item.schedule_key} | {item.kind} | {item.timezone} | {timing} | {instruction}"
+        )
+
+    if not lines:
+        return "No schedule configured"
+    return "key | kind | timezone | timing | instruction\n" + "\n".join(lines)
+
+
 def _get_inactive_weeks(interaction_anchor: Optional[datetime], now: datetime) -> int:
     """Return whole inactive weeks since the last known interaction anchor."""
 
@@ -1402,7 +1426,7 @@ def _render_prompt_context_once(
     )
 
     # Schedule block
-    schedule_str = agent.schedule if agent.schedule else "No schedule configured"
+    schedule_str = _format_agent_schedule_context(agent)
     # Provide the schedule details and a helpful note as separate sections so Prompt can
     # automatically wrap them with <schedule> and <schedule_note> tags respectively.
     important_group.section_text(
@@ -1418,17 +1442,17 @@ def _render_prompt_context_once(
             non_shrinkable=True
         )
     else:
-        if agent.schedule:
+        if schedule_str != "No schedule configured":
             important_group.section_text(
                 "schedule_note",
-                "Current schedule is durable. Change it only for an authorized lasting cadence request; temporary task scope never changes it.",
+                "The schedule collection is durable. Change it only for an authorized cadence, reminder, or future trigger request; temporary task scope never changes it.",
                 weight=1,
                 non_shrinkable=True
             )
         else:
             important_group.section_text(
                 "schedule_note",
-                "No schedule is set. Leave it NULL unless the user requests recurrence.",
+                "No schedule is set. Leave it NULL unless the user requests recurrence, a reminder, or a future trigger.",
                 weight=1,
                 non_shrinkable=True
             )
@@ -1644,6 +1668,23 @@ def _render_prompt_context_once(
         "agent_config_note",
         agent_config_note,
         weight=2,
+        non_shrinkable=True,
+    )
+    if planning_mode_active:
+        schedules_note = "Planning Mode is active; do not mutate __agent_schedules until planning ends."
+    else:
+        schedules_note = (
+            "__agent_schedules is the durable timing control plane. Query it before changing, canceling, or listing existing timing. "
+            "Use one stable schedule_key per distinct job and keep its instruction specific. kind='recurring' uses schedule "
+            "(five-field cron or @every) plus an IANA timezone; kind='once' uses an offset-bearing ISO run_at and preserves seconds. "
+            "For relative timers, derive run_at inside the write with SQLite UTC time; never calculate it mentally, "
+            "e.g. strftime('%Y-%m-%dT%H:%M:%SZ','now','+17 minutes'). "
+            "Insert/update/delete only the intended rows; never replace unrelated schedules. The primary row mirrors the legacy UTC cadence."
+        )
+    variable_group.section_text(
+        "agent_schedules_note",
+        schedules_note,
+        weight=3,
         non_shrinkable=True,
     )
     skills_note = (
@@ -3598,7 +3639,7 @@ def _get_planning_mode_prompt_block() -> str:
         "- Use read-only research during planning only when the scope is unclear; do not fetch, parse, or summarize sources to answer a clear task before end_planning.\n"
         "- Named integration setup/use: before end_planning or asking how to connect, call search_tools(provider) unless the matching provider/API tool is already in the current callable tool list.\n"
         "- Do not do substantive task execution before planning ends: no drafting the final deliverable, no implementation, no outbound task execution, no third-party follow-through, and no results meant to satisfy the task itself.\n"
-        "- Do not update the runtime plan, schedule/__agent_config.schedule, or begin deliverable work until planning is completed. "
+        "- Do not update the runtime plan, __agent_config, __agent_schedules, or begin deliverable work until planning is completed. "
         "Do not do substantive execution or deliverable work before planning ends.\n"
         "- Do not update __agent_config.charter directly as a substitute for completing planning. Calling "
         "end_planning(full_plan=...) is how the final plan replaces your runtime charter.\n"
@@ -3792,7 +3833,7 @@ def _get_system_instruction(
 
     if not planning_mode_active:
         charter_and_schedule_intro = (
-            "Charter and schedule are durable config for ongoing role, scope, preferences, communication guidance, boundaries, and recurrence. "
+            "Charter and schedules are durable config for ongoing role, scope, preferences, communication guidance, boundaries, recurrence, and requested future wake-ups. "
             "Default timezone from the user or conversation; ask only when timing would otherwise be materially wrong. "
         )
     else:
@@ -3804,7 +3845,8 @@ def _get_system_instruction(
         ""
         if planning_mode_active
         else "### Schedule updates:\n"
-        "For setup requests, update charter/schedule first and do not fetch target URLs unless asked to run now/current data; clear stopped schedules with NULL.\n\n"
+        "For setup requests, update charter/timing first and do not fetch target URLs unless asked to run now/current data. "
+        "Use __agent_schedules for named cadences, timers, and future triggers; change only the matching row.\n\n"
     )
     plan_setup_rule = ""
     base_prompt = (
@@ -3932,9 +3974,9 @@ def _get_system_instruction(
         "For explicit deep/exhaustive research and finite-set coverage, do not finalize from search results: after discovery, scrape/open at least 4 promising URLs (or every useful URL if fewer), then synthesize. A structured source already containing every requested field needs no item refetch. Snippets are leads, not sources. Start with one broad search, two if it misses an angle. For named sets, batch gaps, follow up misses, and reconcile coverage; never repeat a successful URL/query. Send a kickoff only for genuinely substantial/long-running work, not a small finite set. If sources support the memo, final next with linked evidence; keep chat deep memos under about 5,000 chars unless asked otherwise.\n\n"
 
         "## Configuration Discipline (CRITICAL)\n\n"
-        "Finished answers/briefings/charts/lookups/one-off research are not charter changes; never store transient facts, results, or guesses in __agent_config. "
-        "Do not set a schedule merely to continue or remember a single research question; schedule only user-requested recurrence. "
-        "Keep cadence unless changed. Set future recurring work once and stop; do not run it unless asked. "
+        "Finished answers/briefings/charts/lookups/one-off research are not config changes; never store transient facts, results, or guesses in __agent_config or __agent_schedules. "
+        "Do not schedule merely to continue or remember your own work; schedule only user-requested recurrence, reminders, or future triggers. "
+        "Keep every unrelated cadence unless changed. Set future work once and stop; do not run it unless asked. "
         "If a future job will email/text and the user says not to send now, do not request contact permission during setup; record recipient/permission needs in charter and request permission only when a send is due.\n\n"
 
         "## Plan Discipline (CRITICAL)\n\n"

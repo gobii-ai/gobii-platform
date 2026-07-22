@@ -16,6 +16,7 @@ from api.evals.scenarios.discord_native import DISCORD_NATIVE_SCENARIO_SLUGS, DI
 from api.evals.scenarios.image_generation import IMAGE_GENERATION_SCENARIO_SLUGS, IMAGE_GENERATION_SUITE_SLUG
 from api.evals.scenarios.responsibility_boundaries import RESPONSIBILITY_BOUNDARY_SCENARIO_SLUGS, RESPONSIBILITY_BOUNDARY_SUITE_SLUG
 from api.evals.scenarios.hallucinated_links import HALLUCINATED_LINK_SCENARIO_SLUGS, HALLUCINATED_LINKS_SUITE_SLUG
+from api.evals.scenarios.agent_scheduling import AGENT_SCHEDULING_SCENARIO_SLUGS, AGENT_SCHEDULING_SUITE_SLUG
 from api.evals.scenarios.meta_gobii import META_GOBII_REAL_HARNESS_SCENARIO_SLUGS, META_GOBII_REAL_HARNESS_SUITE_SLUG
 from api.evals.meta_gobii import META_GOBII_EVAL_SCENARIO_SLUGS, META_GOBII_EVAL_SUITE_SLUG
 from api.evals.suites import EvalSuite, register_builtin_suites
@@ -127,6 +128,11 @@ register_builtin_suites(
             slug=HALLUCINATED_LINKS_SUITE_SLUG,
             description="Link-grounding evals for URL association and construction failures across short and long contexts.",
             scenario_slugs=HALLUCINATED_LINK_SCENARIO_SLUGS,
+        ),
+        EvalSuite(
+            slug=AGENT_SCHEDULING_SUITE_SLUG,
+            description="Multiple schedules, precise timers, targeted changes, and bounded scheduling guardrails.",
+            scenario_slugs=AGENT_SCHEDULING_SCENARIO_SLUGS,
         ),
     ]
 )

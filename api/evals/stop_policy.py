@@ -4,16 +4,21 @@ from typing import Any
 
 import sqlparse
 
-from api.agent.tools.sqlite_agent_config import sqlite_statement_assigns_agent_config_field
+from api.agent.tools.sqlite_agent_config import (
+    sqlite_statement_assigns_agent_config_field,
+    sqlite_statement_mutates_agent_schedules,
+)
 from api.models import PersistentAgentHumanInputRequest, PersistentAgentToolCall
 
 
 SQL_MUTATION_RE = re.compile(r"\b(insert|update|delete|replace|alter|drop|create)\b", re.IGNORECASE)
 PLANNING_STATE_TABLE_NAMES = {
     "__agent_config",
+    "__agent_schedules",
 }
 EVAL_BOOKKEEPING_TABLE_NAMES = {
     "__agent_config",
+    "__agent_schedules",
     "__messages",
     "__tool_results",
 }
@@ -21,8 +26,6 @@ AGENT_CONFIG_FIELD_PATTERNS = {
     "charter": re.compile(r"\bcharter\b", re.IGNORECASE),
     "schedule": re.compile(r"\bschedule\b", re.IGNORECASE),
 }
-
-
 def split_sql_statements(sql: str) -> list[str]:
     return [statement.strip() for statement in sqlparse.split(sql or "") if statement.strip()]
 
@@ -42,7 +45,9 @@ def sql_mutates(statement: str) -> bool:
 
 
 def sql_mutates_planning_state(statement: str) -> bool:
-    return sql_mentions_planning_state(statement) and sql_mutates(statement)
+    lowered = statement.lower()
+    config_mutation = "__agent_config" in lowered and sql_mutates(statement)
+    return config_mutation or sqlite_statement_mutates_agent_schedules(statement)
 
 
 def sqlite_batch_sql(tool_call) -> str:
@@ -121,6 +126,17 @@ def sqlite_batch_mutates_agent_config_field(tool_call, field_name: str) -> bool:
     )
 
 
+def sqlite_batch_mutates_schedule_state(tool_call) -> bool:
+    """Accept the multi-schedule table and the legacy scalar schedule control."""
+    sql = sqlite_batch_sql(tool_call)
+    if not sql:
+        return False
+    return sqlite_batch_mutates_agent_config_field(tool_call, "schedule") or any(
+        sqlite_statement_mutates_agent_schedules(statement)
+        for statement in split_sql_statements(sql)
+    )
+
+
 def _params_match(actual_params: dict[str, Any], expected_params: dict[str, Any]) -> bool:
     return all(actual_params.get(key) == value for key, value in expected_params.items())
 
@@ -174,6 +190,8 @@ def _expected_condition_matches_call(
 
     config_field = condition.get("agent_config_field")
     if config_field and tool_call.tool_name == "sqlite_batch":
+        if config_field == "schedule":
+            return sqlite_batch_mutates_schedule_state(tool_call)
         return sqlite_batch_mutates_agent_config_field(tool_call, config_field)
 
     return True

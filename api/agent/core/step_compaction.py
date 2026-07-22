@@ -105,8 +105,16 @@ class ToolCallStep(_StepBase):
 @dataclass(slots=True)
 class CronTriggerStep(_StepBase):
     cron_expression: str
+    schedule_key: str
+    schedule_name: str
+    schedule_instruction: str
+    scheduled_for: datetime | None
 
     def to_summary_str(self) -> str:
+        if self.schedule_key:
+            timing = self.scheduled_for.isoformat() if self.scheduled_for else self.cron_expression
+            label = self.schedule_name or self.schedule_key
+            return f"⏰ Scheduled {label} [{self.schedule_key}] for {timing}: {self.schedule_instruction}"
         return f"⏰ Cron: {self.cron_expression}"
 
 
@@ -355,6 +363,10 @@ def _convert_step(step: PersistentAgentStep, result_map: dict[str, str]) -> Step
         return CronTriggerStep(
             **base_kwargs,
             cron_expression=ct.cron_expression,
+            schedule_key=ct.schedule_key,
+            schedule_name=ct.schedule_name,
+            schedule_instruction=ct.schedule_instruction,
+            scheduled_for=ct.scheduled_for,
         )
 
     if hasattr(step, "system_step") and step.system_step is not None:
