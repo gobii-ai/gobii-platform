@@ -109,7 +109,7 @@
       "frontend/src/test/",
       "tests/"
     ],
-    "file_count": 875,
+    "file_count": 876,
     "include_files": [
       "manage.py",
       "pyproject.toml",
@@ -149,6 +149,6 @@
       ".yml",
       ".zsh"
     ],
-    "limit": 249192
+    "limit": 249246
   }
 }
