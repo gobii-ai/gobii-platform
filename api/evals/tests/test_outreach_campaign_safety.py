@@ -1,4 +1,3 @@
-import json
 from types import SimpleNamespace
 
 from django.test import SimpleTestCase, tag
@@ -151,20 +150,20 @@ class OutreachCampaignSafetyScenarioTests(SimpleTestCase):
         self.assertTrue(wrong_timezone_result["content"]["saved"])
         self.assertTrue(wrong_timezone_result["content"]["timezone_saved"])
 
-    def test_preflight_mock_readback_tracks_successful_writes(self):
+    def test_preflight_patch_results_are_self_contained_without_mutable_mock_state(self):
         config = preflight_mock_config()
         url = f"https://outreach.example.test{PREFLIGHT_CAMPAIGN_PATH}"
-        updated_sequence = [
-            {
-                "step": 1,
-                "subject": "An acquisition conversation",
-                "body": "I am an investor using seller financing.",
-            }
-        ]
+        http_mock = config["http_request"]
 
-        initial = _resolve_eval_mock_result(config, "http_request", {"method": "GET", "url": url})
-        self.assertEqual(initial["content"]["campaign"]["status"], 0)
-        self.assertEqual(initial["content"]["campaign"]["schedule"]["timezone"], "Etc/GMT+12")
+        self.assertNotIn("state", http_mock)
+        self.assertFalse(
+            any(
+                "set_state" in rule
+                or "result_from_state" in rule
+                or "state_updates_from_params" in rule
+                for rule in http_mock["rules"]
+            )
+        )
 
         sequence_update = _resolve_eval_mock_result(
             config,
@@ -172,55 +171,47 @@ class OutreachCampaignSafetyScenarioTests(SimpleTestCase):
             {
                 "method": "PATCH",
                 "url": url,
-                "body": json.dumps({"sequence": updated_sequence}),
+                "body": '{"sequence": [{"step": 1}]}',
             },
         )
         self.assertTrue(sequence_update["content"]["saved"])
-        after_sequence = _resolve_eval_mock_result(
-            config,
-            "http_request",
-            {"method": "GET", "url": url},
-        )
-        self.assertEqual(after_sequence["content"]["sequence"], updated_sequence)
         self.assertEqual(
-            after_sequence["content"]["campaign"]["schedule"]["timezone"],
+            sequence_update["content"]["changed_fields"],
+            ["sequence"],
+        )
+        self.assertEqual(
+            sequence_update["content"]["schedule"]["timezone"],
             "Etc/GMT+12",
         )
 
-        _resolve_eval_mock_result(
+        combined_update = _resolve_eval_mock_result(
             config,
             "http_request",
             {
                 "method": "PATCH",
                 "url": url,
-                "body": json.dumps({"schedule": {"timezone": "Etc/GMT+5"}}),
+                "body": '{"sequence": [], "schedule": {"timezone": "Etc/GMT+5"}}',
             },
         )
-        after_timezone = _resolve_eval_mock_result(
-            config,
-            "http_request",
-            {"method": "GET", "url": url},
-        )
         self.assertEqual(
-            after_timezone["content"]["campaign"]["schedule"]["timezone"],
-            "Etc/GMT+5",
+            combined_update["content"]["changed_fields"],
+            ["sequence", "schedule.timezone"],
         )
 
-        _resolve_eval_mock_result(
+        rejected_update = _resolve_eval_mock_result(
             config,
             "http_request",
             {
-                "method": "POST",
-                "url": f"https://outreach.example.test{PREFLIGHT_ACTIVATION_PATH}",
+                "method": "PATCH",
+                "url": url,
+                "body": '{"schedule": {"timezone": "America/New_York"}}',
             },
         )
-        after_activation = _resolve_eval_mock_result(
-            config,
-            "http_request",
-            {"method": "GET", "url": url},
+        self.assertFalse(rejected_update["content"]["saved"])
+        self.assertEqual(
+            rejected_update["content"]["schedule"]["timezone"],
+            "Etc/GMT+12",
         )
-        self.assertEqual(after_activation["content"]["campaign"]["status"], 1)
-        self.assertEqual(after_activation["content"]["campaign"]["status_label"], "active")
 
     def test_activation_mock_requires_readback_to_discover_inactive_state(self):
         config = activation_readback_mock_config()

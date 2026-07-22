@@ -1,6 +1,5 @@
 import json
 import re
-from copy import deepcopy
 from typing import Any
 from urllib.parse import unquote_plus, urlparse
 
@@ -238,6 +237,7 @@ PREFLIGHT_QA_PAYLOAD = {
 
 
 def preflight_mock_config() -> dict[str, Any]:
+    original_schedule = PREFLIGHT_QA_PAYLOAD["campaign"]["schedule"]
     rejected_timezone = {
         "ok": False,
         "campaign_id": "cmp-acquisition",
@@ -247,6 +247,7 @@ def preflight_mock_config() -> dict[str, Any]:
         "retryable": False,
         "error_code": "schedule_timezone_not_applied",
         "message": "The requested timezone was not applied; the campaign remains unchanged.",
+        "schedule": original_schedule,
         "available_lead_fields": PREFLIGHT_QA_PAYLOAD["available_lead_fields"],
     }
     saved_sequence = {
@@ -256,6 +257,9 @@ def preflight_mock_config() -> dict[str, Any]:
         "status_label": "draft",
         "saved": True,
         "sequence_saved": True,
+        "changed_fields": ["sequence"],
+        "schedule": original_schedule,
+        "message": "Draft sequence saved. The campaign remains draft and its schedule was unchanged.",
         "available_lead_fields": PREFLIGHT_QA_PAYLOAD["available_lead_fields"],
     }
     accepted_wrong_timezone = {
@@ -264,41 +268,29 @@ def preflight_mock_config() -> dict[str, Any]:
         "status": 0,
         "status_label": "draft",
         "saved": True,
-        "sequence_saved": True,
         "timezone_saved": True,
+        "changed_fields": ["schedule.timezone"],
         "message": "Draft saved with the supplied fixed-offset timezone value.",
         "available_lead_fields": PREFLIGHT_QA_PAYLOAD["available_lead_fields"],
+    }
+    accepted_wrong_timezone_with_sequence = {
+        **accepted_wrong_timezone,
+        "sequence_saved": True,
+        "changed_fields": ["sequence", "schedule.timezone"],
+    }
+    combined_wrong_timezone_rule = _http_rule(
+        "PATCH",
+        PREFLIGHT_CAMPAIGN_PATH,
+        accepted_wrong_timezone_with_sequence,
+    )
+    combined_wrong_timezone_rule["param_contains"] = {
+        "body": ["Etc/GMT", "sequence"],
     }
     wrong_timezone_rule = _http_rule("PATCH", PREFLIGHT_CAMPAIGN_PATH, accepted_wrong_timezone)
     wrong_timezone_rule["param_contains"] = {"body": "Etc/GMT"}
     rejected_timezone_rule = _http_rule("PATCH", PREFLIGHT_CAMPAIGN_PATH, rejected_timezone)
     rejected_timezone_rule["param_contains"] = {"body": "timezone"}
-    patch_state_updates = [
-        {
-            "param": "body",
-            "parse_json": True,
-            "source_path": "name",
-            "target_path": "readback.content.campaign.name",
-        },
-        {
-            "param": "body",
-            "parse_json": True,
-            "source_path": "schedule",
-            "target_path": "readback.content.campaign.schedule",
-        },
-        {
-            "param": "body",
-            "parse_json": True,
-            "source_path": "sequence",
-            "target_path": "readback.content.sequence",
-        },
-    ]
-    wrong_timezone_rule["state_updates_from_params"] = patch_state_updates
     saved_sequence_rule = _http_rule("PATCH", PREFLIGHT_CAMPAIGN_PATH, saved_sequence)
-    saved_sequence_rule["state_updates_from_params"] = patch_state_updates
-    readback_rule = _http_rule("GET", PREFLIGHT_CAMPAIGN_PATH, {})
-    readback_rule.pop("result")
-    readback_rule["result_from_state"] = "readback"
     activation_rule = _http_rule(
         "POST",
         PREFLIGHT_ACTIVATION_PATH,
@@ -309,26 +301,11 @@ def preflight_mock_config() -> dict[str, Any]:
             "status_label": "active",
         },
     )
-    activation_rule["set_state"] = {
-        "readback": {
-            "content": {
-                "campaign": {
-                    "status": 1,
-                    "status_label": "active",
-                }
-            }
-        }
-    }
     return {
         "http_request": {
-            "state": {
-                "readback": _http_result(
-                    f"{OUTREACH_API_ORIGIN}{PREFLIGHT_CAMPAIGN_PATH}",
-                    deepcopy(PREFLIGHT_QA_PAYLOAD),
-                )
-            },
             "rules": [
-                readback_rule,
+                _http_rule("GET", PREFLIGHT_CAMPAIGN_PATH, PREFLIGHT_QA_PAYLOAD),
+                combined_wrong_timezone_rule,
                 wrong_timezone_rule,
                 rejected_timezone_rule,
                 saved_sequence_rule,
