@@ -216,19 +216,15 @@ function CharterChangeDetail({ change }: { change: AgentConfigCharterChange }) {
 
 export function AgentConfigUpdateDetail({ entry }: ToolDetailProps) {
   const timeZone = useAppSelector(selectImmersiveShellViewer).timeZone
-  const parsedUpdate = entry.agentConfigUpdate
-  const charterText = entry.charterText ?? parsedUpdate?.charterValue ?? null
-  const charterChange = parsedUpdate?.charterChange ?? null
+  const charterText = entry.charterText ?? null
+  const charterChange = entry.agentConfigCharterChange ?? null
   const charterConfirmation = entry.agentConfigConfirmation?.charter ?? null
   const hasCharterText = charterText !== null
-  const updatesCharter = Boolean(parsedUpdate?.updatesCharter || hasCharterText || charterChange)
-  const updatesSchedule = parsedUpdate?.updatesSchedule ?? false
-  const scheduleCleared = parsedUpdate?.scheduleCleared ?? false
-  const scheduleRaw = parsedUpdate?.scheduleValue ?? null
-  const scheduleKnown = scheduleCleared || scheduleRaw !== null
-  const scheduleValue = scheduleCleared ? null : scheduleRaw
+  const updatesCharter = charterConfirmation !== null
+  const updatesSchedule = entry.agentConfigConfirmation?.schedule !== undefined
+  const scheduleKnown = entry.scheduleValue !== undefined
   const scheduleDetails = scheduleKnown
-    ? describeSchedule(scheduleValue, { timeZone: timeZone ?? undefined })
+    ? describeSchedule(entry.scheduleValue ?? null, { timeZone: timeZone ?? undefined })
     : null
 
   return (

@@ -4,10 +4,8 @@ from typing import Any
 
 import sqlparse
 
-from api.agent.tools.sqlite_agent_config import (
-    sqlite_statement_assigns_agent_config_field,
-    sqlite_statement_mutates_agent_schedules,
-)
+from api.agent.tools.sqlite_agent_config import sqlite_statement_mutates_agent_schedules
+from api.agent.tools.sqlite_config_statements import sqlite_statement_assigns_agent_config_field
 from api.models import PersistentAgentHumanInputRequest, PersistentAgentToolCall
 
 

@@ -23,6 +23,7 @@ from redis.exceptions import RedisError
 
 from api.agent.core.event_processing import (
     OrchestratorPromptStale,
+    _annotate_agent_config_update_result,
     _capture_tool_display_metadata,
     _completion_with_failover,
     _execute_tool_call_runtime,
@@ -155,9 +156,45 @@ User = get_user_model()
 
 @tag("batch_event_processing")
 class ToolDisplayMetadataTests(TestCase):
+    def test_failed_config_attempt_does_not_gain_confirmation_from_a_later_update(self):
+        failed_charter = SimpleNamespace(
+            prepared=SimpleNamespace(
+                idx=0,
+                tool_name="sqlite_batch",
+                exec_params={"sql": "UPDATE __agent_config SET charter='Rejected' WHERE id=1"},
+            ),
+            result={"status": "error", "message": "failed"},
+        )
+        updated_schedule = SimpleNamespace(
+            prepared=SimpleNamespace(
+                idx=1,
+                tool_name="sqlite_batch",
+                exec_params={"sql": "UPDATE __agent_config SET schedule='0 9 * * *' WHERE id=1"},
+            ),
+            result={"status": "ok"},
+        )
+
+        _annotate_agent_config_update_result(
+            [failed_charter, updated_schedule],
+            SimpleNamespace(updated_fields=("schedule",), errors={}),
+        )
+
+        self.assertNotIn("agent_config_update", failed_charter.result)
+        self.assertEqual(
+            updated_schedule.result["agent_config_update"],
+            {
+                "updated_fields": ["schedule"],
+                "unchanged_fields": [],
+                "errors": {},
+            },
+        )
+
     @patch("api.agent.core.event_processing.read_sqlite_agent_config_snapshot")
     def test_assignment_snapshot_is_captured_only_for_successful_config_mutations(self, mock_read_snapshot):
-        mock_read_snapshot.return_value = SimpleNamespace(charter="Updated full assignment")
+        mock_read_snapshot.return_value = SimpleNamespace(
+            charter="Updated full assignment",
+            schedule="0 9 * * *",
+        )
         patch_call = SimpleNamespace(
             tool_name="sqlite_batch",
             exec_params={
@@ -170,7 +207,12 @@ class ToolDisplayMetadataTests(TestCase):
 
         self.assertEqual(
             _capture_tool_display_metadata(patch_call, {"status": "ok"}),
-            {"agent_config": {"charter": "Updated full assignment"}},
+            {
+                "agent_config": {
+                    "charter": "Updated full assignment",
+                    "schedule": "0 9 * * *",
+                },
+            },
         )
 
         insert_call = SimpleNamespace(
@@ -184,7 +226,12 @@ class ToolDisplayMetadataTests(TestCase):
         )
         self.assertEqual(
             _capture_tool_display_metadata(insert_call, {"status": "ok"}),
-            {"agent_config": {"charter": "Updated full assignment"}},
+            {
+                "agent_config": {
+                    "charter": "Updated full assignment",
+                    "schedule": "0 9 * * *",
+                },
+            },
         )
 
         mock_read_snapshot.reset_mock()
@@ -210,8 +257,16 @@ class ToolDisplayMetadataTests(TestCase):
                 ),
             },
         )
-        self.assertEqual(_capture_tool_display_metadata(schedule_call, {"status": "ok"}), {})
-        mock_read_snapshot.assert_not_called()
+        self.assertEqual(
+            _capture_tool_display_metadata(schedule_call, {"status": "ok"}),
+            {
+                "agent_config": {
+                    "charter": "Updated full assignment",
+                    "schedule": "0 9 * * *",
+                },
+            },
+        )
+        mock_read_snapshot.assert_called_once()
 
 
 @tag("batch_event_processing")

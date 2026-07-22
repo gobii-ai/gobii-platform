@@ -771,6 +771,10 @@ def _serialize_step_entry(env: StepEnvelope, labels: Mapping[str, str]) -> dict:
         charter_text = agent_config.get("charter")
         if isinstance(charter_text, str):
             entry["charterText"] = charter_text
+        if "schedule" in agent_config:
+            schedule_value = agent_config.get("schedule")
+            if schedule_value is None or isinstance(schedule_value, str):
+                entry["scheduleValue"] = schedule_value
     preview_url = _extract_tool_preview_url(tool_call)
     if preview_url:
         lowered_tool_name = tool_name.lower()

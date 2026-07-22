@@ -1,8 +1,11 @@
 import type { ReactElement } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import type { ToolCallEntry } from '../../../types/agentChat'
-import type { AgentConfigSqlUpdate, SqliteInternalTableKind, SqliteStatementOperation } from '../../tooling/agentConfigSql'
-import type { AgentConfigUpdateConfirmation } from '../../tooling/agentConfigResult'
+import type { AgentConfigCharterChange, SqliteInternalTableKind, SqliteStatementOperation } from '../../tooling/agentConfigSql'
+
+export type AgentConfigUpdateConfirmation = Partial<
+  Record<'charter' | 'schedule', 'updated' | 'unchanged'>
+>
 
 export type ToolDetailComponent = (props: ToolDetailProps) => ReactElement
 
@@ -24,7 +27,8 @@ export type ToolEntryDisplay = {
   result: unknown
   summary?: string | null
   charterText?: string | null
-  agentConfigUpdate?: AgentConfigSqlUpdate | null
+  scheduleValue?: string | null
+  agentConfigCharterChange?: AgentConfigCharterChange | null
   agentConfigConfirmation?: AgentConfigUpdateConfirmation | null
   sqlStatements?: string[]
   detailComponent: ToolDetailComponent

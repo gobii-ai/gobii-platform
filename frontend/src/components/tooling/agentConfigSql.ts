@@ -1,14 +1,3 @@
-import { splitSqlByComma } from './sqlFormatting'
-
-export type AgentConfigSqlUpdate = {
-  updatesCharter: boolean
-  updatesSchedule: boolean
-  charterValue: string | null
-  charterChange: AgentConfigCharterChange | null
-  scheduleValue: string | null
-  scheduleCleared: boolean
-}
-
 export type AgentConfigCharterChange = {
   previousText: string | null
   replacementText: string | null
@@ -43,17 +32,12 @@ export type SqliteStatementClassification = {
 }
 
 const AGENT_CONFIG_TABLE = '__agent_config'
-const MUTATION_RE = /\b(update|insert|replace|delete)\b/i
 const SQLITE_INTERNAL_TABLE_NAME_MAP = {
   __messages: 'messages',
   __tool_results: 'toolResults',
   __agent_skills: 'agentSkills',
   __files: 'files',
 } satisfies Record<string, SqliteInternalTableKind>
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-}
 
 function decodeSqlLiteral(value: string): string | null | undefined {
   const trimmed = value.trim()
@@ -74,49 +58,6 @@ function decodeSqlLiteral(value: string): string | null | undefined {
 
 function normalizeEscapedNewlinesForDisplay(value: string | null): string | null {
   return value?.replace(/\\r\\n|\\n|\\r/g, '\n') ?? null
-}
-
-function parseInsertValueAssignment(
-  statement: string,
-  field: string,
-): { present: boolean; value: string | null | undefined } {
-  const insertMatch = statement.match(
-    /\b(?:insert(?:\s+or\s+\w+)?|replace)\b[\s\S]*?\binto\b[\s\S]*?__agent_config\b[\s\S]*?\(([\s\S]*?)\)\s*values\s*\(([\s\S]*?)\)/i,
-  )
-  if (!insertMatch) {
-    return { present: false, value: undefined }
-  }
-
-  const rawColumns = insertMatch[1]
-  const rawValues = insertMatch[2]
-  const columns = splitSqlByComma(rawColumns).map((column) => column.replace(/["'`]/g, '').trim().toLowerCase())
-  const values = splitSqlByComma(rawValues)
-  if (!columns.length || columns.length !== values.length) {
-    return { present: false, value: undefined }
-  }
-
-  const fieldLower = field.toLowerCase()
-  const targetIndex = columns.findIndex((column) => column === fieldLower)
-  if (targetIndex < 0) {
-    return { present: false, value: undefined }
-  }
-
-  return { present: true, value: decodeSqlLiteral(values[targetIndex] ?? '') }
-}
-
-function extractSqlAssignment(statement: string, field: string): string | null {
-  const token = escapeRegExp(field)
-  const singleQuote = new RegExp(`\\b${token}\\b\\s*=\\s*'((?:[^']|'')*)'`, 'i')
-  const singleMatch = statement.match(singleQuote)
-  if (singleMatch) {
-    return singleMatch[1].replace(/''/g, "'")
-  }
-  const doubleQuote = new RegExp(`\\b${token}\\b\\s*=\\s*"((?:[^"]|"")*)"`, 'i')
-  const doubleMatch = statement.match(doubleQuote)
-  if (doubleMatch) {
-    return doubleMatch[1].replace(/""/g, '"')
-  }
-  return null
 }
 
 function extractUpdateAssignments(statement: string): string | null {
@@ -152,20 +93,6 @@ function parsePatchTextAssignment(statement: string): AgentConfigCharterChange |
     previousText: normalizeEscapedNewlinesForDisplay(decodedPreviousText),
     replacementText: normalizeEscapedNewlinesForDisplay(decodedReplacementText),
   }
-}
-
-function hasAssignment(statement: string, field: string): boolean {
-  const token = escapeRegExp(field)
-  const assignRe = new RegExp(`\\b${token}\\b\\s*=`, 'i')
-  return assignRe.test(statement)
-}
-
-function isClearingAssignment(statement: string, field: string): boolean {
-  const token = escapeRegExp(field)
-  const nullRe = new RegExp(`\\b${token}\\b\\s*=\\s*null\\b`, 'i')
-  const emptySingleRe = new RegExp(`\\b${token}\\b\\s*=\\s*''`, 'i')
-  const emptyDoubleRe = new RegExp(`\\b${token}\\b\\s*=\\s*""`, 'i')
-  return nullRe.test(statement) || emptySingleRe.test(statement) || emptyDoubleRe.test(statement)
 }
 
 function normalizeSqlForParsing(sql: string): string {
@@ -509,85 +436,14 @@ export function expandSqlStatements(statements: string[]): string[] {
   return expanded
 }
 
-export function parseAgentConfigUpdates(statements: string[]): AgentConfigSqlUpdate | null {
-  let updatesCharter = false
-  let updatesSchedule = false
-  let charterValue: string | null = null
+export function parseAgentConfigCharterChange(statements: string[]): AgentConfigCharterChange | null {
   let charterChange: AgentConfigCharterChange | null = null
-  let scheduleValue: string | null = null
-  let scheduleCleared = false
-
   for (const statement of expandSqlStatements(statements)) {
-    const normalized = statement.toLowerCase()
-    if (!normalized.includes(AGENT_CONFIG_TABLE)) {
-      continue
-    }
-    if (!MUTATION_RE.test(statement)) {
-      continue
-    }
     const updateAssignments = extractUpdateAssignments(statement)
-    const assignmentSource = updateAssignments ?? ''
-
-    if (hasAssignment(assignmentSource, 'charter')) {
-      updatesCharter = true
-      const parsedCharter = extractSqlAssignment(assignmentSource, 'charter')
-      if (parsedCharter !== null) {
-        charterValue = parsedCharter
-        charterChange = null
-      } else {
-        const parsedChange = parsePatchTextAssignment(assignmentSource)
-        if (parsedChange) {
-          charterValue = null
-          charterChange = parsedChange
-        }
-      }
-    } else if (updateAssignments === null) {
-      const parsedInsertCharter = parseInsertValueAssignment(statement, 'charter')
-      if (parsedInsertCharter.present) {
-        updatesCharter = true
-        if (parsedInsertCharter.value !== undefined) {
-          charterValue = parsedInsertCharter.value
-        }
-      }
-    }
-
-    if (hasAssignment(assignmentSource, 'schedule')) {
-      updatesSchedule = true
-      if (isClearingAssignment(assignmentSource, 'schedule')) {
-        scheduleCleared = true
-        scheduleValue = null
-      } else {
-        const parsedSchedule = extractSqlAssignment(assignmentSource, 'schedule')
-        if (parsedSchedule !== null) {
-          scheduleValue = parsedSchedule
-          scheduleCleared = false
-        }
-      }
-    } else if (updateAssignments === null) {
-      const parsedInsertSchedule = parseInsertValueAssignment(statement, 'schedule')
-      if (parsedInsertSchedule.present) {
-        updatesSchedule = true
-        if (parsedInsertSchedule.value === null || parsedInsertSchedule.value === '') {
-          scheduleCleared = true
-          scheduleValue = null
-        } else if (parsedInsertSchedule.value !== undefined) {
-          scheduleCleared = false
-          scheduleValue = parsedInsertSchedule.value
-        }
-      }
+    const parsedChange = updateAssignments && parsePatchTextAssignment(updateAssignments)
+    if (parsedChange) {
+      charterChange = parsedChange
     }
   }
-
-  if (!updatesCharter && !updatesSchedule) {
-    return null
-  }
-
-  return {
-    updatesCharter,
-    updatesSchedule,
-    charterValue,
-    charterChange,
-    scheduleValue,
-    scheduleCleared,
-  }
+  return charterChange
 }

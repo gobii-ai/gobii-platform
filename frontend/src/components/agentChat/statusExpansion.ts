@@ -12,7 +12,7 @@ export function isScheduleDisplayEntry(entry: ToolEntryDisplay): boolean {
     return true
   }
 
-  return entry.agentConfigUpdate?.updatesSchedule === true
+  return entry.agentConfigConfirmation?.schedule !== undefined
 }
 
 export function isAssignmentDisplayEntry(entry: ToolEntryDisplay): boolean {
@@ -20,7 +20,7 @@ export function isAssignmentDisplayEntry(entry: ToolEntryDisplay): boolean {
     return true
   }
 
-  return entry.agentConfigUpdate?.updatesCharter === true
+  return entry.agentConfigConfirmation?.charter !== undefined
 }
 
 export function isStatusDisplayEntry(entry: ToolEntryDisplay): boolean {

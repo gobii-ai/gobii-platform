@@ -3,7 +3,11 @@ import { describe, expect, it } from 'vitest'
 import type { ToolClusterEvent } from '../types/agentChat'
 import { mergeTimelineEvents } from './agentChatTimeline'
 
-function configEvent(status: 'pending' | 'complete', charterText?: string): ToolClusterEvent {
+function configEvent(
+  status: 'pending' | 'complete',
+  charterText?: string,
+  scheduleValue?: string | null,
+): ToolClusterEvent {
   return {
     kind: 'steps',
     cursor: '100:step:config-step',
@@ -31,6 +35,7 @@ function configEvent(status: 'pending' | 'complete', charterText?: string): Tool
         : '',
       status,
       charterText,
+      scheduleValue,
     }],
   }
 }
@@ -39,7 +44,7 @@ describe('mergeTimelineEvents', () => {
   it('replaces a pending tool entry with finalized charter metadata without duplication', () => {
     const merged = mergeTimelineEvents(
       [configEvent('pending')],
-      [configEvent('complete', 'Full persisted assignment')],
+      [configEvent('complete', 'Full persisted assignment', null)],
     )
 
     expect(merged).toHaveLength(1)
@@ -50,6 +55,7 @@ describe('mergeTimelineEvents', () => {
         id: 'config-step',
         status: 'complete',
         charterText: 'Full persisted assignment',
+        scheduleValue: null,
       }],
     })
   })

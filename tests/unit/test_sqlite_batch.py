@@ -200,6 +200,22 @@ class SqliteBatchToolTests(TestCase):
 
         self.assertEqual(out.get("error_code"), "config_patch_not_persisted")
 
+    def test_patch_text_must_assign_the_charter_field(self):
+        with self._with_temp_db():
+            for assignment in ("schedule=schedule", "charter=charter"):
+                with self.subTest(assignment=assignment):
+                    out = execute_sqlite_batch(
+                        self.agent,
+                        {
+                            "sql": (
+                                f"UPDATE __agent_config SET {assignment} "
+                                "RETURNING patch_text(charter, 'old', 'new')"
+                            ),
+                            "will_continue_work": True,
+                        },
+                    )
+                    self.assertEqual(out.get("error_code"), "config_patch_not_persisted")
+
     def test_agent_config_patch_update_persists(self):
         with self._with_temp_db() as (db_path, _token, _tmp):
             with sqlite3.connect(db_path) as conn:

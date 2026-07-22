@@ -55,13 +55,6 @@ CONFIG_PATCH_NOT_PERSISTED_MESSAGE = (
     "Query not executed: SELECT patch_text(...) only computes a value and does not persist agent config. "
     "Use UPDATE __agent_config SET charter=patch_text(charter, old, new) WHERE id=1."
 )
-PERSISTING_AGENT_CONFIG_STATEMENT_RE = re.compile(
-    r"\b(?:"
-    r"update\s+(?:or\s+\w+\s+)?[\"`\[]?__agent_config[\"`\]]?\s+set\b|"
-    r"(?:insert(?:\s+or\s+\w+)?|replace)\s+into\s+[\"`\[]?__agent_config[\"`\]]?\b"
-    r")",
-    re.IGNORECASE,
-)
 
 
 @dataclass(frozen=True)
@@ -1744,7 +1737,11 @@ def _non_persisting_agent_config_patch(queries: List[str]) -> Optional[str]:
             if (
                 re.search(r"\bpatch_text\s*\(", structural_sql, re.IGNORECASE)
                 and re.search(r"\b__agent_config\b", structural_sql, re.IGNORECASE)
-                and not PERSISTING_AGENT_CONFIG_STATEMENT_RE.search(structural_sql)
+                and not re.search(
+                    r"\bcharter\b\s*=\s*patch_text\s*\(",
+                    structural_sql,
+                    re.IGNORECASE,
+                )
             ):
                 return str(statement).strip()
     return None

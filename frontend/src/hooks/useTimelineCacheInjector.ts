@@ -647,56 +647,9 @@ export async function refreshTimelineLatestInCache(
   })
 }
 
-function timelineVariantFromQueryKey(
-  queryKey: readonly unknown[],
-): { developerMode: boolean; staffContext: StaffViewContext | null } | null {
-  if (queryKey[0] !== 'agent-timeline' || typeof queryKey[1] !== 'string') {
-    return null
-  }
-
-  const developerMode = queryKey[2] === 'developer'
-  const rawStaffContext = queryKey[3]
-  if (rawStaffContext === null || rawStaffContext === undefined) {
-    return { developerMode, staffContext: null }
-  }
-  if (typeof rawStaffContext !== 'string') {
-    return null
-  }
-
-  const separatorIndex = rawStaffContext.indexOf(':')
-  const type = rawStaffContext.slice(0, separatorIndex)
-  const id = rawStaffContext.slice(separatorIndex + 1)
-  if (separatorIndex <= 0 || !id || (type !== 'personal' && type !== 'organization')) {
-    return null
-  }
-  return {
-    developerMode,
-    staffContext: { type, id },
-  }
-}
-
 export async function refreshLoadedTimelineVariantsInCache(
   queryClient: QueryClient,
   agentId: string,
 ): Promise<void> {
-  const variants = new Map<string, { developerMode: boolean; staffContext: StaffViewContext | null }>()
-  for (const query of queryClient.getQueryCache().findAll({ queryKey: ['agent-timeline', agentId] })) {
-    const data = query.state.data as InfiniteData<TimelinePage> | undefined
-    if (!data?.pages.length) {
-      continue
-    }
-    const variant = timelineVariantFromQueryKey(query.queryKey)
-    if (variant) {
-      variants.set(JSON.stringify(variant), variant)
-    }
-  }
-
-  await Promise.all(Array.from(variants.values(), (variant) => (
-    refreshTimelineLatestInCache(queryClient, agentId, {
-      mode: 'contiguous',
-      developerMode: variant.developerMode,
-      staffContext: variant.staffContext,
-      allowDuringQueryFetch: true,
-    })
-  )))
+  await queryClient.refetchQueries({ queryKey: ['agent-timeline', agentId], type: 'all' })
 }

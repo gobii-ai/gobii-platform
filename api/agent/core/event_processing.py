@@ -115,9 +115,9 @@ from ..tools.sqlite_agent_config import (
     apply_sqlite_agent_config_updates,
     read_sqlite_agent_config_snapshot,
     seed_sqlite_agent_config,
-    sqlite_statement_assigns_agent_config_field,
     sqlite_statement_mutates_agent_schedules,
 )
+from ..tools.sqlite_config_statements import sqlite_statement_assigns_agent_config_field
 from ..tools.sqlite_skills import apply_sqlite_skill_updates, refresh_skills_for_tool, seed_sqlite_skills
 from ..tools.custom_tools import execute_create_custom_tool
 from ..tools.custom_tool_names import CREATE_CUSTOM_TOOL_NAME
@@ -2556,7 +2556,7 @@ def _annotate_agent_config_update_result(
 ) -> None:
     config_outcomes = []
     for outcome in outcomes:
-        if outcome.prepared.tool_name == "sqlite_batch":
+        if outcome.prepared.tool_name == "sqlite_batch" and _tool_result_is_success(outcome.result):
             fields = _sqlite_batch_agent_config_attempted_fields(outcome.prepared.exec_params)
             if fields:
                 config_outcomes.append((outcome, fields))
@@ -2567,7 +2567,8 @@ def _annotate_agent_config_update_result(
     attempted_fields = tuple(
         field for field in ("charter", "schedule", "schedules", "emotion") if field in attempted
     )
-    updated_fields = list(config_apply.updated_fields)
+    updated_fields = [field for field in config_apply.updated_fields if field in attempted]
+    errors = {field: message for field, message in config_apply.errors.items() if field in attempted}
     target = max(config_outcomes, key=lambda item: item[0].prepared.idx)[0]
     result = dict(target.result) if isinstance(target.result, dict) else {
         "status": "ok",
@@ -2575,8 +2576,11 @@ def _annotate_agent_config_update_result(
     }
     result["agent_config_update"] = {
         "updated_fields": updated_fields,
-        "unchanged_fields": [field for field in attempted_fields if field not in updated_fields],
-        "errors": config_apply.errors,
+        "unchanged_fields": [
+            field for field in attempted_fields
+            if field not in updated_fields and field not in errors
+        ],
+        "errors": errors,
     }
     target.result = result
 
@@ -3060,7 +3064,7 @@ def _capture_tool_display_metadata(
     if (
         prepared.tool_name != "sqlite_batch"
         or not _tool_result_is_success(result)
-        or "charter" not in _sqlite_batch_agent_config_attempted_fields(prepared.exec_params)
+        or not _sqlite_batch_agent_config_attempted_fields(prepared.exec_params)
     ):
         return {}
 
@@ -3070,6 +3074,7 @@ def _capture_tool_display_metadata(
     return {
         "agent_config": {
             "charter": snapshot.charter,
+            "schedule": snapshot.schedule,
         },
     }
 

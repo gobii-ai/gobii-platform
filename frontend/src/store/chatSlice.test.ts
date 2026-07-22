@@ -1,9 +1,8 @@
-import { QueryClient, type InfiniteData } from '@tanstack/react-query'
+import { QueryClient } from '@tanstack/react-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { fetchAgentTimeline, fetchProcessingStatus, sendAgentMessage, type TimelineResponse } from '../api/agentChat'
+import { fetchProcessingStatus, sendAgentMessage } from '../api/agentChat'
 import { fetchAgentSpawnIntent, type AgentSpawnIntent } from '../api/agentSpawnIntent'
-import { timelineQueryKey, timelineResponseToPage, type TimelinePage } from '../hooks/useAgentTimeline'
 import type { TimelineEvent } from '../types/agentChat'
 import { createAppStore } from './appStore'
 import {
@@ -22,7 +21,6 @@ import {
 vi.mock('../api/agentChat', () => ({
   sendAgentMessage: vi.fn(),
   fetchProcessingStatus: vi.fn(),
-  fetchAgentTimeline: vi.fn(),
 }))
 
 vi.mock('../api/agentSpawnIntent', () => ({
@@ -246,7 +244,6 @@ describe('chatSlice workflow state', () => {
 describe('chatSlice processing state', () => {
   beforeEach(() => {
     vi.mocked(fetchProcessingStatus).mockReset()
-    vi.mocked(fetchAgentTimeline).mockReset()
   })
 
   it('updates the addressed agent when another agent is active', () => {
@@ -262,26 +259,17 @@ describe('chatSlice processing state', () => {
 
   it('refreshes loaded timeline variants when realtime processing becomes inactive', async () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    const emptyResponse: TimelineResponse = {
-      events: [],
-      has_more_older: false,
-      has_more_newer: false,
-      processing_active: false,
-    }
-    queryClient.setQueryData<InfiniteData<TimelinePage>>(timelineQueryKey('agent-1'), {
-      pages: [timelineResponseToPage(emptyResponse)],
-      pageParams: [undefined],
-    })
-    vi.mocked(fetchAgentTimeline).mockResolvedValue(emptyResponse)
+    const refetchQueries = vi.spyOn(queryClient, 'refetchQueries').mockResolvedValue(undefined)
     const store = createAppStore({ queryClient })
 
     store.dispatch(updateRealtimeProcessing('agent-1', { active: true, webTasks: [] }))
     store.dispatch(updateRealtimeProcessing('agent-1', { active: false, webTasks: [] }))
 
     await vi.waitFor(() => {
-      expect(fetchAgentTimeline).toHaveBeenCalledWith('agent-1', expect.objectContaining({
-        direction: 'initial',
-      }))
+      expect(refetchQueries).toHaveBeenCalledWith({
+        queryKey: ['agent-timeline', 'agent-1'],
+        type: 'all',
+      })
     })
   })
 

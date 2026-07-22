@@ -161,38 +161,30 @@ describe('refreshTimelineLatestInCache', () => {
 
   it('refreshes every loaded timeline variant after processing completes', async () => {
     const staffContext = { type: 'personal' as const, id: 'user-1' }
-    const keys = [
+    const agentKeys = [
       timelineQueryKey('agent-1'),
       timelineQueryKey('agent-1', true),
       timelineQueryKey('agent-1', true, staffContext),
     ]
-    for (const key of keys) {
-      queryClient.setQueryData<InfiniteData<TimelinePage>>(key, {
-        pages: [timelineResponseToPage(emptyTimelineResponse)],
-        pageParams: [undefined],
+    const otherAgentKey = timelineQueryKey('agent-2')
+    const fetchedKeys: string[] = []
+    for (const key of [...agentKeys, otherAgentKey]) {
+      await queryClient.fetchInfiniteQuery({
+        queryKey: key,
+        queryFn: async () => {
+          fetchedKeys.push(JSON.stringify(key))
+          return timelineResponseToPage(emptyTimelineResponse)
+        },
+        initialPageParam: undefined,
+        getNextPageParam: () => undefined,
       })
     }
-    queryClient.setQueryData<InfiniteData<TimelinePage>>(timelineQueryKey('agent-2'), {
-      pages: [timelineResponseToPage(emptyTimelineResponse)],
-      pageParams: [undefined],
-    })
-    fetchAgentTimelineMock.mockResolvedValue(emptyTimelineResponse)
+    fetchedKeys.length = 0
 
     await refreshLoadedTimelineVariantsInCache(queryClient, 'agent-1')
 
-    expect(fetchAgentTimelineMock).toHaveBeenCalledTimes(3)
-    expect(fetchAgentTimelineMock).toHaveBeenCalledWith('agent-1', expect.objectContaining({
-      developerMode: false,
-      staffContext: null,
-    }))
-    expect(fetchAgentTimelineMock).toHaveBeenCalledWith('agent-1', expect.objectContaining({
-      developerMode: true,
-      staffContext: null,
-    }))
-    expect(fetchAgentTimelineMock).toHaveBeenCalledWith('agent-1', expect.objectContaining({
-      developerMode: true,
-      staffContext,
-    }))
-    expect(fetchAgentTimelineMock).not.toHaveBeenCalledWith('agent-2', expect.anything())
+    expect(fetchedKeys).toHaveLength(3)
+    expect(fetchedKeys).toEqual(expect.arrayContaining(agentKeys.map((key) => JSON.stringify(key))))
+    expect(fetchedKeys).not.toContain(JSON.stringify(otherAgentKey))
   })
 })

@@ -69,6 +69,7 @@ function clusterForAgentConfig(options: {
   status?: 'pending' | 'complete' | 'error'
   result?: unknown
   charterText?: string | null
+  scheduleValue?: string | null
 } = {}): ToolClusterEvent {
   return {
     kind: 'steps',
@@ -90,6 +91,7 @@ function clusterForAgentConfig(options: {
       result: options.result ?? '',
       status: options.status ?? 'complete',
       charterText: options.charterText,
+      scheduleValue: options.scheduleValue,
     }],
   }
 }
@@ -329,6 +331,10 @@ describe('transformToolCluster agent config display', () => {
     expect(transformed.entries[0]).toMatchObject({
       label: 'Assignment updated',
       charterText: 'Full persisted assignment',
+      agentConfigCharterChange: {
+        previousText: 'Old text',
+        replacementText: 'New text',
+      },
       agentConfigConfirmation: { charter: 'updated' },
     })
   })
@@ -350,12 +356,13 @@ describe('transformToolCluster agent config display', () => {
       label: 'Assignment already current',
       agentConfigConfirmation: { charter: 'unchanged' },
     })
-    expect(transformed.entries[0].agentConfigUpdate?.charterChange).toBeNull()
+    expect(transformed.entries[0].agentConfigCharterChange).toBeNull()
   })
 
   it('suppresses a failed charter field while displaying a confirmed schedule field', () => {
     const transformed = transformToolCluster(clusterForAgentConfig({
       sql: "UPDATE __agent_config SET charter='Rejected', schedule='0 9 * * *' WHERE id=1",
+      scheduleValue: '0 9 * * *',
       result: {
         status: 'ok',
         agent_config_update: {
@@ -370,10 +377,7 @@ describe('transformToolCluster agent config display', () => {
     expect(transformed.entries[0]).toMatchObject({
       label: 'Schedule updated',
       agentConfigConfirmation: { schedule: 'updated' },
-      agentConfigUpdate: {
-        updatesCharter: false,
-        updatesSchedule: true,
-      },
+      scheduleValue: '0 9 * * *',
       charterText: null,
     })
   })
