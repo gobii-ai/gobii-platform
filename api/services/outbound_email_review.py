@@ -52,6 +52,11 @@ class StaleOutboxVersionError(OutboundEmailReviewError):
     pass
 
 
+def _reviews_for_update():
+    # PostgreSQL cannot apply FOR UPDATE to nullable select_related joins used by approval.
+    return OutboundEmailReview.objects.select_for_update(of=("self",))
+
+
 def track_review_event(
     review: OutboundEmailReview,
     event: AnalyticsEvent,
@@ -219,7 +224,7 @@ def expire_review_if_needed(review: OutboundEmailReview, *, now=None) -> bool:
     now = now or timezone.now()
     if review.status != OutboundEmailReview.Status.PENDING or now < review.expires_at:
         return False
-    locked = OutboundEmailReview.objects.select_for_update().select_related("agent").get(pk=review.pk)
+    locked = _reviews_for_update().select_related("agent").get(pk=review.pk)
     if locked.status != OutboundEmailReview.Status.PENDING or now < locked.expires_at:
         review.status = locked.status
         review.decided_at = locked.decided_at
@@ -373,7 +378,7 @@ def update_pending_review_message(
     expected_version: int,
     changes: dict[str, object],
 ) -> OutboundEmailReview:
-    locked = OutboundEmailReview.objects.select_for_update().select_related("message").get(pk=review.pk)
+    locked = _reviews_for_update().select_related("message").get(pk=review.pk)
     expire_review_if_needed(locked)
     if locked.status != OutboundEmailReview.Status.PENDING:
         raise OutboundEmailReviewError("This Outbox item can no longer be edited.")
@@ -468,7 +473,7 @@ def approve_review(
     changes: dict[str, object] | None = None,
     acknowledge_thread_changed: bool = False,
 ) -> OutboundEmailReview:
-    locked = OutboundEmailReview.objects.select_for_update().select_related(
+    locked = _reviews_for_update().select_related(
         "message__from_endpoint",
         "message__owner_agent__user",
         "message__owner_agent__organization",
@@ -533,7 +538,7 @@ def approve_review(
 
 @transaction.atomic
 def discard_review(review: OutboundEmailReview, *, actor, expected_version: int) -> OutboundEmailReview:
-    locked = OutboundEmailReview.objects.select_for_update().get(pk=review.pk)
+    locked = _reviews_for_update().get(pk=review.pk)
     expire_review_if_needed(locked)
     if locked.status != OutboundEmailReview.Status.PENDING:
         raise OutboundEmailReviewError("This Outbox item can no longer be discarded.")
@@ -553,7 +558,7 @@ def discard_review(review: OutboundEmailReview, *, actor, expected_version: int)
 
 @transaction.atomic
 def retry_review(review: OutboundEmailReview, *, actor) -> OutboundEmailReview:
-    locked = OutboundEmailReview.objects.select_for_update().select_related("message").get(pk=review.pk)
+    locked = _reviews_for_update().select_related("message").get(pk=review.pk)
     if locked.status != OutboundEmailReview.Status.APPROVED:
         raise OutboundEmailReviewError("Only an approved Outbox item can be retried.")
     message = locked.message
