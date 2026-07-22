@@ -991,12 +991,49 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
     },
   },
   {
+    name: 'manage_inbound_webhooks',
+    aliases: ['manage_outbound_webhooks'],
+    label: 'Webhook managed',
+    icon: Webhook,
+    iconBgClass: 'bg-violet-100',
+    iconColorClass: 'text-violet-600',
+    detailKind: 'webhookManagement',
+    derive(entry, parameters) {
+      const inbound = entry.toolName !== 'manage_outbound_webhooks'
+      const direction = inbound ? 'Inbound' : 'Outbound'
+      const action = coerceString(parameters?.['action']) || 'manage'
+      const result = parseResultObject(entry.result)
+      const failed = coerceString(result?.['status']) === 'error'
+      const webhooks = Array.isArray(result?.['webhooks']) ? result['webhooks'] : []
+      const webhook = result?.['webhook'] ?? result?.['deleted_webhook']
+      const webhookData = webhook && typeof webhook === 'object' && !Array.isArray(webhook)
+        ? webhook as Record<string, unknown> : null
+      const name = coerceString(webhookData?.['name']) || coerceString(parameters?.['name'])
+      const verbs: Record<string, string> = {
+        create: 'created', update: 'updated', get: 'inspected', rotate_secret: 'secret rotated', delete: 'deleted',
+      }
+      const label = failed
+        ? `${direction} webhook action failed`
+        : action === 'list' ? `${direction} webhooks listed` : `${direction} webhook ${verbs[action] || 'managed'}`
+      const caption = action === 'list'
+        ? webhooks.length ? `${webhooks.length} configured` : `No ${direction.toLowerCase()} webhooks configured`
+        : name || label
+      return {
+        label,
+        caption,
+        summary: failed ? coerceString(result?.['message']) : name ? `${direction} • ${name}` : null,
+        iconBgClass: inbound ? 'bg-violet-100' : 'bg-cyan-100',
+        iconColorClass: inbound ? 'text-violet-600' : 'text-cyan-700',
+      }
+    },
+  },
+  {
     name: 'send_webhook_event',
     label: 'Webhook sent',
     icon: Webhook,
     iconBgClass: 'bg-orange-100',
     iconColorClass: 'text-orange-600',
-    detailKind: 'default',
+    detailKind: 'webhookManagement',
     derive(entry, parameters) {
       const resultData = parseResultObject(entry.result)
       const webhookName =
@@ -1005,28 +1042,11 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
       const status =
         typeof statusValue === 'number' || typeof statusValue === 'string' ? String(statusValue) : null
 
-      const payload = parameters?.['payload']
-      const payloadKeyCount =
-        payload && typeof payload === 'object' && !Array.isArray(payload)
-          ? Object.keys(payload as Record<string, unknown>).length
-          : null
-
-      const summaryParts: string[] = []
-      if (webhookName) {
-        summaryParts.push(webhookName)
-      }
-      if (status) {
-        summaryParts.push(`Status ${status}`)
-      }
-      if (payloadKeyCount) {
-        summaryParts.push(`${payloadKeyCount} field${payloadKeyCount === 1 ? '' : 's'}`)
-      }
-
       const caption = webhookName ? `Webhook: ${truncate(webhookName, 40)}` : null
 
       return {
         caption: caption ?? entry.caption ?? 'Webhook triggered',
-        summary: summaryParts.length ? truncate(summaryParts.join(' • '), 96) : entry.summary ?? null,
+        summary: [webhookName, status ? `Status ${status}` : null].filter(Boolean).join(' • ') || entry.summary || null,
       }
     },
   },

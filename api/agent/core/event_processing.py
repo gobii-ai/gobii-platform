@@ -135,7 +135,6 @@ from ..tools.tool_manager import ToolCatalogEntry, execute_enabled_tool, auto_en
 from ...services.tool_blacklist import is_tool_blacklisted_for_agent, tool_blacklist_error
 from ..tools.web_chat_sender import execute_send_chat_message, _looks_like_routine_progress_message
 from ..tools.peer_dm import execute_send_agent_message
-from ..tools.webhook_sender import execute_send_webhook_event
 from ..tools.agent_variables import clear_variables, get_all_variables, replace_all_variables, substitute_variables
 from ..tools.file_export_helpers import resolve_export_target
 from ..files.filespace_service import _normalize_write_path
@@ -2947,7 +2946,6 @@ _DIRECT_TOOL_EXECUTORS: Dict[str, _ToolExecutorResolver] = {
     "send_sms": lambda: execute_send_sms,
     "send_chat_message": lambda: execute_send_chat_message,
     "send_agent_message": lambda: execute_send_agent_message,
-    "send_webhook_event": lambda: execute_send_webhook_event,
     "update_schedule": lambda: execute_update_schedule,
     "update_charter": lambda: execute_update_charter,
     "update_plan": lambda: execute_update_plan,

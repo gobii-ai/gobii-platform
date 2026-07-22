@@ -9,7 +9,7 @@ from api.models import PersistentAgent, PersistentAgentEnabledTool, PersistentAg
 from api.services.pipedream_apps import enable_pipedream_apps_for_agent
 
 from .registry import SystemSkillDefinition, equivalent_system_skill_keys, get_system_skill_definition, normalize_system_skill_key
-from .defaults import DEFAULT_SYSTEM_SKILL_DEFINITIONS
+from .defaults import DEFAULT_SYSTEM_SKILL_DEFINITIONS, WEBHOOKS_SYSTEM_SKILL_KEY
 
 
 def default_enabled_system_skill_keys() -> tuple[str, ...]:
@@ -50,6 +50,15 @@ def ensure_default_system_skills_enabled(agent: PersistentAgent) -> None:
 
 def get_enabled_system_skill_states(agent: PersistentAgent):
     ensure_default_system_skills_enabled(agent)
+    if (
+        not PersistentAgentSystemSkillState.objects.filter(
+            agent=agent,
+            skill_key=WEBHOOKS_SYSTEM_SKILL_KEY,
+        ).exists()
+        and agent.webhooks.exists()
+    ):
+        # Preserve pre-skill webhook setups without overriding an explicit disable.
+        enable_system_skills(agent, [WEBHOOKS_SYSTEM_SKILL_KEY])
     return PersistentAgentSystemSkillState.objects.filter(agent=agent, is_enabled=True)
 
 

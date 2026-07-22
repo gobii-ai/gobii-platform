@@ -64,7 +64,8 @@ from .meta_ads import get_meta_ads_tool, execute_meta_ads
 from .add_discord_reaction import get_add_discord_reaction_tool, execute_add_discord_reaction
 from .discord_channel_subscriptions import get_discord_channel_subscriptions_tool, execute_discord_channel_subscriptions
 from .send_discord_message import get_send_discord_message_tool, execute_send_discord_message
-from api.agent.system_skills.defaults import DISCORD_NATIVE_SYSTEM_SKILL_KEY
+from . import webhook_management, webhook_sender
+from api.agent.system_skills.defaults import DISCORD_NATIVE_SYSTEM_SKILL_KEY, WEBHOOKS_SYSTEM_SKILL_KEY
 from api.agent.system_skills.image_generation import IMAGE_GENERATION_SYSTEM_SKILL_KEY
 from .meta_gobii import execute_meta_gobii_tool, get_meta_gobii_tool_definition, is_meta_gobii_available_for_agent
 from .meta_gobii_names import META_GOBII_SYSTEM_SKILL_KEY, META_GOBII_TOOL_NAMES
@@ -297,6 +298,24 @@ BUILTIN_TOOL_REGISTRY = {
         "executor": execute_send_discord_message,
         "search_hidden": True,
         "system_skill_key": DISCORD_NATIVE_SYSTEM_SKILL_KEY,
+    },
+    webhook_management.MANAGE_INBOUND_WEBHOOKS_TOOL_NAME: {
+        "definition": webhook_management.get_manage_inbound_webhooks_tool,
+        "executor": webhook_management.execute_manage_inbound_webhooks,
+        "search_hidden": True,
+        "system_skill_key": WEBHOOKS_SYSTEM_SKILL_KEY,
+    },
+    webhook_management.MANAGE_OUTBOUND_WEBHOOKS_TOOL_NAME: {
+        "definition": webhook_management.get_manage_outbound_webhooks_tool,
+        "executor": webhook_management.execute_manage_outbound_webhooks,
+        "search_hidden": True,
+        "system_skill_key": WEBHOOKS_SYSTEM_SKILL_KEY,
+    },
+    webhook_sender.SEND_WEBHOOK_EVENT_TOOL_NAME: {
+        "definition": webhook_sender.get_send_webhook_tool,
+        "executor": webhook_sender.execute_send_webhook_event,
+        "search_hidden": True,
+        "system_skill_key": WEBHOOKS_SYSTEM_SKILL_KEY,
     },
     **{
         tool_name: {

@@ -20,6 +20,7 @@ import { ChartDetail } from './details/chart'
 import { ImageDetail } from './details/image'
 import { VideoDetail } from './details/video'
 import { ApplyPatchDetail, CreateCustomToolDetail, CustomToolRunDetail, PythonExecDetail, RunCommandDetail } from './details/sandbox'
+import { WebhookManagementDetail } from './details/webhooks'
 
 export { normalizeStructuredValue } from './normalize'
 export {
@@ -65,6 +66,7 @@ export {
   ApplyPatchDetail,
   CreateCustomToolDetail,
   CustomToolRunDetail,
+  WebhookManagementDetail,
 }
 
 export const TOOL_DETAIL_COMPONENTS = {
@@ -109,6 +111,7 @@ export const TOOL_DETAIL_COMPONENTS = {
   applyPatch: ApplyPatchDetail,
   createCustomTool: CreateCustomToolDetail,
   customToolRun: CustomToolRunDetail,
+  webhookManagement: WebhookManagementDetail,
 } satisfies Record<string, ToolDetailComponent>
 
 export type DetailKind = keyof typeof TOOL_DETAIL_COMPONENTS

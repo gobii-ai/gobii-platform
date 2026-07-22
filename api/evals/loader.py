@@ -18,6 +18,7 @@ from api.evals.scenarios.responsibility_boundaries import RESPONSIBILITY_BOUNDAR
 from api.evals.scenarios.hallucinated_links import HALLUCINATED_LINK_SCENARIO_SLUGS, HALLUCINATED_LINKS_SUITE_SLUG
 from api.evals.scenarios.agent_scheduling import AGENT_SCHEDULING_SCENARIO_SLUGS, AGENT_SCHEDULING_SUITE_SLUG
 from api.evals.scenarios.meta_gobii import META_GOBII_REAL_HARNESS_SCENARIO_SLUGS, META_GOBII_REAL_HARNESS_SUITE_SLUG
+from api.evals.scenarios.webhooks import WEBHOOK_SCENARIO_SLUGS, WEBHOOKS_SUITE_SLUG
 from api.evals.meta_gobii import META_GOBII_EVAL_SCENARIO_SLUGS, META_GOBII_EVAL_SUITE_SLUG
 from api.evals.suites import EvalSuite, register_builtin_suites
 
@@ -113,6 +114,11 @@ register_builtin_suites(
             slug=DISCORD_NATIVE_SUITE_SLUG,
             description="Native Discord reply-context and reaction behavior over the real agent harness.",
             scenario_slugs=DISCORD_NATIVE_SCENARIO_SLUGS,
+        ),
+        EvalSuite(
+            slug=WEBHOOKS_SUITE_SLUG,
+            description="Native webhook discovery, configuration, sending, and explicit Pipedream routing regressions.",
+            scenario_slugs=WEBHOOK_SCENARIO_SLUGS,
         ),
         EvalSuite(
             slug=IMAGE_GENERATION_SUITE_SLUG,

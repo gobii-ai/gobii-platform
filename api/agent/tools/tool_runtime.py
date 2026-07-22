@@ -20,7 +20,6 @@ from .spawn_web_task import execute_spawn_web_task
 from .static_tools import planning_mode_disallows_tool
 from .tool_manager import execute_enabled_tool
 from .web_chat_sender import execute_send_chat_message
-from .webhook_sender import execute_send_webhook_event
 
 
 def _refresh_agent_tools(agent: PersistentAgent) -> Optional[list[dict]]:
@@ -59,8 +58,6 @@ def execute_runtime_tool_call(
         return execute_send_chat_message(agent, exec_params), updated_tools
     if tool_name == "send_agent_message":
         return execute_send_agent_message(agent, exec_params), updated_tools
-    if tool_name == "send_webhook_event":
-        return execute_send_webhook_event(agent, exec_params), updated_tools
     if tool_name == "update_schedule":
         return execute_update_schedule(agent, exec_params), updated_tools
     if tool_name == "update_charter":

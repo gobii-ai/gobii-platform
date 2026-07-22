@@ -16,6 +16,7 @@ GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY = "google_sheets_native"
 APOLLO_NATIVE_SYSTEM_SKILL_KEY = "apollo_native"
 HUBSPOT_NATIVE_SYSTEM_SKILL_KEY = "hubspot_native"
 DISCORD_NATIVE_SYSTEM_SKILL_KEY = "discord_native"
+WEBHOOKS_SYSTEM_SKILL_KEY = "webhooks"
 CODE_WORK_SYSTEM_SKILL_KEY = "code_work"
 RECRUITMENT_SOURCING_SYSTEM_SKILL_KEY = "recruitment_sourcing"
 
@@ -76,6 +77,29 @@ def _apollo_native_prompt_context(agent) -> str:
 
 def _hubspot_native_prompt_context(agent) -> str:
     return _native_integration_prompt_context(agent, "hubspot")
+
+
+def _webhooks_prompt_context(agent) -> str:
+    def triggered(hook):
+        return hook.last_triggered_at.isoformat() if hook.last_triggered_at else "never"
+
+    inbound = [
+        f"- {hook.name} (id={hook.id}, {'active' if hook.is_active else 'inactive'}, last triggered={triggered(hook)})"
+        for hook in agent.inbound_webhooks.order_by("name")
+    ]
+    outbound = [
+        f"- {hook.name} (id={hook.id}, last sent={triggered(hook)}, last status="
+        f"{hook.last_response_status if hook.last_response_status is not None else 'none'})"
+        for hook in agent.webhooks.order_by("name")
+    ]
+    return "\n".join([
+        "Current native Gobii webhook configuration:",
+        "Inbound triggers:",
+        *(inbound or ["- None configured"]),
+        "Outbound destinations:",
+        *(outbound or ["- None configured"]),
+        "Endpoint and destination URLs are intentionally omitted. Use the matching management tool with action=get only when needed.",
+    ])
 
 
 def _google_sheets_native_prompt_instructions(agent) -> str:
@@ -907,6 +931,62 @@ DISCORD_NATIVE_SYSTEM_SKILL = SystemSkillDefinition(
     ),
 )
 
+
+WEBHOOKS_SYSTEM_SKILL = SystemSkillDefinition(
+    skill_key=WEBHOOKS_SYSTEM_SKILL_KEY,
+    name="Webhooks",
+    search_summary=(
+        "Create and manage native Gobii inbound webhook triggers and outbound webhook destinations, then send "
+        "structured outbound webhook events."
+    ),
+    tool_names=("manage_inbound_webhooks", "manage_outbound_webhooks", "send_webhook_event"),
+    enables=(
+        "create callback URLs that let external provider events wake the agent",
+        "inspect, update, rotate, and remove inbound webhook triggers",
+        "configure outbound destinations and send structured JSON webhook events",
+    ),
+    use_when=(
+        "the user wants an external service or provider event to trigger or wake the agent",
+        "the user asks to create, inspect, update, rotate, or delete an inbound webhook",
+        "the user asks to configure, manage, send, or trigger an outbound webhook",
+        "the task needs a callback URL or HTTP endpoint for asynchronous provider events",
+    ),
+    query_aliases=(
+        "webhook",
+        "webhooks",
+        "callback url",
+        "http callback",
+        "provider event trigger",
+    ),
+    discovery_triggers=(
+        "webhook",
+        "webhooks",
+        "callback url",
+        "events trigger you",
+        "events wake you",
+    ),
+    prompt_instructions=(
+        "Use native Gobii webhooks for webhook setup and delivery. An inbound webhook is a secret-bearing Gobii "
+        "endpoint that an external service POSTs to so an event wakes this agent. An outbound webhook is an external "
+        "destination configured in Gobii; `send_webhook_event` sends JSON to it. Keep those directions distinct.\n"
+        "Prefer native Gobii webhooks over Pipedream. Use or recommend Pipedream only when the user explicitly asks "
+        "for Pipedream, the integration itself is provided through Pipedream, or the provider requires a webhook "
+        "protocol Gobii does not support. Explain an unsupported protocol before suggesting an alternative.\n"
+        "For external events that should wake this agent, call `manage_inbound_webhooks` with action=list before "
+        "creating anything, then create or reuse the intended trigger. Use action=get only when the exact "
+        "secret-bearing endpoint is needed for provider registration. If the provider offers an API and the user "
+        "authorized setup, register that returned URL through the provider API. Otherwise give the user the native "
+        "URL and concise provider UI steps. Do not invent an endpoint, token, signature, or authentication header; "
+        "the generated URL already contains Gobii's receiver secret.\n"
+        "Use `manage_outbound_webhooks` to list or configure destinations. Use `send_webhook_event` only with a "
+        "configured outbound webhook ID and a purpose-built JSON object. Do not create duplicate webhook entries.\n"
+        "A clear user request for a specific create, update, rotate, or delete operation is sufficient authorization; "
+        "do not ask for redundant confirmation. Never infer rotation or deletion merely while troubleshooting. Do not "
+        "repeat secret-bearing URLs in ordinary status summaries or expose them to unrelated recipients."
+    ),
+    prompt_context_renderer=_webhooks_prompt_context,
+)
+
 META_GOBII_SYSTEM_SKILL = SystemSkillDefinition(
     skill_key=META_GOBII_SYSTEM_SKILL_KEY,
     name="Meta Gobii",
@@ -1045,5 +1125,6 @@ DEFAULT_SYSTEM_SKILL_DEFINITIONS = {
     HUBSPOT_NATIVE_SYSTEM_SKILL.skill_key: HUBSPOT_NATIVE_SYSTEM_SKILL,
     META_ADS_SYSTEM_SKILL.skill_key: META_ADS_SYSTEM_SKILL,
     DISCORD_NATIVE_SYSTEM_SKILL.skill_key: DISCORD_NATIVE_SYSTEM_SKILL,
+    WEBHOOKS_SYSTEM_SKILL.skill_key: WEBHOOKS_SYSTEM_SKILL,
     META_GOBII_SYSTEM_SKILL.skill_key: META_GOBII_SYSTEM_SKILL,
 }
