@@ -2,7 +2,7 @@ import { createAsyncThunk, createSlice, type PayloadAction } from '@reduxjs/tool
 import type { InfiniteData, QueryClient } from '@tanstack/react-query'
 
 import { sendAgentMessage, fetchProcessingStatus } from '../api/agentChat'
-import { flushPendingEventsToCache, injectRealtimeEventIntoCache, refreshLoadedTimelineVariantsInCache, refreshTimelineLatestInCache, updateOptimisticEventInCache, updateRosterProcessingInCache } from '../hooks/useTimelineCacheInjector'
+import { flushPendingEventsToCache, injectRealtimeEventIntoCache, refreshLoadedTimelineVariantsInCache, refreshTimelineLatestInCache, replacePendingActionRequestsInCache, updateOptimisticEventInCache, updateRosterProcessingInCache } from '../hooks/useTimelineCacheInjector'
 import { timelineQueryKey, type TimelinePage } from '../hooks/useAgentTimeline'
 import { mergeTimelineEvents, normalizeTimelineEvent } from '../stores/agentChatTimeline'
 import type { AgentMessage, PendingActionRequest, ProcessingSnapshot, ProcessingWebTask, StreamEventPayload, StreamState, ThinkingEvent, TimelineEvent } from '../types/agentChat'
@@ -605,6 +605,21 @@ export const updateRealtimeProcessing = (
     if (wasActive && !snapshot.active) {
       void refreshLoadedTimelineVariantsInCache(extra.queryClient, agentId)
     }
+  }
+}
+
+export const applyPendingActionsSnapshot = (
+  agentId: string,
+  pendingActions: PendingActionRequest[],
+  stateOrder: number,
+) => (dispatch: AppDispatch, getState: () => RootState, extra?: { queryClient?: QueryClient | null }) => {
+  const currentOrder = getState().chat.sessionsByAgentId[agentId]?.workflow.pendingActionsStateOrder ?? 0
+  if (stateOrder < currentOrder) {
+    return
+  }
+  dispatch(chatActions.pendingActionsSnapshotReceived({ agentId, pendingActions, stateOrder }))
+  if (extra?.queryClient) {
+    replacePendingActionRequestsInCache(extra.queryClient, agentId, pendingActions, stateOrder)
   }
 }
 

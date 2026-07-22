@@ -12,7 +12,7 @@ import { timelineQueryKey, timelineResponseToPage, TIMELINE_PAGE_SIZE, type Time
 export const DEFAULT_CONTIGUOUS_BACKFILL_MAX_PAGES = 20
 
 type AgentRosterQueryData = {
-  agents: Array<AgentRosterEntry & { pendingActionStateOrder?: number }>
+  agents: AgentRosterEntry[]
 }
 
 export type RefreshTimelineMode = 'fast' | 'contiguous'
@@ -121,7 +121,7 @@ export function replacePendingHumanInputRequestsInCache(
     },
   )
   if (nextPendingActionsForRoster) {
-    updateRosterPendingActionCountInCache(queryClient, agentId, nextPendingActionsForRoster, stateOrder)
+    updateRosterPendingActionCountInCache(queryClient, agentId, nextPendingActionsForRoster)
   } else {
     void queryClient.invalidateQueries({ queryKey: ['agent-roster'], exact: false })
   }
@@ -133,7 +133,7 @@ export function replacePendingActionRequestsInCache(
   pendingActionRequests: PendingActionRequest[],
   stateOrder = nextClientStateOrder(),
 ) {
-  updateRosterPendingActionCountInCache(queryClient, agentId, pendingActionRequests, stateOrder)
+  updateRosterPendingActionCountInCache(queryClient, agentId, pendingActionRequests)
   queryClient.setQueriesData<InfiniteData<TimelinePage>>(
     { queryKey: ['agent-timeline', agentId], exact: false },
     (old) => {
@@ -185,7 +185,6 @@ function updateRosterPendingActionCountInCache(
   queryClient: QueryClient,
   agentId: string,
   pendingActionRequests: PendingActionRequest[],
-  stateOrder: number,
 ) {
   const nextCount = pendingActionRequests.reduce((total, action) => total + getPendingActionRequestCount(action), 0)
   queryClient.setQueriesData<AgentRosterQueryData>(
@@ -199,21 +198,11 @@ function updateRosterPendingActionCountInCache(
         if (agent.id !== agentId) {
           return agent
         }
-        if (stateOrder < (agent.pendingActionStateOrder ?? 0)) {
-          return agent
-        }
-        if (
-          (agent.pendingActionRequestCount ?? 0) === nextCount
-          && agent.pendingActionStateOrder === stateOrder
-        ) {
+        if ((agent.pendingActionRequestCount ?? 0) === nextCount) {
           return agent
         }
         changed = true
-        return {
-          ...agent,
-          pendingActionRequestCount: nextCount,
-          pendingActionStateOrder: stateOrder,
-        }
+        return { ...agent, pendingActionRequestCount: nextCount }
       })
       return changed ? { ...current, agents: nextAgents } : current
     },

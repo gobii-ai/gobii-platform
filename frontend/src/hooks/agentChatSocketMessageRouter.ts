@@ -5,12 +5,12 @@ import type { AgentMessageNotification, PendingActionRequest, ProcessingSnapshot
 import type { PlanningState, SignupPreviewState } from '../types/agentRoster'
 import type { BurnRateMetadata, UsageInsightUpdatePayload } from '../types/insight'
 import {
-  replacePendingActionRequestsInCache,
   replacePendingHumanInputRequestsInCache,
   updateAgentIdentityInCache,
 } from './useTimelineCacheInjector'
 import { extractAgentChatSocketEnvelopeAgentId } from './agentChatSocketProtocol'
 import { nextClientStateOrder } from '../util/clientStateOrder'
+import { isPlainObject } from '../util/objectUtils'
 
 type AgentIdentityUpdate = {
   agentId?: string | null
@@ -51,10 +51,10 @@ function normalizePlanningState(value: unknown): PlanningState | null {
 }
 
 function normalizeProcessingSnapshot(value: unknown): ProcessingSnapshot | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+  if (!isPlainObject(value)) {
     return null
   }
-  const snapshot = value as Record<string, unknown>
+  const snapshot = value
   if (typeof snapshot.active !== 'boolean' || !Array.isArray(snapshot.webTasks)) {
     return null
   }
@@ -126,13 +126,13 @@ export function routeAgentChatSocketMessage({
   updateAgentIdentity: (update: AgentIdentityUpdate) => void
   updateUsageInsight: (agentId: string, metadata: BurnRateMetadata) => void
   receiveStreamEvent: (agentId: string, payload: StreamEventPayload) => void
-  replacePendingActions?: ((agentId: string, pendingActions: PendingActionRequest[], stateOrder: number) => void) | null
+  replacePendingActions: (agentId: string, pendingActions: PendingActionRequest[], stateOrder: number) => void
   onCreditEvent?: ((payload: Record<string, unknown>) => void) | null
   onAgentProfileEvent?: ((payload: Record<string, unknown>) => void) | null
   onMessageNotificationEvent?: ((payload: AgentMessageNotification) => void) | null
   onDeveloperUpdate?: ((agentId: string) => void) | null
 }): AgentChatSocketMessageOutcome {
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+  if (!isPlainObject(payload)) {
     return { type: 'ignored' }
   }
 
@@ -158,22 +158,18 @@ export function routeAgentChatSocketMessage({
     if (
       !payloadAgentId
       || !mode
-      || !readyPayload
-      || typeof readyPayload !== 'object'
-      || Array.isArray(readyPayload)
+      || !isPlainObject(readyPayload)
     ) {
       return { type: 'ignored' }
     }
-    const readyRecord = readyPayload as Record<string, unknown>
-    const processingSnapshot = normalizeProcessingSnapshot(readyRecord.processing_snapshot)
-    if (!processingSnapshot || !Array.isArray(readyRecord.pending_action_requests)) {
+    const processingSnapshot = normalizeProcessingSnapshot(readyPayload.processing_snapshot)
+    if (!processingSnapshot || !Array.isArray(readyPayload.pending_action_requests)) {
       return { type: 'ignored' }
     }
     const stateOrder = nextClientStateOrder()
-    const pendingActions = normalizePendingActionRequests(readyRecord.pending_action_requests)
+    const pendingActions = normalizePendingActionRequests(readyPayload.pending_action_requests)
     updateProcessing(payloadAgentId, processingSnapshot)
-    replacePendingActionRequestsInCache(queryClient, payloadAgentId, pendingActions, stateOrder)
-    replacePendingActions?.(payloadAgentId, pendingActions, stateOrder)
+    replacePendingActions(payloadAgentId, pendingActions, stateOrder)
     return { type: 'subscription_ready', agentId: payloadAgentId, mode }
   }
 
@@ -219,8 +215,8 @@ export function routeAgentChatSocketMessage({
     return { type: 'handled' }
   }
 
-  if (messageType === 'agent.profile' && message.payload && typeof message.payload === 'object' && !Array.isArray(message.payload)) {
-    const profilePayload = message.payload as Record<string, unknown>
+  if (messageType === 'agent.profile' && isPlainObject(message.payload)) {
+    const profilePayload = message.payload
     const payloadAgentId = extractAgentChatSocketEnvelopeAgentId(message)
     if (payloadAgentId) {
       updateAgentIdentityInCache(queryClient, payloadAgentId, profilePayload)
@@ -234,9 +230,7 @@ export function routeAgentChatSocketMessage({
 
   if (
     messageType === 'human_input_requests.updated'
-    && message.payload
-    && typeof message.payload === 'object'
-    && !Array.isArray(message.payload)
+    && isPlainObject(message.payload)
   ) {
     const payloadAgentId = extractAgentChatSocketEnvelopeAgentId(message)
     if (payloadAgentId) {
@@ -245,7 +239,7 @@ export function routeAgentChatSocketMessage({
         queryClient,
         payloadAgentId,
         normalizePendingHumanInputRequests(
-          (message.payload as Record<string, unknown>).pending_human_input_requests,
+          message.payload.pending_human_input_requests,
         ),
         stateOrder,
       )
@@ -255,33 +249,25 @@ export function routeAgentChatSocketMessage({
 
   if (
     messageType === 'pending_action_requests.updated'
-    && message.payload
-    && typeof message.payload === 'object'
-    && !Array.isArray(message.payload)
+    && isPlainObject(message.payload)
   ) {
     const payloadAgentId = extractAgentChatSocketEnvelopeAgentId(message)
     if (payloadAgentId) {
       const stateOrder = nextClientStateOrder()
       const pendingActions = normalizePendingActionRequests(
-        (message.payload as Record<string, unknown>).pending_action_requests,
+        message.payload.pending_action_requests,
       )
-      replacePendingActionRequestsInCache(
-        queryClient,
-        payloadAgentId,
-        pendingActions,
-        stateOrder,
-      )
-      replacePendingActions?.(payloadAgentId, pendingActions, stateOrder)
+      replacePendingActions(payloadAgentId, pendingActions, stateOrder)
     }
     return { type: 'handled' }
   }
 
-  if (messageType === 'credit.event' && message.payload && typeof message.payload === 'object' && !Array.isArray(message.payload)) {
-    onCreditEvent?.(message.payload as Record<string, unknown>)
+  if (messageType === 'credit.event' && isPlainObject(message.payload)) {
+    onCreditEvent?.(message.payload)
     return { type: 'handled' }
   }
 
-  if (messageType === 'usage.updated' && message.payload && typeof message.payload === 'object' && !Array.isArray(message.payload)) {
+  if (messageType === 'usage.updated' && isPlainObject(message.payload)) {
     const payloadAgentId = extractAgentChatSocketEnvelopeAgentId(message)
     const usagePayload = message.payload as UsageInsightUpdatePayload
     if (payloadAgentId && payloadAgentId === activeAgentId && usagePayload.metadata) {
@@ -292,9 +278,7 @@ export function routeAgentChatSocketMessage({
 
   if (
     messageType === 'message.notification'
-    && message.payload
-    && typeof message.payload === 'object'
-    && !Array.isArray(message.payload)
+    && isPlainObject(message.payload)
   ) {
     onMessageNotificationEvent?.(message.payload as AgentMessageNotification)
     return { type: 'handled' }

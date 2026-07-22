@@ -7,6 +7,7 @@ import type { TimelineEvent } from '../types/agentChat'
 import { createAppStore } from './appStore'
 import {
   chatActions,
+  applyPendingActionsSnapshot,
   loadAgentSpawnIntent,
   refreshProcessing,
   selectActiveChatAgentId,
@@ -200,6 +201,27 @@ describe('chatSlice workflow state', () => {
     expect(selectActiveChatTestSnapshot(store.getState()).pendingActions).toEqual([
       expect.objectContaining({ id: 'new-action' }),
     ])
+  })
+
+  it('rejects a stale pending snapshot before updating the roster cache', () => {
+    const queryClient = new QueryClient()
+    queryClient.setQueryData(['agent-roster'], {
+      agents: [{ id: 'agent-1', pendingActionRequestCount: 0 }],
+    })
+    const store = createAppStore({ queryClient })
+    store.dispatch(chatActions.agentSelected({ agentId: 'agent-1' }))
+    const pendingActions = [{
+      id: 'new-action',
+      kind: 'human_input' as const,
+      count: 0,
+      requests: [],
+    }]
+
+    store.dispatch(applyPendingActionsSnapshot('agent-1', pendingActions, 20))
+    store.dispatch(applyPendingActionsSnapshot('agent-1', [], 10))
+
+    expect(selectActiveChatTestSnapshot(store.getState()).pendingActions).toEqual(pendingActions)
+    expect(queryClient.getQueryData<{ agents: Array<{ pendingActionRequestCount: number }> }>(['agent-roster'])?.agents[0].pendingActionRequestCount).toBe(1)
   })
 
   it('loads spawn intent through the thunk and keeps create-agent workflow state serializable', async () => {

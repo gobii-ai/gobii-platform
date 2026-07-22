@@ -67,16 +67,13 @@ export function confirmAgentChatSocketSubscription({
   confirmedSubscriptions: Map<string, AgentChatSocketSubscription['mode']>
   agentId: string
   mode: AgentChatSocketSubscription['mode']
-}): { confirmed: boolean; shouldBackfill: boolean } {
+}): boolean {
   if (requestedSubscriptions.get(agentId) !== mode) {
-    return { confirmed: false, shouldBackfill: false }
+    return false
   }
   const previousMode = confirmedSubscriptions.get(agentId)
   confirmedSubscriptions.set(agentId, mode)
-  return {
-    confirmed: true,
-    shouldBackfill: mode === 'active' && previousMode !== 'active',
-  }
+  return mode === 'active' && previousMode !== 'active'
 }
 
 export function syncAgentChatSocketSubscriptions({

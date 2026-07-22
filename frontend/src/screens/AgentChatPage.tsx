@@ -67,6 +67,7 @@ import { useRosterPreferencesBridge } from '../hooks/useRosterPreferencesBridge'
 import { useAppDispatch, useAppSelector } from '../store/hooks'
 import type { RootState } from '../store/appStore'
 import {
+  applyPendingActionsSnapshot,
   chatActions,
   persistPendingEventsToCache as persistPendingEventsToCacheThunk,
   receiveRealtimeEvent as receiveRealtimeEventThunk,
@@ -98,7 +99,7 @@ import {
 import { mergeTimelineEvents } from '../stores/agentChatTimeline'
 import { ensureAuthenticated, selectSubscriptionState, subscriptionActions, type PlanTier } from '../store/subscriptionSlice'
 import { useAgentTimeline, flattenTimelinePages, getInitialPagePendingActionsStateOrder, getInitialPageResponse, timelineQueryKey, type TimelinePage } from '../hooks/useAgentTimeline'
-import { refreshTimelineLatestInCache, replacePendingActionRequestsInCache, DEFAULT_CONTIGUOUS_BACKFILL_MAX_PAGES } from '../hooks/useTimelineCacheInjector'
+import { refreshTimelineLatestInCache, DEFAULT_CONTIGUOUS_BACKFILL_MAX_PAGES } from '../hooks/useTimelineCacheInjector'
 import { nextClientStateOrder } from '../util/clientStateOrder'
 import { collapseDetailedStatusRuns } from '../hooks/useSimplifiedTimeline'
 import { usePageLifecycle } from '../hooks/usePageLifecycle'
@@ -2911,12 +2912,7 @@ export function AgentChatPage({
     pendingActionRequests: PendingActionRequest[],
     stateOrder: number,
   ) => {
-    replacePendingActionRequestsInCache(queryClient, targetAgentId, pendingActionRequests, stateOrder)
-    dispatch(chatActions.pendingActionsSnapshotReceived({
-      agentId: targetAgentId,
-      pendingActions: pendingActionRequests,
-      stateOrder,
-    }))
+    dispatch(applyPendingActionsSnapshot(targetAgentId, pendingActionRequests, stateOrder))
     dispatch(chatActions.agentIdentityUpdated({
       agentId: targetAgentId,
       planningState: nextPlanningState,
@@ -3780,13 +3776,8 @@ export function AgentChatPage({
     nextPendingActions: PendingActionRequest[],
     stateOrder = nextClientStateOrder(),
   ) => {
-    replacePendingActionRequestsInCache(queryClient, targetAgentId, nextPendingActions, stateOrder)
-    dispatch(chatActions.pendingActionsSnapshotReceived({
-      agentId: targetAgentId,
-      pendingActions: nextPendingActions,
-      stateOrder,
-    }))
-  }, [dispatch, queryClient])
+    dispatch(applyPendingActionsSnapshot(targetAgentId, nextPendingActions, stateOrder))
+  }, [dispatch])
 
   const handleRespondHumanInputRequest = useCallback(async (
     response:

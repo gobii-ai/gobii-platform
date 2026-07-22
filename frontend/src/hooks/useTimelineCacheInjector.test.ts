@@ -169,14 +169,11 @@ describe('refreshTimelineLatestInCache', () => {
     expect(queryClient.getQueryData<InfiniteData<TimelinePage>>(scopedKey)?.pages[0].raw.pending_action_requests).toHaveLength(1)
   })
 
-  it('rejects an older mutation snapshot in timeline and roster caches', () => {
+  it('rejects an older pending snapshot in the timeline cache', () => {
     const key = timelineQueryKey('agent-1')
     queryClient.setQueryData<InfiniteData<TimelinePage>>(key, {
       pages: [timelineResponseToPage(emptyTimelineResponse, 1)],
       pageParams: [undefined],
-    })
-    queryClient.setQueryData(['agent-roster'], {
-      agents: [{ id: 'agent-1', pendingActionRequestCount: 0 }],
     })
     const newerPendingActions = [{
       id: 'spawn:request-1',
@@ -189,7 +186,6 @@ describe('refreshTimelineLatestInCache', () => {
     replacePendingActionRequestsInCache(queryClient, 'agent-1', [], 10)
 
     expect(queryClient.getQueryData<InfiniteData<TimelinePage>>(key)?.pages[0].raw.pending_action_requests).toEqual(newerPendingActions)
-    expect(queryClient.getQueryData<{ agents: Array<{ pendingActionRequestCount: number }> }>(['agent-roster'])?.agents[0].pendingActionRequestCount).toBe(1)
   })
 
   it('injects finalized events into every loaded variant for the addressed agent', () => {

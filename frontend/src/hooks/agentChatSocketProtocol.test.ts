@@ -30,13 +30,13 @@ describe('agent chat socket subscription state', () => {
       confirmedSubscriptions,
       agentId: 'agent-1',
       mode: 'active',
-    })).toEqual({ confirmed: true, shouldBackfill: true })
+    })).toBe(true)
     expect(confirmAgentChatSocketSubscription({
       requestedSubscriptions,
       confirmedSubscriptions,
       agentId: 'agent-1',
       mode: 'active',
-    })).toEqual({ confirmed: true, shouldBackfill: false })
+    })).toBe(false)
 
     confirmedSubscriptions.clear()
     expect(confirmAgentChatSocketSubscription({
@@ -44,7 +44,7 @@ describe('agent chat socket subscription state', () => {
       confirmedSubscriptions,
       agentId: 'agent-1',
       mode: 'active',
-    })).toEqual({ confirmed: true, shouldBackfill: true })
+    })).toBe(true)
   })
 
   it('ignores a stale confirmation after the requested mode changes', () => {
@@ -56,7 +56,7 @@ describe('agent chat socket subscription state', () => {
       confirmedSubscriptions,
       agentId: 'agent-1',
       mode: 'active',
-    })).toEqual({ confirmed: false, shouldBackfill: false })
+    })).toBe(false)
     expect(confirmedSubscriptions.size).toBe(0)
   })
 })
