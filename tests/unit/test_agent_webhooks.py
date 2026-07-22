@@ -12,16 +12,31 @@ from django.utils.datastructures import MultiValueDict
 from requests import RequestException
 
 from api.agent.tools.webhook_sender import execute_send_webhook_event
+from api.agent.tools.webhook_management import (
+    execute_manage_inbound_webhooks,
+    execute_manage_outbound_webhooks,
+)
+from api.agent.tools.sqlite_skills import format_recent_skills_for_prompt
+from api.agent.tools.static_tools import get_static_tool_names, planning_mode_disallows_tool
+from api.agent.tools.tool_manager import (
+    execute_enabled_tool,
+    get_available_builtin_tool_entries,
+    get_enabled_tool_definitions,
+)
+from api.agent.system_skills.defaults import WEBHOOKS_SYSTEM_SKILL_KEY
+from api.agent.system_skills.registry import shortlist_system_skills
+from api.agent.system_skills.service import enable_system_skills, get_available_system_skill_tool_names
 from api.models import (
     BrowserUseAgent,
     PersistentAgent,
     PersistentAgentInboundWebhook,
     PersistentAgentMessage,
+    PersistentAgentEnabledTool,
     PersistentAgentWebhook,
     ProxyServer,
 )
 from api.webhooks import _parse_inbound_agent_webhook_request
-from util.analytics import AnalyticsEvent
+from util.analytics import AnalyticsEvent, AnalyticsSource
 
 
 class AgentWebhookToolTests(TestCase):
@@ -119,8 +134,12 @@ class AgentWebhookToolTests(TestCase):
 
     @tag("batch_agent_webhooks")
     def test_execute_send_webhook_event_request_exception(self):
-        with patch("api.agent.tools.webhook_sender.requests.post") as mock_post:
-            mock_post.side_effect = RequestException("timeout")
+        self.webhook.url = "https://example.com/hook?token=private-token"
+        self.webhook.save(update_fields=["url", "updated_at"])
+        with patch("api.agent.tools.webhook_sender.requests.post") as mock_post, patch(
+            "api.agent.tools.webhook_sender.Analytics.track_event"
+        ) as mock_track_event:
+            mock_post.side_effect = RequestException("timeout with url: /hook?token=private-token")
 
             result = execute_send_webhook_event(
                 self.agent,
@@ -129,10 +148,18 @@ class AgentWebhookToolTests(TestCase):
 
             self.assertEqual(result.get("status"), "error")
             self.assertIn("timeout", result.get("message", ""))
+            self.assertNotIn(self.webhook.url, result.get("message", ""))
+            self.assertNotIn("private-token", result.get("message", ""))
 
             self.webhook.refresh_from_db()
             self.assertIsNone(self.webhook.last_response_status)
             self.assertIn("timeout", self.webhook.last_error_message)
+            self.assertNotIn(self.webhook.url, self.webhook.last_error_message)
+            self.assertNotIn("private-token", self.webhook.last_error_message)
+            self.assertNotIn(
+                self.webhook.url,
+                json.dumps(mock_track_event.call_args.kwargs["properties"]),
+            )
 
     @tag("batch_agent_webhooks")
     def test_execute_send_webhook_event_requires_proxy(self):
@@ -196,6 +223,380 @@ class AgentWebhookToolTests(TestCase):
         )
         self.assertEqual(result.get("status"), "error")
         self.assertIn("Webhook not found", result.get("message", ""))
+
+
+@tag("batch_agent_webhooks")
+@override_settings(PUBLIC_SITE_URL="https://gobii.test")
+class AgentWebhookManagementToolTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        user_model = get_user_model()
+        cls.user = user_model.objects.create_user(
+            username="webhook-manager",
+            email="manager@example.com",
+            password="password123",
+        )
+        cls.other_user = user_model.objects.create_user(
+            username="other-webhook-manager",
+            email="other-manager@example.com",
+            password="password123",
+        )
+        cls.browser_agent = BrowserUseAgent.objects.create(user=cls.user, name="Webhook Manager Browser")
+        cls.other_browser_agent = BrowserUseAgent.objects.create(
+            user=cls.other_user,
+            name="Other Webhook Manager Browser",
+        )
+        cls.agent = PersistentAgent.objects.create(
+            user=cls.user,
+            name="Webhook Manager",
+            charter="Manage native webhooks",
+            browser_use_agent=cls.browser_agent,
+        )
+        cls.other_agent = PersistentAgent.objects.create(
+            user=cls.other_user,
+            name="Other Webhook Manager",
+            charter="Own separate webhooks",
+            browser_use_agent=cls.other_browser_agent,
+        )
+
+    def test_inbound_management_lifecycle_limits_secret_url_exposure(self):
+        created = execute_manage_inbound_webhooks(
+            self.agent,
+            {
+                "action": "create",
+                "name": "Aimfox",
+                "is_active": True,
+                "will_continue_work": True,
+            },
+        )
+        self.assertEqual(created["status"], "success")
+        created_webhook = created["webhook"]
+        self.assertEqual(created_webhook["name"], "Aimfox")
+        self.assertIn("https://gobii.test/api/v1/webhooks/inbound/agents/", created_webhook["url"])
+        self.assertIn("?t=", created_webhook["url"])
+
+        listed = execute_manage_inbound_webhooks(
+            self.agent,
+            {"action": "list", "will_continue_work": True},
+        )
+        self.assertEqual(len(listed["webhooks"]), 1)
+        self.assertNotIn("url", listed["webhooks"][0])
+
+        webhook_id = created_webhook["id"]
+        inspected = execute_manage_inbound_webhooks(
+            self.agent,
+            {"action": "get", "webhook_id": webhook_id, "will_continue_work": True},
+        )
+        original_url = inspected["webhook"]["url"]
+        updated = execute_manage_inbound_webhooks(
+            self.agent,
+            {
+                "action": "update",
+                "webhook_id": webhook_id,
+                "is_active": False,
+                "will_continue_work": True,
+            },
+        )
+        self.assertFalse(updated["webhook"]["is_active"])
+        self.assertNotIn("url", updated["webhook"])
+
+        rotated = execute_manage_inbound_webhooks(
+            self.agent,
+            {"action": "rotate_secret", "webhook_id": webhook_id, "will_continue_work": True},
+        )
+        self.assertNotEqual(rotated["webhook"]["url"], original_url)
+
+        deleted = execute_manage_inbound_webhooks(
+            self.agent,
+            {"action": "delete", "webhook_id": webhook_id, "will_continue_work": False},
+        )
+        self.assertEqual(deleted["status"], "success")
+        self.assertTrue(deleted["auto_sleep_ok"])
+        self.assertNotIn("url", deleted["deleted_webhook"])
+        self.assertFalse(PersistentAgentInboundWebhook.objects.filter(id=webhook_id).exists())
+
+    def test_outbound_management_lifecycle_omits_url_from_list(self):
+        created = execute_manage_outbound_webhooks(
+            self.agent,
+            {
+                "action": "create",
+                "name": "Operations",
+                "url": "https://hooks.example.com/operations?token=secret",
+                "will_continue_work": True,
+            },
+        )
+        self.assertEqual(created["status"], "success")
+        webhook_id = created["webhook"]["id"]
+        self.assertEqual(created["webhook"]["url"], "https://hooks.example.com/operations?token=secret")
+        PersistentAgentWebhook.objects.filter(id=webhook_id).update(
+            last_error_message="Failed to reach https://hooks.example.com/operations?token=secret",
+        )
+
+        listed = execute_manage_outbound_webhooks(
+            self.agent,
+            {"action": "list", "will_continue_work": True},
+        )
+        self.assertNotIn("url", listed["webhooks"][0])
+        self.assertNotIn("last_error_message", listed["webhooks"][0])
+        self.assertNotIn("token=secret", json.dumps(listed))
+
+        updated = execute_manage_outbound_webhooks(
+            self.agent,
+            {
+                "action": "update",
+                "webhook_id": webhook_id,
+                "url": "https://hooks.example.com/new",
+                "will_continue_work": True,
+            },
+        )
+        self.assertEqual(updated["webhook"]["url"], "https://hooks.example.com/new")
+        self.assertEqual(
+            execute_manage_outbound_webhooks(
+                self.agent,
+                {"action": "get", "webhook_id": webhook_id, "will_continue_work": True},
+            )["webhook"]["url"],
+            "https://hooks.example.com/new",
+        )
+
+        deleted = execute_manage_outbound_webhooks(
+            self.agent,
+            {"action": "delete", "webhook_id": webhook_id, "will_continue_work": False},
+        )
+        self.assertEqual(deleted["status"], "success")
+        self.assertNotIn("url", deleted["deleted_webhook"])
+        self.assertFalse(PersistentAgentWebhook.objects.filter(id=webhook_id).exists())
+
+    def test_management_rejects_empty_updates_and_foreign_webhooks(self):
+        inbound = PersistentAgentInboundWebhook.objects.create(agent=self.other_agent, name="Foreign inbound")
+        outbound = PersistentAgentWebhook.objects.create(
+            agent=self.other_agent,
+            name="Foreign outbound",
+            url="https://example.com/foreign",
+        )
+
+        empty_update = execute_manage_inbound_webhooks(
+            self.agent,
+            {
+                "action": "update",
+                "webhook_id": str(inbound.id),
+                "will_continue_work": True,
+            },
+        )
+        foreign_outbound = execute_manage_outbound_webhooks(
+            self.agent,
+            {
+                "action": "get",
+                "webhook_id": str(outbound.id),
+                "will_continue_work": True,
+            },
+        )
+
+        self.assertEqual(empty_update["status"], "error")
+        self.assertIn("not found for this agent", empty_update["message"])
+        self.assertEqual(foreign_outbound["status"], "error")
+        self.assertIn("not found for this agent", foreign_outbound["message"])
+
+        own_inbound = PersistentAgentInboundWebhook.objects.create(agent=self.agent, name="Own inbound")
+        own_empty_update = execute_manage_inbound_webhooks(
+            self.agent,
+            {
+                "action": "update",
+                "webhook_id": str(own_inbound.id),
+                "will_continue_work": True,
+            },
+        )
+        self.assertEqual(own_empty_update["status"], "error")
+        self.assertIn("Provide name or is_active", own_empty_update["message"])
+
+    def test_management_rejects_duplicate_names_and_invalid_urls(self):
+        first_inbound = execute_manage_inbound_webhooks(
+            self.agent,
+            {"action": "create", "name": "Duplicate", "will_continue_work": True},
+        )
+        duplicate_inbound = execute_manage_inbound_webhooks(
+            self.agent,
+            {"action": "create", "name": "Duplicate", "will_continue_work": True},
+        )
+        first_outbound = execute_manage_outbound_webhooks(
+            self.agent,
+            {
+                "action": "create",
+                "name": "Duplicate",
+                "url": "https://example.com/first",
+                "will_continue_work": True,
+            },
+        )
+        duplicate_outbound = execute_manage_outbound_webhooks(
+            self.agent,
+            {
+                "action": "create",
+                "name": "Duplicate",
+                "url": "https://example.com/second",
+                "will_continue_work": True,
+            },
+        )
+        invalid_outbound = execute_manage_outbound_webhooks(
+            self.agent,
+            {
+                "action": "create",
+                "name": "Invalid URL",
+                "url": "not a URL",
+                "will_continue_work": False,
+            },
+        )
+
+        self.assertEqual(first_inbound["status"], "success")
+        self.assertEqual(duplicate_inbound["status"], "error")
+        self.assertIn("already exists", duplicate_inbound["message"])
+        self.assertEqual(first_outbound["status"], "success")
+        self.assertEqual(duplicate_outbound["status"], "error")
+        self.assertIn("already exists", duplicate_outbound["message"])
+        self.assertEqual(invalid_outbound["status"], "error")
+        self.assertIn("valid URL", invalid_outbound["message"])
+        self.assertTrue(invalid_outbound["auto_sleep_ok"])
+
+    @patch("api.services.agent_webhooks.Analytics.track_event")
+    def test_management_analytics_use_agent_source_without_urls(self, mock_track_event):
+        with self.captureOnCommitCallbacks(execute=True):
+            result = execute_manage_outbound_webhooks(
+                self.agent,
+                {
+                    "action": "create",
+                    "name": "Analytics hook",
+                    "url": "https://example.com/private?token=secret",
+                    "will_continue_work": False,
+                },
+            )
+
+        self.assertEqual(result["status"], "success")
+        mock_track_event.assert_called_once()
+        kwargs = mock_track_event.call_args.kwargs
+        self.assertEqual(kwargs["source"], AnalyticsSource.AGENT)
+        self.assertNotIn("url", kwargs["properties"])
+
+    def test_webhook_tools_are_hidden_until_system_skill_is_enabled(self):
+        webhook_tools = {
+            "manage_inbound_webhooks",
+            "manage_outbound_webhooks",
+            "send_webhook_event",
+        }
+        PersistentAgentWebhook.objects.create(
+            agent=self.agent,
+            name="Existing destination",
+            url="https://example.com/existing",
+        )
+        self.assertTrue(webhook_tools.isdisjoint(get_static_tool_names(self.agent)))
+        self.assertTrue(webhook_tools.isdisjoint(get_available_builtin_tool_entries(self.agent)))
+        self.assertTrue(
+            webhook_tools.issubset(get_available_builtin_tool_entries(self.agent, include_hidden=True))
+        )
+
+        matches = shortlist_system_skills(
+            "Aimfox has an add webhook feature; set it up so events trigger you",
+            available_tool_names=get_available_system_skill_tool_names(self.agent),
+            discovery_only=True,
+        )
+        self.assertIn(WEBHOOKS_SYSTEM_SKILL_KEY, {definition.skill_key for definition in matches})
+
+        result = enable_system_skills(self.agent, [WEBHOOKS_SYSTEM_SKILL_KEY])
+        self.assertEqual(result["enabled"], [WEBHOOKS_SYSTEM_SKILL_KEY])
+        self.assertEqual(result["invalid"], [])
+        self.assertEqual(
+            set(
+                PersistentAgentEnabledTool.objects.filter(agent=self.agent).values_list(
+                    "tool_full_name",
+                    flat=True,
+                )
+            ),
+            webhook_tools,
+        )
+        enabled_names = {
+            definition["function"]["name"]
+            for definition in get_enabled_tool_definitions(self.agent)
+        }
+        self.assertTrue(webhook_tools.issubset(enabled_names))
+
+        inbound_result = execute_enabled_tool(
+            self.agent,
+            "manage_inbound_webhooks",
+            {"action": "list", "will_continue_work": True},
+        )
+        outbound_result = execute_enabled_tool(
+            self.agent,
+            "manage_outbound_webhooks",
+            {"action": "list", "will_continue_work": True},
+        )
+        EmailAddress.objects.create(
+            user=self.user,
+            email=self.user.email,
+            verified=True,
+            primary=True,
+        )
+        send_result = execute_enabled_tool(
+            self.agent,
+            "send_webhook_event",
+            {
+                "webhook_id": "00000000-0000-0000-0000-000000000000",
+                "payload": {},
+                "will_continue_work": False,
+            },
+        )
+
+        self.assertEqual(inbound_result["status"], "success")
+        self.assertEqual(outbound_result["status"], "success")
+        self.assertIn("Webhook not found", send_result["message"])
+
+    def test_webhook_tools_are_unavailable_in_planning_mode(self):
+        webhook_tools = {
+            "manage_inbound_webhooks",
+            "manage_outbound_webhooks",
+            "send_webhook_event",
+        }
+        enable_system_skills(self.agent, [WEBHOOKS_SYSTEM_SKILL_KEY])
+        self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
+        self.agent.save(update_fields=["planning_state", "updated_at"])
+
+        enabled_names = {
+            definition["function"]["name"]
+            for definition in get_enabled_tool_definitions(self.agent)
+        }
+        self.assertTrue(webhook_tools.isdisjoint(enabled_names))
+        for tool_name in webhook_tools:
+            self.assertTrue(planning_mode_disallows_tool(self.agent, tool_name))
+
+    def test_webhook_system_skill_context_distinguishes_directions_without_urls(self):
+        inbound = PersistentAgentInboundWebhook.objects.create(agent=self.agent, name="Aimfox inbound")
+        outbound = PersistentAgentWebhook.objects.create(
+            agent=self.agent,
+            name="Operations outbound",
+            url="https://example.com/private?token=outbound-secret",
+        )
+        enable_system_skills(self.agent, [WEBHOOKS_SYSTEM_SKILL_KEY])
+
+        prompt = format_recent_skills_for_prompt(self.agent)
+
+        self.assertIn("System Skill: Webhooks", prompt)
+        self.assertIn("Prefer native Gobii webhooks over Pipedream", prompt)
+        self.assertIn("Inbound triggers:", prompt)
+        self.assertIn(str(inbound.id), prompt)
+        self.assertIn("Outbound destinations:", prompt)
+        self.assertIn(str(outbound.id), prompt)
+        self.assertNotIn(inbound.secret, prompt)
+        self.assertNotIn(outbound.url, prompt)
+        self.assertNotIn("ask the user to add it on the agent settings page", prompt)
+
+    def test_webhook_eval_suite_is_registered(self):
+        import api.evals.loader  # noqa: F401 - registers scenarios and suites
+        from api.evals.registry import ScenarioRegistry
+        from api.evals.scenarios.webhooks import WEBHOOK_SCENARIO_SLUGS, WEBHOOKS_SUITE_SLUG
+        from api.evals.suites import SuiteRegistry
+
+        suite = SuiteRegistry.get(WEBHOOKS_SUITE_SLUG)
+
+        self.assertIsNotNone(suite)
+        self.assertEqual(tuple(suite.scenario_slugs), WEBHOOK_SCENARIO_SLUGS)
+        for scenario_slug in WEBHOOK_SCENARIO_SLUGS:
+            self.assertIsNotNone(ScenarioRegistry.get(scenario_slug))
 
 
 @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False)

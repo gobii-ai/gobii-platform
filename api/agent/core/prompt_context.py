@@ -1477,7 +1477,6 @@ def _render_prompt_context_once(
             config_authority,
             contact_records,
         )
-    _build_webhooks_block(agent, important_group, span)
     _build_mcp_servers_block(agent, important_group, span)
 
     sandbox_block = _get_sandbox_prompt_summary(agent)
@@ -2711,53 +2710,6 @@ def _build_contacts_block(
         )
 
     return recent_contacts_text
-
-
-def _build_webhooks_block(agent: PersistentAgent, important_group, span) -> None:
-    """Add outbound webhook metadata to the prompt."""
-    webhooks = list(agent.webhooks.order_by("name"))
-    span.set_attribute("persistent_agent.webhooks.count", len(webhooks))
-
-    webhooks_group = important_group.group("webhooks", weight=3)
-
-    if not webhooks:
-        webhooks_group.section_text(
-            "webhooks_note",
-            "You do not have any outbound webhooks configured. If you need one, ask the user to add it on the agent settings page.",
-            weight=1,
-            non_shrinkable=True,
-        )
-        return
-
-    lines: list[str] = [
-        "Available outbound webhooks (use `send_webhook_event`):"
-    ]
-    for hook in webhooks:
-        last_triggered = (
-            hook.last_triggered_at.isoformat() if hook.last_triggered_at else "never"
-        )
-        status_label = (
-            str(hook.last_response_status) if hook.last_response_status is not None else "—"
-        )
-        lines.append(
-            f"- {hook.name} (id={hook.id}) → {hook.url} | last trigger: {last_triggered} | last status: {status_label}"
-        )
-
-    webhooks_group.section_text(
-        "webhook_catalog",
-        "\n".join(lines),
-        weight=2,
-        shrinker="hmt",
-    )
-    webhooks_group.section_text(
-        "webhook_usage_hint",
-        (
-            "When calling `send_webhook_event`, provide the matching `webhook_id` from this list "
-            "and a well-structured JSON `payload`. Avoid sending secrets or personal data unless the user explicitly requests it."
-        ),
-        weight=1,
-        non_shrinkable=True,
-    )
 
 
 def _build_mcp_servers_block(agent: PersistentAgent, important_group, span) -> None:

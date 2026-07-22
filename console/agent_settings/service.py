@@ -12,6 +12,17 @@ from console.mixins import AgentOwnerContextOverrideMixin
 from console.agent_chat.access import resolve_manageable_agent_for_request, user_can_manage_agent, user_is_collaborator
 from api.agent.tasks.process_events import process_agent_events_task
 from api.models import CommsAllowlistEntry, UserPhoneNumber
+from api.services.agent_webhooks import (
+    AgentWebhookError,
+    build_inbound_webhook_url,
+    create_inbound_webhook,
+    create_outbound_webhook,
+    delete_inbound_webhook,
+    delete_outbound_webhook,
+    rotate_inbound_webhook_secret,
+    update_inbound_webhook,
+    update_outbound_webhook,
+)
 from constants.feature_flags import CONTACT_AUTO_APPROVE_EMAIL
 
 
@@ -836,15 +847,13 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
 
     def _build_inbound_webhooks_payload(self, request: HttpRequest, agent: PersistentAgent) -> list[dict[str, object]]:
         payload = []
+        base_url = request.build_absolute_uri('/').rstrip('/')
         for webhook in agent.inbound_webhooks.order_by('name'):
-            endpoint_url = request.build_absolute_uri(
-                reverse('api:inbound_agent_webhook', kwargs={'webhook_id': webhook.id})
-            )
             payload.append(
                 {
                     'id': str(webhook.id),
                     'name': webhook.name,
-                    'url': f'{endpoint_url}?t={webhook.secret}',
+                    'url': build_inbound_webhook_url(webhook, base_url=base_url),
                     'isActive': webhook.is_active,
                     'lastTriggeredAt': webhook.last_triggered_at.isoformat() if webhook.last_triggered_at else None,
                 }
@@ -2094,83 +2103,46 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
         if normalized_action not in {"create", "update", "delete", "rotate_secret"}:
             return _error_response("Unsupported inbound webhook action.")
 
-        def _track_inbound_webhook_event(
-            event_type: AnalyticsEvent,
-            webhook_obj: PersistentAgentInboundWebhook,
-        ) -> None:
-            props = Analytics.with_org_properties(
-                {
-                    'agent_id': str(agent.pk),
-                    'agent_name': agent.name,
-                    'webhook_id': str(webhook_obj.id),
-                    'webhook_name': webhook_obj.name,
-                    'is_active': webhook_obj.is_active,
-                },
-                organization=agent.organization,
-            )
-            transaction.on_commit(
-                lambda evt=event_type, properties=props: Analytics.track_event(
-                    user_id=request.user.id,
-                    event=evt,
-                    source=AnalyticsSource.WEB,
-                    properties=properties.copy(),
-                )
-            )
-
-        if normalized_action in {"delete", "rotate_secret", "update"}:
-            webhook_id = request.POST.get("inbound_webhook_id")
-            if not webhook_id:
-                return _error_response("Missing inbound webhook identifier.")
-            try:
-                webhook = agent.inbound_webhooks.get(id=webhook_id)
-            except PersistentAgentInboundWebhook.DoesNotExist:
-                return _error_response("Inbound webhook not found or no longer exists.")
-        else:
-            webhook = None
-
-        if normalized_action == "delete":
-            _track_inbound_webhook_event(AnalyticsEvent.PERSISTENT_AGENT_INBOUND_WEBHOOK_DELETED, webhook)
-            webhook.delete()
-            return _success_response("Inbound webhook removed.")
-
-        if normalized_action == "rotate_secret":
-            webhook.rotate_secret()
-            _track_inbound_webhook_event(AnalyticsEvent.PERSISTENT_AGENT_INBOUND_WEBHOOK_SECRET_ROTATED, webhook)
-            return _success_response("Inbound webhook secret rotated.")
-
-        name = (request.POST.get("inbound_webhook_name") or "").strip()
-        is_active_raw = request.POST.get("inbound_webhook_is_active")
-        is_active = True if is_active_raw is None else is_active_raw.lower() == "true"
-        if not name:
-            return _error_response("Inbound webhook name is required.")
-
-        if normalized_action == "create":
-            webhook = PersistentAgentInboundWebhook(agent=agent, name=name, is_active=is_active)
-        else:
-            webhook.name = name
-            webhook.is_active = is_active
-
         try:
-            webhook.save()
-        except ValidationError as exc:
-            error_messages = []
-            if hasattr(exc, "message_dict"):
-                for values in exc.message_dict.values():
-                    error_messages.extend(values)
-            elif hasattr(exc, "messages"):
-                error_messages.extend(exc.messages)
+            if normalized_action == "delete":
+                delete_inbound_webhook(
+                    agent,
+                    request.POST.get("inbound_webhook_id"),
+                    actor_user_id=request.user.id,
+                    source=AnalyticsSource.WEB,
+                )
+                return _success_response("Inbound webhook removed.")
+            if normalized_action == "rotate_secret":
+                rotate_inbound_webhook_secret(
+                    agent,
+                    request.POST.get("inbound_webhook_id"),
+                    actor_user_id=request.user.id,
+                    source=AnalyticsSource.WEB,
+                )
+                return _success_response("Inbound webhook secret rotated.")
+
+            name = (request.POST.get("inbound_webhook_name") or "").strip()
+            is_active_raw = request.POST.get("inbound_webhook_is_active")
+            is_active = True if is_active_raw is None else is_active_raw.lower() == "true"
+            if normalized_action == "create":
+                create_inbound_webhook(
+                    agent,
+                    name=name,
+                    is_active=is_active,
+                    actor_user_id=request.user.id,
+                    source=AnalyticsSource.WEB,
+                )
             else:
-                error_messages.append(str(exc))
-
-            message_text = "; ".join(error_messages) if error_messages else "Invalid data."
-            return _error_response(f"Unable to save inbound webhook: {message_text}")
-        except IntegrityError:
-            return _error_response("An inbound webhook with that name already exists for this agent.")
-
-        if normalized_action == "create":
-            _track_inbound_webhook_event(AnalyticsEvent.PERSISTENT_AGENT_INBOUND_WEBHOOK_ADDED, webhook)
-        else:
-            _track_inbound_webhook_event(AnalyticsEvent.PERSISTENT_AGENT_INBOUND_WEBHOOK_UPDATED, webhook)
+                update_inbound_webhook(
+                    agent,
+                    request.POST.get("inbound_webhook_id"),
+                    name=name,
+                    is_active=is_active,
+                    actor_user_id=request.user.id,
+                    source=AnalyticsSource.WEB,
+                )
+        except AgentWebhookError as exc:
+            return _error_response(str(exc))
         return _success_response("Inbound webhook saved.")
 
     def _handle_webhook_action(self, request, agent: PersistentAgent, action: str, *, ajax: bool = False):
@@ -2198,80 +2170,39 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
         if normalized_action not in {"create", "update", "delete"}:
             return _error_response("Unsupported webhook action.")
 
-        def _track_webhook_event(event_type: AnalyticsEvent, webhook_obj: PersistentAgentWebhook) -> None:
-            props = Analytics.with_org_properties(
-                {
-                    'agent_id': str(agent.pk),
-                    'agent_name': agent.name,
-                    'webhook_id': str(webhook_obj.id),
-                    'webhook_name': webhook_obj.name,
-                },
-                organization=agent.organization,
-            )
-            transaction.on_commit(
-                lambda evt=event_type, properties=props: Analytics.track_event(
-                    user_id=request.user.id,
-                    event=evt,
-                    source=AnalyticsSource.WEB,
-                    properties=properties.copy(),
-                )
-            )
-
-        if normalized_action == "delete":
-            webhook_id = request.POST.get("webhook_id")
-            if not webhook_id:
-                return _error_response("Missing webhook identifier.")
-            try:
-                webhook = agent.webhooks.get(id=webhook_id)
-            except PersistentAgentWebhook.DoesNotExist:
-                return _error_response("Webhook not found or no longer exists.")
-
-            _track_webhook_event(AnalyticsEvent.PERSISTENT_AGENT_WEBHOOK_DELETED, webhook)
-            webhook.delete()
-            return _success_response("Webhook removed.")
-
-        name = (request.POST.get("webhook_name") or "").strip()
-        url = (request.POST.get("webhook_url") or "").strip()
-        if not name or not url:
-            return _error_response("Webhook name and URL are required.")
-
-        if normalized_action == "create":
-            webhook = PersistentAgentWebhook(agent=agent, name=name, url=url)
-        else:
-            webhook_id = request.POST.get("webhook_id")
-            if not webhook_id:
-                return _error_response("Missing webhook identifier.")
-            try:
-                webhook = agent.webhooks.get(id=webhook_id)
-            except PersistentAgentWebhook.DoesNotExist:
-                return _error_response("Webhook not found or no longer exists.")
-            webhook.name = name
-            webhook.url = url
-
         try:
-            webhook.full_clean()
-            webhook.save()
-        except ValidationError as exc:
-            error_messages = []
-            if hasattr(exc, "message_dict"):
-                for values in exc.message_dict.values():
-                    error_messages.extend(values)
-            elif hasattr(exc, "messages"):
-                error_messages.extend(exc.messages)
+            if normalized_action == "delete":
+                delete_outbound_webhook(
+                    agent,
+                    request.POST.get("webhook_id"),
+                    actor_user_id=request.user.id,
+                    source=AnalyticsSource.WEB,
+                )
+                return _success_response("Webhook removed.")
+
+            name = (request.POST.get("webhook_name") or "").strip()
+            url = (request.POST.get("webhook_url") or "").strip()
+            if normalized_action == "create":
+                create_outbound_webhook(
+                    agent,
+                    name=name,
+                    url=url,
+                    actor_user_id=request.user.id,
+                    source=AnalyticsSource.WEB,
+                )
             else:
-                error_messages.append(str(exc))
+                update_outbound_webhook(
+                    agent,
+                    request.POST.get("webhook_id"),
+                    name=name,
+                    url=url,
+                    actor_user_id=request.user.id,
+                    source=AnalyticsSource.WEB,
+                )
+        except AgentWebhookError as exc:
+            return _error_response(str(exc))
 
-            message_text = "; ".join(error_messages) if error_messages else "Invalid data."
-            return _error_response(f"Unable to save webhook: {message_text}")
-        except IntegrityError:
-            return _error_response("A webhook with that name already exists for this agent.")
-
-        if normalized_action == "create":
-            _track_webhook_event(AnalyticsEvent.PERSISTENT_AGENT_WEBHOOK_ADDED, webhook)
-            return _success_response("Webhook created.")
-        else:
-            _track_webhook_event(AnalyticsEvent.PERSISTENT_AGENT_WEBHOOK_UPDATED, webhook)
-            return _success_response("Webhook updated.")
+        return _success_response("Webhook created." if normalized_action == "create" else "Webhook updated.")
 
     def _handle_mcp_server_update(self, request, agent: PersistentAgent, *, ajax: bool = False):
         redirect_response = redirect(_agent_settings_app_path(agent))

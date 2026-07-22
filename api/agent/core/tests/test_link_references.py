@@ -318,9 +318,7 @@ class LinkReferenceTests(TestCase):
             "api.agent.core.event_processing.execute_apply_patch"
         ) as apply_patch_mock, patch(
             "api.agent.core.event_processing.execute_send_email"
-        ) as email_mock, patch(
-            "api.agent.core.event_processing.execute_send_webhook_event"
-        ) as webhook_mock:
+        ) as email_mock:
             for tool_name, params, path in cases:
                 with self.subTest(tool_name=tool_name):
                     result, _ = _execute_tool_call_runtime(
@@ -341,7 +339,6 @@ class LinkReferenceTests(TestCase):
         enabled.assert_not_called()
         apply_patch_mock.assert_not_called()
         email_mock.assert_not_called()
-        webhook_mock.assert_not_called()
 
     def test_runtime_allows_embedded_references_only_in_supported_content_fields(self):
         token = rewrite_prompt_urls(

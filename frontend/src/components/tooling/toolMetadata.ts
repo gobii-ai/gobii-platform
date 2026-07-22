@@ -991,6 +991,71 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
     },
   },
   {
+    name: 'manage_inbound_webhooks',
+    label: 'Inbound webhook managed',
+    icon: Webhook,
+    iconBgClass: 'bg-violet-100',
+    iconColorClass: 'text-violet-600',
+    detailKind: 'default',
+    derive(entry, parameters) {
+      const action = coerceString(parameters?.['action'])
+      const resultData = parseResultObject(entry.result)
+      const webhook = resultData?.['webhook']
+      const deletedWebhook = resultData?.['deleted_webhook']
+      const webhookData =
+        webhook && typeof webhook === 'object' && !Array.isArray(webhook)
+          ? webhook as Record<string, unknown>
+          : deletedWebhook && typeof deletedWebhook === 'object' && !Array.isArray(deletedWebhook)
+            ? deletedWebhook as Record<string, unknown>
+            : null
+      const name = coerceString(webhookData?.['name']) || coerceString(parameters?.['name'])
+      const actionLabels: Record<string, string> = {
+        list: 'Inbound webhooks listed',
+        get: 'Inbound webhook inspected',
+        create: 'Inbound webhook created',
+        update: 'Inbound webhook updated',
+        rotate_secret: 'Inbound webhook secret rotated',
+        delete: 'Inbound webhook deleted',
+      }
+      return {
+        caption: action ? actionLabels[action] ?? entry.caption ?? 'Inbound webhook managed' : entry.caption,
+        summary: name ? truncate(name, 96) : entry.summary ?? null,
+      }
+    },
+  },
+  {
+    name: 'manage_outbound_webhooks',
+    label: 'Outbound webhook managed',
+    icon: Webhook,
+    iconBgClass: 'bg-cyan-100',
+    iconColorClass: 'text-cyan-700',
+    detailKind: 'default',
+    derive(entry, parameters) {
+      const action = coerceString(parameters?.['action'])
+      const resultData = parseResultObject(entry.result)
+      const webhook = resultData?.['webhook']
+      const deletedWebhook = resultData?.['deleted_webhook']
+      const webhookData =
+        webhook && typeof webhook === 'object' && !Array.isArray(webhook)
+          ? webhook as Record<string, unknown>
+          : deletedWebhook && typeof deletedWebhook === 'object' && !Array.isArray(deletedWebhook)
+            ? deletedWebhook as Record<string, unknown>
+            : null
+      const name = coerceString(webhookData?.['name']) || coerceString(parameters?.['name'])
+      const actionLabels: Record<string, string> = {
+        list: 'Outbound webhooks listed',
+        get: 'Outbound webhook inspected',
+        create: 'Outbound webhook created',
+        update: 'Outbound webhook updated',
+        delete: 'Outbound webhook deleted',
+      }
+      return {
+        caption: action ? actionLabels[action] ?? entry.caption ?? 'Outbound webhook managed' : entry.caption,
+        summary: name ? truncate(name, 96) : entry.summary ?? null,
+      }
+    },
+  },
+  {
     name: 'send_webhook_event',
     label: 'Webhook sent',
     icon: Webhook,

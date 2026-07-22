@@ -7,6 +7,7 @@ pre-configured outbound webhooks with structured JSON payloads.
 
 import logging
 from typing import Any, Dict, Iterable
+from urllib.parse import parse_qsl, unquote, urlsplit
 
 import requests
 from requests import RequestException
@@ -21,6 +22,30 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_TIMEOUT_SECONDS = 15
 USER_AGENT = "Gobii-AgentWebhook/1.0"
+SEND_WEBHOOK_EVENT_TOOL_NAME = "send_webhook_event"
+
+
+def _redact_webhook_url(value: str | None, webhook: PersistentAgentWebhook) -> str | None:
+    if value is None:
+        return None
+    redacted = str(value)
+    parsed = urlsplit(webhook.url)
+    path_and_query = parsed.path
+    if parsed.query:
+        path_and_query = f"{path_and_query}?{parsed.query}"
+    candidates = {webhook.url, unquote(webhook.url)}
+    if len(path_and_query) >= 4:
+        candidates.update({path_and_query, unquote(path_and_query)})
+    for _key, query_value in parse_qsl(parsed.query, keep_blank_values=False):
+        if len(query_value) >= 4:
+            candidates.add(query_value)
+    if parsed.username and len(parsed.username) >= 4:
+        candidates.add(parsed.username)
+    if parsed.password and len(parsed.password) >= 4:
+        candidates.add(parsed.password)
+    for candidate in sorted((item for item in candidates if item), key=len, reverse=True):
+        redacted = redacted.replace(candidate, "[webhook URL redacted]")
+    return redacted
 
 
 def get_send_webhook_tool() -> Dict[str, Any]:
@@ -28,7 +53,7 @@ def get_send_webhook_tool() -> Dict[str, Any]:
     return {
         "type": "function",
         "function": {
-            "name": "send_webhook_event",
+            "name": SEND_WEBHOOK_EVENT_TOOL_NAME,
             "description": (
                 "Send a JSON payload to one of your configured outbound webhooks. "
                 "You MUST provide the exact `webhook_id` from your context. "
@@ -132,13 +157,14 @@ def _record_delivery_attempt(
     custom_header_count: int,
 ) -> None:
     """Persist delivery attempt metadata and track analytics."""
-    webhook.record_delivery(status_code=status_code, error_message=error_message or "")
+    safe_error_message = _redact_webhook_url(error_message, webhook)
+    webhook.record_delivery(status_code=status_code, error_message=safe_error_message or "")
     _track_webhook_attempt(
         agent,
         webhook,
         result=result,
         status_code=status_code,
-        error_message=error_message,
+        error_message=safe_error_message,
         payload_keys=payload_keys,
         custom_header_count=custom_header_count,
     )
@@ -244,9 +270,9 @@ def execute_send_webhook_event(agent: PersistentAgent, params: Dict[str, Any]) -
             proxies=proxies,
         )
         status_code = response.status_code
-        response_preview = (response.text or "")[:500]
+        response_preview = _redact_webhook_url((response.text or "")[:500], webhook)
     except RequestException as exc:
-        error_message = str(exc)
+        error_message = _redact_webhook_url(str(exc), webhook) or exc.__class__.__name__
         logger.warning(
             "Agent %s webhook '%s' (%s) failed: %s",
             agent.id,

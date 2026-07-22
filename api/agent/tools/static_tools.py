@@ -11,7 +11,10 @@ from .custom_tool_names import CREATE_CUSTOM_TOOL_NAME
 PLANNING_MODE_DISABLED_TOOL_NAMES = frozenset({
     CREATE_CUSTOM_TOOL_NAME,
     "apply_patch",
+    "manage_inbound_webhooks",
+    "manage_outbound_webhooks",
     "request_contact_permission",
+    "send_webhook_event",
     "spawn_web_task",
     "update_plan",
     "create_chart"
@@ -87,7 +90,6 @@ def get_static_tool_definitions(agent: Optional[PersistentAgent]) -> List[dict]:
     from .sms_sender import get_send_sms_tool
     from .spawn_web_task import get_spawn_web_task_tool
     from .web_chat_sender import get_send_chat_tool
-    from .webhook_sender import get_send_webhook_tool
     from .peer_dm import get_send_agent_message_tool
     from .plan import get_update_plan_tool
 
@@ -114,9 +116,6 @@ def get_static_tool_definitions(agent: Optional[PersistentAgent]) -> List[dict]:
         static_tools.append(get_end_planning_tool())
 
     static_tools.append(get_apply_patch_tool())
-
-    if agent.webhooks.exists():
-        static_tools.append(get_send_webhook_tool())
 
     has_peer_links = AgentPeerLink.objects.filter(
         is_enabled=True,
