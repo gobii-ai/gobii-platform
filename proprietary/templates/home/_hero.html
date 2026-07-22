@@ -1,24 +1,34 @@
-<div class="mx-auto mb-8 max-w-5xl text-center">
-  <div class="relative mx-auto mb-4 h-24 w-56 sm:mb-5 sm:h-28 sm:w-64">
-    <div class="absolute left-1/2 top-1/2 h-16 w-36 -translate-x-1/2 -translate-y-1/2 rounded-full bg-violet-300/25 blur-2xl" aria-hidden="true"></div>
-    <div class="absolute right-7 top-5 h-3 w-3 rounded-full border border-violet-400/40 bg-white/40 sm:right-8 sm:top-6" aria-hidden="true"></div>
-    <div class="absolute right-2 top-11 h-2 w-2 rounded-full border border-fuchsia-400/35 bg-white/40 sm:right-3 sm:top-12" aria-hidden="true"></div>
-    <div class="absolute right-10 bottom-2 h-1.5 w-1.5 rounded-full bg-violet-400/35 sm:right-12 sm:bottom-3" aria-hidden="true"></div>
-    <div class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
-      <div class="gobii-hero-fish-cursor" data-gobii-fish-cursor>
-        <div class="gobii-hero-fish" style="width: clamp(96px, 9vw, 118px);" role="img" aria-label="Gobii AI mascot, an animated fish, swimming on the homepage">
-          {% include "home/_gobii_fish.svg" %}
-        </div>
+{% load static %}
+
+{% if settings.GOBII_PROPRIETARY_MODE %}
+<div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3 md:gap-6 mb-6 lg:max-w-3xl mx-auto">
+  <div class="text-center md:text-left">
+    <h1 class="text-4xl sm:text-5xl lg:text-6xl tracking-tight font-light text-gray-900 leading-[1.08]">
+      {% if landing_hero_text %}
+        <span class="font-light">{{ landing_hero_text|safe }}</span>
+      {% else %}
+        Delegate <span class="font-normal bg-gradient-to-r from-violet-700 to-purple-600 bg-clip-text text-transparent">qualified sourcing</span> to AI employees
+      {% endif %}
+    </h1>
+    <p class="mt-4 text-lg text-gray-500 md:max-w-md">Find leads <i aria-hidden="true" data-lucide="user-plus" class="inline-block w-[0.9em] h-[0.9em] text-violet-500 -translate-y-[1px]"></i>, candidates, companies <i aria-hidden="true" data-lucide="building-2" class="inline-block w-[0.9em] h-[0.9em] text-violet-500 -translate-y-[1px]"></i>, and opportunities on schedule <i aria-hidden="true" data-lucide="calendar-clock" class="inline-block w-[0.9em] h-[0.9em] text-violet-500 -translate-y-[1px]"></i>.</p>
+  </div>
+  <div class="flex justify-center md:block flex-shrink-0 order-first md:order-last">
+    <div class="gobii-hero-fish-cursor" data-gobii-fish-cursor>
+      <div class="gobii-hero-fish" role="img" aria-label="Gobii AI mascot, an animated fish, swimming on the homepage">
+        {% include "home/_gobii_fish.svg" %}
       </div>
     </div>
   </div>
-  <h1 class="text-4xl font-light leading-[1.08] tracking-tight text-slate-950 sm:text-5xl">
+</div>
+{% else %}
+<div class="text-center mb-8">
+  <h1 class="text-4xl sm:text-5xl md:text-6xl tracking-tight font-light text-gray-900 max-w-3xl mx-auto leading-[1.15]">
     {% if landing_hero_text %}
       <span class="font-light">{{ landing_hero_text|safe }}</span>
     {% else %}
-      <span class="lg:block">A steady stream of</span>
-      <span class="lg:block"><span class="font-normal bg-gradient-to-r from-violet-700 via-purple-600 to-fuchsia-600 bg-clip-text text-transparent">qualified candidates</span> and sales leads</span>
+      Delegate <span class="font-normal bg-gradient-to-r from-violet-700 to-purple-600 bg-clip-text text-transparent">qualified sourcing</span> to AI employees
     {% endif %}
   </h1>
-  <p class="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-slate-600 sm:text-lg">Your Gobii AI employee keeps searching, adapts to your feedback, and works inside the tools your team already uses.</p>
+  <p class="mt-5 text-base sm:text-lg text-gray-500 max-w-2xl mx-auto leading-relaxed">Find leads <i aria-hidden="true" data-lucide="user-plus" class="inline-block w-[0.9em] h-[0.9em] text-violet-500 -translate-y-[1px]"></i>, candidates, companies <i aria-hidden="true" data-lucide="building-2" class="inline-block w-[0.9em] h-[0.9em] text-violet-500 -translate-y-[1px]"></i>, and opportunities on schedule <i aria-hidden="true" data-lucide="calendar-clock" class="inline-block w-[0.9em] h-[0.9em] text-violet-500 -translate-y-[1px]"></i>.</p>
 </div>
+{% endif %}

@@ -1084,12 +1084,11 @@ class HomePageTests(TestCase):
             normalized_page_text.replace(" ,", ",").replace(" ?", "?").replace(" .", ".")
         )
         self.assertIn(
-            "A steady stream of qualified candidates and sales leads",
+            "Delegate qualified sourcing to AI employees",
             normalized_page_text,
         )
         self.assertIn(
-            "Your Gobii AI employee keeps searching, adapts to your feedback, and works inside "
-            "the tools your team already uses.",
+            "Find leads, candidates, companies, and opportunities on schedule.",
             normalized_page_text,
         )
         self.assertIn(
@@ -3758,16 +3757,18 @@ class RestoredPublicMarketingSurfaceTests(TestCase):
         )
         self.assertGreaterEqual(len(developer_links), 1)
         self.assertIsNotNone(soup.find("a", {"href": reverse("pages:library")}))
-        self.assertIn("Solutions", soup.get_text(" ", strip=True))
-        self.assertIn("Discover", soup.get_text(" ", strip=True))
-        self.assertIn("API", soup.get_text(" ", strip=True))
+        page_text = re.sub(r"\s+", " ", soup.get_text(" ", strip=True))
+        page_text = page_text.replace(" ,", ",").replace(" .", ".")
+        self.assertIn("Solutions", page_text)
+        self.assertIn("Discover", page_text)
+        self.assertIn("API", page_text)
         self.assertEqual(
             soup.find("h1").get_text(" ", strip=True),
-            "A steady stream of qualified candidates and sales leads",
+            "Delegate qualified sourcing to AI employees",
         )
         self.assertIn(
-            "Your Gobii AI employee keeps searching, adapts to your feedback, and works inside the tools your team already uses.",
-            soup.get_text(" ", strip=True),
+            "Find leads, candidates, companies, and opportunities on schedule.",
+            page_text,
         )
         for retired_slug in ("health-care", "defense"):
             self.assertIsNone(
