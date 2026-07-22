@@ -1558,6 +1558,36 @@ class ImpliedSendTests(TestCase):
             ).exists()
         )
 
+    def test_one_off_config_guard_allows_emotion_only_mutation(self):
+        self._add_inbound_web_message("What's the latest Bitcoin price right now?")
+
+        self.assertFalse(
+            ep._should_skip_irrelevant_agent_config_mutation(
+                self.agent,
+                tool_name="sqlite_batch",
+                tool_params={
+                    "sql": (
+                        "UPDATE __agent_config SET emotion='🙂', "
+                        "emotion_timeout_seconds=3600 WHERE id=1"
+                    ),
+                },
+                batch_has_terminal_message=True,
+            )
+        )
+        self.assertTrue(
+            ep._should_skip_irrelevant_agent_config_mutation(
+                self.agent,
+                tool_name="sqlite_batch",
+                tool_params={
+                    "sql": (
+                        "UPDATE __agent_config SET charter='Track every price lookup', "
+                        "emotion='🙂', emotion_timeout_seconds=3600 WHERE id=1"
+                    ),
+                },
+                batch_has_terminal_message=True,
+            )
+        )
+
     def test_prepare_tool_batch_skips_batch_scoped_charter_mutation_without_reply(self):
         self._add_inbound_web_message("Only this batch, these long updates aren't useful.")
 

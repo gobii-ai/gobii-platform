@@ -1182,6 +1182,42 @@ class AgentChatAPITests(TestCase):
         self.assertIsNone(snapshot.get("nextScheduledAt"))
 
     @tag("batch_agent_chat")
+    def test_roster_and_timeline_only_expose_active_emotion(self):
+        expires_at = timezone.now() + timedelta(minutes=20)
+        self.agent.emotion = "🧑🏽‍💻"
+        self.agent.emotion_expires_at = expires_at
+        self.agent.save(update_fields=["emotion", "emotion_expires_at"])
+
+        roster_response = self.client.get(reverse("console_agent_roster"))
+        timeline_response = self.client.get(f"/console/api/agents/{self.agent.id}/timeline/")
+
+        self.assertEqual(roster_response.status_code, 200)
+        roster_agent = next(
+            item for item in roster_response.json()["agents"] if item["id"] == str(self.agent.id)
+        )
+        self.assertEqual(roster_agent["emotion"], "🧑🏽‍💻")
+        expected_expiry = expires_at.isoformat().replace("+00:00", "Z")
+        self.assertEqual(roster_agent["emotion_expires_at"], expected_expiry)
+        self.assertEqual(timeline_response.status_code, 200)
+        self.assertEqual(timeline_response.json()["emotion"], "🧑🏽‍💻")
+        self.assertEqual(timeline_response.json()["emotion_expires_at"], expected_expiry)
+
+        self.agent.emotion_expires_at = timezone.now() - timedelta(seconds=1)
+        self.agent.save(update_fields=["emotion_expires_at"])
+
+        expired_roster_response = self.client.get(reverse("console_agent_roster"))
+        expired_timeline_response = self.client.get(f"/console/api/agents/{self.agent.id}/timeline/")
+        expired_roster_agent = next(
+            item
+            for item in expired_roster_response.json()["agents"]
+            if item["id"] == str(self.agent.id)
+        )
+        self.assertIsNone(expired_roster_agent["emotion"])
+        self.assertIsNone(expired_roster_agent["emotion_expires_at"])
+        self.assertIsNone(expired_timeline_response.json()["emotion"])
+        self.assertIsNone(expired_timeline_response.json()["emotion_expires_at"])
+
+    @tag("batch_agent_chat")
     def test_timeline_endpoint_returns_user_action_events(self):
         action_event = PersistentAgentUserActionEvent.objects.create(
             agent=self.agent,

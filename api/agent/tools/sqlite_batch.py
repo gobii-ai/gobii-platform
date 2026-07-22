@@ -24,7 +24,7 @@ from .sqlite_guardrails import (
 )
 from .sqlite_autocorrect import build_cte_column_candidates, build_sqlglot_candidates
 from .sqlite_query_quality import build_tool_result_query_advisories
-from .sqlite_state import EPHEMERAL_TABLES, _sqlite_db_path_var  # type: ignore
+from .sqlite_state import AGENT_CONFIG_TABLE, EPHEMERAL_TABLES, _sqlite_db_path_var  # type: ignore
 
 if TYPE_CHECKING:
     from ...models import PersistentAgent
@@ -1531,7 +1531,11 @@ def _execute_with_autocorrections(
                 if reporting_note:
                     result_entry["reporting_note"] = reporting_note.strip()
             else:
-                affected = max(cur.rowcount or 0, conn.total_changes - changes_before)
+                if AGENT_CONFIG_TABLE.casefold() in current_query.casefold():
+                    # changes() excludes trigger work and remains accurate for CTE mutations.
+                    affected = conn.execute("SELECT changes();").fetchone()[0]
+                else:
+                    affected = max(cur.rowcount or 0, conn.total_changes - changes_before)
                 msg = f"Query {idx} affected {max(0, affected)} rows."
                 zero_rows_warning = False
                 query_upper = current_query.upper()

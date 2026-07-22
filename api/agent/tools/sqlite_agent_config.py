@@ -1,6 +1,7 @@
 """SQLite-backed agent configuration helpers."""
 
 import logging
+import math
 import re
 import sqlite3
 from contextlib import contextmanager
@@ -9,7 +10,13 @@ from typing import Optional
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.utils import timezone
 
+from ..emotions import (
+    MAX_EMOTION_LENGTH,
+    MAX_EMOTION_TIMEOUT_SECONDS,
+    normalize_emotion_update,
+)
 from .charter_updater import execute_update_charter
 from .schedule_updater import execute_update_schedule
 from .sqlite_guardrails import clear_guarded_connection, open_guarded_sqlite_connection
@@ -72,6 +79,9 @@ class AgentScheduleSnapshot:
 class AgentConfigSnapshot:
     charter: str
     schedule: Optional[str]
+    emotion: Optional[str] = None
+    emotion_timeout_seconds: Optional[int] = None
+    emotion_write_count: int = 0
     schedules: tuple[AgentScheduleSnapshot, ...] = ()
 
 
@@ -134,7 +144,21 @@ def seed_sqlite_agent_config(agent) -> Optional[AgentConfigSnapshot]:
                 CREATE TABLE "{AGENT_CONFIG_TABLE}" (
                     id INTEGER PRIMARY KEY CHECK (id = 1),
                     charter TEXT,
-                    schedule TEXT
+                    schedule TEXT,
+                    emotion TEXT CHECK (
+                        emotion IS NULL OR length(emotion) BETWEEN 1 AND {MAX_EMOTION_LENGTH}
+                    ),
+                    emotion_timeout_seconds INTEGER CHECK (
+                        emotion_timeout_seconds IS NULL OR (
+                            typeof(emotion_timeout_seconds) = 'integer' AND
+                            emotion_timeout_seconds BETWEEN 1 AND {MAX_EMOTION_TIMEOUT_SECONDS}
+                        )
+                    ),
+                    _emotion_write_count INTEGER NOT NULL DEFAULT 0 CHECK (_emotion_write_count >= 0),
+                    CHECK (
+                        (emotion IS NULL AND emotion_timeout_seconds IS NULL) OR
+                        (emotion IS NOT NULL AND emotion_timeout_seconds IS NOT NULL)
+                    )
                 );
                 """
             )
@@ -169,14 +193,51 @@ def seed_sqlite_agent_config(agent) -> Optional[AgentConfigSnapshot]:
                 );
                 """
             )
+            seeded_at = timezone.now()
+            active_emotion, emotion_expires_at = agent.get_active_emotion_state(seeded_at)
+            emotion_timeout_seconds = (
+                min(
+                    MAX_EMOTION_TIMEOUT_SECONDS,
+                    max(1, math.ceil((emotion_expires_at - seeded_at).total_seconds())),
+                )
+                if emotion_expires_at is not None
+                else None
+            )
             snapshot = AgentConfigSnapshot(
                 charter=agent.charter or "",
                 schedule=agent.schedule,
+                emotion=active_emotion,
+                emotion_timeout_seconds=emotion_timeout_seconds,
                 schedules=schedules,
             )
             conn.execute(
-                f'INSERT INTO "{AGENT_CONFIG_TABLE}" (id, charter, schedule) VALUES (1, ?, ?);',
-                (snapshot.charter, snapshot.schedule),
+                f'''INSERT INTO "{AGENT_CONFIG_TABLE}"
+                    (id, charter, schedule, emotion, emotion_timeout_seconds)
+                    VALUES (1, ?, ?, ?, ?);''',
+                (
+                    snapshot.charter,
+                    snapshot.schedule,
+                    snapshot.emotion,
+                    snapshot.emotion_timeout_seconds,
+                ),
+            )
+            conn.execute(
+                f'''CREATE TRIGGER "{AGENT_CONFIG_TABLE}_emotion_write"
+                    AFTER UPDATE OF emotion, emotion_timeout_seconds ON "{AGENT_CONFIG_TABLE}"
+                    BEGIN
+                        UPDATE "{AGENT_CONFIG_TABLE}"
+                        SET _emotion_write_count = _emotion_write_count + 1
+                        WHERE id = NEW.id;
+                    END;'''
+            )
+            conn.execute(
+                f'''CREATE TRIGGER "{AGENT_CONFIG_TABLE}_emotion_insert"
+                    AFTER INSERT ON "{AGENT_CONFIG_TABLE}" WHEN NEW.emotion IS NOT NULL
+                    BEGIN
+                        UPDATE "{AGENT_CONFIG_TABLE}"
+                        SET _emotion_write_count = NEW._emotion_write_count + 1
+                        WHERE id = NEW.id;
+                    END;'''
             )
             conn.executemany(
                 f"""
@@ -225,6 +286,23 @@ def apply_sqlite_agent_config_updates(
                 if isinstance(result, dict)
                 else "Charter update failed."
             )
+
+    if (
+        current.emotion_write_count != baseline.emotion_write_count
+        or _emotion_value(current) != _emotion_value(baseline)
+    ):
+        try:
+            emotion, emotion_expires_at = normalize_emotion_update(
+                current.emotion,
+                current.emotion_timeout_seconds,
+            )
+            agent.emotion = emotion
+            agent.emotion_expires_at = emotion_expires_at
+            agent.save(update_fields=["emotion", "emotion_expires_at"])
+        except ValidationError as exc:
+            errors["emotion"] = _validation_message(exc)
+        else:
+            updated_fields.append("emotion")
 
     legacy_schedule_changed = _normalize_schedule(current.schedule) != _normalize_schedule(baseline.schedule)
     schedule_rows_changed = _schedule_user_rows(current.schedules) != _schedule_user_rows(baseline.schedules)
@@ -275,10 +353,15 @@ def read_sqlite_agent_config_snapshot() -> Optional[AgentConfigSnapshot]:
     try:
         with _guarded_connection(db_path) as conn:
             config_row = conn.execute(
-                f'SELECT charter, schedule FROM "{AGENT_CONFIG_TABLE}" WHERE id = 1;'
+                f'''SELECT charter, schedule, emotion, emotion_timeout_seconds, _emotion_write_count
+                    FROM "{AGENT_CONFIG_TABLE}" WHERE id = 1;'''
             ).fetchone()
             if not config_row:
                 return None
+            emotion, emotion_timeout_seconds = _sqlite_emotion_value(config_row[2], config_row[3])
+            emotion_write_count = config_row[4]
+            if type(emotion_write_count) is not int or emotion_write_count < 0:
+                raise ValueError("emotion write count is invalid")
             schedule_rows = conn.execute(
                 f"""
                 SELECT schedule_key, name, kind, schedule, timezone, run_at,
@@ -291,6 +374,9 @@ def read_sqlite_agent_config_snapshot() -> Optional[AgentConfigSnapshot]:
             return AgentConfigSnapshot(
                 charter=config_row[0] or "",
                 schedule=config_row[1],
+                emotion=emotion,
+                emotion_timeout_seconds=emotion_timeout_seconds,
+                emotion_write_count=emotion_write_count,
                 schedules=schedules,
             )
     except (RuntimeError, sqlite3.Error, ValueError, TypeError):
@@ -554,6 +640,18 @@ def _validation_message(exc: Exception) -> str:
             )
         return " ".join(str(message) for message in exc.messages)
     return str(exc)
+
+
+def _sqlite_emotion_value(emotion, timeout_seconds) -> tuple[Optional[str], Optional[int]]:
+    if emotion is None and timeout_seconds is None:
+        return None, None
+    if not isinstance(emotion, str) or type(timeout_seconds) is not int:
+        raise ValueError("emotion and emotion_timeout_seconds have invalid types")
+    return emotion, timeout_seconds
+
+
+def _emotion_value(snapshot: AgentConfigSnapshot) -> tuple[Optional[str], Optional[int]]:
+    return snapshot.emotion, snapshot.emotion_timeout_seconds
 
 
 def _drop_agent_config_tables() -> None:

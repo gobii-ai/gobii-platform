@@ -15,6 +15,8 @@ type AgentIdentityUpdate = {
   agentId?: string | null
   agentName?: string | null
   agentAvatarUrl?: string | null
+  emotion?: string | null
+  emotionExpiresAt?: string | null
   agentNextScheduledAt?: string | null
   signupPreviewState?: SignupPreviewState | null
   planningState?: PlanningState | null
@@ -53,6 +55,14 @@ function buildAgentIdentityUpdate(payload: Record<string, unknown>): AgentIdenti
   }
   if (Object.prototype.hasOwnProperty.call(payload, 'agent_avatar_url')) {
     nextIdentity.agentAvatarUrl = typeof payload.agent_avatar_url === 'string' ? payload.agent_avatar_url : null
+  }
+  if (Object.prototype.hasOwnProperty.call(payload, 'emotion')) {
+    nextIdentity.emotion = typeof payload.emotion === 'string' ? payload.emotion : null
+  }
+  if (Object.prototype.hasOwnProperty.call(payload, 'emotion_expires_at')) {
+    nextIdentity.emotionExpiresAt = typeof payload.emotion_expires_at === 'string'
+      ? payload.emotion_expires_at
+      : null
   }
   if (Object.prototype.hasOwnProperty.call(payload, 'signup_preview_state')) {
     nextIdentity.signupPreviewState = normalizeSignupPreviewState(payload.signup_preview_state)

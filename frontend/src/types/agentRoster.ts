@@ -14,6 +14,8 @@ export type AgentRosterEntry = {
   id: string
   name: string
   avatarUrl: string | null
+  emotion?: string | null
+  emotionExpiresAt?: string | null
   isActive: boolean
   processingActive: boolean
   lastInteractionAt: string | null

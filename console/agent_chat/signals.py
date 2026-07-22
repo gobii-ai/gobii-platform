@@ -43,6 +43,7 @@ from .timeline import (
     is_chat_hidden_message,
     serialize_plan_event,
     serialize_message_event,
+    serialize_agent_emotion,
     serialize_agent_schedule,
     serialize_processing_snapshot,
     serialize_thinking_event,
@@ -93,6 +94,7 @@ def emit_agent_profile_update(
         "signup_preview_state": agent.signup_preview_state,
         "planning_state": agent.planning_state,
         "timestamp": timezone.now().isoformat(),
+        **serialize_agent_emotion(agent),
         **serialize_agent_schedule(agent),
     }
     if processing_active is not None:
@@ -534,6 +536,8 @@ def broadcast_agent_profile_update(sender, instance: PersistentAgent, created: b
         "mini_description",
         "short_description",
         "schedule",
+        "emotion",
+        "emotion_expires_at",
     }
     update_fields = kwargs.get("update_fields")
     if not created and update_fields is not None:
@@ -552,6 +556,8 @@ def broadcast_agent_profile_update(sender, instance: PersistentAgent, created: b
                 "mini_description",
                 "short_description",
                 "schedule",
+                "emotion",
+                "emotion_expires_at",
                 "is_active",
                 "life_state",
             )

@@ -245,6 +245,8 @@ export function AgentListItem({
           <AgentChatAvatar
             name={agent.name || 'Agent'}
             avatarUrl={agent.avatarUrl}
+            emotion={agent.emotion}
+            emotionExpiresAt={agent.emotionExpiresAt}
             className="agent-roster-item__avatar"
             imageClassName="agent-roster-item__avatar-image"
             textClassName="agent-roster-item__avatar-text"

@@ -142,6 +142,7 @@ dependencies = [
   "sqlglot>=28.5.0",
   "socksio>=1.0.0",
   "clevercsv>=0.8.4",
+  "regex>=2025.8.29",
 ]
 
 [build-system]

@@ -1659,11 +1659,14 @@ def _render_prompt_context_once(
 
     if planning_mode_active:
         agent_config_note = (
-            f"Planning Mode is active; defer {AGENT_CONFIG_TABLE} mutations until after end_planning(full_plan=...). "
-            "Planning questions must use request_human_input."
+            f"Planning Mode: defer {AGENT_CONFIG_TABLE}.charter/schedule until after end_planning(full_plan=...). "
+            "Emotion remains available; questions use request_human_input."
         )
     else:
-        agent_config_note = f"{AGENT_CONFIG_TABLE} id=1: patch_text for lasting owner behavior feedback only; temporary feedback/ordinary tasks never config."
+        agent_config_note = (
+            f"{AGENT_CONFIG_TABLE} id=1: patch_text only for lasting owner feedback, never ordinary tasks. "
+            "For brief genuine self-expression, sparingly pair one emoji emotion with emotion_timeout_seconds=1..86400; clear both NULL."
+        )
     variable_group.section_text(
         "agent_config_note",
         agent_config_note,
@@ -3639,7 +3642,7 @@ def _get_planning_mode_prompt_block() -> str:
         "- Use read-only research during planning only when the scope is unclear; do not fetch, parse, or summarize sources to answer a clear task before end_planning.\n"
         "- Named integration setup/use: before end_planning or asking how to connect, call search_tools(provider) unless the matching provider/API tool is already in the current callable tool list.\n"
         "- Do not do substantive task execution before planning ends: no drafting the final deliverable, no implementation, no outbound task execution, no third-party follow-through, and no results meant to satisfy the task itself.\n"
-        "- Do not update the runtime plan, __agent_config, __agent_schedules, or begin deliverable work until planning is completed. "
+        "- Do not update the runtime plan, __agent_config.charter/schedule, __agent_schedules, or begin deliverable work until planning is completed. "
         "Do not do substantive execution or deliverable work before planning ends.\n"
         "- Do not update __agent_config.charter directly as a substitute for completing planning. Calling "
         "end_planning(full_plan=...) is how the final plan replaces your runtime charter.\n"
