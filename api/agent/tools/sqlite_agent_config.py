@@ -231,13 +231,12 @@ def seed_sqlite_agent_config(agent) -> Optional[AgentConfigSnapshot]:
                     END;'''
             )
             conn.execute(
-                f'''CREATE TRIGGER "{AGENT_CONFIG_TABLE}_emotion_insert"
-                    AFTER INSERT ON "{AGENT_CONFIG_TABLE}" WHEN NEW.emotion IS NOT NULL
-                    BEGIN
-                        UPDATE "{AGENT_CONFIG_TABLE}"
-                        SET _emotion_write_count = NEW._emotion_write_count + 1
-                        WHERE id = NEW.id;
-                    END;'''
+                f'''CREATE TRIGGER "{AGENT_CONFIG_TABLE}_update_only" BEFORE INSERT ON "{AGENT_CONFIG_TABLE}"
+                    BEGIN SELECT RAISE(ABORT, '__agent_config is update-only; use UPDATE'); END;'''
+            )
+            conn.execute(
+                f'''CREATE TRIGGER "{AGENT_CONFIG_TABLE}_no_delete" BEFORE DELETE ON "{AGENT_CONFIG_TABLE}"
+                    BEGIN SELECT RAISE(ABORT, '__agent_config is update-only; use UPDATE'); END;'''
             )
             conn.executemany(
                 f"""

@@ -1659,13 +1659,14 @@ def _render_prompt_context_once(
 
     if planning_mode_active:
         agent_config_note = (
-            f"Planning Mode: defer {AGENT_CONFIG_TABLE}.charter/schedule until after end_planning(full_plan=...). "
-            "Emotion remains available; questions use request_human_input."
+            f"Planning Mode: defer {AGENT_CONFIG_TABLE} mutations until after end_planning(full_plan=...), "
+            "except temporary emotion; questions use request_human_input."
         )
     else:
         agent_config_note = (
-            f"{AGENT_CONFIG_TABLE} id=1: patch_text only for lasting owner feedback, never ordinary tasks. "
-            "For brief genuine self-expression, sparingly pair one emoji emotion with emotion_timeout_seconds=1..86400; clear both NULL."
+            f"{AGENT_CONFIG_TABLE} id=1: patch_text for lasting owner behavior feedback only; "
+            "temporary feedback/ordinary tasks never config. Set emotion sparingly: one emoji + "
+            "emotion_timeout_seconds=1..86400; clear both NULL."
         )
     variable_group.section_text(
         "agent_config_note",

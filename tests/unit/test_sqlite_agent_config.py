@@ -270,38 +270,30 @@ class SqliteAgentConfigTests(TestCase):
         self.assertIn("emotion", result.updated_fields)
         self.assertFalse(result.errors)
 
-    def test_replacing_same_emotion_and_timeout_restarts_expiry(self):
-        initial_now = timezone.now()
-        original_expiry = initial_now + timedelta(hours=1)
-        self.agent.emotion = "🙂"
-        self.agent.emotion_expires_at = original_expiry
-        self.agent.save(update_fields=["emotion", "emotion_expires_at"])
-
+    def test_partial_replace_cannot_wipe_durable_config(self):
         with self._sqlite_state() as db_path:
             snapshot = seed_sqlite_agent_config(self.agent)
             conn = sqlite3.connect(db_path)
             try:
-                conn.execute(
-                    f'''REPLACE INTO "{AGENT_CONFIG_TABLE}"
-                        (id, charter, schedule, emotion, emotion_timeout_seconds)
-                        VALUES (1, ?, ?, ?, ?);''',
-                    (
-                        snapshot.charter,
-                        snapshot.schedule,
-                        snapshot.emotion,
-                        snapshot.emotion_timeout_seconds,
-                    ),
-                )
-                conn.commit()
+                with self.assertRaisesRegex(sqlite3.IntegrityError, "is update-only; use UPDATE"):
+                    conn.execute(f'DELETE FROM "{AGENT_CONFIG_TABLE}" WHERE id = 1;')
+                conn.rollback()
+                with self.assertRaisesRegex(sqlite3.IntegrityError, "is update-only; use UPDATE"):
+                    conn.execute(
+                        f'''REPLACE INTO "{AGENT_CONFIG_TABLE}"
+                            (id, emotion, emotion_timeout_seconds)
+                            VALUES (1, '🙂', 3600);'''
+                    )
+                conn.rollback()
             finally:
                 conn.close()
-            reset_at = initial_now + timedelta(minutes=1)
-            with patch("api.agent.emotions.timezone.now", return_value=reset_at):
-                result = apply_sqlite_agent_config_updates(self.agent, snapshot)
+            result = apply_sqlite_agent_config_updates(self.agent, snapshot)
 
         self.agent.refresh_from_db()
-        self.assertGreater(self.agent.emotion_expires_at, original_expiry)
-        self.assertIn("emotion", result.updated_fields)
+        self.assertEqual(self.agent.charter, "Original charter")
+        self.assertEqual(self.agent.schedule, "0 9 * * *")
+        self.assertEqual(self.agent.get_active_emotion_state(), (None, None))
+        self.assertFalse(result.updated_fields)
         self.assertFalse(result.errors)
 
     def test_emotion_control_rejects_invalid_timeout_and_non_emoji(self):
