@@ -9,6 +9,7 @@ CREDIT_MESSAGE_TOOL_NAMES = frozenset(
         "send_email",
         "send_sms",
         "send_chat_message",
+        "send_discord_message",
         "send_agent_message",
     }
 )
@@ -16,7 +17,8 @@ CREDIT_MESSAGE_ONLY_ALLOWED_TOOL_NAMES = CREDIT_MESSAGE_TOOL_NAMES | frozenset(
     {"sleep_until_next_trigger"}
 )
 CREDIT_MESSAGE_ONLY_ALLOWED_TOOL_NAMES_TEXT = (
-    "send_email, send_sms, send_chat_message, send_agent_message, and sleep_until_next_trigger"
+    "send_email, send_sms, send_chat_message, send_discord_message, send_agent_message, "
+    "and sleep_until_next_trigger"
 )
 
 

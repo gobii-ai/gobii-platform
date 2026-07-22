@@ -11,6 +11,10 @@ from sqlparse.sql import Function, Parenthesis, Values, Where
 
 TOOL_RESULTS_RE = re.compile(r'\b(?:from|join)\s+"?__tool_results"?\b', re.I)
 RESULT_ID_EQ_RE = re.compile(r"\b(?:[a-z_]\w*\.)?result_id\s*=\s*(['\"])(?P<id>[^'\"]+)\1", re.I)
+RESULT_ID_SINGLE_LITERAL_RE = re.compile(
+    r"\b(?:[a-z_]\w*\.)?result_id\s*(?:=\s*(['\"])(?P<eq>[^'\"]+)\1|in\s*\(\s*(['\"])(?P<in>[^'\"]+)\3\s*\))",
+    re.I,
+)
 RESULT_ID_IN_RE = re.compile(r"\b(?:[a-z_]\w*\.)?result_id\s+in\s*\((?P<values>[^)]*)\)", re.I | re.S)
 RESULT_ID_IN_VALUE_RE = re.compile(r"(?:'(?:''|[^'])*'|\"(?:\"\"|[^\"])*\"|\?|[:@$][a-z_]\w*)", re.I)
 CREATE_TABLE_RE = re.compile(r'\bcreate\s+(?:temp(?:orary)?\s+)?table\s+(?:if\s+not\s+exists\s+)?"?(?P<name>[a-z_]\w*)"?', re.I)
@@ -60,10 +64,10 @@ SINGLE_IMPORT_MESSAGE = (
     "with one shaped query over tool_name or result_id IN (...)."
 )
 SOURCE_LITERAL_COPY_MESSAGE = (
-    "Query not executed: this model write copies source facts into SQL literals. Derive complete rows from "
-    "__tool_results in the same INSERT/UPDATE, keyed by stable ID; refresh every mutable/provenance field. Use "
-    "tool_name or visible result_id; don't fetch/copy the blob. For http_request JSON, nested arrays are under "
-    "$.content; use the actual array key. Then query the model."
+    "Query not executed: a source-derived model write used visible facts or URLs as SQL literals. Derive every "
+    "sourced field in the INSERT/UPDATE SELECT/json_each over all relevant __tool_results; only payload paths and "
+    "current result_id/tool_name may be literals. Use stable keys, refresh provenance, omit unavailable URLs, then "
+    "query the model."
 )
 COUNT_FIELDS = (
     "statement_count", "tool_result_statement_count", "single_result_id_filters", "single_derived_result_filters", "single_tool_result_imports",
@@ -188,11 +192,7 @@ def build_tool_result_query_advisories(
         advisories.append(_advisory("tool_result_ctas", "CTAS has no stable identity. Use it only for a disposable extract; reusable models need explicit CREATE TABLE with PRIMARY KEY/UNIQUE, then aggregate INSERT."))
     if available_tool_result_rows < 2:
         if copied_model_tables:
-            advisories.append(_advisory(
-                "source_facts_copied_into_model",
-                SOURCE_LITERAL_COPY_MESSAGE,
-                blocking=True,
-            ))
+            advisories.append(_advisory("source_facts_copied_into_model", SOURCE_LITERAL_COPY_MESSAGE, blocking=True))
         return advisories
     model_advisories, advisories = advisories, []
     literal_select_rows, copied_provenance_urls = _manual_import_evidence(sql_values, tool_result_payloads)
@@ -204,16 +204,18 @@ def build_tool_result_query_advisories(
         advisories.append(_advisory("tool_result_blob_fetch_loop", BLOB_LOOP_MESSAGE, blocking=True))
     elif summary.direct_result_text_fetches:
         advisories.append(_advisory("single_tool_result_blob_fetch", "This fetched one full result_text blob while multiple tool results are available. For multi-source synthesis, query the needed rows together; use substr(result_text,1,N) only for previews."))
-    if summary.single_result_id_filters >= 2 and summary.direct_result_text_fetches < 2:
+    relation_import_tables = source_derived_model_mutation_tables(sql_values)
+    relation_import_ids = tuple(match.group("eq") or match.group("in") for sql in sql_values for match in RESULT_ID_SINGLE_LITERAL_RE.finditer(sql))
+    relation_import_batch = (
+        len(relation_import_tables) == len(relation_import_ids) == summary.single_result_id_filters > 1
+        and len(set(relation_import_ids)) == 1
+    )
+    if summary.single_result_id_filters >= 2 and summary.direct_result_text_fetches < 2 and not relation_import_batch:
         advisories.append(_advisory("tool_result_row_loop", ROW_LOOP_MESSAGE, blocking=True))
-    elif summary.single_tool_result_imports:
+    elif summary.single_tool_result_imports and not relation_import_batch:
         advisories.append(_advisory("single_tool_result_import", SINGLE_IMPORT_MESSAGE))
     if copied_model_tables:
-        advisories.append(_advisory(
-            "source_facts_copied_into_model",
-            SOURCE_LITERAL_COPY_MESSAGE,
-            blocking=True,
-        ))
+        advisories.append(_advisory("source_facts_copied_into_model", SOURCE_LITERAL_COPY_MESSAGE, blocking=True))
     return advisories + model_advisories
 
 
@@ -385,16 +387,22 @@ def _source_literal_copy_tables(
                 continue
             matched_literals = set()
             copied_url = False
-            previous_token = None
-            for token in _mutation_value_tokens(statement, match.group("operation")):
-                if token.is_whitespace or token.ttype in sql_tokens.Comment:
-                    continue
+            value_tokens = [
+                token for token in _mutation_value_tokens(statement, match.group("operation"))
+                if not token.is_whitespace and token.ttype not in sql_tokens.Comment
+            ]
+            for index, token in enumerate(value_tokens):
+                previous_token = value_tokens[index - 1] if index else None
+                next_token = value_tokens[index + 1] if index + 1 < len(value_tokens) else None
                 is_json_selector = previous_token is not None and previous_token.value in {"->", "->>"}
-                previous_token = token
-                if token.ttype != sql_tokens.Literal.String.Single or is_json_selector:
+                is_case_match = (
+                    previous_token is not None and previous_token.normalized in {"WHEN", "THEN", "ELSE"}
+                    or next_token is not None and next_token.normalized in {"THEN", "ELSE", "END"}
+                )
+                if token.ttype != sql_tokens.Literal.String.Single or is_json_selector or is_case_match:
                     continue
                 value = token.value[1:-1].replace("''", "'")
-                if len(value) < 6 or value not in payload_text:
+                if len(value) < 6 or value not in payload_text or re.fullmatch(r"[A-Za-z_]\w*=", value):
                     continue
                 matched_literals.add(value)
                 copied_url = copied_url or bool(URL_RE.fullmatch(value))

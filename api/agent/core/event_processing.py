@@ -69,6 +69,7 @@ from ..tags import maybe_schedule_agent_tags
 from ..comms.routing import (
     bind_inbound_routing_scope,
     capture_inbound_routing_scope,
+    get_current_inbound_message,
     reset_inbound_routing_scope,
 )
 from tasks.services import TaskCreditService
@@ -90,7 +91,7 @@ from .daily_limit_mode import (
 )
 from .period_events import DAILY_HARD_LIMIT_BLOCKED_EVENT, DAILY_HARD_LIMIT_EXCEEDED_EVENT, DAILY_SOFT_LIMIT_EXCEEDED_EVENT, should_emit_daily_agent_event
 from .agent_judge import maybe_run_agent_judge
-from .prompt_context import build_prompt_context, get_agent_daily_credit_state, get_agent_tools
+from .prompt_context import _ConfigAuthorityResolver, build_prompt_context, get_agent_daily_credit_state, get_agent_tools
 from .prompt_run_cache import (
     PromptRunCache,
     bind_prompt_run_cache,
@@ -197,38 +198,124 @@ def _coerce_loop_iteration_limit(value: int | None) -> int:
 
 TOOL_ERROR_TYPE_MAX_BYTES = 120
 PREFERRED_PROVIDER_MAX_AGE = timedelta(hours=1)
-MESSAGE_TOOL_NAMES = set(CREDIT_MESSAGE_TOOL_NAMES)
+MESSAGE_TOOL_NAMES = set(CREDIT_MESSAGE_TOOL_NAMES) | {"send_discord_message"}
 MESSAGE_SUCCESS_STATUSES = {"ok", "queued", "sent", "success"}
 MESSAGE_TOOL_BODY_KEYS = {
     "send_email": "mobile_first_html",
     "send_sms": "body",
     "send_chat_message": "body",
     "send_agent_message": "message",
+    "send_discord_message": "message",
 }
-HUMANIZED_MESSAGE_BODY_KEYS = {**MESSAGE_TOOL_BODY_KEYS, "send_discord_message": "message"}
+REPLY_TOOL_BY_CHANNEL = {CommsChannel.EMAIL: "send_email", CommsChannel.SMS: "send_sms", CommsChannel.WEB: "send_chat_message", CommsChannel.DISCORD: "send_discord_message"}
 SQLITE_MUTATION_RE = re.compile(r"\b(?:insert|update|delete|replace|alter|drop|create)\b", re.IGNORECASE)
 AGENT_CONFIG_TABLE_RE = re.compile(r"\b__agent_config\b", re.IGNORECASE)
-DURABLE_CONFIG_INTENT_RE = re.compile(
-    r"\b(?:going forward|from now on|in the future|next time|always|never|remember|prefer|preference|"
-    r"(?:my |this )?feedback:|each time|every time|make (?:that|this|it) a rule|should(?:n'?t| not) have to|"
-    r"update (?:your )?(?:charter|schedule|instructions)|change (?:your )?(?:charter|schedule|instructions)|"
-    r"charter|schedule|scheduled|recurring|ongoing|proactive|monitor|track|alert|digest|cadence|"
-    r"setup|set up|role|scope|process|workflow|customer context|client context|operating boundary)\b",
+MCP_ACTION_NAME_RE = re.compile(
+    r"(?:^|_)(?:add|archive|cancel|comment|create|delete|edit|invite|merge|move|post|publish|react|remove|"
+    r"rename|reply|schedule|send|set|update|upload|write)(?:_|$)",
+    re.IGNORECASE,
+)
+MCP_READ_NAME_RE = re.compile(
+    r"(?:^|_)(?:fetch|find|get|inspect|list|lookup|query|read|retrieve|scrape|search|view)(?:_|$)",
     re.IGNORECASE,
 )
 TRANSIENT_CONFIG_SCOPE_RE = re.compile(
-    r"\b(?:for this (?:answer|response|report|task|time)|this time|just this once|today only|for now)\b",
+    r"\b(?:(?:just\s+)?for (?:this|today['’]s) (?:answer|response|report|message|email|note|draft|outreach|task|project|renewal|deal|case|ticket|campaign|meeting|time|batch|run)|"
+    r"(?:in|to) (?:this|today['’]s) (?:answer|response|report|message|email|note|draft|meeting)|(?:just )?for today(?: only)?|"
+    r"(?:only|just) today|(?:only|just) (?:this|today['’]s) (?:answer|response|report|message|email|note|draft|outreach|task|batch|run)|"
+    r"(?:this|today['’]s) (?:answer|response|report|message|email|note|draft|outreach|task|batch|run) only|this time|just this once|today only|for now|"
+    r"(?:this is\s+)?(?:just\s+)?(?:a\s+)?one[- ]time (?:exception|request|case)|"
+    r"(?:stop|quit)\s+(?:sending|using)\s+(?:this|the current)\s+(?:email|message|report|batch|source|file|draft|campaign|task|run)|"
+    r"never\s+(?:store|persist|remember|record|share|send|include|reveal|expose)\b[^.!?]{0,80}\b(?:this|that)\s+"
+    r"(?:(?:confidential|customer|client|private|api|access)\s+)?(?:email|message|report|file|document|data|record|secrets?|credentials?|passwords?|tokens?|keys?))\b",
+    re.IGNORECASE,
+)
+NO_DURABLE_CONFIG_RE = re.compile(
+    r"\b(?:do not|don['’]?t|never)\s+(?:(?:save|remember|store|record|persist)\s+"
+    r"(?:this|that|it)(?:\s+(?:feedback|preference|instruction)(?:\s+(?:as\s+(?:(?:a|an)\s+)?(?:rule|preference|instruction)|(?:in|to)\s+(?:your\s+)?(?:charter|instructions)))?|"
+    r"\s+(?:as\s+(?:(?:a|an)\s+)?(?:rule|preference|instruction)|(?:in|to)\s+(?:your\s+)?(?:charter|instructions))|(?=\s*(?:[.!?;,]|$)))|"
+    r"make\s+(?:this|that|it)(?:\s+feedback)?\s+(?:(?:a|an)\s+)?(?:(?:standing|permanent|durable)\s+)?(?:rule|preference|instruction)|"
+    r"(?:update|edit|change|patch)\s+(?:your\s+)?(?:charter|instructions|preferences?))\b",
     re.IGNORECASE,
 )
 DIRECT_USER_CORRECTION_RE = re.compile(
     r"\b(?:stop|quit)[\s,:;-]+(?:(?:always|automatically|constantly|continually|continuously|frequently|"
-    r"just|regularly|repeatedly|routinely)[\s,:;-]+){0,2}(?:writ\w*|say\w*|send\w*|sound\w*|use(?:d|s|ing)?|"
+    r"just|regularly|repeatedly|routinely)[\s,:;-]+){0,2}(?:writ\w*|say\w*|send\w*|sound\w*|us(?:e|ed|es|ing)|"
     r"includ\w*|format\w*|reply\w*|respond\w*|messag\w*|introduc\w*)\b|"
-    r"\b(?:sound(?:s|ed)?|reads?|feels?|looks?)\b.{0,60}\b(?:automated|templated|robotic|generic|formal|"
-    r"informal|spammy|salesy|corporate|product[ -]?y)\b|"
     r"\b(?:too|overly)\s+(?:formal|informal|generic|spammy|salesy|corporate|product[ -]?y)\b|"
     r"\b(?:no\s+(?:more\s+)?|(?:don'?t|do not|never)\s+use\s+)(?:em|en|unicode|double)[ -]?"
-    r"(?:dashes|hyphens)\b",
+    r"(?:dashes|hyphens)\b|"
+    r"\b(?:just|only)\s+(?:come back|report|send|tell|update)\b.{0,100}"
+    r"\b(?:changed|changes|blockers?|next (?:move|step|action))\b|"
+    r"(?:^|[.!?]\s+)never\s+(?:store|share|send|include|reveal|expose)\b[^.!?]{0,80}"
+    r"\b(?:secrets?|credentials?|passwords?|private|confidential|customer data)\b|"
+    r"\b(?:make (?:that|this|it) a rule|do i have to\b.{0,80}\b(?:each|every) time)\b",
+    re.IGNORECASE,
+)
+QUOTED_OUTPUT_FEEDBACK_RE = re.compile(
+    r'["“](?P<quote>[^"”\n]{6,240})["”].{0,60}\b(?:(?:is|are|was|were)\s+(?:not|never)\s+'
+    r"(?:so\s+|very\s+|really\s+)?(?:good|great|useful|helpful)|(?:isn['’]?t|aren['’]?t|wasn['’]?t|weren['’]?t)\s+(?:good|great|useful|helpful)|"
+    r"(?:is|are|was|were)\s+(?:bad|unhelpful|counterproductive))\b",
+    re.IGNORECASE,
+)
+EVALUATIVE_BEHAVIOR_FEEDBACK_RE = re.compile(
+    r"\byour\b.{0,50}\b(?:updates?|messages?|emails?|replies?|answers?|reports?|questions?|headings?|notes?)\b.{0,30}\b(?:"
+    r"(?:is|are|was|were)\s+(?:not|never)\s+(?:so\s+|very\s+|really\s+)?(?:good|great|useful|helpful)|"
+    r"(?:isn['’]?t|aren['’]?t|wasn['’]?t|weren['’]?t)\s+(?:good|great|useful|helpful)|"
+    r"(?:is|are|was|were)\s+(?:bad|unhelpful|counterproductive))\b|"
+    r"\b(?:this|that|it)\s+(?:felt|feels?|sounded|sounds?|read|reads|looked|looks?)\b.{0,30}"
+    r"\b(?:stiff|awkward|off|formal|generic|robotic|templated|salesy|corporate)\b|"
+    r"\b(?:love|like|prefer)\s+(?:this|that|it)\b.{0,140}\b(?:opener|opening|observation|pitch|"
+    r"format|approach|pattern|structure|tone|style)\b|"
+    r"\b(?:nice|great|good)\b.{0,40}\b(?:this|that|the)\s+(?:format|approach|pattern|structure|tone|"
+    r"style)\b.{0,40}\b(?:natural|better|works?|useful|right)\b|"
+    r"\b(?:this|that|it)\s+(?:is|was)\s+(?:really\s+)?(?:good|great)\b.{0,120}"
+    r"\b(?:opener|opening|observation|no pitch|format|approach|pattern|structure|tone|style)\b|"
+    r"\b(?:this|that)(?:['’]s| is)\b.{0,25}\b(?:good|great|better)\s+"
+    r"(?:format|structure|tone|style)\b|"
+    r"\b(?:these|those)\b.{0,50}\b(?:updates?|notes?|replies?)\b.{0,30}\b(?:aren['’]?t|are not|weren['’]?t|were not)\s+(?:useful|helpful|good)\b|"
+    r"\byou\b.{0,30}\b(?:did not|didn['’]?t|failed to)\s+include\b.{0,30}\b(?:links?|urls?|sources?)\b|"
+    r"\bit\s+makes?\b.{0,30}\b(?:person|recipient|reader|user)\b.{0,30}\b(?:do|carry|figure out)\b.{0,20}\bwork\b",
+    re.IGNORECASE,
+)
+TONE_CORRECTION_RE = re.compile(
+    r"\b(?:you|(?:this|that|it)(?:\s+(?:message|email|reply|answer|report|update|note|draft))?)\s+"
+    r"(?:sound(?:s|ed)?|reads?|feels?|looks?)\b.{0,60}\b(?:automated|templated|robotic|generic|formal|"
+    r"informal|spammy|salesy|corporate|product[ -]?y|stiff|awkward|off)\b",
+    re.IGNORECASE,
+)
+BEHAVIOR_OUTPUT_NOUN_RE = re.compile(
+    r"\b(?:message|email|repl(?:y|ies)|response|answer|report|update|note|draft|question|heading|format|tone|style|opener|"
+    r"opening|pitch|structure|wording|communication|table|bullet|takeaway|layout|visual|reporting|workflow|"
+    r"process|outreach|research|sourcing|routing|follow[ -]?up)s?\b",
+    re.IGNORECASE,
+)
+DOMAIN_CONTENT_RE = re.compile(
+    r"\b(?:compan(?:y|ies)|customer|prospect|product|revenue|sales|pricing|funding|market|deal|account|"
+    r"lead|candidate|founder|portfolio|strategy)\b",
+    re.IGNORECASE,
+)
+SEPARATE_FEEDBACK_TASK_RE = re.compile(
+    r"(?:^|[.!?;]\s+|\b(?:also|then|now)\b[:,]?\s+)(?!(?:do not|don['’]?t|never)\b)(?:please\s+)?(?:rewrite|edit|draft|send|email|message|contact|research|find|look up|fetch|export|create|run|check|summari[sz]e|show|give|tell|pause|delete|upload|download|schedule|cancel|call|book|publish|deploy|open|compare|review|investigate|analy[sz]e|collect|gather|verify|build|prepare|make\s+(?:me|us|a|an|the))\b|"
+    r",\s+(?:(?:please\s+)?(?:research|find|look up|fetch|export|create|run|check|show|pause|delete|upload|download|schedule|cancel|call|book|publish|deploy|open|compare|review|investigate|analy[sz]e|collect|gather|verify|build|prepare|make\s+(?:me|us|a|an|the))|please\s+(?:rewrite|edit|draft|send|email|message))\b|"
+    r"(?<!going forward)(?<!from now on)(?<!in the future)(?<!next time)(?<!each time)(?<!every time),\s+"
+    r"(?:please\s+)?(?:send|email|message|contact)\s+"
+    r"(?:it|that|this|[\w'-]+|the\s+(?:rewrite|draft|message|email|note|report))\b|"
+    r"\band\s+(?:please\s+)?(?:(?:rewrite|edit|draft|send|email|message|contact)\s+"
+    r"(?:it|that|this|[\w'-]+|the\s+(?:rewrite|draft|message|email|note|report))\b|"
+    r"(?:research|investigate|analy[sz]e|review|compare|find)\s+(?:(?:me|us)\s+)?(?:[\w-]+\s+){0,3}"
+    r"(?:companies|peers|vendors|options|plans|products|accounts|records|items|prospects|leads|candidates|founders|people|contacts|targets|sources|alternatives)\b|"
+    r"(?:summari[sz]e|export|create|run|check)\s+(?:it|this|that|the\s+(?:rest|results?|findings?|report|analysis|list|table|file|export))\b|"
+    r"pause\s+(?:(?:the|this|that|my|our|your)\s+)?(?:schedule|monitoring|outreach|campaign|work|task|job|run)\b)",
+    re.IGNORECASE,
+)
+DIRECT_FEEDBACK_REPLY_TASK_RE = re.compile(
+    r"(?:^|[.!?,;]\s+|,\s+and\s+|\band\s+|\bthen\b[:,]?\s+)(?:(?:can|could|would)\s+you\s+|(?:please\s+)?)?"
+    r"(?:(?:rewrite|rephrase|revise|shorten|tighten|polish)\b|edit\s+(?:it|this|that|the\s+(?:message|reply|email|note|draft))\b)",
+    re.IGNORECASE,
+)
+DIRECT_FEEDBACK_DELIVERY_TASK_RE = re.compile(
+    r"(?:[,;.!?]|\b(?:and|then)\b)\s*(?:please\s+)?(?:email|text|send|message|contact)\b",
     re.IGNORECASE,
 )
 OPERATIONAL_CAPABILITY_CORRECTION_RE = re.compile(
@@ -240,11 +327,22 @@ OPERATIONAL_CAPABILITY_CORRECTION_RE = re.compile(
     re.IGNORECASE,
 )
 STRONG_DURABLE_CONFIG_INTENT_RE = re.compile(
-    r"\b(?:going forward|from now on|in the future|next time|always|never|remember|"
+    r"\b(?:going forward|from now on|in the future|next time|always|never(?!\s+mind\b)|remember|"
     r"(?:my |this )?feedback:|each time|every time|make (?:that|this|it) a rule|should(?:n'?t| not) have to|"
     r"update (?:your )?(?:charter|schedule|instructions)|change (?:your )?(?:charter|schedule|instructions)|"
     r"charter|schedule|scheduled|recurring|ongoing|proactive|monitor|track|alert|digest|cadence|"
     r"setup|set up|role|scope|process|workflow|customer context|client context|operating boundary)\b",
+    re.IGNORECASE,
+)
+PREFERENCE_CONFIG_INTENT_RE = re.compile(r"\bprefer(?:ence)?\b", re.IGNORECASE)
+DURABLE_SCOPE_SWITCH_RE = re.compile(
+    r"\b(?:going forward|from now on|in the future|next time|each time|every time|make (?:that|this|it) a rule|"
+    r"update (?:your )?(?:charter|instructions)|change (?:your )?(?:charter|instructions))\b",
+    re.IGNORECASE,
+)
+EXPLICIT_DURABLE_SCOPE_RE = re.compile(
+    r"\b(?:going forward|from now on|in the future|next time|each time|every time|always|never(?!\s+mind\b)|remember|prefer(?:ence)?|"
+    r"make (?:that|this|it) a rule|update (?:your )?(?:charter|instructions)|change (?:your )?(?:charter|instructions))\b",
     re.IGNORECASE,
 )
 ONE_OFF_TASK_RE = re.compile(
@@ -353,6 +451,12 @@ def _tool_call_is_progress_update(call: Any, expected_tool_name: str) -> bool:
     )
 
 
+def _same_channel_reply_tool_name(inbound: PersistentAgentMessage | None) -> str | None:
+    if inbound is None or inbound.conversation is None:
+        return None
+    return "send_agent_message" if inbound.conversation.is_peer_dm else REPLY_TOOL_BY_CHANNEL.get(inbound.conversation.channel)
+
+
 def _deep_work_update_gate_context(
     agent: PersistentAgent,
     tool_calls: list[Any],
@@ -368,14 +472,7 @@ def _deep_work_update_gate_context(
     )
     if latest_inbound is None or latest_inbound.conversation is None:
         return None
-    if latest_inbound.conversation.is_peer_dm:
-        expected_message_tool = "send_agent_message"
-    else:
-        expected_message_tool = {
-            CommsChannel.EMAIL: "send_email",
-            CommsChannel.SMS: "send_sms",
-            CommsChannel.WEB: "send_chat_message",
-        }.get(latest_inbound.conversation.channel)
+    expected_message_tool = _same_channel_reply_tool_name(latest_inbound)
     if expected_message_tool is None:
         return None
 
@@ -452,9 +549,7 @@ def _record_deep_work_update_correction(
         "agent": agent,
         "description": f"{DEEP_WORK_UPDATE_CORRECTION_PREFIX} {reason}: {instruction}",
     }
-    attach_completion(step_kwargs)
-    step = PersistentAgentStep.objects.create(**step_kwargs)
-    attach_prompt_archive(step)
+    step = _persist_attached_step(step_kwargs, attach_completion, attach_prompt_archive)
 
 
 def _user_asked_for_setup_question(text: str) -> bool:
@@ -591,32 +686,16 @@ def _record_defaultable_setup_question_correction(
             "charter/schedule with sqlite_batch, and stop unless a real blocker remains."
         ),
     }
-    attach_completion(step_kwargs)
-    step = PersistentAgentStep.objects.create(**step_kwargs)
-    attach_prompt_archive(step)
+    step = _persist_attached_step(step_kwargs, attach_completion, attach_prompt_archive)
     logger.info(
         "Agent %s: rejected defaultable setup question and requested sqlite_batch configuration.",
         agent.id,
     )
 
 
-def _record_missing_direct_correction_patch(
-    agent: PersistentAgent,
-    *,
-    attach_completion: Any,
-    attach_prompt_archive: Any,
-) -> None:
-    step_kwargs = {
-        "agent": agent,
-        "description": (
-            "Tool policy: persist this direct user correction before replying. Call sqlite_batch now with one "
-            "UPDATE __agent_config SET charter=patch_text(charter, old, new) WHERE id=1, changing only the "
-            "relevant clause and preserving unrelated charter guidance."
-        ),
-    }
-    attach_completion(step_kwargs)
-    step = PersistentAgentStep.objects.create(**step_kwargs)
-    attach_prompt_archive(step)
+def _record_policy_step(agent: PersistentAgent, description: str, *, attach_completion: Any, attach_prompt_archive: Any) -> None:
+    step_kwargs = {"agent": agent, "description": description}
+    _persist_attached_step(step_kwargs, attach_completion, attach_prompt_archive)
 
 
 def _truncate_text_bytes(text: str, max_bytes: int) -> str:
@@ -1346,34 +1425,73 @@ def _normalize_tool_calls(message: Any) -> list[Any]:
     return _tool_calls_from_content(message)
 
 
-def _defer_tool_calls_behind_discovery(tool_calls: list[Any]) -> list[Any]:
+def _defer_tool_calls_behind_dependencies(tool_calls: list[Any]) -> list[Any]:
     discovery_calls = [call for call in tool_calls if _get_tool_call_name(call) == "search_tools"]
-    if not discovery_calls or len(discovery_calls) == len(tool_calls):
-        return tool_calls
-    return discovery_calls
+    if discovery_calls and len(discovery_calls) != len(tool_calls):
+        return discovery_calls
+    source_calls = [call for call in tool_calls if _is_dependency_source_tool(call)]
+    if source_calls and any(_get_tool_call_name(call) == "sqlite_batch" for call in tool_calls):
+        return source_calls
+    approval_reads = [call for call in tool_calls if _is_sqlite_read_call(call)]
+    if approval_reads and any(_is_potentially_mutating_external_call(call) for call in tool_calls):
+        return approval_reads
+    return tool_calls
+
+
+def _is_dependency_source_tool(call: Any) -> bool:
+    tool_name = _get_tool_call_name(call) or ""
+    if tool_name == "spawn_web_task_result":
+        return True
+    if tool_name == "http_request":
+        try:
+            _raw_args, params = _parse_tool_call_params(_get_tool_call_arguments(call))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return False
+        return isinstance(params, dict) and str(params.get("method") or "GET").upper() == "GET"
+    if not tool_name.startswith("mcp_") or MCP_ACTION_NAME_RE.search(tool_name):
+        return False
+    return tool_name.startswith("mcp_brightdata_") or bool(MCP_READ_NAME_RE.search(tool_name))
+
+
+def _is_sqlite_read_call(call: Any) -> bool:
+    if _get_tool_call_name(call) != "sqlite_batch":
+        return False
+    try:
+        _raw_args, params = _parse_tool_call_params(_get_tool_call_arguments(call))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return False
+    if not isinstance(params, dict):
+        return False
+    statements = _sqlite_batch_statements(params)
+    return bool(statements) and all(
+        sqlparse.parse(statement)[0].get_type() == "SELECT"
+        for statement in statements
+    )
+
+
+def _is_potentially_mutating_external_call(call: Any) -> bool:
+    tool_name = _get_tool_call_name(call) or ""
+    return tool_name == "http_request" or tool_name.startswith("mcp_") and not _is_dependency_source_tool(call)
+
+
+_MISSING_TOOL_CALL_FIELD = object()
+
+
+def _tool_call_field(call: Any, field: str, *, skip_empty: bool = False) -> Any:
+    function = call.get("function") if isinstance(call, dict) else getattr(call, "function", None)
+    for container in (function, call):
+        if isinstance(container, dict):
+            value = container.get(field, _MISSING_TOOL_CALL_FIELD)
+        else:
+            value = getattr(container, field, _MISSING_TOOL_CALL_FIELD)
+        if value is not _MISSING_TOOL_CALL_FIELD and (value or not skip_empty):
+            return value
+    return None
 
 
 def _get_tool_call_name(call: Any) -> Optional[str]:
-    if call is None:
-        return None
-    function = getattr(call, "function", None)
-    if function is not None:
-        name = getattr(function, "name", None)
-        if name:
-            return _sanitize_tool_name(name)
-    if isinstance(call, dict):
-        function = call.get("function")
-        if isinstance(function, dict):
-            name = function.get("name")
-            if name:
-                return _sanitize_tool_name(name)
-        name = call.get("name")
-        if name:
-            return _sanitize_tool_name(name)
-    name = getattr(call, "name", None)
-    if name:
-        return _sanitize_tool_name(name)
-    return None
+    name = _tool_call_field(call, "name", skip_empty=True)
+    return _sanitize_tool_name(name) if name else None
 
 
 def _sanitize_tool_name(name: str) -> str:
@@ -1476,6 +1594,13 @@ def _completion_from_step_kwargs(step_kwargs: dict[str, Any]) -> PersistentAgent
     return completion if isinstance(completion, PersistentAgentCompletion) else None
 
 
+def _persist_attached_step(step_kwargs: dict[str, Any], attach_completion: Any, attach_prompt_archive: Any) -> PersistentAgentStep:
+    attach_completion(step_kwargs)
+    step = PersistentAgentStep.objects.create(**step_kwargs)
+    attach_prompt_archive(step)
+    return step
+
+
 def _agent_from_step(step: PersistentAgentStep) -> PersistentAgent | None:
     try:
         return step.agent
@@ -1484,17 +1609,92 @@ def _agent_from_step(step: PersistentAgentStep) -> PersistentAgent | None:
 
 
 def _tool_definition_names_for_completion(tools: list[dict] | None) -> list[str]:
-    names: list[str] = []
-    for tool in tools or []:
-        if not isinstance(tool, dict):
-            continue
-        function = tool.get("function")
-        if not isinstance(function, dict):
-            continue
-        name = function.get("name")
-        if isinstance(name, str) and name:
-            names.append(name)
-    return names
+    return [
+        function["name"] for tool in tools or []
+        if isinstance(tool, dict) and isinstance((function := tool.get("function")), dict)
+        and isinstance(function.get("name"), str) and function["name"]
+    ]
+
+
+def _focused_tool_completion_request(
+    tools, failover_configs, tool_name: str, description: str | None, *, parameters=None, fixed_continue: bool | None = None,
+):
+    tool = next(tool for tool in tools if tool.get("function", {}).get("name") == tool_name)
+    description = description or tool["function"].get("description", "")
+    function = {**tool["function"], "description": description}
+    if parameters is not None:
+        function["parameters"] = parameters
+    body_key = MESSAGE_TOOL_BODY_KEYS.get(tool_name)
+    if body_key:
+        parameters, properties = function.get("parameters", {}), function.get("parameters", {}).get("properties", {})
+        body_schema = properties.get(body_key, {})
+        body_description = "\n\n".join(filter(None, (body_schema.get("description"), description)))
+        function["parameters"] = {**parameters, "properties": {**properties, body_key: {**body_schema, "description": body_description}}}
+    if fixed_continue is not None:
+        parameters, properties = function.get("parameters", {}), function.get("parameters", {}).get("properties", {})
+        function["parameters"] = {**parameters, "properties": {**properties, "will_continue_work": {**properties.get("will_continue_work", {}), "const": fixed_continue}}}
+    return [{**tool, "function": function}], [
+        (provider, model, {**(params or {}), "use_parallel_tool_calls": False, **({"tool_choice": {"type": "function", "function": {"name": tool_name}}} if (params or {}).get("supports_tool_choice", True) else {})})
+        for provider, model, params in failover_configs
+    ]
+
+
+def _focused_charter_patch_history(
+    history: list[dict[str, Any]], current_charter: str, lasting_feedback: tuple[str, ...], prior_output: str,
+) -> list[dict[str, Any]]:
+    system_messages = [message for message in history if message.get("role") == "system"]
+    return system_messages + [{
+        "role": "user",
+        "content": (
+            "<charter>" + current_charter + "</charter>\n"
+            "<lasting_feedback>" + json.dumps(lasting_feedback) + "</lasting_feedback>\n"
+            "<prior_output_context>" + prior_output[:1000] + "</prior_output_context>\n"
+            "Patch only lasting_feedback. Every listed item is mandatory; combine them into one conflict-free patch. Other wording from the original turn is out of scope."
+        ),
+    }]
+
+
+def _promote_source_reconciliation_history(history: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    user_content = "\n".join(
+        str(message.get("content") or "") for message in history if message.get("role") == "user"
+    )
+    directives = re.findall(r"\[SOURCE ARRAYS[^\]]+\]", user_content)
+    if not directives:
+        return history
+    promoted = [dict(message) for message in history]
+    promoted[0]["content"] = (
+        str(promoted[0].get("content") or "")
+        + "\n\n## Current Fresh Source Contract (CRITICAL)\n\n"
+        + "\n".join(directives)
+        + "\nThis overrides general read-first guidance: write from the listed source paths before any model SELECT."
+    )
+    return promoted
+
+
+def _source_reconciliation_parameters(directive: str) -> dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": {
+            "sql": {
+                "type": "string",
+                "description": directive + " Start with source-derived model DDL/upserts; end with bounded task-relevant rows. No pre-read or copied values.",
+            },
+            "will_continue_work": {"type": "boolean", "const": True},
+        },
+        "required": ["sql", "will_continue_work"],
+        "additionalProperties": False,
+    }
+
+
+CHARTER_PATCH_PARAMETERS = {
+    "type": "object",
+    "properties": {
+        "target_charter_text": {"type": "string", "description": "Smallest exact contiguous span copied from <charter> that covers every adjacent rule conflicting with the lasting feedback. Preserve lookalikes for other actors/contexts. A general role/workflow and prior output are not targets. Empty if no charter rule controls the behavior."},
+        "replacement_charter_text": {"type": "string", "description": "Complete operational replacement for the target. Apply only the listed lasting clauses, leave no contradiction, and preserve unrelated text inside the target span verbatim."},
+    },
+    "required": ["target_charter_text", "replacement_charter_text"],
+    "additionalProperties": False,
+}
 
 
 def _persist_tool_call_step(
@@ -1537,9 +1737,7 @@ def _persist_tool_call_step(
 
     def _try_create_step() -> Optional[PersistentAgentStep]:
         """Attempt to create the step and tool call record."""
-        attach_completion(step_kwargs)
-        step = PersistentAgentStep.objects.create(**step_kwargs)
-        attach_prompt_archive(step)
+        step = _persist_attached_step(step_kwargs, attach_completion, attach_prompt_archive)
         tool_call_status = status or "complete"
         PersistentAgentToolCall.objects.create(
             step=step,
@@ -1655,9 +1853,7 @@ def _create_pending_tool_call_step(
     }
 
     try:
-        attach_completion(step_kwargs)
-        step = PersistentAgentStep.objects.create(**step_kwargs)
-        attach_prompt_archive(step)
+        step = _persist_attached_step(step_kwargs, attach_completion, attach_prompt_archive)
         PersistentAgentToolCall.objects.create(
             step=step,
             parent_tool_call=parent_tool_call,
@@ -1868,21 +2064,7 @@ def _refund_tool_credit_on_error_if_configured(
 
 
 def _get_tool_call_arguments(call: Any) -> Any:
-    if call is None:
-        return None
-    function = getattr(call, "function", None)
-    if function is not None:
-        arguments = getattr(function, "arguments", None)
-        if arguments is not None:
-            return arguments
-    if isinstance(call, dict):
-        function = call.get("function")
-        if isinstance(function, dict) and "arguments" in function:
-            return function.get("arguments")
-        if "arguments" in call:
-            return call.get("arguments")
-    arguments = getattr(call, "arguments", None)
-    return arguments
+    return _tool_call_field(call, "arguments")
 
 
 def _parse_tool_call_params(raw_args: Any) -> tuple[Any, Any]:
@@ -1981,24 +2163,6 @@ def _plan_has_unfinished_items(agent: PersistentAgent) -> bool:
         logger.debug("Failed to build plan snapshot for terminal-send check.", exc_info=True)
         return False
     return snapshot.todo_count > 0 or snapshot.doing_count > 0
-
-
-def _record_terminal_send_unfinished_plan_correction(
-    agent: PersistentAgent,
-    *,
-    attach_completion: Any,
-    attach_prompt_archive: Any,
-) -> None:
-    step_kwargs = {
-        "agent": agent,
-        "description": (
-            "Terminal message delivery requested stop, but the current plan still has unfinished items. "
-            "Call update_plan with the complete current plan state before stopping."
-        ),
-    }
-    attach_completion(step_kwargs)
-    step = PersistentAgentStep.objects.create(**step_kwargs)
-    attach_prompt_archive(step)
 
 
 def _should_skip_stale_planning_mode_after_terminal_delivery(
@@ -2377,10 +2541,6 @@ def _sqlite_batch_agent_config_attempted_fields(tool_params: Dict[str, Any]) -> 
     )
 
 
-def _sqlite_batch_mutates_agent_charter(tool_params: Dict[str, Any]) -> bool:
-    return "charter" in _sqlite_batch_agent_config_attempted_fields(tool_params)
-
-
 def _annotate_agent_config_update_result(
     outcomes: list[_ToolExecutionOutcome],
     config_apply: AgentConfigApplyResult,
@@ -2414,59 +2574,170 @@ def _user_text_has_durable_config_intent(text: str) -> bool:
     normalized = " ".join((text or "").split())
     if TRANSIENT_CONFIG_SCOPE_RE.search(normalized) and not STRONG_DURABLE_CONFIG_INTENT_RE.search(normalized):
         return False
-    return bool(DURABLE_CONFIG_INTENT_RE.search(normalized))
+    return bool(STRONG_DURABLE_CONFIG_INTENT_RE.search(normalized) or PREFERENCE_CONFIG_INTENT_RE.search(normalized))
 
 
-def _user_text_is_direct_correction(text: str) -> bool:
+def _matches_behavior_feedback(text: str, prior_outbound_text: str = "") -> bool:
+    quote = QUOTED_OUTPUT_FEEDBACK_RE.search(text or "")
+    if prior_outbound_text and quote and " ".join(quote.group("quote").casefold().split()) in " ".join(prior_outbound_text.casefold().split()):
+        return True
+    direct = DIRECT_USER_CORRECTION_RE.search(text) or OPERATIONAL_CAPABILITY_CORRECTION_RE.search(text)
+    tone = TONE_CORRECTION_RE.search(text)
+    evaluative = EVALUATIVE_BEHAVIOR_FEEDBACK_RE.search(text)
+    preference = PREFERENCE_CONFIG_INTENT_RE.search(text) and BEHAVIOR_OUTPUT_NOUN_RE.search(text)
+    durable_directive = EXPLICIT_DURABLE_SCOPE_RE.match(text) and BEHAVIOR_OUTPUT_NOUN_RE.search(text)
+    if DOMAIN_CONTENT_RE.search(text) and not BEHAVIOR_OUTPUT_NOUN_RE.search(text):
+        evaluative = None
+        if not re.search(r"\b(?:automated|templated|robotic|formal|informal|spammy|salesy|corporate|product[ -]?y|stiff|awkward)\b", text, re.I):
+            tone = None
+    return bool(direct or tone or evaluative or preference or durable_directive)
+
+
+@dataclass(frozen=True)
+class _FeedbackTurn:
+    lasting: tuple[str, ...]
+    behavior: bool
+    transient_only: bool
+    feedback_only: bool
+    direct_reply_task: bool
+    separate_task: bool
+
+
+def _analyze_feedback_turn(text: str, prior_outbound_text: str = "") -> _FeedbackTurn:
     normalized = " ".join((text or "").split())
-    return bool(
-        normalized
-        and not TRANSIENT_CONFIG_SCOPE_RE.search(normalized)
-        and (
-            DIRECT_USER_CORRECTION_RE.search(normalized)
-            or OPERATIONAL_CAPABILITY_CORRECTION_RE.search(normalized)
-        )
-    )
+    clauses = tuple(" ".join(clause.split()) for clause in re.split(r"(?<=[.!?;])\s+|[\r\n]+", text or "") if clause.strip())
+    behavior = _matches_behavior_feedback(normalized, prior_outbound_text)
+    no_save_marker = NO_DURABLE_CONFIG_RE.search(normalized)
+    transient_marker = TRANSIENT_CONFIG_SCOPE_RE.search(normalized)
+    lasting: list[str] = []
+    temporary_scope = durable_scope_active = saw_feedback = direct_reply_task = separate_task = False
+    feedback_only = True
+    for clause in clauses:
+        direct_reply = DIRECT_FEEDBACK_REPLY_TASK_RE.search(clause)
+        separate_matches = tuple(SEPARATE_FEEDBACK_TASK_RE.finditer(clause))
+        if separate_matches and EXPLICIT_DURABLE_SCOPE_RE.fullmatch(
+            clause[:separate_matches[0].start()].strip(" ,:;")
+        ):
+            separate_matches = separate_matches[1:]
+        separate = separate_matches[0] if separate_matches else None
+        distinct_task = bool(separate and (direct_reply is None or len(separate_matches) > 1))
+        task = direct_reply or separate
+        candidate = clause[:task.start()].rstrip(" ,;") if task else clause
+        candidate_behavior = _matches_behavior_feedback(candidate, prior_outbound_text)
+        continuation = bool(durable_scope_active and re.match(
+            r"\s*(?:and\s+)?(?:routine\b|only\b|just\b|never\b|always\b|remember\b|keep\b|do not\b|don['’]?t\b|no\b|the\b|these\b|those\b|my\b|your\b|i\b|when\b|if\b|for\b)",
+            candidate, re.IGNORECASE,
+        ))
+        direct_reply_task = direct_reply_task or bool(direct_reply)
+        separate_task = separate_task or distinct_task
+        if direct_reply:
+            saw_feedback = saw_feedback or candidate_behavior
+            if distinct_task:
+                feedback_only = False
+        elif separate:
+            feedback_only = False
+        elif candidate_behavior:
+            saw_feedback = True
+            durable_scope_active = durable_scope_active or bool(EXPLICIT_DURABLE_SCOPE_RE.search(clause))
+        elif NO_DURABLE_CONFIG_RE.search(clause) or TRANSIENT_CONFIG_SCOPE_RE.search(clause):
+            saw_feedback = True
+        elif DURABLE_SCOPE_SWITCH_RE.search(clause):
+            saw_feedback = True
+            durable_scope_active = True
+        elif continuation:
+            saw_feedback = True
+        else:
+            feedback_only = False
 
-
-def _should_require_direct_correction_patch(agent: PersistentAgent) -> bool:
-    if agent.planning_state == PersistentAgent.PlanningState.PLANNING:
-        return False
-
-    latest_inbound = (
-        PersistentAgentMessage.objects.filter(owner_agent=agent, is_outbound=False)
-        .order_by("-timestamp", "-seq")
-        .values("timestamp", "seq", "body")
-        .first()
-    )
-    if latest_inbound is None or not _user_text_is_direct_correction(latest_inbound["body"]):
-        return False
-
-    return PersistentAgentMessage.objects.filter(
-        owner_agent=agent,
-        is_outbound=True,
-    ).filter(
-        Q(timestamp__lt=latest_inbound["timestamp"])
-        | Q(timestamp=latest_inbound["timestamp"], seq__lt=latest_inbound["seq"])
-    ).exists()
-
-
-def _tool_calls_patch_correction_before_reply(tool_calls: list[Any]) -> bool:
-    patch_seen = False
-    for call in tool_calls:
-        tool_name = _get_tool_call_name(call)
-        if tool_name in MESSAGE_TOOL_NAMES and not patch_seen:
-            return False
-        if tool_name != "sqlite_batch":
+        if not candidate:
             continue
-        try:
-            _raw_args, tool_params = _parse_tool_call_params(_get_tool_call_arguments(call))
-        except (TypeError, ValueError, json.JSONDecodeError):
+        if not (candidate_behavior or continuation or NO_DURABLE_CONFIG_RE.search(candidate)
+                or TRANSIENT_CONFIG_SCOPE_RE.search(candidate) or EXPLICIT_DURABLE_SCOPE_RE.search(candidate)):
             continue
-        sql = "\n".join(_sqlite_batch_statements(tool_params))
-        if _sqlite_batch_is_only_agent_config_mutation(tool_params) and "patch_text" in sql.lower():
-            patch_seen = True
-    return patch_seen
+        no_save = NO_DURABLE_CONFIG_RE.search(candidate)
+        durable_after_veto = EXPLICIT_DURABLE_SCOPE_RE.search(candidate, no_save.end()) if no_save else None
+        if no_save and not durable_after_veto:
+            temporary_scope = True
+            continue
+        candidate = candidate[durable_after_veto.start():] if durable_after_veto else candidate
+        transient = TRANSIENT_CONFIG_SCOPE_RE.search(candidate)
+        durable = DURABLE_SCOPE_SWITCH_RE.search(candidate, transient.end()) if transient else EXPLICIT_DURABLE_SCOPE_RE.search(candidate)
+        if not durable and (transient or temporary_scope):
+            temporary_scope = True
+            continue
+        temporary_scope = False
+        lasting.append(candidate[durable.start():] if transient and transient.start() < durable.start() else candidate)
+    if behavior and not lasting and not separate_task and not (no_save_marker or transient_marker):
+        lasting.append(normalized)
+        feedback_only = saw_feedback = True
+    vetoes_persistence = bool(no_save_marker and not EXPLICIT_DURABLE_SCOPE_RE.search(normalized, no_save_marker.end()))
+    transient_only = vetoes_persistence or bool(transient_marker and not lasting)
+    return _FeedbackTurn(tuple(lasting), behavior, transient_only, feedback_only and saw_feedback, direct_reply_task, separate_task)
+
+
+def _user_text_has_only_transient_config_scope(text: str) -> bool:
+    return _analyze_feedback_turn(text).transient_only
+
+
+def _user_text_is_direct_correction(text: str, *, prior_outbound_text: str = "") -> bool:
+    analysis = _analyze_feedback_turn(text, prior_outbound_text)
+    return bool(analysis.lasting and analysis.behavior and not analysis.transient_only)
+
+
+def _direct_correction_context(agent: PersistentAgent, latest_inbound=None):
+    latest_inbound = latest_inbound or get_current_inbound_message(agent)
+    normalized = " ".join(latest_inbound.body.split()) if latest_inbound is not None else ""
+    if latest_inbound is None or not (
+        QUOTED_OUTPUT_FEEDBACK_RE.search(normalized)
+        or _matches_behavior_feedback(normalized)
+    ):
+        return None
+    if agent.planning_state == PersistentAgent.PlanningState.PLANNING or not _ConfigAuthorityResolver(agent).endpoint_can_configure(latest_inbound.from_endpoint):
+        return None
+    prior_outbound = PersistentAgentMessage.objects.filter(owner_agent=agent, is_outbound=True, conversation_id=latest_inbound.conversation_id).filter(
+        Q(timestamp__lt=latest_inbound.timestamp)
+        | Q(timestamp=latest_inbound.timestamp, seq__lt=latest_inbound.seq)
+    ).order_by("-timestamp", "-seq").values_list("body", flat=True).first()
+    analysis = _analyze_feedback_turn(latest_inbound.body, prior_outbound or "")
+    if prior_outbound is None or not (analysis.lasting and analysis.behavior and not analysis.transient_only):
+        return None
+    return latest_inbound, prior_outbound, analysis
+
+
+def _compile_charter_patch_tool_call(tool_call: Any, current_charter: str | None = None) -> Any | None:
+    if _get_tool_call_name(tool_call) != "sqlite_batch":
+        return None
+    try:
+        _raw_args, params = _parse_tool_call_params(_get_tool_call_arguments(tool_call))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+    if not isinstance(params, dict):
+        return None
+    old = params.get("target_charter_text")
+    new = params.get("replacement_charter_text")
+    if not all(isinstance(value, str) for value in (old, new)):
+        return None
+    if any("\x00" in value for value in (old, new)) or not new.strip() or old == new:
+        return None
+    normalized_charter = (current_charter or "").strip()
+    if normalized_charter[-1:] in ".!?" and (not old or old == normalized_charter) and new.startswith(normalized_charter):
+        appended_rule = new[len(normalized_charter):].strip()
+        if appended_rule:
+            old, new = "", appended_rule
+        elif not old:
+            return None
+
+    quoted_old = old.replace("'", "''")
+    quoted_new = new.replace("'", "''")
+    arguments = json.dumps({
+        "sql": (
+            "UPDATE __agent_config SET charter=patch_text(charter, "
+            f"'{quoted_old}', '{quoted_new}') WHERE id=1"
+        ),
+        "will_continue_work": True,
+    })
+    call_id = tool_call.get("id") if isinstance(tool_call, dict) else getattr(tool_call, "id", None)
+    return {"id": call_id, "type": "function", "function": {"name": "sqlite_batch", "arguments": arguments}}
 
 
 def _looks_like_one_off_user_task(text: str) -> bool:
@@ -2489,7 +2760,7 @@ def _message_tool_body_from_params(tool_name: str, tool_params: Dict[str, Any]) 
 
 
 def _normalize_humanized_message_params(tool_name: str, tool_params: Dict[str, Any]) -> Dict[str, Any]:
-    body_key = HUMANIZED_MESSAGE_BODY_KEYS.get(tool_name)
+    body_key = MESSAGE_TOOL_BODY_KEYS.get(tool_name)
     if not body_key:
         return tool_params
     normalized = dict(tool_params)
@@ -2541,30 +2812,21 @@ def _should_skip_irrelevant_agent_config_mutation(
     *,
     batch_has_terminal_message: bool,
 ) -> bool:
-    if tool_name != "sqlite_batch" or not batch_has_terminal_message:
+    if tool_name != "sqlite_batch":
         return False
+    routed_inbound = get_current_inbound_message(agent)
+    latest_user_text = routed_inbound.body if routed_inbound is not None else _latest_inbound_message_text(agent)
+    if (
+        "charter" in _sqlite_batch_agent_config_attempted_fields(tool_params)
+        and _user_text_has_only_transient_config_scope(latest_user_text)
+        and not _user_text_has_durable_config_intent(latest_user_text)
+    ):
+        return True
     if not _sqlite_batch_is_only_agent_config_mutation(tool_params):
         return False
-    latest_user_text = _latest_inbound_message_text(agent)
+    if not batch_has_terminal_message:
+        return False
     return _looks_like_one_off_user_task(latest_user_text)
-
-
-def _record_irrelevant_agent_config_mutation_skip(
-    agent: PersistentAgent,
-    *,
-    attach_completion: Any,
-    attach_prompt_archive: Any,
-) -> None:
-    step_kwargs = {
-        "agent": agent,
-        "description": (
-            "Skipped unrelated __agent_config mutation attached to a one-off final answer. "
-            "Deliver the requested answer without changing durable charter or schedule."
-        ),
-    }
-    attach_completion(step_kwargs)
-    step = PersistentAgentStep.objects.create(**step_kwargs)
-    attach_prompt_archive(step)
 
 
 def _resolve_tool_for_execution(
@@ -2659,26 +2921,6 @@ def _find_successful_duplicate_http_request(
         ):
             return prior_call
     return None
-
-
-def _record_duplicate_http_request_skip(
-    agent: PersistentAgent,
-    prior_call: PersistentAgentToolCall,
-    *,
-    attach_completion: Any,
-    attach_prompt_archive: Any,
-) -> None:
-    step_kwargs = {
-        "agent": agent,
-        "description": (
-            "Skipped duplicate http_request: this exact request already succeeded in this task. "
-            f"Use the prior tool result from step {prior_call.step_id}. "
-            "If it answers the request, send the final message next; do not refetch or inspect __tool_results just to reread it."
-        ),
-    }
-    attach_completion(step_kwargs)
-    step = PersistentAgentStep.objects.create(**step_kwargs)
-    attach_prompt_archive(step)
 
 
 _ToolExecutor = Callable[[PersistentAgent, Dict[str, Any]], Any]
@@ -2788,7 +3030,7 @@ def _capture_tool_display_metadata(
     if (
         prepared.tool_name != "sqlite_batch"
         or not _tool_result_is_success(result)
-        or not _sqlite_batch_mutates_agent_charter(prepared.exec_params)
+        or "charter" not in _sqlite_batch_agent_config_attempted_fields(prepared.exec_params)
     ):
         return {}
 
@@ -2883,7 +3125,7 @@ def _execute_prepared_tool_call(
     )
 
 
-def _prepare_tool_batch_impl(
+def _prepare_tool_batch(
     agent: PersistentAgent,
     *,
     tool_calls: list[Any],
@@ -2897,8 +3139,15 @@ def _prepare_tool_batch_impl(
     has_user_facing_message: bool,
     attach_completion: Any,
     attach_prompt_archive: Any,
-    rate_limit_batch: Optional[_ToolRateLimitBatch] = None,
 ) -> _PreparedToolBatch:
+    rate_limit_batch = (
+        _build_tool_rate_limit_batch(
+            agent,
+            [name for call in tool_calls if (name := _get_tool_call_name(call))],
+        )
+        if len(tool_calls) > 1
+        else None
+    )
     prepared_calls: list[_PreparedToolExecution] = []
     followup_required = False
     all_calls_sleep = not has_non_sleep_calls
@@ -2927,9 +3176,7 @@ def _prepare_tool_batch_impl(
                 "separate reads."
             ),
         }
-        attach_completion(step_kwargs)
-        step = PersistentAgentStep.objects.create(**step_kwargs)
-        attach_prompt_archive(step)
+        step = _persist_attached_step(step_kwargs, attach_completion, attach_prompt_archive)
         return _PreparedToolBatch([], True, False, False, "sqlite_result_fanout_gate")
     batch_has_planning_gate = any(_get_tool_call_name(call) in {"end_planning", "request_human_input"} for call in tool_calls)
     batch_has_terminal_message = any(_tool_call_likely_terminal_message(call) for call in tool_calls)
@@ -2963,9 +3210,7 @@ def _prepare_tool_batch_impl(
                             "Re-send the SAME tool call with a valid 'name' and JSON arguments."
                         ),
                     }
-                    attach_completion(step_kwargs)
-                    step = PersistentAgentStep.objects.create(**step_kwargs)
-                    attach_prompt_archive(step)
+                    step = _persist_attached_step(step_kwargs, attach_completion, attach_prompt_archive)
                     logger.info(
                         "Agent %s: added correction step_id=%s for missing tool name",
                         agent.id,
@@ -3014,9 +3259,7 @@ def _prepare_tool_batch_impl(
                             f"Do not call {tool_name}; message the user with the relevant billing or limit guidance."
                         ),
                     }
-                    attach_completion(step_kwargs)
-                    step = PersistentAgentStep.objects.create(**step_kwargs)
-                    attach_prompt_archive(step)
+                    step = _persist_attached_step(step_kwargs, attach_completion, attach_prompt_archive)
                     logger.info(
                         "Agent %s: rejected %s in credit message-only mode.",
                         agent.id,
@@ -3056,9 +3299,7 @@ def _prepare_tool_batch_impl(
                     "credits_cost": credits_consumed if isinstance(credits_consumed, Decimal) else None,
                     "task_credit": consumed_credit,
                 }
-                attach_completion(step_kwargs)
-                step = PersistentAgentStep.objects.create(**step_kwargs)
-                attach_prompt_archive(step)
+                step = _persist_attached_step(step_kwargs, attach_completion, attach_prompt_archive)
                 logger.info("Agent %s: sleep_until_next_trigger recorded (will sleep after batch)", agent.id)
                 continue
 
@@ -3083,9 +3324,7 @@ def _prepare_tool_batch_impl(
                         "For HTML content, use single quotes for all attributes to avoid JSON conflicts."
                     )
                     step_kwargs = {"agent": agent, "description": step_text}
-                    attach_completion(step_kwargs)
-                    step = PersistentAgentStep.objects.create(**step_kwargs)
-                    attach_prompt_archive(step)
+                    step = _persist_attached_step(step_kwargs, attach_completion, attach_prompt_archive)
                     logger.info(
                         "Agent %s: added correction step_id=%s to request a retried tool call",
                         agent.id,
@@ -3100,9 +3339,7 @@ def _prepare_tool_batch_impl(
                 message_body = str(tool_params.get("body") or "")
                 if not batch_has_planning_gate and agent.planning_state == PersistentAgent.PlanningState.PLANNING and _coerce_optional_bool(tool_params.get("will_continue_work")) is True and PLANNING_READY_WITHOUT_GATE_RE.search(message_body):
                     step_kwargs = {"agent": agent, "description": "Planning Mode is active and the plan appears clear. Call end_planning(full_plan=...) before ready/start-work chat."}
-                    attach_completion(step_kwargs)
-                    step = PersistentAgentStep.objects.create(**step_kwargs)
-                    attach_prompt_archive(step)
+                    step = _persist_attached_step(step_kwargs, attach_completion, attach_prompt_archive)
                     followup_required = True
                     break
                 if _should_reject_defaultable_setup_question(agent, message_body):
@@ -3145,9 +3382,7 @@ def _prepare_tool_batch_impl(
                         "agent": agent,
                         "description": skipped_plan_result["message"],
                     }
-                    attach_completion(step_kwargs)
-                    step = PersistentAgentStep.objects.create(**step_kwargs)
-                    attach_prompt_archive(step)
+                    step = _persist_attached_step(step_kwargs, attach_completion, attach_prompt_archive)
                     logger.info(
                         "Agent %s: skipped redundant research plan update before execution.",
                         agent.id,
@@ -3171,9 +3406,7 @@ def _prepare_tool_batch_impl(
                             "so first call end_planning(full_plan=...) if the plan is sufficient, or request_human_input if blocked."
                         ),
                     }
-                    attach_completion(step_kwargs)
-                    step = PersistentAgentStep.objects.create(**step_kwargs)
-                    attach_prompt_archive(step)
+                    step = _persist_attached_step(step_kwargs, attach_completion, attach_prompt_archive)
                     logger.info(
                         "Agent %s: skipped search_tools before planning gate for execute-now prompt.",
                         agent.id,
@@ -3196,15 +3429,20 @@ def _prepare_tool_batch_impl(
                 tool_params,
                 batch_has_terminal_message=batch_has_terminal_message,
             ):
-                _record_irrelevant_agent_config_mutation_skip(
+                _record_policy_step(
                     agent,
+                    "Skipped unrelated __agent_config mutation or explicitly temporary charter change. "
+                    "Keep one-off/task/batch/day/response state in the current conversation; change durable config only "
+                    "for lasting guidance. Do not retry this mutation; apply temporary guidance in the current reply now.",
                     attach_completion=attach_completion,
                     attach_prompt_archive=attach_prompt_archive,
                 )
                 logger.info(
-                    "Agent %s: skipped irrelevant __agent_config mutation attached to one-off final answer.",
+                    "Agent %s: skipped unrelated or temporary __agent_config mutation.",
                     agent.id,
                 )
+                if not batch_has_terminal_message:
+                    followup_required = True
                 continue
             explicit_continue = _coerce_optional_bool(tool_params.get("will_continue_work"))
             inferred_continue = False
@@ -3261,9 +3499,11 @@ def _prepare_tool_batch_impl(
                     eval_run_id=eval_run_id,
                 )
                 if duplicate_call is not None:
-                    _record_duplicate_http_request_skip(
+                    _record_policy_step(
                         agent,
-                        duplicate_call,
+                        "Skipped duplicate http_request: this exact request already succeeded in this task. "
+                        f"Use the prior tool result from step {duplicate_call.step_id}. If it answers the request, "
+                        "send the final message next; do not refetch or inspect __tool_results just to reread it.",
                         attach_completion=attach_completion,
                         attach_prompt_archive=attach_prompt_archive,
                     )
@@ -3338,44 +3578,6 @@ def _prepare_tool_batch_impl(
         ),
         abort_after_execution=abort_after_execution,
         parallel_ineligible_reason=_parallel_batch_ineligible_reason(prepared_calls),
-    )
-
-
-def _prepare_tool_batch(
-    agent: PersistentAgent,
-    *,
-    tool_calls: list[Any],
-    budget_ctx: Optional[BudgetContext],
-    eval_run_id: Optional[str],
-    heartbeat: Any,
-    lock_extender: Any,
-    credit_snapshot: Any,
-    allow_inferred_message_continue: bool,
-    has_non_sleep_calls: bool,
-    has_user_facing_message: bool,
-    attach_completion: Any,
-    attach_prompt_archive: Any,
-) -> _PreparedToolBatch:
-    rate_limit_batch = None
-    if len(tool_calls) > 1:
-        rate_limit_batch = _build_tool_rate_limit_batch(
-            agent,
-            [name for call in tool_calls if (name := _get_tool_call_name(call))],
-        )
-    return _prepare_tool_batch_impl(
-        agent,
-        tool_calls=tool_calls,
-        budget_ctx=budget_ctx,
-        eval_run_id=eval_run_id,
-        heartbeat=heartbeat,
-        lock_extender=lock_extender,
-        credit_snapshot=credit_snapshot,
-        allow_inferred_message_continue=allow_inferred_message_continue,
-        has_non_sleep_calls=has_non_sleep_calls,
-        has_user_facing_message=has_user_facing_message,
-        attach_completion=attach_completion,
-        attach_prompt_archive=attach_prompt_archive,
-        rate_limit_batch=rate_limit_batch,
     )
 
 
@@ -3660,8 +3862,10 @@ def _finalize_tool_batch(
         and not is_credit_message_only_mode(daily_credit_state, task_credit_available)
         and _plan_has_unfinished_items(agent)
     ):
-        _record_terminal_send_unfinished_plan_correction(
+        _record_policy_step(
             agent,
+            "Terminal message delivery requested stop, but the current plan still has unfinished items. "
+            "Call update_plan with the complete current plan state before stopping.",
             attach_completion=attach_completion,
             attach_prompt_archive=attach_prompt_archive,
         )
@@ -6030,7 +6234,9 @@ def _run_agent_loop(
     continuation_notice: Optional[str] = None
     stale_prompt_system_directive_block = ""
     empty_response_loop_retries = 0
-    direct_correction_patch_seen = False
+    direct_correction_reply_pending = False
+    direct_feedback_reply_completed = False
+    direct_correction_prior_output = ""
     explicit_prefer_low_latency = prefer_low_latency
 
     def _current_human_inbound_generation() -> int:
@@ -6051,11 +6257,12 @@ def _run_agent_loop(
         routing_scope_tokens.append(bind_inbound_routing_scope(initial_routing_scope))
 
         def _refresh_inbound_routing_scope(generation: int) -> None:
-            nonlocal routing_scope_generation
-            routing_scope_tokens.append(
-                bind_inbound_routing_scope(capture_inbound_routing_scope(agent, pending_inbound=True))
-            )
+            nonlocal routing_scope_generation, direct_correction_reply_pending, direct_feedback_reply_completed, direct_correction_prior_output
+            routing_scope_tokens.append(bind_inbound_routing_scope(capture_inbound_routing_scope(agent, pending_inbound=True)))
             routing_scope_generation = generation
+            direct_correction_reply_pending = False
+            direct_feedback_reply_completed = False
+            direct_correction_prior_output = ""
 
         prompt_run_cache = PromptRunCache(
             agent_id=str(agent.id),
@@ -6195,6 +6402,59 @@ def _run_agent_loop(
                 continuation_notice = None
                 routing_profile = get_current_eval_routing_profile()
                 prefer_low_latency = iteration_prefers_low_latency
+                tool_names = _tool_definition_names_for_completion(iteration_tools)
+                feedback_inbound = get_current_inbound_message(agent)
+                feedback_text = feedback_inbound.body if feedback_inbound is not None else ""
+                direct_correction_context = None if direct_correction_reply_pending else _direct_correction_context(agent, feedback_inbound)
+                if direct_correction_context:
+                    direct_correction_prior_output = direct_correction_context[1]
+                feedback_analysis = direct_correction_context[2] if direct_correction_context else _analyze_feedback_turn(feedback_text, direct_correction_prior_output)
+                feedback_only = feedback_analysis.feedback_only
+                direct_correction_pending = bool(
+                    "sqlite_batch" in tool_names
+                    and not direct_correction_reply_pending
+                    and direct_correction_context is not None
+                )
+                transient_feedback_reply_pending = bool(
+                    not direct_correction_reply_pending
+                    and feedback_only
+                    and feedback_analysis.transient_only
+                    and feedback_analysis.behavior
+                )
+                separate_feedback_task = bool(not feedback_only or (
+                    transient_feedback_reply_pending and feedback_analysis.direct_reply_task
+                ))
+                direct_feedback_reply_pending = bool(
+                    direct_correction_reply_pending and feedback_analysis.direct_reply_task
+                    and not DIRECT_FEEDBACK_DELIVERY_TASK_RE.search(feedback_text) and not direct_feedback_reply_completed
+                )
+                direct_feedback_reply_will_continue = bool(direct_feedback_reply_pending and feedback_analysis.separate_task)
+                feedback_reply_pending = direct_feedback_reply_pending or ((direct_correction_reply_pending or transient_feedback_reply_pending) and not separate_feedback_task)
+                feedback_reply_instruction = (
+                    "Rewrite the prior outbound message from scratch and send only the complete replacement. Honor the critique, preserve supported facts, and materially change the wording and structure. No acknowledgement, apology, preface, or explanation. "
+                    + ("Use will_continue_work=true, then execute the distinct remaining request."
+                       if direct_feedback_reply_will_continue else "Use will_continue_work=false.")
+                    if direct_feedback_reply_pending else
+                    "Current-turn feedback acknowledgement only. Send one brief natural first-person reply on this inbound channel with will_continue_work=false. " + ("Use exactly one sentence: begin 'For this <stated scope>,'; state the requested changes inside that finite scope, then end without another timing phrase. " if transient_feedback_reply_pending else "State what you will do and cover each distinct adjustment, for example 'Got it. I'll <specific behaviors>.' ") + "Do not mention saving, config, charter, instructions, or tools; do not research, ask a question, or promise more work."
+                ) if feedback_reply_pending else ""
+                prompt_notice = current_notice
+                if direct_correction_pending:
+                    charter_patch_instruction = (
+                        "Return only target_charter_text and replacement_charter_text; never SQL or will_continue_work. Patch ONLY the lasting clauses listed for this turn; all other current-turn text is temporary or separate and must not appear in the replacement. CURRENT CHARTER (<charter>), the only source for a nonempty target: "
+                        + json.dumps(agent.charter or "")
+                        + ". Default scope is exactly the criticized output's actor, audience, workflow, and condition; never generalize unless the feedback says all, always, or across contexts. Preserve lookalikes for other contexts. A role/workflow is not a target merely because its output was criticized. If no charter rule explicitly controls that behavior, target_charter_text is empty and replacement_charter_text is one concise operational rule, not copied feedback or prior output. Otherwise target the smallest exact contiguous span covering every adjacent conflicting rule, then replace it without contradictions while preserving unrelated text in that span verbatim."
+                    )
+                    prompt_notice = "\n\n".join(filter(None, (
+                        prompt_notice,
+                        "Current-turn lasting feedback to patch, excluding temporary scope and separate tasks: "
+                        + json.dumps(feedback_analysis.lasting),
+                        "PRIOR OUTPUT (context only; never use its text as target_charter_text or replacement_charter_text): "
+                        + json.dumps(direct_correction_prior_output[:1000]),
+                    )))
+                elif feedback_reply_pending:
+                    prompt_notice = "\n\n".join(filter(None, (prompt_notice, feedback_reply_instruction)))
+                elif separate_feedback_task and (direct_correction_reply_pending or transient_feedback_reply_pending):
+                    prompt_notice = "\n\n".join(filter(None, (prompt_notice, "Current turn: feedback scope is resolved. Execute the remaining explicit request now; acknowledge the adjustment naturally within the completed result, not as a separate progress message.")))
                 try:
                     prompt_context_result = build_prompt_context(
                         agent,
@@ -6204,13 +6464,27 @@ def _run_agent_loop(
                         is_first_run=is_first_run,
                         daily_credit_state=daily_state,
                         task_credit_available=task_credit_available,
-                        continuation_notice=current_notice,
+                        continuation_notice=prompt_notice,
                         routing_profile=routing_profile,
                         prefer_low_latency=prefer_low_latency,
                         include_metadata=True,
                         system_directive_block=stale_prompt_system_directive_block,
                         routing_token_seed=routing_token_seed,
                         run_cache=prompt_run_cache,
+                        prompt_message_transform=(
+                            (
+                                lambda prompt_history: _focused_charter_patch_history(
+                                    prompt_history,
+                                    agent.charter or "",
+                                    feedback_analysis.lasting,
+                                    direct_correction_prior_output,
+                                )
+                            )
+                            if direct_correction_pending else None
+                        ) or (
+                            _promote_source_reconciliation_history
+                            if "sqlite_batch" in tool_names else None
+                        ),
                     )
                 except Exception as exc:
                     log_prompt_construction_error(
@@ -6357,10 +6631,7 @@ def _run_agent_loop(
                 request_history = history
                 request_failover_configs = failover_configs
                 fresh_tool_call_step_ids = prompt_metadata.get("fresh_tool_call_step_ids") or []
-                image_attachments = collect_fresh_read_file_image_attachments(
-                    agent,
-                    fresh_tool_call_step_ids,
-                )
+                image_attachments = [] if direct_correction_pending else collect_fresh_read_file_image_attachments(agent, fresh_tool_call_step_ids)
                 if image_attachments:
                     (
                         request_history,
@@ -6387,6 +6658,37 @@ def _run_agent_loop(
                             "Agent %s: read_file image context available but no vision-capable orchestrator endpoint found",
                             agent.id,
                         )
+                request_tools = iteration_tools
+                focused_feedback_reply_tool_name = None
+                source_reconciliation_directive = prompt_metadata.get("source_reconciliation_directive")
+                if direct_correction_pending:
+                    if not prompt_metadata.get("prompt_message_transform_applied"):
+                        request_history = _focused_charter_patch_history(
+                            history, agent.charter or "", feedback_analysis.lasting, direct_correction_prior_output,
+                        )
+                    request_tools, request_failover_configs = _focused_tool_completion_request(
+                        iteration_tools,
+                        request_failover_configs,
+                        "sqlite_batch",
+                        charter_patch_instruction,
+                        parameters=CHARTER_PATCH_PARAMETERS,
+                    )
+                elif source_reconciliation_directive and "sqlite_batch" in tool_names:
+                    request_tools, request_failover_configs = _focused_tool_completion_request(
+                        iteration_tools, request_failover_configs, "sqlite_batch",
+                        source_reconciliation_directive,
+                        parameters=_source_reconciliation_parameters(source_reconciliation_directive),
+                        fixed_continue=True,
+                    )
+                elif feedback_reply_pending:
+                    reply_tool_name = _same_channel_reply_tool_name(feedback_inbound)
+                    if reply_tool_name in tool_names:
+                        focused_feedback_reply_tool_name = reply_tool_name
+                        request_tools, request_failover_configs = _focused_tool_completion_request(
+                            iteration_tools, request_failover_configs, reply_tool_name,
+                            feedback_reply_instruction,
+                            fixed_continue=direct_feedback_reply_will_continue if direct_feedback_reply_pending else False,
+                        )
                 stream_broadcaster = None
                 try:
                     stream_target = resolve_web_stream_target(agent)
@@ -6398,13 +6700,13 @@ def _run_agent_loop(
                 try:
                     response, token_usage = _completion_with_failover(
                         messages=request_history,
-                        tools=iteration_tools,
+                        tools=request_tools,
                         failover_configs=request_failover_configs,
                         agent_id=str(agent.id),
                         safety_identifier=agent.user.id if agent.user else None,
                         preferred_config=preferred_config,
-                        stream_broadcaster=stream_broadcaster,
-                        allow_streamed_content=prompt_allows_implied_send,
+                        stream_broadcaster=None if direct_correction_pending or feedback_reply_pending or source_reconciliation_directive else stream_broadcaster,
+                        allow_streamed_content=prompt_allows_implied_send and not source_reconciliation_directive,
                         stale_prompt_checker=_is_orchestrator_prompt_stale,
                     )
                     empty_response_loop_retries = 0
@@ -6499,7 +6801,7 @@ def _run_agent_loop(
                             agent=agent,
                             eval_run_id=eval_run_id,
                             prompt_archive_id=prompt_archive_id,
-                            llm_tool_names=_tool_definition_names_for_completion(iteration_tools),
+                            llm_tool_names=_tool_definition_names_for_completion(request_tools),
                             thinking_content=thinking_content,
                             **billing_snapshot,
                             **token_usage_fields,
@@ -6531,10 +6833,7 @@ def _run_agent_loop(
                         "agent": agent,
                         "description": internal_reasoning.build_internal_reasoning_description(reasoning_text),
                     }
-                    _attach_completion(step_kwargs)
-                    step = PersistentAgentStep.objects.create(**step_kwargs)
-                    _attach_prompt_archive(step)
-                    return step
+                    return _persist_attached_step(step_kwargs, _attach_completion, _attach_prompt_archive)
 
                 def _apply_runtime_updates() -> tuple[bool, AgentConfigApplyResult]:
                     # Some unit tests call _run_agent_loop directly without agent_sqlite_db().
@@ -6558,9 +6857,7 @@ def _run_agent_loop(
                                     "agent": agent,
                                     "description": f"{label} update failed: {error}",
                                 }
-                                _attach_completion(step_kwargs)
-                                step = PersistentAgentStep.objects.create(**step_kwargs)
-                                _attach_prompt_archive(step)
+                                _persist_attached_step(step_kwargs, _attach_completion, _attach_prompt_archive)
                             except Exception:
                                 logger.debug(
                                     "Failed to persist %s update error step for agent %s",
@@ -6581,28 +6878,28 @@ def _run_agent_loop(
 
                 raw_tool_calls = _normalize_tool_calls(msg)
                 direct_correction_patch_this_response = False
-                direct_correction_pending = (
-                    not direct_correction_patch_seen
-                    and _should_require_direct_correction_patch(agent)
-                )
                 if direct_correction_pending:
-                    direct_correction_patch_this_response = _tool_calls_patch_correction_before_reply(raw_tool_calls)
-                    direct_correction_patch_seen = direct_correction_patch_this_response
-                    if not direct_correction_patch_seen:
-                        _record_missing_direct_correction_patch(
+                    compiled_call = _compile_charter_patch_tool_call(raw_tool_calls[0], agent.charter) if len(raw_tool_calls) == 1 else None
+                    direct_correction_patch_this_response = compiled_call is not None
+                    if compiled_call is not None:
+                        raw_tool_calls = [compiled_call]
+                    if not direct_correction_patch_this_response:
+                        _record_policy_step(
                             agent,
+                            "Tool policy: persist this direct user correction before replying. Return the required "
+                            "exact target/replacement charter span now, changing only the relevant clause and preserving unrelated guidance.",
                             attach_completion=_attach_completion,
                             attach_prompt_archive=_attach_prompt_archive,
                         )
                         _mark_accepted_human_generation_consumed()
                         continue
-                discovery_tool_calls = _defer_tool_calls_behind_discovery(raw_tool_calls)
-                if len(discovery_tool_calls) != len(raw_tool_calls):
+                ready_tool_calls = _defer_tool_calls_behind_dependencies(raw_tool_calls)
+                if len(ready_tool_calls) != len(raw_tool_calls):
                     logger.info(
-                        "Agent %s: deferring non-discovery tool calls until search_tools updates the prompt.",
+                        "Agent %s: deferring tool calls until discovery or fresh source context is available.",
                         agent.id,
                     )
-                    raw_tool_calls = discovery_tool_calls
+                    raw_tool_calls = ready_tool_calls
                 raw_tool_names = [_get_tool_call_name(call) for call in raw_tool_calls]
                 has_explicit_send = any(name in MESSAGE_TOOL_NAMES for name in raw_tool_names if name)
                 has_explicit_sleep = any(name == "sleep_until_next_trigger" for name in raw_tool_names if name)
@@ -6623,7 +6920,10 @@ def _run_agent_loop(
                     implied_send_disabled_reason = "Implied send disabled by prompt configuration."
                 elif not selected_model_allows_implied_send:
                     implied_send_disabled_reason = "Implied send disabled for the selected model."
-                if message_text and not has_explicit_send:
+                if (
+                    message_text and not has_explicit_send and not direct_correction_patch_this_response
+                    and not source_reconciliation_directive
+                ):
                     # Default: STOP. Agent must explicitly request continuation with "CONTINUE_WORK_SIGNAL".
                     # This is safer—agent won't keep running unexpectedly.
                     implied_will_continue = _should_imply_continue(
@@ -6642,10 +6942,7 @@ def _run_agent_loop(
                     if implied_call:
                         implied_send = True
                         implied_stop_after_send = not implied_will_continue  # Stop unless continuation phrase
-                        if direct_correction_patch_this_response:
-                            tool_calls.append(implied_call)
-                        else:
-                            tool_calls = [implied_call] + tool_calls
+                        tool_calls = [implied_call] + tool_calls
                         logger.info(
                             "Agent %s: treating message content as implied %s send.",
                             agent.id,
@@ -6667,15 +6964,16 @@ def _run_agent_loop(
                                         f"UNDLIVERED ANSWER:\n{message_text}"
                                     ),
                                 }
-                                _attach_completion(step_kwargs)
-                                step = PersistentAgentStep.objects.create(**step_kwargs)
-                                _attach_prompt_archive(step)
+                                _persist_attached_step(step_kwargs, _attach_completion, _attach_prompt_archive)
                             except Exception:
                                 logger.debug("Failed to persist implied-send correction step", exc_info=True)
                         # Don't continue here - still execute any other tool calls that were returned
 
                 reasoning_source = thinking_content
-                if not reasoning_source and not implied_send:
+                if (
+                    not reasoning_source and not implied_send and not direct_correction_patch_this_response
+                    and not source_reconciliation_directive
+                ):
                     reasoning_source = msg_content
 
                 reasoning_step = _persist_reasoning_step(reasoning_source)
@@ -6842,6 +7140,11 @@ def _run_agent_loop(
 
                 if not executed_batch.abort_after_execution or _get_processing_abort_reason(agent.id) is None:
                     runtime_errors, config_apply = _apply_runtime_updates()
+                    if direct_correction_patch_this_response:
+                        direct_correction_reply_pending = not config_apply.errors and any(
+                            outcome.prepared.tool_name == "sqlite_batch" and _tool_result_is_success(outcome.result)
+                            for outcome in executed_batch.execution_outcomes
+                        )
                     _annotate_agent_config_update_result(
                         executed_batch.execution_outcomes,
                         config_apply,
@@ -6864,8 +7167,10 @@ def _run_agent_loop(
                     attach_prompt_archive=_attach_prompt_archive,
                 )
                 executed_calls = finalized_batch.executed_calls
-                followup_required = followup_required or finalized_batch.followup_required
+                followup_required = followup_required or finalized_batch.followup_required or direct_correction_patch_this_response
                 message_delivery_ok = finalized_batch.message_delivery_ok
+                if direct_feedback_reply_pending and focused_feedback_reply_tool_name and message_delivery_ok:
+                    direct_feedback_reply_completed = True
                 last_explicit_continue = finalized_batch.last_explicit_continue
                 inferred_message_continue_this_iteration = (
                     finalized_batch.inferred_message_continue_this_iteration

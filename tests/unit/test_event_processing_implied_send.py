@@ -4,6 +4,7 @@ from datetime import timedelta
 import json
 from unittest.mock import MagicMock, patch
 
+import sqlparse
 from django.contrib.auth import get_user_model
 from django.test import TestCase, tag
 from django.utils import timezone
@@ -104,6 +105,21 @@ class ImpliedSendTests(TestCase):
             },
         )
 
+    def test_discord_uses_the_same_delivery_and_reply_semantics(self):
+        inbound = MagicMock()
+        inbound.conversation.is_peer_dm = False
+        inbound.conversation.channel = CommsChannel.DISCORD
+
+        self.assertIn("send_discord_message", ep.MESSAGE_TOOL_NAMES)
+        self.assertEqual(ep.MESSAGE_TOOL_BODY_KEYS["send_discord_message"], "message")
+        self.assertEqual(ep._same_channel_reply_tool_name(inbound), "send_discord_message")
+        self.assertTrue(
+            ep._message_tool_is_terminal(
+                "send_discord_message",
+                {"message": "The report is ready.", "will_continue_work": False},
+            )
+        )
+
     def test_run_setup_resets_inbound_scope_when_prompt_cache_setup_fails(self):
         with patch.object(ep, "PromptRunCache", side_effect=RuntimeError("cache setup failed")), \
              self.assertRaisesRegex(RuntimeError, "cache setup failed"):
@@ -114,83 +130,290 @@ class ImpliedSendTests(TestCase):
     def test_search_tools_is_a_discovery_barrier_for_same_batch_work(self):
         search_call = {"function": {"name": "search_tools", "arguments": '{"query":"meta gobii"}'}}
         research_call = {"function": {"name": "mcp_brightdata_search_engine", "arguments": "{}"}}
+        http_call = {
+            "function": {
+                "name": "http_request",
+                "arguments": '{"method":"GET","url":"https://example.test/data"}',
+            }
+        }
+        sqlite_call = {"function": {"name": "sqlite_batch", "arguments": '{"sql":"SELECT * FROM accounts"}'}}
+        write_call = {"function": {"name": "mcp_slack_send_message", "arguments": "{}"}}
 
         self.assertEqual(
-            ep._defer_tool_calls_behind_discovery([search_call, research_call]),
+            ep._defer_tool_calls_behind_dependencies([search_call, research_call]),
             [search_call],
         )
-        self.assertEqual(ep._defer_tool_calls_behind_discovery([research_call]), [research_call])
+        self.assertEqual(ep._defer_tool_calls_behind_dependencies([research_call]), [research_call])
+        self.assertEqual(
+            ep._defer_tool_calls_behind_dependencies([http_call, sqlite_call]),
+            [http_call],
+        )
+        self.assertEqual(ep._defer_tool_calls_behind_dependencies([research_call, sqlite_call]), [research_call])
+        self.assertEqual(ep._defer_tool_calls_behind_dependencies([write_call, sqlite_call]), [sqlite_call])
 
-    def test_direct_corrections_require_durable_patch_except_when_one_off(self):
-        self.assertTrue(ep._user_text_is_direct_correction("That sounded automated. Stop writing like a template."))
-        self.assertTrue(ep._user_text_is_direct_correction("You sound robotic."))
-        self.assertTrue(ep._user_text_is_direct_correction("Lowercase is too informal."))
-        self.assertTrue(ep._user_text_is_direct_correction("No more em dashes."))
-        self.assertTrue(ep._user_text_is_direct_correction("Don't use em dashes."))
-        self.assertTrue(
-            ep._user_text_is_direct_correction(
-                "you should have github secrets that allow you to use github."
-            )
-        )
-        self.assertTrue(
-            ep._user_text_is_direct_correction(
-                "You already have credentials for that command-line workflow."
-            )
-        )
-        self.assertTrue(
-            ep._user_text_is_direct_correction(
-                "The agent should be able to use the configured environment variables."
-            )
-        )
-        self.assertTrue(ep._user_text_is_direct_correction("Please stop - writing like a template."))
-        self.assertTrue(ep._user_text_is_direct_correction("Please stop always writing like a template."))
-        self.assertTrue(ep._user_text_is_direct_correction("Stop repeatedly sending generic replies."))
-        self.assertFalse(ep._user_text_is_direct_correction("For this response, don't use headings."))
-        self.assertFalse(ep._user_text_is_direct_correction("Don't browse. Just answer the question."))
-        self.assertFalse(ep._user_text_is_direct_correction("You should have a nice day."))
-        self.assertFalse(
-            ep._user_text_is_direct_correction(
-                "You should have access to the CRM tools; export the leads."
-            )
-        )
-        self.assertFalse(
-            ep._user_text_is_direct_correction(
-                "Continue daily sourcing until the recruiter instructs you to pause, stop, "
-                "change search criteria, change format, or close the role."
-            )
-        )
-        self.assertFalse(
-            ep._user_text_is_direct_correction(
-                "Constraint: do not imply a prior relationship or make unsupported claims. Send the email now."
-            )
-        )
-
-    def test_correction_patch_must_use_patch_text_before_reply(self):
-        def call(name, params):
-            return {
-                "id": name,
-                "type": "function",
-                "function": {"name": name, "arguments": json.dumps(params)},
+    def test_sqlite_approval_read_precedes_http_write(self):
+        approval_read = {
+            "function": {
+                "name": "sqlite_batch",
+                "arguments": '{"sql":"SELECT approved FROM outreach_approvals WHERE prospect_id = 42"}',
             }
+        }
+        http_write = {
+            "function": {
+                "name": "http_request",
+                "arguments": '{"method":"POST","url":"https://api.example.test/messages"}',
+            }
+        }
 
-        patch_call = call(
-            "sqlite_batch",
-            {
-                "sql": (
-                    "UPDATE __agent_config SET charter = "
-                    "patch_text(charter, '', 'Keep messages natural.') WHERE id = 1"
-                )
+        self.assertEqual(
+            ep._defer_tool_calls_behind_dependencies([http_write, approval_read]),
+            [approval_read],
+        )
+
+    def test_sqlite_approval_read_precedes_unrecognized_mcp_write(self):
+        approval_read = {
+            "function": {
+                "name": "sqlite_batch",
+                "arguments": '{"sql":"SELECT approved FROM release_approvals WHERE pr_number = 1341"}',
+            }
+        }
+        merge_call = {
+            "function": {
+                "name": "mcp_github_merge_pull_request",
+                "arguments": '{"pull_number":1341}',
+            }
+        }
+
+        self.assertEqual(
+            ep._defer_tool_calls_behind_dependencies([merge_call, approval_read]),
+            [approval_read],
+        )
+
+    def test_feedback_classifier_preserves_real_world_intent(self):
+        durable_feedback = (
+            "That sounded automated. Stop writing like a template.",
+            "You sound robotic.",
+            "Lowercase is too informal.",
+            "No more em dashes.",
+            "Don't use em dashes.",
+            "you should have github secrets that allow you to use github.",
+            "You already have credentials for that command-line workflow.",
+            "The agent should be able to use the configured environment variables.",
+            "Please stop - writing like a template.",
+            "Please stop always writing like a template.",
+            "Stop repeatedly sending generic replies.",
+            "I prefer comparison tables and bullet takeaways. The narrative format is hard to scan.",
+            "Going forward, show source links in reports.",
+            "Going forward, keep responses short.",
+            "From now on, make every response concise.",
+            "Going forward, keep replies short.",
+            "I prefer short responses.",
+            "Do I have to request links each time? Make that a rule.",
+            "yeah these play by play updates arent useful. just come back with what changed + blockers + next move",
+            "That felt kind of stiff.",
+            "this is great actually. a genuine observation can be the whole opener sometimes, no pitch needed",
+            "These updates aren't useful. Never store this customer secret.",
+            "For this batch, put security first. Going forward, never use em dashes.",
+            "Don't save this temporary point; going forward, these updates aren't useful.",
+        )
+        for text in durable_feedback:
+            with self.subTest(durable=text):
+                self.assertTrue(ep._user_text_is_direct_correction(text))
+        quote = "Curious what you think the biggest gap is right now."
+        self.assertTrue(ep._user_text_is_direct_correction(
+            f'"{quote}" this is not so good. it makes the other person do the work',
+            prior_outbound_text=quote,
+        ))
+
+        one_off_or_content = (
+            "Remember, the deadline is Friday.",
+            "I prefer Tuesday for this meeting.",
+            "Always use the Q3 figures in this report.",
+            "Stop sending this email.",
+            "Stop using this source for the report.",
+            "Send a reply that sounds robotic for a demo.",
+            "This is great news about Acme's strategy.",
+            "Those customer messages are not helpful; categorize the complaints.",
+            "This report is bad. Find a better source.",
+            "Your answer was wrong: the renewal date is June 2.",
+            "Explain why customers never share passwords by email.",
+            "Don't browse. Just answer the question.",
+            "Never send this confidential email.",
+            "You should have a nice day.",
+            "That is a better strategy for Acme.",
+            "You should have access to the CRM tools; export the leads.",
+            "Continue daily sourcing until the recruiter instructs you to pause, stop, change search criteria, change format, or close the role.",
+            "Constraint: do not imply a prior relationship or make unsupported claims. Send the email now.",
+        )
+        for text in one_off_or_content:
+            with self.subTest(not_durable=text):
+                self.assertFalse(ep._user_text_is_direct_correction(text))
+
+    def test_feedback_classifier_extracts_scoped_rules_and_tasks(self):
+        lasting_cases = (
+            ("For this renewal only put legal first, going forward send outcomes only.", ("going forward send outcomes only.",)),
+            ("That sounded automated. Stop using templates. Rewrite it naturally.", ("That sounded automated.", "Stop using templates.")),
+            ("That sounded automated. Edit the spreadsheet to add source links.", ("That sounded automated.",)),
+            (
+                "Your reports are too generic. Compare the four companies now. Going forward, use a compact table for portfolio comparisons.",
+                ("Your reports are too generic.", "Going forward, use a compact table for portfolio comparisons."),
+            ),
+            ("For this batch, put security first. Always include source links.", ("Always include source links.",)),
+            ("Do not save this feedback. Going forward, these updates are not useful.", ("Going forward, these updates are not useful.",)),
+            ("Never send this confidential email. Going forward, never share customer secrets.", ("Going forward, never share customer secrets.",)),
+        )
+        for text, expected in lasting_cases:
+            with self.subTest(lasting=text):
+                self.assertEqual(ep._analyze_feedback_turn(text).lasting, expected)
+
+        separate_tasks = (
+            ("Your reports are too generic. Open the portfolio now.", "Your reports are too generic."),
+            ("That sounded robotic and find three prospects.", "That sounded robotic"),
+            ("These updates are not useful and pause the schedule.", "These updates are not useful"),
+            ("Your reports are too generic and research the four companies now.", "Your reports are too generic"),
+            ("That email was too formal and email the rewrite to Sarah.", "That email was too formal"),
+            ("Your report was too generic and export it as CSV.", "Your report was too generic"),
+        )
+        for text, expected_feedback in separate_tasks:
+            with self.subTest(separate_task=text):
+                analysis = ep._analyze_feedback_turn(text, "Here is the prior report.")
+                self.assertEqual(analysis.lasting, (expected_feedback,))
+                self.assertTrue(analysis.separate_task)
+                self.assertFalse(analysis.feedback_only)
+
+        direct_rewrites = (
+            "That sounded robotic and rewrite it naturally.",
+            "That sounded robotic and shorten it.",
+        )
+        for text in direct_rewrites:
+            with self.subTest(direct_rewrite=text):
+                analysis = ep._analyze_feedback_turn(text)
+                self.assertEqual(analysis.lasting, ("That sounded robotic",))
+                self.assertTrue(analysis.direct_reply_task)
+                self.assertFalse(analysis.separate_task)
+
+        mixed_rewrite_tasks = (
+            "That sounded robotic. Rewrite it, then find three prospects.",
+            "That sounded robotic. Rewrite it. Email it to Sarah.",
+        )
+        for text in mixed_rewrite_tasks:
+            with self.subTest(rewrite_then_task=text):
+                analysis = ep._analyze_feedback_turn(text)
+                self.assertTrue(analysis.direct_reply_task)
+                self.assertTrue(analysis.separate_task)
+
+    def test_feedback_classifier_distinguishes_feedback_from_temporary_and_domain_text(self):
+        feedback_only = (
+            ("going forward, these play by play updates arent useful. just come back with what changed + blockers + next move. routine followups are for Morgan, only pull me in on a real blocker", ""),
+            ('"Curious what you think the biggest gap is right now." this is not so good. it makes the other person do the work', "Curious what you think the biggest gap is right now."),
+            ("Great that you found leads, but you did not include links. Do I have to ask each time? Can we make that a rule?", ""),
+            ("Going forward, keep the updates short and include source links.", ""),
+        )
+        for text, prior in feedback_only:
+            with self.subTest(feedback_only=text):
+                analysis = ep._analyze_feedback_turn(text, prior)
+                self.assertTrue(analysis.feedback_only)
+                self.assertFalse(analysis.separate_task)
+
+        transient_feedback = (
+            "That felt stiff; don't update your instructions.",
+            "That sounded robotic. Don't save this.",
+            "For this email only, do not use em dashes.",
+            "For this response, don't use headings.",
+            "For this message, that tone is too formal.",
+            "For this batch, never use headings.",
+            "Never store this customer secret.",
+            "Never persist this API key.",
+            "Never send this confidential email.",
+            "Going forward, do not save this feedback. That sounded stiff.",
+        )
+        for text in transient_feedback:
+            with self.subTest(transient=text):
+                analysis = ep._analyze_feedback_turn(text)
+                self.assertTrue(analysis.transient_only)
+                self.assertFalse(ep._user_text_is_direct_correction(text))
+                if text.startswith("Never"):
+                    self.assertEqual(analysis.lasting, ())
+
+        for text in (
+            "For this customer only, that tone is too formal.",
+            "For this channel only, those updates aren't useful.",
+        ):
+            with self.subTest(durable_context_scope=text):
+                analysis = ep._analyze_feedback_turn(text)
+                self.assertFalse(analysis.transient_only)
+                self.assertEqual(analysis.lasting, (text,))
+
+        task_turns = (
+            "Only this batch, these long updates aren't useful. Pause your schedule until Friday.",
+            "These updates aren't useful. Going forward send only blockers. Pause your schedule until Friday.",
+            "You sound robotic, please find three prospects.",
+        )
+        for text in task_turns:
+            with self.subTest(feedback_plus_task=text):
+                self.assertFalse(ep._analyze_feedback_turn(text).feedback_only)
+
+    def test_structured_charter_patch_compiles_to_one_safe_sqlite_update(self):
+        old = "Owner's rule;\nDROP TABLE notes;"
+        new = "Owner's clearer rule;\nSELECT * FROM notes;"
+        call = {
+            "id": "patch",
+            "type": "function",
+            "function": {
+                "name": "sqlite_batch",
+                "arguments": json.dumps({
+                    "target_charter_text": old,
+                    "replacement_charter_text": new,
+                }),
             },
-        )
-        reply_call = call("send_chat_message", {"body": "Got it.", "will_continue_work": False})
-        concatenation_call = call(
-            "sqlite_batch",
-            {"sql": "UPDATE __agent_config SET charter = charter || 'Keep messages natural.' WHERE id = 1"},
+        }
+
+        compiled = ep._compile_charter_patch_tool_call(call)
+        params = json.loads(compiled["function"]["arguments"])
+
+        self.assertEqual(len(sqlparse.split(params["sql"])), 1)
+        self.assertIn("Owner''s rule", params["sql"])
+        self.assertIn("Owner''s clearer rule", params["sql"])
+        self.assertIs(params["will_continue_work"], True)
+
+        call["function"]["arguments"] = json.dumps({
+            "target_charter_text": "Research prospects.",
+            "replacement_charter_text": "Research prospects. Include verified source links.",
+        })
+        compiled = ep._compile_charter_patch_tool_call(call, "Research prospects.")
+        self.assertIn(
+            "patch_text(charter, '', 'Include verified source links.')",
+            json.loads(compiled["function"]["arguments"])["sql"],
         )
 
-        self.assertTrue(ep._tool_calls_patch_correction_before_reply([patch_call, reply_call]))
-        self.assertFalse(ep._tool_calls_patch_correction_before_reply([reply_call, patch_call]))
-        self.assertFalse(ep._tool_calls_patch_correction_before_reply([concatenation_call]))
+        call["function"]["arguments"] = json.dumps({
+            "target_charter_text": "",
+            "replacement_charter_text": "Research prospects. Include verified source links.",
+        })
+        compiled = ep._compile_charter_patch_tool_call(call, "Research prospects.")
+        self.assertIn(
+            "patch_text(charter, '', 'Include verified source links.')",
+            json.loads(compiled["function"]["arguments"])["sql"],
+        )
+
+    def test_structured_charter_patch_rejects_invalid_values(self):
+        def compile_params(params):
+            return ep._compile_charter_patch_tool_call({
+                "function": {"name": "sqlite_batch", "arguments": json.dumps(params)},
+            })
+
+        for params in (
+            {},
+            [],
+            "old/new",
+            {"target_charter_text": "Rule", "replacement_charter_text": ""},
+            {"target_charter_text": "Rule", "replacement_charter_text": "Rule"},
+            {"target_charter_text": "Rule\x00", "replacement_charter_text": "Better rule"},
+            {"target_charter_text": 1, "replacement_charter_text": "Better rule"},
+            {"preserve": "", "old": "Rule", "new": "Better rule"},
+        ):
+            with self.subTest(params=params):
+                self.assertIsNone(compile_params(params))
 
     def _add_inbound_web_message(self, body):
         user_endpoint = PersistentAgentCommsEndpoint.objects.create(
@@ -227,49 +450,127 @@ class ImpliedSendTests(TestCase):
             body=body,
         )
 
-    def test_direct_correction_patch_requires_prior_outbound_message(self):
-        self._add_inbound_web_message("You sound robotic.")
-
-        self.assertFalse(ep._should_require_direct_correction_patch(self.agent))
-
-    def test_direct_correction_patch_is_disabled_in_planning_mode(self):
-        initial = self._add_inbound_web_message("Initial request")
-        self._add_outbound_web_message(initial.conversation)
-        PersistentAgentMessage.objects.create(
-            owner_agent=self.agent,
-            is_outbound=False,
-            from_endpoint=initial.from_endpoint,
-            conversation=initial.conversation,
-            body="You sound robotic.",
-        )
-        self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
-        self.agent.save(update_fields=["planning_state", "updated_at"])
-
-        self.assertFalse(ep._should_require_direct_correction_patch(self.agent))
-
-    def test_direct_correction_patch_is_required_for_followup_feedback(self):
-        initial = self._add_inbound_web_message("Initial request")
-        self._add_outbound_web_message(initial.conversation)
-        PersistentAgentMessage.objects.create(
-            owner_agent=self.agent,
-            is_outbound=False,
-            from_endpoint=initial.from_endpoint,
-            conversation=initial.conversation,
-            body="You sound robotic.",
-        )
-
-        self.assertTrue(ep._should_require_direct_correction_patch(self.agent))
-
-    def test_direct_correction_patch_uses_seq_to_break_timestamp_ties(self):
-        initial = self._add_inbound_web_message("Initial request")
-        outbound = self._add_outbound_web_message(initial.conversation)
+    def _add_feedback_followup(
+        self,
+        feedback="You sound robotic.",
+        *,
+        initial_body="Initial request",
+        prior_body="Previous agent reply",
+    ):
+        initial = self._add_inbound_web_message(initial_body)
+        outbound = self._add_outbound_web_message(initial.conversation, prior_body)
         correction = PersistentAgentMessage.objects.create(
             owner_agent=self.agent,
             is_outbound=False,
             from_endpoint=initial.from_endpoint,
             conversation=initial.conversation,
+            body=feedback,
+        )
+        return initial, outbound, correction
+
+    def test_direct_correction_patch_requires_prior_outbound_message(self):
+        self._add_inbound_web_message("You sound robotic.")
+
+        self.assertIsNone(ep._direct_correction_context(self.agent))
+
+    def test_direct_correction_patch_is_disabled_in_planning_mode(self):
+        self._add_feedback_followup()
+        self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
+        self.agent.save(update_fields=["planning_state", "updated_at"])
+
+        self.assertIsNone(ep._direct_correction_context(self.agent))
+
+    def test_direct_correction_patch_is_required_for_followup_feedback(self):
+        self._add_feedback_followup()
+
+        self.assertIsNotNone(ep._direct_correction_context(self.agent))
+
+    def test_quoted_feedback_across_a_newline_requires_a_patch(self):
+        prior = "Curious what you think the biggest gap is right now."
+        self._add_feedback_followup(f'"{prior}"\nthis is not so good.', prior_body=prior)
+
+        self.assertIsNotNone(ep._direct_correction_context(self.agent))
+
+    def test_batch_scoped_feedback_requires_only_a_transient_acknowledgement(self):
+        self._add_feedback_followup("Only this batch, those long updates aren't useful.")
+
+        self.assertTrue(ep._analyze_feedback_turn("Only this batch, those long updates aren't useful.").behavior)
+        self.assertIsNone(ep._direct_correction_context(self.agent))
+
+    def test_direct_correction_patch_requires_prior_outbound_in_same_conversation(self):
+        initial = self._add_inbound_web_message("Initial request")
+        self._add_outbound_web_message(initial.conversation)
+        other_conversation = PersistentAgentConversation.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.WEB,
+            address=initial.from_endpoint.address,
+        )
+        PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            is_outbound=False,
+            from_endpoint=initial.from_endpoint,
+            conversation=other_conversation,
             body="You sound robotic.",
         )
+
+        self.assertIsNone(ep._direct_correction_context(self.agent))
+
+    def test_direct_correction_patch_requires_configure_authority(self):
+        external_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.EMAIL,
+            address="external@example.com",
+        )
+        agent_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address="agent@example.com",
+        )
+        conversation = PersistentAgentConversation.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address=external_endpoint.address,
+        )
+        PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            is_outbound=True,
+            from_endpoint=agent_endpoint,
+            to_endpoint=external_endpoint,
+            conversation=conversation,
+            body="Previous agent reply",
+        )
+        PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            is_outbound=False,
+            from_endpoint=external_endpoint,
+            conversation=conversation,
+            body="You sound robotic.",
+        )
+
+        self.assertIsNone(ep._direct_correction_context(self.agent))
+
+    def test_direct_correction_patch_uses_bound_inbound_scope(self):
+        initial, _outbound, correction = self._add_feedback_followup()
+        scope = capture_inbound_routing_scope(self.agent)
+        token = bind_inbound_routing_scope(scope)
+        self.addCleanup(reset_inbound_routing_scope, token)
+        newer_conversation = PersistentAgentConversation.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.WEB,
+            address=initial.from_endpoint.address,
+        )
+        PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            is_outbound=False,
+            from_endpoint=initial.from_endpoint,
+            conversation=newer_conversation,
+            body="What is the latest status?",
+        )
+
+        self.assertEqual(scope.message_id, correction.id)
+        self.assertIsNotNone(ep._direct_correction_context(self.agent))
+
+    def test_direct_correction_patch_uses_seq_to_break_timestamp_ties(self):
+        _initial, outbound, correction = self._add_feedback_followup()
         shared_timestamp = timezone.now()
         PersistentAgentMessage.objects.filter(id=outbound.id).update(
             timestamp=shared_timestamp,
@@ -280,7 +581,7 @@ class ImpliedSendTests(TestCase):
             seq="01BBBBBBBBBBBBBBBBBBBBBBBB",
         )
 
-        self.assertTrue(ep._should_require_direct_correction_patch(self.agent))
+        self.assertIsNotNone(ep._direct_correction_context(self.agent))
 
     def test_eval_mock_result_supports_url_rules(self):
         mock_config = {
@@ -1206,58 +1507,47 @@ class ImpliedSendTests(TestCase):
         self.agent.refresh_from_db()
         self.assertEqual(self.agent.planning_state, PersistentAgent.PlanningState.PLANNING)
 
-    def test_prepare_tool_batch_skips_one_off_config_churn_before_terminal_message(self):
-        self._add_inbound_web_message("What's the latest Bitcoin price right now?")
-
+    def _prepare_tool_batch_for_test(self, tool_calls, *, has_user_facing_message=False):
         with (
             patch.object(ep, "_enforce_tool_rate_limit", return_value=True),
             patch.object(ep, "_ensure_credit_for_tool", return_value={"cost": None, "credit": None}),
         ):
-            prepared = ep._prepare_tool_batch(
+            return ep._prepare_tool_batch(
                 self.agent,
-                tool_calls=[
-                    {
-                        "id": "call_config",
-                        "function": {
-                            "name": "sqlite_batch",
-                            "arguments": json.dumps(
-                                {
-                                    "sql": (
-                                        "UPDATE __agent_config SET charter='Track Bitcoin price after every answer' "
-                                        "WHERE id=1;"
-                                    ),
-                                    "will_continue_work": True,
-                                }
-                            ),
-                        },
-                    },
-                    {
-                        "id": "call_chat",
-                        "function": {
-                            "name": "send_chat_message",
-                            "arguments": json.dumps(
-                                {
-                                    "body": (
-                                        "Bitcoin is trading at $68,500.\n\n"
-                                        "Sources:\n- https://example.test/price"
-                                    ),
-                                    "will_continue_work": False,
-                                }
-                            ),
-                        },
-                    },
-                ],
+                tool_calls=tool_calls,
                 budget_ctx=None,
                 eval_run_id=None,
                 heartbeat=None,
                 lock_extender=None,
                 credit_snapshot={},
-                allow_inferred_message_continue=True,
-                has_non_sleep_calls=True,
-                has_user_facing_message=True,
+                allow_inferred_message_continue=True, has_non_sleep_calls=True,
+                has_user_facing_message=has_user_facing_message,
                 attach_completion=lambda step_kwargs: None,
                 attach_prompt_archive=lambda step: None,
             )
+
+    @staticmethod
+    def _raw_tool_call(tool_name, params, call_id=None):
+        return {
+            "id": call_id or f"call_{tool_name}",
+            "function": {"name": tool_name, "arguments": json.dumps(params)},
+        }
+
+    def test_prepare_tool_batch_skips_one_off_config_churn_before_terminal_message(self):
+        self._add_inbound_web_message("What's the latest Bitcoin price right now?")
+        prepared = self._prepare_tool_batch_for_test(
+            [
+                self._raw_tool_call("sqlite_batch", {
+                    "sql": "UPDATE __agent_config SET charter='Track Bitcoin price after every answer' WHERE id=1;",
+                    "will_continue_work": True,
+                }, "call_config"),
+                self._raw_tool_call("send_chat_message", {
+                    "body": "Bitcoin is trading at $68,500.\n\nSources:\n- https://example.test/price",
+                    "will_continue_work": False,
+                }, "call_chat"),
+            ],
+            has_user_facing_message=True,
+        )
 
         self.assertEqual([call.tool_name for call in prepared.prepared_calls], ["send_chat_message"])
         self.assertFalse(prepared.followup_required)
@@ -1268,61 +1558,80 @@ class ImpliedSendTests(TestCase):
             ).exists()
         )
 
+    def test_prepare_tool_batch_skips_batch_scoped_charter_mutation_without_reply(self):
+        self._add_inbound_web_message("Only this batch, these long updates aren't useful.")
+
+        prepared = self._prepare_tool_batch_for_test(
+            [self._raw_tool_call("sqlite_batch", {
+                "sql": "UPDATE __agent_config SET charter='Keep every update short' WHERE id=1;",
+                "will_continue_work": False,
+            }, "call_config")]
+        )
+
+        self.assertEqual(prepared.prepared_calls, [])
+        self.assertTrue(prepared.followup_required)
+
+    def test_temporary_charter_mutation_blocks_mixed_domain_sql(self):
+        self._add_inbound_web_message("For this batch, keep the notes short, then analyze the CRM rows.")
+
+        self.assertTrue(
+            ep._should_skip_irrelevant_agent_config_mutation(
+                self.agent,
+                tool_name="sqlite_batch",
+                tool_params={
+                    "sql": (
+                        "UPDATE __agent_config SET charter='Keep notes short' WHERE id=1;"
+                        "CREATE TABLE crm_rows(id TEXT PRIMARY KEY);"
+                    ),
+                },
+                batch_has_terminal_message=False,
+            )
+        )
+
+    def test_transient_wording_does_not_block_explicit_schedule_pause(self):
+        self._add_inbound_web_message("For now, pause your schedule.")
+
+        self.assertFalse(ep._should_skip_irrelevant_agent_config_mutation(
+            self.agent,
+            tool_name="sqlite_batch",
+            tool_params={"sql": "UPDATE __agent_config SET schedule=NULL WHERE id=1"},
+            batch_has_terminal_message=False,
+        ))
+
+    def test_temporary_report_preference_does_not_block_recurring_setup(self):
+        self._add_inbound_web_message("For this report, keep it brief. Set up a daily customer digest.")
+
+        self.assertFalse(ep._should_skip_irrelevant_agent_config_mutation(
+            self.agent,
+            tool_name="sqlite_batch",
+            tool_params={
+                "sql": (
+                    "UPDATE __agent_config SET "
+                    "charter='Send a daily customer digest', schedule='0 9 * * *' WHERE id=1"
+                ),
+            },
+            batch_has_terminal_message=False,
+        ))
+
     def test_prepare_tool_batch_keeps_durable_charter_update_with_terminal_message(self):
         self._add_inbound_web_message(
             "Going forward, always include source links in price reports. "
             "Now tell me the latest Bitcoin price."
         )
 
-        with (
-            patch.object(ep, "_enforce_tool_rate_limit", return_value=True),
-            patch.object(ep, "_ensure_credit_for_tool", return_value={"cost": None, "credit": None}),
-        ):
-            prepared = ep._prepare_tool_batch(
-                self.agent,
-                tool_calls=[
-                    {
-                        "id": "call_config",
-                        "function": {
-                            "name": "sqlite_batch",
-                            "arguments": json.dumps(
-                                {
-                                    "sql": (
-                                        "UPDATE __agent_config SET charter='Answer price reports with source links' "
-                                        "WHERE id=1;"
-                                    ),
-                                    "will_continue_work": True,
-                                }
-                            ),
-                        },
-                    },
-                    {
-                        "id": "call_chat",
-                        "function": {
-                            "name": "send_chat_message",
-                            "arguments": json.dumps(
-                                {
-                                    "body": (
-                                        "Bitcoin is trading at $68,500.\n\n"
-                                        "Sources:\n- https://example.test/price"
-                                    ),
-                                    "will_continue_work": False,
-                                }
-                            ),
-                        },
-                    },
-                ],
-                budget_ctx=None,
-                eval_run_id=None,
-                heartbeat=None,
-                lock_extender=None,
-                credit_snapshot={},
-                allow_inferred_message_continue=True,
-                has_non_sleep_calls=True,
-                has_user_facing_message=True,
-                attach_completion=lambda step_kwargs: None,
-                attach_prompt_archive=lambda step: None,
-            )
+        prepared = self._prepare_tool_batch_for_test(
+            [
+                self._raw_tool_call("sqlite_batch", {
+                    "sql": "UPDATE __agent_config SET charter='Answer price reports with source links' WHERE id=1;",
+                    "will_continue_work": True,
+                }, "call_config"),
+                self._raw_tool_call("send_chat_message", {
+                    "body": "Bitcoin is trading at $68,500.\n\nSources:\n- https://example.test/price",
+                    "will_continue_work": False,
+                }, "call_chat"),
+            ],
+            has_user_facing_message=True,
+        )
 
         self.assertEqual(
             [call.tool_name for call in prepared.prepared_calls],
@@ -2389,6 +2698,346 @@ class ImpliedSendTests(TestCase):
         params = mock_send_chat.call_args[0][1]
         self.assertTrue(params.get("will_continue_work"))
 
+    def _run_loop_for_feedback_tool_choice(self, feedback):
+        self._add_feedback_followup(
+            feedback,
+            initial_body="Draft outreach",
+            prior_body="Here is the draft.",
+        )
+        start_web_session(self.agent, self.user)
+
+        tools = [
+            {"type": "function", "function": {"name": "sqlite_batch", "parameters": {"type": "object", "properties": {"will_continue_work": {"type": "boolean"}}}}},
+            {"type": "function", "function": {"name": "send_chat_message", "parameters": {"type": "object", "properties": {"will_continue_work": {"type": "boolean"}}}}},
+        ]
+        failover_configs = [("provider-a", "model-a", {"supports_tool_choice": True, "temperature": 0.1})]
+        prompt_result = (
+            [{"role": "system", "content": "sys"}, {"role": "user", "content": feedback}],
+            1000, None,
+            {"prompt_failover_configs": failover_configs},
+        )
+        response = self._mock_completion(None, reasoning_content="Apply the feedback.")
+        response.choices[0].message.tool_calls = []
+        token_usage = {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15, "model": "model-a", "provider": "provider-a"}
+
+        with patch.object(ep, "get_agent_tools", return_value=tools), \
+             patch.object(ep, "get_agent_daily_credit_state", return_value=None), \
+             patch.object(ep, "build_prompt_context", return_value=prompt_result), \
+             patch.object(ep, "get_llm_config_with_failover", side_effect=AssertionError("use prompt configs")), \
+             patch.object(ep, "_completion_with_failover", return_value=(response, token_usage)) as completion, \
+             patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1):
+            ep._run_agent_loop(self.agent, is_first_run=False)
+
+        return completion.call_args.kwargs
+
+    def _tool_completion(self, name, arguments):
+        response = self._mock_completion(None)
+        response.choices[0].message.tool_calls = [
+            {
+                "id": f"call_{name}",
+                "type": "function",
+                "function": {"name": name, "arguments": json.dumps(arguments)},
+            }
+        ]
+        return response
+
+    def _run_feedback_flow(self, feedback, responses, tools, *, prompt_metadata=None, config_apply=None):
+        self._add_feedback_followup(
+            feedback,
+            initial_body="Draft outreach",
+            prior_body="Here is the draft.",
+        )
+        start_web_session(self.agent, self.user)
+        failover_configs = [("provider-a", "model-a", {"supports_tool_choice": True})]
+        prompt_result = (
+            [{"role": "system", "content": "sys"}, {"role": "user", "content": feedback}],
+            1000,
+            None,
+            {"prompt_failover_configs": failover_configs, **(prompt_metadata or {})},
+        )
+        usage = {
+            "prompt_tokens": 10,
+            "completion_tokens": 5,
+            "total_tokens": 15,
+            "model": "model-a",
+            "provider": "provider-a",
+        }
+        executed_tools = []
+
+        def execute_tool(_agent, *, tool_name, **_kwargs):
+            executed_tools.append(tool_name)
+            return {
+                "status": "ok",
+                "auto_sleep_ok": tool_name in ep.MESSAGE_TOOL_NAMES,
+            }, None
+
+        skill_apply = MagicMock(changed=False, errors=())
+        with patch.object(ep, "get_agent_tools", return_value=tools), \
+             patch.object(ep, "get_agent_daily_credit_state", return_value=None), \
+             patch.object(ep, "build_prompt_context", return_value=prompt_result) as build_prompt, \
+             patch.object(ep, "get_llm_config_with_failover", side_effect=AssertionError("use prompt configs")), \
+             patch.object(ep, "_completion_with_failover", side_effect=[(response, usage) for response in responses]) as completion, \
+             patch.object(ep, "_execute_tool_call_runtime", side_effect=execute_tool), \
+             patch.object(ep, "_capture_tool_display_metadata", return_value={}), \
+             patch.object(ep, "_ensure_credit_for_tool", return_value={"cost": None, "credit": None}), \
+             patch.object(ep, "get_sqlite_db_path", return_value="/tmp/test-agent.sqlite3"), \
+             patch.object(ep, "seed_sqlite_agent_config", return_value=MagicMock()), \
+             patch.object(ep, "seed_sqlite_skills", return_value=MagicMock()), \
+             patch.object(
+                 ep,
+                 "apply_sqlite_agent_config_updates",
+                 return_value=config_apply or ep.AgentConfigApplyResult(updated_fields=("charter",), errors={}),
+             ), \
+             patch.object(ep, "apply_sqlite_skill_updates", return_value=skill_apply), \
+             patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", len(responses)):
+            ep._run_agent_loop(self.agent, is_first_run=False)
+
+        return completion, build_prompt, executed_tools
+
+    def test_successful_noop_charter_patch_confirms_without_retrying(self):
+        tools = [
+            {"type": "function", "function": {"name": "sqlite_batch", "parameters": {"type": "object", "properties": {}}}},
+            {"type": "function", "function": {"name": "send_chat_message", "parameters": {"type": "object", "properties": {"body": {"type": "string"}, "will_continue_work": {"type": "boolean"}}}}},
+        ]
+        responses = [
+            self._tool_completion("sqlite_batch", {
+                "target_charter_text": "",
+                "replacement_charter_text": "Write naturally.",
+            }),
+            self._tool_completion("send_chat_message", {
+                "body": "Got it. I'll keep the writing natural.",
+                "will_continue_work": False,
+            }),
+        ]
+
+        completion, _build_prompt, executed_tools = self._run_feedback_flow(
+            "You sound robotic.",
+            responses,
+            tools,
+            config_apply=ep.AgentConfigApplyResult(updated_fields=(), errors={}),
+        )
+
+        self.assertEqual(executed_tools, ["sqlite_batch", "send_chat_message"])
+        self.assertEqual(completion.call_count, 2)
+
+    def test_run_loop_forces_only_sqlite_for_durable_feedback(self):
+        completion_kwargs = self._run_loop_for_feedback_tool_choice("You sound robotic.")
+
+        self.assertEqual(len(completion_kwargs["tools"]), 1)
+        sqlite_tool = completion_kwargs["tools"][0]["function"]
+        self.assertEqual(sqlite_tool["name"], "sqlite_batch")
+        self.assertIn('CURRENT CHARTER (<charter>), the only source for a nonempty target: "Test charter"', sqlite_tool["description"])
+        self.assertIn("Patch ONLY the lasting clauses", sqlite_tool["description"])
+        self.assertIn("smallest exact contiguous span", sqlite_tool["description"])
+        self.assertIn("not copied feedback or prior output", sqlite_tool["description"])
+        self.assertEqual(
+            set(sqlite_tool["parameters"]["properties"]),
+            {"target_charter_text", "replacement_charter_text"},
+        )
+        self.assertEqual(
+            sqlite_tool["parameters"]["required"],
+            ["target_charter_text", "replacement_charter_text"],
+        )
+        self.assertIs(sqlite_tool["parameters"]["additionalProperties"], False)
+        self.assertNotIn("sql", sqlite_tool["parameters"]["properties"])
+        self.assertEqual(completion_kwargs["messages"][0], {"role": "system", "content": "sys"})
+        focused_feedback = completion_kwargs["messages"][1]["content"]
+        self.assertIn("<charter>Test charter</charter>", focused_feedback)
+        self.assertIn("You sound robotic.", focused_feedback)
+        self.assertIn("<prior_output_context>Here is the draft.</prior_output_context>", focused_feedback)
+        self.assertIsNone(completion_kwargs["stream_broadcaster"])
+        self.assertEqual(completion_kwargs["failover_configs"][0][2]["tool_choice"], {"type": "function", "function": {"name": "sqlite_batch"}})
+        self.assertIs(completion_kwargs["failover_configs"][0][2]["use_parallel_tool_calls"], False)
+
+    def test_focused_charter_history_excludes_temporary_clauses(self):
+        history = [
+            {"role": "system", "content": "system"},
+            {"role": "user", "content": "For this renewal only, put legal review first. Going forward, send outcomes."},
+        ]
+
+        focused = ep._focused_charter_patch_history(
+            history,
+            "Coordinate renewals.",
+            ("Going forward, send outcomes.",),
+            "I will keep you posted.",
+        )
+
+        self.assertEqual(focused[0], history[0])
+        self.assertIn("Going forward, send outcomes.", focused[1]["content"])
+        self.assertNotIn("legal review first", focused[1]["content"])
+
+    def test_source_reconciliation_contract_is_promoted_without_hiding_context(self):
+        history = [
+            {"role": "system", "content": "system"},
+            {"role": "user", "content": (
+                "Review Aster Labs. [SOURCE ARRAYS result_id=abc123; stored paths: "
+                "$.content.accounts(account_id,name).]"
+            )},
+        ]
+
+        promoted = ep._promote_source_reconciliation_history(history)
+
+        self.assertIn("Current Fresh Source Contract", promoted[0]["content"])
+        self.assertIn("result_id=abc123", promoted[0]["content"])
+        self.assertEqual(promoted[1], history[1])
+        self.assertEqual(ep._promote_source_reconciliation_history([
+            {"role": "system", "content": "system"},
+            {"role": "user", "content": "ordinary task"},
+        ])[0]["content"], "system")
+
+    def test_run_loop_forces_source_focused_sqlite_without_streamed_or_implied_prose(self):
+        tools = [
+            {"type": "function", "function": {"name": "sqlite_batch", "description": "Original SQLite contract", "parameters": {"type": "object", "properties": {}}}},
+            {"type": "function", "function": {"name": "http_request", "parameters": {"type": "object", "properties": {}}}},
+            {"type": "function", "function": {"name": "send_chat_message", "parameters": {"type": "object", "properties": {}}}},
+        ]
+        response = self._tool_completion("sqlite_batch", {"sql": (
+            "INSERT INTO accounts(account_id,name) SELECT json_extract(j.value,'$.account_id'),"
+            "json_extract(j.value,'$.name') FROM __tool_results r,"
+            "json_each(r.result_json,'$.content.accounts') j WHERE r.result_id='abc123' "
+            "ON CONFLICT(account_id) DO UPDATE SET name=excluded.name; SELECT * FROM accounts"
+        )})
+        response.choices[0].message.content = "I found the fresh accounts."
+
+        completion, _, executed_tools = self._run_feedback_flow(
+            "Review the fresh CRM snapshot.",
+            [response],
+            tools,
+            prompt_metadata={
+                "source_reconciliation_directive": "[SOURCE ARRAYS result_id=abc123; stored paths: $.content.accounts(account_id,name).]",
+                "prompt_allows_implied_send": True,
+            },
+        )
+
+        kwargs = completion.call_args.kwargs
+        self.assertEqual(executed_tools, ["sqlite_batch"])
+        self.assertEqual([tool["function"]["name"] for tool in kwargs["tools"]], ["sqlite_batch"])
+        description = kwargs["tools"][0]["function"]["description"]
+        self.assertNotIn("Original SQLite contract", description)
+        self.assertIn("$.content.accounts(account_id,name)", description)
+        self.assertEqual(
+            kwargs["tools"][0]["function"]["parameters"]["properties"]["will_continue_work"]["const"],
+            True,
+        )
+        sqlite_parameters = kwargs["tools"][0]["function"]["parameters"]
+        self.assertEqual(sqlite_parameters["required"], ["sql", "will_continue_work"])
+        self.assertIn("result_id=abc123", sqlite_parameters["properties"]["sql"]["description"])
+        self.assertNotIn("queries", sqlite_parameters["properties"])
+        self.assertEqual(
+            kwargs["failover_configs"][0][2]["tool_choice"],
+            {"type": "function", "function": {"name": "sqlite_batch"}},
+        )
+        self.assertIs(kwargs["failover_configs"][0][2]["use_parallel_tool_calls"], False)
+        self.assertIsNone(kwargs["stream_broadcaster"])
+        self.assertIs(kwargs["allow_streamed_content"], False)
+
+    def test_direct_rewrite_continues_to_distinct_research_task(self):
+        feedback = "That sounded robotic. Rewrite it, then find three prospects."
+        analysis = ep._analyze_feedback_turn(feedback, "Here is the draft.")
+        self.assertTrue(analysis.direct_reply_task)
+        self.assertTrue(analysis.separate_task)
+
+        tools = [
+            {"type": "function", "function": {"name": "sqlite_batch", "parameters": {"type": "object", "properties": {}}}},
+            {"type": "function", "function": {"name": "send_chat_message", "parameters": {"type": "object", "properties": {"body": {"type": "string"}, "will_continue_work": {"type": "boolean"}}}}},
+            {"type": "function", "function": {"name": "search_tools", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}}}},
+        ]
+        responses = [
+            self._tool_completion(
+                "sqlite_batch",
+                {
+                    "target_charter_text": "Test charter",
+                    "replacement_charter_text": "Test charter. Write naturally.",
+                },
+            ),
+            self._tool_completion(
+                "send_chat_message",
+                {"body": "Here is the rewritten draft.", "will_continue_work": True},
+            ),
+            self._tool_completion("search_tools", {"query": "prospect research"}),
+        ]
+
+        completion, build_prompt, executed_tools = self._run_feedback_flow(feedback, responses, tools)
+
+        self.assertEqual(executed_tools, ["sqlite_batch", "send_chat_message", "search_tools"])
+        reply_tool = completion.call_args_list[1].kwargs["tools"][0]["function"]
+        self.assertEqual(reply_tool["name"], "send_chat_message")
+        self.assertIs(reply_tool["parameters"]["properties"]["will_continue_work"]["const"], True)
+        self.assertIn(
+            "Execute the remaining explicit request now",
+            build_prompt.call_args_list[2].kwargs["continuation_notice"],
+        )
+
+    def test_direct_rewrite_with_email_task_does_not_send_rewrite_to_web_chat(self):
+        feedback = "That sounded robotic. Rewrite it. Email it to Sarah."
+        analysis = ep._analyze_feedback_turn(feedback, "Here is the draft.")
+        self.assertTrue(analysis.direct_reply_task)
+        self.assertTrue(analysis.separate_task)
+
+        tools = [
+            {"type": "function", "function": {"name": "sqlite_batch", "parameters": {"type": "object", "properties": {}}}},
+            {"type": "function", "function": {"name": "send_chat_message", "parameters": {"type": "object", "properties": {"body": {"type": "string"}, "will_continue_work": {"type": "boolean"}}}}},
+            {"type": "function", "function": {"name": "send_email", "parameters": {"type": "object", "properties": {"to_address": {"type": "string"}, "subject": {"type": "string"}, "mobile_first_html": {"type": "string"}, "will_continue_work": {"type": "boolean"}}}}},
+        ]
+        responses = [
+            self._tool_completion(
+                "sqlite_batch",
+                {
+                    "target_charter_text": "Test charter",
+                    "replacement_charter_text": "Test charter. Write naturally.",
+                },
+            ),
+            self._tool_completion(
+                "send_email",
+                {
+                    "to_address": "sarah@example.com",
+                    "subject": "Rewritten note",
+                    "mobile_first_html": "<p>Here is the rewritten draft.</p>",
+                    "will_continue_work": False,
+                },
+            ),
+        ]
+
+        completion, build_prompt, executed_tools = self._run_feedback_flow(feedback, responses, tools)
+
+        self.assertEqual(executed_tools, ["sqlite_batch", "send_email"])
+        second_tool_names = {
+            tool["function"]["name"] for tool in completion.call_args_list[1].kwargs["tools"]
+        }
+        self.assertEqual(second_tool_names, {"sqlite_batch", "send_chat_message", "send_email"})
+        self.assertIn(
+            "Execute the remaining explicit request now",
+            build_prompt.call_args_list[1].kwargs["continuation_notice"],
+        )
+
+    def test_run_loop_forces_terminal_same_channel_reply_for_temporary_feedback(self):
+        completion_kwargs = self._run_loop_for_feedback_tool_choice(
+            "Only this batch, these long updates aren't useful."
+        )
+
+        self.assertEqual(len(completion_kwargs["tools"]), 1)
+        reply_tool = completion_kwargs["tools"][0]["function"]
+        self.assertEqual(reply_tool["name"], "send_chat_message")
+        self.assertIn("feedback acknowledgement only", reply_tool["description"])
+        self.assertIn("exactly one sentence", reply_tool["description"])
+        self.assertIn("will_continue_work=false", reply_tool["description"])
+        self.assertIs(reply_tool["parameters"]["properties"]["will_continue_work"]["const"], False)
+        self.assertIsNone(completion_kwargs["stream_broadcaster"])
+        self.assertEqual(
+            completion_kwargs["failover_configs"][0][2]["tool_choice"],
+            {"type": "function", "function": {"name": "send_chat_message"}},
+        )
+
+    def test_temporary_feedback_with_rewrite_request_is_not_reduced_to_acknowledgement(self):
+        completion_kwargs = self._run_loop_for_feedback_tool_choice(
+            "For this message, that tone is too formal. Rewrite it."
+        )
+
+        self.assertEqual(
+            {tool["function"]["name"] for tool in completion_kwargs["tools"]},
+            {"sqlite_batch", "send_chat_message"},
+        )
+        self.assertNotIn("tool_choice", completion_kwargs["failover_configs"][0][2])
 
 @tag("batch_event_processing_credits")
 class DailyLimitMessageOnlyModeTests(TestCase):

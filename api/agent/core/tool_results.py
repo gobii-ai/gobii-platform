@@ -9,7 +9,8 @@ from ..tools.context_hints import URL_FIELD_PRIORITY, extract_context_hint, hint
 from ..tools.sqlite_guardrails import clear_guarded_connection, open_guarded_sqlite_connection
 from ..tools.sqlite_state import TOOL_RESULTS_TABLE, get_sqlite_db_path
 from ..tools.tool_manager import SQLITE_TOOL_NAME
-from .result_analysis import ResultAnalysis, analyze_result, analysis_to_dict, _safe_json_path
+from .link_references import is_source_bearing_tool
+from .result_analysis import ResultAnalysis, analyze_result, analysis_to_dict, _get_json_type, _safe_json_path
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +60,7 @@ _LINK_FIELD_RE = re.compile(
     re.IGNORECASE,
 )
 _URL_PART_FIELD_RE = re.compile(
-    r"(\b[\w-]*(?:host|path|route|slug|public_identifier|profile_id)\s*[:=]\s*)([^|\n]*?\S)(?=\s*(?:\||\\n|$))",
+    r"(\b[\w-]*(?:host|path|route)\s*[:=]\s*)([^|\n]*?\S)(?=[^\S\r\n]*(?:\||\\n|\r?\n|$))",
     re.IGNORECASE,
 )
 
@@ -110,10 +111,42 @@ class ToolResultPromptInfo:
     meta: str
     preview_text: Optional[str]
     is_inline: bool
-    schema_text: Optional[str]
+    source_reconciliation_directive: Optional[str]
 
 
-def _build_short_result_id_map(result_ids: Sequence[str]) -> Dict[str, str]:
+def entity_name_stem(value: str) -> str:
+    words = re.sub(r"(?<!^)(?=[A-Z])", "_", value).casefold().replace("-", "_").split("_")
+    leaf = next((word for word in reversed(words) if word), "")
+    return f"{leaf[:-3]}y" if leaf.endswith("ies") else leaf[:-1] if leaf.endswith("s") else leaf
+
+
+def _entity_arrays(analysis: ResultAnalysis | None) -> tuple:
+    json_analysis = analysis.json_analysis if analysis else None
+    if not json_analysis:
+        return ()
+    return tuple(sorted(
+        (item for item in (json_analysis.primary_array, *json_analysis.secondary_arrays) if item and item.item_fields),
+        key=lambda item: (sum(_is_entity_key(field) for field in item.item_fields), item.path),
+    ))
+
+
+def _is_entity_key(field: str) -> bool:
+    return field == "id" or field.endswith("_id")
+
+
+def source_array_entity_groups(result_text: str, tool_name: str) -> tuple[set[str], set[str]]:
+    _meta, _stored_json, _stored_text, analysis = _summarize_result(result_text, "source", tool_name)
+    arrays = _entity_arrays(analysis)
+    return (
+        {entity_name_stem(item.path.rsplit(".", 1)[-1]) for item in arrays},
+        {
+            entity_name_stem(item.path.rsplit(".", 1)[-1]) for item in arrays
+            if any(_is_entity_key(field) for field in item.item_fields)
+        },
+    )
+
+
+def build_short_result_id_map(result_ids: Sequence[str]) -> Dict[str, str]:
     normalized: Dict[str, str] = {str(rid): str(rid) for rid in result_ids}
     uuid_ids = [str(rid) for rid in result_ids if _UUID_RESULT_ID_RE.match(str(rid))]
     if not uuid_ids:
@@ -155,6 +188,7 @@ def prepare_tool_results_for_prompt(
     url_rewriter: Optional[Callable[[str, ToolCallResultRecord], str]] = None,
     paired_url_rewriter: Optional[Callable[[str, ToolCallResultRecord], str]] = None,
     paired_url_step_ids: Optional[Set[str]] = None,
+    named_model_tables: Optional[Set[str]] = None,
 ) -> Dict[str, ToolResultPromptInfo]:
     prompt_info: Dict[str, ToolResultPromptInfo] = {}
     rows: List[Tuple] = []
@@ -163,7 +197,8 @@ def prepare_tool_results_for_prompt(
     if fresh_tool_call_step_id:
         fresh_step_ids.add(fresh_tool_call_step_id)
     paired_step_ids = set(paired_url_step_ids or ())
-    short_id_map = _build_short_result_id_map(
+    model_tables = {table.casefold() for table in (named_model_tables or ())}
+    short_id_map = build_short_result_id_map(
         [
             record.step_id
             for record in records
@@ -196,9 +231,7 @@ def prepare_tool_results_for_prompt(
         if is_analysis_eligible and (stored_json or (is_fresh_tool_call and meta.get("is_json"))):
             payload = _load_json_payload(stored_json, analysis)
             if payload is not None:
-                json_digest = None
-                if analysis and analysis.json_analysis:
-                    json_digest = analysis.json_analysis.json_digest
+                json_digest = analysis.json_analysis.json_digest if analysis and analysis.json_analysis else None
                 if json_digest and json_digest.action in {"skip", "inspect_manually"}:
                     payload = None
             if payload is not None:
@@ -217,7 +250,9 @@ def prepare_tool_results_for_prompt(
             context_hint = hint_from_unstructured_text(analysis_text)
 
         preview_source = (
-            stored_text
+            stored_json
+            if is_fresh_tool_call and stored_json is not None and meta.get("result_json_path")
+            else stored_text
             if stored_text is not None
             else analysis.prepared_text if analysis and analysis.prepared_text is not None
             else result_text
@@ -229,6 +264,31 @@ def prepare_tool_results_for_prompt(
             tool_name=record.tool_name,
             is_fresh_tool_call=is_fresh_tool_call,
         )
+        source_import_prefix = ""
+        keep_source_import_hint = is_source_bearing_tool(record.tool_name) and is_fresh_tool_call
+        if keep_source_import_hint:
+            arrays = _entity_arrays(analysis)
+            model_entities = {entity_name_stem(table) for table in model_tables}
+            relevant_arrays = tuple(
+                item for item in arrays
+                if any(_is_entity_key(field) for field in item.item_fields)
+                or entity_name_stem(item.path.rsplit(".", 1)[-1]) in model_entities
+            )
+            schemas = [f"{item.path}({','.join(item.item_fields[:10])})" for item in relevant_arrays]
+            matching_arrays = tuple(
+                item for item in relevant_arrays
+                if entity_name_stem(item.path.rsplit(".", 1)[-1]) in model_entities
+            )
+            if schemas and matching_arrays:
+                source_import_prefix = (
+                    f"[SOURCE ARRAYS result_id={result_id}; stored paths: {'; '.join(schemas)}. "
+                    "NEXT: output one sqlite_batch only. In that single batch, create/evolve keyed model tables for "
+                    "every listed entity array, import each exact path with INSERT ... SELECT/json_each, then SELECT "
+                    "bounded task-relevant rows from every updated table using stable-ID filters/joins—not counts or "
+                    "whole-table dumps. Derive all facts, URLs, and write keys from j.value. This ordinary evidence "
+                    "task never changes __agent_config/__agent_skills. No pre-read, refetch, blob inspection, copied "
+                    "literals, or splitting arrays across calls.]\n"
+                )
         has_focus = "\nFOCUS:\n" in (context_hint or "")
         if has_focus and not is_inline:
             preview_text = None
@@ -240,11 +300,27 @@ def prepare_tool_results_for_prompt(
         if active_url_rewriter:
             if context_hint:
                 context_hint = active_url_rewriter(context_hint, record)
-            if preview_text:
+            if preview_text and not source_import_prefix:
                 preview_text = active_url_rewriter(preview_text, record)
-        if "$[link:" in f"{context_hint or ''}{preview_text or ''}":
+        has_link_tokens = "$[link:" in f"{context_hint or ''}{preview_text or ''}"
+        if has_link_tokens:
             context_hint = _mark_missing_item_links(context_hint or "") or None
             preview_text = _mark_missing_item_links(preview_text or "")
+        if preview_text and has_link_tokens and keep_source_import_hint and not source_import_prefix:
+            preview_text = (
+                "[VERIFIED LINK PRESENTATION: when presenting these sourced items, anchor each token on its exact "
+                "entity name using the active "
+                "surface syntax ([entity](token) or <a href='token'>entity</a>), never a host, URL, generic "
+                "'link/page', or related entity. No separate URL/link column unless requested. "
+                "For an owner report with 4+ items, say "
+                "Covered N/N and use one channel-appropriate table for every item/requested field. Say Not returned "
+                "where a requested URL is absent. Without a preceding SOURCE ARRAYS directive, use this visible "
+                "source directly rather than creating or querying SQLite. This link guidance does not change the "
+                "requested audience or action.]\n"
+                f"{preview_text}"
+            )
+        if source_import_prefix:
+            preview_text = f"{source_import_prefix}{preview_text or ''}"
 
         is_scrape_markdown = _is_scrape_as_markdown_tool(record.tool_name)
         meta_text = _format_meta_text(
@@ -269,7 +345,7 @@ def prepare_tool_results_for_prompt(
             meta=meta_text,
             preview_text=preview_text,
             is_inline=is_inline,
-            schema_text=None,  # Replaced by analysis in meta_text
+            source_reconciliation_directive=source_import_prefix or None,
         )
 
         if stored_in_db:
@@ -611,7 +687,7 @@ def _summarize_result(
     elif is_json:
         try:
             parsed = json.loads(result_text)
-            json_type = _json_type(parsed)
+            json_type = _get_json_type(parsed)
             if isinstance(parsed, dict):
                 top_keys = list(parsed.keys())[:MAX_TOP_KEYS]
         except Exception:
@@ -669,16 +745,6 @@ def _summarize_result(
     return meta, result_json, result_text_store, analysis
 
 
-def _wrap_as_sqlite_result(result_text: str, full_bytes: int) -> str:
-    return (
-        f"[FULL RESULT ({full_bytes} chars) - ONE-TIME VIEW. "
-        f"Use this visible result now. Reply directly for a simple answer unless it updates an established named domain model. "
-        f"Use SQL to reconcile that model or for exact filtering/ranking across sizable or multiple results, joins, aggregation, chart input, or truncated data; do not query merely to reread or parse. "
-        f"Next turn shows only preview]\n"
-        f"{result_text}"
-    )
-
-
 def _build_prompt_preview(
     result_text: str,
     full_bytes: int,
@@ -687,15 +753,15 @@ def _build_prompt_preview(
     tool_name: str,
     is_fresh_tool_call: bool = False,
 ) -> Tuple[Optional[str], bool]:
+    is_sqlite = tool_name in EXCLUDED_TOOL_NAMES or tool_name.startswith("sqlite")
     if full_bytes <= SMALL_RESULT_ALWAYS_INLINE:
         return result_text, True
 
-    is_sqlite = tool_name in EXCLUDED_TOOL_NAMES or tool_name.startswith("sqlite")
     tiers = PREVIEW_TIERS_SQLITE if is_sqlite else PREVIEW_TIERS_EXTERNAL
     tier_count = len(tiers)
 
     if is_fresh_tool_call and full_bytes <= FRESH_RESULT_INLINE_THRESHOLD:
-        return _wrap_as_sqlite_result(result_text, full_bytes), True
+        return f"[FULL RESULT ({full_bytes} chars) - ONE-TIME VIEW; later turns show a preview]\n{result_text}", True
 
     if recency_position is None or recency_position >= tier_count:
         return None, False
@@ -790,7 +856,7 @@ def _format_meta_text(
             )
 
     if context_hint:
-        meta_line += f"\nUse visible FOCUS directly when it covers the request; query only missing facts.\n{context_hint}"
+        meta_line += f"\nFor an unrelated one-off, use visible FOCUS directly when it covers the request; query only missing facts.\n{context_hint}"
 
     return meta_line
 
@@ -801,22 +867,6 @@ def _truncate_to_bytes(text: str, max_bytes: int) -> Tuple[str, int]:
         return text, 0
     truncated = encoded[:max_bytes].decode("utf-8", errors="ignore")
     return truncated, len(encoded) - max_bytes
-
-
-def _json_type(value: object) -> str:
-    if isinstance(value, dict):
-        return "object"
-    if isinstance(value, list):
-        return "array"
-    if isinstance(value, str):
-        return "string"
-    if isinstance(value, bool):
-        return "boolean"
-    if isinstance(value, (int, float)):
-        return "number"
-    if value is None:
-        return "null"
-    return "unknown"
 
 
 def _is_probably_binary(text: str) -> bool:

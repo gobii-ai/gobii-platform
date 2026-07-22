@@ -49,18 +49,15 @@ class PromptContextSqlitePlacementTests(TestCase):
         self.assertIn("<sqlite_guidance>", system_message["content"])
         self.assertIn("</sqlite_guidance>", system_message["content"])
         self.assertIn("Named tables are the world model", sqlite_guidance)
-        self.assertIn("before external refreshes/decisions", sqlite_guidance)
+        self.assertIn("Use queried rows, not memory, for decisions", sqlite_guidance)
         self.assertIn("use SQLite for exact set logic/counts/ranking", sqlite_guidance)
-        self.assertIn("Keep chat/outreach light. Owner reports on 4+ peers", system_message["content"])
-        self.assertIn(
-            "need resolved/total and one table with requested fields",
-            system_message["content"],
-        )
+        self.assertIn("Keep chat/outreach light. For finite sets", system_message["content"])
         self.assertIn("## Link References (CRITICAL)", system_message["content"])
-        self.assertIn("the raw URL identifies that exact item", system_message["content"])
-        self.assertIn("adjacent token is the only user-visible link", system_message["content"])
-        self.assertIn("An item lacking its token stays unlinked", system_message["content"])
-        self.assertIn("a source/feed token links only itself", system_message["content"])
+        self.assertIn("the raw URL is evidence", system_message["content"])
+        self.assertIn("adjacent token is only a display/fetch handle", system_message["content"])
+        self.assertIn("Items without a token stay plain", system_message["content"])
+        self.assertIn("source/feed tokens link only themselves", system_message["content"])
+        self.assertIn("A report is unfinished while a token-backed entity name is plain", system_message["content"])
         self.assertIn("resolve/source each requested field", system_message["content"])
         self.assertIn("grouped discovery isn't coverage", system_message["content"])
         self.assertIn("separate sourced unavailability from research gaps", system_message["content"])
@@ -108,7 +105,7 @@ class PromptContextSqlitePlacementTests(TestCase):
         )
 
         self.assertIn(
-            "not yet reconciled",
+            "not reconciled",
             prompt_context._get_unreconciled_source_model_warning(self.agent),
         )
 
@@ -124,7 +121,7 @@ class PromptContextSqlitePlacementTests(TestCase):
         )
 
         self.assertIn(
-            "post-update query",
+            "query the model in that batch",
             prompt_context._get_unreconciled_source_model_warning(self.agent),
         )
         post_update_read = PersistentAgentStep.objects.create(agent=self.agent, description="fresh model read")

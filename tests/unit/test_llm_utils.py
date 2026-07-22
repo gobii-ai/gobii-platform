@@ -296,6 +296,20 @@ class RunCompletionReasoningTests(TestCase):
 
     @tag("batch_event_llm")
     @patch("api.agent.core.llm_utils.litellm.completion")
+    def test_tool_boolean_const_survives_provider_sanitization(self, mock_completion):
+        mock_completion.return_value = make_completion_response(content="ok")
+        run_completion(model="mock-model", messages=[], params={}, tools=[{
+            "type": "function", "function": {"name": "finish", "description": "Finish", "parameters": {
+                "type": "object", "properties": {"will_continue_work": {"type": "boolean", "const": False, "enum": [False]}},
+            }},
+        }])
+
+        schema = mock_completion.call_args.kwargs["tools"][0]["function"]["parameters"]["properties"]["will_continue_work"]
+        self.assertIs(schema["const"], False)
+        self.assertNotIn("enum", schema)
+
+    @tag("batch_event_llm")
+    @patch("api.agent.core.llm_utils.litellm.completion")
     def test_parallel_tool_calls_omitted_when_tools_absent(self, mock_completion):
         mock_completion.return_value = make_completion_response(content="ok")
 

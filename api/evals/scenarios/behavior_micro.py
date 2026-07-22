@@ -1,6 +1,7 @@
 import csv
 import io
 import json
+import re
 from copy import deepcopy
 from dataclasses import dataclass, field
 
@@ -9,6 +10,7 @@ from api.agent.core.processing_flags import get_human_inbound_generation
 from api.agent.files.filespace_service import write_bytes_to_dir
 from api.agent.tools.eval_synthetic_tools import EVAL_SYNTHETIC_TOOL_DEFINITIONS, EVAL_SYNTHETIC_TOOL_SERVER, is_eval_synthetic_tool_name
 from api.agent.tools.sqlite_guardrails import clear_guarded_connection, open_guarded_sqlite_connection
+from api.agent.tools.sqlite_query_quality import _structural_sql
 from api.agent.tools.sqlite_state import agent_sqlite_db
 from api.agent.tools.tool_manager import mark_tool_enabled_without_discovery
 from api.evals.base import EvalScenario, ScenarioTask
@@ -16,6 +18,7 @@ from api.evals.execution import ScenarioExecutionTools
 from api.evals.registry import ScenarioRegistry, register_scenario
 from api.evals.tool_params import resolved_tool_param
 from api.evals.stop_policy import (
+    split_sql_statements,
     sqlite_batch_is_only_eval_bookkeeping_read,
     sqlite_batch_is_only_planning_state_read,
     sqlite_batch_is_only_planning_state_mutation,
@@ -57,9 +60,12 @@ CHARTER_ADDS_INFERRED_PREFERENCE_PRESERVING_EXISTING = "charter_adds_inferred_pr
 CHARTER_EXPANDS_SPARSE_CHARTER_WITH_DETAIL = "charter_expands_sparse_charter_with_detail"
 CHARTER_NARROWS_SCOPE_PRESERVING_UNRELATED_GUIDANCE = "charter_narrows_scope_preserving_unrelated_guidance"
 CHARTER_IGNORES_ONE_OFF_PREFERENCE = "charter_ignores_one_off_preference"
+CHARTER_IGNORES_BATCH_SCOPED_PREFERENCE = "charter_ignores_batch_scoped_preference"
 CHARTER_ADDS_FEEDBACK_RULE_FROM_CORRECTION = "charter_adds_feedback_rule_from_correction"
 CHARTER_ADDS_PLAIN_PREFERENCE_WITHOUT_SAVE_WORD = "charter_adds_plain_preference_without_save_word"
 CHARTER_PATCHES_DIRECT_STYLE_CORRECTION = "charter_patches_direct_style_correction"
+CHARTER_PATCHES_EVALUATIVE_OUTPUT_FEEDBACK = "charter_patches_evaluative_output_feedback"
+CHARTER_INTERPRETS_AMBIGUOUS_OPERATING_FEEDBACK = "charter_interprets_ambiguous_operating_feedback"
 CHARTER_RECORDS_CLI_GITHUB_SECRETS_CORRECTION = "charter_records_cli_github_secrets_correction"
 CHARTER_JUDGE_PRESERVES_CLI_GITHUB_SECRET_WORKFLOW = "charter_judge_preserves_cli_github_secret_workflow"
 
@@ -373,9 +379,12 @@ CHARTER_MEMORY_MICRO_SCENARIO_SLUGS = [
     CHARTER_EXPANDS_SPARSE_CHARTER_WITH_DETAIL,
     CHARTER_NARROWS_SCOPE_PRESERVING_UNRELATED_GUIDANCE,
     CHARTER_IGNORES_ONE_OFF_PREFERENCE,
+    CHARTER_IGNORES_BATCH_SCOPED_PREFERENCE,
     CHARTER_ADDS_FEEDBACK_RULE_FROM_CORRECTION,
     CHARTER_ADDS_PLAIN_PREFERENCE_WITHOUT_SAVE_WORD,
     CHARTER_PATCHES_DIRECT_STYLE_CORRECTION,
+    CHARTER_PATCHES_EVALUATIVE_OUTPUT_FEEDBACK,
+    CHARTER_INTERPRETS_AMBIGUOUS_OPERATING_FEEDBACK,
     CHARTER_RECORDS_CLI_GITHUB_SECRETS_CORRECTION,
     CHARTER_JUDGE_PRESERVES_CLI_GITHUB_SECRET_WORKFLOW,
 ]
@@ -1888,18 +1897,19 @@ class CharterMemoryScenario(BehaviorMicroScenario):
     success_summary = ""
     failure_summary = ""
     expect_charter_mutation = True
+    verify_feedback_reply = False
+    feedback_reply_options = {}
 
     def _eval_stop_policy(self):
         if self.expect_charter_mutation:
+            required_calls = [
+                {"tool_name": "sqlite_batch", "agent_config_field": "charter", "after_execution": True}
+            ]
+            if self.verify_feedback_reply:
+                required_calls.append({"tool_name": "send_chat_message", "after_execution": True})
             return {
                 "ignore_sqlite_agent_config_mutations": False,
-                "stop_when_all_seen": [
-                    {
-                        "tool_name": "sqlite_batch",
-                        "agent_config_field": "charter",
-                        "after_execution": True,
-                    }
-                ],
+                "stop_when_all_seen": required_calls,
             }
         return {
             "ignore_sqlite_agent_config_mutations": False,
@@ -1980,10 +1990,20 @@ class CharterMemoryScenario(BehaviorMicroScenario):
         return get_agent_config_mutation_calls_for_run(run_id, after=inbound.timestamp)
 
     def _charter_check(self, agent, mutation_calls):
+        if not self.expect_charter_mutation:
+            passed = not mutation_calls and agent.charter == self.existing_charter
+            return passed, f"mutation_count={len(mutation_calls)}, charter={agent.charter!r}."
         raise NotImplementedError
 
     def _additional_charter_check(self, agent, run_id, inbound):
-        return True, ""
+        if not self.verify_feedback_reply:
+            return True, ""
+        return _one_shot_charter_feedback_check(
+            run_id,
+            inbound,
+            existing_charter=self.existing_charter,
+            **self.feedback_reply_options,
+        )
 
     def run(self, run_id, agent_id):
         self._seed_charter_agent(agent_id)
@@ -1998,6 +2018,21 @@ class CharterMemoryScenario(BehaviorMicroScenario):
         mutation_calls = self._mutation_calls_for_verification(run_id, inbound)
         agent = PersistentAgent.objects.get(id=agent_id)
         passed, failure_detail = self._charter_check(agent, mutation_calls)
+        rescue_steps = PersistentAgentStep.objects.filter(
+            agent=agent, created_at__gt=inbound.timestamp,
+            description__startswith="Skipped unrelated __agent_config",
+        ).count() if not self.expect_charter_mutation else 0
+        passed = passed and not rescue_steps
+        if rescue_steps:
+            failure_detail = f"{failure_detail}; runtime_config_rescues={rescue_steps}"
+        schedule_mutations = [
+            call
+            for call in get_tool_calls_for_run(run_id, after=inbound.timestamp, tool_names={"sqlite_batch"})
+            if sqlite_batch_mutates_agent_config_field(call, "schedule")
+        ]
+        passed = passed and not schedule_mutations
+        if schedule_mutations:
+            failure_detail = f"{failure_detail}; unexpected_schedule_mutations={len(schedule_mutations)}"
         additional_passed, additional_detail = self._additional_charter_check(agent, run_id, inbound)
         passed = passed and additional_passed
         if additional_detail:
@@ -2173,9 +2208,228 @@ class CharterIgnoresOneOffPreferenceScenario(CharterMemoryScenario):
     failure_summary = "Expected no config mutation for one-off preference"
     expect_charter_mutation = False
 
-    def _charter_check(self, agent, mutation_calls):
-        passed = not mutation_calls and agent.charter == self.existing_charter
-        return passed, f"mutation_count={len(mutation_calls)}, charter={agent.charter!r}."
+@register_scenario
+class CharterIgnoresBatchScopedPreferenceScenario(CharterMemoryScenario):
+    slug = CHARTER_IGNORES_BATCH_SCOPED_PREFERENCE
+    description = "A preference scoped to today's batch should not mutate the charter."
+    tasks = [
+        ScenarioTask(name="inject_prompt", assertion_type="manual"),
+        ScenarioTask(name="verify_no_charter_mutation", assertion_type="manual"),
+    ]
+    existing_charter = (
+        "Review vendor renewals monthly. Prioritize by renewal date. Include the owner and renewal risk."
+    )
+    prior_outbound_body = (
+        "Renewal update: Acme is due in 90 days. The security review is open and procurement is waiting."
+    )
+    prompt = "only this batch, those long updates aren't useful. put security reviews first and keep each note super short"
+    verification_task_name = "verify_no_charter_mutation"
+    success_summary = "Agent kept the batch-scoped preference in the current task only."
+    failure_summary = "Expected no config mutation for a preference scoped to today's batch"
+    expect_charter_mutation = False
+
+    def _additional_charter_check(self, agent, run_id, inbound):
+        calls = [
+            call for call in get_tool_calls_for_run(run_id, after=inbound.timestamp)
+            if call.tool_name != "sleep_until_next_trigger"
+        ]
+        if len(calls) != 1 or calls[0].tool_name != "send_chat_message" or str(calls[0].status).lower() != "complete":
+            return False, f"expected one same-channel first action, found {[(call.tool_name, call.status) for call in calls]}"
+
+        call = calls[0]
+        body = str(resolved_tool_param(call, "body") or "")
+        normalized = body.casefold()
+        acknowledges_scope = "security" in normalized and any(
+            term in normalized for term in ("short", "brief", "concise")
+        )
+        claims_permanence = any(term in normalized for term in ("going forward", "from now on", "always"))
+        terminal = resolved_tool_param(call, "will_continue_work") is False
+        clean = not any(term in normalized for term in ("charter", "config", "saved", "updated my instructions"))
+        one_shot, completion_detail = _completion_actions_match(
+            run_id, inbound, calls, ("send_chat_message",)
+        )
+        passed = (
+            one_shot and acknowledges_scope and not claims_permanence
+            and terminal and clean and "?" not in body and len(body) <= 300
+        )
+        return passed, (
+            f"call_count={len(calls)}, acknowledges_scope={acknowledges_scope}, "
+            f"claims_permanence={claims_permanence}, "
+            f"terminal={terminal}, clean={clean}, {completion_detail}, body={body!r}"
+        )
+
+
+def _charter_clauses(value):
+    return [
+        re.sub(r"\s+", " ", clause).strip(" -\t")
+        for clause in re.split(r"[.;\n]+", (value or "").casefold())
+        if clause.strip(" -\t")
+    ]
+
+
+def _keeps_clauses(value, *clauses):
+    charter = re.sub(r"\s+", " ", (value or "").casefold())
+    return all(re.sub(r"\s+", " ", clause.casefold()) in charter for clause in clauses)
+
+
+def _has_clause_rule(value, *pattern_groups, reject=()):
+    return any(
+        all(any(re.search(pattern, clause) for pattern in group) for group in pattern_groups)
+        and not any(re.search(pattern, clause) for pattern in reject)
+        for clause in _charter_clauses(value)
+    )
+
+
+def _requires_candidate_links(value):
+    return _has_clause_rule(
+        value,
+        (r"\b(?:candidate|applicant|prospect|lead|recruit|report|update)\w*\b",),
+        (r"\b(?:links?|urls?|profiles?|citations?)\b",),
+        (r"\b(?:include|add|provide|attach|cite|link|must|should|required)\w*\b", r"\bnever\b.+\bwithout\b"),
+        (r"\b(?:verified|confirmed|known|available|sourced|source[ -]backed|evidence[ -]backed|retrieved)\b",),
+        reject=(
+            r"\b(?:do not|don't|never|omit|skip|avoid)\b.{0,35}\b(?:include|add|provide|attach|link|cite)\w*\b",
+            r"\b(?:even if|whether or not|regardless of)\b.{0,35}\b(?:unavailable|unverified|unknown|missing)\b",
+        ),
+    )
+
+
+def _requires_natural_dashless_style(value):
+    natural = _has_clause_rule(
+        value,
+        (r"\b(?:message|note|outreach|writing|style|tone|voice|copy)\w*\b",),
+        (r"\b(?:natural|human|conversational|authentic|plainspoken)\b", r"\bavoid\b.{0,25}\b(?:template|canned|robotic|automated)\w*\b"),
+        reject=(r"\b(?:use|prefer)\b.{0,25}\b(?:template|canned|robotic|automated)\w*\b",),
+    )
+    dashless = _has_clause_rule(
+        value,
+        (r"\b(?:dashes?|hyphens?)\b",),
+        (r"\b(?:avoid|never|without|omit|skip|stop|no|do not|don't)\b",),
+    )
+    return natural and dashless
+
+
+def _requires_comparison_table_takeaways(value):
+    positive = (
+        r"\b(?:use|prefer|include|add|provide|present|show|format|structure|organi[sz]e|summari[sz]e|"
+        r"keep|make|default|requir)\w*\b",
+    )
+    return all(
+        _has_clause_rule(
+            value,
+            (item,),
+            positive,
+            reject=(
+                rf"\b(?:do not|don't|never|avoid|omit|skip)\b.{{0,40}}{item}",
+                rf"{item}.{{0,40}}\b(?:should|must|are|is)\s+(?:not|never|avoided|omitted)\b",
+            ),
+        )
+        for item in (
+            r"\b(?:comparison\s+)?tables?\b",
+            r"\b(?:bullets?|bullet[ -]points?|takeaways?)\b",
+        )
+    )
+
+
+def _requires_low_recipient_effort(value):
+    return _has_clause_rule(
+        value,
+        (r"\b(?:prospect|outreach|lead)s?\b",),
+        (r"\b(?:question|ask|answer|reply|respond)\w*\b",),
+        (
+            r"\b(?:easy|simple|quick|specific|concrete|low[ -]effort|low[ -]friction)\b",
+            r"\b(?:context|observation|insight)s?\b",
+            r"\b(?:reduce|minimi[sz]e|avoid)\w*\b.{0,35}\b(?:effort|work|burden|friction)\b",
+        ),
+        reject=(
+            r"\b(?:increase|maximi[sz]e|raise)\w*\b.{0,45}\b(?:effort|work|burden|friction)\b",
+            r"\b(?:hard|difficult|demanding)\b.{0,25}\b(?:answer|reply|respond)\w*\b",
+            r"\b(?:make|have|let)\b.{0,20}\b(?:them|recipient|prospect)\b.{0,25}\b(?:do|carry)\b.{0,15}\bwork\b",
+        ),
+    )
+
+
+def _requires_outcome_report(value):
+    return _has_clause_rule(
+        value,
+        (
+            r"\b(?:report|update|summary|recap|brief|message|tell|share|send|notify)\w*\b",
+            r"\b(?:come|report)\s+back\b",
+            r"\breturn\s+with\b",
+            r"\bpull\s+(?:the owner|them)\s+in\b",
+        ),
+        (r"\b(?:what changed|changed|changes?|outcomes?|results?|decisions?)\b",),
+        (r"\b(?:blockers?|impediments?|material risks?)\b",),
+        (r"\bnext (?:move|step|action)s?\b",),
+        reject=(
+            r"\b(?:do not|don't|never|omit|skip|exclude|without)\b.{0,60}"
+            r"\b(?:what changed|changes?|outcomes?|blockers?|impediments?|next (?:move|step|action)s?)\b",
+        ),
+    )
+
+
+def _requires_morgan_routing_boundary(value):
+    owner = r"\b(?:owner|user|me|andrew)\b"
+    routine_to_morgan = _has_clause_rule(
+        value,
+        (r"\b(?:routine|ordinary|standard|normal|day-to-day)\b",),
+        (r"\bmorgan\b",),
+        (r"\b(?:route|send|direct|forward|delegate|assign|handle|own|go|for)\w*\b",),
+    )
+    blockers_to_owner = _has_clause_rule(
+        value,
+        (r"\b(?:real|material|serious|major|significant|genuine)\s+blockers?\b",),
+        (owner,),
+        (r"\b(?:only|send|escalate|surface|flag|notify|involve|contact|pull|loop)\w*\b",),
+    )
+    clauses = _charter_clauses(value)
+    routine = r"(?:routine|ordinary|standard|normal|day-to-day)"
+    blocker = r"(?:real|material|serious|major|significant|genuine)\s+blockers?"
+    route = r"(?:route|send|direct|forward|delegate|assign)\w*"
+    reversed_boundary = any(
+        re.search(rf"\b{route}\b.{{0,45}}\b{routine}\b.{{0,45}}{owner}", clause)
+        or re.search(rf"\b{routine}\b.{{0,35}}\b(?:to|for)\s+(?:the\s+)?(?:owner|user|andrew)\b", clause)
+        or re.search(rf"\b{route}\b.{{0,45}}\b{blocker}\b.{{0,45}}\bmorgan\b", clause)
+        or re.search(rf"\b{blocker}\b.{{0,18}}\b(?:to|for)\s+morgan\b", clause)
+        for clause in clauses
+    )
+    return routine_to_morgan and blockers_to_owner and not reversed_boundary
+
+
+def _charter_patch_pairs(patch_sql):
+    return [
+        (old.replace("''", "'"), new.replace("''", "'"))
+        for old, new in re.findall(
+            r"patch_text\s*\(\s*charter\s*,\s*'((?:''|[^'])*)'\s*,\s*'((?:''|[^'])*)'\s*\)",
+            patch_sql,
+            re.IGNORECASE | re.DOTALL,
+        )
+    ]
+
+
+def _contains_existing_charter(fragment, existing_charter):
+    normalized_fragment = " ".join(re.findall(r"[a-z0-9]+", (fragment or "").casefold()))
+    normalized_existing = " ".join(re.findall(r"[a-z0-9]+", (existing_charter or "").casefold()))
+    return bool(normalized_fragment and normalized_existing and normalized_existing in normalized_fragment)
+
+
+def _uses_one_focused_charter_patch(mutation_calls, existing_charter):
+    if len(mutation_calls) != 1:
+        return False
+    sql = str(resolved_tool_param(mutation_calls[0], "sql") or "")
+    pairs = _charter_patch_pairs(sql)
+    structural_sql = _structural_sql(sql)
+    old, new = pairs[0] if len(pairs) == 1 else (None, None)
+    return (
+        len(pairs) == 1
+        and len(split_sql_statements(sql)) == 1
+        and re.search(r"\bupdate\s+__agent_config\b", structural_sql, re.IGNORECASE)
+        and not re.search(r"\bselect\b", structural_sql, re.IGNORECASE)
+        and old != new
+        and (not old or old in existing_charter)
+        and bool(new.strip())
+        and not _contains_existing_charter(new, existing_charter)
+    )
 
 
 @register_scenario
@@ -2201,17 +2455,15 @@ class CharterAddsFeedbackRuleFromCorrectionScenario(CharterMemoryScenario):
     verification_task_name = "verify_feedback_rule_saved"
     success_summary = "Agent saved the user's correction as an ongoing report-link rule while preserving sourcing guidance."
     failure_summary = "Expected charter to preserve sourcing role and add durable lead/source link guidance"
+    verify_feedback_reply = True
+    feedback_reply_options = {"required_reply_concepts": (("link", "url", "source"),)}
 
     def _charter_check(self, agent, mutation_calls):
-        charter = (agent.charter or "").lower()
-        preserved_job = "candidate" in charter or "lead" in charter or "recruit" in charter
-        includes_link_rule = (
-            ("link" in charter or "url" in charter or "source" in charter or "profile" in charter)
-            and ("report" in charter or "update" in charter or "lead" in charter or "candidate" in charter)
-        )
-        passed = bool(mutation_calls and preserved_job and includes_link_rule)
+        preserved_job = _keeps_clauses(agent.charter, self.existing_charter)
+        includes_link_rule = _requires_candidate_links(agent.charter)
+        focused_patch = _uses_one_focused_charter_patch(mutation_calls, self.existing_charter)
+        passed = bool(focused_patch and preserved_job and includes_link_rule)
         return passed, f"mutation_count={len(mutation_calls)}, charter={agent.charter!r}."
-
 
 @register_scenario
 class CharterAddsPlainPreferenceWithoutSaveWordScenario(CharterMemoryScenario):
@@ -2229,14 +2481,14 @@ class CharterAddsPlainPreferenceWithoutSaveWordScenario(CharterMemoryScenario):
     verification_task_name = "verify_plain_preference_saved"
     success_summary = "Agent saved the user's table-and-bullets preference while preserving market brief guidance."
     failure_summary = "Expected charter to preserve market brief role and add durable table/bullet format preference"
+    verify_feedback_reply = True
+    feedback_reply_options = {"required_reply_concepts": (("table",), ("bullet", "takeaway"))}
 
     def _charter_check(self, agent, mutation_calls):
-        charter = (agent.charter or "").lower()
-        preserved_job = "market" in charter and ("brief" in charter or "finding" in charter)
-        added_format_preference = "table" in charter and ("bullet" in charter or "takeaway" in charter)
-        passed = bool(mutation_calls and preserved_job and added_format_preference)
+        preserved_job = _keeps_clauses(agent.charter, self.existing_charter)
+        added_format_preference = _requires_comparison_table_takeaways(agent.charter)
+        passed = _uses_one_focused_charter_patch(mutation_calls, self.existing_charter) and preserved_job and added_format_preference
         return passed, f"mutation_count={len(mutation_calls)}, charter={agent.charter!r}."
-
 
 @register_scenario
 class CharterPatchesDirectStyleCorrectionScenario(CharterMemoryScenario):
@@ -2250,7 +2502,7 @@ class CharterPatchesDirectStyleCorrectionScenario(CharterMemoryScenario):
         "Research qualified prospects and send concise, personalized outreach. "
         "Keep daily outreach below 20 messages."
     )
-    prior_outbound_body = "Thanks for the context—I'd be delighted to explore how we can unlock value together."
+    prior_outbound_body = "Thanks for sharing that your team is expanding apprenticeships—I'd be delighted to explore how we can unlock value together."
     prompt = (
         "That sounded automated. Stop writing like a template, and don't use em dashes or double hyphens "
         "in my messages. Rewrite it more naturally."
@@ -2258,16 +2510,212 @@ class CharterPatchesDirectStyleCorrectionScenario(CharterMemoryScenario):
     verification_task_name = "verify_partial_style_correction_saved"
     success_summary = "Agent used one partial SQLite patch to save the correction while preserving outreach limits."
     failure_summary = "Expected one patch_text charter mutation preserving the prospecting job and daily limit"
+    verify_feedback_reply = True
+    feedback_reply_options = {"require_result": True, "required_reply_terms": ("apprenticeship",)}
 
     def _charter_check(self, agent, mutation_calls):
-        charter = (agent.charter or "").lower()
-        sql = "\n".join(json.dumps(call.tool_params or {}) for call in mutation_calls).lower()
-        preserved = "qualified prospect" in charter and "below 20" in charter
-        added_style = ("natural" in charter or "human" in charter) and ("dash" in charter or "template" in charter)
-        used_one_patch = len(mutation_calls) == 1 and "patch_text" in sql
+        preserved = _keeps_clauses(agent.charter, self.existing_charter)
+        added_style = _requires_natural_dashless_style(agent.charter)
+        used_one_patch = _uses_one_focused_charter_patch(mutation_calls, self.existing_charter)
         passed = preserved and added_style and used_one_patch
         return passed, f"mutation_count={len(mutation_calls)}, used_patch={used_one_patch}, charter={agent.charter!r}."
 
+def _completion_actions_match(run_id, inbound, calls, expected_tools):
+    completion_ids = list(
+        PersistentAgentCompletion.objects.filter(
+            eval_run_id=run_id,
+            completion_type=PersistentAgentCompletion.CompletionType.ORCHESTRATOR,
+            created_at__gte=inbound.timestamp,
+        )
+        .order_by("created_at", "id")
+        .values_list("id", flat=True)
+    )
+    action_completion_ids = [call.step.completion_id for call in calls]
+    matched = (
+        [call.tool_name for call in calls] == list(expected_tools)
+        and action_completion_ids == completion_ids
+        and None not in action_completion_ids
+        and len(set(action_completion_ids)) == len(action_completion_ids)
+    )
+    return matched, (
+        f"completion_ids={[str(value) for value in completion_ids]}, "
+        f"action_completion_ids={[str(value) for value in action_completion_ids]}"
+    )
+
+
+def _successful_without_repair(call):
+    try:
+        result = call.result if isinstance(call.result, dict) else json.loads(call.result or "{}")
+    except (AttributeError, TypeError, ValueError):
+        return False
+    return (
+        str(call.status).lower() == "complete"
+        and result.get("status") == "ok"
+        and "auto_correction" not in json.dumps(result).casefold()
+    )
+
+
+def _one_shot_charter_feedback_check(
+    run_id,
+    inbound,
+    *,
+    existing_charter,
+    require_result=False,
+    required_reply_terms=(),
+    required_reply_concepts=(),
+):
+    calls = [
+        call for call in get_tool_calls_for_run(run_id, after=inbound.timestamp)
+        if call.tool_name != "sleep_until_next_trigger"
+    ]
+    sqlite_calls = [call for call in calls if call.tool_name == "sqlite_batch"]
+    replies = [call for call in calls if call.tool_name == "send_chat_message"]
+    one_shot, completion_detail = _completion_actions_match(
+        run_id, inbound, calls, ("sqlite_batch", "send_chat_message")
+    )
+    reply_body = str(resolved_tool_param(replies[0], "body") or "") if len(replies) == 1 else ""
+    reply_folded = reply_body.casefold()
+    terminal_reply = (
+        len(replies) == 1
+        and str(replies[0].status).lower() == "complete"
+        and resolved_tool_param(replies[0], "will_continue_work") is False
+    )
+    natural_reply = (
+        len(reply_body.strip()) >= 12
+        and not any(
+            term in reply_folded
+            for term in ("charter", "sqlite", "config", "saved", "stored", "tools", "i'll research", "i will research")
+        )
+        and all(term.casefold() in reply_folded for term in required_reply_terms)
+        and all(
+            any(term.casefold() in reply_folded for term in alternatives)
+            for alternatives in required_reply_concepts
+        )
+    )
+    if require_result:
+        natural_reply = natural_reply and len(reply_body) >= 50 and not any(
+            term in reply_folded
+            for term in (
+                "going forward", "from now on", "i'll ", "i will ", "template", "automated",
+                "thanks for sharing", "explore how we can", "value together", "work together on",
+                "i'd love to", "i'd be delighted", "—", "--",
+            )
+        )
+    clean_sqlite = (
+        len(sqlite_calls) == 1
+        and _successful_without_repair(sqlite_calls[0])
+        and _uses_one_focused_charter_patch(sqlite_calls, existing_charter)
+    )
+    runtime_corrections = PersistentAgentStep.objects.filter(
+        eval_run_id=run_id,
+        created_at__gt=inbound.timestamp,
+        description__startswith="Tool policy: persist this direct user correction",
+    ).count()
+    passed = one_shot and clean_sqlite and terminal_reply and natural_reply and not runtime_corrections
+    return passed, (
+        f"actions={[call.tool_name for call in calls]}, terminal_reply={terminal_reply}, "
+        f"natural_reply={natural_reply}, clean_sqlite={clean_sqlite}, {completion_detail}, "
+        f"runtime_correction_count={runtime_corrections}."
+    )
+
+
+@register_scenario
+class CharterPatchesEvaluativeOutputFeedbackScenario(CharterMemoryScenario):
+    slug = CHARTER_PATCHES_EVALUATIVE_OUTPUT_FEEDBACK
+    description = "Evaluative feedback on a prior output should become a concise charter correction."
+    tasks = [
+        ScenarioTask(name="inject_prompt", assertion_type="manual"),
+        ScenarioTask(name="verify_evaluative_feedback_saved", assertion_type="manual"),
+    ]
+    existing_charter = (
+        "Research qualified prospects and send concise, personalized outreach. "
+        "For prospect outreach, end each note with an open question asking for the recipient's opinion. "
+        "For customer interviews, end each note with an open question asking for the recipient's opinion. "
+        "Keep daily outreach below 20 messages. "
+        "Do not change these instructions unless the owner explicitly asks."
+    )
+    prior_outbound_body = "Prospect outreach draft: Curious what you think the biggest gap is right now."
+    prompt = (
+        '"Curious what you think the biggest gap is right now." this is not so good. '
+        "it makes the other person do the work"
+    )
+    verification_task_name = "verify_evaluative_feedback_saved"
+    success_summary = "Agent interpreted the critique and patched the related outreach rule without adding a feedback block."
+    failure_summary = "Expected one focused patch that removes the high-effort opinion prompt and preserves unrelated limits"
+    verify_feedback_reply = True
+    feedback_reply_options = {"required_reply_concepts": (("question", "ask", "answer", "recipient"),)}
+
+    def _charter_check(self, agent, mutation_calls):
+        charter = (agent.charter or "").lower()
+        old_rule = "For prospect outreach, end each note with an open question asking for the recipient's opinion."
+        preserved = _keeps_clauses(
+            agent.charter,
+            "Research qualified prospects and send concise, personalized outreach.",
+            "For customer interviews, end each note with an open question asking for the recipient's opinion.",
+            "Keep daily outreach below 20 messages.",
+            "Do not change these instructions unless the owner explicitly asks.",
+        )
+        replaced_old_rule = not _keeps_clauses(agent.charter, old_rule)
+        learned_feedback = _requires_low_recipient_effort(agent.charter)
+        used_one_patch = _uses_one_focused_charter_patch(mutation_calls, self.existing_charter)
+        focused = len(agent.charter or "") <= len(self.existing_charter) + 240 and "feedback:" not in charter
+        passed = preserved and replaced_old_rule and learned_feedback and used_one_patch and focused
+        return passed, f"mutation_count={len(mutation_calls)}, used_patch={used_one_patch}, charter={agent.charter!r}."
+
+@register_scenario
+class CharterInterpretsAmbiguousOperatingFeedbackScenario(CharterMemoryScenario):
+    slug = CHARTER_INTERPRETS_AMBIGUOUS_OPERATING_FEEDBACK
+    description = "Messy but durable operating feedback should be interpreted and saved without blocking for clarification."
+    tasks = [
+        ScenarioTask(name="inject_prompt", assertion_type="manual"),
+        ScenarioTask(name="verify_ambiguous_operating_feedback_saved", assertion_type="manual"),
+    ]
+    existing_charter = (
+        "Coordinate vendor renewal work with the team. "
+        "Send the owner a short kickoff and a progress note for each work session. "
+        "Route routine follow-ups and blockers to the owner. "
+        "Never include customer secrets in team messages."
+    )
+    prior_outbound_body = (
+        "I'm starting the renewal review now and will keep you posted as I work through it."
+    )
+    prompt = (
+        "for this renewal only, put legal review first. going forward, these play by play updates arent useful. "
+        "just come back with what changed + blockers + next move. "
+        "routine followups are for Morgan, only pull me in on a real blocker"
+    )
+    verification_task_name = "verify_ambiguous_operating_feedback_saved"
+    success_summary = "Agent inferred and saved the new update and routing boundaries without asking a blocking question."
+    failure_summary = "Expected one focused patch preserving the role and privacy rule while updating reporting and routing"
+    verify_feedback_reply = True
+    feedback_reply_options = {"required_reply_concepts": (("morgan",), ("blocker",))}
+
+    def _charter_check(self, agent, mutation_calls):
+        charter = (agent.charter or "").lower()
+        preserved = _keeps_clauses(
+            agent.charter,
+            "Coordinate vendor renewal work with the team.",
+            "Never include customer secrets in team messages.",
+        )
+        temporary_scope_omitted = "legal review first" not in charter and "put legal" not in charter
+        replaced_old_rule = (
+            "short kickoff and a progress note" not in charter
+            and "route routine follow-ups and blockers to the owner" not in charter
+        )
+        learned_reporting = _requires_outcome_report(agent.charter)
+        learned_routing = _requires_morgan_routing_boundary(agent.charter)
+        used_one_patch = _uses_one_focused_charter_patch(mutation_calls, self.existing_charter)
+        focused = len(agent.charter or "") <= len(self.existing_charter) + 300 and "feedback:" not in charter
+        passed = (
+            preserved
+            and temporary_scope_omitted
+            and replaced_old_rule
+            and learned_reporting
+            and learned_routing
+            and used_one_patch
+            and focused
+        )
+        return passed, f"mutation_count={len(mutation_calls)}, used_patch={used_one_patch}, charter={agent.charter!r}."
 
 @register_scenario
 class ToolChoiceExactJsonUrlUsesHttpRequestScenario(BehaviorMicroScenario):

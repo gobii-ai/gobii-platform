@@ -335,8 +335,8 @@ class LinkReferenceTests(TestCase):
                     self.assertIn(path, result["message"])
                     self.assertIn("Query not executed", result["message"])
                     if tool_name == "sqlite_batch":
-                        self.assertIn("Select raw values/URLs from __tool_results", result["message"])
-                        self.assertIn("never replace tokens with literals", result["message"])
+                        self.assertIn("Derive raw values/URLs inside INSERT ... SELECT", result["message"])
+                        self.assertIn("replace tokens with literals", result["message"])
 
         enabled.assert_not_called()
         apply_patch_mock.assert_not_called()
@@ -691,7 +691,8 @@ class LinkReferenceTests(TestCase):
     def test_source_result_marks_sparse_item_link_field_as_not_provided(self):
         raw_result = (
             "name=Linked | console_url=https://console.example.test/linked\n"
-            "name=Unlinked | console_host=console.example.test | console_route=/unlinked"
+            "name=Unlinked | console_host=console.example.test | console_route=/unlinked | "
+            "profile_id=p_7f2c | directory_slug=unlinked"
         )
         record = ToolCallResultRecord(
             step_id="00000000-0000-4000-8000-000000000012",
@@ -718,10 +719,13 @@ class LinkReferenceTests(TestCase):
         )[record.step_id]
 
         self.assertIn(
-            "name=Unlinked | console_host=[omitted: no item link] | console_route=[omitted: no item link] | console_url= [not provided]",
+            "name=Unlinked | console_host=[omitted: no item link] | console_route=[omitted: no item link] | "
+            "profile_id=p_7f2c | directory_slug=unlinked | console_url= [not provided]",
             prompt_info.preview_text,
         )
         self.assertNotIn("console_host=console.example.test", prompt_info.meta)
+        self.assertIn("profile_id=p_7f2c", prompt_info.preview_text)
+        self.assertIn("directory_slug=unlinked", prompt_info.preview_text)
         self.assertEqual(record.result_text, raw_result)
 
     def test_large_source_focus_replaces_misleading_prefix_and_query_hint(self):
@@ -895,18 +899,15 @@ class LinkReferenceTests(TestCase):
         self.assertIn(f"Compare Acme: {url} [link_ref: {token}]", user_prompt)
         self.assertEqual(system_prompt.count("## Link References (CRITICAL)"), 1)
         self.assertNotIn("## Link References (CRITICAL)", user_prompt)
-        self.assertIn("the raw URL identifies that exact item", system_prompt)
-        self.assertIn("adjacent token is the only user-visible link or URL-tool destination", system_prompt)
+        self.assertIn("the raw URL is evidence", system_prompt)
+        self.assertIn("adjacent token is only a display/fetch handle", system_prompt)
         self.assertIn("Keep pairs attached", system_prompt)
-        self.assertIn("delivery resolves it only after call", system_prompt)
-        self.assertIn("Copy it character-for-character", system_prompt)
-        self.assertIn("`[Atlas launch]($[link:LEXACT])`", system_prompt)
-        self.assertIn("Wrong: `[Atlas launch](https://host/a)`", system_prompt)
-        self.assertIn("If missing, omit the link", system_prompt)
-        self.assertIn("Never reassign a token, derive a sibling URL", system_prompt)
-        self.assertIn("An item lacking its token stays unlinked", system_prompt)
-        self.assertIn("Never put tokens in SQL or search text", system_prompt)
-        self.assertIn("A bare source name or `(source)`", system_prompt)
+        self.assertIn("Final Markdown is exactly `[item]($[link:LEXACT])`", system_prompt)
+        self.assertIn("replace it with a raw URL", system_prompt)
+        self.assertIn("Never encode, edit, reassign, combine, or guess it", system_prompt)
+        self.assertIn("Items without a token stay plain", system_prompt)
+        self.assertIn("SQL/state/search", system_prompt)
+        self.assertIn("A report is unfinished while a token-backed entity name is plain", system_prompt)
         self.assertIn("body must contain the exact tokens", system_prompt)
         message.refresh_from_db()
         self.assertEqual(message.body, f"Compare Acme: {url}")

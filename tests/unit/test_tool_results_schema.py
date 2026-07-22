@@ -615,6 +615,19 @@ class MetaTextFormattingTests(SimpleTestCase):
 class PreviewByteLimitTests(SimpleTestCase):
     """Tests for preview byte limits with large external results."""
 
+    @staticmethod
+    def _prepare_http_result(step_id, payload, *, recency=0, fresh=True, **kwargs):
+        record = tool_results.ToolCallResultRecord(
+            step_id=step_id,
+            tool_name="http_request",
+            created_at=datetime.now(timezone.utc),
+            result_text=json.dumps(payload),
+        )
+        params = {"recency_positions": {step_id: recency}, **kwargs}
+        if fresh:
+            params["fresh_tool_call_step_id"] = step_id
+        return tool_results.prepare_tool_results_for_prompt([record], **params)[step_id], record
+
     def test_large_result_preview_capped(self):
         """Results >= 5KB should have preview capped to 200 bytes."""
         from api.agent.core.tool_results import (
@@ -683,18 +696,13 @@ class PreviewByteLimitTests(SimpleTestCase):
             small_text,
             len(small_text),
             recency_position=0,
-            tool_name="mcp_brightdata_scrape_as_markdown",
+            tool_name="send_chat_message",
         )
 
         self.assertTrue(is_inline)
         self.assertEqual(preview, small_text)
 
-    def test_small_inline_http_result_does_not_include_sql_affordances(self):
-        from api.agent.core.tool_results import (
-            ToolCallResultRecord,
-            prepare_tool_results_for_prompt,
-        )
-
+    def test_fresh_small_inline_http_result_includes_source_model_choice(self):
         payload = {
             "status": "ok",
             "status_code": 206,
@@ -715,28 +723,127 @@ class PreviewByteLimitTests(SimpleTestCase):
                 ],
             },
         }
-        record = ToolCallResultRecord(
-            step_id="step-http",
-            tool_name="http_request",
-            created_at=datetime.now(timezone.utc),
-            result_text=json.dumps(payload),
+        info, record = self._prepare_http_result(
+            "step-http", payload,
+            named_model_tables={"items"},
         )
-
-        info = prepare_tool_results_for_prompt(
-            [record],
-            recency_positions={"step-http": 0},
-            fresh_tool_call_step_id="step-http",
-        )["step-http"]
 
         self.assertTrue(info.is_inline)
         self.assertIn("result_id=step-http", info.meta)
         self.assertIn("parsed_with=json", info.meta)
         self.assertIn("Central bank signals rate hold", info.preview_text)
-        self.assertNotIn("QUERY:", info.meta)
-        self.assertNotIn("PATH:", info.meta)
-        self.assertNotIn("SAMPLE:", info.meta)
-        self.assertNotIn("JSON_DIGEST:", info.meta)
-        self.assertNotIn("__tool_results", info.meta)
+        self.assertIn("SOURCE ARRAYS result_id=step-http; stored paths", info.preview_text)
+        self.assertLess(
+            info.preview_text.index("SOURCE ARRAYS result_id=step-http"),
+            info.preview_text.index("Central bank signals rate hold"),
+        )
+        for expected in (
+            "$.content.items", '"content":{', "one sqlite_batch only", "every listed entity array",
+            "INSERT ... SELECT/json_each", "Derive all facts, URLs, and write keys from j.value",
+            "never changes __agent_config/__agent_skills", "No pre-read, refetch, blob inspection, copied literals",
+        ):
+            self.assertIn(expected, info.preview_text)
+        self.assertEqual(info.preview_text.count("[SOURCE ARRAYS"), 1)
+        self.assertTrue(info.source_reconciliation_directive)
+        self.assertIn(info.source_reconciliation_directive, info.preview_text)
+        aliased = tool_results.prepare_tool_results_for_prompt(
+            [record], recency_positions={"step-http": 0}, fresh_tool_call_step_id="step-http",
+            named_model_tables={"news_items"},
+        )["step-http"]
+        self.assertTrue(aliased.source_reconciliation_directive)
+        compact_payload = json.dumps(payload, separators=(",", ":"))
+        self.assertLess(len(info.preview_text) - len(compact_payload), 1_000)
+        for absent in ("QUERY:", "PATH:", "SAMPLE:", "JSON_DIGEST:", "__tool_results"):
+            self.assertNotIn(absent, info.meta)
+
+        linked = tool_results.prepare_tool_results_for_prompt(
+            [record],
+            recency_positions={"step-http": 0},
+            fresh_tool_call_step_id="step-http",
+            paired_url_rewriter=lambda text, _record: text.replace(
+                "https://news.example.test/rate-hold",
+                "https://news.example.test/rate-hold [link_ref: $[link:LEXACT]]",
+            ),
+            paired_url_step_ids={"step-http"},
+        )["step-http"]
+        for expected in (
+            "VERIFIED LINK PRESENTATION", "anchor each token on its exact entity name",
+            "<a href='token'>entity</a>", "No separate URL/link column unless requested", "owner report with 4+ items",
+            "Say Not returned where a requested URL is absent", "Without a preceding SOURCE ARRAYS directive",
+            "does not change the requested audience or action",
+        ):
+            self.assertIn(expected, linked.preview_text)
+        self.assertNotIn("NEVER OUTREACH", linked.preview_text)
+        self.assertNotIn("[SOURCE ARRAYS result_id=", linked.preview_text)
+
+        linked_model = tool_results.prepare_tool_results_for_prompt(
+            [record],
+            recency_positions={"step-http": 0},
+            fresh_tool_call_step_id="step-http",
+            paired_url_rewriter=lambda text, _record: text.replace(
+                "https://news.example.test/rate-hold",
+                "https://news.example.test/rate-hold [link_ref: $[link:LEXACT]]",
+            ),
+            paired_url_step_ids={"step-http"},
+            named_model_tables={"items"},
+        )["step-http"]
+        self.assertTrue(linked_model.source_reconciliation_directive)
+        self.assertIn("https://news.example.test/rate-hold", linked_model.preview_text)
+        self.assertNotIn("$[link:LEXACT]", linked_model.preview_text)
+
+        recent = tool_results.prepare_tool_results_for_prompt(
+            [record], recency_positions={"step-http": 1}
+        )["step-http"]
+        self.assertNotIn("SOURCE ARRAYS result_id=step-http", recent.preview_text)
+        self.assertIsNone(recent.source_reconciliation_directive)
+        self.assertIn("Central bank signals rate hold", recent.preview_text)
+
+    def test_fresh_relational_http_result_requires_one_source_derived_model_batch(self):
+        payload = {
+            "status": "ok",
+            "content": {
+                "alerts": [{"message": "Account data refreshed"}],
+                "accounts": [{"account_id": "acct-1", "name": "Acme"}],
+                "workstreams": [{"workstream_id": "ws-1", "account_id": "acct-1", "status": "open"}],
+            },
+        }
+        info, _record = self._prepare_http_result(
+            "step-relational", payload,
+            named_model_tables={"accounts"},
+        )
+        preview = info.preview_text
+
+        self.assertIn("$.content.accounts(account_id,name)", preview)
+        self.assertIn("$.content.workstreams(workstream_id,account_id,status)", preview)
+        self.assertNotIn("$.content.alerts", preview)
+        self.assertIn("every listed entity array", preview)
+        self.assertIn("INSERT ... SELECT/json_each", preview)
+        self.assertEqual(preview.count("[SOURCE ARRAYS"), 1)
+        self.assertLess(preview.index("SOURCE ARRAYS"), preview.index('"workstreams"'))
+
+        payload["content"]["notes"] = "context " * 10_000
+        large, _record = self._prepare_http_result(
+            "step-large-relational", payload,
+            named_model_tables={"accounts"},
+        )
+        self.assertFalse(large.is_inline)
+        self.assertIn("SOURCE ARRAYS", large.preview_text)
+        self.assertTrue(large.source_reconciliation_directive)
+
+    def test_fresh_source_without_matching_entity_array_does_not_force_import(self):
+        cases = (
+            ("object", {"answer": "ready"}, set(), '"answer":"ready"'),
+            ("weather", {"forecasts": [{"temperature": 72}]}, {"accounts"}, '"temperature":72'),
+        )
+        for step, content, model_tables, expected in cases:
+            with self.subTest(step=step):
+                info, _record = self._prepare_http_result(
+                    f"step-{step}", {"status": "ok", "content": content},
+                    named_model_tables=model_tables,
+                )
+                self.assertIn(expected, info.preview_text)
+                self.assertNotIn("SOURCE ARRAY", info.preview_text)
+                self.assertIsNone(info.source_reconciliation_directive)
 
     def test_fresh_tool_call_under_threshold_shown_inline(self):
         """Fresh tool calls under 40KB should be shown fully inline with SQLite wrapper."""
@@ -758,8 +865,8 @@ class PreviewByteLimitTests(SimpleTestCase):
         self.assertTrue(is_inline)
         # Should be wrapped with one-time view warning
         self.assertIn("[FULL RESULT (30000 chars) - ONE-TIME VIEW", preview)
-        self.assertIn("Use this visible result now", preview)
-        self.assertIn("exact filtering/ranking across sizable or multiple results", preview)
+        self.assertIn("later turns show a preview", preview)
+        self.assertNotIn("SOURCE ARRAYS", preview)
         self.assertIn(medium_text, preview)
 
     def test_fresh_tool_call_over_threshold_truncated(self):

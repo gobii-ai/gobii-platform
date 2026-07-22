@@ -294,8 +294,9 @@ def get_send_chat_tool() -> Dict[str, Any]:
                     "body": {
                         "type": "string",
                         "description": (
-                            "Natural recipient text; no dash punctuation between phrases. Keep chat/outreach light. Reports comparing 4+ peers use one table. "
-                            "Do not pass tool-call/XML syntax; it is sent literally."
+                            "No dash punctuation or pre-work status for short/finite work. Owner report with 4+ items: "
+                            "include `Covered N/N` and one requested-field "
+                            "Markdown table; link exact entity names only with provided tokens. Keep other chat/outreach light. "
                         ),
                     },
                     "to_address": {

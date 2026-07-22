@@ -23,7 +23,9 @@ class PromptContextSqliteGuidanceTests(SimpleTestCase):
 
         self.assertIn("Named tables are the world model", guidance)
         self.assertIn("digest is partial", guidance)
-        self.assertIn("Read them before external refreshes/decisions, not memory", guidance)
+        self.assertIn("Use queried rows, not memory, for decisions", guidance)
+        self.assertIn("Explicit fresh source: fetch once", guidance)
+        self.assertIn("Otherwise read the model first", guidance)
         self.assertIn("Current complete rows are truth; don't refetch them", guidance)
         self.assertIn("Tool output doesn't update it", guidance)
         self.assertIn("sharing a stable ID or its children", guidance)
@@ -37,6 +39,9 @@ class PromptContextSqliteGuidanceTests(SimpleTestCase):
         self.assertIn("query gaps before reporting", guidance)
         self.assertIn("Only sourced blockers are unresolved", guidance)
         self.assertIn("use SQLite for exact set logic/counts/ranking", guidance)
+        self.assertIn("No sibling-by-sibling result/table/blob loops", guidance)
+        self.assertIn("Inspect unknown structure once", guidance)
+        self.assertNotIn("Copy names/paths/values/URLs", guidance)
 
     def test_low_iteration_warning_keeps_unfinished_work_active(self):
         collector = _NestedPromptSectionCollector()
@@ -120,6 +125,24 @@ class PromptContextSqliteGuidanceTests(SimpleTestCase):
         self.assertIn("SQLite efficiency warning", warning)
         self.assertIn("one result_id at a time", warning)
 
+    def test_sqlite_retry_warning_allows_multi_entity_import_in_one_batch(self):
+        warning = prompt_context._build_sqlite_retry_warning(
+            [
+                (
+                    {
+                        "sql": "INSERT INTO accounts SELECT value FROM __tool_results, "
+                        "json_each(result_json, '$.content.accounts') WHERE result_id='a1'; "
+                        "INSERT INTO workstreams SELECT value FROM __tool_results, "
+                        "json_each(result_json, '$.content.workstreams') WHERE result_id='a1'; "
+                        "SELECT * FROM accounts; SELECT * FROM workstreams"
+                    },
+                    '{"status":"ok"}',
+                ),
+            ]
+        )
+
+        self.assertEqual(warning, "")
+
     def test_sqlite_retry_warning_recovers_from_rejected_singleton_queries(self):
         rejection = (
             "Query not executed: do not read __tool_results or a staging table derived from it one result_id at a "
@@ -150,10 +173,11 @@ class PromptContextSqliteGuidanceTests(SimpleTestCase):
 
         warning = prompt_context._build_unreconciled_source_model_warning([source, stale_read])
 
-        self.assertIn("Fresh source evidence from this work cycle", warning)
-        self.assertIn("upsert all changed/provenance fields by stable key from __tool_results", warning)
-        self.assertIn("If it is unrelated or no relevant model exists", warning)
-        self.assertIn("Do not refetch", warning)
+        self.assertIn("Fresh source evidence is not reconciled", warning)
+        self.assertIn("must use INSERT ... SELECT or UPDATE ... FROM __tool_results/json_each", warning)
+        self.assertIn("Every sourced field, including IDs", warning)
+        self.assertIn("only JSON paths and current result_id/tool_name may be literals", warning)
+        self.assertIn("Otherwise answer it directly", warning)
         self.assertEqual(
             prompt_context._build_unreconciled_source_model_warning([
                 ("http_request", {}, "error"), stale_read,
@@ -225,6 +249,20 @@ class PromptContextSqliteGuidanceTests(SimpleTestCase):
             ])
         )
 
+        child_update = (
+            "sqlite_batch",
+            {"sql": "INSERT INTO workstreams(workstream_id) SELECT json_extract(value,'$.id') "
+                    "FROM __tool_results,json_each(result_json,'$.workstreams')"},
+            "complete",
+        )
+        child_read = ("sqlite_batch", {"sql": "SELECT * FROM workstreams"}, "complete")
+        self.assertTrue(prompt_context._build_unreconciled_source_model_warning([
+            source, stale_read, derived_update, child_update, post_update_read,
+        ]))
+        self.assertEqual(prompt_context._build_unreconciled_source_model_warning([
+            source, stale_read, derived_update, child_update, post_update_read, child_read,
+        ]), "")
+
     def test_source_model_warning_handles_model_first_and_unrelated_mutations(self):
         model_read = ("sqlite_batch", {"sql": "SELECT * FROM accounts"}, "complete")
         source = ("http_request", {}, "complete")
@@ -286,6 +324,30 @@ class PromptContextContactsGuidanceTests(TestCase):
             charter="Test contacts guidance.",
             browser_use_agent=self.browser_agent,
         )
+
+    def test_runtime_config_note_does_not_direct_one_off_feedback_into_config(self):
+        with patch("api.agent.core.prompt_context.ensure_steps_compacted"), patch(
+            "api.agent.core.prompt_context.ensure_comms_compacted"
+        ):
+            context, _, _ = prompt_context.build_prompt_context(self.agent, is_first_run=False)
+
+        content = "\n".join(message["content"] for message in context)
+        self.assertIn("patch_text for lasting owner behavior feedback only", content)
+        self.assertIn("temporary feedback/ordinary tasks never config", content)
+        self.assertIn("No schedule is set. Leave it NULL unless the user requests recurrence", content)
+        self.assertNotIn("Without a schedule, you die", content)
+
+    def test_runtime_schedule_note_keeps_temporary_scope_from_changing_cadence(self):
+        self.agent.schedule = "0 9 * * *"
+        self.agent.save(update_fields=["schedule", "updated_at"])
+        with patch("api.agent.core.prompt_context.ensure_steps_compacted"), patch(
+            "api.agent.core.prompt_context.ensure_comms_compacted"
+        ):
+            context, _, _ = prompt_context.build_prompt_context(self.agent, is_first_run=False)
+
+        content = "\n".join(message["content"] for message in context)
+        self.assertIn("temporary task scope never changes it", content)
+        self.assertNotIn("Task scope changed? Adjust timing", content)
 
     def test_large_allowed_contacts_are_compacted_in_prompt(self):
         CommsAllowlistEntry.objects.bulk_create(

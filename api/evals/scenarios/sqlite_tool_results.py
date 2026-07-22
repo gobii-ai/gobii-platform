@@ -1,3 +1,4 @@
+import json
 import re
 from typing import Iterable
 
@@ -13,7 +14,6 @@ from api.agent.tools.sqlite_query_quality import (
     _reads_table,
     _structural_sql,
     source_derived_model_mutation_tables,
-    source_derived_model_reconciled_tables,
     summarize_sqlite_tool_result_calls,
 )
 from api.agent.tools.sqlite_state import agent_sqlite_db
@@ -24,7 +24,14 @@ from api.evals.execution import ScenarioExecutionTools
 from api.evals.registry import register_scenario
 from api.evals.tool_params import resolved_tool_param
 from api.evals.scenarios.effort_calibration import MESSAGE_TOOL_NAMES, STOP_TOOL_NAMES, _outbound_messages_after, _tool_calls_for_run
-from api.models import EvalRunTask, PersistentAgent, PersistentAgentEnabledTool, PersistentAgentStep, PersistentAgentSystemStep
+from api.models import (
+    EvalRunTask,
+    PersistentAgent,
+    PersistentAgentCompletion,
+    PersistentAgentEnabledTool,
+    PersistentAgentStep,
+    PersistentAgentSystemStep,
+)
 
 
 SQLITE_TOOL_RESULT_SUITE_SLUG = "sqlite_tool_results"
@@ -96,6 +103,181 @@ DOMAIN_WORKSTREAMS = (
     ("ws-security-17", "Security packet", "complete", "Maya Chen", "2026-07-22"),
     ("ws-legal-04", "Contract redlines", "open", "Noah Reed", "2026-07-24"),
 )
+
+
+_MUTATION_TARGET_RE = re.compile(
+    r'\b(?:insert\s+(?:or\s+\w+\s+)?into|replace\s+into|update|delete\s+from)\s+["`\[]?'
+    r'(?P<table>[a-z_]\w*)',
+    re.I,
+)
+
+
+def _result_payload(call) -> dict | None:
+    result = getattr(call, "result", None)
+    try:
+        payload = result if isinstance(result, dict) else json.loads(str(result or ""))
+    except (TypeError, ValueError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _contains_auto_correction(value) -> bool:
+    if isinstance(value, dict):
+        return "auto_correction" in value or any(_contains_auto_correction(item) for item in value.values())
+    return isinstance(value, list) and any(_contains_auto_correction(item) for item in value)
+
+
+def _tool_attempt_failures(calls, label: str, *, reject_auto_correction: bool = False) -> list[str]:
+    failures = []
+    for index, call in enumerate(calls, start=1):
+        call_status = str(getattr(call, "status", "") or "").casefold()
+        payload = _result_payload(call)
+        if call_status != "complete":
+            failures.append(f"{label} attempt {index} had execution status {call_status or 'missing'}")
+        elif not isinstance(payload, dict):
+            failures.append(f"{label} attempt {index} returned an unreadable result")
+        elif str(payload.get("status") or "").casefold() != "ok":
+            failures.append(f"{label} attempt {index} returned result status {payload.get('status') or 'missing'}")
+        elif reject_auto_correction and _contains_auto_correction(payload):
+            failures.append(f"{label} attempt {index} depended on auto-correction")
+    return failures
+
+
+def _sqlite_attempt_failures(calls) -> list[str]:
+    return _tool_attempt_failures(calls, "SQLite", reject_auto_correction=True)
+
+
+def _first_shot_source_phase_failures(calls) -> list[str]:
+    calls = tuple(calls)
+    fetches = [call for call in calls if call.tool_name == "http_request"]
+    sqlite_calls = [call for call in calls if call.tool_name == "sqlite_batch"]
+    sends = [call for call in calls if call.tool_name == "send_chat_message"]
+    failures = _tool_attempt_failures(fetches, "Source fetch")
+    failures.extend(_tool_attempt_failures(sends, "Final send"))
+    failures.extend(message for failed, message in (
+        (
+            [call.tool_name for call in calls] != ["http_request", "sqlite_batch", "send_chat_message"],
+            f"expected fetch, one SQLite batch, then one send; found {[call.tool_name for call in calls]}",
+        ),
+        (
+            len(fetches) != 1
+            or str(resolved_tool_param(fetches[0], "url") or "").rstrip("/")
+            != DOMAIN_REFRESH_URL.rstrip("/"),
+            "expected one exact CRM snapshot fetch",
+        ),
+        (len(sqlite_calls) != 1, f"expected one SQLite batch, found {len(sqlite_calls)}"),
+        (
+            len(sends) != 1 or resolved_tool_param(sends[0], "will_continue_work") is not False,
+            f"expected one successful terminal send, found {len(sends)} send attempt(s)",
+        ),
+    ) if failed)
+
+    completion_ids = [getattr(getattr(call, "step", None), "completion_id", None) for call in calls]
+    if any(completion_id is None for completion_id in completion_ids):
+        failures.append("every source, SQLite, and send phase must link to an orchestrator completion")
+    elif len(set(completion_ids)) != len(completion_ids):
+        failures.append("fetch, SQLite, and send phases need separate completions")
+    return failures
+
+
+def _source_write_effect_failures(calls, expected_tables: Iterable[str]) -> list[str]:
+    expected = {table.casefold() for table in expected_tables}
+    if len(calls) != 1:
+        return ["source-derived model write was not a single clean batch"]
+
+    raw_sql = (calls[0].tool_params or {}).get("queries", (calls[0].tool_params or {}).get("sql") or "")
+    statements = [
+        statement
+        for query in (raw_sql if isinstance(raw_sql, list) else [raw_sql])
+        for statement in sqlparse.split(str(query))
+        if statement.strip()
+    ]
+    derived = []
+    for index, statement in enumerate(statements):
+        tables = set(source_derived_model_mutation_tables([statement]))
+        mutation = _MUTATION_TARGET_RE.search(statement)
+        if mutation and mutation.group("table").casefold() in {"__agent_config", "__agent_skills"}:
+            return ["ordinary source reconciliation changed durable agent configuration"]
+        if mutation and mutation.group("table").casefold() in expected and not tables:
+            return ["source-derived model write began with literal or non-source facts"]
+        if tables:
+            derived.append((index, tables))
+
+    payload = _result_payload(calls[0]) or {}
+    results = payload.get("results", [])
+    derived_tables = set().union(*(tables for _index, tables in derived)) if derived else set()
+    effective = expected.issubset(derived_tables) and all(
+        index < len(results)
+        and not _contains_auto_correction(results[index])
+        and re.search(r"\baffected\s+[1-9]\d*\s+rows?\b", json.dumps(results[index]), re.I)
+        for index, _tables in derived
+    )
+    return [] if effective else [
+        "source-derived model write was wrong, recovered within the batch, or affected no rows"
+    ]
+
+
+_DECISION_FIELD_RE = re.compile(r"\b(?:stage|status|owner|next_action|due_on)\b", re.I)
+_AGGREGATE_CALL_RE = re.compile(
+    r"\b(?:avg|count|group_concat|json_group_array|json_group_object|max|min|sum|total)\s*\([^)]*\)",
+    re.I,
+)
+
+
+def _source_relationship_read_failures(
+    sql_values: Iterable[str], parent_table: str, child_table: str,
+) -> list[str]:
+    expected = {parent_table.casefold(), child_table.casefold()}
+    mutated = set()
+    row_reads = {table: [] for table in expected}
+    for sql in sql_values:
+        for statement in sqlparse.split(str(sql or "")):
+            derived = set(source_derived_model_mutation_tables((statement,)))
+            if derived:
+                mutated.update(derived)
+                continue
+            structural = _structural_sql(statement)
+            select_matches = tuple(re.finditer(r"\bselect\b(?P<projection>.*?)\bfrom\b", structural, re.I | re.S))
+            if not select_matches:
+                continue
+            projection = _AGGREGATE_CALL_RE.sub("", select_matches[-1].group("projection"))
+            if "*" not in projection and not _DECISION_FIELD_RE.search(projection):
+                continue
+            for table in expected.intersection(mutated):
+                if _reads_table(structural, table):
+                    row_reads[table].append((structural, projection))
+
+    missing = sorted(table for table, reads in row_reads.items() if not reads)
+    if missing:
+        return [f"updated model did not return decision rows from: {missing}"]
+    if not all(
+        any("*" in projection or re.search(r"\baccount_id\b", statement, re.I) for statement, projection in reads)
+        for reads in row_reads.values()
+    ):
+        return ["model reads did not expose or filter the stable account relationship"]
+    return []
+
+
+def _orphan_completion_failures(run_id, after) -> list[str]:
+    if after is None:
+        return []
+    completions = PersistentAgentCompletion.objects.filter(
+        eval_run_id=run_id,
+        completion_type=PersistentAgentCompletion.CompletionType.ORCHESTRATOR,
+        created_at__gte=after,
+    )
+    completion_ids = set(completions.values_list("id", flat=True))
+    linked_ids = set(
+        PersistentAgentStep.objects.filter(
+            eval_run_id=run_id,
+            created_at__gte=after,
+            completion_id__in=completion_ids,
+            tool_call__isnull=False,
+        ).values_list("completion_id", flat=True)
+    )
+    count = len(completion_ids - linked_ids)
+    return [f"found {count} orphan reasoning completion(s) without an action"] if count else []
+
 
 UNIQUE_MODEL_INDEX_RE = re.compile(r'\bcreate\s+unique\s+index\b[^;]*?\bon\s+"?(?P<table>[a-z_]\w*)"?', re.I | re.S)
 STABLE_IDENTITY_RE = re.compile(r'\bprimary\s+key\b|(?<!["\'`\[])\bunique\b(?!["\'`\]])', re.I)
@@ -707,20 +889,25 @@ class SqliteToolResultScenario(EvalScenario, ScenarioExecutionTools):
     def _record_result_access(self, run_id: str, *, after, task_name: str, source_urls: Iterable[str], reject_duplicate_fetches: bool = False) -> bool:
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name=task_name)
         calls = _tool_calls_for_run(run_id, after=after)
+        fetch_calls = [call for call in calls if call.tool_name in self.result_access_fetch_tools]
+        sqlite_calls = [call for call in calls if call.tool_name == "sqlite_batch"]
         fetch_counts = _source_fetch_counts(calls, tool_names=self.result_access_fetch_tools, source_urls=source_urls)
-        successful_sqlite, strategy_calls = _sqlite_calls_with_persisted_effects([call for call in calls if call.tool_name == "sqlite_batch"])
+        attempt_urls = [str(resolved_tool_param(call, "url") or "").rstrip("/") for call in fetch_calls]
+        duplicate_attempts = [url for url in fetch_counts if attempt_urls.count(url) > 1]
+        successful_sqlite, strategy_calls = _sqlite_calls_with_persisted_effects(sqlite_calls)
         summary = summarize_sqlite_tool_result_calls(strategy_calls)
         missing = [url for url, count in fetch_counts.items() if count == 0]
-        duplicates = [url for url, count in fetch_counts.items() if count > 1]
         read_file_calls = [call for call in calls if call.tool_name == "read_file"]
         oversized_sqlite = [
             len(str(call.result or "").encode("utf-8"))
             for call in successful_sqlite
             if len(str(call.result or "").encode("utf-8")) > self.max_result_access_response_bytes
         ]
-        failures = [message for failed, message in (
+        failures = _tool_attempt_failures(fetch_calls, "Source fetch")
+        failures.extend(_sqlite_attempt_failures(sqlite_calls))
+        failures.extend(message for failed, message in (
             (bool(missing), f"missing source fetches={missing}"),
-            (reject_duplicate_fetches and bool(duplicates), f"duplicate source fetches={duplicates}"),
+            (reject_duplicate_fetches and bool(duplicate_attempts), f"duplicate source fetches={duplicate_attempts}"),
             (bool(read_file_calls), f"read_file used for web results {len(read_file_calls)} time(s)"),
             (self.require_result_access_sqlite and not successful_sqlite, "no successful sqlite_batch call observed"),
             (bool(successful_sqlite) and summary.aggregate_tool_result_queries < 1, "no aggregate __tool_results query observed"),
@@ -729,7 +916,7 @@ class SqliteToolResultScenario(EvalScenario, ScenarioExecutionTools):
                 f"sqlite result-access probes {len(successful_sqlite)} > {self.max_result_access_sqlite_calls}",
             ),
             (bool(oversized_sqlite), f"oversized SQLite result bytes={oversized_sqlite}"),
-        ) if failed]
+        ) if failed)
         evidence = read_file_calls or successful_sqlite[-1:] or strategy_calls or calls
         self.record_task_result(
             run_id,
@@ -1047,34 +1234,30 @@ class SqliteDomainModelRefreshesAndEvolvesScenario(SqliteDomainModelScenario):
             allowed_tool_names={"http_request", "sqlite_batch", "send_chat_message"}, max_relevant_tool_calls=8,
         )
         calls = _tool_calls_for_run(run_id, after=inbound.timestamp)
-        fetches = [
-            call for call in calls
-            if call.tool_name == "http_request" and str(call.status).lower() == "complete"
-            and str(resolved_tool_param(call, "url") or "").rstrip("/") == DOMAIN_REFRESH_URL.rstrip("/")
-        ]
+        sqlite_attempts = [call for call in calls if call.tool_name == "sqlite_batch"]
         sqlite_calls = [
-            call for call in calls if call.tool_name == "sqlite_batch" and str(call.status).lower() == "complete"
+            call for call in sqlite_attempts if str(call.status).lower() == "complete"
         ]
         sql_values = [str((call.tool_params or {}).get("sql") or "") for call in sqlite_calls]
         source_mutations = set(source_derived_model_mutation_tables(sql_values))
-        reconciled_tables = set(source_derived_model_reconciled_tables(sql_values))
         state_failures, child_table = _inspect_domain_refresh_state(agent_id)
+        if PersistentAgent.objects.values_list("charter", flat=True).get(id=agent_id) != self.domain_charter:
+            state_failures.append("ordinary CRM review changed the agent charter")
         expected_tables = {"accounts"}
         if child_table:
             expected_tables.add(child_table.casefold())
-        failures = [message for failed, message in (
-            (len(fetches) != 1, f"expected one source fetch, found {len(fetches)}"),
-            (not sqlite_calls, "new source evidence was not written to the model"),
+        failures = _first_shot_source_phase_failures(calls)
+        failures.extend(_sqlite_attempt_failures(sqlite_attempts))
+        failures.extend(_source_write_effect_failures(sqlite_attempts, expected_tables))
+        if child_table:
+            failures.extend(_source_relationship_read_failures(sql_values, "accounts", child_table))
+        failures.extend(_orphan_completion_failures(run_id, inbound.timestamp))
+        failures.extend(message for failed, message in (
             (
                 not expected_tables.issubset(source_mutations),
                 f"expected source-derived writes to {sorted(expected_tables)}, found {sorted(source_mutations)}",
             ),
-            (
-                not expected_tables.issubset(reconciled_tables),
-                f"updated model was not queried after reconciliation: {sorted(reconciled_tables)}",
-            ),
-            (len(sqlite_calls) > 4, f"SQLite refresh calls were not bounded: {len(sqlite_calls)}"),
-        ) if failed]
+        ) if failed)
         self._record_check(
             run_id, "verify_source_to_model_refresh", failures,
             "Fetched the newer snapshot once, ingested it, and then replied.",
@@ -1152,6 +1335,7 @@ class SqliteBoundedPortfolioReportScenario(SqliteToolResultScenario):
         task_name = "verify_complete_terminal_report"
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name=task_name)
         calls = _tool_calls_for_run(run_id, after=after)
+        send_calls = [call for call in calls if call.tool_name == "send_chat_message"]
         terminal_calls = [
             (index, call)
             for index, call in enumerate(calls)
@@ -1181,10 +1365,11 @@ class SqliteBoundedPortfolioReportScenario(SqliteToolResultScenario):
             and str(getattr(call, "status", "complete")).lower() == "complete"
         }
         fetched_before_final = all(detail_positions.get(url, final_position + 1) < final_position for url in PORTFOLIO_FETCH_URLS)
-        failures = [message for failed, message in (
+        failures = _tool_attempt_failures(send_calls, "Final send")
+        failures.extend(message for failed, message in (
             (bool(missing_associations), f"final report missing/mismatched={missing_associations}"),
             (not fetched_before_final, "terminal report was sent before all available item evidence was fetched"),
-        ) if failed]
+        ) if failed)
         self.record_task_result(
             run_id,
             None,
@@ -1287,7 +1472,7 @@ class SqliteBoundedPortfolioReportScenario(SqliteToolResultScenario):
 
     @classmethod
     def _has_complete_structured_report(cls, body: str) -> bool:
-        return not cls._missing_portfolio_associations(body) and cls._has_coverage_summary(body)
+        return not cls._missing_portfolio_associations(body) and cls._has_complete_comparison_table(body)
 
     @staticmethod
     def _has_complete_comparison_table(body: str) -> bool:
@@ -1303,41 +1488,64 @@ class SqliteBoundedPortfolioReportScenario(SqliteToolResultScenario):
                 if not stripped.startswith("|") or not stripped.endswith("|"):
                     break
                 data_rows.append(stripped)
-            has_full_comparison = all(
-                any(
-                    company.casefold() in row.casefold()
-                    and founder.casefold() in row.casefold()
-                    and background_term.casefold() in row.casefold()
-                    for row in data_rows
+            entity_rows = tuple(
+                tuple(
+                    (index, row)
+                    for index, row in enumerate(data_rows)
+                    if company.casefold() in row.casefold()
                 )
-                for _slug, company, founder, background_term, _background in PORTFOLIO_COMPANIES
+                for _slug, company, _founder, _background_term, _background in PORTFOLIO_COMPANIES
             )
-            if has_full_comparison and SqliteBoundedPortfolioReportScenario._has_coverage_summary(body):
+            complete_rows = all(
+                len(rows) == 1
+                and all(term.casefold() in rows[0][1].casefold() for term in (company, founder, background_term))
+                for rows, (_slug, company, founder, background_term, _background) in zip(
+                    entity_rows,
+                    PORTFOLIO_COMPANIES,
+                )
+            )
+            distinct_rows = len({rows[0][0] for rows in entity_rows if rows}) == len(PORTFOLIO_COMPANIES)
+            summary = "\n".join((
+                *lines[:separator_index - 1],
+                *lines[separator_index + 1 + len(data_rows):],
+            ))
+            if complete_rows and distinct_rows and SqliteBoundedPortfolioReportScenario._has_coverage_summary(summary):
                 return True
         return False
 
     @staticmethod
     def _has_coverage_summary(body: str) -> bool:
-        mentions_founders = re.search(r"\bfounders?\b", body, re.I)
-        partial_coverage = (
-            re.search(r"\b(?:7\s*/\s*8|(?:7|seven)\s+of\s+(?:the\s+)?(?:8|eight))\b", body, re.I)
-            or (
-                re.search(r"\b(?:7|seven)\b", body, re.I)
-                and re.search(
-                    r"\b(?:1|one)\b.*\b(?:nondisclos|undisclos|unavailable|unresolved|block)",
-                    body,
-                    re.I | re.S,
-                )
+        seven = r"(?:7|seven)"
+        eight = r"(?:8|eight)"
+        company = r"compan(?:y|ies)"
+        state = r"(?:resolved|accounted\s+for|covered)"
+        explicit_total = (
+            re.search(
+                rf"\b{state}\b[^\n]{{0,40}}\b(?:8\s*/\s*8|all\s+{eight})\b[^\n]{{0,30}}\b{company}\b",
+                body,
+                re.I,
+            )
+            or re.search(
+                rf"\b(?:8\s*/\s*8|all\s+{eight})\b[^\n]{{0,30}}\b{company}\b[^\n]{{0,40}}\b{state}\b",
+                body,
+                re.I,
             )
         )
-        incorrect_coverage = re.search(
-            r"\b(?:[0-6]|8|zero|one|two|three|four|five|six|eight)\s+founders?\s+(?:were\s+)?identified\b",
+        founder_coverage = any(re.search(pattern, body, re.I) for pattern in (
+            rf"\b{seven}\s+(?:named\s+)?founders?\s+(?:were\s+)?(?:identified|known|named)\b",
+            rf"\b{seven}\s+of\s+(?:the\s+)?{eight}\s+{company}\b[^\n]{{0,50}}"
+            r"\b(?:named\s+founders?|founders?\s+(?:identified|known|named))\b",
+            rf"\b{seven}\s*(?:of\s+(?:the\s+)?{eight}|/\s*8)\s+(?:named\s+)?founders?\b"
+            r"[^\n]{0,35}\b(?:identified|known|named|found|confirmed|sourced)\b",
+            rf"\b(?:identified|named|found|confirmed|sourced)\b[^\n]{{0,25}}\bfounders?\b"
+            rf"[^\n]{{0,25}}\b(?:for|at)\s+{seven}\s+of\s+(?:the\s+)?{eight}\s+(?:portfolio\s+)?{company}\b",
+            rf"\bfounders?\b[^\n]{{0,20}}\b(?:identified|named|known|confirmed|sourced)\b"
+            rf"[^\n]{{0,25}}\b(?:for|at)\s+{seven}\s+of\s+(?:the\s+)?{eight}\s+(?:portfolio\s+)?{company}\b",
+        ))
+        blocker = re.search(
+            r"\b(?:1|one)\b[^\n]{0,80}\b(?:nondisclos|undisclos|not\s+publicly\s+disclosed|unavailable|unresolved|block)",
             body,
             re.I,
         )
-        complete_listing_with_blocker = (
-            all(company.casefold() in body.casefold() for _slug, company, *_rest in PORTFOLIO_COMPANIES)
-            and re.search(r"\b(?:not publicly disclosed|undisclosed|nondisclos)", body, re.I)
-            and not incorrect_coverage
-        )
-        return bool(mentions_founders and (partial_coverage or complete_listing_with_blocker))
+        nondisclosure = re.search(r"\b(?:nondisclos|undisclos|not\s+publicly\s+disclosed)\b", body, re.I)
+        return bool(explicit_total or (founder_coverage and (blocker or nondisclosure)))
