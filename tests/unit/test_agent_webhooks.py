@@ -595,7 +595,7 @@ class AgentWebhookManagementToolTests(TestCase):
         self.assertNotIn("System Skill: Webhooks", format_recent_skills_for_prompt(self.agent))
         self.assertFalse(PersistentAgentEnabledTool.objects.filter(agent=self.agent).exists())
 
-    def test_webhook_tools_are_unavailable_in_planning_mode(self):
+    def test_webhook_tools_are_available_in_planning_mode(self):
         webhook_tools = {
             "manage_inbound_webhooks",
             "manage_outbound_webhooks",
@@ -609,9 +609,9 @@ class AgentWebhookManagementToolTests(TestCase):
             definition["function"]["name"]
             for definition in get_enabled_tool_definitions(self.agent)
         }
-        self.assertTrue(webhook_tools.isdisjoint(enabled_names))
+        self.assertTrue(webhook_tools.issubset(enabled_names))
         for tool_name in webhook_tools:
-            self.assertTrue(planning_mode_disallows_tool(self.agent, tool_name))
+            self.assertFalse(planning_mode_disallows_tool(self.agent, tool_name))
 
     def test_webhook_system_skill_context_distinguishes_directions_without_urls(self):
         inbound = PersistentAgentInboundWebhook.objects.create(agent=self.agent, name="Aimfox inbound")
