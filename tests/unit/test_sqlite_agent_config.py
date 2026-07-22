@@ -374,3 +374,48 @@ class SqliteAgentConfigTests(TestCase):
                 "emotion_timeout_seconds",
             )
         )
+
+    def test_sqlite_agent_config_rejects_new_literal_newlines(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            db_path = os.path.join(tmp_dir, "state.db")
+            token = set_sqlite_db_path(db_path)
+            try:
+                snapshot = seed_sqlite_agent_config(self.agent)
+                with sqlite3.connect(db_path) as conn:
+                    conn.execute(
+                        f'UPDATE "{AGENT_CONFIG_TABLE}" SET charter = ? WHERE id = 1;',
+                        ("Updated charter\\n- Broken bullet",),
+                    )
+                with patch("api.agent.tools.sqlite_agent_config.execute_update_charter") as update_charter:
+                    result = apply_sqlite_agent_config_updates(self.agent, snapshot)
+            finally:
+                reset_sqlite_db_path(token)
+
+        update_charter.assert_not_called()
+        self.agent.refresh_from_db()
+        self.assertEqual(self.agent.charter, "Original charter")
+        self.assertIn("literal \\n", result.errors["charter"])
+        self.assertNotIn("charter", result.updated_fields)
+
+    def test_sqlite_agent_config_allows_reducing_legacy_literal_newlines(self):
+        self.agent.charter = "Original\\n- Legacy bullet\\n- Another bullet"
+        self.agent.save(update_fields=["charter"])
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            db_path = os.path.join(tmp_dir, "state.db")
+            token = set_sqlite_db_path(db_path)
+            try:
+                snapshot = seed_sqlite_agent_config(self.agent)
+                with sqlite3.connect(db_path) as conn:
+                    conn.execute(
+                        f'UPDATE "{AGENT_CONFIG_TABLE}" SET charter = ? WHERE id = 1;',
+                        ("Updated\n- Clean bullet\\n- Remaining legacy bullet",),
+                    )
+                result = apply_sqlite_agent_config_updates(self.agent, snapshot)
+            finally:
+                reset_sqlite_db_path(token)
+
+        self.agent.refresh_from_db()
+        self.assertEqual(self.agent.charter, "Updated\n- Clean bullet\\n- Remaining legacy bullet")
+        self.assertIn("charter", result.updated_fields)
+        self.assertFalse(result.errors)

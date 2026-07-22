@@ -17,6 +17,7 @@ from ..emotions import (
     MAX_EMOTION_TIMEOUT_SECONDS,
     normalize_emotion_update,
 )
+from .charter_text import count_literal_newlines
 from .charter_updater import execute_update_charter
 from .schedule_updater import execute_update_schedule
 from .sqlite_guardrails import clear_guarded_connection, open_guarded_sqlite_connection
@@ -275,16 +276,26 @@ def apply_sqlite_agent_config_updates(
             schedules=baseline.schedules,
         )
 
-    if _normalize_charter(current.charter) != _normalize_charter(baseline.charter):
-        result = execute_update_charter(agent, {"new_charter": _normalize_charter(current.charter)})
-        if isinstance(result, dict) and result.get("status") == "ok":
-            updated_fields.append("charter")
-        else:
+    normalized_current_charter = _normalize_charter(current.charter)
+    normalized_baseline_charter = _normalize_charter(baseline.charter)
+    if normalized_current_charter != normalized_baseline_charter:
+        if count_literal_newlines(normalized_current_charter) > count_literal_newlines(
+            normalized_baseline_charter
+        ):
             errors["charter"] = (
-                result.get("message", "Charter update failed.")
-                if isinstance(result, dict)
-                else "Charter update failed."
+                "Charter update rejected because it introduced literal \\n text. "
+                "Use actual newline characters in charter Markdown."
             )
+        else:
+            result = execute_update_charter(agent, {"new_charter": normalized_current_charter})
+            if isinstance(result, dict) and result.get("status") == "ok":
+                updated_fields.append("charter")
+            else:
+                errors["charter"] = (
+                    result.get("message", "Charter update failed.")
+                    if isinstance(result, dict)
+                    else "Charter update failed."
+                )
 
     if (
         current.emotion_write_count != baseline.emotion_write_count

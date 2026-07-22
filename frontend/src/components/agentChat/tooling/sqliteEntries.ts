@@ -3,6 +3,7 @@ import { CalendarClock, FileCheck2, Workflow } from 'lucide-react'
 import type { ToolCallEntry } from '../../../types/agentChat'
 import { summarizeSchedule } from '../../../util/schedule'
 import { parseAgentConfigUpdates } from '../../tooling/agentConfigSql'
+import { parseAgentConfigUpdateConfirmation } from '../../tooling/agentConfigResult'
 import { extractSqliteGroupedResult } from '../../tooling/sqliteDisplay'
 import { AgentConfigUpdateDetail } from '../toolDetails'
 import type { ToolDisplayOptions, ToolEntryDisplay } from './types'
@@ -24,18 +25,34 @@ export function buildAgentConfigEntry(
   options: ToolDisplayOptions = {},
 ): ToolEntryDisplay | null {
   const parsedUpdate = parseAgentConfigUpdates(statements)
-  if (!parsedUpdate) {
+  const confirmation = entry.status === 'complete'
+    ? parseAgentConfigUpdateConfirmation(entry.result)
+    : null
+  if (!parsedUpdate || !confirmation) {
     return null
   }
 
   const {
-    updatesCharter,
-    updatesSchedule,
     charterValue,
     charterChange,
     scheduleValue,
     scheduleCleared,
   } = parsedUpdate
+  const charterConfirmation = parsedUpdate.updatesCharter ? confirmation.charter ?? null : null
+  const scheduleConfirmation = parsedUpdate.updatesSchedule ? confirmation.schedule ?? null : null
+  const updatesCharter = charterConfirmation !== null
+  const updatesSchedule = scheduleConfirmation !== null
+  if (!updatesCharter && !updatesSchedule) {
+    return null
+  }
+
+  const confirmedUpdate = {
+    ...parsedUpdate,
+    updatesCharter,
+    updatesSchedule,
+    charterValue: updatesCharter ? charterValue : null,
+    charterChange: charterConfirmation === 'updated' ? charterChange : null,
+  }
   const scheduleKnown = scheduleCleared || scheduleValue !== null
   const hasCharterSnapshot = typeof entry.charterText === 'string'
   const resolvedCharter = hasCharterSnapshot ? entry.charterText : charterValue
@@ -50,6 +67,9 @@ export function buildAgentConfigEntry(
     : scheduleSummary
       ? `Schedule set to ${scheduleSummary}.`
       : 'Schedule updated.'
+  const confirmedScheduleSummary = scheduleConfirmation === 'updated'
+    ? scheduleSummaryText
+    : 'Schedule already current.'
 
   let label = 'Database query'
   let caption: string | null = null
@@ -59,26 +79,24 @@ export function buildAgentConfigEntry(
   let iconColorClass = 'text-indigo-600'
 
   if (updatesCharter && updatesSchedule) {
-    label = 'Assignment and schedule updated'
-    caption = `Assignment updated • ${scheduleCleared ? 'Schedule disabled' : scheduleSummary ?? 'Schedule updated'}`
-    summary = scheduleCleared
-      ? 'Assignment updated. Schedule disabled.'
-      : scheduleSummary
-        ? `Assignment updated. Schedule set to ${scheduleSummary}.`
-        : 'Assignment and schedule updated.'
+    const assignmentLabel = charterConfirmation === 'updated' ? 'Assignment updated' : 'Assignment already current'
+    const scheduleLabel = scheduleConfirmation === 'updated' ? 'schedule updated' : 'schedule already current'
+    label = `${assignmentLabel} and ${scheduleLabel}`
+    caption = `${assignmentLabel} • ${scheduleCleared ? 'Schedule disabled' : scheduleSummary ?? scheduleLabel}`
+    summary = `${assignmentLabel}. ${confirmedScheduleSummary}`
   } else if (updatesCharter) {
-    label = 'Assignment updated'
+    label = charterConfirmation === 'updated' ? 'Assignment updated' : 'Assignment already current'
     caption = charterCaption
       ? truncate(charterCaption, 48)
       : hasCharterSnapshot || charterValue === ''
         ? 'Assignment cleared'
-        : 'Assignment updated'
-    summary = 'Assignment updated.'
+        : label
+    summary = `${label}.`
     icon = FileCheck2
   } else if (updatesSchedule) {
-    label = 'Schedule updated'
+    label = scheduleConfirmation === 'updated' ? 'Schedule updated' : 'Schedule already current'
     caption = scheduleCaption
-    summary = scheduleSummaryText
+    summary = confirmedScheduleSummary
     icon = CalendarClock
     iconBgClass = 'bg-sky-100'
     iconColorClass = 'text-sky-600'
@@ -103,8 +121,9 @@ export function buildAgentConfigEntry(
     rawParameters: entry.parameters,
     result: extractSqliteGroupedResult(entry.result, statementIndexes),
     summary,
-    charterText: resolvedCharter ?? null,
-    agentConfigUpdate: parsedUpdate,
+    charterText: updatesCharter ? resolvedCharter ?? null : null,
+    agentConfigUpdate: confirmedUpdate,
+    agentConfigConfirmation: confirmation,
     sqlStatements: statements,
     detailComponent: AgentConfigUpdateDetail,
     meta: entry.meta,

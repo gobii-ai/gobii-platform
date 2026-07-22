@@ -149,6 +149,84 @@ class SqliteBatchToolTests(TestCase):
         self.assertEqual(ambiguous.get("status"), "error")
         self.assertIn("matched 2 times", ambiguous.get("message", ""))
 
+    def test_config_patch_preview_is_blocked_before_batch_execution(self):
+        with self._with_temp_db() as (db_path, _token, _tmp):
+            out = execute_sqlite_batch(
+                self.agent,
+                {
+                    "sql": (
+                        "CREATE TABLE should_not_exist(value TEXT); "
+                        "SELECT patch_text(charter, 'old', 'new') FROM __agent_config"
+                    ),
+                    "will_continue_work": True,
+                },
+            )
+            with sqlite3.connect(db_path) as conn:
+                table = conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name='should_not_exist'"
+                ).fetchone()
+
+        self.assertEqual(out.get("status"), "error")
+        self.assertEqual(out.get("error_code"), "config_patch_not_persisted")
+        self.assertIs(out.get("retryable"), True)
+        self.assertIn("UPDATE __agent_config SET charter=patch_text", out.get("message", ""))
+        self.assertIsNone(table)
+
+    def test_non_config_patch_text_preview_remains_available(self):
+        with self._with_temp_db():
+            out = execute_sqlite_batch(
+                self.agent,
+                {
+                    "sql": "SELECT patch_text('Keep A.', 'Keep A.', 'Use B.') AS preview",
+                    "will_continue_work": True,
+                },
+            )
+
+        self.assertEqual(out.get("status"), "ok")
+        self.assertEqual(out["results"][0]["result"], [{"preview": "Use B."}])
+
+    def test_patch_text_must_mutate_agent_config_itself(self):
+        with self._with_temp_db():
+            out = execute_sqlite_batch(
+                self.agent,
+                {
+                    "sql": (
+                        "UPDATE another_table SET value=(SELECT patch_text(charter, 'old', 'new') "
+                        "FROM __agent_config)"
+                    ),
+                    "will_continue_work": True,
+                },
+            )
+
+        self.assertEqual(out.get("error_code"), "config_patch_not_persisted")
+
+    def test_agent_config_patch_update_persists(self):
+        with self._with_temp_db() as (db_path, _token, _tmp):
+            with sqlite3.connect(db_path) as conn:
+                conn.execute(
+                    "CREATE TABLE __agent_config(id INTEGER PRIMARY KEY, charter TEXT, schedule TEXT)"
+                )
+                conn.execute(
+                    "INSERT INTO __agent_config(id, charter) VALUES (1, 'Old charter')"
+                )
+            out = execute_sqlite_batch(
+                self.agent,
+                {
+                    "sql": (
+                        "UPDATE __agent_config SET charter=patch_text("
+                        "charter, 'Old charter', 'New charter') WHERE id=1"
+                    ),
+                    "will_continue_work": True,
+                },
+            )
+            with sqlite3.connect(db_path) as conn:
+                charter = conn.execute(
+                    "SELECT charter FROM __agent_config WHERE id=1"
+                ).fetchone()[0]
+
+        self.assertEqual(out.get("status"), "ok")
+        self.assertEqual(charter, "New charter")
+
     def test_single_query_field_is_normalized(self):
         with self._with_temp_db():
             out = execute_sqlite_batch(self.agent, {"sql": "SELECT 42 AS answer"})

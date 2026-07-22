@@ -219,6 +219,7 @@ export function AgentConfigUpdateDetail({ entry }: ToolDetailProps) {
   const parsedUpdate = entry.agentConfigUpdate
   const charterText = entry.charterText ?? parsedUpdate?.charterValue ?? null
   const charterChange = parsedUpdate?.charterChange ?? null
+  const charterConfirmation = entry.agentConfigConfirmation?.charter ?? null
   const hasCharterText = charterText !== null
   const updatesCharter = Boolean(parsedUpdate?.updatesCharter || hasCharterText || charterChange)
   const updatesSchedule = parsedUpdate?.updatesSchedule ?? false
@@ -236,7 +237,9 @@ export function AgentConfigUpdateDetail({ entry }: ToolDetailProps) {
       {updatesCharter && charterChange ? <CharterChangeDetail change={charterChange} /> : null}
       {updatesCharter && hasCharterText ? (
         <div className="space-y-2">
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Updated assignment</p>
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+            {charterConfirmation === 'unchanged' ? 'Assignment already current' : 'Updated assignment'}
+          </p>
           {charterText ? (
             <TruncatedMarkdown content={charterText} maxLines={3} />
           ) : (

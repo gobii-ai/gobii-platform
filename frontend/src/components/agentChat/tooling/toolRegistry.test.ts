@@ -64,6 +64,36 @@ function clusterForApplyPatch(): ToolClusterEvent {
   }
 }
 
+function clusterForAgentConfig(options: {
+  sql?: string
+  status?: 'pending' | 'complete' | 'error'
+  result?: unknown
+  charterText?: string | null
+} = {}): ToolClusterEvent {
+  return {
+    kind: 'steps',
+    cursor: 'step:config',
+    entryCount: 1,
+    collapsible: false,
+    collapseThreshold: 4,
+    earliestTimestamp: '2026-01-01T00:00:00Z',
+    latestTimestamp: '2026-01-01T00:00:00Z',
+    entries: [{
+      id: 'tool-call-config',
+      cursor: 'step:config',
+      timestamp: '2026-01-01T00:00:00Z',
+      toolName: 'sqlite_batch',
+      meta: { label: 'Database query' },
+      parameters: {
+        sql: options.sql ?? "UPDATE __agent_config SET charter=patch_text(charter, 'Old text', 'New text') WHERE id=1",
+      },
+      result: options.result ?? '',
+      status: options.status ?? 'complete',
+      charterText: options.charterText,
+    }],
+  }
+}
+
 describe('transformToolCluster Google API display', () => {
   it('preserves raw developer tool names and payloads', () => {
     const cluster = clusterForRequest('https://example.com')
@@ -262,6 +292,89 @@ describe('transformToolCluster Google API display', () => {
       label: 'Update HubSpot deal',
       caption: 'PATCH • deal_123',
       iconSrc: '/static/images/integrations/native/hubspot.svg',
+    })
+  })
+})
+
+describe('transformToolCluster agent config display', () => {
+  it.each([
+    ['pending update', clusterForAgentConfig({ status: 'pending' })],
+    ['failed update', clusterForAgentConfig({ status: 'error', result: { status: 'error' } })],
+    ['unconfirmed successful update', clusterForAgentConfig({ result: { status: 'ok' } })],
+    ['patch preview', clusterForAgentConfig({
+      sql: "SELECT patch_text(charter, 'Old text', 'New text') FROM __agent_config WHERE id=1",
+      result: { status: 'ok', results: [] },
+    })],
+  ])('keeps a %s as a database query', (_name, cluster) => {
+    const transformed = transformToolCluster(cluster)
+
+    expect(transformed.entries).toHaveLength(1)
+    expect(transformed.entries[0]).toMatchObject({ label: 'Database query' })
+  })
+
+  it('renders a confirmed charter update with its persisted snapshot', () => {
+    const transformed = transformToolCluster(clusterForAgentConfig({
+      charterText: 'Full persisted assignment',
+      result: {
+        status: 'ok',
+        agent_config_update: {
+          updated_fields: ['charter'],
+          unchanged_fields: [],
+          errors: {},
+        },
+      },
+    }))
+
+    expect(transformed.entries).toHaveLength(1)
+    expect(transformed.entries[0]).toMatchObject({
+      label: 'Assignment updated',
+      charterText: 'Full persisted assignment',
+      agentConfigConfirmation: { charter: 'updated' },
+    })
+  })
+
+  it('labels an error-free unchanged charter as already current', () => {
+    const transformed = transformToolCluster(clusterForAgentConfig({
+      charterText: 'Full persisted assignment',
+      result: JSON.stringify({
+        status: 'ok',
+        agent_config_update: {
+          updated_fields: [],
+          unchanged_fields: ['charter'],
+          errors: {},
+        },
+      }),
+    }))
+
+    expect(transformed.entries[0]).toMatchObject({
+      label: 'Assignment already current',
+      agentConfigConfirmation: { charter: 'unchanged' },
+    })
+    expect(transformed.entries[0].agentConfigUpdate?.charterChange).toBeNull()
+  })
+
+  it('suppresses a failed charter field while displaying a confirmed schedule field', () => {
+    const transformed = transformToolCluster(clusterForAgentConfig({
+      sql: "UPDATE __agent_config SET charter='Rejected', schedule='0 9 * * *' WHERE id=1",
+      result: {
+        status: 'ok',
+        agent_config_update: {
+          updated_fields: ['charter', 'schedule'],
+          unchanged_fields: [],
+          errors: { charter: 'Rejected charter' },
+        },
+      },
+    }))
+
+    expect(transformed.entries).toHaveLength(1)
+    expect(transformed.entries[0]).toMatchObject({
+      label: 'Schedule updated',
+      agentConfigConfirmation: { schedule: 'updated' },
+      agentConfigUpdate: {
+        updatesCharter: false,
+        updatesSchedule: true,
+      },
+      charterText: null,
     })
   })
 })

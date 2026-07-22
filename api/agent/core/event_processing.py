@@ -2581,6 +2581,23 @@ def _annotate_agent_config_update_result(
     target.result = result
 
 
+def _tool_result_confirms_charter_patch(result: Any) -> bool:
+    if not _tool_result_is_success(result) or not isinstance(result, dict):
+        return False
+    config_update = result.get("agent_config_update")
+    if not isinstance(config_update, dict):
+        return False
+    errors = config_update.get("errors")
+    if isinstance(errors, dict) and errors.get("charter"):
+        return False
+    confirmed_fields = {
+        str(field)
+        for key in ("updated_fields", "unchanged_fields")
+        for field in (config_update.get(key) or [])
+    }
+    return "charter" in confirmed_fields
+
+
 def _user_text_has_durable_config_intent(text: str) -> bool:
     normalized = " ".join((text or "").split())
     if TRANSIENT_CONFIG_SCOPE_RE.search(normalized) and not STRONG_DURABLE_CONFIG_INTENT_RE.search(normalized):
@@ -7153,15 +7170,16 @@ def _run_agent_loop(
 
                 if not executed_batch.abort_after_execution or _get_processing_abort_reason(agent.id) is None:
                     runtime_errors, config_apply = _apply_runtime_updates()
-                    if direct_correction_patch_this_response:
-                        direct_correction_reply_pending = not config_apply.errors and any(
-                            outcome.prepared.tool_name == "sqlite_batch" and _tool_result_is_success(outcome.result)
-                            for outcome in executed_batch.execution_outcomes
-                        )
                     _annotate_agent_config_update_result(
                         executed_batch.execution_outcomes,
                         config_apply,
                     )
+                    if direct_correction_patch_this_response:
+                        direct_correction_reply_pending = any(
+                            outcome.prepared.tool_name == "sqlite_batch"
+                            and _tool_result_confirms_charter_patch(outcome.result)
+                            for outcome in executed_batch.execution_outcomes
+                        )
 
                 finalized_batch = _finalize_tool_batch(
                     agent,
