@@ -15,6 +15,7 @@ const CHANNEL_LABELS: Record<string, string> = {
   slack: 'Slack',
   discord: 'Discord',
   web: 'Web',
+  mcp: 'MCP',
   other: 'Other',
 }
 
@@ -125,8 +126,8 @@ export const MessageEventCard = memo(function MessageEventCard({
       || isViewerEmailSender)
 
   let authorLabel = isAgent ? agentFirstName || 'Agent' : (isViewerSender ? 'You' : (message.senderName?.trim() || 'User'))
-  if (isWebhook) {
-    authorLabel = message.sourceLabel?.trim() || message.senderName?.trim() || 'Webhook'
+  if (isWebhook || sourceKind === 'mcp') {
+    authorLabel = message.sourceLabel?.trim() || message.senderName?.trim() || (isWebhook ? 'Webhook' : 'Gobii MCP')
   }
   if (isPeer) {
     authorLabel = peerDirectionLabel

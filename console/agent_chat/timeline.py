@@ -314,7 +314,7 @@ def _build_web_user_lookup(messages: Iterable[PersistentAgentMessage]) -> dict[i
             channel = message.conversation.channel
         elif message.from_endpoint_id:
             channel = message.from_endpoint.channel
-        if channel.lower() != "web":
+        if channel.lower() != "web" or get_message_source_metadata(message.raw_payload)[0] == "mcp":
             continue
         from_endpoint = message.from_endpoint
         if not from_endpoint:
@@ -500,6 +500,7 @@ def _serialize_message(
     attachments = [_serialize_attachment(att, message.owner_agent_id) for att in message.attachments.all()]
     conversation = message.conversation
     source_kind, source_label = get_message_source_metadata(message.raw_payload)
+    is_mcp = source_kind == "mcp"
     discord_channel_label = ""
     if channel.lower() == CommsChannel.DISCORD.value:
         discord_channel_label = _discord_channel_label(message, conversation)
@@ -527,7 +528,7 @@ def _serialize_message(
     sender_user_id: int | None = None
     sender_name: str | None = None
     sender_address = message.from_endpoint.address if message.from_endpoint_id else None
-    if channel.lower() == "web" and sender_address:
+    if not is_mcp and channel.lower() == "web" and sender_address:
         user_id, agent_id = parse_web_user_address(sender_address)
         if user_id is not None and (not agent_id or not message.owner_agent_id or str(message.owner_agent_id) == agent_id):
             sender_user_id = user_id
@@ -571,7 +572,7 @@ def _serialize_message(
             "bodyText": message.body or "",
             "subject": subject,
             "isOutbound": bool(message.is_outbound),
-            "channel": channel,
+            "channel": "mcp" if is_mcp else channel,
             "attachments": attachments,
             "timestamp": _format_timestamp(timestamp),
             "relativeTimestamp": _relative_timestamp(timestamp),
@@ -579,9 +580,9 @@ def _serialize_message(
             "peerAgent": peer_payload,
             "peerLinkId": peer_link_id,
             "selfAgentName": self_agent_name,
-            "senderUserId": sender_user_id,
+            "senderUserId": None if is_mcp else sender_user_id,
             "senderName": sender_name,
-            "senderAddress": sender_address,
+            "senderAddress": None if is_mcp else sender_address,
             "sourceKind": source_kind,
             "sourceLabel": source_label,
             "channelLabel": discord_channel_label or None,

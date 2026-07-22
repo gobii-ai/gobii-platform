@@ -25,7 +25,6 @@ from api.models import (
     PersistentAgent,
     PersistentAgentCommsEndpoint,
     PersistentAgentEmailEndpoint,
-    PersistentAgentMessage,
     PersistentAgentSystemSkillState,
 )
 
@@ -88,8 +87,8 @@ class MetaGobiiSystemSkillTests(TestCase):
         self.assertIn("non-duplicated proposal", definition.prompt_instructions)
         self.assertIn("execute only that approved scope", definition.prompt_instructions)
         self.assertIn("avoid echoing full email addresses or phone numbers", definition.prompt_instructions)
-        self.assertIn("Use meta_gobii_send_agent_message only for control-plane", definition.prompt_instructions)
-        self.assertIn("use send_agent_message for questions, handoffs", definition.prompt_instructions)
+        self.assertIn("There is no unlinked control-plane message fallback", definition.prompt_instructions)
+        self.assertIn("use send_agent_message for the initial briefing", definition.prompt_instructions)
 
         for query in [
             "help me create a team of Gobiis, link them, and brief them",
@@ -124,10 +123,10 @@ class MetaGobiiSystemSkillTests(TestCase):
                 "meta_gobii_create_agent",
                 "meta_gobii_request_agent_creation",
                 "meta_gobii_link_agents",
-                "meta_gobii_send_agent_message",
                 "meta_gobii_wait_for_agent_event",
             }.issubset(after_names)
         )
+        self.assertNotIn("meta_gobii_send_agent_message", after_names)
         self.assertNotIn("spawn_agent", after_names)
 
     def test_direct_tool_execution_requires_skill_state(self):
@@ -425,42 +424,15 @@ class MetaGobiiDirectToolTests(TestCase):
         self.assertIsNotNone(updated_tools)
         self.assertNotIn("send_agent_message", _tool_names(updated_tools))
 
-    @patch("api.agent.tasks.process_agent_events_task.delay")
-    def test_send_agent_message_requires_confirmation_then_injects_internal_web_message(self, mock_delay):
-        blocked = execute_meta_gobii_tool(
+    def test_removed_control_plane_message_tool_is_rejected(self):
+        result = execute_meta_gobii_tool(
             self.manager,
             "meta_gobii_send_agent_message",
-            {
-                "agent_id": str(self.peer.id),
-                "body": "Briefing: focus on recruiting signal and report blockers.",
-                "trigger_processing": True,
-            },
-        )
-        _assert_confirmation_required(self, blocked)
-        self.assertFalse(
-            PersistentAgentMessage.objects.filter(
-                owner_agent=self.peer,
-                body__contains="recruiting signal",
-            ).exists()
+            {"agent_id": str(self.peer.id), "body": "Brief the peer."},
         )
 
-        with self.captureOnCommitCallbacks(execute=True):
-            result = execute_meta_gobii_tool(
-                self.manager,
-                "meta_gobii_send_agent_message",
-                {
-                    "agent_id": str(self.peer.id),
-                    "body": "Briefing: focus on recruiting signal and report blockers.",
-                    "trigger_processing": True,
-                    "user_confirmed": True,
-                },
-            )
-
-        self.assertEqual(result["status"], "queued")
-        message = PersistentAgentMessage.objects.get(id=result["message_id"])
-        self.assertEqual(message.owner_agent_id, self.peer.id)
-        self.assertIn("recruiting signal", message.body)
-        mock_delay.assert_called_once_with(str(self.peer.id))
+        self.assertEqual(result["status"], "error")
+        self.assertIn("Unknown Meta Gobii tool", result["message"])
 
     def test_contacts_pending_requests_and_endpoints(self):
         blocked_add = execute_meta_gobii_tool(

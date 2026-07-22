@@ -53,7 +53,7 @@ def _implicit_research_team_plan_args(schedule_policy=None):
             "meta_gobii_get_agent_config_options",
             "meta_gobii_create_agent",
             "meta_gobii_link_agents",
-            "meta_gobii_send_agent_message",
+            "send_agent_message",
         ],
         "tools_before_approval": ["meta_gobii_get_agent_config_options"],
         "needs_human_confirmation": True,

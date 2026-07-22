@@ -568,7 +568,7 @@ TOOL_DEFINITIONS = [
     {
         "name": "gobii_send_agent_message",
         "title": "Send Agent Message",
-        "description": "Send a web-chat message to a persistent agent and optionally attach existing filespace files.",
+        "description": "Send an authenticated Gobii MCP message to a persistent agent and optionally attach existing filespace files.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -757,8 +757,8 @@ TOOL_DEFINITIONS = [
                             "enum": ["agent", "human_user", "external", "system"],
                             "description": (
                                 "Actor source derived from the serialized timeline event: agent for outbound or peer "
-                                "messages, human_user for inbound web user messages, external for other inbound "
-                                "messages, and system for steps/thinking/plan events."
+                                "messages, human_user for inbound web user messages, external for MCP and other "
+                                "inbound messages, and system for steps/thinking/plan events."
                             ),
                         },
                         "from_agent_id": _agent_schema(
@@ -782,7 +782,7 @@ TOOL_DEFINITIONS = [
                         },
                         "channel": {
                             "type": "string",
-                            "description": "Message channel from the serialized timeline event, such as web, email, or sms.",
+                            "description": "Message channel from the serialized timeline event, such as mcp, web, email, or sms.",
                         },
                         "status": {"type": "string", "description": "Tool-call status for steps events."},
                         "tool_name": {"type": "string", "description": "Tool name for steps events."},
@@ -1198,6 +1198,9 @@ def _tool_send_agent_message(request, arguments):
             sender_user_id=sender_user.id,
             attachments=[],
             trigger_processing=False,
+            source="remote_mcp",
+            source_kind="mcp",
+            source_label="Gobii MCP",
         )
         create_message_attachments(message, resolved_attachments)
         if trigger_processing:
@@ -1217,9 +1220,8 @@ def _tool_send_agent_message(request, arguments):
             "latest_cursor": cursor,
             "created_at": _iso(message.timestamp),
             "actor": {
-                "type": "human_user",
+                "type": "external",
                 "source": "remote_mcp",
-                "user_id": sender_user.id,
             },
             "message": _serialize_message(message),
             "timeline_event": event,

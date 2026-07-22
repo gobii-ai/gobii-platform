@@ -919,7 +919,7 @@ META_GOBII_SYSTEM_SKILL = SystemSkillDefinition(
         "request Gobii creation through the existing human Create/Decline approval flow",
         "configure name, charter, schedule, active state, intelligence tier, daily credit limits, whitelist policy, and proactive opt-in",
         "create, list, update, and remove peer-agent links with message-window limits",
-        "send briefings to Gobiis and read or wait on their timelines",
+        "link Gobiis for peer briefings and read or wait on their timelines",
         "upload and list files in a Gobii filespace",
         "manage contacts, allowlists, pending contact requests, contact endpoints, and preferred owner-safe endpoints",
     ),
@@ -991,8 +991,8 @@ META_GOBII_SYSTEM_SKILL = SystemSkillDefinition(
         "Human approval boundary: before making any control-plane mutation, ask the human to approve a concise "
         "summary of the proposed change. Mutations include creating, updating, archiving, linking, unlinking, "
         "briefing or messaging Gobiis, uploading files, adding/removing/approving contacts, changing preferred "
-        "contact endpoints, and changing schedules, resources, or intelligence tiers. Pass user_confirmed=true "
-        "only after that explicit approval. For broad operations involving multiple Gobiis, first summarize the "
+        "contact endpoints, and changing schedules, resources, or intelligence tiers. After explicit approval, set "
+        "user_confirmed=true only on Meta Gobii tools that expose it. For broad multi-Gobii operations, first summarize the "
         "scope and wait for higher-level confirmation.\n"
         "For initial team creation or team-management capability tests, do not create, link, brief, schedule, or "
         "message anything yet. First produce one concise non-duplicated proposal with exactly the requested team scope: role names, "
@@ -1010,9 +1010,11 @@ META_GOBII_SYSTEM_SKILL = SystemSkillDefinition(
         "and cadence/removal in the approval summary. Existing-agent schedule changes require explicit user intent "
         "and approval. If the user approved a scope that omitted schedules, keep schedules out of tool arguments.\n"
         "For team creation after approval, inspect config options and existing agents when useful, then create the "
-        "requested Gobiis, link them, and brief each one. Use meta_gobii_send_agent_message only for control-plane "
-        "briefings when this invoking Gobii is not a linked endpoint; use send_agent_message for questions, handoffs, "
-        "replies, status updates, and ongoing coordination with linked peers. A single-Gobii request that says to "
+        "requested Gobiis and link this invoking Gobii to each target it must brief. After each link is enabled, use "
+        "send_agent_message for the initial briefing and for all later questions, handoffs, replies, status updates, "
+        "and coordination. If a needed manager-to-target link is not already part of the approved graph, include it "
+        "in the proposal and obtain approval before creating it. There is no unlinked control-plane message fallback. "
+        "A single-Gobii request that says to "
         "brief, hand off, or send updates stays one Gobii unless the user asks for a team or multiple Gobiis.\n"
         "Graph restructure/link/archive requests do not imply mutable setting updates; use meta_gobii_update_agent "
         "only when the user asks to change name, charter, schedule, resources, availability, policy, or tier.\n"
@@ -1024,8 +1026,9 @@ META_GOBII_SYSTEM_SKILL = SystemSkillDefinition(
         "When summarizing contact changes, avoid echoing full email addresses or phone numbers unless the user needs "
         "the exact value; prefer names, channels, or masked contact values.\n"
         "Use file tools only with files the human provided or artifacts you created for these agents. When a Gobii must "
-        "work from a provided/uploaded file, copy that file into its filespace before briefing it and attach the path in "
-        "meta_gobii_send_agent_message. Uploads accept small base64 files; do not fetch arbitrary remote URLs through these tools.\n"
+        "work from a provided/uploaded file, place that file in this invoking Gobii's filespace and attach it through "
+        "send_agent_message so normal peer transfer semantics deliver it. Uploads accept small base64 files; do not "
+        "fetch arbitrary remote URLs through these tools.\n"
         "Known unsupported MCP-equivalent surfaces in this direct skill: arbitrary URL file fetch, ad hoc runtime sessions, "
         "and separate task/run abstractions."
     ),

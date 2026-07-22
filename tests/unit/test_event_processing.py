@@ -63,7 +63,11 @@ from api.agent.core.processing_flags import (
 from tests.utils.llm_seed import get_intelligence_tier
 from api.agent.comms.adapters import ParsedMessage
 from api.agent.comms.human_input_requests import submit_human_input_responses_batch
-from api.agent.comms.message_service import ingest_inbound_message, ingest_inbound_webhook_message
+from api.agent.comms.message_service import (
+    ingest_inbound_message,
+    ingest_inbound_webhook_message,
+    inject_internal_web_message,
+)
 from api.agent.peer_comm import PeerMessagingService
 from config.redis_client import get_redis_client
 from api.agent.core.internal_reasoning import (
@@ -1138,6 +1142,31 @@ class PromptContextBuilderTests(TestCase):
         self.assertIn(f"- web: {admin_address} (can configure) - Admin User", content)
         self.assertIn(f"- web: {member_address} - Member User", content)
         self.assertNotIn(f"- web: {member_address} (can configure)", content)
+
+    def test_mcp_message_uses_mcp_identity_and_preserves_owner_authority(self):
+        self._add_low_permission_contacts(self.agent)
+        message, _ = inject_internal_web_message(
+            self.agent.id,
+            "Run the authenticated MCP request.",
+            sender_user_id=self.user.id,
+            trigger_processing=False,
+            source="remote_mcp",
+            source_kind="mcp",
+            source_label="Gobii MCP",
+        )
+        owner_address = message.from_endpoint.address
+
+        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
+             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+            context, _, _ = build_prompt_context(self.agent)
+
+        user_message = next((message for message in context if message["role"] == "user"), None)
+        self.assertIsNotNone(user_message)
+        content = user_message["content"]
+        self.assertIn('Inbound MCP message from "Gobii MCP"', content)
+        self.assertIn("Run the authenticated MCP request.", content)
+        self.assertNotIn(owner_address, content)
+        self.assertNotIn("This sender cannot change your configuration", content)
 
     def test_org_manage_role_email_sender_does_not_get_config_trust_reminder(self):
         org_agent, agent_endpoint, admin, _, _ = self._build_org_prompt_agent("config-auth-email")

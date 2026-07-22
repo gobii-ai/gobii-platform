@@ -785,6 +785,9 @@ def inject_internal_web_message(
     attachments: Iterable[Any] = (),
     trigger_processing: bool = True,
     eval_run_id: str | None = None,
+    source: str = "eval_injection",
+    source_kind: str | None = None,
+    source_label: str | None = None,
 ) -> Tuple[PersistentAgentMessage, PersistentAgentConversation]:
     """
     Inject a web message for testing/evals without going through the API adapters.
@@ -795,6 +798,9 @@ def inject_internal_web_message(
         sender_user_id: Simulated user ID (default -1).
         attachments: Optional list of file-like objects or URLs.
         trigger_processing: If True, queue the processing task.
+        source: Internal source identifier persisted with the message.
+        source_kind: Optional source category used for timeline attribution.
+        source_label: Optional user-facing source name used for timeline attribution.
     """
     agent = PersistentAgent.objects.get(id=agent_id)
     
@@ -817,6 +823,12 @@ def inject_internal_web_message(
     _ensure_participant(conv, from_ep, PersistentAgentConversationParticipant.ParticipantRole.HUMAN_USER)
     _ensure_participant(conv, to_ep, PersistentAgentConversationParticipant.ParticipantRole.AGENT)
 
+    raw_payload = {"source": source, "sender_user_id": sender_user_id}
+    if source_kind:
+        raw_payload["source_kind"] = source_kind
+    if source_label:
+        raw_payload["source_label"] = source_label
+
     # Create Message
     message = PersistentAgentMessage.objects.create(
         is_outbound=False,
@@ -825,7 +837,7 @@ def inject_internal_web_message(
         conversation=conv,
         body=body,
         owner_agent=agent,
-        raw_payload={"source": "eval_injection", "sender_user_id": sender_user_id},
+        raw_payload=raw_payload,
     )
 
     # Attachments
