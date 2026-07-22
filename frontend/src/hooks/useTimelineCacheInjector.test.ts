@@ -2,7 +2,7 @@ import { QueryClient, type InfiniteData } from '@tanstack/react-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { TimelineResponse } from '../api/agentChat'
-import { injectRealtimeEventIntoCache, refreshLoadedTimelineVariantsInCache, refreshTimelineLatestInCache } from './useTimelineCacheInjector'
+import { injectRealtimeEventIntoCache, refreshLoadedTimelineVariantsInCache, refreshTimelineLatestInCache, replacePendingActionRequestsInCache } from './useTimelineCacheInjector'
 import { timelineQueryKey, timelineResponseToPage, type TimelinePage } from './useAgentTimeline'
 
 const { fetchAgentTimelineMock } = vi.hoisted(() => ({
@@ -121,6 +121,71 @@ describe('refreshTimelineLatestInCache', () => {
     expect(queryClient.getQueryData<InfiniteData<TimelinePage>>(key)?.pages[0].events).toEqual([
       expect.objectContaining({ kind: 'developer_error', id: 'error-1' }),
     ])
+  })
+
+  it('preserves a realtime pending action received while an older timeline request is in flight', async () => {
+    const key = timelineQueryKey('agent-1')
+    queryClient.setQueryData<InfiniteData<TimelinePage>>(key, {
+      pages: [timelineResponseToPage(emptyTimelineResponse)],
+      pageParams: [undefined],
+    })
+    const request = deferred<TimelineResponse>()
+    fetchAgentTimelineMock.mockReturnValue(request.promise)
+
+    const refresh = refreshTimelineLatestInCache(queryClient, 'agent-1')
+    replacePendingActionRequestsInCache(queryClient, 'agent-1', [{
+      id: 'spawn:request-1',
+      kind: 'spawn_request',
+      requestId: 'request-1',
+      requestedCharter: 'Research the market',
+    }])
+    request.resolve({ ...emptyTimelineResponse, pending_action_requests: [] })
+    await refresh
+
+    expect(queryClient.getQueryData<InfiniteData<TimelinePage>>(key)?.pages[0].raw.pending_action_requests).toEqual([
+      expect.objectContaining({ id: 'spawn:request-1' }),
+    ])
+  })
+
+  it('updates pending metadata in every developer and staff timeline scope for an agent', () => {
+    const staffContext = { type: 'organization' as const, id: 'org-1' }
+    const standardKey = timelineQueryKey('agent-1')
+    const scopedKey = timelineQueryKey('agent-1', true, staffContext)
+    for (const key of [standardKey, scopedKey]) {
+      queryClient.setQueryData<InfiniteData<TimelinePage>>(key, {
+        pages: [timelineResponseToPage(emptyTimelineResponse)],
+        pageParams: [undefined],
+      })
+    }
+
+    replacePendingActionRequestsInCache(queryClient, 'agent-1', [{
+      id: 'spawn:request-1',
+      kind: 'spawn_request',
+      requestId: 'request-1',
+      requestedCharter: 'Research the market',
+    }])
+
+    expect(queryClient.getQueryData<InfiniteData<TimelinePage>>(standardKey)?.pages[0].raw.pending_action_requests).toHaveLength(1)
+    expect(queryClient.getQueryData<InfiniteData<TimelinePage>>(scopedKey)?.pages[0].raw.pending_action_requests).toHaveLength(1)
+  })
+
+  it('rejects an older pending snapshot in the timeline cache', () => {
+    const key = timelineQueryKey('agent-1')
+    queryClient.setQueryData<InfiniteData<TimelinePage>>(key, {
+      pages: [timelineResponseToPage(emptyTimelineResponse, 1)],
+      pageParams: [undefined],
+    })
+    const newerPendingActions = [{
+      id: 'spawn:request-1',
+      kind: 'spawn_request' as const,
+      requestId: 'request-1',
+      requestedCharter: 'Research the market',
+    }]
+
+    replacePendingActionRequestsInCache(queryClient, 'agent-1', newerPendingActions, 20)
+    replacePendingActionRequestsInCache(queryClient, 'agent-1', [], 10)
+
+    expect(queryClient.getQueryData<InfiniteData<TimelinePage>>(key)?.pages[0].raw.pending_action_requests).toEqual(newerPendingActions)
   })
 
   it('injects finalized events into every loaded variant for the addressed agent', () => {

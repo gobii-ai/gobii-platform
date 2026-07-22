@@ -20,6 +20,7 @@ function normalizePlanningState(value: unknown): PlanningState {
 export function useTimelineMetadataBridge(
   activeAgentId: string | null,
   initialPageResponse: TimelineResponse | null,
+  pendingActionsStateOrder: number,
 ) {
   const dispatch = useAppDispatch()
 
@@ -62,9 +63,10 @@ export function useTimelineMetadataBridge(
       }))
     }
 
-    dispatch(chatActions.pendingActionsReplaced({
+    dispatch(chatActions.pendingActionsSnapshotReceived({
       agentId: activeAgentId,
       pendingActions: initialPageResponse.pending_action_requests ?? [],
+      stateOrder: pendingActionsStateOrder,
     }))
-  }, [activeAgentId, dispatch, initialPageResponse])
+  }, [activeAgentId, dispatch, initialPageResponse, pendingActionsStateOrder])
 }

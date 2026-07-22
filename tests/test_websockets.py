@@ -7,6 +7,8 @@ from unittest.mock import patch
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 from channels.testing import WebsocketCommunicator
+from django.core.exceptions import PermissionDenied
+from django.db import DatabaseError
 from django.test import SimpleTestCase, override_settings, tag
 
 from console.agent_chat.consumers import AgentChatSessionConsumer, AgentChatSubscription
@@ -33,6 +35,15 @@ class EchoConsumerTests(SimpleTestCase):
 @override_settings(CHANNEL_LAYERS=CHANNEL_LAYER_SETTINGS)
 @tag("batch_websocket")
 class AgentChatSessionConsumerTests(SimpleTestCase):
+    SNAPSHOT = {
+        "processing_snapshot": {
+            "active": True,
+            "webTasks": [],
+            "nextScheduledAt": None,
+        },
+        "pending_action_requests": [],
+    }
+
     def _build_communicator(self, *, is_staff: bool = False) -> WebsocketCommunicator:
         communicator = WebsocketCommunicator(AgentChatSessionConsumer.as_asgi(), "/")
         communicator.scope["user"] = SimpleNamespace(
@@ -43,6 +54,263 @@ class AgentChatSessionConsumerTests(SimpleTestCase):
         )
         communicator.scope["session"] = None
         return communicator
+
+    async def _receive_ready(self, communicator, *, agent_id: str, mode: str):
+        ready = await communicator.receive_json_from()
+        self.assertEqual(
+            ready,
+            {
+                "type": "subscription.ready",
+                "agent_id": agent_id,
+                "mode": mode,
+                "payload": self.SNAPSHOT,
+            },
+        )
+
+    @staticmethod
+    async def _build_snapshot(*args, **kwargs):
+        return AgentChatSessionConsumerTests.SNAPSHOT
+
+    def test_subscription_ready_contains_authoritative_snapshot(self) -> None:
+        async def _allow_subscription(*args, **kwargs):
+            return SimpleNamespace(id="agent-a")
+
+        async def _run():
+            communicator = self._build_communicator()
+            connected, _ = await communicator.connect()
+            self.assertTrue(connected)
+            try:
+                await communicator.send_json_to(
+                    {"type": "subscribe", "agent_id": "agent-a", "mode": "active"}
+                )
+                await self._receive_ready(communicator, agent_id="agent-a", mode="active")
+            finally:
+                await communicator.disconnect()
+
+        with patch(
+            "console.agent_chat.consumers.AgentChatSessionConsumer._resolve_agent",
+            new=_allow_subscription,
+        ), patch(
+            "console.agent_chat.consumers.AgentChatSessionConsumer._build_subscription_snapshot",
+            new=self._build_snapshot,
+        ):
+            async_to_sync(_run)()
+
+    def test_group_event_queued_during_snapshot_follows_ready_frame(self) -> None:
+        snapshot_started = asyncio.Event()
+        release_snapshot = asyncio.Event()
+
+        async def _allow_subscription(*args, **kwargs):
+            return SimpleNamespace(id="agent-a")
+
+        async def _delayed_snapshot(*args, **kwargs):
+            snapshot_started.set()
+            await release_snapshot.wait()
+            return self.SNAPSHOT
+
+        async def _run():
+            communicator = self._build_communicator()
+            connected, _ = await communicator.connect()
+            self.assertTrue(connected)
+            try:
+                await communicator.send_json_to(
+                    {"type": "subscribe", "agent_id": "agent-a", "mode": "active"}
+                )
+                await snapshot_started.wait()
+                await get_channel_layer().group_send(
+                    "agent-chat-agent-a",
+                    {
+                        "type": "timeline_event",
+                        "agent_id": "agent-a",
+                        "payload": {"kind": "thinking", "cursor": "1"},
+                    },
+                )
+                release_snapshot.set()
+
+                await self._receive_ready(communicator, agent_id="agent-a", mode="active")
+                event = await communicator.receive_json_from()
+                self.assertEqual(event["type"], "timeline.event")
+                self.assertEqual(event["agent_id"], "agent-a")
+            finally:
+                await communicator.disconnect()
+
+        with patch(
+            "console.agent_chat.consumers.AgentChatSessionConsumer._resolve_agent",
+            new=_allow_subscription,
+        ), patch(
+            "console.agent_chat.consumers.AgentChatSessionConsumer._build_subscription_snapshot",
+            new=_delayed_snapshot,
+        ):
+            async_to_sync(_run)()
+
+    def test_mode_change_returns_fresh_ready_snapshot(self) -> None:
+        snapshots = []
+
+        async def _allow_subscription(*args, **kwargs):
+            return SimpleNamespace(id="agent-a")
+
+        async def _snapshot(*args, **kwargs):
+            snapshot = {
+                **self.SNAPSHOT,
+                "processing_snapshot": {
+                    **self.SNAPSHOT["processing_snapshot"],
+                    "active": len(snapshots) == 1,
+                },
+            }
+            snapshots.append(snapshot)
+            return snapshot
+
+        async def _run():
+            communicator = self._build_communicator()
+            connected, _ = await communicator.connect()
+            self.assertTrue(connected)
+            try:
+                await communicator.send_json_to(
+                    {"type": "subscribe", "agent_id": "agent-a", "mode": "background"}
+                )
+                first = await communicator.receive_json_from()
+                await communicator.send_json_to(
+                    {"type": "subscribe", "agent_id": "agent-a", "mode": "active"}
+                )
+                second = await communicator.receive_json_from()
+                self.assertEqual(first["mode"], "background")
+                self.assertFalse(first["payload"]["processing_snapshot"]["active"])
+                self.assertEqual(second["mode"], "active")
+                self.assertTrue(second["payload"]["processing_snapshot"]["active"])
+            finally:
+                await communicator.disconnect()
+
+        with patch(
+            "console.agent_chat.consumers.AgentChatSessionConsumer._resolve_agent",
+            new=_allow_subscription,
+        ), patch(
+            "console.agent_chat.consumers.AgentChatSessionConsumer._build_subscription_snapshot",
+            new=_snapshot,
+        ):
+            async_to_sync(_run)()
+
+    def test_snapshot_failure_removes_groups_and_returns_error(self) -> None:
+        async def _allow_subscription(*args, **kwargs):
+            return SimpleNamespace(id="agent-a")
+
+        async def _fail_snapshot(*args, **kwargs):
+            raise DatabaseError("snapshot unavailable")
+
+        async def _run():
+            communicator = self._build_communicator()
+            connected, _ = await communicator.connect()
+            self.assertTrue(connected)
+            try:
+                await communicator.send_json_to(
+                    {"type": "subscribe", "agent_id": "agent-a", "mode": "active"}
+                )
+                error = await communicator.receive_json_from()
+                self.assertEqual(error["type"], "subscription.error")
+                self.assertEqual(error["agent_id"], "agent-a")
+                await get_channel_layer().group_send(
+                    "agent-chat-agent-a",
+                    {"type": "timeline_event", "agent_id": "agent-a", "payload": {"cursor": "1"}},
+                )
+                self.assertTrue(await communicator.receive_nothing(timeout=0.1))
+            finally:
+                await communicator.disconnect()
+
+        with patch(
+            "console.agent_chat.consumers.AgentChatSessionConsumer._resolve_agent",
+            new=_allow_subscription,
+        ), patch(
+            "console.agent_chat.consumers.AgentChatSessionConsumer._build_subscription_snapshot",
+            new=_fail_snapshot,
+        ):
+            async_to_sync(_run)()
+
+    def test_mode_change_snapshot_failure_preserves_existing_groups(self) -> None:
+        snapshot_attempts = 0
+
+        async def _allow_subscription(*args, **kwargs):
+            return SimpleNamespace(id="agent-a")
+
+        async def _snapshot(*args, **kwargs):
+            nonlocal snapshot_attempts
+            snapshot_attempts += 1
+            if snapshot_attempts > 1:
+                raise DatabaseError("snapshot unavailable")
+            return self.SNAPSHOT
+
+        async def _run():
+            communicator = self._build_communicator()
+            connected, _ = await communicator.connect()
+            self.assertTrue(connected)
+            try:
+                await communicator.send_json_to(
+                    {"type": "subscribe", "agent_id": "agent-a", "mode": "background"}
+                )
+                await self._receive_ready(communicator, agent_id="agent-a", mode="background")
+                await communicator.send_json_to(
+                    {"type": "subscribe", "agent_id": "agent-a", "mode": "active"}
+                )
+                error = await communicator.receive_json_from()
+                self.assertEqual(error["type"], "subscription.error")
+
+                await get_channel_layer().group_send(
+                    "agent-chat-agent-a",
+                    {"type": "timeline_event", "agent_id": "agent-a", "payload": {"cursor": "1"}},
+                )
+                event = await communicator.receive_json_from()
+                self.assertEqual(event["type"], "timeline.event")
+                self.assertEqual(event["agent_id"], "agent-a")
+            finally:
+                await communicator.disconnect()
+
+        with patch(
+            "console.agent_chat.consumers.AgentChatSessionConsumer._resolve_agent",
+            new=_allow_subscription,
+        ), patch(
+            "console.agent_chat.consumers.AgentChatSessionConsumer._build_subscription_snapshot",
+            new=_snapshot,
+        ):
+            async_to_sync(_run)()
+
+    def test_permission_failure_removes_existing_subscription(self) -> None:
+        authorization_attempts = 0
+
+        async def _resolve_subscription(*args, **kwargs):
+            nonlocal authorization_attempts
+            authorization_attempts += 1
+            if authorization_attempts > 1:
+                raise PermissionDenied("revoked")
+            return SimpleNamespace(id="agent-a")
+
+        async def _run():
+            communicator = self._build_communicator()
+            connected, _ = await communicator.connect()
+            self.assertTrue(connected)
+            try:
+                await communicator.send_json_to(
+                    {"type": "subscribe", "agent_id": "agent-a", "mode": "background"}
+                )
+                await self._receive_ready(communicator, agent_id="agent-a", mode="background")
+                await communicator.send_json_to(
+                    {"type": "subscribe", "agent_id": "agent-a", "mode": "active"}
+                )
+                error = await communicator.receive_json_from()
+                self.assertEqual(error["type"], "subscription.error")
+                await get_channel_layer().group_send(
+                    "agent-chat-agent-a",
+                    {"type": "timeline_event", "agent_id": "agent-a", "payload": {"cursor": "1"}},
+                )
+                self.assertTrue(await communicator.receive_nothing(timeout=0.1))
+            finally:
+                await communicator.disconnect()
+
+        with patch(
+            "console.agent_chat.consumers.AgentChatSessionConsumer._resolve_agent",
+            new=_resolve_subscription,
+        ), patch(
+            "console.agent_chat.consumers.AgentChatSessionConsumer._build_subscription_snapshot",
+            new=self._build_snapshot,
+        ):
+            async_to_sync(_run)()
 
     def test_session_consumer_only_forwards_developer_updates_to_staff(self) -> None:
         async def _allow_subscription(*args, **kwargs):
@@ -56,7 +324,7 @@ class AgentChatSessionConsumerTests(SimpleTestCase):
                 await communicator.send_json_to(
                     {"type": "subscribe", "agent_id": "agent-a", "mode": "active"}
                 )
-                await asyncio.sleep(0.01)
+                await self._receive_ready(communicator, agent_id="agent-a", mode="active")
                 await get_channel_layer().group_send(
                     "agent-chat-agent-a",
                     {"type": "developer_event", "agent_id": "agent-a"},
@@ -72,6 +340,9 @@ class AgentChatSessionConsumerTests(SimpleTestCase):
         with patch(
             "console.agent_chat.consumers.AgentChatSessionConsumer._resolve_agent",
             new=_allow_subscription,
+        ), patch(
+            "console.agent_chat.consumers.AgentChatSessionConsumer._build_subscription_snapshot",
+            new=self._build_snapshot,
         ):
             async_to_sync(_run)(False)
             async_to_sync(_run)(True)
@@ -92,10 +363,11 @@ class AgentChatSessionConsumerTests(SimpleTestCase):
                 await communicator.send_json_to(
                     {"type": "subscribe", "agent_id": "agent-a", "mode": "active"}
                 )
+                await self._receive_ready(communicator, agent_id="agent-a", mode="active")
                 await communicator.send_json_to(
                     {"type": "subscribe", "agent_id": "agent-b", "mode": "background"}
                 )
-                await asyncio.sleep(0.01)
+                await self._receive_ready(communicator, agent_id="agent-b", mode="background")
 
                 await channel_layer.group_send(
                     "agent-chat-agent-a",
@@ -139,6 +411,9 @@ class AgentChatSessionConsumerTests(SimpleTestCase):
         with patch(
             "console.agent_chat.consumers.AgentChatSessionConsumer._resolve_agent",
             new=_allow_subscription,
+        ), patch(
+            "console.agent_chat.consumers.AgentChatSessionConsumer._build_subscription_snapshot",
+            new=self._build_snapshot,
         ):
             async_to_sync(_run)()
 
@@ -158,10 +433,11 @@ class AgentChatSessionConsumerTests(SimpleTestCase):
                 await communicator.send_json_to(
                     {"type": "subscribe", "agent_id": "agent-a", "mode": "active"}
                 )
+                await self._receive_ready(communicator, agent_id="agent-a", mode="active")
                 await communicator.send_json_to(
                     {"type": "subscribe", "agent_id": "agent-b", "mode": "background"}
                 )
-                await asyncio.sleep(0.01)
+                await self._receive_ready(communicator, agent_id="agent-b", mode="background")
 
                 await channel_layer.group_send(
                     "agent-chat-agent-a-user-123",
@@ -206,6 +482,9 @@ class AgentChatSessionConsumerTests(SimpleTestCase):
         with patch(
             "console.agent_chat.consumers.AgentChatSessionConsumer._resolve_agent",
             new=_allow_subscription,
+        ), patch(
+            "console.agent_chat.consumers.AgentChatSessionConsumer._build_subscription_snapshot",
+            new=self._build_snapshot,
         ):
             async_to_sync(_run)()
 
@@ -225,7 +504,7 @@ class AgentChatSessionConsumerTests(SimpleTestCase):
                 await communicator.send_json_to(
                     {"type": "subscribe", "agent_id": "agent-a", "mode": "active"}
                 )
-                await asyncio.sleep(0.01)
+                await self._receive_ready(communicator, agent_id="agent-a", mode="active")
 
                 await channel_layer.group_send(
                     "agent-chat-agent-a",
@@ -264,6 +543,9 @@ class AgentChatSessionConsumerTests(SimpleTestCase):
         with patch(
             "console.agent_chat.consumers.AgentChatSessionConsumer._resolve_agent",
             new=_allow_subscription,
+        ), patch(
+            "console.agent_chat.consumers.AgentChatSessionConsumer._build_subscription_snapshot",
+            new=self._build_snapshot,
         ):
             async_to_sync(_run)()
 

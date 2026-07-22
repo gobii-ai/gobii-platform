@@ -42,6 +42,7 @@ from api.models import (
     build_web_user_address,
 )
 from console.agent_chat import signals as agent_chat_signals
+from console.agent_chat.consumers import AgentChatSessionConsumer
 
 
 CHANNEL_LAYER_SETTINGS = {
@@ -1031,6 +1032,7 @@ class AgentChatSignalTests(TestCase):
         self.assertEqual(pending_requests[0].get("question"), "What should we do next?")
 
     @tag("batch_agent_chat")
+    @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False)
     def test_pending_action_updates_are_filtered_per_viewer(self):
         conversation = PersistentAgentConversation.objects.create(
             owner_agent=self.agent,
@@ -1083,4 +1085,44 @@ class AgentChatSignalTests(TestCase):
         collaborator_kinds = [item.get("kind") for item in collaborator_event.get("payload", {}).get("pending_action_requests", [])]
 
         self.assertEqual(owner_kinds, ["human_input", "spawn_request", "requested_secrets", "contact_requests"])
+        self.assertEqual(collaborator_kinds, ["human_input"])
+
+    @tag("batch_agent_chat")
+    @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False)
+    def test_subscription_snapshot_pending_actions_are_filtered_per_viewer(self):
+        conversation = PersistentAgentConversation.objects.create(
+            owner_agent=self.agent,
+            channel="web",
+            address=build_web_user_address(self.user.id, self.agent.id),
+        )
+        PersistentAgentHumanInputRequest.objects.create(
+            agent=self.agent,
+            conversation=conversation,
+            question="What should we do next?",
+            options_json=[],
+            input_mode=PersistentAgentHumanInputRequest.InputMode.FREE_TEXT_ONLY,
+            requested_via_channel="web",
+        )
+        AgentSpawnRequest.objects.create(
+            agent=self.agent,
+            requested_charter="Handle procurement approvals.",
+        )
+
+        consumer = AgentChatSessionConsumer()
+        with patch(
+            "console.agent_chat.consumers.build_processing_snapshot",
+            return_value=object(),
+        ), patch(
+            "console.agent_chat.consumers.serialize_processing_snapshot",
+            return_value={"active": False, "webTasks": [], "nextScheduledAt": None},
+        ):
+            consumer.user = self.user
+            snapshot_builder = AgentChatSessionConsumer.__dict__["_build_subscription_snapshot"].func
+            owner_snapshot = snapshot_builder(consumer, self.agent)
+            consumer.user = self.collaborator_user
+            collaborator_snapshot = snapshot_builder(consumer, self.agent)
+
+        owner_kinds = [item["kind"] for item in owner_snapshot["pending_action_requests"]]
+        collaborator_kinds = [item["kind"] for item in collaborator_snapshot["pending_action_requests"]]
+        self.assertEqual(owner_kinds, ["human_input", "spawn_request"])
         self.assertEqual(collaborator_kinds, ["human_input"])

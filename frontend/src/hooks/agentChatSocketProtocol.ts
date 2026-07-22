@@ -57,6 +57,25 @@ export function extractAgentChatSocketEnvelopeAgentId(
   return null
 }
 
+export function confirmAgentChatSocketSubscription({
+  requestedSubscriptions,
+  confirmedSubscriptions,
+  agentId,
+  mode,
+}: {
+  requestedSubscriptions: Map<string, AgentChatSocketSubscription['mode']>
+  confirmedSubscriptions: Map<string, AgentChatSocketSubscription['mode']>
+  agentId: string
+  mode: AgentChatSocketSubscription['mode']
+}): boolean {
+  if (requestedSubscriptions.get(agentId) !== mode) {
+    return false
+  }
+  const previousMode = confirmedSubscriptions.get(agentId)
+  confirmedSubscriptions.set(agentId, mode)
+  return mode === 'active' && previousMode !== 'active'
+}
+
 export function syncAgentChatSocketSubscriptions({
   currentSubscriptions,
   desiredSubscriptions,

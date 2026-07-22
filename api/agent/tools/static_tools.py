@@ -11,10 +11,7 @@ from .custom_tool_names import CREATE_CUSTOM_TOOL_NAME
 PLANNING_MODE_DISABLED_TOOL_NAMES = frozenset({
     CREATE_CUSTOM_TOOL_NAME,
     "apply_patch",
-    "manage_inbound_webhooks",
-    "manage_outbound_webhooks",
     "request_contact_permission",
-    "send_webhook_event",
     "spawn_web_task",
     "update_plan",
     "create_chart"

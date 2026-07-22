@@ -501,6 +501,7 @@ vi.mock('../hooks/useAgentTimeline', () => ({
   })),
   flattenTimelinePages: vi.fn(() => timelineState.flatEvents),
   getInitialPageResponse: vi.fn(() => timelineState.initialPageResponse),
+  getInitialPagePendingActionsStateOrder: vi.fn(() => 0),
 }))
 
 vi.mock('../hooks/useTimelineCacheInjector', () => ({

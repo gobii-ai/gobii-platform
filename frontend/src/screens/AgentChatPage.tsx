@@ -67,6 +67,7 @@ import { useRosterPreferencesBridge } from '../hooks/useRosterPreferencesBridge'
 import { useAppDispatch, useAppSelector } from '../store/hooks'
 import type { RootState } from '../store/appStore'
 import {
+  applyPendingActionsSnapshot,
   chatActions,
   persistPendingEventsToCache as persistPendingEventsToCacheThunk,
   receiveRealtimeEvent as receiveRealtimeEventThunk,
@@ -97,15 +98,16 @@ import {
 } from '../store/agentSettingsSlice'
 import { mergeTimelineEvents } from '../stores/agentChatTimeline'
 import { ensureAuthenticated, selectSubscriptionState, subscriptionActions, type PlanTier } from '../store/subscriptionSlice'
-import { useAgentTimeline, flattenTimelinePages, getInitialPageResponse, timelineQueryKey, type TimelinePage } from '../hooks/useAgentTimeline'
-import { refreshTimelineLatestInCache, replacePendingActionRequestsInCache, DEFAULT_CONTIGUOUS_BACKFILL_MAX_PAGES } from '../hooks/useTimelineCacheInjector'
+import { useAgentTimeline, flattenTimelinePages, getInitialPagePendingActionsStateOrder, getInitialPageResponse, timelineQueryKey, type TimelinePage } from '../hooks/useAgentTimeline'
+import { refreshTimelineLatestInCache, DEFAULT_CONTIGUOUS_BACKFILL_MAX_PAGES } from '../hooks/useTimelineCacheInjector'
+import { nextClientStateOrder } from '../util/clientStateOrder'
 import { collapseDetailedStatusRuns } from '../hooks/useSimplifiedTimeline'
 import { usePageLifecycle } from '../hooks/usePageLifecycle'
 import { HttpError } from '../api/http'
 import { safeErrorMessage } from '../api/safeErrorMessage'
 import type { AgentRosterEntry, AgentRosterSortMode, AgentSidebarInvite, PlanningState, SignupPreviewState } from '../types/agentRoster'
 import type { BillingStatusInfo } from '../types/agentAddons'
-import type { AgentMessage, AgentMessageNotification, PendingActionRequest, PendingHumanInputRequest, PlanSnapshot, TimelineEvent } from '../types/agentChat'
+import type { AgentMessage, AgentMessageNotification, PendingActionRequest, PlanSnapshot, TimelineEvent } from '../types/agentChat'
 import type { DailyCreditsUpdatePayload } from '../types/dailyCredits'
 import type { UsageBurnRateResponse, UsageSummaryResponse } from '../components/usage'
 import type { InsightEvent } from '../types/insight'
@@ -1101,11 +1103,15 @@ export function AgentChatPage({
   }, [activeAgentId, developerModeEnabled, queryClient, staffContext])
   const flatEvents = useMemo(() => flattenTimelinePages(timelineQuery.data), [timelineQuery.data])
   const initialPageResponse = useMemo(() => getInitialPageResponse(timelineQuery.data), [timelineQuery.data])
+  const initialPagePendingActionsStateOrder = useMemo(
+    () => getInitialPagePendingActionsStateOrder(timelineQuery.data),
+    [timelineQuery.data],
+  )
   const timelinePendingActionRequests = useMemo<PendingActionRequest[]>(
     () => initialPageResponse?.pending_action_requests ?? [],
     [initialPageResponse],
   )
-  useTimelineMetadataBridge(activeAgentId, initialPageResponse)
+  useTimelineMetadataBridge(activeAgentId, initialPageResponse, initialPagePendingActionsStateOrder)
 
   const activeChatSession = useAppSelector(selectActiveChatSession)
   const authoritativeProcessingByAgentId = useAppSelector(
@@ -1880,6 +1886,7 @@ export function AgentChatPage({
   const socketSnapshot = useAgentChatSocket(desiredSocketSubscriptions, {
     contextOverride: contextReady ? effectiveContext : null,
     staffContextOverride: staffContext,
+    developerMode: developerModeEnabled,
     onCreditEvent: handleCreditEvent,
     onAgentProfileEvent: handleAgentProfileEvent,
     onMessageNotificationEvent: handleAgentMessageNotificationEvent,
@@ -2903,13 +2910,12 @@ export function AgentChatPage({
     targetAgentId: string,
     nextPlanningState: PlanningState,
     pendingActionRequests: PendingActionRequest[],
-    pendingHumanInputRequests: PendingHumanInputRequest[],
   ) => {
-    replacePendingActionRequestsInCache(queryClient, targetAgentId, pendingActionRequests)
-    dispatch(chatActions.pendingActionsReplaced({
-      agentId: targetAgentId,
-      pendingActions: pendingActionRequests,
-    }))
+    dispatch(applyPendingActionsSnapshot(
+      targetAgentId,
+      pendingActionRequests,
+      nextClientStateOrder(),
+    ))
     dispatch(chatActions.agentIdentityUpdated({
       agentId: targetAgentId,
       planningState: nextPlanningState,
@@ -2927,8 +2933,6 @@ export function AgentChatPage({
             raw: {
               ...page.raw,
               planning_state: nextPlanningState,
-              pending_action_requests: pendingActionRequests,
-              pending_human_input_requests: pendingHumanInputRequests,
             },
           })),
         }
@@ -2964,7 +2968,6 @@ export function AgentChatPage({
         activeAgentId,
         result.planningState,
         result.pendingActionRequests,
-        result.pendingHumanInputRequests,
       )
     } catch (error) {
       dispatch(chatActions.sendMessageErrorSet({
@@ -3769,13 +3772,13 @@ export function AgentChatPage({
     }
   }, [activeAgentId, dispatch, sendMessage, sendMessageDisabledReason])
 
-  const replacePendingActionState = useCallback((targetAgentId: string, nextPendingActions: PendingActionRequest[]) => {
-    replacePendingActionRequestsInCache(queryClient, targetAgentId, nextPendingActions)
-    dispatch(chatActions.pendingActionsReplaced({
-      agentId: targetAgentId,
-      pendingActions: nextPendingActions,
-    }))
-  }, [dispatch, queryClient])
+  const replacePendingActionState = useCallback((
+    targetAgentId: string,
+    nextPendingActions: PendingActionRequest[],
+    stateOrder = nextClientStateOrder(),
+  ) => {
+    dispatch(applyPendingActionsSnapshot(targetAgentId, nextPendingActions, stateOrder))
+  }, [dispatch])
 
   const handleRespondHumanInputRequest = useCallback(async (
     response:

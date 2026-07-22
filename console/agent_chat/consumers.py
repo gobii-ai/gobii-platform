@@ -4,9 +4,12 @@ from dataclasses import dataclass
 from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncJsonWebsocketConsumer
 from django.core.exceptions import PermissionDenied
+from django.db import DatabaseError
 
 from console.agent_chat.access import resolve_agent, resolve_staff_agent
+from console.agent_chat.pending_actions import expire_pending_action_requests, list_pending_action_requests
 from console.agent_chat.realtime import user_profile_group_name, user_stream_group_name
+from console.agent_chat.timeline import build_processing_snapshot, serialize_processing_snapshot
 
 
 logger = logging.getLogger(__name__)
@@ -262,31 +265,33 @@ class AgentChatSessionConsumer(AsyncJsonWebsocketConsumer):
         context_override=None,
         staff_context_override=None,
     ) -> None:
-        if agent_id not in self.subscriptions:
-            try:
-                await self._resolve_agent(
-                    self.user,
-                    self.session,
-                    agent_id,
-                    context_override=context_override,
-                    staff_context_override=staff_context_override,
-                )
-            except PermissionDenied as exc:
-                logger.warning(
-                    "AgentChatSessionConsumer permission denied for user %s agent %s: %s",
-                    self.user,
-                    agent_id,
-                    exc,
-                )
-                await self.send_json(
-                    {
-                        "type": "subscription.error",
-                        "agent_id": agent_id,
-                        "message": "Permission denied for agent subscription.",
-                    }
-                )
-                return
+        was_subscribed = agent_id in self.subscriptions
+        try:
+            agent = await self._resolve_agent(
+                self.user,
+                self.session,
+                agent_id,
+                context_override=context_override,
+                staff_context_override=staff_context_override,
+            )
+        except PermissionDenied as exc:
+            logger.warning(
+                "AgentChatSessionConsumer permission denied for user %s agent %s: %s",
+                self.user,
+                agent_id,
+                exc,
+            )
+            await self._remove_subscription(agent_id)
+            await self.send_json(
+                {
+                    "type": "subscription.error",
+                    "agent_id": agent_id,
+                    "message": "Permission denied for agent subscription.",
+                }
+            )
+            return
 
+        if agent_id not in self.subscriptions:
             subscription = AgentChatSubscription(
                 group_name=f"agent-chat-{agent_id}",
                 user_group_name=user_stream_group_name(agent_id, self.user.id),
@@ -314,6 +319,34 @@ class AgentChatSessionConsumer(AsyncJsonWebsocketConsumer):
             self.active_agent_id = agent_id
         elif self.active_agent_id == agent_id:
             self.active_agent_id = None
+
+        try:
+            snapshot = await self._build_subscription_snapshot(agent)
+        except DatabaseError as exc:
+            logger.exception(
+                "AgentChatSessionConsumer failed to build subscription snapshot (agent=%s): %s",
+                agent_id,
+                exc,
+            )
+            if not was_subscribed:
+                await self._remove_subscription(agent_id)
+            await self.send_json(
+                {
+                    "type": "subscription.error",
+                    "agent_id": agent_id,
+                    "message": "Failed to build agent realtime snapshot.",
+                }
+            )
+            return
+
+        await self.send_json(
+            {
+                "type": "subscription.ready",
+                "agent_id": agent_id,
+                "mode": mode,
+                "payload": snapshot,
+            }
+        )
 
         logger.info(
             "AgentChatSessionConsumer subscribed user=%s agent=%s mode=%s channel=%s",
@@ -396,6 +429,14 @@ class AgentChatSessionConsumer(AsyncJsonWebsocketConsumer):
             allow_shared=True,
             allow_delinquent_personal_chat=True,
         )
+
+    @database_sync_to_async
+    def _build_subscription_snapshot(self, agent):
+        expire_pending_action_requests(agent)
+        return {
+            "processing_snapshot": serialize_processing_snapshot(build_processing_snapshot(agent)),
+            "pending_action_requests": list_pending_action_requests(agent, self.user),
+        }
 
 
 class EchoConsumer(AsyncJsonWebsocketConsumer):

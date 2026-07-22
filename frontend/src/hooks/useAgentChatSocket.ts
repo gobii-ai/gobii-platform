@@ -1,14 +1,15 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 
 import { scheduleLoginRedirect } from '../api/http'
 import type { AgentMessageNotification } from '../types/agentChat'
 import { useAppDispatch } from '../store/hooks'
-import { chatActions, receiveRealtimeEvent, receiveStreamEvent, updateRealtimeProcessing } from '../store/chatSlice'
+import { applyPendingActionsSnapshot, chatActions, receiveRealtimeEvent, receiveStreamEvent, updateRealtimeProcessing } from '../store/chatSlice'
 import { refreshTimelineLatestInCache } from './useTimelineCacheInjector'
 import { usePageLifecycle, type PageLifecycleResumeReason, type PageLifecycleSuspendReason } from './usePageLifecycle'
 import { TIMELINE_STALE_TIME_MS, timelineQueryKey } from './useAgentTimeline'
 import {
+  confirmAgentChatSocketSubscription,
   findActiveAgentChatSocketId,
   normalizeAgentChatSocketSubscriptions,
   syncAgentChatSocketSubscriptions,
@@ -69,11 +70,20 @@ function isPageVisible(): boolean {
   return document.visibilityState === 'visible'
 }
 
+function useLatestRef<T>(value: T) {
+  const ref = useRef(value)
+  useLayoutEffect(() => {
+    ref.current = value
+  }, [value])
+  return ref
+}
+
 export function useAgentChatSocket(
   desiredSubscriptionsInput: AgentChatSocketSubscription[],
   options: {
     contextOverride?: AgentChatSocketContextOverride
     staffContextOverride?: StaffViewContext | null
+    developerMode?: boolean
     onCreditEvent?: (payload: Record<string, unknown>) => void
     onAgentProfileEvent?: (payload: Record<string, unknown>) => void
     onMessageNotificationEvent?: (payload: AgentMessageNotification) => void
@@ -86,55 +96,41 @@ export function useAgentChatSocket(
     () => normalizeAgentChatSocketSubscriptions(desiredSubscriptionsInput),
     [desiredSubscriptionsInput],
   )
-  const receiveEventRef = useRef((agentId: string, event: Parameters<typeof receiveRealtimeEvent>[1]) => {
-    dispatch(receiveRealtimeEvent(agentId, event))
-  })
-  const updateProcessingRef = useRef((agentId: string, snapshot: Parameters<typeof updateRealtimeProcessing>[1]) => {
-    dispatch(updateRealtimeProcessing(agentId, snapshot))
-  })
-  const updateAgentIdentityRef = useRef((update: Parameters<typeof chatActions.agentIdentityUpdated>[0]) => {
-    dispatch(chatActions.agentIdentityUpdated(update))
-  })
-  const updateUsageInsightRef = useRef((agentId: string, metadata: Parameters<typeof chatActions.usageInsightUpdated>[0]['metadata']) => {
-    dispatch(chatActions.usageInsightUpdated({ agentId, metadata }))
-  })
-  const receiveStreamRef = useRef((agentId: string, payload: Parameters<typeof receiveStreamEvent>[1]) => {
-    dispatch(receiveStreamEvent(agentId, payload))
-  })
-  const replacePendingActionsRef = useRef((agentId: string, pendingActions: Parameters<typeof chatActions.pendingActionsReplaced>[0]['pendingActions']) => {
-    dispatch(chatActions.pendingActionsReplaced({ agentId, pendingActions }))
-  })
-  const creditEventRef = useRef<typeof options.onCreditEvent | null>(options.onCreditEvent ?? null)
-  const profileEventRef = useRef<typeof options.onAgentProfileEvent | null>(options.onAgentProfileEvent ?? null)
-  const messageNotificationEventRef = useRef<typeof options.onMessageNotificationEvent | null>(
-    options.onMessageNotificationEvent ?? null,
-  )
-  const developerUpdateRef = useRef<typeof options.onDeveloperUpdate | null>(options.onDeveloperUpdate ?? null)
-
-  useEffect(() => {
-    receiveEventRef.current = (agentId, event) => {
+  const handlersRef = useLatestRef({
+    receiveRealtimeEvent: (agentId: string, event: Parameters<typeof receiveRealtimeEvent>[1]) => {
       dispatch(receiveRealtimeEvent(agentId, event))
-    }
-    updateProcessingRef.current = (agentId, snapshot) => {
-      dispatch(updateRealtimeProcessing(agentId, snapshot))
-    }
-    updateAgentIdentityRef.current = (update) => {
+    },
+    updateProcessing: (agentId: string, processing: Parameters<typeof updateRealtimeProcessing>[1]) => {
+      dispatch(updateRealtimeProcessing(agentId, processing))
+    },
+    updateAgentIdentity: (update: Parameters<typeof chatActions.agentIdentityUpdated>[0]) => {
       dispatch(chatActions.agentIdentityUpdated(update))
-    }
-    updateUsageInsightRef.current = (agentId, metadata) => {
+    },
+    updateUsageInsight: (agentId: string, metadata: Parameters<typeof chatActions.usageInsightUpdated>[0]['metadata']) => {
       dispatch(chatActions.usageInsightUpdated({ agentId, metadata }))
-    }
-    receiveStreamRef.current = (agentId, payload) => {
+    },
+    receiveStreamEvent: (agentId: string, payload: Parameters<typeof receiveStreamEvent>[1]) => {
       dispatch(receiveStreamEvent(agentId, payload))
-    }
-  }, [dispatch])
-
-  useEffect(() => {
-    creditEventRef.current = options.onCreditEvent ?? null
-    profileEventRef.current = options.onAgentProfileEvent ?? null
-    messageNotificationEventRef.current = options.onMessageNotificationEvent ?? null
-    developerUpdateRef.current = options.onDeveloperUpdate ?? null
-  }, [options.onCreditEvent, options.onAgentProfileEvent, options.onDeveloperUpdate, options.onMessageNotificationEvent])
+    },
+    replacePendingActions: (
+      agentId: string,
+      pendingActions: Parameters<typeof chatActions.pendingActionsSnapshotReceived>[0]['pendingActions'],
+      stateOrder: number,
+    ) => {
+      dispatch(applyPendingActionsSnapshot(agentId, pendingActions, stateOrder))
+    },
+    onCreditEvent: options.onCreditEvent ?? null,
+    onAgentProfileEvent: options.onAgentProfileEvent ?? null,
+    onMessageNotificationEvent: options.onMessageNotificationEvent ?? null,
+    onDeveloperUpdate: options.onDeveloperUpdate ?? null,
+  })
+  const currentRef = useLatestRef({
+    desiredSubscriptions,
+    activeAgentId: findActiveAgentChatSocketId(desiredSubscriptions),
+    contextOverride: options.contextOverride,
+    staffContext: options.staffContextOverride ?? null,
+    developerMode: options.developerMode === true,
+  })
 
   const retryRef = useRef(0)
   const socketRef = useRef<WebSocket | null>(null)
@@ -149,29 +145,13 @@ export function useAgentChatSocket(
   const pauseReasonRef = useRef<'offline' | null>(null)
   const lastSyncAtRef = useRef(0)
   const lastActivityAtRef = useRef(0)
-  const desiredSubscriptionsRef = useRef<AgentChatSocketSubscription[]>(desiredSubscriptions)
-  const contextOverrideRef = useRef<AgentChatSocketContextOverride>(options.contextOverride)
-  const staffContextOverrideRef = useRef<StaffViewContext | null | undefined>(options.staffContextOverride)
-  const activeAgentIdRef = useRef<string | null>(findActiveAgentChatSocketId(desiredSubscriptions))
-  const subscribedAgentsRef = useRef<Map<string, AgentChatSocketSubscription['mode']>>(new Map())
+  const requestedSubscriptionsRef = useRef<Map<string, AgentChatSocketSubscription['mode']>>(new Map())
+  const confirmedSubscriptionsRef = useRef<Map<string, AgentChatSocketSubscription['mode']>>(new Map())
   const [snapshot, setSnapshot] = useState<AgentChatSocketSnapshot>(() => (
     typeof navigator !== 'undefined' && navigator.onLine === false
       ? { status: 'offline', lastConnectedAt: null, lastError: 'Network connection lost.' }
       : { status: 'idle', lastConnectedAt: null, lastError: null }
   ))
-
-  useEffect(() => {
-    desiredSubscriptionsRef.current = desiredSubscriptions
-    activeAgentIdRef.current = findActiveAgentChatSocketId(desiredSubscriptions)
-  }, [desiredSubscriptions])
-
-  useEffect(() => {
-    contextOverrideRef.current = options.contextOverride
-  }, [options.contextOverride])
-
-  useEffect(() => {
-    staffContextOverrideRef.current = options.staffContextOverride
-  }, [options.staffContextOverride])
 
   const updateSnapshot = useCallback((updates: Partial<AgentChatSocketSnapshot>) => {
     setSnapshot((current) => ({ ...current, ...updates }))
@@ -261,7 +241,7 @@ export function useAgentChatSocket(
     if (typeof navigator !== 'undefined' && navigator.onLine === false) {
       return
     }
-    if (!desiredSubscriptionsRef.current.length) {
+    if (!currentRef.current.desiredSubscriptions.length) {
       return
     }
     const now = Date.now()
@@ -270,8 +250,9 @@ export function useAgentChatSocket(
     }
     lastSyncAtRef.current = now
 
-    desiredSubscriptionsRef.current.forEach(({ agentId }) => {
-      const timelineState = queryClient.getQueryState(timelineQueryKey(agentId))
+    currentRef.current.desiredSubscriptions.forEach(({ agentId }) => {
+      const { developerMode, staffContext } = currentRef.current
+      const timelineState = queryClient.getQueryState(timelineQueryKey(agentId, developerMode, staffContext))
       if (!timelineState) {
         return
       }
@@ -281,9 +262,13 @@ export function useAgentChatSocket(
       if (timelineState.dataUpdatedAt && now - timelineState.dataUpdatedAt < TIMELINE_STALE_TIME_MS) {
         return
       }
-      void refreshTimelineLatestInCache(queryClient, agentId, { mode })
+      void refreshTimelineLatestInCache(queryClient, agentId, {
+        mode,
+        developerMode,
+        staffContext,
+      })
     })
-  }, [queryClient])
+  }, [currentRef, queryClient])
 
   const applySubscriptions = useCallback((nextSubscriptions: AgentChatSocketSubscription[]) => {
     const socket = socketRef.current
@@ -291,18 +276,25 @@ export function useAgentChatSocket(
       return
     }
 
+    const desiredModes = new Map(nextSubscriptions.map(({ agentId, mode }) => [agentId, mode]))
+    for (const [agentId, confirmedMode] of confirmedSubscriptionsRef.current) {
+      if (desiredModes.get(agentId) !== confirmedMode) {
+        confirmedSubscriptionsRef.current.delete(agentId)
+      }
+    }
+
     syncAgentChatSocketSubscriptions({
-      currentSubscriptions: subscribedAgentsRef.current,
+      currentSubscriptions: requestedSubscriptionsRef.current,
       desiredSubscriptions: nextSubscriptions,
-      contextOverride: contextOverrideRef.current,
-      staffContextOverride: staffContextOverrideRef.current,
+      contextOverride: currentRef.current.contextOverride,
+      staffContextOverride: currentRef.current.staffContext,
       sendSocketMessage,
       handleSendFailure: () => {
         updateSnapshot({ status: 'reconnecting', lastError: 'WebSocket send failed.' })
         socket.close()
       },
     })
-  }, [sendSocketMessage, updateSnapshot])
+  }, [currentRef, sendSocketMessage, updateSnapshot])
 
   useEffect(() => {
     applySubscriptions(desiredSubscriptions)
@@ -318,7 +310,7 @@ export function useAgentChatSocket(
     if (existingSocket?.readyState === WebSocket.OPEN) {
       updateSnapshot({ status: 'connected', lastError: null })
       startPingLoop()
-      applySubscriptions(desiredSubscriptionsRef.current)
+      applySubscriptions(currentRef.current.desiredSubscriptions)
       syncNow('contiguous')
       return
     }
@@ -330,7 +322,7 @@ export function useAgentChatSocket(
     updateSnapshot({ status: 'connecting', lastError: null })
     scheduleConnectRef.current(0)
     syncNow('contiguous')
-  }, [applySubscriptions, startPingLoop, syncNow, updateSnapshot])
+  }, [applySubscriptions, currentRef, startPingLoop, syncNow, updateSnapshot])
 
   const handleSuspend = useCallback((reason: PageLifecycleSuspendReason) => {
     if (reason === 'offline') {
@@ -375,8 +367,9 @@ export function useAgentChatSocket(
           console.warn('Failed to close agent chat socket', error)
         }
         socketRef.current = null
-        subscribedAgentsRef.current = new Map()
       }
+      requestedSubscriptionsRef.current = new Map()
+      confirmedSubscriptionsRef.current = new Map()
     }
     closeSocketRef.current = closeSocket
 
@@ -419,8 +412,9 @@ export function useAgentChatSocket(
           lastConnectedAt: Date.now(),
           lastError: null,
         })
-        subscribedAgentsRef.current = new Map()
-        applySubscriptions(desiredSubscriptionsRef.current)
+        requestedSubscriptionsRef.current = new Map()
+        confirmedSubscriptionsRef.current = new Map()
+        applySubscriptions(currentRef.current.desiredSubscriptions)
         startPingLoop()
         syncNow('contiguous')
       }
@@ -432,31 +426,39 @@ export function useAgentChatSocket(
         try {
           const payload = JSON.parse(event.data)
           markActivity()
+          const handlers = handlersRef.current
           const outcome = routeAgentChatSocketMessage({
             payload,
             queryClient,
-            activeAgentId: activeAgentIdRef.current,
-            receiveRealtimeEvent: receiveEventRef.current,
-            updateProcessing: updateProcessingRef.current,
-            updateAgentIdentity: updateAgentIdentityRef.current,
-            updateUsageInsight: updateUsageInsightRef.current,
-            receiveStreamEvent: receiveStreamRef.current,
-            replacePendingActions: replacePendingActionsRef.current,
-            onCreditEvent: creditEventRef.current,
-            onAgentProfileEvent: profileEventRef.current,
-            onMessageNotificationEvent: messageNotificationEventRef.current,
-            onDeveloperUpdate: developerUpdateRef.current,
+            activeAgentId: currentRef.current.activeAgentId,
+            ...handlers,
           })
           if (outcome.type === 'subscription_error') {
             if (outcome.agentId) {
-              subscribedAgentsRef.current.delete(outcome.agentId)
+              requestedSubscriptionsRef.current.delete(outcome.agentId)
+              confirmedSubscriptionsRef.current.delete(outcome.agentId)
             }
-            if (!outcome.agentId || outcome.agentId === activeAgentIdRef.current) {
+            if (!outcome.agentId || outcome.agentId === currentRef.current.activeAgentId) {
               updateSnapshot({ status: 'error', lastError: outcome.message })
               if (isAuthErrorMessage(outcome.message)) {
                 scheduleLoginRedirect()
               }
               syncNow('contiguous')
+            }
+          } else if (outcome.type === 'subscription_ready') {
+            const shouldBackfill = confirmAgentChatSocketSubscription({
+              requestedSubscriptions: requestedSubscriptionsRef.current,
+              confirmedSubscriptions: confirmedSubscriptionsRef.current,
+              agentId: outcome.agentId,
+              mode: outcome.mode,
+            })
+            if (shouldBackfill) {
+              void refreshTimelineLatestInCache(queryClient, outcome.agentId, {
+                mode: 'contiguous',
+                developerMode: currentRef.current.developerMode,
+                staffContext: currentRef.current.staffContext,
+                allowDuringQueryFetch: true,
+              })
             }
           }
         } catch (error) {
@@ -473,7 +475,8 @@ export function useAgentChatSocket(
         }
         clearConnectTimeout()
         socketRef.current = null
-        subscribedAgentsRef.current = new Map()
+        requestedSubscriptionsRef.current = new Map()
+        confirmedSubscriptionsRef.current = new Map()
         stopPingLoop()
         if (closingSocketRef.current === socketInstance) {
           closingSocketRef.current = null
@@ -560,6 +563,8 @@ export function useAgentChatSocket(
     }
   }, [
     clearConnectTimeout,
+    currentRef,
+    handlersRef,
     markActivity,
     queryClient,
     startPingLoop,

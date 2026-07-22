@@ -5,6 +5,7 @@ import type { StaffViewContext } from '../api/context'
 import type { PendingActionRequest, PendingHumanInputAction, PendingHumanInputRequest, TimelineEvent } from '../types/agentChat'
 import type { AgentRosterEntry } from '../types/agentRoster'
 import { compareTimelineCursors } from '../util/timelineCursor'
+import { nextClientStateOrder } from '../util/clientStateOrder'
 import { mergeTimelineEvents } from '../stores/agentChatTimeline'
 import { timelineQueryKey, timelineResponseToPage, TIMELINE_PAGE_SIZE, type TimelinePage } from './useAgentTimeline'
 
@@ -60,58 +61,65 @@ export function replacePendingHumanInputRequestsInCache(
   queryClient: QueryClient,
   agentId: string,
   pendingHumanInputRequests: PendingHumanInputRequest[],
+  stateOrder = nextClientStateOrder(),
 ) {
-  const key = timelineQueryKey(agentId)
   let nextPendingActionsForRoster: PendingActionRequest[] | null = null
-  queryClient.setQueryData<InfiniteData<TimelinePage>>(key, (old) => {
-    if (!old?.pages?.length) {
-      return old
-    }
-
-    const pages = [...old.pages]
-    const lastIndex = pages.length - 1
-    const lastPage = pages[lastIndex]
-    const existingPendingActions = lastPage.raw.pending_action_requests ?? []
-    const nonHumanActions = existingPendingActions.filter((request) => request.kind !== 'human_input')
-    const humanInputActionsByBatch = new Map<string, PendingHumanInputAction>()
-    pendingHumanInputRequests.forEach((request) => {
-      const batchId = request.batchId || request.id
-      const action = humanInputActionsByBatch.get(batchId) ?? {
-        id: `human_input:${batchId}`,
-        kind: 'human_input' as const,
-        requests: [],
-        count: 0,
+  queryClient.setQueriesData<InfiniteData<TimelinePage>>(
+    { queryKey: ['agent-timeline', agentId], exact: false },
+    (old) => {
+      if (!old?.pages?.length) {
+        return old
       }
-      action.requests.push(request)
-      humanInputActionsByBatch.set(batchId, action)
-    })
-    const humanInputActions = Array.from(humanInputActionsByBatch.values()).map((action) => ({
-      ...action,
-      requests: [...action.requests].sort((left, right) => left.batchPosition - right.batchPosition),
-      count: action.requests.length,
-    }))
-    const nextPendingActions = pendingHumanInputRequests.length > 0
-      ? [
+
+      const pages = [...old.pages]
+      const lastIndex = pages.length - 1
+      const lastPage = pages[lastIndex]
+      if (stateOrder < (lastPage.pendingActionsStateOrder ?? 0)) {
+        return old
+      }
+      const existingPendingActions = lastPage.raw.pending_action_requests ?? []
+      const nonHumanActions = existingPendingActions.filter((request) => request.kind !== 'human_input')
+      const humanInputActionsByBatch = new Map<string, PendingHumanInputAction>()
+      pendingHumanInputRequests.forEach((request) => {
+        const batchId = request.batchId || request.id
+        const action = humanInputActionsByBatch.get(batchId) ?? {
+          id: `human_input:${batchId}`,
+          kind: 'human_input' as const,
+          requests: [],
+          count: 0,
+        }
+        action.requests.push(request)
+        humanInputActionsByBatch.set(batchId, action)
+      })
+      const humanInputActions = Array.from(humanInputActionsByBatch.values()).map((action) => ({
+        ...action,
+        requests: [...action.requests].sort((left, right) => left.batchPosition - right.batchPosition),
+        count: action.requests.length,
+      }))
+      const nextPendingActions = pendingHumanInputRequests.length > 0
+        ? [
           ...humanInputActions,
           ...nonHumanActions,
         ]
-      : nonHumanActions
-    nextPendingActionsForRoster = nextPendingActions
+        : nonHumanActions
+      nextPendingActionsForRoster = nextPendingActions
 
-    pages[lastIndex] = {
-      ...lastPage,
-      raw: {
-        ...lastPage.raw,
-        pending_action_requests: nextPendingActions,
-        pending_human_input_requests: pendingHumanInputRequests,
-      },
-    }
+      pages[lastIndex] = {
+        ...lastPage,
+        pendingActionsStateOrder: stateOrder,
+        raw: {
+          ...lastPage.raw,
+          pending_action_requests: nextPendingActions,
+          pending_human_input_requests: pendingHumanInputRequests,
+        },
+      }
 
-    return {
-      ...old,
-      pages,
-    }
-  })
+      return {
+        ...old,
+        pages,
+      }
+    },
+  )
   if (nextPendingActionsForRoster) {
     updateRosterPendingActionCountInCache(queryClient, agentId, nextPendingActionsForRoster)
   } else {
@@ -123,33 +131,40 @@ export function replacePendingActionRequestsInCache(
   queryClient: QueryClient,
   agentId: string,
   pendingActionRequests: PendingActionRequest[],
+  stateOrder = nextClientStateOrder(),
 ) {
   updateRosterPendingActionCountInCache(queryClient, agentId, pendingActionRequests)
-  const key = timelineQueryKey(agentId)
-  queryClient.setQueryData<InfiniteData<TimelinePage>>(key, (old) => {
-    if (!old?.pages?.length) {
-      return old
-    }
+  queryClient.setQueriesData<InfiniteData<TimelinePage>>(
+    { queryKey: ['agent-timeline', agentId], exact: false },
+    (old) => {
+      if (!old?.pages?.length) {
+        return old
+      }
 
-    const pages = [...old.pages]
-    const lastIndex = pages.length - 1
-    const lastPage = pages[lastIndex]
-    pages[lastIndex] = {
-      ...lastPage,
-      raw: {
-        ...lastPage.raw,
-        pending_action_requests: pendingActionRequests,
-        pending_human_input_requests: pendingActionRequests
-          .filter((request) => request.kind === 'human_input')
-          .flatMap((request) => request.requests),
-      },
-    }
+      const pages = [...old.pages]
+      const lastIndex = pages.length - 1
+      const lastPage = pages[lastIndex]
+      if (stateOrder < (lastPage.pendingActionsStateOrder ?? 0)) {
+        return old
+      }
+      pages[lastIndex] = {
+        ...lastPage,
+        pendingActionsStateOrder: stateOrder,
+        raw: {
+          ...lastPage.raw,
+          pending_action_requests: pendingActionRequests,
+          pending_human_input_requests: pendingActionRequests
+            .filter((request) => request.kind === 'human_input')
+            .flatMap((request) => request.requests),
+        },
+      }
 
-    return {
-      ...old,
-      pages,
-    }
-  })
+      return {
+        ...old,
+        pages,
+      }
+    },
+  )
 }
 
 function getPendingActionRequestCount(action: PendingActionRequest): number {
@@ -443,6 +458,26 @@ function hasCursorAdvanced(previous: string | null, next: string | null): boolea
   return compareTimelineCursors(next, previous) > 0
 }
 
+function preserveNewerPendingActionMetadata(
+  currentPage: TimelinePage,
+  incomingPage: TimelinePage,
+): Pick<TimelinePage, 'raw' | 'pendingActionsStateOrder'> {
+  if ((currentPage.pendingActionsStateOrder ?? 0) <= incomingPage.pendingActionsStateOrder) {
+    return {
+      raw: incomingPage.raw,
+      pendingActionsStateOrder: incomingPage.pendingActionsStateOrder,
+    }
+  }
+  return {
+    raw: {
+      ...incomingPage.raw,
+      pending_action_requests: currentPage.raw.pending_action_requests,
+      pending_human_input_requests: currentPage.raw.pending_human_input_requests,
+    },
+    pendingActionsStateOrder: currentPage.pendingActionsStateOrder,
+  }
+}
+
 function mergeLatestPageIntoTailAndDetectGap(
   queryClient: QueryClient,
   key: ReturnType<typeof timelineQueryKey>,
@@ -477,6 +512,7 @@ function mergeLatestPageIntoTailAndDetectGap(
       ? merged[0].cursor
       : latestPage.oldestCursor ?? lastPage.oldestCursor
     newestCursor = nextNewestCursor
+    const pendingMetadata = preserveNewerPendingActionMetadata(lastPage, latestPage)
 
     pages[lastIndex] = {
       ...lastPage,
@@ -484,7 +520,7 @@ function mergeLatestPageIntoTailAndDetectGap(
       newestCursor: nextNewestCursor,
       oldestCursor: nextOldestCursor,
       hasMoreNewer: hasNewerGap,
-      raw: latestPage.raw,
+      ...pendingMetadata,
     }
 
     return {
@@ -526,6 +562,7 @@ function mergeNewerPageIntoTail(
 
     newestCursor = nextNewestCursor
     advanced = hasCursorAdvanced(previousNewestCursor, nextNewestCursor)
+    const pendingMetadata = preserveNewerPendingActionMetadata(lastPage, newerPage)
 
     pages[lastIndex] = {
       ...lastPage,
@@ -533,7 +570,11 @@ function mergeNewerPageIntoTail(
       newestCursor: nextNewestCursor,
       oldestCursor: nextOldestCursor,
       hasMoreNewer: newerPage.hasMoreNewer,
-      raw: { ...newerPage.raw, critical_status: newerPage.raw.critical_status ?? lastPage.raw.critical_status },
+      ...pendingMetadata,
+      raw: {
+        ...pendingMetadata.raw,
+        critical_status: pendingMetadata.raw.critical_status ?? lastPage.raw.critical_status,
+      },
     }
 
     return {
@@ -572,13 +613,14 @@ async function performTimelineLatestRefresh(
   let remainingNewerGap = false
 
   try {
+    const initialRequestStartedOrder = nextClientStateOrder()
     const response = await fetchAgentTimeline(agentId, {
       direction: 'initial',
       limit: TIMELINE_PAGE_SIZE,
       developerMode,
       staffContext,
     })
-    const latestPage = timelineResponseToPage(response)
+    const latestPage = timelineResponseToPage(response, initialRequestStartedOrder)
     const latestMerge = mergeLatestPageIntoTailAndDetectGap(queryClient, key, latestPage)
     remainingNewerGap = latestMerge.hasNewerGap
     let cursor: string | null = latestMerge.newestCursor
@@ -586,6 +628,7 @@ async function performTimelineLatestRefresh(
     if (mode === 'contiguous' && remainingNewerGap && cursor) {
       while (remainingNewerGap && cursor && newerPagesFetched < maxNewerPages) {
         const previousCursor: string = cursor
+        const newerRequestStartedOrder = nextClientStateOrder()
         const newerResponse = await fetchAgentTimeline(agentId, {
           direction: 'newer',
           cursor,
@@ -593,7 +636,7 @@ async function performTimelineLatestRefresh(
           developerMode,
           staffContext,
         })
-        const newerPage = timelineResponseToPage(newerResponse)
+        const newerPage = timelineResponseToPage(newerResponse, newerRequestStartedOrder)
         const newerMerge = mergeNewerPageIntoTail(queryClient, key, newerPage)
 
         newerPagesFetched += 1
