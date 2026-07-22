@@ -299,7 +299,7 @@ def remove_schedule_entry(agent_id, schedule_id) -> None:
             RedBeatSchedulerEntry.from_key(f"redbeat:{entry_name}", app=celery_app).delete()
     except KeyError:
         return
-    except (KombuOperationalError, RedisError):
+    except (ValueError, KombuOperationalError, RedisError):
         logger.error("Unable to remove schedule entry %s", entry_name, exc_info=True)
 
 
@@ -354,7 +354,7 @@ def sync_schedule_entry(schedule_or_id) -> None:
         # HSETNX. A stable per-schedule key therefore needs an explicit
         # reschedule so the new one-shot's last_run_at and zset score agree.
         entry.reschedule(last_run_at=timezone.now())
-    except (KombuOperationalError, RedisError):
+    except (ValueError, KombuOperationalError, RedisError):
         logger.error("Unable to sync schedule entry %s", entry.name, exc_info=True)
 
 
