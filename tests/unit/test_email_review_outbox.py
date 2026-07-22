@@ -1,4 +1,5 @@
 import hashlib
+from dataclasses import replace
 from datetime import timedelta
 from unittest.mock import patch
 
@@ -283,9 +284,47 @@ class EmailReviewOutboxTests(TestCase):
         deliver_agent_email(message)
 
         message.refresh_from_db()
-        self.assertEqual(message.latest_status, DeliveryStatus.QUEUED)
+        self.assertEqual(message.latest_status, DeliveryStatus.FAILED)
         self.assertEqual(message.latest_error_code, "outbox_review_required")
         self.assertFalse(OutboundMessageAttempt.objects.filter(message=message).exists())
+
+    @override_flag(EMAIL_REVIEW_OUTBOX, active=True)
+    @patch("django.db.close_old_connections")
+    def test_policy_tightening_during_send_is_reported_as_failure(self, _close_mock):
+        recipient = "policy-race@example.com"
+        CommsAllowlistEntry.objects.create(
+            agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address=recipient,
+            is_active=True,
+            allow_outbound=True,
+        )
+        initial_decision = replace(
+            classify_email_recipients(self.agent, [recipient]),
+            requires_review=False,
+        )
+
+        with (
+            patch(
+                "api.agent.tools.email_sender.classify_email_recipients",
+                return_value=initial_decision,
+            ),
+            patch("api.agent.comms.outbound_delivery.postmark_status") as provider_status_mock,
+        ):
+            result = execute_send_email(
+                self.agent,
+                {
+                    "to_address": recipient,
+                    "subject": "Policy changed",
+                    "mobile_first_html": "<p>This must not send</p>",
+                    "will_continue_work": False,
+                },
+            )
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("requires human review", result["message"])
+        provider_status_mock.assert_not_called()
+        self.assertFalse(OutboundMessageAttempt.objects.exists())
 
     @override_flag(EMAIL_REVIEW_OUTBOX, active=True)
     def test_low_level_delivery_denies_tampered_approved_message(self):
@@ -613,6 +652,40 @@ class EmailReviewOutboxTests(TestCase):
         contact = CommsAllowlistEntry.objects.get(agent=self.agent, address="new-contact@example.com")
         self.assertFalse(contact.allow_inbound)
         self.assertTrue(contact.allow_outbound)
+
+    @override_flag(EMAIL_REVIEW_OUTBOX, active=True)
+    @patch("api.services.contact_authorization.get_user_max_contacts_per_agent", return_value=1)
+    @patch("api.tasks.outbox.dispatch_approved_outbox_email.delay")
+    def test_approvals_share_serialized_contact_capacity_check(self, delay_mock, _contact_cap_mock):
+        first_review = queue_message_for_review(self._message("first-new-contact@example.com"))
+        second_review = queue_message_for_review(self._message("second-new-contact@example.com"))
+
+        with patch.object(
+            PersistentAgent.objects,
+            "select_for_update",
+            wraps=PersistentAgent.objects.select_for_update,
+        ) as select_for_update_mock:
+            approve_review(first_review, actor=self.owner, expected_version=1)
+            with self.assertRaisesRegex(OutboundEmailReviewError, "0 of 1 contact slots available"):
+                approve_review(second_review, actor=self.owner, expected_version=1)
+
+        self.assertEqual(select_for_update_mock.call_count, 2)
+        second_review.refresh_from_db()
+        self.assertEqual(second_review.status, OutboundEmailReview.Status.PENDING)
+        self.assertTrue(
+            CommsAllowlistEntry.objects.filter(
+                agent=self.agent,
+                address="first-new-contact@example.com",
+                allow_inbound=False,
+                allow_outbound=True,
+            ).exists()
+        )
+        self.assertFalse(
+            CommsAllowlistEntry.objects.filter(
+                agent=self.agent,
+                address="second-new-contact@example.com",
+            ).exists()
+        )
 
     @override_flag(EMAIL_REVIEW_OUTBOX, active=True)
     @patch("api.tasks.outbox.dispatch_approved_outbox_email.delay")

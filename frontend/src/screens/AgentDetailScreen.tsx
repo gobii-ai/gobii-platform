@@ -53,6 +53,11 @@ import type { AllowlistInput, AllowlistTableRow, CollaboratorTableRow, PendingAl
 import { useModal } from '../hooks/useModal'
 import { HttpError } from '../api/http'
 import { safeErrorMessage } from '../api/safeErrorMessage'
+import {
+  EMAIL_SENDING_MODE_OPTIONS,
+  EMAIL_SENDING_MODE_STRICTNESS,
+  type EmailSendingMode,
+} from '../constants/emailSendingModes'
 import { readStoredConsoleContext } from '../util/consoleContextStorage'
 import type { IntelligenceTierKey } from '../types/llmIntelligence'
 import type {
@@ -61,7 +66,6 @@ import type {
   AgentOrganization,
   AgentSettingsData,
   ContactApprovalMode,
-  EmailSendingMode,
   MiniDescriptionMode,
   AgentSettingsReassignmentInfo as ReassignmentInfo,
   AgentSummary,
@@ -174,30 +178,6 @@ const CONTACT_APPROVAL_OPTIONS = [
     value: 'auto_approve_email',
     title: 'Automatically allow email contacts',
     description: 'Anyone your agent emails is added to its contacts.',
-    icon: Mail,
-    badge: Zap,
-  },
-] as const
-
-const EMAIL_SENDING_MODE_OPTIONS = [
-  {
-    value: 'review_all_external',
-    title: 'Review before send',
-    description: 'Every email to someone outside your verified workspace waits in Outbox.',
-    icon: ShieldAlert,
-    badge: null,
-  },
-  {
-    value: 'review_new_contacts',
-    title: 'Review only new contacts',
-    description: 'Known contacts send immediately; first-time external recipients wait for review.',
-    icon: Mail,
-    badge: null,
-  },
-  {
-    value: 'send_automatically',
-    title: 'Send external emails automatically',
-    description: 'External email is sent immediately without human review.',
     icon: Mail,
     badge: Zap,
   },
@@ -2482,11 +2462,6 @@ function AllowlistManager({
   const embeddedInfoCardClassName = 'rounded-xl border border-slate-200/20 bg-slate-950/35 px-4 py-4'
   const embeddedInfoIconClassName = 'flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200/20 bg-slate-900/45 text-slate-300'
   const embeddedPrimaryActionClassName = getSettingsActionButtonClassName({ tone: 'primary' })
-  const modeStrictness: Record<EmailSendingMode, number> = {
-    send_automatically: 0,
-    review_new_contacts: 1,
-    review_all_external: 2,
-  }
   const automaticallyAllowsEmailContacts = emailReviewOutboxEnabled
     ? effectiveEmailSendingMode === 'send_automatically'
     : contactApprovalMode === 'auto_approve_email'
@@ -2554,11 +2529,11 @@ function AllowlistManager({
           )}
           <div className="grid gap-3 lg:grid-cols-3">
             {EMAIL_SENDING_MODE_OPTIONS.map((option) => {
-              const Icon = option.icon
-              const Badge = option.badge
+              const Icon = option.value === 'review_all_external' ? ShieldAlert : Mail
+              const Badge = option.value === 'send_automatically' ? Zap : null
               const selected = emailSendingMode === option.value
               const prohibited = organizationMinimumEmailSendingMode
-                ? modeStrictness[option.value] < modeStrictness[organizationMinimumEmailSendingMode]
+                ? EMAIL_SENDING_MODE_STRICTNESS[option.value] < EMAIL_SENDING_MODE_STRICTNESS[organizationMinimumEmailSendingMode]
                 : false
               return (
                 <label

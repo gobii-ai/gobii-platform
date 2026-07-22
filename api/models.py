@@ -11632,9 +11632,7 @@ class OutboundEmailReviewNotificationState(models.Model):
         related_name="outbox_notification_state",
     )
     pending_cycle_started_at = models.DateTimeField(null=True, blank=True)
-    initial_notification_sent_at = models.DateTimeField(null=True, blank=True)
     last_digest_sent_at = models.DateTimeField(null=True, blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:

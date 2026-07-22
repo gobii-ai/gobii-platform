@@ -231,8 +231,6 @@ export type PendingOutboxReviewsAction = {
     id: string
     subject: string
     recipient: string
-    queuedAt?: string | null
-    detailApiUrl?: string | null
   }>
   outboxUrl: string
 }
