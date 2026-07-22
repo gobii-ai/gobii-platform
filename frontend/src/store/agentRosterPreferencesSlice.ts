@@ -11,6 +11,7 @@ import {
   USER_PREFERENCE_KEY_AGENT_CHAT_NOTIFICATIONS_ENABLED,
   USER_PREFERENCE_KEY_AGENT_CHAT_ROSTER_FAVORITE_AGENT_IDS,
   USER_PREFERENCE_KEY_AGENT_CHAT_ROSTER_SORT_MODE,
+  USER_PREFERENCE_KEY_AGENT_CHAT_SUGGESTIONS_ENABLED,
 } from '../api/userPreferences'
 import type { AgentRosterSortMode } from '../types/agentRoster'
 import { parseAgentRosterSortMode } from '../util/agentRosterSort'
@@ -27,6 +28,7 @@ export type AgentRosterPreferencesState = {
   favoriteAgentIds: PreferenceFieldState<string[]>
   mutedAgentIds: PreferenceFieldState<string[]>
   insightsPanelExpanded: PreferenceFieldState<boolean | null>
+  suggestionsEnabled: PreferenceFieldState<boolean>
   agentChatNotificationsEnabled: PreferenceFieldState<boolean>
 }
 
@@ -35,6 +37,7 @@ export type AgentRosterPreferencesHydrationPayload = {
   favoriteAgentIds?: unknown
   mutedAgentIds?: unknown
   insightsPanelExpanded?: unknown
+  suggestionsEnabled?: unknown
   agentChatNotificationsEnabled?: unknown
 }
 
@@ -45,6 +48,7 @@ type AgentRosterQueryData = {
   favoriteAgentIds?: string[]
   mutedAgentIds?: string[]
   insightsPanelExpanded?: boolean | null
+  suggestionsEnabled?: boolean
   agentChatNotificationsEnabled?: boolean
 }
 
@@ -82,6 +86,12 @@ const preferenceConfig = {
     hydrateOnce: true,
     normalize: parseNullableBooleanPreference,
   },
+  suggestionsEnabled: {
+    preferenceKey: USER_PREFERENCE_KEY_AGENT_CHAT_SUGGESTIONS_ENABLED,
+    rosterQueryField: 'suggestionsEnabled',
+    hydrateOnce: true,
+    normalize: parseBooleanPreference,
+  },
   agentChatNotificationsEnabled: {
     preferenceKey: USER_PREFERENCE_KEY_AGENT_CHAT_NOTIFICATIONS_ENABLED,
     rosterQueryField: 'agentChatNotificationsEnabled',
@@ -95,6 +105,7 @@ const initialState: AgentRosterPreferencesState = {
   favoriteAgentIds: createPreferenceField<string[]>([]),
   mutedAgentIds: createPreferenceField<string[]>([]),
   insightsPanelExpanded: createPreferenceField<boolean | null>(null),
+  suggestionsEnabled: createPreferenceField(true),
   agentChatNotificationsEnabled: createPreferenceField(false),
 }
 
@@ -259,4 +270,7 @@ export const selectAgentRosterSortMode = (state: RootState): AgentRosterSortMode
 export const selectFavoriteAgentIds = (state: RootState): string[] => state.agentRosterPreferences.favoriteAgentIds.value
 export const selectMutedAgentIds = (state: RootState): string[] => state.agentRosterPreferences.mutedAgentIds.value
 export const selectInsightsPanelExpandedPreference = (state: RootState): boolean | null => state.agentRosterPreferences.insightsPanelExpanded.value
+export const selectInsightsPanelPreferenceHydrated = (state: RootState): boolean => state.agentRosterPreferences.insightsPanelExpanded.hydrated
+export const selectSuggestionsEnabled = (state: RootState): boolean => state.agentRosterPreferences.suggestionsEnabled.value
+export const selectSuggestionsPreferenceHydrated = (state: RootState): boolean => state.agentRosterPreferences.suggestionsEnabled.hydrated
 export const selectAgentChatNotificationsEnabled = (state: RootState): boolean => state.agentRosterPreferences.agentChatNotificationsEnabled.value

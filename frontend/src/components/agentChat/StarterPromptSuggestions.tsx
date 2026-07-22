@@ -1,5 +1,5 @@
 import { memo } from 'react'
-import { ChevronRight, FileText, Lightbulb, Link2, ListChecks } from 'lucide-react'
+import { ChevronRight, FileText, Lightbulb, Link2, ListChecks, X } from 'lucide-react'
 import { AgentChatSectionCard } from './uiPrimitives'
 
 export type StarterPrompt = {
@@ -13,6 +13,7 @@ type StarterPromptSuggestionsProps = {
   loading?: boolean
   loadingCount?: number
   disabled?: boolean
+  onDismiss?: () => void
   onSelect?: (prompt: StarterPrompt, position: number) => void | Promise<void>
 }
 
@@ -34,6 +35,7 @@ export const StarterPromptSuggestions = memo(function StarterPromptSuggestions({
   loading = false,
   loadingCount = 3,
   disabled = false,
+  onDismiss,
   onSelect,
 }: StarterPromptSuggestionsProps) {
   if (!loading && !prompts.length) {
@@ -48,7 +50,20 @@ export const StarterPromptSuggestions = memo(function StarterPromptSuggestions({
       aria-label="Suggested follow-ups"
       aria-busy={loading}
     >
-      <h3 className="starter-prompts-card__title">Suggested follow-ups</h3>
+      <div className="starter-prompts-card__header">
+        <h3 className="starter-prompts-card__title">Suggested follow-ups</h3>
+        {onDismiss ? (
+          <button
+            type="button"
+            className="starter-prompts-card__dismiss"
+            onClick={onDismiss}
+            aria-label="Dismiss suggested follow-ups"
+            title="Dismiss suggested follow-ups"
+          >
+            <X aria-hidden="true" />
+          </button>
+        ) : null}
+      </div>
       <div className="starter-prompts-card__rows" role="list">
         {loading
           ? Array.from({ length: Math.max(1, loadingCount) }).map((_, index) => (

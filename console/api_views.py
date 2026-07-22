@@ -3066,6 +3066,9 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
         agent_chat_notifications_enabled = resolved_preferences.get(
             UserPreference.KEY_AGENT_CHAT_NOTIFICATIONS_ENABLED
         )
+        agent_chat_suggestions_enabled = resolved_preferences.get(
+            UserPreference.KEY_AGENT_CHAT_SUGGESTIONS_ENABLED
+        )
         if for_agent_id and not staff_override:
             override_for_agent, error_response, requested_agent_status = self._resolve_override_for_agent(
                 request,
@@ -3265,6 +3268,7 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
                 "muted_agent_ids": muted_agent_ids,
                 "insights_panel_expanded": insights_panel_expanded,
                 "agent_chat_notifications_enabled": agent_chat_notifications_enabled,
+                "agent_chat_suggestions_enabled": agent_chat_suggestions_enabled,
                 "billingStatus": billing_status,
                 "accountPause": account_pause,
                 "agents": payload,
@@ -7028,6 +7032,10 @@ class AgentSuggestionsAPIView(LoginRequiredMixin, View):
             allow_shared=True,
             allow_delinquent_personal_chat=True,
         )
+        preferences = UserPreference.resolve_known_preferences(request.user)
+        if not preferences[UserPreference.KEY_AGENT_CHAT_SUGGESTIONS_ENABLED]:
+            return JsonResponse({"suggestions": [], "source": "none"})
+
         try:
             prompt_count = int(request.GET.get("prompt_count", DEFAULT_PROMPT_COUNT))
         except (TypeError, ValueError):

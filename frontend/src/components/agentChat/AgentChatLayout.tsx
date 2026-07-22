@@ -166,7 +166,9 @@ export type AgentChatLayoutSidebarConfig = Omit<
 > & {
   settings?: AgentChatLayoutSidebarSettings
   insightsPanelExpandedPreference?: boolean | null
+  insightsPanelPreferenceHydrated?: boolean
   onInsightsPanelExpandedPreferenceChange?: (expanded: boolean) => void
+  suggestionsPreferenceHydrated?: boolean
 }
 
 type AgentChatLayoutProps = AgentTimelineProps & {
@@ -428,7 +430,9 @@ export function AgentChatLayout({
   const {
     settings: sidebarSettingsConfig,
     insightsPanelExpandedPreference = null,
+    insightsPanelPreferenceHydrated = true,
     onInsightsPanelExpandedPreferenceChange,
+    suggestionsPreferenceHydrated = true,
     ...chatSidebarProps
   } = sidebarConfig
   const {
@@ -459,6 +463,8 @@ export function AgentChatLayout({
   const sidebarNotificationsEnabled = sidebarSettingsConfig?.notificationsEnabled ?? true
   const sidebarNotificationStatus = sidebarSettingsConfig?.notificationStatus ?? 'off'
   const onSidebarNotificationsEnabledChange = sidebarSettingsConfig?.onNotificationsEnabledChange
+  const sidebarSuggestionsEnabled = sidebarSettingsConfig?.suggestionsEnabled ?? true
+  const onSidebarSuggestionsEnabledChange = sidebarSettingsConfig?.onSuggestionsEnabledChange
   const runtimeSession = useAppSelector(selectActiveChatSession)
   const shellViewer = useAppSelector(selectImmersiveShellViewer)
   const activeAgentId = agentId ?? null
@@ -902,9 +908,11 @@ export function AgentChatLayout({
     starterPrompts,
     starterPromptsLoading,
     starterPromptSubmitting,
+    handleStarterPromptDismiss,
     handleStarterPromptSelect,
   } = useStarterPrompts({
     agentId,
+    enabled: suggestionsPreferenceHydrated && sidebarSuggestionsEnabled,
     events,
     initialLoading,
     spawnIntentLoading,
@@ -1344,6 +1352,8 @@ export function AgentChatLayout({
     notificationsEnabled: sidebarNotificationsEnabled,
     notificationStatus: sidebarNotificationStatus,
     onNotificationsEnabledChange: onSidebarNotificationsEnabledChange,
+    suggestionsEnabled: sidebarSuggestionsEnabled,
+    onSuggestionsEnabledChange: onSidebarSuggestionsEnabledChange,
     onOpenBilling,
     onOpenUsage,
     onOpenApiKeys,
@@ -1364,6 +1374,7 @@ export function AgentChatLayout({
     currentContext,
     isProprietaryMode,
     onSidebarNotificationsEnabledChange,
+    onSidebarSuggestionsEnabledChange,
     onOpenBilling,
     onOpenUsage,
     onOpenApiKeys,
@@ -1382,6 +1393,7 @@ export function AgentChatLayout({
     sidebarCreditsResetOn,
     sidebarNotificationStatus,
     sidebarNotificationsEnabled,
+    sidebarSuggestionsEnabled,
     sidebarTodayCreditsUsed,
     taskQuota,
     viewerEmail,
@@ -1522,6 +1534,7 @@ export function AgentChatLayout({
             onPurchaseSeats={handlePurchaseSeats}
             onReportMessage={handleReportMessage}
             onRetryMessage={onRetryMessage}
+            onStarterPromptDismiss={handleStarterPromptDismiss}
             onStarterPromptSelect={handleStarterPromptSelect}
             onTaskCreditsDismiss={handleTaskCreditsDismiss}
             onTaskCreditsOpenPacks={taskPackCanManageBilling ? () => handleAddonsOpen('tasks') : undefined}
@@ -1618,6 +1631,7 @@ export function AgentChatLayout({
               isProcessing={showProcessingIndicator}
               autoFocus={autoFocusComposer}
               insightsPanelExpandedPreference={insightsPanelExpandedPreference}
+              insightsPanelPreferenceHydrated={insightsPanelPreferenceHydrated}
               onInsightsPanelExpandedPreferenceChange={onInsightsPanelExpandedPreferenceChange}
               insightsLoading={effectiveInsightsLoading}
               onOpenUsage={onOpenUsage}

@@ -3123,12 +3123,41 @@
     color: #1e1b4b;
     overflow: hidden;
 }
+.starter-prompts-card__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.38rem 0.48rem 0.2rem 0.85rem;
+}
 .starter-prompts-card__title {
     margin: 0;
-    padding: 0.6rem 0.85rem 0.42rem;
     color: #3730a3;
     font-size: 0.75rem;
     font-weight: 600;
+}
+.starter-prompts-card__dismiss {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.75rem;
+    height: 1.75rem;
+    border: 0;
+    border-radius: 0.5rem;
+    background: transparent;
+    color: #6366f1;
+    cursor: pointer;
+}
+.starter-prompts-card__dismiss:hover {
+    background: rgba(99, 102, 241, 0.1);
+    color: #3730a3;
+}
+.starter-prompts-card__dismiss:focus-visible {
+    outline: 2px solid rgba(99, 102, 241, 0.45);
+    outline-offset: 1px;
+}
+.starter-prompts-card__dismiss svg {
+    width: 0.9rem;
+    height: 0.9rem;
 }
 .starter-prompts-card__rows {
     display: flex;

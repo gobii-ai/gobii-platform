@@ -85,7 +85,10 @@ import {
   selectAgentRosterSortMode,
   selectFavoriteAgentIds,
   selectInsightsPanelExpandedPreference,
+  selectInsightsPanelPreferenceHydrated,
   selectMutedAgentIds,
+  selectSuggestionsEnabled,
+  selectSuggestionsPreferenceHydrated,
   toggleAgentRosterStringPreference,
 } from '../store/agentRosterPreferencesSlice'
 import {
@@ -575,6 +578,7 @@ type AgentRosterQueryData = {
   favoriteAgentIds?: string[]
   mutedAgentIds?: string[]
   insightsPanelExpanded?: boolean | null
+  suggestionsEnabled?: boolean
   agentChatNotificationsEnabled?: boolean
   agents: AgentRosterEntry[]
   agentInvites?: AgentSidebarInvite[]
@@ -1530,6 +1534,9 @@ export function AgentChatPage({
   const favoriteAgentIds = useAppSelector(selectFavoriteAgentIds)
   const mutedAgentIds = useAppSelector(selectMutedAgentIds)
   const insightsPanelExpandedPreference = useAppSelector(selectInsightsPanelExpandedPreference)
+  const insightsPanelPreferenceHydrated = useAppSelector(selectInsightsPanelPreferenceHydrated)
+  const suggestionsEnabled = useAppSelector(selectSuggestionsEnabled)
+  const suggestionsPreferenceHydrated = useAppSelector(selectSuggestionsPreferenceHydrated)
   const agentChatNotificationsEnabled = useAppSelector(selectAgentChatNotificationsEnabled)
   const notificationPermissionPromptAttemptedRef = useRef(false)
   useRosterPreferencesBridge(rosterQuery.data)
@@ -1558,6 +1565,13 @@ export function AgentChatPage({
   const handleInsightsPanelExpandedPreferenceChange = useCallback(
     (nextInsightsPanelExpanded: boolean) => {
       void dispatch(persistAgentRosterPreference('insightsPanelExpanded', nextInsightsPanelExpanded))
+    },
+    [dispatch],
+  )
+
+  const handleSuggestionsEnabledChange = useCallback(
+    (nextSuggestionsEnabled: boolean) => {
+      void dispatch(persistAgentRosterPreference('suggestionsEnabled', nextSuggestionsEnabled))
     },
     [dispatch],
   )
@@ -4049,6 +4063,8 @@ export function AgentChatPage({
     favoriteAgentIds,
     mutedAgentIds,
     insightsPanelExpandedPreference,
+    insightsPanelPreferenceHydrated,
+    suggestionsPreferenceHydrated,
     switchingAgentId,
     loading: rosterLoading,
     errorMessage: rosterErrorMessage,
@@ -4087,6 +4103,8 @@ export function AgentChatPage({
       notificationsEnabled: agentChatNotificationsEnabled,
       notificationStatus,
       onNotificationsEnabledChange: handleAgentChatNotificationsEnabledChange,
+      suggestionsEnabled,
+      onSuggestionsEnabledChange: handleSuggestionsEnabledChange,
     },
     galleryShellPage: selectionPage,
     galleryShellPanel: selectionPage !== 'agents' ? selectionShellPanel : null,
@@ -4120,6 +4138,7 @@ export function AgentChatPage({
     handleCreateAgent,
     handleExitEmbeddedSettings,
     handleInsightsPanelExpandedPreferenceChange,
+    handleSuggestionsEnabledChange,
     handleOpenSupport,
     handleRespondInvite,
     handleSelectAgent,
@@ -4127,6 +4146,7 @@ export function AgentChatPage({
     handleToggleAgentMute,
     immersiveShellOpenHandlers,
     insightsPanelExpandedPreference,
+    insightsPanelPreferenceHydrated,
     mutedAgentIds,
     notificationStatus,
     onScrolledToAgent,
@@ -4138,6 +4158,8 @@ export function AgentChatPage({
     scrollToAgentId,
     selectionPage,
     selectionShellPanel,
+    suggestionsEnabled,
+    suggestionsPreferenceHydrated,
     showEmbeddedSettings,
     sidebarAgents,
     sidebarTaskCredits?.resetOn,

@@ -840,6 +840,7 @@ class UserPreference(models.Model):
     KEY_AGENT_CHAT_MUTED_AGENT_IDS = "agent.chat.muted_agent_ids"
     KEY_AGENT_CHAT_INSIGHTS_PANEL_EXPANDED = "agent.chat.insights_panel.expanded"
     KEY_AGENT_CHAT_NOTIFICATIONS_ENABLED = "agent.chat.notifications.enabled"
+    KEY_AGENT_CHAT_SUGGESTIONS_ENABLED = "agent.chat.suggestions.enabled"
     KEY_USER_TIMEZONE = "user.timezone"
     PREFERENCE_DEFINITIONS = {
         KEY_AGENT_CHAT_ROSTER_SORT_MODE: {
@@ -860,6 +861,10 @@ class UserPreference(models.Model):
             "type": "nullable_boolean",
         },
         KEY_AGENT_CHAT_NOTIFICATIONS_ENABLED: {
+            "default": True,
+            "type": "boolean",
+        },
+        KEY_AGENT_CHAT_SUGGESTIONS_ENABLED: {
             "default": True,
             "type": "boolean",
         },
@@ -1039,31 +1044,39 @@ class UserPreference(models.Model):
                 cls.PREFERENCE_DEFINITIONS[key],
             )
 
-        try:
-            preference, _ = cls.objects.get_or_create(user=user)
-        except IntegrityError:
-            # Concurrent first-write requests can both race to create the one-to-one
-            # row. If another request won, load that row and continue applying the
-            # validated updates instead of surfacing a duplicate-key failure.
+        with transaction.atomic():
             try:
-                preference = cls.objects.get(user=user)
-            except cls.DoesNotExist:
-                preference, _ = cls.objects.get_or_create(user=user)
-        stored = preference.preferences if isinstance(preference.preferences, dict) else {}
-        known_stored: dict[str, object] = {}
-        for key, definition in cls.PREFERENCE_DEFINITIONS.items():
-            if key not in stored:
-                continue
-            try:
-                known_stored[key] = cls._normalize_preference_value(key, stored.get(key), definition)
-            except ValueError:
-                continue
-        next_stored = {**known_stored, **normalized_updates}
-        if next_stored != stored:
-            preference.preferences = next_stored
-            preference.save(update_fields=["preferences", "updated_at"])
+                preference, created = cls.objects.get_or_create(user=user)
+            except IntegrityError:
+                # Concurrent first writes may race on the one-to-one constraint.
+                # Lock the winning row before merging this request's updates.
+                try:
+                    preference = cls.objects.select_for_update().get(user=user)
+                except cls.DoesNotExist:
+                    preference, created = cls.objects.get_or_create(user=user)
+                    if not created:
+                        preference = cls.objects.select_for_update().get(pk=preference.pk)
+            else:
+                if not created:
+                    # get_or_create() does not lock an existing row. Re-read it under
+                    # the lock so concurrent PATCHes merge instead of overwriting.
+                    preference = cls.objects.select_for_update().get(pk=preference.pk)
 
-        return cls.resolve_known_preferences(user)
+            stored = preference.preferences if isinstance(preference.preferences, dict) else {}
+            known_stored: dict[str, object] = {}
+            for key, definition in cls.PREFERENCE_DEFINITIONS.items():
+                if key not in stored:
+                    continue
+                try:
+                    known_stored[key] = cls._normalize_preference_value(key, stored.get(key), definition)
+                except ValueError:
+                    continue
+            next_stored = {**known_stored, **normalized_updates}
+            if next_stored != stored:
+                preference.preferences = next_stored
+                preference.save(update_fields=["preferences", "updated_at"])
+
+            return cls.resolve_known_preferences(user)
 
 
 def validate_product_announcement_action_url(value: str) -> None:

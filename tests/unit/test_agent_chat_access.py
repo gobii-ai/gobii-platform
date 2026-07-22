@@ -770,6 +770,7 @@ class AgentChatAccessTests(TestCase):
         self.assertEqual(payload.get("agent_roster_sort_mode"), "recent")
         self.assertEqual(payload.get("favorite_agent_ids"), [])
         self.assertTrue(payload.get("agent_chat_notifications_enabled"))
+        self.assertTrue(payload.get("agent_chat_suggestions_enabled"))
         roster_ids = {entry["id"] for entry in payload.get("agents", [])}
         self.assertIn(str(self.org_agent.id), roster_ids)
         self.assertIn(str(self.org_agent_two.id), roster_ids)
@@ -850,6 +851,23 @@ class AgentChatAccessTests(TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertFalse(payload.get("agent_chat_notifications_enabled"))
+
+    def test_roster_includes_agent_chat_suggestions_enabled_preference(self):
+        UserPreference.update_known_preferences(
+            self.user,
+            {
+                UserPreference.KEY_AGENT_CHAT_SUGGESTIONS_ENABLED: False,
+            },
+        )
+
+        response = self.client.get(
+            reverse("console_agent_roster"),
+            HTTP_X_GOBII_CONTEXT_TYPE="organization",
+            HTTP_X_GOBII_CONTEXT_ID=str(self.org.id),
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertFalse(payload.get("agent_chat_suggestions_enabled"))
 
     @tag("batch_agent_chat")
     def test_roster_includes_only_enabled_system_skill_keys(self):

@@ -1,9 +1,9 @@
 import json
 import uuid
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from django.contrib.auth import get_user_model
-from django.db import IntegrityError
+from django.db import IntegrityError, connection, transaction
 from django.test import TestCase, tag
 from django.urls import reverse
 
@@ -44,6 +44,9 @@ class ConsoleUserPreferencesApiTests(TestCase):
         )
         self.assertTrue(
             preferences.get(UserPreference.KEY_AGENT_CHAT_NOTIFICATIONS_ENABLED),
+        )
+        self.assertTrue(
+            preferences.get(UserPreference.KEY_AGENT_CHAT_SUGGESTIONS_ENABLED),
         )
         self.assertEqual(
             preferences.get(UserPreference.KEY_USER_TIMEZONE),
@@ -255,6 +258,44 @@ class ConsoleUserPreferencesApiTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertFalse(UserPreference.objects.filter(user=self.user).exists())
 
+    def test_patch_updates_agent_chat_suggestions_enabled_preference(self):
+        response = self.client.patch(
+            self.url,
+            data=json.dumps(
+                {
+                    "preferences": {
+                        UserPreference.KEY_AGENT_CHAT_SUGGESTIONS_ENABLED: False,
+                    }
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        preferences = response.json().get("preferences", {})
+        self.assertFalse(preferences.get(UserPreference.KEY_AGENT_CHAT_SUGGESTIONS_ENABLED))
+
+        stored = UserPreference.objects.get(user=self.user)
+        self.assertFalse(
+            (stored.preferences or {}).get(UserPreference.KEY_AGENT_CHAT_SUGGESTIONS_ENABLED)
+        )
+
+    def test_patch_rejects_invalid_agent_chat_suggestions_enabled_preference(self):
+        response = self.client.patch(
+            self.url,
+            data=json.dumps(
+                {
+                    "preferences": {
+                        UserPreference.KEY_AGENT_CHAT_SUGGESTIONS_ENABLED: "no",
+                    }
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(UserPreference.objects.filter(user=self.user).exists())
+
     def test_patch_rejects_invalid_favorite_agent_ids(self):
         response = self.client.patch(
             self.url,
@@ -404,14 +445,68 @@ class ConsoleUserPreferencesApiTests(TestCase):
             "America/Los_Angeles",
         )
 
+    def test_update_known_preferences_locks_and_merges_fresh_stored_preferences(self):
+        existing = UserPreference.objects.create(
+            user=self.user,
+            preferences={UserPreference.KEY_AGENT_CHAT_NOTIFICATIONS_ENABLED: False},
+        )
+        stale_preference = UserPreference(
+            pk=existing.pk,
+            user=self.user,
+            preferences={},
+        )
+        select_for_update = UserPreference.objects.select_for_update
+
+        def select_for_update_in_transaction(*args, **kwargs):
+            self.assertTrue(connection.in_atomic_block)
+            return select_for_update(*args, **kwargs)
+
+        with patch.object(
+            UserPreference.objects,
+            "get_or_create",
+            return_value=(stale_preference, False),
+        ), patch.object(
+            UserPreference.objects,
+            "select_for_update",
+            side_effect=select_for_update_in_transaction,
+        ) as locked_query, patch.object(
+            transaction,
+            "atomic",
+            wraps=transaction.atomic,
+        ) as atomic:
+            resolved = UserPreference.update_known_preferences(
+                self.user,
+                {UserPreference.KEY_USER_TIMEZONE: "America/Los_Angeles"},
+            )
+
+        atomic.assert_called_once_with()
+        locked_query.assert_called_once_with()
+        self.assertFalse(resolved[UserPreference.KEY_AGENT_CHAT_NOTIFICATIONS_ENABLED])
+        self.assertEqual(resolved[UserPreference.KEY_USER_TIMEZONE], "America/Los_Angeles")
+        existing.refresh_from_db()
+        self.assertEqual(
+            existing.preferences,
+            {
+                UserPreference.KEY_AGENT_CHAT_NOTIFICATIONS_ENABLED: False,
+                UserPreference.KEY_USER_TIMEZONE: "America/Los_Angeles",
+            },
+        )
+
     def test_update_known_preferences_retries_create_if_row_disappears_after_integrity_error(self):
         replacement = UserPreference.objects.create(user=self.user, preferences={})
+        missing_locked_query = MagicMock()
+        missing_locked_query.get.side_effect = UserPreference.DoesNotExist
+        locked_replacement_query = UserPreference.objects.select_for_update()
 
         with patch.object(
             UserPreference.objects,
             "get_or_create",
             side_effect=[IntegrityError("duplicate key"), (replacement, False)],
-        ), patch.object(UserPreference.objects, "get", side_effect=UserPreference.DoesNotExist):
+        ), patch.object(
+            UserPreference.objects,
+            "select_for_update",
+            side_effect=[missing_locked_query, locked_replacement_query],
+        ):
             resolved = UserPreference.update_known_preferences(
                 self.user,
                 {UserPreference.KEY_USER_TIMEZONE: "America/Los_Angeles"},
@@ -421,6 +516,7 @@ class ConsoleUserPreferencesApiTests(TestCase):
             resolved.get(UserPreference.KEY_USER_TIMEZONE),
             "America/Los_Angeles",
         )
+        replacement.refresh_from_db()
         self.assertEqual(
             replacement.preferences.get(UserPreference.KEY_USER_TIMEZONE),
             "America/Los_Angeles",

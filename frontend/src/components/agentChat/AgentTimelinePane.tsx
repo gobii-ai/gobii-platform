@@ -53,6 +53,7 @@ type AgentTimelinePaneProps = {
   onPurchaseSeats?: () => void
   onReportMessage?: (message: AgentMessage) => void
   onRetryMessage?: (message: AgentMessage) => void | Promise<void>
+  onStarterPromptDismiss?: () => void
   onStarterPromptSelect?: (prompt: StarterPrompt, position: number) => Promise<void>
   onTaskCreditsDismiss?: () => void
   onTaskCreditsOpenPacks?: () => void
@@ -109,6 +110,7 @@ export function AgentTimelinePane({
   onPurchaseSeats,
   onReportMessage,
   onRetryMessage,
+  onStarterPromptDismiss,
   onStarterPromptSelect,
   onTaskCreditsDismiss,
   onTaskCreditsOpenPacks,
@@ -256,6 +258,7 @@ export function AgentTimelinePane({
                   loading={starterPromptsLoading}
                   loadingCount={starterPromptCount}
                   disabled={starterPromptSubmitting || starterPromptsDisabled || composerDisabled}
+                  onDismiss={onStarterPromptDismiss}
                   onSelect={onStarterPromptSelect}
                 />
               ) : null}

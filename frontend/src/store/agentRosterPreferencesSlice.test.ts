@@ -31,6 +31,7 @@ describe('agentRosterPreferencesSlice', () => {
       favoriteAgentIds: ['agent-1'],
       mutedAgentIds: ['agent-2'],
       insightsPanelExpanded: true,
+      suggestionsEnabled: false,
       agentChatNotificationsEnabled: true,
     }))
 
@@ -39,6 +40,7 @@ describe('agentRosterPreferencesSlice', () => {
       favoriteAgentIds: { value: ['agent-1'], persistedValue: ['agent-1'], hydrated: true },
       mutedAgentIds: { value: ['agent-2'], persistedValue: ['agent-2'], hydrated: true },
       insightsPanelExpanded: { value: true, persistedValue: true, hydrated: true },
+      suggestionsEnabled: { value: false, persistedValue: false, hydrated: true },
       agentChatNotificationsEnabled: { value: true, persistedValue: true, hydrated: true },
     })
   })
@@ -63,6 +65,34 @@ describe('agentRosterPreferencesSlice', () => {
       persistedValue: ['agent-1'],
     })
     expect(queryClient.getQueryData<{ favoriteAgentIds: string[] }>(['agent-roster'])?.favoriteAgentIds).toEqual(['agent-1'])
+  })
+
+  it('optimistically disables suggestions and updates the roster cache', async () => {
+    const queryClient = new QueryClient()
+    queryClient.setQueryData(['agent-roster'], {
+      agents: [],
+      suggestionsEnabled: true,
+    })
+    vi.mocked(updateUserPreferences).mockResolvedValue({
+      preferences: {
+        'agent.chat.suggestions.enabled': false,
+      },
+    })
+    const store = createAppStore({ queryClient })
+    store.dispatch(agentRosterPreferencesActions.hydratedFromRoster({ suggestionsEnabled: true }))
+
+    await store.dispatch(persistAgentRosterPreference('suggestionsEnabled', false))
+
+    expect(updateUserPreferences).toHaveBeenCalledWith({
+      preferences: {
+        'agent.chat.suggestions.enabled': false,
+      },
+    })
+    expect(selectAgentRosterPreferencesState(store.getState()).suggestionsEnabled).toMatchObject({
+      value: false,
+      persistedValue: false,
+    })
+    expect(queryClient.getQueryData<{ suggestionsEnabled: boolean }>(['agent-roster'])?.suggestionsEnabled).toBe(false)
   })
 
   it('rolls back Redux and roster cache when persistence fails', async () => {

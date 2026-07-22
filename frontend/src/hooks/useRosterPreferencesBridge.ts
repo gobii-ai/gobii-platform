@@ -10,6 +10,7 @@ type AgentRosterPreferencesSource = Pick<
   | 'favoriteAgentIds'
   | 'mutedAgentIds'
   | 'insightsPanelExpanded'
+  | 'suggestionsEnabled'
   | 'agentChatNotificationsEnabled'
 >
 
@@ -25,6 +26,7 @@ export function useRosterPreferencesBridge(rosterData: AgentRosterPreferencesSou
       favoriteAgentIds: rosterData.favoriteAgentIds,
       mutedAgentIds: rosterData.mutedAgentIds,
       insightsPanelExpanded: rosterData.insightsPanelExpanded,
+      suggestionsEnabled: rosterData.suggestionsEnabled,
       agentChatNotificationsEnabled: rosterData.agentChatNotificationsEnabled,
     }))
   }, [dispatch, rosterData])
