@@ -80,32 +80,26 @@ def _hubspot_native_prompt_context(agent) -> str:
 
 
 def _webhooks_prompt_context(agent) -> str:
-    inbound = list(agent.inbound_webhooks.order_by("name"))
-    outbound = list(agent.webhooks.order_by("name"))
-    lines = ["Current native Gobii webhook configuration:", "Inbound triggers:"]
-    if inbound:
-        for webhook in inbound:
-            last_triggered = webhook.last_triggered_at.isoformat() if webhook.last_triggered_at else "never"
-            state = "active" if webhook.is_active else "inactive"
-            lines.append(
-                f"- {webhook.name} (id={webhook.id}, {state}, last triggered={last_triggered})"
-            )
-    else:
-        lines.append("- None configured")
-    lines.append("Outbound destinations:")
-    if outbound:
-        for webhook in outbound:
-            last_triggered = webhook.last_triggered_at.isoformat() if webhook.last_triggered_at else "never"
-            status = webhook.last_response_status if webhook.last_response_status is not None else "none"
-            lines.append(
-                f"- {webhook.name} (id={webhook.id}, last sent={last_triggered}, last status={status})"
-            )
-    else:
-        lines.append("- None configured")
-    lines.append(
-        "Endpoint and destination URLs are intentionally omitted. Use the matching management tool with action=get only when needed."
-    )
-    return "\n".join(lines)
+    def triggered(hook):
+        return hook.last_triggered_at.isoformat() if hook.last_triggered_at else "never"
+
+    inbound = [
+        f"- {hook.name} (id={hook.id}, {'active' if hook.is_active else 'inactive'}, last triggered={triggered(hook)})"
+        for hook in agent.inbound_webhooks.order_by("name")
+    ]
+    outbound = [
+        f"- {hook.name} (id={hook.id}, last sent={triggered(hook)}, last status="
+        f"{hook.last_response_status if hook.last_response_status is not None else 'none'})"
+        for hook in agent.webhooks.order_by("name")
+    ]
+    return "\n".join([
+        "Current native Gobii webhook configuration:",
+        "Inbound triggers:",
+        *(inbound or ["- None configured"]),
+        "Outbound destinations:",
+        *(outbound or ["- None configured"]),
+        "Endpoint and destination URLs are intentionally omitted. Use the matching management tool with action=get only when needed.",
+    ])
 
 
 def _google_sheets_native_prompt_instructions(agent) -> str:
@@ -949,44 +943,25 @@ WEBHOOKS_SYSTEM_SKILL = SystemSkillDefinition(
     enables=(
         "create callback URLs that let external provider events wake the agent",
         "inspect, update, rotate, and remove inbound webhook triggers",
-        "configure and inspect outbound webhook destinations",
-        "send structured JSON payloads to configured outbound webhooks",
+        "configure outbound destinations and send structured JSON webhook events",
     ),
     use_when=(
         "the user wants an external service or provider event to trigger or wake the agent",
         "the user asks to create, inspect, update, rotate, or delete an inbound webhook",
-        "the user asks to configure or manage an outbound webhook destination",
-        "the user asks the agent to send or trigger a webhook event",
+        "the user asks to configure, manage, send, or trigger an outbound webhook",
         "the task needs a callback URL or HTTP endpoint for asynchronous provider events",
     ),
     query_aliases=(
         "webhook",
         "webhooks",
-        "inbound webhook",
-        "incoming webhook",
-        "outbound webhook",
-        "webhook callback",
         "callback url",
-        "webhook endpoint",
         "http callback",
         "provider event trigger",
-        "send webhook event",
-        "receive provider events",
     ),
     discovery_triggers=(
-        "add webhook",
-        "create webhook",
-        "set up webhook",
-        "setup webhook",
-        "inbound webhook",
-        "incoming webhook",
-        "outbound webhook",
-        "webhook callback",
+        "webhook",
+        "webhooks",
         "callback url",
-        "webhook endpoint",
-        "send webhook",
-        "trigger webhook",
-        "webhook events",
         "events trigger you",
         "events wake you",
     ),
