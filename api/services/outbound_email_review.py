@@ -8,7 +8,6 @@ from django.core.validators import validate_email
 from django.db import transaction
 from django.utils import timezone
 
-from api.agent.comms.message_service import _ensure_participant, _get_or_create_conversation
 from api.agent.comms.email_threading import get_message_contact_address
 from api.models import (
     AgentEmailAccount,
@@ -18,8 +17,6 @@ from api.models import (
     DeliveryStatus,
     OutboundEmailReview,
     PersistentAgent,
-    PersistentAgentCommsEndpoint,
-    PersistentAgentConversationParticipant,
     PersistentAgentMessage,
     PersistentAgentMessageAttachment,
     PersistentAgentUserActionEvent,
@@ -301,48 +298,6 @@ def validate_message_recipients(message: PersistentAgentMessage) -> None:
             raise OutboundEmailReviewError(f"'{address}' is not a valid email address.") from exc
 
 
-def replace_message_recipients(
-    message: PersistentAgentMessage,
-    *,
-    to_address: str,
-    cc_addresses,
-) -> None:
-    normalized_to = normalize_email_addresses([to_address])
-    if not normalized_to:
-        raise OutboundEmailReviewError("A valid To address is required.")
-    normalized_cc = tuple(address for address in normalize_email_addresses(cc_addresses) if address != normalized_to[0])
-    endpoints = {
-        address: PersistentAgentCommsEndpoint.objects.get_or_create(
-            channel=CommsChannel.EMAIL,
-            address=address,
-            defaults={"owner_agent": None},
-        )[0]
-        for address in (normalized_to[0], *normalized_cc)
-    }
-    old_to = get_message_contact_address(message)
-    new_to = normalized_to[0]
-    if old_to != new_to:
-        conversation = _get_or_create_conversation(
-            CommsChannel.EMAIL,
-            new_to,
-            owner_agent=message.owner_agent,
-        )
-        _ensure_participant(
-            conversation,
-            message.from_endpoint,
-            PersistentAgentConversationParticipant.ParticipantRole.AGENT,
-        )
-        _ensure_participant(
-            conversation,
-            endpoints[new_to],
-            PersistentAgentConversationParticipant.ParticipantRole.EXTERNAL,
-        )
-        message.conversation = conversation
-        message.to_endpoint = None
-        message.parent = None
-    message.cc_endpoints.set([endpoints[address] for address in normalized_cc])
-
-
 def replace_message_attachments(message: PersistentAgentMessage, node_ids) -> None:
     if not isinstance(node_ids, list):
         raise OutboundEmailReviewError("attachmentNodeIds must be an array.")
@@ -378,6 +333,11 @@ def update_pending_review_message(
     expected_version: int,
     changes: dict[str, object],
 ) -> OutboundEmailReview:
+    if {"to", "cc"}.intersection(changes):
+        raise OutboundEmailReviewError(
+            "To and CC recipients cannot be changed. Discard this email and ask the agent to create a new one."
+        )
+
     locked = _reviews_for_update().select_related("message").get(pk=review.pk)
     expire_review_if_needed(locked)
     if locked.status != OutboundEmailReview.Status.PENDING:
@@ -386,12 +346,6 @@ def update_pending_review_message(
         raise StaleOutboxVersionError("stale_version")
 
     message = locked.message
-    if "to" in changes or "cc" in changes:
-        replace_message_recipients(
-            message,
-            to_address=str(changes.get("to", get_message_contact_address(message))),
-            cc_addresses=changes.get("cc", message.cc_endpoints.values_list("address", flat=True)),
-        )
     if "subject" in changes:
         payload = dict(message.raw_payload or {})
         payload["subject"] = str(changes["subject"] or "").strip()
