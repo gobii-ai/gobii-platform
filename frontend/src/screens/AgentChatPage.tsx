@@ -647,6 +647,8 @@ type AgentSwitchMeta = {
   agentId: string
   agentName?: string | null
   agentAvatarUrl?: string | null
+  emotion?: string | null
+  emotionExpiresAt?: string | null
   processingActive?: boolean
   signupPreviewState?: SignupPreviewState | null
   planningState?: PlanningState | null
@@ -1309,6 +1311,8 @@ export function AgentChatPage({
 
       const hasName = Object.prototype.hasOwnProperty.call(rawPayload, 'agent_name')
       const hasAvatar = Object.prototype.hasOwnProperty.call(rawPayload, 'agent_avatar_url')
+      const hasEmotion = Object.prototype.hasOwnProperty.call(rawPayload, 'emotion')
+      const hasEmotionExpiresAt = Object.prototype.hasOwnProperty.call(rawPayload, 'emotion_expires_at')
       const hasShortDescription = Object.prototype.hasOwnProperty.call(rawPayload, 'short_description')
       const hasMiniDescription = Object.prototype.hasOwnProperty.call(rawPayload, 'mini_description')
       const hasProcessingActive = Object.prototype.hasOwnProperty.call(rawPayload, 'processing_active')
@@ -1325,6 +1329,8 @@ export function AgentChatPage({
       if (
         !hasName
         && !hasAvatar
+        && !hasEmotion
+        && !hasEmotionExpiresAt
         && !hasShortDescription
         && !hasMiniDescription
         && !hasProcessingActive
@@ -1368,6 +1374,22 @@ export function AgentChatPage({
               const nextAvatar = typeof rawPayload.agent_avatar_url === 'string' ? rawPayload.agent_avatar_url : null
               if (nextAvatar !== next.avatarUrl) {
                 next.avatarUrl = nextAvatar
+                changed = true
+              }
+            }
+            if (hasEmotion) {
+              const nextEmotion = typeof rawPayload.emotion === 'string' ? rawPayload.emotion : null
+              if (nextEmotion !== next.emotion) {
+                next.emotion = nextEmotion
+                changed = true
+              }
+            }
+            if (hasEmotionExpiresAt) {
+              const nextEmotionExpiresAt = typeof rawPayload.emotion_expires_at === 'string'
+                ? rawPayload.emotion_expires_at
+                : null
+              if (nextEmotionExpiresAt !== next.emotionExpiresAt) {
+                next.emotionExpiresAt = nextEmotionExpiresAt
                 changed = true
               }
             }
@@ -1706,6 +1728,10 @@ export function AgentChatPage({
         agentId: nextAgentId,
         agentName: pendingMeta.agentName ?? rosterEntry?.name ?? null,
         agentAvatarUrl: pendingMeta.agentAvatarUrl ?? rosterEntry?.avatarUrl ?? null,
+        emotion: pendingMeta.emotion !== undefined ? pendingMeta.emotion : rosterEntry?.emotion ?? null,
+        emotionExpiresAt: pendingMeta.emotionExpiresAt !== undefined
+          ? pendingMeta.emotionExpiresAt
+          : rosterEntry?.emotionExpiresAt ?? null,
         processingActive: pendingMeta.processingActive ?? rosterEntry?.processingActive,
         signupPreviewState: pendingMeta.signupPreviewState ?? rosterEntry?.signupPreviewState ?? 'none',
         planningState: pendingMeta.planningState ?? rosterEntry?.planningState ?? 'skipped',
@@ -1715,6 +1741,8 @@ export function AgentChatPage({
       setAgentId(nextAgentId, {
         agentName: pendingAgentMetaRef.current.agentName,
         agentAvatarUrl: pendingAgentMetaRef.current.agentAvatarUrl,
+        emotion: pendingAgentMetaRef.current.emotion,
+        emotionExpiresAt: pendingAgentMetaRef.current.emotionExpiresAt,
         processingActive: pendingAgentMetaRef.current.processingActive,
         signupPreviewState: pendingAgentMetaRef.current.signupPreviewState,
         planningState: pendingAgentMetaRef.current.planningState,
@@ -1859,6 +1887,8 @@ export function AgentChatPage({
   })
   const hasActiveRosterMeta = activeRosterMeta !== null
   const activeRosterAvatarUrl = activeRosterMeta?.avatarUrl
+  const activeRosterEmotion = activeRosterMeta?.emotion
+  const activeRosterEmotionExpiresAt = activeRosterMeta?.emotionExpiresAt
   useEffect(() => {
     if (!agentContextReady) return
     if (!activeAgentId) return
@@ -1876,6 +1906,12 @@ export function AgentChatPage({
     setAgentId(activeAgentId, {
       agentName: resolvedPendingMeta?.agentName ?? activeRosterMeta?.name ?? agentName,
       agentAvatarUrl: selectedAgentAvatarUrl,
+      emotion: resolvedPendingMeta?.emotion !== undefined
+        ? resolvedPendingMeta.emotion
+        : activeRosterEmotion ?? null,
+      emotionExpiresAt: resolvedPendingMeta?.emotionExpiresAt !== undefined
+        ? resolvedPendingMeta.emotionExpiresAt
+        : activeRosterEmotionExpiresAt ?? null,
       processingActive: resolvedPendingMeta?.processingActive ?? activeRosterMeta?.processingActive,
       signupPreviewState: resolvedPendingMeta?.signupPreviewState ?? activeRosterSignupPreviewState,
       planningState: resolvedPendingMeta?.planningState ?? activeRosterPlanningState,
@@ -1883,6 +1919,8 @@ export function AgentChatPage({
   }, [
     activeAgentId,
     activeRosterAvatarUrl,
+    activeRosterEmotion,
+    activeRosterEmotionExpiresAt,
     activeRosterMeta?.name,
     activeRosterMeta?.planningState,
     activeRosterMeta?.processingActive,
@@ -2512,6 +2550,8 @@ export function AgentChatPage({
       agentId: agent.id,
       agentName: agent.name,
       agentAvatarUrl: agent.avatarUrl,
+      emotion: agent.emotion,
+      emotionExpiresAt: agent.emotionExpiresAt,
       processingActive: agent.processingActive,
       signupPreviewState: agent.signupPreviewState ?? 'none',
       planningState: agent.planningState ?? 'skipped',
@@ -2522,6 +2562,8 @@ export function AgentChatPage({
       setAgentId(agent.id, {
         agentName: agent.name,
         agentAvatarUrl: agent.avatarUrl,
+        emotion: agent.emotion,
+        emotionExpiresAt: agent.emotionExpiresAt,
         processingActive: agent.processingActive,
         signupPreviewState: agent.signupPreviewState ?? 'none',
         planningState: agent.planningState ?? 'skipped',
@@ -2535,6 +2577,8 @@ export function AgentChatPage({
       openAgentChat(agent.id, {
         agentName: agent.name,
         agentAvatarUrl: agent.avatarUrl,
+        emotion: agent.emotion,
+        emotionExpiresAt: agent.emotionExpiresAt,
         processingActive: agent.processingActive,
         signupPreviewState: agent.signupPreviewState ?? 'none',
         planningState: agent.planningState ?? 'skipped',
@@ -2745,6 +2789,8 @@ export function AgentChatPage({
         pendingAgentMetaRef.current = {
           agentId: result.agent_id,
           agentName: createdAgentName,
+          emotion: createdAgentEntry.emotion,
+          emotionExpiresAt: createdAgentEntry.emotionExpiresAt,
           signupPreviewState: personalSignupPreviewAvailable ? 'awaiting_first_reply_pause' : 'none',
           planningState: createdPlanningState,
         }

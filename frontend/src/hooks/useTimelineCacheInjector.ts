@@ -272,6 +272,22 @@ export function updateAgentIdentityInCache(
         changed = true
       }
     }
+    if (Object.prototype.hasOwnProperty.call(payload, 'emotion')) {
+      const emotion = typeof payload.emotion === 'string' ? payload.emotion : null
+      if (emotion !== (current.emotion ?? null)) {
+        next.emotion = emotion
+        changed = true
+      }
+    }
+    if (Object.prototype.hasOwnProperty.call(payload, 'emotion_expires_at')) {
+      const emotionExpiresAt = typeof payload.emotion_expires_at === 'string'
+        ? payload.emotion_expires_at
+        : null
+      if (emotionExpiresAt !== (current.emotion_expires_at ?? null)) {
+        next.emotion_expires_at = emotionExpiresAt
+        changed = true
+      }
+    }
     if (Object.prototype.hasOwnProperty.call(payload, 'signup_preview_state')) {
       const rawSignupPreviewState = payload.signup_preview_state
       const signupPreviewState = (

@@ -1394,12 +1394,17 @@ class MetaGobiiLocalEvalSetupTests(TestCase):
         with patch("api.evals.local_setup.connection", FakeConnection(schema_editor)):
             added = ensure_eval_local_compat_columns(stdout=stdout)
 
-        self.assertEqual(added, 1)
+        self.assertEqual(added, 3)
         self.assertEqual(
-            schema_editor.added_fields[0],
-            (PersistentAgent, PersistentAgent._meta.get_field("sms_disabled")),
+            schema_editor.added_fields,
+            [
+                (PersistentAgent, PersistentAgent._meta.get_field("sms_disabled")),
+                (PersistentAgent, PersistentAgent._meta.get_field("emotion")),
+                (PersistentAgent, PersistentAgent._meta.get_field("emotion_expires_at")),
+            ],
         )
         self.assertIn("api_persistentagent.sms_disabled", stdout.getvalue())
+        self.assertIn("api_persistentagent.emotion_expires_at", stdout.getvalue())
 
     def test_local_eval_schema_compat_adds_missing_allowlist_sms_columns(self):
         class FakeCursor:

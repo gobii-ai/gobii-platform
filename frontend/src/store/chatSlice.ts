@@ -26,6 +26,8 @@ type MessageSignature = {
 export type AgentChatIdentityState = {
   agentName: string | null
   agentAvatarUrl: string | null
+  emotion: string | null
+  emotionExpiresAt: string | null
   agentMiniDescription: string | null
   agentEmail: string | null
   agentSms: string | null
@@ -94,6 +96,8 @@ export type AgentChatSession = {
 type AgentIdentityUpdateInput = {
   agentName?: string | null
   agentAvatarUrl?: string | null
+  emotion?: string | null
+  emotionExpiresAt?: string | null
   agentMiniDescription?: string | null
   agentEmail?: string | null
   agentSms?: string | null
@@ -145,6 +149,8 @@ export function createInitialSession(): AgentChatSession {
     identity: {
       agentName: null,
       agentAvatarUrl: null,
+      emotion: null,
+      emotionExpiresAt: null,
       agentMiniDescription: null,
       agentEmail: null,
       agentSms: null,
@@ -228,6 +234,12 @@ function applyIdentityUpdate(session: AgentChatSession, update: AgentIdentityUpd
   }
   if (update?.agentAvatarUrl !== undefined) {
     session.identity.agentAvatarUrl = update?.agentAvatarUrl ?? null
+  }
+  if (update?.emotion !== undefined) {
+    session.identity.emotion = update.emotion ?? null
+  }
+  if (update?.emotionExpiresAt !== undefined) {
+    session.identity.emotionExpiresAt = update.emotionExpiresAt ?? null
   }
   if (update?.agentMiniDescription !== undefined) {
     session.identity.agentMiniDescription = update?.agentMiniDescription ?? null

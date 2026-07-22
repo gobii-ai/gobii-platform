@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import timedelta
 import json
 from urllib.parse import parse_qs, urlparse
 from unittest.mock import patch
@@ -12,6 +13,7 @@ from django.contrib.auth import get_user_model
 from django.core.files.base import ContentFile
 from django.test import TestCase, override_settings, tag
 from django.urls import reverse
+from django.utils import timezone
 
 from api.agent.comms.adapters import ParsedMessage
 from api.agent.comms.message_service import ingest_inbound_message, ingest_inbound_webhook_message
@@ -883,6 +885,34 @@ class AgentChatSignalTests(TestCase):
         self.assertEqual(cleared_profile_event.get("type"), "agent_profile_event")
         self.assertEqual(cleared_payload.get("agent_schedule"), "")
         self.assertIsNone(cleared_payload.get("agent_next_scheduled_at"))
+
+    @tag("batch_agent_chat")
+    def test_emotion_update_and_clear_emit_active_profile_state(self):
+        expires_at = timezone.now() + timedelta(minutes=20)
+        self.agent.emotion = "🫡"
+        self.agent.emotion_expires_at = expires_at
+        with self.captureOnCommitCallbacks(execute=True):
+            self.agent.save(update_fields=["emotion", "emotion_expires_at"])
+
+        active_event = self._receive_with_timeout(self.owner_profile_channel_name)
+        active_payload = active_event.get("payload", {})
+        self.assertEqual(active_event.get("type"), "agent_profile_event")
+        self.assertEqual(active_payload.get("emotion"), "🫡")
+        self.assertEqual(
+            active_payload.get("emotion_expires_at"),
+            expires_at.isoformat().replace("+00:00", "Z"),
+        )
+
+        self.agent.emotion = ""
+        self.agent.emotion_expires_at = None
+        with self.captureOnCommitCallbacks(execute=True):
+            self.agent.save(update_fields=["emotion", "emotion_expires_at"])
+
+        cleared_event = self._receive_with_timeout(self.owner_profile_channel_name)
+        cleared_payload = cleared_event.get("payload", {})
+        self.assertEqual(cleared_event.get("type"), "agent_profile_event")
+        self.assertIsNone(cleared_payload.get("emotion"))
+        self.assertIsNone(cleared_payload.get("emotion_expires_at"))
 
     @tag("batch_agent_chat")
     @patch("console.agent_chat.signals.build_processing_snapshot")

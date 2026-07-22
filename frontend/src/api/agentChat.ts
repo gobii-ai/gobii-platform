@@ -37,6 +37,8 @@ export type TimelineResponse = {
   processing_snapshot?: ProcessingSnapshot
   agent_name?: string | null
   agent_avatar_url?: string | null
+  emotion?: string | null
+  emotion_expires_at?: string | null
   agent_schedule?: string | null
   agent_next_scheduled_at?: string | null
   signup_preview_state?: SignupPreviewState | null

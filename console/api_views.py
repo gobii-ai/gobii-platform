@@ -197,6 +197,7 @@ from console.agent_chat.timeline import (
     build_processing_snapshot,
     compute_processing_status,
     fetch_timeline_window,
+    serialize_agent_emotion,
     serialize_agent_schedule,
     serialize_message_event,
     serialize_processing_snapshot,
@@ -2926,6 +2927,7 @@ def _serialize_agent_profile_payload(
             for state in enabled_skill_states
             if state.skill_key
         ],
+        **serialize_agent_emotion(agent),
         **serialize_latest_agent_message_read_state(message_read_state),
     }
 
@@ -3927,6 +3929,7 @@ class AgentTimelineAPIView(LoginRequiredMixin, View):
             "agent_avatar_url": agent.get_avatar_thumbnail_url(),
             "signup_preview_state": agent.signup_preview_state,
             "planning_state": agent.planning_state,
+            **serialize_agent_emotion(agent),
             **serialize_agent_schedule(agent),
             **_pending_action_payload(agent, request.user),
         }

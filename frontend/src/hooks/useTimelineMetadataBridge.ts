@@ -30,6 +30,10 @@ export function useTimelineMetadataBridge(
 
     const name = initialPageResponse.agent_name ?? null
     const avatar = initialPageResponse.agent_avatar_url ?? null
+    const emotion = initialPageResponse.emotion ?? null
+    const emotionExpiresAt = initialPageResponse.emotion_expires_at ?? null
+    const hasEmotion = Object.prototype.hasOwnProperty.call(initialPageResponse, 'emotion')
+    const hasEmotionExpiresAt = Object.prototype.hasOwnProperty.call(initialPageResponse, 'emotion_expires_at')
     const nextScheduledAt = initialPageResponse.agent_next_scheduled_at ?? null
     const hasNextScheduledAt = Object.prototype.hasOwnProperty.call(
       initialPageResponse,
@@ -37,11 +41,21 @@ export function useTimelineMetadataBridge(
     )
     const signupPreviewState = normalizeSignupPreviewState(initialPageResponse.signup_preview_state)
     const planningState = normalizePlanningState(initialPageResponse.planning_state)
-    if (name || avatar || hasNextScheduledAt || signupPreviewState !== 'none' || planningState !== 'skipped') {
+    if (
+      name
+      || avatar
+      || hasEmotion
+      || hasEmotionExpiresAt
+      || hasNextScheduledAt
+      || signupPreviewState !== 'none'
+      || planningState !== 'skipped'
+    ) {
       dispatch(chatActions.agentIdentityUpdated({
         agentId: activeAgentId,
         ...(name ? { agentName: name } : {}),
         ...(avatar ? { agentAvatarUrl: avatar } : {}),
+        ...(hasEmotion ? { emotion } : {}),
+        ...(hasEmotionExpiresAt ? { emotionExpiresAt } : {}),
         ...(hasNextScheduledAt ? { agentNextScheduledAt: nextScheduledAt } : {}),
         signupPreviewState,
         planningState,

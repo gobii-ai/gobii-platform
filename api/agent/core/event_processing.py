@@ -2540,6 +2540,12 @@ def _sqlite_batch_agent_config_attempted_fields(tool_params: Dict[str, Any]) -> 
             for statement in statements
         )
     ]
+    if any(
+        sqlite_statement_assigns_agent_config_field(statement, "emotion")
+        or sqlite_statement_assigns_agent_config_field(statement, "emotion_timeout_seconds")
+        for statement in statements
+    ):
+        fields.append("emotion")
     if any(sqlite_statement_mutates_agent_schedules(statement) for statement in statements):
         fields.append("schedules")
     return tuple(fields)
@@ -2560,7 +2566,7 @@ def _annotate_agent_config_update_result(
 
     attempted = {field for _outcome, fields in config_outcomes for field in fields}
     attempted_fields = tuple(
-        field for field in ("charter", "schedule", "schedules") if field in attempted
+        field for field in ("charter", "schedule", "schedules", "emotion") if field in attempted
     )
     updated_fields = list(config_apply.updated_fields)
     target = max(config_outcomes, key=lambda item: item[0].prepared.idx)[0]
@@ -2822,12 +2828,15 @@ def _should_skip_irrelevant_agent_config_mutation(
         return False
     routed_inbound = get_current_inbound_message(agent)
     latest_user_text = routed_inbound.body if routed_inbound is not None else _latest_inbound_message_text(agent)
+    attempted_fields = set(_sqlite_batch_agent_config_attempted_fields(tool_params))
     if (
-        "charter" in _sqlite_batch_agent_config_attempted_fields(tool_params)
+        "charter" in attempted_fields
         and _user_text_has_only_transient_config_scope(latest_user_text)
         and not _user_text_has_durable_config_intent(latest_user_text)
     ):
         return True
+    if attempted_fields and attempted_fields <= {"emotion"}:
+        return False
     if not _sqlite_batch_is_only_agent_config_mutation(tool_params):
         return False
     if not batch_has_terminal_message:

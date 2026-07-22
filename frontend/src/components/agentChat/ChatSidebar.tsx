@@ -625,6 +625,8 @@ export const ChatSidebar = memo(function ChatSidebar({
           <AgentChatAvatar
             name={activeAgent?.name || 'Agent'}
             avatarUrl={activeAgent?.avatarUrl}
+            emotion={activeAgent?.emotion}
+            emotionExpiresAt={activeAgent?.emotionExpiresAt}
             className="agent-fab-avatar"
             imageClassName="agent-fab-avatar-image"
             textClassName="agent-fab-avatar-text"

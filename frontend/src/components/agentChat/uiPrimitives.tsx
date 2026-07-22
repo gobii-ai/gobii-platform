@@ -186,6 +186,8 @@ export function AgentChatMenuItem({
 type AvatarProps = {
   name: string
   avatarUrl?: string | null
+  emotion?: string | null
+  emotionExpiresAt?: string | null
   className?: string
   imageClassName?: string
   textClassName?: string
@@ -195,6 +197,8 @@ type AvatarProps = {
 export function AgentChatAvatar({
   name,
   avatarUrl,
+  emotion,
+  emotionExpiresAt,
   className,
   imageClassName,
   textClassName,
@@ -204,6 +208,8 @@ export function AgentChatAvatar({
     <AgentAvatarBadge
       name={name}
       avatarUrl={avatarUrl}
+      emotion={emotion}
+      emotionExpiresAt={emotionExpiresAt}
       className={joinClassNames('agent-chat-avatar', className)}
       imageClassName={joinClassNames('agent-chat-avatar__image', imageClassName)}
       textClassName={joinClassNames('agent-chat-avatar__text', textClassName)}

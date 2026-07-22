@@ -37,6 +37,8 @@ export type AgentProfilePayload = {
   id: string
   name: string
   avatar_url: string | null
+  emotion: string | null
+  emotion_expires_at: string | null
   is_active: boolean
   processing_active: boolean
   mini_description: string
@@ -88,6 +90,8 @@ export function agentProfilePayloadToRosterEntry(agent: AgentProfilePayload): Ag
     id: agent.id,
     name: agent.name,
     avatarUrl: agent.avatar_url,
+    emotion: agent.emotion ?? null,
+    emotionExpiresAt: agent.emotion_expires_at ?? null,
     isActive: agent.is_active,
     processingActive: agent.processing_active,
     miniDescription: agent.mini_description,

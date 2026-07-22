@@ -94,3 +94,7 @@ from .agent_scheduling import (
     AGENT_SCHEDULING_SUITE_SLUG,
     AgentSchedulingScenario,
 )
+from .agent_emotions import (
+    AGENT_TEMPORARY_EMOTION_LIFECYCLE,
+    AgentTemporaryEmotionLifecycleScenario,
+)

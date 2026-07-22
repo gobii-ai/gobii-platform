@@ -134,6 +134,48 @@ class TestParallelToolCallsExecution(TestCase):
             },
         )
 
+    def test_emotion_update_is_persisted_and_annotated_in_tool_result(self):
+        self._run_single_iteration_with_sqlite([
+            _tool_call(
+                "sqlite_batch",
+                '{"sql": "UPDATE __agent_config SET emotion = \'🚀\', '
+                'emotion_timeout_seconds = 3600 WHERE id = 1"}',
+            ),
+        ])
+
+        result = json.loads(PersistentAgentToolCall.objects.get(step__agent=self.agent).result)
+        self.agent.refresh_from_db()
+        self.assertEqual(self.agent.emotion, "🚀")
+        self.assertIsNotNone(self.agent.emotion_expires_at)
+        self.assertEqual(result["results"][0]["message"], "Query 0 affected 1 rows.")
+        self.assertEqual(
+            result["agent_config_update"],
+            {
+                "updated_fields": ["emotion"],
+                "unchanged_fields": [],
+                "errors": {},
+            },
+        )
+
+    def test_cte_emotion_update_reports_direct_row_count_not_trigger_work(self):
+        self._run_single_iteration_with_sqlite([
+            _tool_call(
+                "sqlite_batch",
+                json.dumps({
+                    "sql": (
+                        "WITH mood(value, ttl) AS (VALUES ('🚀', 3600)) "
+                        "UPDATE __agent_config "
+                        "SET emotion = (SELECT value FROM mood), "
+                        "emotion_timeout_seconds = (SELECT ttl FROM mood) WHERE id = 1"
+                    ),
+                }),
+            ),
+        ])
+
+        result = json.loads(PersistentAgentToolCall.objects.get(step__agent=self.agent).result)
+        self.assertEqual(result["results"][0]["message"], "Query 0 affected 1 rows.")
+        self.assertEqual(result["agent_config_update"]["updated_fields"], ["emotion"])
+
     def test_config_reconciliation_is_aggregated_with_field_errors(self):
         self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
         self.agent.schedule = "0 9 * * *"

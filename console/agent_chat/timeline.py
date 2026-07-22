@@ -1487,6 +1487,14 @@ def serialize_agent_schedule(agent: PersistentAgent) -> dict:
     }
 
 
+def serialize_agent_emotion(agent: PersistentAgent) -> dict:
+    emotion, expires_at = agent.get_active_emotion_state()
+    return {
+        "emotion": emotion,
+        "emotion_expires_at": _format_timestamp(expires_at),
+    }
+
+
 def fetch_timeline_window(
     agent: PersistentAgent,
     *,

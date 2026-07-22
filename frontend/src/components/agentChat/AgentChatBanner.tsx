@@ -86,6 +86,8 @@ export const AgentChatBanner = memo(function AgentChatBanner({
   const agentId = useAppSelector(selectActiveChatAgentId)
   const agentName = agentNameOverride ?? activeSession.identity.agentName
   const agentAvatarUrl = activeSession.identity.agentAvatarUrl
+  const emotion = activeSession.identity.emotion
+  const emotionExpiresAt = activeSession.identity.emotionExpiresAt
   const agentMiniDescription = activeSession.identity.agentMiniDescription
   const agentEmail = activeSession.identity.agentEmail?.trim() || ''
   const agentSms = activeSession.identity.agentSms?.trim() || ''
@@ -267,6 +269,8 @@ export const AgentChatBanner = memo(function AgentChatBanner({
               <AgentChatAvatar
                 name={trimmedName}
                 avatarUrl={agentAvatarUrl}
+                emotion={emotion}
+                emotionExpiresAt={emotionExpiresAt}
                 className="banner-avatar"
                 imageClassName="banner-avatar-image"
                 textClassName="banner-avatar-text"
@@ -276,6 +280,8 @@ export const AgentChatBanner = memo(function AgentChatBanner({
             <AgentChatAvatar
               name={trimmedName}
               avatarUrl={agentAvatarUrl}
+              emotion={emotion}
+              emotionExpiresAt={emotionExpiresAt}
               className="banner-avatar"
               imageClassName="banner-avatar-image"
               textClassName="banner-avatar-text"

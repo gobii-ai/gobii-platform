@@ -88,6 +88,8 @@ function GalleryCard({
           <AgentChatAvatar
             name={agent.name || 'Agent'}
             avatarUrl={agent.avatarUrl}
+            emotion={agent.emotion}
+            emotionExpiresAt={agent.emotionExpiresAt}
             className="agent-gallery-card__avatar"
             imageClassName="agent-gallery-card__avatar-image"
             textClassName="agent-gallery-card__avatar-text"

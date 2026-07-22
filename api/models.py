@@ -6238,6 +6238,17 @@ class PersistentAgent(models.Model):
         null=True,
         help_text="Optional avatar image displayed for this agent.",
     )
+    emotion = models.CharField(
+        max_length=32,
+        blank=True,
+        default="",
+        help_text="Temporary emoji the agent chose to express its current feeling.",
+    )
+    emotion_expires_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When the agent's temporary emotion stops being active.",
+    )
     avatar_charter_hash = models.CharField(
         max_length=64,
         blank=True,
@@ -6537,6 +6548,17 @@ class PersistentAgent(models.Model):
     def has_avatar(self) -> bool:
         file_field = getattr(self, "avatar", None)
         return bool(getattr(file_field, "name", None))
+
+    def get_active_emotion_state(self, now=None):
+        """Return the current emoji and expiry together, suppressing stale state."""
+        current_time = now or timezone.now()
+        if (
+            not self.emotion
+            or self.emotion_expires_at is None
+            or self.emotion_expires_at <= current_time
+        ):
+            return None, None
+        return self.emotion, self.emotion_expires_at
 
     def get_avatar_version(self) -> str | None:
         file_field = self.avatar
