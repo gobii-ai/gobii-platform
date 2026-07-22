@@ -11,11 +11,11 @@ import {
   fetchOutboxItem,
   updateEmailSendingPolicy,
   updateOutboxItem,
-  type EmailSendingMode,
   type OutboxItem,
 } from '../../api/outbox'
 import { HttpError } from '../../api/http'
 import { ImmersivePageFrame } from '../../components/common/ImmersivePageFrame'
+import { EMAIL_SENDING_MODE_OPTIONS } from '../../constants/emailSendingModes'
 
 
 type ImmersiveOutboxPageProps = {
@@ -32,12 +32,6 @@ const FILTERS: Array<{ key: OutboxFilter; label: string; countKey: 'needsReview'
   { key: 'recent', label: 'Recent', countKey: 'recent' },
 ]
 
-const MODE_OPTIONS: Array<{ value: EmailSendingMode; label: string }> = [
-  { value: 'review_all_external', label: 'Review before send' },
-  { value: 'review_new_contacts', label: 'Review only new contacts' },
-  { value: 'send_automatically', label: 'Send automatically' },
-]
-
 function errorMessage(error: unknown): string {
   if (error instanceof HttpError && error.body && typeof error.body === 'object') {
     const body = error.body as Record<string, unknown>
@@ -49,27 +43,6 @@ function errorMessage(error: unknown): string {
 function formatTimestamp(value?: string | null): string {
   if (!value) return ''
   return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value))
-}
-
-const EMAIL_PREVIEW_BASE_STYLE = `<style>
-  body {
-    font-family: 'Inter Variable', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  }
-</style>`
-
-function buildEmailPreviewDocument(bodyHtml: string): string {
-  const headMatch = /<head(?:\s[^>]*)?>/i.exec(bodyHtml)
-  if (headMatch?.index !== undefined) {
-    const insertionPoint = headMatch.index + headMatch[0].length
-    return `${bodyHtml.slice(0, insertionPoint)}${EMAIL_PREVIEW_BASE_STYLE}${bodyHtml.slice(insertionPoint)}`
-  }
-
-  const bodyMatch = /<body(?:\s[^>]*)?>/i.exec(bodyHtml)
-  if (bodyMatch?.index !== undefined) {
-    return `${bodyHtml.slice(0, bodyMatch.index)}${EMAIL_PREVIEW_BASE_STYLE}${bodyHtml.slice(bodyMatch.index)}`
-  }
-
-  return `${EMAIL_PREVIEW_BASE_STYLE}${bodyHtml}`
 }
 
 function OutboxPolicyPanel({ enabled }: { enabled: boolean }) {
@@ -92,7 +65,7 @@ function OutboxPolicyPanel({ enabled }: { enabled: boolean }) {
             onChange={(event) => mutation.mutate({ defaultMode: event.target.value })}
             className="mt-2 block w-full rounded-lg border border-slate-600 bg-slate-900 px-3 py-2 text-sm text-white"
           >
-            {MODE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+            {EMAIL_SENDING_MODE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.title}</option>)}
           </select>
         </label>
         {policy.canSetMinimum ? (
@@ -104,7 +77,7 @@ function OutboxPolicyPanel({ enabled }: { enabled: boolean }) {
               className="mt-2 block w-full rounded-lg border border-slate-600 bg-slate-900 px-3 py-2 text-sm text-white"
             >
               <option value="">No minimum</option>
-              {MODE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+              {EMAIL_SENDING_MODE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.title}</option>)}
             </select>
           </label>
         ) : <div />}
@@ -247,7 +220,7 @@ function ReviewDetail({ itemId, onClose }: { itemId: string; onClose: () => void
             </fieldset>
           </>
         ) : (
-          <iframe title="Email preview" sandbox="" srcDoc={buildEmailPreviewDocument(item.bodyHtml || '')} className="min-h-96 w-full rounded-xl border border-slate-700 bg-white" />
+          <iframe title="Email preview" sandbox="" srcDoc={item.bodyHtml || ''} className="min-h-96 w-full rounded-xl border border-slate-700 bg-white" />
         )}
       </div>
       {item.attachments?.length ? (

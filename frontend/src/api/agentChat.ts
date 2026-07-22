@@ -435,8 +435,6 @@ export function normalizePendingActionRequests(raw: unknown): PendingActionReque
             id: itemId,
             subject: asNonEmptyString(item.subject) ?? '(No subject)',
             recipient,
-            queuedAt: asNonEmptyString(item.queuedAt),
-            detailApiUrl: asNonEmptyString(item.detailApiUrl),
           }]
         })
         : []

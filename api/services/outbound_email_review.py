@@ -12,7 +12,6 @@ from api.agent.comms.email_threading import get_message_contact_address
 from api.models import (
     AgentEmailAccount,
     AgentFsNode,
-    CommsAllowlistEntry,
     CommsChannel,
     DeliveryStatus,
     OutboundEmailReview,
@@ -20,11 +19,13 @@ from api.models import (
     PersistentAgentMessage,
     PersistentAgentMessageAttachment,
     PersistentAgentUserActionEvent,
-    get_agent_contact_counts,
 )
-from api.services.outbound_email_policy import classify_email_recipients, normalize_email_addresses
-from util.subscription_helper import get_user_max_contacts_per_agent
+from api.services.contact_authorization import (
+    ContactAuthorizationError,
+    authorize_reviewed_email_contacts,
+)
 from api.services.email_verification import EmailVerificationError, require_verified_email
+from api.services.outbound_email_policy import classify_email_recipients, normalize_email_addresses
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 
 
@@ -146,10 +147,6 @@ def load_verified_snapshot_attachments(
     return tuple(verified)
 
 
-def verify_snapshot_attachments(message: PersistentAgentMessage) -> None:
-    load_verified_snapshot_attachments(message)
-
-
 def _attachment_manifest(message: PersistentAgentMessage) -> list[dict[str, object]]:
     return [
         {
@@ -250,32 +247,10 @@ def authorize_reviewed_external_contacts(message: PersistentAgentMessage) -> Non
         )
     if not decision.unknown_external_recipients:
         return
-
-    cap = get_user_max_contacts_per_agent(agent.user, organization=agent.organization)
-    counts = get_agent_contact_counts(agent)
-    if cap > 0 and counts is not None:
-        available = max(cap - counts["total"], 0)
-        if len(decision.unknown_external_recipients) > available:
-            raise OutboundEmailReviewError(
-                f"This agent has {available} of {cap} contact slots available."
-            )
-
-    for address in decision.unknown_external_recipients:
-        contact, created = CommsAllowlistEntry.objects.get_or_create(
-            agent=agent,
-            channel=CommsChannel.EMAIL,
-            address=address,
-            defaults={
-                "is_active": True,
-                "allow_inbound": False,
-                "allow_outbound": True,
-                "can_configure": False,
-            },
-        )
-        if not created and (not contact.is_active or not contact.allow_outbound):
-            raise OutboundEmailReviewError(
-                f"Outbound email is disabled for contact '{address}'. Enable it in Contacts & Access first."
-            )
+    try:
+        authorize_reviewed_email_contacts(agent, decision.unknown_external_recipients)
+    except ContactAuthorizationError as exc:
+        raise OutboundEmailReviewError(str(exc)) from exc
 
 
 def validate_approved_external_contacts(message: PersistentAgentMessage) -> None:
@@ -450,7 +425,7 @@ def approve_review(
     _validate_agent_and_sender(message)
     validate_message_recipients(message)
     _validate_reply_target(message)
-    verify_snapshot_attachments(message)
+    load_verified_snapshot_attachments(message)
     current_hash = compute_message_content_hash(message)
     if current_hash != locked.content_hash:
         raise OutboundEmailReviewError("The email changed outside the Outbox editor and must be reviewed again.")
@@ -521,7 +496,7 @@ def retry_review(review: OutboundEmailReview, *, actor) -> OutboundEmailReview:
     _validate_agent_and_sender(message)
     validate_message_recipients(message)
     validate_approved_external_contacts(message)
-    verify_snapshot_attachments(message)
+    load_verified_snapshot_attachments(message)
     if compute_message_content_hash(message) != locked.approved_content_hash:
         raise OutboundEmailReviewError("The approved email changed and cannot be retried.")
     message.latest_status = DeliveryStatus.QUEUED

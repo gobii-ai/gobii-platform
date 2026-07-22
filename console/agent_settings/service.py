@@ -17,7 +17,6 @@ from api.services.agent_webhooks import (
     AgentWebhookService,
     build_inbound_webhook_url,
 )
-from constants.feature_flags import CONTACT_AUTO_APPROVE_EMAIL
 from constants.feature_flags import CONTACT_AUTO_APPROVE_EMAIL, EMAIL_REVIEW_OUTBOX
 from api.services.outbound_email_policy import (
     email_sending_mode_for_contact_approval_mode,
