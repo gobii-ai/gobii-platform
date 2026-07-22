@@ -2578,7 +2578,7 @@ def _annotate_agent_config_update_result(
         "updated_fields": updated_fields,
         "unchanged_fields": [
             field for field in attempted_fields
-            if field not in updated_fields and field not in errors
+            if field not in updated_fields
         ],
         "errors": errors,
     }
