@@ -265,6 +265,7 @@ class AgentChatSessionConsumer(AsyncJsonWebsocketConsumer):
         context_override=None,
         staff_context_override=None,
     ) -> None:
+        was_subscribed = agent_id in self.subscriptions
         try:
             agent = await self._resolve_agent(
                 self.user,
@@ -327,7 +328,8 @@ class AgentChatSessionConsumer(AsyncJsonWebsocketConsumer):
                 agent_id,
                 exc,
             )
-            await self._remove_subscription(agent_id)
+            if not was_subscribed:
+                await self._remove_subscription(agent_id)
             await self.send_json(
                 {
                     "type": "subscription.error",

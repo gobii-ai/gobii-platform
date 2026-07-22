@@ -224,6 +224,53 @@ class AgentChatSessionConsumerTests(SimpleTestCase):
         ):
             async_to_sync(_run)()
 
+    def test_mode_change_snapshot_failure_preserves_existing_groups(self) -> None:
+        snapshot_attempts = 0
+
+        async def _allow_subscription(*args, **kwargs):
+            return SimpleNamespace(id="agent-a")
+
+        async def _snapshot(*args, **kwargs):
+            nonlocal snapshot_attempts
+            snapshot_attempts += 1
+            if snapshot_attempts > 1:
+                raise DatabaseError("snapshot unavailable")
+            return self.SNAPSHOT
+
+        async def _run():
+            communicator = self._build_communicator()
+            connected, _ = await communicator.connect()
+            self.assertTrue(connected)
+            try:
+                await communicator.send_json_to(
+                    {"type": "subscribe", "agent_id": "agent-a", "mode": "background"}
+                )
+                await self._receive_ready(communicator, agent_id="agent-a", mode="background")
+                await communicator.send_json_to(
+                    {"type": "subscribe", "agent_id": "agent-a", "mode": "active"}
+                )
+                error = await communicator.receive_json_from()
+                self.assertEqual(error["type"], "subscription.error")
+
+                await get_channel_layer().group_send(
+                    "agent-chat-agent-a",
+                    {"type": "timeline_event", "agent_id": "agent-a", "payload": {"cursor": "1"}},
+                )
+                event = await communicator.receive_json_from()
+                self.assertEqual(event["type"], "timeline.event")
+                self.assertEqual(event["agent_id"], "agent-a")
+            finally:
+                await communicator.disconnect()
+
+        with patch(
+            "console.agent_chat.consumers.AgentChatSessionConsumer._resolve_agent",
+            new=_allow_subscription,
+        ), patch(
+            "console.agent_chat.consumers.AgentChatSessionConsumer._build_subscription_snapshot",
+            new=_snapshot,
+        ):
+            async_to_sync(_run)()
+
     def test_permission_failure_removes_existing_subscription(self) -> None:
         authorization_attempts = 0
 

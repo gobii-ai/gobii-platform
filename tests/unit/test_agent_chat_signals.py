@@ -1073,14 +1073,8 @@ class AgentChatSignalTests(TestCase):
                 purpose="Approve vendor contract",
             )
 
-        owner_event = max(
-            self._drain_channel_events(self.owner_user_stream_channel_name),
-            key=lambda event: len(event.get("payload", {}).get("pending_action_requests", [])),
-        )
-        collaborator_event = max(
-            self._drain_channel_events(self.collaborator_user_stream_channel_name),
-            key=lambda event: len(event.get("payload", {}).get("pending_action_requests", [])),
-        )
+        owner_event = self._drain_channel_events(self.owner_user_stream_channel_name)[-1]
+        collaborator_event = self._drain_channel_events(self.collaborator_user_stream_channel_name)[-1]
 
         self.assertEqual(owner_event.get("type"), "pending_action_requests_event")
         self.assertEqual(collaborator_event.get("type"), "pending_action_requests_event")
