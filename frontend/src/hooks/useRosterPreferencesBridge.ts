@@ -9,7 +9,7 @@ type AgentRosterPreferencesSource = Pick<
   | 'agentRosterSortMode'
   | 'favoriteAgentIds'
   | 'mutedAgentIds'
-  | 'insightsPanelExpanded'
+  | 'insightsPanelExpandedByAgent'
   | 'suggestionsEnabled'
   | 'agentChatNotificationsEnabled'
 >
@@ -25,7 +25,7 @@ export function useRosterPreferencesBridge(rosterData: AgentRosterPreferencesSou
       sortMode: rosterData.agentRosterSortMode,
       favoriteAgentIds: rosterData.favoriteAgentIds,
       mutedAgentIds: rosterData.mutedAgentIds,
-      insightsPanelExpanded: rosterData.insightsPanelExpanded,
+      insightsPanelExpandedByAgent: rosterData.insightsPanelExpandedByAgent,
       suggestionsEnabled: rosterData.suggestionsEnabled,
       agentChatNotificationsEnabled: rosterData.agentChatNotificationsEnabled,
     }))

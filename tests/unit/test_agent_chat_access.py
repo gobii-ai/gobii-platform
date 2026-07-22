@@ -769,6 +769,7 @@ class AgentChatAccessTests(TestCase):
         payload = response.json()
         self.assertEqual(payload.get("agent_roster_sort_mode"), "recent")
         self.assertEqual(payload.get("favorite_agent_ids"), [])
+        self.assertEqual(payload.get("insights_panel_expanded_by_agent"), {})
         self.assertTrue(payload.get("agent_chat_notifications_enabled"))
         self.assertTrue(payload.get("agent_chat_suggestions_enabled"))
         roster_ids = {entry["id"] for entry in payload.get("agents", [])}
@@ -834,6 +835,32 @@ class AgentChatAccessTests(TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertFalse(payload.get("insights_panel_expanded"))
+
+    def test_roster_includes_insights_panel_expanded_preferences_by_agent(self):
+        UserPreference.update_known_preferences(
+            self.user,
+            {
+                UserPreference.KEY_AGENT_CHAT_INSIGHTS_PANEL_EXPANDED_BY_AGENT: {
+                    str(self.org_agent.id): False,
+                    str(self.org_agent_two.id): True,
+                },
+            },
+        )
+
+        response = self.client.get(
+            reverse("console_agent_roster"),
+            HTTP_X_GOBII_CONTEXT_TYPE="organization",
+            HTTP_X_GOBII_CONTEXT_ID=str(self.org.id),
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(
+            payload.get("insights_panel_expanded_by_agent"),
+            {
+                str(self.org_agent.id): False,
+                str(self.org_agent_two.id): True,
+            },
+        )
 
     def test_roster_includes_agent_chat_notifications_enabled_preference(self):
         UserPreference.update_known_preferences(

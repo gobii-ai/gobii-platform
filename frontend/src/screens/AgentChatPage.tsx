@@ -80,6 +80,7 @@ import {
 import { immersiveShellActions } from '../store/immersiveShellSlice'
 import {
   agentRosterPreferencesActions,
+  persistInsightsPanelExpandedPreference,
   persistAgentRosterPreference,
   selectAgentChatNotificationsEnabled,
   selectAgentRosterSortMode,
@@ -578,6 +579,7 @@ type AgentRosterQueryData = {
   favoriteAgentIds?: string[]
   mutedAgentIds?: string[]
   insightsPanelExpanded?: boolean | null
+  insightsPanelExpandedByAgent?: Record<string, boolean>
   suggestionsEnabled?: boolean
   agentChatNotificationsEnabled?: boolean
   agents: AgentRosterEntry[]
@@ -1533,7 +1535,9 @@ export function AgentChatPage({
   const agentRosterSortMode = useAppSelector(selectAgentRosterSortMode)
   const favoriteAgentIds = useAppSelector(selectFavoriteAgentIds)
   const mutedAgentIds = useAppSelector(selectMutedAgentIds)
-  const insightsPanelExpandedPreference = useAppSelector(selectInsightsPanelExpandedPreference)
+  const insightsPanelExpandedPreference = useAppSelector((state) => (
+    selectInsightsPanelExpandedPreference(state, activeAgentId)
+  ))
   const insightsPanelPreferenceHydrated = useAppSelector(selectInsightsPanelPreferenceHydrated)
   const suggestionsEnabled = useAppSelector(selectSuggestionsEnabled)
   const suggestionsPreferenceHydrated = useAppSelector(selectSuggestionsPreferenceHydrated)
@@ -1564,9 +1568,12 @@ export function AgentChatPage({
 
   const handleInsightsPanelExpandedPreferenceChange = useCallback(
     (nextInsightsPanelExpanded: boolean) => {
-      void dispatch(persistAgentRosterPreference('insightsPanelExpanded', nextInsightsPanelExpanded))
+      if (!activeAgentId) {
+        return
+      }
+      void dispatch(persistInsightsPanelExpandedPreference(activeAgentId, nextInsightsPanelExpanded))
     },
-    [dispatch],
+    [activeAgentId, dispatch],
   )
 
   const handleSuggestionsEnabledChange = useCallback(

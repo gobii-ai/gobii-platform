@@ -42,6 +42,10 @@ class ConsoleUserPreferencesApiTests(TestCase):
         self.assertIsNone(
             preferences.get(UserPreference.KEY_AGENT_CHAT_INSIGHTS_PANEL_EXPANDED),
         )
+        self.assertEqual(
+            preferences.get(UserPreference.KEY_AGENT_CHAT_INSIGHTS_PANEL_EXPANDED_BY_AGENT),
+            {},
+        )
         self.assertTrue(
             preferences.get(UserPreference.KEY_AGENT_CHAT_NOTIFICATIONS_ENABLED),
         )
@@ -221,6 +225,149 @@ class ConsoleUserPreferencesApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         preferences = response.json().get("preferences", {})
         self.assertIsNone(preferences.get(UserPreference.KEY_AGENT_CHAT_INSIGHTS_PANEL_EXPANDED))
+
+    def test_patch_merges_insights_panel_preferences_by_agent(self):
+        first_agent_id = uuid.uuid4()
+        second_agent_id = uuid.uuid4()
+
+        first_response = self.client.patch(
+            self.url,
+            data=json.dumps(
+                {
+                    "preferences": {
+                        UserPreference.KEY_AGENT_CHAT_INSIGHTS_PANEL_EXPANDED_BY_AGENT: {
+                            str(first_agent_id).upper(): False,
+                        },
+                    }
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(first_response.status_code, 200)
+
+        second_response = self.client.patch(
+            self.url,
+            data=json.dumps(
+                {
+                    "preferences": {
+                        UserPreference.KEY_AGENT_CHAT_INSIGHTS_PANEL_EXPANDED_BY_AGENT: {
+                            str(second_agent_id): True,
+                        },
+                    }
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(second_response.status_code, 200)
+        expected = {
+            str(first_agent_id): False,
+            str(second_agent_id): True,
+        }
+        self.assertEqual(
+            second_response.json()["preferences"][
+                UserPreference.KEY_AGENT_CHAT_INSIGHTS_PANEL_EXPANDED_BY_AGENT
+            ],
+            expected,
+        )
+
+        stored = UserPreference.objects.get(user=self.user)
+        self.assertEqual(
+            stored.preferences[UserPreference.KEY_AGENT_CHAT_INSIGHTS_PANEL_EXPANDED_BY_AGENT],
+            expected,
+        )
+
+    def test_patch_rejects_invalid_insights_panel_preferences_by_agent(self):
+        valid_agent_id = str(uuid.uuid4())
+        invalid_values = (
+            [],
+            {"not-an-agent-uuid": False},
+            {valid_agent_id: "false"},
+            {valid_agent_id: False, valid_agent_id.upper(): True},
+        )
+
+        for invalid_value in invalid_values:
+            with self.subTest(invalid_value=invalid_value):
+                response = self.client.patch(
+                    self.url,
+                    data=json.dumps(
+                        {
+                            "preferences": {
+                                UserPreference.KEY_AGENT_CHAT_INSIGHTS_PANEL_EXPANDED_BY_AGENT: invalid_value,
+                            }
+                        }
+                    ),
+                    content_type="application/json",
+                )
+                self.assertEqual(response.status_code, 400)
+                self.assertFalse(UserPreference.objects.filter(user=self.user).exists())
+
+    def test_agent_scoped_preference_merge_preserves_unknown_stored_preferences(self):
+        first_agent_id = str(uuid.uuid4())
+        second_agent_id = str(uuid.uuid4())
+        future_key = "agent.chat.future.preference"
+        preference = UserPreference.objects.create(
+            user=self.user,
+            preferences={
+                future_key: {"enabled": True},
+                UserPreference.KEY_AGENT_CHAT_INSIGHTS_PANEL_EXPANDED_BY_AGENT: {
+                    first_agent_id: False,
+                },
+            },
+        )
+
+        UserPreference.update_known_preferences(
+            self.user,
+            {
+                UserPreference.KEY_AGENT_CHAT_INSIGHTS_PANEL_EXPANDED_BY_AGENT: {
+                    second_agent_id: True,
+                },
+            },
+        )
+
+        preference.refresh_from_db()
+        self.assertEqual(preference.preferences[future_key], {"enabled": True})
+        self.assertEqual(
+            preference.preferences[UserPreference.KEY_AGENT_CHAT_INSIGHTS_PANEL_EXPANDED_BY_AGENT],
+            {
+                first_agent_id: False,
+                second_agent_id: True,
+            },
+        )
+
+    def test_insights_panel_preferences_by_agent_are_isolated_per_user(self):
+        agent_id = str(uuid.uuid4())
+        other_user = get_user_model().objects.create_user(
+            username="other-preferences-owner",
+            email="other-preferences-owner@example.com",
+            password="password123",
+        )
+        UserPreference.update_known_preferences(
+            self.user,
+            {
+                UserPreference.KEY_AGENT_CHAT_INSIGHTS_PANEL_EXPANDED_BY_AGENT: {
+                    agent_id: False,
+                },
+            },
+        )
+        UserPreference.update_known_preferences(
+            other_user,
+            {
+                UserPreference.KEY_AGENT_CHAT_INSIGHTS_PANEL_EXPANDED_BY_AGENT: {
+                    agent_id: True,
+                },
+            },
+        )
+
+        self.assertFalse(
+            UserPreference.resolve_known_preferences(self.user)[
+                UserPreference.KEY_AGENT_CHAT_INSIGHTS_PANEL_EXPANDED_BY_AGENT
+            ][agent_id]
+        )
+        self.assertTrue(
+            UserPreference.resolve_known_preferences(other_user)[
+                UserPreference.KEY_AGENT_CHAT_INSIGHTS_PANEL_EXPANDED_BY_AGENT
+            ][agent_id]
+        )
 
     def test_patch_updates_agent_chat_notifications_enabled_preference(self):
         response = self.client.patch(

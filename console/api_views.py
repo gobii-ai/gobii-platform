@@ -3063,6 +3063,10 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
         insights_panel_expanded = resolved_preferences.get(
             UserPreference.KEY_AGENT_CHAT_INSIGHTS_PANEL_EXPANDED
         )
+        insights_panel_expanded_by_agent = resolved_preferences.get(
+            UserPreference.KEY_AGENT_CHAT_INSIGHTS_PANEL_EXPANDED_BY_AGENT,
+            {},
+        )
         agent_chat_notifications_enabled = resolved_preferences.get(
             UserPreference.KEY_AGENT_CHAT_NOTIFICATIONS_ENABLED
         )
@@ -3267,6 +3271,7 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
                 "favorite_agent_ids": favorite_agent_ids,
                 "muted_agent_ids": muted_agent_ids,
                 "insights_panel_expanded": insights_panel_expanded,
+                "insights_panel_expanded_by_agent": insights_panel_expanded_by_agent,
                 "agent_chat_notifications_enabled": agent_chat_notifications_enabled,
                 "agent_chat_suggestions_enabled": agent_chat_suggestions_enabled,
                 "billingStatus": billing_status,

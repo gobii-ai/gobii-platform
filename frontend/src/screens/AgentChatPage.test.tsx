@@ -60,6 +60,7 @@ const {
     agents: [] as unknown[],
     agentChatNotificationsEnabled: true,
     suggestionsEnabled: true,
+    insightsPanelExpandedByAgent: {} as Record<string, boolean>,
     mutedAgentIds: [] as string[],
     personalSignupPreviewCreateAvailable: false,
   },
@@ -153,12 +154,16 @@ vi.mock('../api/agentChat', () => ({
 
 vi.mock('../api/userPreferences', () => ({
   parseBooleanPreference: vi.fn((value: unknown) => value === true),
+  parseInsightsPanelExpandedByAgentPreference: vi.fn((value: unknown) => (
+    value && typeof value === 'object' && !Array.isArray(value) ? value : {}
+  )),
   parseNullableBooleanPreference: vi.fn((value: unknown) => typeof value === 'boolean' ? value : null),
   updateUserPreferences: updateUserPreferencesMock,
   parseFavoriteAgentIdsPreference: vi.fn(() => []),
   USER_PREFERENCE_KEY_AGENT_CHAT_NOTIFICATIONS_ENABLED: 'agent_chat_notifications_enabled',
   USER_PREFERENCE_KEY_AGENT_CHAT_MUTED_AGENT_IDS: 'agent_chat_muted_agent_ids',
   USER_PREFERENCE_KEY_AGENT_CHAT_INSIGHTS_PANEL_EXPANDED: 'agent_chat_insights_panel_expanded',
+  USER_PREFERENCE_KEY_AGENT_CHAT_INSIGHTS_PANEL_EXPANDED_BY_AGENT: 'agent.chat.insights_panel.expanded_by_agent',
   USER_PREFERENCE_KEY_AGENT_CHAT_SUGGESTIONS_ENABLED: 'agent_chat_suggestions_enabled',
   USER_PREFERENCE_KEY_AGENT_CHAT_ROSTER_FAVORITE_AGENT_IDS: 'agent_chat_roster_favorite_agent_ids',
   USER_PREFERENCE_KEY_AGENT_CHAT_ROSTER_SORT_MODE: 'agent_chat_roster_sort_mode',
@@ -209,7 +214,10 @@ vi.mock('../components/agentChat/AgentChatLayout', async () => {
       agentId?: string | null
       sidebar?: {
         agents?: Array<{ id: string }>
+        insightsPanelExpandedPreference?: boolean | null
+        onInsightsPanelExpandedPreferenceChange?: (expanded: boolean) => void
         showEmbeddedSettings?: boolean
+        onSelectAgent?: (agent: { id: string }) => void
         onConfigureAgent?: (agent: { id: string }) => void
         onBackFromEmbeddedSettings?: () => void
         settings?: {
@@ -266,6 +274,7 @@ vi.mock('../components/agentChat/AgentChatLayout', async () => {
       const configureTarget = sidebar?.agents?.find((agent) => agent.id !== agentId) ?? sidebar?.agents?.[0] ?? null
       const sidebarNotificationsEnabled = sidebar?.settings?.notificationsEnabled
       const sidebarSuggestionsEnabled = sidebar?.settings?.suggestionsEnabled
+      const insightsPanelExpandedPreference = sidebar?.insightsPanelExpandedPreference
       const hasAgentReply = events?.some((event) => event.kind === 'message' && event.message?.status !== 'sending') ?? false
       const signupPreviewState = (
         agentChatStoreState.signupPreviewState === 'awaiting_first_reply_pause'
@@ -283,6 +292,11 @@ vi.mock('../components/agentChat/AgentChatLayout', async () => {
           <div data-testid="embedded-settings-open">{String(Boolean(sidebar?.showEmbeddedSettings))}</div>
           <div data-testid="notifications-enabled">{String(Boolean(sidebarNotificationsEnabled))}</div>
           <div data-testid="suggestions-enabled">{String(Boolean(sidebarSuggestionsEnabled))}</div>
+          <div data-testid="insights-panel-expanded-preference">
+            {insightsPanelExpandedPreference === null || insightsPanelExpandedPreference === undefined
+              ? 'auto'
+              : String(insightsPanelExpandedPreference)}
+          </div>
           <div data-testid="notification-status">{sidebar?.settings?.notificationStatus ?? ''}</div>
           <div data-testid="google-sheets-drive-tab-enabled">{String(Boolean(enabledIntegrationTabs.googleSheetsDrive))}</div>
           <div data-testid="apollo-native-tab-enabled">{String(Boolean(enabledIntegrationTabs.apolloNative))}</div>
@@ -332,6 +346,26 @@ vi.mock('../components/agentChat/AgentChatLayout', async () => {
             }}
           >
             Configure
+          </button>
+          <button
+            type="button"
+            data-testid="switch-agent"
+            onClick={() => {
+              if (configureTarget) {
+                sidebar?.onSelectAgent?.(configureTarget)
+              }
+            }}
+          >
+            Switch agent
+          </button>
+          <button
+            type="button"
+            data-testid="toggle-insights-panel"
+            onClick={() => sidebar?.onInsightsPanelExpandedPreferenceChange?.(
+              !insightsPanelExpandedPreference,
+            )}
+          >
+            Toggle insights panel
           </button>
           <button type="button" data-testid="back-from-settings" onClick={() => sidebar?.onBackFromEmbeddedSettings?.()}>
             Back
@@ -430,6 +464,7 @@ vi.mock('../hooks/useAgentRoster', () => ({
       favoriteAgentIds: [],
       mutedAgentIds: rosterState.mutedAgentIds,
       insightsPanelExpanded: null,
+      insightsPanelExpandedByAgent: rosterState.insightsPanelExpandedByAgent,
       suggestionsEnabled: rosterState.suggestionsEnabled,
       agentChatNotificationsEnabled: rosterState.agentChatNotificationsEnabled,
       requestedAgentStatus: null,
@@ -689,6 +724,7 @@ describe('AgentChatPage trial onboarding', () => {
     rosterState.agents = []
     rosterState.agentChatNotificationsEnabled = true
     rosterState.suggestionsEnabled = true
+    rosterState.insightsPanelExpandedByAgent = {}
     rosterState.mutedAgentIds = []
     rosterState.personalSignupPreviewCreateAvailable = false
     agentChatStoreState.signupPreviewState = 'none'
@@ -704,6 +740,45 @@ describe('AgentChatPage trial onboarding', () => {
 
   afterEach(() => {
     window.history.pushState({}, '', '/')
+  })
+
+  it('keeps the Insights panel preference scoped to the active agent', async () => {
+    const firstAgentId = '11111111-1111-4111-8111-111111111111'
+    const secondAgentId = '22222222-2222-4222-8222-222222222222'
+    rosterState.agents = [
+      buildRosterAgent(firstAgentId, 'First Agent'),
+      buildRosterAgent(secondAgentId, 'Second Agent'),
+    ]
+    rosterState.insightsPanelExpandedByAgent = {
+      [firstAgentId]: false,
+      [secondAgentId]: true,
+    }
+    window.history.pushState({}, '', `/app/agents/${firstAgentId}`)
+
+    renderAgentChatPage({ agentId: firstAgentId })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('insights-panel-expanded-preference')).toHaveTextContent('false')
+    })
+
+    fireEvent.click(screen.getByTestId('switch-agent'))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('active-agent-id')).toHaveTextContent(secondAgentId)
+      expect(screen.getByTestId('insights-panel-expanded-preference')).toHaveTextContent('true')
+    })
+
+    fireEvent.click(screen.getByTestId('toggle-insights-panel'))
+
+    await waitFor(() => {
+      expect(updateUserPreferencesMock).toHaveBeenCalledWith({
+        preferences: {
+          'agent.chat.insights_panel.expanded_by_agent': {
+            [secondAgentId]: false,
+          },
+        },
+      })
+    })
   })
 
   it('keeps the selected agent working when stale timeline metadata reports idle during a switch', async () => {

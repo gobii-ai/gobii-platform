@@ -3,6 +3,10 @@ import { staffViewContextHeaders, type ConsoleContext, type StaffViewContext } f
 import type { AgentRosterEntry, AgentRosterSortMode, AgentSidebarInvite, PlanningState, SignupPreviewState } from '../types/agentRoster'
 import type { AccountPauseInfo, BillingStatusInfo } from '../types/agentAddons'
 import type { LlmIntelligenceConfig } from '../types/llmIntelligence'
+import {
+  parseInsightsPanelExpandedByAgentPreference,
+  type InsightsPanelExpandedByAgent,
+} from './userPreferences'
 
 export type UpdateAgentPayload = {
   preferred_llm_tier?: string
@@ -77,6 +81,7 @@ type AgentRosterPayload = {
   favorite_agent_ids?: string[]
   muted_agent_ids?: string[]
   insights_panel_expanded?: boolean | null
+  insights_panel_expanded_by_agent?: unknown
   agent_chat_suggestions_enabled?: boolean
   agent_chat_notifications_enabled?: boolean
   billingStatus?: BillingStatusInfo | null
@@ -137,6 +142,7 @@ export async function fetchAgentRoster(
   favoriteAgentIds: string[]
   mutedAgentIds: string[]
   insightsPanelExpanded: boolean | null
+  insightsPanelExpandedByAgent: InsightsPanelExpandedByAgent
   suggestionsEnabled: boolean
   agentChatNotificationsEnabled: boolean
   requestedAgentStatus?: 'deleted' | 'missing' | null
@@ -166,6 +172,9 @@ export async function fetchAgentRoster(
       ? payload.muted_agent_ids.filter((value): value is string => typeof value === 'string')
       : [],
     insightsPanelExpanded: payload.insights_panel_expanded ?? null,
+    insightsPanelExpandedByAgent: parseInsightsPanelExpandedByAgentPreference(
+      payload.insights_panel_expanded_by_agent,
+    ),
     suggestionsEnabled: payload.agent_chat_suggestions_enabled !== false,
     agentChatNotificationsEnabled: payload.agent_chat_notifications_enabled !== false,
     requestedAgentStatus: payload.requested_agent_status ?? null,
