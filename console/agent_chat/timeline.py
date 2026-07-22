@@ -500,6 +500,7 @@ def _serialize_message(
     attachments = [_serialize_attachment(att, message.owner_agent_id) for att in message.attachments.all()]
     conversation = message.conversation
     source_kind, source_label = get_message_source_metadata(message.raw_payload)
+    is_mcp = source_kind == "mcp"
     discord_channel_label = ""
     if channel.lower() == CommsChannel.DISCORD.value:
         discord_channel_label = _discord_channel_label(message, conversation)
@@ -557,6 +558,11 @@ def _serialize_message(
         else:
             sender_name = source_label
 
+    display_channel = "mcp" if is_mcp else channel
+    if is_mcp:
+        sender_user_id = None
+        sender_address = None
+
     body_html = _message_body_html(message, channel, attachments)
     subject = _message_subject(message, channel)
 
@@ -571,7 +577,7 @@ def _serialize_message(
             "bodyText": message.body or "",
             "subject": subject,
             "isOutbound": bool(message.is_outbound),
-            "channel": channel,
+            "channel": display_channel,
             "attachments": attachments,
             "timestamp": _format_timestamp(timestamp),
             "relativeTimestamp": _relative_timestamp(timestamp),

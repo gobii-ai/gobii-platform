@@ -137,7 +137,7 @@ def _search_system_skills_tool() -> dict[str, Any]:
 
 
 def _record_plan_tool() -> dict[str, Any]:
-    allowed_tool_names = list(META_GOBII_TOOL_NAMES) + [LEGACY_SPAWN_TOOL_NAME]
+    allowed_tool_names = list(META_GOBII_TOOL_NAMES) + ["send_agent_message", LEGACY_SPAWN_TOOL_NAME]
     return {
         "type": "function",
         "function": {
@@ -162,8 +162,8 @@ def _record_plan_tool() -> dict[str, Any]:
                         "description": (
                             "Complete post-approval lifecycle, using each direct tool name once in first-use order. "
                             "Include create/link/message tools when the user asked to create, deploy, link, or brief. "
-                            "Any newly created Gobii that will do work needs meta_gobii_send_agent_message for its "
-                            "initial briefing."
+                            "Any newly created Gobii that will do work needs an approved link from the manager "
+                            "Gobii followed by send_agent_message for its initial briefing."
                         ),
                         "maxItems": 12,
                     },
@@ -338,7 +338,7 @@ def _record_response_tool() -> dict[str, Any]:
                         "items": {"type": "string"},
                         "description": (
                             "Concrete briefing messages to send to proposed Gobiis after approval. Must be non-empty "
-                            "when the recorded plan includes meta_gobii_send_agent_message; include one concise line "
+                            "when the recorded plan includes send_agent_message; include one concise line "
                             "per proposed or affected Gobii when roles are known."
                         ),
                         "maxItems": 8,
@@ -786,8 +786,8 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
                     "A request to show the team design before creation means ask for approval first; it does not "
                     "remove create, link, or briefing steps from ordered_tools. "
                     "For a multi-Gobii team, include meta_gobii_link_agents. For any request to brief, hand off, "
-                    "follow up, send updates, coordinate with an owner/team, or explain initial work, include "
-                    "meta_gobii_send_agent_message as the explicit briefing/handoff step. "
+                    "follow up, send updates, coordinate with an owner/team, or explain initial work, include an "
+                    "approved manager-to-target link and then send_agent_message as the explicit briefing/handoff step. "
                     "Briefing an audience is not a second Gobii; a request for one Gobii to do work and brief or "
                     "send updates remains one planned agent unless the user asks for a team or multiple Gobiis. "
                     "If the user asks to restructure, reorganize, rewire, relink, add links, or fix a Gobii graph, "
@@ -796,11 +796,12 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
                     "Do not include meta_gobii_update_agent for graph restructure, link, unlink, or archive work "
                     "unless the user asks to change name, charter, schedule, resources, availability, policy, or tier. "
                     "Whenever meta_gobii_create_agent will create a Gobii that is expected to do work, include "
-                    "meta_gobii_send_agent_message to deliver the initial role/project briefing after approval; "
+                    "meta_gobii_link_agents to connect the manager to the target, then send_agent_message to deliver "
+                    "the initial role/project briefing after approval; "
                     "the exception is an explicit request to use only the separate human Create/Decline request flow. "
                     "This initial briefing requirement applies even when the created Gobii's work is scheduled, "
                     "recurring, proactive, or outward-facing follow-up/reporting work; schedule configuration or "
-                    "charter updates are not a substitute for meta_gobii_send_agent_message. "
+                    "charter updates are not a substitute for send_agent_message. "
                     "Preserve the user's domain words in planned_role_names, such as competitor pricing, customer "
                     "success, CRM notes, recruiting, sales, operations, or reporting. "
                     "For broad operations involving multiple Gobiis, require a higher-level confirmation summary "
@@ -828,7 +829,8 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
                     "A request like 'Make the X Gobii...' names an existing Gobii and should update that Gobii, "
                     "not create a new one. "
                     "When the user asks to create a Gobii or team and also asks to brief, hand off, follow up, send "
-                    "updates, or explain initial work, include meta_gobii_send_agent_message as the briefing step; "
+                    "updates, or explain initial work, include a manager-to-target link and send_agent_message as the "
+                    "briefing step; "
                     "creating or updating the charter is not a substitute for the initial briefing. "
                     "Treat explicit cadence words such as daily, weekly, weekday, monthly, every morning, scheduled, "
                     "recurring, proactively, digest, report, check, and check-in as schedule_in_scope=true. "
@@ -918,7 +920,7 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
                     "asks_for_approval must be true. If planned_agent_count is greater than zero, proposed_roles "
                     "must describe those roles. When there is more than one proposed role or the plan includes "
                     "meta_gobii_link_agents, proposed_links must contain the graph edges. If the plan includes "
-                    "meta_gobii_send_agent_message, initial_briefings must include the messages to send after "
+                    "send_agent_message, initial_briefings must include the messages to send after "
                     "approval; creating or updating the charter is not a substitute. If briefing messages are not "
                     "already written, synthesize concise role/project briefings from planned_role_names. "
                     "Do not paste the same initial briefing text into response_text more than once; when "
@@ -947,7 +949,7 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
                     "must explicitly ask for approval or confirmation before mutations; do not record false.\n"
                     "- If ordered_tools includes meta_gobii_link_agents, proposed_links must contain concrete "
                     "role-to-role graph edges.\n"
-                    "- If ordered_tools includes meta_gobii_send_agent_message, initial_briefings must contain "
+                    "- If ordered_tools includes send_agent_message, initial_briefings must contain "
                     "the actual post-approval briefing messages; do not leave it empty when planned_role_names exist.\n"
                     "Record the response and structured design facts."
                 ),
@@ -1190,7 +1192,7 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
             normalized["proposed_roles"] = derived_args["proposed_roles"]
         if "meta_gobii_link_agents" in ordered_tools and not normalized.get("proposed_links"):
             normalized["proposed_links"] = derived_args["proposed_links"]
-        if "meta_gobii_send_agent_message" in ordered_tools and not normalized.get("initial_briefings"):
+        if "send_agent_message" in ordered_tools and not normalized.get("initial_briefings"):
             normalized["initial_briefings"] = derived_args["initial_briefings"]
         if plan_args.get("needs_human_confirmation") and not normalized.get("asks_for_approval"):
             normalized["asks_for_approval"] = derived_args["asks_for_approval"]
@@ -1221,7 +1223,7 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
                 for index in range(len(role_names) - 1)
             ]
         initial_briefings = []
-        if "meta_gobii_send_agent_message" in ordered_tools:
+        if "send_agent_message" in ordered_tools:
             initial_briefings = [
                 f"{role_name}: execute the requested {role_name.lower()} workstream.{scope_note} Coordinate with linked Gobiis."
                 for role_name in role_names

@@ -1139,6 +1139,49 @@ class PromptContextBuilderTests(TestCase):
         self.assertIn(f"- web: {member_address} - Member User", content)
         self.assertNotIn(f"- web: {member_address} (can configure)", content)
 
+    def test_mcp_message_uses_mcp_identity_and_preserves_owner_authority(self):
+        self._add_low_permission_contacts(self.agent)
+        agent_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.WEB,
+            address=build_web_agent_address(self.agent.id),
+        )
+        owner_address = build_web_user_address(self.user.id, self.agent.id)
+        owner_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.WEB,
+            address=owner_address,
+        )
+        conversation = PersistentAgentConversation.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.WEB,
+            address=owner_address,
+        )
+        PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=owner_endpoint,
+            to_endpoint=agent_endpoint,
+            conversation=conversation,
+            is_outbound=False,
+            body="Run the authenticated MCP request.",
+            raw_payload={
+                "source": "remote_mcp",
+                "source_kind": "mcp",
+                "source_label": "Gobii MCP",
+            },
+        )
+
+        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
+             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+            context, _, _ = build_prompt_context(self.agent)
+
+        user_message = next((message for message in context if message["role"] == "user"), None)
+        self.assertIsNotNone(user_message)
+        content = user_message["content"]
+        self.assertIn('Inbound MCP message from "Gobii MCP"', content)
+        self.assertIn("Run the authenticated MCP request.", content)
+        self.assertNotIn(owner_address, content)
+        self.assertNotIn("This sender cannot change your configuration", content)
+
     def test_org_manage_role_email_sender_does_not_get_config_trust_reminder(self):
         org_agent, agent_endpoint, admin, _, _ = self._build_org_prompt_agent("config-auth-email")
         self._add_low_permission_contacts(org_agent)

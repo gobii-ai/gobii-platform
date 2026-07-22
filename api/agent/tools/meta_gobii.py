@@ -12,7 +12,6 @@ from django.db import IntegrityError, transaction
 from django.db.models import Q
 
 from agents.services import AgentService
-from api.agent.comms.message_service import inject_internal_web_message
 from api.agent.core.llm_config import (
     AgentLLMTier,
     get_allowed_tier_rank,
@@ -22,7 +21,6 @@ from api.agent.core.llm_config import (
     resolve_intelligence_tier_for_owner,
     resolve_preferred_tier_for_owner,
 )
-from api.agent.files.attachment_helpers import AttachmentResolutionError, create_message_attachments, resolve_filespace_attachments
 from api.agent.files.filespace_service import get_or_create_default_filespace, write_bytes_to_dir
 from api.models import (
     AgentFsNode,
@@ -34,7 +32,6 @@ from api.models import (
     PersistentAgentCommsEndpoint,
     PersistentAgentSystemSkillState,
     UserPhoneNumber,
-    build_web_user_address,
 )
 from api.services.daily_credit_limits import calculate_daily_credit_slider_bounds, get_tier_credit_multiplier, scale_daily_credit_limit_for_tier_change
 from api.services.daily_credit_settings import get_daily_credit_settings_for_owner
@@ -43,7 +40,6 @@ from console.agent_chat.timeline import (
     DEFAULT_PAGE_SIZE as TIMELINE_DEFAULT_PAGE_SIZE,
     MAX_PAGE_SIZE as TIMELINE_MAX_PAGE_SIZE,
     fetch_timeline_window,
-    serialize_message_event,
     serialize_processing_snapshot,
 )
 from pages.account_info_cache import invalidate_account_info_cache
@@ -504,51 +500,6 @@ TOOL_DEFINITIONS: dict[str, dict[str, Any]] = {
         ),
         "output": _output_object(
             {"status": {"type": "string"}, "message": {"type": "string"}, "link": _LINK_OUTPUT, **_confirmation_output_schema()}
-        ),
-    },
-    "meta_gobii_send_agent_message": {
-        "description": (
-            "Inject a control-plane briefing or task message into one accessible Gobii and optionally attach files already "
-            "in that agent's filespace. This is not a peer DM. If the invoking Gobii shares an enabled peer link with the "
-            "target, use send_agent_message instead. Requires human approval via user_confirmed before messaging or briefing "
-            "another Gobii."
-        ),
-        "parameters": _object(
-            {
-                "agent_id": _agent_id(),
-                "body": {"type": "string", "description": "Message body sent to the agent."},
-                "attachment_file_paths": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "Optional filespace paths such as /uploads/report.pdf to attach to the message.",
-                },
-                "trigger_processing": {
-                    "type": "boolean",
-                    "default": True,
-                    "description": "Whether to queue the agent to process the inbound message.",
-                },
-                "user_confirmed": {
-                    "type": "boolean",
-                    "default": False,
-                    "description": _confirmation_description("message or briefing"),
-                },
-            },
-            required=("agent_id", "body"),
-        ),
-        "output": _output_object(
-            {
-                "status": {"type": "string"},
-                "message_id": _UUID,
-                "agent_id": _UUID,
-                "cursor": _STRING_OR_NULL,
-                "latest_cursor": _STRING_OR_NULL,
-                "created_at": _STRING_OR_NULL,
-                "message": _MESSAGE_OUTPUT,
-                "conversation_id": _UUID,
-                "attachment_count": {"type": "integer"},
-                **_confirmation_output_schema(),
-            },
-            required=("status",),
         ),
     },
     "meta_gobii_get_agent_timeline": {
@@ -1225,62 +1176,6 @@ def _tool_unlink_agents(invoking_agent: PersistentAgent, params: dict[str, Any])
     payload = _serialize_peer_link(link)
     link.remove_preserving_history()
     return {"status": "unlinked", "message": "Peer link removed; historical conversation messages were preserved.", "link": payload}
-
-
-def _tool_send_agent_message(invoking_agent: PersistentAgent, params: dict[str, Any]) -> dict[str, Any]:
-    agent = _get_agent(invoking_agent, params.get("agent_id"))
-    body = _required_string(params, "body", allow_blank=False)
-    trigger_processing = _optional_bool(params.get("trigger_processing", True), "trigger_processing")
-    attachment_paths = params.get("attachment_file_paths") or []
-    if not isinstance(attachment_paths, list) or any(not isinstance(path, str) for path in attachment_paths):
-        raise MetaGobiiToolError("attachment_file_paths must be an array of filespace paths.")
-    _require_user_confirmed(
-        params,
-        action=f"message `{agent.name}`",
-        proposed_actions=[
-            f"Send a briefing/message to `{agent.name}`.",
-            f"Attach {len(attachment_paths)} file(s)." if attachment_paths else "Send without file attachments.",
-            "Queue the Gobii to process the message." if trigger_processing else "Store the message without triggering processing.",
-        ],
-    )
-
-    sender_address = build_web_user_address(user_id=invoking_agent.user_id, agent_id=agent.id)
-    if not agent.is_sender_whitelisted(CommsChannel.WEB, sender_address):
-        raise MetaGobiiToolError("Invoking Gobii's owner is not allowed to message this agent.")
-
-    try:
-        resolved_attachments = resolve_filespace_attachments(agent, attachment_paths)
-    except AttachmentResolutionError as exc:
-        raise MetaGobiiToolError(str(exc)) from exc
-
-    with transaction.atomic():
-        message, conversation = inject_internal_web_message(
-            agent.id,
-            body,
-            sender_user_id=invoking_agent.user_id,
-            attachments=[],
-            trigger_processing=False,
-        )
-        create_message_attachments(message, resolved_attachments)
-        if trigger_processing:
-            from api.agent.tasks import process_agent_events_task
-
-            transaction.on_commit(lambda: process_agent_events_task.delay(str(agent.id)))
-
-    event = serialize_message_event(message)
-    cursor = event.get("cursor")
-    return {
-        "status": "queued" if trigger_processing else "stored",
-        "message_id": str(message.id),
-        "agent_id": str(agent.id),
-        "cursor": cursor,
-        "latest_cursor": cursor,
-        "created_at": _iso(message.timestamp),
-        "message": _serialize_message(message),
-        "timeline_event": event,
-        "conversation_id": str(conversation.id),
-        "attachment_count": len(resolved_attachments),
-    }
 
 
 def _tool_get_agent_timeline(invoking_agent: PersistentAgent, params: dict[str, Any]) -> dict[str, Any]:
@@ -2212,7 +2107,6 @@ _HANDLERS: dict[str, Callable[[PersistentAgent, dict[str, Any]], dict[str, Any]]
     "meta_gobii_list_agent_links": _tool_list_agent_links,
     "meta_gobii_link_agents": _tool_link_agents,
     "meta_gobii_unlink_agents": _tool_unlink_agents,
-    "meta_gobii_send_agent_message": _tool_send_agent_message,
     "meta_gobii_get_agent_timeline": _tool_get_agent_timeline,
     "meta_gobii_wait_for_agent_event": _tool_wait_for_agent_event,
     "meta_gobii_list_agent_files": _tool_list_agent_files,

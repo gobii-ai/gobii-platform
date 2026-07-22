@@ -15,7 +15,6 @@ META_GOBII_TOOL_NAMES = (
     "meta_gobii_list_agent_links",
     "meta_gobii_link_agents",
     "meta_gobii_unlink_agents",
-    "meta_gobii_send_agent_message",
     "meta_gobii_get_agent_timeline",
     "meta_gobii_wait_for_agent_event",
     "meta_gobii_list_agent_files",

@@ -15,6 +15,7 @@ const CHANNEL_LABELS: Record<string, string> = {
   slack: 'Slack',
   discord: 'Discord',
   web: 'Web',
+  mcp: 'MCP',
   other: 'Other',
 }
 
@@ -91,6 +92,7 @@ export const MessageEventCard = memo(function MessageEventCard({
   const channel = (message.channel || 'web').toLowerCase()
   const sourceKind = (message.sourceKind || '').toLowerCase()
   const isWebhook = sourceKind === 'webhook'
+  const isMcp = sourceKind === 'mcp'
   const hasPeerMetadata = Boolean(message.peerAgent || message.peerLinkId)
   const isPeer = Boolean(message.isPeer || hasPeerMetadata)
 
@@ -128,6 +130,9 @@ export const MessageEventCard = memo(function MessageEventCard({
   if (isWebhook) {
     authorLabel = message.sourceLabel?.trim() || message.senderName?.trim() || 'Webhook'
   }
+  if (isMcp) {
+    authorLabel = message.sourceLabel?.trim() || message.senderName?.trim() || 'Gobii MCP'
+  }
   if (isPeer) {
     authorLabel = peerDirectionLabel
   }
@@ -142,6 +147,10 @@ export const MessageEventCard = memo(function MessageEventCard({
   let showChannelTag = channel !== 'web'
   if (isWebhook) {
     channelLabel = 'Webhook'
+    showChannelTag = true
+  }
+  if (isMcp) {
+    channelLabel = 'MCP'
     showChannelTag = true
   }
   if (isPeer) {

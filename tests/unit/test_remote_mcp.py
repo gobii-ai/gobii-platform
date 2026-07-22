@@ -642,7 +642,9 @@ class RemoteMCPViewTests(TestCase):
         self.assertTrue(credit_response.json()["result"]["isError"])
         self.assertEqual(credit_content["details"]["field"], "daily_credit_limit")
 
-    def test_file_upload_and_message_attachment_path(self):
+    @patch("api.services.remote_mcp.can_user_use_personal_agents_and_api", return_value=True)
+    @patch("api.auth.can_user_use_personal_agents_and_api", return_value=True)
+    def test_file_upload_and_message_attachment_path(self, _mock_auth_access, _mock_scope_access):
         agent = self._create_agent(self.user, "File MCP Agent")
         encoded = base64.b64encode(b"hello from mcp").decode("ascii")
 
@@ -684,12 +686,31 @@ class RemoteMCPViewTests(TestCase):
         self.assertEqual(send_content["agent_id"], str(agent.id))
         self.assertTrue(send_content["cursor"])
         self.assertEqual(send_content["latest_cursor"], send_content["cursor"])
+        self.assertEqual(send_content["actor"], {"type": "external", "source": "remote_mcp"})
+        timeline_message = send_content["timeline_event"]["message"]
+        self.assertEqual(timeline_message["channel"], "mcp")
+        self.assertEqual(timeline_message["sourceKind"], "mcp")
+        self.assertEqual(timeline_message["sourceLabel"], "Gobii MCP")
+        self.assertEqual(timeline_message["senderName"], "Gobii MCP")
+        self.assertIsNone(timeline_message["senderUserId"])
+        self.assertIsNone(timeline_message["senderAddress"])
         message = PersistentAgentMessage.objects.get(id=message_id)
+        self.assertEqual(
+            message.raw_payload,
+            {
+                "source": "remote_mcp",
+                "sender_user_id": self.user.id,
+                "source_kind": "mcp",
+                "source_label": "Gobii MCP",
+            },
+        )
         attachment = message.attachments.get()
         self.assertEqual(str(attachment.filespace_node_id), node_id)
         process_delay.assert_called_once_with(str(agent.id))
 
-    def test_timeline_cursor_reads_and_wait_filters(self):
+    @patch("api.services.remote_mcp.can_user_use_personal_agents_and_api", return_value=True)
+    @patch("api.auth.can_user_use_personal_agents_and_api", return_value=True)
+    def test_timeline_cursor_reads_and_wait_filters(self, _mock_auth_access, _mock_scope_access):
         agent = self._create_agent(self.user, "Timeline MCP Agent")
 
         initial_response = self._call_tool("gobii_get_agent_timeline", {"agent_id": str(agent.id), "limit": 5})
@@ -741,9 +762,10 @@ class RemoteMCPViewTests(TestCase):
                 "timeout_seconds": 0,
                 "event_types": ["message"],
                 "filters": {
-                    "from_actor_type": "human_user",
+                    "from_actor_type": "external",
                     "to_agent_id": str(agent.id),
                     "message_id": send_content["message_id"],
+                    "channel": "mcp",
                 },
             },
         )

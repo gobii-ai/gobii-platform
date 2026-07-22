@@ -2522,9 +2522,14 @@ def _build_contacts_block(
             endpoint_channel = msg.conversation.channel
             endpoint_address = msg.conversation.address
         elif not msg.is_outbound:
-            endpoint = msg.from_endpoint
-            endpoint_channel = endpoint.channel
-            endpoint_address = endpoint.address
+            source_kind, source_label = get_message_source_metadata(msg.raw_payload)
+            if source_kind == "mcp":
+                endpoint_channel = "mcp"
+                endpoint_address = source_label or "Gobii MCP"
+            else:
+                endpoint = msg.from_endpoint
+                endpoint_channel = endpoint.channel
+                endpoint_address = endpoint.address
         if not endpoint_address:
             continue
         key = (endpoint_channel, endpoint_address)
@@ -4856,6 +4861,7 @@ def _get_unified_history_prompt(
                 from_addr = _format_web_party(from_addr, m.from_endpoint_id)
             source_kind, source_label = get_message_source_metadata(m.raw_payload)
             is_webhook = channel == CommsChannel.OTHER and str(source_kind).strip().lower() == "webhook"
+            is_mcp = str(source_kind).strip().lower() == "mcp"
             if m.is_outbound:
                 to_addr = m.to_endpoint.address if m.to_endpoint else "N/A"
                 if channel == CommsChannel.EMAIL and m.conversation and m.conversation.address:
@@ -4870,6 +4876,9 @@ def _get_unified_history_prompt(
                 if is_webhook:
                     label = str(source_label).strip() if isinstance(source_label, str) and str(source_label).strip() else "unknown webhook"
                     header = f'[{m.timestamp.isoformat()}] Inbound webhook "{label}" triggered:'
+                elif is_mcp:
+                    label = str(source_label).strip() if isinstance(source_label, str) and str(source_label).strip() else "Gobii MCP"
+                    header = f'[{m.timestamp.isoformat()}] Inbound MCP message from "{label}":'
                 elif source_label:
                     header = f"[{m.timestamp.isoformat()}] On {channel}, you received a message from {source_label}:"
                 else:
@@ -4877,6 +4886,8 @@ def _get_unified_history_prompt(
 
             if is_webhook:
                 event_type = f"{event_prefix}_webhook"
+            elif is_mcp:
+                event_type = f"{event_prefix}_mcp"
             else:
                 event_type = f"{event_prefix}_{channel.lower()}"
             components = {"header": header}

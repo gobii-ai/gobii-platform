@@ -480,7 +480,7 @@ class MetaGobiiEvalScoringTests(TestCase):
                     "meta_gobii_get_agent_config_options",
                     "meta_gobii_create_agent",
                     "meta_gobii_link_agents",
-                    "meta_gobii_send_agent_message",
+                    "send_agent_message",
                 ],
                 "tools_before_approval": ["meta_gobii_get_agent_config_options"],
                 "needs_human_confirmation": True,
@@ -511,7 +511,30 @@ class MetaGobiiEvalScoringTests(TestCase):
         self.assertTrue(scores["schedule_scope"][0])
         self.assertTrue(scores["team_design"][0])
 
-    def test_single_customer_success_follow_up_does_not_require_peer_link(self):
+    def test_removed_control_plane_message_tool_is_forbidden(self):
+        case = _case("positive_team_creation")
+
+        scores = score_meta_gobii_case(
+            case,
+            skill_selected=True,
+            plan_args={
+                "ordered_tools": [
+                    "meta_gobii_create_agent",
+                    "meta_gobii_link_agents",
+                    "meta_gobii_send_agent_message",
+                ],
+                "tools_before_approval": [],
+                "needs_human_confirmation": True,
+                "planned_agent_count": 3,
+                "planned_role_names": ["Recruiting", "Sales", "Customer Signal"],
+                "extra_scope_items": [],
+            },
+        )
+
+        self.assertFalse(scores["tool_plan"][0])
+        self.assertIn("meta_gobii_send_agent_message", scores["tool_plan"][1])
+
+    def test_single_customer_success_follow_up_requires_manager_peer_link(self):
         case = _case("ambiguous_customer_success_follow_up")
 
         scores = score_meta_gobii_case(
@@ -526,7 +549,8 @@ class MetaGobiiEvalScoringTests(TestCase):
                     "meta_gobii_list_agents",
                     "meta_gobii_get_agent_config_options",
                     "meta_gobii_create_agent",
-                    "meta_gobii_send_agent_message",
+                    "meta_gobii_link_agents",
+                    "send_agent_message",
                 ],
                 "tools_before_approval": ["meta_gobii_list_agents", "meta_gobii_get_agent_config_options"],
                 "needs_human_confirmation": True,
@@ -544,7 +568,7 @@ class MetaGobiiEvalScoringTests(TestCase):
                         "responsibility": "Coordinate churn-risk follow-up with the account owner.",
                     }
                 ],
-                "proposed_links": [],
+                "proposed_links": ["Meta Manager <-> Customer Success Churn Follow-up Gobii"],
                 "initial_briefings": ["Customer Success Churn Follow-up Gobii: coordinate with the account owner."],
                 "asks_for_approval": True,
                 "extra_scope_items": [],
@@ -782,7 +806,7 @@ class MetaGobiiEvalScoringTests(TestCase):
                 "ordered_tools": [
                     "meta_gobii_create_agent",
                     "meta_gobii_link_agents",
-                    "meta_gobii_send_agent_message",
+                    "send_agent_message",
                 ],
                 "tools_before_approval": ["meta_gobii_get_agent_config_options"],
                 "needs_human_confirmation": True,
@@ -811,7 +835,7 @@ class MetaGobiiEvalScoringTests(TestCase):
             case,
             skill_selected=True,
             plan_args={
-                "ordered_tools": ["meta_gobii_create_agent", "meta_gobii_send_agent_message"],
+                "ordered_tools": ["meta_gobii_create_agent", "meta_gobii_link_agents", "send_agent_message"],
                 "tools_before_approval": [],
                 "needs_human_confirmation": True,
                 "planned_agent_count": 1,
@@ -825,7 +849,7 @@ class MetaGobiiEvalScoringTests(TestCase):
             case,
             skill_selected=True,
             plan_args={
-                "ordered_tools": ["meta_gobii_create_agent", "meta_gobii_send_agent_message"],
+                "ordered_tools": ["meta_gobii_create_agent", "meta_gobii_link_agents", "send_agent_message"],
                 "tools_before_approval": [],
                 "needs_human_confirmation": True,
                 "planned_agent_count": 1,
@@ -854,7 +878,7 @@ class MetaGobiiEvalScoringTests(TestCase):
                     "meta_gobii_get_agent_config_options",
                     "meta_gobii_create_agent",
                     "meta_gobii_link_agents",
-                    "meta_gobii_send_agent_message",
+                    "send_agent_message",
                 ],
                 "tools_before_approval": ["meta_gobii_get_agent_config_options"],
                 "needs_human_confirmation": True,
@@ -886,7 +910,7 @@ class MetaGobiiEvalScoringTests(TestCase):
             case,
             skill_selected=True,
             plan_args={
-                "ordered_tools": ["meta_gobii_create_agent", "meta_gobii_send_agent_message"],
+                "ordered_tools": ["meta_gobii_create_agent", "meta_gobii_link_agents", "send_agent_message"],
                 "tools_before_approval": [],
                 "needs_human_confirmation": True,
                 "planned_agent_count": 1,
@@ -900,7 +924,7 @@ class MetaGobiiEvalScoringTests(TestCase):
             case,
             skill_selected=True,
             plan_args={
-                "ordered_tools": ["meta_gobii_create_agent", "meta_gobii_send_agent_message"],
+                "ordered_tools": ["meta_gobii_create_agent", "meta_gobii_link_agents", "send_agent_message"],
                 "tools_before_approval": [],
                 "needs_human_confirmation": True,
                 "planned_agent_count": 1,
@@ -1016,7 +1040,7 @@ class MetaGobiiEvalScoringTests(TestCase):
                 "ordered_tools": [
                     "meta_gobii_create_agent",
                     "meta_gobii_link_agents",
-                    "meta_gobii_send_agent_message",
+                    "send_agent_message",
                 ],
                 "tools_before_approval": [],
                 "needs_human_confirmation": False,
@@ -1095,7 +1119,7 @@ class MetaGobiiEvalScenarioTests(TestCase):
                                 "meta_gobii_get_agent_config_options",
                                 "meta_gobii_create_agent",
                                 "meta_gobii_link_agents",
-                                "meta_gobii_send_agent_message",
+                                "send_agent_message",
                             ],
                             "tools_before_approval": ["meta_gobii_get_agent_config_options"],
                             "needs_human_confirmation": True,
@@ -1200,7 +1224,7 @@ class MetaGobiiEvalScenarioTests(TestCase):
                 "ordered_tools": [
                     "meta_gobii_create_agent",
                     "meta_gobii_link_agents",
-                    "meta_gobii_send_agent_message",
+                    "send_agent_message",
                 ],
                 "needs_human_confirmation": True,
                 "planned_role_names": ["Sourcing", "Screening", "Coordinator"],
@@ -1227,7 +1251,8 @@ class MetaGobiiEvalScenarioTests(TestCase):
             {
                 "ordered_tools": [
                     "meta_gobii_create_agent",
-                    "meta_gobii_send_agent_message",
+                    "meta_gobii_link_agents",
+                    "send_agent_message",
                 ],
                 "needs_human_confirmation": True,
                 "planned_role_names": ["support ops"],
