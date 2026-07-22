@@ -8,12 +8,13 @@ from unittest.mock import patch
 from allauth.account.models import EmailAddress
 from django.contrib.auth import get_user_model
 from django.test import SimpleTestCase, TestCase, tag
+from django.utils import timezone
 
 import api.evals.loader  # noqa: F401 - registers scenarios and suites
 from api.evals.scenarios import sqlite_tool_results as sqlite_evals
 from api.agent.core.event_processing import _get_completed_process_run_count, _resolve_eval_mock_result
 from api.agent.core.prompt_context import _get_system_instruction, build_prompt_context_preview
-from api.agent.core.tool_results import _wrap_as_sqlite_result
+from api.agent.core.tool_results import _build_prompt_preview
 from api.agent.tools.create_chart import get_create_chart_tool
 from api.agent.tools.eval_synthetic_tools import EVAL_SYNTHETIC_TOOL_DEFINITIONS
 from api.agent.tools.plan import get_update_plan_tool
@@ -66,7 +67,10 @@ from api.evals.scenarios.sqlite_tool_results import (
     SqliteNaturalResultAccessScenario,
     SqliteToolResultScenario,
     _decision_model_tables,
+    _first_shot_source_phase_failures,
     _portfolio_mock,
+    _source_write_effect_failures,
+    _sqlite_attempt_failures,
 )
 from api.evals.stop_policy import should_stop_for_eval_policy
 from api.evals.suites import SuiteRegistry
@@ -76,6 +80,7 @@ from api.models import (
     EvalRun,
     EvalRunTask,
     PersistentAgent,
+    PersistentAgentCompletion,
     PersistentAgentCommsEndpoint,
     PersistentAgentMessage,
     PersistentAgentStep,
@@ -170,25 +175,27 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
                 source_urls=SOURCE_URLS,
             ))
 
-        calls.append(_eval_tool_call("read_file", {"path": "$[tool_results/abc/result_text]"}))
-        with patch("api.evals.scenarios.sqlite_tool_results._tool_calls_for_run", return_value=calls):
-            self.assertFalse(scenario._record_result_access(
-                "run", after=None,
-                task_name="verify_natural_result_access",
-                source_urls=SOURCE_URLS,
-            ))
-        self.assertIn("read_file used for web results", recorded[-1][1]["observed_summary"])
-
-        oversized_calls = calls[:-2] + [_eval_tool_call(
-            "sqlite_batch",
-            {"sql": "SELECT result_id, result_text FROM __tool_results ORDER BY result_id"},
-            result="x" * 40_000,
-        )]
-        with patch("api.evals.scenarios.sqlite_tool_results._tool_calls_for_run", return_value=oversized_calls):
-            self.assertFalse(scenario._record_result_access(
-                "run", after=None, task_name="verify_natural_result_access", source_urls=SOURCE_URLS,
-            ))
-        self.assertIn("oversized SQLite result", recorded[-1][1]["observed_summary"])
+        failed_fetch = _eval_tool_call(
+            "mcp_brightdata_scrape_as_markdown", {"url": SOURCE_URLS[0]}, status="error",
+        )
+        failed_sqlite = _eval_tool_call("sqlite_batch", result='{"status":"error"}')
+        oversized = _eval_tool_call(
+            "sqlite_batch", {"sql": "SELECT result_text FROM __tool_results"}, result="x" * 40_000,
+        )
+        regressions = (
+            ("Source fetch attempt 1", [failed_fetch, *calls]),
+            ("SQLite attempt 1", [*calls[:-1], failed_sqlite, calls[-1]]),
+            ("read_file used for web results", [*calls, _eval_tool_call("read_file", {"path": "result_text"})]),
+            ("oversized SQLite result", [*calls[:-1], oversized]),
+        )
+        for expected, attempts in regressions:
+            with self.subTest(expected=expected), patch(
+                "api.evals.scenarios.sqlite_tool_results._tool_calls_for_run", return_value=attempts,
+            ):
+                self.assertFalse(scenario._record_result_access(
+                    "run", after=None, task_name="verify_natural_result_access", source_urls=SOURCE_URLS,
+                ))
+            self.assertIn(expected, recorded[-1][1]["observed_summary"])
 
     def test_portfolio_requires_complete_unique_research_and_terminal_report(self):
         scenario, recorded = SqliteBoundedPortfolioReportScenario(), []
@@ -218,6 +225,35 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
             ))
             self.assertEqual(scenario._record_complete_terminal_report("run", after=None), body)
         self.assertEqual(recorded[-1][0][2], EvalRunTask.Status.PASSED)
+
+        failed_fetch = _eval_tool_call(
+            "mcp_brightdata_scrape_as_markdown",
+            {"url": PORTFOLIO_FETCH_URLS[0]},
+            status="error",
+        )
+        with patch(
+            "api.evals.scenarios.sqlite_tool_results._tool_calls_for_run",
+            return_value=[failed_fetch, *calls],
+        ):
+            self.assertFalse(scenario._record_result_access(
+                "run", after=None, task_name="verify_result_access",
+                source_urls=PORTFOLIO_FETCH_URLS,
+                reject_duplicate_fetches=True,
+            ))
+        self.assertIn("Source fetch attempt 1", recorded[-1][1]["observed_summary"])
+
+        failed_send = _eval_tool_call(
+            "send_chat_message",
+            {"body": body, "will_continue_work": False},
+            status="error",
+        )
+        with patch(
+            "api.evals.scenarios.sqlite_tool_results._tool_calls_for_run",
+            return_value=[*fetches, sqlite, failed_send, final],
+        ):
+            scenario._record_complete_terminal_report("run", after=None)
+        self.assertEqual(recorded[-1][0][2], EvalRunTask.Status.FAILED)
+        self.assertIn("Final send attempt 1", recorded[-1][1]["observed_summary"])
 
         bad_calls = [*fetches[:-1], fetches[1], sqlite, _eval_tool_call(
             "send_chat_message",
@@ -280,47 +316,50 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
 
         self.assertEqual(recorded[-1][0][2], EvalRunTask.Status.PASSED)
         self.assertIn("complete structured comparison", recorded[-1][1]["observed_summary"])
-        self.assertTrue(
-            scenario._has_complete_comparison_table(
-                body.replace(
-                    "7 founders identified; 1 evidence-backed nondisclosure.",
-                    "7 of the 8 companies have named founders; Umbra is not publicly disclosed.",
+        summary = "7 founders identified; 1 evidence-backed nondisclosure."
+        cases = (
+            (True, "7 of the 8 companies have named founders; Umbra is not publicly disclosed."),
+            (True, "Seven founders identified.\nOne company has an evidence-backed nondisclosure."),
+            (True, "Seven of eight founders were identified; the remaining founder is not publicly disclosed."),
+            (True, "I found founders for seven of the eight portfolio companies; Umbra's is not publicly disclosed."),
+            (False, "Here you go."),
+            (False, "1 founder identified."),
+            (False, "All 8 founders identified."),
+            (False, "8 founders identified."),
+            (False, "Eight founders were identified."),
+        )
+        for expected, replacement in cases:
+            with self.subTest(summary=replacement):
+                self.assertEqual(
+                    scenario._has_complete_comparison_table(body.replace(summary, replacement)), expected,
                 )
-            )
+
+    def test_portfolio_hierarchy_rejects_coverage_and_row_gaming(self):
+        scenario = SqliteBoundedPortfolioReportScenario()
+        rows = [
+            f"| {company} | {founder} | {background} |"
+            for _slug, company, founder, _term, background in PORTFOLIO_COMPANIES
+        ]
+        table = "| Company | Founder | Background |\n|---|---|---|\n" + "\n".join(rows)
+        valid_summary = "Resolved 8/8 companies: 7 founders identified; 1 evidence-backed nondisclosure."
+
+        giant_row = "| " + " | ".join(
+            term
+            for _slug, company, founder, _background_term, background in PORTFOLIO_COMPANIES
+            for term in (company, founder, background)
+        ) + " |"
+        duplicate = "\n".join((rows[0], rows[0], *rows[1:]))
+        cases = (
+            (True, f"{valid_summary}\n\n{table}"),
+            (True, f"{table}\n\n{valid_summary}"),
+            (False, f"Coverage complete.\n\n{table}"),
+            (False, f"7 days reviewed; 1 blocker remains.\n\n{table}"),
+            (False, f"{valid_summary}\n\n| Company | Founder | Background |\n|---|---|---|\n{giant_row}"),
+            (False, f"{valid_summary}\n\n| Company | Founder | Background |\n|---|---|---|\n{duplicate}"),
         )
-        self.assertTrue(
-            scenario._has_complete_comparison_table(
-                body.replace(
-                    "7 founders identified; 1 evidence-backed nondisclosure.",
-                    "Seven founders identified.\nOne company has an evidence-backed nondisclosure.",
-                )
-            )
-        )
-        self.assertTrue(
-            scenario._has_complete_comparison_table(
-                body.replace("7 founders identified; 1 evidence-backed nondisclosure.", "Here you go.")
-            )
-        )
-        self.assertFalse(
-            scenario._has_complete_comparison_table(
-                body.replace("7 founders identified; 1 evidence-backed nondisclosure.", "1 founder identified.")
-            )
-        )
-        self.assertFalse(
-            scenario._has_complete_comparison_table(
-                body.replace("7 founders identified; 1 evidence-backed nondisclosure.", "All 8 founders identified.")
-            )
-        )
-        self.assertFalse(
-            scenario._has_complete_comparison_table(
-                body.replace("7 founders identified; 1 evidence-backed nondisclosure.", "8 founders identified.")
-            )
-        )
-        self.assertFalse(
-            scenario._has_complete_comparison_table(
-                body.replace("7 founders identified; 1 evidence-backed nondisclosure.", "Eight founders were identified.")
-            )
-        )
+        for expected, report in cases:
+            with self.subTest(expected=expected, report=report[:80]):
+                self.assertEqual(scenario._has_complete_comparison_table(report), expected)
 
     def test_portfolio_hierarchy_rejects_dummy_table(self):
         scenario, recorded = SqliteBoundedPortfolioReportScenario(), []
@@ -387,9 +426,9 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
         self.assertEqual(scenario._missing_portfolio_associations(body), [])
         self.assertTrue(scenario._has_complete_comparison_table(body))
 
-    def test_portfolio_accepts_entity_blocks_with_nested_field_bullets(self):
+    def test_portfolio_rejects_complete_non_table_formats(self):
         scenario = SqliteBoundedPortfolioReportScenario()
-        body = "Seven of eight companies have named founders; one has a sourced nondisclosure.\n\n" + "\n\n".join(
+        entity_blocks = "Seven of eight companies have named founders; one has a sourced nondisclosure.\n\n" + "\n\n".join(
             "\n".join((
                 f"- {company}",
                 f"  - Founder: {founder}",
@@ -401,23 +440,18 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
                 PORTFOLIO_SOURCE_URLS,
             )
         )
-
-        self.assertEqual(scenario._missing_portfolio_associations(body), [])
-        self.assertFalse(scenario._has_complete_comparison_table(body))
-        self.assertTrue(scenario._has_complete_structured_report(body))
-
-    def test_portfolio_accepts_complete_prose_listing_with_disclosure_blocker(self):
-        scenario = SqliteBoundedPortfolioReportScenario()
-        body = "Founders of the current portfolio companies:\n\n" + "\n\n".join(
+        prose = "Founders of the current portfolio companies:\n\n" + "\n\n".join(
             f"**{company}**, {founder}. {background} [{url}]"
             for (_slug, company, founder, _term, background), url in zip(
                 PORTFOLIO_COMPANIES,
                 PORTFOLIO_SOURCE_URLS,
             )
         )
-
-        self.assertEqual(scenario._missing_portfolio_associations(body), [])
-        self.assertTrue(scenario._has_complete_structured_report(body))
+        for body in (entity_blocks, prose):
+            with self.subTest(format=body[:20]):
+                self.assertEqual(scenario._missing_portfolio_associations(body), [])
+                self.assertFalse(scenario._has_complete_comparison_table(body))
+                self.assertFalse(scenario._has_complete_structured_report(body))
 
     def test_portfolio_fixture_exposes_direct_evidence_and_search_fallback(self):
         mocks = _portfolio_mock()
@@ -714,6 +748,99 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
             ):
                 self.assertNotIn(implementation_term, prompt.lower())
 
+    def test_source_ingest_rejects_every_non_clean_sqlite_attempt(self):
+        clean = _eval_tool_call(
+            "sqlite_batch",
+            result='{"status":"ok","results":[{"message":"Query 0 affected 1 rows."}]}',
+        )
+        cases = (
+            _eval_tool_call("sqlite_batch", result=clean.result, status="error"),
+            _eval_tool_call("sqlite_batch", result='{"status":"warning","results":[]}'),
+            _eval_tool_call("sqlite_batch", result='{"status":"error","results":[]}'),
+            _eval_tool_call(
+                "sqlite_batch",
+                result='{"status":"ok","results":[{"auto_correction":{"applied":true}}]}',
+            ),
+            _eval_tool_call("sqlite_batch", result="not-json"),
+        )
+
+        self.assertEqual(_sqlite_attempt_failures([clean]), [])
+        for call in cases:
+            with self.subTest(result=call.result, status=call.status):
+                self.assertTrue(_sqlite_attempt_failures([call]))
+
+        failures = _sqlite_attempt_failures([cases[1], clean])
+        self.assertTrue(failures)
+        self.assertIn("attempt 1", failures[0])
+
+    def test_domain_refresh_phase_order_rejects_recovery(self):
+        def call(tool_name, completion, params=None, **kwargs):
+            return _eval_tool_call(
+                tool_name,
+                params,
+                step=SimpleNamespace(completion_id=completion),
+                **kwargs,
+            )
+
+        fetch = call("http_request", "fetch", {"url": sqlite_evals.DOMAIN_REFRESH_URL})
+        sqlite = call("sqlite_batch", "sqlite", {"sql": "SELECT 1"})
+        send = call(
+            "send_chat_message",
+            "send",
+            {"body": "Done", "will_continue_work": False},
+        )
+        clean = [fetch, sqlite, send]
+        failed_fetch = call(
+            "http_request", "failed", {"url": sqlite_evals.DOMAIN_REFRESH_URL}, status="error",
+        )
+
+        self.assertEqual(_first_shot_source_phase_failures(clean), [])
+        cases = (
+            ([sqlite, fetch, send], "expected fetch"),
+            ([fetch, fetch, sqlite, send], "expected one exact CRM snapshot fetch"),
+            ([failed_fetch, sqlite, send], "execution status error"),
+            ([fetch, sqlite, send, send], "terminal send"),
+        )
+        for calls, expected_failure in cases:
+            with self.subTest(expected_failure=expected_failure):
+                failures = _first_shot_source_phase_failures(calls)
+                self.assertTrue(any(expected_failure in failure for failure in failures), failures)
+
+        sqlite.step.completion_id = "fetch"
+        failures = _first_shot_source_phase_failures(clean)
+        self.assertTrue(any("separate completions" in failure for failure in failures), failures)
+
+    def test_source_model_write_effect_rejects_zero_row_and_literal_recovery(self):
+        source_insert = (
+            "INSERT INTO accounts SELECT json_extract(value, '$.id') "
+            "FROM __tool_results, json_each(result_json, '$.content.accounts')"
+        )
+
+        def call(sql, *results):
+            return _eval_tool_call(
+                "sqlite_batch",
+                {"sql": sql},
+                result={"status": "ok", "results": list(results)},
+            )
+
+        affected = {"message": "Query affected 1 rows."}
+        clean = call(source_insert, affected)
+        regressions = (
+            call(
+                source_insert.replace("$.content.accounts", "$.accounts") + ";" + source_insert,
+                {"message": "Query affected 0 rows."},
+                affected,
+            ),
+            call("INSERT INTO accounts(id) VALUES ('acct-1');" + source_insert, affected, affected),
+            call(source_insert, {**affected, "auto_correction": {"applied": True}}),
+            call("UPDATE __agent_config SET charter='special case';" + source_insert, affected, affected),
+        )
+
+        self.assertEqual(_source_write_effect_failures([clean], {"accounts"}), [])
+        for attempted_recovery in regressions:
+            self.assertTrue(_source_write_effect_failures([attempted_recovery], {"accounts"}))
+        self.assertTrue(_source_write_effect_failures([clean], {"accounts", "workstreams"}))
+
     def test_domain_refresh_verifier_checks_persisted_rows(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             db_path = Path(temp_dir) / "state.db"
@@ -993,18 +1120,9 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
         scenario.record_task_result = lambda *args, **kwargs: recorded.append((args, kwargs))
         calls = [
             SimpleNamespace(
-                step="rejected",
-                status="error",
-                result='{"status":"error","message":"Query not executed: link references are unsupported","retryable":true}',
-                tool_name="sqlite_batch",
-                tool_params={
-                    "sql": "CREATE TABLE plans(vendor TEXT, plan TEXT); "
-                    "INSERT INTO plans VALUES ('CareMesh', 'Clinic');"
-                },
-            ),
-            SimpleNamespace(
                 step="step",
                 status="complete",
+                result='{"status":"ok"}',
                 tool_name="sqlite_batch",
                 tool_params={
                     "sql": """
@@ -1036,8 +1154,8 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
         initial_calls = [
             SimpleNamespace(
                 step="initial",
-                status="error",
-                result='{"status":"error","message":"Query 4 failed: no such column"}',
+                status="complete",
+                result='{"status":"ok"}',
                 tool_name="sqlite_batch",
                 tool_params={"sql": """
                     CREATE TABLE raw_plans AS
@@ -1051,15 +1169,6 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
                     SELECT vendor, json_extract(plan_json, '$.plan'),
                            json_extract(plan_json, '$.monthly_price_usd'), source_url
                     FROM raw_plans;
-                    SELECT missing_column FROM plans;
-                """},
-            ),
-            SimpleNamespace(
-                step="recovery",
-                status="complete",
-                result='{"status":"ok"}',
-                tool_name="sqlite_batch",
-                tool_params={"sql": """
                     SELECT vendor, plan FROM plans WHERE price <= 900 ORDER BY price;
                 """},
             )
@@ -1074,6 +1183,7 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
             SimpleNamespace(
                 step="followup",
                 status="complete",
+                result='{"status":"ok"}',
                 tool_name="sqlite_batch",
                 tool_params={"sql": "SELECT vendor, plan FROM plans WHERE price <= 1600 ORDER BY price;"},
             )
@@ -1090,6 +1200,7 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
             SimpleNamespace(
                 step="step",
                 status="complete",
+                result='{"status":"ok"}',
                 tool_name="sqlite_batch",
                 tool_params={
                     "sql": """
@@ -1114,6 +1225,7 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
             SimpleNamespace(
                 step="step",
                 status="complete",
+                result='{"status":"ok"}',
                 tool_name="sqlite_batch",
                 tool_params={
                     "sql": """
@@ -1252,6 +1364,7 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
             SimpleNamespace(
                 step="step",
                 status="complete",
+                result='{"status":"ok"}',
                 tool_name="sqlite_batch",
                 tool_params={
                     "sql": """
@@ -1283,6 +1396,7 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
             SimpleNamespace(
                 step="step",
                 status="complete",
+                result='{"status":"ok"}',
                 tool_name="sqlite_batch",
                 tool_params={
                     "sql": "SELECT v.vendor, p.plan, p.price FROM vendors v JOIN plans p ON p.vendor=v.vendor "
@@ -1469,14 +1583,20 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
         self.assertIn("set a resume schedule", outreach_description)
         self.assertIn("only makes sense when a schedule exists", schedule_description)
 
-    def test_fresh_full_tool_result_wrapper_discourages_redundant_sqlite_rereads(self):
-        wrapped = _wrap_as_sqlite_result('{"answer": "ready"}', 19)
+    def test_fresh_full_tool_result_wrapper_only_describes_visibility(self):
+        wrapped, is_inline = _build_prompt_preview(
+            '{"answer": "ready"}' * 200,
+            3800,
+            recency_position=0,
+            tool_name="http_request",
+            is_fresh_tool_call=True,
+        )
 
-        self.assertIn("Reply directly for a simple answer", wrapped)
-        self.assertIn("unless it updates an established named domain model", wrapped)
-        self.assertIn("Use SQL to reconcile that model", wrapped)
-        self.assertIn("exact filtering/ranking across sizable or multiple results", wrapped)
-        self.assertIn("do not query merely to reread or parse", wrapped)
+        self.assertTrue(is_inline)
+        self.assertIn("FULL RESULT (3800 chars) - ONE-TIME VIEW", wrapped)
+        self.assertIn("later turns show a preview", wrapped)
+        self.assertIn('{"answer": "ready"}', wrapped)
+        self.assertNotIn("SOURCE ARRAYS", wrapped)
 
 
 @tag("eval_sim")
@@ -2150,13 +2270,18 @@ class FirstRunPromptCalibrationTests(TestCase):
         )
         self.assertIn("A skipped web send never permits switching", system_prompt)
         self.assertIn("one compact tracked request; use options for a decision and free text", system_prompt)
-        self.assertIn("smallest exact charter phrase; preserve every unrelated word/setting verbatim", system_prompt)
+        self.assertIn("Replace conflicts/softened absolutes", system_prompt)
+        self.assertIn("append only if no related clause", system_prompt)
+        self.assertIn("finite task/batch/day/run/project/renewal/deal/case feedback is temporary", system_prompt)
         self.assertIn("Set false after delivery/config and no active work", system_prompt)
         self.assertIn("Do not set a schedule merely to continue or remember a single research question", system_prompt)
         self.assertIn("explicit SQLite/database request and sqlite_batch is callable", system_prompt)
         self.assertIn("do not search for a SQLite/database tool", system_prompt)
         self.assertIn("enabled tool fits -> use directly", system_prompt)
-        self.assertIn("public exact URL + http/scrape tool callable", system_prompt)
+        self.assertIn("named model + explicit fresh source/URL -> http_request only, no text/send/plan; WAIT", system_prompt)
+        self.assertIn("Use queried rows, not memory, for decisions", system_prompt)
+        self.assertIn("data/api/feed/file URL -> http_request", system_prompt)
+        self.assertIn("reconcile+SELECT there before use", system_prompt)
         self.assertIn("spawn_web_task only after access/render/login blockage", system_prompt)
         self.assertIn("exact docs/blog/changelog/release-notes URL", system_prompt)
         self.assertIn("opaque identifiers", system_prompt)

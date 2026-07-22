@@ -566,6 +566,141 @@ def _fix_json_key_vs_alias(sql: str, error_msg: str) -> tuple[str, str | None]:
     return sql, None
 
 
+def _fix_insert_select_upsert_ambiguity(sql: str) -> tuple[str, str | None]:
+    """Disambiguate SQLite UPSERTs whose SELECT has a FROM but no WHERE.
+
+    SQLite can parse the ``ON`` in ``INSERT ... SELECT ... FROM ... ON CONFLICT``
+    as a join clause. A no-op top-level WHERE makes the intended UPSERT grammar
+    unambiguous. Nested WHERE clauses do not resolve that ambiguity.
+    """
+    words: list[tuple[str, int, int, int]] = []
+    depth = 0
+    index = 0
+    length = len(sql)
+
+    while index < length:
+        char = sql[index]
+        next_char = sql[index + 1] if index + 1 < length else ""
+
+        if char == "-" and next_char == "-":
+            newline = sql.find("\n", index + 2)
+            index = length if newline == -1 else newline + 1
+            continue
+        if char == "/" and next_char == "*":
+            closing = sql.find("*/", index + 2)
+            index = length if closing == -1 else closing + 2
+            continue
+        if char in {"'", '"', "`"}:
+            quote = char
+            index += 1
+            while index < length:
+                if sql[index] == quote:
+                    if index + 1 < length and sql[index + 1] == quote:
+                        index += 2
+                        continue
+                    index += 1
+                    break
+                index += 1
+            continue
+        if char == "[":
+            closing = sql.find("]", index + 1)
+            index = length if closing == -1 else closing + 1
+            continue
+        if char == "(":
+            depth += 1
+            index += 1
+            continue
+        if char == ")":
+            depth = max(0, depth - 1)
+            index += 1
+            continue
+        if char.isalpha() or char == "_":
+            end = index + 1
+            while end < length and (sql[end].isalnum() or sql[end] in {"_", "$"}):
+                end += 1
+            words.append((sql[index:end].upper(), index, end, depth))
+            index = end
+            continue
+        index += 1
+
+    insert_index = next(
+        (position for position, (word, _start, _end, level) in enumerate(words)
+         if word == "INSERT" and level == 0),
+        None,
+    )
+    if insert_index is None:
+        return sql, None
+
+    action_index = next(
+        (
+            position
+            for position in range(insert_index + 1, len(words) - 1)
+            if words[position][0] == "DO"
+            and words[position][3] == 0
+            and words[position + 1][0] in {"NOTHING", "UPDATE"}
+            and words[position + 1][3] == 0
+        ),
+        None,
+    )
+    if action_index is None:
+        return sql, None
+
+    conflict_index = next(
+        (
+            position
+            for position in range(action_index - 1, insert_index, -1)
+            if words[position][0] == "ON"
+            and words[position][3] == 0
+            and words[position + 1][0] == "CONFLICT"
+            and words[position + 1][3] == 0
+        ),
+        None,
+    )
+    if conflict_index is None:
+        return sql, None
+
+    select_index = next(
+        (
+            position
+            for position in range(conflict_index - 1, insert_index, -1)
+            if words[position][0] == "SELECT" and words[position][3] == 0
+        ),
+        None,
+    )
+    if select_index is None:
+        return sql, None
+
+    from_index = next(
+        (
+            position
+            for position in range(select_index + 1, conflict_index)
+            if words[position][0] == "FROM" and words[position][3] == 0
+        ),
+        None,
+    )
+    if from_index is None:
+        return sql, None
+
+    if any(
+        word == "WHERE" and level == 0
+        for word, _start, _end, level in words[from_index + 1:conflict_index]
+    ):
+        return sql, None
+
+    clause_words = {"GROUP", "HAVING", "WINDOW", "ORDER", "LIMIT", "UNION", "EXCEPT", "INTERSECT"}
+    insertion_index = next(
+        (
+            words[position][1]
+            for position in range(from_index + 1, conflict_index)
+            if words[position][0] in clause_words and words[position][3] == 0
+        ),
+        words[conflict_index][1],
+    )
+    separator = "" if sql[:insertion_index].endswith((" ", "\t", "\r", "\n")) else " "
+    fixed = sql[:insertion_index] + separator + "WHERE 1=1 " + sql[insertion_index:]
+    return fixed, "added WHERE 1=1 to disambiguate INSERT ... SELECT ... ON CONFLICT"
+
+
 def _apply_all_sql_fixes(sql: str, error_msg: str = "") -> tuple[str, list[str]]:
     """Apply all SQL fixes and return (fixed_sql, list_of_corrections)."""
     corrections = []
@@ -595,6 +730,10 @@ def _apply_all_sql_fixes(sql: str, error_msg: str = "") -> tuple[str, list[str]]
         corrections.append(fix)
 
     sql, fix = _fix_dialect_syntax(sql)
+    if fix:
+        corrections.append(fix)
+
+    sql, fix = _fix_insert_select_upsert_ambiguity(sql)
     if fix:
         corrections.append(fix)
 
@@ -1365,6 +1504,7 @@ def _execute_with_autocorrections(
         try:
             consume_patch_text_error()
             start_query_timer(conn)
+            changes_before = conn.total_changes
             cur.execute(current_query)
             if cur.description is not None:
                 columns = [col[0] for col in cur.description]
@@ -1379,7 +1519,7 @@ def _execute_with_autocorrections(
                 if reporting_note:
                     result_entry["reporting_note"] = reporting_note.strip()
             else:
-                affected = cur.rowcount if cur.rowcount is not None else 0
+                affected = max(cur.rowcount or 0, conn.total_changes - changes_before)
                 msg = f"Query {idx} affected {max(0, affected)} rows."
                 zero_rows_warning = False
                 query_upper = current_query.upper()
@@ -1753,11 +1893,12 @@ def _execute_sqlite_batch_inner(
 
         blocking_advisories = [advisory for advisory in advisories if advisory.blocking]
         if blocking_advisories:
+            primary = [item for item in blocking_advisories if item.code == "source_facts_copied_into_model"]
             return {
                 "status": "error",
                 "results": [],
                 "db_size_mb": round(_get_db_size_mb(db_path), 2),
-                "message": " ".join(advisory.message for advisory in blocking_advisories),
+                "message": " ".join(advisory.message for advisory in (primary or blocking_advisories)),
                 "retryable": True,
                 "advisories": [
                     {"code": advisory.code, "message": advisory.message}
@@ -1892,9 +2033,13 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
         "function": {
             "name": "sqlite_batch",
             "description": (
-                "SQLite world model + hard logic. Current complete rows are truth: answer without refetching sources. Read before memory. Tool output isn't state: keyed rows/children belong in the model. Reconcile relations, evolve schema, then query; only unrelated one-offs bypass it. Reusable: "
-                "PRIMARY KEY/UNIQUE + provenance; CTAS is disposable. Normalize children; use joins/set logic/counts/ranking; return needed rows. Import tool output via INSERT ... SELECT/json_each from __tool_results, never copied rows; batch siblings by IN/tool_name. Prefer custom tools writing keyed models for imports/API fan-out. "
-                "http_request JSON: result_json $.content. No ATTACH. `sql` uses semicolons; apostrophe: 'O''Brien'. grep_context_all/split_sections arrays: json_each + ctx.value, not json_extract."
+                "SQLite world model + exact logic. Fetch alone; next completion reconcile and SELECT. SOURCE ARRAYS "
+                "lists paths. Every sourced SET/VALUES and write WHERE/ON key must derive inside INSERT ... SELECT / "
+                "UPDATE ... FROM __tool_results/json_each; only paths/current result_id/tool_name may be literals, "
+                "never facts/URLs/keys. Reconcile entities/relations, evolve schema, then SELECT the model before deciding/reporting. Use "
+                "UNIQUE keys + provenance; normalize children; joins/sets/counts/ranking; CTAS is one-off. http_request "
+                "JSON: result_json $.content. INSERT SELECT needs WHERE before ON CONFLICT. No ATTACH. SQL uses "
+                "semicolons; apostrophe: 'O''Brien'. grep_context_all/split_sections arrays: json_each + ctx.value."
             ),
             "parameters": {
                 "type": "object",

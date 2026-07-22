@@ -10,10 +10,7 @@ from api.agent.tools.peer_dm import get_send_agent_message_tool
 from api.agent.tools.send_discord_message import get_send_discord_message_tool
 from api.agent.tools.sms_sender import get_send_sms_tool
 from api.agent.tools.web_chat_sender import get_send_chat_tool
-from api.agent.core.prompt_context import (
-    _get_email_formatting_guidance,
-    _get_web_chat_formatting_guidance,
-)
+from api.agent.core.prompt_context import _get_formatting_guidance
 
 
 @tag("batch_attachment_guidance")
@@ -78,21 +75,23 @@ class AttachmentGuidanceTests(SimpleTestCase):
         discord_tool = get_send_discord_message_tool()
         peer_tool = get_send_agent_message_tool()
         sms_tool = get_send_sms_tool()
-        email_guidance = _get_email_formatting_guidance()
-        chat_guidance = _get_web_chat_formatting_guidance()
+        surface_guidance = _get_formatting_guidance()
 
-        self.assertIn("reports/dashboards", email_guidance)
+        self.assertIn("reports/dashboards", surface_guidance)
         self.assertIn("Never leave metrics in plain lists", email_tool["function"]["description"])
         self.assertIn("styled tables or metric blocks", email_tool["function"]["parameters"]["properties"]["mobile_first_html"]["description"])
         self.assertIn("false when this email is the requested final delivery", email_tool["function"]["parameters"]["properties"]["will_continue_work"]["description"])
         self.assertIn("Do not use this to simulate or confirm an email/SMS delivery", chat_tool["function"]["description"])
-        self.assertIn("Start with the answer/main finding", chat_guidance)
-        self.assertIn("Address known recipients once", chat_guidance)
-        self.assertIn("agent-name self-intros", chat_guidance)
+        self.assertIn("Start with the answer/main finding", surface_guidance)
+        self.assertIn("Address known recipients once", surface_guidance)
+        self.assertIn("agent-name self-intros", surface_guidance)
         body_guidance = chat_tool["function"]["parameters"]["properties"]["body"]["description"]
-        self.assertIn("Keep chat/outreach light", body_guidance)
-        self.assertIn("Reports comparing 4+ peers", body_guidance)
-        self.assertIn("use one table", body_guidance)
+        self.assertIn("Owner report with 4+ items", body_guidance)
+        self.assertIn("Covered N/N", body_guidance)
+        self.assertIn("one requested-field Markdown table", body_guidance)
+        self.assertIn("exact entity name", body_guidance)
+        self.assertIn("other chat/outreach light", body_guidance)
+        self.assertNotIn("$[link:id]", body_guidance)
         delivery_fields = (
             email_tool["function"]["parameters"]["properties"]["mobile_first_html"]["description"],
             body_guidance,

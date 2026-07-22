@@ -25,6 +25,7 @@ from api.agent.tools.sqlite_batch import (
     _get_error_hint,
     _fix_unescaped_single_quote_runs,
     _fix_json_key_vs_alias,
+    _fix_insert_select_upsert_ambiguity,
     _fix_python_operators,
     _fix_singular_plural_columns,
     _fix_singular_plural_tables,
@@ -97,6 +98,16 @@ class SqliteBatchToolTests(TestCase):
             self.assertEqual(results[-1]["result"], [{"a": 1}, {"a": 2}])
             self.assertIsInstance(out.get("db_size_mb"), (int, float))
             self.assertIn("Executed 3 queries", out.get("message", ""))
+
+    def test_cte_insert_reports_actual_changed_rows(self):
+        with self._with_temp_db():
+            out = execute_sqlite_batch(self.agent, {"sql": (
+                "CREATE TABLE t(a INTEGER); "
+                "WITH rows(a) AS (VALUES (1),(2)) INSERT INTO t SELECT a FROM rows;"
+            )})
+
+        self.assertEqual(out.get("status"), "ok", out.get("message"))
+        self.assertEqual(out["results"][1]["message"], "Query 1 affected 2 rows.")
 
     def test_stops_on_error_and_reports_index(self):
         with self._with_temp_db() as (db_path, token, tmp):
@@ -264,15 +275,14 @@ class SqliteBatchToolTests(TestCase):
         definition = get_sqlite_batch_tool()
         description = definition["function"]["description"]
 
-        self.assertIn("SQLite world model + hard logic", description)
-        self.assertIn("Current complete rows are truth: answer without refetching sources", description)
-        self.assertIn("keyed rows/children belong in the model", description)
-        self.assertIn("Reconcile relations, evolve schema, then query", description)
-        self.assertIn("only unrelated one-offs bypass it", description)
-        self.assertIn("joins/set logic/counts/ranking", description)
-        self.assertIn("PRIMARY KEY/UNIQUE + provenance", description)
-        self.assertIn("Import tool output via INSERT ... SELECT/json_each", description)
-        self.assertIn("from __tool_results, never copied rows", description)
+        for expected in (
+            "SQLite world model + exact logic", "Fetch alone; next completion reconcile and SELECT",
+            "SOURCE ARRAYS lists paths", "Every sourced SET/VALUES and write WHERE/ON key",
+            "SELECT the model before deciding/reporting", "INSERT ... SELECT / UPDATE ... FROM __tool_results/json_each",
+            "WHERE before ON CONFLICT", "never facts/URLs/keys",
+        ):
+            self.assertIn(expected, description)
+        self.assertNotIn("before one terminal send", description)
 
     def test_tool_result_ctas_warns_that_identity_is_disposable(self):
         with self._with_temp_db() as (db_path, _token, _tmp):
@@ -485,6 +495,8 @@ class SqliteBatchToolTests(TestCase):
                 out.get("advisories", [{}])[0].get("code"),
                 "bulk_manual_working_table_from_visible_results",
             )
+            self.assertIn("used visible facts or URLs", out.get("message", ""))
+            self.assertNotIn("literal-row import", out.get("message", ""))
             conn = sqlite3.connect(db_path)
             try:
                 table = conn.execute(
@@ -493,6 +505,72 @@ class SqliteBatchToolTests(TestCase):
             finally:
                 conn.close()
             self.assertIsNone(table)
+
+    def test_nested_http_rows_must_be_derived_and_can_reconcile_in_one_batch(self):
+        with self._with_temp_db() as (db_path, _token, _tmp):
+            payload = json.dumps({
+                "status": "ok",
+                "content": {
+                    "accounts": [{
+                        "account_id": "acct-1", "name": "Aster Labs", "stage": "contracting",
+                        "source_url": "https://crm.example.test/aster",
+                    }],
+                    "workstreams": [{
+                        "workstream_id": "ws-1", "account_id": "acct-1", "name": "Redlines",
+                        "status": "open", "source_url": "https://crm.example.test/aster",
+                    }],
+                },
+            })
+            with sqlite3.connect(db_path) as conn:
+                conn.execute(
+                    "CREATE TABLE __tool_results(result_id TEXT PRIMARY KEY, tool_name TEXT, "
+                    "result_json TEXT, result_text TEXT)"
+                )
+                conn.execute("INSERT INTO __tool_results VALUES ('r1','http_request',?,?)", (payload, payload))
+                conn.execute(
+                    "CREATE TABLE accounts(account_id TEXT PRIMARY KEY, name TEXT, stage TEXT, source_url TEXT)"
+                )
+
+            copied = execute_sqlite_batch(self.agent, {
+                "sql": (
+                    "INSERT INTO accounts(account_id,name,stage,source_url) VALUES "
+                    "('acct-1','Aster Labs','contracting','https://crm.example.test/aster')"
+                ),
+                "will_continue_work": True,
+            })
+            self.assertEqual(copied.get("status"), "error")
+            self.assertEqual(copied.get("advisories", [{}])[0].get("code"), "source_facts_copied_into_model")
+
+            reconciled = execute_sqlite_batch(self.agent, {
+                "sql": (
+                    "CREATE TABLE workstreams(workstream_id TEXT PRIMARY KEY, account_id TEXT, name TEXT, "
+                    "status TEXT, source_url TEXT);"
+                    "INSERT INTO accounts(account_id,name,stage,source_url) "
+                    "SELECT json_extract(j.value,'$.account_id'),json_extract(j.value,'$.name'),"
+                    "json_extract(j.value,'$.stage'),json_extract(j.value,'$.source_url') "
+                    "FROM __tool_results r,json_each(r.result_json,'$.content.accounts') j "
+                    "WHERE r.result_id='r1' ON CONFLICT(account_id) DO UPDATE SET name=excluded.name,"
+                    "stage=excluded.stage,source_url=excluded.source_url;"
+                    "INSERT INTO workstreams(workstream_id,account_id,name,status,source_url) "
+                    "SELECT json_extract(j.value,'$.workstream_id'),json_extract(j.value,'$.account_id'),"
+                    "json_extract(j.value,'$.name'),json_extract(j.value,'$.status'),"
+                    "json_extract(j.value,'$.source_url') "
+                    "FROM __tool_results r,json_each(r.result_json,'$.content.workstreams') j "
+                    "WHERE r.result_id='r1' ON CONFLICT(workstream_id) DO UPDATE SET "
+                    "account_id=excluded.account_id,name=excluded.name,status=excluded.status,"
+                    "source_url=excluded.source_url;"
+                    "SELECT a.name AS account_name,w.name AS workstream_name,w.status FROM accounts a JOIN workstreams w "
+                    "ON w.account_id=a.account_id WHERE a.account_id='acct-1';"
+                ),
+                "will_continue_work": True,
+            })
+
+            self.assertEqual(reconciled.get("status"), "ok", reconciled)
+            self.assertNotIn("advisories", reconciled)
+            self.assertEqual(
+                reconciled["results"][-1]["result"],
+                [{"account_name": "Aster Labs", "workstream_name": "Redlines", "status": "open"}],
+            )
 
     def test_bulk_manual_tool_result_select_copy_is_rejected_before_execution(self):
         with self._with_temp_db() as (db_path, _token, _tmp):
@@ -845,6 +923,74 @@ class SqliteBatchToolTests(TestCase):
         self.assertEqual(commented, [])
         self.assertEqual(double_quoted_text, [])
 
+    def test_related_model_imports_from_one_source_are_not_a_row_loop(self):
+        sql = (
+            "INSERT INTO accounts(account_id) SELECT json_extract(result_json,'$.account_id') "
+            "FROM __tool_results WHERE result_id='r1';"
+            "INSERT INTO workstreams(workstream_id) SELECT json_extract(value,'$.id') "
+            "FROM __tool_results,json_each(result_json,'$.workstreams') WHERE result_id='r1';"
+        )
+
+        advisories = build_tool_result_query_advisories([sql], available_tool_result_rows=4)
+        split_sources = build_tool_result_query_advisories(
+            [sql.replace("result_id='r1';", "result_id='r2';", 1)],
+            available_tool_result_rows=4,
+        )
+
+        self.assertEqual(advisories, [])
+        self.assertIn("tool_result_row_loop", {advisory.code for advisory in split_sources})
+
+    def test_related_model_imports_from_one_source_execute_without_warning(self):
+        payload = json.dumps({
+            "content": {
+                "accounts": [{"account_id": "acct-1", "name": "Acme"}],
+                "workstreams": [{"workstream_id": "ws-1", "account_id": "acct-1", "status": "open"}],
+            }
+        })
+        with self._with_temp_db() as (db_path, _token, _tmp):
+            conn = sqlite3.connect(db_path)
+            try:
+                conn.execute(
+                    "CREATE TABLE __tool_results "
+                    "(result_id TEXT PRIMARY KEY, tool_name TEXT, result_json TEXT, result_text TEXT)"
+                )
+                conn.executemany(
+                    "INSERT INTO __tool_results VALUES (?, ?, ?, ?)",
+                    [("abc123", "http_request", payload, "")] + [
+                        (f"old-{index}", "http_request", "{}", "") for index in range(4)
+                    ],
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            out = execute_sqlite_batch(self.agent, {"sql": """
+                CREATE TABLE accounts(account_id TEXT PRIMARY KEY, name TEXT);
+                CREATE TABLE workstreams(
+                    workstream_id TEXT PRIMARY KEY,
+                    account_id TEXT,
+                    status TEXT
+                );
+                INSERT INTO accounts(account_id, name)
+                SELECT json_extract(j.value, '$.account_id'), json_extract(j.value, '$.name')
+                FROM __tool_results r, json_each(r.result_json, '$.content.accounts') j
+                WHERE r.result_id='abc123';
+                INSERT INTO workstreams(workstream_id, account_id, status)
+                SELECT json_extract(j.value, '$.workstream_id'),
+                       json_extract(j.value, '$.account_id'), json_extract(j.value, '$.status')
+                FROM __tool_results r, json_each(r.result_json, '$.content.workstreams') j
+                WHERE r.result_id='abc123';
+                SELECT * FROM accounts;
+                SELECT * FROM workstreams;
+            """})
+
+        self.assertEqual(out.get("status"), "ok", out.get("message"))
+        self.assertNotIn("advisories", out)
+        self.assertEqual(out["results"][-2]["result"], [{"account_id": "acct-1", "name": "Acme"}])
+        self.assertEqual(out["results"][-1]["result"], [{
+            "workstream_id": "ws-1", "account_id": "acct-1", "status": "open",
+        }])
+
     def test_tool_result_quality_detects_smart_queries_and_advisories(self):
         sql = """
         CREATE TABLE candidate_sources(url TEXT);
@@ -1064,17 +1210,38 @@ class SqliteBatchToolTests(TestCase):
             available_tool_result_rows=1,
             tool_result_payloads=(payload,),
         )
+        parsed_text = build_tool_result_query_advisories(
+            [
+                "INSERT INTO accounts(account_id, stage) "
+                "SELECT substr(result_text, instr(result_text, 'account_id=') + 11), "
+                "substr(result_text, instr(result_text, 'stage=') + 6) FROM __tool_results"
+            ],
+            available_tool_result_rows=1,
+            tool_result_payloads=("account_id=acct-1 | stage=contracting",),
+        )
+        case_logic = build_tool_result_query_advisories(
+            [
+                "INSERT INTO accounts(account_id, stage, priority) SELECT "
+                "json_extract(j.value,'$.account_id'), "
+                "CASE json_extract(j.value,'$.stage') WHEN 'in progress' THEN 'active' ELSE 'inactive' END, "
+                "CASE json_extract(j.value,'$.priority') WHEN 'enterprise' THEN 1 ELSE 0 END "
+                "FROM __tool_results r, json_each(r.result_json,'$.content.accounts') j"
+            ],
+            available_tool_result_rows=1,
+            tool_result_payloads=(
+                '{"content":{"accounts":[{"account_id":"acct-1","stage":"in progress",'
+                '"priority":"enterprise","normalized":"active","fallback":"inactive"}]}}',
+            ),
+        )
         self.assertEqual(copied[0].code, "source_facts_copied_into_model")
         self.assertTrue(copied[0].blocking)
-        self.assertIn("copies source facts into SQL literals", copied[0].message)
-        self.assertIn("refresh every mutable/provenance field", copied[0].message)
-        self.assertIn("don't fetch/copy the blob", copied[0].message)
-        self.assertIn("nested arrays are under $.content", copied[0].message)
-        self.assertFalse(any(item.code == "source_facts_copied_into_model" for item in derived))
-        self.assertFalse(any(item.code == "source_facts_copied_into_model" for item in unrelated))
-        self.assertFalse(any(item.code == "source_facts_copied_into_model" for item in identity_predicate))
-        self.assertFalse(any(item.code == "source_facts_copied_into_model" for item in single_normalization))
-        self.assertFalse(any(item.code == "source_facts_copied_into_model" for item in arrow_derived))
+        self.assertIn("used visible facts or URLs as SQL literals", copied[0].message)
+        self.assertIn("Derive every sourced field", copied[0].message)
+        self.assertIn("omit unavailable URLs", copied[0].message)
+        for allowed in (
+            derived, unrelated, identity_predicate, single_normalization, arrow_derived, parsed_text, case_logic,
+        ):
+            self.assertFalse(any(item.code == "source_facts_copied_into_model" for item in allowed))
         self.assertTrue(any(item.code == "source_facts_copied_into_model" for item in partially_derived))
 
     def test_model_read_classification_excludes_raw_results_and_staging(self):
@@ -2222,6 +2389,98 @@ class SqliteBatchToolTests(TestCase):
         self.assertIn("AND", fixed)
         self.assertIn("LIKE", fixed)
         self.assertTrue(len(fixes) >= 3)
+
+    def test_fix_insert_select_upsert_adds_top_level_where(self):
+        sql = (
+            "INSERT INTO accounts(account_id,name) "
+            "SELECT json_extract(j.value,'$.account_id'),json_extract(j.value,'$.name') "
+            "FROM json_each((SELECT result_json ->> '$.content.accounts' "
+            "FROM __tool_results WHERE result_id='4c134c')) AS j "
+            "ON CONFLICT(account_id) DO UPDATE SET name=excluded.name"
+        )
+
+        fixed, correction = _fix_insert_select_upsert_ambiguity(sql)
+
+        self.assertIn(")) AS j WHERE 1=1 ON CONFLICT", fixed)
+        self.assertIn("disambiguate", correction)
+
+    def test_fix_insert_select_upsert_preserves_existing_top_level_where(self):
+        sql = (
+            "INSERT INTO accounts(account_id) SELECT account_id FROM incoming "
+            "WHERE account_id IS NOT NULL ON CONFLICT(account_id) DO NOTHING"
+        )
+
+        fixed, correction = _fix_insert_select_upsert_ambiguity(sql)
+
+        self.assertEqual(fixed, sql)
+        self.assertIsNone(correction)
+
+    def test_fix_insert_select_upsert_preserves_values_form(self):
+        sql = "INSERT INTO accounts(account_id) VALUES ('acct-1') ON CONFLICT(account_id) DO NOTHING"
+
+        fixed, correction = _fix_insert_select_upsert_ambiguity(sql)
+
+        self.assertEqual(fixed, sql)
+        self.assertIsNone(correction)
+
+    def test_fix_insert_select_upsert_checks_final_compound_select(self):
+        sql = (
+            "INSERT INTO accounts(account_id) "
+            "SELECT account_id FROM primary_accounts WHERE active=1 "
+            "UNION ALL SELECT account_id FROM secondary_accounts "
+            "ON CONFLICT(account_id) DO NOTHING"
+        )
+
+        fixed, correction = _fix_insert_select_upsert_ambiguity(sql)
+
+        self.assertIn("FROM secondary_accounts WHERE 1=1 ON CONFLICT", fixed)
+        self.assertIn("disambiguate", correction)
+
+    def test_fix_insert_select_upsert_ignores_where_in_literals_and_comments(self):
+        sql = (
+            "INSERT INTO notes(note_id,note) SELECT note_id,'WHERE ON CONFLICT' "
+            "FROM incoming /* WHERE */ ON CONFLICT(note_id) DO NOTHING"
+        )
+
+        fixed, correction = _fix_insert_select_upsert_ambiguity(sql)
+
+        self.assertIn("/* WHERE */ WHERE 1=1 ON CONFLICT", fixed)
+        self.assertIn("disambiguate", correction)
+
+    def test_fix_insert_select_upsert_preserves_join_to_conflict_table(self):
+        sql = "INSERT INTO target SELECT a.id FROM a JOIN conflict ON conflict.id=a.id"
+
+        fixed, correction = _fix_insert_select_upsert_ambiguity(sql)
+
+        self.assertEqual(fixed, sql)
+        self.assertIsNone(correction)
+
+    def test_insert_select_upsert_ambiguity_is_corrected_before_execution(self):
+        payload = json.dumps({"content": {"accounts": [{"account_id": "acct-1", "name": "Aster Labs"}]}})
+        with self._with_temp_db() as (db_path, _token, _tmp):
+            with sqlite3.connect(db_path) as conn:
+                conn.execute(
+                    "CREATE TABLE __tool_results(result_id TEXT PRIMARY KEY, tool_name TEXT, "
+                    "result_json TEXT, result_text TEXT)"
+                )
+                conn.execute("INSERT INTO __tool_results VALUES ('4c134c','http_request',?,?)", (payload, payload))
+
+            out = execute_sqlite_batch(self.agent, {"sql": (
+                "CREATE TABLE accounts(account_id TEXT PRIMARY KEY,name TEXT);"
+                "INSERT INTO accounts(account_id,name) "
+                "SELECT json_extract(j.value,'$.account_id'),json_extract(j.value,'$.name') "
+                "FROM json_each((SELECT result_json ->> '$.content.accounts' "
+                "FROM __tool_results WHERE result_id='4c134c')) AS j "
+                "ON CONFLICT(account_id) DO UPDATE SET name=excluded.name;"
+                "SELECT account_id,name FROM accounts"
+            )})
+
+        self.assertEqual(out.get("status"), "ok", out.get("message"))
+        self.assertEqual(out["results"][-1]["result"], [{"account_id": "acct-1", "name": "Aster Labs"}])
+        auto_fix = out["results"][1].get("auto_correction")
+        self.assertIsNotNone(auto_fix)
+        self.assertIn("WHERE 1=1 ON CONFLICT", auto_fix["after"])
+        self.assertIn("disambiguate", " ".join(auto_fix["fixes"]))
 
     def test_integration_trailing_tool_params(self):
         """Full integration: trailing tool params are stripped and query runs."""

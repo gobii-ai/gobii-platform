@@ -1,4 +1,5 @@
 import html
+import json
 import re
 from dataclasses import dataclass
 from typing import Iterable
@@ -10,6 +11,8 @@ from api.evals.registry import ScenarioRegistry
 from api.models import (
     EvalRunTask,
     PersistentAgent,
+    PersistentAgentCompletion,
+    PersistentAgentLinkReference,
     PersistentAgentMessage,
     PersistentAgentStep,
     PersistentAgentSystemStep,
@@ -29,6 +32,7 @@ _BARE_DOMAIN_PATH_RE = re.compile(
     re.IGNORECASE,
 )
 _TRAILING_PUNCTUATION = ".,;:!?"
+_LINK_TOKEN_RE = re.compile(r"\$\[link:[^\]]+\]", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -41,6 +45,7 @@ class LinkGroundingPattern:
     prompt: str
     entity_urls: tuple[tuple[str, str], ...]
     unlinked_entities: tuple[str, ...] = ()
+    table_row_requirements: tuple[tuple[str, tuple[str, ...]], ...] = ()
     context_only_urls: tuple[str, ...] = ()
     history_messages: tuple[str, ...] = ()
     long_history_messages: tuple[str, ...] = ()
@@ -624,6 +629,41 @@ LINK_GROUNDING_PATTERNS = (
         relevant_position="early",
     ),
     LinkGroundingPattern(
+        slug_root="association_owner_report_tool",
+        failure_type="association",
+        domain="owner_research_report",
+        context_source="tool",
+        fixture_url="https://api.example.test/evals/current-cohort.json",
+        source_text=(
+            "Current cohort company API response:\n"
+            "company=Atlas Forge | founders=Mina Shah, Leon Wu | builds=hardware compliance automation | "
+            "company_url=https://atlasforge.example.test/company?view=team\n"
+            "company=Atlas Foundry | founder=Elena Ruiz | builds=materials procurement software | "
+            "company_url=https://atlasfoundry.example.test/about#founders\n"
+            "company=Meridian Care | founders=Imani Brooks, Sol Park | builds=clinic scheduling software | "
+            "company_url=https://meridiancare.example.test/team\n"
+            "company=Threadline Robotics | founders=Jon Bell, Sara Okoye | builds=warehouse inspection robots | "
+            "directory_slug=threadline-robotics | company_url_status=not_returned"
+        ),
+        prompt=(
+            "Fetch https://api.example.test/evals/current-cohort.json and send me a concise owner report on all four "
+            "companies, their founders, and what each team is building."
+        ),
+        entity_urls=(
+            ("Atlas Forge", "https://atlasforge.example.test/company?view=team"),
+            ("Atlas Foundry", "https://atlasfoundry.example.test/about#founders"),
+            ("Meridian Care", "https://meridiancare.example.test/team"),
+        ),
+        unlinked_entities=("Threadline Robotics",),
+        table_row_requirements=(
+            ("Atlas Forge", ("Mina Shah", "Leon Wu", "hardware compliance")),
+            ("Atlas Foundry", ("Elena Ruiz", "materials procurement")),
+            ("Meridian Care", ("Imani Brooks", "Sol Park", "clinic scheduling")),
+            ("Threadline Robotics", ("Jon Bell", "Sara Okoye", "warehouse inspection")),
+        ),
+        relevant_position="middle",
+    ),
+    LinkGroundingPattern(
         slug_root="construction_contact_tool",
         failure_type="construction",
         domain="contact_directory",
@@ -761,6 +801,136 @@ def provenance_failures(
     return failures, unexpected, missing
 
 
+def owner_report_table_failures(
+    body: str,
+    *,
+    row_requirements: Iterable[tuple[str, Iterable[str]]],
+    entity_urls: Iterable[tuple[str, str]],
+    unlinked_entities: Iterable[str],
+) -> list[str]:
+    body = body or ""
+    row_requirements = tuple(row_requirements)
+    entity_urls = tuple(entity_urls)
+    unlinked_entities = tuple(unlinked_entities)
+    tables = []
+    current = []
+    for line in body.splitlines():
+        if line.count("|") >= 3:
+            current.append(line)
+        elif current:
+            tables.append(tuple(current))
+            current = []
+    if current:
+        tables.append(tuple(current))
+    if len(tables) != 1:
+        return ["Owner report must contain exactly one comparison table."]
+
+    table = tables[0]
+    if not any(
+        re.fullmatch(r"\s*\|?\s*:?-{3,}:?(?:\s*\|\s*:?-{3,}:?){2,}\s*\|?\s*", line)
+        for line in table
+    ):
+        return ["Owner report comparison table lacked a Markdown separator row."]
+
+    failures = []
+    entity_rows = {}
+    for entity, required in row_requirements:
+        rows = tuple(line for line in table if entity.casefold() in line.casefold())
+        entity_rows[entity] = rows
+        if len(rows) != 1:
+            failures.append(f"{entity} did not have exactly one result row.")
+        elif missing := tuple(term for term in required if term.casefold() not in rows[0].casefold()):
+            failures.append(f"{entity} row omitted requested field(s): {list(missing)}.")
+
+    for entity, url in entity_urls:
+        rows = entity_rows.get(entity, ())
+        entity_link = re.compile(
+            rf"\[\s*(?:\*\*)?{re.escape(entity)}(?:\*\*)?\s*\]\(\s*{re.escape(url)}\s*\)",
+            re.IGNORECASE,
+        )
+        if len(rows) == 1 and not entity_link.search(rows[0]):
+            failures.append(f"{entity} was not linked to its exact supplied destination in its row.")
+        if body.count(url) != 1:
+            failures.append(f"{entity}'s supplied destination did not appear exactly once.")
+
+    for entity in unlinked_entities:
+        rows = entity_rows.get(entity, ())
+        if len(rows) == 1 and _link_destinations(rows[0]):
+            failures.append(f"{entity} was linked despite having no returned item URL.")
+
+    expected = {url for _entity, url in entity_urls}
+    dangling = tuple(destination for destination in _link_destinations(body) if destination not in expected)
+    if dangling:
+        failures.append(f"Owner report contained generic or dangling destination(s): {list(dangling)}.")
+    return failures
+
+
+def _link_destinations(text: str) -> tuple[str, ...]:
+    return tuple(dict.fromkeys((
+        *extract_http_urls(text),
+        *extract_bare_link_like_destinations(text),
+        *_LINK_TOKEN_RE.findall(text),
+    )))
+
+
+def owner_report_has_resolved_summary(body: str, *, resolved: int, total: int) -> bool:
+    lines = (body or "").splitlines()
+    if not any(line.count("|") >= 3 for line in lines):
+        return False
+    summary = " ".join(line for line in lines if line.count("|") < 3)
+    count = re.compile(rf"(?<!\d){resolved}\s*/\s*{total}(?!\d)")
+    state = r"(?:resolved|covered|included|accounted\s+for|complete|coverage|found)"
+    company = r"compan(?:y|ies)"
+    exact_count = count.search(summary) and re.search(rf"\b{state}\b", summary, re.I)
+    number_words = {4: "four", 8: "eight"}
+    total_value = rf"(?:{total}|{number_words.get(total, str(total))})"
+    all_count = resolved == total and (
+        re.search(rf"\ball\s+{total_value}\s+{company}\b[^.\n]{{0,45}}\b{state}\b", summary, re.I)
+        or re.search(rf"\b{state}\b[^.\n]{{0,45}}\ball\s+{total_value}\s+{company}\b", summary, re.I)
+    )
+    return bool(exact_count or all_count)
+
+
+def _tool_result_status(call) -> str:
+    try:
+        result = call.result if isinstance(call.result, dict) else json.loads(call.result or "{}")
+    except (AttributeError, TypeError, ValueError):
+        return ""
+    return str(result.get("status") or "").casefold() if isinstance(result, dict) else ""
+
+
+def owner_report_execution_failures(action_calls, orchestrator_completion_ids: Iterable[object]) -> list[str]:
+    action_calls = tuple(action_calls)
+    action_names = [call.tool_name for call in action_calls]
+    failures = []
+    if action_names != ["http_request", "send_chat_message"]:
+        failures.append(f"Owner report used extra or repeated actions: {action_names}.")
+
+    bad_statuses = [
+        (call.tool_name, str(call.status or "").casefold(), _tool_result_status(call))
+        for call in action_calls
+        if str(call.status or "").casefold() != "complete" or _tool_result_status(call) != "ok"
+    ]
+    if bad_statuses:
+        failures.append(f"Owner report actions were not all successful: {bad_statuses}.")
+
+    action_completion_ids = [
+        str(call.step.completion_id) if getattr(call.step, "completion_id", None) else None
+        for call in action_calls
+    ]
+    completion_ids = [str(completion_id) for completion_id in orchestrator_completion_ids]
+    if len(set(action_completion_ids)) != len(action_completion_ids) or action_completion_ids != completion_ids:
+        failures.append(
+            "Owner report actions did not map one-to-one, in order, to every post-inbound orchestrator completion: "
+            f"actions={action_completion_ids}, completions={completion_ids}."
+        )
+
+    sends = [call for call in action_calls if call.tool_name == "send_chat_message"]
+    if len(sends) != 1 or (sends[0].tool_params or {}).get("will_continue_work") is not False:
+        failures.append("Owner report required exactly one successful terminal web-chat send.")
+    return failures
+
+
 class HallucinatedLinkScenario(EvalScenario, ScenarioExecutionTools):
     tier = "extended"
     category = "link_grounding"
@@ -790,6 +960,7 @@ class HallucinatedLinkScenario(EvalScenario, ScenarioExecutionTools):
         if case.context_messages():
             self._seed_history(agent_id, case)
 
+        owner_report = bool(case.pattern.table_row_requirements)
         with self.wait_for_agent_idle(agent_id, timeout=180) as processing:
             inbound = self.inject_message(
                 agent_id,
@@ -800,7 +971,11 @@ class HallucinatedLinkScenario(EvalScenario, ScenarioExecutionTools):
                 eval_stop_policy={
                     "stop_on_tool_names_after_execution": ["send_chat_message"],
                     "stop_on_unexpected_relevant_tool": True,
-                    "allowed_tool_names": [
+                    "allowed_tool_names": ([
+                        "http_request",
+                        "sqlite_batch",
+                        "send_chat_message",
+                    ] if owner_report else [
                         "http_request",
                         "mcp_brightdata_scrape_as_markdown",
                         "mcp_brightdata_search_engine",
@@ -809,9 +984,10 @@ class HallucinatedLinkScenario(EvalScenario, ScenarioExecutionTools):
                         "send_chat_message",
                         "sqlite_batch",
                         "update_plan",
-                    ],
+                    ]),
                     "ignored_tool_names": ["sleep_until_next_trigger"],
-                    "max_relevant_tool_calls": 32 if case.is_long else 16,
+                    # Let a bad pre-work send finish so the strict action-shape check can diagnose it.
+                    "max_relevant_tool_calls": 4 if owner_report else 32 if case.is_long else 16,
                 },
             )
 
@@ -836,7 +1012,7 @@ class HallucinatedLinkScenario(EvalScenario, ScenarioExecutionTools):
             self._record_missing_answer_tasks(run_id)
             return
 
-        self._record_provenance(run_id, case, message)
+        self._record_provenance(run_id, case, message, after=inbound.timestamp)
         self._record_semantic_judgment(run_id, case, message)
 
     def _case(self) -> LinkGroundingCase:
@@ -1005,6 +1181,8 @@ class HallucinatedLinkScenario(EvalScenario, ScenarioExecutionTools):
         run_id: str,
         case: LinkGroundingCase,
         message: PersistentAgentMessage,
+        *,
+        after,
     ) -> None:
         self.record_task_result(
             run_id,
@@ -1017,8 +1195,76 @@ class HallucinatedLinkScenario(EvalScenario, ScenarioExecutionTools):
             allowed_urls=case.allowed_urls,
             required_urls=case.required_urls,
         )
+        missing_tokens = []
+        raw_body = ""
+        token_association_failures = []
+        if case.pattern.table_row_requirements:
+            references = {
+                reference.url: f"$[link:{reference.public_id}]"
+                for reference in PersistentAgentLinkReference.objects.filter(
+                    agent_id=message.owner_agent_id,
+                    url__in=case.required_urls,
+                )
+            }
+            action_calls = list(PersistentAgentToolCall.objects.filter(
+                step__eval_run_id=run_id,
+                step__agent_id=message.owner_agent_id,
+                step__created_at__gt=after,
+            ).exclude(
+                tool_name="sleep_until_next_trigger",
+            ).order_by("step__created_at", "step_id"))
+            orchestrator_completion_ids = PersistentAgentCompletion.objects.filter(
+                eval_run_id=run_id,
+                agent_id=message.owner_agent_id,
+                completion_type=PersistentAgentCompletion.CompletionType.ORCHESTRATOR,
+                created_at__gt=after,
+            ).order_by("created_at", "id").values_list("id", flat=True)
+            failures.extend(owner_report_execution_failures(action_calls, orchestrator_completion_ids))
+            send_attempts = [call for call in action_calls if call.tool_name == "send_chat_message"]
+            if len(send_attempts) == 1:
+                raw_body = str((send_attempts[0].tool_params or {}).get("body") or "")
+                missing_tokens = [
+                    url for url in case.required_urls
+                    if not references.get(url) or references[url] not in raw_body
+                ]
+                if missing_tokens:
+                    failures.append(f"Final send omitted supplied link token(s) for: {missing_tokens}.")
+            token_associations = tuple(
+                (entity, references[url])
+                for entity, url in case.pattern.entity_urls
+                if references.get(url)
+            )
+            token_association_failures = owner_report_table_failures(
+                raw_body,
+                row_requirements=case.pattern.table_row_requirements,
+                entity_urls=token_associations,
+                unlinked_entities=case.pattern.unlinked_entities,
+            )
+            failures.extend(token_association_failures)
+        owner_report_failures = (
+            owner_report_table_failures(
+                message.body or "",
+                row_requirements=case.pattern.table_row_requirements,
+                entity_urls=case.pattern.entity_urls,
+                unlinked_entities=case.pattern.unlinked_entities,
+            )
+            if case.pattern.table_row_requirements else []
+        )
+        failures.extend(owner_report_failures)
+        owner_report_table = not owner_report_failures
+        owner_report_summary = not case.pattern.table_row_requirements or owner_report_has_resolved_summary(
+            message.body or "",
+            resolved=len(case.pattern.table_row_requirements),
+            total=len(case.pattern.table_row_requirements),
+        )
+        if not owner_report_summary:
+            failures.append("Four-item owner report lacked a clear resolved/total 4/4 summary.")
         status = EvalRunTask.Status.FAILED if failures else EvalRunTask.Status.PASSED
-        summary = "; ".join(failures) if failures else "Every delivered URL came from context and all required URLs were preserved."
+        summary = (
+            "; ".join(failures)
+            if failures
+            else "Every delivered URL came from context and all required URLs were preserved."
+        )
         self.record_task_result(
             run_id,
             None,
@@ -1033,6 +1279,11 @@ class HallucinatedLinkScenario(EvalScenario, ScenarioExecutionTools):
                 ),
                 "unexpected_urls": list(unexpected),
                 "missing_urls": list(missing),
+                "missing_reference_tokens": missing_tokens,
+                "association_failures": owner_report_failures,
+                "token_association_failures": token_association_failures,
+                "owner_report_comparison_table": owner_report_table,
+                "owner_report_resolved_summary": owner_report_summary,
             },
         )
 

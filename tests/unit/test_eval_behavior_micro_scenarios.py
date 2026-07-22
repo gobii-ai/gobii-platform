@@ -27,9 +27,12 @@ from api.evals.scenarios.behavior_micro import (
     CHARTER_ADDS_FEEDBACK_RULE_FROM_CORRECTION,
     CHARTER_ADDS_INFERRED_PREFERENCE_PRESERVING_EXISTING,
     CHARTER_ADDS_PLAIN_PREFERENCE_WITHOUT_SAVE_WORD,
-    CHARTER_PATCHES_DIRECT_STYLE_CORRECTION,
     CHARTER_EXPANDS_SPARSE_CHARTER_WITH_DETAIL,
     CHARTER_IGNORES_ONE_OFF_PREFERENCE,
+    CHARTER_INTERPRETS_AMBIGUOUS_OPERATING_FEEDBACK,
+    CHARTER_PATCHES_DIRECT_STYLE_CORRECTION,
+    CHARTER_PATCHES_EVALUATIVE_OUTPUT_FEEDBACK,
+    CHARTER_IGNORES_BATCH_SCOPED_PREFERENCE,
     CHARTER_JUDGE_PRESERVES_CLI_GITHUB_SECRET_WORKFLOW,
     CHARTER_MEMORY_MICRO_SCENARIO_SLUGS,
     CHARTER_NARROWS_SCOPE_PRESERVING_UNRELATED_GUIDANCE,
@@ -76,6 +79,7 @@ from api.evals.scenarios.monitor_pollution import (
     _schedule_is_reasonable_pollution_monitoring,
 )
 from api.evals.scenarios.permit_followup_single_reply import PermitFollowupSingleReplyScenario
+from api.evals.scenarios.sqlite_tool_results import _source_relationship_read_failures
 from api.evals.scenarios.weather_lookup import _is_free_weather_request, _weather_lookup_http_mock
 from api.evals.stop_policy import (
     should_stop_for_eval_policy,
@@ -93,6 +97,7 @@ from api.models import (
     EvalRunTask,
     PersistentAgent,
     PersistentAgentCommsEndpoint,
+    PersistentAgentCompletion,
     PersistentAgentConversation,
     PersistentAgentEnabledTool,
     PersistentAgentHumanInputRequest,
@@ -124,16 +129,29 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
         self.assertEqual(tool_choice_suite.scenario_slugs, TOOL_CHOICE_MICRO_SCENARIO_SLUGS)
         self.assertFalse(set(CHARTER_MEMORY_MICRO_SCENARIO_SLUGS) & set(BEHAVIOR_MICRO_SCENARIO_SLUGS))
         self.assertFalse(set(CHARTER_MEMORY_MICRO_SCENARIO_SLUGS) & set(TOOL_CHOICE_MICRO_SCENARIO_SLUGS))
-        self.assertIn(CHARTER_ADDS_DURABLE_PREFERENCE_PRESERVING_EXISTING, charter_memory_suite.scenario_slugs)
-        self.assertIn(CHARTER_ADDS_INFERRED_PREFERENCE_PRESERVING_EXISTING, charter_memory_suite.scenario_slugs)
-        self.assertIn(CHARTER_EXPANDS_SPARSE_CHARTER_WITH_DETAIL, charter_memory_suite.scenario_slugs)
-        self.assertIn(CHARTER_NARROWS_SCOPE_PRESERVING_UNRELATED_GUIDANCE, charter_memory_suite.scenario_slugs)
-        self.assertIn(CHARTER_IGNORES_ONE_OFF_PREFERENCE, charter_memory_suite.scenario_slugs)
-        self.assertIn(CHARTER_ADDS_FEEDBACK_RULE_FROM_CORRECTION, charter_memory_suite.scenario_slugs)
-        self.assertIn(CHARTER_ADDS_PLAIN_PREFERENCE_WITHOUT_SAVE_WORD, charter_memory_suite.scenario_slugs)
-        self.assertIn(CHARTER_PATCHES_DIRECT_STYLE_CORRECTION, charter_memory_suite.scenario_slugs)
-        self.assertIn(CHARTER_RECORDS_CLI_GITHUB_SECRETS_CORRECTION, charter_memory_suite.scenario_slugs)
-        self.assertIn(CHARTER_JUDGE_PRESERVES_CLI_GITHUB_SECRET_WORKFLOW, charter_memory_suite.scenario_slugs)
+        for slug in (
+            CHARTER_ADDS_DURABLE_PREFERENCE_PRESERVING_EXISTING,
+            CHARTER_ADDS_INFERRED_PREFERENCE_PRESERVING_EXISTING,
+            CHARTER_EXPANDS_SPARSE_CHARTER_WITH_DETAIL,
+            CHARTER_NARROWS_SCOPE_PRESERVING_UNRELATED_GUIDANCE,
+            CHARTER_IGNORES_ONE_OFF_PREFERENCE,
+            CHARTER_ADDS_FEEDBACK_RULE_FROM_CORRECTION,
+            CHARTER_ADDS_PLAIN_PREFERENCE_WITHOUT_SAVE_WORD,
+            CHARTER_PATCHES_DIRECT_STYLE_CORRECTION,
+            CHARTER_RECORDS_CLI_GITHUB_SECRETS_CORRECTION,
+            CHARTER_JUDGE_PRESERVES_CLI_GITHUB_SECRET_WORKFLOW,
+        ):
+            self.assertIn(slug, charter_memory_suite.scenario_slugs)
+
+    def test_new_charter_feedback_prompts_do_not_prescribe_persistence(self):
+        for slug in (
+            CHARTER_IGNORES_BATCH_SCOPED_PREFERENCE,
+            CHARTER_PATCHES_EVALUATIVE_OUTPUT_FEEDBACK,
+            CHARTER_INTERPRETS_AMBIGUOUS_OPERATING_FEEDBACK,
+        ):
+            prompt = ScenarioRegistry.get(slug).prompt.casefold()
+            for forbidden in ("charter", "sqlite", "patch_text", "save this", "update your instructions"):
+                self.assertNotIn(forbidden, prompt)
 
     def test_github_credential_retention_scenarios_expose_diagnostic_tasks(self):
         charter_scenario = ScenarioRegistry.get(CHARTER_RECORDS_CLI_GITHUB_SECRETS_CORRECTION)
@@ -740,10 +758,11 @@ class BehaviorMicroHelperTests(TestCase):
                 for definition in get_enabled_tool_definitions(agent)
             }
 
-    def _add_tool_call(self, tool_name, params=None, status="complete"):
+    def _add_tool_call(self, tool_name, params=None, status="complete", completion=None):
         step = PersistentAgentStep.objects.create(
             agent=self.agent,
             eval_run=self.run,
+            completion=completion,
             description=f"{tool_name} call",
         )
         return PersistentAgentToolCall.objects.create(
@@ -753,6 +772,35 @@ class BehaviorMicroHelperTests(TestCase):
             result="{}",
             status=status,
         )
+
+    @staticmethod
+    def _charter_patch_sql(old, new):
+        old = old.replace("'", "''")
+        new = new.replace("'", "''")
+        return f"UPDATE __agent_config SET charter=patch_text(charter,'{old}','{new}')"
+
+    def _add_clean_charter_patch(self, completion, *, old="", new="Keep prospect questions easy to answer."):
+        call = self._add_tool_call(
+            "sqlite_batch",
+            {"sql": self._charter_patch_sql(old, new)},
+            completion=completion,
+        )
+        call.result = '{"status":"ok","results":[{"message":"Query 0 affected 1 rows."}]}'
+        call.save(update_fields=["result"])
+        return call
+
+    def _add_orchestrator_completion(self):
+        return PersistentAgentCompletion.objects.create(agent=self.agent, eval_run=self.run)
+
+    def _assert_charter_cases(self, slug, *, old, new, passing, failing):
+        scenario = ScenarioRegistry.get(slug)
+        calls = [SimpleNamespace(tool_params={"sql": self._charter_patch_sql(old, new)})]
+        for charter in passing:
+            passed, detail = scenario._charter_check(SimpleNamespace(charter=charter), calls)
+            self.assertTrue(passed, detail)
+        for charter in failing:
+            passed, detail = scenario._charter_check(SimpleNamespace(charter=charter), calls)
+            self.assertFalse(passed, detail)
 
     def _add_human_input_request(self, run, question):
         conversation = PersistentAgentConversation.objects.create(
@@ -868,6 +916,150 @@ class BehaviorMicroHelperTests(TestCase):
         self.assertTrue(passed, detail)
         self.assertFalse(no_patch_passed, no_patch_detail)
         self.assertFalse(harmful_passed, harmful_detail)
+
+    def test_charter_feedback_checks_preserve_scope_and_semantic_direction(self):
+        link = ScenarioRegistry.get(CHARTER_ADDS_FEEDBACK_RULE_FROM_CORRECTION)
+        link_rule = "Include a verified profile URL for every candidate."
+        self._assert_charter_cases(
+            link.slug,
+            old="",
+            new=link_rule,
+            passing=[link.existing_charter + " " + link_rule,
+                     link.existing_charter + " Never send candidate reports without verified source links."],
+            failing=[
+                link.existing_charter + " Never include profile URLs in candidate reports.",
+                link.existing_charter + " Always include candidate URLs, even if unavailable or unverified.",
+                link.existing_charter + " Always include a profile URL for every candidate.",
+                link_rule,
+            ],
+        )
+
+        style = ScenarioRegistry.get(CHARTER_PATCHES_DIRECT_STYLE_CORRECTION)
+        style_rule = "Keep messages conversational and avoid automated templates. Do not use dashes or hyphens."
+        self._assert_charter_cases(
+            style.slug,
+            old="",
+            new=style_rule,
+            passing=[style.existing_charter + " " + style_rule],
+            failing=[
+                style.existing_charter + " Keep messages natural, use automated templates, and include dashes.",
+                style_rule,
+            ],
+        )
+
+    def test_evaluative_and_messy_feedback_checks_keep_unrelated_clauses(self):
+        evaluative = ScenarioRegistry.get(CHARTER_PATCHES_EVALUATIVE_OUTPUT_FEEDBACK)
+        old_question = "For prospect outreach, end each note with an open question asking for the recipient's opinion."
+        easy_question = "For prospect outreach, use observations and ask a specific question that is easy to answer."
+        good_evaluative = evaluative.existing_charter.replace(old_question, easy_question)
+        self._assert_charter_cases(
+            evaluative.slug,
+            old=old_question,
+            new=easy_question,
+            passing=[good_evaluative],
+            failing=[
+                evaluative.existing_charter.replace(old_question, "Make every question easy to answer."),
+                evaluative.existing_charter.replace(
+                    old_question,
+                    "Prospect outreach should increase recipient effort and make them do the work.",
+                ),
+                good_evaluative.replace("Do not change these instructions unless the owner explicitly asks.", ""),
+            ],
+        )
+
+        operating = ScenarioRegistry.get(CHARTER_INTERPRETS_AMBIGUOUS_OPERATING_FEEDBACK)
+        old_operating = (
+            "Send the owner a short kickoff and a progress note for each work session. "
+            "Route routine follow-ups and blockers to the owner."
+        )
+        new_operating = (
+            "Send outcome reports with what changed, material blockers, and the next action. "
+            "Route routine follow-ups to Morgan. Only notify the owner for real blockers."
+        )
+        good_operating = operating.existing_charter.replace(old_operating, new_operating)
+        natural_operating = operating.existing_charter.replace(
+            old_operating,
+            "After kickoff, only message the owner with what changed, blockers, and next move. "
+            "Route routine follow-ups to Morgan. Only pull the owner in on a real blocker.",
+        )
+        compact_operating = operating.existing_charter.replace(
+            old_operating,
+            "After kickoff, only pull the owner in on a real blocker — routine follow-ups are for Morgan. "
+            "Come back with what changed, blockers, and next move; play-by-play updates are not useful.",
+        )
+        changed_operating = operating.existing_charter.replace(
+            old_operating,
+            "After kickoff, only message the owner when something has changed, there's a real blocker, "
+            "or a next move is needed. Route routine follow-ups to Morgan.",
+        )
+        self._assert_charter_cases(
+            operating.slug,
+            old=old_operating,
+            new=new_operating,
+            passing=[good_operating, natural_operating, compact_operating, changed_operating],
+            failing=[
+                good_operating.replace("Send outcome reports", "Never send outcome reports"),
+                good_operating.replace(
+                    "Route routine follow-ups to Morgan. Only notify the owner for real blockers.",
+                    "Route routine follow-ups to the owner. Send serious blockers to Morgan.",
+                ),
+                good_operating + " Put legal review first.",
+                good_operating.replace("Never include customer secrets in team messages.", ""),
+            ],
+        )
+
+    def test_focused_charter_patch_rejects_wrong_old_and_full_charter_append(self):
+        scenario = ScenarioRegistry.get(CHARTER_ADDS_PLAIN_PREFERENCE_WITHOUT_SAVE_WORD)
+        rule = "Use comparison tables and bullet takeaways."
+        agent = SimpleNamespace(charter=scenario.existing_charter + " " + rule)
+        good_call = SimpleNamespace(tool_params={"sql": self._charter_patch_sql("", rule)})
+        wrong_old = SimpleNamespace(tool_params={"sql": self._charter_patch_sql(scenario.prior_outbound_body, rule)})
+        full_append = SimpleNamespace(
+            tool_params={"sql": self._charter_patch_sql("", scenario.existing_charter + " " + rule)}
+        )
+        opposite_rule = "Never use comparison tables or bullet takeaways."
+        opposite_agent = SimpleNamespace(charter=scenario.existing_charter + " " + opposite_rule)
+        opposite_call = SimpleNamespace(tool_params={"sql": self._charter_patch_sql("", opposite_rule)})
+
+        self.assertTrue(scenario._charter_check(agent, [good_call])[0])
+        self.assertFalse(scenario._charter_check(agent, [wrong_old])[0])
+        self.assertFalse(scenario._charter_check(agent, [full_append])[0])
+        self.assertFalse(scenario._charter_check(agent, [good_call, good_call])[0])
+        self.assertFalse(scenario._charter_check(opposite_agent, [opposite_call])[0])
+
+    def test_domain_refresh_checker_requires_relationship_decision_rows(self):
+        imports = (
+            "INSERT INTO accounts(account_id,stage) SELECT json_extract(j.value,'$.account_id'),"
+            "json_extract(j.value,'$.stage') FROM __tool_results r,"
+            "json_each(r.result_json,'$.content.accounts') j;"
+            "INSERT INTO workstreams(workstream_id,account_id,status) SELECT "
+            "json_extract(j.value,'$.workstream_id'),json_extract(j.value,'$.account_id'),"
+            "json_extract(j.value,'$.status') FROM __tool_results r,"
+            "json_each(r.result_json,'$.content.workstreams') j;"
+        )
+        row_reads = imports + "SELECT * FROM accounts; SELECT * FROM workstreams;"
+        joined_read = imports + (
+            "SELECT a.stage,w.status,w.owner FROM accounts a JOIN workstreams w "
+            "ON w.account_id=a.account_id;"
+        )
+        bounded_reads = imports + (
+            "SELECT stage,owner,next_action FROM accounts WHERE account_id='acct-aster-042';"
+            "SELECT status,owner,due_on FROM workstreams WHERE account_id='acct-aster-042';"
+        )
+        count_only = imports + "SELECT count(*) FROM accounts; SELECT count(*) FROM workstreams;"
+        unlinked_reads = imports + "SELECT stage FROM accounts; SELECT status FROM workstreams;"
+
+        self.assertEqual(_source_relationship_read_failures([row_reads], "accounts", "workstreams"), [])
+        self.assertEqual(_source_relationship_read_failures([joined_read], "accounts", "workstreams"), [])
+        self.assertEqual(_source_relationship_read_failures([bounded_reads], "accounts", "workstreams"), [])
+        self.assertIn(
+            "did not return decision rows",
+            _source_relationship_read_failures([count_only], "accounts", "workstreams")[0],
+        )
+        self.assertIn(
+            "stable account relationship",
+            _source_relationship_read_failures([unlinked_reads], "accounts", "workstreams")[0],
+        )
 
     def test_eval_synthetic_tools_are_catalog_backed_for_eval_agents(self):
         self.agent.execution_environment = "eval"
@@ -1503,6 +1695,130 @@ class BehaviorMicroHelperTests(TestCase):
             [expected, unrelated],
         )
         self.assertNotIn(config_update, get_common_use_case_tool_calls_for_run(self.run.id))
+
+    def test_batch_scoped_charter_eval_requires_one_useful_terminal_web_reply(self):
+        scenario = ScenarioRegistry.get(CHARTER_IGNORES_BATCH_SCOPED_PREFERENCE)
+        inbound = SimpleNamespace(timestamp=timezone.now() - timedelta(seconds=1))
+        completion = self._add_orchestrator_completion()
+        reply = self._add_tool_call(
+            "send_chat_message",
+            {
+                "body": "Got it. For this batch, security reviews come first and every note stays short.",
+                "will_continue_work": False,
+            },
+            completion=completion,
+        )
+
+        self.assertTrue(scenario._additional_charter_check(self.agent, self.run.id, inbound)[0])
+        reply.tool_params = {
+            "body": "Going forward, security reviews always come first and every note stays short.",
+            "will_continue_work": False,
+        }
+        reply.save(update_fields=["tool_params"])
+        self.assertFalse(scenario._additional_charter_check(self.agent, self.run.id, inbound)[0])
+
+        self._add_orchestrator_completion()
+        self.assertFalse(scenario._additional_charter_check(self.agent, self.run.id, inbound)[0])
+
+    def test_transient_preferences_leave_the_charter_untouched(self):
+        mutation = SimpleNamespace(tool_params={"sql": "UPDATE __agent_config SET charter='changed'"})
+        for slug in (CHARTER_IGNORES_ONE_OFF_PREFERENCE, CHARTER_IGNORES_BATCH_SCOPED_PREFERENCE):
+            scenario = ScenarioRegistry.get(slug)
+            unchanged = SimpleNamespace(charter=scenario.existing_charter)
+            changed = SimpleNamespace(charter=scenario.existing_charter + " New rule.")
+            self.assertTrue(scenario._charter_check(unchanged, [])[0])
+            self.assertFalse(scenario._charter_check(unchanged, [mutation])[0])
+            self.assertFalse(scenario._charter_check(changed, [])[0])
+
+    def test_durable_charter_eval_requires_a_clean_two_completion_first_shot(self):
+        scenario = ScenarioRegistry.get(CHARTER_PATCHES_EVALUATIVE_OUTPUT_FEEDBACK)
+        inbound = SimpleNamespace(timestamp=timezone.now() - timedelta(seconds=1))
+        old = "For prospect outreach, end each note with an open question asking for the recipient's opinion."
+        new = "For prospect outreach, ask a specific question that is easy to answer."
+        sqlite_completion = self._add_orchestrator_completion()
+        sqlite_call = self._add_clean_charter_patch(sqlite_completion, old=old, new=new)
+        reply_completion = self._add_orchestrator_completion()
+        reply = self._add_tool_call(
+            "send_chat_message",
+            {
+                "body": "Got it. I’ll make each prospect question specific and easy to answer. Sound right?",
+                "will_continue_work": False,
+            },
+            completion=reply_completion,
+        )
+
+        self.assertTrue(scenario._additional_charter_check(self.agent, self.run.id, inbound)[0])
+        good_sql = sqlite_call.tool_params
+        sqlite_call.tool_params = {"sql": self._charter_patch_sql(scenario.prior_outbound_body, new)}
+        sqlite_call.save(update_fields=["tool_params"])
+        self.assertFalse(scenario._additional_charter_check(self.agent, self.run.id, inbound)[0])
+        sqlite_call.tool_params = good_sql
+        sqlite_call.save(update_fields=["tool_params"])
+
+        good_result = sqlite_call.result
+        sqlite_call.result = '{"status":"ok","results":[{"auto_correction":{"fixes":["retry"]}}]}'
+        sqlite_call.save(update_fields=["result"])
+        self.assertFalse(scenario._additional_charter_check(self.agent, self.run.id, inbound)[0])
+        sqlite_call.result = good_result
+        sqlite_call.save(update_fields=["result"])
+
+        reply.status = "error"
+        reply.save(update_fields=["status"])
+        self.assertFalse(scenario._additional_charter_check(self.agent, self.run.id, inbound)[0])
+        reply.status = "complete"
+        reply.save(update_fields=["status"])
+
+        reply.step.completion = sqlite_completion
+        reply.step.save(update_fields=["completion"])
+        self.assertFalse(scenario._additional_charter_check(self.agent, self.run.id, inbound)[0])
+        reply.step.completion = reply_completion
+        reply.step.save(update_fields=["completion"])
+
+        extra_completion = self._add_orchestrator_completion()
+        self.assertFalse(scenario._additional_charter_check(self.agent, self.run.id, inbound)[0])
+        extra_completion.delete()
+        correction = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            eval_run=self.run,
+            description="Tool policy: persist this direct user correction before replying.",
+        )
+        self.assertFalse(scenario._additional_charter_check(self.agent, self.run.id, inbound)[0])
+        correction.delete()
+        self.assertTrue(scenario._additional_charter_check(self.agent, self.run.id, inbound)[0])
+
+    def test_direct_rewrite_eval_accepts_a_natural_question_inside_the_rewrite(self):
+        scenario = ScenarioRegistry.get(CHARTER_PATCHES_DIRECT_STYLE_CORRECTION)
+        inbound = SimpleNamespace(timestamp=timezone.now() - timedelta(seconds=1))
+        sqlite_completion = self._add_orchestrator_completion()
+        self._add_clean_charter_patch(
+            sqlite_completion,
+            new="Keep messages conversational and avoid templates. Do not use dashes or hyphens.",
+        )
+        reply_completion = self._add_orchestrator_completion()
+        self._add_tool_call(
+            "send_chat_message",
+            {
+                "body": "The apprenticeship work caught my eye. What are you hoping to build next?",
+                "will_continue_work": False,
+            },
+            completion=reply_completion,
+        )
+
+        passed, detail = scenario._additional_charter_check(self.agent, self.run.id, inbound)
+
+        self.assertTrue(passed, detail)
+
+        reply = PersistentAgentToolCall.objects.filter(
+            step__eval_run=self.run,
+            tool_name="send_chat_message",
+        ).get()
+        reply.tool_params = {
+            "body": "Your team is expanding apprenticeships. Let's work together on that.",
+            "will_continue_work": False,
+        }
+        reply.save(update_fields=["tool_params"])
+        passed, _detail = scenario._additional_charter_check(self.agent, self.run.id, inbound)
+        self.assertFalse(passed)
 
     def test_common_use_case_tool_calls_keep_mixed_sqlite_config_and_domain_work(self):
         mixed_batch = self._add_tool_call(

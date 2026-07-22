@@ -102,12 +102,13 @@ from ..tools.sqlite_query_quality import (
     named_model_read_tables,
     source_derived_model_mutation_tables,
     source_derived_model_reconciled_tables,
+    _sql_values_from_params,
     summarize_sqlite_tool_result_sql,
 )
 from ..tools.sqlite_skills import format_recent_skills_for_prompt
 from ..tools.tool_manager import ensure_default_tools_enabled, ensure_skill_tools_enabled, get_enabled_tool_definitions
 from ..system_skills.discovery import format_system_skill_discovery_prompt
-from .tool_results import PREVIEW_TIER_COUNT, SPAWN_WEB_TASK_RESULT_TOOL_NAME, ToolCallResultRecord, ToolResultPromptInfo, prepare_tool_results_for_prompt
+from .tool_results import PREVIEW_TIER_COUNT, SPAWN_WEB_TASK_RESULT_TOOL_NAME, ToolCallResultRecord, ToolResultPromptInfo, build_short_result_id_map, entity_name_stem, prepare_tool_results_for_prompt, source_array_entity_groups
 from .link_references import is_source_bearing_tool, pair_prompt_urls, rewrite_prompt_urls
 from .daily_limit_mode import (
     CREDIT_MESSAGE_ONLY_ALLOWED_TOOL_NAMES_TEXT,
@@ -139,17 +140,15 @@ CONTACT_PROMPT_INLINE_LIMIT = 25
 CONTACT_PROMPT_SAMPLE_LIMIT = 10
 LINK_REFERENCE_PROMPT_NOTE = (
     "## Link References (CRITICAL)\n\n"
-    "Sources may pair `https://host/a [link_ref: $[link:L…]]`: the raw URL identifies that exact item for "
-    "reasoning; its adjacent token is the only user-visible link or URL-tool destination. Keep pairs attached. "
-    "Send tools must receive the token; delivery resolves it only after call. Copy it character-for-character: "
-    "`{\"url\":\"$[link:LEXACT]\"}` becomes `[Atlas launch]($[link:LEXACT])`. Wrong: "
-    "`[Atlas launch](https://host/a)` or any raw `http(s)` destination. A token is one whole URL, not an "
-    "ID/instruction, and changes no action/tool. Never reassign a token, derive a sibling URL, decode, edit, shorten, "
-    "combine, or guess. If missing, omit the link. An item lacking its token stays unlinked; a source/feed token "
-    "links only itself. Never put tokens in SQL or search text. When sources are requested, link all included "
-    "token-backed sources and reserve room. "
-    "A bare source name or `(source)` is not a citation. Before sending, the body must contain the exact tokens or it "
-    "is unfinished."
+    "Sources may pair `raw URL [link_ref: $[link:L…]]`: the raw URL is evidence; its adjacent token is only a "
+    "display/fetch handle. Keep pairs attached. Final Markdown is exactly `[item]($[link:LEXACT])`; HTML uses "
+    "`<a href=\"$[link:LEXACT]\">item</a>`; URL tools use `{\"url\":\"$[link:LEXACT]\"}`. The token is the whole "
+    "destination. Never encode, edit, reassign, combine, or guess it; never put it inside `[]`, SQL/state/search, or "
+    "replace it with a raw URL. Items without a token stay plain; source/feed tokens link only themselves. A report "
+    "is unfinished while a token-backed entity name is plain: `Atlas URL [link_ref: $[link:L1]]` becomes "
+    "`[Atlas]($[link:L1])`. Outreach links only if useful/requested. Cite beside the supported "
+    "claim; a source name alone is not a citation. Before sending, the "
+    "body must contain the exact tokens for linked claims."
 )
 SQLITE_EFFICIENCY_WARNING = (
     "SQLite efficiency warning: you've been handling __tool_results one result_id at a time. "
@@ -164,7 +163,6 @@ TOOL_RESULT_LOOKUP_COMPONENTS = frozenset({
     "parent_result_id",
     "result_id",
     "result_meta",
-    "result_schema",
 })
 
 
@@ -209,12 +207,6 @@ def _prompt_render_settings_from_failover_configs(
         for _, _, params_with_hints in failover_configs
     )
     return model, allow_implied_send
-
-
-def _prompt_render_signature_from_failover_configs(
-    failover_configs: Sequence[Tuple[str, str, Mapping[str, Any]]] | None,
-) -> Tuple[str, bool]:
-    return _prompt_render_settings_from_failover_configs(failover_configs)
 
 
 def _prompt_routing_range_from_failover_configs(
@@ -598,6 +590,14 @@ def _extract_spawn_web_task_task_id(result_text: object) -> Optional[str]:
     return str(task_id) if task_id else None
 
 
+def _tool_result_status_is_ok(result: object) -> bool:
+    try:
+        payload = result if isinstance(result, dict) else json.loads(str(result or ""))
+    except (TypeError, ValueError):
+        return False
+    return isinstance(payload, dict) and str(payload.get("status") or "").casefold() == "ok"
+
+
 def _build_browser_task_tool_result_record(
     task: BrowserUseAgentTask,
     result_step: Optional[BrowserUseAgentTaskStep],
@@ -681,11 +681,12 @@ def _get_sqlite_guidance() -> str:
     """Return the compact contract for data retrieval, storage, and analysis."""
     return (
         "## SQLite Data\n\n"
-        "Named tables are the world model; digest is partial. Read them before external refreshes/decisions, not memory. Current complete rows are truth; don't refetch them. "
+        "Named tables are the world model; digest is partial. Use queried rows, not memory, for decisions. Current complete rows are truth; don't refetch them. "
+        "Explicit fresh source: fetch once, then reconcile and SELECT the model in one SQLite batch. Otherwise read the model first and fetch only stale/missing facts. "
         "Tool output doesn't update it. Source rows sharing a stable ID or its children belong there even when small: reconcile entities/relations, evolve schema, then query before acting/reporting. Only unrelated one-offs bypass it. "
         "Use stable keys. Upserts refresh every mutable/provenance field; inspect identity after wrong row counts; query gaps before reporting. Only sourced blockers are unresolved. "
-        "Normalize children with PRIMARY KEY/UNIQUE and indexes; use SQLite for exact set logic/counts/ranking; return needed rows. Import ordinary tool output via INSERT ... SELECT/json_each from __tool_results (batch siblings by IN/tool_name), never copied facts/URLs; custom tools can write keyed models directly. "
-        "Never query one result_id at a time, make per-result tables, or loop blobs. CTAS is one-off; named tables persist, TEMP do not. Copy names/paths/values/URLs from results; inspect unknown structure once. "
+        "Normalize children with PRIMARY KEY/UNIQUE + indexes; use SQLite for exact set logic/counts/ranking. "
+        "No sibling-by-sibling result/table/blob loops. Custom tools may write keyed models directly. CTAS is one-off; named tables persist, TEMP do not. Inspect unknown structure once. "
         "Locate payloads with analysis_json/top_keys; http_request JSON is result_json $.content. Prefer result_json for known paths, else result_text.\n\n"
         "Snapshots:\n"
         "* __tool_results: result_id, tool_name, created_at, result_json, result_text, analysis_json, is_truncated, top_keys.\n"
@@ -1327,6 +1328,7 @@ def _render_prompt_context_once(
     system_directive_block: str = "",
     skip_compaction: bool = False,
     run_cache: PromptRunCache | None = None,
+    prompt_message_transform: Callable[[List[dict]], List[dict]] | None = None,
 ) -> PromptRenderResult:
     max_iterations = _resolve_max_iterations(max_iterations)
     planning_mode_active = agent.planning_state == PersistentAgent.PlanningState.PLANNING
@@ -1350,10 +1352,8 @@ def _render_prompt_context_once(
         prompt_failover_configs
     )
 
-    # Create token estimator for the specific model
     token_estimator = _create_token_estimator(model, run_cache)
 
-    # Initialize promptree with the token estimator
     prompt = Prompt(token_estimator=token_estimator)
     config_authority = _ConfigAuthorityResolver(agent)
 
@@ -1421,14 +1421,14 @@ def _render_prompt_context_once(
         if agent.schedule:
             important_group.section_text(
                 "schedule_note",
-                "UPDATE YOUR SCHEDULE if the timing no longer matches the job. User wants it more/less frequent? Change it now. Task scope changed? Adjust timing to match.",
+                "Current schedule is durable. Change it only for an authorized lasting cadence request; temporary task scope never changes it.",
                 weight=1,
                 non_shrinkable=True
             )
         else:
             important_group.section_text(
                 "schedule_note",
-                "⚠️ NO SCHEDULE SET. When in doubt, set one—default '0 9 * * *'. Without a schedule, you die when you stop.",
+                "No schedule is set. Leave it NULL unless the user requests recurrence.",
                 weight=1,
                 non_shrinkable=True
             )
@@ -1544,7 +1544,7 @@ def _render_prompt_context_once(
                 "Planning Mode is active; end_planning(full_plan=...) replaces your runtime charter."
                 if planning_mode_active
                 else (
-                    "Charter is durable memory. Merge ongoing role/scope, recurrence, and user corrections; preserve unrelated guidance and omit one-offs, completed work, or guesses."
+                    "Charter is durable memory. Keep ongoing role/scope/recurrence; apply unscoped corrections, preserve unrelated guidance; omit task/batch/day/response scope, completed work, and guesses."
                 )
             ),
             weight=2,
@@ -1577,20 +1577,25 @@ def _render_prompt_context_once(
             records=lambda snapshot: snapshot.records,
         )
 
+    sqlite_schema_block = get_sqlite_schema_prompt()
+    named_model_tables = {
+        match.group(1)
+        for match in re.finditer(r"^Table ([^\s(]+)", sqlite_schema_block, re.MULTILINE)
+        if not match.group(1).startswith("__")
+    }
+
     # Unified history follows the important context (order within user prompt: important -> unified_history -> critical)
     unified_history_group = prompt.group("unified_history", weight=3)
-    fresh_tool_call_step_ids, has_link_references = _get_unified_history_prompt(
+    fresh_tool_call_step_ids, has_link_references, source_reconciliation_directives = _get_unified_history_prompt(
         agent,
         unified_history_group,
         config_authority,
         run_cache=run_cache,
+        named_model_tables=named_model_tables,
     )
 
-    # Variable priority sections (weight=4) - can be heavily shrunk with smart truncation
     variable_group = prompt.group("variable", weight=4)
 
-    # SQLite schema - always available
-    sqlite_schema_block = get_sqlite_schema_prompt()
     variable_group.section_text(
         "sqlite_schema",
         sqlite_schema_block,
@@ -1634,11 +1639,7 @@ def _render_prompt_context_once(
             "Planning questions must use request_human_input."
         )
     else:
-        agent_config_note = (
-            f"Write {AGENT_CONFIG_TABLE} id=1 via sqlite_batch; clear schedule with NULL or ''. "
-            "Before replying to a direct correction, make one partial charter UPDATE with patch_text; do not wait for explicit save wording. "
-            "Setup: update config first; fetch targets only if asked to run now."
-        )
+        agent_config_note = f"{AGENT_CONFIG_TABLE} id=1: patch_text for lasting owner behavior feedback only; temporary feedback/ordinary tasks never config."
     variable_group.section_text(
         "agent_config_note",
         agent_config_note,
@@ -1807,9 +1808,25 @@ def _render_prompt_context_once(
     token_misses_before = run_cache.token_counts.misses if run_cache is not None else 0
     with tracer.start_as_current_span("Promptree Render") as render_span:
         user_content = prompt.render(user_token_budget)
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_content},
+        ]
+        original_messages = messages
+        if prompt_message_transform is not None:
+            transformed = prompt_message_transform(messages)
+            if (
+                len(transformed) != 2
+                or transformed[0].get("role") != "system"
+                or transformed[1].get("role") != "user"
+            ):
+                raise ValueError("prompt_message_transform must return one system and one user message")
+            messages = transformed
+            system_prompt = str(messages[0].get("content") or "")
+            user_content = str(messages[1].get("content") or "")
         render_span.set_attribute("prompt.fast_path", prompt.used_fast_path())
         render_span.set_attribute("prompt.characters", len(user_content))
-        render_span.set_attribute("prompt.fitted_tokens", prompt.get_tokens_after_fitting())
+        render_span.set_attribute("prompt.fitted_tokens", token_estimator(user_content))
         if run_cache is not None:
             render_span.set_attribute(
                 "prompt.token_cache.hits",
@@ -1821,15 +1838,17 @@ def _render_prompt_context_once(
             )
 
     # Get token counts before and after fitting
-    tokens_before = prompt.get_tokens_before_fitting() + system_tokens
-    tokens_after = prompt.get_tokens_after_fitting() + system_tokens
+    original_tokens_before = prompt.get_tokens_before_fitting() + system_tokens
+    system_tokens = token_estimator(system_prompt)
+    tokens_after = token_estimator(user_content) + system_tokens
+    tokens_before = max(original_tokens_before, tokens_after)
     tokens_saved = tokens_before - tokens_after
+    source_reconciliation_directive = "\n".join(
+        directive for directive in source_reconciliation_directives if directive in user_content
+    ) or None
 
     return PromptRenderResult(
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_content},
-        ],
+        messages=messages,
         tokens_before=tokens_before,
         tokens_after=tokens_after,
         tokens_saved=tokens_saved,
@@ -1837,7 +1856,9 @@ def _render_prompt_context_once(
         system_tokens=system_tokens,
         metadata={
             "prompt_allows_implied_send": prompt_allows_implied_send,
-            "prompt_render_signature": _prompt_render_signature_from_failover_configs(
+            "prompt_message_transform_applied": messages != original_messages,
+            "source_reconciliation_directive": source_reconciliation_directive,
+            "prompt_render_signature": _prompt_render_settings_from_failover_configs(
                 prompt_failover_configs
             ),
             "prompt_routing_range": _prompt_routing_range_from_failover_configs(
@@ -1952,7 +1973,7 @@ def _stabilize_prompt_render(
             routing_profile=routing_profile,
             prefer_low_latency=prefer_low_latency,
         )
-        if _prompt_render_signature_from_failover_configs(resolved) == result.metadata["prompt_render_signature"]:
+        if _prompt_render_settings_from_failover_configs(resolved) == result.metadata["prompt_render_signature"]:
             return result, resolved, render_count
         configs = resolved
 
@@ -1961,7 +1982,7 @@ def _stabilize_prompt_render(
         " preview" if preview else "",
         agent.id,
     )
-    if _prompt_render_signature_from_failover_configs(configs) != result.metadata["prompt_render_signature"]:
+    if _prompt_render_settings_from_failover_configs(configs) != result.metadata["prompt_render_signature"]:
         result = _render_prompt_context_once(
             agent,
             prompt_failover_configs=configs,
@@ -1988,6 +2009,7 @@ def build_prompt_context(
     system_directive_block: str = "",
     routing_token_seed: Optional[int] = None,
     run_cache: PromptRunCache | None = None,
+    prompt_message_transform: Callable[[List[dict]], List[dict]] | None = None,
 ) -> tuple[List[dict], int, Optional[UUID]] | tuple[List[dict], int, Optional[UUID], dict[str, Any]]:
     """
     Return a system + user message for the LLM using promptree for token budget management.
@@ -2005,6 +2027,7 @@ def build_prompt_context(
         prefer_low_latency: Optional low-latency routing hint used to match the
             prompt against the same failover set the completion call will use.
         include_metadata: When true, include prompt capability metadata in the return value.
+        prompt_message_transform: Optional final shaping applied before routing metrics and archival.
 
     Returns:
         Tuple of (messages, fitted_token_count, prompt_archive_id) where
@@ -2038,6 +2061,7 @@ def build_prompt_context(
             routing_profile=routing_profile,
             system_directive_block=system_directive_block,
             run_cache=run_cache,
+            prompt_message_transform=prompt_message_transform,
         ),
     )
     render_result.metadata["prompt_failover_configs"] = list(prompt_failover_configs or [])
@@ -2319,13 +2343,6 @@ def _recent_contact_records_for_prompt(
     )
     ordered.sort(key=lambda record: record.relevance_at or "", reverse=True)
     return ordered[:CONTACT_PROMPT_SAMPLE_LIMIT]
-
-
-def _allowed_communication_channels(
-    agent_endpoints: Sequence[PersistentAgentCommsEndpoint],
-) -> list[str]:
-    channels = {endpoint.channel for endpoint in agent_endpoints if endpoint.channel}
-    return sorted(channels)
 
 
 def _build_contacts_block(
@@ -2700,7 +2717,7 @@ def _build_contacts_block(
     )
     
     # Explicitly list allowed communication channels
-    allowed_channels = _allowed_communication_channels(agent_eps)
+    allowed_channels = sorted({endpoint.channel for endpoint in agent_eps if endpoint.channel})
 
     if allowed_channels:
         contacts_group.section_text(
@@ -3226,35 +3243,6 @@ def _get_implied_send_context(
 
     return None
 
-def _get_web_chat_formatting_guidance() -> str:
-    """Return rich Markdown guidance for chat surfaces with full rendering support."""
-
-    return (
-        "Web chat and peer DMs:\n"
-        "Start with the answer/main finding. Address known recipients once around actions; avoid generic delivery logs and agent-name self-intros unless asked. "
-        "Use whitespace, not separators. Charts: paste create_chart result.inline; don't attach/read/rebuild."
-    )
-
-
-def _get_sms_formatting_guidance() -> str:
-    """Return plain-text guidance for SMS replies."""
-
-    return (
-        "SMS formatting (plain text, short):\n"
-        "No Markdown or HTML. Aim for one direct sentence and <=160 chars when practical."
-    )
-
-
-def _get_email_formatting_guidance() -> str:
-    """Return HTML formatting guidance for email replies."""
-
-    return (
-        "Email formatting (rich, expressive HTML):\n"
-        "Use body-only HTML, not Markdown. For reports/dashboards, avoid bare HTML: put inline style attrs on section headers, tables/cells, and key-value spans so important numbers, statuses, and value changes are visibly highlighted with color, badges, or icons. Do not leave report metrics/statuses in plain <ul>/<p> blocks; use styled tables, metric blocks, or badge-like spans. "
-        "For charts, copy <img> src from create_chart result.inline_html or returned $[/path]; never construct paths/download URLs."
-    )
-
-
 def _get_formatting_guidance() -> str:
     """Return shared formatting guidance for all delivery surfaces."""
 
@@ -3262,13 +3250,18 @@ def _get_formatting_guidance() -> str:
         "Formatting guidance:\n"
         "Use the matching surface; be direct and sourced.\n\n"
         "<web_chat>\n"
-        f"{_get_web_chat_formatting_guidance()}\n"
+        "Web chat and peer DMs:\n"
+        "Start with the answer/main finding. Address known recipients once around actions; avoid generic delivery logs and agent-name self-intros unless asked. "
+        "Use whitespace, not separators. Charts: paste create_chart result.inline; don't attach/read/rebuild.\n"
         "</web_chat>\n\n"
         "<email>\n"
-        f"{_get_email_formatting_guidance()}\n"
+        "Email formatting (rich, expressive HTML):\n"
+        "Use body-only HTML, not Markdown. For reports/dashboards, avoid bare HTML: put inline style attrs on section headers, tables/cells, and key-value spans so important numbers, statuses, and value changes are visibly highlighted with color, badges, or icons. Do not leave report metrics/statuses in plain <ul>/<p> blocks; use styled tables, metric blocks, or badge-like spans. "
+        "For charts, copy <img> src from create_chart result.inline_html or returned $[/path]; never construct paths/download URLs.\n"
         "</email>\n\n"
         "<sms>\n"
-        f"{_get_sms_formatting_guidance()}\n"
+        "SMS formatting (plain text, short):\n"
+        "No Markdown or HTML. Aim for one direct sentence and <=160 chars when practical.\n"
         "</sms>\n\n"
         "<fallback>\n"
         "If mixed/unknown, use actual delivery surface: web chat Markdown, email HTML, SMS plain text.\n"
@@ -3283,8 +3276,7 @@ def _get_reasoning_streak_prompt(reasoning_only_streak: int, *, implied_send_act
         return ""
 
     streak_label = "reply" if reasoning_only_streak == 1 else f"{reasoning_only_streak} consecutive replies"
-    # MAX_NO_TOOL_STREAK=1, so any no-tool response triggers auto-stop warning
-    urgency = "Auto-stop imminent! " if reasoning_only_streak >= 1 else ""
+    urgency = "Auto-stop imminent! "
     if implied_send_active:
         patterns = (
             "(1) More work? Include a tool call, or end message with \"CONTINUE_WORK_SIGNAL\" (stripped) "
@@ -3331,7 +3323,7 @@ def _build_sqlite_retry_warning(
             if is_empty:
                 empty_counts[result_id] += 1
 
-    summary = summarize_sqlite_tool_result_sql(sql_values)
+    call_summaries = [summarize_sqlite_tool_result_sql([sql]) for sql in sql_values]
     if row_loop_rejections >= 2:
         return (
             "SQLite recovery: repeated singleton result queries were rejected. Do not retry that shape. Query all "
@@ -3339,9 +3331,8 @@ def _build_sqlite_retry_warning(
             "by stable key and query it; otherwise answer the shaped result. Refetch only if evidence is stale or missing."
         )
     inefficient_result_loop = (
-        summary.direct_result_text_fetches >= 2
-        or summary.duplicate_direct_fetches
-        or summary.single_tool_result_imports >= 2
+        sum(summary.direct_result_text_fetches > 0 for summary in call_summaries) >= 2
+        or sum(summary.single_tool_result_imports > 0 for summary in call_summaries) >= 2
     )
     if not result_id_counts:
         if inefficient_result_loop:
@@ -3377,15 +3368,6 @@ def _get_recent_sqlite_retry_warning(agent: PersistentAgent) -> str:
     return _build_sqlite_retry_warning(recent_calls)
 
 
-def _sqlite_sql_values(params: dict[str, Any] | None) -> list[str]:
-    if not isinstance(params, dict):
-        return []
-    value = params.get("sql") or params.get("queries") or params.get("query")
-    if isinstance(value, (list, tuple)):
-        return [str(item) for item in value if str(item or "").strip()]
-    return [str(value)] if value else []
-
-
 def _build_unreconciled_source_model_warning(
     recent_calls: Sequence[Tuple[str, dict[str, Any] | None, str]],
 ) -> str:
@@ -3402,7 +3384,7 @@ def _build_unreconciled_source_model_warning(
     for index, (tool_name, params, status) in enumerate(recent_calls):
         if status != "complete" or tool_name != "sqlite_batch":
             continue
-        sql_values = _sqlite_sql_values(params)
+        sql_values = _sql_values_from_params(params or {})
         sqlite_events.append((
             index,
             set(named_model_read_tables(sql_values)),
@@ -3417,25 +3399,23 @@ def _build_unreconciled_source_model_warning(
         if index > latest_source_index
         for table in targets
     }
-    relevant_targets = set(latest_mutation_by_table)
-    if read_tables:
-        relevant_targets.intersection_update(read_tables)
-    if relevant_targets and all(
+    if latest_mutation_by_table and all(
         any(
             (index > latest_mutation_by_table[table] and table in reads)
             or (index == latest_mutation_by_table[table] and table in reconciled)
             for index, reads, _mutations, reconciled in sqlite_events
         )
-        for table in relevant_targets
+        for table in latest_mutation_by_table
     ):
         return ""
 
     if not read_tables and not latest_mutation_by_table:
         return ""
     return (
-        "Fresh source evidence from this work cycle is not yet reconciled with the named model you read. If it belongs "
-        "to that domain and is newer, upsert all changed/provenance fields by stable key from __tool_results, add relations, then answer "
-        "from a post-update query. If it is unrelated or no relevant model exists, answer the source directly. Do not refetch."
+        "Fresh source evidence is not reconciled with the named model you read. If it belongs there, the next SQLite "
+        "call must use INSERT ... SELECT or UPDATE ... FROM __tool_results/json_each. Every sourced field, including IDs, "
+        "names, dates, and URLs, must be extracted; only JSON paths and current result_id/tool_name may be literals. "
+        "Refresh mutable/provenance fields, add relations, and query the model in that batch. Otherwise answer it directly."
     )
 
 
@@ -3833,9 +3813,10 @@ def _get_system_instruction(
         "\n\n"
         f"{continuation_mode_block}"
         "## CRITICAL: Tool Call Format — READ THIS FIRST\n\n"
-        "**Use the API's native `tool_calls` field.** Tool calls are separate API fields, not message text.\n"
-        "NEVER write XML (`<function_calls>`, `<invoke>`, `<parameter>`) or text-call syntax (`sqlite_batch(sql=\"...\")`, `http_request(url=\"...\")`) in content; those are ignored and may be sent literally to the user.\n"
-        "Tool arguments are JSON objects with exact schema keys, e.g. `{\"sql\": \"SELECT * FROM table\", \"will_continue_work\": true}`. Never invent keys with punctuation such as `will_continue_work=` or put tool syntax in send-message bodies.\n\n"
+        "Use native `tool_calls`, never XML/text-call syntax. With work calls, content must be empty; only explicit "
+        "send_* calls deliver required updates/finals. Arguments are JSON objects with exact schema keys, e.g. "
+        "`{\"sql\": \"SELECT * FROM table\", \"will_continue_work\": true}`; no keys like `will_continue_work=` "
+        "or tool syntax in send bodies.\n\n"
         "Language policy:\n"
         "- Default to English; switch only if the user asks or starts in another language. Summarize/translate tool output as needed.\n\n"
 
@@ -3848,8 +3829,9 @@ def _get_system_instruction(
         "\n\n"
         "## Durable Config (CRITICAL)\n\n"
 
-        "Direct behavior/output corrections are durable unless explicitly one-response. Before replying, use one sqlite_batch patch_text UPDATE on the smallest exact charter phrase; preserve every unrelated word/setting verbatim, never wait for 'update your charter', and never mention the patch. "
-        "Otherwise mutate config only for durable role, scope, preferences, monitoring, recurrence, or memory; never save transient facts, completed work, or guesses.\n\n"
+        "Scope veto: finite task/batch/day/run/project/renewal/deal/case feedback is temporary. If it gives no separate task, only acknowledge briefly; do not research or change config. In mixed feedback, scope carries forward until another marker; persist only lasting clauses. Otherwise authorized behavior feedback is lasting: before any reply, first call sqlite_batch with one patch_text UPDATE of the related clause. "
+        "Replace conflicts/softened absolutes; preserve unrelated text; append only if no related clause; don't reread/ask. "
+        "Confirm naturally; invite correction if unsure; never mention internals or save transient facts/results/guesses.\n\n"
 
         f"{schedule_updates_guidance}"
 
@@ -3886,7 +3868,7 @@ def _get_system_instruction(
         "Do not invent work, results, preferences, or personal experiences.\n\n"
 
         "## Output Rules\n\n"
-        "Keep chat/outreach light. Owner reports on 4+ peers need resolved/total and one table with requested fields. For finite sets, grouped discovery isn't coverage: resolve/source each requested field. Label blockers partial; separate sourced unavailability from research gaps. Ground facts, numbers, units, and URLs in tool results; never relabel/convert units unless asked. Present requested data directly; omit unrelated/unavailable fields and follow-up offers after simple facts, prices, statuses, or lookups. "
+        "Keep chat/outreach light. For finite sets, grouped discovery isn't coverage: resolve/source each requested field. Label blockers partial; separate sourced unavailability from research gaps. An owner report on 4+ items is unfinished without `Covered N/N` and every item/requested field in one channel-appropriate table. Ground facts, numbers, units, and URLs in tool results; never relabel/convert units unless asked. Present requested data directly; omit unrelated/unavailable fields and follow-up offers after simple facts, prices, statuses, or lookups. "
         "Charts: create only when requested/materially useful. "
         "Paste create_chart result.inline/result.inline_html in the message; do not attach/read charts or invent paths, hashes, image tags, or <img> URLs. "
         "Use create_csv for tabular exports, create_pdf for PDFs, and create_file for other text/doc formats; create_file query mode must return exactly one row and one column.\n\n"
@@ -3897,8 +3879,8 @@ def _get_system_instruction(
         "Do not download or upload files unless absolutely necessary or explicitly requested by the user. "
 
         "## Tool Rules\n\n```\nopaque identifiers -> copy exposed tool names and supplied endpoints/paths/IDs/placeholders character-for-character; never shorten or normalize\n"
-        "small result -> answer; exact URL -> requested tool; build/create custom tool -> create_custom_tool first; supplied URLs -> opaque runtime inputs, no prefetch/inspect/browser\n"
-        "public exact URL + http/scrape tool callable -> http_request or scrape directly; spawn_web_task only after access/render/login blockage\n"
+        "unrelated small result -> answer; build/create custom tool -> create_custom_tool first; supplied URLs -> opaque runtime inputs, no prefetch/inspect/browser\n"
+        "named model + explicit fresh source/URL -> http_request only, no text/send/plan; WAIT; next completion exactly one reconcile+SELECT sqlite_batch; then report\n"
         "exact docs/blog/changelog/release-notes URL -> scrape_as_markdown or http_request first; never spawn_web_task first just because it is a webpage or app URL\n"
         "explicit SQLite/database request and sqlite_batch is callable -> use sqlite_batch directly; do not search for a SQLite/database tool\n"
         "recurring setup with URL -> sqlite_batch charter+schedule first; no URL search/read/fetch unless asked to run now\n"
@@ -3906,7 +3888,7 @@ def _get_system_instruction(
         "localhost/private/rendered/login page -> spawn_web_task (or retry with it after scrape/http cannot access)\n"
         "webpage screenshot/visual capture/PDF/rendered artifact -> spawn_web_task\n"
         "provided filespace path -> pass directly to the requested tool; read_file only when contents are needed, never for http(s) URLs\n"
-        "data/api/feed/file URL -> http_request (PDF may need read_file; browser only if blocked or rendered/login needed)\n"
+        "data/api/feed/file URL -> http_request; if it belongs to a named model, reconcile+SELECT there before use; PDF may need read_file; spawn_web_task only after access/render/login blockage\n"
         "HTML page to read -> scrape_as_markdown or structured extractor; known platforms/social -> structured extractor first\n"
         "local reviews/maps lead screen -> structured Maps/reviews tool directly; omitted city -> representative market/broad query, not human input\n"
         "weather geocoding -> forecast/current API before replying\n"
@@ -3914,7 +3896,7 @@ def _get_system_instruction(
         "create/launch/deploy/manage agent, specialist-agent, or entire research/analyst/scout team -> only search_tools('meta gobii control plane') first; never batch with update_plan/research/config\n"
         "discovery hint -> search_tools(exact query); enabled tool fits -> use directly; no fit or task evolved -> search_tools(domain)\n"
         "interactive/login/JS-only -> spawn_web_task; if active_browser_tasks >= 3 -> sleep_until_next_trigger\n"
-        "store/query data only when reuse, joins, filtering, chart input, aggregation, or size makes direct reading unreliable\n"
+        "store/query ad hoc data only when reuse, joins, filtering, chart input, aggregation, or size makes direct reading unreliable\n"
         "same URLs/items returned twice -> no new evidence; report result/shortfall, stop; no query variants\n"
         "```\n"
 
@@ -3932,7 +3914,7 @@ def _get_system_instruction(
         f"{_get_formatting_guidance()}\n\n"
 
         "The fetch→report rhythm: fetch data, then deliver it to the user. "
-        "If the latest tool result is a small JSON, CSV, text, scrape, or API payload that contains the answer, answer from it directly. "
+        "If the latest tool result is an unrelated small JSON, CSV, text, scrape, or API payload that contains the answer, answer from it directly. "
         "Do not use sqlite_batch to reread __tool_results, create a temporary table, or parse a small result unless you need SQL for real filtering, joining, aggregation, or chart input. "
         "Show requested detail, summarize overflow, and for multi-step research investigate only leads needed to satisfy the stated scope.\n\n"
 
@@ -3944,17 +3926,16 @@ def _get_system_instruction(
         "config first. Never send 'I'll save/update it' with will_continue_work=false; do it first.\n\n"
         f"{LINK_REFERENCE_PROMPT_NOTE}\n\n"
         "## Bounded Current Research (CRITICAL)\n\n"
-        "For one-off latest/current company/batch/funding/pricing/product/news/status asks except finite sets: use bounded research mode. Do one focused search or structured lookup; scrape 1-3 top sources if snippets are insufficient; then send one answer with takeaways and cite at least two distinct source URLs compactly. After one result set plus 1-2 strong pages, final answer is next, not another query. Use at most one web search query unless empty/contradictory. Do not run alternate query variants, call update_plan, send progress-only messages, create files/charts, build SQLite, or keep searching once sources can answer. Escalate only for explicit deep/exhaustive work, market maps, exports, list-all, outreach, monitoring, or scope that truly needs it.\n\n"
+        "For one-off latest/current company/batch/funding/pricing/product/news/status asks except finite sets: use bounded research mode. Do one focused search or structured lookup; scrape 1-3 top sources if snippets are insufficient; then send one answer with takeaways and cite at least two distinct source URLs compactly. After one result set plus 1-2 strong pages, final answer is next, not another query. Use at most one web search query unless empty/contradictory. Do not run alternate query variants, call update_plan, send progress-only messages, create files/charts, build an ad hoc SQLite model, or keep searching once sources can answer. Escalate only for explicit deep/exhaustive work, market maps, exports, list-all, outreach, monitoring, or scope that truly needs it.\n\n"
 
         "## Deep Research Source Budget (CRITICAL)\n\n"
-        "For explicit deep/exhaustive research and finite-set coverage, do not finalize from search results: after discovery, scrape/open at least 4 promising URLs (or every useful URL if fewer), then synthesize. Snippets are leads, not sources. Start with one broad search, two if it misses an angle. For named sets, batch gaps, follow up misses, and reconcile coverage; never repeat a successful URL/query. If sources support the memo, final next with linked evidence; keep chat deep memos under about 5,000 chars unless asked otherwise.\n\n"
+        "For explicit deep/exhaustive research and finite-set coverage, do not finalize from search results: after discovery, scrape/open at least 4 promising URLs (or every useful URL if fewer), then synthesize. A structured source already containing every requested field needs no item refetch. Snippets are leads, not sources. Start with one broad search, two if it misses an angle. For named sets, batch gaps, follow up misses, and reconcile coverage; never repeat a successful URL/query. Send a kickoff only for genuinely substantial/long-running work, not a small finite set. If sources support the memo, final next with linked evidence; keep chat deep memos under about 5,000 chars unless asked otherwise.\n\n"
 
         "## Configuration Discipline (CRITICAL)\n\n"
         "Finished answers/briefings/charts/lookups/one-off research are not charter changes; never store transient facts, results, or guesses in __agent_config. "
         "Do not set a schedule merely to continue or remember a single research question; schedule only user-requested recurrence. "
         "Keep cadence unless changed. Set future recurring work once and stop; do not run it unless asked. "
-        "If a future job will email/text and the user says not to send now, do not request contact permission during setup; record recipient/permission needs in charter and request permission only when a send is due. "
-        "Keep explicitly one-off preferences like 'stand by' in the current conversation; otherwise treat corrections as durable.\n\n"
+        "If a future job will email/text and the user says not to send now, do not request contact permission during setup; record recipient/permission needs in charter and request permission only when a send is due.\n\n"
 
         "## Plan Discipline (CRITICAL)\n\n"
         "Use `update_plan` only for substantial multi-step work where a visible plan helps. "
@@ -4441,7 +4422,8 @@ def _get_unified_history_prompt(
     config_authority: _ConfigAuthorityResolver,
     *,
     run_cache: PromptRunCache | None = None,
-) -> Tuple[Set[str], bool]:
+    named_model_tables: Set[str] | None = None,
+) -> Tuple[Set[str], bool, Tuple[str, ...]]:
     """Add summaries + interleaved recent steps & messages to the provided promptree group."""
     epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
     unified_limit, unified_hysteresis = _get_unified_history_limits(agent)
@@ -4524,8 +4506,6 @@ def _get_unified_history_prompt(
         .prefetch_related("attachments__filespace_node")
         .order_by("-timestamp")[:unified_fetch_span]
     )
-
-    # Collect structured events with their components grouped together
     structured_events: List[Tuple[datetime, str, dict]] = []  # (timestamp, event_type, components)
 
     step_candidates: List[PersistentAgentStep] = []
@@ -4555,6 +4535,8 @@ def _get_unified_history_prompt(
                 "step_id",
                 "result",
                 "tool_name",
+                "tool_params",
+                "status",
                 "step__completion_id",
                 "parent_tool_call_id",
                 "parent_tool_call__tool_name",
@@ -4562,6 +4544,7 @@ def _get_unified_history_prompt(
         )
         tool_call_parent_ids: Dict[str, str] = {}
         tool_call_parent_names: Dict[str, str] = {}
+        source_reconciliations = []
         for row in tool_call_results:
             step_id = str(row["step_id"])
             step = step_lookup.get(step_id)
@@ -4584,6 +4567,10 @@ def _get_unified_history_prompt(
                 parent_tool_name = row.get("parent_tool_call__tool_name") or ""
                 if parent_tool_name:
                     tool_call_parent_names[step_id] = str(parent_tool_name)
+            if row.get("tool_name") == "sqlite_batch" and str(row.get("status") or "").casefold() == "complete" and _tool_result_status_is_ok(result_text):
+                sql_values = _sql_values_from_params(row.get("tool_params") or {})
+                if set(source_derived_model_reconciled_tables(sql_values)).intersection(named_model_tables or ()):
+                    source_reconciliations.append((step.created_at, "\n".join(sql_values)))
             tool_call_records.append(
                 ToolCallResultRecord(
                     step_id=step_id,
@@ -4625,6 +4612,36 @@ def _get_unified_history_prompt(
                 }
             else:
                 fresh_tool_call_step_ids = {newest_record.step_id}
+            if named_model_tables:
+                short_ids = build_short_result_id_map([record.step_id for record in tool_call_records])
+                model_entities = {entity_name_stem(table) for table in named_model_tables}
+
+                def source_is_reconciled(record):
+                    result_id = short_ids.get(record.step_id, record.step_id)
+                    all_entities, keyed_entities = source_array_entity_groups(record.result_text, record.tool_name)
+                    matching_entities = all_entities.intersection(model_entities)
+                    if not matching_entities:
+                        return True
+                    required_entities = matching_entities | keyed_entities
+                    reconciled_entities = set()
+                    for reconciled_at, sql in source_reconciliations:
+                        if reconciled_at <= record.created_at:
+                            continue
+                        id_filter = re.search(r"\bresult_id\b\s*(?:=|\bIN\b)", sql, re.IGNORECASE)
+                        tool_filter = re.search(r"\btool_name\b\s*(?:=|\bIN\b)", sql, re.IGNORECASE)
+                        id_match = not id_filter or any(value in sql for value in (result_id, record.step_id))
+                        tool_match = not tool_filter or record.tool_name in sql
+                        if id_match and tool_match:
+                            reconciled_entities.update(
+                                entity_name_stem(table)
+                                for table in source_derived_model_reconciled_tables([sql])
+                            )
+                    return bool(required_entities) and required_entities.issubset(reconciled_entities)
+
+                fresh_tool_call_step_ids.update(
+                    record.step_id for record in tool_call_records
+                    if is_source_bearing_tool(record.tool_name) and not source_is_reconciled(record)
+                )
 
             # Build recency position map: most recent = 0, then 1, 2, etc.
             ordered_records = sorted(tool_call_records, key=lambda r: r.created_at, reverse=True)
@@ -4659,9 +4676,9 @@ def _get_unified_history_prompt(
             create=is_source_bearing_tool(record.tool_name),
         ),
         paired_url_step_ids=paired_url_step_ids,
+        named_model_tables=named_model_tables,
     )
 
-    # format steps (group meta/params/result components together)
     for s in steps:
         try:
             system_step = getattr(s, "system_step", None)
@@ -4692,8 +4709,6 @@ def _get_unified_history_prompt(
                 if result_info.preview_text:
                     key = "result" if result_info.is_inline else "result_preview"
                     components[key] = result_info.preview_text
-                if result_info.schema_text:
-                    components["result_schema"] = result_info.schema_text
 
             structured_events.append((s.created_at, "tool_call", components))
         except ObjectDoesNotExist:
@@ -4741,7 +4756,6 @@ def _get_unified_history_prompt(
                 return f"{address} - {display_name}"
         return address
 
-    # format messages
     for m in messages:
         if not m.from_endpoint:
             # Skip malformed records defensively
@@ -4979,7 +4993,6 @@ def _get_unified_history_prompt(
             "prompt": 1,      # Browser task/user prompt context; useful but repeatable
             "result": 1,      # Payload body; can be shrunk to protect model limits.
             "result_meta": 2, # Medium priority - supports tool result lookup
-            "result_schema": 1, # Query/shape hint from tool_results.py; keep intact.
             "result_preview": 1, # Payload preview; can be shrunk to protect model limits.
             "result_summary": 1, # Low priority - browser task prose summary
             "files": 3,       # High priority - direct filespace paths for follow-up actions
@@ -5038,7 +5051,12 @@ def _get_unified_history_prompt(
                     non_shrinkable=non_shrinkable,
                 )
 
-    return fresh_tool_call_step_ids, has_link_references
+    source_reconciliation_directives = tuple(
+        info.source_reconciliation_directive
+        for info in tool_result_prompt_info.values()
+        if info.source_reconciliation_directive
+    )
+    return fresh_tool_call_step_ids, has_link_references, source_reconciliation_directives
 
 
 def get_agent_tools(agent: PersistentAgent = None) -> List[dict]:

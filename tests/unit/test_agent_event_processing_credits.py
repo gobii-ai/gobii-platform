@@ -89,6 +89,7 @@ class CreditMessageOnlyModeTests(TestCase):
     def test_restricted_tool_filter_keeps_only_message_and_sleep_tools(self):
         tools = [
             {"type": "function", "function": {"name": "send_email"}},
+            {"type": "function", "function": {"name": "send_discord_message"}},
             {"type": "function", "function": {"name": "sleep_until_next_trigger"}},
             {"type": "function", "function": {"name": "sqlite_query"}},
         ]
@@ -97,7 +98,7 @@ class CreditMessageOnlyModeTests(TestCase):
 
         self.assertEqual(
             [tool["function"]["name"] for tool in filtered],
-            ["send_email", "sleep_until_next_trigger"],
+            ["send_email", "send_discord_message", "sleep_until_next_trigger"],
         )
 
 
