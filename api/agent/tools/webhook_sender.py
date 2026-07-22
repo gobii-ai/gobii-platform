@@ -1,9 +1,4 @@
-"""
-Webhook sender tool for persistent agents.
-
-Provides a tool definition and execution helper that lets agents trigger
-pre-configured outbound webhooks with structured JSON payloads.
-"""
+"""Send structured events to persistent-agent outbound webhooks."""
 
 import logging
 from typing import Any, Dict, Iterable
@@ -23,6 +18,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_TIMEOUT_SECONDS = 15
 USER_AGENT = "Gobii-AgentWebhook/1.0"
 SEND_WEBHOOK_EVENT_TOOL_NAME = "send_webhook_event"
+MIN_REDACTION_LENGTH = 4
 
 
 def _redact_webhook_url(value: str | None, webhook: PersistentAgentWebhook) -> str | None:
@@ -34,15 +30,12 @@ def _redact_webhook_url(value: str | None, webhook: PersistentAgentWebhook) -> s
     if parsed.query:
         path_and_query = f"{path_and_query}?{parsed.query}"
     candidates = {webhook.url, unquote(webhook.url)}
-    if len(path_and_query) >= 4:
+    if len(path_and_query) >= MIN_REDACTION_LENGTH:
         candidates.update({path_and_query, unquote(path_and_query)})
-    for _key, query_value in parse_qsl(parsed.query, keep_blank_values=False):
-        if len(query_value) >= 4:
-            candidates.add(query_value)
-    if parsed.username and len(parsed.username) >= 4:
-        candidates.add(parsed.username)
-    if parsed.password and len(parsed.password) >= 4:
-        candidates.add(parsed.password)
+    # Short substrings would over-redact ordinary error text.
+    sensitive_parts = [parsed.hostname, parsed.username, parsed.password]
+    sensitive_parts.extend(value for _key, value in parse_qsl(parsed.query, keep_blank_values=False))
+    candidates.update(part for part in sensitive_parts if part and len(part) >= MIN_REDACTION_LENGTH)
     for candidate in sorted((item for item in candidates if item), key=len, reverse=True):
         redacted = redacted.replace(candidate, "[webhook URL redacted]")
     return redacted
@@ -93,15 +86,11 @@ def _coerce_headers(raw_headers: Any) -> Dict[str, str]:
     """Return a sanitized headers dictionary."""
     if not isinstance(raw_headers, dict):
         return {}
-
-    safe_headers: Dict[str, str] = {}
-    for key, value in raw_headers.items():
-        if not isinstance(key, str):
-            continue
-        if not isinstance(value, str):
-            continue
-        safe_headers[key.strip()] = value
-    return safe_headers
+    return {
+        key.strip(): value
+        for key, value in raw_headers.items()
+        if isinstance(key, str) and isinstance(value, str)
+    }
 
 
 def _track_webhook_attempt(
@@ -202,15 +191,14 @@ def execute_send_webhook_event(agent: PersistentAgent, params: Dict[str, Any]) -
     webhook_id = params.get("webhook_id")
     payload = params.get("payload")
     headers = _coerce_headers(params.get("headers"))
-    will_continue_work_raw = params.get("will_continue_work", None)
-    if will_continue_work_raw is None:
-        will_continue_work = None
-    elif isinstance(will_continue_work_raw, bool):
-        will_continue_work = will_continue_work_raw
-    elif isinstance(will_continue_work_raw, str):
-        will_continue_work = will_continue_work_raw.lower() == "true"
-    else:
-        will_continue_work = None
+    will_continue_work_raw = params.get("will_continue_work")
+    will_continue_work = (
+        will_continue_work_raw
+        if isinstance(will_continue_work_raw, bool)
+        else will_continue_work_raw.lower() == "true"
+        if isinstance(will_continue_work_raw, str)
+        else None
+    )
 
     if not webhook_id or not isinstance(webhook_id, str):
         return {"status": "error", "message": "Missing or invalid webhook_id parameter."}
@@ -222,10 +210,7 @@ def execute_send_webhook_event(agent: PersistentAgent, params: Dict[str, Any]) -
 
     try:
         webhook = agent.webhooks.get(id=webhook_id)
-    except (ValidationError, ValueError):
-        logger.warning("Agent %s supplied invalid webhook id %s", agent.id, webhook_id)
-        return {"status": "error", "message": "Webhook not found for this agent."}
-    except PersistentAgentWebhook.DoesNotExist:
+    except (PersistentAgentWebhook.DoesNotExist, ValidationError, ValueError):
         logger.warning("Agent %s attempted to call unknown webhook %s", agent.id, webhook_id)
         return {"status": "error", "message": "Webhook not found for this agent."}
 
@@ -240,21 +225,24 @@ def execute_send_webhook_event(agent: PersistentAgent, params: Dict[str, Any]) -
         payload_keys,
     )
 
+    def record(result: str, status_code: int | None, error_message: str | None) -> None:
+        _record_delivery_attempt(
+            agent,
+            webhook,
+            result=result,
+            status_code=status_code,
+            error_message=error_message,
+            payload_keys=payload_keys,
+            custom_header_count=custom_header_count,
+        )
+
     proxies, proxy_error = select_proxies_for_webhook(
         agent,
         select_proxy_for_persistent_agent,
         log_context=f"agent {agent.id}",
     )
     if proxy_error:
-        _record_delivery_attempt(
-            agent,
-            webhook,
-            result="proxy_unavailable",
-            status_code=None,
-            error_message=proxy_error,
-            payload_keys=payload_keys,
-            custom_header_count=custom_header_count,
-        )
+        record("proxy_unavailable", None, proxy_error)
         return _build_webhook_response(
             status="error",
             webhook=webhook,
@@ -280,15 +268,7 @@ def execute_send_webhook_event(agent: PersistentAgent, params: Dict[str, Any]) -
             webhook.id,
             error_message,
         )
-        _record_delivery_attempt(
-            agent,
-            webhook,
-            result="request_error",
-            status_code=None,
-            error_message=error_message,
-            payload_keys=payload_keys,
-            custom_header_count=custom_header_count,
-        )
+        record("request_error", None, error_message)
         return _build_webhook_response(
             status="error",
             webhook=webhook,
@@ -296,15 +276,7 @@ def execute_send_webhook_event(agent: PersistentAgent, params: Dict[str, Any]) -
         )
 
     if 200 <= status_code < 300:
-        _record_delivery_attempt(
-            agent,
-            webhook,
-            result="success",
-            status_code=status_code,
-            error_message=None,
-            payload_keys=payload_keys,
-            custom_header_count=custom_header_count,
-        )
+        record("success", status_code, None)
         response = _build_webhook_response(
             status="success",
             webhook=webhook,
@@ -316,15 +288,7 @@ def execute_send_webhook_event(agent: PersistentAgent, params: Dict[str, Any]) -
             response["auto_sleep_ok"] = True
         return response
 
-    _record_delivery_attempt(
-        agent,
-        webhook,
-        result="http_error",
-        status_code=status_code,
-        error_message=response_preview,
-        payload_keys=payload_keys,
-        custom_header_count=custom_header_count,
-    )
+    record("http_error", status_code, response_preview)
     return _build_webhook_response(
         status="error",
         webhook=webhook,

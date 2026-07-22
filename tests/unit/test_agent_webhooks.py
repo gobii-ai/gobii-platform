@@ -32,6 +32,7 @@ from api.models import (
     PersistentAgentInboundWebhook,
     PersistentAgentMessage,
     PersistentAgentEnabledTool,
+    PersistentAgentSystemSkillState,
     PersistentAgentWebhook,
     ProxyServer,
 )
@@ -160,6 +161,21 @@ class AgentWebhookToolTests(TestCase):
                 self.webhook.url,
                 json.dumps(mock_track_event.call_args.kwargs["properties"]),
             )
+
+    @tag("batch_agent_webhooks")
+    def test_execute_send_webhook_event_redacts_hostname_from_connection_error(self):
+        self.webhook.url = "https://private-hooks.example.com/events"
+        self.webhook.save(update_fields=["url", "updated_at"])
+        error = "Failed to resolve 'private-hooks.example.com'"
+        with patch("api.agent.tools.webhook_sender.requests.post", side_effect=RequestException(error)):
+            result = execute_send_webhook_event(
+                self.agent,
+                {"webhook_id": str(self.webhook.id), "payload": {"value": 1}},
+            )
+
+        self.webhook.refresh_from_db()
+        self.assertNotIn("private-hooks.example.com", result["message"])
+        self.assertNotIn("private-hooks.example.com", self.webhook.last_error_message)
 
     @tag("batch_agent_webhooks")
     def test_execute_send_webhook_event_requires_proxy(self):
@@ -545,6 +561,39 @@ class AgentWebhookManagementToolTests(TestCase):
         self.assertEqual(inbound_result["status"], "success")
         self.assertEqual(outbound_result["status"], "success")
         self.assertIn("Webhook not found", send_result["message"])
+
+    def test_existing_webhook_lazily_enables_skill_unless_previously_disabled(self):
+        webhook_tools = {
+            "manage_inbound_webhooks",
+            "manage_outbound_webhooks",
+            "send_webhook_event",
+        }
+        PersistentAgentWebhook.objects.create(
+            agent=self.agent,
+            name="Legacy destination",
+            url="https://example.com/legacy",
+        )
+
+        prompt = format_recent_skills_for_prompt(self.agent)
+
+        self.assertIn("System Skill: Webhooks", prompt)
+        self.assertEqual(
+            set(
+                PersistentAgentEnabledTool.objects.filter(agent=self.agent).values_list(
+                    "tool_full_name", flat=True
+                )
+            ),
+            webhook_tools,
+        )
+
+        PersistentAgentSystemSkillState.objects.filter(
+            agent=self.agent,
+            skill_key=WEBHOOKS_SYSTEM_SKILL_KEY,
+        ).update(is_enabled=False)
+        PersistentAgentEnabledTool.objects.filter(agent=self.agent).delete()
+
+        self.assertNotIn("System Skill: Webhooks", format_recent_skills_for_prompt(self.agent))
+        self.assertFalse(PersistentAgentEnabledTool.objects.filter(agent=self.agent).exists())
 
     def test_webhook_tools_are_unavailable_in_planning_mode(self):
         webhook_tools = {

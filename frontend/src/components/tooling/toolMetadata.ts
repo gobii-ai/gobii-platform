@@ -998,33 +998,6 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
     iconBgClass: 'bg-violet-100',
     iconColorClass: 'text-violet-600',
     detailKind: 'default',
-    derive(entry, parameters) {
-      const inbound = entry.toolName !== 'manage_outbound_webhooks'
-      const direction = inbound ? 'Inbound' : 'Outbound'
-      const action = coerceString(parameters?.['action'])
-      const resultData = parseResultObject(entry.result)
-      const webhook = resultData?.['webhook']
-      const deletedWebhook = resultData?.['deleted_webhook']
-      const webhookData =
-        webhook && typeof webhook === 'object' && !Array.isArray(webhook)
-          ? webhook as Record<string, unknown>
-          : deletedWebhook && typeof deletedWebhook === 'object' && !Array.isArray(deletedWebhook)
-            ? deletedWebhook as Record<string, unknown>
-            : null
-      const name = coerceString(webhookData?.['name']) || coerceString(parameters?.['name'])
-      const actionLabel = action === 'list'
-        ? `${direction} webhooks listed`
-        : action === 'rotate_secret'
-          ? `${direction} webhook secret rotated`
-          : `${direction} webhook ${action === 'get' ? 'inspected' : action ? `${action}d` : 'managed'}`
-      return {
-        label: `${direction} webhook managed`,
-        iconBgClass: inbound ? 'bg-violet-100' : 'bg-cyan-100',
-        iconColorClass: inbound ? 'text-violet-600' : 'text-cyan-700',
-        caption: action ? actionLabel : entry.caption,
-        summary: name ? truncate(name, 96) : entry.summary ?? null,
-      }
-    },
   },
   {
     name: 'send_webhook_event',

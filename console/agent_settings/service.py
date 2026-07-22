@@ -2073,15 +2073,7 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
         return redirect(_agent_settings_app_path(agent))
 
     @staticmethod
-    def _webhook_action_response(
-        request,
-        redirect_response,
-        *,
-        ajax: bool,
-        success: bool,
-        message: str,
-        payload: dict[str, object] | None = None,
-    ):
+    def _webhook_action_response(request, redirect_response, *, ajax, success, message, payload=None):
         if ajax:
             body = {"success": success, "message" if success else "error": message}
             if success and payload:
@@ -2090,85 +2082,55 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
         (messages.success if success else messages.error)(request, message)
         return redirect_response
 
-    def _handle_inbound_webhook_action(self, request, agent: PersistentAgent, action: str, *, ajax: bool = False):
+    def _handle_webhook_management(self, request, agent, direction, action, *, ajax=False):
         redirect_response = redirect(_agent_settings_app_path(agent))
         normalized_action = (action or "").lower()
-        if normalized_action not in {"create", "update", "delete", "rotate_secret"}:
+        inbound = direction == "inbound"
+        allowed = {"create", "update", "delete", "rotate_secret"} if inbound else {"create", "update", "delete"}
+        if normalized_action not in allowed:
             return self._webhook_action_response(
                 request,
                 redirect_response,
                 ajax=ajax,
                 success=False,
-                message="Unsupported inbound webhook action.",
+                message=f"Unsupported {'inbound ' if inbound else ''}webhook action.",
             )
-
-        is_active_raw = request.POST.get("inbound_webhook_is_active")
+        prefix = "inbound_" if inbound else ""
+        values = {"webhook_id": request.POST.get(f"{prefix}webhook_id"),
+                  "name": request.POST.get(f"{prefix}webhook_name")}
+        if inbound:
+            is_active = request.POST.get("inbound_webhook_is_active")
+            values["is_active"] = True if is_active is None else is_active.lower() == "true"
+        else:
+            values["url"] = request.POST.get("webhook_url")
         try:
-            AgentWebhookService(
-                agent,
-                actor_user_id=request.user.id,
-                source=AnalyticsSource.WEB,
-            ).manage_inbound(
-                normalized_action,
-                webhook_id=request.POST.get("inbound_webhook_id"),
-                name=request.POST.get("inbound_webhook_name"),
-                is_active=True if is_active_raw is None else is_active_raw.lower() == "true",
+            AgentWebhookService(agent, actor_user_id=request.user.id, source=AnalyticsSource.WEB).manage(
+                direction, normalized_action, **values
             )
         except AgentWebhookError as exc:
             return self._webhook_action_response(
                 request, redirect_response, ajax=ajax, success=False, message=str(exc)
             )
-        message = {
-            "create": "Inbound webhook saved.",
-            "update": "Inbound webhook saved.",
-            "delete": "Inbound webhook removed.",
-            "rotate_secret": "Inbound webhook secret rotated.",
-        }[normalized_action]
+        if inbound:
+            message = {
+                "create": "Inbound webhook saved.",
+                "update": "Inbound webhook saved.",
+                "delete": "Inbound webhook removed.",
+                "rotate_secret": "Inbound webhook secret rotated.",
+            }[normalized_action]
+            payload = {"inboundWebhooks": self._build_inbound_webhooks_payload(request, agent)}
+        else:
+            message = "Webhook removed." if normalized_action == "delete" else f"Webhook {normalized_action}d."
+            payload = {"webhooks": self._build_webhooks_payload(agent)}
         return self._webhook_action_response(
-            request,
-            redirect_response,
-            ajax=ajax,
-            success=True,
-            message=message,
-            payload={"inboundWebhooks": self._build_inbound_webhooks_payload(request, agent)},
+            request, redirect_response, ajax=ajax, success=True, message=message, payload=payload
         )
 
-    def _handle_webhook_action(self, request, agent: PersistentAgent, action: str, *, ajax: bool = False):
-        redirect_response = redirect(_agent_settings_app_path(agent))
-        normalized_action = (action or "").lower()
-        if normalized_action not in {"create", "update", "delete"}:
-            return self._webhook_action_response(
-                request,
-                redirect_response,
-                ajax=ajax,
-                success=False,
-                message="Unsupported webhook action.",
-            )
+    def _handle_inbound_webhook_action(self, request, agent, action, *, ajax=False):
+        return self._handle_webhook_management(request, agent, "inbound", action, ajax=ajax)
 
-        try:
-            AgentWebhookService(
-                agent,
-                actor_user_id=request.user.id,
-                source=AnalyticsSource.WEB,
-            ).manage_outbound(
-                normalized_action,
-                webhook_id=request.POST.get("webhook_id"),
-                name=request.POST.get("webhook_name"),
-                url=request.POST.get("webhook_url"),
-            )
-        except AgentWebhookError as exc:
-            return self._webhook_action_response(
-                request, redirect_response, ajax=ajax, success=False, message=str(exc)
-            )
-        message = "Webhook removed." if normalized_action == "delete" else f"Webhook {normalized_action}d."
-        return self._webhook_action_response(
-            request,
-            redirect_response,
-            ajax=ajax,
-            success=True,
-            message=message,
-            payload={"webhooks": self._build_webhooks_payload(agent)},
-        )
+    def _handle_webhook_action(self, request, agent, action, *, ajax=False):
+        return self._handle_webhook_management(request, agent, "outbound", action, ajax=ajax)
 
     def _handle_mcp_server_update(self, request, agent: PersistentAgent, *, ajax: bool = False):
         redirect_response = redirect(_agent_settings_app_path(agent))
