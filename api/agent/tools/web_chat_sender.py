@@ -10,6 +10,7 @@ from django.utils import timezone
 
 from ..comms.message_service import _get_or_create_conversation, _ensure_participant
 from ..comms.message_reads import is_peer_dm_message
+from ..comms.outbound_content_policy import markdown_only_error
 from ..comms.routing import get_current_inbound_message, get_message_sender_address
 from ..files.attachment_helpers import AttachmentResolutionError, create_message_attachments, resolve_filespace_attachments
 from ..files.filespace_service import broadcast_message_attachment_update
@@ -297,6 +298,7 @@ def get_send_chat_tool() -> Dict[str, Any]:
                             "No dash punctuation or pre-work status for short/finite work. Owner report with 4+ items: "
                             "include `Covered N/N` and one requested-field "
                             "Markdown table; link exact entity names only with provided tokens. Keep other chat/outreach light. "
+                            "Use Markdown only; raw HTML is rejected. Use code formatting to show HTML literally."
                         ),
                     },
                     "to_address": {
@@ -332,6 +334,8 @@ def execute_send_chat_message(agent: PersistentAgent, params: Dict[str, Any]) ->
     body = substitute_variables_with_filespace(body, agent)
     if not body:
         return {"status": "error", "message": "Message body is required."}
+    if content_error := markdown_only_error(body, surface="Web chat"):
+        return content_error
     if _looks_like_placeholder_body(body):
         return {
             "status": "error",

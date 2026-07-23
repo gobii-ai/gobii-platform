@@ -7,6 +7,7 @@ from typing import Any, Dict
 from uuid import UUID
 
 from ..files.attachment_helpers import AttachmentResolutionError, resolve_filespace_attachments
+from ..comms.outbound_content_policy import markdown_only_error
 from .attachment_guidance import SEND_TOOL_ATTACHMENTS_DESCRIPTION
 from ..peer_comm import PeerMessagingDuplicateError, PeerMessagingError, PeerMessagingService
 from ...models import PersistentAgent, PersistentAgentMessage
@@ -93,7 +94,10 @@ def get_send_agent_message_tool() -> Dict[str, Any]:
                     },
                     "message": {
                         "type": "string",
-                        "description": "New information, question, or handoff the peer needs; never an acknowledgment-only reply.",
+                        "description": (
+                            "New information, question, or handoff the peer needs; never an acknowledgment-only reply. "
+                            "Use Markdown only; raw HTML is rejected. Use code formatting to show HTML literally."
+                        ),
                     },
                     "attachments": {
                         "type": "array",
@@ -126,6 +130,8 @@ def execute_send_agent_message(agent: PersistentAgent, params: Dict[str, Any]) -
         }
 
     message = substitute_variables_with_filespace(str(message), agent)
+    if content_error := markdown_only_error(message, surface="Peer messaging"):
+        return content_error
 
     try:
         peer_agent_uuid = UUID(str(peer_agent_id_raw))
