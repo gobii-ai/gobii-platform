@@ -44,16 +44,16 @@ TOOL_PAYLOAD_RE = re.compile(r"\b(?:result_json|result_text|analysis_json)\b", r
 URL_RE = re.compile(r"https?://[^\s'\",)]+", re.I)
 BULK_MANUAL_VALUES_ROW_LIMIT = 4
 BULK_COPY_MESSAGE = (
-    "Query not executed: a literal-row import copied from tool results is unreliable. Do not copy rows from visible "
-    "output; derive them from all relevant __tool_results rows in one INSERT ... SELECT/json_each query."
+    "This literal-row import copied visible tool output. Next time derive rows from all relevant __tool_results in "
+    "one INSERT ... SELECT/json_each query."
 )
 BLOB_LOOP_MESSAGE = (
-    "Query not executed: full result blobs were fetched one at a time. Combine prior outputs in one shaped query "
+    "Full result blobs were fetched one at a time. Next time combine prior outputs in one shaped query "
     "using tool_name or result_id IN (...), plus CTEs/json_extract/json_each as needed."
 )
 ROW_LOOP_MESSAGE = (
-    "Query not executed: do not read __tool_results or a staging table derived from it one result_id at a time. "
-    "A one-item IN (...) is still one-at-a-time. Do not retry that shape: use one shaped INSERT ... SELECT/json_each or "
+    "This read handled __tool_results or a derived staging table one result_id at a time. A one-item IN (...) is still "
+    "one-at-a-time. Next time use one shaped INSERT ... SELECT/json_each or "
     "query covering every relevant sibling via tool_name or a multi-item result_id IN (...)."
 )
 MANUAL_COPY_MESSAGE = (
@@ -65,9 +65,8 @@ SINGLE_IMPORT_MESSAGE = (
     "with one shaped query over tool_name or result_id IN (...)."
 )
 SOURCE_LITERAL_COPY_MESSAGE = (
-    "Query not executed: a source-derived model write used visible facts or URLs as SQL literals. Derive every "
-    "sourced field in the INSERT/UPDATE SELECT/json_each over all relevant __tool_results; only payload paths and "
-    "current result_id/tool_name may be literals. Use stable keys, refresh provenance, omit unavailable URLs, then "
+    "This model write copied visible source facts or URLs as SQL literals. Next time derive sourced fields in the "
+    "INSERT/UPDATE SELECT/json_each over all relevant __tool_results, use stable keys, refresh provenance, and then "
     "query the model."
 )
 GROUNDED_LITERAL_IMPORT_MESSAGE = (
@@ -215,12 +214,12 @@ def build_tool_result_query_advisories(
     ungrounded_copied_tables = copied_model_tables - grounded_literal_tables
     unkeyed_models = set(summary.unkeyed_explicit_table_names).intersection(summary.row_derived_working_table_names)
     if unkeyed_models:
-        advisories.append(_advisory("reusable_model_missing_identity", f"Query not executed: reusable table(s) {', '.join(sorted(unkeyed_models))} derive repeating tool-result rows without stable identity. Add PRIMARY KEY/UNIQUE to CREATE TABLE; use TEMP CTAS only for a disposable extract.", blocking=True))
+        advisories.append(_advisory("reusable_model_missing_identity", f"Reusable table(s) {', '.join(sorted(unkeyed_models))} derive repeating tool-result rows without stable identity. Add PRIMARY KEY/UNIQUE to CREATE TABLE; use TEMP CTAS only for a disposable extract."))
     if summary.tool_result_ctas:
         advisories.append(_advisory("tool_result_ctas", "CTAS has no stable identity. Use it only for a disposable extract; reusable models need explicit CREATE TABLE with PRIMARY KEY/UNIQUE, then aggregate INSERT."))
     if available_tool_result_rows < 2:
         if ungrounded_copied_tables:
-            advisories.append(_advisory("source_facts_copied_into_model", SOURCE_LITERAL_COPY_MESSAGE, blocking=True))
+            advisories.append(_advisory("source_facts_copied_into_model", SOURCE_LITERAL_COPY_MESSAGE))
         if grounded_literal_tables:
             advisories.append(_advisory("grounded_literal_model_import", GROUNDED_LITERAL_IMPORT_MESSAGE))
         return advisories
@@ -233,25 +232,28 @@ def build_tool_result_query_advisories(
         and len(copied_provenance_urls) >= 2
         and not all_manual_values_grounded
     ):
-        advisories.append(_advisory("bulk_manual_working_table_from_visible_results", BULK_COPY_MESSAGE, blocking=True))
+        advisories.append(_advisory("bulk_manual_working_table_from_visible_results", BULK_COPY_MESSAGE))
     elif summary.manual_values_working_tables:
         advisories.append(_advisory("manual_working_table_from_visible_results", MANUAL_COPY_MESSAGE))
     if summary.direct_result_text_fetches >= 2 or summary.duplicate_direct_fetches:
-        advisories.append(_advisory("tool_result_blob_fetch_loop", BLOB_LOOP_MESSAGE, blocking=True))
+        advisories.append(_advisory("tool_result_blob_fetch_loop", BLOB_LOOP_MESSAGE))
     elif summary.direct_result_text_fetches:
         advisories.append(_advisory("single_tool_result_blob_fetch", "This fetched one full result_text blob while multiple tool results are available. For multi-source synthesis, query the needed rows together; use substr(result_text,1,N) only for previews."))
     relation_import_tables = source_derived_model_mutation_tables(sql_values)
     relation_import_ids = tuple(match.group("eq") or match.group("in") for sql in sql_values for match in RESULT_ID_SINGLE_LITERAL_RE.finditer(sql))
     relation_import_batch = (
         len(relation_import_tables) == len(relation_import_ids) == summary.single_result_id_filters > 1
-        and len(set(relation_import_ids)) == 1
+        and (
+            len(set(relation_import_ids)) == 1
+            or len(set(relation_import_tables)) == len(relation_import_tables)
+        )
     )
     if summary.single_result_id_filters >= 2 and summary.direct_result_text_fetches < 2 and not relation_import_batch:
-        advisories.append(_advisory("tool_result_row_loop", ROW_LOOP_MESSAGE, blocking=True))
+        advisories.append(_advisory("tool_result_row_loop", ROW_LOOP_MESSAGE))
     elif summary.single_tool_result_imports and not relation_import_batch:
         advisories.append(_advisory("single_tool_result_import", SINGLE_IMPORT_MESSAGE))
     if ungrounded_copied_tables:
-        advisories.append(_advisory("source_facts_copied_into_model", SOURCE_LITERAL_COPY_MESSAGE, blocking=True))
+        advisories.append(_advisory("source_facts_copied_into_model", SOURCE_LITERAL_COPY_MESSAGE))
     if grounded_literal_tables:
         advisories.append(_advisory("grounded_literal_model_import", GROUNDED_LITERAL_IMPORT_MESSAGE))
     return advisories + model_advisories
@@ -353,8 +355,8 @@ def _tool_result_cte_names(statement: str) -> tuple[str, ...]:
     return tuple(names)
 
 
-def _advisory(code: str, message: str, *, blocking: bool = False) -> SimpleNamespace:
-    return SimpleNamespace(code=code, message=message, blocking=blocking)
+def _advisory(code: str, message: str) -> SimpleNamespace:
+    return SimpleNamespace(code=code, message=message)
 
 
 def _sql_values_from_params(params: dict) -> list[str]:

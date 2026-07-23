@@ -98,7 +98,6 @@ from ..tools.spawn_web_task import get_browser_daily_task_limit
 from ..tools.static_tools import get_static_tool_definitions
 from ..tools.sqlite_state import AGENT_CONFIG_TABLE, AGENT_SKILLS_TABLE, CONTACTS_TABLE, FILES_TABLE, get_sqlite_digest_prompt, get_sqlite_schema_prompt
 from ..tools.sqlite_query_quality import (
-    ROW_LOOP_MESSAGE,
     named_model_read_tables,
     source_derived_model_mutation_tables,
     source_derived_model_reconciled_tables,
@@ -143,8 +142,9 @@ LINK_REFERENCE_PROMPT_NOTE = (
     "Sources may pair `raw URL [link_ref: $[link:L…]]`: the raw URL is evidence; its adjacent token is only a "
     "display/fetch handle. Keep pairs attached. Final Markdown is exactly `[item]($[link:LEXACT])`; HTML uses "
     "`<a href=\"$[link:LEXACT]\">item</a>`; URL tools use `{\"url\":\"$[link:LEXACT]\"}`. The token is the whole "
-    "destination. Never encode, edit, reassign, combine, or guess it; never put it inside `[]`, SQL/state/search, or "
-    "replace it with a raw URL. Items without a token stay plain; source/feed tokens link only themselves. A report "
+    "destination. Never encode, edit, reassign, combine, or guess it; never put it inside `[]` or search text. "
+    "SQLite source rows derive raw URLs from __tool_results; for an unavoidable agent-authored URL value, pass the "
+    "exact handle through a named binding, never SQL text. Items without a token stay plain; source/feed tokens link only themselves. A report "
     "is unfinished while a token-backed entity name is plain: `Atlas URL [link_ref: $[link:L1]]` becomes "
     "`[Atlas]($[link:L1])`. Outreach links only if useful/requested. Cite beside the supported "
     "claim; a source name alone is not a citation. Before sending, the "
@@ -683,9 +683,10 @@ def _get_sqlite_guidance() -> str:
         "## SQLite Data\n\n"
         "Named tables are the world model; digest is partial. Use queried rows, not memory, for decisions. Current complete rows are truth; don't refetch them. "
         "Explicit fresh source: fetch once, then reconcile and SELECT the model in one SQLite batch. Otherwise read the model first and fetch only stale/missing facts. "
-        "Tool output doesn't update it. Source rows sharing a stable ID or its children belong there even when small: reconcile entities/relations, evolve schema, then query before acting/reporting. Only unrelated one-offs bypass it. "
+        "Tool output doesn't update it. During long or multi-source work, reconcile each useful source batch so tables become the checklist, intermediate state, and resume point. "
+        "Source rows sharing a stable ID or its children belong there even when small: reconcile entities/relations, evolve schema, then query before acting/reporting. Only unrelated one-offs bypass it. "
         "Use stable keys. Upserts refresh every mutable/provenance field; inspect identity after wrong row counts; query gaps before reporting. Only sourced blockers are unresolved. "
-        "Normalize children with PRIMARY KEY/UNIQUE + indexes; use SQLite for exact set logic/counts/ranking. "
+        "Normalize children with PRIMARY KEY/UNIQUE + indexes; use SQLite for exact set logic/counts/ranking. Bind messy agent-authored values with :name + bindings; source facts still derive from __tool_results. For fuzzy interpretation of unstructured text, bind one JSON array and expand it with json_each(:rows), retaining source result IDs/provenance. "
         "No sibling-by-sibling result/table/blob loops. Custom tools may write keyed models directly. CTAS is one-off; named tables persist, TEMP do not. Inspect unknown structure once. "
         "Locate payloads with analysis_json/top_keys; http_request JSON is result_json $.content. Prefer result_json for known paths, else result_text.\n\n"
         "Snapshots:\n"
@@ -3330,7 +3331,11 @@ def _build_sqlite_retry_warning(
         if not sql:
             continue
         sql_values.append(sql)
-        if ROW_LOOP_MESSAGE.split(" A one-item", 1)[0] in (result_text or ""):
+        if (
+            "Query not executed: do not read __tool_results or a staging table derived from it one "
+            "result_id at a time."
+            in (result_text or "")
+        ):
             row_loop_rejections += 1
         result_ids = set(_SQLITE_RESULT_ID_RE.findall(sql))
         if not result_ids:
@@ -3399,10 +3404,14 @@ def _build_unreconciled_source_model_warning(
         return ""
 
     sqlite_events: list[tuple[int, set[str], set[str], set[str]]] = []
+    inspected_source_batch = False
     for index, (tool_name, params, status) in enumerate(recent_calls):
         if status != "complete" or tool_name != "sqlite_batch":
             continue
         sql_values = _sql_values_from_params(params or {})
+        inspected_source_batch = inspected_source_batch or bool(
+            summarize_sqlite_tool_result_sql(sql_values).tool_result_statement_count
+        )
         sqlite_events.append((
             index,
             set(named_model_read_tables(sql_values)),
@@ -3417,18 +3426,48 @@ def _build_unreconciled_source_model_warning(
         if index > latest_source_index
         for table in targets
     }
-    if latest_mutation_by_table and all(
-        any(
-            (index > latest_mutation_by_table[table] and table in reads)
-            or (index == latest_mutation_by_table[table] and table in reconciled)
+    pending_model_reads = sorted(
+        table
+        for table, mutation_index in latest_mutation_by_table.items()
+        if not any(
+            (index > mutation_index and table in reads)
+            or (index == mutation_index and table in reconciled)
             for index, reads, _mutations, reconciled in sqlite_events
         )
-        for table in latest_mutation_by_table
-    ):
-        return ""
+    )
+    if latest_mutation_by_table:
+        if not pending_model_reads:
+            return ""
+        return (
+            "Fresh source evidence is reconciled. Next, query the updated named model before answering or acting; "
+            f"include the still-unread updated table(s): {', '.join(pending_model_reads)}. Use joins, set logic, "
+            "counts, or ranking there instead of rereading transient results or repeating the write."
+        )
 
     if not read_tables and not latest_mutation_by_table:
-        return ""
+        completed_source_count = sum(
+            status == "complete" and is_source_bearing_tool(tool_name)
+            for tool_name, _params, status in recent_calls
+        )
+        if completed_source_count < 2:
+            return ""
+        if inspected_source_batch:
+            return (
+                "You already inspected this source batch. Do not query raw __tool_results again. The next action must "
+                "create or evolve the durable keyed model, then query it. For fuzzy interpretation of unstructured "
+                "text, bind one JSON array and expand it with json_each(:rows), retaining source result IDs and "
+                "provenance; do not build literal INSERTs. Import same-shaped siblings with one set query over "
+                "tool_name or result_id IN (...), not one statement per result_id."
+            )
+        return (
+            "Multiple source results form a working set and remain transient. The next action must be sqlite_batch: "
+            "create or evolve durable named entity/relationship tables with PRIMARY "
+            "KEY/UNIQUE and provenance (not TEMP/CTAS), reconcile this source batch directly from __tool_results, then "
+            "query coverage gaps and next work. Import same-shaped siblings in one set query over tool_name or "
+            "result_id IN (...), never one INSERT per result_id; use separate statements only for different entity "
+            "shapes. Do not answer or act from transient results. Bind only agent-authored "
+            "notes or classifications; derive source facts and URLs in SQL."
+        )
     return (
         "Fresh source evidence is not reconciled with the named model you read. If it belongs there, the next SQLite "
         "call must use INSERT ... SELECT or UPDATE ... FROM __tool_results/json_each. Every sourced field, including IDs, "

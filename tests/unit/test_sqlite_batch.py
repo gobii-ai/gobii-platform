@@ -99,6 +99,48 @@ class SqliteBatchToolTests(TestCase):
             self.assertIsInstance(out.get("db_size_mb"), (int, float))
             self.assertIn("Executed 3 queries", out.get("message", ""))
 
+    def test_named_bindings_preserve_messy_values_across_a_batch(self):
+        bindings = {
+            "company_id": "ocv-1",
+            "company_name": "O'Brien & Sons",
+            "notes": "Line one\nLine two with :punctuation, quotes, and {json}.",
+        }
+        with self._with_temp_db():
+            out = execute_sqlite_batch(
+                self.agent,
+                {
+                    "sql": (
+                        "CREATE TABLE companies(company_id TEXT PRIMARY KEY, name TEXT, notes TEXT);"
+                        "INSERT INTO companies(company_id,name,notes) "
+                        "VALUES (:company_id,:company_name,:notes);"
+                        "SELECT company_id,name,notes FROM companies WHERE company_id=:company_id;"
+                    ),
+                    "bindings": bindings,
+                    "will_continue_work": True,
+                },
+            )
+
+        self.assertEqual(out.get("status"), "ok", out.get("message"))
+        self.assertEqual(out["results"][-1]["result"], [{
+            "company_id": bindings["company_id"],
+            "name": bindings["company_name"],
+            "notes": bindings["notes"],
+        }])
+
+    def test_named_bindings_reject_nested_values(self):
+        with self._with_temp_db():
+            out = execute_sqlite_batch(
+                self.agent,
+                {
+                    "sql": "SELECT :value",
+                    "bindings": {"value": {"nested": "not a SQLite scalar"}},
+                    "will_continue_work": True,
+                },
+            )
+
+        self.assertEqual(out.get("status"), "error")
+        self.assertIn("JSON scalar", out.get("message", ""))
+
     def test_cte_insert_reports_actual_changed_rows(self):
         with self._with_temp_db():
             out = execute_sqlite_batch(self.agent, {"sql": (
@@ -373,7 +415,10 @@ class SqliteBatchToolTests(TestCase):
             "SQLite world model + exact logic", "Fetch alone; next completion reconcile and SELECT",
             "SOURCE ARRAYS lists paths", "Every sourced SET/VALUES and write WHERE/ON key",
             "SELECT the model before deciding/reporting", "INSERT ... SELECT / UPDATE ... FROM __tool_results/json_each",
-            "WHERE before ON CONFLICT", "never facts/URLs/keys",
+            "WHERE before ON CONFLICT", "never facts/URLs/keys", "named bindings",
+            "fuzzy extraction from unstructured text", "json_each(:rows)",
+            "Same-shaped sibling results use one set import",
+            "separate statements only for different entity shapes",
         ):
             self.assertIn(expected, description)
         self.assertNotIn("before one terminal send", description)
@@ -399,7 +444,7 @@ class SqliteBatchToolTests(TestCase):
                 },
             )
 
-            self.assertEqual(out.get("status"), "warning")
+            self.assertEqual(out.get("status"), "ok")
             self.assertEqual(out.get("advisories", [{}])[0].get("code"), "tool_result_ctas")
             self.assertIn("PRIMARY KEY/UNIQUE", out.get("message", ""))
 
@@ -442,13 +487,14 @@ class SqliteBatchToolTests(TestCase):
                     "will_continue_work": True,
                 },
             )
-            self.assertEqual(unkeyed.get("status"), "error")
+            self.assertEqual(unkeyed.get("status"), "ok")
             self.assertEqual(unkeyed.get("advisories", [{}])[0].get("code"), "reusable_model_missing_identity")
 
             keyed = execute_sqlite_batch(
                 self.agent,
                 {
                     "sql": (
+                        "DROP TABLE vendors;"
                         "CREATE TABLE vendors(vendor TEXT PRIMARY KEY);"
                         "INSERT OR IGNORE INTO vendors SELECT json_extract(p.value, '$.vendor') "
                         "FROM __tool_results JOIN json_each(result_json, '$.plans') p;"
@@ -467,7 +513,6 @@ class SqliteBatchToolTests(TestCase):
                 ],
                 available_tool_result_rows=1,
             )
-            self.assertTrue(one_result_unkeyed[0].blocking)
             self.assertEqual(one_result_unkeyed[0].code, "reusable_model_missing_identity")
 
             one_result_ctas = build_tool_result_query_advisories(
@@ -500,7 +545,7 @@ class SqliteBatchToolTests(TestCase):
                 },
             )
 
-            self.assertEqual(out.get("status"), "warning")
+            self.assertEqual(out.get("status"), "ok")
             self.assertEqual(out.get("advisories", [{}])[0].get("code"), "single_tool_result_blob_fetch")
             self.assertIn("query the needed rows together", out.get("message", ""))
 
@@ -542,7 +587,7 @@ class SqliteBatchToolTests(TestCase):
                 },
             )
 
-            self.assertEqual(out.get("status"), "warning")
+            self.assertEqual(out.get("status"), "ok")
             self.assertEqual(
                 out.get("advisories", [{}])[0].get("code"),
                 "manual_working_table_from_visible_results",
@@ -555,7 +600,7 @@ class SqliteBatchToolTests(TestCase):
                 conn.close()
             self.assertEqual(row, (40, 900))
 
-    def test_bulk_manual_tool_result_copy_is_rejected_before_execution(self):
+    def test_bulk_manual_tool_result_copy_executes_with_advice(self):
         with self._with_temp_db() as (db_path, _token, _tmp):
             conn = sqlite3.connect(db_path)
             try:
@@ -583,14 +628,12 @@ class SqliteBatchToolTests(TestCase):
                 },
             )
 
-            self.assertEqual(out.get("status"), "error")
-            self.assertTrue(out.get("retryable"))
+            self.assertEqual(out.get("status"), "ok")
             self.assertEqual(
                 out.get("advisories", [{}])[0].get("code"),
                 "bulk_manual_working_table_from_visible_results",
             )
-            self.assertIn("used visible facts or URLs", out.get("message", ""))
-            self.assertNotIn("literal-row import", out.get("message", ""))
+            self.assertIn("literal-row import copied visible tool output", out.get("message", ""))
             conn = sqlite3.connect(db_path)
             try:
                 table = conn.execute(
@@ -598,7 +641,9 @@ class SqliteBatchToolTests(TestCase):
                 ).fetchone()
             finally:
                 conn.close()
-            self.assertIsNone(table)
+            self.assertEqual(table, ("copied_rows",))
+            with sqlite3.connect(db_path) as conn:
+                self.assertEqual(conn.execute("SELECT COUNT(*) FROM copied_rows").fetchone(), (4,))
 
     def test_fully_grounded_bulk_insert_executes_instead_of_rejecting_useful_work(self):
         with self._with_temp_db() as (db_path, _token, _tmp):
@@ -633,11 +678,11 @@ class SqliteBatchToolTests(TestCase):
                 },
             )
 
-            self.assertEqual(out.get("status"), "warning")
+            self.assertEqual(out.get("status"), "ok")
             self.assertEqual(out.get("advisories", [{}])[0].get("code"), "grounded_literal_model_import")
             self.assertEqual(out.get("results", [])[-1].get("result"), [{"count": 4}])
 
-    def test_literal_insert_cannot_recombine_values_from_different_source_rows(self):
+    def test_literal_insert_recombination_executes_with_advice(self):
         with self._with_temp_db() as (db_path, _token, _tmp):
             payload = json.dumps({
                 "contacts": [
@@ -662,11 +707,12 @@ class SqliteBatchToolTests(TestCase):
                 },
             )
 
-            self.assertEqual(out.get("status"), "error")
+            self.assertEqual(out.get("status"), "ok")
             self.assertEqual(out.get("advisories", [{}])[0].get("code"), "source_facts_copied_into_model")
             with sqlite3.connect(db_path) as conn:
-                self.assertIsNone(
-                    conn.execute("SELECT name FROM sqlite_master WHERE name='contacts'").fetchone()
+                self.assertEqual(
+                    conn.execute("SELECT name, role FROM contacts").fetchone(),
+                    ("Alice Example", "Chief Financial Officer"),
                 )
 
     def test_grounded_literal_import_still_requires_stable_model_identity(self):
@@ -689,10 +735,11 @@ class SqliteBatchToolTests(TestCase):
                 },
             )
 
-            self.assertEqual(out.get("status"), "error")
+            self.assertEqual(out.get("status"), "ok")
             self.assertEqual(out.get("advisories", [{}])[0].get("code"), "source_facts_copied_into_model")
 
             with sqlite3.connect(db_path) as conn:
+                conn.execute("DROP TABLE contacts")
                 conn.execute("CREATE TABLE contacts(name TEXT, role TEXT)")
             out = execute_sqlite_batch(
                 self.agent,
@@ -701,9 +748,9 @@ class SqliteBatchToolTests(TestCase):
                     "will_continue_work": True,
                 },
             )
-            self.assertEqual(out.get("status"), "error")
+            self.assertEqual(out.get("status"), "ok")
             with sqlite3.connect(db_path) as conn:
-                self.assertEqual(conn.execute("SELECT COUNT(*) FROM contacts").fetchone(), (0,))
+                self.assertEqual(conn.execute("SELECT COUNT(*) FROM contacts").fetchone(), (1,))
 
     def test_grounded_literal_insert_executes_and_source_derived_batch_reconciles(self):
         with self._with_temp_db() as (db_path, _token, _tmp):
@@ -737,7 +784,7 @@ class SqliteBatchToolTests(TestCase):
                 ),
                 "will_continue_work": True,
             })
-            self.assertEqual(copied.get("status"), "warning")
+            self.assertEqual(copied.get("status"), "ok")
             self.assertEqual(copied.get("advisories", [{}])[0].get("code"), "grounded_literal_model_import")
             with sqlite3.connect(db_path) as conn:
                 self.assertEqual(
@@ -776,59 +823,38 @@ class SqliteBatchToolTests(TestCase):
                 [{"account_name": "Aster Labs", "workstream_name": "Redlines", "status": "open"}],
             )
 
-    def test_bulk_manual_tool_result_select_copy_is_rejected_before_execution(self):
-        with self._with_temp_db() as (db_path, _token, _tmp):
-            conn = sqlite3.connect(db_path)
-            try:
-                conn.execute("CREATE TABLE __tool_results (result_id TEXT PRIMARY KEY, result_text TEXT)")
-                conn.executemany(
-                    "INSERT INTO __tool_results (result_id, result_text) VALUES (?, ?)",
-                    [
-                        ("r1", "source https://source.example.test/a"),
-                        ("r2", "source https://source.example.test/b"),
-                    ],
+    def test_bulk_manual_tool_result_select_shapes_receive_advice(self):
+        rows = [
+            f"SELECT {index}, 'https://source.example.test/{'a' if index % 2 else 'b'}'"
+            for index in range(12)
+        ]
+        union_rows = " UNION ALL ".join(rows)
+        json_a = json.dumps([{"id": index} for index in range(2)])
+        json_b = json.dumps([{"id": index} for index in range(2, 4)])
+        queries = (
+            f"CREATE TABLE copied_rows(id INTEGER, label TEXT); INSERT INTO copied_rows {union_rows};",
+            "CREATE TABLE copied_rows(id INTEGER, label TEXT);"
+            + ";".join(f"INSERT INTO copied_rows {row}" for row in rows),
+            f"CREATE TABLE copied_rows AS {union_rows};",
+            "CREATE TABLE copied_rows(id INTEGER, label TEXT);"
+            f"INSERT INTO copied_rows SELECT json_extract(value, '$.id'), 'https://source.example.test/a' FROM json_each('{json_a}');"
+            f"INSERT INTO copied_rows SELECT json_extract(value, '$.id'), 'https://source.example.test/b' FROM json_each('{json_b}');",
+        )
+        payloads = (
+            "source https://source.example.test/a",
+            "source https://source.example.test/b",
+        )
+        for sql in queries:
+            with self.subTest(sql=sql[:80]):
+                advisories = build_tool_result_query_advisories(
+                    [sql],
+                    available_tool_result_rows=2,
+                    tool_result_payloads=payloads,
                 )
-                conn.commit()
-            finally:
-                conn.close()
-
-            rows = [
-                f"SELECT {index}, 'https://source.example.test/{'a' if index % 2 else 'b'}'"
-                for index in range(12)
-            ]
-            union_rows = " UNION ALL ".join(rows)
-            json_a = json.dumps([{"id": index} for index in range(2)])
-            json_b = json.dumps([{"id": index} for index in range(2, 4)])
-            queries = (
-                f"CREATE TABLE copied_rows(id INTEGER, label TEXT); INSERT INTO copied_rows {union_rows};",
-                "CREATE TABLE copied_rows(id INTEGER, label TEXT);"
-                + ";".join(f"INSERT INTO copied_rows {row}" for row in rows),
-                f"CREATE TABLE copied_rows AS {union_rows};",
-                "CREATE TABLE copied_rows(id INTEGER, label TEXT);"
-                f"INSERT INTO copied_rows SELECT json_extract(value, '$.id'), 'https://source.example.test/a' FROM json_each('{json_a}');"
-                f"INSERT INTO copied_rows SELECT json_extract(value, '$.id'), 'https://source.example.test/b' FROM json_each('{json_b}');",
-            )
-            for sql in queries:
-                with self.subTest(sql=sql[:80]):
-                    out = execute_sqlite_batch(
-                        self.agent,
-                        {"sql": sql, "will_continue_work": True},
-                    )
-                    self.assertEqual(out.get("status"), "error")
-                    self.assertTrue(out.get("retryable"))
-                    self.assertEqual(
-                        out.get("advisories", [{}])[0].get("code"),
-                        "bulk_manual_working_table_from_visible_results",
-                    )
-
-            conn = sqlite3.connect(db_path)
-            try:
-                table = conn.execute(
-                    "SELECT name FROM sqlite_master WHERE type='table' AND name='copied_rows'"
-                ).fetchone()
-            finally:
-                conn.close()
-            self.assertIsNone(table)
+                self.assertIn(
+                    "bulk_manual_working_table_from_visible_results",
+                    {advisory.code for advisory in advisories},
+                )
 
     def test_bulk_manual_constants_are_not_blocked_by_unrelated_tool_results(self):
         with self._with_temp_db() as (db_path, _token, _tmp):
@@ -862,7 +888,7 @@ class SqliteBatchToolTests(TestCase):
                 },
             )
 
-            self.assertEqual(out.get("status"), "warning")
+            self.assertEqual(out.get("status"), "ok")
             self.assertEqual(out["results"][-1]["result"], [{"count": 12}])
             self.assertNotEqual(
                 out.get("advisories", [{}])[0].get("code"),
@@ -961,7 +987,7 @@ class SqliteBatchToolTests(TestCase):
                     {advisory.code for advisory in advisories},
                 )
 
-    def test_per_result_import_loop_is_rejected_before_execution(self):
+    def test_per_result_import_loop_executes_with_advice(self):
         with self._with_temp_db() as (db_path, _token, _tmp):
             conn = sqlite3.connect(db_path)
             try:
@@ -990,8 +1016,7 @@ class SqliteBatchToolTests(TestCase):
                 },
             )
 
-            self.assertEqual(out.get("status"), "error")
-            self.assertTrue(out.get("retryable"))
+            self.assertEqual(out.get("status"), "ok")
             self.assertEqual(out.get("advisories", [{}])[0].get("code"), "tool_result_row_loop")
             conn = sqlite3.connect(db_path)
             try:
@@ -1000,9 +1025,11 @@ class SqliteBatchToolTests(TestCase):
                 ).fetchone()
             finally:
                 conn.close()
-            self.assertIsNone(table)
+            self.assertEqual(table, ("items",))
+            with sqlite3.connect(db_path) as conn:
+                self.assertEqual(conn.execute("SELECT COUNT(*) FROM items").fetchone(), (2,))
 
-    def test_derived_result_loop_is_rejected_before_execution(self):
+    def test_derived_result_loop_executes_with_advice(self):
         with self._with_temp_db() as (db_path, _token, _tmp):
             conn = sqlite3.connect(db_path)
             try:
@@ -1033,8 +1060,7 @@ class SqliteBatchToolTests(TestCase):
                 },
             )
 
-            self.assertEqual(out.get("status"), "error")
-            self.assertTrue(out.get("retryable"))
+            self.assertEqual(out.get("status"), "ok")
             self.assertEqual(out.get("advisories", [{}])[0].get("code"), "tool_result_row_loop")
             conn = sqlite3.connect(db_path)
             try:
@@ -1043,7 +1069,9 @@ class SqliteBatchToolTests(TestCase):
                 ).fetchone()
             finally:
                 conn.close()
-            self.assertIsNone(table)
+            self.assertEqual(table, ("product_pages",))
+            with sqlite3.connect(db_path) as conn:
+                self.assertEqual(conn.execute("SELECT COUNT(*) FROM product_pages").fetchone(), (4,))
 
     def test_derived_result_loop_boundaries(self):
         derived = (
@@ -1063,7 +1091,7 @@ class SqliteBatchToolTests(TestCase):
             + "SELECT * FROM product_pages WHERE entity_id='one';"
             + "SELECT * FROM product_pages WHERE entity_id='two';",
         )
-        blocked_sql = (
+        advised_sql = (
             derived
             + "SELECT result_text FROM product_pages WHERE result_id='r1';"
             + "SELECT result_text FROM product_pages WHERE result_id='r2';",
@@ -1078,20 +1106,20 @@ class SqliteBatchToolTests(TestCase):
                 self.assertLess(summary.single_derived_result_filters, 2)
                 self.assertFalse(
                     any(
-                        advisory.blocking and advisory.code == "tool_result_row_loop"
+                        advisory.code == "tool_result_row_loop"
                         for advisory in build_tool_result_query_advisories(
                             [sql],
                             available_tool_result_rows=4,
                         )
                     )
                 )
-        for sql in blocked_sql:
-            with self.subTest(kind="blocked", sql=sql):
+        for sql in advised_sql:
+            with self.subTest(kind="advised", sql=sql):
                 summary = summarize_sqlite_tool_result_sql([sql])
                 self.assertEqual(summary.single_derived_result_filters, 2)
                 self.assertTrue(
                     any(
-                        advisory.blocking and advisory.code == "tool_result_row_loop"
+                        advisory.code == "tool_result_row_loop"
                         for advisory in build_tool_result_query_advisories(
                             [sql],
                             available_tool_result_rows=4,
@@ -1123,11 +1151,10 @@ class SqliteBatchToolTests(TestCase):
         )
 
         self.assertEqual(one_import[0].code, "single_tool_result_import")
-        self.assertFalse(one_import[0].blocking)
         self.assertEqual(commented, [])
         self.assertEqual(double_quoted_text, [])
 
-    def test_related_model_imports_from_one_source_are_not_a_row_loop(self):
+    def test_related_model_imports_in_one_batch_are_not_a_row_loop(self):
         sql = (
             "INSERT INTO accounts(account_id) SELECT json_extract(result_json,'$.account_id') "
             "FROM __tool_results WHERE result_id='r1';"
@@ -1140,9 +1167,17 @@ class SqliteBatchToolTests(TestCase):
             [sql.replace("result_id='r1';", "result_id='r2';", 1)],
             available_tool_result_rows=4,
         )
+        repeated_target = build_tool_result_query_advisories(
+            [
+                "INSERT INTO accounts SELECT result_json FROM __tool_results WHERE result_id='r1';"
+                "INSERT INTO accounts SELECT result_json FROM __tool_results WHERE result_id='r2';"
+            ],
+            available_tool_result_rows=4,
+        )
 
         self.assertEqual(advisories, [])
-        self.assertIn("tool_result_row_loop", {advisory.code for advisory in split_sources})
+        self.assertEqual(split_sources, [])
+        self.assertIn("tool_result_row_loop", {advisory.code for advisory in repeated_target})
 
     def test_related_model_imports_from_one_source_execute_without_warning(self):
         payload = json.dumps({
@@ -1349,7 +1384,7 @@ class SqliteBatchToolTests(TestCase):
             (),
         )
 
-    def test_source_facts_copied_into_model_are_rejected(self):
+    def test_source_facts_copied_into_model_receive_advice(self):
         payload = (
             '{"account_id":"acct-1","stage":"contracting","next_action":"resolve redlines",'
             '"source_url":"https://crm.example.test/acct-1"}'
@@ -1438,10 +1473,9 @@ class SqliteBatchToolTests(TestCase):
             ),
         )
         self.assertEqual(copied[0].code, "source_facts_copied_into_model")
-        self.assertTrue(copied[0].blocking)
-        self.assertIn("used visible facts or URLs as SQL literals", copied[0].message)
-        self.assertIn("Derive every sourced field", copied[0].message)
-        self.assertIn("omit unavailable URLs", copied[0].message)
+        self.assertIn("copied visible source facts or URLs as SQL literals", copied[0].message)
+        self.assertIn("derive sourced fields", copied[0].message)
+        self.assertIn("refresh provenance", copied[0].message)
         for allowed in (
             derived, unrelated, identity_predicate, single_normalization, arrow_derived, parsed_text, case_logic,
         ):

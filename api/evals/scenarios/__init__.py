@@ -63,6 +63,7 @@ from .sqlite_tool_results import (
     SQLITE_TOOL_RESULT_SCENARIO_SLUGS,
     SQLITE_TOOL_RESULT_SUITE_SLUG,
     SqliteDedupeRequeryScenario,
+    SqliteIncrementalDomainModelScenario,
     SqliteIntermediateWorkingTableScenario,
     SqliteItemLinkReportScenario,
     SqliteMultiResultWebSynthesisScenario,

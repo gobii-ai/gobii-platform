@@ -1508,6 +1508,7 @@ def _execute_with_autocorrections(
     query: str,
     idx: int,
     base_corrections: list[str],
+    bindings: dict[str, object],
 ) -> tuple[Dict[str, Any] | None, str, list[str], str | None]:
     seen: set[str] = {query}
     queue_items: deque[tuple[str, list[str]]] = deque([(query, base_corrections)])
@@ -1522,7 +1523,7 @@ def _execute_with_autocorrections(
             consume_patch_text_error()
             start_query_timer(conn)
             changes_before = conn.total_changes
-            cur.execute(current_query)
+            cur.execute(current_query, bindings)
             if cur.description is not None:
                 columns = [col[0] for col in cur.description]
                 rows = [dict(zip(columns, row)) for row in cur.fetchall()]
@@ -1808,6 +1809,23 @@ def _normalize_queries(params: Dict[str, Any]) -> Optional[List[str]]:
     return queries if queries else None
 
 
+def _normalize_named_bindings(params: Dict[str, Any]) -> tuple[dict[str, object] | None, str | None]:
+    raw = params.get("bindings")
+    if raw is None:
+        return {}, None
+    if not isinstance(raw, dict):
+        return None, "Provide `bindings` as an object keyed by SQL parameter name."
+
+    bindings: dict[str, object] = {}
+    for key, value in raw.items():
+        if not isinstance(key, str) or not re.fullmatch(r"[A-Za-z_]\w*", key):
+            return None, "Every binding name must be a plain SQL parameter name such as `company_name`."
+        if value is not None and not isinstance(value, (str, int, float, bool)):
+            return None, f"Binding `{key}` must be a JSON scalar (string, number, boolean, or null)."
+        bindings[key] = value
+    return bindings, None
+
+
 def _run_sqlite_batch_in_subprocess(
     *,
     agent_id: str,
@@ -1903,6 +1921,9 @@ def _execute_sqlite_batch_inner(
             "status": "error",
             "message": "Provide `sql` as a SQL string (semicolon-separated for multiple statements).",
         }
+    bindings, bindings_error = _normalize_named_bindings(params)
+    if bindings_error:
+        return {"status": "error", "message": bindings_error}
 
     will_continue_work_raw = params.get("will_continue_work", None)
     if will_continue_work_raw is None:
@@ -1948,21 +1969,6 @@ def _execute_sqlite_batch_inner(
         preview = [q.strip()[:160] for q in queries[:5]]
         logger.info("Agent %s executing sqlite_batch: %s queries (preview=%s)", agent_id, len(queries), preview)
 
-        blocking_advisories = [advisory for advisory in advisories if advisory.blocking]
-        if blocking_advisories:
-            primary = [item for item in blocking_advisories if item.code == "source_facts_copied_into_model"]
-            return {
-                "status": "error",
-                "results": [],
-                "db_size_mb": round(_get_db_size_mb(db_path), 2),
-                "message": " ".join(advisory.message for advisory in (primary or blocking_advisories)),
-                "retryable": True,
-                "advisories": [
-                    {"code": advisory.code, "message": advisory.message}
-                    for advisory in blocking_advisories
-                ],
-            }
-
         for idx, query in enumerate(queries):
             if not isinstance(query, str) or not query.strip():
                 had_error = True
@@ -1990,6 +1996,7 @@ def _execute_sqlite_batch_inner(
                 query,
                 idx,
                 query_corrections,
+                bindings or {},
             )
             if failure_message:
                 had_error = True
@@ -2020,8 +2027,6 @@ def _execute_sqlite_batch_inner(
         if db_size_mb > 50:
             size_warning = " WARNING: DB SIZE EXCEEDS 50MB. YOU MUST EXECUTE MORE QUERIES TO SHRINK THE SIZE, OR THE WHOLE DB WILL BE WIPED!!!"
 
-        if advisories:
-            had_warning = True
         advice = (
             " [!] SQLITE QUERY ADVICE: " + " ".join(advisory.message for advisory in advisories)
             if advisories else ""
@@ -2094,8 +2099,13 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
                 "lists paths. Every sourced SET/VALUES and write WHERE/ON key must derive inside INSERT ... SELECT / "
                 "UPDATE ... FROM __tool_results/json_each; only paths/current result_id/tool_name may be literals, "
                 "never facts/URLs/keys. Reconcile entities/relations, evolve schema, then SELECT the model before deciding/reporting. Use "
-                "UNIQUE keys + provenance; normalize children; joins/sets/counts/ranking; CTAS is one-off. http_request "
-                "JSON: result_json $.content. INSERT SELECT needs WHERE before ON CONFLICT. No ATTACH. SQL uses "
+                "UNIQUE keys + provenance; normalize children; joins/sets/counts/ranking. For agent-authored notes or "
+                "classifications that cannot come from a source row, use named bindings like :note with the bindings object; "
+                "never hand-escape messy values into SQL. For fuzzy extraction from unstructured text, bind one JSON "
+                "array and expand it with json_each(:rows), retaining source result IDs/provenance. Same-shaped sibling "
+                "results use one set import over tool_name or result_id IN (...), never one INSERT per result_id; use "
+                "separate statements only for different entity shapes. CTAS is one-off. "
+                "http_request JSON: result_json $.content. INSERT SELECT needs WHERE before ON CONFLICT. No ATTACH. SQL uses "
                 "semicolons; apostrophe: 'O''Brien'. grep_context_all/split_sections arrays: json_each + ctx.value."
             ),
             "parameters": {
@@ -2104,6 +2114,17 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
                     "sql": {
                         "type": "string",
                         "description": "SQL string; use semicolons between statements.",
+                    },
+                    "bindings": {
+                        "type": "object",
+                        "description": (
+                            "Optional named SQL values. Use :name in SQL and {\"name\": value} here; keys omit the colon. "
+                            "Values must be strings, numbers, booleans, or null. Source facts should still derive directly "
+                            "from __tool_results."
+                        ),
+                        "additionalProperties": {
+                            "type": ["string", "number", "boolean", "null"],
+                        },
                     },
                     "will_continue_work": {
                         "type": "boolean",
