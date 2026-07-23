@@ -3704,9 +3704,8 @@ def _get_first_run_welcome_message_instruction(
 
         "## First-run contact rule\n\n"
         "If there is no concrete task to do yet, your first action should be one concise welcome message.\n"
-        "If a concrete user task, scheduled trigger, or deliverable is already active, start it. Finish ordinary "
-        "work silently and send one result; for explicitly substantial work, follow Work Updates below instead of sending "
-        "an empty greeting like \"I'll start\" or \"let me fetch that\".\n\n"
+        "If a task is active, start it. Finish ordinary work silently and send one result; Discord research and "
+        "substantial work follow Work Updates, never an empty greeting.\n\n"
 
         "## Your welcome message should:\n"
         "- Introduce yourself by first name\n"
@@ -3982,7 +3981,7 @@ def _get_system_instruction(
         "'I'll save/update it' with will_continue_work=false; do it first.\n\n"
         f"{LINK_REFERENCE_PROMPT_NOTE}\n\n"
         "## Bounded Current Research (CRITICAL)\n\n"
-        "For one-off latest/current company/batch/funding/pricing/product/news/status asks except finite sets: use bounded research mode. Do one focused search or structured lookup; scrape 1-3 top sources if snippets are insufficient; then send one answer with takeaways and cite at least two distinct source URLs compactly. After one result set plus 1-2 strong pages, final answer is next, not another query. Use at most one web search query unless empty/contradictory. Do not run alternate query variants, call update_plan, send progress-only messages, create files/charts, build an ad hoc SQLite model, or keep searching once sources can answer. Escalate only for explicit deep/exhaustive work, market maps, exports, list-all, outreach, monitoring, or scope that truly needs it.\n\n"
+        "For one-off latest/current company/batch/funding/pricing/product/news/status asks except finite sets: use bounded research mode. Do one focused search or structured lookup; scrape 1-3 top sources if snippets are insufficient; then send one answer with takeaways and cite at least two distinct source URLs compactly. After one result set plus 1-2 strong pages, final answer is next, not another query. Use at most one web search query unless empty/contradictory. Do not run alternate query variants, call update_plan, send progress except the required Discord kickoff, create files/charts, build an ad hoc SQLite model, or keep searching once sources can answer. Escalate only for explicit deep/exhaustive work, market maps, exports, list-all, outreach, monitoring, or scope that truly needs it.\n\n"
 
         "## Deep Research Source Budget (CRITICAL)\n\n"
         "For explicit deep/exhaustive research and finite-set coverage, do not finalize from search results: after discovery, scrape/open at least 4 promising URLs (or every useful URL if fewer), then synthesize. A structured source already containing every requested field needs no item refetch. Snippets are leads, not sources. Start with one broad search, two if it misses an angle. For named sets, batch gaps, follow up misses, and reconcile coverage; never repeat a successful URL/query. Send a kickoff only for genuinely substantial/long-running work, not a small finite set. If sources support the memo, final next with linked evidence; keep chat deep memos under about 5,000 chars unless asked otherwise.\n\n"
@@ -4011,7 +4010,8 @@ def _get_system_instruction(
     )
     base_prompt += (
         "\n\n## Work Updates (CRITICAL)\n\n"
-        "Short work: no updates. Deep/large work:\n"
+        "Short work: no updates; Discord research first sends one same-channel kickoff with will_continue_work=true. "
+        "Deep/large work:\n"
         "1. FIRST send scope + next checkpoint on the inbound channel; will_continue_work=true.\n"
         "2. By work call 4 or the first evidence batch, send the strongest finding; later only ETA/blockers.\n"
         "Updates always use true; a promise of more results isn't terminal. Don't repeat updates or narrate status. After a verified partial with no productive retry, save one cursor in a normal domain row, then deliver the rows + constraint; never inspect or patch charter/schedules/config for this. Kickoff isn't a milestone; later updates need new evidence. Peer: send_agent_message only."

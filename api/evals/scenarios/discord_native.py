@@ -3,6 +3,8 @@ from dataclasses import dataclass
 
 from api.agent.system_skills.defaults import DISCORD_NATIVE_SYSTEM_SKILL_KEY
 from api.agent.system_skills.service import enable_system_skills
+from api.agent.tools.eval_synthetic_tools import EVAL_SYNTHETIC_TOOL_SERVER
+from api.agent.tools.tool_manager import mark_tool_enabled_without_discovery
 from api.evals.base import EvalScenario, ScenarioTask
 from api.evals.execution import ScenarioExecutionTools
 from api.evals.registry import ScenarioRegistry, register_scenario
@@ -10,7 +12,10 @@ from api.evals.scenarios.agent_emotions import _assigned_config_fields
 from api.models import (
     EvalRunTask,
     PersistentAgent,
+    PersistentAgentEnabledTool,
     PersistentAgentMessage,
+    PersistentAgentStep,
+    PersistentAgentSystemStep,
     PersistentAgentToolCall,
 )
 from api.services.discord_messages import (
@@ -26,12 +31,19 @@ DISCORD_NATIVE_REACTION_SHARED_WIN = "discord_native_reaction_shared_win"
 DISCORD_NATIVE_REACTION_SERIOUS_REQUEST_RESTRAINT = (
     "discord_native_reaction_serious_request_restraint"
 )
+DISCORD_NATIVE_RESEARCH_KICKOFF = "discord_native_research_kickoff"
 DISCORD_NATIVE_SCENARIO_SLUGS = (
     DISCORD_NATIVE_REACTION_REPLY_CONTEXT,
     DISCORD_NATIVE_REACTION_SHARED_WIN,
     DISCORD_NATIVE_REACTION_SERIOUS_REQUEST_RESTRAINT,
+    DISCORD_NATIVE_RESEARCH_KICKOFF,
 )
 DISCORD_NATIVE_SUITE_SLUG = "discord_native"
+DEEP_WORK_CORRECTION_STEP_PREFIX = "Deep-work communication correction:"
+DISCORD_RESEARCH_TOOL_NAMES = {
+    "mcp_brightdata_search_engine",
+    "mcp_brightdata_scrape_as_markdown",
+}
 
 
 @dataclass(frozen=True)
@@ -297,3 +309,231 @@ def _discord_reaction_scenario_class(case):
 
 for discord_reaction_case in DISCORD_REACTION_CASES[1:]:
     ScenarioRegistry.register(_discord_reaction_scenario_class(discord_reaction_case)())
+
+
+@register_scenario
+class DiscordNativeResearchKickoffScenario(EvalScenario, ScenarioExecutionTools):
+    slug = DISCORD_NATIVE_RESEARCH_KICKOFF
+    description = "An explicit Discord research request should get a short same-channel kickoff before research begins."
+    tier = "core"
+    category = "conversation"
+    expected_runtime = "short"
+    cost_class = "low"
+    owner = "agent-platform"
+    area = "agent_behavior"
+    tags = ("discord", "real_harness", "responsiveness", "research")
+    prompt = (
+        "Could you find out whether ExampleForum visibility restrictions are usually temporary or permanent, "
+        "and tell me what you find."
+    )
+    tasks = [
+        ScenarioTask(name="inject_event", assertion_type="agent_processing"),
+        ScenarioTask(name="verify_kickoff_precedes_research", assertion_type="tool_call"),
+        ScenarioTask(name="verify_sourced_result", assertion_type="tool_call"),
+    ]
+
+    @staticmethod
+    def _message_body(call: PersistentAgentToolCall) -> str:
+        return str((call.tool_params or {}).get("message") or "").strip()
+
+    @staticmethod
+    def _call_succeeded(call: PersistentAgentToolCall) -> bool:
+        try:
+            result = json.loads(call.result or "{}")
+        except (TypeError, ValueError):
+            return False
+        return call.status == "complete" and result.get("status") == "success"
+
+    def run(self, run_id: str, agent_id: str) -> None:
+        PersistentAgent.objects.filter(id=agent_id).update(
+            charter="Research product and community questions carefully and answer with sourced findings.",
+            planning_state=PersistentAgent.PlanningState.SKIPPED,
+        )
+        prior_step = PersistentAgentStep.objects.create(
+            agent_id=agent_id,
+            description="Process events",
+        )
+        PersistentAgentSystemStep.objects.create(
+            step=prior_step,
+            code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
+        )
+        agent = PersistentAgent.objects.get(id=agent_id)
+        skill_result = enable_system_skills(agent, [DISCORD_NATIVE_SYSTEM_SKILL_KEY])
+        if skill_result.get("invalid"):
+            raise ValueError(f"Could not enable Discord system skill: {skill_result}")
+
+        for tool_name in DISCORD_RESEARCH_TOOL_NAMES:
+            mark_tool_enabled_without_discovery(agent, tool_name)
+            PersistentAgentEnabledTool.objects.filter(
+                agent=agent,
+                tool_full_name=tool_name,
+            ).update(tool_server=EVAL_SYNTHETIC_TOOL_SERVER, tool_name=tool_name)
+
+        channel_id = f"eval-discord-research-{str(run_id)[:8]}"
+        guild_id = "eval-discord-guild"
+        conversation = get_or_create_discord_conversation(
+            agent,
+            address=discord_conversation_address(agent.id, guild_id, channel_id),
+            channel_id=channel_id,
+            channel_name="research",
+        )
+        agent_endpoint, channel_endpoint = ensure_discord_conversation_participants(
+            agent,
+            conversation,
+            platform_channel_address=discord_channel_address(guild_id, channel_id),
+        )
+        inbound = PersistentAgentMessage.objects.create(
+            owner_agent=agent,
+            from_endpoint=channel_endpoint,
+            to_endpoint=agent_endpoint,
+            conversation=conversation,
+            is_outbound=False,
+            body=self.prompt,
+            raw_payload={
+                "source": "discord_bot",
+                "source_kind": "discord",
+                "source_label": "Maya in #research",
+                "discord_message_id": "eval-discord-research-message",
+                "discord_channel_id": channel_id,
+                "discord_channel_name": "research",
+                "discord_author_name": "Maya",
+            },
+        )
+        mock_config = {
+            "send_discord_message": {
+                "rules": [
+                    {
+                        "param_equals": {"will_continue_work": True},
+                        "result": {
+                            "status": "success",
+                            "message_id": "eval-discord-research-kickoff",
+                            "channel_id": channel_id,
+                            "auto_sleep_ok": False,
+                        },
+                    },
+                    {
+                        "param_equals": {"will_continue_work": False},
+                        "result": {
+                            "status": "success",
+                            "message_id": "eval-discord-research-result",
+                            "channel_id": channel_id,
+                            "auto_sleep_ok": True,
+                        },
+                    },
+                ],
+            },
+            "mcp_brightdata_search_engine": {
+                "status": "success",
+                "result": {
+                    "organic": [
+                        {
+                            "link": "https://support.example.test/account-visibility",
+                            "title": "Account visibility restrictions",
+                            "description": (
+                                "Visibility restrictions may be temporary, but unresolved policy violations "
+                                "can require an appeal."
+                            ),
+                        }
+                    ]
+                },
+                "auto_sleep_ok": False,
+            },
+            "mcp_brightdata_scrape_as_markdown": {
+                "status": "success",
+                "result": (
+                    "ExampleForum says visibility restrictions may be temporary. Accounts should review their "
+                    "status notice and appeal when a restriction was applied in error."
+                ),
+                "auto_sleep_ok": False,
+            },
+        }
+
+        self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="inject_event")
+        with self.wait_for_agent_idle(agent_id, timeout=180):
+            self.trigger_processing(
+                agent_id,
+                eval_run_id=run_id,
+                mock_config=mock_config,
+                eval_stop_policy={
+                    "max_relevant_tool_calls": 8,
+                    "ignored_tool_names": ["sleep_until_next_trigger", "update_plan"],
+                },
+            )
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED,
+            task_name="inject_event",
+            observed_summary="An explicit research request arrived through a real Discord conversation.",
+            artifacts={"message": inbound},
+        )
+
+        calls = list(
+            PersistentAgentToolCall.objects.filter(
+                step__eval_run_id=run_id,
+                step__created_at__gte=inbound.timestamp,
+            ).order_by("step__created_at", "step__id")
+        )
+        first_research_index = next(
+            (index for index, call in enumerate(calls) if call.tool_name in DISCORD_RESEARCH_TOOL_NAMES),
+            None,
+        )
+        kickoff_indexes = [
+            index
+            for index, call in enumerate(calls)
+            if call.tool_name == "send_discord_message"
+            and (call.tool_params or {}).get("channel_id") == channel_id
+            and (call.tool_params or {}).get("will_continue_work") is True
+            and len(self._message_body(call).split()) >= 4
+            and self._call_succeeded(call)
+        ]
+        corrections = PersistentAgentStep.objects.filter(
+            agent_id=agent_id,
+            created_at__gte=inbound.timestamp,
+            description__startswith=DEEP_WORK_CORRECTION_STEP_PREFIX,
+        ).count()
+        kickoff_passed = (
+            first_research_index is not None
+            and kickoff_indexes == [0]
+            and kickoff_indexes[0] < first_research_index
+        )
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED if kickoff_passed else EvalRunTask.Status.FAILED,
+            task_name="verify_kickoff_precedes_research",
+            observed_summary=(
+                "One Discord kickoff preceded the first executed research call."
+                if kickoff_passed
+                else (
+                    "Expected one Discord kickoff before executed research; "
+                    f"call_order={[call.tool_name for call in calls]}, corrections={corrections}."
+                )
+            ),
+            artifacts={"step": calls[0].step} if calls else {},
+        )
+
+        final_calls = [
+            call
+            for index, call in enumerate(calls)
+            if first_research_index is not None
+            and index > first_research_index
+            and call.tool_name == "send_discord_message"
+            and (call.tool_params or {}).get("channel_id") == channel_id
+            and (call.tool_params or {}).get("will_continue_work") is False
+            and len(self._message_body(call).split()) >= 12
+            and self._call_succeeded(call)
+        ]
+        result_passed = len(final_calls) == 1
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED if result_passed else EvalRunTask.Status.FAILED,
+            task_name="verify_sourced_result",
+            observed_summary=(
+                "The agent delivered one substantive Discord result after research."
+                if result_passed
+                else f"Expected one final Discord result after research; saw {len(final_calls)}."
+            ),
+            artifacts={"step": final_calls[0].step} if final_calls else {},
+        )

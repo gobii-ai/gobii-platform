@@ -120,6 +120,36 @@ class ImpliedSendTests(TestCase):
             )
         )
 
+    def test_discord_research_requires_kickoff_before_first_work_call(self):
+        reason = ep._deep_work_update_gate_reason(
+            "Please research whether this restriction is temporary.",
+            ["mcp_brightdata_search_engine"],
+            prior_work_count=0,
+            prior_update_count=0,
+            batch_has_progress_update=False,
+            require_kickoff=True,
+        )
+
+        self.assertEqual(reason, "kickoff")
+
+    def test_ordinary_web_research_does_not_trigger_deep_work_gate(self):
+        reason = ep._deep_work_update_gate_reason(
+            "Please research whether this restriction is temporary.",
+            ["mcp_brightdata_search_engine"],
+            prior_work_count=0,
+            prior_update_count=0,
+            batch_has_progress_update=False,
+        )
+
+        self.assertIsNone(reason)
+
+    def test_explicit_research_detection_excludes_negated_requests(self):
+        self.assertTrue(ep._is_explicit_research_request("Please research this account restriction."))
+        self.assertTrue(ep._is_explicit_research_request("Could you look into this?"))
+        self.assertTrue(ep._is_explicit_research_request("Find out why the visibility changed."))
+        self.assertFalse(ep._is_explicit_research_request("No need to research this; use the supplied answer."))
+        self.assertFalse(ep._is_explicit_research_request("Don't figure this out; just use the supplied note."))
+
     def test_run_setup_resets_inbound_scope_when_prompt_cache_setup_fails(self):
         with patch.object(ep, "PromptRunCache", side_effect=RuntimeError("cache setup failed")), \
              self.assertRaisesRegex(RuntimeError, "cache setup failed"):
