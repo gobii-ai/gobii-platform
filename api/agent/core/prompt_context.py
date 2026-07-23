@@ -3784,6 +3784,7 @@ def _get_system_instruction(
     continuation_mode_block = "" if is_first_run else _get_continuation_mode_prompt_block()
     has_unfinished_plan = (
         not planning_mode_active
+        and isinstance(agent, PersistentAgent)
         and agent.kanban_cards.filter(status__in=("todo", "doing")).exists()
     )
 
