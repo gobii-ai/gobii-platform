@@ -4,13 +4,17 @@ from types import SimpleNamespace
 from django.test import SimpleTestCase, tag
 
 import api.evals.loader  # noqa: F401 - registers scenarios and suites
+from api.agent.tools.sqlite_query_quality import summarize_sqlite_tool_result_sql
 from api.evals.registry import ScenarioRegistry
 from api.evals.scenarios.sqlite_tool_results import (
+    SQLITE_INCREMENTAL_DOMAIN_MODEL,
     SQLITE_SOURCE_ARRAY_FIRST_WRITE,
     SQLITE_TOOL_RESULT_SCENARIO_SLUGS,
     SQLITE_TOOL_RESULT_SUITE_SLUG,
+    SqliteIncrementalDomainModelScenario,
     SqliteSourceArrayFirstWriteScenario,
     _source_array_first_write_failures,
+    _uses_queryable_source_model,
 )
 from api.evals.suites import SuiteRegistry
 
@@ -84,6 +88,44 @@ class SqliteSourceArrayEvalTests(SimpleTestCase):
 
         for leaked_term in ("sqlite", "__tool_results", "json_each", "insert", "select", "table"):
             self.assertNotIn(leaked_term, prompt)
+
+    def test_incremental_domain_model_case_is_registered_without_teaching_sql(self):
+        suite = SuiteRegistry.get(SQLITE_TOOL_RESULT_SUITE_SLUG)
+        scenario = ScenarioRegistry.get(SQLITE_INCREMENTAL_DOMAIN_MODEL)
+
+        self.assertIsNotNone(scenario)
+        self.assertIn(SQLITE_INCREMENTAL_DOMAIN_MODEL, SQLITE_TOOL_RESULT_SCENARIO_SLUGS)
+        self.assertIn(SQLITE_INCREMENTAL_DOMAIN_MODEL, suite.scenario_slugs)
+        self.assertEqual(
+            [task.name for task in scenario.tasks],
+            [
+                "inject_prompt",
+                "verify_incremental_domain_model",
+                "verify_operating_answer",
+            ],
+        )
+        prompt = SqliteIncrementalDomainModelScenario.prompt.casefold()
+        for leaked_term in ("sqlite", "__tool_results", "json_each", "insert", "select", "table"):
+            self.assertNotIn(leaked_term, prompt)
+
+    def test_existing_item_report_accepts_a_queried_source_model(self):
+        summary = summarize_sqlite_tool_result_sql([
+            "CREATE TABLE vehicles(vin TEXT PRIMARY KEY, price INTEGER);"
+            "INSERT INTO vehicles SELECT json_extract(value,'$.vin'),json_extract(value,'$.price') "
+            "FROM __tool_results,json_each(result_json,'$.content.vehicles') WHERE result_id='feed-a';"
+            "INSERT INTO vehicles SELECT json_extract(value,'$.vin'),json_extract(value,'$.price') "
+            "FROM __tool_results,json_each(result_json,'$.content.vehicles') WHERE result_id='feed-b';"
+            "SELECT vin,price FROM vehicles ORDER BY price;"
+        ])
+
+        self.assertTrue(_uses_queryable_source_model(summary))
+        unkeyed = summarize_sqlite_tool_result_sql([
+            "CREATE TABLE vehicles(vin TEXT, price INTEGER);"
+            "INSERT INTO vehicles SELECT json_extract(value,'$.vin'),json_extract(value,'$.price') "
+            "FROM __tool_results,json_each(result_json,'$.content.vehicles') WHERE result_id='feed-a';"
+            "SELECT vin,price FROM vehicles ORDER BY price;"
+        ])
+        self.assertFalse(_uses_queryable_source_model(unkeyed))
 
     def test_first_write_scorer_accepts_direct_source_array_import(self):
         failures = _source_array_first_write_failures(

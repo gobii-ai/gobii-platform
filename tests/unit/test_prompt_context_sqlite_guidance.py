@@ -28,6 +28,8 @@ class PromptContextSqliteGuidanceTests(SimpleTestCase):
         self.assertIn("Otherwise read the model first", guidance)
         self.assertIn("Current complete rows are truth; don't refetch them", guidance)
         self.assertIn("Tool output doesn't update it", guidance)
+        self.assertIn("reconcile each useful source batch", guidance)
+        self.assertIn("checklist, intermediate state, and resume point", guidance)
         self.assertIn("sharing a stable ID or its children", guidance)
         self.assertIn("reconcile entities/relations", guidance)
         self.assertIn("before acting/reporting", guidance)
@@ -39,6 +41,7 @@ class PromptContextSqliteGuidanceTests(SimpleTestCase):
         self.assertIn("query gaps before reporting", guidance)
         self.assertIn("Only sourced blockers are unresolved", guidance)
         self.assertIn("use SQLite for exact set logic/counts/ranking", guidance)
+        self.assertIn("Bind messy agent-authored values with :name + bindings", guidance)
         self.assertIn("No sibling-by-sibling result/table/blob loops", guidance)
         self.assertIn("Inspect unknown structure once", guidance)
         self.assertNotIn("Copy names/paths/values/URLs", guidance)
@@ -279,6 +282,88 @@ class PromptContextSqliteGuidanceTests(SimpleTestCase):
         )
         self.assertTrue(
             prompt_context._build_unreconciled_source_model_warning([source, model_read, unrelated_write])
+        )
+
+    def test_multi_source_work_gets_an_incremental_model_checkpoint(self):
+        first_source = ("mcp_brightdata_search_engine", {"query": "company roster"}, "complete")
+        second_source = ("mcp_brightdata_search_engine", {"query": "founder roster"}, "complete")
+
+        self.assertEqual(
+            prompt_context._build_unreconciled_source_model_warning([first_source]),
+            "",
+        )
+        warning = prompt_context._build_unreconciled_source_model_warning([
+            first_source,
+            second_source,
+        ])
+
+        self.assertIn("form a working set and remain transient", warning)
+        self.assertIn("next action must be sqlite_batch", warning)
+        self.assertIn("durable named entity/relationship tables", warning)
+        self.assertIn("PRIMARY KEY/UNIQUE and provenance (not TEMP/CTAS)", warning)
+        self.assertIn("reconcile this source batch", warning)
+        self.assertIn("query coverage gaps", warning)
+        self.assertIn("Import same-shaped siblings in one set query", warning)
+        self.assertIn("separate statements only for different entity shapes", warning)
+        self.assertIn("Do not answer or act from transient results", warning)
+
+        inspection = (
+            "sqlite_batch",
+            {"sql": "SELECT result_id, substr(result_text,1,500) FROM __tool_results ORDER BY created_at"},
+            "complete",
+        )
+        post_inspection = prompt_context._build_unreconciled_source_model_warning([
+            first_source,
+            second_source,
+            inspection,
+        ])
+        self.assertIn("already inspected this source batch", post_inspection)
+        self.assertIn("Do not query raw __tool_results again", post_inspection)
+        self.assertIn("bind one JSON array", post_inspection)
+        self.assertIn("json_each(:rows)", post_inspection)
+        self.assertIn("Import same-shaped siblings with one set query", post_inspection)
+
+        modeled_without_read = (
+            "sqlite_batch",
+            {
+                "sql": (
+                    "CREATE TABLE companies(company_id TEXT PRIMARY KEY, name TEXT);"
+                    "INSERT INTO companies(company_id,name) "
+                    "SELECT json_extract(value,'$.company_id'),json_extract(value,'$.name') "
+                    "FROM __tool_results,json_each(result_json,'$.companies')"
+                )
+            },
+            "complete",
+        )
+        read_checkpoint = prompt_context._build_unreconciled_source_model_warning([
+            first_source,
+            second_source,
+            modeled_without_read,
+        ])
+        self.assertIn("Fresh source evidence is reconciled", read_checkpoint)
+        self.assertIn("still-unread updated table(s): companies", read_checkpoint)
+        self.assertIn("instead of rereading transient results or repeating the write", read_checkpoint)
+
+        modeled = (
+            "sqlite_batch",
+            {
+                "sql": (
+                    "CREATE TABLE companies(company_id TEXT PRIMARY KEY, name TEXT);"
+                    "INSERT INTO companies(company_id,name) "
+                    "SELECT json_extract(value,'$.company_id'),json_extract(value,'$.name') "
+                    "FROM __tool_results,json_each(result_json,'$.companies');"
+                    "SELECT * FROM companies"
+                )
+            },
+            "complete",
+        )
+        self.assertEqual(
+            prompt_context._build_unreconciled_source_model_warning([
+                first_source,
+                second_source,
+                modeled,
+            ]),
+            "",
         )
 
 

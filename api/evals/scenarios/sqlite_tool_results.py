@@ -44,6 +44,7 @@ SQLITE_BOUNDED_PORTFOLIO_REPORT = "sqlite_tool_results_bounded_portfolio_report"
 SQLITE_DOMAIN_TRUTH_OVER_STALE_HISTORY = "sqlite_domain_truth_over_stale_history"
 SQLITE_DOMAIN_MODEL_REFRESHES_AND_EVOLVES = "sqlite_domain_model_refreshes_and_evolves"
 SQLITE_SOURCE_ARRAY_FIRST_WRITE = "sqlite_source_array_first_write"
+SQLITE_INCREMENTAL_DOMAIN_MODEL = "sqlite_incremental_domain_model"
 SQLITE_TOOL_RESULT_SCENARIO_SLUGS = [
     SQLITE_MULTI_RESULT_WEB_SYNTHESIS,
     SQLITE_INTERMEDIATE_WORKING_TABLE,
@@ -54,6 +55,7 @@ SQLITE_TOOL_RESULT_SCENARIO_SLUGS = [
     SQLITE_DOMAIN_TRUTH_OVER_STALE_HISTORY,
     SQLITE_DOMAIN_MODEL_REFRESHES_AND_EVOLVES,
     SQLITE_SOURCE_ARRAY_FIRST_WRITE,
+    SQLITE_INCREMENTAL_DOMAIN_MODEL,
 ]
 
 
@@ -112,6 +114,33 @@ RELEASE_EVENTS = (
     ("rel-search-18", "Search index", "2026-07-23T17:00:43Z", "Mateo Ruiz", "blocked"),
     ("rel-billing-09", "Billing worker", "2026-07-24T13:05:29Z", "Hana Lee", "approved"),
     ("rel-mobile-27", "Mobile client", "2026-07-24T19:45:11Z", "Avery Cole", "canceled"),
+)
+
+INITIATIVE_FEED_URL = "https://ops.example.test/initiatives.json"
+OWNERSHIP_FEED_URL = "https://ops.example.test/ownership.json"
+RISK_FEED_URL = "https://ops.example.test/risks.json"
+OPERATING_FEED_URLS = (INITIATIVE_FEED_URL, OWNERSHIP_FEED_URL, RISK_FEED_URL)
+INITIATIVES = (
+    ("init-checkout", "Checkout Recovery", "active", "revenue"),
+    ("init-search", "Search Relevance", "active", "discovery"),
+    ("init-migration", "Lumen Migration", "active", "platform"),
+    ("init-mobile", "Mobile Refresh", "paused", "engagement"),
+    ("init-billing", "Billing Reliability", "active", "revenue"),
+    ("init-onboarding", "Onboarding Simplification", "active", "activation"),
+)
+OWNERSHIP_ASSIGNMENTS = (
+    ("own-checkout", "init-checkout", "Priya Shah", "primary"),
+    ("own-search", "init-search", "Mateo Ruiz", "primary"),
+    ("own-mobile", "init-mobile", "Avery Cole", "primary"),
+    ("own-billing", "init-billing", "Hana Lee", "primary"),
+    ("own-onboarding", "init-onboarding", "Rowan Kim", "advisor"),
+)
+INITIATIVE_RISKS = (
+    ("risk-checkout", "init-checkout", "critical", "payment data consistency"),
+    ("risk-search", "init-search", "medium", "index freshness"),
+    ("risk-migration", "init-migration", "high", "cutover dependency"),
+    ("risk-billing", "init-billing", "low", "retry backlog"),
+    ("risk-onboarding", "init-onboarding", "high", "incomplete analytics"),
 )
 
 
@@ -623,6 +652,67 @@ def _release_calendar_mock() -> dict:
     }
 
 
+def _operating_feeds_mock() -> dict:
+    payloads = {
+        INITIATIVE_FEED_URL: {
+            "source_url": INITIATIVE_FEED_URL,
+            "initiatives": [
+                {
+                    "initiative_id": initiative_id,
+                    "name": name,
+                    "status": status,
+                    "program": program,
+                    "source_url": INITIATIVE_FEED_URL,
+                }
+                for initiative_id, name, status, program in INITIATIVES
+            ],
+        },
+        OWNERSHIP_FEED_URL: {
+            "source_url": OWNERSHIP_FEED_URL,
+            "assignments": [
+                {
+                    "assignment_id": assignment_id,
+                    "initiative_id": initiative_id,
+                    "person": person,
+                    "role": role,
+                    "source_url": OWNERSHIP_FEED_URL,
+                }
+                for assignment_id, initiative_id, person, role in OWNERSHIP_ASSIGNMENTS
+            ],
+        },
+        RISK_FEED_URL: {
+            "source_url": RISK_FEED_URL,
+            "risks": [
+                {
+                    "risk_id": risk_id,
+                    "initiative_id": initiative_id,
+                    "risk_level": risk_level,
+                    "reason": reason,
+                    "source_url": RISK_FEED_URL,
+                }
+                for risk_id, initiative_id, risk_level, reason in INITIATIVE_RISKS
+            ],
+        },
+    }
+    return {
+        "http_request": {
+            "rules": [
+                {
+                    "url_contains": url,
+                    "result": {
+                        "status": "ok",
+                        "status_code": 200,
+                        "url": url,
+                        "content": payload,
+                    },
+                }
+                for url, payload in payloads.items()
+            ],
+            "default": {"status": "error", "message": "Unknown eval URL."},
+        }
+    }
+
+
 MOCK_BUILDERS = {
     "web": _web_mock,
     "aged_web": lambda: _web_mock(facts_last=True),
@@ -630,6 +720,7 @@ MOCK_BUILDERS = {
     "dedupe": _dedupe_mock,
     "inventory": _inventory_mock,
     "release_calendar": _release_calendar_mock,
+    "operating_feeds": _operating_feeds_mock,
 }
 
 
@@ -942,6 +1033,17 @@ def _source_array_first_write_failures(sqlite_calls, model_table: str | None) ->
     return failures
 
 
+def _uses_queryable_source_model(summary) -> bool:
+    source_models = set(summary.row_derived_working_table_names)
+    return bool(
+        source_models
+        and summary.single_tool_result_imports
+        and summary.creates_working_table
+        and summary.reads_working_table
+        and source_models.isdisjoint(summary.unkeyed_explicit_table_names)
+    )
+
+
 class SqliteToolResultScenario(EvalScenario, ScenarioExecutionTools):
     tier = "core"
     category = "sqlite_tool_results"
@@ -955,6 +1057,7 @@ class SqliteToolResultScenario(EvalScenario, ScenarioExecutionTools):
     max_single_result_filters = 1
     max_sqlite_usage_calls: int | None = None
     max_sqlite_attempts: int | None = None
+    accept_queryable_source_model = False
     reject_result_id_case_rows = False
     sourced_answer_task_name = "verify_sourced_answer"
     result_access_source_urls: tuple[str, ...] = ()
@@ -1005,6 +1108,7 @@ class SqliteToolResultScenario(EvalScenario, ScenarioExecutionTools):
         calls = _tool_calls_for_run(run_id, after=after, tool_names={"sqlite_batch"})
         successful_calls, strategy_calls = _sqlite_calls_with_persisted_effects(calls)
         summary = summarize_sqlite_tool_result_calls(strategy_calls)
+        modeled_usage = self.accept_queryable_source_model and _uses_queryable_source_model(summary)
         result_id_case_calls = [
             call for call in successful_calls
             if any(
@@ -1020,8 +1124,8 @@ class SqliteToolResultScenario(EvalScenario, ScenarioExecutionTools):
             (not successful_calls, "no successful sqlite_batch call observed"),
             (self.max_sqlite_attempts is not None and len(calls) > self.max_sqlite_attempts, f"sqlite_batch attempts {len(calls)} > {self.max_sqlite_attempts}"),
             (self.max_sqlite_usage_calls is not None and len(successful_calls) > self.max_sqlite_usage_calls, f"sqlite_batch calls {len(successful_calls)} > {self.max_sqlite_usage_calls}"),
-            (summary.aggregate_tool_result_queries < 1, "no aggregate __tool_results query observed"),
-            (summary.smart_tool_result_queries < 1, "no smart __tool_results query observed"),
+            (summary.aggregate_tool_result_queries < 1 and not modeled_usage, "no aggregate __tool_results query observed"),
+            (summary.smart_tool_result_queries < 1 and not modeled_usage, "no smart __tool_results query observed"),
             (summary.direct_result_text_fetches > max_direct_fetches, f"direct result_text fetches {summary.direct_result_text_fetches} > {max_direct_fetches}"),
             (bool(summary.duplicate_direct_fetches), f"duplicate direct result_text fetches={summary.duplicate_direct_fetches}"),
             (bool(summary.manual_values_working_tables), f"manual VALUES working tables={summary.manual_values_working_tables}"),
@@ -1487,6 +1591,164 @@ class SqliteSourceArrayFirstWriteScenario(SqliteDomainModelScenario):
 
 
 @register_scenario
+class SqliteIncrementalDomainModelScenario(SqliteDomainModelScenario):
+    slug = SQLITE_INCREMENTAL_DOMAIN_MODEL
+    description = "Multi-source operating work should build a keyed relational model before research ends."
+    tasks = [
+        ScenarioTask(name="inject_prompt", assertion_type="agent_processing"),
+        ScenarioTask(name="verify_incremental_domain_model", assertion_type="tool_call"),
+        ScenarioTask(name="verify_operating_answer", assertion_type="manual"),
+    ]
+    prompt = (
+        "We're coordinating this work across people and feeds. Build the current ownership and risk picture from "
+        "these sources. Tell me every active initiative without a primary owner, then rank the owned active "
+        "initiatives by risk. Include the source links; I'll have follow-ups.\n\n"
+        + "\n".join(f"- {url}" for url in OPERATING_FEED_URLS)
+    )
+
+    def run(self, run_id: str, agent_id: str) -> None:
+        self._ready_agent(agent_id)
+        PersistentAgent.objects.filter(id=agent_id).update(
+            charter="Keep current cross-team operating ownership and risk evidence coherent."
+        )
+        self._enable_tools(agent_id, ("http_request",))
+        inbound = self._inject_and_wait(
+            run_id,
+            agent_id,
+            self.prompt,
+            _operating_feeds_mock(),
+            allowed_tool_names={"http_request", "sqlite_batch", "send_chat_message"},
+            max_relevant_tool_calls=12,
+        )
+        self._record_incremental_model(run_id, after=inbound.timestamp)
+        self._record_sourced_answer(
+            run_id,
+            agent_id=agent_id,
+            after=inbound.timestamp,
+            task_name="verify_operating_answer",
+            source_urls=OPERATING_FEED_URLS,
+            required_terms=(
+                "Lumen Migration",
+                "Onboarding Simplification",
+                "Checkout Recovery",
+                "critical",
+                "Priya Shah",
+            ),
+            min_sources=3,
+        )
+
+    def _record_incremental_model(self, run_id: str, *, after) -> None:
+        task_name = "verify_incremental_domain_model"
+        self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name=task_name)
+        calls = _tool_calls_for_run(run_id, after=after)
+        source_calls = [call for call in calls if call.tool_name == "http_request"]
+        sqlite_calls = [call for call in calls if call.tool_name == "sqlite_batch"]
+        successful_sqlite = [
+            call for call in sqlite_calls
+            if str(getattr(call, "status", "")).casefold() == "complete"
+            and str((_result_payload(call) or {}).get("status") or "").casefold() == "ok"
+        ]
+        source_positions = [
+            index
+            for index, call in enumerate(calls)
+            if call.tool_name == "http_request"
+            and str(getattr(call, "status", "")).casefold() == "complete"
+        ]
+        last_source_position = max(source_positions) if source_positions else -1
+        after_last_source = [
+            call for index, call in enumerate(calls)
+            if call in successful_sqlite and index > last_source_position
+        ]
+
+        def sql_values(selected_calls) -> list[str]:
+            return [str((call.tool_params or {}).get("sql") or "") for call in selected_calls]
+
+        all_sql_values = sql_values(successful_sqlite)
+        combined_sql = "\n".join(all_sql_values)
+        after_targets = set(source_derived_model_mutation_tables(sql_values(after_last_source)))
+        all_targets = set(source_derived_model_mutation_tables(all_sql_values))
+        summary = summarize_sqlite_tool_result_calls(successful_sqlite)
+        candidates = tuple(dict.fromkeys((*summary.working_table_names, *all_targets)))
+        _modeled, _row_modeled, identity_tables = _domain_model_lineage(
+            combined_sql,
+            direct_tables=all_targets,
+            row_direct_tables=summary.row_derived_working_table_names,
+            candidate_tables=candidates,
+        )
+        statements = [
+            _structural_sql(statement)
+            for statement in sqlparse.split(combined_sql)
+            if statement.strip()
+        ]
+        literal_model_writes = []
+        for statement in statements:
+            mutation = _MUTATION_TARGET_RE.search(statement)
+            if (
+                mutation
+                and mutation.group("table").casefold() in all_targets
+                and mutation.group("table").casefold()
+                not in source_derived_model_mutation_tables((statement,))
+            ):
+                literal_model_writes.append(statement)
+        decision_reads = [
+            statement
+            for statement in statements
+            if re.search(r"\bselect\b", statement, re.I)
+            and any(_reads_table(statement, table) for table in all_targets)
+        ]
+        fetch_counts = _source_fetch_counts(
+            source_calls,
+            tool_names={"http_request"},
+            source_urls=OPERATING_FEED_URLS,
+        )
+        failures = _tool_attempt_failures(source_calls, "Source fetch")
+        failures.extend(_sqlite_attempt_failures(sqlite_calls))
+        failures.extend(message for failed, message in (
+            (
+                any(count != 1 for count in fetch_counts.values()),
+                f"expected each operating feed once, found {fetch_counts}",
+            ),
+            (
+                not after_targets,
+                "the completed source batch was not reconciled before answering",
+            ),
+            (
+                len(all_targets) < 2,
+                f"expected related entity models, found {sorted(all_targets)}",
+            ),
+            (
+                not all_targets.issubset(identity_tables),
+                f"modeled tables lacked stable identity: {sorted(all_targets - identity_tables)}",
+            ),
+            (bool(literal_model_writes), "source facts were copied into model writes as SQL literals"),
+            (
+                not re.search(r"\binitiative_id\b", combined_sql, re.I),
+                "model did not preserve the cross-feed initiative relationship",
+            ),
+            (
+                not re.search(r"\b(?:source_url|source_id|provenance)\b", combined_sql, re.I),
+                "modeled entities lacked source provenance",
+            ),
+            (
+                not any(re.search(r"\b(?:left\s+join|not\s+exists|having)\b", statement, re.I)
+                        for statement in decision_reads),
+                "model was not queried for missing ownership with set logic",
+            ),
+            (
+                not any("risk" in statement.casefold() and re.search(r"\border\s+by\b", statement, re.I)
+                        for statement in decision_reads),
+                "modeled risk was not ranked in SQL",
+            ),
+        ) if failed)
+        self._record_check(
+            run_id,
+            task_name,
+            failures,
+            f"Incrementally modeled and queried related operating tables: {sorted(all_targets)}.",
+        )
+
+
+@register_scenario
 class SqliteDedupeRequeryScenario(SqliteToolResultScenario):
     slug = SQLITE_DEDUPE_REQUERY
     description = "Duplicate source synthesis should use aggregate SQLite/CTE queries, not repeated blob re-fetches."
@@ -1514,6 +1776,8 @@ class SqliteItemLinkReportScenario(SqliteToolResultScenario):
     required_terms = ("Model Y", "Harrisburg", "$27,455")
     min_sources = 2
     max_single_result_filters = 2
+    require_working_table = True
+    accept_queryable_source_model = True
     sourced_answer_task_name = "verify_listing_links_in_report"
 
 

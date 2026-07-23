@@ -201,6 +201,16 @@ def resolve_link_reference_params(value, agent, *, tool_name: str = "", _path=()
         return [resolve_link_reference_params(item, agent, tool_name=tool_name, _path=(*_path, index), _allowed=_allowed) for index, item in enumerate(value)]
     if not isinstance(value, str):
         return value
+    if tool_name == "sqlite_batch" and _path and _path[0] == "bindings":
+        stripped = value.strip()
+        if _REFERENCE_RE.fullmatch(stripped):
+            resolved = resolve_link_references(stripped, agent)
+            return value[: len(value) - len(value.lstrip())] + resolved + value[len(value.rstrip()):]
+    if tool_name == "sqlite_batch" and _contains_reference_syntax(value):
+        # A valid handle is safe opaque data in SQLite. Direct source extraction remains preferable,
+        # but rejecting the whole query loses otherwise useful modeled work.
+        resolve_link_references(value, agent)
+        return value
     if _path and _path[0] in _allowed:
         if tool_name == "http_request":
             return resolve_link_references(value, agent)
@@ -212,9 +222,10 @@ def resolve_link_reference_params(value, agent, *, tool_name: str = "", _path=()
         return value[: len(value) - len(value.lstrip())] + resolved + value[len(value.rstrip()):]
     if tool_name and _contains_reference_syntax(value):
         location = f"{tool_name}.{_param_path(_path)}" if tool_name else _param_path(_path) or "this value"
-        guidance = "Derive raw values/URLs inside INSERT ... SELECT from __tool_results; never copy a blob or replace tokens with literals." if tool_name == "sqlite_batch" else "Use a standalone token only where URL input is supported, move it to supported message/document content, or omit it."
         raise LinkReferenceResolutionError(
-            f"Query not executed: link references are unsupported in {location}. {guidance}")
+            f"Query not executed: link references are unsupported in {location}. "
+            "Use a standalone token only where URL input is supported, move it to supported message/document content, or omit it."
+        )
     return value
 
 

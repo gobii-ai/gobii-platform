@@ -308,7 +308,6 @@ class LinkReferenceTests(TestCase):
         cases = (
             ("create_image", {"prompt": f"Render {token}", "file_path": "/exports/a.png"}, "create_image.prompt"),
             ("create_video", {"prompt": token, "file_path": "/exports/a.mp4"}, "create_video.prompt"),
-            ("sqlite_batch", {"queries": [{"sql": f"SELECT '{token}'"}]}, "sqlite_batch.queries[0].sql"),
             ("apply_patch", {"patch": f"+ {token}"}, "apply_patch.patch"),
             ("send_email", {"subject": token, "mobile_first_html": "Body"}, "send_email.subject"),
             ("send_webhook_event", {"payload": {"item": {"url": token}}}, "send_webhook_event.payload.item.url"),
@@ -332,13 +331,36 @@ class LinkReferenceTests(TestCase):
                     self.assertTrue(result["retryable"])
                     self.assertIn(path, result["message"])
                     self.assertIn("Query not executed", result["message"])
-                    if tool_name == "sqlite_batch":
-                        self.assertIn("Derive raw values/URLs inside INSERT ... SELECT", result["message"])
-                        self.assertIn("replace tokens with literals", result["message"])
 
         enabled.assert_not_called()
         apply_patch_mock.assert_not_called()
         email_mock.assert_not_called()
+
+    def test_sqlite_allows_a_valid_link_handle_as_opaque_fallback_data(self):
+        token = rewrite_prompt_urls(
+            "https://profiles.example.test/avery?view=full",
+            self.agent,
+            create=True,
+        )
+        params = {
+            "sql": f"INSERT INTO prospects(profile_ref) VALUES ('{token}')",
+            "will_continue_work": True,
+        }
+
+        with patch(
+            "api.agent.core.event_processing.execute_enabled_tool",
+            return_value={"status": "ok"},
+        ) as enabled:
+            result, _ = _execute_tool_call_runtime(
+                self.agent,
+                tool_name="sqlite_batch",
+                exec_params=params,
+                budget_ctx=None,
+                eval_run_id=None,
+            )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(enabled.call_args.args[2], params)
 
     def test_runtime_allows_embedded_references_only_in_supported_content_fields(self):
         token = rewrite_prompt_urls(
@@ -367,6 +389,22 @@ class LinkReferenceTests(TestCase):
                 tool_name="create_file",
             )
         self.assertIn("create_file.content", str(raised.exception))
+
+    def test_sqlite_named_binding_resolves_a_known_link_handle_as_data(self):
+        url = "https://profiles.example.test/avery"
+        token = rewrite_prompt_urls(url, self.agent, create=True)
+
+        resolved = resolve_link_reference_params(
+            {
+                "sql": "INSERT INTO prospects(profile_url) VALUES (:profile_url)",
+                "bindings": {"profile_url": token},
+                "will_continue_work": True,
+            },
+            self.agent,
+            tool_name="sqlite_batch",
+        )
+
+        self.assertEqual(resolved["bindings"]["profile_url"], url)
 
     def test_rejects_references_concatenated_into_urls(self):
         token = rewrite_prompt_urls(
@@ -900,10 +938,10 @@ class LinkReferenceTests(TestCase):
         self.assertIn("adjacent token is only a display/fetch handle", system_prompt)
         self.assertIn("Keep pairs attached", system_prompt)
         self.assertIn("Final Markdown is exactly `[item]($[link:LEXACT])`", system_prompt)
-        self.assertIn("replace it with a raw URL", system_prompt)
         self.assertIn("Never encode, edit, reassign, combine, or guess it", system_prompt)
         self.assertIn("Items without a token stay plain", system_prompt)
-        self.assertIn("SQL/state/search", system_prompt)
+        self.assertIn("SQLite source rows derive raw URLs from __tool_results", system_prompt)
+        self.assertIn("exact handle through a named binding, never SQL text", system_prompt)
         self.assertIn("A report is unfinished while a token-backed entity name is plain", system_prompt)
         self.assertIn("body must contain the exact tokens", system_prompt)
         message.refresh_from_db()
