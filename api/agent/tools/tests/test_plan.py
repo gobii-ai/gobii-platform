@@ -6,6 +6,7 @@ from django.test import SimpleTestCase, TestCase, tag
 from api.agent.tools.plan import (
     build_redundant_research_plan_skip_result,
     execute_update_plan,
+    format_current_plan_for_prompt,
     get_update_plan_tool,
 )
 from api.models import (
@@ -90,6 +91,33 @@ class UpdatePlanResearchSuppressionTests(TestCase):
             browser_use_agent=self.browser_agent,
             charter="Test agent.",
         )
+
+    def test_unfinished_plan_prompt_places_cleanup_next_to_plan(self):
+        PersistentAgentKanbanCard.objects.create(
+            assigned_agent=self.agent,
+            title="Deliver the final report",
+            status=PersistentAgentKanbanCard.Status.TODO,
+            priority=1,
+        )
+
+        prompt = format_current_plan_for_prompt(self.agent)
+
+        self.assertIn("send the final delivery with true", prompt)
+        self.assertIn("finish/defer all Doing/Todo via update_plan false", prompt)
+
+    def test_planning_mode_does_not_prompt_for_final_delivery(self):
+        self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
+        self.agent.save(update_fields=["planning_state"])
+        PersistentAgentKanbanCard.objects.create(
+            assigned_agent=self.agent,
+            title="Deliver the final report",
+            status=PersistentAgentKanbanCard.Status.TODO,
+            priority=1,
+        )
+
+        prompt = format_current_plan_for_prompt(self.agent)
+
+        self.assertNotIn("send the final delivery", prompt)
 
     def test_redundant_research_progress_update_is_skipped(self):
         PersistentAgentKanbanCard.objects.create(

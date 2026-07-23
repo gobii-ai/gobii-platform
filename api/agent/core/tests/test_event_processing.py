@@ -456,7 +456,7 @@ class MessageToolExplicitContinuationTests(TestCase):
 
         self.assertFalse(_tool_call_likely_terminal_message(call))
 
-    def test_terminal_message_with_unfinished_plan_requires_followup(self):
+    def test_terminal_message_with_unfinished_plan_stops(self):
         PersistentAgentKanbanCard.objects.create(
             assigned_agent=self.agent,
             title="Synthesize final report",
@@ -499,9 +499,9 @@ class MessageToolExplicitContinuationTests(TestCase):
         )
 
         self.assertTrue(finalized.terminal_message_delivery_ok)
-        self.assertTrue(finalized.followup_required)
+        self.assertFalse(finalized.followup_required)
         self.assertIs(finalized.last_explicit_continue, False)
-        self.assertTrue(
+        self.assertFalse(
             PersistentAgentStep.objects.filter(
                 agent=self.agent,
                 description__contains="current plan still has unfinished items",

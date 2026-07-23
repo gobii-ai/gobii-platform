@@ -10,7 +10,12 @@ from uuid import UUID
 from django.db import transaction
 from django.utils import timezone
 
-from api.models import PersistentAgentKanbanCard, PersistentAgentMessage, PersistentAgentPlanDeliverable
+from api.models import (
+    PersistentAgent,
+    PersistentAgentKanbanCard,
+    PersistentAgentMessage,
+    PersistentAgentPlanDeliverable,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -469,8 +474,16 @@ def format_current_plan_for_prompt(agent) -> str:
     if not (snapshot.todo_count or snapshot.doing_count or snapshot.done_count):
         return "Current plan: none"
 
+    unfinished = (
+        (snapshot.todo_count or snapshot.doing_count)
+        and agent.planning_state != PersistentAgent.PlanningState.PLANNING
+    )
     lines = [
-        "Current plan:",
+        (
+            "Current plan (before stopping: send the final delivery with true, then finish/defer all Doing/Todo via update_plan false):"
+            if unfinished
+            else "Current plan:"
+        ),
         f"- Doing: {snapshot.doing_count}",
         f"- Todo: {snapshot.todo_count}",
         f"- Done: {snapshot.done_count}",

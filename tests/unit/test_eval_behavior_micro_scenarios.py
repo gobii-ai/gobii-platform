@@ -61,6 +61,7 @@ from api.evals.scenarios.behavior_micro import (
     get_plan_activity_calls_for_run,
     get_pending_human_input_requests,
     get_planning_mutation_calls_before_end_planning,
+    explicit_stop_is_bounded_to_plan_closeout,
     tool_call_is_plan_activity,
 )
 from api.evals.scenarios.effort_calibration import _hierarchical_report_shape
@@ -741,6 +742,39 @@ class BehaviorMicroHelperTests(TestCase):
 
     def _add_orchestrator_completion(self):
         return PersistentAgentCompletion.objects.create(agent=self.agent, eval_run=self.run)
+
+    def test_explicit_stop_allows_at_most_one_plan_closeout_completion(self):
+        terminal_completion = self._add_orchestrator_completion()
+        terminal_call = self._add_tool_call(
+            "send_chat_message",
+            {"body": "Done.", "will_continue_work": False},
+            completion=terminal_completion,
+        )
+        after = terminal_completion.created_at - timedelta(seconds=1)
+
+        stopped, detail = explicit_stop_is_bounded_to_plan_closeout(
+            self.run.id,
+            after=after,
+            call=terminal_call,
+        )
+        self.assertTrue(stopped, detail)
+
+        closeout_completion = self._add_orchestrator_completion()
+        self._add_tool_call("update_plan", {"plan": [], "will_continue_work": False}, completion=closeout_completion)
+        stopped, detail = explicit_stop_is_bounded_to_plan_closeout(
+            self.run.id,
+            after=after,
+            call=terminal_call,
+        )
+        self.assertTrue(stopped, detail)
+
+        self._add_orchestrator_completion()
+        stopped, detail = explicit_stop_is_bounded_to_plan_closeout(
+            self.run.id,
+            after=after,
+            call=terminal_call,
+        )
+        self.assertFalse(stopped, detail)
 
     def _assert_charter_cases(self, slug, *, old, new, passing, failing):
         scenario = ScenarioRegistry.get(slug)
