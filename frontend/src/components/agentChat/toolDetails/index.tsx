@@ -1,6 +1,7 @@
 import type { ToolDetailComponent } from '../tooling/types'
 
 import { EndPlanningDetail, GenericToolDetail, McpToolDetail, UpdateCharterDetail } from './details/common'
+import { UpdatePlanDetail } from './details/plan'
 import { SqliteBatchDetail, SqliteInternalTableDetail } from './details/sqlite'
 import { SearchToolDetail } from './details/search'
 import { ApiRequestDetail } from './details/api'
@@ -26,6 +27,7 @@ export { normalizeStructuredValue } from './normalize'
 export {
   GenericToolDetail,
   EndPlanningDetail,
+  UpdatePlanDetail,
   UpdateCharterDetail,
   McpToolDetail,
   SqliteBatchDetail,
@@ -72,6 +74,7 @@ export {
 export const TOOL_DETAIL_COMPONENTS = {
   default: GenericToolDetail,
   endPlanning: EndPlanningDetail,
+  updatePlan: UpdatePlanDetail,
   updateCharter: UpdateCharterDetail,
   sqliteBatch: SqliteBatchDetail,
   sqliteInternalTable: SqliteInternalTableDetail,
