@@ -84,6 +84,28 @@ class TextSanitizationTests(TestCase):
             with self.subTest(rich_html=rich_html):
                 self.assertEqual(normalize_humanized_message_style(rich_html), expected)
 
+    def test_humanized_message_style_preserves_word_boundaries_across_inline_html(self):
+        text = (
+            "<p><span>Hey there! I'm Alan</span>—<span>nice to meet you.</span></p>"
+            "<ol>"
+            "<li><strong>OpenCV (computer vision library)</strong>—"
+            "<span>Companies founded around the ecosystem</span></li>"
+            "<li><strong>OCV Capital or a specific VC/accelerator</strong>—A venture firm</li>"
+            "</ol>"
+        )
+
+        self.assertEqual(
+            normalize_humanized_message_style(text),
+            (
+                "<p><span>Hey there! I'm Alan</span>, <span>nice to meet you.</span></p>"
+                "<ol>"
+                "<li><strong>OpenCV (computer vision library)</strong>, "
+                "<span>Companies founded around the ecosystem</span></li>"
+                "<li><strong>OCV Capital or a specific VC/accelerator</strong>, A venture firm</li>"
+                "</ol>"
+            ),
+        )
+
     def test_strip_control_chars_removes_disallowed_characters(self):
         dirty = "Hello\x00World\u0019"
 

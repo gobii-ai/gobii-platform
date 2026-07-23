@@ -40,7 +40,8 @@ _FORBIDDEN_DASH_RE = re.compile(
     r"(?:[ \t]*(?:[\u2012\u2013\u2014\u2015\u2e3a\u2e3b]+|--+|&(?:mdash|ndash|#8211|#8212|#x2013|#x2014);)[ \t]*|[ \t]+-[ \t]+)",
     re.IGNORECASE,
 )
-_OPENING_INLINE_HTML_TEXT_RE = re.compile(r"(?:<(?:a|b|em|i|span|strong)\b[^>]*>\s*)+[^<\s]", re.IGNORECASE)
+_INLINE_HTML_TEXT_BEFORE_RE = re.compile(r"[^<>\s](?:[ \t]*</?(?:a|abbr|acronym|b|code|em|i|span|strong)\b[^>]*>)*[ \t]*\Z", re.IGNORECASE)
+_INLINE_HTML_TEXT_AFTER_RE = re.compile(r"\A[ \t]*(?:</?(?:a|abbr|acronym|b|code|em|i|span|strong)\b[^>]*>[ \t]*)*[^<>\s]", re.IGNORECASE)
 
 
 def normalize_humanized_message_style(value: str | None) -> str:
@@ -48,10 +49,9 @@ def normalize_humanized_message_style(value: str | None) -> str:
 
     def normalize_prose(prose: str, offset: int) -> str:
         def punctuate(match):
-            before = prose[:match.start()].rstrip(" \t")
-            after = prose[match.end():].lstrip(" \t")
-            visible_after = bool(after) or bool(_OPENING_INLINE_HTML_TEXT_RE.match(text[offset + match.end():]))
-            return ", " if before and visible_after and not (before.endswith("\n") or after.startswith("\n")) else ""
+            has_before = bool(_INLINE_HTML_TEXT_BEFORE_RE.search(text[:offset + match.start()]))
+            has_after = bool(_INLINE_HTML_TEXT_AFTER_RE.match(text[offset + match.end():]))
+            return ", " if has_before and has_after else ""
 
         return _FORBIDDEN_DASH_RE.sub(punctuate, prose)
 
@@ -499,7 +499,6 @@ def strip_llm_artifacts(value: str | None) -> str:
 # Quote characters that might wrap blockquote content redundantly
 # Includes straight quotes, smart quotes, and various international quotation marks
 _OPENING_QUOTES = {'"', "\u201c", "\u201e", "\u00ab", "\u2039", "\u2018", "'"}
-_CLOSING_QUOTES = {'"', "\u201c", "\u201d", "\u00bb", "\u203a", "\u2019", "'"}
 _QUOTE_PAIRS = {
     '"': '"',           # straight double
     "\u201c": "\u201d",  # smart double " → "
