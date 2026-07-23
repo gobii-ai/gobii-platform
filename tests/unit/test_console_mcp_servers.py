@@ -2135,6 +2135,38 @@ class MCPServerAssignmentAPITests(TestCase):
         manager.refresh_server.assert_not_called()
         manager.remove_server.assert_not_called()
 
+    @patch("api.services.mcp_servers.sandbox_compute_enabled_for_agent", return_value=False)
+    def test_update_stdio_assignments_rejects_agent_without_sandbox(
+        self,
+        _mock_sandbox_compute_enabled_for_agent,
+    ):
+        org = Organization.objects.create(name="STDIO Org", slug="stdio-org", created_by=self.user)
+        OrganizationMembership.objects.create(
+            org=org,
+            user=self.user,
+            role=OrganizationMembership.OrgRole.OWNER,
+        )
+        self._set_org_context(org)
+        server = MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.ORGANIZATION,
+            organization=org,
+            name="org-stdio",
+            display_name="Org STDIO Server",
+            command="npx",
+            command_args=["-y", "@example/mcp"],
+        )
+        agent = _create_console_test_agent(user=self.user, organization=org, name="No Sandbox")
+
+        response = self.client.post(
+            reverse("console-mcp-server-assignments", args=[server.id]),
+            data=json.dumps({"agent_ids": [str(agent.id)]}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("sandbox compute", response.content.decode().lower())
+        self.assertFalse(PersistentAgentMCPServer.objects.filter(server_config=server).exists())
+
     def test_assignments_platform_scope_blocked(self):
         server = MCPServerConfig.objects.create(
             scope=MCPServerConfig.Scope.PLATFORM,

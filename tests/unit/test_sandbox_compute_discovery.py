@@ -121,8 +121,14 @@ class SandboxComputeDiscoveryServiceTests(TestCase):
         backend.discover_mcp_tools.assert_not_called()
 
     @patch("api.services.sandbox_compute.set_cached_mcp_tool_definitions")
+    @patch("api.services.sandbox_compute.sandbox_compute_enabled_for_agent", return_value=True)
     @patch("api.services.sandbox_compute.sandbox_compute_enabled", return_value=True)
-    def test_service_stores_agent_scoped_cache_for_stdio_discovery(self, _mock_enabled, mock_set_cache):
+    def test_service_stores_agent_scoped_cache_for_stdio_discovery(
+        self,
+        _mock_enabled,
+        _mock_enabled_for_agent,
+        mock_set_cache,
+    ):
         backend = Mock()
         backend.discover_mcp_tools.return_value = {
             "status": "ok",
@@ -158,3 +164,39 @@ class SandboxComputeDiscoveryServiceTests(TestCase):
         self.assertEqual(backend.discover_mcp_tools.call_args.kwargs["agent"], self.agent)
         self.assertEqual(backend.discover_mcp_tools.call_args.kwargs["session"], session)
         mock_set_cache.assert_called_once_with(server_id, "agent-fingerprint", result["tools"])
+
+    @patch("api.services.sandbox_compute.sandbox_compute_enabled_for_agent", return_value=False)
+    @patch("api.services.sandbox_compute.sandbox_compute_enabled", return_value=True)
+    def test_service_rejects_stdio_discovery_for_ineligible_agent(
+        self,
+        _mock_enabled,
+        _mock_enabled_for_agent,
+    ):
+        backend = Mock()
+        service = SandboxComputeService(backend=backend)
+        server_id = str(uuid.uuid4())
+        runtime = SimpleNamespace(
+            config_id=server_id,
+            scope=MCPServerConfig.Scope.USER,
+            command="npx",
+            url="",
+        )
+
+        with patch(
+            "api.services.sandbox_compute._build_mcp_server_payload",
+            return_value=(
+                {
+                    "config_id": server_id,
+                    "scope": MCPServerConfig.Scope.USER,
+                    "command": "npx",
+                    "url": "",
+                },
+                runtime,
+            ),
+        ), patch.object(service, "_ensure_session") as mock_ensure_session:
+            result = service.discover_mcp_tools(server_id, reason="manual_test", agent=self.agent)
+
+        self.assertEqual(result.get("status"), "error")
+        self.assertIn("sandbox compute", result.get("message", "").lower())
+        mock_ensure_session.assert_not_called()
+        backend.discover_mcp_tools.assert_not_called()

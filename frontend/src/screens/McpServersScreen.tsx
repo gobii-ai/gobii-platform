@@ -74,6 +74,7 @@ export function McpServersScreen({
   const servers = data?.servers ?? []
   const resolvedOwnerScope = ownerScope ?? data?.ownerScope
   const resolvedAllowCommands = allowCommands ?? data?.allowCommands ?? false
+  const isCommandCapabilityPending = allowCommands === undefined && data === undefined && error == null
   const ownerLabelText = resolvedOwnerScope === 'platform' ? 'the platform' : ownerLabel || data?.ownerLabel || 'your workspace'
   const listError = error instanceof Error ? error.message : null
 
@@ -92,6 +93,9 @@ export function McpServersScreen({
   }, [])
 
   const openCreateModal = useCallback(() => {
+    if (isCommandCapabilityPending) {
+      return
+    }
     showModal((onClose) => (
       <McpServerFormModal
         mode="create"
@@ -113,6 +117,7 @@ export function McpServersScreen({
     listUrl,
     resolvedOwnerScope,
     resolvedAllowCommands,
+    isCommandCapabilityPending,
     handleSuccess,
     handleError,
     oauthStartUrl,
@@ -281,10 +286,16 @@ export function McpServersScreen({
             type="button"
             className={primaryButtonClassName}
             onClick={openCreateModal}
+            disabled={isCommandCapabilityPending}
+            aria-busy={isCommandCapabilityPending}
           >
             <Plus className="h-4 w-4" aria-hidden="true" />
             Add MCP Server
-            {isFetching && !isLoading && <span className="text-xs font-normal text-white/80">Refreshing…</span>}
+            {isCommandCapabilityPending ? (
+              <span className="text-xs font-normal text-white/80">Loading…</span>
+            ) : (
+              isFetching && !isLoading && <span className="text-xs font-normal text-white/80">Refreshing…</span>
+            )}
           </button>
           )}
         />

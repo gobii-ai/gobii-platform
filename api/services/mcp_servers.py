@@ -7,6 +7,7 @@ from django.db import transaction
 from django.db.models import Q
 
 from api.models import MCPServerConfig, PersistentAgent, PersistentAgentMCPServer, PersistentAgentEnabledTool
+from api.services.sandbox_compute import sandbox_compute_enabled_for_agent
 from marketing_events.custom_events import ConfiguredCustomEvent, emit_configured_custom_capi_event
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 
@@ -101,6 +102,46 @@ def server_assignment_agent_ids(server: MCPServerConfig) -> Set[str]:
     }
 
 
+def _server_requires_agent_sandbox(server: MCPServerConfig) -> bool:
+    return bool(
+        server.scope != MCPServerConfig.Scope.PLATFORM
+        and server.command
+        and not server.url
+    )
+
+
+def _validate_agent_sandbox_for_servers(
+    agent: PersistentAgent,
+    servers: Iterable[MCPServerConfig],
+) -> None:
+    sandbox_required_ids = {
+        str(server.id)
+        for server in servers
+        if _server_requires_agent_sandbox(server)
+    }
+    if sandbox_required_ids and not sandbox_compute_enabled_for_agent(agent):
+        raise ValueError(
+            "STDIO MCP servers require sandbox compute for this agent. "
+            f"Ineligible server ids: {', '.join(sorted(sandbox_required_ids))}"
+        )
+
+
+def _filter_sandbox_unavailable_servers(
+    agent: PersistentAgent,
+    servers: Iterable[MCPServerConfig],
+) -> List[MCPServerConfig]:
+    configs = list(servers)
+    if not any(_server_requires_agent_sandbox(server) for server in configs):
+        return configs
+    if sandbox_compute_enabled_for_agent(agent):
+        return configs
+    return [
+        server
+        for server in configs
+        if not _server_requires_agent_sandbox(server)
+    ]
+
+
 def set_server_assignments(server: MCPServerConfig, desired_agent_ids: IterableType[str]) -> None:
     """Assign the given server to the provided collection of agents."""
 
@@ -110,12 +151,29 @@ def set_server_assignments(server: MCPServerConfig, desired_agent_ids: IterableT
     desired_set = {str(agent_id) for agent_id in desired_agent_ids}
     assignable_qs = _assignable_agents_queryset(server)
     assignable_map = {
-        str(agent.id): agent for agent in assignable_qs.only('id')
+        str(agent.id): agent
+        for agent in (
+            assignable_qs.select_related("user")
+            if _server_requires_agent_sandbox(server)
+            else assignable_qs.only("id")
+        )
     }
 
     invalid = desired_set - set(assignable_map.keys())
     if invalid:
         raise ValueError(f"Invalid agent ids for this server: {', '.join(sorted(invalid))}")
+
+    if _server_requires_agent_sandbox(server):
+        ineligible = {
+            agent_id
+            for agent_id in desired_set
+            if not sandbox_compute_enabled_for_agent(assignable_map[agent_id])
+        }
+        if ineligible:
+            raise ValueError(
+                "STDIO MCP servers require sandbox compute for every assigned agent. "
+                f"Ineligible agent ids: {', '.join(sorted(ineligible))}"
+            )
 
     existing = server_assignment_agent_ids(server)
     to_add = desired_set - existing
@@ -185,11 +243,14 @@ def agent_accessible_server_configs(
         queryset = queryset.filter(id__in=allowed_config_ids)
     elif allowed_server_names is not None:
         queryset = queryset.filter(name__in=allowed_server_names)
-    return sorted(
-        queryset,
-        key=lambda config: (
-            (config.display_name or "").lower(),
-            (config.name or "").lower(),
+    return _filter_sandbox_unavailable_servers(
+        agent,
+        sorted(
+            queryset,
+            key=lambda config: (
+                (config.display_name or "").lower(),
+                (config.name or "").lower(),
+            ),
         ),
     )
 
@@ -201,7 +262,10 @@ def agent_server_overview(agent: PersistentAgent) -> List[Dict[str, Any]]:
     assigned_ids = set(agent_enabled_server_ids(agent))
 
     if agent.organization_id:
-        for cfg in organization_server_configs(agent.organization_id):
+        for cfg in _filter_sandbox_unavailable_servers(
+            agent,
+            organization_server_configs(agent.organization_id),
+        ):
             server_id = str(cfg.id)
             overview.append(
                 _serialize_config(
@@ -216,7 +280,10 @@ def agent_server_overview(agent: PersistentAgent) -> List[Dict[str, Any]]:
             _serialize_config(cfg, inherited=True, assigned=True)
         )
 
-    for cfg in personal_server_configs(agent.user_id):
+    for cfg in _filter_sandbox_unavailable_servers(
+        agent,
+        personal_server_configs(agent.user_id),
+    ):
         server_id = str(cfg.id)
         overview.append(
             _serialize_config(
@@ -244,19 +311,21 @@ def update_agent_personal_servers(
     if not desired_set and not existing_set:
         return
 
-    valid_ids = {
-        str(server_id)
-        for server_id in MCPServerConfig.objects.filter(
+    valid_configs = list(
+        MCPServerConfig.objects.filter(
             scope=MCPServerConfig.Scope.USER,
             user=agent.user,
             is_active=True,
             id__in=desired_set,
-        ).values_list('id', flat=True)
-    }
+        )
+    )
+    valid_ids = {str(server.id) for server in valid_configs}
 
     invalid = desired_set - valid_ids
     if invalid:
         raise ValueError(f"Invalid personal MCP server ids: {', '.join(sorted(invalid))}")
+
+    _validate_agent_sandbox_for_servers(agent, valid_configs)
 
     to_add = valid_ids - existing_set
     to_remove = existing_set - desired_set
@@ -392,19 +461,21 @@ def update_agent_org_servers(
     if not desired_set and not existing_set:
         return
 
-    valid_ids = {
-        str(server_id)
-        for server_id in MCPServerConfig.objects.filter(
+    valid_configs = list(
+        MCPServerConfig.objects.filter(
             scope=MCPServerConfig.Scope.ORGANIZATION,
             organization_id=agent.organization_id,
             is_active=True,
             id__in=desired_set,
-        ).values_list('id', flat=True)
-    }
+        )
+    )
+    valid_ids = {str(server.id) for server in valid_configs}
 
     invalid = desired_set - valid_ids
     if invalid:
         raise ValueError(f"Invalid organization MCP server ids: {', '.join(sorted(invalid))}")
+
+    _validate_agent_sandbox_for_servers(agent, valid_configs)
 
     to_add = valid_ids - existing_set
     to_remove = existing_set - desired_set
