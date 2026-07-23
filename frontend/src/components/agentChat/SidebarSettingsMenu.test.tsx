@@ -126,4 +126,28 @@ describe('SidebarSettingsMenu', () => {
 
     expect(handleNotificationsEnabledChange).toHaveBeenCalledWith(false)
   })
+
+  it('renders a reversible suggested follow-ups preference', async () => {
+    const handleSuggestionsEnabledChange = vi.fn()
+
+    render(
+      <SidebarSettingsMenu
+        context={{ type: 'personal', id: '1', name: 'Personal' }}
+        viewerEmail="person@example.com"
+        isProprietaryMode={true}
+        suggestionsEnabled={false}
+        onSuggestionsEnabledChange={handleSuggestionsEnabledChange}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open settings' }))
+
+    const toggle = await screen.findByRole('switch', { name: 'Suggested follow-ups' })
+    expect(toggle).toHaveAttribute('aria-checked', 'false')
+    expect(screen.getByText('Hidden')).toBeInTheDocument()
+
+    fireEvent.click(toggle)
+
+    expect(handleSuggestionsEnabledChange).toHaveBeenCalledWith(true)
+  })
 })

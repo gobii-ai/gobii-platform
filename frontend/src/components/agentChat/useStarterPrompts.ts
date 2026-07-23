@@ -13,6 +13,7 @@ const STARTER_PROMPT_STALE_TIME_MS = 60_000
 
 type UseStarterPromptsParams = {
   agentId?: string | null
+  enabled?: boolean
   events: TimelineEvent[]
   initialLoading: boolean
   spawnIntentLoading: boolean
@@ -26,6 +27,7 @@ type UseStarterPromptsResult = {
   starterPrompts: StarterPrompt[]
   starterPromptsLoading: boolean
   starterPromptSubmitting: boolean
+  handleStarterPromptDismiss: () => void
   handleStarterPromptSelect: (prompt: StarterPrompt, position: number) => Promise<void>
 }
 
@@ -49,14 +51,15 @@ function isStarterPrompt(suggestion: unknown): suggestion is StarterPrompt {
 function starterPromptsQueryKey(
   agentId: string | null | undefined,
   promptCount: number,
-  latestEventCursor: string | null,
+  latestAgentReplyCursor: string | null,
   refreshNonce: number,
 ) {
-  return ['agent-starter-prompts', agentId ?? null, promptCount, latestEventCursor, refreshNonce] as const
+  return ['agent-starter-prompts', agentId ?? null, promptCount, latestAgentReplyCursor, refreshNonce] as const
 }
 
 export function useStarterPrompts({
   agentId,
+  enabled = true,
   events,
   initialLoading,
   spawnIntentLoading,
@@ -67,6 +70,7 @@ export function useStarterPrompts({
 }: UseStarterPromptsParams): UseStarterPromptsResult {
   const [starterPromptSubmitting, setStarterPromptSubmitting] = useState(false)
   const [starterPromptFetchReadyKey, setStarterPromptFetchReadyKey] = useState<string | null>(null)
+  const [dismissedStarterPromptRequestKey, setDismissedStarterPromptRequestKey] = useState<string | null>(null)
   const [idleRefreshNonce, setIdleRefreshNonce] = useState(0)
   const starterPromptInFlightRef = useRef(false)
   const wasWorkingRef = useRef(isWorkingNow)
@@ -83,11 +87,14 @@ export function useStarterPrompts({
     () => events.some((event) => event.kind === 'message' && Boolean(event.message.isOutbound)),
     [events],
   )
-  const latestEventCursor = useMemo(() => {
-    if (!events.length) {
-      return null
+  const latestAgentReplyCursor = useMemo(() => {
+    for (let index = events.length - 1; index >= 0; index -= 1) {
+      const event = events[index]
+      if (event.kind === 'message' && event.message.isOutbound) {
+        return event.cursor
+      }
     }
-    return events[events.length - 1]?.cursor ?? null
+    return null
   }, [events])
 
   useEffect(() => {
@@ -98,7 +105,8 @@ export function useStarterPrompts({
   }, [isWorkingNow])
 
   const canRequestSuggestions = Boolean(
-    agentId
+    enabled
+    && agentId
     && onSendMessage
     && hasAgentMessage
     && !initialLoading
@@ -108,13 +116,18 @@ export function useStarterPrompts({
   )
 
   const starterPromptRequestKey = useMemo(
-    () => JSON.stringify([agentId ?? null, promptCount, latestEventCursor, idleRefreshNonce]),
-    [agentId, idleRefreshNonce, latestEventCursor, promptCount],
+    () => JSON.stringify([agentId ?? null, promptCount, latestAgentReplyCursor, idleRefreshNonce]),
+    [agentId, idleRefreshNonce, latestAgentReplyCursor, promptCount],
   )
+  const starterPromptContextKey = useMemo(
+    () => JSON.stringify([agentId ?? null, latestAgentReplyCursor, idleRefreshNonce]),
+    [agentId, idleRefreshNonce, latestAgentReplyCursor],
+  )
+  const starterPromptsDismissed = dismissedStarterPromptRequestKey === starterPromptContextKey
   const starterPromptFetchReady = starterPromptFetchReadyKey === starterPromptRequestKey
 
   const starterPromptsQuery = useQuery({
-    queryKey: starterPromptsQueryKey(agentId, promptCount, latestEventCursor, idleRefreshNonce),
+    queryKey: starterPromptsQueryKey(agentId, promptCount, latestAgentReplyCursor, idleRefreshNonce),
     queryFn: async ({ signal }) => {
       if (!agentId) {
         throw new Error('No agentId')
@@ -125,7 +138,7 @@ export function useStarterPrompts({
       })
       return (payload.suggestions || []).filter(isStarterPrompt).slice(0, promptCount)
     },
-    enabled: canRequestSuggestions && starterPromptFetchReady,
+    enabled: canRequestSuggestions && starterPromptFetchReady && !starterPromptsDismissed,
     staleTime: STARTER_PROMPT_STALE_TIME_MS,
     refetchOnWindowFocus: false,
     retry: false,
@@ -151,10 +164,15 @@ export function useStarterPrompts({
     }
   }, [starterPromptsQuery.error])
 
-  const starterPrompts = useMemo(() => starterPromptsQuery.data ?? EMPTY_PROMPTS, [starterPromptsQuery.data])
+  const starterPrompts = useMemo(
+    () => starterPromptsQuery.data ?? EMPTY_PROMPTS,
+    [starterPromptsQuery.data],
+  )
 
   const canShowStarterPrompts = Boolean(
-    hasAgentMessage
+    enabled
+    && !starterPromptsDismissed
+    && hasAgentMessage
     && !initialLoading
     && !spawnIntentLoading
     && !isWorkingNow
@@ -177,6 +195,10 @@ export function useStarterPrompts({
     setIdleRefreshNonce(0)
     wasWorkingRef.current = false
   }, [agentId])
+
+  const handleStarterPromptDismiss = useCallback(() => {
+    setDismissedStarterPromptRequestKey(starterPromptContextKey)
+  }, [starterPromptContextKey])
 
   const handleStarterPromptSelect = useCallback(
     async (prompt: StarterPrompt, position: number) => {
@@ -208,6 +230,7 @@ export function useStarterPrompts({
     starterPrompts: canShowStarterPrompts ? starterPrompts : EMPTY_PROMPTS,
     starterPromptsLoading: showStarterPromptLoading,
     starterPromptSubmitting,
+    handleStarterPromptDismiss,
     handleStarterPromptSelect,
   }
 }

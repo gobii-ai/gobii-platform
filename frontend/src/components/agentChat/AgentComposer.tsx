@@ -530,6 +530,7 @@ type AgentComposerProps = {
   onFocus?: () => void
   onRequestScrollToBottom?: () => void
   insightsPanelExpandedPreference?: boolean | null
+  insightsPanelPreferenceHydrated?: boolean
   onInsightsPanelExpandedPreferenceChange?: (expanded: boolean) => void
   isProcessing?: boolean
   insightsLoading?: boolean
@@ -575,6 +576,7 @@ export const AgentComposer = memo(function AgentComposer({
   onFocus,
   onRequestScrollToBottom,
   insightsPanelExpandedPreference = null,
+  insightsPanelPreferenceHydrated = true,
   onInsightsPanelExpandedPreferenceChange,
   isProcessing = false,
   insightsLoading = false,
@@ -764,9 +766,10 @@ export const AgentComposer = memo(function AgentComposer({
   const wasProcessingRef = useRef(isProcessing)
   const isProcessingRef = useRef(isProcessing)
   const hadPendingActionsRef = useRef(false)
-  const baseWorkingExpanded = insightsPanelExpandedPreference ?? autoWorkingExpanded
   const hasPendingActions = pendingActionRequests.length > 0
-  const resolvedWorkingExpanded = pendingActionsForceExpanded || baseWorkingExpanded
+  const resolvedWorkingExpanded = insightsPanelPreferenceHydrated
+    ? insightsPanelExpandedPreference ?? (pendingActionsForceExpanded || autoWorkingExpanded)
+    : false
 
   useEffect(() => {
     isProcessingRef.current = isProcessing
@@ -919,8 +922,8 @@ export const AgentComposer = memo(function AgentComposer({
     onRequestScrollToBottom?.()
   }, [isTouchDevice, onRequestScrollToBottom])
 
-  const selectWorkingTab = useCallback((tabId: string) => {
-    if (!resolvedWorkingExpanded) {
+  const selectWorkingTab = useCallback((tabId: string, expandPanel = true) => {
+    if (expandPanel && !resolvedWorkingExpanded) {
       if (onInsightsPanelExpandedPreferenceChange) {
         onInsightsPanelExpandedPreferenceChange(true)
       } else {
@@ -981,7 +984,7 @@ export const AgentComposer = memo(function AgentComposer({
 
     const nextPendingTabId = changedPendingTab?.id ?? pendingActionTabs[0]?.id
     if (nextPendingTabId) {
-      selectWorkingTab(nextPendingTabId)
+      selectWorkingTab(nextPendingTabId, false)
     }
   }, [
     activeWorkingTabId,

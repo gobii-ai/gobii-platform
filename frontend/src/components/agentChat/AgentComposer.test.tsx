@@ -296,9 +296,11 @@ describe('AgentComposer pending action insights panel', () => {
     expect(screen.getByText('Stripe API key')).toBeInTheDocument()
   })
 
-  it('auto-expands when pending requests arrive despite a collapsed insight preference', async () => {
+  it('keeps a saved collapsed preference when pending requests arrive', async () => {
+    const handleExpandedPreferenceChange = vi.fn()
     const { rerender } = renderAgentComposer({
       insightsPanelExpandedPreference: false,
+      onInsightsPanelExpandedPreferenceChange: handleExpandedPreferenceChange,
     })
 
     expect(screen.queryByText('Needs your input')).not.toBeInTheDocument()
@@ -310,12 +312,54 @@ describe('AgentComposer pending action insights panel', () => {
         insightsLoading={false}
         isProcessing={false}
         insightsPanelExpandedPreference={false}
+        onInsightsPanelExpandedPreferenceChange={handleExpandedPreferenceChange}
       />,
     )
 
     await waitFor(() => {
-      expect(screen.getByText('Stripe API key')).toBeInTheDocument()
+      expect(screen.getByText('Needs your input')).toBeInTheDocument()
     })
+    expect(screen.getByText('1 request')).toBeInTheDocument()
+    expect(screen.queryByText('Stripe API key')).not.toBeInTheDocument()
+    expect(handleExpandedPreferenceChange).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByText('Needs your input').closest('.composer-working-header-row') as HTMLElement)
+
+    expect(handleExpandedPreferenceChange).toHaveBeenCalledWith(true)
+  })
+
+  it('stays collapsed while a saved panel preference hydrates', () => {
+    const handleExpandedPreferenceChange = vi.fn()
+    const { rerender } = renderAgentComposer({
+      pendingActionRequests: [makeRequestedSecretsAction()],
+      insightsPanelPreferenceHydrated: false,
+      onInsightsPanelExpandedPreferenceChange: handleExpandedPreferenceChange,
+    })
+
+    expect(screen.getByText('Needs your input')).toBeInTheDocument()
+    expect(screen.queryByText('Stripe API key')).not.toBeInTheDocument()
+    expect(handleExpandedPreferenceChange).not.toHaveBeenCalled()
+
+    rerender(
+      <AgentComposer
+        onSubmit={vi.fn(async () => undefined)}
+        pendingActionRequests={[makeRequestedSecretsAction()]}
+        insightsLoading={false}
+        isProcessing={false}
+        insightsPanelExpandedPreference={false}
+        insightsPanelPreferenceHydrated={true}
+        onInsightsPanelExpandedPreferenceChange={handleExpandedPreferenceChange}
+      />,
+    )
+
+    expect(screen.getByText('Needs your input')).toBeInTheDocument()
+    expect(screen.getByText('1 request')).toBeInTheDocument()
+    expect(screen.queryByText('Stripe API key')).not.toBeInTheDocument()
+    expect(handleExpandedPreferenceChange).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: 'View 1 pending credentials request' }))
+
+    expect(handleExpandedPreferenceChange).toHaveBeenCalledWith(true)
   })
 
   it('renders pending request tabs alongside regular insight tabs', () => {

@@ -10,6 +10,7 @@ from django.urls import reverse
 from api.agent.core.processing_flags import clear_processing_queued_flag, set_processing_queued_flag
 from console.agent_chat.suggestions import _context_from_timeline_events, _generate_dynamic_suggestions
 from api.models import (
+    AgentCollaborator,
     BrowserUseAgent,
     CommsChannel,
     PersistentAgent,
@@ -17,6 +18,7 @@ from api.models import (
     PersistentAgentCompletion,
     PersistentAgentConversation,
     PersistentAgentMessage,
+    UserPreference,
     build_web_agent_address,
     build_web_user_address,
 )
@@ -92,6 +94,44 @@ class AgentChatSuggestionsAPITests(TestCase):
         payload = response.json()
         self.assertEqual(payload.get("source"), "none")
         self.assertEqual(payload.get("suggestions"), [])
+
+    @patch("console.api_views.build_agent_timeline_suggestions")
+    def test_returns_empty_without_building_suggestions_when_viewer_disabled_them(self, mock_build):
+        UserPreference.update_known_preferences(
+            self.user,
+            {UserPreference.KEY_AGENT_CHAT_SUGGESTIONS_ENABLED: False},
+        )
+
+        response = self.client.get(self._suggestions_url())
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"suggestions": [], "source": "none"})
+        mock_build.assert_not_called()
+
+    @patch("console.api_views.build_agent_timeline_suggestions")
+    def test_shared_agent_uses_collaborator_suggestion_preference(self, mock_build):
+        collaborator = get_user_model().objects.create_user(
+            username="suggestions-collaborator",
+            email="suggestions-collaborator@example.com",
+            password="password123",
+        )
+        with patch("util.subscription_helper.get_user_max_contacts_per_agent", return_value=0):
+            AgentCollaborator.objects.create(
+                agent=self.agent,
+                user=collaborator,
+                invited_by=self.user,
+            )
+        UserPreference.update_known_preferences(
+            collaborator,
+            {UserPreference.KEY_AGENT_CHAT_SUGGESTIONS_ENABLED: False},
+        )
+        self.client.force_login(collaborator)
+
+        response = self.client.get(self._suggestions_url())
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"suggestions": [], "source": "none"})
+        mock_build.assert_not_called()
 
     def test_returns_static_prompts_for_initial_phase(self):
         self._create_message(body="What can you help with?", is_outbound=False)

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
-import { Bell, Building2, ChevronDown, CircleHelp, ClipboardList, CreditCard, KeyRound, LockKeyhole, ServerCog, Settings, User, UserRound } from 'lucide-react'
+import { Bell, Building2, ChevronDown, CircleHelp, ClipboardList, CreditCard, KeyRound, LockKeyhole, ServerCog, Settings, Sparkles, User, UserRound, type LucideIcon } from 'lucide-react'
 import { Button, Dialog, Popover } from 'react-aria-components'
 
 import type { ConsoleContext } from '../../api/context'
@@ -34,6 +34,8 @@ export type SidebarSettingsInfo = {
   notificationsEnabled?: boolean
   notificationStatus?: 'off' | 'on' | 'needs_permission' | 'blocked'
   onNotificationsEnabledChange?: (enabled: boolean) => void
+  suggestionsEnabled?: boolean
+  onSuggestionsEnabledChange?: (enabled: boolean) => void
   taskCredits?: SidebarTaskCreditsInfo | null
   onOpenHelp?: (() => void) | null
 }
@@ -88,6 +90,46 @@ function resolveNotificationStatusLabel(
   return 'On'
 }
 
+function SidebarPreferenceToggle({
+  checked,
+  icon: Icon,
+  label,
+  onChange,
+  status,
+}: {
+  checked: boolean
+  icon: LucideIcon
+  label: string
+  onChange?: (checked: boolean) => void
+  status: string
+}) {
+  return (
+    <button
+      type="button"
+      className="sidebar-settings__notification-toggle"
+      role="switch"
+      aria-label={label}
+      aria-checked={checked}
+      onClick={() => onChange?.(!checked)}
+    >
+      <span className="sidebar-settings__notification-copy">
+        <span className="sidebar-settings__notification-title">
+          <Icon className="sidebar-settings__link-icon" aria-hidden="true" />
+          <span>{label}</span>
+        </span>
+        <span className="sidebar-settings__notification-status">{status}</span>
+      </span>
+      <span
+        className="sidebar-settings__switch"
+        data-checked={checked ? 'true' : 'false'}
+        aria-hidden="true"
+      >
+        <span className="sidebar-settings__switch-thumb" />
+      </span>
+    </button>
+  )
+}
+
 export function SidebarSettingsMenu({
   context = null,
   viewerEmail = null,
@@ -111,6 +153,8 @@ export function SidebarSettingsMenu({
   notificationsEnabled = true,
   notificationStatus = 'off',
   onNotificationsEnabledChange,
+  suggestionsEnabled = true,
+  onSuggestionsEnabledChange,
   taskCredits = null,
   onOpenHelp = null,
   variant = 'sidebar',
@@ -173,9 +217,6 @@ export function SidebarSettingsMenu({
     notificationsEnabled,
     notificationStatus,
   )
-  const handleNotificationToggle = useCallback(() => {
-    onNotificationsEnabledChange?.(!notificationsEnabled)
-  }, [notificationsEnabled, onNotificationsEnabledChange])
   const handleTriggerPointerDownCapture = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
     if (!open) {
       return
@@ -241,28 +282,20 @@ export function SidebarSettingsMenu({
           <div className="sidebar-settings__rule" role="separator" aria-hidden="true" />
 
           <div className="sidebar-settings__links">
-            <button
-              type="button"
-              className="sidebar-settings__notification-toggle"
-              role="switch"
-              aria-checked={notificationsEnabled}
-              onClick={handleNotificationToggle}
-            >
-              <span className="sidebar-settings__notification-copy">
-                <span className="sidebar-settings__notification-title">
-                  <Bell className="sidebar-settings__link-icon" aria-hidden="true" />
-                  <span>Notifications &amp; sound</span>
-                </span>
-                <span className="sidebar-settings__notification-status">{notificationStatusLabel}</span>
-              </span>
-              <span
-                className="sidebar-settings__switch"
-                data-checked={notificationsEnabled ? 'true' : 'false'}
-                aria-hidden="true"
-              >
-                <span className="sidebar-settings__switch-thumb" />
-              </span>
-            </button>
+            <SidebarPreferenceToggle
+              checked={notificationsEnabled}
+              icon={Bell}
+              label="Notifications & sound"
+              onChange={onNotificationsEnabledChange}
+              status={notificationStatusLabel}
+            />
+            <SidebarPreferenceToggle
+              checked={suggestionsEnabled}
+              icon={Sparkles}
+              label="Suggested follow-ups"
+              onChange={onSuggestionsEnabledChange}
+              status={suggestionsEnabled ? 'Shown after replies' : 'Hidden'}
+            />
             <div className="sidebar-settings__rule" role="separator" aria-hidden="true" />
             {canShowProfile ? (
               onOpenProfile ? (

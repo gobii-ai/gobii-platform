@@ -4,13 +4,15 @@ import { createSlice, type PayloadAction } from '@reduxjs/toolkit'
 import {
   parseBooleanPreference,
   parseFavoriteAgentIdsPreference,
-  parseNullableBooleanPreference,
+  parseInsightsPanelExpandedByAgentPreference,
   updateUserPreferences,
-  USER_PREFERENCE_KEY_AGENT_CHAT_INSIGHTS_PANEL_EXPANDED,
+  USER_PREFERENCE_KEY_AGENT_CHAT_INSIGHTS_PANEL_EXPANDED_BY_AGENT,
   USER_PREFERENCE_KEY_AGENT_CHAT_MUTED_AGENT_IDS,
   USER_PREFERENCE_KEY_AGENT_CHAT_NOTIFICATIONS_ENABLED,
   USER_PREFERENCE_KEY_AGENT_CHAT_ROSTER_FAVORITE_AGENT_IDS,
   USER_PREFERENCE_KEY_AGENT_CHAT_ROSTER_SORT_MODE,
+  USER_PREFERENCE_KEY_AGENT_CHAT_SUGGESTIONS_ENABLED,
+  type InsightsPanelExpandedByAgent,
 } from '../api/userPreferences'
 import type { AgentRosterSortMode } from '../types/agentRoster'
 import { parseAgentRosterSortMode } from '../util/agentRosterSort'
@@ -26,7 +28,8 @@ export type AgentRosterPreferencesState = {
   sortMode: PreferenceFieldState<AgentRosterSortMode>
   favoriteAgentIds: PreferenceFieldState<string[]>
   mutedAgentIds: PreferenceFieldState<string[]>
-  insightsPanelExpanded: PreferenceFieldState<boolean | null>
+  insightsPanelExpandedByAgent: PreferenceFieldState<InsightsPanelExpandedByAgent>
+  suggestionsEnabled: PreferenceFieldState<boolean>
   agentChatNotificationsEnabled: PreferenceFieldState<boolean>
 }
 
@@ -34,7 +37,8 @@ export type AgentRosterPreferencesHydrationPayload = {
   sortMode?: unknown
   favoriteAgentIds?: unknown
   mutedAgentIds?: unknown
-  insightsPanelExpanded?: unknown
+  insightsPanelExpandedByAgent?: unknown
+  suggestionsEnabled?: unknown
   agentChatNotificationsEnabled?: unknown
 }
 
@@ -44,7 +48,8 @@ type AgentRosterQueryData = {
   agentRosterSortMode?: AgentRosterSortMode
   favoriteAgentIds?: string[]
   mutedAgentIds?: string[]
-  insightsPanelExpanded?: boolean | null
+  insightsPanelExpandedByAgent?: InsightsPanelExpandedByAgent
+  suggestionsEnabled?: boolean
   agentChatNotificationsEnabled?: boolean
 }
 
@@ -56,6 +61,8 @@ type AgentRosterPreferenceConfig = {
 }
 
 const AGENT_ROSTER_QUERY_KEY = ['agent-roster'] as const
+const insightsPanelWriteQueueByAgent = new Map<string, Promise<void>>()
+const latestInsightsPanelWriteByAgent = new Map<string, symbol>()
 
 const preferenceConfig = {
   sortMode: {
@@ -76,11 +83,17 @@ const preferenceConfig = {
     hydrateOnce: false,
     normalize: parseFavoriteAgentIdsPreference,
   },
-  insightsPanelExpanded: {
-    preferenceKey: USER_PREFERENCE_KEY_AGENT_CHAT_INSIGHTS_PANEL_EXPANDED,
-    rosterQueryField: 'insightsPanelExpanded',
+  insightsPanelExpandedByAgent: {
+    preferenceKey: USER_PREFERENCE_KEY_AGENT_CHAT_INSIGHTS_PANEL_EXPANDED_BY_AGENT,
+    rosterQueryField: 'insightsPanelExpandedByAgent',
     hydrateOnce: true,
-    normalize: parseNullableBooleanPreference,
+    normalize: parseInsightsPanelExpandedByAgentPreference,
+  },
+  suggestionsEnabled: {
+    preferenceKey: USER_PREFERENCE_KEY_AGENT_CHAT_SUGGESTIONS_ENABLED,
+    rosterQueryField: 'suggestionsEnabled',
+    hydrateOnce: true,
+    normalize: parseBooleanPreference,
   },
   agentChatNotificationsEnabled: {
     preferenceKey: USER_PREFERENCE_KEY_AGENT_CHAT_NOTIFICATIONS_ENABLED,
@@ -94,7 +107,8 @@ const initialState: AgentRosterPreferencesState = {
   sortMode: createPreferenceField('recent' as AgentRosterSortMode),
   favoriteAgentIds: createPreferenceField<string[]>([]),
   mutedAgentIds: createPreferenceField<string[]>([]),
-  insightsPanelExpanded: createPreferenceField<boolean | null>(null),
+  insightsPanelExpandedByAgent: createPreferenceField<InsightsPanelExpandedByAgent>({}),
+  suggestionsEnabled: createPreferenceField(true),
   agentChatNotificationsEnabled: createPreferenceField(false),
 }
 
@@ -140,10 +154,7 @@ function updateRosterPreferenceInCache<K extends AgentRosterPreferenceField>(
         return current
       }
       const currentValue = current[queryField]
-      if (Array.isArray(currentValue) && Array.isArray(nextValue) && sameStringList(currentValue, nextValue)) {
-        return current
-      }
-      if (Object.is(currentValue, nextValue)) {
+      if (samePreferenceValue(currentValue, nextValue)) {
         return current
       }
       return {
@@ -210,6 +221,42 @@ const agentRosterPreferencesSlice = createSlice({
       const target = state[action.payload.field] as PreferenceFieldState<AgentRosterPreferencesState[K]['value']>
       target.value = target.persistedValue
     },
+    insightsPanelAgentOptimisticallySet(
+      state,
+      action: PayloadAction<{ agentId: string; expanded: boolean }>,
+    ) {
+      const target = state.insightsPanelExpandedByAgent
+      target.value = {
+        ...target.value,
+        [action.payload.agentId]: action.payload.expanded,
+      }
+    },
+    insightsPanelAgentPersisted(
+      state,
+      action: PayloadAction<{ agentId: string; attemptedValue: boolean }>,
+    ) {
+      const target = state.insightsPanelExpandedByAgent
+      target.persistedValue = {
+        ...target.persistedValue,
+        [action.payload.agentId]: action.payload.attemptedValue,
+      }
+    },
+    insightsPanelAgentRolledBack(
+      state,
+      action: PayloadAction<{ agentId: string; attemptedValue: boolean }>,
+    ) {
+      const target = state.insightsPanelExpandedByAgent
+      if (target.value[action.payload.agentId] !== action.payload.attemptedValue) {
+        return
+      }
+      const nextValue = { ...target.value }
+      if (Object.prototype.hasOwnProperty.call(target.persistedValue, action.payload.agentId)) {
+        nextValue[action.payload.agentId] = target.persistedValue[action.payload.agentId]
+      } else {
+        delete nextValue[action.payload.agentId]
+      }
+      target.value = nextValue
+    },
   },
 })
 
@@ -244,6 +291,76 @@ export function persistAgentRosterPreference<K extends AgentRosterPreferenceFiel
   }
 }
 
+export function persistInsightsPanelExpandedPreference(agentId: string, expanded: boolean) {
+  return async (dispatch: AppDispatch, getState: () => RootState, extra?: { queryClient?: QueryClient | null }) => {
+    const normalizedAgentId = agentId.trim()
+    if (!normalizedAgentId) {
+      return
+    }
+
+    const field = 'insightsPanelExpandedByAgent' as const
+    if (!getState().agentRosterPreferences.insightsPanelExpandedByAgent.hydrated) {
+      return
+    }
+
+    const writeToken = Symbol(normalizedAgentId)
+    latestInsightsPanelWriteByAgent.set(normalizedAgentId, writeToken)
+    dispatch(agentRosterPreferencesActions.insightsPanelAgentOptimisticallySet({
+      agentId: normalizedAgentId,
+      expanded,
+    }))
+    updateRosterPreferenceInCache(
+      extra?.queryClient,
+      field,
+      getState().agentRosterPreferences.insightsPanelExpandedByAgent.value,
+    )
+
+    const previousWrite = insightsPanelWriteQueueByAgent.get(normalizedAgentId) ?? Promise.resolve()
+    const currentWrite = previousWrite
+      .catch(() => undefined)
+      .then(async () => {
+        try {
+          await updateUserPreferences({
+            preferences: {
+              [USER_PREFERENCE_KEY_AGENT_CHAT_INSIGHTS_PANEL_EXPANDED_BY_AGENT]: {
+                [normalizedAgentId]: expanded,
+              },
+            },
+          })
+          dispatch(agentRosterPreferencesActions.insightsPanelAgentPersisted({
+            agentId: normalizedAgentId,
+            attemptedValue: expanded,
+          }))
+        } catch {
+          if (latestInsightsPanelWriteByAgent.get(normalizedAgentId) === writeToken) {
+            dispatch(agentRosterPreferencesActions.insightsPanelAgentRolledBack({
+              agentId: normalizedAgentId,
+              attemptedValue: expanded,
+            }))
+          }
+        }
+
+        updateRosterPreferenceInCache(
+          extra?.queryClient,
+          field,
+          getState().agentRosterPreferences.insightsPanelExpandedByAgent.value,
+        )
+      })
+    insightsPanelWriteQueueByAgent.set(normalizedAgentId, currentWrite)
+
+    try {
+      await currentWrite
+    } finally {
+      if (insightsPanelWriteQueueByAgent.get(normalizedAgentId) === currentWrite) {
+        insightsPanelWriteQueueByAgent.delete(normalizedAgentId)
+      }
+      if (latestInsightsPanelWriteByAgent.get(normalizedAgentId) === writeToken) {
+        latestInsightsPanelWriteByAgent.delete(normalizedAgentId)
+      }
+    }
+  }
+}
+
 export function toggleAgentRosterStringPreference(field: 'favoriteAgentIds' | 'mutedAgentIds', agentId: string) {
   return (dispatch: AppDispatch, getState: () => RootState) => {
     const currentValue = getState().agentRosterPreferences[field].value
@@ -258,5 +375,20 @@ export const selectAgentRosterPreferencesState = (state: RootState): AgentRoster
 export const selectAgentRosterSortMode = (state: RootState): AgentRosterSortMode => state.agentRosterPreferences.sortMode.value
 export const selectFavoriteAgentIds = (state: RootState): string[] => state.agentRosterPreferences.favoriteAgentIds.value
 export const selectMutedAgentIds = (state: RootState): string[] => state.agentRosterPreferences.mutedAgentIds.value
-export const selectInsightsPanelExpandedPreference = (state: RootState): boolean | null => state.agentRosterPreferences.insightsPanelExpanded.value
+export const selectInsightsPanelExpandedPreference = (
+  state: RootState,
+  agentId: string | null,
+): boolean | null => {
+  const values = state.agentRosterPreferences.insightsPanelExpandedByAgent.value
+  if (!agentId || !Object.prototype.hasOwnProperty.call(values, agentId)) {
+    return null
+  }
+  const value = values[agentId]
+  return typeof value === 'boolean' ? value : null
+}
+export const selectInsightsPanelPreferenceHydrated = (state: RootState): boolean => (
+  state.agentRosterPreferences.insightsPanelExpandedByAgent.hydrated
+)
+export const selectSuggestionsEnabled = (state: RootState): boolean => state.agentRosterPreferences.suggestionsEnabled.value
+export const selectSuggestionsPreferenceHydrated = (state: RootState): boolean => state.agentRosterPreferences.suggestionsEnabled.hydrated
 export const selectAgentChatNotificationsEnabled = (state: RootState): boolean => state.agentRosterPreferences.agentChatNotificationsEnabled.value

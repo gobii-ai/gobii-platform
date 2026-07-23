@@ -3123,9 +3123,14 @@
     color: #1e1b4b;
     overflow: hidden;
 }
+.starter-prompts-card__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.52rem 0.85rem 0.34rem;
+}
 .starter-prompts-card__title {
     margin: 0;
-    padding: 0.6rem 0.85rem 0.42rem;
     color: #3730a3;
     font-size: 0.75rem;
     font-weight: 600;
@@ -3223,6 +3228,32 @@
     border-radius: 999px;
     background: rgba(99, 102, 241, 0.22);
     color: transparent;
+}
+.starter-prompts-card__actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 0.15rem;
+    padding: 0.28rem 0.55rem 0.42rem;
+}
+.starter-prompts-card__action {
+    min-height: 2rem;
+    border: 0;
+    border-radius: 0.48rem;
+    background: transparent;
+    padding: 0.28rem 0.48rem;
+    color: #4f46e5;
+    font-size: 0.72rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+.starter-prompts-card__action:hover {
+    background: rgba(99, 102, 241, 0.1);
+    color: #312e81;
+}
+.starter-prompts-card__action:focus-visible {
+    outline: 2px solid rgba(99, 102, 241, 0.45);
+    outline-offset: 1px;
 }
 .agent-chat-section-card.template-recommendations-card {
     gap: 0.72rem;

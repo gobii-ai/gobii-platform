@@ -839,7 +839,9 @@ class UserPreference(models.Model):
     KEY_AGENT_CHAT_ROSTER_FAVORITE_AGENT_IDS = "agent.chat.roster.favorite_agent_ids"
     KEY_AGENT_CHAT_MUTED_AGENT_IDS = "agent.chat.muted_agent_ids"
     KEY_AGENT_CHAT_INSIGHTS_PANEL_EXPANDED = "agent.chat.insights_panel.expanded"
+    KEY_AGENT_CHAT_INSIGHTS_PANEL_EXPANDED_BY_AGENT = "agent.chat.insights_panel.expanded_by_agent"
     KEY_AGENT_CHAT_NOTIFICATIONS_ENABLED = "agent.chat.notifications.enabled"
+    KEY_AGENT_CHAT_SUGGESTIONS_ENABLED = "agent.chat.suggestions.enabled"
     KEY_USER_TIMEZONE = "user.timezone"
     PREFERENCE_DEFINITIONS = {
         KEY_AGENT_CHAT_ROSTER_SORT_MODE: {
@@ -859,7 +861,16 @@ class UserPreference(models.Model):
             "default": None,
             "type": "nullable_boolean",
         },
+        KEY_AGENT_CHAT_INSIGHTS_PANEL_EXPANDED_BY_AGENT: {
+            "default": {},
+            "type": "uuid_boolean_map",
+            "merge_updates": True,
+        },
         KEY_AGENT_CHAT_NOTIFICATIONS_ENABLED: {
+            "default": True,
+            "type": "boolean",
+        },
+        KEY_AGENT_CHAT_SUGGESTIONS_ENABLED: {
             "default": True,
             "type": "boolean",
         },
@@ -944,6 +955,29 @@ class UserPreference(models.Model):
         return cls._normalize_boolean_preference_value(key, value)
 
     @classmethod
+    def _normalize_uuid_boolean_map_preference_value(cls, key: str, value: object) -> dict[str, bool]:
+        if not isinstance(value, dict):
+            raise ValueError(f"Invalid value for '{key}'. Expected an object keyed by agent UUID.")
+
+        normalized: dict[str, bool] = {}
+        for raw_agent_id, expanded in value.items():
+            if not isinstance(raw_agent_id, str) or not isinstance(expanded, bool):
+                raise ValueError(
+                    f"Invalid value for '{key}'. Expected boolean values keyed by agent UUID."
+                )
+            try:
+                canonical_agent_id = str(uuid.UUID(raw_agent_id.strip()))
+            except (TypeError, ValueError, AttributeError) as exc:
+                raise ValueError(
+                    f"Invalid value for '{key}'. Expected boolean values keyed by agent UUID."
+                ) from exc
+            if canonical_agent_id in normalized:
+                raise ValueError(f"Invalid value for '{key}'. Duplicate agent UUIDs are not allowed.")
+            normalized[canonical_agent_id] = expanded
+
+        return normalized
+
+    @classmethod
     def _normalize_preference_value(
         cls,
         key: str,
@@ -966,6 +1000,9 @@ class UserPreference(models.Model):
 
         if preference_type == "nullable_boolean":
             return cls._normalize_nullable_boolean_preference_value(key, value)
+
+        if preference_type == "uuid_boolean_map":
+            return cls._normalize_uuid_boolean_map_preference_value(key, value)
 
         if preference_type == "timezone":
             return cls._normalize_timezone_preference_value(key, value)
@@ -1039,31 +1076,53 @@ class UserPreference(models.Model):
                 cls.PREFERENCE_DEFINITIONS[key],
             )
 
-        try:
-            preference, _ = cls.objects.get_or_create(user=user)
-        except IntegrityError:
-            # Concurrent first-write requests can both race to create the one-to-one
-            # row. If another request won, load that row and continue applying the
-            # validated updates instead of surfacing a duplicate-key failure.
+        with transaction.atomic():
             try:
-                preference = cls.objects.get(user=user)
-            except cls.DoesNotExist:
-                preference, _ = cls.objects.get_or_create(user=user)
-        stored = preference.preferences if isinstance(preference.preferences, dict) else {}
-        known_stored: dict[str, object] = {}
-        for key, definition in cls.PREFERENCE_DEFINITIONS.items():
-            if key not in stored:
-                continue
-            try:
-                known_stored[key] = cls._normalize_preference_value(key, stored.get(key), definition)
-            except ValueError:
-                continue
-        next_stored = {**known_stored, **normalized_updates}
-        if next_stored != stored:
-            preference.preferences = next_stored
-            preference.save(update_fields=["preferences", "updated_at"])
+                preference, created = cls.objects.get_or_create(user=user)
+            except IntegrityError:
+                # Concurrent first writes may race on the one-to-one constraint.
+                # Lock the winning row before merging this request's updates.
+                try:
+                    preference = cls.objects.select_for_update().get(user=user)
+                except cls.DoesNotExist:
+                    preference, created = cls.objects.get_or_create(user=user)
+                    if not created:
+                        preference = cls.objects.select_for_update().get(pk=preference.pk)
+            else:
+                if not created:
+                    # get_or_create() does not lock an existing row. Re-read it under
+                    # the lock so concurrent PATCHes merge instead of overwriting.
+                    preference = cls.objects.select_for_update().get(pk=preference.pk)
 
-        return cls.resolve_known_preferences(user)
+            stored = preference.preferences if isinstance(preference.preferences, dict) else {}
+            known_stored: dict[str, object] = {}
+            for key, definition in cls.PREFERENCE_DEFINITIONS.items():
+                if key not in stored:
+                    continue
+                try:
+                    known_stored[key] = cls._normalize_preference_value(key, stored.get(key), definition)
+                except ValueError:
+                    continue
+            # Preserve preferences written by a newer rolling-deploy version while
+            # still replacing malformed values for keys this version understands.
+            next_stored = {
+                key: value
+                for key, value in stored.items()
+                if key not in cls.PREFERENCE_DEFINITIONS
+            }
+            next_stored.update(known_stored)
+            for key, value in normalized_updates.items():
+                definition = cls.PREFERENCE_DEFINITIONS[key]
+                if definition.get("merge_updates"):
+                    current_value = next_stored.get(key, {})
+                    next_stored[key] = {**current_value, **value}
+                else:
+                    next_stored[key] = value
+            if next_stored != stored:
+                preference.preferences = next_stored
+                preference.save(update_fields=["preferences", "updated_at"])
+
+            return cls.resolve_known_preferences(user)
 
 
 def validate_product_announcement_action_url(value: str) -> None:

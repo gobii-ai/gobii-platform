@@ -13,6 +13,8 @@ type StarterPromptSuggestionsProps = {
   loading?: boolean
   loadingCount?: number
   disabled?: boolean
+  onDismiss?: () => void
+  onTurnOff?: () => void
   onSelect?: (prompt: StarterPrompt, position: number) => void | Promise<void>
 }
 
@@ -34,6 +36,8 @@ export const StarterPromptSuggestions = memo(function StarterPromptSuggestions({
   loading = false,
   loadingCount = 3,
   disabled = false,
+  onDismiss,
+  onTurnOff,
   onSelect,
 }: StarterPromptSuggestionsProps) {
   if (!loading && !prompts.length) {
@@ -48,7 +52,9 @@ export const StarterPromptSuggestions = memo(function StarterPromptSuggestions({
       aria-label="Suggested follow-ups"
       aria-busy={loading}
     >
-      <h3 className="starter-prompts-card__title">Suggested follow-ups</h3>
+      <div className="starter-prompts-card__header">
+        <h3 className="starter-prompts-card__title">Suggested follow-ups</h3>
+      </div>
       <div className="starter-prompts-card__rows" role="list">
         {loading
           ? Array.from({ length: Math.max(1, loadingCount) }).map((_, index) => (
@@ -91,6 +97,30 @@ export const StarterPromptSuggestions = memo(function StarterPromptSuggestions({
             )
           })}
       </div>
+      {onDismiss || onTurnOff ? (
+        <div className="starter-prompts-card__actions" role="group" aria-label="Suggestion display options">
+          {onDismiss ? (
+            <button
+              type="button"
+              className="starter-prompts-card__action"
+              onClick={onDismiss}
+              title="Hide this set until the agent replies or finishes new work"
+            >
+              Hide for now
+            </button>
+          ) : null}
+          {onTurnOff ? (
+            <button
+              type="button"
+              className="starter-prompts-card__action"
+              onClick={onTurnOff}
+              title="Hide future suggestions until you turn them back on in Settings"
+            >
+              Turn off suggestions
+            </button>
+          ) : null}
+        </div>
+      ) : null}
       {loading ? <span className="sr-only">Loading suggested follow-ups</span> : null}
     </AgentChatSectionCard>
   )
