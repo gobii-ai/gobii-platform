@@ -44,6 +44,8 @@ const COMMUNICATION_TOOL_NAMES = [
   'send_sms',
   'send_web_message',
   'send_chat_message',
+  'send_discord_message',
+  'discord_send_message',
   'send_agent_message',
 ] as const
 
@@ -68,6 +70,7 @@ const APOLLO_ICON_SRC = '/static/images/integrations/native/apollo.svg'
 const GOOGLE_SHEETS_ICON_SRC = '/static/images/integrations/pipedream/google_sheets.svg'
 const GOOGLE_DRIVE_ICON_SRC = '/static/images/integrations/native/google_drive.svg'
 const HUBSPOT_ICON_SRC = '/static/images/integrations/native/hubspot.svg'
+const DISCORD_ICON_SRC = '/static/images/integrations/native/discord.svg'
 
 export type ToolMetadataConfig = {
   name: string
@@ -423,6 +426,78 @@ function deriveFileExport(
     label: isError ? `${fallbackLabel} failed` : fallbackLabel,
     caption: caption ?? entry.caption ?? fallbackLabel,
     summary: summaryParts.length ? truncate(summaryParts.join(' • '), 96) : entry.summary ?? null,
+  }
+}
+
+function deriveDiscordSubscriptions(
+  entry: ToolCallEntry,
+  parameters: Record<string, unknown> | null,
+): ToolDescriptorTransform {
+  const action = coerceString(parameters?.action) || ''
+  const result = parseResultObject(entry.result)
+  const status = coerceString(result?.status)
+  const subscription = isRecord(result?.subscription) ? result.subscription : null
+  const channelName = coerceString(subscription?.channel_name) || coerceString(parameters?.channel_name)
+  const guildName = coerceString(subscription?.guild_name)
+  const countValue = action === 'list_guilds'
+    ? result?.guilds
+    : action === 'discover_channels'
+      ? result?.channels
+      : action === 'list'
+        ? result?.subscriptions
+        : null
+  const count = Array.isArray(countValue) ? countValue.length : null
+  const countSubject = action === 'list_guilds'
+    ? 'server'
+    : action === 'discover_channels'
+      ? 'channel'
+      : 'subscription'
+  const actionLabels: Record<string, string> = {
+    list_guilds: 'Discord servers',
+    discover_channels: 'Discord channels',
+    ensure: 'Discord channel subscribed',
+    list: 'Discord subscriptions',
+    disable: 'Discord channel unsubscribed',
+  }
+  const pendingCaptions: Record<string, string> = {
+    list_guilds: 'Checking available servers',
+    discover_channels: 'Finding available channels',
+    ensure: 'Subscribing to channel',
+    list: 'Checking channel subscriptions',
+    disable: 'Removing channel subscription',
+  }
+  const channelCaption = channelName
+    ? `${guildName ? `${guildName} • ` : ''}#${channelName.replace(/^#/, '')}`
+    : null
+  const caption = status === 'action_required'
+    ? 'Connection required'
+    : count !== null
+      ? `${count} ${countSubject}${count === 1 ? '' : 's'}`
+      : channelCaption ?? pendingCaptions[action] ?? 'Managing Discord'
+
+  return {
+    label: status === 'error'
+      ? 'Discord action failed'
+      : status === 'action_required'
+        ? 'Discord setup required'
+        : actionLabels[action] ?? 'Discord',
+    caption,
+    summary: status && status !== 'success' ? coerceString(result?.message) : entry.summary ?? null,
+    iconSrc: DISCORD_ICON_SRC,
+  }
+}
+
+function deriveDiscordReaction(
+  entry: ToolCallEntry,
+  parameters: Record<string, unknown> | null,
+): ToolDescriptorTransform {
+  const result = parseResultObject(entry.result)
+  const emoji = coerceString(result?.emoji) || coerceString(parameters?.emoji)
+  return {
+    label: coerceString(result?.status) === 'error' ? 'Discord reaction failed' : 'Discord reaction',
+    caption: emoji ? `Reacted with ${emoji}` : 'Adding reaction',
+    summary: coerceString(result?.message) ?? entry.summary ?? null,
+    iconSrc: DISCORD_ICON_SRC,
   }
 }
 
@@ -1014,6 +1089,24 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
         summary,
       }
     },
+  },
+  {
+    name: 'discord_channel_subscriptions',
+    label: 'Discord',
+    icon: MessageCircle,
+    iconBgClass: 'bg-indigo-50',
+    iconColorClass: 'text-indigo-700',
+    detailKind: 'discord',
+    derive: deriveDiscordSubscriptions,
+  },
+  {
+    name: 'add_discord_reaction',
+    label: 'Discord reaction',
+    icon: MessageCircle,
+    iconBgClass: 'bg-indigo-50',
+    iconColorClass: 'text-indigo-700',
+    detailKind: 'discord',
+    derive: deriveDiscordReaction,
   },
   {
     name: 'manage_inbound_webhooks',

@@ -20,12 +20,14 @@ describe('StarterPromptSuggestions', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'Hide for now' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Hide' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: /Hide for now/ }))
 
     expect(onDismiss).toHaveBeenCalledOnce()
     expect(onTurnOff).not.toHaveBeenCalled()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Turn off suggestions' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Hide' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: /Turn off suggestions/ }))
 
     expect(onDismiss).toHaveBeenCalledOnce()
     expect(onTurnOff).toHaveBeenCalledOnce()

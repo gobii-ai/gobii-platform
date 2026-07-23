@@ -145,9 +145,9 @@ export function AgentCreateSplitButton({
             title={createAgentDisabledReason ?? undefined}
           >
             <Plus className="agent-create-menu__item-icon sidebar-settings__link-icon" aria-hidden="true" />
-            <span className="agent-create-menu__item-copy">
-              <span className="agent-create-menu__item-title">Blank agent</span>
-              <span className="agent-create-menu__item-description">Start from a fresh charter.</span>
+            <span className="agent-chat-menu-item__copy">
+              <span className="agent-chat-menu-item__title agent-create-menu__item-title">Blank agent</span>
+              <span className="agent-chat-menu-item__description agent-create-menu__item-description">Start from a fresh charter.</span>
             </span>
           </button>
           <div className="sidebar-settings__rule" role="separator" aria-hidden="true" />
@@ -192,9 +192,9 @@ export function AgentCreateSplitButton({
                     ) : (
                       <Bot className="agent-create-menu__item-icon sidebar-settings__link-icon" aria-hidden="true" />
                     )}
-                    <span className="agent-create-menu__item-copy">
-                      <span className="agent-create-menu__item-title">{template.name}</span>
-                      <span className="agent-create-menu__item-description">{templateDescription(template)}</span>
+                    <span className="agent-chat-menu-item__copy">
+                      <span className="agent-chat-menu-item__title agent-create-menu__item-title">{template.name}</span>
+                      <span className="agent-chat-menu-item__description agent-create-menu__item-description">{templateDescription(template)}</span>
                     </span>
                   </button>
                 )

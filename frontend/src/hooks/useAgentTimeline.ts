@@ -7,7 +7,7 @@ import type { StaffViewContext } from '../api/context'
 import { nextClientStateOrder } from '../util/clientStateOrder'
 
 export const TIMELINE_PAGE_SIZE = 50
-export const TIMELINE_STALE_TIME_MS = 5 * 60_000
+export const TIMELINE_STALE_TIME_MS = 60_000
 
 export type TimelinePage = {
   events: TimelineEvent[]
