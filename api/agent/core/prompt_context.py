@@ -681,14 +681,11 @@ def _get_sqlite_guidance() -> str:
     """Return the compact contract for data retrieval, storage, and analysis."""
     return (
         "## SQLite Data\n\n"
-        "Named tables are the world model; digest is partial. Use queried rows, not memory, for decisions. Current complete rows are truth; don't refetch them. "
-        "Explicit fresh source: fetch once, then reconcile and SELECT the model in one SQLite batch. Otherwise read the model first and fetch only stale/missing facts. "
-        "Tool output doesn't update it. During long or multi-source work, reconcile each useful source batch so tables become the checklist, intermediate state, and resume point. "
-        "Source rows sharing a stable ID or its children belong there even when small: reconcile entities/relations, evolve schema, then query before acting/reporting. Only unrelated one-offs bypass it. "
-        "Use stable keys. Upserts refresh every mutable/provenance field; inspect identity after wrong row counts; query gaps before reporting. Only sourced blockers are unresolved. "
-        "Normalize children with PRIMARY KEY/UNIQUE + indexes; use SQLite for exact set logic/counts/ranking. Bind messy agent-authored values with :name + bindings; source facts still derive from __tool_results. For fuzzy interpretation of unstructured text, bind one JSON array and expand it with json_each(:rows), retaining source result IDs/provenance. "
-        "No sibling-by-sibling result/table/blob loops. Custom tools may write keyed models directly. CTAS is one-off; named tables persist, TEMP do not. Inspect unknown structure once. "
-        "Locate payloads with analysis_json/top_keys; http_request JSON is result_json $.content. Prefer result_json for known paths, else result_text.\n\n"
+        "Named tables are the world model: query them, not memory; don't refetch complete rows. For requested fresh data, fetch once; otherwise query first and fetch only stale/missing facts. Reconcile and SELECT in one batch. "
+        "Tool output doesn't update the model. On long/multi-source work, import each useful batch directly from __tool_results with INSERT ... SELECT/json_each; tables hold checklist, intermediate, and resume state. Never transcribe visible rows into VALUES. SELECT coverage in the same batch. "
+        "Model stable-ID entities, children/people, relationships, qualification evidence, and coverage even in small batches; evolve schema and use SQL to expose missing fields before reporting. Only unrelated one-offs bypass. "
+        "Upserts refresh mutable/provenance fields. Query wrong counts/gaps; only sourced blockers are unresolved. Normalize children with keys/indexes; use exact SQL for sets/counts/ranking. Bind agent-authored values with :name; source facts derive from __tool_results. For fuzzy text, bind one JSON array and json_each(:rows) with provenance. "
+        "No sibling-by-sibling loops. Custom tools may write keyed models. CTAS/TEMP is one-off. Inspect unknown structure once. Locate payloads with analysis_json/top_keys; http_request JSON is result_json $.content. Prefer known-path result_json, else result_text.\n\n"
         "Snapshots:\n"
         "* __tool_results: result_id, tool_name, created_at, result_json, result_text, analysis_json, is_truncated, top_keys.\n"
         "* __messages: message_id, seq, timestamp, channel, is_outbound, from_address, to_address, subject, body, "
@@ -3085,7 +3082,7 @@ def add_budget_awareness_sections(
                     f"{burn_emoji}Burn rate: {burn_rate} credits/hour over the last {burn_window} minutes "
                     f"(threshold: {burn_threshold}). "
                     + (
-                        "Use smaller chunks; report useful partials; set a resume schedule if durable work remains."
+                        "Pacing signal, not permission to stop: use efficient batches. If a hard limit blocks completion, deliver useful partials, name it, and ask for credits."
                         if over_threshold
                         else ""
                     )
@@ -3974,11 +3971,10 @@ def _get_system_instruction(
         "Show requested detail, summarize overflow, and for multi-step research investigate only leads needed to satisfy the stated scope.\n\n"
 
         "A final send ends the work cycle. If a result reports `remaining_work`/`next_cursor` and the user asked to "
-        "preserve or continue it: first use one direct sqlite_batch update to save the cursor and follow any "
-        "resume-schedule direction; the current config is already in the prompt, so do not SELECT or read_file first. "
-        "Append new resume state with `charter = charter || '...'`; use patch_text only to replace an exact existing "
-        "phrase. After that update succeeds, the next call must send the report; do not inspect files, messages, or "
-        "config first. Never send 'I'll save/update it' with will_continue_work=false; do it first.\n\n"
+        "preserve or continue it: use one sqlite_batch call to upsert both in a normal domain-progress table. Do not "
+        "inspect or mutate charter/schedules/config unless the user independently requested a schedule. After it "
+        "succeeds, the next call must send the report; do not inspect files or messages first. Never send "
+        "'I'll save/update it' with will_continue_work=false; do it first.\n\n"
         f"{LINK_REFERENCE_PROMPT_NOTE}\n\n"
         "## Bounded Current Research (CRITICAL)\n\n"
         "For one-off latest/current company/batch/funding/pricing/product/news/status asks except finite sets: use bounded research mode. Do one focused search or structured lookup; scrape 1-3 top sources if snippets are insufficient; then send one answer with takeaways and cite at least two distinct source URLs compactly. After one result set plus 1-2 strong pages, final answer is next, not another query. Use at most one web search query unless empty/contradictory. Do not run alternate query variants, call update_plan, send progress-only messages, create files/charts, build an ad hoc SQLite model, or keep searching once sources can answer. Escalate only for explicit deep/exhaustive work, market maps, exports, list-all, outreach, monitoring, or scope that truly needs it.\n\n"
@@ -4010,14 +4006,10 @@ def _get_system_instruction(
     )
     base_prompt += (
         "\n\n## Work Updates (CRITICAL)\n\n"
-        "Short work: no updates. Deep/exhaustive, large-batch, implementation/deployment work:\n"
+        "Short work: no updates. Deep/large work:\n"
         "1. FIRST send scope + next checkpoint on the inbound channel; will_continue_work=true.\n"
-        "2. Before work call 4 (or after the first evidence batch/phase, if sooner), send the strongest concrete "
-        "finding so far, not task status like 'sources scraped' or 'compiling'. Later only for ETA/blockers.\n"
-        "After an update, don't repeat it; next response starts with work calls. "
-        "Kickoff isn't a milestone: each later update must state a concrete new finding from completed tools, "
-        "never kickoff text. No evidence: keep working.\n"
-        "No generic narration/reasoning. Peer: send_agent_message only."
+        "2. By work call 4 or the first evidence batch, send the strongest finding; later only ETA/blockers.\n"
+        "Updates always use true; a promise of more results isn't terminal. Don't repeat updates or narrate status. After a verified partial with no productive retry, save one cursor in a normal domain row, then deliver the rows + constraint; never inspect or patch charter/schedules/config for this. Kickoff isn't a milestone; later updates need new evidence. Peer: send_agent_message only."
     )
     base_prompt += "\n\n<sqlite_guidance>\n" + _get_sqlite_guidance() + "\n</sqlite_guidance>"
 

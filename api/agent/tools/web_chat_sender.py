@@ -312,7 +312,7 @@ def get_send_chat_tool() -> Dict[str, Any]:
                     },
                     "will_continue_work": {
                         "type": "boolean",
-                        "description": "REQUIRED. true=another immediate tool call follows in this turn; false=current turn is done, even if future scheduled work remains, and no current plan items remain unfinished. Never send a message solely to justify continuing work.",
+                        "description": "REQUIRED. true if immediate work follows, including any progress update/promise of more results; false only when this turn and current plan are done. Never message solely to justify continuation.",
                     },
                 },
                 "required": ["body", "will_continue_work"],

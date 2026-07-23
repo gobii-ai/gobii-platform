@@ -144,6 +144,20 @@ class ImpliedContinuationDecisionTests(SimpleTestCase):
 
         self.assertFalse(result)
 
+    def test_terminal_progress_message_promising_more_results_is_repaired(self):
+        result = _should_infer_message_tool_continuation(
+            "I have 25 healthcare staffing firms loaded. Keep building, more data coming!"
+        )
+
+        self.assertTrue(result)
+
+    def test_final_partial_delivery_does_not_force_continuation(self):
+        result = _should_infer_message_tool_continuation(
+            "Here are the three verified prospects. The other profiles are unavailable from the current source."
+        )
+
+        self.assertFalse(result)
+
 
 @tag("batch_event_processing")
 class DeepWorkUpdateGateTests(SimpleTestCase):

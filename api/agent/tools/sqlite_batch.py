@@ -2100,16 +2100,13 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
         "function": {
             "name": "sqlite_batch",
             "description": (
-                "SQLite world model + exact logic. Fetch alone; next completion reconcile and SELECT. SOURCE ARRAYS "
-                "lists paths. Every sourced SET/VALUES and write WHERE/ON key must derive inside INSERT ... SELECT / "
-                "UPDATE ... FROM __tool_results/json_each; only paths/current result_id/tool_name may be literals, "
-                "never facts/URLs/keys. Reconcile entities/relations, evolve schema, then SELECT the model before deciding/reporting. Use "
-                "UNIQUE keys + provenance; normalize children; joins/sets/counts/ranking. For agent-authored notes or "
-                "classifications that cannot come from a source row, use named bindings like :note with the bindings object; "
-                "never hand-escape messy values into SQL. For fuzzy extraction from unstructured text, bind one JSON "
-                "array and expand it with json_each(:rows), retaining source result IDs/provenance. Same-shaped sibling "
-                "results use one set import over tool_name or result_id IN (...), never one INSERT per result_id; use "
-                "separate statements only for different entity shapes. CTAS is one-off. "
+                "SQLite world model + exact logic. After a fetch, reconcile and SELECT. SOURCE ARRAYS lists paths. "
+                "Never transcribe visible rows. Derive sourced SET/VALUES and write keys inside INSERT ... SELECT / "
+                "UPDATE ... FROM __tool_results/json_each; only paths/current result_id/tool_name may be literals. "
+                "Reconcile keyed entities/relations with provenance; evolve schema and SELECT before decisions. "
+                "Normalize children; use joins/sets/counts/ranking. Bind authored notes/classifications as :name; never "
+                "hand-escape. For fuzzy text, bind one JSON array and json_each(:rows), retaining result IDs. Import "
+                "same-shaped siblings in one set over tool_name or result_id IN (...); separate different shapes. CTAS is one-off. "
                 "http_request JSON: result_json $.content. INSERT SELECT needs WHERE before ON CONFLICT. No ATTACH. SQL uses "
                 "semicolons; apostrophe: 'O''Brien'. grep_context_all/split_sections arrays: json_each + ctx.value."
             ),

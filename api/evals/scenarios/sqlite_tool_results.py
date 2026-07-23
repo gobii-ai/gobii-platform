@@ -1,5 +1,6 @@
 import json
 import re
+from decimal import Decimal
 from typing import Iterable
 
 import sqlparse
@@ -45,6 +46,7 @@ SQLITE_DOMAIN_TRUTH_OVER_STALE_HISTORY = "sqlite_domain_truth_over_stale_history
 SQLITE_DOMAIN_MODEL_REFRESHES_AND_EVOLVES = "sqlite_domain_model_refreshes_and_evolves"
 SQLITE_SOURCE_ARRAY_FIRST_WRITE = "sqlite_source_array_first_write"
 SQLITE_INCREMENTAL_DOMAIN_MODEL = "sqlite_incremental_domain_model"
+SQLITE_PROSPECT_PIPELINE_COMPLETES = "sqlite_prospect_pipeline_completes"
 SQLITE_TOOL_RESULT_SCENARIO_SLUGS = [
     SQLITE_MULTI_RESULT_WEB_SYNTHESIS,
     SQLITE_INTERMEDIATE_WORKING_TABLE,
@@ -56,6 +58,7 @@ SQLITE_TOOL_RESULT_SCENARIO_SLUGS = [
     SQLITE_DOMAIN_MODEL_REFRESHES_AND_EVOLVES,
     SQLITE_SOURCE_ARRAY_FIRST_WRITE,
     SQLITE_INCREMENTAL_DOMAIN_MODEL,
+    SQLITE_PROSPECT_PIPELINE_COMPLETES,
 ]
 
 
@@ -120,6 +123,16 @@ INITIATIVE_FEED_URL = "https://ops.example.test/initiatives.json"
 OWNERSHIP_FEED_URL = "https://ops.example.test/ownership.json"
 RISK_FEED_URL = "https://ops.example.test/risks.json"
 OPERATING_FEED_URLS = (INITIATIVE_FEED_URL, OWNERSHIP_FEED_URL, RISK_FEED_URL)
+
+PROSPECT_PROFILE_URLS = (
+    "https://profiles.example.test/people/maya-chen",
+    "https://profiles.example.test/people/leo-martin",
+    "https://profiles.example.test/people/priya-nwosu",
+    "https://profiles.example.test/people/evan-cho",
+)
+PROSPECT_COMPANY_FEED_URL = "https://crm.example.test/staffing/companies.json"
+PROSPECT_PEOPLE_FEED_URL = "https://crm.example.test/staffing/people.json"
+PROSPECT_FEED_URLS = (PROSPECT_COMPANY_FEED_URL, PROSPECT_PEOPLE_FEED_URL)
 INITIATIVES = (
     ("init-checkout", "Checkout Recovery", "active", "revenue"),
     ("init-search", "Search Relevance", "active", "discovery"),
@@ -707,6 +720,100 @@ def _operating_feeds_mock() -> dict:
                     },
                 }
                 for url, payload in payloads.items()
+            ],
+            "default": {"status": "error", "message": "Unknown eval URL."},
+        }
+    }
+
+
+def _prospect_pipeline_mock() -> dict:
+    organizations = [
+        {
+            "id": "org-care-01",
+            "name": "Harbor Clinical Staffing",
+            "estimated_num_employees": 42,
+            "website_url": "https://harbor-clinical.example.test",
+        },
+        {
+            "id": "org-north-02",
+            "name": "Northline Allied Health",
+            "estimated_num_employees": 67,
+            "website_url": "https://northline-allied.example.test",
+        },
+        {
+            "id": "org-lumen-03",
+            "name": "Lumen Nurse Partners",
+            "estimated_num_employees": 28,
+            "website_url": "https://lumen-nurse.example.test",
+        },
+        {
+            "id": "org-cascade-04",
+            "name": "Cascade Medical Search",
+            "estimated_num_employees": 81,
+            "website_url": "https://cascade-medical.example.test",
+        },
+    ]
+    people = [
+        {
+            "id": "person-maya-01",
+            "name": "Maya Chen",
+            "title": "Founder and CEO",
+            "organization_id": "org-care-01",
+            "organization_name": "Harbor Clinical Staffing",
+            "linkedin_url": PROSPECT_PROFILE_URLS[0],
+        },
+        {
+            "id": "person-leo-02",
+            "name": "Leo Martin",
+            "title": "Managing Partner",
+            "organization_id": "org-north-02",
+            "organization_name": "Northline Allied Health",
+            "linkedin_url": PROSPECT_PROFILE_URLS[1],
+        },
+        {
+            "id": "person-priya-03",
+            "name": "Priya Nwosu",
+            "title": "Head of Recruiting",
+            "organization_id": "org-lumen-03",
+            "organization_name": "Lumen Nurse Partners",
+            "linkedin_url": PROSPECT_PROFILE_URLS[2],
+        },
+        {
+            "id": "person-evan-04",
+            "name": "Evan Cho",
+            "title": "Owner",
+            "organization_id": "org-cascade-04",
+            "organization_name": "Cascade Medical Search",
+            "linkedin_url": PROSPECT_PROFILE_URLS[3],
+        },
+    ]
+    return {
+        "http_request": {
+            "rules": [
+                {
+                    "url_contains": PROSPECT_COMPANY_FEED_URL,
+                    "result": {
+                        "status": "ok",
+                        "status_code": 200,
+                        "url": PROSPECT_COMPANY_FEED_URL,
+                        "content": {
+                            "source_url": PROSPECT_COMPANY_FEED_URL,
+                            "organizations": organizations,
+                        },
+                    },
+                },
+                {
+                    "url_contains": PROSPECT_PEOPLE_FEED_URL,
+                    "result": {
+                        "status": "ok",
+                        "status_code": 200,
+                        "url": PROSPECT_PEOPLE_FEED_URL,
+                        "content": {
+                            "source_url": PROSPECT_PEOPLE_FEED_URL,
+                            "people": people,
+                        },
+                    },
+                },
             ],
             "default": {"status": "error", "message": "Unknown eval URL."},
         }
@@ -1745,6 +1852,161 @@ class SqliteIncrementalDomainModelScenario(SqliteDomainModelScenario):
             task_name,
             failures,
             f"Incrementally modeled and queried related operating tables: {sorted(all_targets)}.",
+        )
+
+
+@register_scenario
+class SqliteProspectPipelineCompletesScenario(SqliteDomainModelScenario):
+    slug = SQLITE_PROSPECT_PIPELINE_COMPLETES
+    description = (
+        "High burn rate should not turn an organization seed batch into a terminal status update; prospect work "
+        "should model companies and people, measure coverage, and deliver the requested contacts."
+    )
+    cost_class = "medium"
+    tags = (*SqliteToolResultScenario.tags, "coverage", "effort_calibration", "trajectory_regression")
+    tasks = [
+        ScenarioTask(name="inject_prompt", assertion_type="agent_processing"),
+        ScenarioTask(name="verify_prospect_pipeline", assertion_type="tool_call"),
+        ScenarioTask(name="verify_complete_prospect_report", assertion_type="manual"),
+    ]
+    prompt = (
+        "Build a reusable first batch of four US healthcare staffing prospects at firms under 100 employees. "
+        "For each one I need the recruiter or owner's name, title, company, company size, profile link, and a short "
+        "qualification note. The current company and people exports are below. Give me the completed batch as a "
+        "concise report; I'll have follow-ups by company and person.\n\n"
+        + "\n".join(f"- {url}" for url in PROSPECT_FEED_URLS)
+    )
+
+    def run(self, run_id: str, agent_id: str) -> None:
+        self._ready_agent(agent_id)
+        PersistentAgent.objects.filter(id=agent_id).update(
+            charter=(
+                "Source qualified staffing prospects and keep company, person, evidence, and coverage state coherent "
+                "for follow-up work."
+            ),
+            daily_credit_limit=50,
+        )
+        burn_step = PersistentAgentStep.objects.create(
+            agent_id=agent_id,
+            description="Recent prospect research eval work",
+        )
+        PersistentAgentStep.objects.filter(id=burn_step.id).update(credits_cost=Decimal("5.5"))
+        self._enable_tools(agent_id, ("http_request",))
+        inbound = self._inject_and_wait(
+            run_id,
+            agent_id,
+            self.prompt,
+            _prospect_pipeline_mock(),
+            allowed_tool_names={
+                "http_request",
+                "sqlite_batch",
+                "send_chat_message",
+                "update_plan",
+            },
+            max_relevant_tool_calls=12,
+        )
+        self._record_prospect_pipeline(run_id, after=inbound.timestamp)
+        self._record_sourced_answer(
+            run_id,
+            agent_id=agent_id,
+            after=inbound.timestamp,
+            task_name="verify_complete_prospect_report",
+            source_urls=PROSPECT_PROFILE_URLS,
+            required_terms=("Maya Chen", "Leo Martin", "Priya Nwosu", "Evan Cho"),
+            min_sources=4,
+        )
+
+    def _record_prospect_pipeline(self, run_id: str, *, after) -> None:
+        task_name = "verify_prospect_pipeline"
+        self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name=task_name)
+        calls = _tool_calls_for_run(run_id, after=after)
+        company_positions = [
+            index for index, call in enumerate(calls)
+            if call.tool_name == "http_request"
+            and str(resolved_tool_param(call, "url") or "").rstrip("/")
+            == PROSPECT_COMPANY_FEED_URL.rstrip("/")
+            and str(getattr(call, "status", "")).casefold() == "complete"
+        ]
+        people_positions = [
+            index for index, call in enumerate(calls)
+            if call.tool_name == "http_request"
+            and str(resolved_tool_param(call, "url") or "").rstrip("/")
+            == PROSPECT_PEOPLE_FEED_URL.rstrip("/")
+            and str(getattr(call, "status", "")).casefold() == "complete"
+        ]
+        sqlite_attempts = [call for call in calls if call.tool_name == "sqlite_batch"]
+        sqlite_calls = [
+            call for call in sqlite_attempts
+            if str(getattr(call, "status", "")).casefold() == "complete"
+            and str((_result_payload(call) or {}).get("status") or "").casefold() == "ok"
+        ]
+        sql_values = [str((call.tool_params or {}).get("sql") or "") for call in sqlite_calls]
+        combined_sql = "\n".join(sql_values)
+        model_tables = set(source_derived_model_mutation_tables(sql_values))
+        summary = summarize_sqlite_tool_result_calls(sqlite_calls)
+        _modeled, _row_modeled, identity_tables = _domain_model_lineage(
+            combined_sql,
+            direct_tables=model_tables,
+            row_direct_tables=summary.row_derived_working_table_names,
+            candidate_tables=summary.working_table_names,
+        )
+        statements = [
+            _structural_sql(statement)
+            for statement in sqlparse.split(combined_sql)
+            if statement.strip()
+        ]
+        cross_entity_queries = [
+            statement for statement in statements
+            if re.search(r"\bselect\b", statement, re.I)
+            and re.search(r"\b(?:join|exists|having)\b", statement, re.I)
+            and sum(_reads_table(statement, table) for table in model_tables) >= 2
+        ]
+        terminal_positions = [
+            index for index, call in enumerate(calls)
+            if call.tool_name == "send_chat_message"
+            and (call.tool_params or {}).get("will_continue_work") is False
+            and str(getattr(call, "status", "")).casefold() == "complete"
+            and not (_result_payload(call) or {}).get("skipped")
+        ]
+        last_source_position = max((*company_positions, *people_positions), default=-1)
+        failures = _tool_attempt_failures(
+            [
+                call for call in calls
+                if call.tool_name == "http_request"
+            ],
+            "Prospect source",
+        )
+        failures.extend(_sqlite_attempt_failures(sqlite_attempts))
+        failures.extend(message for failed, message in (
+            (not company_positions, "company discovery never completed"),
+            (not people_positions, "person discovery never completed"),
+            (
+                len(model_tables) < 2,
+                f"expected related company/person model tables, found {sorted(model_tables)}",
+            ),
+            (
+                not model_tables.issubset(identity_tables),
+                f"prospect model lacked stable identity: {sorted(model_tables - identity_tables)}",
+            ),
+            (
+                not re.search(r"\b(?:organization|company)_id\b", combined_sql, re.I),
+                "company-to-person identity was not preserved",
+            ),
+            (not cross_entity_queries, "model was not queried across the company-person relationship"),
+            (
+                len(terminal_positions) != 1,
+                f"expected one terminal prospect report, found {len(terminal_positions)}",
+            ),
+            (
+                bool(terminal_positions) and terminal_positions[0] <= last_source_position,
+                "agent sent a terminal status before person-level sourcing finished",
+            ),
+        ) if failed)
+        self._record_check(
+            run_id,
+            task_name,
+            failures,
+            f"Modeled {sorted(model_tables)}, queried the company-person relationship, and delivered after sourcing.",
         )
 
 
