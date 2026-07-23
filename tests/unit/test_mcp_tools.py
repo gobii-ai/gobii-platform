@@ -685,9 +685,9 @@ class MCPToolManagerTests(TestCase):
             name="agent-aware-server",
             display_name="Agent-aware Server",
             description="",
-            command="npx",
-            args=["-y", "@dummy/server"],
-            url=None,
+            command=None,
+            args=[],
+            url="https://example.com/mcp",
             auth_method=MCPServerConfig.AuthMethod.NONE,
             env={},
             headers={},
@@ -886,6 +886,155 @@ class MCPToolManagerTests(TestCase):
         self.assertEqual(result.get("status"), "ok")
         self.assertEqual(result.get("result"), {"pong": True})
         mock_service.mcp_request.assert_called_once()
+
+    @patch("api.agent.tools.mcp_manager.sandbox_compute_enabled_for_agent", return_value=False)
+    def test_execute_non_platform_stdio_rejects_agent_without_sandbox(
+        self,
+        _mock_sandbox_enabled_for_agent,
+    ):
+        agent = SimpleNamespace(id=uuid.uuid4(), organization=None, user=None)
+        runtime = MCPServerRuntime(
+            config_id=str(uuid.uuid4()),
+            name="sandbox-required-server",
+            display_name="Sandbox Required Server",
+            description="",
+            command="npx",
+            args=["-y", "@dummy/server"],
+            url=None,
+            auth_method=MCPServerConfig.AuthMethod.NONE,
+            env={},
+            headers={},
+            prefetch_apps=[],
+            scope=MCPServerConfig.Scope.USER,
+            organization_id=None,
+            user_id=str(uuid.uuid4()),
+            updated_at=datetime.now(UTC),
+        )
+        tool = MCPToolInfo(
+            config_id=runtime.config_id,
+            full_name=f"mcp_{runtime.name}_ping",
+            server_name=runtime.name,
+            tool_name="ping",
+            description="Ping",
+            parameters={"type": "object", "properties": {}},
+        )
+        self.manager._initialized = True
+        self.manager._server_cache = {runtime.config_id: runtime}
+        self.manager._tools_cache = {runtime.config_id: [tool]}
+
+        enabled_qs = MagicMock()
+        enabled_qs.exists.return_value = True
+        usage_row = SimpleNamespace(last_used_at=None, usage_count=0, save=MagicMock())
+
+        with patch(
+            "api.agent.tools.mcp_manager.PersistentAgentEnabledTool.objects.filter",
+            return_value=enabled_qs,
+        ), patch(
+            "api.agent.tools.mcp_manager.PersistentAgentEnabledTool.objects.get_or_create",
+            return_value=(usage_row, False),
+        ), patch.object(
+            self.manager,
+            "_ensure_runtime_registered",
+        ) as mock_ensure_registered:
+            result = self.manager.execute_mcp_tool(agent, tool.full_name, {})
+
+        self.assertEqual(result.get("status"), "error")
+        self.assertIn("requires sandbox compute", result.get("message", "").lower())
+        mock_ensure_registered.assert_not_called()
+
+    @patch("api.agent.tools.mcp_manager.sandbox_compute_enabled_for_agent", return_value=False)
+    def test_cached_non_platform_stdio_is_unavailable_without_agent_sandbox(
+        self,
+        _mock_sandbox_enabled_for_agent,
+    ):
+        agent = SimpleNamespace(id=uuid.uuid4(), organization=None, user=None)
+        runtime = MCPServerRuntime(
+            config_id=str(uuid.uuid4()),
+            name="cached-sandbox-required-server",
+            display_name="Cached Sandbox Required Server",
+            description="",
+            command="npx",
+            args=["-y", "@dummy/server"],
+            url=None,
+            auth_method=MCPServerConfig.AuthMethod.NONE,
+            env={},
+            headers={},
+            prefetch_apps=[],
+            scope=MCPServerConfig.Scope.USER,
+            organization_id=None,
+            user_id=str(uuid.uuid4()),
+            updated_at=datetime.now(UTC),
+        )
+        tool = MCPToolInfo(
+            config_id=runtime.config_id,
+            full_name=f"mcp_{runtime.name}_ping",
+            server_name=runtime.name,
+            tool_name="ping",
+            description="Ping",
+            parameters={"type": "object", "properties": {}},
+        )
+        self.manager._tools_cache = {runtime.config_id: [tool]}
+
+        with patch.object(self.manager, "_register_server") as mock_register:
+            available = self.manager._ensure_runtime_registered(runtime, agent=agent)
+
+        self.assertFalse(available)
+        mock_register.assert_not_called()
+
+    def test_isolated_non_platform_stdio_execution_routes_through_sandbox_path(self):
+        agent = SimpleNamespace(id=uuid.uuid4(), organization=None, user=None)
+        runtime = MCPServerRuntime(
+            config_id=str(uuid.uuid4()),
+            name="isolated-sandbox-required-server",
+            display_name="Isolated Sandbox Required Server",
+            description="",
+            command="npx",
+            args=["-y", "@dummy/server"],
+            url=None,
+            auth_method=MCPServerConfig.AuthMethod.NONE,
+            env={},
+            headers={},
+            prefetch_apps=[],
+            scope=MCPServerConfig.Scope.USER,
+            organization_id=None,
+            user_id=str(uuid.uuid4()),
+            updated_at=datetime.now(UTC),
+        )
+        tool = MCPToolInfo(
+            config_id=runtime.config_id,
+            full_name=f"mcp_{runtime.name}_ping",
+            server_name=runtime.name,
+            tool_name="ping",
+            description="Ping",
+            parameters={"type": "object", "properties": {}},
+        )
+        self.manager._server_cache = {runtime.config_id: runtime}
+        enabled_qs = MagicMock()
+        enabled_qs.exists.return_value = True
+        sandbox_result = {"status": "ok", "result": {"pong": True}}
+
+        with patch(
+            "api.agent.tools.mcp_manager.PersistentAgentEnabledTool.objects.filter",
+            return_value=enabled_qs,
+        ), patch.object(
+            self.manager,
+            "execute_mcp_tool",
+            return_value=sandbox_result,
+        ) as mock_execute:
+            result = self.manager.execute_mcp_tool_isolated(
+                agent,
+                tool.full_name,
+                {},
+                tool_info=tool,
+            )
+
+        self.assertEqual(result, sandbox_result)
+        mock_execute.assert_called_once_with(
+            agent,
+            tool.full_name,
+            {},
+            tool_info=tool,
+        )
 
     @patch("api.agent.tools.mcp_manager.sandbox_compute_enabled_for_agent", return_value=True)
     def test_execute_http_mcp_tool_skips_sandbox_routing(self, _mock_sandbox_enabled_for_agent):
@@ -1493,7 +1642,13 @@ class MCPToolManagerTests(TestCase):
         with patch.object(self.manager, "_register_server", side_effect=error):
             self.assertFalse(self.manager.discover_tools_for_server(self.config_id))
         
-    def test_get_tools_for_agent_registers_accessible_servers_only(self):
+    @patch("api.services.mcp_servers.sandbox_compute_enabled_for_agent", return_value=True)
+    @patch("api.agent.tools.mcp_manager.sandbox_compute_enabled_for_agent", return_value=True)
+    def test_get_tools_for_agent_registers_accessible_servers_only(
+        self,
+        _mock_sandbox_enabled_for_agent,
+        _mock_server_sandbox_enabled_for_agent,
+    ):
         """Ensure discovery runs only for servers the agent can access."""
         User = get_user_model()
         user = User.objects.create_user(username="lazy-agent@example.com")
