@@ -10,9 +10,11 @@ from api.evals.scenarios.discord_native import (
     DISCORD_NATIVE_REACTION_SERIOUS_REQUEST_RESTRAINT,
     DISCORD_NATIVE_REACTION_REPLY_CONTEXT,
     DISCORD_NATIVE_REACTION_SHARED_WIN,
+    DISCORD_NATIVE_RESEARCH_KICKOFF,
     DISCORD_NATIVE_SCENARIO_SLUGS,
     DISCORD_NATIVE_SUITE_SLUG,
     DiscordNativeReactionReplyContextScenario,
+    DiscordNativeResearchKickoffScenario,
 )
 from api.evals.suites import SuiteRegistry
 
@@ -31,6 +33,20 @@ class DiscordNativeScenarioTests(SimpleTestCase):
         self.assertIsNotNone(
             ScenarioRegistry.get(DISCORD_NATIVE_REACTION_SERIOUS_REQUEST_RESTRAINT)
         )
+        self.assertIsNotNone(ScenarioRegistry.get(DISCORD_NATIVE_RESEARCH_KICKOFF))
+
+    def test_research_kickoff_prompt_does_not_prescribe_responsiveness_contract(self):
+        prompt = DiscordNativeResearchKickoffScenario.prompt.casefold()
+
+        for implementation_term in (
+            "acknowledge",
+            "before",
+            "kickoff",
+            "progress",
+            "working on",
+        ):
+            with self.subTest(implementation_term=implementation_term):
+                self.assertNotIn(implementation_term, prompt)
 
     def test_reaction_tool_contract_requires_target_and_continuation(self):
         tool = get_add_discord_reaction_tool()["function"]

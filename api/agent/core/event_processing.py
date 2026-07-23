@@ -364,6 +364,12 @@ NON_SUBSTANTIAL_WORK_RE = re.compile(
     r"\b(?:not|isn'?t|is not|don'?t|do not)\s+(?:an?\s+)?(?:deep|exhaustive|comprehensive|thorough|extensive)\b",
     re.IGNORECASE,
 )
+EXPLICIT_RESEARCH_REQUEST_RE = re.compile(
+    r"\b(?:research|investigate)\b|\b(?:look|dig)\s+into\b|\b(?:find|figure)\s+out\b", re.IGNORECASE
+)
+NEGATED_RESEARCH_REQUEST_RE = re.compile(
+    r"\b(?:don'?t|do not|no need to|without)\b.{0,24}\b(?:research|investigat|look|dig|find|figur)", re.IGNORECASE
+)
 DEEP_WORK_UPDATE_CORRECTION_PREFIX = "Deep-work communication correction:"
 # Canonical phrase the agent should use to signal continuation.
 # Prompts tell the agent to include this exact phrase when it has more work.
@@ -385,6 +391,11 @@ CONTINUATION_PHRASES = (
     "moving on to ",
     "more data coming",
 )
+
+
+def _is_explicit_research_request(text: str) -> bool:
+    return bool(EXPLICIT_RESEARCH_REQUEST_RE.search(text or "") and not NEGATED_RESEARCH_REQUEST_RE.search(text or ""))
+
 
 class OrchestratorPromptStale(RuntimeError):
     """Raised when newer human input makes an in-flight orchestrator prompt stale."""
@@ -410,6 +421,7 @@ def _deep_work_update_gate_reason(
     prior_has_midwork_update: bool = False,
     prior_kickoff_correction: bool = False,
     prior_milestone_correction: bool = False,
+    require_kickoff: bool = False,
 ) -> str | None:
     work_names = [
         name
@@ -419,11 +431,8 @@ def _deep_work_update_gate_reason(
     if not work_names or batch_has_progress_update:
         return None
 
-    substantial_start = bool(
-        SUBSTANTIAL_WORK_RE.search(latest_user_text or "")
-        and not NON_SUBSTANTIAL_WORK_RE.search(latest_user_text or "")
-    )
-    if prior_update_count == 0 and prior_work_count == 0 and substantial_start and not prior_kickoff_correction:
+    substantial_start = bool(SUBSTANTIAL_WORK_RE.search(latest_user_text or "") and not NON_SUBSTANTIAL_WORK_RE.search(latest_user_text or ""))
+    if prior_update_count == 0 and prior_work_count == 0 and (substantial_start or require_kickoff) and not prior_kickoff_correction:
         return "kickoff"
     if (
         substantial_start
@@ -476,6 +485,8 @@ def _deep_work_update_gate_context(
     expected_message_tool = _same_channel_reply_tool_name(latest_inbound)
     if expected_message_tool is None:
         return None
+    latest_user_text = latest_inbound.body or ""
+    require_kickoff = latest_inbound.conversation.channel == CommsChannel.DISCORD and _is_explicit_research_request(latest_user_text)
 
     prior_calls = PersistentAgentToolCall.objects.filter(
         step__agent=agent,
@@ -505,7 +516,7 @@ def _deep_work_update_gate_context(
         ).values_list("description", flat=True)
     )
     return _deep_work_update_gate_reason(
-        latest_inbound.body or "",
+        latest_user_text,
         [_get_tool_call_name(call) or "" for call in tool_calls],
         prior_work_count=prior_work_calls.count(),
         prior_update_count=len(prior_updates),
@@ -523,6 +534,7 @@ def _deep_work_update_gate_context(
             description.startswith(f"{DEEP_WORK_UPDATE_CORRECTION_PREFIX} milestone:")
             for description in prior_correction_descriptions
         ),
+        require_kickoff=require_kickoff,
     )
 
 
@@ -535,10 +547,10 @@ def _record_deep_work_update_correction(
 ) -> None:
     if reason == "kickoff":
         instruction = (
-            "The task calls were held once because this substantial request needs a kickoff. In your next response, "
+            "The task calls were held once because this request needs a kickoff. In your next response, "
             "first use the same-channel send tool with will_continue_work=true, then reissue the intended task calls. "
-            "Briefly name the outcome and when the requester will hear a substantive finding, without listing methods. "
-            "After the first evidence batch, share the strongest concrete finding, not task status like 'sources scraped.'"
+            "Briefly name the outcome and next checkpoint, without listing methods. Short work reports the final next; "
+            "deep/large work shares the strongest finding after the first evidence batch."
         )
     else:
         instruction = (
