@@ -5,11 +5,12 @@ from django.contrib.auth import get_user_model
 from django.test import SimpleTestCase, TestCase, tag
 
 from api.agent.comms.outbound_content_policy import contains_raw_html, markdown_only_error
+from api.agent.peer_comm import PeerMessagingError, PeerMessagingService
 from api.agent.tools.agent_variables import clear_variables, set_agent_variable
 from api.agent.tools.peer_dm import execute_send_agent_message, get_send_agent_message_tool
 from api.agent.tools.send_discord_message import execute_send_discord_message, get_send_discord_message_tool
 from api.agent.tools.web_chat_sender import execute_send_chat_message, get_send_chat_tool
-from api.models import BrowserUseAgent, PersistentAgent, PersistentAgentMessage, build_web_user_address
+from api.models import AgentPeerLink, BrowserUseAgent, PersistentAgent, PersistentAgentMessage, build_web_user_address
 
 
 @tag("batch_text_sanitization")
@@ -34,6 +35,9 @@ class OutboundContentPolicyTests(SimpleTestCase):
             "| Status | Value |\n| --- | --- |\n| Open | 2 |",
             "<https://example.com>",
             "2 < 3 and 4 > 1",
+            "The type is List<String> here.",
+            "The input uses Optional<Input> here.",
+            "Compare a<b and c>d values.",
             "&lt;strong&gt;literal&lt;/strong&gt;",
             "`<strong>literal</strong>`",
             "```html\n<strong>literal</strong>\n```",
@@ -92,6 +96,11 @@ class NativeMarkdownSenderTests(TestCase):
             charter="Receive native Markdown sends.",
             browser_use_agent=peer_browser_agent,
             execution_environment="eval",
+        )
+        AgentPeerLink.objects.create(
+            agent_a=self.agent,
+            agent_b=self.peer_agent,
+            created_by=self.user,
         )
 
     def tearDown(self):
@@ -195,8 +204,7 @@ class NativeMarkdownSenderTests(TestCase):
             attachments=[],
         )
 
-    @patch("api.agent.tools.peer_dm.PeerMessagingService")
-    def test_peer_message_rejects_html_before_delivery(self, peer_messaging_service_mock):
+    def test_peer_message_rejects_html_before_delivery(self):
         result = execute_send_agent_message(
             self.agent,
             {
@@ -207,7 +215,17 @@ class NativeMarkdownSenderTests(TestCase):
         )
 
         self.assert_unsupported_markup(result, "Peer messaging")
-        peer_messaging_service_mock.assert_not_called()
+        self.assertFalse(PersistentAgentMessage.objects.filter(owner_agent=self.agent).exists())
+
+    def test_peer_service_rejects_html_for_direct_callers(self):
+        service = PeerMessagingService(self.agent, self.peer_agent)
+
+        with self.assertRaises(PeerMessagingError) as raised:
+            service.send_message("<strong>Spawn handoff</strong>")
+
+        self.assertEqual(raised.exception.error_type, "unsupported_markup")
+        self.assertIs(raised.exception.retryable, True)
+        self.assertFalse(PersistentAgentMessage.objects.filter(owner_agent=self.agent).exists())
 
     @patch("api.agent.tools.peer_dm.PeerMessagingService")
     @patch("api.agent.tools.peer_dm.resolve_filespace_attachments", return_value=[])

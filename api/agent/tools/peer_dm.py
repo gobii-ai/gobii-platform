@@ -7,7 +7,6 @@ from typing import Any, Dict
 from uuid import UUID
 
 from ..files.attachment_helpers import AttachmentResolutionError, resolve_filespace_attachments
-from ..comms.outbound_content_policy import markdown_only_error
 from .attachment_guidance import SEND_TOOL_ATTACHMENTS_DESCRIPTION
 from ..peer_comm import PeerMessagingDuplicateError, PeerMessagingError, PeerMessagingService
 from ...models import PersistentAgent, PersistentAgentMessage
@@ -130,8 +129,6 @@ def execute_send_agent_message(agent: PersistentAgent, params: Dict[str, Any]) -
         }
 
     message = substitute_variables_with_filespace(str(message), agent)
-    if content_error := markdown_only_error(message, surface="Peer messaging"):
-        return content_error
 
     try:
         peer_agent_uuid = UUID(str(peer_agent_id_raw))
@@ -199,9 +196,11 @@ def execute_send_agent_message(agent: PersistentAgent, params: Dict[str, Any]) -
             "status": exc.status,
             "message": str(exc),
         }
+        if exc.error_type:
+            response["error_type"] = exc.error_type
         if exc.retry_at:
             response["retry_at_iso"] = exc.retry_at.isoformat()
-        if status in RETRYABLE_PEER_MESSAGE_STATUSES:
+        if exc.retryable or status in RETRYABLE_PEER_MESSAGE_STATUSES:
             response["retryable"] = True
         return response
 
