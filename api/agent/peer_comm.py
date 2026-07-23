@@ -15,6 +15,7 @@ from waffle import flag_is_active
 
 from observability import traced
 
+from api.agent.comms.outbound_content_policy import markdown_only_error
 from api.agent.files.attachment_helpers import ResolvedAttachment, create_message_attachments
 from api.agent.files.filespace_service import dedupe_name, get_or_create_default_filespace, get_or_create_dir
 from api.agent.tools.outbound_duplicate_guard import detect_recent_duplicate_message
@@ -36,10 +37,20 @@ logger = logging.getLogger(__name__)
 class PeerMessagingError(Exception):
     """Raised when peer messaging cannot proceed."""
 
-    def __init__(self, message: str, *, status: str = "error", retry_at=None):
+    def __init__(
+        self,
+        message: str,
+        *,
+        status: str = "error",
+        retry_at=None,
+        error_type: str | None = None,
+        retryable: bool = False,
+    ):
         super().__init__(message)
         self.status = status
         self.retry_at = retry_at
+        self.error_type = error_type
+        self.retryable = retryable
 
 
 class PeerMessagingDuplicateError(PeerMessagingError):
@@ -126,6 +137,12 @@ class PeerMessagingService:
             raise PeerMessagingError("Message body cannot be empty.")
 
         normalized_body = body.strip()
+        if content_error := markdown_only_error(normalized_body, surface="Peer messaging"):
+            raise PeerMessagingError(
+                str(content_error["message"]),
+                error_type=str(content_error["error_type"]),
+                retryable=bool(content_error["retryable"]),
+            )
         resolved_attachments = list(attachments or ())
         now = timezone.now()
 
