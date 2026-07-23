@@ -3229,9 +3229,7 @@
 }
 .starter-prompts-card__actions {
     display: flex;
-    flex-wrap: wrap;
     justify-content: flex-end;
-    gap: 0.35rem;
 }
 .agent-chat-button.starter-prompts-card__action {
     border-color: rgba(99, 102, 241, 0.1);
@@ -3247,6 +3245,64 @@
 .starter-prompts-card__action-icon {
     width: 0.78rem;
     height: 0.78rem;
+}
+.starter-prompts-card__action-chevron {
+    width: 0.7rem;
+    height: 0.7rem;
+}
+.starter-prompts-card__menu-popover {
+    z-index: 70;
+    width: min(17rem, calc(100vw - 1rem));
+    border: 1px solid rgba(99, 102, 241, 0.18);
+    border-radius: 0.7rem;
+    background: #ffffff;
+    box-shadow: 0 12px 28px rgba(41, 28, 84, 0.15);
+    overflow: hidden;
+}
+.starter-prompts-card__menu {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    padding: 0.3rem;
+    outline: none;
+}
+.starter-prompts-card__menu-item {
+    align-items: flex-start;
+    gap: 0.6rem;
+    min-height: 2.8rem;
+    padding: 0.55rem 0.6rem;
+    border-radius: 0.5rem;
+    color: #312e81;
+    cursor: pointer;
+    outline: none;
+}
+.starter-prompts-card__menu-item[data-hovered],
+.starter-prompts-card__menu-item[data-focused] {
+    background: rgba(99, 102, 241, 0.08);
+}
+.starter-prompts-card__menu-item-icon {
+    width: 0.9rem;
+    height: 0.9rem;
+    flex: 0 0 auto;
+    margin-top: 0.08rem;
+    color: #4f46e5;
+}
+.starter-prompts-card__menu-item-copy {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 0.12rem;
+}
+.starter-prompts-card__menu-item-title {
+    font-size: 0.75rem;
+    font-weight: 650;
+    line-height: 1.2;
+}
+.starter-prompts-card__menu-item-description {
+    color: #6366a1;
+    font-size: 0.68rem;
+    font-weight: 500;
+    line-height: 1.3;
 }
 .agent-chat-section-card.template-recommendations-card {
     gap: 0.72rem;
