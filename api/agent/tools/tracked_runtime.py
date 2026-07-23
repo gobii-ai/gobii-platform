@@ -1,7 +1,6 @@
 import json
 import logging
 import time
-from decimal import Decimal
 from typing import Any, Dict, Optional
 
 from api.agent.comms.human_input_requests import attach_originating_step_from_result, track_human_input_request_created
@@ -156,7 +155,7 @@ def execute_tracked_runtime_tool_call(
             result_content=result_content,
             execution_duration_ms=duration_ms,
             status=tool_status,
-            credits_consumed=credits_consumed if isinstance(credits_consumed, Decimal) else credits_consumed,
+            credits_consumed=credits_consumed,
             consumed_credit=consumed_credit,
             attach_completion=attach_completion,
             attach_prompt_archive=_no_prompt_archive,

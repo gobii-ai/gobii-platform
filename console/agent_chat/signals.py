@@ -220,10 +220,7 @@ def _broadcast_tool_cluster(step: PersistentAgentStep) -> None:
     if not step.agent_id:
         return
     tool_call = getattr(step, "tool_call", None)
-    if (
-        tool_call is not None
-        and tool_call.status == PersistentAgentToolCall.Status.QUEUED
-    ):
+    if tool_call is not None and tool_call.status == PersistentAgentToolCall.Status.QUEUED:
         return
     try:
         payload = build_tool_cluster_from_steps([step])

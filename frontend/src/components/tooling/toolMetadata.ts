@@ -31,7 +31,7 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import { summarizeSchedule } from '../../util/schedule'
-import { parseResultObject } from '../../util/objectUtils'
+import { isRecord, parseResultObject } from '../../util/objectUtils'
 import type { ToolCallEntry } from '../agentChat/types'
 import type { ToolDescriptor, ToolDescriptorTransform } from '../agentChat/tooling/types'
 import { summarizeToolSearchForCaption } from '../agentChat/tooling/searchUtils'
@@ -542,16 +542,8 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
     detailKind: 'updatePlan',
     derive(entry, parameters) {
       const plan = Array.isArray(parameters?.plan) ? parameters.plan : []
-      const activeStep = plan.find((item) => (
-        typeof item === 'object'
-        && item !== null
-        && item.status === 'doing'
-        && coerceString(item.step)
-      ))
-      const activeStepText = (
-        typeof activeStep === 'object'
-        && activeStep !== null
-      ) ? coerceString(activeStep.step) : null
+      const activeStep = plan.find((item) => isRecord(item) && item.status === 'doing')
+      const activeStepText = isRecord(activeStep) ? coerceString(activeStep.step) : null
 
       return {
         caption: activeStepText

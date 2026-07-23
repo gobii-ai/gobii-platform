@@ -1,146 +1,80 @@
-import {
-  Check,
-  Circle,
-  CircleDot,
-  FileText,
-  MessageSquareText,
-  type LucideIcon,
-} from 'lucide-react'
+import { Check, Circle, CircleDot, FileText, MessageSquareText, type LucideIcon } from 'lucide-react'
 
-import { isRecord } from '../../../../util/objectUtils'
+import { isRecord, parseResultObject } from '../../../../util/objectUtils'
+import type { PlanTaskStatus } from '../../PlanTaskItem'
 import type { ToolDetailProps } from '../../tooling/types'
-import { tryParseJson } from '../normalize'
 import { Section } from '../shared'
+import { isNonEmptyString } from '../utils'
 
-type PlanStatus = 'todo' | 'doing' | 'done'
+type PlanStep = { step: string; status: PlanTaskStatus }
+type Deliverable = [key: string, label: string, detail: string | null, icon: LucideIcon]
 
-type PlanStep = {
-  step: string
-  status: PlanStatus
-}
+const STATUS_DISPLAY = {
+  todo: [Circle, 'To do', 'text-slate-400', 'text-slate-700'],
+  doing: [CircleDot, 'In progress', 'text-blue-600', 'font-semibold text-slate-900'],
+  done: [Check, 'Done', 'rounded-full bg-emerald-100 p-0.5 text-emerald-700', 'text-slate-500'],
+} satisfies Record<PlanTaskStatus, [LucideIcon, string, string, string]>
 
-type PlanDeliverable = {
-  key: string
-  label: string
-  detail: string | null
-  icon: LucideIcon
-}
-
-const PLAN_STATUS_DISPLAY: Record<PlanStatus, {
-  label: string
-  icon: LucideIcon
-  iconClassName: string
-  titleClassName: string
-}> = {
-  todo: {
-    label: 'To do',
-    icon: Circle,
-    iconClassName: 'text-slate-400',
-    titleClassName: 'text-slate-700',
-  },
-  doing: {
-    label: 'In progress',
-    icon: CircleDot,
-    iconClassName: 'text-blue-600',
-    titleClassName: 'font-semibold text-slate-900',
-  },
-  done: {
-    label: 'Done',
-    icon: Check,
-    iconClassName: 'rounded-full bg-emerald-100 p-0.5 text-emerald-700',
-    titleClassName: 'text-slate-500',
-  },
-}
-
-function nonEmptyString(value: unknown): string | null {
-  return typeof value === 'string' && value.trim() ? value.trim() : null
+function text(value: unknown): string | null {
+  return isNonEmptyString(value) ? value.trim() : null
 }
 
 function parsePlanSteps(value: unknown): PlanStep[] {
   if (!Array.isArray(value)) return []
-
   return value.flatMap((item) => {
     if (!isRecord(item)) return []
-    const step = nonEmptyString(item.step)
+    const step = text(item.step)
     const status = item.status
-    if (!step || (status !== 'todo' && status !== 'doing' && status !== 'done')) {
-      return []
-    }
-    return [{ step, status }]
+    return step && (status === 'todo' || status === 'doing' || status === 'done')
+      ? [{ step, status }]
+      : []
   })
 }
 
-function parseDeliverables(parameters: Record<string, unknown> | null): PlanDeliverable[] {
+function parseDeliverables(parameters: Record<string, unknown> | null): Deliverable[] {
   if (!parameters) return []
-
-  const files = Array.isArray(parameters.files)
+  const files: Deliverable[] = Array.isArray(parameters.files)
     ? parameters.files.flatMap((item, index) => {
       if (!isRecord(item)) return []
-      const path = nonEmptyString(item.path)
-      if (!path) return []
-      return [{
-        key: `file:${path}:${index}`,
-        label: nonEmptyString(item.label) ?? path.split('/').filter(Boolean).at(-1) ?? 'File',
-        detail: path,
-        icon: FileText,
-      }]
+      const path = text(item.path)
+      return path
+        ? [[`file:${path}:${index}`, text(item.label) ?? path.split('/').filter(Boolean).at(-1) ?? 'File', path, FileText]]
+        : []
     })
     : []
-
-  const messages = Array.isArray(parameters.messages)
+  const messages: Deliverable[] = Array.isArray(parameters.messages)
     ? parameters.messages.flatMap((item, index) => {
       if (!isRecord(item)) return []
-      const messageId = nonEmptyString(item.message_id)
-      if (!messageId) return []
-      return [{
-        key: `message:${messageId}:${index}`,
-        label: nonEmptyString(item.label) ?? 'Delivered message',
-        detail: null,
-        icon: MessageSquareText,
-      }]
+      const messageId = text(item.message_id)
+      return messageId
+        ? [[`message:${messageId}:${index}`, text(item.label) ?? 'Delivered message', null, MessageSquareText]]
+        : []
     })
     : []
-
   return [...files, ...messages]
-}
-
-function parseResultRecord(result: unknown): Record<string, unknown> | null {
-  if (isRecord(result)) return result
-  if (typeof result !== 'string') return null
-  const parsed = tryParseJson(result)
-  return isRecord(parsed) ? parsed : null
 }
 
 function buildPlanSummary(steps: PlanStep[]): string {
   if (!steps.length) return 'No active steps'
-
-  const counts = steps.reduce(
-    (summary, step) => {
-      summary[step.status] += 1
-      return summary
-    },
-    { todo: 0, doing: 0, done: 0 },
-  )
-
+  const count = (status: PlanTaskStatus) => steps.filter((step) => step.status === status).length
+  const [doing, todo, done] = [count('doing'), count('todo'), count('done')]
   return [
-    counts.doing ? `${counts.doing} in progress` : null,
-    counts.todo ? `${counts.todo} to do` : null,
-    counts.done ? `${counts.done} done` : null,
+    doing ? `${doing} in progress` : null,
+    todo ? `${todo} to do` : null,
+    done ? `${done} done` : null,
   ].filter(Boolean).join(' • ')
 }
 
 export function UpdatePlanDetail({ entry }: ToolDetailProps) {
-  const parameters = entry.parameters
-  const steps = parsePlanSteps(parameters?.plan)
-  const deliverables = parseDeliverables(parameters)
-  const result = parseResultRecord(entry.result)
+  const steps = parsePlanSteps(entry.parameters?.plan)
+  const deliverables = parseDeliverables(entry.parameters)
+  const result = parseResultObject(entry.result)
   const failed = entry.status === 'error' || result?.status === 'error'
-  const errorMessage = nonEmptyString(result?.message)
 
   if (failed) {
     return (
       <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2.5 text-sm text-red-700">
-        {errorMessage ?? 'The plan could not be updated.'}
+        {text(result?.message) ?? 'The plan could not be updated.'}
       </div>
     )
   }
@@ -148,22 +82,17 @@ export function UpdatePlanDetail({ entry }: ToolDetailProps) {
   return (
     <div className="space-y-4 text-sm">
       <p className="text-slate-500">{buildPlanSummary(steps)}</p>
-
       <Section title="Current Plan">
         {steps.length ? (
           <ol className="space-y-3">
             {steps.map((step, index) => {
-              const display = PLAN_STATUS_DISPLAY[step.status]
-              const StatusIcon = display.icon
+              const [StatusIcon, label, iconClassName, titleClassName] = STATUS_DISPLAY[step.status]
               return (
                 <li key={`${step.step}:${index}`} className="flex items-start gap-3">
-                  <StatusIcon
-                    className={`mt-0.5 h-5 w-5 shrink-0 ${display.iconClassName}`}
-                    aria-hidden="true"
-                  />
+                  <StatusIcon className={`mt-0.5 h-5 w-5 shrink-0 ${iconClassName}`} aria-hidden="true" />
                   <div className="min-w-0">
-                    <p className={`leading-5 ${display.titleClassName}`}>{step.step}</p>
-                    <p className="mt-0.5 text-xs text-slate-500">{display.label}</p>
+                    <p className={`leading-5 ${titleClassName}`}>{step.step}</p>
+                    <p className="mt-0.5 text-xs text-slate-500">{label}</p>
                   </div>
                 </li>
               )
@@ -173,24 +102,18 @@ export function UpdatePlanDetail({ entry }: ToolDetailProps) {
           <p className="text-slate-600">The active plan was cleared.</p>
         )}
       </Section>
-
       {deliverables.length ? (
         <Section title="Deliverables">
           <ul className="space-y-2.5">
-            {deliverables.map((deliverable) => {
-              const DeliverableIcon = deliverable.icon
-              return (
-                <li key={deliverable.key} className="flex items-start gap-3">
-                  <DeliverableIcon className="mt-0.5 h-4 w-4 shrink-0 text-indigo-600" aria-hidden="true" />
-                  <div className="min-w-0">
-                    <p className="font-medium text-slate-700">{deliverable.label}</p>
-                    {deliverable.detail ? (
-                      <p className="mt-0.5 break-all font-mono text-xs text-slate-500">{deliverable.detail}</p>
-                    ) : null}
-                  </div>
-                </li>
-              )
-            })}
+            {deliverables.map(([key, label, detail, Icon]) => (
+              <li key={key} className="flex items-start gap-3">
+                <Icon className="mt-0.5 h-4 w-4 shrink-0 text-indigo-600" aria-hidden="true" />
+                <div className="min-w-0">
+                  <p className="font-medium text-slate-700">{label}</p>
+                  {detail ? <p className="mt-0.5 break-all font-mono text-xs text-slate-500">{detail}</p> : null}
+                </div>
+              </li>
+            ))}
           </ul>
         </Section>
       ) : null}
