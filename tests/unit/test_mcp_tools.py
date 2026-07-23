@@ -4446,7 +4446,6 @@ class MCPToolIntegrationTests(TestCase):
             ).exists()
         )
 
-    @tag("batch_agent_tools")
     @patch("api.agent.tools.tool_manager.get_mcp_manager")
     def test_get_manager_does_not_trigger_global_initialization(self, mock_get_manager):
         from api.agent.tools import tool_manager
@@ -4457,7 +4456,6 @@ class MCPToolIntegrationTests(TestCase):
         self.assertIs(tool_manager._get_manager(), manager)
         manager.initialize.assert_not_called()
 
-    @tag("batch_agent_tools")
     def test_mcp_execution_wrappers_reuse_prepared_tool_info(self):
         from api.agent.tools import mcp_manager
 
@@ -4511,7 +4509,6 @@ class MCPToolIntegrationTests(TestCase):
             tool_info=tool,
         )
 
-    @tag("batch_agent_tools")
     @patch('api.agent.tools.tool_manager._get_manager')
     @patch('api.agent.tools.tool_manager.execute_mcp_tool')
     def test_execute_enabled_tool_decodes_pipedream_unicode_escapes(self, mock_execute, mock_get_manager):
@@ -4550,7 +4547,6 @@ class MCPToolIntegrationTests(TestCase):
         self.assertEqual(executed_params["properties"]["body"], expected_message)
         self.assertEqual(executed_params["items"], [expected_message])
 
-    @tag("batch_agent_tools")
     @patch('api.agent.tools.tool_manager._get_manager')
     @patch('api.agent.tools.tool_manager.execute_mcp_tool')
     def test_execute_enabled_tool_leaves_pipedream_discord_send_params_unchanged(self, mock_execute, mock_get_manager):
@@ -4578,7 +4574,6 @@ class MCPToolIntegrationTests(TestCase):
         self.assertNotIn("username", executed_params)
         self.assertNotIn("includeSentViaPipedream", executed_params)
 
-    @tag("batch_agent_tools")
     @patch('api.agent.tools.tool_manager._get_manager')
     @patch('api.agent.tools.tool_manager.execute_mcp_tool')
     def test_execute_enabled_tool_preserves_discord_send_overrides(self, mock_execute, mock_get_manager):
@@ -4607,7 +4602,6 @@ class MCPToolIntegrationTests(TestCase):
         self.assertEqual(executed_params["username"], "Custom Bot")
         self.assertIs(executed_params["includeSentViaPipedream"], True)
 
-    @tag("batch_agent_tools")
     def test_execute_mcp_tool_infers_pipedream_app_slug_from_component_key(self):
         config, _created = MCPServerConfig.objects.update_or_create(
             scope=MCPServerConfig.Scope.PLATFORM,

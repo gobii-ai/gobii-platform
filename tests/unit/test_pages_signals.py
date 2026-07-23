@@ -1884,7 +1884,6 @@ class SubscriptionSignalTests(TestCase):
         self.assertEqual(self.billing.execution_pause_reason, "")
         self.assertIsNone(self.billing.execution_paused_at)
 
-    @tag("batch_pages")
     def test_active_subscription_update_with_pause_collection_keeps_owner_customer_paused(self):
         resume_at = (timezone.now() + timedelta(days=21)).replace(microsecond=0)
         payload = _build_event_payload(status="active", billing_reason="subscription_update")
@@ -1921,7 +1920,6 @@ class SubscriptionSignalTests(TestCase):
         self.assertIsNotNone(self.billing.execution_paused_at)
         self.assertEqual(self.billing.execution_pause_resume_at, resume_at)
 
-    @tag("batch_pages")
     def test_active_subscription_update_clears_customer_pause_when_pause_collection_removed(self):
         resume_at = (timezone.now() + timedelta(days=7)).replace(microsecond=0)
         self.billing.execution_paused = True
@@ -1970,7 +1968,6 @@ class SubscriptionSignalTests(TestCase):
         self.assertIsNone(self.billing.execution_paused_at)
         self.assertIsNone(self.billing.execution_pause_resume_at)
 
-    @tag("batch_pages")
     def test_secondary_active_subscription_update_does_not_clear_customer_pause(self):
         resume_at = (timezone.now() + timedelta(days=7)).replace(microsecond=0)
         self.billing.execution_paused = True
@@ -2016,7 +2013,6 @@ class SubscriptionSignalTests(TestCase):
         self.assertEqual(self.billing.execution_pause_reason, EXECUTION_PAUSE_REASON_CUSTOMER_ACCOUNT_PAUSE)
         self.assertEqual(self.billing.execution_pause_resume_at, resume_at)
 
-    @tag("batch_pages")
     def test_secondary_active_subscription_update_does_not_resume_billing_pause(self):
         self.billing.execution_paused = True
         self.billing.execution_pause_reason = EXECUTION_PAUSE_REASON_BILLING_DELINQUENCY

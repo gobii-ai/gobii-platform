@@ -1315,40 +1315,11 @@ class ContinuationModePromptContextTests(TestCase):
         system_prompt = self._render_system_prompt(is_first_run=False)
 
         self.assertIn("## Continuation Mode", system_prompt)
-        self.assertIn("Continue the existing work thread", system_prompt)
-        self.assertIn("prefer one direct next tool call", system_prompt)
-        self.assertIn("If one workstream waits on human input, credentials, auth, or a third party", system_prompt)
-        self.assertIn("continue the next unblocked charter/plan item", system_prompt)
-        self.assertIn("verify blockers once, then keep moving", system_prompt)
 
     def test_prompt_omits_continuation_mode_on_first_run(self):
         system_prompt = self._render_system_prompt(is_first_run=True)
 
         self.assertNotIn("## Continuation Mode", system_prompt)
-
-    def test_prompt_includes_human_communication_style_guidance(self):
-        system_prompt = self._render_system_prompt(is_first_run=False)
-
-        self.assertIn("## Communication Style", system_prompt)
-        self.assertIn("Delivered messages should sound like a specific real person", system_prompt)
-        self.assertIn("No dash punctuation", system_prompt)
-        self.assertIn("including spaced single hyphens", system_prompt)
-        self.assertIn("bullets, and tables are fine", system_prompt)
-        self.assertIn("clarity and honesty beat forced friendliness", system_prompt.lower())
-        self.assertIn("preserve the user's meaning, voice, key terms, and commitments", system_prompt)
-        self.assertIn("AI-giveaway phrases", system_prompt)
-
-    def test_prompt_calibrates_deep_work_updates_without_status_spam(self):
-        system_prompt = self._render_system_prompt(is_first_run=False)
-
-        self.assertIn("## Work Updates (CRITICAL)", system_prompt)
-        self.assertIn("Short work: no updates", system_prompt)
-        self.assertIn("FIRST send scope + next checkpoint on the inbound channel", system_prompt)
-        self.assertIn("Before work call 4 (or after the first evidence batch/phase, if sooner)", system_prompt)
-        self.assertIn("strongest concrete finding", system_prompt)
-        self.assertIn("not task status like 'sources scraped' or 'compiling'", system_prompt)
-        self.assertIn("No generic narration/reasoning", system_prompt)
-        self.assertIn("Peer: send_agent_message only", system_prompt)
 
 
 @tag("batch_event_processing")

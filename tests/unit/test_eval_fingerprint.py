@@ -130,18 +130,19 @@ class ScenarioFingerprintTests(TestCase):
         self.assertEqual(len(fp), 16)
         self.assertTrue(all(c in "0123456789abcdef" for c in fp))
 
-    def test_real_scenarios_have_fingerprints(self):
-        """Verify fingerprinting works on actual registered scenarios."""
+    def test_registered_scenarios_have_fingerprints(self):
+        """Verify fingerprinting integrates with every registered scenario."""
         from api.evals.registry import ScenarioRegistry
         import api.evals.loader  # noqa: F401 - triggers scenario registration
 
         scenarios = ScenarioRegistry.list_all()
-        self.assertGreater(len(scenarios), 0, "Should have registered scenarios")
+        self.assertGreater(len(scenarios), 0)
 
-        for slug in scenarios:
-            scenario = ScenarioRegistry.get(slug)
-            fp = compute_scenario_fingerprint(scenario)
-            self.assertEqual(len(fp), 16, f"Fingerprint for {slug} should be 16 chars")
+        for slug, scenario in scenarios.items():
+            with self.subTest(slug=slug):
+                fingerprint = compute_scenario_fingerprint(scenario)
+                self.assertEqual(len(fingerprint), 16)
+                self.assertTrue(all(character in "0123456789abcdef" for character in fingerprint))
 
 
 @tag("batch_eval_fingerprint")

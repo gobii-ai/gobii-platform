@@ -48,8 +48,7 @@ from api.agent.tools.sqlite_state import reset_sqlite_db_path, set_sqlite_db_pat
 from api.models import BrowserUseAgent, PersistentAgent
 
 
-@tag("batch_sqlite")
-class SqliteBatchToolTests(TestCase):
+class SqliteBatchTestCase(TestCase):
     @classmethod
     def setUpTestData(cls):
         User = get_user_model()
@@ -85,6 +84,9 @@ class SqliteBatchToolTests(TestCase):
 
         return _Cxt()
 
+
+@tag("batch_sqlite")
+class SqliteBatchCoreTests(SqliteBatchTestCase):
     def test_executes_multiple_queries(self):
         with self._with_temp_db() as (db_path, token, tmp):
             queries = [
@@ -643,6 +645,9 @@ class SqliteBatchToolTests(TestCase):
                 conn.close()
             self.assertEqual(row, (40, 900))
 
+
+@tag("batch_sqlite_quality")
+class SqliteBatchQualityTests(SqliteBatchTestCase):
     def test_bulk_manual_tool_result_copy_executes_with_advice(self):
         with self._with_temp_db() as (db_path, _token, _tmp):
             conn = sqlite3.connect(db_path)
@@ -1936,6 +1941,9 @@ class SqliteBatchToolTests(TestCase):
             self.assertIsNotNone(auto_fix)
             self.assertTrue(any("VALUE -> VALUES" in fix for fix in auto_fix["fixes"]))
 
+
+@tag("batch_sqlite_autocorrect")
+class SqliteBatchAutocorrectTests(SqliteBatchTestCase):
     def test_autocorrect_multi_pass_cte_and_alias(self):
         """Fixes multiple typos across retries (CTE + alias)."""
         with self._with_temp_db() as (db_path, token, tmp):

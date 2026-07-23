@@ -896,7 +896,6 @@ class AgentChatAccessTests(TestCase):
         payload = response.json()
         self.assertFalse(payload.get("agent_chat_suggestions_enabled"))
 
-    @tag("batch_agent_chat")
     def test_roster_includes_only_enabled_system_skill_keys(self):
         PersistentAgentSystemSkillState.objects.create(
             agent=self.org_agent,
@@ -1064,7 +1063,6 @@ class AgentChatAccessTests(TestCase):
             "Handles follow-up workflows for shared collaborators.",
         )
 
-    @tag("batch_agent_chat")
     def test_roster_shows_shared_agents_only_in_personal_context(self):
         User = get_user_model()
         owner = User.objects.create_user(

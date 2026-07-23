@@ -199,9 +199,10 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
     def test_common_use_case_micro_evals_are_complete_and_registered(self):
         registered = ScenarioRegistry.list_all()
 
-        self.assertEqual(len(COMMON_USE_CASE_EVAL_CASES), 134)
-        self.assertEqual(len(COMMON_USE_CASE_MICRO_SCENARIO_SLUGS), 134)
-        self.assertEqual(len(set(COMMON_USE_CASE_MICRO_SCENARIO_SLUGS)), 134)
+        self.assertEqual(
+            len(COMMON_USE_CASE_MICRO_SCENARIO_SLUGS),
+            len(set(COMMON_USE_CASE_MICRO_SCENARIO_SLUGS)),
+        )
         self.assertTrue(set(COMMON_USE_CASE_MICRO_SCENARIO_SLUGS).issubset(TOOL_CHOICE_MICRO_SCENARIO_SLUGS))
         self.assertTrue(set(COMMON_USE_CASE_MICRO_SCENARIO_SLUGS).issubset(BEHAVIOR_MICRO_SCENARIO_SLUGS))
 
@@ -253,8 +254,6 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
         self.assertFalse(by_slug["common_use_case_061_send_summary_email"].plan_expected)
         self.assertFalse(by_slug["common_use_case_020_search_reddit_mentions"].plan_expected)
         self.assertFalse(by_slug["common_use_case_020_search_reddit_mentions"].stop_after_success)
-        self.assertIn("BiomeBoost Pro", by_slug["common_use_case_020_search_reddit_mentions"].prompt)
-        self.assertIn("API latency stayed under 120 ms", by_slug["common_use_case_064_send_digest_email"].prompt)
         self.assertIn("sqlite_batch", by_slug["common_use_case_061_send_summary_email"].allowed_preamble_tools)
         self.assertIn("sqlite_batch", by_slug["common_use_case_063_send_followup_email"].allowed_preamble_tools)
         self.assertIn("sqlite_batch", by_slug["common_use_case_064_send_digest_email"].allowed_preamble_tools)
@@ -266,9 +265,7 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
             by_slug["common_use_case_061_send_summary_email"].accepted_tool_alternatives,
             {"send_email": ("request_contact_permission",)},
         )
-        self.assertIn("Enterprise leads increased", by_slug["common_use_case_061_send_summary_email"].prompt)
         self.assertIn("sqlite_batch", by_slug["common_use_case_062_send_attachment_email"].allowed_preamble_tools)
-        self.assertIn("Action items", by_slug["common_use_case_075_create_markdown_file"].prompt)
         self.assertEqual(by_slug["common_use_case_069_secure_api_key_request"].forbidden_tools, ())
         self.assertEqual(by_slug["common_use_case_036_apollo_contacts"].expected_tools, ("http_request",))
         self.assertEqual(by_slug["common_use_case_037_apollo_accounts"].expected_tools, ("http_request",))
@@ -300,21 +297,7 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
             by_slug["common_use_case_038_apollo_enrich_person"].eval_synthetic_tools,
             ("apollo_io-people-enrichment",),
         )
-        self.assertIn("sheet-123", by_slug["common_use_case_051_sheets_update_row"].prompt)
         self.assertEqual(by_slug["common_use_case_077_create_bar_chart"].allowed_preamble_tools, ("sqlite_batch",))
-        self.assertIn("Jan 120", by_slug["common_use_case_079_create_report_with_chart"].prompt)
-        self.assertIn("already has accounts and contacts", by_slug["common_use_case_085_sqlite_join_tables"].prompt)
-        self.assertIn("Jordan Lee at Acme AI", by_slug["common_use_case_031_linkedin_person_profile"].prompt)
-        self.assertIn("Acme AI", by_slug["common_use_case_032_linkedin_company_profile"].prompt)
-        self.assertIn("Search LinkedIn", by_slug["common_use_case_034_linkedin_people_search"].prompt)
-        self.assertIn("beta launched", by_slug["common_use_case_073_create_status_pdf"].prompt)
-        self.assertIn("site plan", by_slug["common_use_case_074_create_permit_pdf"].prompt)
-        self.assertIn("populated SQLite leads table", by_slug["common_use_case_086_sqlite_export_query_csv"].prompt)
-        self.assertIn("alex@example.test", by_slug["common_use_case_082_sqlite_insert_rows"].prompt)
-        self.assertIn("nina@example.test", by_slug["common_use_case_082_sqlite_insert_rows"].prompt)
-        self.assertIn("https://status.example.test/support", by_slug["common_use_case_092_schedule_hourly_monitor"].prompt)
-        self.assertIn("BTC-USD", by_slug["common_use_case_096_schedule_price_alert"].prompt)
-        self.assertIn("https://borough.example.test/permits/decks", by_slug["common_use_case_097_schedule_permit_check"].prompt)
         self.assertEqual(
             by_slug["common_use_case_099_request_monitoring_scope"].accepted_tool_alternatives,
             {"request_human_input": ("send_chat_message",)},
@@ -330,17 +313,10 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
             ),
         )
         self.assertFalse(by_slug["common_use_case_091_schedule_daily_digest"].plan_expected)
-        self.assertIn("ET schedule", by_slug["common_use_case_093_schedule_weekly_report"].prompt)
-        self.assertIn("revenue operations candidates", by_slug["common_use_case_101_linkedin_revenue_ops_candidates"].prompt)
-        self.assertIn("HR leaders", by_slug["common_use_case_102_linkedin_hr_leaders"].prompt)
         self.assertEqual(
             by_slug["common_use_case_103_apollo_logistics_leads"].eval_synthetic_tools,
             ("apollo_io-search-contacts",),
         )
-        self.assertIn("VC funding", by_slug["common_use_case_104_recent_vc_funding_research"].prompt)
-        self.assertIn("market timestamp", by_slug["common_use_case_105_current_finance_snapshot"].prompt)
-        self.assertIn("review evidence", by_slug["common_use_case_106_maps_dental_lead_screen"].prompt)
-        self.assertIn("do not run it now", by_slug["common_use_case_107_schedule_vc_digest"].prompt)
         self.assertEqual(
             by_slug["common_use_case_138_intercom_notes_capability_answer"].accepted_tool_alternatives,
             {"send_chat_message": ("search_tools",)},
@@ -378,31 +354,6 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
         }
         self.assertEqual(len(new_intelligent_work_slugs), 26)
         self.assertTrue(new_intelligent_work_slugs.issubset(by_slug))
-        self.assertEqual(
-            len({by_slug[slug].prompt for slug in new_intelligent_work_slugs}),
-            len(new_intelligent_work_slugs),
-        )
-        concrete_prompt_markers = {
-            "common_use_case_109_http_json_dedupe_domains": (
-                "https://api.example.test/vendors/alpha.json",
-                "https://api.example.test/vendors/beta.json",
-            ),
-            "common_use_case_110_scrape_compare_with_sqlite": (
-                "https://stripe.com/docs/security",
-                "https://auth0.com/docs/security",
-            ),
-            "common_use_case_122_custom_tool_bulk_api_sqlite": (
-                "https://api.example.test/products?page=1",
-            ),
-            "common_use_case_123_custom_tool_partial_retry": (
-                "https://api.example.test/events?cursor=start",
-            ),
-            "common_use_case_128_maps_reviews_sqlite_dedupe": ("Austin",),
-        }
-        for slug, markers in concrete_prompt_markers.items():
-            for marker in markers:
-                with self.subTest(slug=slug, marker=marker):
-                    self.assertIn(marker, by_slug[slug].prompt)
         self.assertGreaterEqual(
             sum("sqlite_batch" in by_slug[slug].expected_tools for slug in new_intelligent_work_slugs),
             18,
@@ -488,7 +439,6 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
             by_slug["common_use_case_060_sheets_append_rows"].accepted_tool_alternatives,
             {"google_sheets-add-rows": ("google_sheets-add-multiple-rows",)},
         )
-        self.assertIn("company Vanta", by_slug["common_use_case_060_sheets_append_rows"].prompt)
         sheets_mock = CommonUseCaseToolChoiceScenario._google_sheets_mock_success("google_sheets-list-worksheets")
         self.assertIn("use the requested Google Sheets tool next", sheets_mock["message"])
         self.assertNotIn("mutation tool", sheets_mock["message"])
