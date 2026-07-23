@@ -1602,25 +1602,6 @@ export function AgentChatPage({
     })
   }, [developerModeEnabled, queryClient, staffContext])
 
-  useEffect(() => {
-    if (
-      !activeAgentId
-      || !agentContextReady
-      || isNewAgent
-      || shellSubview !== 'chat'
-      || (typeof navigator !== 'undefined' && navigator.onLine === false)
-    ) {
-      return
-    }
-    void runContiguousTimelineBackfill(activeAgentId)
-  }, [
-    activeAgentId,
-    agentContextReady,
-    isNewAgent,
-    runContiguousTimelineBackfill,
-    shellSubview,
-  ])
-
   const syncLatestTimeline = useCallback(async (
     agentIdToRefresh: string,
     { repinToLatest }: { repinToLatest: boolean },
@@ -2112,8 +2093,14 @@ export function AgentChatPage({
     () => getLatestPlanSnapshot(timelineEvents, initialPageResponse?.current_plan ?? null),
     [timelineEvents, initialPageResponse?.current_plan],
   )
-  const hasSelectedAgent = Boolean(activeAgentId)
-  const allowAgentRefresh = hasSelectedAgent && !contextSwitching && agentContextReady && !rosterContextMismatch
+  const allowAgentRefresh = Boolean(activeAgentId) && !contextSwitching && agentContextReady && !rosterContextMismatch
+  useEffect(() => {
+    if (!allowAgentRefresh || !activeAgentId || isNewAgent || shellSubview !== 'chat'
+      || (typeof navigator !== 'undefined' && navigator.onLine === false)) {
+      return
+    }
+    void runContiguousTimelineBackfill(activeAgentId)
+  }, [activeAgentId, allowAgentRefresh, isNewAgent, runContiguousTimelineBackfill, shellSubview])
   useEffect(() => {
     allowAgentRefreshRef.current = allowAgentRefresh
   }, [allowAgentRefresh])

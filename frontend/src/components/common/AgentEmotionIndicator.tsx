@@ -19,72 +19,45 @@ export function AgentEmotionIndicator({
   const emotionKey = normalizedEmotion && Number.isFinite(emotionExpiresAtMs)
     ? `${normalizedEmotion}\u0000${emotionExpiresAtMs}`
     : null
-
-  if (!emotionKey || !normalizedEmotion) {
-    return null
-  }
-
-  return (
-    <ActiveAgentEmotionIndicator
-      key={emotionKey}
-      name={trimmedName}
-      emotion={normalizedEmotion}
-      expiresAtMs={emotionExpiresAtMs}
-      className={className}
-    />
-  )
-}
-
-type ActiveAgentEmotionIndicatorProps = {
-  name: string
-  emotion: string
-  expiresAtMs: number
-  className?: string
-}
-
-function ActiveAgentEmotionIndicator({
-  name,
-  emotion,
-  expiresAtMs,
-  className,
-}: ActiveAgentEmotionIndicatorProps) {
-  const [active, setActive] = useState(() => expiresAtMs > Date.now())
+  const [visibleEmotionKey, setVisibleEmotionKey] = useState<string | null>(() => (
+    emotionKey && emotionExpiresAtMs > Date.now() ? emotionKey : null
+  ))
 
   useEffect(() => {
-    if (!active) {
-      return
+    const syncVisibility = () => {
+      setVisibleEmotionKey(
+        emotionKey && emotionExpiresAtMs > Date.now() ? emotionKey : null,
+      )
     }
-    const expireIfDue = () => {
-      if (expiresAtMs <= Date.now()) {
-        setActive(false)
-      }
-    }
-    const timeoutId = window.setTimeout(
-      expireIfDue,
-      Math.max(0, expiresAtMs - Date.now()),
-    )
-    window.addEventListener('focus', expireIfDue)
-    document.addEventListener('visibilitychange', expireIfDue)
+    const syncTimeoutId = window.setTimeout(syncVisibility, 0)
+    const expiryTimeoutId = emotionKey
+      ? window.setTimeout(syncVisibility, Math.max(0, emotionExpiresAtMs - Date.now()))
+      : null
+    window.addEventListener('focus', syncVisibility)
+    document.addEventListener('visibilitychange', syncVisibility)
     return () => {
-      window.clearTimeout(timeoutId)
-      window.removeEventListener('focus', expireIfDue)
-      document.removeEventListener('visibilitychange', expireIfDue)
+      window.clearTimeout(syncTimeoutId)
+      if (expiryTimeoutId !== null) {
+        window.clearTimeout(expiryTimeoutId)
+      }
+      window.removeEventListener('focus', syncVisibility)
+      document.removeEventListener('visibilitychange', syncVisibility)
     }
-  }, [active, expiresAtMs])
+  }, [emotionExpiresAtMs, emotionKey])
 
-  if (!active) {
+  if (!normalizedEmotion || visibleEmotionKey !== emotionKey) {
     return null
   }
 
   return (
     <span
       className={['agent-emotion-indicator', className].filter(Boolean).join(' ')}
-      data-agent-emotion={emotion}
+      data-agent-emotion={normalizedEmotion}
       role="img"
-      aria-label={`${name}'s current emotion: ${emotion}`}
-      title={`${name}'s current emotion: ${emotion}`}
+      aria-label={`${trimmedName}'s current emotion: ${normalizedEmotion}`}
+      title={`${trimmedName}'s current emotion: ${normalizedEmotion}`}
     >
-      {emotion}
+      {normalizedEmotion}
     </span>
   )
 }

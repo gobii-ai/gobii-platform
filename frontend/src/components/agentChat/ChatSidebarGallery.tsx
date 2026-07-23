@@ -94,7 +94,7 @@ function GalleryCard({
             textClassName="agent-gallery-card__avatar-text"
           />
           <div className="agent-gallery-card__hero-meta">
-            <span className="agent-gallery-card__name-row">
+            <span className="agent-name-emotion-row">
               <span className="agent-gallery-card__name">{agent.name || 'Agent'}</span>
               <AgentEmotionIndicator
                 name={agent.name || 'Agent'}

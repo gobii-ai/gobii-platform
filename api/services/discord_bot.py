@@ -994,13 +994,9 @@ def _agent_avatar_url(agent: PersistentAgent) -> str:
 def _agent_webhook_username(agent: PersistentAgent) -> str:
     base_name = (agent.name or "").strip() or "Agent"
     emotion, _expires_at = agent.get_active_emotion_state()
-    if not emotion:
-        return base_name[:DISCORD_WEBHOOK_USERNAME_MAX_LENGTH].rstrip() or "Agent"
-
-    suffix = f" {emotion}"
-    base_name_limit = max(1, DISCORD_WEBHOOK_USERNAME_MAX_LENGTH - len(suffix))
-    truncated_name = base_name[:base_name_limit].rstrip() or "Agent"
-    return f"{truncated_name}{suffix}"
+    suffix = f" {emotion}" if emotion else ""
+    name_limit = DISCORD_WEBHOOK_USERNAME_MAX_LENGTH - len(suffix)
+    return f"{base_name[:name_limit].rstrip() or 'Agent'}{suffix}"
 
 
 def _get_or_create_channel_webhook(subscription: PersistentAgentDiscordChannelSubscription) -> PersistentAgentDiscordWebhook:

@@ -266,7 +266,7 @@ export function AgentListItem({
       </span>
       {showMeta ? (
         <span className="agent-roster-item__meta">
-          <span className="agent-roster-item__name-row">
+          <span className="agent-name-emotion-row">
             <span className="agent-roster-item__name">{agent.name || 'Agent'}</span>
             <AgentEmotionIndicator
               name={agent.name || 'Agent'}

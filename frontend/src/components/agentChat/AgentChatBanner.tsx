@@ -289,7 +289,7 @@ export const AgentChatBanner = memo(function AgentChatBanner({
               {showIdentitySettingsButton ? (
                 <button
                   type="button"
-                  className="banner-identity-button banner-name-button banner-name-group"
+                  className="banner-identity-button banner-name-button agent-name-emotion-row"
                   onClick={handleIdentitySettingsClick}
                   disabled={identitySettingsDisabled}
                   aria-disabled={settingsDisabled ? 'true' : undefined}
@@ -304,7 +304,7 @@ export const AgentChatBanner = memo(function AgentChatBanner({
                   />
                 </button>
               ) : (
-                <span className="banner-name-group">
+                <span className="agent-name-emotion-row">
                   <span className="banner-name">{trimmedName}</span>
                   <AgentEmotionIndicator
                     name={trimmedName}
