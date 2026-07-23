@@ -836,6 +836,7 @@ def _steps_queryset(agent: PersistentAgent, direction: TimelineDirection, cursor
     limit = MAX_PAGE_SIZE * 3
     qs = (
         PersistentAgentStep.objects.filter(agent=agent, tool_call__isnull=False)
+        .exclude(tool_call__status=PersistentAgentToolCall.Status.QUEUED)
         .select_related("tool_call", "agent")
         .prefetch_related("human_input_requests")
         .order_by("-created_at", "-id")
@@ -1104,6 +1105,8 @@ def _has_more_before(agent: PersistentAgent, cursor: CursorPayload | None) -> bo
         agent=agent,
         tool_call__isnull=False,
         created_at__lt=dt,
+    ).exclude(
+        tool_call__status=PersistentAgentToolCall.Status.QUEUED,
     ).exists()
     if cursor.kind == "step":
         try:
@@ -1113,6 +1116,8 @@ def _has_more_before(agent: PersistentAgent, cursor: CursorPayload | None) -> bo
                 tool_call__isnull=False,
                 created_at=dt,
                 id__lt=uuid_identifier,
+            ).exclude(
+                tool_call__status=PersistentAgentToolCall.Status.QUEUED,
             ).exists()
         except Exception:
             pass
@@ -1192,6 +1197,8 @@ def _has_more_after(agent: PersistentAgent, cursor: CursorPayload | None) -> boo
         agent=agent,
         tool_call__isnull=False,
         created_at__gt=dt,
+    ).exclude(
+        tool_call__status=PersistentAgentToolCall.Status.QUEUED,
     ).exists()
     if cursor.kind == "step":
         try:
@@ -1201,6 +1208,8 @@ def _has_more_after(agent: PersistentAgent, cursor: CursorPayload | None) -> boo
                 tool_call__isnull=False,
                 created_at=dt,
                 id__gt=uuid_identifier,
+            ).exclude(
+                tool_call__status=PersistentAgentToolCall.Status.QUEUED,
             ).exists()
         except Exception:
             pass

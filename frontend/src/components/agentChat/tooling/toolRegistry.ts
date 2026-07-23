@@ -341,6 +341,10 @@ function buildSqliteEntries(clusterCursor: string, entry: ToolCallEntry, options
 }
 
 function buildToolEntries(clusterCursor: string, entry: ToolCallEntry, options: ToolDisplayOptions = {}): ToolEntryDisplay[] {
+  if (entry.status === 'queued') {
+    return []
+  }
+
   const toolName = entry.toolName ?? entry.meta?.label ?? 'tool'
   if (entry.developerEvent) {
     const completion = entry.developerEvent.kind === 'completion' ? entry.developerEvent : null

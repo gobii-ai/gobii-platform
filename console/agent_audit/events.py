@@ -11,6 +11,7 @@ from api.models import (
     PersistentAgentMessage,
     PersistentAgentStep,
     PersistentAgentSystemMessage,
+    PersistentAgentToolCall,
 )
 from console.agent_audit.serializers import (
     serialize_completion,
@@ -180,6 +181,7 @@ def _tool_events(agent, cursor, direction, limit, at, developer):
     queryset = (
         PersistentAgentStep.objects
         .filter(agent=agent, tool_call__isnull=False)
+        .exclude(tool_call__status=PersistentAgentToolCall.Status.QUEUED)
         .select_related("tool_call", "completion", "llm_prompt_archive")
         .prefetch_related("human_input_requests")
     )

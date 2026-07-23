@@ -500,6 +500,29 @@ class StaffAgentAuditAPITests(TestCase):
         self.assertEqual(tool_event["parameters"], {"nested": {"value": 7}})
         self.assertEqual(tool_event["result"], json.dumps({"ok": True}))
 
+    def test_developer_timeline_hides_queued_tool_calls(self):
+        queued_step = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            description="",
+        )
+        PersistentAgentToolCall.objects.create(
+            step=queued_step,
+            tool_name="queued_tool",
+            tool_params={"value": 1},
+            result="",
+            status=PersistentAgentToolCall.Status.QUEUED,
+        )
+
+        response = self.client.get(
+            f"/console/api/agents/{self.agent.id}/timeline/?developer=1&limit=10"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn(
+            str(queued_step.id),
+            {event.get("id") for event in response.json()["events"]},
+        )
+
     def test_developer_timeline_uses_regular_chat_email_rendering(self):
         message = self._create_agent_message(
             '<div style="font-family: sans-serif"><p>Hello <strong>there</strong>.</p></div>'

@@ -219,6 +219,12 @@ def _resolve_profile_listener_user_ids(agent: PersistentAgent) -> set[int]:
 def _broadcast_tool_cluster(step: PersistentAgentStep) -> None:
     if not step.agent_id:
         return
+    tool_call = getattr(step, "tool_call", None)
+    if (
+        tool_call is not None
+        and tool_call.status == PersistentAgentToolCall.Status.QUEUED
+    ):
+        return
     try:
         payload = build_tool_cluster_from_steps([step])
     except ValueError:
@@ -306,7 +312,10 @@ def emit_pending_action_requests_update(agent: PersistentAgent) -> None:
 def _should_emit_tool_call_developer_update(tool_call: PersistentAgentToolCall | None) -> bool:
     if tool_call is None:
         return False
-    return tool_call.status != "pending"
+    return tool_call.status not in {
+        PersistentAgentToolCall.Status.QUEUED,
+        PersistentAgentToolCall.Status.PENDING,
+    }
 
 
 def emit_tool_call_realtime(step: PersistentAgentStep) -> None:
@@ -498,6 +507,8 @@ def broadcast_new_tool_step(sender, instance: PersistentAgentStep, created: bool
 @receiver(post_save, sender=PersistentAgentToolCall)
 def broadcast_new_tool_call(sender, instance: PersistentAgentToolCall, created: bool, **kwargs):
     if not created:
+        return
+    if instance.status == PersistentAgentToolCall.Status.QUEUED:
         return
     step = instance.step
     emit_tool_call_realtime(step)

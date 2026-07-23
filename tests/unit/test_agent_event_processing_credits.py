@@ -1,5 +1,6 @@
 from decimal import Decimal
 from datetime import datetime, timezone as dt_timezone
+import json
 from pathlib import Path
 
 from django.test import TestCase, tag, override_settings
@@ -567,6 +568,50 @@ class PersistentAgentToolCreditTests(TestCase):
             attach_completion=lambda _step_kwargs: None,
             attach_prompt_archive=lambda _step: None,
         )
+
+    @override_settings(TOOL_CREDIT_NO_CHARGE_ON_ERROR_TOOLS=set())
+    def test_unstarted_queued_tool_is_cancelled_and_refunded_regardless_of_error_policy(self):
+        amount = Decimal("2.000")
+        credit, completion, step = self._create_charged_pending_tool_step(
+            tool_name="sqlite_query",
+            amount=amount,
+        )
+        PersistentAgentToolCall.objects.filter(step=step).update(
+            status=PersistentAgentToolCall.Status.QUEUED,
+        )
+        prepared = ep._PreparedToolExecution(
+            idx=2,
+            tool_name="sqlite_query",
+            tool_params={"sql": "select 1"},
+            exec_params={"sql": "select 1"},
+            pending_step=step,
+            credits_consumed=amount,
+            consumed_credit=credit,
+            call_id="queued-refund-test",
+            explicit_continue=None,
+            inferred_continue=False,
+            parallel_safe=False,
+            parallel_ineligible_reason="unsafe_tool:sqlite_query",
+        )
+
+        ep._cancel_unstarted_tool_calls(
+            self.agent,
+            [prepared],
+            reason="Tool call was cancelled before execution by a stop request.",
+        )
+
+        credit.refresh_from_db()
+        step.refresh_from_db()
+        completion.refresh_from_db()
+        tool_call = PersistentAgentToolCall.objects.get(step=step)
+        result = json.loads(tool_call.result)
+        self.assertEqual(tool_call.status, PersistentAgentToolCall.Status.ERROR)
+        self.assertEqual(tool_call.execution_duration_ms, 0)
+        self.assertTrue(result["retryable"])
+        self.assertEqual(credit.credits_used, Decimal("0.000"))
+        self.assertIsNone(step.credits_cost)
+        self.assertIsNone(step.task_credit_id)
+        self.assertIsNone(completion.credits_cost)
 
     @override_settings(TOOL_CREDIT_NO_CHARGE_ON_ERROR_TOOLS={"create_video"})
     def test_allowlisted_tool_error_refunds_credit_and_clears_step_charge(self):
