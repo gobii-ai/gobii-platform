@@ -1698,23 +1698,22 @@ def _clean_statement(statement: str) -> Optional[str]:
     return trimmed or None
 
 
-def _statement_has_sql(statement: Statement) -> bool:
-    for token in statement.flatten():
-        if token.is_whitespace:
-            continue
-        if token.ttype in sql_tokens.Comment:
-            continue
-        if token.ttype in sql_tokens.Punctuation and token.value == ";":
-            continue
-        return True
-    return False
+def _structural_sql(statement: Statement, *, omit_strings: bool = False) -> str:
+    return " ".join(
+        token.value
+        for token in statement.flatten()
+        if not token.is_whitespace
+        and token.ttype not in sql_tokens.Comment
+        and not (omit_strings and token.ttype in sql_tokens.Literal.String.Single)
+        and not (token.ttype in sql_tokens.Punctuation and token.value == ";")
+    )
 
 
 def _split_sqlite_statements(sql: str) -> List[str]:
     """Split SQL into statements using sqlparse."""
     statements: List[str] = []
     for statement in sqlparse.parse(sql):
-        if not _statement_has_sql(statement):
+        if not _structural_sql(statement):
             continue
         cleaned = _clean_statement(str(statement))
         if cleaned:
@@ -1723,18 +1722,23 @@ def _split_sqlite_statements(sql: str) -> List[str]:
     return statements
 
 
+_TRANSACTION_WRAPPER_RE = re.compile(
+    r"^(?:BEGIN(?:\s+(?:DEFERRED|IMMEDIATE|EXCLUSIVE))?(?:\s+TRANSACTION)?|COMMIT(?:\s+TRANSACTION)?|END(?:\s+TRANSACTION)?)$",
+    re.IGNORECASE,
+)
+
+
+def _is_redundant_transaction_wrapper(sql: str) -> bool:
+    statements = sqlparse.parse(sql)
+    return len(statements) == 1 and bool(_TRANSACTION_WRAPPER_RE.fullmatch(_structural_sql(statements[0]).strip()))
+
+
 def _non_persisting_agent_config_patch(queries: List[str]) -> Optional[str]:
     for query in queries:
         for statement in sqlparse.parse(query):
-            if not _statement_has_sql(statement):
+            if not _structural_sql(statement):
                 continue
-            structural_sql = " ".join(
-                token.value
-                for token in statement.flatten()
-                if not token.is_whitespace
-                and token.ttype not in sql_tokens.Comment
-                and token.ttype not in sql_tokens.Literal.String.Single
-            )
+            structural_sql = _structural_sql(statement, omit_strings=True)
             if (
                 re.search(r"\bpatch_text\s*\(", structural_sql, re.IGNORECASE)
                 and re.search(r"\b__agent_config\b", structural_sql, re.IGNORECASE)
@@ -1806,6 +1810,7 @@ def _normalize_queries(params: Dict[str, Any]) -> Optional[List[str]]:
         if split_items:
             queries.extend(split_items)
 
+    queries = [query for query in queries if not _is_redundant_transaction_wrapper(query)]
     return queries if queries else None
 
 
