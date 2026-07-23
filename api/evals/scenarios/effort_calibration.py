@@ -297,7 +297,9 @@ def _sqlite_call_persists_resume_state(call: PersistentAgentToolCall) -> bool:
         return False
 
     sql = sqlite_batch_sql(call).lower()
-    has_remaining_state = "remaining_work" in sql or bool(
+    if "__agent_config" in sql or "__agent_schedules" in sql:
+        return False
+    has_remaining_state = bool(re.search(r"\bremaining(?:_work)?\b", sql)) or bool(
         re.search(r"(?:\b\d+\s+(?:remaining|pending)\b|\b(?:remaining|pending)\D{0,20}\d+\b)", sql)
     )
     if not has_remaining_state or ("next_cursor" not in sql and "cursor" not in sql):

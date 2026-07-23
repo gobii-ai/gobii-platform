@@ -383,6 +383,7 @@ CONTINUATION_PHRASES = (
     "working on ",
     "proceeding to ",
     "moving on to ",
+    "more data coming",
 )
 
 class OrchestratorPromptStale(RuntimeError):
@@ -3495,7 +3496,7 @@ def _prepare_tool_batch(
                         tool_params[body_key] = cleaned_body
                         tool_params["will_continue_work"] = True
                     elif (
-                        explicit_continue is None
+                        explicit_continue is not True
                         and allow_inferred_message_continue
                         and _should_infer_message_tool_continuation(cleaned_body)
                     ):
