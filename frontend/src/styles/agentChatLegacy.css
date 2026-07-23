@@ -3374,6 +3374,12 @@
     width: 0.82rem;
     height: 0.82rem;
 }
+.agent-chat-main[data-sidebar-mode='gallery'] .template-recommendations-card__grid {
+    grid-template-columns: 1fr;
+}
+.agent-chat-main[data-sidebar-mode='gallery'] .template-recommendations-card__item:nth-child(n+3) {
+    display: none;
+}
 @media (max-width: 900px) {
     .template-recommendations-card__grid {
         grid-template-columns: 1fr;
