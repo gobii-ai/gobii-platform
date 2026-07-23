@@ -12,7 +12,7 @@ import os
 import logging
 import re
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from contextvars import copy_context
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -1711,35 +1711,23 @@ def _persist_tool_call_step(
     attach_prompt_archive: Any,
     parent_tool_call: Any = None,
     display_metadata: Dict[str, Any] | None = None,
+    emit_realtime: bool = True,
 ) -> Optional["PersistentAgentStep"]:
-    """Persist a tool call step with robust error handling.
-
-    This function handles all database errors gracefully to ensure agent
-    processing continues even if step persistence fails. The tool has already
-    executed - we're just recording it.
-
-    Returns the created step, or None if persistence failed.
-    """
+    """Persist a tool call step, returning None when recording fails."""
     from api.models import PersistentAgentStep, PersistentAgentToolCall
+
     normalized_result = _normalize_tool_result_content(result_content)
-
-    # Truncate tool_name as a safety measure (should already be sanitized, but be defensive)
     safe_tool_name = (tool_name or "")[:256]
-
-    # Build a safe description (truncate if needed)
     description = _build_tool_call_description(safe_tool_name, tool_params, normalized_result)
-
     step_kwargs = {
         "agent": agent,
-        "description": description[:500],  # Ensure description fits
+        "description": description[:500],
         "credits_cost": credits_consumed if isinstance(credits_consumed, Decimal) else None,
         "task_credit": consumed_credit,
     }
 
     def _try_create_step() -> Optional[PersistentAgentStep]:
-        """Attempt to create the step and tool call record."""
         step = _persist_attached_step(step_kwargs, attach_completion, attach_prompt_archive)
-        tool_call_status = status or "complete"
         PersistentAgentToolCall.objects.create(
             step=step,
             parent_tool_call=parent_tool_call,
@@ -1748,57 +1736,39 @@ def _persist_tool_call_step(
             result=normalized_result,
             display_metadata=display_metadata or None,
             execution_duration_ms=execution_duration_ms,
-            status=tool_call_status,
+            status=status or PersistentAgentToolCall.Status.COMPLETE,
         )
-        _emit_tool_call_realtime(step, "realtime")
+        if emit_realtime:
+            _emit_tool_call_realtime(step, "realtime")
         return step
 
-    # Try primary path
-    try:
-        step = _try_create_step()
-        logger.info(
-            "Agent %s: persisted tool call step_id=%s for %s",
-            agent.id,
-            getattr(step, "id", None),
-            safe_tool_name,
-        )
-        return step
-    except OperationalError:
-        # Stale connection - retry once
-        close_old_connections()
+    for attempt in range(2):
+        failure: Exception | None = None
         try:
             step = _try_create_step()
             logger.info(
-                "Agent %s: persisted tool call (retry) step_id=%s for %s",
+                "Agent %s: persisted tool call%s step_id=%s for %s",
                 agent.id,
+                " (retry)" if attempt else "",
                 getattr(step, "id", None),
                 safe_tool_name,
             )
             return step
-        except Exception as retry_exc:
-            log_tool_persistence_error(
-                agent,
-                retry_exc,
-                source="api.agent.core.event_processing._persist_tool_call_step.retry",
-                logger=logger,
-                completion=_completion_from_step_kwargs(step_kwargs),
-                context=_tool_context_for_error(
-                    safe_tool_name,
-                    tool_params,
-                    result_content=normalized_result,
-                    execution_duration_ms=execution_duration_ms,
-                    status=status or "complete",
-                    credits_consumed=credits_consumed,
-                    consumed_credit=consumed_credit,
-                ),
-            )
-            return None
-    except DatabaseError as db_exc:
-        # Data errors, integrity errors, etc. - log and continue
+        except OperationalError as exc:
+            if attempt == 0:
+                close_old_connections()
+                continue
+            failure = exc
+        except Exception as exc:
+            failure = exc
         log_tool_persistence_error(
             agent,
-            db_exc,
-            source="api.agent.core.event_processing._persist_tool_call_step",
+            failure,
+            source=(
+                "api.agent.core.event_processing._persist_tool_call_step.retry"
+                if attempt
+                else "api.agent.core.event_processing._persist_tool_call_step"
+            ),
             logger=logger,
             completion=_completion_from_step_kwargs(step_kwargs),
             context=_tool_context_for_error(
@@ -1812,29 +1782,12 @@ def _persist_tool_call_step(
             ),
         )
         return None
-    except Exception as exc:
-        # Catch-all for unexpected errors - never crash the agent
-        log_tool_persistence_error(
-            agent,
-            exc,
-            source="api.agent.core.event_processing._persist_tool_call_step",
-            logger=logger,
-            completion=_completion_from_step_kwargs(step_kwargs),
-            context=_tool_context_for_error(
-                safe_tool_name,
-                tool_params,
-                result_content=normalized_result,
-                execution_duration_ms=execution_duration_ms,
-                status=status or "complete",
-                credits_consumed=credits_consumed,
-                consumed_credit=consumed_credit,
-            ),
-        )
-        return None
+    return None
 
 
-def _create_pending_tool_call_step(
+def _create_queued_tool_call_step(
     agent: "PersistentAgent",
+    batch_index: int,
     tool_name: str,
     tool_params: Dict[str, Any],
     credits_consumed: Any,
@@ -1843,45 +1796,48 @@ def _create_pending_tool_call_step(
     attach_prompt_archive: Any,
     parent_tool_call: Any = None,
 ) -> Optional["PersistentAgentStep"]:
-    from api.models import PersistentAgentStep, PersistentAgentToolCall
-
-    safe_tool_name = (tool_name or "")[:256]
-    step_kwargs = {
-        "agent": agent,
-        "description": "",
-        "credits_cost": credits_consumed if isinstance(credits_consumed, Decimal) else None,
-        "task_credit": consumed_credit,
-    }
-
-    try:
-        step = _persist_attached_step(step_kwargs, attach_completion, attach_prompt_archive)
-        PersistentAgentToolCall.objects.create(
-            step=step,
-            parent_tool_call=parent_tool_call,
-            tool_name=safe_tool_name,
-            tool_params=tool_params,
-            result="",
-            execution_duration_ms=None,
-            status="pending",
+    step = _persist_tool_call_step(
+        agent=agent,
+        tool_name=tool_name,
+        tool_params=tool_params,
+        result_content="",
+        execution_duration_ms=None,
+        status=PersistentAgentToolCall.Status.QUEUED,
+        credits_consumed=credits_consumed,
+        consumed_credit=consumed_credit,
+        attach_completion=attach_completion,
+        attach_prompt_archive=attach_prompt_archive,
+        parent_tool_call=parent_tool_call,
+        emit_realtime=False,
+    )
+    if step is not None:
+        logger.info(
+            "Agent %s tool transition step=%s tool=%s batch_index=%s state=queued",
+            agent.id,
+            step.id,
+            tool_name,
+            batch_index,
         )
-        _emit_tool_call_realtime(step, "pending")
-        return step
-    except Exception as exc:
-        log_tool_persistence_error(
-            agent,
-            exc,
-            source="api.agent.core.event_processing._create_pending_tool_call_step",
-            logger=logger,
-            completion=_completion_from_step_kwargs(step_kwargs),
-            context=_tool_context_for_error(
-                safe_tool_name,
-                tool_params,
-                status="pending",
-                credits_consumed=credits_consumed,
-                consumed_credit=consumed_credit,
-            ),
+    return step
+
+
+def _log_tool_step_persistence_failure(
+    step: "PersistentAgentStep",
+    exc: Exception,
+    *,
+    source: str,
+    context: dict[str, Any],
+) -> None:
+    agent = _agent_from_step(step)
+    if agent is not None:
+        log_tool_persistence_error(agent, exc, source=source, logger=logger, context=context)
+    else:
+        logger.debug(
+            "Tool call persistence failed for agent %s step %s",
+            getattr(step, "agent_id", None),
+            getattr(step, "id", None),
+            exc_info=True,
         )
-        return None
 
 
 def _finalize_pending_tool_call_step(
@@ -1893,7 +1849,7 @@ def _finalize_pending_tool_call_step(
     status: str,
     parent_tool_call: Any = None,
     display_metadata: Dict[str, Any] | None = None,
-) -> None:
+) -> bool:
     from api.models import PersistentAgentToolCall
 
     normalized_result = _normalize_tool_result_content(result_content)
@@ -1904,29 +1860,19 @@ def _finalize_pending_tool_call_step(
         step.description = description[:500]
         step.save(update_fields=["description"])
     except Exception as exc:
-        agent = _agent_from_step(step)
-        if agent is not None:
-            log_tool_persistence_error(
-                agent,
-                exc,
-                source="api.agent.core.event_processing._finalize_pending_tool_call_step.description",
-                logger=logger,
-                context=_tool_context_for_error(
-                    safe_tool_name,
-                    tool_params,
-                    result_content=normalized_result,
-                    execution_duration_ms=execution_duration_ms,
-                    status=status,
-                    step=step,
-                ),
-            )
-        else:
-            logger.debug(
-                "Failed to update tool step description for agent %s step %s",
-                getattr(step, "agent_id", None),
-                getattr(step, "id", None),
-                exc_info=True,
-            )
+        _log_tool_step_persistence_failure(
+            step,
+            exc,
+            source="api.agent.core.event_processing._finalize_pending_tool_call_step.description",
+            context=_tool_context_for_error(
+                safe_tool_name,
+                tool_params,
+                result_content=normalized_result,
+                execution_duration_ms=execution_duration_ms,
+                status=status,
+                step=step,
+            ),
+        )
 
     created_tool_call = False
     try:
@@ -1956,34 +1902,25 @@ def _finalize_pending_tool_call_step(
                 update_fields.append("parent_tool_call")
             tool_call.save(update_fields=update_fields)
     except Exception as exc:
-        agent = _agent_from_step(step)
-        if agent is not None:
-            log_tool_persistence_error(
-                agent,
-                exc,
-                source="api.agent.core.event_processing._finalize_pending_tool_call_step",
-                logger=logger,
-                context=_tool_context_for_error(
-                    safe_tool_name,
-                    tool_params,
-                    result_content=normalized_result,
-                    execution_duration_ms=execution_duration_ms,
-                    status=status,
-                    step=step,
-                ),
-            )
-        else:
-            logger.debug(
-                "Failed to finalize tool call for agent %s step %s",
-                getattr(step, "agent_id", None),
-                getattr(step, "id", None),
-                exc_info=True,
-            )
-        return
+        _log_tool_step_persistence_failure(
+            step,
+            exc,
+            source="api.agent.core.event_processing._finalize_pending_tool_call_step",
+            context=_tool_context_for_error(
+                safe_tool_name,
+                tool_params,
+                result_content=normalized_result,
+                execution_duration_ms=execution_duration_ms,
+                status=status,
+                step=step,
+            ),
+        )
+        return False
 
     _emit_tool_call_realtime(step, "finalized")
     if not created_tool_call:
         _emit_tool_call_developer_update(step, "finalized")
+    return True
 
 
 def _clear_refunded_step_charge(step: "PersistentAgentStep") -> None:
@@ -2024,10 +1961,13 @@ def _refund_tool_credit_on_error_if_configured(
     step: Optional["PersistentAgentStep"],
     credits_consumed: Any,
     consumed_credit: Any,
+    force: bool = False,
 ) -> None:
+    if not force and not should_refund_tool_credit_on_error(tool_name):
+        return
     if step is None or not isinstance(credits_consumed, Decimal):
         return
-    if consumed_credit is None or not should_refund_tool_credit_on_error(tool_name):
+    if consumed_credit is None:
         return
 
     owner = getattr(agent, "organization", None) or getattr(agent, "user", None)
@@ -2118,6 +2058,8 @@ class _ToolExecutionOutcome:
     updated_tools: Optional[List[dict]]
     variable_map: Dict[str, str]
     display_metadata: Dict[str, Any] = field(default_factory=dict)
+    persisted_result_content: Optional[str] = None
+    persisted_status: Optional[str] = None
 
 
 @dataclass
@@ -2127,6 +2069,7 @@ class _PreparedToolBatch:
     all_calls_sleep: bool
     abort_after_execution: bool
     parallel_ineligible_reason: Optional[str]
+    cancel_prepared_calls: bool = False
 
 
 @dataclass
@@ -2142,6 +2085,188 @@ class _ExecutedToolBatch:
     execution_outcomes: list[_ToolExecutionOutcome]
     tools: List[dict]
     abort_after_execution: bool = False
+
+
+def _mark_tool_call_started(
+    agent: PersistentAgent,
+    *,
+    step: Optional["PersistentAgentStep"],
+    tool_name: str,
+    batch_index: int,
+) -> None:
+    if step is None:
+        return
+
+    started_at = dj_timezone.now()
+    with transaction.atomic():
+        tool_call = (
+            PersistentAgentToolCall.objects.select_for_update()
+            .filter(step_id=step.id)
+            .first()
+        )
+        if tool_call is None or tool_call.status != PersistentAgentToolCall.Status.QUEUED:
+            return
+        PersistentAgentStep.objects.filter(id=step.id).update(created_at=started_at)
+        tool_call.status = PersistentAgentToolCall.Status.PENDING
+        tool_call.save(update_fields=["status"])
+
+    step.created_at = started_at
+    cached_tool_call = getattr(step, "tool_call", None)
+    if cached_tool_call is not None:
+        cached_tool_call.status = PersistentAgentToolCall.Status.PENDING
+    logger.info(
+        "Agent %s tool transition step=%s tool=%s batch_index=%s state=pending",
+        agent.id,
+        step.id,
+        tool_name,
+        batch_index,
+    )
+    _emit_tool_call_realtime(step, "pending")
+
+
+def _mark_prepared_tool_started(
+    agent: PersistentAgent,
+    prepared: _PreparedToolExecution,
+) -> None:
+    _mark_tool_call_started(
+        agent,
+        step=prepared.pending_step,
+        tool_name=prepared.tool_name,
+        batch_index=prepared.idx,
+    )
+
+
+def _serialize_tool_execution_outcome(
+    agent: PersistentAgent,
+    outcome: _ToolExecutionOutcome,
+) -> tuple[str, str]:
+    result = outcome.result
+    if _is_error_status(result):
+        result = _normalize_error_result(result)
+        outcome.result = result
+
+    try:
+        result_content = json.dumps(result)
+    except (TypeError, ValueError):
+        try:
+            result_content = json.dumps(result, default=str)
+        except (TypeError, ValueError) as exc:
+            logger.exception(
+                "Agent %s: failed to serialize tool result for %s (call_id=%s)",
+                agent.id,
+                outcome.prepared.tool_name,
+                outcome.prepared.call_id or "<none>",
+            )
+            result = _build_safe_error_payload(
+                "Tool result serialization failed.",
+                error_type=type(exc).__name__,
+                retryable=False,
+            )
+            outcome.result = result
+            result_content = json.dumps(result)
+
+    tool_status = (
+        PersistentAgentToolCall.Status.ERROR
+        if _is_error_status(result)
+        else PersistentAgentToolCall.Status.COMPLETE
+    )
+    return result_content, tool_status
+
+
+def _persist_tool_execution_outcome(
+    agent: PersistentAgent,
+    outcome: _ToolExecutionOutcome,
+) -> tuple[Optional[PersistentAgentStep], str, str]:
+    result_content, tool_status = _serialize_tool_execution_outcome(agent, outcome)
+    step = outcome.prepared.pending_step
+    if (
+        step is not None
+        and (
+            outcome.persisted_result_content != result_content
+            or outcome.persisted_status != tool_status
+        )
+    ):
+        close_old_connections()
+        persisted = _finalize_pending_tool_call_step(
+            step=step,
+            tool_name=outcome.prepared.tool_name,
+            tool_params=outcome.prepared.tool_params,
+            result_content=result_content,
+            execution_duration_ms=outcome.duration_ms,
+            status=tool_status,
+            display_metadata=outcome.display_metadata,
+        )
+        if persisted:
+            outcome.persisted_result_content = result_content
+            outcome.persisted_status = tool_status
+            logger.info(
+                "Agent %s tool transition step=%s tool=%s batch_index=%s state=%s duration_ms=%s",
+                agent.id,
+                step.id,
+                outcome.prepared.tool_name,
+                outcome.prepared.idx,
+                tool_status,
+                outcome.duration_ms,
+            )
+    return step, result_content, tool_status
+
+
+def _cancel_unstarted_tool_calls(
+    agent: PersistentAgent,
+    prepared_calls: list[_PreparedToolExecution],
+    *,
+    reason: str,
+) -> None:
+    result_content = json.dumps(
+        {
+            "status": "error",
+            "message": reason,
+            "retryable": True,
+        }
+    )
+    for prepared in prepared_calls:
+        step = prepared.pending_step
+        if step is None:
+            continue
+        status = (
+            PersistentAgentToolCall.objects.filter(step_id=step.id)
+            .values_list("status", flat=True)
+            .first()
+        )
+        if status != PersistentAgentToolCall.Status.QUEUED:
+            continue
+        for attempt in range(2):
+            persisted = _finalize_pending_tool_call_step(
+                step=step,
+                tool_name=prepared.tool_name,
+                tool_params=prepared.tool_params,
+                result_content=result_content,
+                execution_duration_ms=0,
+                status=PersistentAgentToolCall.Status.ERROR,
+            )
+            if persisted:
+                break
+            if attempt == 0:
+                close_old_connections()
+        _refund_tool_credit_on_error_if_configured(
+            agent=agent,
+            tool_name=prepared.tool_name,
+            step=step,
+            credits_consumed=prepared.credits_consumed,
+            consumed_credit=prepared.consumed_credit,
+            force=True,
+        )
+        if (
+            not isinstance(prepared.credits_consumed, Decimal)
+            or prepared.consumed_credit is None
+        ):
+            _clear_refunded_step_charge(step)
+        log = logger.info if persisted else logger.error
+        log(
+            "Agent %s tool transition step=%s tool=%s batch_index=%s state=%s reason=cancelled_before_start",
+            agent.id, step.id, prepared.tool_name, prepared.idx,
+            PersistentAgentToolCall.Status.ERROR if persisted else PersistentAgentToolCall.Status.QUEUED,
+        )
 
 
 @dataclass
@@ -3192,6 +3317,7 @@ def _prepare_tool_batch(
     followup_required = False
     all_calls_sleep = not has_non_sleep_calls
     abort_after_execution = False
+    cancel_prepared_calls = False
     deep_work_update_reason = _deep_work_update_gate_context(agent, tool_calls)
     if deep_work_update_reason:
         _record_deep_work_update_correction(
@@ -3232,6 +3358,7 @@ def _prepare_tool_batch(
                 check_context="tool_batch",
             ):
                 abort_after_execution = True
+                cancel_prepared_calls = True
                 break
             if lock_extender:
                 lock_extender.maybe_extend()
@@ -3582,8 +3709,9 @@ def _prepare_tool_batch(
             consumed_credit = credit_info.get("credit")
 
             close_old_connections()
-            pending_step = _create_pending_tool_call_step(
+            pending_step = _create_queued_tool_call_step(
                 agent=agent,
+                batch_index=idx,
                 tool_name=tool_name,
                 tool_params=tool_params,
                 credits_consumed=credits_consumed,
@@ -3618,10 +3746,11 @@ def _prepare_tool_batch(
         ),
         abort_after_execution=abort_after_execution,
         parallel_ineligible_reason=_parallel_batch_ineligible_reason(prepared_calls),
+        cancel_prepared_calls=cancel_prepared_calls,
     )
 
 
-def _execute_prepared_tool_batch(
+def _execute_prepared_tool_batch_inner(
     agent: PersistentAgent,
     prepared_batch: _PreparedToolBatch,
     *,
@@ -3634,7 +3763,15 @@ def _execute_prepared_tool_batch(
     execution_outcomes: list[_ToolExecutionOutcome] = []
     run_parallel_batch = prepared_batch.parallel_ineligible_reason is None
     available_tools = tools
-    abort_after_execution = False
+    abort_after_execution = prepared_batch.abort_after_execution
+    execution_aborted = False
+
+    if prepared_batch.cancel_prepared_calls:
+        return _ExecutedToolBatch(
+            execution_outcomes=[],
+            tools=available_tools,
+            abort_after_execution=True,
+        )
 
     if run_parallel_batch:
         logger.info(
@@ -3645,11 +3782,36 @@ def _execute_prepared_tool_batch(
         base_variables = get_all_variables()
         max_workers = min(len(prepared_batch.prepared_calls), max(1, get_max_parallel_tool_calls()))
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = []
-            for prepared in prepared_batch.prepared_calls:
-                context = copy_context()
-                futures.append(
-                    executor.submit(
+            futures: set[Any] = set()
+            next_prepared_index = 0
+
+            def submit_available_calls() -> None:
+                nonlocal abort_after_execution, execution_aborted, next_prepared_index
+                while (
+                    not execution_aborted
+                    and len(futures) < max_workers
+                    and next_prepared_index < len(prepared_batch.prepared_calls)
+                ):
+                    prepared = prepared_batch.prepared_calls[next_prepared_index]
+                    with tracer.start_as_current_span("Execute Tool") as tool_span:
+                        if _should_abort_processing(
+                            agent,
+                            budget_ctx=budget_ctx,
+                            heartbeat=heartbeat,
+                            span=tool_span,
+                            check_context="tool_batch_execute",
+                        ):
+                            abort_after_execution = True
+                            execution_aborted = True
+                            return
+                        if lock_extender:
+                            lock_extender.maybe_extend()
+                        tool_span.set_attribute("persistent_agent.id", str(agent.id))
+                        tool_span.set_attribute("tool.name", prepared.tool_name)
+                        _mark_prepared_tool_started(agent, prepared)
+                    next_prepared_index += 1
+                    context = copy_context()
+                    future = executor.submit(
                         context.run,
                         _execute_prepared_tool_call,
                         agent,
@@ -3658,13 +3820,18 @@ def _execute_prepared_tool_batch(
                         eval_run_id=eval_run_id,
                         parallel_safe=True,
                     )
-                )
-            execution_outcomes = [future.result() for future in futures]
+                    futures.add(future)
 
-        execution_outcomes = [
-            _refresh_skills_for_tool_outcome(agent, outcome)
-            for outcome in execution_outcomes
-        ]
+            submit_available_calls()
+            while futures:
+                completed_futures, _ = wait(futures, return_when=FIRST_COMPLETED)
+                for future in completed_futures:
+                    futures.remove(future)
+                    outcome = _refresh_skills_for_tool_outcome(agent, future.result())
+                    _persist_tool_execution_outcome(agent, outcome)
+                    execution_outcomes.append(outcome)
+                submit_available_calls()
+
         merged_variables = dict(base_variables)
         for outcome in sorted(execution_outcomes, key=lambda item: item.prepared.idx):
             merged_variables.update(outcome.variable_map)
@@ -3691,6 +3858,7 @@ def _execute_prepared_tool_batch(
                     lock_extender.maybe_extend()
                 tool_span.set_attribute("persistent_agent.id", str(agent.id))
                 tool_span.set_attribute("tool.name", prepared.tool_name)
+                _mark_prepared_tool_started(agent, prepared)
                 outcome = _execute_prepared_tool_call(
                     agent,
                     prepared,
@@ -3699,6 +3867,7 @@ def _execute_prepared_tool_batch(
                     parallel_safe=False,
                 )
                 execution_outcomes.append(outcome)
+                _persist_tool_execution_outcome(agent, outcome)
                 if prepared.tool_name in MESSAGE_TOOL_NAMES:
                     try:
                         agent.refresh_from_db(fields=["signup_preview_state"])
@@ -3736,6 +3905,34 @@ def _execute_prepared_tool_batch(
     )
 
 
+def _execute_prepared_tool_batch(
+    agent: PersistentAgent,
+    prepared_batch: _PreparedToolBatch,
+    *,
+    budget_ctx: Optional[BudgetContext],
+    eval_run_id: Optional[str],
+    tools: List[dict],
+    heartbeat: Any,
+    lock_extender: Any,
+) -> _ExecutedToolBatch:
+    try:
+        return _execute_prepared_tool_batch_inner(
+            agent,
+            prepared_batch,
+            budget_ctx=budget_ctx,
+            eval_run_id=eval_run_id,
+            tools=tools,
+            heartbeat=heartbeat,
+            lock_extender=lock_extender,
+        )
+    finally:
+        _cancel_unstarted_tool_calls(
+            agent,
+            prepared_batch.prepared_calls,
+            reason="Tool call was cancelled before execution because batch processing stopped.",
+        )
+
+
 def _finalize_tool_batch(
     agent: PersistentAgent,
     execution_outcomes: list[_ToolExecutionOutcome],
@@ -3758,34 +3955,29 @@ def _finalize_tool_batch(
 
     for outcome in sorted(execution_outcomes, key=lambda item: item.prepared.idx):
         prepared = outcome.prepared
-        result = outcome.result
         tool_name = prepared.tool_name
-        if _is_error_status(result):
-            result = _normalize_error_result(result)
+        step, result_content, tool_status = _persist_tool_execution_outcome(agent, outcome)
+        result = outcome.result
+        status = result.get("status") if isinstance(result, dict) else None
+        if step is None:
+            step = _persist_tool_call_step(
+                agent=agent,
+                tool_name=tool_name,
+                tool_params=prepared.tool_params,
+                result_content=result_content,
+                execution_duration_ms=outcome.duration_ms,
+                status=tool_status,
+                credits_consumed=prepared.credits_consumed,
+                consumed_credit=prepared.consumed_credit,
+                attach_completion=attach_completion,
+                attach_prompt_archive=attach_prompt_archive,
+                display_metadata=outcome.display_metadata,
+            )
+            prepared.pending_step = step
+            if step is not None:
+                outcome.persisted_result_content = result_content
+                outcome.persisted_status = tool_status
 
-        try:
-            result_content = json.dumps(result)
-        except (TypeError, ValueError):
-            try:
-                result_content = json.dumps(result, default=str)
-            except Exception as exc:
-                logger.exception(
-                    "Agent %s: failed to serialize tool result for %s (call_id=%s)",
-                    agent.id,
-                    tool_name,
-                    prepared.call_id or "<none>",
-                )
-                result = _build_safe_error_payload(
-                    "Tool result serialization failed.",
-                    error_type=type(exc).__name__,
-                    retryable=False,
-                )
-                result_content = json.dumps(result)
-
-        try:
-            status = result.get("status") if isinstance(result, dict) else None
-        except Exception:
-            status = None
         result_preview = result_content[:RESULT_LOG_MAX_CHARS]
         logger.info(
             "Agent %s: %s completed status=%s result=%s%s",
@@ -3816,34 +4008,6 @@ def _finalize_tool_batch(
             terminal_message_delivery_ok |= effective_explicit_continue is not True
 
         is_error_status = _is_error_status(result)
-        tool_status = "error" if is_error_status else "complete"
-
-        close_old_connections()
-        if prepared.pending_step is not None:
-            _finalize_pending_tool_call_step(
-                step=prepared.pending_step,
-                tool_name=tool_name,
-                tool_params=prepared.tool_params,
-                result_content=result_content,
-                execution_duration_ms=outcome.duration_ms,
-                status=tool_status,
-                display_metadata=outcome.display_metadata,
-            )
-            step = prepared.pending_step
-        else:
-            step = _persist_tool_call_step(
-                agent=agent,
-                tool_name=tool_name,
-                tool_params=prepared.tool_params,
-                result_content=result_content,
-                execution_duration_ms=outcome.duration_ms,
-                status=tool_status,
-                credits_consumed=prepared.credits_consumed,
-                consumed_credit=prepared.consumed_credit,
-                attach_completion=attach_completion,
-                attach_prompt_archive=attach_prompt_archive,
-                display_metadata=outcome.display_metadata,
-            )
         if not is_error_status and is_source_bearing_tool(tool_name):
             rewrite_prompt_urls(result_content, agent, create=True)
         if is_error_status:
@@ -7167,6 +7331,11 @@ def _run_agent_loop(
                 all_calls_sleep = prepared_batch.all_calls_sleep
 
                 if _should_stop_for_eval_policy(agent, budget_ctx=budget_ctx, span=iter_span):
+                    _cancel_unstarted_tool_calls(
+                        agent,
+                        prepared_batch.prepared_calls,
+                        reason="Tool call was cancelled before execution by the evaluation stop policy.",
+                    )
                     _mark_accepted_human_generation_consumed()
                     _attempt_cycle_close_for_sleep(agent, budget_ctx)
                     return cumulative_token_usage

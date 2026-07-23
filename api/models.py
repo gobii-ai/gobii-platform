@@ -11965,6 +11965,12 @@ class PersistentAgentStep(models.Model):
 
 class PersistentAgentToolCall(models.Model):
 
+    class Status(models.TextChoices):
+        QUEUED = "queued", "Queued"
+        PENDING = "pending", "Pending"
+        COMPLETE = "complete", "Complete"
+        ERROR = "error", "Error"
+
     # Re-use the Step's PK to keep a strict 1-1 relationship
     step = models.OneToOneField(
         "PersistentAgentStep",
@@ -11996,9 +12002,10 @@ class PersistentAgentToolCall(models.Model):
     )
     status = models.CharField(
         max_length=32,
-        default="complete",
+        choices=Status.choices,
+        default=Status.COMPLETE,
         blank=True,
-        help_text="Execution status for the tool call (pending, complete, error).",
+        help_text="Execution status for the tool call (queued, pending, complete, error).",
     )
 
     class Meta:

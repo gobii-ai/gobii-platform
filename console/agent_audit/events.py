@@ -20,7 +20,7 @@ from console.agent_audit.serializers import (
     serialize_system_message,
     serialize_tool_call,
 )
-from console.agent_chat.timeline import serialize_message_event
+from console.agent_chat.timeline import serialize_message_event, visible_tool_steps_queryset
 
 DEFAULT_LIMIT = 30
 MAX_LIMIT = 100
@@ -178,8 +178,7 @@ def _completion_events(agent, cursor, direction, limit, at, developer):
 
 def _tool_events(agent, cursor, direction, limit, at, developer):
     queryset = (
-        PersistentAgentStep.objects
-        .filter(agent=agent, tool_call__isnull=False)
+        visible_tool_steps_queryset(agent)
         .select_related("tool_call", "completion", "llm_prompt_archive")
         .prefetch_related("human_input_requests")
     )

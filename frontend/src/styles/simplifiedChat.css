@@ -59,6 +59,7 @@
 
 .collapsed-activity-cluster__body {
   width: min(820px, 100%);
+  padding-bottom: 1rem;
   border-radius: 1.25rem;
   background: linear-gradient(155deg, rgba(255, 255, 255, 0.98), rgba(234, 247, 255, 0.95));
   box-shadow: 0 14px 34px rgba(15, 23, 42, 0.12);

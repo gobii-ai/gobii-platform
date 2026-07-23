@@ -61,7 +61,7 @@ function messageEvent(cursor: string, bodyText = 'Message'): MessageEvent {
 
 describe('collapseDetailedStatusRuns', () => {
   it('renders a single visible action directly instead of collapsing it', () => {
-    const action = stepCluster('1:step:first', ['update_plan', 'search_web'])
+    const action = stepCluster('1:step:first', ['sleep_until_next_trigger', 'search_web'])
 
     const result = collapseDetailedStatusRuns([action], {
       latestPlanCursor: null,
@@ -203,12 +203,16 @@ describe('collapseDetailedStatusRuns', () => {
     })
   })
 
-  it('drops runs with no visible actions', () => {
+  it('keeps plan updates as visible actions', () => {
     const result = collapseDetailedStatusRuns([stepCluster('1:step:hidden', ['update_plan'])], {
       latestPlanCursor: null,
       latestScheduleEntryId: null,
     })
 
-    expect(result).toEqual([])
+    expect(result).toHaveLength(1)
+    expect(result[0]).toMatchObject({
+      kind: 'steps',
+      cursor: '1:step:hidden',
+    })
   })
 })

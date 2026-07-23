@@ -236,6 +236,21 @@ class AgentChatSignalTests(TestCase):
         self.assertIn("active", processing_payload)
 
     @tag("batch_agent_chat")
+    def test_queued_tool_call_creation_emits_no_realtime_event(self):
+        step = PersistentAgentStep.objects.create(agent=self.agent, description="")
+
+        with patch("console.agent_chat.signals._send") as mock_send:
+            PersistentAgentToolCall.objects.create(
+                step=step,
+                tool_name="queued_tool",
+                tool_params={"arg": 1},
+                result="",
+                status=PersistentAgentToolCall.Status.QUEUED,
+            )
+
+        mock_send.assert_not_called()
+
+    @tag("batch_agent_chat")
     def test_user_action_creation_emits_timeline_event(self):
         with self.captureOnCommitCallbacks(execute=True):
             PersistentAgentUserActionEvent.objects.create(

@@ -31,7 +31,7 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import { summarizeSchedule } from '../../util/schedule'
-import { parseResultObject } from '../../util/objectUtils'
+import { isRecord, parseResultObject } from '../../util/objectUtils'
 import type { ToolCallEntry } from '../agentChat/types'
 import type { ToolDescriptor, ToolDescriptorTransform } from '../agentChat/tooling/types'
 import { summarizeToolSearchForCaption } from '../agentChat/tooling/searchUtils'
@@ -47,14 +47,17 @@ const COMMUNICATION_TOOL_NAMES = [
   'send_agent_message',
 ] as const
 
-const BASE_SKIP_TOOL_NAMES = ['sleep', 'sleep_until_next_trigger', 'action', 'update_plan', '', null] as const
+const BASE_SKIP_TOOL_NAMES = ['sleep', 'sleep_until_next_trigger', 'action', '', null] as const
 
 export const CHAT_SKIP_TOOL_NAMES = new Set<string | null>([
   ...COMMUNICATION_TOOL_NAMES,
   ...BASE_SKIP_TOOL_NAMES,
 ])
 
-export const USAGE_SKIP_TOOL_NAMES = new Set<string | null>(BASE_SKIP_TOOL_NAMES)
+export const USAGE_SKIP_TOOL_NAMES = new Set<string | null>([
+  ...BASE_SKIP_TOOL_NAMES,
+  'update_plan',
+])
 
 export const SKIP_TOOL_NAMES = CHAT_SKIP_TOOL_NAMES
 
@@ -527,6 +530,28 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
         charterText,
         caption: charterText ? truncate(charterText, 48) : entry.caption ?? 'Assignment updated',
         separateFromPreview: true,
+      }
+    },
+  },
+  {
+    name: 'update_plan',
+    label: 'Updated Plan',
+    icon: ClipboardList,
+    iconBgClass: 'bg-emerald-100',
+    iconColorClass: 'text-emerald-700',
+    detailKind: 'updatePlan',
+    derive(entry, parameters) {
+      const plan = Array.isArray(parameters?.plan) ? parameters.plan : []
+      const activeStep = plan.find((item) => isRecord(item) && item.status === 'doing')
+      const activeStepText = isRecord(activeStep) ? coerceString(activeStep.step) : null
+
+      return {
+        caption: activeStepText
+          ? buildTrailingPreview(activeStepText, 72)
+          : plan.length
+            ? `${plan.length} step${plan.length === 1 ? '' : 's'}`
+            : entry.caption ?? null,
+        summary: null,
       }
     },
   },

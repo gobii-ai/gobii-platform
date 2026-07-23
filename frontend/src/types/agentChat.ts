@@ -65,7 +65,7 @@ export type ToolMeta = {
   label: string
 }
 
-export type ToolCallStatus = 'pending' | 'complete' | 'error'
+export type ToolCallStatus = 'queued' | 'pending' | 'complete' | 'error'
 
 export type ToolCallEntry = {
   id: string

@@ -79,6 +79,14 @@ def _message_queryset(agent: PersistentAgent):
         Q(**{hidden_key: False}) | Q(**{f"{hidden_key}__isnull": True}),
     )
 
+
+def visible_tool_steps_queryset(agent: PersistentAgent):
+    return PersistentAgentStep.objects.filter(
+        agent=agent,
+        tool_call__isnull=False,
+    ).exclude(tool_call__status=PersistentAgentToolCall.Status.QUEUED)
+
+
 TimelineDirection = Literal["initial", "older", "newer"]
 
 
@@ -835,7 +843,7 @@ def _messages_queryset(agent: PersistentAgent, direction: TimelineDirection, cur
 def _steps_queryset(agent: PersistentAgent, direction: TimelineDirection, cursor: CursorPayload | None) -> Sequence[PersistentAgentStep]:
     limit = MAX_PAGE_SIZE * 3
     qs = (
-        PersistentAgentStep.objects.filter(agent=agent, tool_call__isnull=False)
+        visible_tool_steps_queryset(agent)
         .select_related("tool_call", "agent")
         .prefetch_related("human_input_requests")
         .order_by("-created_at", "-id")
@@ -1100,17 +1108,12 @@ def _has_more_before(agent: PersistentAgent, cursor: CursorPayload | None) -> bo
             timestamp=dt,
             seq__lt=cursor.identifier,
         ).exists()
-    step_exists = PersistentAgentStep.objects.filter(
-        agent=agent,
-        tool_call__isnull=False,
-        created_at__lt=dt,
-    ).exists()
+    step_qs = visible_tool_steps_queryset(agent)
+    step_exists = step_qs.filter(created_at__lt=dt).exists()
     if cursor.kind == "step":
         try:
             uuid_identifier = uuid.UUID(cursor.identifier)
-            step_exists = step_exists or PersistentAgentStep.objects.filter(
-                agent=agent,
-                tool_call__isnull=False,
+            step_exists = step_exists or step_qs.filter(
                 created_at=dt,
                 id__lt=uuid_identifier,
             ).exists()
@@ -1188,17 +1191,12 @@ def _has_more_after(agent: PersistentAgent, cursor: CursorPayload | None) -> boo
             seq__gt=cursor.identifier,
         ).exists()
 
-    step_exists = PersistentAgentStep.objects.filter(
-        agent=agent,
-        tool_call__isnull=False,
-        created_at__gt=dt,
-    ).exists()
+    step_qs = visible_tool_steps_queryset(agent)
+    step_exists = step_qs.filter(created_at__gt=dt).exists()
     if cursor.kind == "step":
         try:
             uuid_identifier = uuid.UUID(cursor.identifier)
-            step_exists = step_exists or PersistentAgentStep.objects.filter(
-                agent=agent,
-                tool_call__isnull=False,
+            step_exists = step_exists or step_qs.filter(
                 created_at=dt,
                 id__gt=uuid_identifier,
             ).exists()

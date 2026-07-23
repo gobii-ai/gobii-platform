@@ -302,8 +302,422 @@ class TestParallelToolCallsExecution(TestCase):
         self.assertEqual(mock_execute_enabled.call_count, 2)
         self.assertGreaterEqual(max_active, 2)
 
+    @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
+    @patch("api.agent.core.event_processing.execute_send_sms")
+    @patch("api.agent.core.event_processing.execute_enabled_tool")
+    def test_serial_batch_only_exposes_the_current_call_as_pending(
+        self,
+        mock_execute_enabled,
+        mock_send_sms,
+        _mock_credit,
+    ):
+        from api.agent.core import event_processing as ep
+
+        observed_states = []
+        observed_terminal_metadata = []
+
+        def statuses_by_tool():
+            records = list(
+                PersistentAgentToolCall.objects.filter(step__agent=self.agent)
+                .values_list("tool_name", "status", "result", "execution_duration_ms")
+            )
+            observed_terminal_metadata.append(
+                {
+                    tool_name: (result, duration_ms)
+                    for tool_name, status, result, duration_ms in records
+                    if status == PersistentAgentToolCall.Status.COMPLETE
+                }
+            )
+            return {
+                tool_name: status
+                for tool_name, status, _result, _duration_ms in records
+            }
+
+        def enabled_side_effect(
+            _agent,
+            _tool_name,
+            _params,
+            isolated_mcp=False,
+            current_sqlite_db_path=None,
+            resolved_entry=None,
+        ):
+            observed_states.append(statuses_by_tool())
+            return {"status": "ok", "auto_sleep_ok": True}
+
+        def sms_side_effect(*_args, **_kwargs):
+            observed_states.append(statuses_by_tool())
+            return {"status": "success", "auto_sleep_ok": True}
+
+        mock_execute_enabled.side_effect = enabled_side_effect
+        mock_send_sms.side_effect = sms_side_effect
+
+        with patch.object(ep, "_emit_tool_call_realtime") as mock_realtime:
+            self._run_single_iteration(
+                [
+                    _tool_call("read_file", '{"path": "/exports/a.txt"}'),
+                    _tool_call("send_sms", '{"to": "+15555550100", "body": "hi"}'),
+                    _tool_call("http_request", '{"method": "GET", "url": "https://example.com"}'),
+                ]
+            )
+
+        self.assertEqual(
+            observed_states,
+            [
+                {"read_file": "pending", "send_sms": "queued", "http_request": "queued"},
+                {"read_file": "complete", "send_sms": "pending", "http_request": "queued"},
+                {"read_file": "complete", "send_sms": "complete", "http_request": "pending"},
+            ],
+        )
+        read_file_result, read_file_duration = observed_terminal_metadata[1]["read_file"]
+        self.assertEqual(json.loads(read_file_result)["status"], "ok")
+        self.assertIsNotNone(read_file_duration)
+        send_sms_result, send_sms_duration = observed_terminal_metadata[2]["send_sms"]
+        self.assertEqual(json.loads(send_sms_result)["status"], "success")
+        self.assertIsNotNone(send_sms_duration)
+        transitions_by_step = {}
+        for call in mock_realtime.call_args_list:
+            step, transition = call.args
+            transitions_by_step.setdefault(step.id, []).append(transition)
+        self.assertEqual(len(transitions_by_step), 3)
+        self.assertTrue(
+            all(transitions == ["pending", "finalized"] for transitions in transitions_by_step.values())
+        )
+        self.assertEqual(
+            set(
+                PersistentAgentToolCall.objects.filter(step__agent=self.agent)
+                .values_list("status", flat=True)
+            ),
+            {"complete"},
+        )
+
+    @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
+    @patch("api.agent.core.event_processing.execute_enabled_tool")
+    def test_parallel_worker_limit_promotes_queued_call_after_a_slot_opens(
+        self,
+        mock_execute_enabled,
+        _mock_credit,
+    ):
+        from api.agent.core import event_processing as ep
+
+        real_mark_started = ep._mark_prepared_tool_started
+        transition_counts = []
+        active = 0
+        max_active = 0
+        lock = threading.Lock()
+
+        def observe_mark_started(agent, prepared):
+            real_mark_started(agent, prepared)
+            statuses = list(
+                PersistentAgentToolCall.objects.filter(step__agent=self.agent)
+                .values_list("status", flat=True)
+            )
+            transition_counts.append(
+                (
+                    statuses.count("pending"),
+                    statuses.count("queued"),
+                    statuses.count("complete"),
+                )
+            )
+
+        def execute_side_effect(*_args, **_kwargs):
+            nonlocal active, max_active
+            with lock:
+                active += 1
+                max_active = max(max_active, active)
+            time.sleep(0.04)
+            with lock:
+                active -= 1
+            return {"status": "ok", "auto_sleep_ok": True}
+
+        mock_execute_enabled.side_effect = execute_side_effect
+        with patch.object(ep, "get_max_parallel_tool_calls", return_value=2), patch.object(
+            ep,
+            "_mark_prepared_tool_started",
+            side_effect=observe_mark_started,
+        ):
+            self._run_single_iteration(
+                [
+                    _tool_call("read_file", '{"path": "/exports/a.txt"}'),
+                    _tool_call("http_request", '{"method": "GET", "url": "https://example.com/a"}'),
+                    _tool_call("mcp_brightdata_search_engine", '{"query": "openai"}'),
+                ]
+            )
+
+        self.assertEqual(transition_counts[:2], [(1, 2, 0), (2, 1, 0)])
+        self.assertEqual(transition_counts[2][1], 0)
+        self.assertLessEqual(transition_counts[2][0], 2)
+        self.assertGreaterEqual(transition_counts[2][2], 1)
+        self.assertEqual(max_active, 2)
+        self.assertEqual(
+            PersistentAgentToolCall.objects.filter(
+                step__agent=self.agent,
+                status=PersistentAgentToolCall.Status.COMPLETE,
+            ).count(),
+            3,
+        )
+
+    @patch(
+        "api.agent.core.event_processing.execute_enabled_tool",
+        return_value={"status": "ok", "auto_sleep_ok": True},
+    )
+    def test_credit_failure_after_admission_executes_affordable_subset(
+        self,
+        mock_execute_enabled,
+    ):
+        with patch(
+            "api.agent.core.event_processing._ensure_credit_for_tool",
+            side_effect=[
+                {"cost": None, "credit": None},
+                None,
+            ],
+        ):
+            self._run_single_iteration(
+                [
+                    _tool_call("read_file", '{"path": "/exports/a.txt"}'),
+                    _tool_call("http_request", '{"method": "GET", "url": "https://example.com"}'),
+                ]
+            )
+
+        mock_execute_enabled.assert_called_once()
+        tool_calls = PersistentAgentToolCall.objects.filter(step__agent=self.agent)
+        self.assertEqual(tool_calls.count(), 1)
+        self.assertEqual(tool_calls.get().tool_name, "read_file")
+        self.assertEqual(tool_calls.get().status, PersistentAgentToolCall.Status.COMPLETE)
+
+    def test_terminal_persistence_guard_advances_only_after_confirmed_write(self):
+        from api.agent.core import event_processing as ep
+
+        step = PersistentAgentStep.objects.create(agent=self.agent)
+        PersistentAgentToolCall.objects.create(
+            step=step,
+            tool_name="read_file",
+            tool_params={"path": "/exports/a.txt"},
+            status=PersistentAgentToolCall.Status.PENDING,
+        )
+        prepared = ep._PreparedToolExecution(
+            idx=1,
+            tool_name="read_file",
+            tool_params={"path": "/exports/a.txt"},
+            exec_params={"path": "/exports/a.txt"},
+            pending_step=step,
+            credits_consumed=None,
+            consumed_credit=None,
+            call_id="persist-retry",
+            explicit_continue=None,
+            inferred_continue=False,
+            parallel_safe=True,
+            parallel_ineligible_reason=None,
+        )
+        outcome = ep._ToolExecutionOutcome(
+            prepared=prepared,
+            result={"status": "ok"},
+            duration_ms=12,
+            updated_tools=None,
+            variable_map={},
+        )
+
+        with patch.object(ep, "_finalize_pending_tool_call_step", return_value=False) as mock_finalize:
+            ep._persist_tool_execution_outcome(self.agent, outcome)
+            ep._persist_tool_execution_outcome(self.agent, outcome)
+
+        self.assertEqual(mock_finalize.call_count, 2)
+        self.assertIsNone(outcome.persisted_result_content)
+        self.assertIsNone(outcome.persisted_status)
+
+    def test_unexpected_execution_error_terminalizes_unstarted_calls(self):
+        from api.agent.core import event_processing as ep
+
+        prepared_calls = []
+        for idx, tool_name in enumerate(("read_file", "http_request"), start=1):
+            step = ep._create_queued_tool_call_step(
+                agent=self.agent,
+                batch_index=idx,
+                tool_name=tool_name,
+                tool_params={},
+                credits_consumed=None,
+                consumed_credit=None,
+                attach_completion=lambda _step_kwargs: None,
+                attach_prompt_archive=lambda _step: None,
+            )
+            prepared_calls.append(
+                ep._PreparedToolExecution(
+                    idx=idx,
+                    tool_name=tool_name,
+                    tool_params={},
+                    exec_params={},
+                    pending_step=step,
+                    credits_consumed=None,
+                    consumed_credit=None,
+                    call_id=f"unexpected-{idx}",
+                    explicit_continue=None,
+                    inferred_continue=False,
+                    parallel_safe=False,
+                    parallel_ineligible_reason=f"unsafe_tool:{tool_name}",
+                )
+            )
+        prepared_batch = ep._PreparedToolBatch(
+            prepared_calls=prepared_calls,
+            followup_required=False,
+            all_calls_sleep=False,
+            abort_after_execution=False,
+            parallel_ineligible_reason="unsafe_tool:read_file",
+        )
+
+        with patch.object(
+            ep,
+            "_mark_prepared_tool_started",
+            side_effect=DatabaseError("start transition failed"),
+        ):
+            with self.assertRaises(DatabaseError):
+                ep._execute_prepared_tool_batch(
+                    self.agent,
+                    prepared_batch,
+                    budget_ctx=None,
+                    eval_run_id=None,
+                    tools=[],
+                    heartbeat=None,
+                    lock_extender=None,
+                )
+
+        tool_calls = PersistentAgentToolCall.objects.filter(step__agent=self.agent)
+        self.assertEqual(tool_calls.count(), 2)
+        self.assertFalse(tool_calls.filter(status__in=["queued", "pending"]).exists())
+        self.assertEqual(
+            set(tool_calls.values_list("status", flat=True)),
+            {PersistentAgentToolCall.Status.ERROR},
+        )
+
+    def test_tracked_runtime_tool_uses_queued_pending_terminal_lifecycle(self):
+        from api.agent.core import event_processing as ep
+        from api.agent.tools.tracked_runtime import execute_tracked_runtime_tool_call
+
+        with patch.object(ep, "_enforce_tool_rate_limit", return_value=True), patch.object(
+            ep,
+            "_ensure_credit_for_tool",
+            return_value={"cost": None, "credit": None},
+        ), patch(
+            "api.agent.tools.tracked_runtime.execute_runtime_tool_call",
+            return_value=({"status": "ok"}, None),
+        ), patch.object(ep, "_emit_tool_call_realtime") as mock_realtime:
+            result, updated_tools = execute_tracked_runtime_tool_call(
+                self.agent,
+                tool_name="read_file",
+                exec_params={"path": "/exports/a.txt"},
+            )
+
+        self.assertEqual(result, {"status": "ok"})
+        self.assertIsNone(updated_tools)
+        tool_call = PersistentAgentToolCall.objects.get(step__agent=self.agent)
+        self.assertEqual(tool_call.status, PersistentAgentToolCall.Status.COMPLETE)
+        self.assertEqual(
+            [call.args[1] for call in mock_realtime.call_args_list],
+            ["pending", "finalized"],
+        )
+
+    @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
+    @patch("api.agent.core.event_processing.execute_enabled_tool")
+    def test_eval_policy_exit_terminalizes_every_queued_call(
+        self,
+        mock_execute_enabled,
+        _mock_credit,
+    ):
+        with patch(
+            "api.agent.core.event_processing._should_stop_for_eval_policy",
+            return_value=True,
+        ):
+            self._run_single_iteration(
+                [
+                    _tool_call("read_file", '{"path": "/exports/a.txt"}'),
+                    _tool_call("http_request", '{"method": "GET", "url": "https://example.com"}'),
+                ]
+            )
+
+        mock_execute_enabled.assert_not_called()
+        tool_calls = PersistentAgentToolCall.objects.filter(step__agent=self.agent)
+        self.assertEqual(tool_calls.count(), 2)
+        self.assertFalse(tool_calls.filter(status__in=["queued", "pending"]).exists())
+        self.assertTrue(
+            all(
+                call.status == PersistentAgentToolCall.Status.ERROR
+                and call.execution_duration_ms == 0
+                and json.loads(call.result)["retryable"]
+                for call in tool_calls
+            )
+        )
+
+    @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
+    @patch("api.agent.core.event_processing.execute_enabled_tool")
+    def test_stop_during_batch_preparation_terminalizes_admitted_calls(
+        self,
+        mock_execute_enabled,
+        _mock_credit,
+    ):
+        preparation_checks = 0
+
+        def should_abort(*_args, check_context, **_kwargs):
+            nonlocal preparation_checks
+            if check_context != "tool_batch":
+                return False
+            preparation_checks += 1
+            return preparation_checks == 3
+
+        with patch(
+            "api.agent.core.event_processing._should_abort_processing",
+            side_effect=should_abort,
+        ):
+            self._run_single_iteration(
+                [
+                    _tool_call("read_file", '{"path": "/exports/a.txt"}'),
+                    _tool_call("http_request", '{"method": "GET", "url": "https://example.com"}'),
+                    _tool_call("mcp_brightdata_search_engine", '{"query": "openai"}'),
+                ]
+            )
+
+        mock_execute_enabled.assert_not_called()
+        tool_calls = PersistentAgentToolCall.objects.filter(step__agent=self.agent)
+        self.assertEqual(tool_calls.count(), 2)
+        self.assertFalse(tool_calls.filter(status__in=["queued", "pending"]).exists())
+        self.assertEqual(
+            set(tool_calls.values_list("status", flat=True)),
+            {PersistentAgentToolCall.Status.ERROR},
+        )
+
+    @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
+    @patch("api.agent.core.event_processing.execute_enabled_tool")
+    @patch(
+        "api.agent.core.event_processing.execute_send_sms",
+        return_value={"status": "success", "auto_sleep_ok": True},
+    )
+    def test_signup_preview_pause_terminalizes_unstarted_serial_siblings(
+        self,
+        mock_send_sms,
+        mock_execute_enabled,
+        _mock_credit,
+    ):
+        with patch(
+            "api.agent.core.event_processing.is_signup_preview_processing_paused",
+            return_value=True,
+        ):
+            self._run_single_iteration(
+                [
+                    _tool_call("send_sms", '{"to": "+15555550100", "body": "hi"}'),
+                    _tool_call("read_file", '{"path": "/exports/a.txt"}'),
+                ]
+            )
+
+        mock_send_sms.assert_called_once()
+        mock_execute_enabled.assert_not_called()
+        calls_by_name = {
+            call.tool_name: call
+            for call in PersistentAgentToolCall.objects.filter(step__agent=self.agent)
+        }
+        self.assertEqual(calls_by_name["send_sms"].status, PersistentAgentToolCall.Status.COMPLETE)
+        self.assertEqual(calls_by_name["read_file"].status, PersistentAgentToolCall.Status.ERROR)
+        self.assertEqual(calls_by_name["read_file"].execution_duration_ms, 0)
+        self.assertTrue(json.loads(calls_by_name["read_file"].result)["retryable"])
+
     @patch("api.agent.core.event_processing.execute_enabled_tool", return_value={"status": "ok", "auto_sleep_ok": True})
-    def test_parallel_preparation_batches_rate_limits_and_persists_pending_rows(
+    def test_parallel_preparation_batches_rate_limits_and_persists_tool_rows(
         self,
         mock_execute_enabled,
     ):

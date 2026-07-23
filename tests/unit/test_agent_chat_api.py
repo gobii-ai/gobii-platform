@@ -89,7 +89,13 @@ from api.services.web_sessions import heartbeat_web_session, start_web_session
 from config.redis_client import get_redis_client
 from console.agent_chat.plan_events import persist_plan_event
 from console.agent_chat.timeline import build_processing_snapshot, build_tool_cluster_from_steps
-from console.agent_chat.timeline import _steps_queryset, fetch_timeline_window
+from console.agent_chat.timeline import (
+    CursorPayload,
+    _has_more_after,
+    _has_more_before,
+    _steps_queryset,
+    fetch_timeline_window,
+)
 from console.agent_chat.timeline import serialize_plan_event
 from util.onboarding import (
     TRIAL_ONBOARDING_PENDING_SESSION_KEY,
@@ -987,6 +993,67 @@ class AgentChatAPITests(TestCase):
         self.assertIn("accountPause", critical_status)
         self.assertIn("dailyCredits", critical_status)
         self.assertIn("contactCapStatus", critical_status)
+
+    @tag("batch_agent_chat")
+    def test_queued_tool_calls_are_excluded_from_all_timeline_pagination_queries(self):
+        browser_agent = BrowserUseAgent.objects.create(
+            user=self.user,
+            name="Queued Timeline Browser",
+        )
+        agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Queued Timeline Agent",
+            charter="Test queued timeline visibility",
+            browser_use_agent=browser_agent,
+        )
+        now = timezone.now()
+
+        visible_step = PersistentAgentStep.objects.create(
+            agent=agent,
+            description="Visible tool",
+        )
+        PersistentAgentToolCall.objects.create(
+            step=visible_step,
+            tool_name="visible_tool",
+            tool_params={},
+            result=json.dumps({"status": "ok"}),
+            status=PersistentAgentToolCall.Status.COMPLETE,
+        )
+        older_queued_step = PersistentAgentStep.objects.create(agent=agent)
+        newer_queued_step = PersistentAgentStep.objects.create(agent=agent)
+        for step in (older_queued_step, newer_queued_step):
+            PersistentAgentToolCall.objects.create(
+                step=step,
+                tool_name="hidden_tool",
+                tool_params={},
+                result="",
+                status=PersistentAgentToolCall.Status.QUEUED,
+            )
+        PersistentAgentStep.objects.filter(id=older_queued_step.id).update(
+            created_at=now - timedelta(hours=1),
+        )
+        PersistentAgentStep.objects.filter(id=visible_step.id).update(created_at=now)
+        PersistentAgentStep.objects.filter(id=newer_queued_step.id).update(
+            created_at=now + timedelta(hours=1),
+        )
+        visible_step.created_at = now
+        cursor = CursorPayload(
+            value=int(now.timestamp() * 1_000_000),
+            kind="step",
+            identifier=str(visible_step.id),
+        )
+
+        self.assertEqual(
+            [step.id for step in _steps_queryset(agent, "initial", None)],
+            [visible_step.id],
+        )
+        self.assertEqual(
+            [step.id for step in _steps_queryset(agent, "older", cursor)],
+            [visible_step.id],
+        )
+        self.assertEqual(_steps_queryset(agent, "newer", cursor), [])
+        self.assertFalse(_has_more_before(agent, cursor))
+        self.assertFalse(_has_more_after(agent, cursor))
 
     @tag("batch_agent_chat")
     def test_timeline_uses_discord_channel_label_for_inbound_and_outbound_messages(self):
