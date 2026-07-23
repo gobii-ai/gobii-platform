@@ -37,6 +37,8 @@ TARGETED_CANCEL_PRESERVES_OTHER = "agent_schedule_targeted_cancel_preserves_othe
 LIST_WITHOUT_MUTATION = "agent_schedule_list_without_mutation"
 UNSAFE_BURST_GUARDRAIL = "agent_schedule_unsafe_burst_guardrail"
 BULK_LIMIT_GUARDRAIL = "agent_schedule_bulk_limit_guardrail"
+IMPLIED_MONITORING_DEFAULTS = "agent_schedule_implied_monitoring_defaults"
+REPEATABLE_REPORT_NUDGE = "agent_schedule_repeatable_report_nudge"
 
 
 @dataclass(frozen=True)
@@ -48,6 +50,24 @@ class AgentSchedulingCase:
 
 
 AGENT_SCHEDULING_CASES = (
+    AgentSchedulingCase(
+        IMPLIED_MONITORING_DEFAULTS,
+        "Clear ongoing monitoring should get a sensible cadence without a planning survey.",
+        "Keep nudging me to review the sales pipeline so it doesn't go stale.",
+        "monitor",
+    ),
+    AgentSchedulingCase(
+        REPEATABLE_REPORT_NUDGE,
+        (
+            "A naturally repeatable report should prompt one concrete cadence offer "
+            "without silently scheduling it."
+        ),
+        (
+            "I keep doing this by hand every week. This week's signup count is 112 and last week's "
+            "was 100. What's the percentage change?"
+        ),
+        "nudge",
+    ),
     AgentSchedulingCase(
         MULTIPLE_RECURRING,
         "One request should create two independent recurring jobs without collapsing either cadence.",
@@ -137,6 +157,19 @@ def _cron_matches(expression, *, minute, hour, weekdays):
     return actual in aliases[weekdays]
 
 
+def _offers_concrete_weekly_cadence(body):
+    return bool(
+        re.search(r"\b(?:weekly|every week|each week)\b", body)
+        and re.search(
+            r"\b(?:schedule|automate|automatically|set (?:this|it) up|"
+            r"set up (?:a |the )?(?:weekly )?(?:reminder|check-in|report|job)|"
+            r"make (?:this|it) recurring|take (?:this|it) off your hands)\b|"
+            r"\bi (?:can|could|will|'ll) (?:handle|track|run)\b",
+            body,
+        )
+    )
+
+
 def _call_succeeded(call):
     if str(call.status or "").casefold() != "complete":
         return False
@@ -144,7 +177,13 @@ def _call_succeeded(call):
         payload = call.result if isinstance(call.result, dict) else json.loads(call.result or "{}")
     except (TypeError, ValueError):
         return False
-    return isinstance(payload, dict) and str(payload.get("status") or "").casefold() in {"ok", "warning"}
+    if (
+        not isinstance(payload, dict)
+        or str(payload.get("status") or "").casefold() not in {"ok", "warning"}
+    ):
+        return False
+    config_update = payload.get("agent_config_update")
+    return not (isinstance(config_update, dict) and config_update.get("errors"))
 
 
 def _schedule_sql_strategy_failures(case, calls, *, exact_target=None):
@@ -159,7 +198,7 @@ def _schedule_sql_strategy_failures(case, calls, *, exact_target=None):
     reads_schedules = bool(re.search(r"\bselect\b.*\bfrom\s+[\"`\[]?__agent_schedules\b", sql, re.I | re.S))
     failures = []
 
-    if case.expected_action in {"multiple", "exact", "timer", "update", "cancel"}:
+    if case.expected_action in {"monitor", "multiple", "exact", "timer", "update", "cancel"}:
         if not mutation_calls:
             failures.append("no __agent_schedules or legacy schedule mutation was attempted")
         elif not all(_call_succeeded(call) for call in mutation_calls):
@@ -170,6 +209,8 @@ def _schedule_sql_strategy_failures(case, calls, *, exact_target=None):
         failures.append("unsafe cadence was attempted instead of rejected before mutation")
     if case.expected_action == "list" and mutation_calls:
         failures.append("read-only schedule question mutated durable timing")
+    if case.expected_action == "nudge" and mutation_calls:
+        failures.append("cadence offer silently created a schedule")
     if case.expected_action == "timer" and not re.search(r"\b(?:strftime|datetime|julianday)\s*\(", sql, re.I):
         failures.append("relative timer was not resolved with SQLite time")
     if case.expected_action in {"update", "cancel"}:
@@ -372,7 +413,29 @@ class AgentSchedulingScenario(EvalScenario, ScenarioExecutionTools):
             if after.get("onboarding_checkin") != before.get("onboarding_checkin"):
                 failures.append("timing change altered the unrelated onboarding check-in")
 
-        if action == "multiple":
+        if action == "monitor":
+            monitors = [
+                row
+                for row in requested_active
+                if all(
+                    term in (row.instruction or "").casefold()
+                    for term in ("pipeline", "review")
+                )
+            ]
+            if len(requested_active) != 1 or len(monitors) != 1:
+                failures.append("ongoing pipeline review did not create one specific recurring job")
+            elif monitors[0].kind != PersistentAgentSchedule.Kind.RECURRING:
+                failures.append("ongoing pipeline review was not recurring")
+            elif not monitors[0].expression:
+                failures.append("ongoing pipeline review has no cadence")
+        elif action == "nudge":
+            if after != before:
+                failures.append("repeatable one-off report changed durable timing without permission")
+            if not re.search(r"\b12(?:\.0+)?\s*%", body):
+                failures.append("repeatable report did not answer the requested calculation")
+            if not _offers_concrete_weekly_cadence(body):
+                failures.append("repeatable report did not offer a concrete weekly cadence")
+        elif action == "multiple":
             support = [row for row in requested_active if "triage" in (row.instruction or "").casefold()]
             recap = [row for row in requested_active if "trend" in (row.instruction or "").casefold()]
             if len(requested_active) != 2 or len(support) != 1 or len(recap) != 1:

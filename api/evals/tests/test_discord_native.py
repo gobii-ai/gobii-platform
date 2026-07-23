@@ -7,7 +7,9 @@ import api.evals.loader  # noqa: F401 - registers scenarios and suites
 from api.agent.tools.add_discord_reaction import get_add_discord_reaction_tool
 from api.evals.registry import ScenarioRegistry
 from api.evals.scenarios.discord_native import (
+    DISCORD_NATIVE_REACTION_SERIOUS_REQUEST_RESTRAINT,
     DISCORD_NATIVE_REACTION_REPLY_CONTEXT,
+    DISCORD_NATIVE_REACTION_SHARED_WIN,
     DISCORD_NATIVE_SCENARIO_SLUGS,
     DISCORD_NATIVE_SUITE_SLUG,
     DiscordNativeReactionReplyContextScenario,
@@ -25,6 +27,10 @@ class DiscordNativeScenarioTests(SimpleTestCase):
         self.assertEqual(tuple(suite.scenario_slugs), DISCORD_NATIVE_SCENARIO_SLUGS)
         self.assertIsNotNone(scenario)
         self.assertIn("real_harness", scenario.get_metadata().tags)
+        self.assertIsNotNone(ScenarioRegistry.get(DISCORD_NATIVE_REACTION_SHARED_WIN))
+        self.assertIsNotNone(
+            ScenarioRegistry.get(DISCORD_NATIVE_REACTION_SERIOUS_REQUEST_RESTRAINT)
+        )
 
     def test_reaction_tool_contract_requires_target_and_continuation(self):
         tool = get_add_discord_reaction_tool()["function"]
@@ -60,5 +66,30 @@ class DiscordNativeScenarioTests(SimpleTestCase):
                 call,
                 channel_id="channel-1",
                 message_id="message-1",
+            )
+        )
+
+    def test_reply_verifier_rejects_reaction_sized_acknowledgements(self):
+        call = SimpleNamespace(
+            tool_name="send_discord_message",
+            tool_params={
+                "channel_id": "channel-1",
+                "message": "I see it.",
+                "will_continue_work": False,
+            },
+            result=json.dumps({"status": "success"}),
+        )
+
+        self.assertFalse(
+            DiscordNativeReactionReplyContextScenario._reply_matches(
+                call,
+                channel_id="channel-1",
+            )
+        )
+        call.tool_params["message"] = "Check the auth service health and recent error logs first."
+        self.assertTrue(
+            DiscordNativeReactionReplyContextScenario._reply_matches(
+                call,
+                channel_id="channel-1",
             )
         )

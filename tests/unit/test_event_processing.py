@@ -5256,6 +5256,47 @@ class EventProcessingRuntimeGuardTests(TestCase):
         self.assertFalse(_latest_inbound_message_needs_reply(self.agent))
         self.assertFalse(_should_continue_for_unanswered_inbound_after_tools(self.agent, finalized))
 
+    def test_successful_discord_reaction_satisfies_unanswered_inbound(self):
+        self._create_inbound_email_message(body="nice, the fix shipped", timestamp=timezone.now())
+        prepared = _PreparedToolExecution(
+            idx=0,
+            tool_name="add_discord_reaction",
+            tool_params={
+                "channel_id": "channel-1",
+                "message_id": "message-1",
+                "emoji": "🎉",
+                "will_continue_work": False,
+            },
+            exec_params={},
+            pending_step=None,
+            credits_consumed=None,
+            consumed_credit=None,
+            call_id="call-reaction",
+            explicit_continue=False,
+            inferred_continue=False,
+            parallel_safe=False,
+            parallel_ineligible_reason="unsafe_tool:add_discord_reaction",
+        )
+        outcome = _ToolExecutionOutcome(
+            prepared=prepared,
+            result={"status": "success", "auto_sleep_ok": True},
+            duration_ms=1,
+            updated_tools=None,
+            variable_map={},
+        )
+
+        finalized = _finalize_tool_batch(
+            self.agent,
+            [outcome],
+            attach_completion=lambda kwargs: None,
+            attach_prompt_archive=lambda step: None,
+        )
+
+        self.assertTrue(finalized.message_delivery_ok)
+        self.assertTrue(finalized.terminal_message_delivery_ok)
+        self.assertFalse(finalized.followup_required)
+        self.assertFalse(_should_continue_for_unanswered_inbound_after_tools(self.agent, finalized))
+
     def test_pending_progress_reply_continues_after_non_message_stop(self):
         finalized = _FinalizedToolBatch(
             executed_calls=1,

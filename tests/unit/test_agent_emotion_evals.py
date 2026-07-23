@@ -8,11 +8,13 @@ from django.utils import timezone
 import api.evals.loader  # noqa: F401 - registers canonical scenarios and suites
 from api.evals.registry import ScenarioRegistry
 from api.evals.scenarios.agent_emotions import (
+    AGENT_PROACTIVE_EMOTION_SCENARIO_SLUGS,
     AGENT_TEMPORARY_EMOTION_LIFECYCLE,
     EMOTION_TURNS,
     INITIAL_CHARTER,
     ORDINARY_WORK_PROMPT,
     ORDINARY_WORK_TASK,
+    PROACTIVE_EMOTION_CASES,
     brief_reply_failures,
     emotion_state_failures,
     emotion_trace_failures,
@@ -52,8 +54,24 @@ class AgentEmotionEvalTests(SimpleTestCase):
         self.assertIn("multi_turn", scenario.tags)
         self.assertIn("sqlite", scenario.tags)
 
+    def test_proactive_judgment_scenarios_cover_action_and_restraint(self):
+        self.assertEqual(len(AGENT_PROACTIVE_EMOTION_SCENARIO_SLUGS), 3)
+        self.assertEqual(
+            {case.expected_kind for case in PROACTIVE_EMOTION_CASES},
+            {"positive", "struggle", "none"},
+        )
+        for slug in AGENT_PROACTIVE_EMOTION_SCENARIO_SLUGS:
+            scenario = ScenarioRegistry.get(slug)
+            self.assertIsNotNone(scenario)
+            self.assertIn("initiative", scenario.tags)
+            self.assertIn(slug, SuiteRegistry.get("core").scenario_slugs)
+
     def test_prompts_are_natural_and_do_not_leak_the_control_plane(self):
-        prompts = [turn.prompt for turn in EMOTION_TURNS] + [ORDINARY_WORK_PROMPT]
+        prompts = (
+            [turn.prompt for turn in EMOTION_TURNS]
+            + [case.prompt for case in PROACTIVE_EMOTION_CASES]
+            + [ORDINARY_WORK_PROMPT]
+        )
         for value in prompts:
             prompt = value.casefold()
             for forbidden in (
@@ -64,6 +82,15 @@ class AgentEmotionEvalTests(SimpleTestCase):
                 "database",
             ):
                 self.assertNotIn(forbidden, prompt)
+
+    def test_struggle_case_describes_a_concrete_repeated_failure(self):
+        struggle = next(
+            case for case in PROACTIVE_EMOTION_CASES if case.expected_kind == "struggle"
+        )
+
+        self.assertIn("third time", struggle.prompt.casefold())
+        self.assertIn("blocked", struggle.prompt.casefold())
+        self.assertIn("setback", struggle.prompt.casefold())
 
     def test_trace_scorer_accepts_equivalent_bounded_set_and_clear_sql(self):
         set_call = _sqlite_call(

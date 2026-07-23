@@ -2275,7 +2275,7 @@ class FirstRunPromptCalibrationTests(TestCase):
         self.assertIn("finite task/batch/day/run/project/renewal/deal/case feedback is temporary", system_prompt)
         self.assertIn("Set false after delivery/config and no active work", system_prompt)
         self.assertIn(
-            "Do not schedule merely to continue or remember your own work; schedule only user-requested recurrence, reminders, or future triggers",
+            "Explicit or clearly implied ongoing work, reminders, and future triggers may be scheduled",
             system_prompt,
         )
         self.assertIn("explicit SQLite/database request and sqlite_batch is callable", system_prompt)

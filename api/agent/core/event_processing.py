@@ -3800,8 +3800,8 @@ def _finalize_tool_batch(
             and result.get("skipped") is True
         )
         effective_explicit_continue = prepared.explicit_continue
+        status_label = str(status or "").lower()
         if tool_name in MESSAGE_TOOL_NAMES and not message_delivery_skipped:
-            status_label = str(status or "").lower()
             if status_label in MESSAGE_SUCCESS_STATUSES:
                 message_delivery_ok = True
                 successful_message_tools.add(tool_name)
@@ -3809,6 +3809,10 @@ def _finalize_tool_batch(
                     progress_message_delivery_ok = True
                 else:
                     terminal_message_delivery_ok = True
+        elif tool_name == "add_discord_reaction" and status_label in MESSAGE_SUCCESS_STATUSES:
+            message_delivery_ok = True
+            progress_message_delivery_ok |= effective_explicit_continue is True
+            terminal_message_delivery_ok |= effective_explicit_continue is not True
 
         is_error_status = _is_error_status(result)
         tool_status = "error" if is_error_status else "complete"

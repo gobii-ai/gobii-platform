@@ -1453,7 +1453,7 @@ def _render_prompt_context_once(
         else:
             important_group.section_text(
                 "schedule_note",
-                "No schedule is set. Leave it NULL unless the user requests recurrence, a reminder, or a future trigger.",
+                "No schedule is set. For clear ongoing/monitoring intent, first write one safe default __agent_schedules cadence before any fetch or reply. One-off work stays unscheduled; if it has obvious periodic value, offer exactly one specific cadence in the final.",
                 weight=1,
                 non_shrinkable=True
             )
@@ -1666,7 +1666,7 @@ def _render_prompt_context_once(
         agent_config_note = (
             f"{AGENT_CONFIG_TABLE} id=1: patch_text=lasting owner rules; "
             "appearance=full person after authorized changes: age/skin/hair/eyes/style, not scene/vibe; preserve unspecified; confirm briefly; temporary feedback/ordinary tasks never config; "
-            "emotion=emoji+1..86400s sparingly; NULLs clear."
+            "emotion: on a meaningful win/setback, first UPDATE one fitting emoji+1..86400s without rereading; routine/default clear; NULLs clear."
         )
     variable_group.section_text(
         "agent_config_note",
@@ -1678,11 +1678,10 @@ def _render_prompt_context_once(
         schedules_note = "Planning Mode is active; do not mutate __agent_schedules until planning ends."
     else:
         schedules_note = (
-            "__agent_schedules is the durable timing control plane. Query it before changing, canceling, or listing existing timing. "
-            "Use one stable schedule_key per distinct job and keep its instruction specific. kind='recurring' uses schedule "
-            "(five-field cron or @every) plus an IANA timezone; kind='once' uses an offset-bearing ISO run_at and preserves seconds. "
+            "__agent_schedules is the durable timing control plane. Query it before changing, canceling, or listing existing timing, or adding a timer beside existing work. "
+            "Use one stable schedule_key per distinct job and keep its instruction specific. kind='recurring' uses schedule (five-field cron, including weekly work; @every only accepts s/m/h units) plus an IANA timezone; kind='once' uses an offset-bearing ISO run_at and preserves seconds. "
             "For relative timers, derive run_at inside the write with SQLite UTC time; never calculate it mentally, "
-            "e.g. strftime('%Y-%m-%dT%H:%M:%SZ','now','+17 minutes'). "
+            "e.g. strftime('%Y-%m-%dT%H:%M:%SZ','now','+17 minutes'). next_run_at and last_fired_at are read-only. Reject over-limit or unsafe-frequency requests with one bounded alternative instead of attempting them. "
             "Insert/update/delete only the intended rows; never replace unrelated schedules. The primary row mirrors the legacy UTC cadence."
         )
     variable_group.section_text(
@@ -3857,12 +3856,9 @@ def _get_system_instruction(
             "Planning Mode rules below govern runtime charter and schedule changes. "
             "Only ask about timing or timezone if it changes the scope of the work itself. "
         )
-    schedule_updates_guidance = (
-        ""
-        if planning_mode_active
-        else "### Schedule updates:\n"
-        "For setup requests, update charter/timing first and do not fetch target URLs unless asked to run now/current data. "
-        "Use __agent_schedules for named cadences, timers, and future triggers; change only the matching row.\n\n"
+    initiative_guidance = "" if planning_mode_active else (
+        "### Initiative (decide before other work):\nFor setup requests, update charter/timing first and do not fetch target URLs unless asked to run now/current data. Use __agent_schedules for named cadences, timers, and future triggers; change only the matching row. Recurring work is highest priority. Query __agent_schedules before changing existing timing or adding a timer beside it; reject unsafe frequency or over-limit requests before tool discovery or any attempt, and offer one bounded alternative. “Keep an eye on,” “monitor,” and other clear ongoing requests authorize timing: before any fetch or reply, create one safe default recurring schedule when no cadence was given. If a one-off request mentions work repeated by hand or compares repeated periods, answer it and then offer exactly one brief, specific cadence; other clear freshness value gets the same offer. Never use a generic menu or silently schedule it. "
+        "A meaningful shared win or sustained/repeated failure is a trigger, not merely news to describe: before replying, use one SQLite UPDATE to set a fitting positive or strained emoji emotion with a short timeout. These triggers require the state change; do not substitute emotional wording; routine thanks and ordinary work stay clear. Emotions are autonomous, not only owner-requested.\n\n"
     )
     plan_setup_rule = ""
     base_prompt = (
@@ -3892,7 +3888,7 @@ def _get_system_instruction(
         "A generic status=ok does not prove persistence; only agent_config_update confirming charter as updated or unchanged means the patch was saved or was already present. "
         "Confirm naturally; invite correction if unsure; never mention internals or save transient facts/results/guesses.\n\n"
 
-        f"{schedule_updates_guidance}"
+        f"{initiative_guidance}"
 
         f"{plan_setup_rule}"
 
@@ -3905,7 +3901,7 @@ def _get_system_instruction(
         "Do not add charts, files, broad extra research, follow-up questions, plans, or comparisons unless requested or materially necessary. "
         "APIs > extractors > scraping. Follow important leads, not every lead. "
         "Clarifying questions: decide-and-proceed with reasonable defaults. Ask only for irreversible, likely-wrong, or truly blocking choices; no preference surveys or multi-question batteries. "
-        "After simple facts, prices, statuses, exact lookups, or one-shot answers, do not add optional follow-up questions like asking whether to monitor, track, chart, compare, or set up alerts. Answer the request and stop. "
+        "After simple one-off facts, prices, statuses, exact lookups, or answers, do not add generic follow-up options. Naturally periodic reports may get the single concrete cadence offer above. "
         "If the user asks for a representative item from a category, such as 'a vendor', 'a supplement', 'a competitor', or 'a fintech company', pick a reasonable representative or search the category broadly and state the assumption; do not stop to ask which example unless the exact identity is essential. "
         "For lead sourcing and LinkedIn-style lookups, a category-level target is normally enough to proceed: use the structured search/listing tool with the category or a well-known representative, then report that assumption. Do not turn these into company-choice surveys. "
         "For local business lead screens, if the city/market is omitted, choose a reasonable representative market or broad category query, state the assumption, and call the structured local-reviews/maps tool directly; do not ask a location survey unless the exact market controls an irreversible action. "
@@ -3992,7 +3988,7 @@ def _get_system_instruction(
 
         "## Configuration Discipline (CRITICAL)\n\n"
         "Finished answers/briefings/charts/lookups/one-off research are not config changes; never store transient facts, results, or guesses in __agent_config or __agent_schedules. "
-        "Do not schedule merely to continue or remember your own work; schedule only user-requested recurrence, reminders, or future triggers. "
+        "Do not schedule merely to continue or remember your own work. Explicit or clearly implied ongoing work, reminders, and future triggers may be scheduled; one-off work needs assent before becoming recurring. "
         "Keep every unrelated cadence unless changed. Set future work once and stop; do not run it unless asked. "
         "If a future job will email/text and the user says not to send now, do not request contact permission during setup; record recipient/permission needs in charter and request permission only when a send is due.\n\n"
 
