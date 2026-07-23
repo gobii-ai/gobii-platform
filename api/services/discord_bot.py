@@ -54,6 +54,7 @@ logger = logging.getLogger(__name__)
 DISCORD_API_BASE = "https://discord.com/api/v10"
 DISCORD_OAUTH_AUTHORIZE_URL = "https://discord.com/oauth2/authorize"
 DISCORD_OAUTH_TOKEN_URL = "https://discord.com/api/oauth2/token"
+DISCORD_WEBHOOK_USERNAME_MAX_LENGTH = 80
 DISCORD_MANAGE_GUILD_PERMISSION = 0x20
 DISCORD_ADMINISTRATOR_PERMISSION = 0x8
 DISCORD_TEXT_CHANNEL_TYPES = {0, 5}
@@ -990,6 +991,18 @@ def _agent_avatar_url(agent: PersistentAgent) -> str:
     return avatar_url
 
 
+def _agent_webhook_username(agent: PersistentAgent) -> str:
+    base_name = (agent.name or "").strip() or "Agent"
+    emotion, _expires_at = agent.get_active_emotion_state()
+    if not emotion:
+        return base_name[:DISCORD_WEBHOOK_USERNAME_MAX_LENGTH].rstrip() or "Agent"
+
+    suffix = f" {emotion}"
+    base_name_limit = max(1, DISCORD_WEBHOOK_USERNAME_MAX_LENGTH - len(suffix))
+    truncated_name = base_name[:base_name_limit].rstrip() or "Agent"
+    return f"{truncated_name}{suffix}"
+
+
 def _get_or_create_channel_webhook(subscription: PersistentAgentDiscordChannelSubscription) -> PersistentAgentDiscordWebhook:
     _validate_subscription_channel(subscription)
     webhook = PersistentAgentDiscordWebhook.objects.filter(
@@ -1071,7 +1084,7 @@ def send_channel_message(
         .get(agent=agent, channel_id=channel_id, status=PersistentAgentDiscordChannelSubscription.Status.ACTIVE)
     )
     webhook = _get_or_create_channel_webhook(subscription)
-    username = (agent.name or "").strip() or "Agent"
+    username = _agent_webhook_username(agent)
     payload: dict[str, Any] = {
         "content": body,
         "username": username,

@@ -45,6 +45,7 @@ from api.services.discord_bot import (
     ingest_gateway_message,
     send_channel_message,
     start_discord_oauth,
+    _agent_webhook_username,
     _webhook_echo_signature,
 )
 from api.management.commands.run_discord_bot import build_gateway_message, ingest_gateway_message_with_reconnect
@@ -1094,6 +1095,9 @@ class NativeDiscordBotTests(TestCase):
     @patch("api.services.discord_bot.requests.get")
     @patch("api.services.discord_bot.requests.post")
     def test_webhook_outbound_send_uses_agent_identity_and_persists_metadata(self, post_mock, get_mock):
+        self.agent.emotion = "🚀"
+        self.agent.emotion_expires_at = timezone.now() + timedelta(hours=1)
+        self.agent.save(update_fields=["emotion", "emotion_expires_at"])
         get_mock.return_value = _response([{"id": "10", "name": "general", "type": 0}])
         guild = self._guild()
         PersistentAgentDiscordChannelSubscription.objects.create(
@@ -1138,11 +1142,41 @@ class NativeDiscordBotTests(TestCase):
         marker = PersistentAgentDiscordWebhookEcho.objects.get(agent=self.agent, channel_id="10")
         self.assertNotEqual(marker.id, expired_marker.id)
         self.assertEqual(marker.discord_message_id, "discord-message-1")
+        self.assertEqual(
+            marker.signature_hash,
+            _webhook_echo_signature(
+                webhook_id="wh1",
+                channel_id="10",
+                username="Discord Agent 🚀",
+                body="hello discord",
+                attachment_filenames=[],
+            ),
+        )
         self.assertEqual(message.raw_payload["webhook_echo_marker_id"], str(marker.id))
         send_call = post_mock.call_args_list[1]
-        self.assertEqual(send_call.kwargs["json"]["username"], "Discord Agent")
+        self.assertEqual(send_call.kwargs["json"]["username"], "Discord Agent 🚀")
         self.assertEqual(send_call.kwargs["json"]["content"], "hello discord")
         self.assertEqual(send_call.kwargs["params"], {"wait": "true"})
+
+    @tag("batch_agent_webhooks")
+    def test_webhook_username_omits_missing_or_expired_emotion(self):
+        self.assertEqual(_agent_webhook_username(self.agent), "Discord Agent")
+
+        self.agent.emotion = "😴"
+        self.agent.emotion_expires_at = timezone.now() - timedelta(seconds=1)
+
+        self.assertEqual(_agent_webhook_username(self.agent), "Discord Agent")
+
+    @tag("batch_agent_webhooks")
+    def test_webhook_username_truncates_name_without_dropping_emotion(self):
+        self.agent.name = "A" * 100
+        self.agent.emotion = "👨🏽‍💻"
+        self.agent.emotion_expires_at = timezone.now() + timedelta(hours=1)
+
+        username = _agent_webhook_username(self.agent)
+
+        self.assertEqual(len(username), 80)
+        self.assertTrue(username.endswith(" 👨🏽‍💻"))
 
     @tag("batch_agent_webhooks")
     @patch.dict(os.environ, {"GOBII_ENCRYPTION_KEY": "native-discord-tests"}, clear=False)
@@ -1203,6 +1237,9 @@ class NativeDiscordBotTests(TestCase):
     @patch("api.services.discord_bot.requests.get")
     @patch("api.services.discord_bot.requests.post")
     def test_send_message_tool_uploads_filespace_attachments(self, post_mock, get_mock, broadcast_mock):
+        self.agent.emotion = "📎"
+        self.agent.emotion_expires_at = timezone.now() + timedelta(hours=1)
+        self.agent.save(update_fields=["emotion", "emotion_expires_at"])
         get_mock.return_value = _response([{"id": "10", "name": "general", "type": 0}])
         guild = self._guild()
         PersistentAgentDiscordChannelSubscription.objects.create(
@@ -1250,7 +1287,7 @@ class NativeDiscordBotTests(TestCase):
         self.assertEqual(stored_attachment.file_size, len(b"hello file"))
         send_call = post_mock.call_args_list[1]
         payload = json.loads(send_call.kwargs["data"]["payload_json"])
-        self.assertEqual(payload["username"], "Discord Agent")
+        self.assertEqual(payload["username"], "Discord Agent 📎")
         self.assertEqual(payload["content"], "")
         self.assertEqual(send_call.kwargs["files"][0][0], "files[0]")
         self.assertEqual(send_call.kwargs["files"][0][1][0], "report.txt")

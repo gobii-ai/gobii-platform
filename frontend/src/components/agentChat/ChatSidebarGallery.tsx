@@ -1,6 +1,7 @@
 import { Mail, MessageSquare, Plus, Settings, Star } from 'lucide-react'
 
 import type { AgentRosterEntry } from '../../types/agentRoster'
+import { AgentEmotionIndicator } from '../common/AgentEmotionIndicator'
 import { AgentCreateSplitButton, type TeamTemplateCreateMenu } from './AgentCreateSplitButton'
 import { AgentEmptyState, AgentListSectionHeader } from './ChatSidebarParts'
 import { AgentChatAvatar, AgentChatIconButton, AgentChatPill, joinClassNames } from './uiPrimitives'
@@ -88,14 +89,20 @@ function GalleryCard({
           <AgentChatAvatar
             name={agent.name || 'Agent'}
             avatarUrl={agent.avatarUrl}
-            emotion={agent.emotion}
-            emotionExpiresAt={agent.emotionExpiresAt}
             className="agent-gallery-card__avatar"
             imageClassName="agent-gallery-card__avatar-image"
             textClassName="agent-gallery-card__avatar-text"
           />
           <div className="agent-gallery-card__hero-meta">
-            <span className="agent-gallery-card__name">{agent.name || 'Agent'}</span>
+            <span className="agent-gallery-card__name-row">
+              <span className="agent-gallery-card__name">{agent.name || 'Agent'}</span>
+              <AgentEmotionIndicator
+                name={agent.name || 'Agent'}
+                emotion={agent.emotion}
+                emotionExpiresAt={agent.emotionExpiresAt}
+                className="agent-gallery-card__emotion"
+              />
+            </span>
             {pendingRequestCount > 0 ? (
               <AgentChatPill className="agent-roster-pending-pill" tone="info">
                 {pendingRequestCount} {pendingRequestCount === 1 ? 'request' : 'requests'}

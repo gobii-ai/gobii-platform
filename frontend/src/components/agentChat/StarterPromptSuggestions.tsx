@@ -1,6 +1,6 @@
 import { memo } from 'react'
-import { ChevronRight, FileText, Lightbulb, Link2, ListChecks } from 'lucide-react'
-import { AgentChatSectionCard } from './uiPrimitives'
+import { ChevronRight, EyeOff, FileText, Lightbulb, LightbulbOff, Link2, ListChecks } from 'lucide-react'
+import { AgentChatButton, AgentChatSectionCard } from './uiPrimitives'
 
 export type StarterPrompt = {
   id: string
@@ -54,6 +54,32 @@ export const StarterPromptSuggestions = memo(function StarterPromptSuggestions({
     >
       <div className="starter-prompts-card__header">
         <h3 className="starter-prompts-card__title">Suggested follow-ups</h3>
+        {onDismiss || onTurnOff ? (
+          <div className="starter-prompts-card__actions" role="group" aria-label="Suggestion display options">
+            {onDismiss ? (
+              <AgentChatButton
+                className="starter-prompts-card__action"
+                size="sm"
+                onClick={onDismiss}
+                title="Hide this set until the agent replies or finishes new work"
+              >
+                <EyeOff className="starter-prompts-card__action-icon" aria-hidden="true" />
+                Hide for now
+              </AgentChatButton>
+            ) : null}
+            {onTurnOff ? (
+              <AgentChatButton
+                className="starter-prompts-card__action"
+                size="sm"
+                onClick={onTurnOff}
+                title="Hide future suggestions until you turn them back on in Settings"
+              >
+                <LightbulbOff className="starter-prompts-card__action-icon" aria-hidden="true" />
+                Turn off suggestions
+              </AgentChatButton>
+            ) : null}
+          </div>
+        ) : null}
       </div>
       <div className="starter-prompts-card__rows" role="list">
         {loading
@@ -97,30 +123,6 @@ export const StarterPromptSuggestions = memo(function StarterPromptSuggestions({
             )
           })}
       </div>
-      {onDismiss || onTurnOff ? (
-        <div className="starter-prompts-card__actions" role="group" aria-label="Suggestion display options">
-          {onDismiss ? (
-            <button
-              type="button"
-              className="starter-prompts-card__action"
-              onClick={onDismiss}
-              title="Hide this set until the agent replies or finishes new work"
-            >
-              Hide for now
-            </button>
-          ) : null}
-          {onTurnOff ? (
-            <button
-              type="button"
-              className="starter-prompts-card__action"
-              onClick={onTurnOff}
-              title="Hide future suggestions until you turn them back on in Settings"
-            >
-              Turn off suggestions
-            </button>
-          ) : null}
-        </div>
-      ) : null}
       {loading ? <span className="sr-only">Loading suggested follow-ups</span> : null}
     </AgentChatSectionCard>
   )
