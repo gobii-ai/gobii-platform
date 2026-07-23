@@ -296,7 +296,7 @@ describe('AgentComposer pending action insights panel', () => {
     expect(screen.getByText('Stripe API key')).toBeInTheDocument()
   })
 
-  it('keeps a saved collapsed preference when pending requests arrive', async () => {
+  it('temporarily opens a saved collapsed panel when new questions arrive', async () => {
     const handleExpandedPreferenceChange = vi.fn()
     const { rerender } = renderAgentComposer({
       insightsPanelExpandedPreference: false,
@@ -308,7 +308,7 @@ describe('AgentComposer pending action insights panel', () => {
     rerender(
       <AgentComposer
         onSubmit={vi.fn(async () => undefined)}
-        pendingActionRequests={[makeRequestedSecretsAction()]}
+        pendingActionRequests={[makeHumanInputAction()]}
         insightsLoading={false}
         isProcessing={false}
         insightsPanelExpandedPreference={false}
@@ -319,13 +319,13 @@ describe('AgentComposer pending action insights panel', () => {
     await waitFor(() => {
       expect(screen.getByText('Needs your input')).toBeInTheDocument()
     })
-    expect(screen.getByText('1 request')).toBeInTheDocument()
-    expect(screen.queryByText('Stripe API key')).not.toBeInTheDocument()
+    expect(screen.getByText('Which account should I use?')).toBeInTheDocument()
     expect(handleExpandedPreferenceChange).not.toHaveBeenCalled()
 
     fireEvent.click(screen.getByText('Needs your input').closest('.composer-working-header-row') as HTMLElement)
 
-    expect(handleExpandedPreferenceChange).toHaveBeenCalledWith(true)
+    expect(handleExpandedPreferenceChange).toHaveBeenCalledWith(false)
+    expect(screen.queryByText('Which account should I use?')).not.toBeInTheDocument()
   })
 
   it('stays collapsed while a saved panel preference hydrates', () => {

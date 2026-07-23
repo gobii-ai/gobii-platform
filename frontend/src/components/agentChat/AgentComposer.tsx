@@ -722,7 +722,9 @@ export const AgentComposer = memo(function AgentComposer({
   const [draftHumanInputResponses, setDraftHumanInputResponses] = useState<Record<string, HumanInputComposerResponse>>({})
   const draftHumanInputResponsesRef = useRef<Record<string, HumanInputComposerResponse>>({})
   const [autoWorkingExpanded, setAutoWorkingExpanded] = useState(true)
-  const [pendingActionsForceExpanded, setPendingActionsForceExpanded] = useState(() => pendingActionRequests.length > 0)
+  const hasPendingActions = pendingActionRequests.length > 0
+  const hasPendingQuestions = pendingActionRequests.some((action) => action.kind === 'human_input')
+  const [pendingQuestionsForceExpanded, setPendingQuestionsForceExpanded] = useState(hasPendingQuestions)
   const { isProprietaryMode } = useAppSelector(selectSubscriptionState)
   const [appsModal, showAppsModal] = useModal()
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
@@ -765,11 +767,10 @@ export const AgentComposer = memo(function AgentComposer({
   // Track previous processing state for auto-expand/collapse
   const wasProcessingRef = useRef(isProcessing)
   const isProcessingRef = useRef(isProcessing)
-  const hadPendingActionsRef = useRef(false)
-  const hasPendingActions = pendingActionRequests.length > 0
-  const resolvedWorkingExpanded = insightsPanelPreferenceHydrated
-    ? insightsPanelExpandedPreference ?? (pendingActionsForceExpanded || autoWorkingExpanded)
-    : false
+  const resolvedWorkingExpanded = pendingQuestionsForceExpanded
+    || (insightsPanelPreferenceHydrated
+      ? insightsPanelExpandedPreference ?? autoWorkingExpanded
+      : false)
 
   useEffect(() => {
     isProcessingRef.current = isProcessing
@@ -788,15 +789,6 @@ export const AgentComposer = memo(function AgentComposer({
     }
     wasProcessingRef.current = isProcessing
   }, [insightsPanelExpandedPreference, isProcessing])
-
-  useEffect(() => {
-    if (hasPendingActions && !hadPendingActionsRef.current) {
-      setPendingActionsForceExpanded(true)
-    } else if (!hasPendingActions && hadPendingActionsRef.current) {
-      setPendingActionsForceExpanded(false)
-    }
-    hadPendingActionsRef.current = hasPendingActions
-  }, [hasPendingActions])
 
   const MAX_COMPOSER_HEIGHT = 320
 
@@ -967,18 +959,22 @@ export const AgentComposer = memo(function AgentComposer({
       signature: pendingActionTabSignature,
     }
 
+    if (!hasPendingQuestions) setPendingQuestionsForceExpanded(false)
     if (!pendingActionTabs.length || !hasPendingSignatureChanged) {
       return
     }
 
-    setPendingActionsForceExpanded(true)
+    const shouldRevealChangedQuestion = changedPendingTab?.pendingKind === 'questions'
+    if (shouldRevealChangedQuestion) {
+      setPendingQuestionsForceExpanded(true)
+    }
 
     const activePendingTabStillOpen = Boolean(
       activeWorkingTabId
       && workingTabIds.has(activeWorkingTabId)
       && isPendingWorkingTabId(activeWorkingTabId),
     )
-    if (activePendingTabStillOpen) {
+    if (activePendingTabStillOpen && (!shouldRevealChangedQuestion || resolvedWorkingExpanded)) {
       return
     }
 
@@ -990,8 +986,10 @@ export const AgentComposer = memo(function AgentComposer({
     activeWorkingTabId,
     agentId,
     focusKey,
+    hasPendingQuestions,
     pendingActionTabSignature,
     pendingActionTabs,
+    resolvedWorkingExpanded,
     selectWorkingTab,
     workingTabIds,
   ])
@@ -1074,7 +1072,7 @@ export const AgentComposer = memo(function AgentComposer({
   const handlePanelToggle = useCallback(() => {
     const newExpanded = !resolvedWorkingExpanded
     if (!newExpanded) {
-      setPendingActionsForceExpanded(false)
+      setPendingQuestionsForceExpanded(false)
     }
     if (onInsightsPanelExpandedPreferenceChange) {
       onInsightsPanelExpandedPreferenceChange(newExpanded)
