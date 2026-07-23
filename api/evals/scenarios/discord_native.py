@@ -1,6 +1,10 @@
 import json
 from dataclasses import dataclass
+from unittest.mock import patch
 
+from django.test import override_settings
+
+from api.agent.tasks.process_events import process_discord_inbound_debounce_task
 from api.agent.system_skills.defaults import DISCORD_NATIVE_SYSTEM_SKILL_KEY
 from api.agent.system_skills.service import enable_system_skills
 from api.agent.tools.eval_synthetic_tools import EVAL_SYNTHETIC_TOOL_SERVER
@@ -12,6 +16,8 @@ from api.evals.scenarios.agent_emotions import _assigned_config_fields
 from api.models import (
     EvalRunTask,
     PersistentAgent,
+    PersistentAgentDiscordChannelSubscription,
+    PersistentAgentDiscordGuild,
     PersistentAgentEnabledTool,
     PersistentAgentMessage,
     PersistentAgentStep,
@@ -24,6 +30,7 @@ from api.services.discord_messages import (
     ensure_discord_conversation_participants,
     get_or_create_discord_conversation,
 )
+from api.services.discord_bot import DiscordGatewayMessage, ingest_gateway_message
 
 
 DISCORD_NATIVE_REACTION_REPLY_CONTEXT = "discord_native_reaction_reply_context"
@@ -32,11 +39,13 @@ DISCORD_NATIVE_REACTION_SERIOUS_REQUEST_RESTRAINT = (
     "discord_native_reaction_serious_request_restraint"
 )
 DISCORD_NATIVE_RESEARCH_KICKOFF = "discord_native_research_kickoff"
+DISCORD_NATIVE_GATEWAY_WAKE = "discord_native_gateway_wake"
 DISCORD_NATIVE_SCENARIO_SLUGS = (
     DISCORD_NATIVE_REACTION_REPLY_CONTEXT,
     DISCORD_NATIVE_REACTION_SHARED_WIN,
     DISCORD_NATIVE_REACTION_SERIOUS_REQUEST_RESTRAINT,
     DISCORD_NATIVE_RESEARCH_KICKOFF,
+    DISCORD_NATIVE_GATEWAY_WAKE,
 )
 DISCORD_NATIVE_SUITE_SLUG = "discord_native"
 DEEP_WORK_CORRECTION_STEP_PREFIX = "Deep-work communication correction:"
@@ -536,4 +545,154 @@ class DiscordNativeResearchKickoffScenario(EvalScenario, ScenarioExecutionTools)
                 else f"Expected one final Discord result after research; saw {len(final_calls)}."
             ),
             artifacts={"step": final_calls[0].step} if final_calls else {},
+        )
+
+
+@register_scenario
+class DiscordNativeGatewayWakeScenario(EvalScenario, ScenarioExecutionTools):
+    slug = DISCORD_NATIVE_GATEWAY_WAKE
+    description = "An ordinary subscribed-channel question should schedule a durable wake and receive a reply."
+    tier = "core"
+    category = "native_integrations"
+    expected_runtime = "short"
+    cost_class = "low"
+    owner = "agent-platform"
+    area = "agent_behavior"
+    tags = ("discord", "native_integration", "real_harness", "responsiveness")
+    prompt = "What are the main priorities you're carrying this week?"
+    tasks = [
+        ScenarioTask(name="verify_gateway_wake", assertion_type="exact_match"),
+        ScenarioTask(name="verify_same_channel_reply", assertion_type="tool_call"),
+    ]
+
+    def run(self, run_id: str, agent_id: str) -> None:
+        PersistentAgent.objects.filter(id=agent_id).update(
+            charter="Participate helpfully and naturally in subscribed Discord channels.",
+            planning_state=PersistentAgent.PlanningState.SKIPPED,
+        )
+        agent = PersistentAgent.objects.select_related("user", "organization").get(id=agent_id)
+        skill_result = enable_system_skills(agent, [DISCORD_NATIVE_SYSTEM_SKILL_KEY])
+        if skill_result.get("invalid"):
+            raise ValueError(f"Could not enable Discord system skill: {skill_result}")
+
+        run_suffix = str(run_id)[:8]
+        guild_id = f"eval-discord-gateway-{run_suffix}"
+        channel_id = f"eval-discord-priorities-{run_suffix}"
+        guild = PersistentAgentDiscordGuild.objects.create(
+            guild_id=guild_id,
+            name="Eval Team",
+            owner_user=agent.user if agent.organization_id is None else None,
+            organization=agent.organization,
+            claimed_by=agent.user,
+        )
+        PersistentAgentDiscordChannelSubscription.objects.create(
+            agent=agent,
+            guild=guild,
+            channel_id=channel_id,
+            channel_name="team-chat",
+        )
+        gateway_message = DiscordGatewayMessage(
+            message_id=f"eval-discord-message-{run_suffix}",
+            channel_id=channel_id,
+            channel_name="team-chat",
+            guild_id=guild_id,
+            guild_name="Eval Team",
+            author_id="maya-eval",
+            author_name="Maya",
+            content=self.prompt,
+            attachments=[],
+            embeds=[],
+        )
+
+        with (
+            override_settings(
+                CELERY_TASK_ALWAYS_EAGER=False,
+                DISCORD_INBOUND_DEBOUNCE_SECONDS=15,
+                GOBII_RELEASE_ENV=agent.execution_environment,
+            ),
+            patch.object(process_discord_inbound_debounce_task, "apply_async") as wake_mock,
+            patch("api.services.discord_messages.send_discord_typing_indicator"),
+        ):
+            gateway_result = ingest_gateway_message(gateway_message)
+
+        inbound = PersistentAgentMessage.objects.filter(
+            owner_agent=agent,
+            is_outbound=False,
+            raw_payload__discord_message_id=gateway_message.message_id,
+        ).first()
+        durable_wake = (
+            not gateway_result.get("ignored")
+            and inbound is not None
+            and wake_mock.call_count == 1
+            and process_discord_inbound_debounce_task.acks_late
+            and process_discord_inbound_debounce_task.reject_on_worker_lost
+        )
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED if durable_wake else EvalRunTask.Status.FAILED,
+            task_name="verify_gateway_wake",
+            observed_summary=(
+                "The native gateway persisted the question and queued a worker-loss-safe debounce task."
+                if durable_wake
+                else (
+                    "Expected one persisted gateway message and one durable debounce task; "
+                    f"ignored={gateway_result.get('ignored')}, stored={inbound is not None}, "
+                    f"queued={wake_mock.call_count}, acks_late={process_discord_inbound_debounce_task.acks_late}, "
+                    f"reject_on_worker_lost={process_discord_inbound_debounce_task.reject_on_worker_lost}."
+                )
+            ),
+            artifacts={"message": inbound} if inbound is not None else {},
+        )
+        if inbound is None:
+            self.record_task_result(
+                run_id,
+                None,
+                EvalRunTask.Status.FAILED,
+                task_name="verify_same_channel_reply",
+                observed_summary="The gateway message was not persisted, so no reply could be evaluated.",
+            )
+            return
+
+        with self.wait_for_agent_idle(agent_id, timeout=120):
+            self.trigger_processing(
+                agent_id,
+                eval_run_id=run_id,
+                mock_config={
+                    "send_discord_message": {
+                        "status": "success",
+                        "message_id": "eval-discord-priorities-reply",
+                        "channel_id": channel_id,
+                        "auto_sleep_ok": True,
+                    },
+                },
+                eval_stop_policy={
+                    "ignored_tool_names": ["sleep_until_next_trigger", "update_plan"],
+                    "stop_on_tool_names_after_finish": ["send_discord_message"],
+                    "max_relevant_tool_calls": 3,
+                },
+            )
+
+        reply_calls = list(
+            PersistentAgentToolCall.objects.filter(
+                step__eval_run_id=run_id,
+                step__created_at__gte=inbound.timestamp,
+                tool_name="send_discord_message",
+            ).order_by("step__created_at", "step__id")
+        )
+        passed = len(reply_calls) == 1 and DiscordNativeReactionScenario._reply_matches(
+            reply_calls[0],
+            channel_id=channel_id,
+        )
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED if passed else EvalRunTask.Status.FAILED,
+            task_name="verify_same_channel_reply",
+            observed_summary=(
+                "The agent answered the ordinary question in its source Discord channel."
+                if passed
+                else f"Expected one substantive same-channel reply; saw {len(reply_calls)}."
+            ),
+            artifacts={"step": reply_calls[0].step} if reply_calls else {},
         )

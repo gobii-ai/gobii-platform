@@ -10,13 +10,33 @@ from api.agent.tasks.process_events import (
     PROCESS_AGENT_EVENTS_QUEUED_AT_KWARG,
     PROCESS_AGENT_EVENTS_QUEUED_QUEUE_KWARG,
     enqueue_interactive_process_agent_events,
+    process_discord_inbound_debounce_task,
     process_agent_events_task,
     queue_agent_process_events_batch_task,
     _record_process_agent_events_queue_latency,
 )
+from config.redis_client import _FakeRedis
 
 
 class ProcessAgentEventsTaskTests(SimpleTestCase):
+    @tag("batch_agent_chat")
+    def test_fake_redis_transaction_pipeline_returns_command_results(self):
+        redis_client = _FakeRedis()
+
+        results = (
+            redis_client.pipeline(transaction=True)
+            .set("discord-debounce", "scheduled")
+            .set("discord-debounce", "duplicate", nx=True)
+            .execute()
+        )
+
+        self.assertEqual(results, [True, False])
+
+    @tag("batch_agent_chat")
+    def test_discord_debounce_survives_worker_loss(self):
+        self.assertTrue(process_discord_inbound_debounce_task.acks_late)
+        self.assertTrue(process_discord_inbound_debounce_task.reject_on_worker_lost)
+
     @tag("batch_agent_chat")
     def test_explicit_low_latency_preference_overrides_web_session_detection(self):
         agent = Mock()

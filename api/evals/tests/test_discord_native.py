@@ -7,12 +7,14 @@ import api.evals.loader  # noqa: F401 - registers scenarios and suites
 from api.agent.tools.add_discord_reaction import get_add_discord_reaction_tool
 from api.evals.registry import ScenarioRegistry
 from api.evals.scenarios.discord_native import (
+    DISCORD_NATIVE_GATEWAY_WAKE,
     DISCORD_NATIVE_REACTION_SERIOUS_REQUEST_RESTRAINT,
     DISCORD_NATIVE_REACTION_REPLY_CONTEXT,
     DISCORD_NATIVE_REACTION_SHARED_WIN,
     DISCORD_NATIVE_RESEARCH_KICKOFF,
     DISCORD_NATIVE_SCENARIO_SLUGS,
     DISCORD_NATIVE_SUITE_SLUG,
+    DiscordNativeGatewayWakeScenario,
     DiscordNativeReactionReplyContextScenario,
     DiscordNativeResearchKickoffScenario,
 )
@@ -34,6 +36,7 @@ class DiscordNativeScenarioTests(SimpleTestCase):
             ScenarioRegistry.get(DISCORD_NATIVE_REACTION_SERIOUS_REQUEST_RESTRAINT)
         )
         self.assertIsNotNone(ScenarioRegistry.get(DISCORD_NATIVE_RESEARCH_KICKOFF))
+        self.assertIsNotNone(ScenarioRegistry.get(DISCORD_NATIVE_GATEWAY_WAKE))
 
     def test_research_kickoff_prompt_does_not_prescribe_responsiveness_contract(self):
         prompt = DiscordNativeResearchKickoffScenario.prompt.casefold()
@@ -44,6 +47,19 @@ class DiscordNativeScenarioTests(SimpleTestCase):
             "kickoff",
             "progress",
             "working on",
+        ):
+            with self.subTest(implementation_term=implementation_term):
+                self.assertNotIn(implementation_term, prompt)
+
+    def test_gateway_wake_prompt_does_not_prescribe_dispatch_or_reply_behavior(self):
+        prompt = DiscordNativeGatewayWakeScenario.prompt.casefold()
+
+        for implementation_term in (
+            "acknowledge",
+            "discord",
+            "reply",
+            "respond",
+            "wake",
         ):
             with self.subTest(implementation_term=implementation_term):
                 self.assertNotIn(implementation_term, prompt)

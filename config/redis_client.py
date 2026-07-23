@@ -54,10 +54,11 @@ class _FakePipeline:
         return self
 
     def execute(self):
+        results = []
         for name, args, kwargs in self._ops:
-            getattr(self._client, name)(*args, **kwargs)
+            results.append(getattr(self._client, name)(*args, **kwargs))
         self._ops.clear()
-        return True
+        return results
 
 
 class _FakeRegisteredScript:
@@ -237,7 +238,7 @@ class _FakeRedis:
         self.set(steps_key, n)
         return [1, n]
 
-    def pipeline(self):
+    def pipeline(self, transaction: bool = True):
         return _FakePipeline(self)
 
     def publish(self, channel: str, message: Any) -> int:
