@@ -1597,8 +1597,29 @@ export function AgentChatPage({
     return refreshTimelineLatestInCache(queryClient, agentIdToRefresh, {
       mode: 'contiguous',
       maxNewerPages: RESUME_TIMELINE_BACKFILL_MAX_NEWER_PAGES,
+      developerMode: developerModeEnabled,
+      staffContext,
     })
-  }, [dispatch, queryClient])
+  }, [developerModeEnabled, queryClient, staffContext])
+
+  useEffect(() => {
+    if (
+      !activeAgentId
+      || !agentContextReady
+      || isNewAgent
+      || shellSubview !== 'chat'
+      || (typeof navigator !== 'undefined' && navigator.onLine === false)
+    ) {
+      return
+    }
+    void runContiguousTimelineBackfill(activeAgentId)
+  }, [
+    activeAgentId,
+    agentContextReady,
+    isNewAgent,
+    runContiguousTimelineBackfill,
+    shellSubview,
+  ])
 
   const syncLatestTimeline = useCallback(async (
     agentIdToRefresh: string,
