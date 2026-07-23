@@ -29,6 +29,7 @@ from api.agent.tools.sqlite_batch import (
     _fix_python_operators,
     _fix_singular_plural_columns,
     _fix_singular_plural_tables,
+    _is_redundant_transaction_wrapper,
     _is_typo,
     _SqliteBatchLimits,
     _should_skip_memory_limits_for_virtualapple_emulation,
@@ -98,6 +99,48 @@ class SqliteBatchToolTests(TestCase):
             self.assertEqual(results[-1]["result"], [{"a": 1}, {"a": 2}])
             self.assertIsInstance(out.get("db_size_mb"), (int, float))
             self.assertIn("Executed 3 queries", out.get("message", ""))
+
+    def test_redundant_transaction_wrapper_does_not_break_batch(self):
+        with self._with_temp_db():
+            out = execute_sqlite_batch(
+                self.agent,
+                {
+                    "sql": (
+                        "BEGIN TRANSACTION;"
+                        "CREATE TABLE prospects(id TEXT PRIMARY KEY, name TEXT);"
+                        "INSERT INTO prospects(id,name) VALUES ('p1','Aster Search');"
+                        "COMMIT;"
+                        "SELECT id,name FROM prospects;"
+                    ),
+                    "will_continue_work": True,
+                },
+            )
+
+        self.assertEqual(out.get("status"), "ok", out.get("message"))
+        self.assertEqual(len(out["results"]), 3)
+        self.assertEqual(
+            out["results"][-1]["result"],
+            [{"id": "p1", "name": "Aster Search"}],
+        )
+        self.assertIn("Executed 3 queries", out.get("message", ""))
+
+    def test_only_transaction_boundaries_are_treated_as_wrappers(self):
+        for sql in (
+            "BEGIN",
+            "BEGIN IMMEDIATE TRANSACTION;",
+            "/* generated wrapper */ COMMIT TRANSACTION;",
+            "END",
+        ):
+            with self.subTest(sql=sql):
+                self.assertTrue(_is_redundant_transaction_wrapper(sql))
+
+        for sql in (
+            "ROLLBACK",
+            "SAVEPOINT agent_work",
+            "SELECT 'BEGIN TRANSACTION' AS note",
+        ):
+            with self.subTest(sql=sql):
+                self.assertFalse(_is_redundant_transaction_wrapper(sql))
 
     def test_named_bindings_preserve_messy_values_across_a_batch(self):
         bindings = {
