@@ -154,25 +154,25 @@ jobs:
       matrix:
         include:
           - batch: shard_01
-            tag: batch_pages batch_sms batch_console_email_oauth batch_token_usage batch_event_parallel batch_allowlist_direction batch_tool_costs batch_output_schema batch_soft_expiration batch_console_api_keys batch_console_allowlist batch_pa_shutdown_triggers complexity_guardrails_batch
+            tag: batch_pages batch_sms batch_token_usage batch_event_parallel batch_allowlist_direction batch_tool_costs batch_output_schema batch_soft_expiration batch_console_api_keys batch_console_allowlist batch_pa_shutdown_triggers complexity_guardrails_batch
           - batch: shard_02
-            tag: batch_mcp_tools batch_human_input batch_eval_fingerprint batch_user_flags batch_api_agents batch_api_tasks pipedream_jit_connect batch_browser_task_db batch_agent_transfer batch_periodic batch_mcp_admin mcp_org_assignment_batch
+            tag: batch_mcp_tools batch_human_input batch_eval_fingerprint batch_api_agents pipedream_jit_connect batch_periodic batch_mcp_admin mcp_org_assignment_batch
           - batch: shard_03
-            tag: batch_pages_signals batch_console_agents batch_organizations referral_batch batch_subscription batch_email_body batch_support_turnstile batch_billing_rollup batch_agent_collaborators batch_api_org_keys batch_spawn_depth batch_compaction batch_browser_agent_max_tokens
+            tag: batch_pages_signals batch_console_agents batch_organizations referral_batch batch_subscription batch_email_body batch_support_turnstile batch_billing_rollup batch_agent_collaborators batch_api_org_keys batch_spawn_depth batch_compaction batch_browser_agent_max_tokens batch_sqlite_autocorrect
           - batch: shard_04
             tag: batch_agent_chat batch_console_api batch_agent_webhooks batch_usage_api batch_forward_detection pipedream_connect http_request_batch batch_system_settings batch_schedule batch_plan_versioning smtp batch_browser_config batch_org_billing
           - batch: shard_05
-            tag: batch_event_processing batch_result_analysis batch_promptree llm_routing_profiles_batch global_secrets_batch batch_agent_invite batch_api_tasks_reads batch_secrets batch_celery_redbeat batch_setup_cookies batch_redis_budget_cleanup batch_dedicated_proxy_models batch_charter_tools
+            tag: batch_event_processing batch_result_analysis llm_routing_profiles_batch global_secrets_batch batch_agent_invite batch_api_tasks_reads batch_celery_redbeat batch_setup_cookies batch_redis_budget_cleanup batch_dedicated_proxy_models batch_charter_tools
           - batch: shard_06
-            tag: batch_event_processing_credits batch_marketing_events batch_email batch_video_generation batch_proxy_selection batch_public_templates batch_email_blocklist batch_global_skill_evals batch_xvfb batch_websocket batch_stripe_config batch_peer_intro
+            tag: batch_event_processing_credits batch_marketing_events batch_email batch_video_generation batch_proxy_selection batch_public_templates batch_email_blocklist batch_global_skill_evals batch_xvfb batch_websocket batch_stripe_config batch_peer_intro batch_secrets batch_agent_transfer
           - batch: shard_07
             tag: batch_sqlite batch_agent_lifecycle batch_console_mcp_servers batch_agent_short_description batch_api_tasks_mutations batch_email_verification batch_peer_dm agent_credit_soft_target_batch batch_console_mcp_oauth batch_native_integrations batch_agent_tags eval_sim batch_recruitment_sourcing batch_image_generation_skill
           - batch: shard_08
-            tag: batch_agent_tools sqlite_analysis batch_event_llm batch_agent_secrets_ctx batch_task_credits batch_allowlist_rules batch_api_decodo batch_llm_intelligence batch_llm_admin_cleanup batch_dedicated_proxy_service batch_pa_step_credits oss_readiness_batch batch_api_serializer batch_fbp_middleware
+            tag: batch_agent_tools sqlite_analysis batch_event_llm batch_agent_secrets_ctx batch_task_credits batch_allowlist_rules batch_api_decodo batch_llm_intelligence batch_llm_admin_cleanup batch_dedicated_proxy_service batch_pa_step_credits oss_readiness_batch batch_api_serializer batch_fbp_middleware batch_browser_task_db batch_console_email_oauth
           - batch: shard_09
-            tag: context_hints_batch batch_text_sanitization batch_billing batch_outbound_delivery batch_console_context batch_agent_limits batch_email_sender_db batch_secrets_profiles batch_contact_requests batch_outbound_dedupe batch_email_allowlist batch_redis_leaks
+            tag: context_hints_batch batch_text_sanitization batch_billing batch_outbound_delivery batch_console_context batch_agent_limits batch_email_sender_db batch_secrets_profiles batch_contact_requests batch_outbound_dedupe batch_email_allowlist batch_redis_leaks batch_api_tasks batch_promptree batch_sqlite_quality
           - batch: shard_10
-            tag: batch_agent_filesystem batch_api_persistent_agents batch_console_agents_management batch_tool_results batch_owner_billing batch_attachment_guidance batch_link_shortener batch_step_compaction batch_browser_profile batch_email_footer batch_outbound_email batch_web_task_followup
+            tag: batch_agent_filesystem batch_api_persistent_agents batch_console_agents_management batch_tool_results batch_owner_billing batch_attachment_guidance batch_link_shortener batch_step_compaction batch_browser_profile batch_email_footer batch_outbound_email batch_web_task_followup batch_user_flags
     env:
       # Ensure Django loads test settings; manage.py still imports config.settings first
       DJANGO_SETTINGS_MODULE: config.test_settings
