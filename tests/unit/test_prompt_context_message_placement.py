@@ -120,10 +120,10 @@ class PromptContextSqlitePlacementTests(TestCase):
             status="complete",
         )
 
-        self.assertIn(
-            "query the model in that batch",
-            prompt_context._get_unreconciled_source_model_warning(self.agent),
-        )
+        warning = prompt_context._get_unreconciled_source_model_warning(self.agent)
+        self.assertIn("Fresh source evidence is reconciled", warning)
+        self.assertIn("still-unread updated table(s): accounts", warning)
+        self.assertNotIn("not reconciled", warning)
         post_update_read = PersistentAgentStep.objects.create(agent=self.agent, description="fresh model read")
         PersistentAgentToolCall.objects.create(
             step=post_update_read,
