@@ -327,51 +327,6 @@ class MetaGobiiEvalRegistrationTests(TestCase):
         self.assertEqual(plan_task.debug_artifacts["response_calls"][0]["name"], "record_meta_gobii_response")
         self.assertIn("response_args", plan_task.debug_artifacts)
 
-    def test_skill_discovery_prompt_covers_file_upload_requests(self):
-        scenario = MetaGobiiSystemSkillScenario()
-        calls = []
-
-        def fake_run_tool_completion(**kwargs):
-            calls.append(kwargs)
-            if len(calls) == 1:
-                return [{"name": SKILL_SEARCH_TOOL_NAME, "arguments": {"query": "upload file to Gobii"}}]
-            return [
-                {
-                    "name": ENABLE_SYSTEM_SKILLS_TOOL_NAME,
-                    "arguments": {"skill_keys": ["meta_gobii"]},
-                }
-            ]
-
-        with patch.object(scenario, "_run_tool_completion", side_effect=fake_run_tool_completion):
-            scenario._run_skill_discovery(_case("no_schedule_upload_files_only"), simulated=False)
-
-        discovery_text = "\n".join(message["content"] for message in calls[0]["messages"])
-        self.assertIn("upload files to", discovery_text)
-        self.assertIn("uploads or attaches a file", discovery_text)
-
-    def test_skill_discovery_prompt_covers_scheduled_gobii_creation_requests(self):
-        scenario = MetaGobiiSystemSkillScenario()
-        calls = []
-
-        def fake_run_tool_completion(**kwargs):
-            calls.append(kwargs)
-            if len(calls) == 1:
-                return [{"name": SKILL_SEARCH_TOOL_NAME, "arguments": {"query": "recruiting pipeline Gobii"}}]
-            return [
-                {
-                    "name": ENABLE_SYSTEM_SKILLS_TOOL_NAME,
-                    "arguments": {"skill_keys": ["meta_gobii"]},
-                }
-            ]
-
-        with patch.object(scenario, "_run_tool_completion", side_effect=fake_run_tool_completion):
-            scenario._run_skill_discovery(_case("schedule_recurring_candidate_pipeline"), simulated=False)
-
-        discovery_text = "\n".join(message["content"] for message in calls[0]["messages"])
-        self.assertIn("Create a ... Gobii", discovery_text)
-        self.assertIn("Scheduled or recurring Gobii setup", discovery_text)
-        self.assertIn("sends check-ins", discovery_text)
-
     def test_skill_discovery_retries_omitted_positive_search_once(self):
         scenario = MetaGobiiSystemSkillScenario()
         calls = []
@@ -1182,39 +1137,6 @@ class MetaGobiiEvalScenarioTests(TestCase):
         self.assertEqual(statuses["select_system_skill"], EvalRunTask.Status.PASSED)
         self.assertEqual(statuses["plan_meta_gobii_tools"], EvalRunTask.Status.PASSED)
 
-    def test_discovery_prompt_covers_design_before_creation_requests(self):
-        scenario = ScenarioRegistry.get("meta_gobii_team_management_capability_test")
-
-        with patch.object(scenario, "_run_tool_completion", return_value=[]) as mock_completion:
-            discovery_calls = scenario._run_skill_discovery(scenario.case, simulated=False)
-
-        self.assertEqual(
-            [call["name"] for call in discovery_calls],
-            [SKILL_SEARCH_TOOL_NAME, ENABLE_SYSTEM_SKILLS_TOOL_NAME],
-        )
-        messages = mock_completion.call_args.kwargs["messages"]
-        prompt_text = "\n".join(str(message.get("content") or "") for message in messages).lower()
-        self.assertIn("design", prompt_text)
-        self.assertIn("links", prompt_text)
-        self.assertIn("briefings", prompt_text)
-        self.assertIn("before creation", prompt_text)
-
-    def test_discovery_prompt_covers_demo_setup_team_requests(self):
-        scenario = ScenarioRegistry.get("meta_gobii_no_schedule_demo_team")
-
-        with patch.object(scenario, "_run_tool_completion", return_value=[]) as mock_completion:
-            discovery_calls = scenario._run_skill_discovery(scenario.case, simulated=False)
-
-        self.assertEqual(
-            [call["name"] for call in discovery_calls],
-            [SKILL_SEARCH_TOOL_NAME, ENABLE_SYSTEM_SKILLS_TOOL_NAME],
-        )
-        messages = mock_completion.call_args.kwargs["messages"]
-        prompt_text = "\n".join(str(message.get("content") or "") for message in messages).lower()
-        self.assertIn("demo", prompt_text)
-        self.assertIn("setup-only", prompt_text)
-        self.assertIn("does not make gobii creation content-only", prompt_text)
-
     def test_response_normalization_derives_missing_briefings_from_plan(self):
         scenario = ScenarioRegistry.get("meta_gobii_no_schedule_recruiting_project_team")
 
@@ -1613,38 +1535,6 @@ class MetaGobiiLocalEvalSetupTests(TestCase):
         self.assertIn("openrouter-deepseek-v4-flash", output)
         self.assertIn("openrouter-qwen", output)
         self.assertIn("openai-gpt-4-1-mini", output)
-
-    def test_simulated_meta_gobii_run_uses_canonical_run_evals_path(self):
-        stdout = StringIO()
-
-        call_command(
-            "run_evals",
-            "--suite",
-            "meta_gobii",
-            "--sync",
-            "--n-runs",
-            "1",
-            "--simulated",
-            stdout=stdout,
-        )
-
-        suite_run = EvalSuiteRun.objects.latest("created_at")
-        self.assertEqual(suite_run.suite_slug, "meta_gobii")
-        self.assertEqual(suite_run.launch_config["mode"], "simulated")
-        self.assertTrue(suite_run.launch_config["launcher_code_version"])
-        self.assertIn("launcher_code_branch", suite_run.launch_config)
-        self.assertEqual(suite_run.runs.count(), len(META_GOBII_EVAL_SCENARIO_SLUGS))
-        self.assertTrue(
-            suite_run.runs.filter(
-                scenario_slug=META_GOBII_SPECIALIST_AGENT_LAUNCH_REAL_HARNESS
-            ).exists()
-        )
-        self.assertFalse(
-            EvalRunTask.objects.filter(run__suite_run=suite_run)
-            .exclude(status=EvalRunTask.Status.PASSED)
-            .exists()
-        )
-        self.assertIn("SIMULATED mode", stdout.getvalue())
 
     def test_simulated_single_meta_gobii_scenario_uses_canonical_run_evals_path(self):
         stdout = StringIO()

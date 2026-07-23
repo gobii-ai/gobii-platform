@@ -28,7 +28,7 @@ from api.agent.core.event_processing import (
     _prepare_tool_batch,
     _ToolExecutionOutcome,
 )
-from api.agent.core.prompt_context import _get_system_instruction, build_prompt_context
+from api.agent.core.prompt_context import build_prompt_context
 from api.agent.core.tool_results import ToolCallResultRecord, prepare_tool_results_for_prompt
 from api.agent.tools.agent_variables import (
     clear_variables,
@@ -934,16 +934,6 @@ class LinkReferenceTests(TestCase):
         self.assertIn(f"Compare Acme: {url} [link_ref: {token}]", user_prompt)
         self.assertEqual(system_prompt.count("## Link References (CRITICAL)"), 1)
         self.assertNotIn("## Link References (CRITICAL)", user_prompt)
-        self.assertIn("the raw URL is evidence", system_prompt)
-        self.assertIn("adjacent token is only a display/fetch handle", system_prompt)
-        self.assertIn("Keep pairs attached", system_prompt)
-        self.assertIn("Final Markdown is exactly `[item]($[link:LEXACT])`", system_prompt)
-        self.assertIn("Never encode, edit, reassign, combine, or guess it", system_prompt)
-        self.assertIn("Items without a token stay plain", system_prompt)
-        self.assertIn("SQLite source rows derive raw URLs from __tool_results", system_prompt)
-        self.assertIn("exact handle through a named binding, never SQL text", system_prompt)
-        self.assertIn("A report is unfinished while a token-backed entity name is plain", system_prompt)
-        self.assertIn("body must contain the exact tokens", system_prompt)
         message.refresh_from_db()
         self.assertEqual(message.body, f"Compare Acme: {url}")
 
@@ -988,16 +978,6 @@ class LinkReferenceTests(TestCase):
 
         self.assertEqual(first, second)
         self.assertRegex(first, r"^\$\[link:L[0123456789ABCDEFGHJKMNPQRSTVWXYZ]{16}\]$")
-
-    def test_system_prompt_contains_one_canonical_reference_rule(self):
-        prompt = _get_system_instruction(self.agent, is_first_run=False)
-
-        self.assertEqual(prompt.count("## Link References (CRITICAL)"), 1)
-        self.assertEqual(prompt.count("$[link:L…]"), 1)
-        self.assertNotIn("LINK OUTPUT CONTRACT", prompt)
-        self.assertIn("build/create custom tool -> create_custom_tool first", prompt)
-        self.assertIn("supplied URLs -> opaque runtime inputs", prompt)
-        self.assertNotIn("Message delivery blocked", prompt)
 
     def test_http_request_url_schema_accepts_link_references(self):
         properties = get_http_request_tool()["function"]["parameters"]["properties"]

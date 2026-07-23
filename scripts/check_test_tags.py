@@ -156,20 +156,74 @@ def collect_tests_and_tags(pyfile: str) -> tuple[int, int, list[str], set[str]]:
     return total, untagged, untagged_list, used_tags
 
 
-def load_ci_tags(ci_yml_path: str = ".github/workflows/ci.yml") -> set[str]:
+def collect_cross_shard_tests(
+    pyfile: str,
+    tag_shards: dict[str, str],
+) -> list[tuple[str, list[tuple[str, str]]]]:
+    """Return tests whose class/method tags assign them to multiple shards."""
+    with open(pyfile, "r", encoding="utf-8") as fh:
+        try:
+            tree = ast.parse(fh.read(), filename=pyfile)
+        except SyntaxError:
+            return []
+
+    constants = collect_module_string_constants(tree)
+    conflicts: list[tuple[str, list[tuple[str, str]]]] = []
+
+    def record_conflict(test_name: str, tags: set[str]) -> None:
+        assignments = sorted(
+            (test_tag, tag_shards[test_tag])
+            for test_tag in tags
+            if test_tag in tag_shards
+        )
+        if len({shard for _, shard in assignments}) > 1:
+            conflicts.append((test_name, assignments))
+
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef) and node.name.startswith("test_"):
+            record_conflict(
+                f"{pyfile}::{node.name}",
+                class_or_func_tags(node.decorator_list, constants),
+            )
+        elif isinstance(node, ast.ClassDef):
+            class_tags = class_or_func_tags(node.decorator_list, constants)
+            for method in node.body:
+                if isinstance(method, ast.FunctionDef) and method.name.startswith("test_"):
+                    method_tags = class_or_func_tags(method.decorator_list, constants)
+                    record_conflict(
+                        f"{pyfile}::{node.name}.{method.name}",
+                        class_tags | method_tags,
+                    )
+
+    return conflicts
+
+
+def load_ci_tag_shards(ci_yml_path: str = ".github/workflows/ci.yml") -> dict[str, str]:
     # Only accept YAML mapping lines that begin with optional spaces then 'tag:'
     # to avoid matching shell strings like: echo "... tag: $TAG".
+    batch_line = re.compile(r"^\s*-\s*batch:\s*['\"]?([A-Za-z0-9_.-]+)['\"]?\s*$")
     tag_line = re.compile(r"^\s*tag:\s*['\"]?([A-Za-z0-9_.\-\s]+)['\"]?\s*$")
-    tags: set[str] = set()
+    tag_shards: dict[str, str] = {}
+    current_batch: str | None = None
     try:
         with open(ci_yml_path, "r", encoding="utf-8") as f:
             for line in f:
-                m = tag_line.match(line)
-                if m:
-                    tags.update(m.group(1).split())
+                batch_match = batch_line.match(line)
+                if batch_match:
+                    current_batch = batch_match.group(1)
+                    continue
+                tag_match = tag_line.match(line)
+                if tag_match and current_batch:
+                    for test_tag in tag_match.group(1).split():
+                        tag_shards[test_tag] = current_batch
+                    current_batch = None
     except FileNotFoundError:
         pass
-    return tags
+    return tag_shards
+
+
+def load_ci_tags(ci_yml_path: str = ".github/workflows/ci.yml") -> set[str]:
+    return set(load_ci_tag_shards(ci_yml_path))
 
 
 def main() -> int:
@@ -182,6 +236,8 @@ def main() -> int:
     total_untagged = 0
     untagged_names: list[str] = []
     used_tags: set[str] = set()
+    tag_shards = load_ci_tag_shards()
+    cross_shard_tests: list[tuple[str, list[tuple[str, str]]]] = []
 
     for f in sorted(files):
         t, u, names, tags = collect_tests_and_tags(f)
@@ -189,8 +245,9 @@ def main() -> int:
         total_untagged += u
         untagged_names.extend(names)
         used_tags |= tags
+        cross_shard_tests.extend(collect_cross_shard_tests(f, tag_shards))
 
-    ci_tags = load_ci_tags()
+    ci_tags = set(tag_shards)
 
     ok = True
     if total_untagged > 0:
@@ -212,6 +269,18 @@ def main() -> int:
             print(f" - {tag}")
     else:
         print("All used tags are present in CI matrix.")
+
+    if cross_shard_tests:
+        ok = False
+        print("Tests assigned to multiple CI shards:")
+        for test_name, assignments in cross_shard_tests:
+            formatted_assignments = ", ".join(
+                f"{test_tag} -> {shard}"
+                for test_tag, shard in assignments
+            )
+            print(f" - {test_name}: {formatted_assignments}")
+    else:
+        print("No tests are assigned to multiple CI shards.")
 
     # Optionally warn for CI tags not used
     unused_ci_tags = ci_tags - used_tags

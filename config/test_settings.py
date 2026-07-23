@@ -24,6 +24,10 @@ os.environ["STRIPE_TEST_SECRET_KEY"] = os.environ.get("STRIPE_TEST_SECRET_KEY") 
 
 from .settings import *
 
+# Production-strength password hashing dominates tests that create users. Tests
+# that exercise a specific hashing algorithm should override this explicitly.
+PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
+
 # -----------------------------------------------------------------------------
 #  Network and LLM isolation
 # -----------------------------------------------------------------------------
