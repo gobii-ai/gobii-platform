@@ -6774,6 +6774,12 @@ def _run_agent_loop(
                     if not _is_orchestrator_prompt_stale():
                         remove_pending_agent(agent.id, client=redis_client)
 
+                def _finish_agent_loop(*, consume_human: bool = True) -> int:
+                    if consume_human:
+                        _mark_accepted_human_generation_consumed()
+                    _attempt_cycle_close_for_sleep(agent, budget_ctx)
+                    return cumulative_token_usage
+
                 def _attach_prompt_archive(step: PersistentAgentStep) -> None:
                     nonlocal prompt_archive_attached
                     if not prompt_archive_id or prompt_archive_attached:
@@ -6873,22 +6879,13 @@ def _run_agent_loop(
                 if terminal_plan_cleanup_this_iteration:
                     terminal_plan_cleanup_pending = False
                     if "update_plan" not in tool_names:
-                        logger.info(
-                            "Agent %s: update_plan unavailable for terminal closeout; stopping.",
-                            agent.id,
-                        )
-                        _mark_accepted_human_generation_consumed()
-                        _attempt_cycle_close_for_sleep(agent, budget_ctx)
-                        return cumulative_token_usage
+                        logger.info("Agent %s: update_plan unavailable for terminal closeout; stopping.", agent.id)
+                        return _finish_agent_loop()
                     request_tools, request_failover_configs = _focused_tool_completion_request(
                         iteration_tools,
                         request_failover_configs,
                         "update_plan",
-                        (
-                            "The final user-facing delivery already succeeded. This is the only closeout turn: "
-                            "call update_plan once with every current item finished or explicitly deferred. "
-                            "Do not message, research, or take any other action."
-                        ),
+                        "Final delivery succeeded. Only call update_plan once to finish/defer every current item; do nothing else.",
                         fixed_continue=False,
                     )
                 elif direct_correction_pending:
@@ -7215,13 +7212,8 @@ def _run_agent_loop(
                         _mark_accepted_human_generation_consumed()
                         continue
                     if terminal_plan_cleanup_this_iteration:
-                        logger.info(
-                            "Agent %s: bounded terminal plan closeout returned no tool; stopping.",
-                            agent.id,
-                        )
-                        _mark_accepted_human_generation_consumed()
-                        _attempt_cycle_close_for_sleep(agent, budget_ctx)
-                        return cumulative_token_usage
+                        logger.info("Agent %s: bounded terminal plan closeout returned no tool; stopping.", agent.id)
+                        return _finish_agent_loop()
                     if not message_text and not thinking_content:
                         # Truly empty response (no text, no thinking, no tools) = agent is done
                         # Log plan state to help diagnose premature termination
@@ -7241,9 +7233,7 @@ def _run_agent_loop(
                             type(msg_content).__name__,
                             len(msg_content) if msg_content else 0,
                         )
-                        _mark_accepted_human_generation_consumed()
-                        _attempt_cycle_close_for_sleep(agent, budget_ctx)
-                        return cumulative_token_usage
+                        return _finish_agent_loop()
                     if reasoning_step is not None:
                         try:
                             reasoning_step.description = internal_reasoning.build_internal_reasoning_description(
@@ -7292,9 +7282,7 @@ def _run_agent_loop(
                             plan_state,
                             message_text or thinking_content or "(none)",
                         )
-                        _mark_accepted_human_generation_consumed()
-                        _attempt_cycle_close_for_sleep(agent, budget_ctx)
-                        return cumulative_token_usage
+                        return _finish_agent_loop()
                     _mark_accepted_human_generation_consumed()
                     continue
 
@@ -7366,9 +7354,7 @@ def _run_agent_loop(
                         prepared_batch.prepared_calls,
                         reason="Tool call was cancelled before execution by the evaluation stop policy.",
                     )
-                    _mark_accepted_human_generation_consumed()
-                    _attempt_cycle_close_for_sleep(agent, budget_ctx)
-                    return cumulative_token_usage
+                    return _finish_agent_loop()
 
                 executed_batch = _execute_prepared_tool_batch(
                     agent,
@@ -7460,9 +7446,7 @@ def _run_agent_loop(
                     followup_required = True
 
                 if _should_stop_for_eval_policy(agent, budget_ctx=budget_ctx, span=iter_span):
-                    _mark_accepted_human_generation_consumed()
-                    _attempt_cycle_close_for_sleep(agent, budget_ctx)
-                    return cumulative_token_usage
+                    return _finish_agent_loop()
 
                 _mark_accepted_human_generation_consumed()
 
@@ -7487,16 +7471,11 @@ def _run_agent_loop(
                         followup_required = True
 
                 if terminal_plan_cleanup_this_iteration:
-                    logger.info(
-                        "Agent %s: bounded terminal plan closeout turn finished; stopping.",
-                        agent.id,
-                    )
-                    _attempt_cycle_close_for_sleep(agent, budget_ctx)
-                    return cumulative_token_usage
+                    logger.info("Agent %s: bounded terminal plan closeout turn finished; stopping.", agent.id)
+                    return _finish_agent_loop(consume_human=False)
                 elif all_calls_sleep:
                     logger.info("Agent %s is sleeping.", agent.id)
-                    _attempt_cycle_close_for_sleep(agent, budget_ctx)
-                    return cumulative_token_usage
+                    return _finish_agent_loop(consume_human=False)
                 elif _should_continue_for_unanswered_inbound_after_tools(agent, finalized_batch):
                     logger.info(
                         "Agent %s: non-message tool batch requested stop while latest inbound message "
@@ -7514,8 +7493,7 @@ def _run_agent_loop(
                         "Agent %s: tool batch ended with explicit stop; auto-sleeping.",
                         agent.id,
                     )
-                    _attempt_cycle_close_for_sleep(agent, budget_ctx)
-                    return cumulative_token_usage
+                    return _finish_agent_loop(consume_human=False)
                 # Implied send without continuation phrase = agent is done, force stop
                 elif (
                     implied_stop_after_send
@@ -7527,8 +7505,7 @@ def _run_agent_loop(
                         "Agent %s: implied send without continuation phrase; auto-sleeping.",
                         agent.id,
                     )
-                    _attempt_cycle_close_for_sleep(agent, budget_ctx)
-                    return cumulative_token_usage
+                    return _finish_agent_loop(consume_human=False)
                 elif (
                     not followup_required
                     and last_explicit_continue is None
@@ -7539,8 +7516,7 @@ def _run_agent_loop(
                         "Agent %s: tool batch complete with no follow-up required; auto-sleeping.",
                         agent.id,
                     )
-                    _attempt_cycle_close_for_sleep(agent, budget_ctx)
-                    return cumulative_token_usage
+                    return _finish_agent_loop(consume_human=False)
                 elif not followup_required and last_explicit_continue is True:
                     logger.info(
                         "Agent %s: tools returned auto_sleep_ok but agent explicitly requested continuation; continuing.",

@@ -3782,11 +3782,6 @@ def _get_system_instruction(
     planning_mode_active = agent.planning_state == PersistentAgent.PlanningState.PLANNING
     implied_send_active = implied_send_context is not None
     continuation_mode_block = "" if is_first_run else _get_continuation_mode_prompt_block()
-    has_unfinished_plan = (
-        not planning_mode_active
-        and isinstance(agent, PersistentAgent)
-        and agent.kanban_cards.filter(status__in=("todo", "doing")).exists()
-    )
 
     if implied_send_active:
         display_name = implied_send_context.get("display_name") if implied_send_context else "active web chat user"
@@ -3831,21 +3826,12 @@ def _get_system_instruction(
         if implied_send_active
         else ""
     )
-    plan_closeout_guidance = (
-        "This run has unfinished visible plan items. Before stopping, send the final delivery with true, then make one "
-        "update_plan call that finishes/defers every Doing/Todo item and uses false.\n\n"
-        if has_unfinished_plan
-        else (
-            "Plans: if cleanup remains, send final report with true, update_plan finished/deferred items, "
-            "then stop with false.\n\n"
-        )
-    )
     stop_continue_examples = (
         "## Stop/continue\n\n"
         "Set will_continue_work=true only for immediate work: unsent results, unverified constraints, plan cleanup, or needed tool results. "
         "Set false after delivery/config and no active work; future schedules do not count.\n"
         f"{text_only_guidance}"
-        f"{plan_closeout_guidance}"
+        "Plans: if cleanup remains, send final report with true, update_plan finished/deferred items, then stop with false.\n\n"
         "Recurring or truly multi-phase work may need charter/schedule updates; one-off work usually needs neither.\n"
     )
 
