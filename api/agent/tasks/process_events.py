@@ -543,7 +543,12 @@ def process_pending_agent_events_task(
     )
 
 
-@shared_task(bind=True, name="api.agent.tasks.process_discord_inbound_debounce")
+@shared_task(
+    bind=True,
+    name="api.agent.tasks.process_discord_inbound_debounce",
+    acks_late=True,
+    reject_on_worker_lost=True,
+)
 def process_discord_inbound_debounce_task(
     self,
     persistent_agent_id: str,
