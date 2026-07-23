@@ -12,7 +12,9 @@ from api.evals.scenarios.agent_scheduling import (
     AGENT_SCHEDULING_SCENARIO_SLUGS,
     AGENT_SCHEDULING_SUITE_SLUG,
     RELATIVE_TIMER_PRESERVES_RECURRING,
+    _call_succeeded,
     _cron_matches,
+    _offers_concrete_weekly_cadence,
     _schedule_snapshot,
     _schedule_sql_strategy_failures,
 )
@@ -63,7 +65,7 @@ class AgentSchedulingEvalTests(TestCase):
         suite = SuiteRegistry.get(AGENT_SCHEDULING_SUITE_SLUG)
 
         self.assertIsNotNone(suite)
-        self.assertEqual(len(AGENT_SCHEDULING_SCENARIO_SLUGS), 8)
+        self.assertEqual(len(AGENT_SCHEDULING_SCENARIO_SLUGS), 10)
         self.assertEqual(suite.scenario_slugs, AGENT_SCHEDULING_SCENARIO_SLUGS)
         for slug in AGENT_SCHEDULING_SCENARIO_SLUGS:
             scenario = ScenarioRegistry.get(slug)
@@ -161,6 +163,35 @@ class AgentSchedulingEvalTests(TestCase):
         self.assertIn(
             "named schedule change was not a targeted mutation",
             _schedule_sql_strategy_failures(case, [untargeted]),
+        )
+
+    def test_schedule_call_with_reconciliation_errors_is_not_successful(self):
+        call = _sqlite_call(
+            "INSERT INTO __agent_schedules (schedule_key, kind, schedule) "
+            "VALUES ('pipeline', 'recurring', '@every 1w')"
+        )
+        call.result = json.dumps(
+            {
+                "status": "ok",
+                "agent_config_update": {
+                    "updated_fields": [],
+                    "errors": {"schedules": "Invalid interval part: 1w"},
+                },
+            }
+        )
+
+        self.assertFalse(_call_succeeded(call))
+
+    def test_concrete_weekly_cadence_offer_accepts_a_reminder_but_not_generic_tracking(self):
+        self.assertTrue(
+            _offers_concrete_weekly_cadence(
+                "Want me to set up a weekly reminder that runs the numbers for you?"
+            )
+        )
+        self.assertFalse(
+            _offers_concrete_weekly_cadence(
+                "I can track that. Let me know if you need anything else."
+            )
         )
 
     def test_timer_scorer_requires_default_checkin_preservation_and_own_purpose(self):

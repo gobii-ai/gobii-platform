@@ -1,10 +1,12 @@
 import json
+from dataclasses import dataclass
 
 from api.agent.system_skills.defaults import DISCORD_NATIVE_SYSTEM_SKILL_KEY
 from api.agent.system_skills.service import enable_system_skills
 from api.evals.base import EvalScenario, ScenarioTask
 from api.evals.execution import ScenarioExecutionTools
-from api.evals.registry import register_scenario
+from api.evals.registry import ScenarioRegistry, register_scenario
+from api.evals.scenarios.agent_emotions import _assigned_config_fields
 from api.models import (
     EvalRunTask,
     PersistentAgent,
@@ -20,14 +22,52 @@ from api.services.discord_messages import (
 
 
 DISCORD_NATIVE_REACTION_REPLY_CONTEXT = "discord_native_reaction_reply_context"
-DISCORD_NATIVE_SCENARIO_SLUGS = (DISCORD_NATIVE_REACTION_REPLY_CONTEXT,)
+DISCORD_NATIVE_REACTION_SHARED_WIN = "discord_native_reaction_shared_win"
+DISCORD_NATIVE_REACTION_SERIOUS_REQUEST_RESTRAINT = (
+    "discord_native_reaction_serious_request_restraint"
+)
+DISCORD_NATIVE_SCENARIO_SLUGS = (
+    DISCORD_NATIVE_REACTION_REPLY_CONTEXT,
+    DISCORD_NATIVE_REACTION_SHARED_WIN,
+    DISCORD_NATIVE_REACTION_SERIOUS_REQUEST_RESTRAINT,
+)
 DISCORD_NATIVE_SUITE_SLUG = "discord_native"
 
 
-@register_scenario
-class DiscordNativeReactionReplyContextScenario(EvalScenario, ScenarioExecutionTools):
-    slug = DISCORD_NATIVE_REACTION_REPLY_CONTEXT
-    description = "Ensures a Discord reply can trigger a reaction against the correct current message."
+@dataclass(frozen=True)
+class DiscordReactionCase:
+    slug: str
+    description: str
+    body: str
+    expected_action: str
+    allowed_emojis: tuple[str, ...] = ()
+
+
+DISCORD_REACTION_CASES = (
+    DiscordReactionCase(
+        slug=DISCORD_NATIVE_REACTION_REPLY_CONTEXT,
+        description="A direct reaction request should target the exact current Discord message.",
+        body="A thumbs-up reaction is enough to confirm you've seen this.",
+        expected_action="reaction",
+        allowed_emojis=("👍",),
+    ),
+    DiscordReactionCase(
+        slug=DISCORD_NATIVE_REACTION_SHARED_WIN,
+        description="A lightweight shared win should receive a natural celebratory reaction.",
+        body="The checkout fix is live and CI is green now 🎉",
+        expected_action="reaction",
+        allowed_emojis=("🎉", "🥳", "🙌", "🔥", "✅", "🚀", "💚", "❤️", "👍"),
+    ),
+    DiscordReactionCase(
+        slug=DISCORD_NATIVE_REACTION_SERIOUS_REQUEST_RESTRAINT,
+        description="A substantive incident question should get a reply rather than reaction-only treatment.",
+        body="Customers can't log in after the deploy. What should we check first?",
+        expected_action="reply",
+    ),
+)
+
+
+class DiscordNativeReactionScenario(EvalScenario, ScenarioExecutionTools):
     tier = "extended"
     category = "native_integrations"
     expected_runtime = "short"
@@ -37,23 +77,49 @@ class DiscordNativeReactionReplyContextScenario(EvalScenario, ScenarioExecutionT
     tags = ("discord", "native_integration", "real_harness", "tool_choice")
     tasks = [
         ScenarioTask(name="inject_event", assertion_type="manual"),
-        ScenarioTask(name="verify_reaction", assertion_type="exact_match"),
+        ScenarioTask(name="verify_channel_action", assertion_type="exact_match"),
     ]
+    case: DiscordReactionCase
 
     @staticmethod
-    def _reaction_matches(call, *, channel_id: str, message_id: str) -> bool:
+    def _parsed_result(call):
+        result = call.result or ""
+        try:
+            return json.loads(result) if isinstance(result, str) else result
+        except json.JSONDecodeError:
+            return {}
+
+    @classmethod
+    def _reaction_matches(
+        cls,
+        call,
+        *,
+        channel_id: str,
+        message_id: str,
+        allowed_emojis: tuple[str, ...] = ("👍",),
+    ) -> bool:
         if call.tool_name != "add_discord_reaction":
             return False
         params = call.tool_params or {}
-        result = call.result or ""
-        try:
-            parsed_result = json.loads(result) if isinstance(result, str) else result
-        except json.JSONDecodeError:
-            return False
+        parsed_result = cls._parsed_result(call)
         return (
             params.get("channel_id") == channel_id
             and params.get("message_id") == message_id
-            and params.get("emoji") == "👍"
+            and params.get("emoji") in allowed_emojis
+            and isinstance(parsed_result, dict)
+            and parsed_result.get("status") == "success"
+        )
+
+    @classmethod
+    def _reply_matches(cls, call, *, channel_id: str) -> bool:
+        if call.tool_name != "send_discord_message":
+            return False
+        params = call.tool_params or {}
+        message = str(params.get("message") or "").strip()
+        parsed_result = cls._parsed_result(call)
+        return (
+            params.get("channel_id") == channel_id
+            and len(message.split()) >= 6
             and params.get("will_continue_work") is False
             and isinstance(parsed_result, dict)
             and parsed_result.get("status") == "success"
@@ -61,7 +127,7 @@ class DiscordNativeReactionReplyContextScenario(EvalScenario, ScenarioExecutionT
 
     def run(self, run_id: str, agent_id: str) -> None:
         PersistentAgent.objects.filter(id=agent_id).update(
-            charter="Participate helpfully in subscribed Discord channels.",
+            charter="Participate helpfully and naturally in subscribed Discord channels.",
             planning_state=PersistentAgent.PlanningState.SKIPPED,
         )
         agent = PersistentAgent.objects.get(id=agent_id)
@@ -89,7 +155,7 @@ class DiscordNativeReactionReplyContextScenario(EvalScenario, ScenarioExecutionT
             to_endpoint=agent_endpoint,
             conversation=conversation,
             is_outbound=False,
-            body="A thumbs-up reaction is enough to confirm you've seen this.",
+            body=self.case.body,
             raw_payload={
                 "source": "discord_bot",
                 "source_kind": "discord",
@@ -125,14 +191,19 @@ class DiscordNativeReactionReplyContextScenario(EvalScenario, ScenarioExecutionT
                         "status": "success",
                         "channel_id": channel_id,
                         "message_id": message_id,
-                        "emoji": "👍",
+                        "auto_sleep_ok": True,
+                    },
+                    "send_discord_message": {
+                        "status": "success",
+                        "message_id": "eval-discord-reply",
+                        "channel_id": channel_id,
                         "auto_sleep_ok": True,
                     },
                 },
                 eval_stop_policy={
                     "ignored_tool_names": ["sleep_until_next_trigger", "update_plan"],
-                    "stop_on_tool_names_after_finish": ["add_discord_reaction"],
-                    "max_relevant_tool_calls": 2,
+                    "stop_on_tool_names_after_finish": ["send_discord_message"],
+                    "max_relevant_tool_calls": 3,
                 },
             )
         self.record_task_result(
@@ -140,7 +211,7 @@ class DiscordNativeReactionReplyContextScenario(EvalScenario, ScenarioExecutionT
             None,
             EvalRunTask.Status.PASSED,
             task_name="inject_event",
-            observed_summary="A Discord reply carrying referenced-message context was processed by the real harness.",
+            observed_summary="A natural Discord message was processed by the real harness.",
             artifacts={"message": inbound},
         )
 
@@ -151,20 +222,78 @@ class DiscordNativeReactionReplyContextScenario(EvalScenario, ScenarioExecutionT
             ).order_by("step__created_at", "step__id")
         )
         reaction_calls = [call for call in calls if call.tool_name == "add_discord_reaction"]
-        passed = len(reaction_calls) == 1 and self._reaction_matches(
-            reaction_calls[0],
-            channel_id=channel_id,
-            message_id=message_id,
-        )
+        reply_calls = [call for call in calls if call.tool_name == "send_discord_message"]
+        sqlite_calls = [call for call in calls if call.tool_name == "sqlite_batch"]
+        if self.case.expected_action == "reaction":
+            sqlite_is_bounded_emotion = (
+                self.case.slug == DISCORD_NATIVE_REACTION_SHARED_WIN
+                and len(sqlite_calls) == 1
+                and _assigned_config_fields(sqlite_calls[0])
+                == {"emotion", "emotion_timeout_seconds"}
+            )
+            passed = (
+                not reply_calls
+                and (not sqlite_calls or sqlite_is_bounded_emotion)
+                and len(reaction_calls) == 1
+                and self._reaction_matches(
+                    reaction_calls[0],
+                    channel_id=channel_id,
+                    message_id=message_id,
+                    allowed_emojis=self.case.allowed_emojis,
+                )
+            )
+            summary = (
+                "Agent added one fitting reaction to the exact inbound Discord message."
+                if passed
+                else (
+                    "Expected one fitting Discord reaction without a reply or unrelated config write; "
+                    f"saw {len(reaction_calls)} reaction, {len(reply_calls)} reply, and "
+                    f"{len(sqlite_calls)} SQLite call(s)."
+                )
+            )
+            evidence = reaction_calls[0] if reaction_calls else None
+        else:
+            passed = not reaction_calls and len(reply_calls) == 1 and self._reply_matches(
+                reply_calls[0],
+                channel_id=channel_id,
+            )
+            summary = (
+                "Agent answered the substantive Discord question without reaction-only treatment."
+                if passed
+                else (
+                    "Expected one substantive Discord reply and no reaction; "
+                    f"saw {len(reply_calls)} reply and {len(reaction_calls)} reaction call(s)."
+                )
+            )
+            evidence = reply_calls[0] if reply_calls else None
         self.record_task_result(
             run_id,
             None,
             EvalRunTask.Status.PASSED if passed else EvalRunTask.Status.FAILED,
-            task_name="verify_reaction",
-            observed_summary=(
-                "Agent added the requested thumbs-up to the exact inbound Discord message."
-                if passed
-                else f"Expected one correctly targeted Discord reaction; saw {len(reaction_calls)} reaction call(s)."
-            ),
-            artifacts={"step": reaction_calls[0].step} if reaction_calls else {},
+            task_name="verify_channel_action",
+            observed_summary=summary,
+            artifacts={"step": evidence.step} if evidence is not None else {},
         )
+
+
+@register_scenario
+class DiscordNativeReactionReplyContextScenario(DiscordNativeReactionScenario):
+    slug = DISCORD_REACTION_CASES[0].slug
+    description = DISCORD_REACTION_CASES[0].description
+    case = DISCORD_REACTION_CASES[0]
+
+
+def _discord_reaction_scenario_class(case):
+    class _DiscordNativeReactionScenario(DiscordNativeReactionScenario):
+        slug = case.slug
+        description = case.description
+
+    _DiscordNativeReactionScenario.case = case
+    _DiscordNativeReactionScenario.__name__ = (
+        "".join(part.title() for part in case.slug.split("_")) + "Scenario"
+    )
+    return _DiscordNativeReactionScenario
+
+
+for discord_reaction_case in DISCORD_REACTION_CASES[1:]:
+    ScenarioRegistry.register(_discord_reaction_scenario_class(discord_reaction_case)())

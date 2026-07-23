@@ -423,7 +423,12 @@ class PromptContextContactsGuidanceTests(TestCase):
             content,
         )
         self.assertIn("temporary feedback/ordinary tasks never config", content)
-        self.assertIn("No schedule is set. Leave it NULL unless the user requests recurrence", content)
+        self.assertIn(
+            "For clear ongoing/monitoring intent, first write one safe default __agent_schedules cadence",
+            content,
+        )
+        self.assertIn("Recurring work is highest priority", content)
+        self.assertIn("Emotions are autonomous, not only owner-requested", content)
         self.assertNotIn("Without a schedule, you die", content)
 
     def test_runtime_schedule_note_keeps_temporary_scope_from_changing_cadence(self):

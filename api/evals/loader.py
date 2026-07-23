@@ -12,16 +12,36 @@ from api.evals.scenarios.google_sheets_native import GOOGLE_SHEETS_NATIVE_SCENAR
 from api.evals.scenarios.apollo_native import APOLLO_NATIVE_SCENARIO_SLUGS, APOLLO_NATIVE_SUITE_SLUG
 from api.evals.scenarios.recruitment_sourcing import RECRUITMENT_SOURCING_SCENARIO_SLUGS, RECRUITMENT_SOURCING_SUITE_SLUG
 from api.evals.scenarios.hubspot_native import HUBSPOT_NATIVE_SCENARIO_SLUGS, HUBSPOT_NATIVE_SUITE_SLUG
-from api.evals.scenarios.discord_native import DISCORD_NATIVE_SCENARIO_SLUGS, DISCORD_NATIVE_SUITE_SLUG
+from api.evals.scenarios.discord_native import (
+    DISCORD_NATIVE_REACTION_SERIOUS_REQUEST_RESTRAINT,
+    DISCORD_NATIVE_REACTION_SHARED_WIN,
+    DISCORD_NATIVE_SCENARIO_SLUGS,
+    DISCORD_NATIVE_SUITE_SLUG,
+)
 from api.evals.scenarios.image_generation import IMAGE_GENERATION_SCENARIO_SLUGS, IMAGE_GENERATION_SUITE_SLUG
 from api.evals.scenarios.responsibility_boundaries import RESPONSIBILITY_BOUNDARY_SCENARIO_SLUGS, RESPONSIBILITY_BOUNDARY_SUITE_SLUG
 from api.evals.scenarios.hallucinated_links import HALLUCINATED_LINK_SCENARIO_SLUGS, HALLUCINATED_LINKS_SUITE_SLUG
-from api.evals.scenarios.agent_scheduling import AGENT_SCHEDULING_SCENARIO_SLUGS, AGENT_SCHEDULING_SUITE_SLUG
+from api.evals.scenarios.agent_emotions import AGENT_PROACTIVE_EMOTION_SCENARIO_SLUGS
+from api.evals.scenarios.agent_scheduling import (
+    AGENT_SCHEDULING_SCENARIO_SLUGS,
+    AGENT_SCHEDULING_SUITE_SLUG,
+    IMPLIED_MONITORING_DEFAULTS,
+    REPEATABLE_REPORT_NUDGE,
+)
 from api.evals.scenarios.agent_appearance import AGENT_APPEARANCE_SCENARIO_SLUGS, AGENT_APPEARANCE_SUITE_SLUG
 from api.evals.scenarios.meta_gobii import META_GOBII_REAL_HARNESS_SCENARIO_SLUGS, META_GOBII_REAL_HARNESS_SUITE_SLUG
 from api.evals.scenarios.webhooks import WEBHOOK_SCENARIO_SLUGS, WEBHOOKS_SUITE_SLUG
 from api.evals.meta_gobii import META_GOBII_EVAL_SCENARIO_SLUGS, META_GOBII_EVAL_SUITE_SLUG
 from api.evals.suites import EvalSuite, register_builtin_suites
+
+AGENT_INITIATIVE_SUITE_SLUG = "agent_initiative"
+AGENT_INITIATIVE_SCENARIO_SLUGS = (
+    IMPLIED_MONITORING_DEFAULTS,
+    REPEATABLE_REPORT_NUDGE,
+    *AGENT_PROACTIVE_EMOTION_SCENARIO_SLUGS,
+    DISCORD_NATIVE_REACTION_SHARED_WIN,
+    DISCORD_NATIVE_REACTION_SERIOUS_REQUEST_RESTRAINT,
+)
 
 # Built-in suites (in addition to the dynamic "all" suite)
 register_builtin_suites(
@@ -140,6 +160,11 @@ register_builtin_suites(
             slug=AGENT_SCHEDULING_SUITE_SLUG,
             description="Multiple schedules, precise timers, targeted changes, and bounded scheduling guardrails.",
             scenario_slugs=AGENT_SCHEDULING_SCENARIO_SLUGS,
+        ),
+        EvalSuite(
+            slug=AGENT_INITIATIVE_SUITE_SLUG,
+            description="Sensible initiative for recurring work, transient emotion, and Discord reactions.",
+            scenario_slugs=AGENT_INITIATIVE_SCENARIO_SLUGS,
         ),
         EvalSuite(
             slug=AGENT_APPEARANCE_SUITE_SLUG,
