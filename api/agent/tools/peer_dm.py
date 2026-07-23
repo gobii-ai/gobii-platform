@@ -93,7 +93,10 @@ def get_send_agent_message_tool() -> Dict[str, Any]:
                     },
                     "message": {
                         "type": "string",
-                        "description": "New information, question, or handoff the peer needs; never an acknowledgment-only reply.",
+                        "description": (
+                            "New information, question, or handoff the peer needs; never an acknowledgment-only reply. "
+                            "Use Markdown only; raw HTML is rejected. Use code formatting to show HTML literally."
+                        ),
                     },
                     "attachments": {
                         "type": "array",
@@ -193,9 +196,11 @@ def execute_send_agent_message(agent: PersistentAgent, params: Dict[str, Any]) -
             "status": exc.status,
             "message": str(exc),
         }
+        if exc.error_type:
+            response["error_type"] = exc.error_type
         if exc.retry_at:
             response["retry_at_iso"] = exc.retry_at.isoformat()
-        if status in RETRYABLE_PEER_MESSAGE_STATUSES:
+        if exc.retryable or status in RETRYABLE_PEER_MESSAGE_STATUSES:
             response["retryable"] = True
         return response
 

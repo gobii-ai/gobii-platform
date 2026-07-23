@@ -100,13 +100,26 @@ def _eval_tool_call(tool_name, tool_params=None, *, step=None, result='{"status"
 
 @tag("eval_sim")
 class ResumeStateHeuristicTests(SimpleTestCase):
-    def test_patch_text_cursor_with_pending_count_is_persisted_resume_state(self):
+    def test_patch_text_cursor_in_charter_is_not_domain_resume_state(self):
         call = _eval_tool_call(
             "sqlite_batch",
             {
                 "sql": (
                     "UPDATE __agent_config SET charter = patch_text(charter, 'old', "
                     "'Cursor: candidate-offset-3, pending: 12.') WHERE id = 1;"
+                )
+            },
+        )
+
+        self.assertFalse(_sqlite_call_persists_resume_state(call))
+
+    def test_domain_progress_remaining_column_is_persisted_resume_state(self):
+        call = _eval_tool_call(
+            "sqlite_batch",
+            {
+                "sql": (
+                    "CREATE TABLE candidate_progress (next_cursor TEXT, remaining INTEGER); "
+                    "INSERT INTO candidate_progress VALUES ('candidate-offset-3', 12);"
                 )
             },
         )
@@ -139,12 +152,14 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
         self.assertIn(SQLITE_BOUNDED_PORTFOLIO_REPORT, suite.scenario_slugs)
         self.assertIn(sqlite_evals.SQLITE_DOMAIN_TRUTH_OVER_STALE_HISTORY, suite.scenario_slugs)
         self.assertIn(sqlite_evals.SQLITE_DOMAIN_MODEL_REFRESHES_AND_EVOLVES, suite.scenario_slugs)
+        self.assertIn(sqlite_evals.SQLITE_PROSPECT_PIPELINE_COMPLETES, suite.scenario_slugs)
 
     def test_trajectory_regression_prompts_do_not_prescribe_tools_or_format(self):
         prompts = (
             SqliteMultiResultWebSynthesisScenario.prompt,
             SqliteNaturalResultAccessScenario.prompt,
             SqliteBoundedPortfolioReportScenario.prompt,
+            sqlite_evals.SqliteProspectPipelineCompletesScenario.prompt,
         )
 
         for prompt in prompts:
@@ -1838,7 +1853,7 @@ class EffortCalibrationHarnessTests(TestCase):
             EvalRunTask.Status.PASSED,
         )
 
-    def test_future_work_preserved_accepts_patch_text_cursor_and_remaining_count_in_charter(self):
+    def test_future_work_preserved_rejects_cursor_state_in_charter(self):
         User = get_user_model()
         user = User.objects.create_user(username="future_work_charter_resume_user")
         browser_agent = BrowserUseAgent.objects.create(user=user, name="Future Work Charter Resume Browser")
@@ -1879,10 +1894,10 @@ class EffortCalibrationHarnessTests(TestCase):
             work_tool_names={"eval_verify_candidate_batch"},
         )
 
-        self.assertTrue(passed)
+        self.assertFalse(passed)
         self.assertEqual(
             run.tasks.get(name="verify_future_work_preserved").status,
-            EvalRunTask.Status.PASSED,
+            EvalRunTask.Status.FAILED,
         )
 
     def test_future_work_preserved_rejects_single_unscheduled_batch(self):
@@ -2282,7 +2297,7 @@ class FirstRunPromptCalibrationTests(TestCase):
         self.assertIn("do not search for a SQLite/database tool", system_prompt)
         self.assertIn("enabled tool fits -> use directly", system_prompt)
         self.assertIn("named model + explicit fresh source/URL -> http_request only, no text/send/plan; WAIT", system_prompt)
-        self.assertIn("Use queried rows, not memory, for decisions", system_prompt)
+        self.assertIn("query them, not memory", system_prompt)
         self.assertIn("data/api/feed/file URL -> http_request", system_prompt)
         self.assertIn("reconcile+SELECT there before use", system_prompt)
         self.assertIn("spawn_web_task only after access/render/login blockage", system_prompt)
@@ -2298,11 +2313,10 @@ class FirstRunPromptCalibrationTests(TestCase):
         )
         self.assertIn("Email/SMS imperatives map directly to send_email/send_sms", system_prompt)
         self.assertIn("Do not downgrade requested email/SMS delivery to chat", system_prompt)
-        self.assertIn("After an update, don't repeat it", system_prompt)
-        self.assertIn("each later update must state a concrete new finding", system_prompt)
-        self.assertIn("never kickoff text", system_prompt)
-        self.assertIn("first use one direct sqlite_batch update to save the cursor", system_prompt)
-        self.assertIn("do not SELECT or read_file first", system_prompt)
-        self.assertIn("Append new resume state with `charter = charter || '...'`", system_prompt)
+        self.assertIn("Don't repeat updates", system_prompt)
+        self.assertIn("later updates need new evidence", system_prompt)
+        self.assertIn("Kickoff isn't a milestone", system_prompt)
+        self.assertIn("upsert both in a normal domain-progress table", system_prompt)
+        self.assertIn("Do not inspect or mutate charter/schedules/config", system_prompt)
         self.assertIn("the next call must send the report", system_prompt)
         self.assertIn("Never send 'I'll save/update it' with will_continue_work=false", system_prompt)
