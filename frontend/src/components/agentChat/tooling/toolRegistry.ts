@@ -346,6 +346,10 @@ function buildToolEntries(clusterCursor: string, entry: ToolCallEntry, options: 
   }
 
   const toolName = entry.toolName ?? entry.meta?.label ?? 'tool'
+  const normalizedName = toolName.toLowerCase()
+  if (normalizedName === 'send_discord_message' || normalizedName === 'discord_send_message') {
+    return []
+  }
   if (entry.developerEvent) {
     const completion = entry.developerEvent.kind === 'completion' ? entry.developerEvent : null
     const step = entry.developerEvent.kind === 'step' ? entry.developerEvent : null
@@ -387,7 +391,6 @@ function buildToolEntries(clusterCursor: string, entry: ToolCallEntry, options: 
       sourceEntry: entry,
     }]
   }
-  const normalizedName = (toolName || '').toLowerCase()
   if (CHAT_SKIP_TOOL_NAMES.has(normalizedName as string)) {
     return []
   }
