@@ -215,6 +215,12 @@ def load_ci_tag_shards(ci_yml_path: str = ".github/workflows/ci.yml") -> dict[st
                 tag_match = tag_line.match(line)
                 if tag_match and current_batch:
                     for test_tag in tag_match.group(1).split():
+                        previous_shard = tag_shards.get(test_tag)
+                        if previous_shard and previous_shard != current_batch:
+                            raise ValueError(
+                                f"CI tag '{test_tag}' is assigned to both "
+                                f"{previous_shard} and {current_batch}"
+                            )
                         tag_shards[test_tag] = current_batch
                     current_batch = None
     except FileNotFoundError:
@@ -236,7 +242,11 @@ def main() -> int:
     total_untagged = 0
     untagged_names: list[str] = []
     used_tags: set[str] = set()
-    tag_shards = load_ci_tag_shards()
+    try:
+        tag_shards = load_ci_tag_shards()
+    except ValueError as exc:
+        print(f"Invalid CI shard configuration: {exc}")
+        return 1
     cross_shard_tests: list[tuple[str, list[tuple[str, str]]]] = []
 
     for f in sorted(files):

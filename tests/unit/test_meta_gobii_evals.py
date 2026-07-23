@@ -1536,6 +1536,42 @@ class MetaGobiiLocalEvalSetupTests(TestCase):
         self.assertIn("openrouter-qwen", output)
         self.assertIn("openai-gpt-4-1-mini", output)
 
+    def test_simulated_meta_gobii_suite_expands_all_registered_scenarios(self):
+        stdout = StringIO()
+
+        def complete_without_running_tasks(run_id):
+            EvalRun.objects.filter(id=run_id).update(status=EvalRun.Status.COMPLETED)
+
+        with (
+            patch(
+                "api.management.commands.run_evals.run_eval_task.delay",
+                side_effect=complete_without_running_tasks,
+            ) as mock_run_eval,
+            patch("api.management.commands.run_evals.gc_eval_runs_task.delay"),
+            patch("api.management.commands.run_evals.time.sleep"),
+        ):
+            call_command(
+                "run_evals",
+                "--suite",
+                "meta_gobii",
+                "--sync",
+                "--n-runs",
+                "1",
+                "--simulated",
+                stdout=stdout,
+            )
+
+        suite_run = EvalSuiteRun.objects.latest("created_at")
+        scenario_slugs = list(suite_run.runs.values_list("scenario_slug", flat=True))
+        self.assertEqual(suite_run.suite_slug, "meta_gobii")
+        self.assertEqual(suite_run.launch_config["mode"], "simulated")
+        self.assertTrue(suite_run.launch_config["launcher_code_version"])
+        self.assertIn("launcher_code_branch", suite_run.launch_config)
+        self.assertEqual(len(scenario_slugs), len(META_GOBII_EVAL_SCENARIO_SLUGS))
+        self.assertCountEqual(scenario_slugs, META_GOBII_EVAL_SCENARIO_SLUGS)
+        self.assertIn(META_GOBII_SPECIALIST_AGENT_LAUNCH_REAL_HARNESS, scenario_slugs)
+        self.assertEqual(mock_run_eval.call_count, len(META_GOBII_EVAL_SCENARIO_SLUGS))
+
     def test_simulated_single_meta_gobii_scenario_uses_canonical_run_evals_path(self):
         stdout = StringIO()
 

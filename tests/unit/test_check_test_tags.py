@@ -77,3 +77,25 @@ jobs:
                 "batch_three": "shard_02",
             },
         )
+
+    def test_ci_tag_cannot_be_assigned_to_multiple_shards(self):
+        workflow = """
+jobs:
+  tests:
+    strategy:
+      matrix:
+        include:
+          - batch: shard_01
+            tag: batch_one batch_two
+          - batch: shard_02
+            tag: batch_one batch_three
+"""
+        with TemporaryDirectory() as temp_dir:
+            workflow_file = Path(temp_dir) / "ci.yml"
+            workflow_file.write_text(workflow, encoding="utf-8")
+
+            with self.assertRaisesMessage(
+                ValueError,
+                "CI tag 'batch_one' is assigned to both shard_01 and shard_02",
+            ):
+                load_ci_tag_shards(str(workflow_file))
