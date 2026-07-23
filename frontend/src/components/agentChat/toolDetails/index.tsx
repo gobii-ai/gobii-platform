@@ -22,6 +22,7 @@ import { ImageDetail } from './details/image'
 import { VideoDetail } from './details/video'
 import { ApplyPatchDetail, CreateCustomToolDetail, CustomToolRunDetail, PythonExecDetail, RunCommandDetail } from './details/sandbox'
 import { WebhookManagementDetail } from './details/webhooks'
+import { DiscordToolDetail } from './details/discord'
 
 export { normalizeStructuredValue } from './normalize'
 export {
@@ -69,6 +70,7 @@ export {
   CreateCustomToolDetail,
   CustomToolRunDetail,
   WebhookManagementDetail,
+  DiscordToolDetail,
 }
 
 export const TOOL_DETAIL_COMPONENTS = {
@@ -115,6 +117,7 @@ export const TOOL_DETAIL_COMPONENTS = {
   createCustomTool: CreateCustomToolDetail,
   customToolRun: CustomToolRunDetail,
   webhookManagement: WebhookManagementDetail,
+  discord: DiscordToolDetail,
 } satisfies Record<string, ToolDetailComponent>
 
 export type DetailKind = keyof typeof TOOL_DETAIL_COMPONENTS

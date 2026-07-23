@@ -1,5 +1,6 @@
 import { memo } from 'react'
-import { ChevronRight, FileText, Lightbulb, Link2, ListChecks } from 'lucide-react'
+import { ChevronDown, ChevronRight, EyeOff, FileText, Lightbulb, LightbulbOff, Link2, ListChecks } from 'lucide-react'
+import { Button, Menu, MenuItem, MenuTrigger, Popover, type Key } from 'react-aria-components'
 import { AgentChatSectionCard } from './uiPrimitives'
 
 export type StarterPrompt = {
@@ -44,6 +45,14 @@ export const StarterPromptSuggestions = memo(function StarterPromptSuggestions({
     return null
   }
 
+  const handleDisplayAction = (key: Key) => {
+    if (key === 'hide-for-now') {
+      onDismiss?.()
+    } else if (key === 'turn-off-suggestions') {
+      onTurnOff?.()
+    }
+  }
+
   return (
     <AgentChatSectionCard
       className="timeline-event starter-prompts-card"
@@ -54,6 +63,62 @@ export const StarterPromptSuggestions = memo(function StarterPromptSuggestions({
     >
       <div className="starter-prompts-card__header">
         <h3 className="starter-prompts-card__title">Suggested follow-ups</h3>
+        {onDismiss || onTurnOff ? (
+          <MenuTrigger>
+            <Button
+              className="agent-chat-button starter-prompts-card__action"
+              data-tone="neutral"
+              data-variant="soft"
+              data-size="sm"
+            >
+              <EyeOff size={13} aria-hidden="true" />
+              <span>Hide</span>
+              <ChevronDown size={11} aria-hidden="true" />
+            </Button>
+            <Popover
+              className="agent-chat-menu-popover starter-prompts-card__menu-popover"
+              placement="bottom end"
+              offset={5}
+            >
+              <Menu
+                aria-label="Suggestion display options"
+                className="agent-chat-menu"
+                onAction={handleDisplayAction}
+              >
+                {onDismiss ? (
+                  <MenuItem
+                    id="hide-for-now"
+                    textValue="Hide for now"
+                    className="agent-chat-menu-item starter-prompts-card__menu-item"
+                  >
+                    <EyeOff size={15} className="starter-prompts-card__menu-item-icon" aria-hidden="true" />
+                    <span className="agent-chat-menu-item__copy">
+                      <span className="agent-chat-menu-item__title">Hide for now</span>
+                      <span className="agent-chat-menu-item__description">
+                        Suggestions return after the agent&apos;s next update.
+                      </span>
+                    </span>
+                  </MenuItem>
+                ) : null}
+                {onTurnOff ? (
+                  <MenuItem
+                    id="turn-off-suggestions"
+                    textValue="Turn off suggestions"
+                    className="agent-chat-menu-item starter-prompts-card__menu-item"
+                  >
+                    <LightbulbOff size={15} className="starter-prompts-card__menu-item-icon" aria-hidden="true" />
+                    <span className="agent-chat-menu-item__copy">
+                      <span className="agent-chat-menu-item__title">Turn off suggestions</span>
+                      <span className="agent-chat-menu-item__description">
+                        Re-enable them anytime in Settings.
+                      </span>
+                    </span>
+                  </MenuItem>
+                ) : null}
+              </Menu>
+            </Popover>
+          </MenuTrigger>
+        ) : null}
       </div>
       <div className="starter-prompts-card__rows" role="list">
         {loading
@@ -97,30 +162,6 @@ export const StarterPromptSuggestions = memo(function StarterPromptSuggestions({
             )
           })}
       </div>
-      {onDismiss || onTurnOff ? (
-        <div className="starter-prompts-card__actions" role="group" aria-label="Suggestion display options">
-          {onDismiss ? (
-            <button
-              type="button"
-              className="starter-prompts-card__action"
-              onClick={onDismiss}
-              title="Hide this set until the agent replies or finishes new work"
-            >
-              Hide for now
-            </button>
-          ) : null}
-          {onTurnOff ? (
-            <button
-              type="button"
-              className="starter-prompts-card__action"
-              onClick={onTurnOff}
-              title="Hide future suggestions until you turn them back on in Settings"
-            >
-              Turn off suggestions
-            </button>
-          ) : null}
-        </div>
-      ) : null}
       {loading ? <span className="sr-only">Loading suggested follow-ups</span> : null}
     </AgentChatSectionCard>
   )

@@ -1597,8 +1597,10 @@ export function AgentChatPage({
     return refreshTimelineLatestInCache(queryClient, agentIdToRefresh, {
       mode: 'contiguous',
       maxNewerPages: RESUME_TIMELINE_BACKFILL_MAX_NEWER_PAGES,
+      developerMode: developerModeEnabled,
+      staffContext,
     })
-  }, [dispatch, queryClient])
+  }, [developerModeEnabled, queryClient, staffContext])
 
   const syncLatestTimeline = useCallback(async (
     agentIdToRefresh: string,
@@ -2091,8 +2093,14 @@ export function AgentChatPage({
     () => getLatestPlanSnapshot(timelineEvents, initialPageResponse?.current_plan ?? null),
     [timelineEvents, initialPageResponse?.current_plan],
   )
-  const hasSelectedAgent = Boolean(activeAgentId)
-  const allowAgentRefresh = hasSelectedAgent && !contextSwitching && agentContextReady && !rosterContextMismatch
+  const allowAgentRefresh = Boolean(activeAgentId) && !contextSwitching && agentContextReady && !rosterContextMismatch
+  useEffect(() => {
+    if (!allowAgentRefresh || !activeAgentId || isNewAgent || shellSubview !== 'chat'
+      || (typeof navigator !== 'undefined' && navigator.onLine === false)) {
+      return
+    }
+    void runContiguousTimelineBackfill(activeAgentId)
+  }, [activeAgentId, allowAgentRefresh, isNewAgent, runContiguousTimelineBackfill, shellSubview])
   useEffect(() => {
     allowAgentRefreshRef.current = allowAgentRefresh
   }, [allowAgentRefresh])

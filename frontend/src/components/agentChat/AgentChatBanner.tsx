@@ -9,6 +9,7 @@ import { track } from '../../util/analytics'
 import { AnalyticsEvent } from '../../constants/analyticsEvents'
 import type { PlanSnapshot } from '../../types/agentChat'
 import type { DailyCreditsStatus } from '../../types/dailyCredits'
+import { AgentEmotionIndicator } from '../common/AgentEmotionIndicator'
 import type { AgentChatSidebarMode } from './sidebarMode'
 import { AgentChatAvatar, AgentChatButton, AgentChatMenuItem } from './uiPrimitives'
 
@@ -269,8 +270,6 @@ export const AgentChatBanner = memo(function AgentChatBanner({
               <AgentChatAvatar
                 name={trimmedName}
                 avatarUrl={agentAvatarUrl}
-                emotion={emotion}
-                emotionExpiresAt={emotionExpiresAt}
                 className="banner-avatar"
                 imageClassName="banner-avatar-image"
                 textClassName="banner-avatar-text"
@@ -280,8 +279,6 @@ export const AgentChatBanner = memo(function AgentChatBanner({
             <AgentChatAvatar
               name={trimmedName}
               avatarUrl={agentAvatarUrl}
-              emotion={emotion}
-              emotionExpiresAt={emotionExpiresAt}
               className="banner-avatar"
               imageClassName="banner-avatar-image"
               textClassName="banner-avatar-text"
@@ -292,16 +289,30 @@ export const AgentChatBanner = memo(function AgentChatBanner({
               {showIdentitySettingsButton ? (
                 <button
                   type="button"
-                  className="banner-identity-button banner-name-button"
+                  className="banner-identity-button banner-name-button agent-name-emotion-row"
                   onClick={handleIdentitySettingsClick}
                   disabled={identitySettingsDisabled}
                   aria-disabled={settingsDisabled ? 'true' : undefined}
                   title={resolvedSettingsLabel}
                 >
                   <span className="banner-name">{trimmedName}</span>
+                  <AgentEmotionIndicator
+                    name={trimmedName}
+                    emotion={emotion}
+                    emotionExpiresAt={emotionExpiresAt}
+                    className="banner-emotion"
+                  />
                 </button>
               ) : (
-                <span className="banner-name">{trimmedName}</span>
+                <span className="agent-name-emotion-row">
+                  <span className="banner-name">{trimmedName}</span>
+                  <AgentEmotionIndicator
+                    name={trimmedName}
+                    emotion={emotion}
+                    emotionExpiresAt={emotionExpiresAt}
+                    className="banner-emotion"
+                  />
+                </span>
               )}
               {agentEmail || agentSms ? (
                 <span className="banner-contact-links">

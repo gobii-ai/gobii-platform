@@ -3,8 +3,6 @@ import { useEffect, useRef, useState, type CSSProperties } from 'react'
 type AgentAvatarBadgeProps = {
   name: string
   avatarUrl?: string | null
-  emotion?: string | null
-  emotionExpiresAt?: string | null
   className?: string
   imageClassName?: string
   textClassName?: string
@@ -18,8 +16,6 @@ const MAX_AVATAR_LOAD_RETRIES = 3
 export function AgentAvatarBadge({
   name,
   avatarUrl,
-  emotion,
-  emotionExpiresAt,
   className,
   imageClassName,
   textClassName,
@@ -32,42 +28,12 @@ export function AgentAvatarBadge({
   const lastInitial = nameParts.length > 1 ? nameParts[nameParts.length - 1]?.charAt(0).toUpperCase() || '' : ''
   const initials = `${firstInitial}${lastInitial}`.trim()
   const normalizedAvatarUrl = (avatarUrl || '').trim() || null
-  const normalizedEmotion = (emotion || '').trim() || null
-  const emotionExpiresAtMs = emotionExpiresAt ? Date.parse(emotionExpiresAt) : Number.NaN
-  const emotionKey = normalizedEmotion && Number.isFinite(emotionExpiresAtMs)
-    ? `${normalizedEmotion}\u0000${emotionExpiresAtMs}`
-    : null
-  const [expiredEmotionKey, setExpiredEmotionKey] = useState<string | null>(() => (
-    emotionKey && emotionExpiresAtMs <= Date.now() ? emotionKey : null
-  ))
   const [avatarSrc, setAvatarSrc] = useState<string | null>(normalizedAvatarUrl)
   const hasAvatar = Boolean(avatarSrc)
   const [avatarReady, setAvatarReady] = useState(false)
   const [avatarRetryCount, setAvatarRetryCount] = useState(0)
   const imageRef = useRef<HTMLImageElement | null>(null)
   const retryTimeoutRef = useRef<number | null>(null)
-
-  useEffect(() => {
-    if (!emotionKey || emotionKey === expiredEmotionKey) {
-      return
-    }
-    const expireIfDue = () => {
-      if (emotionExpiresAtMs <= Date.now()) {
-        setExpiredEmotionKey(emotionKey)
-      }
-    }
-    const timeoutId = window.setTimeout(
-      expireIfDue,
-      Math.max(0, emotionExpiresAtMs - Date.now()),
-    )
-    window.addEventListener('focus', expireIfDue)
-    document.addEventListener('visibilitychange', expireIfDue)
-    return () => {
-      window.clearTimeout(timeoutId)
-      window.removeEventListener('focus', expireIfDue)
-      document.removeEventListener('visibilitychange', expireIfDue)
-    }
-  }, [emotionExpiresAtMs, emotionKey, expiredEmotionKey])
 
   useEffect(() => {
     if (retryTimeoutRef.current !== null) {
@@ -123,10 +89,6 @@ export function AgentAvatarBadge({
     opacity: hasAvatar && avatarReady ? 1 : 0,
     transition: `opacity ${AVATAR_FADE_MS}ms ease`,
   }
-  const activeEmotion = emotionKey && emotionExpiresAtMs > Date.now() && emotionKey !== expiredEmotionKey
-    ? normalizedEmotion
-    : null
-
   return (
     <div className={className} style={containerStyle}>
       <span className={textClassName} style={fallbackStyleWithFade}>
@@ -164,17 +126,6 @@ export function AgentAvatarBadge({
             }, retryDelayMs)
           }}
         />
-      ) : null}
-      {activeEmotion ? (
-        <span
-          className="agent-avatar-emotion"
-          data-agent-emotion={activeEmotion}
-          role="img"
-          aria-label={`${trimmedName}'s current emotion: ${activeEmotion}`}
-          title={`${trimmedName}'s current emotion: ${activeEmotion}`}
-        >
-          {activeEmotion}
-        </span>
       ) : null}
     </div>
   )

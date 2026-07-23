@@ -173,8 +173,8 @@ export function DeveloperModeControls({
             <span>{selectedExportRange.label}</span>
             <ChevronDown className="developer-export-chevron" aria-hidden />
           </Button>
-          <Popover className="developer-export-popover" placement="bottom end" offset={6}>
-            <Menu aria-label="Developer export range" onAction={selectExportRange} className="developer-export-menu">
+          <Popover className="agent-chat-menu-popover developer-export-popover" placement="bottom end" offset={6}>
+            <Menu aria-label="Developer export range" onAction={selectExportRange} className="agent-chat-menu">
               {EXPORT_RANGES.map((range) => (
                 <MenuItem key={range.key} id={range.key} textValue={range.label} className="agent-chat-menu-item developer-export-option" data-selected={range.key === actions.exportRange ? 'true' : 'false'}>
                   <span>{range.label}</span>
