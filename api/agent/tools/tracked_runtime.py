@@ -51,11 +51,12 @@ def execute_tracked_runtime_tool_call(
 ) -> tuple[Any, Optional[list[dict]]]:
     from api.agent.core.event_processing import (
         _build_safe_error_payload,
-        _create_pending_tool_call_step,
+        _create_queued_tool_call_step,
         _enforce_tool_rate_limit,
         _ensure_credit_for_tool,
         _finalize_pending_tool_call_step,
         _is_error_status,
+        _mark_tool_call_started,
         _normalize_error_result,
         _persist_tool_call_step,
     )
@@ -83,8 +84,9 @@ def execute_tracked_runtime_tool_call(
 
     credits_consumed = credit_info.get("cost")
     consumed_credit = credit_info.get("credit")
-    pending_step = _create_pending_tool_call_step(
+    pending_step = _create_queued_tool_call_step(
         agent=agent,
+        batch_index=1,
         tool_name=tool_name,
         tool_params=exec_params,
         credits_consumed=credits_consumed,
@@ -98,6 +100,12 @@ def execute_tracked_runtime_tool_call(
     updated_tools: Optional[list[dict]] = None
     duration_ms: Optional[int] = None
     try:
+        _mark_tool_call_started(
+            agent,
+            step=pending_step,
+            tool_name=tool_name,
+            batch_index=1,
+        )
         started_at = time.monotonic()
         context_step_id = str(pending_step.id) if pending_step is not None else None
         with tool_execution_context(step_id=context_step_id):

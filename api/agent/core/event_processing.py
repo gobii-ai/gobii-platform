@@ -1899,7 +1899,7 @@ def _finalize_pending_tool_call_step(
     status: str,
     parent_tool_call: Any = None,
     display_metadata: Dict[str, Any] | None = None,
-) -> None:
+) -> bool:
     from api.models import PersistentAgentToolCall
 
     normalized_result = _normalize_tool_result_content(result_content)
@@ -1985,11 +1985,12 @@ def _finalize_pending_tool_call_step(
                 getattr(step, "id", None),
                 exc_info=True,
             )
-        return
+        return False
 
     _emit_tool_call_realtime(step, "finalized")
     if not created_tool_call:
         _emit_tool_call_developer_update(step, "finalized")
+    return True
 
 
 def _clear_refunded_step_charge(step: "PersistentAgentStep") -> None:
@@ -2154,6 +2155,7 @@ class _PreparedToolBatch:
     all_calls_sleep: bool
     abort_after_execution: bool
     parallel_ineligible_reason: Optional[str]
+    cancel_prepared_calls: bool = False
 
 
 @dataclass
@@ -2171,11 +2173,13 @@ class _ExecutedToolBatch:
     abort_after_execution: bool = False
 
 
-def _mark_prepared_tool_started(
+def _mark_tool_call_started(
     agent: PersistentAgent,
-    prepared: _PreparedToolExecution,
+    *,
+    step: Optional["PersistentAgentStep"],
+    tool_name: str,
+    batch_index: int,
 ) -> None:
-    step = prepared.pending_step
     if step is None:
         return
 
@@ -2200,10 +2204,22 @@ def _mark_prepared_tool_started(
         "Agent %s tool transition step=%s tool=%s batch_index=%s state=pending",
         agent.id,
         step.id,
-        prepared.tool_name,
-        prepared.idx,
+        tool_name,
+        batch_index,
     )
     _emit_tool_call_realtime(step, "pending")
+
+
+def _mark_prepared_tool_started(
+    agent: PersistentAgent,
+    prepared: _PreparedToolExecution,
+) -> None:
+    _mark_tool_call_started(
+        agent,
+        step=prepared.pending_step,
+        tool_name=prepared.tool_name,
+        batch_index=prepared.idx,
+    )
 
 
 def _serialize_tool_execution_outcome(
@@ -2257,7 +2273,7 @@ def _persist_tool_execution_outcome(
         )
     ):
         close_old_connections()
-        _finalize_pending_tool_call_step(
+        persisted = _finalize_pending_tool_call_step(
             step=step,
             tool_name=outcome.prepared.tool_name,
             tool_params=outcome.prepared.tool_params,
@@ -2266,17 +2282,18 @@ def _persist_tool_execution_outcome(
             status=tool_status,
             display_metadata=outcome.display_metadata,
         )
-        outcome.persisted_result_content = result_content
-        outcome.persisted_status = tool_status
-        logger.info(
-            "Agent %s tool transition step=%s tool=%s batch_index=%s state=%s duration_ms=%s",
-            agent.id,
-            step.id,
-            outcome.prepared.tool_name,
-            outcome.prepared.idx,
-            tool_status,
-            outcome.duration_ms,
-        )
+        if persisted:
+            outcome.persisted_result_content = result_content
+            outcome.persisted_status = tool_status
+            logger.info(
+                "Agent %s tool transition step=%s tool=%s batch_index=%s state=%s duration_ms=%s",
+                agent.id,
+                step.id,
+                outcome.prepared.tool_name,
+                outcome.prepared.idx,
+                tool_status,
+                outcome.duration_ms,
+            )
     return step, result_content, tool_status
 
 
@@ -3381,6 +3398,7 @@ def _prepare_tool_batch(
     followup_required = False
     all_calls_sleep = not has_non_sleep_calls
     abort_after_execution = False
+    cancel_prepared_calls = False
     deep_work_update_reason = _deep_work_update_gate_context(agent, tool_calls)
     if deep_work_update_reason:
         _record_deep_work_update_correction(
@@ -3421,6 +3439,7 @@ def _prepare_tool_batch(
                 check_context="tool_batch",
             ):
                 abort_after_execution = True
+                cancel_prepared_calls = True
                 break
             if lock_extender:
                 lock_extender.maybe_extend()
@@ -3808,10 +3827,11 @@ def _prepare_tool_batch(
         ),
         abort_after_execution=abort_after_execution,
         parallel_ineligible_reason=_parallel_batch_ineligible_reason(prepared_calls),
+        cancel_prepared_calls=cancel_prepared_calls,
     )
 
 
-def _execute_prepared_tool_batch(
+def _execute_prepared_tool_batch_inner(
     agent: PersistentAgent,
     prepared_batch: _PreparedToolBatch,
     *,
@@ -3824,9 +3844,10 @@ def _execute_prepared_tool_batch(
     execution_outcomes: list[_ToolExecutionOutcome] = []
     run_parallel_batch = prepared_batch.parallel_ineligible_reason is None
     available_tools = tools
-    abort_after_execution = False
+    abort_after_execution = prepared_batch.abort_after_execution
+    execution_aborted = False
 
-    if prepared_batch.abort_after_execution:
+    if prepared_batch.cancel_prepared_calls:
         _cancel_unstarted_tool_calls(
             agent,
             prepared_batch.prepared_calls,
@@ -3851,9 +3872,9 @@ def _execute_prepared_tool_batch(
             next_prepared_index = 0
 
             def submit_available_calls() -> None:
-                nonlocal abort_after_execution, next_prepared_index
+                nonlocal abort_after_execution, execution_aborted, next_prepared_index
                 while (
-                    not abort_after_execution
+                    not execution_aborted
                     and len(futures) < max_workers
                     and next_prepared_index < len(prepared_batch.prepared_calls)
                 ):
@@ -3867,6 +3888,7 @@ def _execute_prepared_tool_batch(
                             check_context="tool_batch_execute",
                         ):
                             abort_after_execution = True
+                            execution_aborted = True
                             return
                         if lock_extender:
                             lock_extender.maybe_extend()
@@ -3968,16 +3990,39 @@ def _execute_prepared_tool_batch(
                         after_count,
                     )
 
-    _cancel_unstarted_tool_calls(
-        agent,
-        prepared_batch.prepared_calls,
-        reason="Tool call was cancelled before execution because batch processing stopped.",
-    )
     return _ExecutedToolBatch(
         execution_outcomes=execution_outcomes,
         tools=available_tools,
         abort_after_execution=abort_after_execution,
     )
+
+
+def _execute_prepared_tool_batch(
+    agent: PersistentAgent,
+    prepared_batch: _PreparedToolBatch,
+    *,
+    budget_ctx: Optional[BudgetContext],
+    eval_run_id: Optional[str],
+    tools: List[dict],
+    heartbeat: Any,
+    lock_extender: Any,
+) -> _ExecutedToolBatch:
+    try:
+        return _execute_prepared_tool_batch_inner(
+            agent,
+            prepared_batch,
+            budget_ctx=budget_ctx,
+            eval_run_id=eval_run_id,
+            tools=tools,
+            heartbeat=heartbeat,
+            lock_extender=lock_extender,
+        )
+    finally:
+        _cancel_unstarted_tool_calls(
+            agent,
+            prepared_batch.prepared_calls,
+            reason="Tool call was cancelled before execution because batch processing stopped.",
+        )
 
 
 def _finalize_tool_batch(
@@ -4021,8 +4066,9 @@ def _finalize_tool_batch(
                 display_metadata=outcome.display_metadata,
             )
             prepared.pending_step = step
-            outcome.persisted_result_content = result_content
-            outcome.persisted_status = tool_status
+            if step is not None:
+                outcome.persisted_result_content = result_content
+                outcome.persisted_status = tool_status
 
         result_preview = result_content[:RESULT_LOG_MAX_CHARS]
         logger.info(

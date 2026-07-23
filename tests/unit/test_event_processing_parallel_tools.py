@@ -456,6 +456,164 @@ class TestParallelToolCallsExecution(TestCase):
             3,
         )
 
+    @patch(
+        "api.agent.core.event_processing.execute_enabled_tool",
+        return_value={"status": "ok", "auto_sleep_ok": True},
+    )
+    def test_credit_failure_after_admission_executes_affordable_subset(
+        self,
+        mock_execute_enabled,
+    ):
+        with patch(
+            "api.agent.core.event_processing._ensure_credit_for_tool",
+            side_effect=[
+                {"cost": None, "credit": None},
+                None,
+            ],
+        ):
+            self._run_single_iteration(
+                [
+                    _tool_call("read_file", '{"path": "/exports/a.txt"}'),
+                    _tool_call("http_request", '{"method": "GET", "url": "https://example.com"}'),
+                ]
+            )
+
+        mock_execute_enabled.assert_called_once()
+        tool_calls = PersistentAgentToolCall.objects.filter(step__agent=self.agent)
+        self.assertEqual(tool_calls.count(), 1)
+        self.assertEqual(tool_calls.get().tool_name, "read_file")
+        self.assertEqual(tool_calls.get().status, PersistentAgentToolCall.Status.COMPLETE)
+
+    def test_terminal_persistence_guard_advances_only_after_confirmed_write(self):
+        from api.agent.core import event_processing as ep
+
+        step = PersistentAgentStep.objects.create(agent=self.agent)
+        PersistentAgentToolCall.objects.create(
+            step=step,
+            tool_name="read_file",
+            tool_params={"path": "/exports/a.txt"},
+            status=PersistentAgentToolCall.Status.PENDING,
+        )
+        prepared = ep._PreparedToolExecution(
+            idx=1,
+            tool_name="read_file",
+            tool_params={"path": "/exports/a.txt"},
+            exec_params={"path": "/exports/a.txt"},
+            pending_step=step,
+            credits_consumed=None,
+            consumed_credit=None,
+            call_id="persist-retry",
+            explicit_continue=None,
+            inferred_continue=False,
+            parallel_safe=True,
+            parallel_ineligible_reason=None,
+        )
+        outcome = ep._ToolExecutionOutcome(
+            prepared=prepared,
+            result={"status": "ok"},
+            duration_ms=12,
+            updated_tools=None,
+            variable_map={},
+        )
+
+        with patch.object(ep, "_finalize_pending_tool_call_step", return_value=False) as mock_finalize:
+            ep._persist_tool_execution_outcome(self.agent, outcome)
+            ep._persist_tool_execution_outcome(self.agent, outcome)
+
+        self.assertEqual(mock_finalize.call_count, 2)
+        self.assertIsNone(outcome.persisted_result_content)
+        self.assertIsNone(outcome.persisted_status)
+
+    def test_unexpected_execution_error_terminalizes_unstarted_calls(self):
+        from api.agent.core import event_processing as ep
+
+        prepared_calls = []
+        for idx, tool_name in enumerate(("read_file", "http_request"), start=1):
+            step = ep._create_queued_tool_call_step(
+                agent=self.agent,
+                batch_index=idx,
+                tool_name=tool_name,
+                tool_params={},
+                credits_consumed=None,
+                consumed_credit=None,
+                attach_completion=lambda _step_kwargs: None,
+                attach_prompt_archive=lambda _step: None,
+            )
+            prepared_calls.append(
+                ep._PreparedToolExecution(
+                    idx=idx,
+                    tool_name=tool_name,
+                    tool_params={},
+                    exec_params={},
+                    pending_step=step,
+                    credits_consumed=None,
+                    consumed_credit=None,
+                    call_id=f"unexpected-{idx}",
+                    explicit_continue=None,
+                    inferred_continue=False,
+                    parallel_safe=False,
+                    parallel_ineligible_reason=f"unsafe_tool:{tool_name}",
+                )
+            )
+        prepared_batch = ep._PreparedToolBatch(
+            prepared_calls=prepared_calls,
+            followup_required=False,
+            all_calls_sleep=False,
+            abort_after_execution=False,
+            parallel_ineligible_reason="unsafe_tool:read_file",
+        )
+
+        with patch.object(
+            ep,
+            "_mark_prepared_tool_started",
+            side_effect=DatabaseError("start transition failed"),
+        ):
+            with self.assertRaises(DatabaseError):
+                ep._execute_prepared_tool_batch(
+                    self.agent,
+                    prepared_batch,
+                    budget_ctx=None,
+                    eval_run_id=None,
+                    tools=[],
+                    heartbeat=None,
+                    lock_extender=None,
+                )
+
+        tool_calls = PersistentAgentToolCall.objects.filter(step__agent=self.agent)
+        self.assertEqual(tool_calls.count(), 2)
+        self.assertFalse(tool_calls.filter(status__in=["queued", "pending"]).exists())
+        self.assertEqual(
+            set(tool_calls.values_list("status", flat=True)),
+            {PersistentAgentToolCall.Status.ERROR},
+        )
+
+    def test_tracked_runtime_tool_uses_queued_pending_terminal_lifecycle(self):
+        from api.agent.core import event_processing as ep
+        from api.agent.tools.tracked_runtime import execute_tracked_runtime_tool_call
+
+        with patch.object(ep, "_enforce_tool_rate_limit", return_value=True), patch.object(
+            ep,
+            "_ensure_credit_for_tool",
+            return_value={"cost": None, "credit": None},
+        ), patch(
+            "api.agent.tools.tracked_runtime.execute_runtime_tool_call",
+            return_value=({"status": "ok"}, None),
+        ), patch.object(ep, "_emit_tool_call_realtime") as mock_realtime:
+            result, updated_tools = execute_tracked_runtime_tool_call(
+                self.agent,
+                tool_name="read_file",
+                exec_params={"path": "/exports/a.txt"},
+            )
+
+        self.assertEqual(result, {"status": "ok"})
+        self.assertIsNone(updated_tools)
+        tool_call = PersistentAgentToolCall.objects.get(step__agent=self.agent)
+        self.assertEqual(tool_call.status, PersistentAgentToolCall.Status.COMPLETE)
+        self.assertEqual(
+            [call.args[1] for call in mock_realtime.call_args_list],
+            ["pending", "finalized"],
+        )
+
     @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
     @patch("api.agent.core.event_processing.execute_enabled_tool")
     def test_eval_policy_exit_terminalizes_every_queued_call(
