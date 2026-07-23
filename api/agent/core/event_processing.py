@@ -2297,8 +2297,8 @@ class _FinalizedToolBatch:
 def _plan_has_unfinished_items(agent: PersistentAgent) -> bool:
     try:
         snapshot = build_plan_snapshot(agent)
-    except Exception:
-        logger.debug("Failed to build plan snapshot for terminal-send check.", exc_info=True)
+    except DatabaseError:
+        logger.debug("Failed to build plan snapshot for terminal closeout.", exc_info=True)
         return False
     return snapshot.todo_count > 0 or snapshot.doing_count > 0
 
@@ -4074,22 +4074,6 @@ def _finalize_tool_batch(
             executed_non_message_action = True
 
     followup_required = followup_required or bool(human_input_delivery_tools - successful_message_tools)
-
-    if (
-        agent.planning_state != PersistentAgent.PlanningState.PLANNING
-        and terminal_message_delivery_ok
-        and not followup_required
-        and not is_credit_message_only_mode(daily_credit_state, task_credit_available)
-        and _plan_has_unfinished_items(agent)
-    ):
-        _record_policy_step(
-            agent,
-            "Terminal message delivery requested stop, but the current plan still has unfinished items. "
-            "Call update_plan with the complete current plan state before stopping.",
-            attach_completion=attach_completion,
-            attach_prompt_archive=attach_prompt_archive,
-        )
-        followup_required = True
 
     return _FinalizedToolBatch(
         executed_calls=executed_calls,
@@ -6457,6 +6441,7 @@ def _run_agent_loop(
     direct_correction_reply_pending = False
     direct_feedback_reply_completed = False
     direct_correction_prior_output = ""
+    terminal_plan_cleanup_pending = False
     explicit_prefer_low_latency = prefer_low_latency
 
     def _current_human_inbound_generation() -> int:
@@ -6477,12 +6462,15 @@ def _run_agent_loop(
         routing_scope_tokens.append(bind_inbound_routing_scope(initial_routing_scope))
 
         def _refresh_inbound_routing_scope(generation: int) -> None:
-            nonlocal routing_scope_generation, direct_correction_reply_pending, direct_feedback_reply_completed, direct_correction_prior_output
+            nonlocal routing_scope_generation, direct_correction_reply_pending
+            nonlocal direct_feedback_reply_completed, direct_correction_prior_output
+            nonlocal terminal_plan_cleanup_pending
             routing_scope_tokens.append(bind_inbound_routing_scope(capture_inbound_routing_scope(agent, pending_inbound=True)))
             routing_scope_generation = generation
             direct_correction_reply_pending = False
             direct_feedback_reply_completed = False
             direct_correction_prior_output = ""
+            terminal_plan_cleanup_pending = False
 
         prompt_run_cache = PromptRunCache(
             agent_id=str(agent.id),
@@ -6786,6 +6774,12 @@ def _run_agent_loop(
                     if not _is_orchestrator_prompt_stale():
                         remove_pending_agent(agent.id, client=redis_client)
 
+                def _finish_agent_loop(*, consume_human: bool = True) -> int:
+                    if consume_human:
+                        _mark_accepted_human_generation_consumed()
+                    _attempt_cycle_close_for_sleep(agent, budget_ctx)
+                    return cumulative_token_usage
+
                 def _attach_prompt_archive(step: PersistentAgentStep) -> None:
                     nonlocal prompt_archive_attached
                     if not prompt_archive_id or prompt_archive_attached:
@@ -6881,7 +6875,20 @@ def _run_agent_loop(
                 request_tools = iteration_tools
                 focused_feedback_reply_tool_name = None
                 source_reconciliation_directive = prompt_metadata.get("source_reconciliation_directive")
-                if direct_correction_pending:
+                terminal_plan_cleanup_this_iteration = terminal_plan_cleanup_pending
+                if terminal_plan_cleanup_this_iteration:
+                    terminal_plan_cleanup_pending = False
+                    if "update_plan" not in tool_names:
+                        logger.info("Agent %s: update_plan unavailable for terminal closeout; stopping.", agent.id)
+                        return _finish_agent_loop()
+                    request_tools, request_failover_configs = _focused_tool_completion_request(
+                        iteration_tools,
+                        request_failover_configs,
+                        "update_plan",
+                        "Final delivery succeeded. Only call update_plan once to finish/defer every current item; do nothing else.",
+                        fixed_continue=False,
+                    )
+                elif direct_correction_pending:
                     if not prompt_metadata.get("prompt_message_transform_applied"):
                         request_history = _focused_charter_patch_history(
                             history, agent.charter or "", feedback_analysis.lasting, direct_correction_prior_output,
@@ -7204,6 +7211,9 @@ def _run_agent_loop(
                         reasoning_only_streak = 0
                         _mark_accepted_human_generation_consumed()
                         continue
+                    if terminal_plan_cleanup_this_iteration:
+                        logger.info("Agent %s: bounded terminal plan closeout returned no tool; stopping.", agent.id)
+                        return _finish_agent_loop()
                     if not message_text and not thinking_content:
                         # Truly empty response (no text, no thinking, no tools) = agent is done
                         # Log plan state to help diagnose premature termination
@@ -7223,9 +7233,7 @@ def _run_agent_loop(
                             type(msg_content).__name__,
                             len(msg_content) if msg_content else 0,
                         )
-                        _mark_accepted_human_generation_consumed()
-                        _attempt_cycle_close_for_sleep(agent, budget_ctx)
-                        return cumulative_token_usage
+                        return _finish_agent_loop()
                     if reasoning_step is not None:
                         try:
                             reasoning_step.description = internal_reasoning.build_internal_reasoning_description(
@@ -7274,9 +7282,7 @@ def _run_agent_loop(
                             plan_state,
                             message_text or thinking_content or "(none)",
                         )
-                        _mark_accepted_human_generation_consumed()
-                        _attempt_cycle_close_for_sleep(agent, budget_ctx)
-                        return cumulative_token_usage
+                        return _finish_agent_loop()
                     _mark_accepted_human_generation_consumed()
                     continue
 
@@ -7348,9 +7354,7 @@ def _run_agent_loop(
                         prepared_batch.prepared_calls,
                         reason="Tool call was cancelled before execution by the evaluation stop policy.",
                     )
-                    _mark_accepted_human_generation_consumed()
-                    _attempt_cycle_close_for_sleep(agent, budget_ctx)
-                    return cumulative_token_usage
+                    return _finish_agent_loop()
 
                 executed_batch = _execute_prepared_tool_batch(
                     agent,
@@ -7425,10 +7429,24 @@ def _run_agent_loop(
                 if runtime_errors:
                     followup_required = True
 
+                if (
+                    agent.planning_state != PersistentAgent.PlanningState.PLANNING
+                    and finalized_batch.terminal_message_delivery_ok
+                    and not followup_required
+                    and not is_credit_message_only_mode(daily_state, task_credit_available)
+                    and _plan_has_unfinished_items(agent)
+                ):
+                    _record_policy_step(
+                        agent,
+                        "Final delivery succeeded with unfinished visible plan items. Run one bounded update_plan closeout, then stop.",
+                        attach_completion=_attach_completion,
+                        attach_prompt_archive=_attach_prompt_archive,
+                    )
+                    terminal_plan_cleanup_pending = True
+                    followup_required = True
+
                 if _should_stop_for_eval_policy(agent, budget_ctx=budget_ctx, span=iter_span):
-                    _mark_accepted_human_generation_consumed()
-                    _attempt_cycle_close_for_sleep(agent, budget_ctx)
-                    return cumulative_token_usage
+                    return _finish_agent_loop()
 
                 _mark_accepted_human_generation_consumed()
 
@@ -7452,10 +7470,12 @@ def _run_agent_loop(
                     if not _skip_stale_planning_mode_after_terminal_delivery(agent):
                         followup_required = True
 
-                if all_calls_sleep:
+                if terminal_plan_cleanup_this_iteration:
+                    logger.info("Agent %s: bounded terminal plan closeout turn finished; stopping.", agent.id)
+                    return _finish_agent_loop(consume_human=False)
+                elif all_calls_sleep:
                     logger.info("Agent %s is sleeping.", agent.id)
-                    _attempt_cycle_close_for_sleep(agent, budget_ctx)
-                    return cumulative_token_usage
+                    return _finish_agent_loop(consume_human=False)
                 elif _should_continue_for_unanswered_inbound_after_tools(agent, finalized_batch):
                     logger.info(
                         "Agent %s: non-message tool batch requested stop while latest inbound message "
@@ -7473,8 +7493,7 @@ def _run_agent_loop(
                         "Agent %s: tool batch ended with explicit stop; auto-sleeping.",
                         agent.id,
                     )
-                    _attempt_cycle_close_for_sleep(agent, budget_ctx)
-                    return cumulative_token_usage
+                    return _finish_agent_loop(consume_human=False)
                 # Implied send without continuation phrase = agent is done, force stop
                 elif (
                     implied_stop_after_send
@@ -7486,8 +7505,7 @@ def _run_agent_loop(
                         "Agent %s: implied send without continuation phrase; auto-sleeping.",
                         agent.id,
                     )
-                    _attempt_cycle_close_for_sleep(agent, budget_ctx)
-                    return cumulative_token_usage
+                    return _finish_agent_loop(consume_human=False)
                 elif (
                     not followup_required
                     and last_explicit_continue is None
@@ -7498,8 +7516,7 @@ def _run_agent_loop(
                         "Agent %s: tool batch complete with no follow-up required; auto-sleeping.",
                         agent.id,
                     )
-                    _attempt_cycle_close_for_sleep(agent, budget_ctx)
-                    return cumulative_token_usage
+                    return _finish_agent_loop(consume_human=False)
                 elif not followup_required and last_explicit_continue is True:
                     logger.info(
                         "Agent %s: tools returned auto_sleep_ok but agent explicitly requested continuation; continuing.",

@@ -30,6 +30,14 @@ MONITORING_SCOPE_QUESTION = "common_use_case_099_request_monitoring_scope"
 
 @tag("eval_sim")
 class BehaviorMicroScenarioTests(SimpleTestCase):
+    def test_final_report_eval_does_not_count_skipped_send_as_delivered(self):
+        scenario = ScenarioRegistry.get("planning_final_report_completes_visible_plan")
+        skipped_call = SimpleNamespace(result=json.dumps({"status": "ok", "skipped": True}))
+        delivered_call = SimpleNamespace(result=json.dumps({"status": "ok"}))
+
+        self.assertFalse(scenario._message_call_was_delivered(skipped_call))
+        self.assertTrue(scenario._message_call_was_delivered(delivered_call))
+
     def test_planning_questions_eval_exercises_normal_wait_lifecycle(self):
         scenario = ScenarioRegistry.get(PLANNING_FIRST_TURN_ASKS_BOUNDED_QUESTIONS)
         policy = scenario._eval_stop_policy()

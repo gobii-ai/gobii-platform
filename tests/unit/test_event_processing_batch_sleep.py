@@ -377,7 +377,7 @@ class TestBatchToolCallsWithSleep(TestCase):
     @patch('api.agent.core.event_processing.execute_send_email', return_value={"status": "ok", "auto_sleep_ok": True})
     @patch('api.agent.core.event_processing.build_prompt_context')
     @patch('api.agent.core.event_processing._completion_with_failover')
-    def test_auto_sleep_not_overridden_with_open_plan_work(
+    def test_terminal_send_allows_only_one_bounded_plan_closeout_turn(
         self,
         mock_completion,
         mock_build_prompt,
@@ -407,7 +407,13 @@ class TestBatchToolCallsWithSleep(TestCase):
             tc.function.arguments = args
             return tc
 
-        tc_email = mk_tc('send_email', '{"to": "a@example.com", "subject": "hi", "mobile_first_html": "<p>Hi</p>"}')
+        tc_email = mk_tc(
+            'send_email',
+            (
+                '{"to_address": "a@example.com", "subject": "hi", '
+                '"mobile_first_html": "<p>Hi</p>", "will_continue_work": false}'
+            ),
+        )
         tc_charter = mk_tc('update_charter', '{"new_charter": "Stay focused"}')
 
         msg = MagicMock()
@@ -418,37 +424,54 @@ class TestBatchToolCallsWithSleep(TestCase):
         resp = MagicMock(); resp.choices = [choice]
         resp.model_extra = {"usage": MagicMock(prompt_tokens=10, completion_tokens=5, total_tokens=15, prompt_tokens_details=MagicMock(cached_tokens=0))}
 
-        tc_plan = mk_tc(
-            'update_plan',
-            '{"plan": [{"step": "Finish outstanding work", "status": "done"}], "will_continue_work": false}',
-        )
-        followup_msg = MagicMock()
-        followup_msg.tool_calls = [tc_plan]
-        followup_msg.content = None
-        followup_choice = MagicMock(); followup_choice.message = followup_msg
+        followup_choice = MagicMock()
+        followup_choice.message = {
+            "tool_calls": [],
+            "content": None,
+            "reasoning_content": "Let me get my bearings before I update the plan.",
+        }
         followup_resp = MagicMock(); followup_resp.choices = [followup_choice]
         followup_resp.model_extra = {"usage": MagicMock(prompt_tokens=4, completion_tokens=2, total_tokens=6, prompt_tokens_details=MagicMock(cached_tokens=0))}
+
+        third_choice = MagicMock()
+        third_choice.message = {
+            "tool_calls": [],
+            "content": None,
+            "reasoning_content": "Let me assess the current state again.",
+        }
+        third_resp = MagicMock(); third_resp.choices = [third_choice]
+        third_resp.model_extra = {"usage": MagicMock(prompt_tokens=4, completion_tokens=2, total_tokens=6, prompt_tokens_details=MagicMock(cached_tokens=0))}
 
         mock_completion.side_effect = [
             (resp, {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15, "model": "m", "provider": "p"}),
             (followup_resp, {"prompt_tokens": 4, "completion_tokens": 2, "total_tokens": 6, "model": "m", "provider": "p"}),
+            (third_resp, {"prompt_tokens": 4, "completion_tokens": 2, "total_tokens": 6, "model": "m", "provider": "p"}),
         ]
 
         from api.agent.core import event_processing as ep
-        with patch.object(ep, 'MAX_AGENT_LOOP_ITERATIONS', 2):
+        with patch.object(ep, 'MAX_AGENT_LOOP_ITERATIONS', 3):
             ep._run_agent_loop(self.agent, is_first_run=False)
 
         self.assertEqual(mock_completion.call_count, 2)
+        closeout_tools = mock_completion.call_args_list[1].kwargs["tools"]
+        self.assertEqual(
+            [tool["function"]["name"] for tool in closeout_tools],
+            ["update_plan"],
+        )
+        self.assertIs(
+            closeout_tools[0]["function"]["parameters"]["properties"]["will_continue_work"]["const"],
+            False,
+        )
         self.assertEqual(len(notices), 2)
         self.assertIsNone(notices[0])
         self.assertIsNone(notices[1])
         self.assertTrue(
             PersistentAgentStep.objects.filter(
                 agent=self.agent,
-                description__contains="current plan still has unfinished items",
+                description__contains="one bounded update_plan closeout",
             ).exists()
         )
-        self.assertFalse(
+        self.assertTrue(
             PersistentAgentKanbanCard.objects.filter(
                 assigned_agent=self.agent,
                 status__in=[

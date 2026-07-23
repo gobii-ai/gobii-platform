@@ -476,6 +476,46 @@ def get_tool_calls_for_run(run_id, *, after=None, tool_names=None):
     return list(queryset.select_related("step", "step__agent").order_by("step__created_at", "step__id"))
 
 
+def explicit_stop_is_bounded_to_plan_closeout(run_id, *, after, call):
+    completion_ids = list(
+        PersistentAgentCompletion.objects.filter(
+            eval_run_id=run_id,
+            completion_type=PersistentAgentCompletion.CompletionType.ORCHESTRATOR,
+            created_at__gte=after,
+        )
+        .order_by("created_at", "id")
+        .values_list("id", flat=True)
+    )
+    call_completion_id = getattr(getattr(call, "step", None), "completion_id", None)
+    if not call_completion_id or call_completion_id not in completion_ids:
+        return False, (
+            f"stop_completion_id={call_completion_id}, "
+            f"orchestrator_completion_ids={[str(value) for value in completion_ids]}"
+        )
+
+    later_completion_ids = completion_ids[completion_ids.index(call_completion_id) + 1:]
+    if not later_completion_ids:
+        return True, f"stop_completion_id={call_completion_id}, later_completion_ids=[]"
+    if len(later_completion_ids) != 1:
+        return False, (
+            f"stop_completion_id={call_completion_id}, "
+            f"later_completion_ids={[str(value) for value in later_completion_ids]}"
+        )
+
+    closeout_calls = list(
+        PersistentAgentToolCall.objects.filter(
+            step__eval_run_id=run_id,
+            step__completion_id=later_completion_ids[0],
+        ).values_list("tool_name", flat=True)
+    )
+    bounded = closeout_calls == ["update_plan"]
+    return bounded, (
+        f"stop_completion_id={call_completion_id}, "
+        f"later_completion_ids={[str(value) for value in later_completion_ids]}, "
+        f"closeout_calls={closeout_calls}"
+    )
+
+
 def get_first_relevant_tool_call(run_id, *, after=None, ignored_tool_names=None):
     ignored = set(ignored_tool_names or ())
     for call in get_tool_calls_for_run(run_id, after=after):
@@ -1548,6 +1588,7 @@ class PlanningFinalReportCompletesVisiblePlanScenario(BehaviorMicroScenario):
         ScenarioTask(name="inject_prompt", assertion_type="manual"),
         ScenarioTask(name="verify_final_report_sent", assertion_type="manual"),
         ScenarioTask(name="verify_plan_completed", assertion_type="manual"),
+        ScenarioTask(name="verify_terminal_delivery_had_at_most_one_plan_closeout", assertion_type="manual"),
     ]
 
     def _seed_unfinished_plan(self, agent_id):
@@ -1571,7 +1612,11 @@ class PlanningFinalReportCompletesVisiblePlanScenario(BehaviorMicroScenario):
             payload = json.loads(call.result or "{}")
         except json.JSONDecodeError:
             return False
-        return isinstance(payload, dict) and payload.get("status") in {"ok", "sent", "success"}
+        return (
+            isinstance(payload, dict)
+            and payload.get("status") in {"ok", "sent", "success"}
+            and not payload.get("skipped")
+        )
 
     def run(self, run_id, agent_id):
         self._set_planning_state(agent_id, PersistentAgent.PlanningState.COMPLETED)
@@ -1612,13 +1657,13 @@ class PlanningFinalReportCompletesVisiblePlanScenario(BehaviorMicroScenario):
             if self._message_call_was_delivered(call)
         ]
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="verify_final_report_sent")
-        if send_calls:
+        if len(send_calls) == 1:
             self.record_task_result(
                 run_id,
                 None,
                 EvalRunTask.Status.PASSED,
                 task_name="verify_final_report_sent",
-                observed_summary="Agent delivered a web chat report.",
+                observed_summary="Agent delivered exactly one web chat report.",
                 artifacts={"step": send_calls[0].step},
             )
         else:
@@ -1627,7 +1672,7 @@ class PlanningFinalReportCompletesVisiblePlanScenario(BehaviorMicroScenario):
                 None,
                 EvalRunTask.Status.FAILED,
                 task_name="verify_final_report_sent",
-                observed_summary="Expected one delivered send_chat_message call.",
+                observed_summary=f"Expected exactly one delivered send_chat_message call; found {len(send_calls)}.",
             )
 
         unfinished = list(
@@ -1663,6 +1708,53 @@ class PlanningFinalReportCompletesVisiblePlanScenario(BehaviorMicroScenario):
                 ),
                 artifacts={"step": (send_calls[0].step if send_calls else None)},
             )
+
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.RUNNING,
+            task_name="verify_terminal_delivery_had_at_most_one_plan_closeout",
+        )
+        run_calls = get_tool_calls_for_run(run_id, after=inbound.timestamp)
+        explicit_stop_calls = [
+            call
+            for call in run_calls
+            if resolved_tool_param(call, "will_continue_work") is False
+        ]
+        terminal_delivery_calls = [
+            call
+            for call in send_calls
+            if resolved_tool_param(call, "will_continue_work") is False
+        ]
+        stop_anchor = (
+            terminal_delivery_calls[0]
+            if terminal_delivery_calls
+            else (explicit_stop_calls[-1] if explicit_stop_calls else None)
+        )
+        stopped = False
+        detail = (
+            f"delivered_send_calls={len(send_calls)}, "
+            f"terminal_delivery_calls={len(terminal_delivery_calls)}, "
+            f"explicit_stop_calls={len(explicit_stop_calls)}"
+        )
+        if len(send_calls) == 1 and stop_anchor is not None:
+            stopped, detail = explicit_stop_is_bounded_to_plan_closeout(
+                run_id,
+                after=inbound.timestamp,
+                call=stop_anchor,
+            )
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED if stopped else EvalRunTask.Status.FAILED,
+            task_name="verify_terminal_delivery_had_at_most_one_plan_closeout",
+            observed_summary=(
+                "The terminal delivery ended processing directly or after one update_plan-only closeout."
+                if stopped
+                else f"Processing continued beyond one bounded plan closeout or no terminal stop was issued: {detail}."
+            ),
+            artifacts={"step": stop_anchor.step} if stop_anchor is not None else {},
+        )
 
 
 @register_scenario
