@@ -246,7 +246,12 @@ from console.agent_creation import (
 )
 from console.views import _track_org_event_for_console, _mcp_server_event_properties
 from api.views import PersistentAgentViewSet, cancel_browser_use_task
-from api.services.sandbox_compute import SANDBOX_COMPUTE_WAFFLE_FLAG, SandboxComputeService, SandboxComputeUnavailable
+from api.services.sandbox_compute import (
+    SANDBOX_COMPUTE_WAFFLE_FLAG,
+    SandboxComputeService,
+    SandboxComputeUnavailable,
+    sandbox_compute_enabled,
+)
 from waffle import flag_is_active
 from console.llm_serializers import build_llm_overview, serialize_intelligence_tier
 import litellm
@@ -1471,6 +1476,15 @@ def _resolve_mcp_owner(request: HttpRequest) -> tuple[str, str, object | None, o
 
     label = request.user.get_full_name() or request.user.username or request.user.email or "Personal"
     return ("user", label, request.user, None)
+
+
+def _user_mcp_commands_allowed(request: HttpRequest, owner_scope: str) -> bool:
+    """Allow command servers only when every assignable agent shares the requesting user."""
+    return (
+        owner_scope == MCPServerConfig.Scope.USER
+        and sandbox_compute_enabled()
+        and flag_is_active(request, SANDBOX_COMPUTE_WAFFLE_FLAG)
+    )
 
 
 def _owner_queryset(owner_scope: str, owner_user, owner_org):
@@ -7259,7 +7273,7 @@ class MCPServerListAPIView(LoginRequiredMixin, View):
             {
                 "owner_scope": owner_scope,
                 "owner_label": owner_label,
-                "allow_commands": flag_is_active(request, SANDBOX_COMPUTE_WAFFLE_FLAG),
+                "allow_commands": _user_mcp_commands_allowed(request, owner_scope),
                 "result_count": len(servers),
                 "servers": servers,
             }
@@ -7270,7 +7284,7 @@ class MCPServerListAPIView(LoginRequiredMixin, View):
             return payload
 
         owner_scope, _, owner_user, owner_org = _resolve_mcp_owner(request)
-        allow_commands = flag_is_active(request, SANDBOX_COMPUTE_WAFFLE_FLAG)
+        allow_commands = _user_mcp_commands_allowed(request, owner_scope)
         form = MCPServerConfigForm(payload, allow_commands=allow_commands)
         if form.is_valid():
             try:
@@ -7310,7 +7324,7 @@ class MCPServerDetailAPIView(LoginRequiredMixin, View):
         if isinstance(payload := _json_payload_or_bad_request(request), HttpResponseBadRequest):
             return payload
 
-        allow_commands = flag_is_active(request, SANDBOX_COMPUTE_WAFFLE_FLAG)
+        allow_commands = _user_mcp_commands_allowed(request, server.scope)
         form = MCPServerConfigForm(payload, instance=server, allow_commands=allow_commands)
         if form.is_valid():
             try:
