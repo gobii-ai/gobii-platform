@@ -79,6 +79,7 @@ class MCPServerListAPITests(TestCase):
         payload = response.json()
         self.assertEqual(payload["owner_scope"], "user")
         self.assertEqual(payload["owner_label"], self.user.username)
+        self.assertFalse(payload["allow_commands"])
         self.assertEqual(payload["result_count"], 1)
         self.assertEqual(len(payload["servers"]), 1)
         record = payload["servers"][0]
@@ -89,6 +90,15 @@ class MCPServerListAPITests(TestCase):
         self.assertIn("oauth_status_url", record)
         self.assertFalse(record["oauth_pending"])
         self.assertFalse(record["oauth_connected"])
+
+    @patch("console.api_views.flag_is_active", return_value=True)
+    def test_reports_command_capability_for_sandbox_compute_users(self, _mock_flag_is_active):
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("console-mcp-server-list"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["allow_commands"])
 
     def test_returns_organization_scope_when_context_selected(self):
         org = Organization.objects.create(
@@ -567,6 +577,7 @@ class PlatformMCPServerAPITests(TestCase):
         payload = response.json()
         self.assertEqual(payload["owner_scope"], MCPServerConfig.Scope.PLATFORM)
         self.assertEqual(payload["owner_label"], "Platform")
+        self.assertTrue(payload["allow_commands"])
         self.assertEqual(payload["result_count"], 1)
         self.assertEqual(payload["servers"][0]["id"], str(platform_server.id))
         self.assertEqual(payload["servers"][0]["scope"], MCPServerConfig.Scope.PLATFORM)

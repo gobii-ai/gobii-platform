@@ -7371,6 +7371,7 @@ class MCPServerListAPIView(LoginRequiredMixin, View):
             {
                 "owner_scope": owner_scope,
                 "owner_label": owner_label,
+                "allow_commands": flag_is_active(request, SANDBOX_COMPUTE_WAFFLE_FLAG),
                 "result_count": len(servers),
                 "servers": servers,
             }
@@ -7499,6 +7500,7 @@ class PlatformMCPServerListAPIView(SystemAdminAPIView):
             {
                 "owner_scope": MCPServerConfig.Scope.PLATFORM,
                 "owner_label": "Platform",
+                "allow_commands": True,
                 "result_count": len(servers),
                 "servers": servers,
             }

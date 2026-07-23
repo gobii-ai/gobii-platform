@@ -40,7 +40,7 @@ export function McpServersScreen({
   testUrlTemplate,
   ownerScope,
   ownerLabel,
-  allowCommands = false,
+  allowCommands,
   pipedreamAppsUrl = null,
   pipedreamAppSearchUrl = null,
   nativeIntegrationsUrl = null,
@@ -73,6 +73,7 @@ export function McpServersScreen({
 
   const servers = data?.servers ?? []
   const resolvedOwnerScope = ownerScope ?? data?.ownerScope
+  const resolvedAllowCommands = allowCommands ?? data?.allowCommands ?? false
   const ownerLabelText = resolvedOwnerScope === 'platform' ? 'the platform' : ownerLabel || data?.ownerLabel || 'your workspace'
   const listError = error instanceof Error ? error.message : null
 
@@ -96,7 +97,7 @@ export function McpServersScreen({
         mode="create"
         listUrl={listUrl}
         ownerScope={resolvedOwnerScope}
-        allowCommands={allowCommands}
+        allowCommands={resolvedAllowCommands}
         onClose={onClose}
         onSuccess={handleSuccess}
         onError={handleError}
@@ -111,7 +112,7 @@ export function McpServersScreen({
     showModal,
     listUrl,
     resolvedOwnerScope,
-    allowCommands,
+    resolvedAllowCommands,
     handleSuccess,
     handleError,
     oauthStartUrl,
@@ -128,7 +129,7 @@ export function McpServersScreen({
           listUrl={listUrl}
           detailUrl={detailUrl}
           ownerScope={resolvedOwnerScope}
-          allowCommands={allowCommands}
+          allowCommands={resolvedAllowCommands}
           onClose={onClose}
           onSuccess={handleSuccess}
           onError={handleError}
@@ -145,7 +146,7 @@ export function McpServersScreen({
       detailUrlTemplate,
       listUrl,
       resolvedOwnerScope,
-      allowCommands,
+      resolvedAllowCommands,
       handleSuccess,
       handleError,
       oauthStartUrl,
