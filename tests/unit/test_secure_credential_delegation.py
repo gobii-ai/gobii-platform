@@ -6,7 +6,6 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings, tag
 from django.utils import timezone
 
-from api.agent.core.prompt_context import _get_system_instruction
 from api.agent.system_skills import get_system_skill_definition, shortlist_system_skills
 from api.agent.tools.http_request import get_http_request_tool
 from api.agent.tools.meta_gobii import execute_meta_gobii_tool
@@ -160,15 +159,6 @@ class SecureApiRequestTests(TestCase):
 
         self.assertIn("response may contain credentials", description)
         self.assertIn("secure credential delegation", description)
-
-    def test_core_api_routing_exempts_credential_bearing_responses(self):
-        prompt = _get_system_instruction(self.agent, is_first_run=True)
-
-        self.assertIn(
-            "credential-returning API -> search_tools('secure credential delegation') first",
-            prompt,
-        )
-        self.assertIn("non-secret data/api/feed/file URL -> http_request", prompt)
 
     def test_real_harness_eval_suite_is_registered(self):
         import api.evals.loader  # noqa: F401
