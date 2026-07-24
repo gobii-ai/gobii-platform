@@ -140,6 +140,13 @@ class ConsoleViewsTest(TestCase):
             )
         return organization
 
+    def _select_organization_context(self, organization):
+        session = self.client.session
+        session["context_type"] = "organization"
+        session["context_id"] = str(organization.id)
+        session["context_name"] = organization.name
+        session.save()
+
     def _create_staff_test_agent(
         self,
         *,
@@ -3374,6 +3381,106 @@ class ConsoleViewsTest(TestCase):
         browser_agent.refresh_from_db()
         self.assertEqual(agent.name, long_name)
         self.assertEqual(browser_agent.name, long_name)
+
+    @tag("batch_console_agents_management")
+    def test_org_agent_avatar_save_ignores_deleted_personal_agent_name(self):
+        from api.models import BrowserUseAgent, OrganizationMembership, PersistentAgent
+
+        organization = self._create_organization(
+            name="Avatar Name Scope Org",
+            slug="avatar-name-scope-org",
+            role=OrganizationMembership.OrgRole.OWNER,
+        )
+        self._select_organization_context(organization)
+
+        personal_browser_agent = BrowserUseAgent.objects.create(user=self.user, name="John Pork")
+        personal_agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="John Pork",
+            charter="Personal archived work",
+            browser_use_agent=personal_browser_agent,
+        )
+        personal_agent.soft_delete()
+
+        organization_creator = get_user_model().objects.create_user(
+            username="avatar-name-scope-creator@example.com",
+            email="avatar-name-scope-creator@example.com",
+            password="testpass123",
+        )
+        organization_agent = self._create_staff_test_agent(
+            user=organization_creator,
+            name="John Pork",
+            organization=organization,
+        )
+
+        tmp_media = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp_media, ignore_errors=True)
+        png_bytes = (
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+            b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\x0bIDAT\x08\xd7c\xf8\x0f"
+            b"\x00\x01\x01\x01\x00\x18\xdd\x8d\x1d\x00\x00\x00\x00IEND\xaeB`\x82"
+        )
+
+        with override_settings(MEDIA_ROOT=tmp_media, MEDIA_URL="/media/"):
+            response = self.client.post(
+                reverse("console_agent_settings", kwargs={"agent_id": organization_agent.id}),
+                {
+                    "name": organization_agent.name,
+                    "charter": organization_agent.charter,
+                    "is_active": "on",
+                    "avatar": SimpleUploadedFile("avatar.png", png_bytes, content_type="image/png"),
+                },
+                HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+            )
+
+            self.assertEqual(response.status_code, 200, response.content)
+            self.assertTrue(response.json()["success"])
+            organization_agent.refresh_from_db()
+            self.assertTrue(organization_agent.avatar)
+            self.assertTrue(default_storage.exists(organization_agent.avatar.name))
+
+    @tag("batch_console_agents_management")
+    def test_org_agent_settings_reject_active_name_conflict_in_same_org(self):
+        from api.models import OrganizationMembership
+
+        organization = self._create_organization(
+            name="Active Name Scope Org",
+            slug="active-name-scope-org",
+            role=OrganizationMembership.OrgRole.OWNER,
+        )
+        self._select_organization_context(organization)
+
+        self._create_staff_test_agent(
+            user=self.user,
+            organization=organization,
+            name="Existing Agent",
+        )
+        renamed_agent = self._create_staff_test_agent(
+            user=self.user,
+            organization=organization,
+            name="Renamed Agent",
+        )
+        renamed_browser_agent = renamed_agent.browser_use_agent
+
+        response = self.client.post(
+            reverse("console_agent_settings", kwargs={"agent_id": renamed_agent.id}),
+            {
+                "name": "Existing Agent",
+                "charter": renamed_agent.charter,
+                "is_active": "on",
+            },
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.json()["error"],
+            "You already have an agent named 'Existing Agent'.",
+        )
+        renamed_agent.refresh_from_db()
+        renamed_browser_agent.refresh_from_db()
+        self.assertEqual(renamed_agent.name, "Renamed Agent")
+        self.assertEqual(renamed_browser_agent.name, "Renamed Agent Browser")
 
     @tag("batch_console_agents_management")
     def test_agent_settings_formats_validation_errors(self):
