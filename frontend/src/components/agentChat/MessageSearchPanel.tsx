@@ -37,7 +37,7 @@ type ParsedSearch = AgentMessageSearchFilters & {
 }
 
 type ActiveShortcut = {
-  kind: 'has' | 'in'
+  kind: 'has' | 'agent'
   fragment: string
   start: number
 } | null
@@ -108,7 +108,7 @@ function parseSearchQuery(value: string, agents: AgentRosterEntry[]): ParsedSear
     },
   )
 
-  const quotedAgentPattern = /\bin:\s*(?:"([^"]+)"|'([^']+)')/i
+  const quotedAgentPattern = /\bagent:\s*(?:"([^"]+)"|'([^']+)')/i
   const quotedAgentMatch = quotedAgentPattern.exec(searchableText)
   if (quotedAgentMatch) {
     const requestedName = (quotedAgentMatch[1] || quotedAgentMatch[2] || '').trim().toLocaleLowerCase()
@@ -119,7 +119,7 @@ function parseSearchQuery(value: string, agents: AgentRosterEntry[]): ParsedSear
   }
 
   if (!selectedAgent) {
-    const operatorMatch = /\bin:\s*/i.exec(searchableText)
+    const operatorMatch = /\bagent:\s*/i.exec(searchableText)
     if (operatorMatch) {
       const remainder = searchableText.slice(operatorMatch.index + operatorMatch[0].length)
       selectedAgent = [...agents]
@@ -133,7 +133,7 @@ function parseSearchQuery(value: string, agents: AgentRosterEntry[]): ParsedSear
   }
 
   searchableText = searchableText
-    .replace(/\b(?:has|in):\s*$/gi, ' ')
+    .replace(/\b(?:has|agent):\s*$/gi, ' ')
     .replace(/\s+/g, ' ')
     .trim()
 
@@ -146,14 +146,14 @@ function parseSearchQuery(value: string, agents: AgentRosterEntry[]): ParsedSear
 }
 
 function activeShortcutFor(query: string): ActiveShortcut {
-  const matches = [...query.matchAll(/(^|\s)(has|in):\s*/gi)]
+  const matches = [...query.matchAll(/(^|\s)(has|agent):\s*/gi)]
   const match = matches.at(-1)
   if (!match || match.index === undefined) return null
-  const kind = match[2].toLowerCase() as 'has' | 'in'
+  const kind = match[2].toLowerCase() as 'has' | 'agent'
   const fragment = query.slice(match.index + match[0].length)
   if (
     (kind === 'has' && /^(?:attachment|attachments|image|file)\s+/i.test(fragment))
-    || (kind === 'in' && /^(?:"[^"]+"|'[^']+')\s+/.test(fragment))
+    || (kind === 'agent' && /^(?:"[^"]+"|'[^']+')\s+/.test(fragment))
   ) {
     return null
   }
@@ -169,7 +169,7 @@ function replaceActiveShortcut(query: string, shortcut: ActiveShortcut, replacem
   return `${query.slice(0, shortcut.start)}${replacement}`
 }
 
-function appendOperator(query: string, operator: 'has' | 'in'): string {
+function appendOperator(query: string, operator: 'has' | 'agent'): string {
   const prefix = query.trim()
   return `${prefix ? `${prefix} ` : ''}${operator}:`
 }
@@ -177,7 +177,7 @@ function appendOperator(query: string, operator: 'has' | 'in'): string {
 function fallbackHistoryLabel(entry: SearchHistoryEntry): string {
   const parts: string[] = []
   if (entry.q.trim()) parts.push(entry.q.trim())
-  if (entry.agentName) parts.push(`in:"${entry.agentName}"`)
+  if (entry.agentName) parts.push(`agent:"${entry.agentName}"`)
   if (entry.attachment !== 'any') parts.push(`has:${entry.attachment}`)
   return parts.join(' ') || 'Search'
 }
@@ -276,7 +276,7 @@ export function MessageSearchPanel({
       .slice(0, AGENT_RESULT_LIMIT)
   }, [agents, parsedSearch.q, parsedSearch.selectedAgent])
   const shortcutAgents = useMemo(() => {
-    if (activeShortcut?.kind !== 'in') return []
+    if (activeShortcut?.kind !== 'agent') return []
     return agents
       .filter((agent) => (
         !activeShortcut.fragment
@@ -292,7 +292,7 @@ export function MessageSearchPanel({
       || option.label.toLocaleLowerCase().includes(activeShortcut.fragment)
     ))
   }, [activeShortcut])
-  const shortcutCount = activeShortcut?.kind === 'in'
+  const shortcutCount = activeShortcut?.kind === 'agent'
     ? shortcutAgents.length
     : shortcutAttachments.length
   const resolvedShortcutIndex = shortcutCount > 0
@@ -366,19 +366,19 @@ export function MessageSearchPanel({
   }
 
   const selectAgentShortcut = (agent: AgentRosterEntry) => {
-    const nextQuery = replaceActiveShortcut(query, activeShortcut, `in:"${agent.name}" `)
+    const nextQuery = replaceActiveShortcut(query, activeShortcut, `agent:"${agent.name}" `)
     handleQueryChange(nextQuery)
     if (!parseSearchQuery(nextQuery, agents).q) runSearch(nextQuery)
     inputRef.current?.focus()
   }
 
-  const beginShortcut = (kind: 'has' | 'in') => {
+  const beginShortcut = (kind: 'has' | 'agent') => {
     handleQueryChange(appendOperator(query, kind))
     window.requestAnimationFrame(() => inputRef.current?.focus())
   }
 
   const selectHighlightedShortcut = () => {
-    if (activeShortcut?.kind === 'in') {
+    if (activeShortcut?.kind === 'agent') {
       const agent = shortcutAgents[resolvedShortcutIndex]
       if (agent) selectAgentShortcut(agent)
       return
@@ -453,9 +453,9 @@ export function MessageSearchPanel({
         {showInitialSuggestions ? (
           <div className="message-search-shortcuts">
             <div className="message-search-panel__section-title"><span>Filters</span></div>
-            <button type="button" className="message-search-shortcut" onClick={() => beginShortcut('in')}>
+            <button type="button" className="message-search-shortcut" onClick={() => beginShortcut('agent')}>
               <UserRoundSearch className="h-4 w-4" />
-              <span><strong>In a specific agent</strong><small>in: agent name</small></span>
+              <span><strong>In a specific agent</strong><small>agent: agent name</small></span>
             </button>
             <button type="button" className="message-search-shortcut" onClick={() => beginShortcut('has')}>
               <Paperclip className="h-4 w-4" />
@@ -467,9 +467,9 @@ export function MessageSearchPanel({
         {showShortcutSuggestions ? (
           <div className="message-search-shortcuts" id={SHORTCUT_LIST_ID} role="listbox">
             <div className="message-search-panel__section-title">
-              <span>{activeShortcut?.kind === 'in' ? 'Agents' : 'Message contains'}</span>
+              <span>{activeShortcut?.kind === 'agent' ? 'Agents' : 'Message contains'}</span>
             </div>
-            {activeShortcut?.kind === 'in' ? shortcutAgents.map((agent) => (
+            {activeShortcut?.kind === 'agent' ? shortcutAgents.map((agent) => (
               <button
                 type="button"
                 className="message-search-shortcut"
