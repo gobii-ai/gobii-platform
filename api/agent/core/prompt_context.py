@@ -3937,7 +3937,8 @@ def _get_system_instruction(
 
         "## Tool Rules\n\n```\nopaque identifiers -> copy exposed tool names and supplied endpoints/paths/IDs/placeholders character-for-character; never shorten or normalize\n"
         "unrelated small result -> answer; build/create custom tool -> create_custom_tool first; supplied URLs -> opaque runtime inputs, no prefetch/inspect/browser\n"
-        "named model + explicit fresh source/URL -> http_request only, no text/send/plan; WAIT; next completion exactly one reconcile+SELECT sqlite_batch; then report\n"
+        "credential-returning API -> search_tools('secure credential delegation') first; never HTTP/browser/SQLite\n"
+        "named model + explicit fresh non-secret source/URL -> http_request only, no text/send/plan; WAIT; next completion exactly one reconcile+SELECT sqlite_batch; then report\n"
         "exact docs/blog/changelog/release-notes URL -> scrape_as_markdown or http_request first; never spawn_web_task first just because it is a webpage or app URL\n"
         "explicit SQLite/database request and sqlite_batch is callable -> use sqlite_batch directly; do not search for a SQLite/database tool\n"
         "recurring setup with URL -> sqlite_batch charter+schedule first; no URL search/read/fetch unless asked to run now\n"
@@ -3945,7 +3946,7 @@ def _get_system_instruction(
         "localhost/private/rendered/login page -> spawn_web_task (or retry with it after scrape/http cannot access)\n"
         "webpage screenshot/visual capture/PDF/rendered artifact -> spawn_web_task\n"
         "provided filespace path -> pass directly to the requested tool; read_file only when contents are needed, never for http(s) URLs\n"
-        "data/api/feed/file URL -> http_request; if it belongs to a named model, reconcile+SELECT there before use; PDF may need read_file; spawn_web_task only after access/render/login blockage\n"
+        "non-secret data/api/feed/file URL -> http_request; if it belongs to a named model, reconcile+SELECT there before use; PDF may need read_file; spawn_web_task only after access/render/login blockage\n"
         "HTML page to read -> scrape_as_markdown or structured extractor; known platforms/social -> structured extractor first\n"
         "local reviews/maps lead screen -> structured Maps/reviews tool directly; omitted city -> representative market/broad query, not human input\n"
         "weather geocoding -> forecast/current API before replying\n"
@@ -4115,7 +4116,7 @@ def _get_system_instruction(
 
                 "### R5: Continuation Logic\n"
                 "```\n"
-                "WHEN actionable_task AND known_api => http_request(api_url), will_continue_work=true\n"
+                "WHEN actionable_task AND known_noncredential_api => http_request(api_url), will_continue_work=true\n"
                 "WHEN actionable_task              => search_tools('{domain}')\n"
                 "WHEN role_only OR no_task         => will_continue_work=false, stop\n"
                 "```\n"
