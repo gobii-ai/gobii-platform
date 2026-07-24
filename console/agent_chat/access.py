@@ -61,6 +61,35 @@ def shared_agent_queryset_for(user) -> QuerySet:
         .filter(collaborators__user=user)
     )
 
+
+def agent_querysets_for_context(
+    user,
+    context: ConsoleContext,
+    *,
+    staff_context: bool = False,
+    allow_delinquent_personal_chat: bool = False,
+) -> tuple[QuerySet, QuerySet]:
+    """Return primary and collaborator agent querysets for a console context."""
+    if staff_context:
+        queryset = PersistentAgent.objects.non_eval().alive().select_related("browser_use_agent")
+        scope = (
+            {"organization_id": context.id}
+            if context.type == "organization"
+            else {"organization__isnull": True, "user_id": context.id}
+        )
+        return queryset.filter(**scope), queryset.none()
+
+    primary = agent_queryset_for(
+        user,
+        context,
+        allow_delinquent_personal_chat=allow_delinquent_personal_chat,
+    )
+    return (
+        primary,
+        shared_agent_queryset_for(user) if context.type == "personal" else primary.none(),
+    )
+
+
 def user_can_manage_agent(
     user,
     agent: PersistentAgent,

@@ -73,11 +73,15 @@ def is_chat_hidden_message(message: PersistentAgentMessage) -> bool:
     return bool(payload.get(HIDE_IN_CHAT_PAYLOAD_KEY))
 
 
-def _message_queryset(agent: PersistentAgent):
+def visible_message_queryset():
     hidden_key = f"raw_payload__{HIDE_IN_CHAT_PAYLOAD_KEY}"
-    return PersistentAgentMessage.objects.filter(owner_agent=agent).filter(
+    return PersistentAgentMessage.objects.filter(
         Q(**{hidden_key: False}) | Q(**{f"{hidden_key}__isnull": True}),
     )
+
+
+def visible_agent_message_queryset(agent: PersistentAgent):
+    return visible_message_queryset().filter(owner_agent=agent)
 
 
 def visible_tool_steps_queryset(agent: PersistentAgent):
@@ -814,7 +818,7 @@ def _build_cluster(entries: Sequence[StepEnvelope], labels: Mapping[str, str]) -
 def _messages_queryset(agent: PersistentAgent, direction: TimelineDirection, cursor: CursorPayload | None) -> Sequence[PersistentAgentMessage]:
     limit = MAX_PAGE_SIZE * 3
     qs = (
-        _message_queryset(agent)
+        visible_agent_message_queryset(agent)
         .select_related(
             "from_endpoint",
             "to_endpoint",
@@ -1101,7 +1105,7 @@ def _has_more_before(agent: PersistentAgent, cursor: CursorPayload | None) -> bo
     if cursor is None:
         return False
     dt = _dt_from_cursor(cursor)
-    message_qs = _message_queryset(agent)
+    message_qs = visible_agent_message_queryset(agent)
     message_exists = message_qs.filter(timestamp__lt=dt).exists()
     if cursor.kind == "message":
         message_exists = message_exists or message_qs.filter(
@@ -1183,7 +1187,7 @@ def _has_more_after(agent: PersistentAgent, cursor: CursorPayload | None) -> boo
         return False
     dt = _dt_from_cursor(cursor)
 
-    message_qs = _message_queryset(agent)
+    message_qs = visible_agent_message_queryset(agent)
     message_exists = message_qs.filter(timestamp__gt=dt).exists()
     if cursor.kind == "message":
         message_exists = message_exists or message_qs.filter(
@@ -1583,9 +1587,67 @@ def fetch_timeline_window(
     )
 
 
-def serialize_message_event(message: PersistentAgentMessage) -> dict:
+def fetch_timeline_window_around_message(
+    agent: PersistentAgent,
+    message: PersistentAgentMessage,
+    *,
+    limit: int = DEFAULT_PAGE_SIZE,
+    fetch_window=fetch_timeline_window,
+    viewer_user=None,
+) -> TimelineWindow:
+    limit = max(1, min(limit, MAX_PAGE_SIZE))
+    anchor_cursor = CursorPayload(
+        value=_microsecond_epoch(message.timestamp),
+        kind="message",
+        identifier=message.seq,
+    )
+    older_limit = limit // 2
+    newer_limit = max(0, limit - older_limit - 1)
+    window_options = {"viewer_user": viewer_user} if viewer_user is not None else {}
+    older = fetch_window(
+        agent,
+        cursor=anchor_cursor.encode(),
+        direction="older",
+        limit=max(1, older_limit),
+        **window_options,
+    )
+    newer = fetch_window(
+        agent,
+        cursor=anchor_cursor.encode(),
+        direction="newer",
+        limit=max(1, newer_limit),
+        **window_options,
+    )
+    events = [
+        *older.events[:older_limit],
+        serialize_message_event(message, viewer_user=viewer_user),
+    ]
+    if newer_limit:
+        events.extend(newer.events[:newer_limit])
+    oldest_cursor = older.oldest_cursor or anchor_cursor.encode()
+    newest_cursor = (
+        newer.newest_cursor
+        if newer_limit and newer.events
+        else anchor_cursor.encode()
+    )
+    return TimelineWindow(
+        events=events,
+        oldest_cursor=oldest_cursor,
+        newest_cursor=newest_cursor,
+        has_more_older=older.has_more_older if older_limit else _has_more_before(agent, anchor_cursor),
+        has_more_newer=newer.has_more_newer if newer_limit else _has_more_after(agent, anchor_cursor),
+        processing_snapshot=newer.processing_snapshot,
+        current_plan=newer.current_plan,
+    )
+
+
+def serialize_message_event(message: PersistentAgentMessage, *, viewer_user=None) -> dict:
     envelope = _envelop_messages([message])[0]
-    return _serialize_message(envelope)
+    return _serialize_message(
+        envelope,
+        _build_web_user_lookup([message]),
+        _build_viewer_message_feedback_lookup([message], viewer_user),
+    )
 
 
 def serialize_user_action_event(event: PersistentAgentUserActionEvent, *, viewer_user=None) -> dict:

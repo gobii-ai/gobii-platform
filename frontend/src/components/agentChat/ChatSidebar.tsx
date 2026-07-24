@@ -1,12 +1,11 @@
-import { memo, useState, useCallback, useEffect, useMemo, useRef, type ReactNode } from 'react'
+import { memo, useState, useCallback, useEffect, useMemo, useRef, type Dispatch, type ReactNode, type SetStateAction } from 'react'
 import { createPortal } from 'react-dom'
-import { ArrowLeftRight, Bell, BellOff, Check, LayoutGrid, List, PanelLeft, PanelLeftClose, PanelRightClose, Plus, Settings, X } from 'lucide-react'
+import { ArrowLeftRight, Bell, BellOff, Check, LayoutGrid, List, PanelLeft, PanelLeftClose, PanelRightClose, Plus, Search, Settings, X } from 'lucide-react'
 
 import type { ConsoleContext } from '../../api/context'
 import { useAppSelector } from '../../store/hooks'
 import { selectActiveChatAgentId } from '../../store/chatSlice'
 import type { AgentRosterEntry, AgentRosterSortMode, AgentSidebarInvite } from '../../types/agentRoster'
-import { buildAgentSearchBlob } from '../../util/agentCards'
 import { ActionConfirmDialog } from '../common/ActionConfirmDialog'
 import { AgentCreateSplitButton, type TeamTemplateCreateMenu } from './AgentCreateSplitButton'
 import { AgentChatContextSwitcher, type AgentChatContextSwitcherData } from './AgentChatContextSwitcher'
@@ -15,12 +14,12 @@ import { ChatSidebarGallery } from './ChatSidebarGallery'
 import { SelectionShellPageSwitcher, SELECTION_SHELL_PAGE_LABELS, type SelectionShellPage } from './SelectionShellPageSwitcher'
 import { AgentEmptyState, AgentListItem, AgentListSectionHeader, AgentSearchInput, AgentSortToggle } from './ChatSidebarParts'
 import { ProductAnnouncementBell } from './ProductAnnouncementBell'
+import { MessageSearchPanel, type MessageSearchState } from './MessageSearchPanel'
 import { SidebarSettingsMenu, type SidebarSettingsInfo } from './SidebarSettingsMenu'
 import { AgentInviteDetails, AgentInviteSidebarItem, type AgentInviteAction, type AgentInviteDialogState } from './AgentInviteSidebarItem'
 import { getNextAgentChatSidebarMode, getPreviousAgentChatSidebarMode, type AgentChatSidebarMode, SIDEBAR_MOBILE_BREAKPOINT_PX, type AgentDrawerViewMode } from './sidebarMode'
 import { AgentChatAvatar, AgentChatButton } from './uiPrimitives'
 
-const SEARCH_THRESHOLD = 6
 const CONTEXT_MENU_WIDTH = 208
 const CONTEXT_MENU_HEIGHT = 104
 const CONTEXT_MENU_MARGIN = 8
@@ -33,6 +32,8 @@ type ContextMenuPosition = {
 type AgentContextMenuState = ContextMenuPosition & {
   agent: AgentRosterEntry
 }
+
+export type { MessageSearchState } from './MessageSearchPanel'
 
 function clampContextMenuPosition(x: number, y: number): ContextMenuPosition {
   if (typeof window === 'undefined') {
@@ -77,6 +78,8 @@ export type ChatSidebarProps = {
   onBackFromEmbeddedSettings?: () => void
   scrollToAgentId?: string | null
   onScrolledToAgent?: (agentId: string) => void
+  messageSearchState?: MessageSearchState
+  onMessageSearchStateChange?: Dispatch<SetStateAction<MessageSearchState>>
 }
 
 export const ChatSidebar = memo(function ChatSidebar({
@@ -112,6 +115,8 @@ export const ChatSidebar = memo(function ChatSidebar({
   onBackFromEmbeddedSettings,
   scrollToAgentId = null,
   onScrolledToAgent,
+  messageSearchState: controlledMessageSearchState,
+  onMessageSearchStateChange,
 }: ChatSidebarProps) {
   const storeActiveAgentId = useAppSelector(selectActiveChatAgentId)
   const activeAgentId = activeAgentIdOverride !== undefined ? activeAgentIdOverride : storeActiveAgentId
@@ -126,7 +131,25 @@ export const ChatSidebar = memo(function ChatSidebar({
     return window.innerWidth < SIDEBAR_MOBILE_BREAKPOINT_PX
   })
   const [drawerOpen, setDrawerOpen] = useState(false)
-  const [searchQuery, setSearchQuery] = useState('')
+  const [localMessageSearchState, setLocalMessageSearchState] = useState<MessageSearchState>({
+    open: false,
+    query: '',
+    submittedQuery: null,
+  })
+  const messageSearchState = controlledMessageSearchState ?? localMessageSearchState
+  const updateMessageSearchState = onMessageSearchStateChange ?? setLocalMessageSearchState
+  const messageSearchOpen = messageSearchState.open
+  const searchQuery = messageSearchState.query
+  const setMessageSearchOpen = useCallback((open: boolean) => {
+    updateMessageSearchState((current) => (
+      current.open === open ? current : { ...current, open }
+    ))
+  }, [updateMessageSearchState])
+  const setSearchQuery = useCallback((query: string) => {
+    updateMessageSearchState((current) => (
+      current.query === query ? current : { ...current, query }
+    ))
+  }, [updateMessageSearchState])
   const [drawerViewMode, setDrawerViewMode] = useState<AgentDrawerViewMode>('list')
   const contextMenuRef = useRef<HTMLDivElement | null>(null)
   const [agentContextMenu, setAgentContextMenu] = useState<AgentContextMenuState | null>(null)
@@ -139,15 +162,6 @@ export const ChatSidebar = memo(function ChatSidebar({
   const showCustomGalleryShellPanel = galleryShellPage !== 'agents' && Boolean(galleryShellPanel)
   const collapsed = desktopMode === 'collapsed' && !showSettingsView
   const galleryMode = desktopMode === 'gallery' || showSettingsView
-  const showSearch = agents.length >= SEARCH_THRESHOLD
-  const filteredAgents = useMemo(() => {
-    if (!searchQuery.trim()) {
-      return agents
-    }
-    const query = searchQuery.trim().toLowerCase()
-    return agents.filter((agent) => buildAgentSearchBlob(agent).includes(query))
-  }, [agents, searchQuery])
-
   const favoriteAgentIdSet = useMemo(() => new Set(favoriteAgentIds), [favoriteAgentIds])
   const mutedAgentIdSet = useMemo(() => new Set(mutedAgentIds), [mutedAgentIds])
   const hasFavoritesInRoster = useMemo(
@@ -155,16 +169,16 @@ export const ChatSidebar = memo(function ChatSidebar({
     [agents, favoriteAgentIdSet],
   )
   const favoriteFilteredAgents = useMemo(
-    () => filteredAgents.filter((agent) => favoriteAgentIdSet.has(agent.id)),
-    [filteredAgents, favoriteAgentIdSet],
+    () => agents.filter((agent) => favoriteAgentIdSet.has(agent.id)),
+    [agents, favoriteAgentIdSet],
   )
   const allFilteredAgents = useMemo(
-    () => filteredAgents.filter((agent) => !favoriteAgentIdSet.has(agent.id)),
-    [filteredAgents, favoriteAgentIdSet],
+    () => agents.filter((agent) => !favoriteAgentIdSet.has(agent.id)),
+    [agents, favoriteAgentIdSet],
   )
   const collapsedFilteredAgents = useMemo(
-    () => hasFavoritesInRoster ? [...favoriteFilteredAgents, ...allFilteredAgents] : filteredAgents,
-    [allFilteredAgents, favoriteFilteredAgents, filteredAgents, hasFavoritesInRoster],
+    () => hasFavoritesInRoster ? [...favoriteFilteredAgents, ...allFilteredAgents] : agents,
+    [agents, allFilteredAgents, favoriteFilteredAgents, hasFavoritesInRoster],
   )
 
   useEffect(() => {
@@ -177,11 +191,6 @@ export const ChatSidebar = memo(function ChatSidebar({
     if (isMobile && !drawerOpen) {
       return
     }
-    if (searchQuery && !filteredAgents.some((agent) => agent.id === scrollToAgentId)) {
-      setSearchQuery('')
-      return
-    }
-
     const frame = window.requestAnimationFrame(() => {
       const root: ParentNode | null = isMobile ? document : sidebarRootRef.current
       const selectorId = typeof CSS !== 'undefined' && typeof CSS.escape === 'function'
@@ -207,20 +216,22 @@ export const ChatSidebar = memo(function ChatSidebar({
     desktopMode,
     drawerOpen,
     drawerViewMode,
-    filteredAgents,
     isMobile,
     onScrolledToAgent,
     scrollToAgentId,
-    searchQuery,
     showCustomGalleryShellPanel,
     showSettingsView,
   ])
 
   useEffect(() => {
-    if (!drawerOpen) {
-      setSearchQuery('')
+    if (isMobile && !drawerOpen) {
+      updateMessageSearchState((current) => (
+        !current.open && !current.query && !current.submittedQuery
+          ? current
+          : { open: false, query: '', submittedQuery: null }
+      ))
     }
-  }, [drawerOpen])
+  }, [drawerOpen, isMobile, updateMessageSearchState])
 
   useEffect(() => {
     const checkMobile = () => {
@@ -261,6 +272,43 @@ export const ChatSidebar = memo(function ChatSidebar({
     }
     onDesktopModeChange?.(getNextAgentChatSidebarMode(desktopMode))
   }, [desktopMode, onDesktopModeChange, showSettingsView])
+
+  const openMessageSearch = useCallback(() => {
+    if (isMobile) {
+      setDrawerOpen(true)
+    } else {
+      onDesktopModeChange?.('list')
+    }
+    setMessageSearchOpen(true)
+  }, [isMobile, onDesktopModeChange, setMessageSearchOpen])
+
+  const openAndFocusMessageSearch = useCallback(() => {
+    openMessageSearch()
+    window.requestAnimationFrame(() => {
+      document.querySelector<HTMLInputElement>(
+        '.message-search-panel .agent-roster-search__input',
+      )?.focus()
+    })
+  }, [openMessageSearch])
+
+  useEffect(() => {
+    const handleFindShortcut = (event: globalThis.KeyboardEvent) => {
+      if (
+        event.defaultPrevented
+        || event.key.toLocaleLowerCase() !== 'f'
+        || (!event.metaKey && !event.ctrlKey)
+        || event.altKey
+        || event.shiftKey
+      ) {
+        return
+      }
+      event.preventDefault()
+      openAndFocusMessageSearch()
+    }
+
+    document.addEventListener('keydown', handleFindShortcut, true)
+    return () => document.removeEventListener('keydown', handleFindShortcut, true)
+  }, [openAndFocusMessageSearch])
 
   const handleAgentSelect = useCallback(
     (agent: AgentRosterEntry) => {
@@ -459,8 +507,7 @@ export const ChatSidebar = memo(function ChatSidebar({
   ) : null
 
   const renderListContent = useCallback((variant: 'drawer' | 'sidebar', collapsedView: boolean) => {
-    const sourceAgents = collapsedView ? collapsedFilteredAgents : filteredAgents
-    const emptyCount = collapsedView ? collapsedFilteredAgents.length : filteredAgents.length
+    const sourceAgents = collapsedView ? collapsedFilteredAgents : agents
     const showInvites = !collapsedView && agentInvites.length > 0
     const hasListRows = hasAgents || showInvites
     const renderAgentItem = (agent: AgentRosterEntry, isFavorite: boolean) => (
@@ -518,8 +565,8 @@ export const ChatSidebar = memo(function ChatSidebar({
           hasAgents={hasListRows}
           loading={loading}
           errorMessage={errorMessage}
-          filteredCount={emptyCount + (showInvites ? agentInvites.length : 0)}
-          searchQuery={searchQuery}
+          filteredCount={sourceAgents.length + (showInvites ? agentInvites.length : 0)}
+          searchQuery=""
         />
 
         {collapsedView ? (
@@ -575,6 +622,7 @@ export const ChatSidebar = memo(function ChatSidebar({
     )
   }, [
     activeAgentId,
+    agents,
     allFilteredAgents,
     agentInvites,
     collapsedFilteredAgents,
@@ -584,7 +632,6 @@ export const ChatSidebar = memo(function ChatSidebar({
     errorMessage,
     favoriteAgentIdSet,
     favoriteFilteredAgents,
-    filteredAgents,
     handleAgentSelect,
     handleCreateAgent,
     hasAgents,
@@ -597,10 +644,23 @@ export const ChatSidebar = memo(function ChatSidebar({
     onToggleAgentFavorite,
     openAgentContextMenu,
     openInviteDialog,
-    searchQuery,
     switchingAgentId,
     teamTemplateMenu,
   ])
+
+  const messageSearchPanel = (
+    <MessageSearchPanel
+      key={`${contextSwitcher?.current.type ?? settings?.context?.type}:${contextSwitcher?.current.id ?? settings?.context?.id}`}
+      agents={agents}
+      context={contextSwitcher?.current ?? settings?.context ?? null}
+      viewerKey={settings?.viewerEmail ?? null}
+      agentsLoading={loading}
+      state={messageSearchState}
+      onStateChange={updateMessageSearchState}
+      onAgentSelect={handleAgentSelect}
+      onResultSelect={isMobile ? () => setDrawerOpen(false) : undefined}
+    />
+  )
 
   if (isMobile) {
     const mobileContextSwitcher = contextSwitcher
@@ -650,34 +710,38 @@ export const ChatSidebar = memo(function ChatSidebar({
             setDrawerOpen(false)
           }}
           title={
-            showSettingsView
+            messageSearchOpen
+              ? 'Search'
+              : showSettingsView
               ? embeddedSettingsTitle
               : (drawerViewMode === 'gallery' && galleryShellPage !== 'agents' ? shellTitle : 'Switch agent')
           }
           icon={PanelLeft}
           bodyPadding={false}
-          headerAccessory={!showSettingsView && mobileContextSwitcher ? (
+          headerAccessory={!messageSearchOpen && !showSettingsView && mobileContextSwitcher ? (
             <AgentChatContextSwitcher {...mobileContextSwitcher} variant="drawer" />
           ) : null}
-          ariaLabel={showSettingsView ? embeddedSettingsTitle : 'Switch agent'}
+          ariaLabel={messageSearchOpen ? 'Search agents and messages' : showSettingsView ? embeddedSettingsTitle : 'Switch agent'}
         >
-          {showSettingsView ? embeddedSettingsPanel : null}
-          {!showSettingsView && !showCustomGalleryShellPanel && showSearch ? (
+          {messageSearchOpen ? messageSearchPanel : null}
+          {!messageSearchOpen && showSettingsView ? embeddedSettingsPanel : null}
+          {!messageSearchOpen && !showSettingsView && !showCustomGalleryShellPanel ? (
             <AgentSearchInput
               variant="drawer"
               value={searchQuery}
               onChange={setSearchQuery}
               onClear={() => setSearchQuery('')}
+              onFocus={openMessageSearch}
             />
           ) : null}
-          {!showSettingsView && !showCustomGalleryShellPanel && showSortToggle ? (
+          {!messageSearchOpen && !showSettingsView && !showCustomGalleryShellPanel && showSortToggle ? (
             <AgentSortToggle
               variant="drawer"
               value={rosterSortMode}
               onChange={(mode) => onRosterSortModeChange?.(mode)}
             />
           ) : null}
-          {!showSettingsView && !showCustomGalleryShellPanel && hasAgents ? (
+          {!messageSearchOpen && !showSettingsView && !showCustomGalleryShellPanel && hasAgents ? (
             <div className="agent-drawer-view-toggle" role="group" aria-label="Agent roster view">
               <button
                 type="button"
@@ -700,7 +764,7 @@ export const ChatSidebar = memo(function ChatSidebar({
             </div>
           ) : null}
 
-          {!showSettingsView && showGalleryShellSwitcher ? (
+          {!messageSearchOpen && !showSettingsView && showGalleryShellSwitcher ? (
             <div className="agent-drawer-shell-switcher">
               <SelectionShellPageSwitcher
                 currentPage={galleryShellPage}
@@ -709,7 +773,7 @@ export const ChatSidebar = memo(function ChatSidebar({
               />
             </div>
           ) : null}
-          {!showSettingsView && drawerViewMode === 'gallery' ? (
+          {!messageSearchOpen && !showSettingsView && drawerViewMode === 'gallery' ? (
             showCustomGalleryShellPanel ? (
               <div className="agent-gallery-scroll" data-variant="drawer">
                 {galleryShellPanel}
@@ -717,14 +781,14 @@ export const ChatSidebar = memo(function ChatSidebar({
             ) : (
               <ChatSidebarGallery
                 variant="drawer"
-                agents={filteredAgents}
+                agents={agents}
                 favoriteAgentIds={favoriteAgentIds}
                 activeAgentId={activeAgentId}
                 switchingAgentId={switchingAgentId}
                 hasAgents={hasAgents}
                 loading={loading}
                 errorMessage={errorMessage}
-                searchQuery={searchQuery}
+                searchQuery=""
                 onSelectAgent={handleAgentSelect}
                 onConfigureAgent={onConfigureAgent}
                 onToggleAgentFavorite={onToggleAgentFavorite}
@@ -735,12 +799,12 @@ export const ChatSidebar = memo(function ChatSidebar({
                 teamTemplateMenu={teamTemplateMenu}
               />
             )
-          ) : !showSettingsView ? (
+          ) : !messageSearchOpen && !showSettingsView ? (
             <div className="agent-drawer-list" role="list">
               {renderListContent('drawer', false)}
             </div>
           ) : null}
-          {!showSettingsView && settings ? (
+          {!messageSearchOpen && !showSettingsView && settings ? (
             <SidebarSettingsMenu
               {...settings}
               variant="drawer"
@@ -759,18 +823,19 @@ export const ChatSidebar = memo(function ChatSidebar({
     <>
     <aside
       ref={setSidebarRootRef}
-      className={`chat-sidebar chat-sidebar--${desktopMode}`}
-      data-collapsed={collapsed}
-      data-sidebar-mode={desktopMode}
+      className={`chat-sidebar chat-sidebar--${messageSearchOpen ? 'list' : desktopMode}`}
+      data-collapsed={messageSearchOpen ? false : collapsed}
+      data-sidebar-mode={messageSearchOpen ? 'list' : desktopMode}
+      data-search-open={messageSearchOpen ? 'true' : undefined}
     >
       <div className="chat-sidebar-inner">
         <div
           className="chat-sidebar-header"
-          data-collapsed={collapsed ? 'true' : 'false'}
+          data-collapsed={messageSearchOpen ? 'false' : collapsed ? 'true' : 'false'}
           data-has-center={showHeaderCenter ? 'true' : 'false'}
         >
           <div className="chat-sidebar-header-start">
-            {!collapsed ? (
+            {messageSearchOpen || !collapsed ? (
               <a href="/" className="chat-sidebar-logo-link">
                 <img src={sidebarLogoSrc} alt={sidebarLogoAlt} className="chat-sidebar-logo" />
               </a>
@@ -791,7 +856,24 @@ export const ChatSidebar = memo(function ChatSidebar({
             </div>
           ) : null}
           <div className="chat-sidebar-header-actions">
-            {!collapsed ? (
+            {messageSearchOpen || collapsed ? (
+              <button
+                type="button"
+                className="chat-sidebar-toggle"
+                onClick={() => {
+                  if (messageSearchOpen) {
+                    setMessageSearchOpen(false)
+                    return
+                  }
+                  openMessageSearch()
+                }}
+                aria-label={messageSearchOpen ? 'Close search' : 'Search agents and messages'}
+                title={messageSearchOpen ? 'Close search' : 'Search agents and messages'}
+              >
+                {messageSearchOpen ? <X className="h-4 w-4" /> : <Search className="h-4 w-4" />}
+              </button>
+            ) : null}
+            {!messageSearchOpen && !collapsed ? (
               <button
                 type="button"
                 className="chat-sidebar-toggle"
@@ -802,7 +884,7 @@ export const ChatSidebar = memo(function ChatSidebar({
                 <PanelLeftClose className="h-4 w-4" />
               </button>
             ) : null}
-            {!galleryMode && !showSettingsView ? (
+            {!messageSearchOpen && !galleryMode && !showSettingsView ? (
               <button
                 type="button"
                 className="chat-sidebar-toggle"
@@ -816,7 +898,7 @@ export const ChatSidebar = memo(function ChatSidebar({
           </div>
         </div>
 
-        <div className="chat-sidebar-section">
+        {messageSearchOpen ? messageSearchPanel : <div className="chat-sidebar-section">
           {showSettingsView ? (
             <div className="chat-sidebar-section-header">
               <span className="chat-sidebar-section-title">{embeddedSettingsTitle}</span>
@@ -830,19 +912,18 @@ export const ChatSidebar = memo(function ChatSidebar({
             </div>
           )}
 
-          {!collapsed && !showSettingsView && !showCustomGalleryShellPanel && (showSearch || showSortToggle) ? (
+          {!collapsed && !showSettingsView && !showCustomGalleryShellPanel ? (
             <div
               className="chat-sidebar-controls"
               data-gallery={galleryMode ? 'true' : 'false'}
             >
-              {showSearch ? (
-                <AgentSearchInput
-                  variant="sidebar"
-                  value={searchQuery}
-                  onChange={setSearchQuery}
-                  onClear={() => setSearchQuery('')}
-                />
-              ) : null}
+              <AgentSearchInput
+                variant="sidebar"
+                value={searchQuery}
+                onChange={setSearchQuery}
+                onClear={() => setSearchQuery('')}
+                onFocus={openMessageSearch}
+              />
               {showSortToggle ? (
                 <AgentSortToggle
                   variant="sidebar"
@@ -864,14 +945,14 @@ export const ChatSidebar = memo(function ChatSidebar({
           ) : galleryMode ? (
             <ChatSidebarGallery
               variant="sidebar"
-              agents={filteredAgents}
+              agents={agents}
               favoriteAgentIds={favoriteAgentIds}
               activeAgentId={activeAgentId}
               switchingAgentId={switchingAgentId}
               hasAgents={hasAgents}
               loading={loading}
               errorMessage={errorMessage}
-              searchQuery={searchQuery}
+              searchQuery=""
               onSelectAgent={handleAgentSelect}
               onConfigureAgent={onConfigureAgent}
               onToggleAgentFavorite={onToggleAgentFavorite}
@@ -886,9 +967,9 @@ export const ChatSidebar = memo(function ChatSidebar({
               {renderListContent('sidebar', collapsed)}
             </div>
           )}
-        </div>
+        </div>}
 
-        {!showSettingsView && settings ? (
+        {!messageSearchOpen && !showSettingsView && settings ? (
           <SidebarSettingsMenu
             {...settings}
             variant="sidebar"

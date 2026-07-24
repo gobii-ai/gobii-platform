@@ -1,4 +1,4 @@
-import type { KeyboardEvent, MouseEvent } from 'react'
+import { forwardRef, type KeyboardEvent, type MouseEvent } from 'react'
 import { Check, Search, Star, X } from 'lucide-react'
 
 import type { AgentRosterEntry, AgentRosterSortMode } from '../../types/agentRoster'
@@ -13,18 +13,49 @@ type AgentSearchInputProps = {
   value: string
   onChange: (value: string) => void
   onClear: () => void
+  onFocus?: () => void
+  placeholder?: string
+  autoFocus?: boolean
+  maxLength?: number
+  onKeyDown?: (event: KeyboardEvent<HTMLInputElement>) => void
+  ariaControls?: string
+  ariaExpanded?: boolean
+  ariaActiveDescendant?: string
 }
 
-export function AgentSearchInput({ variant, value, onChange, onClear }: AgentSearchInputProps) {
+export const AgentSearchInput = forwardRef<HTMLInputElement, AgentSearchInputProps>(function AgentSearchInput({
+  variant,
+  value,
+  onChange,
+  onClear,
+  onFocus,
+  placeholder = 'Search agents and messages…',
+  autoFocus = false,
+  maxLength = 256,
+  onKeyDown,
+  ariaControls,
+  ariaExpanded,
+  ariaActiveDescendant,
+}, ref) {
   return (
     <div className="agent-roster-search" data-variant={variant}>
       <Search className="agent-roster-search__icon" aria-hidden="true" />
       <input
         type="text"
+        ref={ref}
         className="agent-roster-search__input"
-        placeholder={variant === 'drawer' ? 'Search agents...' : 'Search...'}
+        placeholder={placeholder}
         value={value}
         onChange={(event) => onChange(event.target.value)}
+        onFocus={onFocus}
+        onKeyDown={onKeyDown}
+        autoFocus={autoFocus}
+        maxLength={maxLength}
+        role={ariaControls ? 'combobox' : undefined}
+        aria-autocomplete={ariaControls ? 'list' : undefined}
+        aria-controls={ariaControls}
+        aria-expanded={ariaControls ? ariaExpanded : undefined}
+        aria-activedescendant={ariaActiveDescendant}
         autoComplete="off"
         autoCapitalize="off"
         spellCheck={false}
@@ -41,7 +72,7 @@ export function AgentSearchInput({ variant, value, onChange, onClear }: AgentSea
       ) : null}
     </div>
   )
-}
+})
 
 type AgentSortToggleProps = {
   variant: SortVariant

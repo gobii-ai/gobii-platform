@@ -173,10 +173,9 @@ from util.subscription_helper import get_user_max_contacts_per_agent
 from util.urls import IMMERSIVE_APP_BASE_PATH, append_context_query, build_staff_developer_chat_path_for_agent
 
 from console.agent_chat.access import (
-    agent_queryset_for,
+    agent_querysets_for_context,
     resolve_agent_for_request,
     resolve_manageable_agent_for_request,
-    shared_agent_queryset_for,
     user_can_manage_agent,
     user_can_manage_agent_settings,
     user_has_natural_agent_chat_access,
@@ -190,6 +189,11 @@ from console.agent_chat.pending_actions import (
     list_pending_action_requests,
     serialize_contact_request,
 )
+from console.agent_chat.message_search import (
+    DEFAULT_SEARCH_LIMIT,
+    MessageSearchValidationError,
+    search_agent_messages,
+)
 from console.agent_chat.timeline import (
     DEFAULT_PAGE_SIZE,
     TimelineDirection,
@@ -197,13 +201,17 @@ from console.agent_chat.timeline import (
     build_processing_snapshot,
     compute_processing_status,
     fetch_timeline_window,
+    fetch_timeline_window_around_message,
+    visible_agent_message_queryset,
     serialize_agent_emotion,
     serialize_agent_schedule,
     serialize_message_event,
     serialize_processing_snapshot,
     serialize_user_action_event,
 )
-from console.agent_chat.developer_timeline import fetch_developer_timeline_window
+from console.agent_chat.developer_timeline import (
+    fetch_developer_timeline_window,
+)
 from console.agent_chat.user_actions import (
     record_contact_requests_resolved,
     record_human_input_answered,
@@ -3135,42 +3143,27 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
             queryset=PersistentAgentSystemSkillState.objects.filter(is_enabled=True).order_by("skill_key"),
             to_attr="enabled_system_skill_states_for_roster",
         )
-        if staff_override:
-            agents_qs = PersistentAgent.objects.non_eval().alive().select_related("browser_use_agent")
-            if context_info.current_context.type == "organization":
-                agents_qs = agents_qs.filter(organization_id=context_info.current_context.id)
-            else:
-                agents_qs = agents_qs.filter(
-                    organization__isnull=True,
-                    user_id=context_info.current_context.id,
-                )
-            agents_qs = agents_qs.prefetch_related(
-                email_prefetch,
-                sms_prefetch,
-                enabled_system_skills_prefetch,
-            ).order_by("name")
-        else:
-            agents_qs = (
-                agent_queryset_for(
-                    request.user,
-                    context_info.current_context,
-                    allow_delinquent_personal_chat=True,
-                )
-                .prefetch_related(email_prefetch, sms_prefetch, enabled_system_skills_prefetch)
-                .order_by("name")
-            )
+        agents_qs, shared_qs = agent_querysets_for_context(
+            request.user,
+            context_info.current_context,
+            staff_context=bool(staff_override),
+            allow_delinquent_personal_chat=True,
+        )
+        agents_qs = agents_qs.prefetch_related(
+            email_prefetch,
+            sms_prefetch,
+            enabled_system_skills_prefetch,
+        ).order_by("name")
         agent_ids = list(agents_qs.values_list("id", flat=True))
         agents = list(agents_qs)
-        if context_info.current_context.type == "personal" and not staff_override:
-            shared_qs = (
-                shared_agent_queryset_for(request.user)
-                .prefetch_related(email_prefetch, sms_prefetch, enabled_system_skills_prefetch)
-            )
-            if agent_ids:
-                shared_qs = shared_qs.exclude(id__in=agent_ids)
-            shared_agents = list(shared_qs.order_by("name"))
-        else:
-            shared_agents = []
+        shared_qs = shared_qs.prefetch_related(
+            email_prefetch,
+            sms_prefetch,
+            enabled_system_skills_prefetch,
+        )
+        if agent_ids:
+            shared_qs = shared_qs.exclude(id__in=agent_ids)
+        shared_agents = list(shared_qs.order_by("name"))
         collaborators_by_agent_id = {agent.id for agent in shared_agents}
         agents += shared_agents
         if staff_override and for_agent_id and all(str(agent.id) != str(for_agent_id) for agent in agents):
@@ -3281,6 +3274,30 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
                 "llmIntelligence": llm_intelligence,
             }
         )
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class AgentMessageSearchAPIView(LoginRequiredMixin, View):
+    http_method_names = ["get"]
+
+    def get(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        try:
+            limit = int(request.GET.get("limit", DEFAULT_SEARCH_LIMIT))
+        except (TypeError, ValueError):
+            return HttpResponseBadRequest("limit must be an integer.")
+
+        try:
+            payload = search_agent_messages(
+                request,
+                query=request.GET.get("q") or "",
+                agent_id=request.GET.get("agent_id") or None,
+                attachment_filter=(request.GET.get("attachment") or "any").lower(),
+                cursor=request.GET.get("cursor") or None,
+                limit=limit,
+            )
+        except MessageSearchValidationError as exc:
+            return HttpResponseBadRequest(str(exc))
+        return JsonResponse(payload)
 
 
 class AgentProfileAPIView(LoginRequiredMixin, View):
@@ -3907,17 +3924,54 @@ class AgentTimelineAPIView(LoginRequiredMixin, View):
             agent = self._resume_signup_preview_if_eligible(request, agent)
 
         cursor = request.GET.get("cursor") or None
+        anchor_message_id = request.GET.get("anchor_message_id") or None
         try:
             limit = int(request.GET.get("limit", DEFAULT_PAGE_SIZE))
         except ValueError:
             return HttpResponseBadRequest("limit must be an integer")
 
-        if developer_mode:
+        anchor_message = None
+        if anchor_message_id:
+            try:
+                parsed_anchor_id = uuid.UUID(anchor_message_id)
+            except (TypeError, ValueError, AttributeError):
+                raise Http404("Message not found.")
+            anchor_message = (
+                visible_agent_message_queryset(agent)
+                .select_related(
+                    "from_endpoint",
+                    "to_endpoint",
+                    "conversation__peer_link",
+                    "peer_agent",
+                    "owner_agent",
+                )
+                .prefetch_related("attachments__filespace_node")
+                .filter(id=parsed_anchor_id)
+                .first()
+            )
+            if anchor_message is None:
+                raise Http404("Message not found.")
+
+        if developer_mode and anchor_message is not None:
+            window = fetch_timeline_window_around_message(
+                agent,
+                anchor_message,
+                limit=limit,
+                fetch_window=fetch_developer_timeline_window,
+            )
+        elif developer_mode:
             window = fetch_developer_timeline_window(
                 agent,
                 cursor=cursor,
                 direction=direction,
                 limit=limit,
+            )
+        elif anchor_message is not None:
+            window = fetch_timeline_window_around_message(
+                agent,
+                anchor_message,
+                limit=limit,
+                viewer_user=request.user,
             )
         else:
             window = fetch_timeline_window(

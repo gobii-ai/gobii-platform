@@ -38,6 +38,7 @@ import type { StatusExpansionTargets } from './statusExpansion'
 import { addInferredPlanFiles, filterChangedPlanSnapshot, hasCompletedPlanDeliverables } from './planSnapshotUtils'
 import type { AgentChatShellSubview } from '../../util/agentChatShellRoutes'
 import { useAppDispatch, useAppSelector } from '../../store/hooks'
+import { revealTimelineMessage } from '../../util/timelineNavigation'
 import { selectActiveChatSession } from '../../store/chatSlice'
 import { immersiveShellActions, selectImmersiveShellViewer, selectImmersiveSidebarMode } from '../../store/immersiveShellSlice'
 
@@ -1331,12 +1332,7 @@ export function AgentChatLayout({
   }, [clearPlanPreviewTimers])
 
   const handlePlanMessageClick = useCallback((messageId: string) => {
-    if (typeof document === 'undefined') {
-      return
-    }
-    const escaped = typeof window !== 'undefined' && window.CSS?.escape ? window.CSS.escape(messageId) : messageId.replace(/"/g, '\\"')
-    const target = document.querySelector<HTMLElement>(`[data-message-id="${escaped}"]`)
-    target?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    revealTimelineMessage(messageId, { block: 'center' })
     setPlanSheetOpen(false)
   }, [])
 
