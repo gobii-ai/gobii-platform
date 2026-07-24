@@ -25,8 +25,8 @@ BUILTIN_PETS = (
     {
         "id": BUILTIN_PET_ID,
         "kind": "builtin",
-        "displayName": "Pixel Gobii Fish",
-        "description": "A cheerful pixel-art purple robot fish.",
+        "displayName": "Gobii",
+        "description": "The official mascot of Gobii.",
         "spritesheetUrl": "images/pets/gobii-fish-v2.webp",
     },
     {
