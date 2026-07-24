@@ -36,7 +36,10 @@ def get_send_discord_message_tool() -> Dict[str, Any]:
                     },
                     "message": {
                         "type": "string",
-                        "description": "Message body to send. Optional when attachments are provided. For reports, use Markdown sections, bullets/tables, status labels, tasteful emoji labels. "
+                        "description": "Message body to send. Optional when attachments are provided. "
+                                       "For reports, use compact Markdown sections, bullets, bold labels, status labels, and tasteful emoji. "
+                                       "Discord cannot render tables: never send pipe-separated columns with a "
+                                       "hyphen-divider row, even as a summary. "
                                        "Use Markdown only; raw HTML is rejected. Use code formatting to show HTML literally. "
                                        "Do not pass tool-call/XML syntax; it is sent literally.",
                     },

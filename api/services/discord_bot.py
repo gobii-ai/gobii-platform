@@ -38,6 +38,7 @@ from api.agent.system_skills.defaults import DISCORD_NATIVE_SYSTEM_SKILL_KEY
 from api.agent.files.attachment_helpers import ResolvedAttachment, create_message_attachments
 from api.agent.files.filespace_service import broadcast_message_attachment_update
 from api.services.agent_avatar_public import build_public_agent_avatar_thumbnail_url
+from api.services.discord_markdown import normalize_discord_markdown
 from api.services.discord_messages import (
     create_discord_outbound_message,
     discord_agent_address,
@@ -1060,7 +1061,7 @@ def send_channel_message(
     attachments: Iterable[ResolvedAttachment] | None = None,
 ) -> PersistentAgentMessage:
     resolved_attachments = list(attachments or [])
-    body = decode_unicode_character_escapes(body)
+    body = normalize_discord_markdown(decode_unicode_character_escapes(body))
     if not body and not resolved_attachments:
         raise ValueError("message is required when attachments is empty.")
     if len(resolved_attachments) > DISCORD_WEBHOOK_MAX_FILES:

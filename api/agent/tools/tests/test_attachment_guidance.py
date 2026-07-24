@@ -85,6 +85,8 @@ class AttachmentGuidanceTests(SimpleTestCase):
         self.assertIn("Start with the answer/main finding", surface_guidance)
         self.assertIn("Address known recipients once", surface_guidance)
         self.assertIn("agent-name self-intros", surface_guidance)
+        self.assertIn("Discord cannot render tables", surface_guidance)
+        self.assertIn("never send pipe-separated columns with a hyphen-divider row", surface_guidance)
         body_guidance = chat_tool["function"]["parameters"]["properties"]["body"]["description"]
         self.assertIn("Owner report with 4+ items", body_guidance)
         self.assertIn("Covered N/N", body_guidance)

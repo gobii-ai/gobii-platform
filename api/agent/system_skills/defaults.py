@@ -922,6 +922,8 @@ DISCORD_NATIVE_SYSTEM_SKILL = SystemSkillDefinition(
         "Do not request Discord server IDs or channel IDs as secrets.\n"
         "Use `send_discord_message` for outbound Discord replies to subscribed channels. Pass `channel_id`, `message`, and the correct `will_continue_work` value. "
         "Write the message in Discord-compatible Markdown; raw HTML is rejected. "
+        "Discord cannot render tables: never send pipe-separated columns with a hyphen-divider row, even as a summary. "
+        "Use compact headings with bullets or bold labels. "
         f"To upload files: {SEND_TOOL_ATTACHMENTS_DESCRIPTION} "
         "The backend sends through a channel webhook using the agent's name and avatar.\n"
         "Use `add_discord_reaction` for lightweight social moments such as acknowledgement, thanks, agreement, humor, congratulations, or a shared win, even when no reaction was explicitly requested. "

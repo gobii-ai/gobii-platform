@@ -8,15 +8,18 @@ from api.agent.tools.add_discord_reaction import get_add_discord_reaction_tool
 from api.evals.registry import ScenarioRegistry
 from api.evals.scenarios.discord_native import (
     DISCORD_NATIVE_GATEWAY_WAKE,
+    DISCORD_NATIVE_READABLE_COMPARISON,
     DISCORD_NATIVE_REACTION_SERIOUS_REQUEST_RESTRAINT,
     DISCORD_NATIVE_REACTION_REPLY_CONTEXT,
     DISCORD_NATIVE_REACTION_SHARED_WIN,
     DISCORD_NATIVE_RESEARCH_KICKOFF,
     DISCORD_NATIVE_SCENARIO_SLUGS,
     DISCORD_NATIVE_SUITE_SLUG,
+    DISCORD_READABLE_COMPARISON_PROMPT,
     DiscordNativeGatewayWakeScenario,
     DiscordNativeReactionReplyContextScenario,
     DiscordNativeResearchKickoffScenario,
+    contains_markdown_pipe_table,
 )
 from api.evals.suites import SuiteRegistry
 
@@ -35,8 +38,42 @@ class DiscordNativeScenarioTests(SimpleTestCase):
         self.assertIsNotNone(
             ScenarioRegistry.get(DISCORD_NATIVE_REACTION_SERIOUS_REQUEST_RESTRAINT)
         )
+        self.assertIsNotNone(ScenarioRegistry.get(DISCORD_NATIVE_READABLE_COMPARISON))
         self.assertIsNotNone(ScenarioRegistry.get(DISCORD_NATIVE_RESEARCH_KICKOFF))
         self.assertIsNotNone(ScenarioRegistry.get(DISCORD_NATIVE_GATEWAY_WAKE))
+
+    def test_readable_comparison_prompt_does_not_prescribe_formatting_contract(self):
+        prompt = DISCORD_READABLE_COMPARISON_PROMPT.casefold()
+
+        for implementation_term in ("bullet", "discord", "format", "markdown", "table"):
+            with self.subTest(implementation_term=implementation_term):
+                self.assertNotIn(implementation_term, prompt)
+
+    def test_markdown_pipe_table_detector_distinguishes_discord_safe_structure(self):
+        self.assertTrue(
+            contains_markdown_pipe_table(
+                "| Option | Tradeoff |\n"
+                "| --- | --- |\n"
+                "| Alpha | Fast, risky |\n"
+                "| Beta | Balanced |"
+            )
+        )
+        self.assertTrue(
+            contains_markdown_pipe_table(
+                "Option | Tradeoff\n"
+                ":--- | ---:\n"
+                "Alpha | Fast, risky"
+            )
+        )
+        self.assertFalse(
+            contains_markdown_pipe_table(
+                "**Alpha**\n"
+                "- Speed: fastest\n"
+                "- Risk: highest\n\n"
+                "**Beta**\n"
+                "- Balanced"
+            )
+        )
 
     def test_research_kickoff_prompt_does_not_prescribe_responsiveness_contract(self):
         prompt = DiscordNativeResearchKickoffScenario.prompt.casefold()

@@ -75,6 +75,16 @@ class OutboundContentPolicyTests(SimpleTestCase):
                 self.assertIn("raw HTML is rejected", description)
                 self.assertIn("code formatting", description)
 
+    def test_discord_tool_contract_does_not_recommend_unsupported_tables(self):
+        description = (
+            get_send_discord_message_tool()["function"]["parameters"]["properties"]["message"]["description"]
+        )
+
+        self.assertNotIn("bullets/tables", description)
+        self.assertIn("Discord cannot render tables", description)
+        self.assertIn("never send pipe-separated columns with a hyphen-divider row", description)
+        self.assertIn("bold labels", description)
+
 
 @tag("batch_text_sanitization")
 class NativeMarkdownSenderTests(TestCase):
