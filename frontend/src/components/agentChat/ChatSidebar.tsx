@@ -1,6 +1,7 @@
-import { memo, useState, useCallback, useEffect, useMemo, useRef, type ReactNode } from 'react'
+import { memo, useState, useCallback, useEffect, useMemo, useRef, type Dispatch, type ReactNode, type SetStateAction } from 'react'
 import { ArrowLeftRight, Bell, BellOff, Check, LayoutGrid, List, PanelLeft, PanelLeftClose, PanelRightClose, Plus, Search, Settings, X } from 'lucide-react'
 
+import type { AgentMessageSearchFilters } from '../../api/agentMessageSearch'
 import type { ConsoleContext } from '../../api/context'
 import { useAppSelector } from '../../store/hooks'
 import { selectActiveChatAgentId } from '../../store/chatSlice'
@@ -25,6 +26,12 @@ const SEARCH_THRESHOLD = 6
 
 type AgentContextMenuState = FixedContextMenuPosition & {
   agent: AgentRosterEntry
+}
+
+export type MessageSearchState = {
+  open: boolean
+  query: string
+  submitted: AgentMessageSearchFilters | null
 }
 
 export type ChatSidebarProps = {
@@ -60,6 +67,8 @@ export type ChatSidebarProps = {
   onBackFromEmbeddedSettings?: () => void
   scrollToAgentId?: string | null
   onScrolledToAgent?: (agentId: string) => void
+  messageSearchState?: MessageSearchState
+  onMessageSearchStateChange?: Dispatch<SetStateAction<MessageSearchState>>
 }
 
 export const ChatSidebar = memo(function ChatSidebar({
@@ -95,6 +104,8 @@ export const ChatSidebar = memo(function ChatSidebar({
   onBackFromEmbeddedSettings,
   scrollToAgentId = null,
   onScrolledToAgent,
+  messageSearchState: controlledMessageSearchState,
+  onMessageSearchStateChange,
 }: ChatSidebarProps) {
   const storeActiveAgentId = useAppSelector(selectActiveChatAgentId)
   const activeAgentId = activeAgentIdOverride !== undefined ? activeAgentIdOverride : storeActiveAgentId
@@ -109,8 +120,30 @@ export const ChatSidebar = memo(function ChatSidebar({
     return window.innerWidth < SIDEBAR_MOBILE_BREAKPOINT_PX
   })
   const [drawerOpen, setDrawerOpen] = useState(false)
-  const [messageSearchOpen, setMessageSearchOpen] = useState(false)
-  const [searchQuery, setSearchQuery] = useState('')
+  const [localMessageSearchState, setLocalMessageSearchState] = useState<MessageSearchState>({
+    open: false,
+    query: '',
+    submitted: null,
+  })
+  const messageSearchState = controlledMessageSearchState ?? localMessageSearchState
+  const updateMessageSearchState = onMessageSearchStateChange ?? setLocalMessageSearchState
+  const messageSearchOpen = messageSearchState.open
+  const searchQuery = messageSearchState.query
+  const setMessageSearchOpen = useCallback((open: boolean) => {
+    updateMessageSearchState((current) => (
+      current.open === open ? current : { ...current, open }
+    ))
+  }, [updateMessageSearchState])
+  const setSearchQuery = useCallback((query: string) => {
+    updateMessageSearchState((current) => (
+      current.query === query ? current : { ...current, query }
+    ))
+  }, [updateMessageSearchState])
+  const setMessageSearchSubmitted = useCallback((submitted: AgentMessageSearchFilters | null) => {
+    updateMessageSearchState((current) => (
+      current.submitted === submitted ? current : { ...current, submitted }
+    ))
+  }, [updateMessageSearchState])
   const [drawerViewMode, setDrawerViewMode] = useState<AgentDrawerViewMode>('list')
   const [agentContextMenu, setAgentContextMenu] = useState<AgentContextMenuState | null>(null)
   const [inviteDialog, setInviteDialog] = useState<AgentInviteDialogState | null>(null)
@@ -195,16 +228,20 @@ export const ChatSidebar = memo(function ChatSidebar({
     onScrolledToAgent,
     scrollToAgentId,
     searchQuery,
+    setSearchQuery,
     showCustomGalleryShellPanel,
     showSettingsView,
   ])
 
   useEffect(() => {
-    if (!drawerOpen) {
-      setSearchQuery('')
-      setMessageSearchOpen(false)
+    if (isMobile && !drawerOpen) {
+      updateMessageSearchState((current) => (
+        !current.open && !current.query && !current.submitted
+          ? current
+          : { open: false, query: '', submitted: null }
+      ))
     }
-  }, [drawerOpen])
+  }, [drawerOpen, isMobile, updateMessageSearchState])
 
   useEffect(() => {
     const checkMobile = () => {
@@ -251,7 +288,7 @@ export const ChatSidebar = memo(function ChatSidebar({
       onDesktopModeChange?.('list')
     }
     setMessageSearchOpen(true)
-  }, [isMobile, onDesktopModeChange])
+  }, [isMobile, onDesktopModeChange, setMessageSearchOpen])
 
   const handleAgentSelect = useCallback(
     (agent: AgentRosterEntry) => {
@@ -549,17 +586,6 @@ export const ChatSidebar = memo(function ChatSidebar({
       <>
       <div ref={setSidebarRootRef} className="chat-sidebar-mobile-content">
         <AgentChatButton
-          className="agent-message-search-fab"
-          variant="solid"
-          onClick={() => {
-            openMessageSearch()
-            setDrawerOpen(true)
-          }}
-          aria-label="Search agents and messages"
-        >
-          <Search className="h-4 w-4" />
-        </AgentChatButton>
-        <AgentChatButton
           className="agent-fab"
           variant="solid"
           onClick={() => setDrawerOpen(true)}
@@ -616,6 +642,8 @@ export const ChatSidebar = memo(function ChatSidebar({
               agentsLoading={loading}
               query={searchQuery}
               onQueryChange={setSearchQuery}
+              submitted={messageSearchState.submitted}
+              onSubmittedChange={setMessageSearchSubmitted}
               onAgentSelect={handleAgentSelect}
               onResultSelect={() => setDrawerOpen(false)}
             />
@@ -803,6 +831,8 @@ export const ChatSidebar = memo(function ChatSidebar({
             agentsLoading={loading}
             query={searchQuery}
             onQueryChange={setSearchQuery}
+            submitted={messageSearchState.submitted}
+            onSubmittedChange={setMessageSearchSubmitted}
             onAgentSelect={handleAgentSelect}
           />
         ) : <div className="chat-sidebar-section">

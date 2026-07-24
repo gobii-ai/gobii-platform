@@ -26,6 +26,8 @@ type MessageSearchPanelProps = {
   agentsLoading?: boolean
   query: string
   onQueryChange: (query: string) => void
+  submitted: AgentMessageSearchFilters | null
+  onSubmittedChange: (filters: AgentMessageSearchFilters | null) => void
   onAgentSelect?: (agent: AgentRosterEntry) => void
   onResultSelect?: () => void
 }
@@ -245,12 +247,13 @@ export function MessageSearchPanel({
   agentsLoading = false,
   query,
   onQueryChange,
+  submitted,
+  onSubmittedChange,
   onAgentSelect,
   onResultSelect,
 }: MessageSearchPanelProps) {
   const inputRef = useRef<HTMLInputElement | null>(null)
   const [highlightedShortcutIndex, setHighlightedShortcutIndex] = useState(0)
-  const [submitted, setSubmitted] = useState<AgentMessageSearchFilters | null>(null)
   const storageKey = historyStorageKey(viewerKey, context)
   const [history, setHistory] = useState<SearchHistoryEntry[]>(() => readHistory(storageKey))
   const availableAgentIds = useMemo(() => new Set(agents.map((agent) => agent.id)), [agents])
@@ -326,7 +329,7 @@ export function MessageSearchPanel({
     }
     if (!filters.q && !filters.agentId && filters.attachment === 'any') return
     onQueryChange(displayQuery)
-    setSubmitted(filters)
+    onSubmittedChange(filters)
     const entry: SearchHistoryEntry = {
       ...filters,
       displayQuery: displayQuery.trim(),
@@ -342,7 +345,7 @@ export function MessageSearchPanel({
     ].slice(0, HISTORY_LIMIT)
     setHistory(nextHistory)
     writeHistory(storageKey, nextHistory)
-  }, [agents, availableHistory, onQueryChange, storageKey])
+  }, [agents, availableHistory, onQueryChange, onSubmittedChange, storageKey])
 
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault()
@@ -351,7 +354,7 @@ export function MessageSearchPanel({
 
   const handleQueryChange = (nextQuery: string) => {
     onQueryChange(nextQuery)
-    setSubmitted(null)
+    onSubmittedChange(null)
     setHighlightedShortcutIndex(0)
   }
 
@@ -427,7 +430,7 @@ export function MessageSearchPanel({
           onChange={handleQueryChange}
           onClear={() => {
             onQueryChange('')
-            setSubmitted(null)
+            onSubmittedChange(null)
           }}
           placeholder="Search agents and messages…"
           autoFocus
@@ -563,7 +566,7 @@ export function MessageSearchPanel({
           <>
             <div className="message-search-panel__section-title">
               <span>Messages</span>
-              <button type="button" onClick={() => setSubmitted(null)}>Search history</button>
+              <button type="button" onClick={() => onSubmittedChange(null)}>Search history</button>
             </div>
             {searchQuery.isLoading ? (
               <div className="message-search-panel__empty"><Loader2 className="h-5 w-5 animate-spin" /> Searching…</div>
