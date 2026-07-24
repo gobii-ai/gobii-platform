@@ -79,6 +79,7 @@ class MCPServerListAPITests(TestCase):
         payload = response.json()
         self.assertEqual(payload["owner_scope"], "user")
         self.assertEqual(payload["owner_label"], self.user.username)
+        self.assertFalse(payload["allow_commands"])
         self.assertEqual(payload["result_count"], 1)
         self.assertEqual(len(payload["servers"]), 1)
         record = payload["servers"][0]
@@ -90,7 +91,27 @@ class MCPServerListAPITests(TestCase):
         self.assertFalse(record["oauth_pending"])
         self.assertFalse(record["oauth_connected"])
 
-    def test_returns_organization_scope_when_context_selected(self):
+    @patch("console.api_views.sandbox_compute_enabled", return_value=True)
+    @patch("console.api_views.flag_is_active", return_value=True)
+    def test_reports_command_capability_for_sandbox_compute_users(
+        self,
+        _mock_flag_is_active,
+        _mock_sandbox_compute_enabled,
+    ):
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("console-mcp-server-list"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["allow_commands"])
+
+    @patch("console.api_views.sandbox_compute_enabled", return_value=True)
+    @patch("console.api_views.flag_is_active", return_value=True)
+    def test_organization_scope_does_not_report_command_capability(
+        self,
+        _mock_flag_is_active,
+        _mock_sandbox_compute_enabled,
+    ):
         org = Organization.objects.create(
             name="Acme Org",
             slug="acme-org",
@@ -121,12 +142,27 @@ class MCPServerListAPITests(TestCase):
         payload = response.json()
         self.assertEqual(payload["owner_scope"], "organization")
         self.assertEqual(payload["owner_label"], "Acme Org")
+        self.assertFalse(payload["allow_commands"])
         self.assertEqual(payload["result_count"], 1)
         record = payload["servers"][0]
         self.assertEqual(record["id"], str(server.id))
         self.assertEqual(record["scope"], MCPServerConfig.Scope.ORGANIZATION)
         self.assertEqual(record["url"], "https://org.example.com/mcp")
         self.assertFalse(record["oauth_pending"])
+
+    @patch("console.api_views.sandbox_compute_enabled", return_value=False)
+    @patch("console.api_views.flag_is_active", return_value=True)
+    def test_personal_scope_does_not_report_commands_when_sandbox_compute_is_disabled(
+        self,
+        _mock_flag_is_active,
+        _mock_sandbox_compute_enabled,
+    ):
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("console-mcp-server-list"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json()["allow_commands"])
 
     def test_viewer_role_blocked_from_org_scope(self):
         org = Organization.objects.create(
@@ -222,6 +258,42 @@ class MCPServerCrudAPITests(TestCase):
         self.assertFalse(props["has_command"])
         self.assertTrue(props["is_active"])
         self.assertIsNone(track_kwargs.get("organization"))
+
+    @patch("console.api_views.sandbox_compute_enabled", return_value=True)
+    @patch("console.api_views.flag_is_active", return_value=True)
+    @patch("console.api_views._track_org_event_for_console")
+    @patch("console.api_views.get_mcp_manager")
+    def test_create_personal_command_server_for_sandbox_compute_user(
+        self,
+        mock_get_mcp_manager,
+        mock_track_event,
+        _mock_flag_is_active,
+        _mock_sandbox_compute_enabled,
+    ):
+        response = self.client.post(
+            reverse("console-mcp-server-list"),
+            data=json.dumps(
+                {
+                    "display_name": "Personal Command",
+                    "command": "npx",
+                    "command_args": ["-y", "@example/mcp"],
+                    "url": "",
+                    "auth_method": MCPServerConfig.AuthMethod.NONE,
+                    "is_active": True,
+                    "headers": {},
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        server = MCPServerConfig.objects.get()
+        self.assertEqual(server.scope, MCPServerConfig.Scope.USER)
+        self.assertEqual(server.user, self.user)
+        self.assertEqual(server.command, "npx")
+        self.assertEqual(server.command_args, ["-y", "@example/mcp"])
+        mock_get_mcp_manager.return_value.refresh_server.assert_called_once_with(str(server.id))
+        mock_track_event.assert_called_once()
 
     @patch("api.services.mcp_tool_discovery.SandboxComputeService")
     @patch("api.services.mcp_tool_discovery.sandbox_compute_enabled", return_value=True)
@@ -399,6 +471,102 @@ class MCPServerCrudAPITests(TestCase):
         self.assertIn("errors", payload)
         self.assertIn("url", payload["errors"])
 
+    @patch("console.api_views.sandbox_compute_enabled", return_value=True)
+    @patch("console.api_views.flag_is_active", return_value=True)
+    def test_create_organization_command_server_is_rejected(
+        self,
+        _mock_flag_is_active,
+        _mock_sandbox_compute_enabled,
+    ):
+        org = Organization.objects.create(
+            name="Command Org",
+            slug="command-org",
+            created_by=self.user,
+        )
+        OrganizationMembership.objects.create(
+            org=org,
+            user=self.user,
+            role=OrganizationMembership.OrgRole.OWNER,
+        )
+        session = self.client.session
+        session["context_type"] = "organization"
+        session["context_id"] = str(org.id)
+        session["context_name"] = org.name
+        session.save()
+
+        response = self.client.post(
+            reverse("console-mcp-server-list"),
+            data=json.dumps(
+                {
+                    "display_name": "Organization Command",
+                    "command": "npx",
+                    "command_args": ["-y", "@example/mcp"],
+                    "url": "",
+                    "auth_method": MCPServerConfig.AuthMethod.NONE,
+                    "is_active": True,
+                    "headers": {},
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("command", response.json()["errors"])
+        self.assertFalse(MCPServerConfig.objects.filter(organization=org).exists())
+
+    @patch("console.api_views.sandbox_compute_enabled", return_value=True)
+    @patch("console.api_views.flag_is_active", return_value=True)
+    def test_update_organization_server_to_command_is_rejected(
+        self,
+        _mock_flag_is_active,
+        _mock_sandbox_compute_enabled,
+    ):
+        org = Organization.objects.create(
+            name="Existing Command Org",
+            slug="existing-command-org",
+            created_by=self.user,
+        )
+        OrganizationMembership.objects.create(
+            org=org,
+            user=self.user,
+            role=OrganizationMembership.OrgRole.OWNER,
+        )
+        session = self.client.session
+        session["context_type"] = "organization"
+        session["context_id"] = str(org.id)
+        session["context_name"] = org.name
+        session.save()
+        server = MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.ORGANIZATION,
+            organization=org,
+            name="existing-http",
+            display_name="Existing HTTP",
+            url="https://example.com/mcp",
+        )
+
+        response = self.client.patch(
+            reverse("console-mcp-server-detail", args=[server.id]),
+            data=json.dumps(
+                {
+                    "display_name": server.display_name,
+                    "name": server.name,
+                    "command": "npx",
+                    "command_args": ["-y", "@example/mcp"],
+                    "url": "",
+                    "auth_method": MCPServerConfig.AuthMethod.NONE,
+                    "is_active": True,
+                    "headers": {},
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("command", response.json()["errors"])
+        server.refresh_from_db()
+        self.assertEqual(server.command, "")
+        self.assertEqual(server.url, "https://example.com/mcp")
+
     def test_create_server_duplicate_name_returns_validation_error(self):
         MCPServerConfig.objects.create(
             scope=MCPServerConfig.Scope.USER,
@@ -567,6 +735,7 @@ class PlatformMCPServerAPITests(TestCase):
         payload = response.json()
         self.assertEqual(payload["owner_scope"], MCPServerConfig.Scope.PLATFORM)
         self.assertEqual(payload["owner_label"], "Platform")
+        self.assertTrue(payload["allow_commands"])
         self.assertEqual(payload["result_count"], 1)
         self.assertEqual(payload["servers"][0]["id"], str(platform_server.id))
         self.assertEqual(payload["servers"][0]["scope"], MCPServerConfig.Scope.PLATFORM)
@@ -1965,6 +2134,38 @@ class MCPServerAssignmentAPITests(TestCase):
         manager.initialize.assert_not_called()
         manager.refresh_server.assert_not_called()
         manager.remove_server.assert_not_called()
+
+    @patch("api.services.mcp_servers.sandbox_compute_enabled_for_agent", return_value=False)
+    def test_update_stdio_assignments_rejects_agent_without_sandbox(
+        self,
+        _mock_sandbox_compute_enabled_for_agent,
+    ):
+        org = Organization.objects.create(name="STDIO Org", slug="stdio-org", created_by=self.user)
+        OrganizationMembership.objects.create(
+            org=org,
+            user=self.user,
+            role=OrganizationMembership.OrgRole.OWNER,
+        )
+        self._set_org_context(org)
+        server = MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.ORGANIZATION,
+            organization=org,
+            name="org-stdio",
+            display_name="Org STDIO Server",
+            command="npx",
+            command_args=["-y", "@example/mcp"],
+        )
+        agent = _create_console_test_agent(user=self.user, organization=org, name="No Sandbox")
+
+        response = self.client.post(
+            reverse("console-mcp-server-assignments", args=[server.id]),
+            data=json.dumps({"agent_ids": [str(agent.id)]}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("sandbox compute", response.content.decode().lower())
+        self.assertFalse(PersistentAgentMCPServer.objects.filter(server_config=server).exists())
 
     def test_assignments_platform_scope_blocked(self):
         server = MCPServerConfig.objects.create(

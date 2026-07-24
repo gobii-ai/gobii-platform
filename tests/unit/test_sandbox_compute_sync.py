@@ -648,6 +648,42 @@ class SandboxComputeSyncTests(TestCase):
         mock_enqueue.assert_called_once_with(self.agent, source="mcp_request")
         mock_sync.assert_not_called()
 
+    def test_mcp_request_rejects_stdio_for_ineligible_agent(self):
+        backend = _DummyBackend()
+        runtime = SimpleNamespace(
+            config_id="cfg-stdio",
+            scope=MCPServerConfig.Scope.USER,
+            command="npx",
+            url="",
+        )
+        with patch("api.services.sandbox_compute.sandbox_compute_enabled", return_value=True), patch(
+            "api.services.sandbox_compute.sandbox_compute_enabled_for_agent",
+            return_value=False,
+        ), patch(
+            "api.services.sandbox_compute._build_mcp_server_payload",
+            return_value=(
+                {
+                    "config_id": runtime.config_id,
+                    "scope": runtime.scope,
+                    "command": runtime.command,
+                    "url": runtime.url,
+                },
+                runtime,
+            ),
+        ), patch.object(SandboxComputeService, "_ensure_session") as mock_ensure_session:
+            service = SandboxComputeService(backend=backend)
+            result = service.mcp_request(
+                self.agent,
+                runtime.config_id,
+                "ping",
+                {},
+            )
+
+        self.assertEqual(result.get("status"), "error")
+        self.assertIn("sandbox compute", result.get("message", "").lower())
+        mock_ensure_session.assert_not_called()
+        self.assertEqual(backend.mcp_calls, [])
+
     def test_tool_request_enqueues_async_post_sync(self):
         backend = _DummyBackend()
         with patch("api.services.sandbox_compute.sandbox_compute_enabled", return_value=True), patch(

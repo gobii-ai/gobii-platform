@@ -2309,8 +2309,14 @@ class SandboxComputeService:
         *,
         full_tool_name: Optional[str] = None,
     ) -> Dict[str, Any]:
+        server_payload, runtime = _build_mcp_server_payload(server_config_id, agent=agent)
+        if _requires_agent_pod_discovery(runtime) and not sandbox_compute_enabled_for_agent(agent):
+            return {
+                "status": "error",
+                "message": "This MCP server requires sandbox compute, which is not available for this agent.",
+            }
+
         session = self._ensure_session(agent, source="mcp_request")
-        server_payload, _runtime = _build_mcp_server_payload(server_config_id, agent=agent)
         if not server_payload:
             result = {"status": "error", "message": "MCP server config not available."}
             _track_execution_event(
@@ -2647,6 +2653,11 @@ class SandboxComputeService:
         if _requires_agent_pod_discovery(runtime):
             if agent is None:
                 return {"status": "skipped", "message": "Sandboxed stdio discovery requires an agent context."}
+            if not sandbox_compute_enabled_for_agent(agent):
+                return {
+                    "status": "error",
+                    "message": "This MCP server requires sandbox compute, which is not available for this agent.",
+                }
             session = self._ensure_session(agent, source="discover_mcp_tools")
 
         result = self._backend.discover_mcp_tools(
