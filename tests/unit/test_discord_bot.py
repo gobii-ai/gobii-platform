@@ -14,7 +14,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from api.agent.system_skills.registry import get_system_skill_definition
-from api.agent.core.prompt_context import _format_discord_reply_context, build_prompt_context
+from api.agent.core.prompt_context import _format_discord_reply_context, _get_system_instruction, build_prompt_context
 from api.agent.files.attachment_helpers import ResolvedAttachment
 from api.agent.tools.add_discord_reaction import execute_add_discord_reaction
 from api.agent.tools.discord_channel_subscriptions import execute_discord_channel_subscriptions
@@ -48,6 +48,7 @@ from api.services.discord_bot import (
     _agent_webhook_username,
     _webhook_echo_signature,
 )
+from api.services.discord_markdown import normalize_discord_markdown
 from api.management.commands.run_discord_bot import build_gateway_message, ingest_gateway_message_with_reconnect
 
 
@@ -1208,6 +1209,90 @@ class NativeDiscordBotTests(TestCase):
 
     @tag("batch_agent_webhooks")
     @patch.dict(os.environ, {"GOBII_ENCRYPTION_KEY": "native-discord-tests"}, clear=False)
+    @patch("api.services.discord_bot.requests.get")
+    @patch("api.services.discord_bot.requests.post")
+    def test_webhook_outbound_send_converts_markdown_table_to_discord_structure(self, post_mock, get_mock):
+        get_mock.return_value = _response([{"id": "10", "name": "general", "type": 0}])
+        guild = self._guild()
+        PersistentAgentDiscordChannelSubscription.objects.create(
+            agent=self.agent,
+            guild=guild,
+            channel_id="10",
+            channel_name="general",
+        )
+        post_mock.side_effect = [
+            _response({"id": "wh1", "token": "token1", "name": "Gobii"}),
+            _response({"id": "discord-message-1", "channel_id": "10"}),
+        ]
+
+        message = send_channel_message(
+            self.agent,
+            channel_id="10",
+            body=(
+                "**Summary**\n\n"
+                "| Option | Speed | Risk |\n"
+                "| --- | --- | --- |\n"
+                "| Alpha | Fastest | High |\n"
+                "| Beta | Balanced | Medium |"
+            ),
+        )
+
+        expected = (
+            "**Summary**\n\n"
+            "**Alpha**\n"
+            "- **Speed:** Fastest\n"
+            "- **Risk:** High\n\n"
+            "**Beta**\n"
+            "- **Speed:** Balanced\n"
+            "- **Risk:** Medium"
+        )
+        self.assertEqual(message.body, expected)
+        send_call = post_mock.call_args_list[1]
+        self.assertEqual(send_call.kwargs["json"]["content"], expected)
+
+    @tag("batch_agent_webhooks")
+    def test_discord_table_normalizer_transposes_matrix_and_preserves_code_fences(self):
+        matrix = (
+            "| | Alpha | Beta |\n"
+            "| --- | --- | --- |\n"
+            "| Speed | Fastest | Balanced |\n"
+            "| Risk | High | Medium |"
+        )
+        self.assertEqual(
+            normalize_discord_markdown(matrix),
+            (
+                "**Alpha**\n"
+                "- **Speed:** Fastest\n"
+                "- **Risk:** High\n\n"
+                "**Beta**\n"
+                "- **Speed:** Balanced\n"
+                "- **Risk:** Medium"
+            ),
+        )
+
+        fenced = f"```markdown\n{matrix}\n```"
+        self.assertEqual(normalize_discord_markdown(fenced), fenced)
+
+    @tag("batch_agent_webhooks")
+    def test_discord_table_normalizer_keeps_valid_dense_message_within_content_limit(self):
+        headers = ["Company", "Owner", "Stage", "Region", "Status", "Score", "Note"]
+        rows = [
+            [f"item-{row}", *(f"value-{row}-{column}" for column in range(1, 7))]
+            for row in range(15)
+        ]
+        table = (
+            f"| {' | '.join(headers)} |\n"
+            f"| {' | '.join(['---'] * len(headers))} |\n"
+            + "\n".join(f"| {' | '.join(row)} |" for row in rows)
+        )
+
+        self.assertLessEqual(len(table), 2_000)
+        normalized = normalize_discord_markdown(table)
+        self.assertLessEqual(len(normalized), 2_000)
+        self.assertNotIn("| --- |", normalized)
+
+    @tag("batch_agent_webhooks")
+    @patch.dict(os.environ, {"GOBII_ENCRYPTION_KEY": "native-discord-tests"}, clear=False)
     @patch("api.services.discord_bot.build_public_agent_avatar_thumbnail_url", return_value="https://app.example.test/public/agents/avatar.png")
     @patch("api.services.discord_bot.requests.get")
     @patch("api.services.discord_bot.requests.post")
@@ -1382,6 +1467,18 @@ class NativeDiscordBotTests(TestCase):
         self.assertIn("filespace paths or $[/path]", skill.prompt_instructions)
         self.assertIn("Body text never attaches files", skill.prompt_instructions)
         self.assertIn("Use `add_discord_reaction`", skill.prompt_instructions)
+        self.assertIn("Discord cannot render tables", skill.prompt_instructions)
+        self.assertIn("never send pipe-separated columns with a hyphen-divider row", skill.prompt_instructions)
+
+    @tag("batch_agent_webhooks")
+    def test_global_report_contract_allows_a_supported_discord_equivalent(self):
+        prompt = _get_system_instruction(self.agent)
+
+        self.assertNotIn("every item/requested field in one channel-appropriate table", prompt)
+        self.assertIn(
+            "one channel-appropriate structured comparison: a table where supported, headings and bullets where not",
+            prompt,
+        )
 
     @tag("batch_agent_webhooks")
     def test_discord_app_api_returns_agent_state(self):

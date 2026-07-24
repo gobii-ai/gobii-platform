@@ -1,4 +1,5 @@
 import json
+import re
 from dataclasses import dataclass
 from unittest.mock import patch
 
@@ -24,6 +25,7 @@ from api.models import (
     PersistentAgentSystemStep,
     PersistentAgentToolCall,
 )
+from api.services.discord_markdown import normalize_discord_markdown
 from api.services.discord_messages import (
     discord_channel_address,
     discord_conversation_address,
@@ -38,12 +40,14 @@ DISCORD_NATIVE_REACTION_SHARED_WIN = "discord_native_reaction_shared_win"
 DISCORD_NATIVE_REACTION_SERIOUS_REQUEST_RESTRAINT = (
     "discord_native_reaction_serious_request_restraint"
 )
+DISCORD_NATIVE_READABLE_COMPARISON = "discord_native_readable_comparison"
 DISCORD_NATIVE_RESEARCH_KICKOFF = "discord_native_research_kickoff"
 DISCORD_NATIVE_GATEWAY_WAKE = "discord_native_gateway_wake"
 DISCORD_NATIVE_SCENARIO_SLUGS = (
     DISCORD_NATIVE_REACTION_REPLY_CONTEXT,
     DISCORD_NATIVE_REACTION_SHARED_WIN,
     DISCORD_NATIVE_REACTION_SERIOUS_REQUEST_RESTRAINT,
+    DISCORD_NATIVE_READABLE_COMPARISON,
     DISCORD_NATIVE_RESEARCH_KICKOFF,
     DISCORD_NATIVE_GATEWAY_WAKE,
 )
@@ -53,6 +57,31 @@ DISCORD_RESEARCH_TOOL_NAMES = {
     "mcp_brightdata_search_engine",
     "mcp_brightdata_scrape_as_markdown",
 }
+DISCORD_READABLE_COMPARISON_PROMPT = (
+    "Please post a compact standup comparison of these rollout options: "
+    "Alpha is fastest but highest risk; Beta is balanced; Gamma is safest but slowest."
+)
+MARKDOWN_TABLE_DIVIDER_CELL = re.compile(r":?-{3,}:?")
+
+
+def contains_markdown_pipe_table(text: str) -> bool:
+    lines = [line.strip() for line in str(text or "").splitlines()]
+    for index in range(1, len(lines)):
+        divider_cells = [
+            cell.strip()
+            for cell in lines[index].strip("|").split("|")
+        ]
+        header_cells = [
+            cell.strip()
+            for cell in lines[index - 1].strip("|").split("|")
+        ]
+        if (
+            len(divider_cells) >= 2
+            and len(header_cells) == len(divider_cells)
+            and all(MARKDOWN_TABLE_DIVIDER_CELL.fullmatch(cell) for cell in divider_cells)
+        ):
+            return True
+    return False
 
 
 @dataclass(frozen=True)
@@ -84,6 +113,15 @@ DISCORD_REACTION_CASES = (
         description="A substantive incident question should get a reply rather than reaction-only treatment.",
         body="Customers can't log in after the deploy. What should we check first?",
         expected_action="reply",
+    ),
+    DiscordReactionCase(
+        slug=DISCORD_NATIVE_READABLE_COMPARISON,
+        description=(
+            "A comparative Discord report should use readable native structure "
+            "instead of an unsupported pipe table."
+        ),
+        body=DISCORD_READABLE_COMPARISON_PROMPT,
+        expected_action="supported_reply",
     ),
 )
 
@@ -278,11 +316,16 @@ class DiscordNativeReactionScenario(EvalScenario, ScenarioExecutionTools):
                 reply_calls[0],
                 channel_id=channel_id,
             )
+            if passed and self.case.expected_action == "supported_reply":
+                delivered_reply = normalize_discord_markdown(
+                    str((reply_calls[0].tool_params or {}).get("message") or "")
+                )
+                passed = not contains_markdown_pipe_table(delivered_reply)
             summary = (
-                "Agent answered the substantive Discord question without reaction-only treatment."
+                "Agent delivered one substantive, Discord-supported reply."
                 if passed
                 else (
-                    "Expected one substantive Discord reply and no reaction; "
+                    "Expected one substantive Discord-supported reply and no reaction; "
                     f"saw {len(reply_calls)} reply and {len(reaction_calls)} reaction call(s)."
                 )
             )
