@@ -736,7 +736,8 @@ TOOL_DEFINITIONS: dict[str, dict[str, Any]] = {
     "meta_gobii_assign_agent_secret": {
         "description": (
             "Consume one short-lived secure value reference into an accessible Gobii's encrypted, domain-scoped "
-            "credential store. The plaintext is never returned. Requires human approval via user_confirmed."
+            "credential store. Do not use this for email credentials; use meta_gobii_configure_agent_email. "
+            "The plaintext is never returned. Requires human approval via user_confirmed."
         ),
         "parameters": _object(
             {

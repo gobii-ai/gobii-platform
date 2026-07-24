@@ -142,6 +142,10 @@ class SecureApiRequestTests(TestCase):
         self.assertIsNotNone(definition)
         self.assertEqual(definition.tool_names, (SECURE_API_REQUEST_TOOL_NAME,))
         self.assertIn("never fetch that response", definition.prompt_instructions.lower())
+        self.assertIn(
+            "never install a mailbox credential as a generic agent secret",
+            definition.prompt_instructions.lower(),
+        )
         self.assertNotIn("primeforge", definition.prompt_instructions.lower())
         matches = shortlist_system_skills(
             "provision credentials from an API into several child Gobiis",
