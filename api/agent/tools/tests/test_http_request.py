@@ -1,10 +1,16 @@
 from django.test import SimpleTestCase, tag
 
-from api.agent.tools.http_request import _native_api_error_message
+from api.agent.tools.http_request import _native_api_error_message, get_http_request_tool
 
 
 @tag("http_request_batch")
 class NativeHttpErrorMessageTests(SimpleTestCase):
+    def test_tool_description_prefers_dollar_secret_placeholders(self):
+        description = get_http_request_tool()["function"]["description"]
+
+        self.assertIn("$[secret:my_api_key]", description)
+        self.assertIn("<<<my_api_key>>>", description)
+
     def test_extracts_google_error_message(self):
         message = _native_api_error_message(
             {
