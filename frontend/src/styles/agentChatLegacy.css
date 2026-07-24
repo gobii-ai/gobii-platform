@@ -5736,27 +5736,8 @@
     line-height: 1.45;
     overflow-wrap: anywhere;
 }
-.message-search-result__excerpt :is(p, ul, ol, pre, blockquote, table) {
-    margin-top: 0.25rem;
-    margin-bottom: 0.25rem;
-}
-.message-search-result__excerpt :is(ul, ol) {
-    padding-left: 1.15rem;
-}
-.message-search-result__excerpt pre {
-    overflow: hidden;
-    padding: 0.55rem;
-    border-radius: 0.45rem;
-    background: rgba(2, 6, 23, 0.72);
-    white-space: pre-wrap;
-}
-.message-search-result__excerpt img {
-    max-height: 5rem;
-    object-fit: contain;
-}
-.message-search-result__excerpt .chat-html-content {
-    font-size: inherit;
-    line-height: inherit;
+.message-search-result__excerpt p {
+    margin: 0;
 }
 .message-search-result__excerpt mark {
     border-radius: 0.15rem;
