@@ -952,7 +952,7 @@ export function AgentChatPage({
   const [messageSearchState, setMessageSearchState] = useState<MessageSearchState>({
     open: false,
     query: '',
-    submitted: null,
+    submittedQuery: null,
   })
   const developerModeEnabled = developerMode && isSystemAdmin
   const pendingReadMarkerByAgentRef = useRef<Record<string, string>>({})
@@ -1074,7 +1074,7 @@ export function AgentChatPage({
     const previousKey = previousMessageSearchContextKeyRef.current
     previousMessageSearchContextKeyRef.current = messageSearchContextKey
     if (previousKey && previousKey !== messageSearchContextKey) {
-      setMessageSearchState({ open: false, query: '', submitted: null })
+      setMessageSearchState({ open: false, query: '', submittedQuery: null })
     }
   }, [messageSearchContextKey])
   const contextMatchesAgent = !contextLookupAgentId || contextResolvedForAgentId === contextLookupAgentId

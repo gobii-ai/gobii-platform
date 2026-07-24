@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefCallback } from 'react'
 
+import { revealTimelineMessage } from '../../util/timelineNavigation'
+
 const NEAR_BOTTOM_PX = 96
 const TOP_LOAD_PX = 160
 const PROGRAMMATIC_SCROLL_MS = 180
@@ -452,21 +454,12 @@ export function useTimelineScrollController({
     if (!initialLoading && eventCount > 0 && !didInitialJumpRef.current) {
       didInitialJumpRef.current = true
       if (targetMessageId && contentNode) {
-        const escaped = typeof CSS !== 'undefined' && typeof CSS.escape === 'function'
-          ? CSS.escape(targetMessageId)
-          : targetMessageId.replace(/["\\]/g, '\\$&')
-        const target = contentNode.querySelector<HTMLElement>(`[data-message-id="${escaped}"]`)
-        if (target) {
+        const timeout = revealTimelineMessage(targetMessageId, {
+          root: contentNode,
+          highlight: true,
+        })
+        if (timeout !== null) {
           setPinned(false)
-          const reducedMotion = typeof window.matchMedia === 'function'
-            && window.matchMedia('(prefers-reduced-motion: reduce)').matches
-          target.scrollIntoView({
-            block: 'start',
-            behavior: reducedMotion ? 'auto' : 'smooth',
-          })
-          target.classList.remove('message-search-target')
-          window.requestAnimationFrame(() => target.classList.add('message-search-target'))
-          const timeout = window.setTimeout(() => target.classList.remove('message-search-target'), 2200)
           return () => window.clearTimeout(timeout)
         }
       }
