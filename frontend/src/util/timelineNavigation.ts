@@ -5,6 +5,41 @@ type RevealTimelineMessageOptions = {
   highlight?: boolean
 }
 
+function scrollWithinTimeline(
+  target: HTMLElement,
+  block: ScrollLogicalPosition,
+  behavior: ScrollBehavior,
+): void {
+  const container = target.closest<HTMLElement>('#timeline-shell')
+  if (!container) {
+    target.scrollIntoView({ block, behavior })
+    return
+  }
+
+  const containerRect = container.getBoundingClientRect()
+  const targetRect = target.getBoundingClientRect()
+  const targetStyle = window.getComputedStyle(target)
+  const marginTop = Number.parseFloat(targetStyle.scrollMarginTop) || 0
+  const marginBottom = Number.parseFloat(targetStyle.scrollMarginBottom) || 0
+  const start = targetRect.top - containerRect.top - marginTop
+  const end = targetRect.bottom - containerRect.bottom + marginBottom
+  let top = start
+
+  if (block === 'center') {
+    top -= (container.clientHeight - targetRect.height) / 2
+  } else if (block === 'end') {
+    top = end
+  } else if (block === 'nearest') {
+    if (targetRect.top >= containerRect.top + marginTop
+      && targetRect.bottom <= containerRect.bottom - marginBottom) {
+      return
+    }
+    top = targetRect.top < containerRect.top ? start : end
+  }
+
+  container.scrollBy({ top, behavior })
+}
+
 export function revealTimelineMessage(
   messageId: string,
   {
@@ -21,10 +56,11 @@ export function revealTimelineMessage(
   if (!target) return null
 
   const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
-  target.scrollIntoView({
+  scrollWithinTimeline(
+    target,
     block,
-    behavior: behavior ?? (reducedMotion ? 'auto' : 'smooth'),
-  })
+    behavior ?? (reducedMotion ? 'auto' : 'smooth'),
+  )
   if (!highlight) return null
 
   target.classList.remove('message-search-target')
