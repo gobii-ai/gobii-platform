@@ -2,6 +2,10 @@
     --agent-chat-sidebar-width: 18rem;
     --agent-chat-sidebar-width-collapsed: 5rem;
     --agent-chat-sidebar-width-gallery: 34rem;
+    --agent-chat-sidebar-width-search: min(
+        calc(var(--agent-chat-sidebar-width) + var(--agent-chat-sidebar-width)),
+        calc(100vw - 20rem)
+    );
     --agent-chat-gallery-conversation-width: 25rem;
     --agent-chat-purple-base: #1e1145;
     --agent-chat-purple-background: radial-gradient(ellipse at 25% 0%, rgba(64, 27, 104, 0.18) 0%, transparent 55%),
@@ -363,6 +367,11 @@
 .agent-chat-main[data-sidebar-mode='gallery'],
 .banner-shell[data-sidebar-mode='gallery'] {
     --agent-chat-sidebar-current-width: var(--agent-chat-sidebar-width-gallery, 34rem);
+}
+.chat-sidebar[data-search-open='true'],
+.chat-sidebar[data-search-open='true'] ~ .agent-chat-main,
+.chat-sidebar[data-search-open='true'] ~ .banner-shell {
+    --agent-chat-sidebar-current-width: var(--agent-chat-sidebar-width-search, 36rem);
 }
 @media (max-width: 767px) {
     .banner-shell {
@@ -2930,6 +2939,7 @@
 .timeline-event {
     position: relative;
     contain: layout style;
+    scroll-margin-top: calc(var(--agent-chat-banner-height, 4rem) + 0.75rem);
     scroll-margin-bottom: 1rem;
 }
 .hard-limit-callout {

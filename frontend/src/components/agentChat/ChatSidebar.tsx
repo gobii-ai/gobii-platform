@@ -798,6 +798,7 @@ export const ChatSidebar = memo(function ChatSidebar({
       className={`chat-sidebar chat-sidebar--${messageSearchOpen ? 'list' : desktopMode}`}
       data-collapsed={messageSearchOpen ? false : collapsed}
       data-sidebar-mode={messageSearchOpen ? 'list' : desktopMode}
+      data-search-open={messageSearchOpen ? 'true' : undefined}
     >
       <div className="chat-sidebar-inner">
         <div
@@ -827,21 +828,23 @@ export const ChatSidebar = memo(function ChatSidebar({
             </div>
           ) : null}
           <div className="chat-sidebar-header-actions">
-            <button
-              type="button"
-              className="chat-sidebar-toggle"
-              onClick={() => {
-                if (messageSearchOpen) {
-                  setMessageSearchOpen(false)
-                  return
-                }
-                openMessageSearch()
-              }}
-              aria-label={messageSearchOpen ? 'Close search' : 'Search agents and messages'}
-              title={messageSearchOpen ? 'Close search' : 'Search agents and messages'}
-            >
-              {messageSearchOpen ? <X className="h-4 w-4" /> : <Search className="h-4 w-4" />}
-            </button>
+            {messageSearchOpen || collapsed ? (
+              <button
+                type="button"
+                className="chat-sidebar-toggle"
+                onClick={() => {
+                  if (messageSearchOpen) {
+                    setMessageSearchOpen(false)
+                    return
+                  }
+                  openMessageSearch()
+                }}
+                aria-label={messageSearchOpen ? 'Close search' : 'Search agents and messages'}
+                title={messageSearchOpen ? 'Close search' : 'Search agents and messages'}
+              >
+                {messageSearchOpen ? <X className="h-4 w-4" /> : <Search className="h-4 w-4" />}
+              </button>
+            ) : null}
             {!messageSearchOpen && !collapsed ? (
               <button
                 type="button"
