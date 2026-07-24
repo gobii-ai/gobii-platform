@@ -24,10 +24,6 @@
   pointer-events: none;
 }
 
-.immersive-pet__context-menu {
-  pointer-events: auto;
-}
-
 @media (max-width: 767px) {
   .immersive-pet-layer {
     display: none;

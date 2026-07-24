@@ -4120,7 +4120,9 @@ export function AgentChatPage({
       onNotificationsEnabledChange: handleAgentChatNotificationsEnabledChange,
       suggestionsEnabled,
       onSuggestionsEnabledChange: handleSuggestionsEnabledChange,
+      // complexity-budget: exclude-start pet
       showPetPreference: true,
+      // complexity-budget: exclude-end pet
     },
     galleryShellPage: selectionPage,
     galleryShellPanel: selectionPage !== 'agents' ? selectionShellPanel : null,

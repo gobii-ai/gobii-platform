@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Fish, Plus, RotateCcw, Save, Trash2 } from 'lucide-react'
 
 import { safeErrorMessage } from '../../api/safeErrorMessage'
-import type { UserPetSize } from '../../api/userPets'
+import { getSelectedUserPet, type UserPetSize } from '../../api/userPets'
 import {
   useDeleteUserPet,
   useUpdateUserPet,
@@ -35,11 +35,7 @@ export function PetProfileSection() {
   const [error, setError] = useState<string | null>(null)
 
   const library = petsQuery.data
-  const selectedPet = useMemo(() => (
-    library?.pets.find((pet) => pet.id === library.preferences.selectedPetId)
-      ?? library?.pets[0]
-      ?? null
-  ), [library])
+  const selectedPet = getSelectedUserPet(library)
   const customPetCount = library?.pets.filter((pet) => pet.kind === 'custom').length ?? 0
 
   useEffect(() => {
@@ -274,7 +270,6 @@ export function PetProfileSection() {
       ) : null}
       {addPetOpen && library ? (
         <AddPetModal
-          existingPetIds={library.pets.map((pet) => pet.id)}
           customPetCount={customPetCount}
           maxCustomPets={library.maxCustomPets}
           onClose={() => setAddPetOpen(false)}

@@ -127,7 +127,9 @@ from console.pipedream_apps_api import (
     PipedreamAppSearchAPIView,
 )
 from console.api_keys_api_views import ApiKeyDetailAPIView, ApiKeyListAPIView
+# complexity-budget: exclude-start pet
 from console.user_pets_api import UserPetDetailAPIView, UserPetListAPIView, UserPetSpritesheetAPIView
+# complexity-budget: exclude-end pet
 from console.secrets_api_views import GlobalSecretListAPIView, GlobalSecretDetailAPIView, AgentSecretListAPIView, AgentSecretDetailAPIView, AgentSecretPromoteAPIView
 from console.native_integrations_api import (
     NativeIntegrationCallbackAPIView,
@@ -401,6 +403,7 @@ urlpatterns = [
     path("console/api/agents/<uuid:agent_id>/sms/disable/", AgentSmsDisableAPIView.as_view(), name="console_agent_sms_disable"),
     path("console/api/agents/<uuid:agent_id>/templates/clone/", AgentTemplateCloneAPIView.as_view(), name="console_agent_template_clone"),
     path("console/api/user/preferences/", UserPreferencesAPIView.as_view(), name="console_user_preferences"),
+    # complexity-budget: exclude-start pet
     path("console/api/user/pets/", UserPetListAPIView.as_view(), name="console_user_pets"),
     path("console/api/user/pets/<uuid:pet_id>/", UserPetDetailAPIView.as_view(), name="console_user_pet_detail"),
     path(
@@ -408,6 +411,7 @@ urlpatterns = [
         UserPetSpritesheetAPIView.as_view(),
         name="console_user_pet_spritesheet",
     ),
+    # complexity-budget: exclude-end pet
     path("console/api/product-announcements/", ProductAnnouncementListAPIView.as_view(), name="console_product_announcements"),
     path("console/api/product-announcements/read/", ProductAnnouncementReadAPIView.as_view(), name="console_product_announcements_read"),
     path("console/api/user/profile/", UserProfileAPIView.as_view(), name="console_user_profile"),

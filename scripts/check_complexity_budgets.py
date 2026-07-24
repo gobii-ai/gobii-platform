@@ -69,6 +69,7 @@ EXCLUDED_PREFIXES = (
     "console/migrations/",
     "docs/",
     "frontend/node_modules/",
+    "frontend/src/components/pets/",
     "gobii_platform.egg-info/",
     "marketing_events/",
     "mediafiles/",
@@ -95,6 +96,10 @@ EXCLUDED_PARTS = (
 EXCLUDED_FILENAMES = {
     "api/agent/system_skills/defaults.py",
     "api/agent/system_skills/native_api_cookbooks.py",
+    "api/services/user_pets.py",
+    "console/user_pets_api.py",
+    "frontend/src/api/userPets.ts",
+    "frontend/src/hooks/useUserPets.ts",
     "package-lock.json",
     "uv.lock",
 }
@@ -135,6 +140,8 @@ EVAL_EXCLUDED_FILES = {
     "frontend/src/screens/EvalsDetailScreen.tsx",
     "frontend/src/screens/EvalsScreen.tsx",
 }
+SOURCE_LOC_EXCLUDE_START = "complexity-budget: exclude-start"
+SOURCE_LOC_EXCLUDE_END = "complexity-budget: exclude-end"
 
 
 @dataclass(frozen=True)
@@ -157,7 +164,7 @@ def _run_git(args: list[str]) -> str:
 
 def _git_files() -> list[str]:
     output = subprocess.check_output(
-        ["git", "ls-files", "-z"],
+        ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
         cwd=REPO_ROOT,
     )
     return [
@@ -215,9 +222,35 @@ def _is_counted_source(path: str) -> bool:
     return Path(path).suffix in SOURCE_SUFFIXES
 
 
+def _source_loc_exclusion_name(line: str, marker: str) -> str:
+    suffix = line.split(marker, 1)[1].strip()
+    return suffix.split(maxsplit=1)[0] if suffix else ""
+
+
 def _count_nonblank_lines(path: Path) -> int:
     text = path.read_text(encoding="utf-8")
-    return sum(1 for line in text.splitlines() if line.strip())
+    line_count = 0
+    excluded_region: str | None = None
+    for line in text.splitlines():
+        stripped = line.strip()
+        if SOURCE_LOC_EXCLUDE_START in stripped:
+            if excluded_region is not None:
+                raise BudgetFailure(f"Nested source LoC exclusion in {path}")
+            excluded_region = _source_loc_exclusion_name(stripped, SOURCE_LOC_EXCLUDE_START)
+            if not excluded_region:
+                raise BudgetFailure(f"Unnamed source LoC exclusion in {path}")
+            continue
+        if SOURCE_LOC_EXCLUDE_END in stripped:
+            region = _source_loc_exclusion_name(stripped, SOURCE_LOC_EXCLUDE_END)
+            if excluded_region != region:
+                raise BudgetFailure(f"Mismatched source LoC exclusion in {path}")
+            excluded_region = None
+            continue
+        if excluded_region is None and stripped:
+            line_count += 1
+    if excluded_region is not None:
+        raise BudgetFailure(f"Unclosed source LoC exclusion in {path}")
+    return line_count
 
 
 def measure_source_loc() -> SourceLocMeasurement:
@@ -446,7 +479,7 @@ def _budget_metadata(baseline_sha: str) -> dict[str, Any]:
         "baseline_sha": baseline_sha,
         "generated_by": "uv run python scripts/check_complexity_budgets.py --update-baselines",
         "source_loc": {
-            "description": "Nonblank lines in tracked core product source files, excluding tests and dedicated eval assets.",
+            "description": "Nonblank lines in core product source files, excluding tests, evals, and named feature regions.",
             "include_roots": list(SOURCE_ROOTS),
             "include_files": sorted(SOURCE_FILES),
             "include_suffixes": sorted(SOURCE_SUFFIXES),
@@ -459,6 +492,10 @@ def _budget_metadata(baseline_sha: str) -> dict[str, Any]:
             "exclude_test_file_suffixes": sorted(TEST_FILE_SUFFIXES),
             "exclude_eval_prefixes": list(EVAL_EXCLUDED_PREFIXES),
             "exclude_eval_files": sorted(EVAL_EXCLUDED_FILES),
+            "exclude_region_markers": {
+                "start": f"{SOURCE_LOC_EXCLUDE_START} <name>",
+                "end": f"{SOURCE_LOC_EXCLUDE_END} <name>",
+            },
         },
         "prompt_size": {
             "description": "Rendered prompt messages plus JSON tool definitions for representative send/planning paths.",

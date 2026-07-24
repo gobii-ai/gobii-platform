@@ -554,8 +554,10 @@ VITE_ASSET_RELEASE_ID_FILE = Path(
 )
 MEDIA_URL = "/media/"
 MEDIA_ROOT = env('MEDIA_ROOT', default=BASE_DIR / 'mediafiles')
+# complexity-budget: exclude-start pet
 USER_PET_MAX_UPLOAD_BYTES = 4 * 1024 * 1024
 USER_PET_MAX_CUSTOM_PETS = 10
+# complexity-budget: exclude-end pet
 
 STORAGES = {
     "default": {

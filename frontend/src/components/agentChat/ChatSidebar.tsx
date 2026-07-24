@@ -1,5 +1,4 @@
 import { memo, useState, useCallback, useEffect, useMemo, useRef, type ReactNode } from 'react'
-import { createPortal } from 'react-dom'
 import { ArrowLeftRight, Bell, BellOff, Check, LayoutGrid, List, PanelLeft, PanelLeftClose, PanelRightClose, Plus, Settings, X } from 'lucide-react'
 
 import type { ConsoleContext } from '../../api/context'
@@ -8,6 +7,7 @@ import { selectActiveChatAgentId } from '../../store/chatSlice'
 import type { AgentRosterEntry, AgentRosterSortMode, AgentSidebarInvite } from '../../types/agentRoster'
 import { buildAgentSearchBlob } from '../../util/agentCards'
 import { ActionConfirmDialog } from '../common/ActionConfirmDialog'
+import { FixedContextMenu, type FixedContextMenuPosition } from '../common/FixedContextMenu'
 import { AgentCreateSplitButton, type TeamTemplateCreateMenu } from './AgentCreateSplitButton'
 import { AgentChatContextSwitcher, type AgentChatContextSwitcherData } from './AgentChatContextSwitcher'
 import { AgentChatMobileSheet } from './AgentChatMobileSheet'
@@ -21,27 +21,9 @@ import { getNextAgentChatSidebarMode, getPreviousAgentChatSidebarMode, type Agen
 import { AgentChatAvatar, AgentChatButton } from './uiPrimitives'
 
 const SEARCH_THRESHOLD = 6
-const CONTEXT_MENU_WIDTH = 208
-const CONTEXT_MENU_HEIGHT = 104
-const CONTEXT_MENU_MARGIN = 8
 
-type ContextMenuPosition = {
-  x: number
-  y: number
-}
-
-type AgentContextMenuState = ContextMenuPosition & {
+type AgentContextMenuState = FixedContextMenuPosition & {
   agent: AgentRosterEntry
-}
-
-function clampContextMenuPosition(x: number, y: number): ContextMenuPosition {
-  if (typeof window === 'undefined') {
-    return { x, y }
-  }
-  return {
-    x: Math.min(Math.max(CONTEXT_MENU_MARGIN, x), Math.max(CONTEXT_MENU_MARGIN, window.innerWidth - CONTEXT_MENU_WIDTH - CONTEXT_MENU_MARGIN)),
-    y: Math.min(Math.max(CONTEXT_MENU_MARGIN, y), Math.max(CONTEXT_MENU_MARGIN, window.innerHeight - CONTEXT_MENU_HEIGHT - CONTEXT_MENU_MARGIN)),
-  }
 }
 
 export type ChatSidebarProps = {
@@ -128,7 +110,6 @@ export const ChatSidebar = memo(function ChatSidebar({
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [drawerViewMode, setDrawerViewMode] = useState<AgentDrawerViewMode>('list')
-  const contextMenuRef = useRef<HTMLDivElement | null>(null)
   const [agentContextMenu, setAgentContextMenu] = useState<AgentContextMenuState | null>(null)
   const [inviteDialog, setInviteDialog] = useState<AgentInviteDialogState | null>(null)
   const [inviteBusy, setInviteBusy] = useState(false)
@@ -325,59 +306,9 @@ export const ChatSidebar = memo(function ChatSidebar({
     setAgentContextMenu(null)
   }, [])
 
-  const openAgentContextMenu = useCallback((agent: AgentRosterEntry, position: ContextMenuPosition) => {
-    setAgentContextMenu({ agent, ...clampContextMenuPosition(position.x, position.y) })
+  const openAgentContextMenu = useCallback((agent: AgentRosterEntry, position: FixedContextMenuPosition) => {
+    setAgentContextMenu({ agent, ...position })
   }, [])
-
-  const handleContextMenuMute = useCallback(() => {
-    if (!agentContextMenu) {
-      return
-    }
-    onToggleAgentMute?.(agentContextMenu.agent.id)
-    closeAgentContextMenu()
-  }, [agentContextMenu, closeAgentContextMenu, onToggleAgentMute])
-
-  const handleContextMenuSettings = useCallback(() => {
-    if (!agentContextMenu) {
-      return
-    }
-    onConfigureAgent?.(agentContextMenu.agent)
-    closeAgentContextMenu()
-    if (isMobile) {
-      setDrawerOpen(false)
-    }
-  }, [agentContextMenu, closeAgentContextMenu, isMobile, onConfigureAgent])
-
-  useEffect(() => {
-    if (!agentContextMenu || typeof document === 'undefined') {
-      return
-    }
-
-    const handlePointerDown = (event: PointerEvent) => {
-      if (contextMenuRef.current?.contains(event.target as Node)) {
-        return
-      }
-      closeAgentContextMenu()
-    }
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        closeAgentContextMenu()
-      }
-    }
-
-    document.addEventListener('pointerdown', handlePointerDown, true)
-    document.addEventListener('keydown', handleKeyDown, true)
-    window.addEventListener('resize', closeAgentContextMenu)
-    window.addEventListener('scroll', closeAgentContextMenu, true)
-    contextMenuRef.current?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus()
-
-    return () => {
-      document.removeEventListener('pointerdown', handlePointerDown, true)
-      document.removeEventListener('keydown', handleKeyDown, true)
-      window.removeEventListener('resize', closeAgentContextMenu)
-      window.removeEventListener('scroll', closeAgentContextMenu, true)
-    }
-  }, [agentContextMenu, closeAgentContextMenu])
 
   const sidebarLogoSrc = '/static/images/gobii_fish.png'
   const sidebarLogoAlt = 'Gobii Fish'
@@ -393,40 +324,30 @@ export const ChatSidebar = memo(function ChatSidebar({
   const showHeaderCenter = showHeaderPageSwitcher || showHeaderContextSwitcher
   const showOrganizationShellPage = settings?.context ? settings.context.type === 'organization' : true
   const contextMenuMuted = agentContextMenu ? mutedAgentIdSet.has(agentContextMenu.agent.id) : false
-  const contextMenuRoot = typeof document !== 'undefined' ? document.body : null
-  const agentContextMenuElement = agentContextMenu && contextMenuRoot
-    ? createPortal(
-      <div
-        ref={contextMenuRef}
-        className="agent-roster-context-menu sidebar-settings__menu"
-        role="menu"
-        aria-label={`${agentContextMenu.agent.name || 'Agent'} actions`}
-        style={{ left: agentContextMenu.x, top: agentContextMenu.y }}
-      >
-        <button
-          type="button"
-          role="menuitem"
-          className="sidebar-settings__link agent-roster-context-menu__item"
-          onClick={handleContextMenuMute}
-          disabled={!onToggleAgentMute}
-        >
-          {contextMenuMuted ? <Bell className="sidebar-settings__link-icon" /> : <BellOff className="sidebar-settings__link-icon" />}
-          <span>{contextMenuMuted ? 'Unmute' : 'Mute'}</span>
-        </button>
-        <button
-          type="button"
-          role="menuitem"
-          className="sidebar-settings__link agent-roster-context-menu__item"
-          onClick={handleContextMenuSettings}
-          disabled={!onConfigureAgent}
-        >
-          <Settings className="sidebar-settings__link-icon" />
-          <span>Settings</span>
-        </button>
-      </div>,
-      contextMenuRoot,
-    )
-    : null
+  const agentContextMenuElement = agentContextMenu ? (
+    <FixedContextMenu
+      position={agentContextMenu}
+      onClose={closeAgentContextMenu}
+      ariaLabel={`${agentContextMenu.agent.name || 'Agent'} actions`}
+      items={[
+        {
+          label: contextMenuMuted ? 'Unmute' : 'Mute',
+          icon: contextMenuMuted ? Bell : BellOff,
+          disabled: !onToggleAgentMute,
+          onSelect: () => onToggleAgentMute?.(agentContextMenu.agent.id),
+        },
+        {
+          label: 'Settings',
+          icon: Settings,
+          disabled: !onConfigureAgent,
+          onSelect: () => {
+            onConfigureAgent?.(agentContextMenu.agent)
+            if (isMobile) setDrawerOpen(false)
+          },
+        },
+      ]}
+    />
+  ) : null
   const inviteDialogElement = inviteDialog ? (
     <ActionConfirmDialog
       open={true}

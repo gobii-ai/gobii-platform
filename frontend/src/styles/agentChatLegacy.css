@@ -7216,12 +7216,12 @@
     outline: 2px solid rgba(221, 214, 254, 0.36);
     outline-offset: 1px;
 }
-.agent-roster-context-menu {
+.fixed-context-menu {
     position: fixed;
     z-index: 120;
     width: 13rem;
 }
-.agent-roster-context-menu__item:disabled {
+.fixed-context-menu__item:disabled {
     cursor: not-allowed;
     opacity: 0.55;
 }

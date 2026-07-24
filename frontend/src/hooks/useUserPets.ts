@@ -12,12 +12,23 @@ import {
 
 export const USER_PETS_QUERY_KEY = ['user-pets'] as const
 
-export function useUserPets() {
+export function useUserPets(enabled = true) {
   return useQuery({
     queryKey: USER_PETS_QUERY_KEY,
     queryFn: ({ signal }) => fetchUserPets(signal),
     staleTime: 5 * 60_000,
     refetchOnWindowFocus: false,
+    enabled,
+  })
+}
+
+function useUserPetLibraryMutation<TVariables>(
+  mutationFn: (variables: TVariables) => Promise<UserPetLibrary>,
+) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn,
+    onSuccess: (data) => queryClient.setQueryData(USER_PETS_QUERY_KEY, data),
   })
 }
 
@@ -51,28 +62,19 @@ export function useUpdateUserPetPreferences() {
 }
 
 export function useUploadUserPet() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: uploadUserPet,
-    onSuccess: (data) => queryClient.setQueryData(USER_PETS_QUERY_KEY, data),
-  })
+  return useUserPetLibraryMutation(uploadUserPet)
 }
 
 export function useUpdateUserPet() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: ({ petId, changes }: {
-      petId: string
-      changes: { displayName?: string; description?: string }
-    }) => updateUserPet(petId, changes),
-    onSuccess: (data) => queryClient.setQueryData(USER_PETS_QUERY_KEY, data),
-  })
+  return useUserPetLibraryMutation(({
+    petId,
+    changes,
+  }: {
+    petId: string
+    changes: { displayName?: string; description?: string }
+  }) => updateUserPet(petId, changes))
 }
 
 export function useDeleteUserPet() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: deleteUserPet,
-    onSuccess: (data) => queryClient.setQueryData(USER_PETS_QUERY_KEY, data),
-  })
+  return useUserPetLibraryMutation(deleteUserPet)
 }

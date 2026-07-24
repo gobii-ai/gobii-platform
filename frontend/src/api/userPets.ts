@@ -30,6 +30,12 @@ export type UserPetLibrary = {
 
 export type UserPetPreferencesPatch = Partial<UserPetPreferences>
 
+export function getSelectedUserPet(library?: UserPetLibrary | null): UserPet | null {
+  return library?.pets.find((pet) => pet.id === library.preferences.selectedPetId)
+    ?? library?.pets[0]
+    ?? null
+}
+
 export function fetchUserPets(signal?: AbortSignal): Promise<UserPetLibrary> {
   return jsonFetch<UserPetLibrary>('/console/api/user/pets/', { signal })
 }
