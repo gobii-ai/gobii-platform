@@ -96,12 +96,37 @@
   background: rgba(14, 165, 233, 0.12);
 }
 
+.pet-profile__pet-option--add {
+  border-style: dashed;
+  color: rgba(186, 230, 253, 0.96);
+}
+
+.pet-profile__pet-option--add:not(:disabled):hover {
+  border-color: rgba(125, 211, 252, 0.48);
+  background: rgba(14, 165, 233, 0.08);
+}
+
+.pet-profile__pet-option--add:disabled {
+  cursor: not-allowed;
+  opacity: 0.56;
+}
+
+.pet-profile__add-icon {
+  display: inline-flex;
+  width: 4rem;
+  aspect-ratio: 1;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(125, 211, 252, 0.24);
+  border-radius: 1rem;
+  background: rgba(14, 165, 233, 0.1);
+}
+
 .pet-profile__option-preview {
   width: 4rem;
 }
 
-.pet-profile__custom-details,
-.pet-profile__upload {
+.pet-profile__custom-details {
   display: grid;
   gap: 0.85rem;
 }
@@ -112,14 +137,6 @@
 
 .pet-profile__custom-details .profile-screen__button-row {
   grid-column: 1 / -1;
-}
-
-.pet-profile__upload {
-  padding-top: 0.2rem;
-}
-
-.pet-profile input[type='file'] {
-  padding: 0.48rem;
 }
 
 @media (max-width: 720px) {

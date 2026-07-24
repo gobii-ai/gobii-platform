@@ -25,32 +25,7 @@
 }
 
 .immersive-pet__context-menu {
-  position: fixed;
-  width: 10rem;
-  padding: 0.3rem;
-  border: 1px solid rgba(196, 181, 253, 0.24);
-  border-radius: 0.7rem;
-  background: rgba(15, 23, 42, 0.98);
-  box-shadow: 0 12px 28px rgba(2, 6, 23, 0.34);
   pointer-events: auto;
-}
-
-.immersive-pet__context-menu button {
-  width: 100%;
-  border: 0;
-  border-radius: 0.5rem;
-  background: transparent;
-  color: rgba(248, 245, 255, 0.96);
-  font-size: 0.85rem;
-  font-weight: 700;
-  padding: 0.58rem 0.65rem;
-  text-align: left;
-}
-
-.immersive-pet__context-menu button:hover,
-.immersive-pet__context-menu button:focus-visible {
-  background: rgba(139, 92, 246, 0.2);
-  outline: none;
 }
 
 @media (max-width: 767px) {
