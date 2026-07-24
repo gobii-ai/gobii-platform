@@ -245,6 +245,10 @@ class ImpliedSendTests(TestCase):
             "These updates aren't useful. Never store this customer secret.",
             "For this batch, put security first. Going forward, never use em dashes.",
             "Don't save this temporary point; going forward, these updates aren't useful.",
+            "That's not your job.",
+            "Your job isn't tracking content ideas.",
+            "Your job is tracking infrastructure and resource blockers.",
+            "Stay in your lane.",
         )
         for text in durable_feedback:
             with self.subTest(durable=text):
@@ -274,6 +278,8 @@ class ImpliedSendTests(TestCase):
             "You should have access to the CRM tools; export the leads.",
             "Continue daily sourcing until the recruiter instructs you to pause, stop, change search criteria, change format, or close the role.",
             "Constraint: do not imply a prior relationship or make unsupported claims. Send the email now.",
+            "Your job is done for today.",
+            "Your job isn't done yet.",
         )
         for text in one_off_or_content:
             with self.subTest(not_durable=text):
@@ -1030,6 +1036,45 @@ class ImpliedSendTests(TestCase):
         self.assertEqual(routed.tool_name, "send_chat_message")
         self.assertIn("target company", routed.tool_params["body"])
         self.assertFalse(routed.tool_params["will_continue_work"])
+
+    def test_focused_feedback_reply_stays_terminal_when_model_omits_continue_flag(self):
+        prepared = ep._prepare_tool_batch(
+            self.agent,
+            tool_calls=[
+                {
+                    "id": "call_feedback",
+                    "function": {
+                        "name": "send_chat_message",
+                        "arguments": json.dumps(
+                            {
+                                "body": (
+                                    "Got it. I'll stick to tracking access and resource blockers. "
+                                    f"{ep.CANONICAL_CONTINUATION_PHRASE}"
+                                )
+                            }
+                        ),
+                    },
+                },
+            ],
+            budget_ctx=None,
+            eval_run_id=None,
+            heartbeat=None,
+            lock_extender=None,
+            credit_snapshot={},
+            allow_inferred_message_continue=True,
+            has_non_sleep_calls=True,
+            has_user_facing_message=True,
+            attach_completion=lambda step_kwargs: None,
+            attach_prompt_archive=lambda step: None,
+            forced_message_continue=False,
+        )
+
+        self.assertEqual(len(prepared.prepared_calls), 1)
+        self.assertFalse(prepared.prepared_calls[0].tool_params["will_continue_work"])
+        self.assertNotIn(
+            ep.CANONICAL_CONTINUATION_PHRASE,
+            prepared.prepared_calls[0].tool_params["body"],
+        )
 
     def test_clarify_chat_question_stays_chat_outside_planning(self):
         prepared = ep._prepare_tool_batch(

@@ -249,7 +249,8 @@ DIRECT_USER_CORRECTION_RE = re.compile(
     r"\b(?:changed|changes|blockers?|next (?:move|step|action))\b|"
     r"(?:^|[.!?]\s+)never\s+(?:store|share|send|include|reveal|expose)\b[^.!?]{0,80}"
     r"\b(?:secrets?|credentials?|passwords?|private|confidential|customer data)\b|"
-    r"\b(?:make (?:that|this|it) a rule|do i have to\b.{0,80}\b(?:each|every) time)\b",
+    r"\b(?:make (?:that|this|it) a rule|do i have to\b.{0,80}\b(?:each|every) time)\b|"
+    r"\b(?:(?:(?:that|this|it)(?:['’]?s| is)\s+)?not\s+your\s+(?:job|role|responsibility|lane)|(?:your|the agent['’]?s)\s+(?:job|role|responsibility|scope)\s+(?:(?:isn['’]?t|is not)(?!\s+(?:done|complete|finished)\b)|(?:is to|is|should be)(?!\s+(?:done|complete|finished)\b))|stay (?:in|within) your (?:lane|role|scope))\b",
     re.IGNORECASE,
 )
 QUOTED_OUTPUT_FEEDBACK_RE = re.compile(
@@ -3314,8 +3315,8 @@ def _prepare_tool_batch(
     allow_inferred_message_continue: bool,
     has_non_sleep_calls: bool,
     has_user_facing_message: bool,
-    attach_completion: Any,
-    attach_prompt_archive: Any,
+    attach_completion: Any, attach_prompt_archive: Any,
+    forced_message_continue: bool | None = None,
 ) -> _PreparedToolBatch:
     rate_limit_batch = (
         _build_tool_rate_limit_batch(
@@ -3635,7 +3636,7 @@ def _prepare_tool_batch(
                         tool_params[body_key] = cleaned_body
                         tool_params["will_continue_work"] = True
                     elif (
-                        explicit_continue is not True
+                        explicit_continue is None
                         and allow_inferred_message_continue
                         and _should_infer_message_tool_continuation(cleaned_body)
                     ):
@@ -3660,6 +3661,8 @@ def _prepare_tool_batch(
                     tool_params.get("will_continue_work")
                 ) is None:
                     tool_params["will_continue_work"] = False
+                if forced_message_continue is not None:
+                    tool_params["will_continue_work"] = forced_message_continue
                 explicit_continue = _coerce_optional_bool(tool_params.get("will_continue_work"))
 
             if should_skip_auto_substitution(tool_name):
@@ -6650,7 +6653,7 @@ def _run_agent_loop(
                     charter_patch_instruction = (
                         "Return only target_charter_text and replacement_charter_text; never SQL or will_continue_work. Patch ONLY the lasting clauses listed for this turn; all other current-turn text is temporary or separate and must not appear in the replacement. CURRENT CHARTER (<charter>), the only source for a nonempty target: "
                         + json.dumps(agent.charter or "")
-                        + ". Default scope is exactly the criticized output's actor, audience, workflow, and condition; never generalize unless the feedback says all, always, or across contexts. Preserve lookalikes for other contexts. A role/workflow is not a target merely because its output was criticized. If no charter rule explicitly controls that behavior, target_charter_text is empty and replacement_charter_text is one concise operational rule, not copied feedback or prior output. Otherwise target the smallest exact contiguous span covering every adjacent conflicting rule, then replace it without contradictions while preserving unrelated text in that span verbatim."
+                        + ". Scope ordinary corrections to the criticized actor, audience, workflow, and condition; preserve similar rules elsewhere. For role/ownership feedback, state what is owned and remove or qualify conflicting ownership/direction; a named incident is evidence, not scope, and only explicit human reassignment expands the role. If no charter rule controls it, use an empty target and one concise operational rule, not copied feedback or prior output. Otherwise replace the smallest exact contiguous span covering conflicts, preserving unrelated text inside it verbatim."
                     )
                     prompt_notice = "\n\n".join(filter(None, (
                         prompt_notice,
@@ -7340,6 +7343,7 @@ def _run_agent_loop(
                     lock_extender=lock_extender,
                     credit_snapshot=credit_snapshot,
                     allow_inferred_message_continue=allow_inferred_message_continue,
+                    forced_message_continue=(direct_feedback_reply_will_continue if direct_feedback_reply_pending else False) if focused_feedback_reply_tool_name else None,
                     has_non_sleep_calls=has_non_sleep_calls,
                     has_user_facing_message=has_user_facing_message,
                     attach_completion=_attach_completion,
