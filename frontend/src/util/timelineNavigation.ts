@@ -1,6 +1,7 @@
 type RevealTimelineMessageOptions = {
   root?: ParentNode
   block?: ScrollLogicalPosition
+  behavior?: ScrollBehavior
   highlight?: boolean
 }
 
@@ -9,6 +10,7 @@ export function revealTimelineMessage(
   {
     root = document,
     block = 'start',
+    behavior,
     highlight = false,
   }: RevealTimelineMessageOptions = {},
 ): number | null {
@@ -19,7 +21,10 @@ export function revealTimelineMessage(
   if (!target) return null
 
   const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
-  target.scrollIntoView({ block, behavior: reducedMotion ? 'auto' : 'smooth' })
+  target.scrollIntoView({
+    block,
+    behavior: behavior ?? (reducedMotion ? 'auto' : 'smooth'),
+  })
   if (!highlight) return null
 
   target.classList.remove('message-search-target')

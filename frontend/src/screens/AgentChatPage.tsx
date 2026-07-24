@@ -118,6 +118,7 @@ import type { InsightEvent } from '../types/insight'
 import type { IntelligenceTierKey } from '../types/llmIntelligence'
 import { track, AnalyticsEvent } from '../util/analytics'
 import { sortRosterEntries } from '../util/agentRosterSort'
+import { revealTimelineMessage } from '../util/timelineNavigation'
 import { type AgentChatShellSubview, buildAgentChatShellPath, buildAgentChatShellSelectionPath } from '../util/agentChatShellRoutes'
 import { storeConsoleContext } from '../util/consoleContextStorage'
 import { navigateWithinApp } from '../util/appNavigation'
@@ -1077,6 +1078,15 @@ export function AgentChatPage({
       setMessageSearchState({ open: false, query: '', submittedQuery: null })
     }
   }, [messageSearchContextKey])
+  useEffect(() => {
+    if (!messageAnchorId || typeof window === 'undefined') {
+      return
+    }
+    const timeout = window.setTimeout(() => {
+      revealTimelineMessage(messageAnchorId, { behavior: 'auto' })
+    }, 300)
+    return () => window.clearTimeout(timeout)
+  }, [messageAnchorId, messageSearchState.open])
   const contextMatchesAgent = !contextLookupAgentId || contextResolvedForAgentId === contextLookupAgentId
   const contextReady = (
     Boolean(effectiveContext)

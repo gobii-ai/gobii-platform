@@ -274,11 +274,41 @@ export const ChatSidebar = memo(function ChatSidebar({
   }, [desktopMode, onDesktopModeChange, showSettingsView])
 
   const openMessageSearch = useCallback(() => {
-    if (!isMobile) {
+    if (isMobile) {
+      setDrawerOpen(true)
+    } else {
       onDesktopModeChange?.('list')
     }
     setMessageSearchOpen(true)
   }, [isMobile, onDesktopModeChange, setMessageSearchOpen])
+
+  const openAndFocusMessageSearch = useCallback(() => {
+    openMessageSearch()
+    window.requestAnimationFrame(() => {
+      document.querySelector<HTMLInputElement>(
+        '.message-search-panel .agent-roster-search__input',
+      )?.focus()
+    })
+  }, [openMessageSearch])
+
+  useEffect(() => {
+    const handleFindShortcut = (event: globalThis.KeyboardEvent) => {
+      if (
+        event.defaultPrevented
+        || event.key.toLocaleLowerCase() !== 'f'
+        || (!event.metaKey && !event.ctrlKey)
+        || event.altKey
+        || event.shiftKey
+      ) {
+        return
+      }
+      event.preventDefault()
+      openAndFocusMessageSearch()
+    }
+
+    document.addEventListener('keydown', handleFindShortcut, true)
+    return () => document.removeEventListener('keydown', handleFindShortcut, true)
+  }, [openAndFocusMessageSearch])
 
   const handleAgentSelect = useCallback(
     (agent: AgentRosterEntry) => {
