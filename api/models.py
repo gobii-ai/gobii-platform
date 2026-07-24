@@ -300,6 +300,7 @@ class CommsChannel(models.TextChoices):
 
 
 class DeliveryStatus(models.TextChoices):
+    PENDING_APPROVAL = "pending_approval", "Pending approval"
     QUEUED = "queued", "Queued"
     SENDING = "sending", "Sending"
     SENT = "sent", "Sent to provider"
@@ -841,6 +842,8 @@ class UserPreference(models.Model):
     KEY_AGENT_CHAT_INSIGHTS_PANEL_EXPANDED = "agent.chat.insights_panel.expanded"
     KEY_AGENT_CHAT_INSIGHTS_PANEL_EXPANDED_BY_AGENT = "agent.chat.insights_panel.expanded_by_agent"
     KEY_AGENT_CHAT_NOTIFICATIONS_ENABLED = "agent.chat.notifications.enabled"
+    KEY_DEFAULT_EMAIL_SENDING_MODE = "agent.email.default_sending_mode"
+    KEY_OUTBOX_EMAIL_NOTIFICATIONS_ENABLED = "agent.email.outbox_notifications.enabled"
     KEY_AGENT_CHAT_SUGGESTIONS_ENABLED = "agent.chat.suggestions.enabled"
     KEY_USER_TIMEZONE = "user.timezone"
     PREFERENCE_DEFINITIONS = {
@@ -867,6 +870,17 @@ class UserPreference(models.Model):
             "merge_updates": True,
         },
         KEY_AGENT_CHAT_NOTIFICATIONS_ENABLED: {
+            "default": True,
+            "type": "boolean",
+        },
+        KEY_DEFAULT_EMAIL_SENDING_MODE: {
+            "default": "review_all_external",
+            "type": "choice",
+            "allowed_values": frozenset(
+                {"review_all_external", "review_new_contacts", "send_automatically"}
+            ),
+        },
+        KEY_OUTBOX_EMAIL_NOTIFICATIONS_ENABLED: {
             "default": True,
             "type": "boolean",
         },
@@ -6483,6 +6497,18 @@ class PersistentAgent(models.Model):
             "automatically added to the agent's contact list. SMS always requires approval."
         ),
     )
+
+    class EmailSendingMode(models.TextChoices):
+        REVIEW_ALL_EXTERNAL = "review_all_external", "Review before send"
+        REVIEW_NEW_CONTACTS = "review_new_contacts", "Review only new contacts"
+        SEND_AUTOMATICALLY = "send_automatically", "Send automatically"
+
+    email_sending_mode = models.CharField(
+        max_length=32,
+        choices=EmailSendingMode.choices,
+        default=EmailSendingMode.REVIEW_ALL_EXTERNAL,
+        help_text="Requested email sending mode. Organization policy may enforce a stricter effective mode.",
+    )
     execution_environment = models.CharField(
         max_length=64,
         default=get_default_execution_environment,
@@ -7708,6 +7734,12 @@ class PersistentAgentUserActionEvent(models.Model):
         CONTACTS_APPROVED = "contacts_approved", "Contacts Approved"
         CONTACTS_DECLINED = "contacts_declined", "Contacts Declined"
         CONTACTS_RESOLVED = "contacts_resolved", "Contacts Resolved"
+        OUTBOX_EDITED = "outbox_edited", "Outbox email edited"
+        OUTBOX_APPROVED = "outbox_approved", "Outbox email approved"
+        OUTBOX_DISCARDED = "outbox_discarded", "Outbox email discarded"
+        OUTBOX_EXPIRED = "outbox_expired", "Outbox email expired"
+        OUTBOX_FAILED = "outbox_failed", "Outbox email failed"
+        OUTBOX_RETRIED = "outbox_retried", "Outbox email retried"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     agent = models.ForeignKey(
@@ -11569,6 +11601,7 @@ class PersistentAgentMessageAttachment(models.Model):
     content_type = models.CharField(max_length=128)
     file_size = models.PositiveBigIntegerField()
     filename = models.CharField(max_length=512)
+    content_sha256 = models.CharField(max_length=64, blank=True)
     filespace_node = models.ForeignKey(
         "AgentFsNode",
         on_delete=models.SET_NULL,
@@ -11580,6 +11613,101 @@ class PersistentAgentMessageAttachment(models.Model):
 
     def __str__(self):
         return f"Attachment({self.filename})"
+
+
+class OutboundEmailReview(models.Model):
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        APPROVED = "approved", "Approved"
+        DISCARDED = "discarded", "Discarded"
+        EXPIRED = "expired", "Expired"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    message = models.OneToOneField(
+        PersistentAgentMessage,
+        on_delete=models.CASCADE,
+        related_name="outbound_email_review",
+    )
+    agent = models.ForeignKey(
+        PersistentAgent,
+        on_delete=models.CASCADE,
+        related_name="outbound_email_reviews",
+    )
+    status = models.CharField(
+        max_length=16,
+        choices=Status.choices,
+        default=Status.PENDING,
+        db_index=True,
+    )
+    content_version = models.PositiveIntegerField(default=1)
+    content_hash = models.CharField(max_length=64)
+    approved_version = models.PositiveIntegerField(null=True, blank=True)
+    approved_content_hash = models.CharField(max_length=64, blank=True)
+    queued_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    last_edited_at = models.DateTimeField(null=True, blank=True)
+    last_edited_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="outbox_items_edited",
+    )
+    decided_at = models.DateTimeField(null=True, blank=True)
+    decided_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="outbox_items_decided",
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-queued_at", "-id"]
+        indexes = [
+            models.Index(fields=["agent", "status", "-queued_at"], name="outbox_agent_status_idx"),
+            models.Index(fields=["status", "expires_at"], name="outbox_status_expiry_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return f"OutboundEmailReview<{self.id}:{self.status}>"
+
+
+class OutboundEmailReviewNotificationState(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="outbox_notification_state",
+    )
+    organization = models.OneToOneField(
+        "Organization",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="outbox_notification_state",
+    )
+    pending_cycle_started_at = models.DateTimeField(null=True, blank=True)
+    last_digest_sent_at = models.DateTimeField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    Q(user__isnull=False, organization__isnull=True)
+                    | Q(user__isnull=True, organization__isnull=False)
+                ),
+                name="outbox_notification_exactly_one_workspace",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        workspace = self.organization_id or self.user_id
+        return f"OutboundEmailReviewNotificationState<{workspace}>"
 
 
 class PersistentAgentWebSession(models.Model):

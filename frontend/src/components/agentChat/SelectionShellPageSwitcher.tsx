@@ -1,13 +1,16 @@
-import { useCallback, useMemo, useState } from 'react'
-import { BarChart3, Building2, Check, ChevronDown, CreditCard, KeyRound, LayoutGrid, ServerCog, UserRound, type LucideIcon } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { BarChart3, Building2, Check, ChevronDown, CreditCard, KeyRound, LayoutGrid, MailCheck, ServerCog, UserRound, type LucideIcon } from 'lucide-react'
 import { Button, Dialog, DialogTrigger, ListBox, ListBoxItem, Popover, type Key, type Selection } from 'react-aria-components'
 
 import type { SelectionShellPage } from '../../types/immersiveShell'
+import { fetchOutbox } from '../../api/outbox'
 
 export type { SelectionShellPage }
 
 export const SELECTION_SHELL_PAGE_LABELS: Record<SelectionShellPage, string> = {
   agents: 'My Agents',
+  outbox: 'Outbox',
   billing: 'Billing',
   profile: 'Profile',
   organization: 'Team',
@@ -25,6 +28,7 @@ type SelectionPageOption = {
 
 const PAGE_OPTIONS: SelectionPageOption[] = [
   { key: 'agents', label: SELECTION_SHELL_PAGE_LABELS.agents, icon: LayoutGrid },
+  { key: 'outbox', label: SELECTION_SHELL_PAGE_LABELS.outbox, icon: MailCheck },
   { key: 'billing', label: SELECTION_SHELL_PAGE_LABELS.billing, icon: CreditCard },
   { key: 'profile', label: SELECTION_SHELL_PAGE_LABELS.profile, icon: UserRound },
   { key: 'organization', label: SELECTION_SHELL_PAGE_LABELS.organization, icon: Building2 },
@@ -46,10 +50,26 @@ export function SelectionShellPageSwitcher({
   showOrganization = true,
 }: SelectionShellPageSwitcherProps) {
   const [open, setOpen] = useState(false)
+  const outboxCountQuery = useQuery({
+    queryKey: ['outbox', 'needs_review', '', 'nav-count'],
+    queryFn: () => fetchOutbox('needs_review', ''),
+    retry: false,
+    refetchInterval: 30_000,
+  })
+  useEffect(() => {
+    const refresh = () => void outboxCountQuery.refetch()
+    window.addEventListener('gobii:outbox-updated', refresh)
+    return () => window.removeEventListener('gobii:outbox-updated', refresh)
+  }, [outboxCountQuery.refetch])
+  const pendingOutboxCount = outboxCountQuery.data?.counts.needsReview ?? 0
+  const outboxAvailable = outboxCountQuery.data?.available === true
   const selectedKeys = useMemo(() => new Set<Key>([currentPage]), [currentPage])
   const pageOptions = useMemo(
-    () => PAGE_OPTIONS.filter((option) => showOrganization || option.key !== 'organization'),
-    [showOrganization],
+    () => PAGE_OPTIONS.filter((option) => (
+      (showOrganization || option.key !== 'organization')
+      && (outboxAvailable || option.key !== 'outbox')
+    )),
+    [outboxAvailable, showOrganization],
   )
 
   const handleSelectionChange = useCallback(
@@ -87,6 +107,7 @@ export function SelectionShellPageSwitcher({
         data-open={open ? 'true' : 'false'}
       >
         <span className="selection-shell-switcher__label">{SELECTION_SHELL_PAGE_LABELS[currentPage]}</span>
+        {pendingOutboxCount > 0 ? <span className="rounded-full bg-amber-500 px-1.5 py-0.5 text-[10px] font-bold text-slate-950">{pendingOutboxCount}</span> : null}
         <ChevronDown
           className="selection-shell-switcher__chevron"
           aria-hidden="true"
@@ -115,6 +136,9 @@ export function SelectionShellPageSwitcher({
                     <>
                       <Icon className="selection-shell-switcher__item-icon sidebar-settings__link-icon" aria-hidden="true" />
                       <span className="selection-shell-switcher__item-label">{option.label}</span>
+                      {option.key === 'outbox' && pendingOutboxCount > 0 ? (
+                        <span className="rounded-full bg-amber-500 px-1.5 py-0.5 text-[10px] font-bold text-slate-950">{pendingOutboxCount}</span>
+                      ) : null}
                       {isSelected ? <Check className="selection-shell-switcher__item-check" aria-hidden="true" /> : null}
                     </>
                   )}

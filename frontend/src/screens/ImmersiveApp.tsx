@@ -12,6 +12,7 @@ import { ImmersiveApiKeysPage } from './apiKeys/ImmersiveApiKeysPage'
 import { ImmersiveBillingPage } from './billing/ImmersiveBillingPage'
 import { ImmersiveMcpServersPage } from './integrations/ImmersiveMcpServersPage'
 import { ImmersiveOrganizationPage } from './organization/ImmersiveOrganizationPage'
+import { ImmersiveOutboxPage } from './outbox/ImmersiveOutboxPage'
 import { OrganizationInviteAcceptPage } from './organization/OrganizationInviteAcceptPage'
 import { ImmersiveProfilePage } from './profile/ImmersiveProfilePage'
 import { ImmersiveSecretsPage } from './secrets/ImmersiveSecretsPage'
@@ -33,6 +34,7 @@ const UPGRADE_MODAL_QUERY_PARAM = 'upgrade'
 type AppRoute =
   | { kind: 'command-center' }
   | { kind: 'agent-select' }
+  | { kind: 'outbox' }
   | { kind: 'billing' }
   | { kind: 'profile' }
   | { kind: 'organization' }
@@ -45,7 +47,7 @@ type AppRoute =
   | { kind: 'agent-chat'; agentId: string | null }
   | { kind: 'not-found' }
 
-type AppAnalyticsRoute = 'command_center' | 'agent_select' | 'billing' | 'profile' | 'organization' | 'organization_invite_accept' | 'agent_collaborator_invite' | 'secrets' | 'usage' | 'integrations' | 'api_keys' | 'agent_new' | 'agent_chat' | 'not_found'
+type AppAnalyticsRoute = 'command_center' | 'agent_select' | 'outbox' | 'billing' | 'profile' | 'organization' | 'organization_invite_accept' | 'agent_collaborator_invite' | 'secrets' | 'usage' | 'integrations' | 'api_keys' | 'agent_new' | 'agent_chat' | 'not_found'
 
 type LocationSnapshot = {
   pathname: string
@@ -67,7 +69,7 @@ type ImmersiveAppProps = {
   nativeIntegrationsUrl?: string | null
 }
 
-type AgentShellPage = Extract<SelectionShellPage, 'billing' | 'profile' | 'organization' | 'secrets' | 'usage' | 'integrations' | 'api-keys'>
+type AgentShellPage = Extract<SelectionShellPage, 'outbox' | 'billing' | 'profile' | 'organization' | 'secrets' | 'usage' | 'integrations' | 'api-keys'>
 type AgentShellLayout = 'main' | 'sidebar-shell'
 type AgentShellPageRenderContext = {
   layout: AgentShellLayout
@@ -89,6 +91,10 @@ const AGENT_SHELL_PRESERVED_QUERY_KEYS = [
   'staff_context_id',
 ] as const
 const AGENT_SHELL_PAGE_CONFIG: Record<AgentShellPage, AgentShellPageConfig> = {
+  outbox: {
+    path: '/app/outbox',
+    render: ({ layout, refreshKey }) => <ImmersiveOutboxPage layout={layout} refreshKey={refreshKey} />,
+  },
   billing: {
     path: '/app/billing',
     render: ({ layout, refreshKey }) => <ImmersiveBillingPage layout={layout} refreshKey={refreshKey} />,
@@ -192,6 +198,10 @@ function parseRoute(pathname: string): AppRoute {
     return { kind: 'billing' }
   }
 
+  if (parts[0] === 'outbox') {
+    return { kind: 'outbox' }
+  }
+
   if (parts[0] === 'profile') {
     return { kind: 'profile' }
   }
@@ -229,6 +239,9 @@ function getAnalyticsRoute(route: AppRoute): AppAnalyticsRoute {
   }
   if (route.kind === 'agent-select') {
     return 'agent_select'
+  }
+  if (route.kind === 'outbox') {
+    return 'outbox'
   }
   if (route.kind === 'billing') {
     return 'billing'
@@ -270,6 +283,9 @@ function getAnalyticsPath(route: AppRoute, pathname: string): string {
   if (route.kind === 'agent-select') {
     return '/app/agents'
   }
+  if (route.kind === 'outbox') {
+    return '/app/outbox'
+  }
   if (route.kind === 'billing') {
     return '/app/billing'
   }
@@ -309,6 +325,9 @@ function getAnalyticsTitle(route: AppRoute): string {
   }
   if (route.kind === 'agent-select') {
     return 'My Agents · Gobii'
+  }
+  if (route.kind === 'outbox') {
+    return 'Outbox · Gobii'
   }
   if (route.kind === 'billing') {
     return 'Billing · Gobii'

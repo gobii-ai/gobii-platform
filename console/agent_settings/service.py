@@ -17,7 +17,12 @@ from api.services.agent_webhooks import (
     AgentWebhookService,
     build_inbound_webhook_url,
 )
-from constants.feature_flags import CONTACT_AUTO_APPROVE_EMAIL
+from constants.feature_flags import CONTACT_AUTO_APPROVE_EMAIL, EMAIL_REVIEW_OUTBOX
+from api.services.outbound_email_policy import (
+    email_sending_mode_for_contact_approval_mode,
+    get_effective_email_sending_mode,
+    get_organization_minimum_email_sending_mode,
+)
 
 
 class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, DetailView):
@@ -1072,6 +1077,7 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
         features = {
             'organizations': flag_is_active(request, 'organizations'),
             'contactAutoApproveEmail': flag_is_active(request, CONTACT_AUTO_APPROVE_EMAIL),
+            'emailReviewOutbox': flag_is_active(request, EMAIL_REVIEW_OUTBOX),
         }
 
         can_reassign = bool(context.get('can_reassign'))
@@ -1139,6 +1145,9 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
                 'pendingTransfer': pending_transfer_payload,
                 'whitelistPolicy': agent.whitelist_policy,
                 'contactApprovalMode': agent.contact_approval_mode,
+                'emailSendingMode': agent.email_sending_mode,
+                'effectiveEmailSendingMode': get_effective_email_sending_mode(agent),
+                'organizationMinimumEmailSendingMode': get_organization_minimum_email_sending_mode(agent.organization),
                 'preferredLlmTier': getattr(getattr(agent, 'preferred_llm_tier', None), 'key', AgentLLMTier.STANDARD.value),
                 'organization': (
                     {
@@ -1645,6 +1654,20 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
             and not flag_is_active(request, CONTACT_AUTO_APPROVE_EMAIL)
         ):
             return _general_error("Automatic email contact approval is not available.")
+        new_email_sending_mode = (
+            request.POST.get('email_sending_mode')
+            or agent.email_sending_mode
+        ).strip()
+        if new_email_sending_mode not in PersistentAgent.EmailSendingMode.values:
+            return _general_error("Select a valid external email autonomy option.")
+        if not flag_is_active(request, EMAIL_REVIEW_OUTBOX):
+            new_email_sending_mode = email_sending_mode_for_contact_approval_mode(
+                new_contact_approval_mode
+            )
+        elif new_email_sending_mode == PersistentAgent.EmailSendingMode.SEND_AUTOMATICALLY:
+            new_contact_approval_mode = PersistentAgent.ContactApprovalMode.AUTO_APPROVE_EMAIL
+        else:
+            new_contact_approval_mode = PersistentAgent.ContactApprovalMode.REQUIRE_APPROVAL
 
         avatar_file = request.FILES.get('avatar')
         clear_avatar_flag = (request.POST.get('clear_avatar') or '').strip().lower() in {'1', 'true', 'yes', 'on'}
@@ -1698,6 +1721,7 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
         prev_preferred_tier = getattr(getattr(agent, "preferred_llm_tier", None), "key", AgentLLMTier.STANDARD.value)
         prev_whitelist_policy = agent.whitelist_policy
         prev_contact_approval_mode = agent.contact_approval_mode
+        prev_email_sending_mode = agent.email_sending_mode
 
         plan = None
         if owner is not None:
@@ -1882,6 +1906,9 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
                 if agent.contact_approval_mode != new_contact_approval_mode:
                     agent.contact_approval_mode = new_contact_approval_mode
                     agent_fields_to_update.append('contact_approval_mode')
+                if agent.email_sending_mode != new_email_sending_mode:
+                    agent.email_sending_mode = new_email_sending_mode
+                    agent_fields_to_update.append('email_sending_mode')
 
                 # Update daily credit limit if changed
                 if agent.daily_credit_limit != new_daily_limit:
@@ -2033,6 +2060,8 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
                     update_props['previous_whitelist_policy'] = prev_whitelist_policy
                 if 'contact_approval_mode' in changed_fields_for_analytics:
                     update_props['previous_contact_approval_mode'] = prev_contact_approval_mode
+                if 'email_sending_mode' in changed_fields_for_analytics:
+                    update_props['previous_email_sending_mode'] = prev_email_sending_mode
                 Analytics.track_event(
                     user_id=request.user.id,
                     event=AnalyticsEvent.PERSISTENT_AGENT_UPDATED,
@@ -2067,6 +2096,8 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
                 'miniDescriptionMode': agent.mini_description_mode,
                 'preferredLlmTier': getattr(getattr(agent, "preferred_llm_tier", None), "key", None),
                 'contactApprovalMode': agent.contact_approval_mode,
+                'emailSendingMode': agent.email_sending_mode,
+                'effectiveEmailSendingMode': get_effective_email_sending_mode(agent),
                 'warning': preferred_tier_warning,
             })
 

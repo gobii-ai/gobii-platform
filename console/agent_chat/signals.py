@@ -16,6 +16,7 @@ from api.models import (
     BrowserUseAgentTask,
     CommsAllowlistRequest,
     OrganizationMembership,
+    OutboundEmailReview,
     PersistentAgent,
     PersistentAgentCompletion,
     PersistentAgentError,
@@ -420,6 +421,72 @@ def _broadcast_pending_action_requests_for_agent(agent_id) -> None:
         emit_pending_action_requests_update(agent)
 
     transaction.on_commit(_on_commit)
+
+
+def emit_outbox_update(review: OutboundEmailReview) -> None:
+    agent = review.agent
+    workspace_filter = (
+        {"agent__organization_id": agent.organization_id}
+        if agent.organization_id
+        else {"agent__user_id": agent.user_id, "agent__organization__isnull": True}
+    )
+    pending_count = OutboundEmailReview.objects.filter(
+        **workspace_filter,
+        status=OutboundEmailReview.Status.PENDING,
+        expires_at__gt=timezone.now(),
+    ).count()
+    payload = {
+        "agent_id": str(agent.id),
+        "outbox_item_id": str(review.id),
+        "review_status": review.status,
+        "delivery_status": review.message.latest_status,
+        "pending_count": pending_count,
+        "workspace": {
+            "type": "organization" if agent.organization_id else "personal",
+            "id": str(agent.organization_id or agent.user_id),
+        },
+        "timestamp": timezone.now().isoformat(),
+    }
+    user_model = get_user_model()
+    for user_id in _resolve_profile_listener_user_ids(agent):
+        viewer = user_model.objects.filter(pk=user_id).first()
+        if viewer and user_can_manage_agent_settings(viewer, agent, allow_delinquent_personal_chat=True):
+            _send(user_profile_group_name(user_id), "outbox_event", payload)
+
+
+@receiver(post_save, sender=OutboundEmailReview)
+def broadcast_outbox_review_updated(sender, instance: OutboundEmailReview, created: bool, **kwargs):
+    review_id = instance.id
+    agent_id = instance.agent_id
+
+    def _on_commit():
+        try:
+            review = OutboundEmailReview.objects.select_related("agent", "message").get(pk=review_id)
+        except OutboundEmailReview.DoesNotExist:
+            return
+        _broadcast_pending_action_requests_for_agent(agent_id)
+        emit_outbox_update(review)
+        from api.services.outbox_notifications import sync_outbox_notification_cycle
+
+        sync_outbox_notification_cycle(review, allow_initial=created)
+        try:
+            payload = serialize_message_event(review.message)
+        except Exception:
+            logger.debug("Failed to serialize Outbox message update %s", review.message_id, exc_info=True)
+        else:
+            _send(_group_name(agent_id), "timeline_event", payload, agent_id=str(agent_id))
+
+    transaction.on_commit(_on_commit)
+
+
+@receiver(post_save, sender=PersistentAgentMessage)
+def broadcast_outbox_delivery_status_updated(sender, instance: PersistentAgentMessage, created: bool, **kwargs):
+    if created or not instance.owner_agent_id:
+        return
+    review = OutboundEmailReview.objects.filter(message_id=instance.id).select_related("agent", "message").first()
+    if review is None:
+        return
+    transaction.on_commit(lambda: emit_outbox_update(review))
 
 
 @receiver(post_save, sender=AgentSpawnRequest)

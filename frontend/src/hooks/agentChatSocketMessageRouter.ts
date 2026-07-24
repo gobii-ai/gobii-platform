@@ -277,6 +277,16 @@ export function routeAgentChatSocketMessage({
   }
 
   if (
+    messageType === 'outbox.updated'
+    && message.payload
+    && typeof message.payload === 'object'
+    && !Array.isArray(message.payload)
+  ) {
+    window.dispatchEvent(new CustomEvent('gobii:outbox-updated', { detail: message.payload }))
+    return { type: 'handled' }
+  }
+
+  if (
     messageType === 'message.notification'
     && isPlainObject(message.payload)
   ) {

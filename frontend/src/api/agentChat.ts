@@ -155,6 +155,9 @@ type PendingActionRequestWire = {
   remove_api_url?: unknown
   resolveApiUrl?: unknown
   resolve_api_url?: unknown
+  items?: unknown
+  outboxUrl?: unknown
+  outbox_url?: unknown
 }
 
 type RequestedSecretWire = {
@@ -417,6 +420,30 @@ export function normalizePendingActionRequests(raw: unknown): PendingActionReque
         requests,
         count: count || requests.length,
         resolveApiUrl: asNonEmptyString(request.resolveApiUrl) ?? asNonEmptyString(request.resolve_api_url),
+      })
+      return
+    }
+    if (kind === 'outbox_reviews') {
+      const items = Array.isArray(request.items)
+        ? request.items.flatMap((rawItem) => {
+          if (!rawItem || typeof rawItem !== 'object' || Array.isArray(rawItem)) return []
+          const item = rawItem as Record<string, unknown>
+          const itemId = asNonEmptyString(item.id)
+          const recipient = asNonEmptyString(item.recipient)
+          if (!itemId || !recipient) return []
+          return [{
+            id: itemId,
+            subject: asNonEmptyString(item.subject) ?? '(No subject)',
+            recipient,
+          }]
+        })
+        : []
+      normalized.push({
+        id,
+        kind,
+        count: count || items.length,
+        items,
+        outboxUrl: asNonEmptyString(request.outboxUrl) ?? asNonEmptyString(request.outbox_url) ?? '/app/outbox',
       })
       return
     }

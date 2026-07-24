@@ -3,7 +3,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from api.agent.comms.human_input_requests import expire_pending_human_input_requests, list_pending_human_input_requests
-from api.models import AgentSpawnRequest, CommsAllowlistRequest, PersistentAgent, PersistentAgentHumanInputRequest, PersistentAgentSecret
+from api.models import AgentSpawnRequest, CommsAllowlistRequest, OutboundEmailReview, PersistentAgent, PersistentAgentHumanInputRequest, PersistentAgentSecret
 
 from .access import user_can_manage_agent_settings
 
@@ -119,6 +119,14 @@ def count_pending_action_requests_for_agents(agents: list[PersistentAgent], view
             status=CommsAllowlistRequest.RequestStatus.PENDING,
         ).filter(active_expiry_filter),
     )
+    _add_pending_counts(
+        counts,
+        OutboundEmailReview.objects.filter(
+            agent_id__in=manageable_agent_ids,
+            status=OutboundEmailReview.Status.PENDING,
+            expires_at__gt=now,
+        ),
+    )
 
     return counts
 
@@ -226,6 +234,34 @@ def list_pending_action_requests(agent: PersistentAgent, viewer_user) -> list[di
                 ],
                 "count": contact_request_count,
                 "resolveApiUrl": reverse("console_agent_contact_requests_resolve", kwargs={"agent_id": agent.id}),
+            }
+        )
+
+    outbox_qs = OutboundEmailReview.objects.filter(
+        agent=agent,
+        status=OutboundEmailReview.Status.PENDING,
+        expires_at__gt=timezone.now(),
+    ).select_related("message__to_endpoint", "message__conversation").order_by("-queued_at")
+    outbox_count = outbox_qs.count()
+    if outbox_count:
+        pending_actions.append(
+            {
+                "id": "outbox_reviews",
+                "kind": "outbox_reviews",
+                "count": outbox_count,
+                "items": [
+                    {
+                        "id": str(review.id),
+                        "subject": str((review.message.raw_payload or {}).get("subject") or ""),
+                        "recipient": (
+                            review.message.conversation.address
+                            if review.message.conversation_id
+                            else review.message.to_endpoint.address
+                        ),
+                    }
+                    for review in outbox_qs[:10]
+                ],
+                "outboxUrl": "/app/outbox",
             }
         )
 

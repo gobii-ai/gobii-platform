@@ -6,6 +6,8 @@ from django.test import SimpleTestCase, tag
 import api.evals.loader  # noqa: F401 - registers scenarios and suites
 from api.evals.registry import ScenarioRegistry
 from api.evals.scenarios.message_quality import (
+    EMAIL_REVIEW_OUTBOX_COMMUNICATION_SLUG,
+    EmailReviewOutboxCommunicationScenario,
     FAILED_EMAIL_DELIVERY_RECOVERY_SLUG,
     FailedEmailDeliveryRecoveryScenario,
     MESSAGE_QUALITY_CASES,
@@ -30,10 +32,11 @@ class MessageQualityScenarioTests(SimpleTestCase):
 
         self.assertIsNotNone(suite)
         self.assertEqual(tuple(suite.scenario_slugs), MESSAGE_QUALITY_SCENARIO_SLUGS)
-        self.assertEqual(len(suite.scenario_slugs), 19)
+        self.assertEqual(len(suite.scenario_slugs), 20)
         self.assertIn(REPLY_CHANNEL_CONTINUITY_SLUG, suite.scenario_slugs)
         self.assertIn(UNAVAILABLE_WEB_CHANNEL_CONTINUITY_SLUG, suite.scenario_slugs)
         self.assertIn(FAILED_EMAIL_DELIVERY_RECOVERY_SLUG, suite.scenario_slugs)
+        self.assertIn(EMAIL_REVIEW_OUTBOX_COMMUNICATION_SLUG, suite.scenario_slugs)
 
     def test_generated_cases_cover_email_and_chat_for_each_real_world_domain(self):
         channels_by_brief = {}
@@ -78,6 +81,10 @@ class MessageQualityScenarioTests(SimpleTestCase):
         self.assertEqual(failure_metadata.cost_class, "low")
         self.assertIn("tool_failure", failure_metadata.tags)
 
+        outbox_metadata = registered[EMAIL_REVIEW_OUTBOX_COMMUNICATION_SLUG].get_metadata()
+        self.assertEqual(outbox_metadata.cost_class, "low")
+        self.assertIn("review_before_send", outbox_metadata.tags)
+
     def test_failed_delivery_notice_requires_clear_non_delivery_language(self):
         self.assertTrue(
             FailedEmailDeliveryRecoveryScenario._notice_reports_failure(
@@ -87,6 +94,18 @@ class MessageQualityScenarioTests(SimpleTestCase):
         self.assertFalse(
             FailedEmailDeliveryRecoveryScenario._notice_reports_failure(
                 "The email was sent successfully."
+            )
+        )
+
+    def test_outbox_notice_requires_review_and_non_delivery_language(self):
+        self.assertTrue(
+            EmailReviewOutboxCommunicationScenario._notice_reports_pending_approval(
+                "The email is awaiting approval in the Outbox and has not been sent."
+            )
+        )
+        self.assertFalse(
+            EmailReviewOutboxCommunicationScenario._notice_reports_pending_approval(
+                "The email was sent successfully and is also in review."
             )
         )
 
