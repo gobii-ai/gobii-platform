@@ -107,3 +107,9 @@ from .agent_appearance import (
     OwnerDirectedAppearanceScenario,
     UnauthorizedAppearanceScenario,
 )
+from .secure_credential_delegation import (
+    SECURE_CREDENTIAL_DELEGATION_SCENARIO_SLUGS,
+    SECURE_CREDENTIAL_DELEGATION_SUITE_SLUG,
+    SecureDelegationGenericChildSecretScenario,
+    SecureDelegationMixedMailboxesScenario,
+)

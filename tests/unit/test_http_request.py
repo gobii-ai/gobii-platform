@@ -7,7 +7,7 @@ from unittest.mock import patch, MagicMock
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings, tag
 
-from api.models import BrowserUseAgent, PersistentAgent
+from api.models import BrowserUseAgent, PersistentAgent, PersistentAgentSecret
 from api.agent.tools.http_request import _native_http_error_guidance, execute_http_request
 
 
@@ -95,6 +95,36 @@ class HttpRequestJsonParsingTests(TestCase):
         self.assertIsInstance(result["content"], list)
         self.assertEqual(len(result["content"]), 3)
         self.assertEqual(result["content"][0]["id"], 1)
+
+    @patch("api.agent.tools.http_request.select_proxy_for_persistent_agent")
+    @patch("api.agent.tools.http_request.requests.request")
+    def test_secret_placeholder_in_url_is_not_written_to_response_log(self, mock_request, mock_proxy):
+        mock_proxy.return_value = None
+        mock_request.return_value = _make_mock_response(
+            content=b'{"ok": true}',
+            content_type="application/json",
+        )
+        secret = PersistentAgentSecret(
+            agent=self.agent,
+            domain_pattern="https://api.example.com",
+            name="Query credential",
+            key="query_credential",
+        )
+        secret.set_value("dont-log-credential-123")
+        secret.save()
+
+        with self.assertLogs("api.agent.tools.http_request", level="INFO") as captured:
+            execute_http_request(
+                self.agent,
+                {
+                    "method": "GET",
+                    "url": "https://api.example.com/data?key=$[secret:query_credential]",
+                },
+            )
+
+        requested_url = mock_request.call_args.args[1]
+        self.assertIn("dont-log-credential-123", requested_url)
+        self.assertNotIn("dont-log-credential-123", "\n".join(captured.output))
 
     @patch("api.agent.tools.http_request.select_proxy_for_persistent_agent")
     @patch("api.agent.tools.http_request.requests.request")

@@ -413,6 +413,7 @@ def execute_http_request(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
     url = params.get("url")
     if not url:
         return {"status": "error", "message": "Missing required parameter: url"}
+    display_url = str(url)
 
     will_continue_work = _coerce_optional_bool(params.get("will_continue_work"))
     download_requested = _coerce_optional_bool(params.get("download")) is True
@@ -603,7 +604,7 @@ def execute_http_request(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
                     "provider_key": native_provider.key,
                     "provider_name": native_provider.display_name,
                     "method": method,
-                    "url": url,
+                    "url": display_url,
                     "retryable": resp.status_code >= 500 or resp.status_code == 429,
                     "guidance": _native_http_error_guidance(native_provider.key, resp.status_code, ""),
                 }
@@ -716,7 +717,7 @@ def execute_http_request(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
     response_size = len(content_str) if isinstance(content_str, str) else len(str(content_str))
     logger.info(
         "Agent %s HTTP response: %s %s - Status: %d, Size: %d chars%s",
-        agent.id, method, url, resp.status_code, response_size,
+        agent.id, method, display_url, resp.status_code, response_size,
         " (truncated)" if truncated else ""
     )
     
@@ -735,7 +736,7 @@ def execute_http_request(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
                 "provider_key": native_provider.key,
                 "provider_name": native_provider.display_name,
                 "method": method,
-                "url": url,
+                "url": display_url,
                 "retryable": resp.status_code >= 500 or resp.status_code == 429,
                 "guidance": _native_http_error_guidance(native_provider.key, resp.status_code, content_str),
             }

@@ -39,6 +39,12 @@ from .mcp_manager import MCPToolInfo, MCPToolManager, get_mcp_manager, execute_m
 from .sqlite_batch import get_sqlite_batch_tool, execute_sqlite_batch
 from .sqlite_state import agent_sqlite_db
 from .http_request import get_http_request_tool, execute_http_request
+from .secure_api_request import (
+    SECURE_API_REQUEST_TOOL_NAME,
+    SECURE_CREDENTIAL_DELEGATION_SYSTEM_SKILL_KEY,
+    execute_secure_api_request,
+    get_secure_api_request_tool,
+)
 from .brightdata import (
     BRIGHTDATA_LINKEDIN_PERSON_PROFILE_TOOL_NAME,
     BRIGHTDATA_SCRAPE_AS_MARKDOWN_TOOL_NAME,
@@ -205,6 +211,12 @@ BUILTIN_TOOL_REGISTRY = {
         "definition": get_http_request_tool,
         "executor": execute_http_request,
         "parallel_safe": True,
+    },
+    SECURE_API_REQUEST_TOOL_NAME: {
+        "definition": get_secure_api_request_tool,
+        "executor": execute_secure_api_request,
+        "search_hidden": True,
+        "system_skill_key": SECURE_CREDENTIAL_DELEGATION_SYSTEM_SKILL_KEY,
     },
     BRIGHTDATA_SEARCH_ENGINE_TOOL_NAME: {
         "definition": get_brightdata_search_engine_tool,
