@@ -9,7 +9,7 @@ class NativeHttpErrorMessageTests(SimpleTestCase):
         description = get_http_request_tool()["function"]["description"]
 
         self.assertIn("$[secret:my_api_key]", description)
-        self.assertIn("<<<my_api_key>>>", description)
+        self.assertNotIn("<<<my_api_key>>>", description)
 
     def test_extracts_google_error_message(self):
         message = _native_api_error_message(

@@ -367,10 +367,10 @@ def get_http_request_tool() -> Dict[str, Any]:
                 "For weather, a geocoding endpoint only resolves coordinates; call a forecast/current-conditions endpoint before replying with weather. "
                 "Do NOT use this when the task is to read or verify what appears on a webpage; use `spawn_web_task` for user-visible pages even if they are simple HTML. "
                 "The URL, headers, and body can include secret placeholders using `$[secret:my_api_key]`. "
-                "The legacy form `<<<my_api_key>>>` is also supported. These placeholders will be replaced with "
-                "the corresponding secret values at execution time. The response is truncated to 5MB. Text content "
-                "is returned even if served with application/octet-stream; only truly binary data (images, etc.) is "
-                "omitted. You may need to look up API docs using the mcp_brightdata_search_engine tool."
+                "These placeholders will be replaced with the corresponding secret values at execution time. "
+                "The response is truncated to 5MB. Text content is returned even if served with "
+                "application/octet-stream; only truly binary data (images, etc.) is omitted. You may need to look "
+                "up API docs using the mcp_brightdata_search_engine tool."
             ),
             "parameters": {
                 "type": "object",
