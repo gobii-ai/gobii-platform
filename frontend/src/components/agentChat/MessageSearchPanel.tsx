@@ -11,8 +11,6 @@ import {
 import type { ConsoleContext } from '../../api/context'
 import type { AgentRosterEntry } from '../../types/agentRoster'
 import { buildAgentSearchBlob } from '../../util/agentCards'
-import { looksLikeHtml } from '../../util/sanitize'
-import { MessageContent } from './MessageContent'
 import { AgentSearchInput } from './ChatSidebarParts'
 import { AgentChatAvatar } from './uiPrimitives'
 
@@ -228,85 +226,15 @@ function revealVisibleMessage(messageId: string): void {
   })
 }
 
-function clearSearchHighlights(root: HTMLElement): void {
-  root.querySelectorAll('mark[data-message-search-highlight]').forEach((mark) => {
-    mark.replaceWith(document.createTextNode(mark.textContent ?? ''))
-  })
-  root.normalize()
-}
-
-function highlightRenderedExcerpt(root: HTMLElement, segments: MessageSearchExcerptSegment[]): () => void {
-  const terms = [...new Set(
-    segments
-      .filter((segment) => segment.highlighted)
-      .map((segment) => segment.text.trim())
-      .filter(Boolean),
-  )].sort((left, right) => right.length - left.length)
-  if (!terms.length) return () => {}
-
-  const pattern = new RegExp(terms.map((term) => term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'gi')
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
-  const textNodes: Text[] = []
-  let currentNode = walker.nextNode()
-  while (currentNode) {
-    if (!currentNode.parentElement?.closest('mark[data-message-search-highlight]')) {
-      textNodes.push(currentNode as Text)
-    }
-    currentNode = walker.nextNode()
-  }
-
-  textNodes.forEach((textNode) => {
-    const value = textNode.data
-    const matches = [...value.matchAll(pattern)]
-    if (!matches.length) return
-
-    const fragment = document.createDocumentFragment()
-    let position = 0
-    matches.forEach((match) => {
-      const matchIndex = match.index ?? 0
-      if (matchIndex > position) {
-        fragment.append(value.slice(position, matchIndex))
-      }
-      const highlight = document.createElement('mark')
-      highlight.dataset.messageSearchHighlight = 'true'
-      highlight.textContent = match[0]
-      fragment.append(highlight)
-      position = matchIndex + match[0].length
-    })
-    if (position < value.length) {
-      fragment.append(value.slice(position))
-    }
-    textNode.replaceWith(fragment)
-  })
-
-  return () => clearSearchHighlights(root)
-}
-
-function FormattedSearchExcerpt({
-  text,
-  segments,
-}: {
-  text: string
-  segments: MessageSearchExcerptSegment[]
-}) {
-  const contentRef = useRef<HTMLDivElement | null>(null)
-  const html = looksLikeHtml(text) ? text : null
-
-  useEffect(() => {
-    const root = contentRef.current
-    if (!root) return
-    clearSearchHighlights(root)
-    return highlightRenderedExcerpt(root, segments)
-  }, [segments, text])
-
+function SearchExcerpt({ segments }: { segments: MessageSearchExcerptSegment[] }) {
   return (
-    <div ref={contentRef}>
-      <MessageContent
-        bodyHtml={html}
-        bodyText={html ? null : text}
-        showEmptyState={false}
-      />
-    </div>
+    <p>
+      {segments.map((segment, index) => (
+        segment.highlighted
+          ? <mark key={index}>{segment.text}</mark>
+          : <span key={index}>{segment.text}</span>
+      ))}
+    </p>
   )
 }
 
@@ -683,10 +611,7 @@ export function MessageSearchPanel({
                     ) : null}
                   </div>
                   <div className="message-search-result__excerpt">
-                    <FormattedSearchExcerpt
-                      text={result.excerpt_text}
-                      segments={result.excerpt}
-                    />
+                    <SearchExcerpt segments={result.excerpt} />
                   </div>
                 </div>
               </article>

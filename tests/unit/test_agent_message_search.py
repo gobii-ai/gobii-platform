@@ -138,6 +138,39 @@ class AgentMessageSearchTests(TestCase):
         self.assertEqual(second.json()["results"][0]["message_id"], str(older.id))
         self.assertIsNone(second.json()["next_cursor"])
 
+    def test_rich_content_is_normalized_to_plain_text_before_excerpting(self):
+        self._create_message(
+            self.agent,
+            (
+                '<div style="color: #333">'
+                f"<p>{'Earlier account details. ' * 20}</p>"
+                "<p>Still no <strong>Apollo</strong> API key for this account.</p>"
+                f"<p>{'Later account details. ' * 20}</p>"
+                "</div>"
+            ),
+        )
+
+        response = self._search(q="Apollo")
+
+        self.assertEqual(response.status_code, 200)
+        result = response.json()["results"][0]
+        self.assertIn("Apollo", result["excerpt_text"])
+        self.assertNotIn("<strong>", result["excerpt_text"])
+        self.assertNotIn("style=", result["excerpt_text"])
+        self.assertTrue(any(segment["highlighted"] and segment["text"] == "Apollo" for segment in result["excerpt"]))
+
+        markdown_message = self._create_message(
+            self.agent,
+            "**Apollo** needs a [new API key](https://example.com/request).",
+        )
+        markdown_response = self._search(q="Apollo")
+        markdown_result = next(
+            item
+            for item in markdown_response.json()["results"]
+            if item["message_id"] == str(markdown_message.id)
+        )
+        self.assertEqual(markdown_result["excerpt_text"], "Apollo needs a new API key.")
+
     def test_search_includes_inbound_messages_and_excludes_tool_content(self):
         inbound = self._create_message(
             self.agent,

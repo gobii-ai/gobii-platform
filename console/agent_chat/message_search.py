@@ -14,6 +14,7 @@ from django.db.models import Exists, OuterRef, Q, QuerySet
 from api.models import PersistentAgent, PersistentAgentMessage, PersistentAgentMessageAttachment
 from console.context_helpers import resolve_console_context, resolve_staff_console_context
 from console.context_overrides import get_context_override, get_staff_context_override
+from util.text_sanitizer import sanitize_notification_preview_text
 
 from .access import agent_queryset_for, shared_agent_queryset_for
 
@@ -141,12 +142,7 @@ def _positive_highlight_terms(query: str) -> list[str]:
     return sorted(terms, key=len, reverse=True)
 
 
-def _excerpt_segments(body: str, query: str) -> list[dict[str, Any]]:
-    text = body or ""
-    terms = _positive_highlight_terms(query)
-    if not text:
-        return [{"text": "", "highlighted": False}]
-
+def _excerpt_bounds(text: str, terms: list[str]) -> tuple[int, int]:
     match_start = None
     folded = text.casefold()
     for term in terms:
@@ -155,26 +151,22 @@ def _excerpt_segments(body: str, query: str) -> list[dict[str, Any]]:
             match_start = index
 
     if len(text) <= EXCERPT_LENGTH:
-        excerpt = text
-        prefix = ""
-        suffix = ""
-    else:
-        center = match_start if match_start is not None else 0
-        start = max(0, center - EXCERPT_LENGTH // 3)
-        end = min(len(text), start + EXCERPT_LENGTH)
-        if end - start < EXCERPT_LENGTH:
-            start = max(0, end - EXCERPT_LENGTH)
-        excerpt = text[start:end]
-        prefix = "…" if start > 0 else ""
-        suffix = "…" if end < len(text) else ""
+        return 0, len(text)
 
+    center = match_start if match_start is not None else 0
+    start = max(0, center - EXCERPT_LENGTH // 3)
+    end = min(len(text), start + EXCERPT_LENGTH)
+    if end - start < EXCERPT_LENGTH:
+        start = max(0, end - EXCERPT_LENGTH)
+    return start, end
+
+
+def _highlight_excerpt(excerpt: str, terms: list[str]) -> list[dict[str, Any]]:
     if not terms:
-        return [{"text": f"{prefix}{excerpt}{suffix}", "highlighted": False}]
+        return [{"text": excerpt, "highlighted": False}]
 
     pattern = re.compile("|".join(re.escape(term) for term in terms), re.IGNORECASE)
     segments: list[dict[str, Any]] = []
-    if prefix:
-        segments.append({"text": prefix, "highlighted": False})
     position = 0
     for match in pattern.finditer(excerpt):
         if match.start() > position:
@@ -183,9 +175,17 @@ def _excerpt_segments(body: str, query: str) -> list[dict[str, Any]]:
         position = match.end()
     if position < len(excerpt):
         segments.append({"text": excerpt[position:], "highlighted": False})
-    if suffix:
-        segments.append({"text": suffix, "highlighted": False})
     return segments
+
+
+def _excerpt_segments(body: str, query: str) -> list[dict[str, Any]]:
+    text = body or ""
+    if not text:
+        return [{"text": "", "highlighted": False}]
+    terms = _positive_highlight_terms(query)
+    start, end = _excerpt_bounds(text, terms)
+    excerpt = f"{'…' if start else ''}{text[start:end]}{'…' if end < len(text) else ''}"
+    return _highlight_excerpt(excerpt, terms)
 
 
 def search_agent_messages(
@@ -271,7 +271,8 @@ def search_agent_messages(
     results = []
     for message in page:
         attachments = list(message.attachments.all())
-        excerpt = _excerpt_segments(message.body, query)
+        normalized_body = sanitize_notification_preview_text(message.body)
+        excerpt = _excerpt_segments(normalized_body, query)
         results.append(
             {
                 "message_id": str(message.id),
