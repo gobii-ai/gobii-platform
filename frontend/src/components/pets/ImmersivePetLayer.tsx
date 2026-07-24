@@ -33,6 +33,7 @@ const PET_ASPECT_RATIO = 208 / 192
 const VIEWPORT_MARGIN = 16
 const DEFAULT_EDGE_GAP = 24
 const PET_LOOK_DEADZONE_PX = 1
+const POINTER_IDLE_DELAY_MS = 2_500
 const CONTEXT_MENU_WIDTH = 208
 const CONTEXT_MENU_HEIGHT = 104
 const CONTEXT_MENU_MARGIN = 8
@@ -120,7 +121,7 @@ export function ImmersivePetLayer() {
   const petRef = useRef<HTMLDivElement | null>(null)
   const contextMenuRef = useRef<HTMLDivElement | null>(null)
   const dragRef = useRef<DragState | null>(null)
-  const gazeFrameRef = useRef<number | null>(null)
+  const gazeIdleTimerRef = useRef<number | null>(null)
   const [viewport, setViewport] = useState(() => ({
     width: typeof window === 'undefined' ? 0 : window.innerWidth,
     height: typeof window === 'undefined' ? 0 : window.innerHeight,
@@ -128,6 +129,8 @@ export function ImmersivePetLayer() {
   const [dragPosition, setDragPosition] = useState<PixelPosition | null>(null)
   const [dragDirection, setDragDirection] = useState<'left' | 'right'>('right')
   const [lookIndex, setLookIndex] = useState<number | null>(null)
+  const [pointerActive, setPointerActive] = useState(false)
+  const [gazeEmotionKey, setGazeEmotionKey] = useState<string | null>(null)
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null)
   const [expiredEmotionKey, setExpiredEmotionKey] = useState<string | null>(null)
 
@@ -176,21 +179,27 @@ export function ImmersivePetLayer() {
     || activeSession.processing.awaitingResponse
     || (activeSession.stream.streaming && !activeSession.stream.streaming.done),
   )
-  const semanticAnimation = resolvePetAnimation({
-    processingActive: isAgentWorking,
+  const emotionAnimation = resolvePetAnimation({
+    processingActive: false,
     emotion: activeSession.identity.emotion,
     emotionExpiresAt: activeSession.identity.emotionExpiresAt,
     now: expiredEmotionKey === emotionKey ? Number.POSITIVE_INFINITY : 0,
   })
+  const semanticAnimation = isAgentWorking ? 'running' : emotionAnimation
   const isDragging = dragPosition !== null
-  const canGaze = Boolean(library?.preferences.enabled && selectedPet)
+  const canTrackPointer = Boolean(library?.preferences.enabled && selectedPet)
     && !isMobile
     && !reducedMotion
-    && semanticAnimation === 'idle'
+    && !isAgentWorking
     && !isDragging
-  const animation = semanticAnimation === 'idle' && isDragging
-    ? (dragDirection === 'left' ? 'running-left' : 'running-right')
-    : semanticAnimation
+  const canGaze = canTrackPointer && pointerActive && gazeEmotionKey === emotionKey
+  const animation = isAgentWorking
+    ? semanticAnimation
+    : isDragging
+      ? (dragDirection === 'left' ? 'running-left' : 'running-right')
+      : canGaze
+        ? 'idle'
+        : semanticAnimation
   const animatedColumn = useAnimationColumn(animation, reducedMotion)
   const frame = useMemo(() => {
     if (animation !== 'idle' || reducedMotion) {
@@ -212,34 +221,41 @@ export function ImmersivePetLayer() {
   }, [animatedColumn, animation, canGaze, lookIndex, reducedMotion])
 
   useEffect(() => {
-    if (!canGaze) return
+    if (!canTrackPointer) return
     const handlePointerMove = (event: PointerEvent) => {
-      if (gazeFrameRef.current !== null) {
-        window.cancelAnimationFrame(gazeFrameRef.current)
+      setPointerActive(true)
+      setGazeEmotionKey(emotionKey)
+      if (gazeIdleTimerRef.current !== null) {
+        window.clearTimeout(gazeIdleTimerRef.current)
       }
-      gazeFrameRef.current = window.requestAnimationFrame(() => {
-        gazeFrameRef.current = null
-        const rect = petRef.current?.getBoundingClientRect()
-        if (!rect) return
-        const dx = event.clientX - (rect.left + rect.width / 2)
-        const dy = event.clientY - (rect.top + rect.height / 2)
-        if (Math.hypot(dx, dy) <= PET_LOOK_DEADZONE_PX) {
-          setLookIndex(null)
-          return
-        }
-        const clockwiseFromUp = (Math.atan2(dx, -dy) * 180 / Math.PI + 360) % 360
-        setLookIndex(Math.round(clockwiseFromUp / 22.5) % 16)
-      })
+      gazeIdleTimerRef.current = window.setTimeout(() => {
+        gazeIdleTimerRef.current = null
+        setPointerActive(false)
+        setLookIndex(null)
+      }, POINTER_IDLE_DELAY_MS)
+
+      const rect = petRef.current?.getBoundingClientRect()
+      if (!rect) return
+      const dx = event.clientX - (rect.left + rect.width / 2)
+      const dy = event.clientY - (rect.top + rect.height / 2)
+      if (Math.hypot(dx, dy) <= PET_LOOK_DEADZONE_PX) {
+        setLookIndex(null)
+        return
+      }
+      const clockwiseFromUp = (Math.atan2(dx, -dy) * 180 / Math.PI + 360) % 360
+      setLookIndex(Math.round(clockwiseFromUp / 22.5) % 16)
     }
     document.addEventListener('pointermove', handlePointerMove)
     return () => {
       document.removeEventListener('pointermove', handlePointerMove)
-      if (gazeFrameRef.current !== null) {
-        window.cancelAnimationFrame(gazeFrameRef.current)
-        gazeFrameRef.current = null
-      }
     }
-  }, [canGaze])
+  }, [canTrackPointer, emotionKey])
+
+  useEffect(() => () => {
+    if (gazeIdleTimerRef.current !== null) {
+      window.clearTimeout(gazeIdleTimerRef.current)
+    }
+  }, [])
 
   useEffect(() => {
     if (!contextMenu) return
