@@ -13,6 +13,8 @@ PET_SPRITESHEET_HEIGHT = PET_FRAME_HEIGHT * PET_ROWS
 # V2 reserves row 0, column 6 as the dedicated neutral/front look frame.
 PET_USED_COLUMNS_BY_ROW = (7, 8, 8, 4, 5, 8, 6, 6, 6, 8, 8)
 PET_MIN_VISIBLE_PIXELS = 50
+DEFAULT_BUILTIN_PET_ID = "builtin:gobii-fish"
+BUILTIN_PET_IDS = frozenset({DEFAULT_BUILTIN_PET_ID, "builtin:eevee"})
 
 
 class UserPetValidationError(ValueError):
@@ -20,12 +22,13 @@ class UserPetValidationError(ValueError):
 
 
 def normalize_user_pet_selector(key: str, value: object) -> str:
-    if value == "builtin:gobii-fish":
-        return value
     if not isinstance(value, str):
         raise ValueError(f"Invalid value for '{key}'. Expected a pet identifier.")
+    normalized_value = value.strip()
+    if normalized_value in BUILTIN_PET_IDS:
+        return normalized_value
     try:
-        return str(uuid.UUID(value.strip()))
+        return str(uuid.UUID(normalized_value))
     except (ValueError, AttributeError) as exc:
         raise ValueError(f"Invalid value for '{key}'. Expected a pet identifier.") from exc
 

@@ -11,11 +11,32 @@ from django.urls import reverse
 from django.views import View
 
 from api.models import UserPet, UserPreference
-from api.services.user_pets import UserPetValidationError, validate_user_pet_spritesheet
+from api.services.user_pets import (
+    BUILTIN_PET_IDS,
+    DEFAULT_BUILTIN_PET_ID,
+    UserPetValidationError,
+    validate_user_pet_spritesheet,
+)
 from console.api_helpers import ApiLoginRequiredMixin, _parse_json_body
 
 
-BUILTIN_PET_ID = "builtin:gobii-fish"
+BUILTIN_PET_ID = DEFAULT_BUILTIN_PET_ID
+BUILTIN_PETS = (
+    {
+        "id": BUILTIN_PET_ID,
+        "kind": "builtin",
+        "displayName": "Pixel Gobii Fish",
+        "description": "A cheerful pixel-art purple robot fish.",
+        "spritesheetUrl": "images/pets/gobii-fish-v2.webp",
+    },
+    {
+        "id": "builtin:eevee",
+        "kind": "builtin",
+        "displayName": "Eevee",
+        "description": "Matt's runt-of-the-litter corgi.",
+        "spritesheetUrl": "images/pets/eevee-v2.webp",
+    },
+)
 
 
 def _owned_pet_exists(user, pet_id: object) -> bool:
@@ -26,6 +47,12 @@ def _owned_pet_exists(user, pet_id: object) -> bool:
     except (ValueError, AttributeError):
         return False
     return UserPet.objects.filter(user=user, pk=normalized_id).exists()
+
+
+def _selectable_pet_exists(user, pet_id: object) -> bool:
+    return isinstance(pet_id, str) and (
+        pet_id in BUILTIN_PET_IDS or _owned_pet_exists(user, pet_id)
+    )
 
 
 def _serialize_pet(pet: UserPet) -> dict[str, object]:
@@ -41,7 +68,7 @@ def _serialize_pet(pet: UserPet) -> dict[str, object]:
 def _resolved_pet_preferences(user) -> dict[str, object]:
     preferences = UserPreference.resolve_known_preferences(user)
     selected_id = preferences[UserPreference.KEY_USER_PET_SELECTED_ID]
-    if selected_id != BUILTIN_PET_ID and not _owned_pet_exists(user, selected_id):
+    if not _selectable_pet_exists(user, selected_id):
         selected_id = BUILTIN_PET_ID
     return {
         "enabled": preferences[UserPreference.KEY_USER_PET_ENABLED],
@@ -53,15 +80,10 @@ def _resolved_pet_preferences(user) -> dict[str, object]:
 
 def _serialize_pet_library(user) -> dict[str, object]:
     pets = [
-        {
-            "id": BUILTIN_PET_ID,
-            "kind": "builtin",
-            "displayName": "Pixel Gobii Fish",
-            "description": "A cheerful pixel-art purple robot fish.",
-            "spritesheetUrl": static("images/pets/gobii-fish-v2.webp"),
-        },
-        *[_serialize_pet(pet) for pet in UserPet.objects.filter(user=user)],
+        {**pet, "spritesheetUrl": static(pet["spritesheetUrl"])}
+        for pet in BUILTIN_PETS
     ]
+    pets.extend(_serialize_pet(pet) for pet in UserPet.objects.filter(user=user))
     return {
         "pets": pets,
         "preferences": _resolved_pet_preferences(user),
@@ -140,7 +162,7 @@ class UserPetListAPIView(ApiLoginRequiredMixin, View):
         }
         if "selectedPetId" in payload:
             selected_id = payload["selectedPetId"]
-            if selected_id != BUILTIN_PET_ID and not _owned_pet_exists(request.user, selected_id):
+            if not _selectable_pet_exists(request.user, selected_id):
                 return JsonResponse({"error": "Select a pet from your library."}, status=400)
         for field, preference_key in field_map.items():
             if field in payload:
