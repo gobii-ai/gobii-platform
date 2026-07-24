@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
-import { Bell, Building2, ChevronDown, CircleHelp, ClipboardList, CreditCard, KeyRound, LockKeyhole, ServerCog, Settings, Sparkles, User, UserRound, type LucideIcon } from 'lucide-react'
+import { Bell, Building2, ChevronDown, CircleHelp, ClipboardList, CreditCard, Fish, KeyRound, LockKeyhole, ServerCog, Settings, Sparkles, User, UserRound, type LucideIcon } from 'lucide-react'
 import { Button, Dialog, Popover } from 'react-aria-components'
 
 import type { ConsoleContext } from '../../api/context'
+import { useUpdateUserPetPreferences, useUserPets } from '../../hooks/useUserPets'
 
 export type SidebarTaskCreditsInfo = {
   usedToday: number | null
@@ -36,6 +37,7 @@ export type SidebarSettingsInfo = {
   onNotificationsEnabledChange?: (enabled: boolean) => void
   suggestionsEnabled?: boolean
   onSuggestionsEnabledChange?: (enabled: boolean) => void
+  showPetPreference?: boolean
   taskCredits?: SidebarTaskCreditsInfo | null
   onOpenHelp?: (() => void) | null
 }
@@ -130,6 +132,22 @@ function SidebarPreferenceToggle({
   )
 }
 
+function SidebarPetPreferenceToggle() {
+  const petsQuery = useUserPets()
+  const preferencesMutation = useUpdateUserPetPreferences()
+  if (!petsQuery.data) return null
+
+  return (
+    <SidebarPreferenceToggle
+      checked={petsQuery.data.preferences.enabled}
+      icon={Fish}
+      label="Workspace pet"
+      onChange={(enabled) => preferencesMutation.mutate({ enabled })}
+      status={petsQuery.data.preferences.enabled ? 'Visible' : 'Hidden'}
+    />
+  )
+}
+
 export function SidebarSettingsMenu({
   context = null,
   viewerEmail = null,
@@ -155,6 +173,7 @@ export function SidebarSettingsMenu({
   onNotificationsEnabledChange,
   suggestionsEnabled = true,
   onSuggestionsEnabledChange,
+  showPetPreference = false,
   taskCredits = null,
   onOpenHelp = null,
   variant = 'sidebar',
@@ -296,6 +315,7 @@ export function SidebarSettingsMenu({
               onChange={onSuggestionsEnabledChange}
               status={suggestionsEnabled ? 'Shown after replies' : 'Hidden'}
             />
+            {showPetPreference ? <SidebarPetPreferenceToggle /> : null}
             <div className="sidebar-settings__rule" role="separator" aria-hidden="true" />
             {canShowProfile ? (
               onOpenProfile ? (
