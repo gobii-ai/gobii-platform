@@ -42,7 +42,7 @@ import { CollaboratorInviteDialog } from '../components/agentChat/CollaboratorIn
 import { PublicAgentShareDialog } from '../components/agentChat/PublicAgentShareDialog'
 import { ModalForm } from '../components/common/ModalForm'
 import { HelpSupportDialog } from '../components/common/HelpSupportDialog'
-import { ChatSidebar } from '../components/agentChat/ChatSidebar'
+import { ChatSidebar, type MessageSearchState } from '../components/agentChat/ChatSidebar'
 import { HighPriorityBanner } from '../components/agentChat/HighPriorityBanner'
 import { type SelectionShellPage } from '../components/agentChat/SelectionShellPageSwitcher'
 import { findLatestStatusExpansionTargets } from '../components/agentChat/statusExpansion'
@@ -949,6 +949,11 @@ export function AgentChatPage({
     [appLocationSearch],
   )
   const [messageAnchorUnavailable, setMessageAnchorUnavailable] = useState(false)
+  const [messageSearchState, setMessageSearchState] = useState<MessageSearchState>({
+    open: false,
+    query: '',
+    submitted: null,
+  })
   const developerModeEnabled = developerMode && isSystemAdmin
   const pendingReadMarkerByAgentRef = useRef<Record<string, string>>({})
   const [shellPathname, setShellPathname] = useState(() => (
@@ -1058,6 +1063,20 @@ export function AgentChatPage({
   const [pendingAgentEmails, setPendingAgentEmails] = useState<Record<string, string>>({})
   const contactRefreshAttemptsRef = useRef<Record<string, number>>({})
   const effectiveContext = contextData?.context ?? null
+  const messageSearchContextKey = effectiveContext
+    ? `${effectiveContext.type}:${effectiveContext.id}`
+    : null
+  const previousMessageSearchContextKeyRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!messageSearchContextKey) {
+      return
+    }
+    const previousKey = previousMessageSearchContextKeyRef.current
+    previousMessageSearchContextKeyRef.current = messageSearchContextKey
+    if (previousKey && previousKey !== messageSearchContextKey) {
+      setMessageSearchState({ open: false, query: '', submitted: null })
+    }
+  }, [messageSearchContextKey])
   const contextMatchesAgent = !contextLookupAgentId || contextResolvedForAgentId === contextLookupAgentId
   const contextReady = (
     Boolean(effectiveContext)
@@ -3467,6 +3486,8 @@ export function AgentChatPage({
     onRosterSortModeChange: handleAgentRosterSortModeChange,
     desktopMode: selectionSidebarMode,
     onDesktopModeChange: handleSelectionSidebarModeChange,
+    messageSearchState,
+    onMessageSearchStateChange: setMessageSearchState,
     contextSwitcher: contextSwitcher ?? undefined,
     settings: selectionSidebarSettings,
     galleryShellPage: selectionPage,
@@ -4126,6 +4147,8 @@ export function AgentChatPage({
     teamTemplateMenu,
     rosterSortMode: agentRosterSortMode,
     onRosterSortModeChange: handleAgentRosterSortModeChange,
+    messageSearchState,
+    onMessageSearchStateChange: setMessageSearchState,
     onInsightsPanelExpandedPreferenceChange: handleInsightsPanelExpandedPreferenceChange,
     contextSwitcher: contextSwitcher ?? undefined,
     settings: {
@@ -4195,6 +4218,7 @@ export function AgentChatPage({
     insightsPanelExpandedPreference,
     insightsPanelPreferenceHydrated,
     mutedAgentIds,
+    messageSearchState,
     notificationStatus,
     onScrolledToAgent,
     onSelectionPageChange,

@@ -373,6 +373,9 @@
 .chat-sidebar[data-search-open='true'] ~ .banner-shell {
     --agent-chat-sidebar-current-width: var(--agent-chat-sidebar-width-search, 36rem);
 }
+.chat-sidebar[data-search-open='true'] {
+    --agent-chat-primary-banner-height: 3.5rem;
+}
 @media (max-width: 767px) {
     .banner-shell {
         left: 0;
@@ -5460,15 +5463,6 @@
 }
 .chat-sidebar-header-actions .chat-context-switcher {
     min-width: 0;
-}
-.agent-message-search-fab {
-    position: fixed;
-    left: 0.75rem;
-    bottom: 5.25rem;
-    z-index: 31;
-    width: 2.75rem;
-    height: 2.75rem;
-    border-radius: 999px;
 }
 .message-search-panel {
     display: flex;
