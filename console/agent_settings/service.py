@@ -1809,15 +1809,12 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
             ):
                 return _general_error("That dedicated IP is already assigned to another agent.")
 
-        # Check for uniqueness, excluding the current agent's BrowserUseAgent (if present)
-        exclude_pk = browser_agent.id if browser_agent else agent.browser_use_agent_id
-        browser_name_conflict = BrowserUseAgent.objects.filter(
-            user=request.user,
-            name=new_name
-        )
-        if exclude_pk:
-            browser_name_conflict = browser_name_conflict.exclude(pk=exclude_pk)
-        if browser_name_conflict.exists():
+        if PersistentAgent.has_active_name_conflict(
+            user_id=agent.user_id,
+            organization_id=agent.organization_id,
+            name=new_name,
+            exclude_id=agent.id,
+        ):
             return _general_error(f"You already have an agent named '{new_name}'.")
 
         try:
