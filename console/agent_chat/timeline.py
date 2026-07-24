@@ -1583,6 +1583,56 @@ def fetch_timeline_window(
     )
 
 
+def fetch_timeline_window_around_message(
+    agent: PersistentAgent,
+    message: PersistentAgentMessage,
+    *,
+    limit: int = DEFAULT_PAGE_SIZE,
+    viewer_user=None,
+) -> TimelineWindow:
+    limit = max(1, min(limit, MAX_PAGE_SIZE))
+    anchor_cursor = CursorPayload(
+        value=_microsecond_epoch(message.timestamp),
+        kind="message",
+        identifier=message.seq,
+    )
+    older_limit = limit // 2
+    newer_limit = max(0, limit - older_limit - 1)
+    older = fetch_timeline_window(
+        agent,
+        cursor=anchor_cursor.encode(),
+        direction="older",
+        limit=max(1, older_limit),
+        viewer_user=viewer_user,
+    )
+    newer = fetch_timeline_window(
+        agent,
+        cursor=anchor_cursor.encode(),
+        direction="newer",
+        limit=max(1, newer_limit),
+        viewer_user=viewer_user,
+    )
+    anchor_event = serialize_message_event(message)
+    events = [*older.events[:older_limit], anchor_event]
+    if newer_limit:
+        events.extend(newer.events[:newer_limit])
+    oldest_cursor = older.oldest_cursor or anchor_cursor.encode()
+    newest_cursor = (
+        newer.newest_cursor
+        if newer_limit and newer.events
+        else anchor_cursor.encode()
+    )
+    return TimelineWindow(
+        events=events,
+        oldest_cursor=oldest_cursor,
+        newest_cursor=newest_cursor,
+        has_more_older=older.has_more_older if older_limit else _has_more_before(agent, anchor_cursor),
+        has_more_newer=newer.has_more_newer if newer_limit else _has_more_after(agent, anchor_cursor),
+        processing_snapshot=newer.processing_snapshot,
+        current_plan=newer.current_plan,
+    )
+
+
 def serialize_message_event(message: PersistentAgentMessage) -> dict:
     envelope = _envelop_messages([message])[0]
     return _serialize_message(envelope)

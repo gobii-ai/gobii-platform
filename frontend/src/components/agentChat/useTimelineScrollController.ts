@@ -21,6 +21,7 @@ type TimelineScrollControllerOptions = {
   pageCount: number
   setAutoScrollPinned: (pinned: boolean) => void
   switchingAgentId: string | null
+  targetMessageId?: string | null
 }
 
 function bottomDistance(container: HTMLElement): number {
@@ -65,6 +66,7 @@ export function useTimelineScrollController({
   pageCount,
   setAutoScrollPinned,
   switchingAgentId,
+  targetMessageId = null,
 }: TimelineScrollControllerOptions) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const pinnedRef = useRef(autoScrollPinned)
@@ -276,7 +278,7 @@ export function useTimelineScrollController({
     prependAnchorRef.current = null
     pointerActiveRef.current = false
     touchYRef.current = null
-  }, [activeAgentId])
+  }, [activeAgentId, targetMessageId])
 
   useEffect(() => {
     const container = timelineNode
@@ -449,9 +451,28 @@ export function useTimelineScrollController({
 
     if (!initialLoading && eventCount > 0 && !didInitialJumpRef.current) {
       didInitialJumpRef.current = true
+      if (targetMessageId && contentNode) {
+        const escaped = typeof CSS !== 'undefined' && typeof CSS.escape === 'function'
+          ? CSS.escape(targetMessageId)
+          : targetMessageId.replace(/["\\]/g, '\\$&')
+        const target = contentNode.querySelector<HTMLElement>(`[data-message-id="${escaped}"]`)
+        if (target) {
+          setPinned(false)
+          const reducedMotion = typeof window.matchMedia === 'function'
+            && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+          target.scrollIntoView({
+            block: 'center',
+            behavior: reducedMotion ? 'auto' : 'smooth',
+          })
+          target.classList.remove('message-search-target')
+          window.requestAnimationFrame(() => target.classList.add('message-search-target'))
+          const timeout = window.setTimeout(() => target.classList.remove('message-search-target'), 2200)
+          return () => window.clearTimeout(timeout)
+        }
+      }
       pinAndJumpToBottom()
     }
-  }, [eventCount, initialLoading, isNewAgent, pinAndJumpToBottom])
+  }, [contentNode, eventCount, initialLoading, isNewAgent, pinAndJumpToBottom, setPinned, targetMessageId])
 
   useEffect(() => {
     syncMeasurements()

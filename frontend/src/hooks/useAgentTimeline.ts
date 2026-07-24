@@ -39,19 +39,25 @@ export function timelineResponseToPage(
 
 type PageParam = { direction: 'initial' } | { direction: 'older'; cursor: string } | { direction: 'newer'; cursor: string }
 
-export function timelineQueryKey(agentId: string | null, developerMode = false, staffContext?: StaffViewContext | null) {
+export function timelineQueryKey(
+  agentId: string | null,
+  developerMode = false,
+  staffContext?: StaffViewContext | null,
+  anchorMessageId?: string | null,
+) {
   return [
     'agent-timeline',
     agentId,
     developerMode ? 'developer' : 'standard',
     staffContext ? `${staffContext.type}:${staffContext.id}` : null,
+    anchorMessageId ?? null,
   ] as const
 }
 
-export function useAgentTimeline(agentId: string | null, options?: { enabled?: boolean; developerMode?: boolean; staffContext?: StaffViewContext | null }) {
+export function useAgentTimeline(agentId: string | null, options?: { enabled?: boolean; developerMode?: boolean; staffContext?: StaffViewContext | null; anchorMessageId?: string | null }) {
   const developerMode = options?.developerMode === true
   return useInfiniteQuery<TimelinePage, Error, InfiniteData<TimelinePage>, ReturnType<typeof timelineQueryKey>, PageParam | undefined>({
-    queryKey: timelineQueryKey(agentId, developerMode, options?.staffContext),
+    queryKey: timelineQueryKey(agentId, developerMode, options?.staffContext, options?.anchorMessageId),
     queryFn: async ({ pageParam, signal }) => {
       if (!agentId) {
         throw new Error('No agentId')
@@ -61,7 +67,7 @@ export function useAgentTimeline(agentId: string | null, options?: { enabled?: b
       const requestStartedOrder = nextClientStateOrder()
 
       if (direction === 'initial') {
-        const response = await fetchAgentTimeline(agentId, { direction: 'initial', limit: TIMELINE_PAGE_SIZE, signal, developerMode, staffContext: options?.staffContext })
+        const response = await fetchAgentTimeline(agentId, { direction: 'initial', limit: TIMELINE_PAGE_SIZE, signal, developerMode, staffContext: options?.staffContext, anchorMessageId: options?.anchorMessageId })
         return timelineResponseToPage(response, requestStartedOrder)
       }
 

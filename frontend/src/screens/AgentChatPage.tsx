@@ -227,7 +227,9 @@ function navigateToAgentChat(agentId: string): void {
     return
   }
   const nextPath = buildAgentChatShellPath(window.location.pathname, agentId, 'chat')
-  const nextUrl = `${nextPath}${window.location.search}${window.location.hash}`
+  const params = new URLSearchParams(window.location.search)
+  params.delete('message')
+  const nextUrl = `${nextPath}${params.size ? `?${params.toString()}` : ''}${window.location.hash}`
   window.history.pushState({ agentId }, '', nextUrl)
   window.dispatchEvent(new PopStateEvent('popstate'))
 }
@@ -942,6 +944,11 @@ export function AgentChatPage({
   onOpenIntegrations,
   appLocationSearch,
 }: AgentChatPageProps) {
+  const messageAnchorId = useMemo(
+    () => new URLSearchParams(appLocationSearch ?? '').get('message'),
+    [appLocationSearch],
+  )
+  const [messageAnchorUnavailable, setMessageAnchorUnavailable] = useState(false)
   const developerModeEnabled = developerMode && isSystemAdmin
   const pendingReadMarkerByAgentRef = useRef<Record<string, string>>({})
   const [shellPathname, setShellPathname] = useState(() => (
@@ -1075,7 +1082,23 @@ export function AgentChatPage({
     enabled: agentContextReady && !isNewAgent,
     developerMode: developerModeEnabled,
     staffContext,
+    anchorMessageId: messageAnchorId,
   })
+  useEffect(() => {
+    if (!messageAnchorId) {
+      return
+    }
+    if (!timelineQuery.error || !(timelineQuery.error instanceof HttpError) || timelineQuery.error.status !== 404) {
+      if (timelineQuery.isSuccess) setMessageAnchorUnavailable(false)
+      return
+    }
+    setMessageAnchorUnavailable(true)
+    if (typeof window === 'undefined') return
+    const nextUrl = new URL(window.location.href)
+    nextUrl.searchParams.delete('message')
+    window.history.replaceState(window.history.state, '', `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`)
+    window.dispatchEvent(new PopStateEvent('popstate'))
+  }, [messageAnchorId, timelineQuery.error, timelineQuery.isSuccess])
   const developerRefreshStateRef = useRef<{
     agentId: string | null
     running: boolean
@@ -1297,6 +1320,7 @@ export function AgentChatPage({
     pageCount: timelineQuery.data?.pages?.length ?? 0,
     setAutoScrollPinned,
     switchingAgentId,
+    targetMessageId: messageAnchorId,
   })
   const pinnedAtSuspendRef = useRef(autoScrollPinned)
   const resumeBackfillInFlightRef = useRef<Promise<void> | null>(null)
@@ -1750,6 +1774,7 @@ export function AgentChatPage({
   const openAgentChat = useCallback(
     (nextAgentId: string, pendingMeta: Omit<AgentSwitchMeta, 'agentId'> = {}) => {
       if (nextAgentId === activeAgentIdRef.current) {
+        navigateToAgentChat(nextAgentId)
         return
       }
       const rosterEntry = rosterAgents.find((agent) => agent.id === nextAgentId)
@@ -2742,6 +2767,13 @@ export function AgentChatPage({
   }, [createAgentDisabledReason, effectiveOrganizationId, teamTemplateLaunchBusyId])
 
   const handleJumpToLatest = useCallback(() => {
+    if (messageAnchorId && typeof window !== 'undefined') {
+      const nextUrl = new URL(window.location.href)
+      nextUrl.searchParams.delete('message')
+      window.history.pushState(window.history.state, '', `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`)
+      window.dispatchEvent(new PopStateEvent('popstate'))
+      return
+    }
     const currentAgentId = activeAgentIdRef.current
     void (async () => {
       if (timelineHasMoreNewer && currentAgentId) {
@@ -2750,7 +2782,7 @@ export function AgentChatPage({
       }
       pinAndJumpToBottom()
     })()
-  }, [pinAndJumpToBottom, syncLatestTimeline, timelineHasMoreNewer])
+  }, [messageAnchorId, pinAndJumpToBottom, syncLatestTimeline, timelineHasMoreNewer])
 
   const handleComposerFocus = useCallback(() => {
     scrollOnComposerFocus()
@@ -4228,7 +4260,7 @@ export function AgentChatPage({
     resolvedIsOrgOwned,
   ])
 
-  const timelineErrorMessage = timelineQuery.error
+  const timelineErrorMessage = timelineQuery.error && !messageAnchorUnavailable
     ? safeErrorMessage(timelineQuery.error, 'Unable to load agent timeline right now.')
     : null
   const topLevelError = timelineErrorMessage || (sessionStatus === 'error' ? sessionError : null)
@@ -4298,6 +4330,9 @@ export function AgentChatPage({
     >
       {topLevelError ? (
         <div className="mx-auto w-full max-w-3xl px-4 py-2 text-sm text-rose-600">{topLevelError}</div>
+      ) : null}
+      {messageAnchorUnavailable ? (
+        <div className="mx-auto w-full max-w-3xl px-4 py-2 text-sm text-amber-700">Message unavailable. Showing the latest conversation.</div>
       ) : null}
       {intelligenceGate ? (
         <AgentIntelligenceGateModal
