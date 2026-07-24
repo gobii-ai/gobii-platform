@@ -23,9 +23,9 @@ def get_send_discord_message_tool() -> Dict[str, Any]:
         "function": {
             "name": "send_discord_message",
             "description": (
-                "Send this agent's requested, owned contribution to a subscribed Discord channel. Include others' work "
-                "only when this agent's charter or request owns the aggregation, and attribute it; separate assignments "
-                "are not synthesis."
+                "Send only this agent's requested, owned contribution to a subscribed Discord channel. Do not answer for "
+                "an addressed actor, echo their visible status, supervise, or add instructions. Include others' work only "
+                "for charter/request-owned aggregation, attributed; separate assignments are not synthesis."
             ),
             "parameters": {
                 "type": "object",

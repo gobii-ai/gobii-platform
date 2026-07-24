@@ -193,7 +193,7 @@ class CharterRecordsCliGithubSecretsCorrectionScenario(CharterMemoryScenario):
     description = "A correction about configured GitHub App secrets should become durable CLI workflow guidance."
     tasks = [
         ScenarioTask(name="inject_prompt", assertion_type="manual"),
-        ScenarioTask(name="verify_cli_secret_workflow_saved", assertion_type="manual"),
+        ScenarioTask(name="verify_cli_secret_workflow_saved", assertion_type="llm_judge"),
     ]
     existing_charter = GITHUB_DOCS_EXISTING_CHARTER
     prior_outbound_body = (
@@ -204,6 +204,11 @@ class CharterRecordsCliGithubSecretsCorrectionScenario(CharterMemoryScenario):
     verification_task_name = "verify_cli_secret_workflow_saved"
     success_summary = "Agent saved the configured GitHub App secret route without weakening the existing PR workflow."
     failure_summary = "Expected one targeted charter patch preserving the docs workflow and recording CLI secret access"
+    semantic_judge_question = (
+        "Does the updated charter preserve the documentation branch, pull-request, reviewer, assignee, and "
+        "no-auto-merge workflow while recording that available GitHub secrets authorize command-line GitHub "
+        "work even when the native integration is disconnected?"
+    )
 
     def _eval_stop_policy(self):
         policy = super()._eval_stop_policy()
@@ -215,33 +220,14 @@ class CharterRecordsCliGithubSecretsCorrectionScenario(CharterMemoryScenario):
         seed_github_app_env_var_secrets(agent_id)
 
     def _charter_check(self, agent, mutation_calls):
-        charter = (agent.charter or "").casefold()
         sql = "\n".join(json.dumps(call.tool_params or {}) for call in mutation_calls).casefold()
-        preserved_workflow = all(
-            term in charter
-            for term in (
-                "documentation",
-                "branch",
-                "pull request",
-                "reviewer",
-                "assignee",
-                "never merge",
-                "command-line git",
-            )
-        )
-        records_secret_route = (
-            "github app" in charter
-            and any(term in charter for term in ("secret", "credential", "environment"))
-            and any(term in charter for term in ("cli", "command-line", "command line", "git"))
-        )
         used_one_patch = len(mutation_calls) == 1 and "patch_text" in sql
         blocks_valid_path = github_guidance_blocks_configured_cli_path(agent.charter)
-        passed = used_one_patch and preserved_workflow and records_secret_route and not blocks_valid_path
+        passed = used_one_patch and agent.charter != self.existing_charter and not blocks_valid_path
         return (
             passed,
             (
                 f"mutation_count={len(mutation_calls)}, used_patch={used_one_patch}, "
-                f"preserved_workflow={preserved_workflow}, records_secret_route={records_secret_route}, "
                 f"blocks_valid_path={blocks_valid_path}, charter={agent.charter!r}."
             ),
         )

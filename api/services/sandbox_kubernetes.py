@@ -702,6 +702,26 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
         except ValueError:
             return {"status": "error", "message": "Sandbox proxy returned invalid JSON."}
 
+    def sqlite_rsync(
+        self,
+        agent,
+        session: AgentComputeSession,
+        *,
+        local_db_path: str,
+        direction: str,
+    ) -> Dict[str, Any]:
+        from api.services.sandbox_sqlite_rsync import run_sqlite_rsync, sqlite_rsync_websocket_url
+
+        service_name = _sandbox_service_name(agent.id)
+        base_url = _sandbox_service_url(self._namespace, service_name, "")
+        return run_sqlite_rsync(
+            websocket_url=sqlite_rsync_websocket_url(base_url),
+            token=self._compute_api_token,
+            agent_id=str(agent.id),
+            local_db_path=local_db_path,
+            direction=direction,
+        )
+
     def _get_pod(self, pod_name: str) -> Optional[Dict[str, Any]]:
         try:
             return self._read_pod(pod_name)
@@ -1352,6 +1372,7 @@ def _build_pod_manifest(
     env = [
         {"name": "SANDBOX_RUNTIME_CACHE_ROOT", "value": "/runtime-cache"},
         {"name": "SANDBOX_AGENT_WORKSPACE_LAYOUT", "value": "isolated"},
+        {"name": "SANDBOX_AGENT_ID", "value": agent_id},
     ]
     env.extend(
         _build_proxy_env(

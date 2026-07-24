@@ -1,14 +1,20 @@
 import base64
 import os
+import shutil
+import signal
+import socket
 import sqlite3
+import subprocess
+import sys
 import tempfile
+import time
 from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.db.models import Max
-from django.test import TestCase, tag
+from django.test import TestCase, override_settings, tag
 from django.utils import timezone
 
 from api.agent.files.filespace_service import write_bytes_to_dir
@@ -21,6 +27,7 @@ from api.models import (
     PersistentAgentSecret,
 )
 from api.services.sandbox_compute import (
+    LocalSandboxBackend,
     SandboxComputeService,
     SandboxComputeUnavailable,
     SandboxSessionUpdate,
@@ -28,8 +35,10 @@ from api.services.sandbox_compute import (
     _post_sync_queue_key,
     custom_tool_workspace_root_for_backend,
 )
+from api.services.sandbox_sqlite_rsync import run_sqlite_rsync
 from api.services.sandbox_internal_paths import (
     CUSTOM_TOOL_SQLITE_FILESPACE_PATH,
+    GOBII_AGENT_SQLITE_PATH_ENV,
     custom_tool_sqlite_workspace_path,
     is_sandbox_internal_path,
 )
@@ -48,6 +57,8 @@ class _DummyBackend:
         self.snapshot_calls: list[dict] = []
         self.terminate_calls: list[dict] = []
         self.delete_resource_calls: list[dict] = []
+        self.sqlite_rsync_calls: list[dict] = []
+        self.sqlite_rsync_handler = None
 
     def deploy_or_resume(self, agent, session):
         self.deploy_calls.append(
@@ -149,6 +160,17 @@ class _DummyBackend:
         }
         self.delete_resource_calls.append(call)
         return {"status": "ok", "actions": []}
+
+    def sqlite_rsync(self, agent, session, *, local_db_path, direction):
+        call = {
+            "agent_id": str(agent.id),
+            "local_db_path": local_db_path,
+            "direction": direction,
+        }
+        self.sqlite_rsync_calls.append(call)
+        if self.sqlite_rsync_handler is not None:
+            return self.sqlite_rsync_handler(call)
+        return {"status": "ok", "duration_ms": 1, "wire_bytes": 128}
 
 
 @tag("batch_agent_lifecycle")
@@ -786,17 +808,7 @@ class SandboxComputeSyncTests(TestCase):
             )
 
             self.assertEqual(result.get("status"), "ok")
-            self.assertEqual(
-                result.get("shared_sqlite_db"),
-                {
-                    "available": True,
-                    "same_db_as_sqlite_batch": True,
-                    "transport": "sandbox_sync",
-                    "sync_back": "ok",
-                    "deleted": False,
-                    "size_bytes": len(synced_bytes),
-                },
-            )
+            self.assertNotIn("shared_sqlite_db", result)
             conn = sqlite3.connect(db_path)
             try:
                 rows = conn.execute("SELECT coin_id, name FROM crypto_prices ORDER BY coin_id").fetchall()
@@ -828,6 +840,682 @@ class SandboxComputeSyncTests(TestCase):
         self.assertNotIn("since", push_call["payload"])
         session = AgentComputeSession.objects.get(agent=self.agent)
         self.assertIsNotNone(session.last_filespace_sync_at)
+
+    @tag("batch_sandbox_sqlite_sync")
+    @override_settings(SANDBOX_SQLITE_SYNC_MODE="rsync")
+    def test_run_command_uses_delta_sync_and_exposes_shared_sqlite_path(self):
+        backend = _DummyBackend()
+
+        def _sqlite_rsync(call):
+            if call["direction"] == "sandbox_to_worker":
+                connection = sqlite3.connect(call["local_db_path"])
+                try:
+                    connection.execute(
+                        "INSERT OR REPLACE INTO crypto_prices (coin_id, name) VALUES (?, ?)",
+                        ("sandbox", "Sandbox"),
+                    )
+                    connection.commit()
+                finally:
+                    connection.close()
+            return {"status": "ok", "duration_ms": 2, "wire_bytes": 256}
+
+        backend.sqlite_rsync_handler = _sqlite_rsync
+
+        with tempfile.TemporaryDirectory() as tmp_dir, patch(
+            "api.services.sandbox_compute.sandbox_compute_enabled",
+            return_value=True,
+        ), patch(
+            "api.services.sandbox_compute._select_proxy_for_session",
+            return_value=None,
+        ), patch(
+            "api.services.sandbox_compute.build_filespace_pull_manifest",
+            return_value={"status": "ok", "files": [], "sync_cursor": None},
+        ), patch(
+            "api.services.sandbox_compute._sync_on_run_command",
+            return_value=False,
+        ):
+            db_path = f"{tmp_dir}/state.db"
+            self._create_sqlite_db_file(db_path, rows=[("worker", "Worker")])
+            result = SandboxComputeService(backend=backend).run_command(
+                self.agent,
+                "sqlite3 \"$GOBII_AGENT_SQLITE_PATH\" 'select count(*) from crypto_prices'",
+                local_sqlite_db_path=db_path,
+            )
+
+            connection = sqlite3.connect(db_path)
+            try:
+                rows = connection.execute(
+                    "SELECT coin_id, name FROM crypto_prices ORDER BY coin_id"
+                ).fetchall()
+            finally:
+                connection.close()
+
+        self.assertEqual(result.get("status"), "ok")
+        self.assertEqual(
+            [call["direction"] for call in backend.sqlite_rsync_calls],
+            ["worker_to_sandbox", "sandbox_to_worker"],
+        )
+        self.assertEqual(
+            backend.run_command_calls[0]["env"][GOBII_AGENT_SQLITE_PATH_ENV],
+            custom_tool_sqlite_workspace_path(self.agent.id),
+        )
+        self.assertNotIn("shared_sqlite_db", result)
+        self.assertEqual(rows, [("sandbox", "Sandbox"), ("worker", "Worker")])
+
+    @tag("batch_sandbox_sqlite_sync")
+    @override_settings(SANDBOX_SQLITE_SYNC_MODE="rsync")
+    def test_python_exec_syncs_commits_back_after_error_result(self):
+        backend = _DummyBackend()
+
+        def _tool_request(agent, session, tool_name, params):
+            backend.tool_calls.append(
+                {
+                    "agent_id": str(agent.id),
+                    "tool_name": tool_name,
+                    "params": params,
+                }
+            )
+            return {"status": "error", "exit_code": 1, "message": "script failed"}
+
+        def _sqlite_rsync(call):
+            if call["direction"] == "sandbox_to_worker":
+                connection = sqlite3.connect(call["local_db_path"])
+                try:
+                    connection.execute(
+                        "INSERT OR REPLACE INTO crypto_prices (coin_id, name) VALUES (?, ?)",
+                        ("committed", "Committed"),
+                    )
+                    connection.commit()
+                finally:
+                    connection.close()
+            return {"status": "ok", "duration_ms": 2, "wire_bytes": 256}
+
+        backend.tool_request = _tool_request
+        backend.sqlite_rsync_handler = _sqlite_rsync
+
+        with tempfile.TemporaryDirectory() as tmp_dir, patch(
+            "api.services.sandbox_compute.sandbox_compute_enabled",
+            return_value=True,
+        ), patch(
+            "api.services.sandbox_compute.sandbox_compute_enabled_for_agent",
+            return_value=True,
+        ), patch(
+            "api.services.sandbox_compute._select_proxy_for_session",
+            return_value=None,
+        ), patch(
+            "api.services.sandbox_compute.build_filespace_pull_manifest",
+            return_value={"status": "ok", "files": [], "sync_cursor": None},
+        ), patch(
+            "api.services.sandbox_compute._sync_on_tool_call",
+            return_value=False,
+        ):
+            db_path = f"{tmp_dir}/state.db"
+            self._create_sqlite_db_file(db_path, rows=[])
+            result = SandboxComputeService(backend=backend).tool_request(
+                self.agent,
+                "python_exec",
+                {"code": "raise RuntimeError('after commit')"},
+                local_sqlite_db_path=db_path,
+            )
+            connection = sqlite3.connect(db_path)
+            try:
+                rows = connection.execute("SELECT coin_id, name FROM crypto_prices").fetchall()
+            finally:
+                connection.close()
+
+        self.assertEqual(result.get("status"), "error")
+        self.assertEqual(rows, [("committed", "Committed")])
+        self.assertEqual(
+            backend.tool_calls[0]["params"]["env"][GOBII_AGENT_SQLITE_PATH_ENV],
+            custom_tool_sqlite_workspace_path(self.agent.id),
+        )
+        self.assertEqual(
+            [call["direction"] for call in backend.sqlite_rsync_calls],
+            ["worker_to_sandbox", "sandbox_to_worker"],
+        )
+
+    @tag("batch_sandbox_sqlite_sync")
+    @override_settings(SANDBOX_SQLITE_SYNC_MODE="rsync")
+    def test_run_command_syncs_commits_back_after_timeout_result(self):
+        backend = _DummyBackend()
+
+        def _run_command(*_args, **_kwargs):
+            return {"status": "error", "message": "Command timed out."}
+
+        def _sqlite_rsync(call):
+            if call["direction"] == "sandbox_to_worker":
+                connection = sqlite3.connect(call["local_db_path"])
+                try:
+                    connection.execute(
+                        "INSERT OR REPLACE INTO crypto_prices (coin_id, name) VALUES (?, ?)",
+                        ("before_timeout", "Before Timeout"),
+                    )
+                    connection.commit()
+                finally:
+                    connection.close()
+            return {"status": "ok", "duration_ms": 2, "wire_bytes": 256}
+
+        backend.run_command = _run_command
+        backend.sqlite_rsync_handler = _sqlite_rsync
+
+        with tempfile.TemporaryDirectory() as tmp_dir, patch(
+            "api.services.sandbox_compute.sandbox_compute_enabled",
+            return_value=True,
+        ), patch(
+            "api.services.sandbox_compute._select_proxy_for_session",
+            return_value=None,
+        ), patch(
+            "api.services.sandbox_compute.build_filespace_pull_manifest",
+            return_value={"status": "ok", "files": [], "sync_cursor": None},
+        ), patch(
+            "api.services.sandbox_compute._sync_on_run_command",
+            return_value=False,
+        ):
+            db_path = f"{tmp_dir}/state.db"
+            self._create_sqlite_db_file(db_path, rows=[])
+            result = SandboxComputeService(backend=backend).run_command(
+                self.agent,
+                "commit-then-timeout",
+                local_sqlite_db_path=db_path,
+            )
+            connection = sqlite3.connect(db_path)
+            try:
+                rows = connection.execute("SELECT coin_id, name FROM crypto_prices").fetchall()
+            finally:
+                connection.close()
+
+        self.assertEqual(result.get("status"), "error")
+        self.assertEqual(rows, [("before_timeout", "Before Timeout")])
+        self.assertEqual(
+            [call["direction"] for call in backend.sqlite_rsync_calls],
+            ["worker_to_sandbox", "sandbox_to_worker"],
+        )
+
+    @tag("batch_sandbox_sqlite_sync")
+    @override_settings(SANDBOX_SQLITE_SYNC_MODE="rsync")
+    def test_run_command_syncs_commits_back_after_backend_exception(self):
+        backend = _DummyBackend()
+
+        def _run_command(*_args, **_kwargs):
+            raise RuntimeError("backend disconnected")
+
+        def _sqlite_rsync(call):
+            if call["direction"] == "sandbox_to_worker":
+                connection = sqlite3.connect(call["local_db_path"])
+                try:
+                    connection.execute(
+                        "INSERT OR REPLACE INTO crypto_prices (coin_id, name) VALUES (?, ?)",
+                        ("before_exception", "Before Exception"),
+                    )
+                    connection.commit()
+                finally:
+                    connection.close()
+            return {"status": "ok", "duration_ms": 2, "wire_bytes": 256}
+
+        backend.run_command = _run_command
+        backend.sqlite_rsync_handler = _sqlite_rsync
+
+        with tempfile.TemporaryDirectory() as tmp_dir, patch(
+            "api.services.sandbox_compute.sandbox_compute_enabled",
+            return_value=True,
+        ), patch(
+            "api.services.sandbox_compute._select_proxy_for_session",
+            return_value=None,
+        ), patch(
+            "api.services.sandbox_compute.build_filespace_pull_manifest",
+            return_value={"status": "ok", "files": [], "sync_cursor": None},
+        ):
+            db_path = f"{tmp_dir}/state.db"
+            self._create_sqlite_db_file(db_path, rows=[])
+            with self.assertRaisesRegex(RuntimeError, "backend disconnected"):
+                SandboxComputeService(backend=backend).run_command(
+                    self.agent,
+                    "commit-then-disconnect",
+                    local_sqlite_db_path=db_path,
+                )
+            connection = sqlite3.connect(db_path)
+            try:
+                rows = connection.execute("SELECT coin_id, name FROM crypto_prices").fetchall()
+            finally:
+                connection.close()
+
+        self.assertEqual(rows, [("before_exception", "Before Exception")])
+        self.assertEqual(
+            [call["direction"] for call in backend.sqlite_rsync_calls],
+            ["worker_to_sandbox", "sandbox_to_worker"],
+        )
+
+    @tag("batch_sandbox_sqlite_sync")
+    @override_settings(SANDBOX_SQLITE_SYNC_MODE="rsync_with_fallback")
+    def test_rsync_failure_falls_back_to_snapshot_in_both_directions(self):
+        backend = _DummyBackend()
+        synced_bytes = self._sqlite_bytes(rows=[("fallback", "Fallback")])
+        backend.sqlite_rsync_handler = lambda _call: {
+            "status": "error",
+            "message": "websocket unavailable",
+        }
+
+        def _sync_filespace(agent, session, *, direction, payload=None):
+            backend.sync_calls.append(
+                {
+                    "agent_id": str(agent.id),
+                    "direction": direction,
+                    "payload": payload or {},
+                }
+            )
+            if direction == "push":
+                return {
+                    "status": "ok",
+                    "changes": [
+                        {
+                            "path": CUSTOM_TOOL_SQLITE_FILESPACE_PATH,
+                            "content_b64": base64.b64encode(synced_bytes).decode("ascii"),
+                            "mime_type": "application/vnd.sqlite3",
+                        }
+                    ],
+                }
+            return {"status": "ok", "applied": 1, "skipped": 0, "conflicts": 0}
+
+        backend.sync_filespace = _sync_filespace
+
+        with tempfile.TemporaryDirectory() as tmp_dir, patch(
+            "api.services.sandbox_compute.sandbox_compute_enabled",
+            return_value=True,
+        ), patch(
+            "api.services.sandbox_compute._select_proxy_for_session",
+            return_value=None,
+        ), patch(
+            "api.services.sandbox_compute.build_filespace_pull_manifest",
+            return_value={"status": "ok", "files": [], "sync_cursor": None},
+        ), patch(
+            "api.services.sandbox_compute._sync_on_run_command",
+            return_value=False,
+        ):
+            db_path = f"{tmp_dir}/state.db"
+            self._create_sqlite_db_file(db_path, rows=[("worker", "Worker")])
+            result = SandboxComputeService(backend=backend).run_command(
+                self.agent,
+                "echo fallback",
+                local_sqlite_db_path=db_path,
+            )
+            connection = sqlite3.connect(db_path)
+            try:
+                rows = connection.execute("SELECT coin_id, name FROM crypto_prices").fetchall()
+            finally:
+                connection.close()
+
+        self.assertEqual(result.get("status"), "ok")
+        self.assertNotIn("shared_sqlite_db", result)
+        self.assertEqual(rows, [("fallback", "Fallback")])
+        self.assertEqual(
+            [call["direction"] for call in backend.sqlite_rsync_calls],
+            ["worker_to_sandbox", "sandbox_to_worker", "sandbox_to_worker"],
+        )
+
+    @tag("batch_sandbox_sqlite_sync")
+    @override_settings(SANDBOX_SQLITE_SYNC_MODE="rsync")
+    def test_pre_sync_failure_prevents_execution(self):
+        backend = _DummyBackend()
+        backend.sqlite_rsync_handler = lambda _call: {
+            "status": "error",
+            "message": "pre-sync unavailable",
+        }
+
+        with tempfile.TemporaryDirectory() as tmp_dir, patch(
+            "api.services.sandbox_compute.sandbox_compute_enabled",
+            return_value=True,
+        ), patch(
+            "api.services.sandbox_compute._select_proxy_for_session",
+            return_value=None,
+        ), patch(
+            "api.services.sandbox_compute.build_filespace_pull_manifest",
+            return_value={"status": "ok", "files": [], "sync_cursor": None},
+        ):
+            db_path = f"{tmp_dir}/state.db"
+            self._create_sqlite_db_file(db_path, rows=[("worker", "Worker")])
+            result = SandboxComputeService(backend=backend).run_command(
+                self.agent,
+                "echo should-not-run",
+                local_sqlite_db_path=db_path,
+            )
+
+        self.assertEqual(result.get("status"), "error")
+        self.assertEqual(backend.run_command_calls, [])
+        self.assertEqual(
+            [call["direction"] for call in backend.sqlite_rsync_calls],
+            ["worker_to_sandbox"],
+        )
+
+    @tag("batch_sandbox_sqlite_sync")
+    @override_settings(SANDBOX_SQLITE_SYNC_MODE="rsync")
+    def test_total_post_sync_failure_preserves_canonical_worker_database(self):
+        backend = _DummyBackend()
+
+        def _sqlite_rsync(call):
+            if call["direction"] == "worker_to_sandbox":
+                return {"status": "ok", "duration_ms": 2, "wire_bytes": 256}
+            connection = sqlite3.connect(call["local_db_path"])
+            try:
+                connection.execute(
+                    "INSERT OR REPLACE INTO crypto_prices (coin_id, name) VALUES (?, ?)",
+                    ("partial", "Partial"),
+                )
+                connection.commit()
+            finally:
+                connection.close()
+            return {"status": "error", "message": "post-sync unavailable"}
+
+        backend.sqlite_rsync_handler = _sqlite_rsync
+
+        with tempfile.TemporaryDirectory() as tmp_dir, patch(
+            "api.services.sandbox_compute.sandbox_compute_enabled",
+            return_value=True,
+        ), patch(
+            "api.services.sandbox_compute._select_proxy_for_session",
+            return_value=None,
+        ), patch(
+            "api.services.sandbox_compute.build_filespace_pull_manifest",
+            return_value={"status": "ok", "files": [], "sync_cursor": None},
+        ), patch(
+            "api.services.sandbox_compute._sync_on_run_command",
+            return_value=False,
+        ):
+            db_path = f"{tmp_dir}/state.db"
+            self._create_sqlite_db_file(db_path, rows=[("worker", "Worker")])
+            result = SandboxComputeService(backend=backend).run_command(
+                self.agent,
+                "echo ran",
+                local_sqlite_db_path=db_path,
+            )
+            connection = sqlite3.connect(db_path)
+            try:
+                rows = connection.execute(
+                    "SELECT coin_id, name FROM crypto_prices ORDER BY coin_id"
+                ).fetchall()
+            finally:
+                connection.close()
+
+        self.assertEqual(result.get("status"), "error")
+        self.assertEqual(result.get("execution_status"), "ok")
+        self.assertEqual(result.get("stdout"), "ran: echo ran")
+        self.assertEqual(result.get("error_code"), "sqlite_sync_failed")
+        self.assertEqual(rows, [("worker", "Worker")])
+        self.assertEqual(
+            [call["direction"] for call in backend.sqlite_rsync_calls],
+            ["worker_to_sandbox", "sandbox_to_worker", "sandbox_to_worker"],
+        )
+
+    @tag("batch_sandbox_sqlite_sync")
+    @override_settings(SANDBOX_SQLITE_SYNC_MODE="snapshot")
+    def test_deleted_sandbox_database_does_not_delete_canonical_worker_database(self):
+        backend = _DummyBackend()
+
+        def _sync_filespace(agent, session, *, direction, payload=None):
+            backend.sync_calls.append(
+                {
+                    "agent_id": str(agent.id),
+                    "direction": direction,
+                    "payload": payload or {},
+                }
+            )
+            if direction == "push":
+                return {
+                    "status": "ok",
+                    "changes": [
+                        {
+                            "path": CUSTOM_TOOL_SQLITE_FILESPACE_PATH,
+                            "is_deleted": True,
+                        }
+                    ],
+                }
+            return {"status": "ok", "applied": 1, "skipped": 0, "conflicts": 0}
+
+        backend.sync_filespace = _sync_filespace
+
+        with tempfile.TemporaryDirectory() as tmp_dir, patch(
+            "api.services.sandbox_compute.sandbox_compute_enabled",
+            return_value=True,
+        ), patch(
+            "api.services.sandbox_compute._select_proxy_for_session",
+            return_value=None,
+        ), patch(
+            "api.services.sandbox_compute.build_filespace_pull_manifest",
+            return_value={"status": "ok", "files": [], "sync_cursor": None},
+        ), patch(
+            "api.services.sandbox_compute._sync_on_run_command",
+            return_value=False,
+        ):
+            db_path = f"{tmp_dir}/state.db"
+            self._create_sqlite_db_file(db_path, rows=[("worker", "Worker")])
+            result = SandboxComputeService(backend=backend).run_command(
+                self.agent,
+                "rm \"$GOBII_AGENT_SQLITE_PATH\"",
+                local_sqlite_db_path=db_path,
+            )
+            connection = sqlite3.connect(db_path)
+            try:
+                rows = connection.execute("SELECT coin_id, name FROM crypto_prices").fetchall()
+            finally:
+                connection.close()
+
+        self.assertEqual(result.get("status"), "error")
+        self.assertIn("deleted", result.get("message", "").lower())
+        self.assertEqual(rows, [("worker", "Worker")])
+
+    @tag("batch_sandbox_sqlite_sync")
+    def test_local_run_command_and_python_exec_share_worker_database_without_sync(self):
+        with tempfile.TemporaryDirectory() as tmp_dir, patch(
+            "api.services.sandbox_compute.sandbox_compute_enabled",
+            return_value=True,
+        ), patch(
+            "api.services.sandbox_compute.sandbox_compute_enabled_for_agent",
+            return_value=True,
+        ), patch(
+            "api.services.sandbox_compute._select_proxy_for_session",
+            return_value=None,
+        ), patch(
+            "api.services.sandbox_compute._sync_on_run_command",
+            return_value=False,
+        ), patch(
+            "api.services.sandbox_compute._sync_on_tool_call",
+            return_value=False,
+        ):
+            db_path = f"{tmp_dir}/state.db"
+            self._create_sqlite_db_file(db_path, rows=[("sqlite_batch", "SQLite Batch")])
+            service = SandboxComputeService(backend=LocalSandboxBackend())
+            command_result = service.run_command(
+                self.agent,
+                (
+                    "python -c 'import os, sqlite3; "
+                    "c=sqlite3.connect(os.environ[\"GOBII_AGENT_SQLITE_PATH\"]); "
+                    "c.execute(\"INSERT INTO crypto_prices VALUES "
+                    "(\\\"run_command\\\", \\\"Run Command\\\")\"); c.commit(); c.close()'"
+                ),
+                local_sqlite_db_path=db_path,
+            )
+            python_result = service.tool_request(
+                self.agent,
+                "python_exec",
+                {
+                    "code": (
+                        "import os, sqlite3\n"
+                        "c=sqlite3.connect(os.environ['GOBII_AGENT_SQLITE_PATH'])\n"
+                        "c.execute(\"INSERT INTO crypto_prices VALUES ('python_exec', 'Python Exec')\")\n"
+                        "c.commit()\n"
+                        "c.close()\n"
+                    )
+                },
+                local_sqlite_db_path=db_path,
+            )
+            connection = sqlite3.connect(db_path)
+            try:
+                rows = connection.execute(
+                    "SELECT coin_id FROM crypto_prices ORDER BY coin_id"
+                ).fetchall()
+            finally:
+                connection.close()
+
+        self.assertEqual(command_result.get("status"), "ok")
+        self.assertEqual(python_result.get("status"), "ok")
+        self.assertEqual(rows, [("python_exec",), ("run_command",), ("sqlite_batch",)])
+
+    @tag("batch_sandbox_sqlite_sync")
+    def test_real_sqlite_rsync_loopback_transfers_page_delta(self):
+        binary = shutil.which("sqlite3_rsync")
+        if not binary:
+            self.skipTest("sqlite3_rsync is only available in the pinned application test image")
+
+        token = "sqlite-rsync-loopback-token"
+        transport = os.path.abspath("api/services/sqlite_rsync_ssh.py")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            worker_db = f"{tmp_dir}/worker.sqlite3"
+            connection = sqlite3.connect(worker_db)
+            try:
+                connection.execute("PRAGMA page_size=8192;")
+                connection.execute("CREATE TABLE payloads (id INTEGER PRIMARY KEY, body BLOB)")
+                connection.executemany(
+                    "INSERT INTO payloads (body) VALUES (?)",
+                    [(os.urandom(2048),) for _ in range(1024)],
+                )
+                connection.commit()
+            finally:
+                connection.close()
+
+            port_socket = socket.socket()
+            port_socket.bind(("127.0.0.1", 0))
+            port = port_socket.getsockname()[1]
+            port_socket.close()
+            server_env = os.environ.copy()
+            server_env.update(
+                {
+                    "SANDBOX_WORKSPACE_ROOT": f"{tmp_dir}/sandbox",
+                    "SANDBOX_COMPUTE_API_TOKEN": token,
+                    "SANDBOX_SQLITE_RSYNC_BINARY": binary,
+                }
+            )
+            server = subprocess.Popen(
+                [
+                    sys.executable,
+                    "-m",
+                    "uvicorn",
+                    "sandbox_server.asgi:application",
+                    "--host",
+                    "127.0.0.1",
+                    "--port",
+                    str(port),
+                    "--log-level",
+                    "warning",
+                ],
+                env=server_env,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                text=True,
+                start_new_session=True,
+            )
+            try:
+                deadline = time.monotonic() + 10
+                while time.monotonic() < deadline:
+                    try:
+                        with socket.create_connection(("127.0.0.1", port), timeout=0.1):
+                            break
+                    except OSError:
+                        if server.poll() is not None:
+                            self.fail(f"Loopback ASGI server exited: {server.stderr.read()}")
+                        time.sleep(0.05)
+                else:
+                    self.fail("Loopback ASGI server did not become ready")
+
+                with self.settings(
+                    SANDBOX_SQLITE_RSYNC_BINARY=binary,
+                    SANDBOX_SQLITE_RSYNC_TRANSPORT=transport,
+                    SANDBOX_SQLITE_RSYNC_TIMEOUT_SECONDS=30,
+                ):
+                    initial = run_sqlite_rsync(
+                        websocket_url=f"ws://127.0.0.1:{port}/sandbox/compute/sqlite_rsync",
+                        token=token,
+                        agent_id=str(self.agent.id),
+                        local_db_path=worker_db,
+                        direction="worker_to_sandbox",
+                    )
+                    self.assertEqual(initial.get("status"), "ok", initial)
+
+                    connection = sqlite3.connect(worker_db)
+                    try:
+                        connection.execute(
+                            "UPDATE payloads SET body = ? WHERE id = 512",
+                            (os.urandom(2048),),
+                        )
+                        connection.commit()
+                    finally:
+                        connection.close()
+                    delta = run_sqlite_rsync(
+                        websocket_url=f"ws://127.0.0.1:{port}/sandbox/compute/sqlite_rsync",
+                        token=token,
+                        agent_id=str(self.agent.id),
+                        local_db_path=worker_db,
+                        direction="worker_to_sandbox",
+                    )
+                    self.assertEqual(delta.get("status"), "ok", delta)
+                    self.assertLess(delta["wire_bytes"], os.path.getsize(worker_db) // 10)
+
+                    sandbox_db = (
+                        f"{tmp_dir}/sandbox/{self.agent.id}"
+                        f"{CUSTOM_TOOL_SQLITE_FILESPACE_PATH}"
+                    )
+                    connection = sqlite3.connect(sandbox_db)
+                    try:
+                        connection.execute("PRAGMA journal_mode=WAL;")
+                        connection.execute(
+                            "CREATE TABLE sandbox_schema (name TEXT PRIMARY KEY)"
+                        )
+                        connection.execute(
+                            "INSERT INTO sandbox_schema (name) VALUES (?)",
+                            ("schema-change",),
+                        )
+                        connection.execute(
+                            "INSERT INTO payloads (body) VALUES (?)",
+                            (b"sandbox-write",),
+                        )
+                        connection.commit()
+                    finally:
+                        connection.close()
+                    pushed = run_sqlite_rsync(
+                        websocket_url=f"ws://127.0.0.1:{port}/sandbox/compute/sqlite_rsync",
+                        token=token,
+                        agent_id=str(self.agent.id),
+                        local_db_path=worker_db,
+                        direction="sandbox_to_worker",
+                    )
+                    self.assertEqual(pushed.get("status"), "ok", pushed)
+
+                connection = sqlite3.connect(worker_db)
+                try:
+                    sandbox_rows = connection.execute(
+                        "SELECT COUNT(*) FROM payloads WHERE body = ?",
+                        (b"sandbox-write",),
+                    ).fetchone()[0]
+                    schema_rows = connection.execute(
+                        "SELECT name FROM sandbox_schema"
+                    ).fetchall()
+                    page_size = connection.execute("PRAGMA page_size").fetchone()[0]
+                finally:
+                    connection.close()
+                self.assertEqual(sandbox_rows, 1)
+                self.assertEqual(schema_rows, [("schema-change",)])
+                self.assertEqual(page_size, 8192)
+            finally:
+                try:
+                    os.killpg(server.pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
+                try:
+                    server.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    try:
+                        os.killpg(server.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    server.wait()
 
     def test_sync_custom_tool_sqlite_pull_snapshots_live_wal_database(self):
         backend = _DummyBackend()
@@ -990,7 +1678,7 @@ class SandboxComputeSyncTests(TestCase):
         self.assertEqual(rows, [("test", "Test")])
         self.assertEqual(integrity, "ok")
 
-    def test_sync_custom_tool_workspace_push_applies_exports_when_sqlite_is_deleted(self):
+    def test_sync_custom_tool_workspace_push_rejects_deleted_sqlite_and_preserves_host_db(self):
         backend = _DummyBackend()
         service = SandboxComputeService(backend=backend)
         cursor = timezone.now() - timedelta(minutes=5)
@@ -1004,21 +1692,23 @@ class SandboxComputeSyncTests(TestCase):
             db_path = handle.name
         self.addCleanup(lambda: os.path.exists(db_path) and os.remove(db_path))
         self._create_sqlite_db_file(db_path, rows=[("test", "Test")])
-        export_bytes = b"mermaid export"
+        export_bytes = b"preserve this export"
+        sync_timestamp = timezone.now()
 
         def _sync_filespace(agent, session, *, direction, payload=None):
             if direction == "push":
                 return {
                     "status": "ok",
+                    "sync_timestamp": sync_timestamp.isoformat(),
                     "changes": [
                         {
                             "path": CUSTOM_TOOL_SQLITE_FILESPACE_PATH,
                             "is_deleted": True,
                         },
                         {
-                            "path": "/exports/mermaid_98928a38.png",
+                            "path": "/exports/preserved.txt",
                             "content_b64": base64.b64encode(export_bytes).decode("ascii"),
-                            "mime_type": "image/png",
+                            "mime_type": "text/plain",
                         },
                     ],
                 }
@@ -1028,13 +1718,22 @@ class SandboxComputeSyncTests(TestCase):
 
         result = service._sync_custom_tool_workspace_push(self.agent, session, db_path)
 
-        self.assertEqual(result, {"status": "ok", "sqlite_synced": True, "deleted": True})
-        self.assertFalse(os.path.exists(db_path))
-        export_node = AgentFsNode.objects.get(path="/exports/mermaid_98928a38.png")
-        self.assertEqual(export_node.mime_type, "image/png")
-        self.assertEqual(export_node.size_bytes, len(export_bytes))
+        self.assertEqual(result.get("status"), "error")
+        self.assertIn("canonical state was preserved", result.get("message", ""))
+        self.assertTrue(os.path.exists(db_path))
+        connection = sqlite3.connect(db_path)
+        try:
+            rows = connection.execute(
+                "SELECT coin_id, name FROM crypto_prices ORDER BY coin_id"
+            ).fetchall()
+        finally:
+            connection.close()
+        self.assertEqual(rows, [("test", "Test")])
+        export_node = AgentFsNode.objects.get(path="/exports/preserved.txt")
+        with export_node.content.open("rb") as handle:
+            self.assertEqual(handle.read(), export_bytes)
         session.refresh_from_db()
-        self.assertGreater(session.last_filespace_sync_at, cursor)
+        self.assertEqual(session.last_filespace_sync_at, sync_timestamp)
 
     def test_run_custom_tool_command_requires_shared_sqlite_to_sync_back(self):
         backend = _DummyBackend()
@@ -1160,17 +1859,7 @@ class SandboxComputeSyncTests(TestCase):
             )
 
         self.assertEqual(result.get("status"), "ok")
-        self.assertEqual(
-            result.get("shared_sqlite_db"),
-            {
-                "available": True,
-                "same_db_as_sqlite_batch": True,
-                "transport": "sandbox_sync",
-                "sync_back": "ok",
-                "deleted": False,
-                "size_bytes": len(synced_bytes),
-            },
-        )
+        self.assertNotIn("shared_sqlite_db", result)
         self.assertEqual(len(backend.run_command_calls), 1)
         merged_env = backend.run_command_calls[0]["env"]
         self.assertEqual(merged_env["OPENAI_API_KEY"], "from-secret")

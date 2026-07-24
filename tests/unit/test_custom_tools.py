@@ -42,6 +42,7 @@ from api.agent.tools.custom_tool_names import CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKI
 from api.agent.tools.apply_patch import execute_apply_patch
 from api.agent.tools.create_file import get_create_file_tool
 from api.agent.tools.search_tools import search_tools
+from api.agent.tools.run_command import execute_run_command
 from api.agent.tools.sqlite_batch import execute_sqlite_batch
 from api.agent.tools.sqlite_state import agent_sqlite_db
 from api.agent.tools.tool_manager import (
@@ -51,6 +52,7 @@ from api.agent.tools.tool_manager import (
     get_enabled_tool_definitions,
 )
 from api.services.native_integrations import META_ADS_PROVIDER, upsert_manual_native_integration_credentials
+from api.services.agent_sqlite_coordination import AgentSQLiteBusy
 from api.services.sandbox_internal_paths import sandbox_workspace_root_for_agent
 from api.services.sandbox_kubernetes import KubernetesSandboxBackend
 from api.services.sandbox_compute import SandboxComputeService, SandboxSessionUpdate, LocalSandboxBackend
@@ -1571,14 +1573,6 @@ def run(params, ctx):
             "status": "ok",
             "stdout": f"debug line\n{CUSTOM_TOOL_RESULT_MARKER}{{\"result\": {{\"value\": 2}}}}\n",
             "stderr": "",
-            "shared_sqlite_db": {
-                "available": True,
-                "same_db_as_sqlite_batch": True,
-                "transport": "sandbox_sync",
-                "sync_back": "ok",
-                "deleted": False,
-                "size_bytes": 123,
-            },
         }
         mock_service_cls.return_value = mock_service
 
@@ -1586,17 +1580,6 @@ def run(params, ctx):
 
         self.assertEqual(result["status"], "ok")
         self.assertEqual(result["result"], {"value": 2})
-        self.assertEqual(
-            result["shared_sqlite_db"],
-            {
-                "available": True,
-                "same_db_as_sqlite_batch": True,
-                "transport": "sandbox_sync",
-                "sync_back": "ok",
-                "deleted": False,
-                "size_bytes": 123,
-            },
-        )
         self.assertEqual(result["stdout"], "debug line")
         mock_service._ensure_session.assert_called_once_with(self.agent, source="custom_tool_source_sync")
         mock_service._sync_workspace_push.assert_called_once()
@@ -2280,6 +2263,65 @@ def run(params, ctx):
             content_type="application/json",
             HTTP_AUTHORIZATION=f"Bearer {token}",
         )
+
+    def test_sqlite_capable_sandbox_tools_report_lock_contention_as_retryable(self):
+        busy = AgentSQLiteBusy("Another SQLite-capable tool is already running for this agent.")
+
+        with patch("api.agent.tools.run_command.SandboxComputeService"), patch(
+            "api.agent.tools.run_command.get_sqlite_db_path",
+            return_value=None,
+        ), patch("api.agent.tools.run_command.agent_sqlite_db", side_effect=busy):
+            run_result = execute_run_command(self.agent, {"command": "true"})
+
+        PersistentAgentEnabledTool.objects.create(
+            agent=self.agent,
+            tool_full_name="python_exec",
+            tool_server="builtin",
+            tool_name="python_exec",
+        )
+        with patch(
+            "api.agent.tools.tool_manager.sandbox_compute_enabled_for_agent",
+            return_value=True,
+        ), patch("api.agent.tools.tool_manager.SandboxComputeService"), patch(
+            "api.agent.tools.tool_manager.agent_sqlite_db",
+            side_effect=busy,
+        ):
+            python_result = execute_enabled_tool(
+                self.agent,
+                "python_exec",
+                {"code": "print('unreachable')"},
+            )
+
+        expected = {
+            "status": "error",
+            "error_code": "agent_sqlite_busy",
+            "message": str(busy),
+            "retryable": True,
+        }
+        self.assertEqual(run_result, expected)
+        self.assertEqual(python_result, expected)
+
+    @override_settings(CUSTOM_TOOL_CHILD_FAILURE_LIMIT=3)
+    def test_nested_sqlite_rejections_count_toward_child_failure_budget(self):
+        cache.clear()
+        custom_tool = self._create_bridge_custom_tool()
+        token = build_custom_tool_bridge_token(self.agent, custom_tool)
+
+        with patch(
+            "api.custom_tool_bridge.agent_sqlite_execution_is_active",
+            return_value=True,
+        ), patch("api.custom_tool_bridge.execute_tracked_runtime_tool_call") as execute_mock, patch(
+            "api.custom_tool_bridge.maybe_run_agent_judge"
+        ):
+            first = self._post_bridge_tool_call(token, tool_name="python_exec")
+            second = self._post_bridge_tool_call(token, tool_name="python_exec")
+            third = self._post_bridge_tool_call(token, tool_name="python_exec")
+
+        self.assertEqual(first.json()["error_code"], "nested_agent_sqlite_not_supported")
+        self.assertEqual(second.json()["error_code"], "nested_agent_sqlite_not_supported")
+        self.assertTrue(third.json()["custom_tool_abort"])
+        self.assertEqual(third.json()["failure_count"], 3)
+        execute_mock.assert_not_called()
 
     @override_settings(CUSTOM_TOOL_CHILD_FAILURE_LIMIT=3)
     @patch("api.custom_tool_bridge.maybe_run_agent_judge")

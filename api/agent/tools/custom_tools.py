@@ -1280,8 +1280,6 @@ def execute_custom_tool(
         "status": "ok",
         "result": parsed_result,
     }
-    if isinstance(result.get("shared_sqlite_db"), dict):
-        response["shared_sqlite_db"] = result["shared_sqlite_db"]
     if cleaned_stdout:
         response["stdout"] = cleaned_stdout
     if result.get("stderr"):

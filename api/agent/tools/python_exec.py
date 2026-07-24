@@ -10,6 +10,8 @@ def get_python_exec_tool() -> Dict[str, Any]:
                 "Execute Python code inside the agent's sandboxed compute session. "
                 "Use for quick scripts, data transforms, and calculations. "
                 "Sandbox proxy env vars and sandbox env_var secrets are already available via os.environ. "
+                "The shared agent SQLite database path is available in os.environ['GOBII_AGENT_SQLITE_PATH'] "
+                "and may be queried or updated with Python's sqlite3 module. "
                 "Supports a timeout (default 30s, max 120s)."
             ),
             "parameters": {

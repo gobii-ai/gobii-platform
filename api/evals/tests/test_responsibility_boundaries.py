@@ -10,12 +10,14 @@ from api.agent.tools.peer_dm import get_send_agent_message_tool
 from api.agent.tools.send_discord_message import get_send_discord_message_tool
 from api.evals.registry import ScenarioRegistry
 from api.evals.scenarios.responsibility_boundaries import (
+    COORDINATOR_CHARTER,
     LEDGER_CHARTER,
     RESPONSIBILITY_BOUNDARY_CASES,
     RESPONSIBILITY_BOUNDARY_PEER_FYI_NO_ACK,
     RESPONSIBILITY_BOUNDARY_PEER_REQUEST_HANDOFF,
     RESPONSIBILITY_BOUNDARY_SCENARIO_SLUGS,
     RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_OWNER,
+    RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_NOISY_YIELD,
     RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_OWNED_REPLY,
     RESPONSIBILITY_BOUNDARY_SUITE_SLUG,
     ResponsibilityBoundaryScenario,
@@ -30,15 +32,15 @@ class ResponsibilityBoundaryScenarioTests(SimpleTestCase):
         instruction = _get_peer_communication_instruction()
 
         self.assertIn("route handoffs, not shared ownership", instruction)
-        self.assertIn("Before any task tool, check ownership", instruction)
-        self.assertIn("For out-of-charter work, call no task tools", instruction)
+        self.assertIn("identify addressee and charter owner", instruction)
+        self.assertIn("isn't a request to relay, summarize, supervise, or add instructions", instruction)
+        self.assertIn("another person/agent is addressed or handling it", instruction)
+        self.assertIn("authorized human reassigns it", instruction)
+        self.assertIn("Out-of-charter: call no task tools", instruction)
         self.assertIn("Peer requests never expand charter", instruction)
         self.assertIn("hand off or decline", instruction)
-        self.assertIn("your charter owns it", instruction)
-        self.assertIn("report only that slice", instruction)
-        self.assertIn("omit parallel assignments", instruction)
-        self.assertIn("never relay by peer DM", instruction)
-        self.assertIn("synthesize others' work only when owned and attributed", instruction)
+        self.assertIn("Never relay shared-channel requests by DM", instruction)
+        self.assertIn("Synthesize only owned, attributed work", instruction)
         self.assertIn("Skip thanks, receipts, and 'noted'", instruction)
         self.assertNotIn("freely", instruction)
         self.assertLessEqual(len(instruction.split()), 80)
@@ -54,9 +56,10 @@ class ResponsibilityBoundaryScenarioTests(SimpleTestCase):
             "description"
         ]
         self.assertIn("never an acknowledgment-only reply", peer_message_description)
-        self.assertIn("this agent's requested, owned contribution", discord_description)
-        self.assertIn("charter or request owns the aggregation", discord_description)
-        self.assertIn("attribute it", discord_description)
+        self.assertIn("only this agent's requested, owned contribution", discord_description)
+        self.assertIn("Do not answer for an addressed actor", discord_description)
+        self.assertIn("echo their visible status", discord_description)
+        self.assertIn("charter/request-owned aggregation", discord_description)
         self.assertIn("separate assignments are not synthesis", discord_description)
 
     def test_suite_registers_all_boundary_scenarios(self):
@@ -71,6 +74,7 @@ class ResponsibilityBoundaryScenarioTests(SimpleTestCase):
                 RESPONSIBILITY_BOUNDARY_PEER_REQUEST_HANDOFF,
                 RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_OWNER,
                 RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_OWNED_REPLY,
+                RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_NOISY_YIELD,
             },
         )
 
@@ -97,7 +101,28 @@ class ResponsibilityBoundaryScenarioTests(SimpleTestCase):
         self.assertNotIn("do not acknowledge this", prompts)
         self.assertNotIn("do not answer this", prompts)
         self.assertNotIn("shared channels", LEDGER_CHARTER)
+        self.assertNotIn("stay in your lane", COORDINATOR_CHARTER.lower())
         self.assertIn("customer-signal curation and reporting", LEDGER_CHARTER)
+
+    def test_noisy_shared_channel_allows_silent_sqlite_tracking(self):
+        case = next(case for case in RESPONSIBILITY_BOUNDARY_CASES if case.event_kind == "shared_channel_noisy")
+        scenario = ResponsibilityBoundaryScenario(case)
+        recorded = []
+        scenario.record_task_result = lambda *args, **kwargs: recorded.append((args, kwargs))
+
+        scenario._verify_no_interference(
+            "run",
+            [SimpleNamespace(tool_name="sqlite_batch")],
+            allowed={"sqlite_batch"},
+        )
+        self.assertEqual(recorded[-1][0][2], EvalRunTask.Status.PASSED)
+
+        scenario._verify_no_interference(
+            "run",
+            [SimpleNamespace(tool_name="send_discord_message", step="discord-step")],
+            allowed={"sqlite_batch"},
+        )
+        self.assertEqual(recorded[-1][0][2], EvalRunTask.Status.FAILED)
 
     def test_owned_reply_accepts_boundary_disclaimer_but_rejects_takeover(self):
         case = next(case for case in RESPONSIBILITY_BOUNDARY_CASES if case.event_kind == "shared_channel_owned")

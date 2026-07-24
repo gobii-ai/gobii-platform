@@ -34,6 +34,7 @@ from api.evals.scenarios.behavior_micro import (
     CHARTER_PATCHES_EVALUATIVE_OUTPUT_FEEDBACK,
     CHARTER_IGNORES_BATCH_SCOPED_PREFERENCE,
     CHARTER_JUDGE_PRESERVES_CLI_GITHUB_SECRET_WORKFLOW,
+    CHARTER_INTERPRETS_ROLE_BOUNDARY_CORRECTION,
     CHARTER_MEMORY_MICRO_SCENARIO_SLUGS,
     CHARTER_NARROWS_SCOPE_PRESERVING_UNRELATED_GUIDANCE,
     CHARTER_RECORDS_CLI_GITHUB_SECRETS_CORRECTION,
@@ -139,6 +140,7 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
             CHARTER_ADDS_FEEDBACK_RULE_FROM_CORRECTION,
             CHARTER_ADDS_PLAIN_PREFERENCE_WITHOUT_SAVE_WORD,
             CHARTER_PATCHES_DIRECT_STYLE_CORRECTION,
+            CHARTER_INTERPRETS_ROLE_BOUNDARY_CORRECTION,
             CHARTER_RECORDS_CLI_GITHUB_SECRETS_CORRECTION,
             CHARTER_JUDGE_PRESERVES_CLI_GITHUB_SECRET_WORKFLOW,
         ):
@@ -149,6 +151,7 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
             CHARTER_IGNORES_BATCH_SCOPED_PREFERENCE,
             CHARTER_PATCHES_EVALUATIVE_OUTPUT_FEEDBACK,
             CHARTER_INTERPRETS_AMBIGUOUS_OPERATING_FEEDBACK,
+            CHARTER_INTERPRETS_ROLE_BOUNDARY_CORRECTION,
         ):
             prompt = ScenarioRegistry.get(slug).prompt.casefold()
             for forbidden in ("charter", "sqlite", "patch_text", "save this", "update your instructions"):
@@ -901,35 +904,56 @@ class BehaviorMicroHelperTests(TestCase):
         self.assertFalse(no_patch_passed, no_patch_detail)
         self.assertFalse(harmful_passed, harmful_detail)
 
-    def test_charter_feedback_checks_preserve_scope_and_semantic_direction(self):
-        link = ScenarioRegistry.get(CHARTER_ADDS_FEEDBACK_RULE_FROM_CORRECTION)
-        link_rule = "Include a verified profile URL for every candidate."
-        self._assert_charter_cases(
-            link.slug,
-            old="",
-            new=link_rule,
-            passing=[link.existing_charter + " " + link_rule,
-                     link.existing_charter + " Never send candidate reports without verified source links."],
-            failing=[
-                link.existing_charter + " Never include profile URLs in candidate reports.",
-                link.existing_charter + " Always include candidate URLs, even if unavailable or unverified.",
-                link.existing_charter + " Always include a profile URL for every candidate.",
-                link_rule,
-            ],
-        )
+    def test_semantic_charter_requirements_use_llm_judges_not_word_lists(self):
+        inbound = SimpleNamespace(timestamp=timezone.now())
+        for slug in (
+            CHARTER_ADDS_DURABLE_PREFERENCE_PRESERVING_EXISTING,
+            CHARTER_ADDS_FEEDBACK_RULE_FROM_CORRECTION,
+            CHARTER_PATCHES_DIRECT_STYLE_CORRECTION,
+            CHARTER_INTERPRETS_ROLE_BOUNDARY_CORRECTION,
+            CHARTER_RECORDS_CLI_GITHUB_SECRETS_CORRECTION,
+        ):
+            scenario = ScenarioRegistry.get(slug)
+            verification = next(task for task in scenario.tasks if task.name == scenario.verification_task_name)
+            self.assertEqual(verification.assertion_type, "llm_judge")
 
-        style = ScenarioRegistry.get(CHARTER_PATCHES_DIRECT_STYLE_CORRECTION)
-        style_rule = "Keep messages conversational and avoid automated templates. Do not use dashes or hyphens."
-        self._assert_charter_cases(
-            style.slug,
-            old="",
-            new=style_rule,
-            passing=[style.existing_charter + " " + style_rule],
-            failing=[
-                style.existing_charter + " Keep messages natural, use automated templates, and include dashes.",
-                style_rule,
-            ],
-        )
+            scenario.llm_judge = MagicMock(
+                return_value=("Semantically correct", "The intent is preserved without relying on exact wording.")
+            )
+            passed, detail = scenario._semantic_charter_check(
+                SimpleNamespace(charter="A concise paraphrase of the intended durable behavior."),
+                self.run.id,
+                inbound,
+            )
+            self.assertTrue(passed, detail)
+            judge_call = scenario.llm_judge.call_args.kwargs
+            self.assertIn("not the presence of exact words", judge_call["question"])
+            self.assertIn("Updated charter:", judge_call["context"])
+
+            scenario.llm_judge.return_value = ("Incorrect or incomplete", "The meaning was reversed.")
+            passed, detail = scenario._semantic_charter_check(
+                SimpleNamespace(charter="A harmful reversal."),
+                self.run.id,
+                inbound,
+            )
+            self.assertFalse(passed, detail)
+
+    def test_semantic_charter_checks_still_require_one_focused_patch(self):
+        for slug in (
+            CHARTER_ADDS_FEEDBACK_RULE_FROM_CORRECTION,
+            CHARTER_PATCHES_DIRECT_STYLE_CORRECTION,
+            CHARTER_INTERPRETS_ROLE_BOUNDARY_CORRECTION,
+        ):
+            scenario = ScenarioRegistry.get(slug)
+            rule = "Apply the durable correction."
+            agent = SimpleNamespace(charter=scenario.existing_charter + " " + rule)
+            call = SimpleNamespace(tool_params={"sql": self._charter_patch_sql("", rule)})
+
+            passed, detail = scenario._charter_check(agent, [call])
+            missing_patch, missing_detail = scenario._charter_check(agent, [])
+
+            self.assertTrue(passed, detail)
+            self.assertFalse(missing_patch, missing_detail)
 
     def test_evaluative_and_messy_feedback_checks_keep_unrelated_clauses(self):
         evaluative = ScenarioRegistry.get(CHARTER_PATCHES_EVALUATIVE_OUTPUT_FEEDBACK)
@@ -1801,8 +1825,15 @@ class BehaviorMicroHelperTests(TestCase):
             "will_continue_work": False,
         }
         reply.save(update_fields=["tool_params"])
-        passed, _detail = scenario._additional_charter_check(self.agent, self.run.id, inbound)
-        self.assertFalse(passed)
+        passed, detail = scenario._additional_charter_check(self.agent, self.run.id, inbound)
+        self.assertTrue(passed, detail)
+
+        scenario.llm_judge = MagicMock(
+            return_value=("Incorrect or incomplete", "This is generic template language, not a natural rewrite.")
+        )
+        passed, detail = scenario._semantic_charter_check(self.agent, self.run.id, inbound)
+        self.assertFalse(passed, detail)
+        self.assertIn("Let's work together on that.", scenario.llm_judge.call_args.kwargs["context"])
 
     def test_common_use_case_tool_calls_keep_mixed_sqlite_config_and_domain_work(self):
         mixed_batch = self._add_tool_call(

@@ -67,6 +67,7 @@ CHARTER_ADDS_PLAIN_PREFERENCE_WITHOUT_SAVE_WORD = "charter_adds_plain_preference
 CHARTER_PATCHES_DIRECT_STYLE_CORRECTION = "charter_patches_direct_style_correction"
 CHARTER_PATCHES_EVALUATIVE_OUTPUT_FEEDBACK = "charter_patches_evaluative_output_feedback"
 CHARTER_INTERPRETS_AMBIGUOUS_OPERATING_FEEDBACK = "charter_interprets_ambiguous_operating_feedback"
+CHARTER_INTERPRETS_ROLE_BOUNDARY_CORRECTION = "charter_interprets_role_boundary_correction"
 CHARTER_RECORDS_CLI_GITHUB_SECRETS_CORRECTION = "charter_records_cli_github_secrets_correction"
 CHARTER_JUDGE_PRESERVES_CLI_GITHUB_SECRET_WORKFLOW = "charter_judge_preserves_cli_github_secret_workflow"
 
@@ -386,6 +387,7 @@ CHARTER_MEMORY_MICRO_SCENARIO_SLUGS = [
     CHARTER_PATCHES_DIRECT_STYLE_CORRECTION,
     CHARTER_PATCHES_EVALUATIVE_OUTPUT_FEEDBACK,
     CHARTER_INTERPRETS_AMBIGUOUS_OPERATING_FEEDBACK,
+    CHARTER_INTERPRETS_ROLE_BOUNDARY_CORRECTION,
     CHARTER_RECORDS_CLI_GITHUB_SECRETS_CORRECTION,
     CHARTER_JUDGE_PRESERVES_CLI_GITHUB_SECRET_WORKFLOW,
 ]
@@ -1992,6 +1994,7 @@ class CharterMemoryScenario(BehaviorMicroScenario):
     expect_charter_mutation = True
     verify_feedback_reply = False
     feedback_reply_options = {}
+    semantic_judge_question = ""
 
     def _eval_stop_policy(self):
         if self.expect_charter_mutation:
@@ -2098,6 +2101,30 @@ class CharterMemoryScenario(BehaviorMicroScenario):
             **self.feedback_reply_options,
         )
 
+    def _semantic_charter_check(self, agent, run_id, inbound):
+        if not self.semantic_judge_question:
+            return True, ""
+        replies = get_tool_calls_for_run(
+            run_id,
+            after=inbound.timestamp,
+            tool_names=["send_chat_message"],
+        )
+        reply = str(resolved_tool_param(replies[-1], "body") or "") if replies else ""
+        choice, reasoning = self.llm_judge(
+            question=(
+                f"{self.semantic_judge_question} Judge the meaning, not the presence of exact words or phrases."
+            ),
+            context=(
+                f"Original charter:\n{self.existing_charter}\n\n"
+                f"Prior agent output:\n{self.prior_outbound_body or '(none)'}\n\n"
+                f"User feedback:\n{self.prompt}\n\n"
+                f"Updated charter:\n{agent.charter or ''}\n\n"
+                f"Agent reply:\n{reply or '(none)'}"
+            ),
+            options=["Semantically correct", "Incorrect or incomplete"],
+        )
+        return choice == "Semantically correct", f"semantic_judge={choice}: {reasoning}"
+
     def run(self, run_id, agent_id):
         self._seed_charter_agent(agent_id)
         inbound = self._inject_charter_prompt(run_id, agent_id)
@@ -2131,6 +2158,11 @@ class CharterMemoryScenario(BehaviorMicroScenario):
         if additional_detail:
             failure_detail = "; ".join(detail for detail in (failure_detail, additional_detail) if detail)
         if passed:
+            semantic_passed, semantic_detail = self._semantic_charter_check(agent, run_id, inbound)
+            passed = semantic_passed
+            if semantic_detail:
+                failure_detail = "; ".join(detail for detail in (failure_detail, semantic_detail) if detail)
+        if passed:
             artifacts = {"step": mutation_calls[0].step} if mutation_calls else {}
             self.record_task_result(
                 run_id,
@@ -2161,22 +2193,20 @@ class CharterAddsDurablePreferencePreservingExistingScenario(CharterMemoryScenar
     description = "Durable user preferences should be merged into the charter without dropping existing guidance."
     tasks = [
         ScenarioTask(name="inject_prompt", assertion_type="manual"),
-        ScenarioTask(name="verify_charter_update_preserved_existing", assertion_type="manual"),
+        ScenarioTask(name="verify_charter_update_preserved_existing", assertion_type="llm_judge"),
     ]
     existing_charter = "Monitor AI funding news weekly. Prefer concise section titles in reports."
     prompt = "For status updates, concise bullets work best for me going forward."
     verification_task_name = "verify_charter_update_preserved_existing"
     success_summary = "Agent merged the durable bullet preference into charter while preserving existing guidance."
     failure_summary = "Expected a charter update preserving existing job/guidance and adding bullets"
+    semantic_judge_question = (
+        "Does the updated charter preserve weekly AI-funding monitoring and concise section titles while adding "
+        "the durable preference for concise bulleted status updates?"
+    )
 
     def _charter_check(self, agent, mutation_calls):
-        charter = (agent.charter or "").lower()
-        preserved_job = "ai funding" in charter
-        preserved_existing_guidance = "concise section title" in charter
-        added_preference = "bullet" in charter
-        passed = bool(
-            mutation_calls and preserved_job and preserved_existing_guidance and added_preference
-        )
+        passed = len(mutation_calls) == 1 and agent.charter != self.existing_charter
         return passed, f"mutation_count={len(mutation_calls)}, charter={agent.charter!r}."
 
 
@@ -2373,35 +2403,6 @@ def _has_clause_rule(value, *pattern_groups, reject=()):
     )
 
 
-def _requires_candidate_links(value):
-    return _has_clause_rule(
-        value,
-        (r"\b(?:candidate|applicant|prospect|lead|recruit|report|update)\w*\b",),
-        (r"\b(?:links?|urls?|profiles?|citations?)\b",),
-        (r"\b(?:include|add|provide|attach|cite|link|must|should|required)\w*\b", r"\bnever\b.+\bwithout\b"),
-        (r"\b(?:verified|confirmed|known|available|sourced|source[ -]backed|evidence[ -]backed|retrieved)\b",),
-        reject=(
-            r"\b(?:do not|don't|never|omit|skip|avoid)\b.{0,35}\b(?:include|add|provide|attach|link|cite)\w*\b",
-            r"\b(?:even if|whether or not|regardless of)\b.{0,35}\b(?:unavailable|unverified|unknown|missing)\b",
-        ),
-    )
-
-
-def _requires_natural_dashless_style(value):
-    natural = _has_clause_rule(
-        value,
-        (r"\b(?:message|note|outreach|writing|style|tone|voice|copy)\w*\b",),
-        (r"\b(?:natural|human|conversational|authentic|plainspoken)\b", r"\bavoid\b.{0,25}\b(?:template|canned|robotic|automated)\w*\b"),
-        reject=(r"\b(?:use|prefer)\b.{0,25}\b(?:template|canned|robotic|automated)\w*\b",),
-    )
-    dashless = _has_clause_rule(
-        value,
-        (r"\b(?:dashes?|hyphens?)\b",),
-        (r"\b(?:avoid|never|without|omit|skip|stop|no|do not|don't)\b",),
-    )
-    return natural and dashless
-
-
 def _requires_comparison_table_takeaways(value):
     positive = (
         r"\b(?:use|prefer|include|add|provide|present|show|format|structure|organi[sz]e|summari[sz]e|"
@@ -2531,7 +2532,7 @@ class CharterAddsFeedbackRuleFromCorrectionScenario(CharterMemoryScenario):
     description = "User feedback phrased as a rule should be merged into charter without requiring explicit save wording."
     tasks = [
         ScenarioTask(name="inject_prompt", assertion_type="manual"),
-        ScenarioTask(name="verify_feedback_rule_saved", assertion_type="manual"),
+        ScenarioTask(name="verify_feedback_rule_saved", assertion_type="llm_judge"),
     ]
     existing_charter = (
         "Source qualified candidates for open roles and send structured recruiting updates with names, "
@@ -2549,13 +2550,15 @@ class CharterAddsFeedbackRuleFromCorrectionScenario(CharterMemoryScenario):
     success_summary = "Agent saved the user's correction as an ongoing report-link rule while preserving sourcing guidance."
     failure_summary = "Expected charter to preserve sourcing role and add durable lead/source link guidance"
     verify_feedback_reply = True
-    feedback_reply_options = {"required_reply_concepts": (("link", "url", "source"),)}
+    semantic_judge_question = (
+        "Does the updated charter preserve the recruiting-sourcing job and durably require known, source-backed "
+        "candidate links in updates, without requiring fabricated or unavailable URLs? Does the reply naturally "
+        "acknowledge that correction?"
+    )
 
     def _charter_check(self, agent, mutation_calls):
-        preserved_job = _keeps_clauses(agent.charter, self.existing_charter)
-        includes_link_rule = _requires_candidate_links(agent.charter)
         focused_patch = _uses_one_focused_charter_patch(mutation_calls, self.existing_charter)
-        passed = bool(focused_patch and preserved_job and includes_link_rule)
+        passed = focused_patch and agent.charter != self.existing_charter
         return passed, f"mutation_count={len(mutation_calls)}, charter={agent.charter!r}."
 
 @register_scenario
@@ -2589,7 +2592,7 @@ class CharterPatchesDirectStyleCorrectionScenario(CharterMemoryScenario):
     description = "A direct correction should trigger one partial SQLite charter patch without explicit save wording."
     tasks = [
         ScenarioTask(name="inject_prompt", assertion_type="manual"),
-        ScenarioTask(name="verify_partial_style_correction_saved", assertion_type="manual"),
+        ScenarioTask(name="verify_partial_style_correction_saved", assertion_type="llm_judge"),
     ]
     existing_charter = (
         "Research qualified prospects and send concise, personalized outreach. "
@@ -2604,13 +2607,15 @@ class CharterPatchesDirectStyleCorrectionScenario(CharterMemoryScenario):
     success_summary = "Agent used one partial SQLite patch to save the correction while preserving outreach limits."
     failure_summary = "Expected one patch_text charter mutation preserving the prospecting job and daily limit"
     verify_feedback_reply = True
-    feedback_reply_options = {"require_result": True, "required_reply_terms": ("apprenticeship",)}
+    semantic_judge_question = (
+        "Does the updated charter preserve prospect research, personalized outreach, and the daily limit while "
+        "durably requiring natural, non-template writing without em dashes or double hyphens? Is the reply an "
+        "actual natural rewrite of the prior outreach rather than a promise to rewrite it?"
+    )
 
     def _charter_check(self, agent, mutation_calls):
-        preserved = _keeps_clauses(agent.charter, self.existing_charter)
-        added_style = _requires_natural_dashless_style(agent.charter)
         used_one_patch = _uses_one_focused_charter_patch(mutation_calls, self.existing_charter)
-        passed = preserved and added_style and used_one_patch
+        passed = used_one_patch and agent.charter != self.existing_charter
         return passed, f"mutation_count={len(mutation_calls)}, used_patch={used_one_patch}, charter={agent.charter!r}."
 
 def _completion_actions_match(run_id, inbound, calls, expected_tools):
@@ -2809,6 +2814,49 @@ class CharterInterpretsAmbiguousOperatingFeedbackScenario(CharterMemoryScenario)
             and focused
         )
         return passed, f"mutation_count={len(mutation_calls)}, used_patch={used_one_patch}, charter={agent.charter!r}."
+
+
+@register_scenario
+class CharterInterpretsRoleBoundaryCorrectionScenario(CharterMemoryScenario):
+    slug = CHARTER_INTERPRETS_ROLE_BOUNDARY_CORRECTION
+    description = "Rapid human role feedback should become a durable ownership boundary, not a one-off exception."
+    tasks = [
+        ScenarioTask(name="inject_prompt", assertion_type="manual"),
+        ScenarioTask(name="verify_role_boundary_saved", assertion_type="llm_judge"),
+    ]
+    existing_charter = (
+        "Coordinate the launch team. Track infrastructure, access, and operational blockers across workstreams. "
+        "Proactively surface actionable issues. Keep a concise weekly risk digest."
+    )
+    prior_outbound_body = (
+        "@Nadia, retry the vendor import now, use batches of 50, and send me your log before posting results."
+    )
+    prompt = "Your job is tracking infrastructure and resource blockers for the team."
+    verification_task_name = "verify_role_boundary_saved"
+    success_summary = "Agent turned the terse correction into a durable observer-versus-owner boundary."
+    failure_summary = "Expected one focused patch that preserves tracking and reporting but stops directing others' work"
+    verify_feedback_reply = True
+    semantic_judge_question = (
+        "Treat the rapid feedback as the pair “That is not your job” and “Your job is tracking infrastructure "
+        "and resource blockers.” Does the updated charter preserve blocker tracking and the weekly risk digest "
+        "while removing or clearly limiting authority to direct, supervise, answer for, or perform other "
+        "people's work unless a human explicitly reassigns it? Does the reply naturally acknowledge that boundary?"
+    )
+
+    def _inject_charter_prompt(self, run_id, agent_id):
+        self.inject_message(
+            agent_id,
+            "That's not your job.",
+            trigger_processing=False,
+            eval_run_id=run_id,
+        )
+        return super()._inject_charter_prompt(run_id, agent_id)
+
+    def _charter_check(self, agent, mutation_calls):
+        focused_patch = _uses_one_focused_charter_patch(mutation_calls, self.existing_charter)
+        passed = focused_patch and agent.charter != self.existing_charter
+        return passed, f"mutation_count={len(mutation_calls)}, focused={focused_patch}, charter={agent.charter!r}."
+
 
 @register_scenario
 class ToolChoiceExactJsonUrlUsesHttpRequestScenario(BehaviorMicroScenario):

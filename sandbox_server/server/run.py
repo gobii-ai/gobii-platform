@@ -1,7 +1,10 @@
 import json
 import logging
+import os
+import signal
 import subprocess
 import sys
+import tempfile
 import time
 from typing import Any, Dict, Optional, Tuple
 
@@ -24,6 +27,57 @@ from sandbox_server.workspace import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _terminate_process_group(process: subprocess.Popen) -> None:
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except (PermissionError, ProcessLookupError):
+        return
+    time.sleep(0.05)
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except (PermissionError, ProcessLookupError):
+        pass
+
+
+def _run_managed_process(
+    command,
+    *,
+    shell: bool,
+    cwd: str,
+    env: Dict[str, str],
+    timeout: int,
+) -> subprocess.CompletedProcess:
+    with tempfile.TemporaryFile() as stdout_file, tempfile.TemporaryFile() as stderr_file:
+        process = subprocess.Popen(
+            command,
+            shell=shell,
+            cwd=cwd,
+            env=env,
+            stdout=stdout_file,
+            stderr=stderr_file,
+            start_new_session=True,
+        )
+        try:
+            process.wait(timeout=timeout)
+        except subprocess.TimeoutExpired as exc:
+            _terminate_process_group(process)
+            process.wait()
+            stdout_file.seek(0)
+            stderr_file.seek(0)
+            raise subprocess.TimeoutExpired(
+                exc.cmd,
+                exc.timeout,
+                output=stdout_file.read().decode("utf-8", errors="replace"),
+                stderr=stderr_file.read().decode("utf-8", errors="replace"),
+            ) from exc
+        _terminate_process_group(process)
+        stdout_file.seek(0)
+        stderr_file.seek(0)
+        stdout = stdout_file.read().decode("utf-8", errors="replace")
+        stderr = stderr_file.read().decode("utf-8", errors="replace")
+        return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
 
 
 def _sandbox_env_with_proxy_manifest(
@@ -131,13 +185,11 @@ def _handle_run_command(payload: Dict[str, Any]) -> Dict[str, Any]:
     )
 
     try:
-        result = subprocess.run(
+        result = _run_managed_process(
             command,
             shell=True,
             cwd=cwd,
             env=_sandbox_env_with_proxy_manifest(agent_root, env, trusted_env_keys=trusted_env_keys),
-            capture_output=True,
-            text=True,
             timeout=timeout,
         )
     except subprocess.TimeoutExpired:
@@ -217,12 +269,11 @@ def _handle_python_exec(payload: Dict[str, Any]) -> Dict[str, Any]:
         trusted_env_keys = []
 
     try:
-        result = subprocess.run(
+        result = _run_managed_process(
             [sys.executable, "-c", code],
+            shell=False,
             cwd=str(agent_root),
             env=_sandbox_env_with_proxy_manifest(agent_root, extra_env, trusted_env_keys=trusted_env_keys),
-            capture_output=True,
-            text=True,
             timeout=timeout,
         )
     except subprocess.TimeoutExpired:
