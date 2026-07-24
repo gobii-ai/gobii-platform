@@ -1,12 +1,13 @@
 import time
 from concurrent.futures import ThreadPoolExecutor
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from django.test import SimpleTestCase, tag
 
 from api.agent.tools.sqlite_state import _should_compact_sqlite
 from api.custom_tool_bridge import _nested_sqlite_tool_error
 from api.services.agent_sqlite_coordination import (
+    _extend_lease,
     agent_sqlite_execution,
     agent_sqlite_execution_is_active,
 )
@@ -40,6 +41,17 @@ class AgentSQLiteCoordinationTests(SimpleTestCase):
         with agent_sqlite_execution("agent-observable"):
             self.assertTrue(agent_sqlite_execution_is_active("agent-observable"))
         self.assertFalse(agent_sqlite_execution_is_active("agent-observable"))
+
+    def test_active_lease_is_extended_until_execution_finishes(self):
+        lock = Mock()
+        stopped = Mock()
+        stopped.wait.side_effect = [False, True]
+
+        with patch("api.services.agent_sqlite_coordination._LOCK_TIMEOUT_SECONDS", 2):
+            _extend_lease(lock, stopped)
+
+        lock.extend.assert_called_once_with()
+        self.assertEqual(stopped.wait.call_count, 2)
 
     @patch(
         "api.custom_tool_bridge.agent_sqlite_execution_is_active",

@@ -2,9 +2,7 @@ import asyncio
 import hmac
 import json
 import os
-import shutil
 import sqlite3
-import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -13,7 +11,7 @@ from sandbox_server.server.internal_paths import CUSTOM_TOOL_SQLITE_FILESPACE_PA
 
 SQLITE_RSYNC_WEBSOCKET_PATH = "/sandbox/compute/sqlite_rsync"
 _CHUNK_BYTES = 64 * 1024
-_AGENT_LOCKS: dict[str, asyncio.Lock] = {}
+_SQLITE_RSYNC_LOCK = asyncio.Lock()
 
 
 def _header(scope: dict[str, Any], name: bytes) -> str:
@@ -29,8 +27,12 @@ def _authorized(scope: dict[str, Any]) -> bool:
     return bool(expected and provided and hmac.compare_digest(expected, provided))
 
 
+def _configured_agent_id() -> str:
+    return os.environ.get("SANDBOX_AGENT_ID", "").strip()
+
+
 def _sqlite_path(agent_id: str) -> Path:
-    return _agent_workspace(agent_id) / CUSTOM_TOOL_SQLITE_FILESPACE_PATH.lstrip("/")
+    return _agent_workspace(_configured_agent_id() or agent_id) / CUSTOM_TOOL_SQLITE_FILESPACE_PATH.lstrip("/")
 
 
 def _quick_check(path: Path) -> tuple[bool, str]:
@@ -62,17 +64,11 @@ def _invalidate_replica(path: Path) -> None:
         pass
 
 
-def _prepare_replica_stage(target: Path) -> Path:
+def _ensure_replica(target: Path) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, raw_path = tempfile.mkstemp(prefix=".sqlite-rsync-", suffix=".sqlite3", dir=target.parent)
-    os.close(descriptor)
-    stage = Path(raw_path)
-    if target.exists():
-        shutil.copyfile(target, stage)
-    else:
-        connection = sqlite3.connect(stage)
+    if not target.exists():
+        connection = sqlite3.connect(target)
         connection.close()
-    return stage
 
 
 async def _send_json(send, payload: dict[str, Any]) -> None:
@@ -95,7 +91,11 @@ async def _receive_handshake(receive) -> tuple[str | None, str | None]:
         return None, None
     if mode not in {"origin", "replica"}:
         return None, None
-    return agent_id.strip(), mode
+    agent_id = agent_id.strip()
+    configured_agent_id = _configured_agent_id()
+    if configured_agent_id and agent_id != configured_agent_id:
+        return None, None
+    return agent_id, mode
 
 
 async def _relay_websocket_to_stdin(receive, process: asyncio.subprocess.Process) -> None:
@@ -141,13 +141,10 @@ async def _read_stderr(process: asyncio.subprocess.Process) -> bytes:
 
 async def _run_remote_half(agent_id: str, mode: str, receive, send) -> tuple[int, str]:
     target = _sqlite_path(agent_id)
-    stage: Path | None = None
-    sqlite_path = target
 
     if mode == "replica":
-        stage = await asyncio.to_thread(_prepare_replica_stage, target)
-        sqlite_path = stage
-        arguments = ["--replica", "worker.db", str(sqlite_path)]
+        await asyncio.to_thread(_ensure_replica, target)
+        arguments = ["--replica", "worker.db", str(target)]
     else:
         if not target.exists():
             return 1, "Sandbox agent SQLite database is missing."
@@ -155,7 +152,7 @@ async def _run_remote_half(agent_id: str, mode: str, receive, send) -> tuple[int
         if not valid:
             await asyncio.to_thread(_invalidate_replica, target)
             return 1, f"Sandbox agent SQLite database is invalid: {message}"
-        arguments = ["--origin", str(sqlite_path), "worker.db"]
+        arguments = ["--origin", str(target), "worker.db"]
 
     binary = os.environ.get("SANDBOX_SQLITE_RSYNC_BINARY", "/usr/local/bin/sqlite3_rsync")
     timeout = max(1, int(os.environ.get("SANDBOX_SQLITE_RSYNC_TIMEOUT_SECONDS", "180")))
@@ -182,30 +179,15 @@ async def _run_remote_half(agent_id: str, mode: str, receive, send) -> tuple[int
         await asyncio.gather(inbound, return_exceptions=True)
         stderr = (await stderr_task).decode("utf-8", errors="replace").strip()
 
-        if exit_code == 0 and stage is not None:
-            valid, message = await asyncio.to_thread(_quick_check, stage)
-            if not valid:
-                await asyncio.to_thread(_invalidate_replica, target)
-                return 1, f"Replicated SQLite database failed validation: {message}"
-            await asyncio.to_thread(_remove_sidecars, target)
-            await asyncio.to_thread(os.replace, stage, target)
-            stage = None
-        elif stage is not None:
+        if exit_code != 0 and mode == "replica":
             # The worker is authoritative. Invalidate a failed replica so the
             # next pull starts from an empty, known-good seed.
             await asyncio.to_thread(_invalidate_replica, target)
         return exit_code, stderr
     except OSError as exc:
-        if stage is not None:
+        if mode == "replica":
             await asyncio.to_thread(_invalidate_replica, target)
         return 1, f"Failed to start sqlite3_rsync: {exc}"
-    finally:
-        if stage is not None:
-            try:
-                stage.unlink()
-            except FileNotFoundError:
-                pass
-            _remove_sidecars(stage)
 
 
 async def websocket_application(scope, receive, send) -> None:
@@ -224,8 +206,7 @@ async def websocket_application(scope, receive, send) -> None:
         await send({"type": "websocket.close", "code": 4400})
         return
 
-    lock = _AGENT_LOCKS.setdefault(agent_id, asyncio.Lock())
-    async with lock:
+    async with _SQLITE_RSYNC_LOCK:
         await _send_json(send, {"status": "ready"})
         exit_code, message = await _run_remote_half(agent_id, mode, receive, send)
         try:

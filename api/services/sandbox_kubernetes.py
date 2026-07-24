@@ -1372,6 +1372,7 @@ def _build_pod_manifest(
     env = [
         {"name": "SANDBOX_RUNTIME_CACHE_ROOT", "value": "/runtime-cache"},
         {"name": "SANDBOX_AGENT_WORKSPACE_LAYOUT", "value": "isolated"},
+        {"name": "SANDBOX_AGENT_ID", "value": agent_id},
     ]
     env.extend(
         _build_proxy_env(

@@ -17,7 +17,6 @@ dependencies = [
     "mcp==1.13.1",
     "asgiref==3.9.1",
     "uvicorn[standard]>=0.35.0",
-    "websockets>=15.0",
 ]
 
 [tool.setuptools]

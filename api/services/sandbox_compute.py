@@ -12,7 +12,7 @@ import tempfile
 import time
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import Any, Dict, Optional, Sequence
+from typing import Any, Callable, Dict, Optional, Sequence
 
 import requests
 from celery.exceptions import CeleryError
@@ -27,7 +27,6 @@ from kombu.exceptions import OperationalError as KombuOperationalError
 from api.models import AgentComputeSession, ComputeSnapshot, GlobalSecret, PersistentAgent, MCPServerConfig, PersistentAgentSecret
 from api.proxy_selection import select_proxy, select_proxy_for_persistent_agent
 from api.services.mcp_tool_cache import set_cached_mcp_tool_definitions
-from api.services.agent_sqlite_coordination import coordinate_sandbox_sqlite_call
 from api.services.sandbox_filespace_sync import apply_filespace_push, build_filespace_pull_manifest
 from api.services.sandbox_internal_paths import (
     CUSTOM_TOOL_SQLITE_FILESPACE_PATH,
@@ -549,16 +548,6 @@ class LocalSandboxBackend(SandboxComputeBackend):
             return build_filespace_pull_manifest(agent, since=since)
         return {"status": "error", "message": "Invalid sync direction."}
 
-    def sqlite_rsync(
-        self,
-        agent,
-        session: AgentComputeSession,
-        *,
-        local_db_path: str,
-        direction: str,
-    ) -> Dict[str, Any]:
-        return {"status": "skipped", "message": "Local backend shares the worker SQLite file."}
-
     def terminate(
         self,
         agent,
@@ -1033,59 +1022,36 @@ def _check_sqlite_integrity(db_path: str) -> tuple[bool, str]:
             conn.execute("PRAGMA busy_timeout=5000;")
         except sqlite3.Error:
             pass
-        row = conn.execute("PRAGMA integrity_check;").fetchone()
+        row = conn.execute("PRAGMA quick_check(1);").fetchone()
     finally:
         conn.close()
 
-    message = str(row[0]) if row and row[0] is not None else "empty integrity_check result"
+    message = str(row[0]) if row and row[0] is not None else "empty quick_check result"
     return message.lower() == "ok", message
 
 
-def _validate_sqlite_file_content(content: bytes) -> tuple[bool, str]:
-    with tempfile.TemporaryDirectory(prefix="gobii-sqlite-sync-") as tmp_dir:
-        candidate_path = os.path.join(tmp_dir, "candidate.db")
-        with open(candidate_path, "wb") as handle:
-            handle.write(content)
-        try:
-            return _check_sqlite_integrity(candidate_path)
-        except sqlite3.Error as exc:
-            return False, str(exc)
-
-
-def _restore_sqlite_file_content(db_path: str, content: bytes) -> None:
+def _restore_sqlite_file_content(db_path: str, content: bytes) -> tuple[bool, str]:
     os.makedirs(os.path.dirname(db_path), exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="gobii-sqlite-sync-") as tmp_dir:
-        snapshot_path = os.path.join(tmp_dir, "snapshot.db")
-        with open(snapshot_path, "wb") as handle:
+    stage_descriptor, stage_path = tempfile.mkstemp(
+        prefix=".gobii-sqlite-restore-",
+        suffix=".sqlite3",
+        dir=os.path.dirname(db_path),
+    )
+    try:
+        with os.fdopen(stage_descriptor, "wb") as handle:
             handle.write(content)
-
-        stage_descriptor, stage_path = tempfile.mkstemp(
-            prefix=".gobii-sqlite-restore-",
-            suffix=".sqlite3",
-            dir=os.path.dirname(db_path),
-        )
-        os.close(stage_descriptor)
+        valid, message = _check_sqlite_integrity(stage_path)
+        if not valid:
+            return False, message
+        _remove_sqlite_sidecars(db_path)
+        os.replace(stage_path, db_path)
+        return True, message
+    finally:
         try:
-            with sqlite3.connect(snapshot_path, timeout=5) as source_conn, sqlite3.connect(
-                stage_path,
-                timeout=5,
-            ) as target_conn:
-                try:
-                    target_conn.execute("PRAGMA busy_timeout=5000;")
-                except sqlite3.Error:
-                    pass
-                source_conn.backup(target_conn)
-                target_conn.commit()
-
-            _remove_sqlite_sidecars(stage_path)
-            _remove_sqlite_sidecars(db_path)
-            os.replace(stage_path, db_path)
-        finally:
-            try:
-                os.remove(stage_path)
-            except FileNotFoundError:
-                pass
-            _remove_sqlite_sidecars(stage_path)
+            os.remove(stage_path)
+        except FileNotFoundError:
+            pass
+        _remove_sqlite_sidecars(stage_path)
 
 
 def _ensure_sqlite_database(db_path: str) -> None:
@@ -1104,25 +1070,61 @@ def _sqlite_sync_mode() -> str:
     return mode
 
 
-def _execution_result_with_sqlite_sync_error(
+def _execution_result_with_sync_error(
     result: Any,
     sync_result: Dict[str, Any],
+    *,
+    target: str = "sqlite",
 ) -> Dict[str, Any]:
     if not isinstance(result, dict):
         return sync_result
 
     merged = dict(result)
-    sync_message = str(sync_result.get("message") or "Shared SQLite synchronization failed.")
-    merged["sqlite_sync_error"] = sync_message
+    sqlite_target = target == "sqlite"
+    sync_message = str(
+        sync_result.get("message")
+        or ("Shared SQLite synchronization failed." if sqlite_target else "Workspace synchronization failed.")
+    )
+    merged["sqlite_sync_error" if sqlite_target else "workspace_sync_error"] = sync_message
     if merged.get("status") != "error":
         merged["execution_status"] = merged.get("status")
         merged["status"] = "error"
-        merged["error_code"] = "sqlite_sync_failed"
-        merged["message"] = (
-            "Sandbox execution completed, but its shared SQLite changes could not be preserved: "
-            f"{sync_message}"
-        )
+        merged["error_code"] = "sqlite_sync_failed" if sqlite_target else "workspace_sync_failed"
+        subject = "shared SQLite changes" if sqlite_target else "workspace changes"
+        merged["message"] = f"Sandbox execution completed, but its {subject} could not be preserved: {sync_message}"
     return merged
+
+
+def _record_sqlite_sync_result(
+    *,
+    agent_id: Any,
+    direction: str,
+    result: Dict[str, Any],
+    started_at: float,
+    db_path: str,
+    transport: str,
+    fallback_used: bool,
+) -> Dict[str, Any]:
+    recorded = dict(result)
+    recorded.setdefault("duration_ms", int((time.monotonic() - started_at) * 1000))
+    recorded["transport"] = transport
+    recorded["fallback_used"] = fallback_used
+    recorded["db_size_bytes"] = os.path.getsize(db_path) if os.path.exists(db_path) else 0
+    recorded.setdefault("sqlite_version", sqlite3.sqlite_version)
+    logger.info(
+        "Sandbox SQLite sync completed agent=%s direction=%s status=%s transport=%s "
+        "duration_ms=%s bytes_transferred=%s db_size_bytes=%s fallback_used=%s sqlite_version=%s",
+        agent_id,
+        direction,
+        recorded.get("status"),
+        transport,
+        recorded.get("duration_ms"),
+        recorded.get("wire_bytes", recorded.get("bytes_transferred")),
+        recorded["db_size_bytes"],
+        fallback_used,
+        recorded.get("sqlite_version"),
+    )
+    return recorded
 
 
 def _proxy_id(proxy: Any) -> Optional[str]:
@@ -1830,7 +1832,6 @@ class SandboxComputeService:
             logger.info("Sandbox session deploy_or_resume agent=%s reason=%s", agent.id, reason)
         return session
 
-    @coordinate_sandbox_sqlite_call
     def run_command(
         self,
         agent,
@@ -1845,34 +1846,28 @@ class SandboxComputeService:
         session = self._ensure_session(agent, source="run_command")
         runtime_env = dict(env or {})
         if local_sqlite_db_path:
-            runtime_env[GOBII_AGENT_SQLITE_PATH_ENV] = (
-                local_sqlite_db_path
-                if isinstance(self._backend, LocalSandboxBackend)
-                else posixpath.join(
-                    custom_tool_workspace_root_for_backend(self._backend, agent.id),
-                    CUSTOM_TOOL_SQLITE_FILESPACE_PATH.lstrip("/"),
-                )
+            runtime_env[GOBII_AGENT_SQLITE_PATH_ENV] = self._sandbox_sqlite_path(
+                agent,
+                local_sqlite_db_path,
             )
         merged_env, trusted_secret_keys = _merge_agent_env_vars_with_secret_keys(agent, runtime_env)
         backend_env = merged_env if merged_env else (runtime_env if runtime_env else None)
 
-        if local_sqlite_db_path and not isinstance(self._backend, LocalSandboxBackend):
-            pull_result = self._sync_sqlite_to_sandbox(agent, session, local_sqlite_db_path)
-            if not isinstance(pull_result, dict) or pull_result.get("status") != "ok":
-                return pull_result if isinstance(pull_result, dict) else {
-                    "status": "error",
-                    "message": "SQLite pre-sync returned an invalid response.",
-                }
         try:
-            result = self._backend.run_command(
+            result = self._execute_with_shared_sqlite(
                 agent,
                 session,
-                command,
-                cwd=cwd,
-                env=backend_env,
-                trusted_env_keys=trusted_secret_keys or None,
-                timeout=timeout,
-                interactive=interactive,
+                local_sqlite_db_path,
+                lambda: self._backend.run_command(
+                    agent,
+                    session,
+                    command,
+                    cwd=cwd,
+                    env=backend_env,
+                    trusted_env_keys=trusted_secret_keys or None,
+                    timeout=timeout,
+                    interactive=interactive,
+                ),
             )
         except Exception as exc:
             _track_sandbox_event(
@@ -1889,28 +1884,6 @@ class SandboxComputeService:
                 },
             )
             raise
-
-        if local_sqlite_db_path and not isinstance(self._backend, LocalSandboxBackend):
-            push_result = self._sync_sqlite_from_sandbox(agent, session, local_sqlite_db_path)
-            if push_result.get("status") != "ok":
-                result = _execution_result_with_sqlite_sync_error(result, push_result)
-            elif isinstance(result, dict):
-                result = dict(result)
-                result["shared_sqlite_db"] = {
-                    "available": True,
-                    "same_db_as_sqlite_batch": True,
-                    "transport": push_result.get("transport") or "sandbox_sync",
-                    "sync_back": "ok",
-                    "fallback_used": bool(push_result.get("fallback_used")),
-                }
-        elif local_sqlite_db_path and isinstance(result, dict):
-            result = dict(result)
-            result["shared_sqlite_db"] = {
-                "available": True,
-                "same_db_as_sqlite_batch": True,
-                "transport": "local",
-                "sync_back": "not_needed",
-            }
 
         sync_enqueued = False
         if isinstance(result, dict) and result.get("status") != "error":
@@ -1996,7 +1969,10 @@ class SandboxComputeService:
             break
 
         if sqlite_change is None:
-            return {"status": "ok", "sqlite_synced": False}
+            workspace_result = self._apply_workspace_push_response(agent, session, response)
+            if workspace_result.get("status") != "ok":
+                return workspace_result
+            return {"status": "ok", "sqlite_synced": False, "workspace_synced": True}
 
         if bool(sqlite_change.get("is_deleted")):
             return {
@@ -2009,18 +1985,11 @@ class SandboxComputeService:
             return {"status": "error", "message": "Sandbox SQLite sync returned invalid file content."}
 
         try:
-            valid, integrity_message = _validate_sqlite_file_content(content)
+            valid, integrity_message = _restore_sqlite_file_content(local_sqlite_db_path, content)
             if not valid:
                 return {
                     "status": "error",
                     "message": f"Sandbox SQLite sync returned malformed database: {integrity_message}",
-                }
-            _restore_sqlite_file_content(local_sqlite_db_path, content)
-            valid, integrity_message = _check_sqlite_integrity(local_sqlite_db_path)
-            if not valid:
-                return {
-                    "status": "error",
-                    "message": f"Restored synced SQLite DB failed integrity check: {integrity_message}",
                 }
         except (OSError, sqlite3.Error) as exc:
             return {"status": "error", "message": f"Failed to write synced SQLite DB: {exc}"}
@@ -2036,6 +2005,7 @@ class SandboxComputeService:
             "sqlite_synced": True,
             "deleted": False,
             "size_bytes": len(content),
+            "workspace_synced": True,
         }
 
     def _sync_sqlite_to_sandbox(
@@ -2044,13 +2014,13 @@ class SandboxComputeService:
         session: AgentComputeSession,
         local_sqlite_db_path: str,
     ) -> Dict[str, Any]:
+        started_at = time.monotonic()
         try:
             _ensure_sqlite_database(local_sqlite_db_path)
         except (OSError, sqlite3.Error) as exc:
             return {"status": "error", "message": f"Failed to initialize shared SQLite DB: {exc}"}
 
         mode = _sqlite_sync_mode()
-        started_at = time.monotonic()
         if mode != "snapshot":
             result = self._backend.sqlite_rsync(
                 agent,
@@ -2059,18 +2029,25 @@ class SandboxComputeService:
                 direction="worker_to_sandbox",
             )
             if result.get("status") == "ok":
-                logger.info(
-                    "Sandbox SQLite delta sync completed agent=%s direction=worker_to_sandbox "
-                    "duration_ms=%s wire_bytes=%s db_size_bytes=%s fallback_used=false sqlite_version=%s",
-                    agent.id,
-                    result.get("duration_ms"),
-                    result.get("wire_bytes"),
-                    os.path.getsize(local_sqlite_db_path),
-                    result.get("sqlite_version"),
+                return _record_sqlite_sync_result(
+                    agent_id=agent.id,
+                    direction="worker_to_sandbox",
+                    result=result,
+                    started_at=started_at,
+                    db_path=local_sqlite_db_path,
+                    transport="sqlite_rsync",
+                    fallback_used=False,
                 )
-                return {**result, "transport": "sqlite_rsync"}
             if mode == "rsync":
-                return result
+                return _record_sqlite_sync_result(
+                    agent_id=agent.id,
+                    direction="worker_to_sandbox",
+                    result=result,
+                    started_at=started_at,
+                    db_path=local_sqlite_db_path,
+                    transport="sqlite_rsync",
+                    fallback_used=False,
+                )
             logger.warning(
                 "Sandbox SQLite delta sync failed; using snapshot fallback agent=%s "
                 "direction=worker_to_sandbox transport_status=%s",
@@ -2079,31 +2056,23 @@ class SandboxComputeService:
             )
 
         fallback = self._sync_custom_tool_sqlite_pull(agent, session, local_sqlite_db_path)
-        if isinstance(fallback, dict):
-            fallback = dict(fallback)
-            fallback["transport"] = "snapshot"
-            fallback["fallback_used"] = mode != "snapshot"
-            fallback["duration_ms"] = int((time.monotonic() - started_at) * 1000)
-            logger.info(
-                "Sandbox SQLite snapshot sync completed agent=%s direction=worker_to_sandbox "
-                "duration_ms=%s bytes_transferred=%s db_size_bytes=%s fallback_used=%s sqlite_version=%s",
-                agent.id,
-                fallback["duration_ms"],
-                fallback.get("bytes_transferred"),
-                fallback.get("db_size_bytes"),
-                fallback["fallback_used"],
-                fallback.get("sqlite_version"),
-            )
-        return fallback
+        return _record_sqlite_sync_result(
+            agent_id=agent.id,
+            direction="worker_to_sandbox",
+            result=fallback,
+            started_at=started_at,
+            db_path=local_sqlite_db_path,
+            transport="snapshot",
+            fallback_used=mode != "snapshot",
+        )
 
     def _sync_sqlite_from_sandbox(
         self,
         agent,
         session: AgentComputeSession,
         local_sqlite_db_path: str,
-        *,
-        sync_workspace: bool = False,
     ) -> Dict[str, Any]:
+        started_at = time.monotonic()
         mode = _sqlite_sync_mode()
         if mode != "snapshot":
             stage_descriptor, stage_path = tempfile.mkstemp(
@@ -2144,28 +2113,31 @@ class SandboxComputeService:
                     else:
                         _remove_sqlite_sidecars(local_sqlite_db_path)
                         os.replace(stage_path, local_sqlite_db_path)
-                        if sync_workspace:
-                            workspace_result = self._sync_workspace_push(agent, session)
-                            if isinstance(workspace_result, dict) and workspace_result.get("status") != "ok":
-                                return workspace_result
-                        logger.info(
-                            "Sandbox SQLite delta sync completed agent=%s direction=sandbox_to_worker "
-                            "duration_ms=%s wire_bytes=%s db_size_bytes=%s fallback_used=false sqlite_version=%s",
-                            agent.id,
-                            result.get("duration_ms"),
-                            result.get("wire_bytes"),
-                            os.path.getsize(local_sqlite_db_path),
-                            result.get("sqlite_version"),
-                        )
-                        return {
+                        synced_result = {
                             **result,
                             "sqlite_synced": True,
-                            "transport": "sqlite_rsync",
                             "size_bytes": os.path.getsize(local_sqlite_db_path),
                         }
+                        return _record_sqlite_sync_result(
+                            agent_id=agent.id,
+                            direction="sandbox_to_worker",
+                            result=synced_result,
+                            started_at=started_at,
+                            db_path=local_sqlite_db_path,
+                            transport="sqlite_rsync",
+                            fallback_used=False,
+                        )
 
                 if mode == "rsync":
-                    return result
+                    return _record_sqlite_sync_result(
+                        agent_id=agent.id,
+                        direction="sandbox_to_worker",
+                        result=result,
+                        started_at=started_at,
+                        db_path=local_sqlite_db_path,
+                        transport="sqlite_rsync",
+                        fallback_used=False,
+                    )
                 logger.warning(
                     "Sandbox SQLite delta sync failed; using snapshot fallback agent=%s "
                     "direction=sandbox_to_worker transport_status=%s",
@@ -2174,7 +2146,15 @@ class SandboxComputeService:
                 )
             except (OSError, sqlite3.Error) as exc:
                 if mode == "rsync":
-                    return {"status": "error", "message": f"Failed staging SQLite rsync: {exc}"}
+                    return _record_sqlite_sync_result(
+                        agent_id=agent.id,
+                        direction="sandbox_to_worker",
+                        result={"status": "error", "message": f"Failed staging SQLite rsync: {exc}"},
+                        started_at=started_at,
+                        db_path=local_sqlite_db_path,
+                        transport="sqlite_rsync",
+                        fallback_used=False,
+                    )
                 logger.warning(
                     "Failed staging SQLite rsync; using snapshot fallback agent=%s error_type=%s",
                     agent.id,
@@ -2187,33 +2167,85 @@ class SandboxComputeService:
                     pass
                 _remove_sqlite_sidecars(stage_path)
 
-        fallback_started_at = time.monotonic()
         fallback = self._sync_custom_tool_workspace_push(agent, session, local_sqlite_db_path)
-        if isinstance(fallback, dict):
-            fallback = dict(fallback)
-            fallback["transport"] = "snapshot"
-            fallback["fallback_used"] = mode != "snapshot"
-            fallback["duration_ms"] = int((time.monotonic() - fallback_started_at) * 1000)
-            fallback["bytes_transferred"] = fallback.get("size_bytes", 0)
-            fallback["db_size_bytes"] = (
-                os.path.getsize(local_sqlite_db_path)
-                if os.path.exists(local_sqlite_db_path)
-                else 0
-            )
-            fallback["sqlite_version"] = sqlite3.sqlite_version
-            logger.info(
-                "Sandbox SQLite snapshot sync completed agent=%s direction=sandbox_to_worker "
-                "duration_ms=%s bytes_transferred=%s db_size_bytes=%s fallback_used=%s sqlite_version=%s",
-                agent.id,
-                fallback["duration_ms"],
-                fallback["bytes_transferred"],
-                fallback["db_size_bytes"],
-                fallback["fallback_used"],
-                fallback["sqlite_version"],
-            )
-        return fallback
+        fallback = dict(fallback)
+        fallback["bytes_transferred"] = fallback.get("size_bytes", 0)
+        return _record_sqlite_sync_result(
+            agent_id=agent.id,
+            direction="sandbox_to_worker",
+            result=fallback,
+            started_at=started_at,
+            db_path=local_sqlite_db_path,
+            transport="snapshot",
+            fallback_used=mode != "snapshot",
+        )
 
-    @coordinate_sandbox_sqlite_call
+    def _sandbox_sqlite_path(self, agent, local_sqlite_db_path: str) -> str:
+        if isinstance(self._backend, LocalSandboxBackend):
+            return local_sqlite_db_path
+        return posixpath.join(
+            custom_tool_workspace_root_for_backend(self._backend, agent.id),
+            CUSTOM_TOOL_SQLITE_FILESPACE_PATH.lstrip("/"),
+        )
+
+    def _execute_with_shared_sqlite(
+        self,
+        agent,
+        session: AgentComputeSession,
+        local_sqlite_db_path: Optional[str],
+        execute: Callable[[], Any],
+        *,
+        sync_workspace: bool = False,
+        require_sqlite_sync: bool = False,
+    ) -> Any:
+        if not local_sqlite_db_path or isinstance(self._backend, LocalSandboxBackend):
+            return execute()
+
+        pull_result = self._sync_sqlite_to_sandbox(agent, session, local_sqlite_db_path)
+        if pull_result.get("status") != "ok":
+            return pull_result
+
+        def _post_sync() -> tuple[Dict[str, Any], Optional[str]]:
+            sync_result = self._sync_sqlite_from_sandbox(agent, session, local_sqlite_db_path)
+            if sync_result.get("status") != "ok":
+                return sync_result, "sqlite"
+            if require_sqlite_sync and not sync_result.get("sqlite_synced"):
+                return {
+                    "status": "error",
+                    "message": "Custom tool SQLite sync did not return the shared agent DB.",
+                }, "sqlite"
+            if sync_workspace and not sync_result.get("workspace_synced"):
+                workspace_result = self._sync_workspace_push(agent, session)
+                if not isinstance(workspace_result, dict) or workspace_result.get("status") != "ok":
+                    return (
+                        workspace_result
+                        if isinstance(workspace_result, dict)
+                        else {"status": "error", "message": "Workspace sync returned an invalid response."}
+                    ), "workspace"
+            return sync_result, None
+
+        try:
+            result = execute()
+        except Exception:
+            try:
+                sync_result, sync_target = _post_sync()
+                if sync_target:
+                    logger.error(
+                        "Sandbox post-exception sync failed agent=%s target=%s error_code=%s",
+                        agent.id,
+                        sync_target,
+                        sync_result.get("error_code"),
+                    )
+            except Exception:
+                # Cleanup must not replace the original sandbox execution error.
+                logger.exception("Sandbox post-exception SQLite sync raised agent=%s", agent.id)
+            raise
+
+        sync_result, sync_target = _post_sync()
+        if sync_target:
+            return _execution_result_with_sync_error(result, sync_result, target=sync_target)
+        return result
+
     def run_custom_tool_command(
         self,
         agent,
@@ -2227,18 +2259,10 @@ class SandboxComputeService:
         sqlite_env_key: Optional[str] = None,
     ) -> Dict[str, Any]:
         session = self._ensure_session(agent, source="custom_tool_run_command")
-        shared_sqlite_db: Optional[Dict[str, Any]] = None
 
         runtime_env = dict(env or {})
         if local_sqlite_db_path:
-            sandbox_sqlite_path = (
-                local_sqlite_db_path
-                if isinstance(self._backend, LocalSandboxBackend)
-                else posixpath.join(
-                    custom_tool_workspace_root_for_backend(self._backend, agent.id),
-                    CUSTOM_TOOL_SQLITE_FILESPACE_PATH.lstrip("/"),
-                )
-            )
+            sandbox_sqlite_path = self._sandbox_sqlite_path(agent, local_sqlite_db_path)
             runtime_env[GOBII_AGENT_SQLITE_PATH_ENV] = sandbox_sqlite_path
             if sqlite_env_key:
                 runtime_env[sqlite_env_key] = sandbox_sqlite_path
@@ -2246,69 +2270,23 @@ class SandboxComputeService:
         merged_env, trusted_secret_keys = _merge_agent_env_vars_with_secret_keys(agent, runtime_env)
         backend_env = merged_env if merged_env else None
 
-        if local_sqlite_db_path and not isinstance(self._backend, LocalSandboxBackend):
-            pull_result = self._sync_sqlite_to_sandbox(agent, session, local_sqlite_db_path)
-            if not isinstance(pull_result, dict):
-                return {"status": "error", "message": "Custom tool SQLite pull sync returned an invalid response."}
-            if pull_result.get("status") != "ok":
-                return pull_result
-
-        result = self._backend.run_command(
+        return self._execute_with_shared_sqlite(
             agent,
             session,
-            command,
-            cwd=cwd,
-            env=backend_env,
-            trusted_env_keys=trusted_secret_keys or None,
-            timeout=timeout,
-            interactive=interactive,
-        )
-
-        if local_sqlite_db_path and isinstance(self._backend, LocalSandboxBackend):
-            shared_sqlite_db = {
-                "available": True,
-                "same_db_as_sqlite_batch": True,
-                "transport": "local",
-                "sync_back": "not_needed",
-            }
-
-        if local_sqlite_db_path and not isinstance(self._backend, LocalSandboxBackend):
-            push_result = self._sync_sqlite_from_sandbox(
+            local_sqlite_db_path,
+            lambda: self._backend.run_command(
                 agent,
                 session,
-                local_sqlite_db_path,
-                sync_workspace=True,
-            )
-            if push_result.get("status") != "ok":
-                return _execution_result_with_sqlite_sync_error(result, push_result)
-            if not push_result.get("sqlite_synced"):
-                message = "Custom tool SQLite sync did not return the shared agent DB."
-                if isinstance(result, dict) and result.get("status") == "error":
-                    result = dict(result)
-                    result["sqlite_sync_error"] = message
-                    return result
-                return {"status": "error", "message": message}
-            shared_sqlite_db = {
-                "available": True,
-                "same_db_as_sqlite_batch": True,
-                "transport": (
-                    "sandbox_sync"
-                    if push_result.get("transport") == "snapshot"
-                    else push_result.get("transport") or "sandbox_sync"
-                ),
-                "sync_back": "ok",
-                "deleted": False,
-            }
-            if push_result.get("fallback_used"):
-                shared_sqlite_db["fallback_used"] = True
-            if isinstance(push_result.get("size_bytes"), int):
-                shared_sqlite_db["size_bytes"] = push_result["size_bytes"]
-
-        if shared_sqlite_db and isinstance(result, dict):
-            result = dict(result)
-            result["shared_sqlite_db"] = shared_sqlite_db
-
-        return result
+                command,
+                cwd=cwd,
+                env=backend_env,
+                trusted_env_keys=trusted_secret_keys or None,
+                timeout=timeout,
+                interactive=interactive,
+            ),
+            sync_workspace=True,
+            require_sqlite_sync=True,
+        )
 
     def mcp_request(
         self,
@@ -2383,7 +2361,6 @@ class SandboxComputeService:
         _log_tool_call("mcp_request", tool_name, params, agent_id=str(agent.id))
         return result
 
-    @coordinate_sandbox_sqlite_call
     def tool_request(
         self,
         agent,
@@ -2401,28 +2378,22 @@ class SandboxComputeService:
                 existing_env = {}
             if local_sqlite_db_path:
                 existing_env = dict(existing_env)
-                existing_env[GOBII_AGENT_SQLITE_PATH_ENV] = (
-                    local_sqlite_db_path
-                    if isinstance(self._backend, LocalSandboxBackend)
-                    else posixpath.join(
-                        custom_tool_workspace_root_for_backend(self._backend, agent.id),
-                        CUSTOM_TOOL_SQLITE_FILESPACE_PATH.lstrip("/"),
-                    )
+                existing_env[GOBII_AGENT_SQLITE_PATH_ENV] = self._sandbox_sqlite_path(
+                    agent,
+                    local_sqlite_db_path,
                 )
             merged_env, trusted_secret_keys = _merge_agent_env_vars_with_secret_keys(agent, existing_env)
             if merged_env:
                 params_payload["env"] = merged_env
             if trusted_secret_keys:
                 params_payload["trusted_env_keys"] = trusted_secret_keys
-            if local_sqlite_db_path and not isinstance(self._backend, LocalSandboxBackend):
-                pull_result = self._sync_sqlite_to_sandbox(agent, session, local_sqlite_db_path)
-                if not isinstance(pull_result, dict) or pull_result.get("status") != "ok":
-                    return pull_result if isinstance(pull_result, dict) else {
-                        "status": "error",
-                        "message": "SQLite pre-sync returned an invalid response.",
-                    }
         try:
-            result = self._backend.tool_request(agent, session, tool_name, params_payload)
+            result = self._execute_with_shared_sqlite(
+                agent,
+                session,
+                local_sqlite_db_path if tool_name == "python_exec" else None,
+                lambda: self._backend.tool_request(agent, session, tool_name, params_payload),
+            )
         except Exception as exc:
             _track_sandbox_event(
                 agent=agent,
@@ -2438,30 +2409,6 @@ class SandboxComputeService:
                 },
             )
             raise
-
-        if tool_name == "python_exec" and local_sqlite_db_path:
-            if isinstance(self._backend, LocalSandboxBackend):
-                if isinstance(result, dict):
-                    result = dict(result)
-                    result["shared_sqlite_db"] = {
-                        "available": True,
-                        "same_db_as_sqlite_batch": True,
-                        "transport": "local",
-                        "sync_back": "not_needed",
-                    }
-            else:
-                push_result = self._sync_sqlite_from_sandbox(agent, session, local_sqlite_db_path)
-                if push_result.get("status") != "ok":
-                    result = _execution_result_with_sqlite_sync_error(result, push_result)
-                elif isinstance(result, dict):
-                    result = dict(result)
-                    result["shared_sqlite_db"] = {
-                        "available": True,
-                        "same_db_as_sqlite_batch": True,
-                        "transport": push_result.get("transport") or "sandbox_sync",
-                        "sync_back": "ok",
-                        "fallback_used": bool(push_result.get("fallback_used")),
-                    }
 
         sync_enqueued = False
         if isinstance(result, dict) and result.get("status") != "error":

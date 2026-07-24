@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 import sqlite3
 import tempfile
@@ -11,6 +12,7 @@ from sandbox_server.server.sqlite_rsync import (
     _authorized,
     _invalidate_replica,
     _quick_check,
+    _receive_handshake,
     _sqlite_path,
 )
 
@@ -81,6 +83,20 @@ class SQLiteRsyncEndpointTests(unittest.TestCase):
         self.assertEqual(sqlite_path.name, "custom_tool_agent_state.sqlite3")
         self.assertIn(".gobii/internal", sqlite_path.as_posix())
         self.assertTrue(sqlite_path.is_relative_to(Path(tmp_dir)))
+
+    def test_handshake_must_match_configured_pod_agent(self):
+        events = [
+            {
+                "type": "websocket.receive",
+                "text": json.dumps({"agent_id": "other-agent", "mode": "origin"}),
+            }
+        ]
+
+        async def receive():
+            return events.pop(0)
+
+        with patch.dict(os.environ, {"SANDBOX_AGENT_ID": "pod-agent"}, clear=False):
+            self.assertEqual(asyncio.run(_receive_handshake(receive)), (None, None))
 
     def test_invalidating_replica_removes_database_and_sidecars(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

@@ -808,17 +808,7 @@ class SandboxComputeSyncTests(TestCase):
             )
 
             self.assertEqual(result.get("status"), "ok")
-            self.assertEqual(
-                result.get("shared_sqlite_db"),
-                {
-                    "available": True,
-                    "same_db_as_sqlite_batch": True,
-                    "transport": "sandbox_sync",
-                    "sync_back": "ok",
-                    "deleted": False,
-                    "size_bytes": len(synced_bytes),
-                },
-            )
+            self.assertNotIn("shared_sqlite_db", result)
             conn = sqlite3.connect(db_path)
             try:
                 rows = conn.execute("SELECT coin_id, name FROM crypto_prices ORDER BY coin_id").fetchall()
@@ -909,7 +899,7 @@ class SandboxComputeSyncTests(TestCase):
             backend.run_command_calls[0]["env"][GOBII_AGENT_SQLITE_PATH_ENV],
             custom_tool_sqlite_workspace_path(self.agent.id),
         )
-        self.assertEqual(result["shared_sqlite_db"]["transport"], "sqlite_rsync")
+        self.assertNotIn("shared_sqlite_db", result)
         self.assertEqual(rows, [("sandbox", "Sandbox"), ("worker", "Worker")])
 
     @tag("batch_sandbox_sqlite_sync")
@@ -979,7 +969,10 @@ class SandboxComputeSyncTests(TestCase):
             backend.tool_calls[0]["params"]["env"][GOBII_AGENT_SQLITE_PATH_ENV],
             custom_tool_sqlite_workspace_path(self.agent.id),
         )
-        self.assertEqual(result["shared_sqlite_db"]["sync_back"], "ok")
+        self.assertEqual(
+            [call["direction"] for call in backend.sqlite_rsync_calls],
+            ["worker_to_sandbox", "sandbox_to_worker"],
+        )
 
     @tag("batch_sandbox_sqlite_sync")
     @override_settings(SANDBOX_SQLITE_SYNC_MODE="rsync")
@@ -1033,7 +1026,64 @@ class SandboxComputeSyncTests(TestCase):
 
         self.assertEqual(result.get("status"), "error")
         self.assertEqual(rows, [("before_timeout", "Before Timeout")])
-        self.assertEqual(result["shared_sqlite_db"]["sync_back"], "ok")
+        self.assertEqual(
+            [call["direction"] for call in backend.sqlite_rsync_calls],
+            ["worker_to_sandbox", "sandbox_to_worker"],
+        )
+
+    @tag("batch_sandbox_sqlite_sync")
+    @override_settings(SANDBOX_SQLITE_SYNC_MODE="rsync")
+    def test_run_command_syncs_commits_back_after_backend_exception(self):
+        backend = _DummyBackend()
+
+        def _run_command(*_args, **_kwargs):
+            raise RuntimeError("backend disconnected")
+
+        def _sqlite_rsync(call):
+            if call["direction"] == "sandbox_to_worker":
+                connection = sqlite3.connect(call["local_db_path"])
+                try:
+                    connection.execute(
+                        "INSERT OR REPLACE INTO crypto_prices (coin_id, name) VALUES (?, ?)",
+                        ("before_exception", "Before Exception"),
+                    )
+                    connection.commit()
+                finally:
+                    connection.close()
+            return {"status": "ok", "duration_ms": 2, "wire_bytes": 256}
+
+        backend.run_command = _run_command
+        backend.sqlite_rsync_handler = _sqlite_rsync
+
+        with tempfile.TemporaryDirectory() as tmp_dir, patch(
+            "api.services.sandbox_compute.sandbox_compute_enabled",
+            return_value=True,
+        ), patch(
+            "api.services.sandbox_compute._select_proxy_for_session",
+            return_value=None,
+        ), patch(
+            "api.services.sandbox_compute.build_filespace_pull_manifest",
+            return_value={"status": "ok", "files": [], "sync_cursor": None},
+        ):
+            db_path = f"{tmp_dir}/state.db"
+            self._create_sqlite_db_file(db_path, rows=[])
+            with self.assertRaisesRegex(RuntimeError, "backend disconnected"):
+                SandboxComputeService(backend=backend).run_command(
+                    self.agent,
+                    "commit-then-disconnect",
+                    local_sqlite_db_path=db_path,
+                )
+            connection = sqlite3.connect(db_path)
+            try:
+                rows = connection.execute("SELECT coin_id, name FROM crypto_prices").fetchall()
+            finally:
+                connection.close()
+
+        self.assertEqual(rows, [("before_exception", "Before Exception")])
+        self.assertEqual(
+            [call["direction"] for call in backend.sqlite_rsync_calls],
+            ["worker_to_sandbox", "sandbox_to_worker"],
+        )
 
     @tag("batch_sandbox_sqlite_sync")
     @override_settings(SANDBOX_SQLITE_SYNC_MODE="rsync_with_fallback")
@@ -1095,8 +1145,7 @@ class SandboxComputeSyncTests(TestCase):
                 connection.close()
 
         self.assertEqual(result.get("status"), "ok")
-        self.assertEqual(result["shared_sqlite_db"]["transport"], "snapshot")
-        self.assertTrue(result["shared_sqlite_db"]["fallback_used"])
+        self.assertNotIn("shared_sqlite_db", result)
         self.assertEqual(rows, [("fallback", "Fallback")])
         self.assertEqual(
             [call["direction"] for call in backend.sqlite_rsync_calls],
@@ -1798,17 +1847,7 @@ class SandboxComputeSyncTests(TestCase):
             )
 
         self.assertEqual(result.get("status"), "ok")
-        self.assertEqual(
-            result.get("shared_sqlite_db"),
-            {
-                "available": True,
-                "same_db_as_sqlite_batch": True,
-                "transport": "sandbox_sync",
-                "sync_back": "ok",
-                "deleted": False,
-                "size_bytes": len(synced_bytes),
-            },
-        )
+        self.assertNotIn("shared_sqlite_db", result)
         self.assertEqual(len(backend.run_command_calls), 1)
         merged_env = backend.run_command_calls[0]["env"]
         self.assertEqual(merged_env["OPENAI_API_KEY"], "from-secret")

@@ -1571,14 +1571,6 @@ def run(params, ctx):
             "status": "ok",
             "stdout": f"debug line\n{CUSTOM_TOOL_RESULT_MARKER}{{\"result\": {{\"value\": 2}}}}\n",
             "stderr": "",
-            "shared_sqlite_db": {
-                "available": True,
-                "same_db_as_sqlite_batch": True,
-                "transport": "sandbox_sync",
-                "sync_back": "ok",
-                "deleted": False,
-                "size_bytes": 123,
-            },
         }
         mock_service_cls.return_value = mock_service
 
@@ -1586,17 +1578,6 @@ def run(params, ctx):
 
         self.assertEqual(result["status"], "ok")
         self.assertEqual(result["result"], {"value": 2})
-        self.assertEqual(
-            result["shared_sqlite_db"],
-            {
-                "available": True,
-                "same_db_as_sqlite_batch": True,
-                "transport": "sandbox_sync",
-                "sync_back": "ok",
-                "deleted": False,
-                "size_bytes": 123,
-            },
-        )
         self.assertEqual(result["stdout"], "debug line")
         mock_service._ensure_session.assert_called_once_with(self.agent, source="custom_tool_source_sync")
         mock_service._sync_workspace_push.assert_called_once()
