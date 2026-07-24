@@ -1,5 +1,5 @@
 {
-  "baseline_sha": "4f95c164bba3ad29bfef805820866ad1a5c1aa79",
+  "baseline_sha": "f065ad6f9b0592134bf6b7532987baec4a676607",
   "generated_by": "uv run python scripts/check_complexity_budgets.py --update-baselines",
   "prompt_size": {
     "description": "Rendered prompt messages plus JSON tool definitions for representative send/planning paths.",
@@ -109,7 +109,7 @@
       "frontend/src/test/",
       "tests/"
     ],
-    "file_count": 885,
+    "file_count": 892,
     "include_files": [
       "manage.py",
       "pyproject.toml",
@@ -149,6 +149,6 @@
       ".yml",
       ".zsh"
     ],
-    "limit": 251000
+    "limit": 252007
   }
 }
