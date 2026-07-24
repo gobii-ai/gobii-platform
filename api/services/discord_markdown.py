@@ -3,6 +3,7 @@ import re
 
 _TABLE_DIVIDER_CELL = re.compile(r":?-{3,}:?")
 _CODE_FENCE = re.compile(r"^\s*(`{3,}|~{3,})")
+_DISCORD_CONTENT_LIMIT = 2_000
 
 
 def _split_table_row(line: str) -> list[str] | None:
@@ -58,9 +59,19 @@ def _format_table(headers: list[str], rows: list[list[str]]) -> list[str]:
     return blocks
 
 
-def normalize_discord_markdown(body: str) -> str:
-    """Replace Markdown tables that Discord exposes as raw text."""
+def _format_compact_table(headers: list[str], rows: list[list[str]]) -> list[str]:
+    compact_headers = list(headers)
+    if not compact_headers[0]:
+        compact_headers[0] = "Metric"
+    return [
+        "\n".join(
+            " · ".join(row)
+            for row in [compact_headers, *rows]
+        )
+    ]
 
+
+def _normalize_discord_tables(body: str, *, compact: bool) -> str:
     lines = body.splitlines()
     normalized: list[str] = []
     active_fence = ""
@@ -94,7 +105,11 @@ def normalize_discord_markdown(body: str) -> str:
             rows.append((row + [""] * len(headers))[:len(headers)])
             next_index += 1
 
-        formatted = _format_table(headers, rows)
+        formatted = (
+            _format_compact_table(headers, rows)
+            if compact
+            else _format_table(headers, rows)
+        )
         if not formatted:
             normalized.append(lines[index])
             index += 1
@@ -104,3 +119,12 @@ def normalize_discord_markdown(body: str) -> str:
         index = next_index
 
     return "\n".join(normalized)
+
+
+def normalize_discord_markdown(body: str) -> str:
+    """Replace Markdown tables that Discord exposes as raw text."""
+
+    normalized = _normalize_discord_tables(body, compact=False)
+    if len(body) <= _DISCORD_CONTENT_LIMIT < len(normalized):
+        return _normalize_discord_tables(body, compact=True)
+    return normalized

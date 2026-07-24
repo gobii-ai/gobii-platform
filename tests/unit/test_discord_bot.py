@@ -1274,6 +1274,24 @@ class NativeDiscordBotTests(TestCase):
         self.assertEqual(normalize_discord_markdown(fenced), fenced)
 
     @tag("batch_agent_webhooks")
+    def test_discord_table_normalizer_keeps_valid_dense_message_within_content_limit(self):
+        headers = ["Company", "Owner", "Stage", "Region", "Status", "Score", "Note"]
+        rows = [
+            [f"item-{row}", *(f"value-{row}-{column}" for column in range(1, 7))]
+            for row in range(15)
+        ]
+        table = (
+            f"| {' | '.join(headers)} |\n"
+            f"| {' | '.join(['---'] * len(headers))} |\n"
+            + "\n".join(f"| {' | '.join(row)} |" for row in rows)
+        )
+
+        self.assertLessEqual(len(table), 2_000)
+        normalized = normalize_discord_markdown(table)
+        self.assertLessEqual(len(normalized), 2_000)
+        self.assertNotIn("| --- |", normalized)
+
+    @tag("batch_agent_webhooks")
     @patch.dict(os.environ, {"GOBII_ENCRYPTION_KEY": "native-discord-tests"}, clear=False)
     @patch("api.services.discord_bot.build_public_agent_avatar_thumbnail_url", return_value="https://app.example.test/public/agents/avatar.png")
     @patch("api.services.discord_bot.requests.get")
