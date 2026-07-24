@@ -584,7 +584,7 @@ export function useTimelineScrollController({
           const reducedMotion = typeof window.matchMedia === 'function'
             && window.matchMedia('(prefers-reduced-motion: reduce)').matches
           target.scrollIntoView({
-            block: 'center',
+            block: 'start',
             behavior: reducedMotion ? 'auto' : 'smooth',
           })
           target.classList.remove('message-search-target')

@@ -219,7 +219,7 @@ function revealVisibleMessage(messageId: string): void {
     if (!target) return
     const reducedMotion = typeof window.matchMedia === 'function'
       && window.matchMedia('(prefers-reduced-motion: reduce)').matches
-    target.scrollIntoView({ block: 'center', behavior: reducedMotion ? 'auto' : 'smooth' })
+    target.scrollIntoView({ block: 'start', behavior: reducedMotion ? 'auto' : 'smooth' })
     target.classList.remove('message-search-target')
     window.requestAnimationFrame(() => target.classList.add('message-search-target'))
     window.setTimeout(() => target.classList.remove('message-search-target'), 2200)
