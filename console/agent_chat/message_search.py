@@ -172,10 +172,21 @@ def _highlight_excerpt(excerpt: str, terms: list[str]) -> list[dict[str, Any]]:
 
 
 def _excerpt_segments(body: str, query: str) -> list[dict[str, Any]]:
-    text = body or ""
+    raw_text = body or ""
+    text = sanitize_notification_preview_text(raw_text)
+    terms = _positive_highlight_terms(query)
+    folded_text = text.casefold()
+    folded_raw_text = raw_text.casefold()
+    hidden_terms = [
+        term
+        for term in terms
+        if term.casefold() not in folded_text and term.casefold() in folded_raw_text
+    ]
+    if hidden_terms:
+        match_context = f"Matched in link or formatting: {', '.join(hidden_terms)}"
+        text = f"{text} · {match_context}" if text else match_context
     if not text:
         return [{"text": "", "highlighted": False}]
-    terms = _positive_highlight_terms(query)
     start, end = _excerpt_bounds(text, terms)
     excerpt = f"{'…' if start else ''}{text[start:end]}{'…' if end < len(text) else ''}"
     return _highlight_excerpt(excerpt, terms)
@@ -254,13 +265,11 @@ def search_agent_messages(
     results = []
     for message in page:
         attachments = list(message.attachments.all())
-        normalized_body = sanitize_notification_preview_text(message.body)
-        excerpt = _excerpt_segments(normalized_body, query)
         results.append(
             {
                 "message_id": str(message.id),
                 "timestamp": message.timestamp.isoformat(),
-                "excerpt": excerpt,
+                "excerpt": _excerpt_segments(message.body, query),
                 "attachment_count": len(attachments),
                 "has_images": any(
                     (attachment.content_type or "").lower().startswith("image/")
