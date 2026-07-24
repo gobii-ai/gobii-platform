@@ -7,6 +7,7 @@ from django.test import TestCase, override_settings, tag
 from django.utils import timezone
 
 from api.agent.system_skills import get_system_skill_definition, shortlist_system_skills
+from api.agent.tools.http_request import get_http_request_tool
 from api.agent.tools.meta_gobii import execute_meta_gobii_tool
 from api.agent.tools.meta_gobii_names import META_GOBII_SYSTEM_SKILL_KEY
 from api.agent.tools.secure_api_request import (
@@ -152,6 +153,12 @@ class SecureApiRequestTests(TestCase):
             available_tool_names={SECURE_API_REQUEST_TOOL_NAME},
         )
         self.assertEqual([match.skill_key for match in matches], [SECURE_CREDENTIAL_DELEGATION_SYSTEM_SKILL_KEY])
+
+    def test_ordinary_http_directs_credential_responses_to_secure_delegation(self):
+        description = get_http_request_tool()["function"]["description"].lower()
+
+        self.assertIn("response may contain credentials", description)
+        self.assertIn("secure credential delegation", description)
 
     def test_real_harness_eval_suite_is_registered(self):
         import api.evals.loader  # noqa: F401
