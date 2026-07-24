@@ -26,15 +26,40 @@ export const PET_ANIMATIONS: Record<PetAnimationName, PetAnimationSpec> = {
   review: { row: 8, durations: [150, 150, 150, 150, 150, 280] },
 }
 
-const NEGATIVE_EMOTIONS = [
-  '😞', '😔', '😟', '😢', '😭', '😣', '😖', '😫', '😩', '😓', '😥', '😰',
-  '😨', '😱', '😡', '😠', '🤬', '💔', '❌', '⚠', '🫠', '😵', '🤕', '🤒',
+const DISTRESSED_EMOTIONS = [
+  '🙁', '☹', '😞', '😔', '😟', '🥺', '😢', '😭', '😣', '😖', '😫', '😩',
+  '😓', '😥', '😰', '😨', '😱', '🫨', '😡', '😠', '🤬', '😤', '🤯',
+  '🥵', '🥶', '🤢', '🤮', '🤧', '😷', '🤒', '🤕', '🥴', '😵', '🫠',
+  '😈', '👿', '👹', '👺', '💀', '☠', '💩', '💔', '❤️‍🩹', '🩹',
+  '❌', '🚫', '🆘', '⚠', '🚧', '📉', '💥', '🌧', '⛈',
 ]
-const FOCUSED_EMOTIONS = ['🤔', '🧐', '🤓', '👀', '🔍', '🧠', '💭']
-const WAITING_EMOTIONS = ['😕', '😬', '🤨', '❓', '⌛', '⏳']
+
+const FOCUSED_EMOTIONS = [
+  '🤔', '🧐', '🤓', '🤨', '👀', '👁', '🔍', '🔎', '🧠', '💭', '🧩',
+  '📝', '✍', '📚', '📖', '📓', '📋', '🗂', '💻', '🖥', '⌨', '🧪',
+  '🔬', '🔭', '🧬', '🛠', '🔧', '⚙', '📐', '📏', '💡',
+]
+
+const WAITING_EMOTIONS = [
+  '😕', '🫤', '😬', '😶', '🫥', '😐', '😑', '🙄', '😯', '😦', '😧',
+  '😮', '😲', '😳', '🫣', '🤐', '🤫', '🥱', '😴', '😪', '🤤', '😮‍💨',
+  '❓', '❔', '⌛', '⏳', '⏰', '🕐', '⏸', '🐌', '🐢', '🌙', '💤',
+]
+
 const CELEBRATING_EMOTIONS = [
-  '🥳', '🎉', '🎊', '🚀', '🔥', '🤩', '😆', '😁', '😄', '😃', '🙌', '💪',
-  '🏆', '✨', '⚡', '✅',
+  '😀', '😃', '😄', '😁', '😆', '😅', '😂', '🤣', '🤩', '🥳', '😍',
+  '🥰', '🤪', '😎', '🤑', '🎉', '🎊', '🎈', '🎆', '🎇', '✨', '🌟',
+  '⭐', '💫', '🔥', '⚡', '🚀', '🙌', '👏', '💪', '🕺', '💃', '🏆',
+  '🥇', '🏅', '🎯', '✅', '☑', '💯', '📈', '❤️‍🔥',
+]
+
+const FRIENDLY_EMOTIONS = [
+  '😊', '😇', '🙂', '🙃', '😉', '😌', '😏', '😘', '😗', '😙', '😚',
+  '😋', '😛', '😝', '😜', '🤗', '🤭', '🫢', '🫡', '🤠', '🥸', '🤡',
+  '👋', '🤚', '🖐', '✋', '🖖', '👌', '🤌', '🤏', '✌', '🤞', '🫰',
+  '🤟', '🤘', '🤙', '👍', '🙏', '🫶', '💋', '💖', '💗', '💓', '💞',
+  '💕', '💟', '❣', '❤', '🧡', '💛', '💚', '💙', '💜', '🤎', '🤍',
+  '👻', '👽', '👾', '🤖', '🎃', '🌈', '🌞', '🌻', '🌸',
 ]
 
 function containsAny(value: string, candidates: string[]): boolean {
@@ -43,10 +68,11 @@ function containsAny(value: string, candidates: string[]): boolean {
 
 export function animationForEmotion(emotion: string | null): PetAnimationName | null {
   if (!emotion) return null
-  if (containsAny(emotion, NEGATIVE_EMOTIONS)) return 'failed'
+  if (containsAny(emotion, DISTRESSED_EMOTIONS)) return 'failed'
   if (containsAny(emotion, FOCUSED_EMOTIONS)) return 'review'
   if (containsAny(emotion, WAITING_EMOTIONS)) return 'waiting'
   if (containsAny(emotion, CELEBRATING_EMOTIONS)) return 'jumping'
+  if (containsAny(emotion, FRIENDLY_EMOTIONS)) return 'waving'
   return 'waving'
 }
 
