@@ -89,13 +89,23 @@ class ConsoleUserPetsApiTests(TestCase):
             },
         )
 
-    def test_get_returns_builtin_pet_and_default_preferences(self):
+    def test_get_returns_builtin_pets_and_default_preferences(self):
         response = self.client.get(self.url)
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertEqual(payload["maxCustomPets"], settings.USER_PET_MAX_CUSTOM_PETS)
         self.assertEqual(payload["pets"][0]["id"], BUILTIN_PET_ID)
+        self.assertEqual(
+            payload["pets"][1],
+            {
+                "id": "builtin:eevee",
+                "kind": "builtin",
+                "displayName": "Eevee",
+                "description": "Matt's runt-of-the-litter corgi.",
+                "spritesheetUrl": "/static/images/pets/eevee-v2.webp",
+            },
+        )
         self.assertEqual(
             payload["preferences"],
             {
@@ -111,7 +121,7 @@ class ConsoleUserPetsApiTests(TestCase):
 
         self.assertEqual(response.status_code, 201)
         pet = UserPet.objects.get(user=self.user)
-        custom_pet = response.json()["pets"][1]
+        custom_pet = next(item for item in response.json()["pets"] if item["kind"] == "custom")
         self.assertEqual(custom_pet["id"], str(pet.id))
         self.assertEqual(custom_pet["displayName"], "Orbit")
         self.assertTrue(response.json()["preferences"]["enabled"])
@@ -163,6 +173,16 @@ class ConsoleUserPetsApiTests(TestCase):
         )
         stored = UserPreference.resolve_known_preferences(self.user)
         self.assertEqual(stored[UserPreference.KEY_USER_PET_POSITION], {"x": 0.25, "y": 0.75})
+
+    def test_selects_an_included_non_default_pet(self):
+        response = self.client.patch(
+            self.url,
+            data=json.dumps({"selectedPetId": "builtin:eevee"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["preferences"]["selectedPetId"], "builtin:eevee")
 
     def test_cannot_select_another_users_pet(self):
         other_pet = UserPet.objects.create(
