@@ -11,7 +11,6 @@ export type AgentMessageSearchResult = {
   message_id: string
   timestamp: string
   excerpt: MessageSearchExcerptSegment[]
-  excerpt_text: string
   attachment_count: number
   has_images: boolean
   agent: {

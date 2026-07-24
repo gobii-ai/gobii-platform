@@ -117,6 +117,10 @@ class AgentMessageSearchTests(TestCase):
     def _search(self, **params):
         return self.client.get(reverse("console_agent_message_search"), params)
 
+    @staticmethod
+    def _excerpt_text(result):
+        return "".join(segment["text"] for segment in result["excerpt"])
+
     def test_text_search_uses_newest_first_cursor_pagination(self):
         older = self._create_message(self.agent, "alpha project older")
         newer = self._create_message(self.agent, "alpha project newer")
@@ -125,7 +129,7 @@ class AgentMessageSearchTests(TestCase):
 
         self.assertEqual(first.status_code, 200)
         self.assertEqual(first.json()["results"][0]["message_id"], str(newer.id))
-        self.assertEqual(first.json()["results"][0]["excerpt_text"], "alpha project newer")
+        self.assertEqual(self._excerpt_text(first.json()["results"][0]), "alpha project newer")
         self.assertTrue(first.json()["next_cursor"])
         self.assertTrue(any(segment["highlighted"] for segment in first.json()["results"][0]["excerpt"]))
 
@@ -154,9 +158,10 @@ class AgentMessageSearchTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         result = response.json()["results"][0]
-        self.assertIn("Apollo", result["excerpt_text"])
-        self.assertNotIn("<strong>", result["excerpt_text"])
-        self.assertNotIn("style=", result["excerpt_text"])
+        excerpt_text = self._excerpt_text(result)
+        self.assertIn("Apollo", excerpt_text)
+        self.assertNotIn("<strong>", excerpt_text)
+        self.assertNotIn("style=", excerpt_text)
         self.assertTrue(any(segment["highlighted"] and segment["text"] == "Apollo" for segment in result["excerpt"]))
 
         markdown_message = self._create_message(
@@ -169,7 +174,7 @@ class AgentMessageSearchTests(TestCase):
             for item in markdown_response.json()["results"]
             if item["message_id"] == str(markdown_message.id)
         )
-        self.assertEqual(markdown_result["excerpt_text"], "Apollo needs a new API key.")
+        self.assertEqual(self._excerpt_text(markdown_result), "Apollo needs a new API key.")
 
     def test_search_includes_inbound_messages_and_excludes_tool_content(self):
         inbound = self._create_message(

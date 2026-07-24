@@ -16,7 +16,8 @@ from console.context_helpers import resolve_console_context, resolve_staff_conso
 from console.context_overrides import get_context_override, get_staff_context_override
 from util.text_sanitizer import sanitize_notification_preview_text
 
-from .access import agent_queryset_for, shared_agent_queryset_for
+from .access import agent_querysets_for_context
+from .timeline import visible_message_queryset
 
 
 DEFAULT_SEARCH_LIMIT = 30
@@ -60,33 +61,25 @@ class MessageSearchCursor:
         return cls(timestamp=timestamp, seq=seq)
 
 
-def _visible_agent_queryset(request) -> QuerySet[PersistentAgent]:
+def _visible_agent_queryset(request) -> QuerySet:
     staff_override = get_staff_context_override(request)
     if staff_override:
         if not (request.user.is_staff or request.user.is_superuser):
             raise PermissionDenied("Not permitted.")
         context = resolve_staff_console_context(request.user, staff_override).current_context
-        queryset = PersistentAgent.objects.non_eval().alive()
-        if context.type == "organization":
-            return queryset.filter(organization_id=context.id)
-        return queryset.filter(organization__isnull=True, user_id=context.id)
-
-    context_info = resolve_console_context(
+    else:
+        context = resolve_console_context(
+            request.user,
+            request.session,
+            override=get_context_override(request),
+        ).current_context
+    primary, shared = agent_querysets_for_context(
         request.user,
-        request.session,
-        override=get_context_override(request),
-    )
-    queryset = agent_queryset_for(
-        request.user,
-        context_info.current_context,
+        context,
+        staff_context=bool(staff_override),
         allow_delinquent_personal_chat=True,
     )
-    if context_info.current_context.type != "personal":
-        return queryset
-    shared_ids = shared_agent_queryset_for(request.user).values("id")
-    return PersistentAgent.objects.filter(
-        Q(id__in=queryset.values("id")) | Q(id__in=shared_ids),
-    )
+    return primary | shared
 
 
 def _sqlite_query_tokens(query: str) -> tuple[list[list[str]], list[str]]:
@@ -219,12 +212,8 @@ def search_agent_messages(
         except (PersistentAgent.DoesNotExist, ValueError) as exc:
             raise PermissionDenied("Agent not found.") from exc
 
-    queryset = PersistentAgentMessage.objects.filter(
+    queryset = visible_message_queryset().filter(
         owner_agent_id__in=visible_agents.values("id"),
-    )
-    hidden_key = "raw_payload__hide_in_chat"
-    queryset = queryset.filter(
-        Q(**{hidden_key: False}) | Q(**{f"{hidden_key}__isnull": True}),
     )
     if agent_id:
         queryset = queryset.filter(owner_agent_id=agent_id)
@@ -239,19 +228,13 @@ def search_agent_messages(
             queryset = _apply_sqlite_text_search(queryset, query)
 
     attachments = PersistentAgentMessageAttachment.objects.filter(message_id=OuterRef("pk"))
-    image_attachments = attachments.filter(content_type__istartswith="image/")
-    file_attachments = attachments.exclude(content_type__istartswith="image/")
-    queryset = queryset.annotate(
-        has_attachment=Exists(attachments),
-        has_image_attachment=Exists(image_attachments),
-        has_file_attachment=Exists(file_attachments),
-    )
-    if attachment_filter == "attachment":
-        queryset = queryset.filter(has_attachment=True)
-    elif attachment_filter == "image":
-        queryset = queryset.filter(has_image_attachment=True)
-    elif attachment_filter == "file":
-        queryset = queryset.filter(has_file_attachment=True)
+    attachment_querysets = {
+        "attachment": attachments,
+        "image": attachments.filter(content_type__istartswith="image/"),
+        "file": attachments.exclude(content_type__istartswith="image/"),
+    }
+    if attachment_filter != "any":
+        queryset = queryset.filter(Exists(attachment_querysets[attachment_filter]))
 
     if decoded_cursor:
         queryset = queryset.filter(
@@ -278,7 +261,6 @@ def search_agent_messages(
                 "message_id": str(message.id),
                 "timestamp": message.timestamp.isoformat(),
                 "excerpt": excerpt,
-                "excerpt_text": "".join(segment["text"] for segment in excerpt),
                 "attachment_count": len(attachments),
                 "has_images": any(
                     (attachment.content_type or "").lower().startswith("image/")

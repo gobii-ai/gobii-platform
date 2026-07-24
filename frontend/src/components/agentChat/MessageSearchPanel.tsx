@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type MouseEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type FormEvent, type KeyboardEvent, type SetStateAction } from 'react'
 import { useInfiniteQuery } from '@tanstack/react-query'
 import { File, History, Image, Loader2, Paperclip, Search, Trash2, UserRoundSearch } from 'lucide-react'
 
@@ -10,13 +10,16 @@ import {
 } from '../../api/agentMessageSearch'
 import type { ConsoleContext } from '../../api/context'
 import type { AgentRosterEntry } from '../../types/agentRoster'
+import { handleAppAnchorClick } from '../../util/appNavigation'
 import { buildAgentSearchBlob } from '../../util/agentCards'
+import { revealTimelineMessage } from '../../util/timelineNavigation'
 import { AgentSearchInput } from './ChatSidebarParts'
 import { AgentChatAvatar } from './uiPrimitives'
 
-type SearchHistoryEntry = AgentMessageSearchFilters & {
-  agentName: string | null
-  displayQuery?: string
+export type MessageSearchState = {
+  open: boolean
+  query: string
+  submittedQuery: string | null
 }
 
 type MessageSearchPanelProps = {
@@ -24,15 +27,14 @@ type MessageSearchPanelProps = {
   context: ConsoleContext | null
   viewerKey: string | number | null
   agentsLoading?: boolean
-  query: string
-  onQueryChange: (query: string) => void
-  submitted: AgentMessageSearchFilters | null
-  onSubmittedChange: (filters: AgentMessageSearchFilters | null) => void
+  state: MessageSearchState
+  onStateChange: Dispatch<SetStateAction<MessageSearchState>>
   onAgentSelect?: (agent: AgentRosterEntry) => void
   onResultSelect?: () => void
 }
 
 type ParsedSearch = AgentMessageSearchFilters & {
+  agentFilterPresent: boolean
   selectedAgent: AgentRosterEntry | null
 }
 
@@ -48,41 +50,30 @@ const SHORTCUT_LIST_ID = 'message-search-shortcut-list'
 const ATTACHMENT_OPTIONS: {
   value: Exclude<MessageAttachmentFilter, 'any'>
   label: string
-  token: string
   icon: typeof Paperclip
 }[] = [
-  { value: 'attachment', label: 'Any attachment', token: 'attachment', icon: Paperclip },
-  { value: 'image', label: 'Image', token: 'image', icon: Image },
-  { value: 'file', label: 'Other file', token: 'file', icon: File },
+  { value: 'attachment', label: 'Any attachment', icon: Paperclip },
+  { value: 'image', label: 'Image', icon: Image },
+  { value: 'file', label: 'Other file', icon: File },
 ]
 
 function historyStorageKey(viewerKey: string | number | null, context: ConsoleContext | null): string | null {
   if (!viewerKey || !context) return null
-  return `gobii:message-search-history:v1:${viewerKey}:${context.type}:${context.id}`
+  return `gobii:message-search-history:v2:${viewerKey}:${context.type}:${context.id}`
 }
 
-function readHistory(key: string | null): SearchHistoryEntry[] {
+function readHistory(key: string | null): string[] {
   if (!key || typeof window === 'undefined') return []
   try {
     const raw = JSON.parse(window.localStorage.getItem(key) ?? '[]')
     if (!Array.isArray(raw)) return []
-    return raw.filter((entry): entry is SearchHistoryEntry => (
-      entry
-      && typeof entry === 'object'
-      && typeof entry.q === 'string'
-      && (entry.agentId === null || typeof entry.agentId === 'string')
-      && (entry.displayQuery === undefined || typeof entry.displayQuery === 'string')
-      && (
-        entry.attachment === 'any'
-        || ATTACHMENT_OPTIONS.some((option) => option.value === entry.attachment)
-      )
-    )).slice(0, HISTORY_LIMIT)
+    return raw.filter((entry): entry is string => typeof entry === 'string').slice(0, HISTORY_LIMIT)
   } catch {
     return []
   }
 }
 
-function writeHistory(key: string | null, history: SearchHistoryEntry[]): void {
+function writeHistory(key: string | null, history: string[]): void {
   if (!key || typeof window === 'undefined') return
   try {
     window.localStorage.setItem(key, JSON.stringify(history.slice(0, HISTORY_LIMIT)))
@@ -94,7 +85,6 @@ function writeHistory(key: string | null, history: SearchHistoryEntry[]): void {
 function parseSearchQuery(value: string, agents: AgentRosterEntry[]): ParsedSearch {
   let searchableText = value
   let attachment: MessageAttachmentFilter = 'any'
-  let selectedAgent: AgentRosterEntry | null = null
 
   searchableText = searchableText.replace(
     /\bhas:\s*(attachment|attachments|image|file)\b/gi,
@@ -108,27 +98,24 @@ function parseSearchQuery(value: string, agents: AgentRosterEntry[]): ParsedSear
     },
   )
 
-  const quotedAgentPattern = /\bagent:\s*(?:"([^"]+)"|'([^']+)')/i
-  const quotedAgentMatch = quotedAgentPattern.exec(searchableText)
-  if (quotedAgentMatch) {
-    const requestedName = (quotedAgentMatch[1] || quotedAgentMatch[2] || '').trim().toLocaleLowerCase()
-    selectedAgent = agents.find((agent) => agent.name.trim().toLocaleLowerCase() === requestedName) ?? null
+  const operatorMatch = /\bagent:\s*/i.exec(searchableText)
+  const agentFilterPresent = Boolean(operatorMatch)
+  let selectedAgent: AgentRosterEntry | null = null
+  if (operatorMatch) {
+    const valueStart = operatorMatch.index + operatorMatch[0].length
+    const remainder = searchableText.slice(valueStart)
+    const quoted = /^(?:"([^"]+)"|'([^']+)')/.exec(remainder)
+    const requestedName = quoted
+      ? (quoted[1] || quoted[2] || '').trim().toLocaleLowerCase()
+      : null
+    selectedAgent = requestedName
+      ? agents.find((agent) => agent.name.trim().toLocaleLowerCase() === requestedName) ?? null
+      : [...agents]
+          .sort((left, right) => right.name.length - left.name.length)
+          .find((agent) => remainder.toLocaleLowerCase().startsWith(agent.name.trim().toLocaleLowerCase())) ?? null
     if (selectedAgent) {
-      searchableText = searchableText.replace(quotedAgentMatch[0], ' ')
-    }
-  }
-
-  if (!selectedAgent) {
-    const operatorMatch = /\bagent:\s*/i.exec(searchableText)
-    if (operatorMatch) {
-      const remainder = searchableText.slice(operatorMatch.index + operatorMatch[0].length)
-      selectedAgent = [...agents]
-        .sort((left, right) => right.name.length - left.name.length)
-        .find((agent) => remainder.toLocaleLowerCase().startsWith(agent.name.trim().toLocaleLowerCase())) ?? null
-      if (selectedAgent) {
-        const end = operatorMatch.index + operatorMatch[0].length + selectedAgent.name.length
-        searchableText = `${searchableText.slice(0, operatorMatch.index)} ${searchableText.slice(end)}`
-      }
+      const consumedLength = quoted?.[0].length ?? selectedAgent.name.length
+      searchableText = `${searchableText.slice(0, operatorMatch.index)} ${searchableText.slice(valueStart + consumedLength)}`
     }
   }
 
@@ -140,9 +127,24 @@ function parseSearchQuery(value: string, agents: AgentRosterEntry[]): ParsedSear
   return {
     q: searchableText,
     agentId: selectedAgent?.id ?? null,
+    agentFilterPresent,
     attachment,
     selectedAgent,
   }
+}
+
+function searchFilters(parsed: ParsedSearch): AgentMessageSearchFilters {
+  return {
+    q: parsed.q,
+    agentId: parsed.agentId,
+    attachment: parsed.attachment,
+  }
+}
+
+function sameFilters(left: AgentMessageSearchFilters, right: AgentMessageSearchFilters): boolean {
+  return left.q === right.q
+    && left.agentId === right.agentId
+    && left.attachment === right.attachment
 }
 
 function activeShortcutFor(query: string): ActiveShortcut {
@@ -152,8 +154,8 @@ function activeShortcutFor(query: string): ActiveShortcut {
   const kind = match[2].toLowerCase() as 'has' | 'agent'
   const fragment = query.slice(match.index + match[0].length)
   if (
-    (kind === 'has' && /^(?:attachment|attachments|image|file)\s+/i.test(fragment))
-    || (kind === 'agent' && /^(?:"[^"]+"|'[^']+')\s+/.test(fragment))
+    (kind === 'has' && /^(?:attachment|attachments|image|file)(?:\s+|$)/i.test(fragment))
+    || (kind === 'agent' && /^(?:"[^"]+"|'[^']+')(?:\s+|$)/.test(fragment))
   ) {
     return null
   }
@@ -174,58 +176,12 @@ function appendOperator(query: string, operator: 'has' | 'agent'): string {
   return `${prefix ? `${prefix} ` : ''}${operator}:`
 }
 
-function fallbackHistoryLabel(entry: SearchHistoryEntry): string {
-  const parts: string[] = []
-  if (entry.q.trim()) parts.push(entry.q.trim())
-  if (entry.agentName) parts.push(`agent:"${entry.agentName}"`)
-  if (entry.attachment !== 'any') parts.push(`has:${entry.attachment}`)
-  return parts.join(' ') || 'Search'
-}
-
 function resultUrl(agentId: string, messageId: string): string {
   const base = `/app/agents/${agentId}`
   if (typeof window === 'undefined') return `${base}?message=${messageId}`
   const params = new URLSearchParams(window.location.search)
   params.set('message', messageId)
   return `${base}?${params.toString()}${window.location.hash}`
-}
-
-function navigateToResult(event: MouseEvent<HTMLElement>, href: string): boolean {
-  if (
-    event.defaultPrevented
-    || event.button !== 0
-    || event.metaKey
-    || event.ctrlKey
-    || event.shiftKey
-    || event.altKey
-    || typeof window === 'undefined'
-  ) {
-    return false
-  }
-  if (event.target instanceof Element && event.target.closest('a[href]')) {
-    return false
-  }
-  event.preventDefault()
-  window.history.pushState({ messageSearch: true }, '', href)
-  window.dispatchEvent(new PopStateEvent('popstate'))
-  return true
-}
-
-function revealVisibleMessage(messageId: string): void {
-  if (typeof document === 'undefined') return
-  window.requestAnimationFrame(() => {
-    const escaped = typeof CSS !== 'undefined' && typeof CSS.escape === 'function'
-      ? CSS.escape(messageId)
-      : messageId.replace(/["\\]/g, '\\$&')
-    const target = document.querySelector<HTMLElement>(`[data-message-id="${escaped}"]`)
-    if (!target) return
-    const reducedMotion = typeof window.matchMedia === 'function'
-      && window.matchMedia('(prefers-reduced-motion: reduce)').matches
-    target.scrollIntoView({ block: 'start', behavior: reducedMotion ? 'auto' : 'smooth' })
-    target.classList.remove('message-search-target')
-    window.requestAnimationFrame(() => target.classList.add('message-search-target'))
-    window.setTimeout(() => target.classList.remove('message-search-target'), 2200)
-  })
 }
 
 function SearchExcerpt({ segments }: { segments: MessageSearchExcerptSegment[] }) {
@@ -245,23 +201,28 @@ export function MessageSearchPanel({
   context,
   viewerKey,
   agentsLoading = false,
-  query,
-  onQueryChange,
-  submitted,
-  onSubmittedChange,
+  state,
+  onStateChange,
   onAgentSelect,
   onResultSelect,
 }: MessageSearchPanelProps) {
+  const { query, submittedQuery } = state
   const inputRef = useRef<HTMLInputElement | null>(null)
   const [highlightedShortcutIndex, setHighlightedShortcutIndex] = useState(0)
   const storageKey = historyStorageKey(viewerKey, context)
-  const [history, setHistory] = useState<SearchHistoryEntry[]>(() => readHistory(storageKey))
-  const availableAgentIds = useMemo(() => new Set(agents.map((agent) => agent.id)), [agents])
+  const [history, setHistory] = useState<string[]>(() => readHistory(storageKey))
   const availableHistory = useMemo(
-    () => history.filter((entry) => entry.agentId === null || availableAgentIds.has(entry.agentId)),
-    [availableAgentIds, history],
+    () => history.filter((entry) => {
+      const parsed = parseSearchQuery(entry, agents)
+      return !parsed.agentFilterPresent || Boolean(parsed.selectedAgent)
+    }),
+    [agents, history],
   )
   const parsedSearch = useMemo(() => parseSearchQuery(query, agents), [agents, query])
+  const submitted = useMemo(
+    () => submittedQuery ? searchFilters(parseSearchQuery(submittedQuery, agents)) : null,
+    [agents, submittedQuery],
+  )
   const activeShortcut = useMemo(() => activeShortcutFor(query), [query])
   const matchingAgents = useMemo(() => {
     if (parsedSearch.selectedAgent) return [parsedSearch.selectedAgent]
@@ -288,7 +249,7 @@ export function MessageSearchPanel({
     if (activeShortcut?.kind !== 'has') return []
     return ATTACHMENT_OPTIONS.filter((option) => (
       !activeShortcut.fragment
-      || option.token.startsWith(activeShortcut.fragment)
+      || option.value.startsWith(activeShortcut.fragment)
       || option.label.toLocaleLowerCase().includes(activeShortcut.fragment)
     ))
   }, [activeShortcut])
@@ -318,34 +279,27 @@ export function MessageSearchPanel({
     () => searchQuery.data?.pages.flatMap((page) => page.results) ?? [],
     [searchQuery.data],
   )
-  const canSearch = Boolean(parsedSearch.q || parsedSearch.agentId) || parsedSearch.attachment !== 'any'
+  const canSearch = (
+    (!parsedSearch.agentFilterPresent || Boolean(parsedSearch.agentId))
+    && (Boolean(parsedSearch.q || parsedSearch.agentId) || parsedSearch.attachment !== 'any')
+  )
 
   const runSearch = useCallback((displayQuery: string) => {
     const parsed = parseSearchQuery(displayQuery, agents)
-    const filters: AgentMessageSearchFilters = {
-      q: parsed.q,
-      agentId: parsed.agentId,
-      attachment: parsed.attachment,
-    }
+    if (parsed.agentFilterPresent && !parsed.agentId) return
+    const filters = searchFilters(parsed)
     if (!filters.q && !filters.agentId && filters.attachment === 'any') return
-    onQueryChange(displayQuery)
-    onSubmittedChange(filters)
-    const entry: SearchHistoryEntry = {
-      ...filters,
-      displayQuery: displayQuery.trim(),
-      agentName: parsed.selectedAgent?.name ?? null,
-    }
+    const entry = displayQuery.trim()
+    onStateChange((current) => ({ ...current, query: displayQuery, submittedQuery: entry }))
     const nextHistory = [
       entry,
       ...availableHistory.filter((item) => (
-        item.q !== entry.q
-        || item.agentId !== entry.agentId
-        || item.attachment !== entry.attachment
+        !sameFilters(searchFilters(parseSearchQuery(item, agents)), filters)
       )),
     ].slice(0, HISTORY_LIMIT)
     setHistory(nextHistory)
     writeHistory(storageKey, nextHistory)
-  }, [agents, availableHistory, onQueryChange, onSubmittedChange, storageKey])
+  }, [agents, availableHistory, onStateChange, storageKey])
 
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault()
@@ -353,8 +307,7 @@ export function MessageSearchPanel({
   }
 
   const handleQueryChange = (nextQuery: string) => {
-    onQueryChange(nextQuery)
-    onSubmittedChange(null)
+    onStateChange((current) => ({ ...current, query: nextQuery, submittedQuery: null }))
     setHighlightedShortcutIndex(0)
   }
 
@@ -384,7 +337,7 @@ export function MessageSearchPanel({
       return
     }
     const attachmentOption = shortcutAttachments[resolvedShortcutIndex]
-    if (attachmentOption) selectAttachmentShortcut(attachmentOption.token)
+    if (attachmentOption) selectAttachmentShortcut(attachmentOption.value)
   }
 
   const handleSearchInputKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
@@ -414,7 +367,7 @@ export function MessageSearchPanel({
   const showShortcutSuggestions = Boolean(activeShortcut)
 
   return (
-    <section className="message-search-panel" aria-label="Search agents and messages">
+    <section className="message-search-panel flex min-h-0 flex-1 flex-col" aria-label="Search agents and messages">
       <div className="message-search-panel__heading">
         <div>
           <h2>Search</h2>
@@ -422,16 +375,13 @@ export function MessageSearchPanel({
         </div>
       </div>
 
-      <form className="message-search-panel__form" onSubmit={handleSubmit}>
+      <form className="message-search-panel__form flex flex-col" onSubmit={handleSubmit}>
         <AgentSearchInput
           ref={inputRef}
           variant="sidebar"
           value={query}
           onChange={handleQueryChange}
-          onClear={() => {
-            onQueryChange('')
-            onSubmittedChange(null)
-          }}
+          onClear={() => handleQueryChange('')}
           placeholder="Search agents and messages…"
           autoFocus
           onKeyDown={handleSearchInputKeyDown}
@@ -443,21 +393,21 @@ export function MessageSearchPanel({
               : undefined
           }
         />
-        <button type="submit" className="message-search-panel__submit" disabled={!canSearch || searchQuery.isFetching}>
+        <button type="submit" className="message-search-panel__submit inline-flex items-center justify-center" disabled={!canSearch || searchQuery.isFetching}>
           {searchQuery.isFetching && !searchQuery.isFetchingNextPage ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
           Search messages
         </button>
       </form>
 
-      <div className="message-search-panel__results">
+      <div className="message-search-panel__results flex min-h-0 flex-1 flex-col overflow-y-auto">
         {showInitialSuggestions ? (
-          <div className="message-search-shortcuts">
+          <div className="message-search-shortcuts flex flex-col">
             <div className="message-search-panel__section-title"><span>Filters</span></div>
-            <button type="button" className="message-search-shortcut" onClick={() => beginShortcut('agent')}>
+            <button type="button" className="message-search-shortcut flex w-full items-center text-left" onClick={() => beginShortcut('agent')}>
               <UserRoundSearch className="h-4 w-4" />
               <span><strong>In a specific agent</strong><small>agent: agent name</small></span>
             </button>
-            <button type="button" className="message-search-shortcut" onClick={() => beginShortcut('has')}>
+            <button type="button" className="message-search-shortcut flex w-full items-center text-left" onClick={() => beginShortcut('has')}>
               <Paperclip className="h-4 w-4" />
               <span><strong>Includes an attachment</strong><small>has: image or file</small></span>
             </button>
@@ -465,14 +415,14 @@ export function MessageSearchPanel({
         ) : null}
 
         {showShortcutSuggestions ? (
-          <div className="message-search-shortcuts" id={SHORTCUT_LIST_ID} role="listbox">
+          <div className="message-search-shortcuts flex flex-col" id={SHORTCUT_LIST_ID} role="listbox">
             <div className="message-search-panel__section-title">
               <span>{activeShortcut?.kind === 'agent' ? 'Agents' : 'Message contains'}</span>
             </div>
             {activeShortcut?.kind === 'agent' ? shortcutAgents.map((agent) => (
               <button
                 type="button"
-                className="message-search-shortcut"
+                className="message-search-shortcut flex w-full items-center text-left"
                 id={`message-search-shortcut-${shortcutAgents.indexOf(agent)}`}
                 key={agent.id}
                 role="option"
@@ -484,9 +434,9 @@ export function MessageSearchPanel({
                 <AgentChatAvatar
                   name={agent.name}
                   avatarUrl={agent.avatarUrl}
-                  className="message-search-shortcut__avatar"
-                  imageClassName="message-search-shortcut__avatar-image"
-                  textClassName="message-search-shortcut__avatar-text"
+                  className="message-search-avatar"
+                  imageClassName="message-search-avatar__image"
+                  textClassName="message-search-avatar__text"
                 />
                 <span><strong>{agent.name}</strong><small>{agent.miniDescription || agent.shortDescription || 'Agent'}</small></span>
               </button>
@@ -495,17 +445,17 @@ export function MessageSearchPanel({
               return (
                 <button
                   type="button"
-                  className="message-search-shortcut"
+                  className="message-search-shortcut flex w-full items-center text-left"
                   id={`message-search-shortcut-${shortcutAttachments.indexOf(option)}`}
                   key={option.value}
                   role="option"
                   aria-selected={shortcutAttachments.indexOf(option) === resolvedShortcutIndex}
                   data-highlighted={shortcutAttachments.indexOf(option) === resolvedShortcutIndex ? 'true' : 'false'}
                   onMouseEnter={() => setHighlightedShortcutIndex(shortcutAttachments.indexOf(option))}
-                  onClick={() => selectAttachmentShortcut(option.token)}
+                  onClick={() => selectAttachmentShortcut(option.value)}
                 >
                   <Icon className="h-4 w-4" />
-                  <span><strong>{option.label}</strong><small>has:{option.token}</small></span>
+                  <span><strong>{option.label}</strong><small>has:{option.value}</small></span>
                 </button>
               )
             })}
@@ -513,21 +463,21 @@ export function MessageSearchPanel({
         ) : null}
 
         {!showShortcutSuggestions && matchingAgents.length ? (
-          <div className="message-search-agent-results">
+          <div className="message-search-agent-results flex flex-col">
             <div className="message-search-panel__section-title"><span>Agents</span></div>
             {matchingAgents.map((agent) => (
               <button
                 type="button"
-                className="message-search-agent-result"
+                className="message-search-agent-result settings-card-surface settings-card-surface--embedded flex w-full items-center text-left"
                 key={agent.id}
                 onClick={() => onAgentSelect?.(agent)}
               >
                 <AgentChatAvatar
                   name={agent.name}
                   avatarUrl={agent.avatarUrl}
-                  className="message-search-agent-result__avatar"
-                  imageClassName="message-search-agent-result__avatar-image"
-                  textClassName="message-search-agent-result__avatar-text"
+                  className="message-search-avatar"
+                  imageClassName="message-search-avatar__image"
+                  textClassName="message-search-avatar__text"
                 />
                 <span>
                   <strong>{agent.name}</strong>
@@ -539,22 +489,22 @@ export function MessageSearchPanel({
         ) : null}
 
         {!submitted && !showShortcutSuggestions ? (
-          <div className="message-search-panel__history">
+          <div className="message-search-panel__history flex flex-col">
             <div className="message-search-panel__section-title">
               <span><History className="h-3.5 w-3.5" /> Recent searches</span>
               {availableHistory.length ? (
                 <button type="button" onClick={clearHistory}><Trash2 className="h-3.5 w-3.5" /> Clear</button>
               ) : null}
             </div>
-            {availableHistory.length ? availableHistory.map((entry, index) => (
+            {availableHistory.length ? availableHistory.map((entry) => (
               <button
                 type="button"
-                className="message-search-panel__history-item"
-                key={`${entry.q}:${entry.agentId}:${entry.attachment}:${index}`}
-                onClick={() => runSearch(entry.displayQuery || fallbackHistoryLabel(entry))}
+                className="message-search-panel__history-item flex w-full items-center text-left"
+                key={entry}
+                onClick={() => runSearch(entry)}
               >
                 <Search className="h-4 w-4" />
-                <span>{entry.displayQuery || fallbackHistoryLabel(entry)}</span>
+                <span>{entry}</span>
               </button>
             )) : !showInitialSuggestions ? (
               <p className="message-search-panel__empty">Press Enter to search messages.</p>
@@ -566,63 +516,63 @@ export function MessageSearchPanel({
           <>
             <div className="message-search-panel__section-title">
               <span>Messages</span>
-              <button type="button" onClick={() => onSubmittedChange(null)}>Search history</button>
+              <button
+                type="button"
+                onClick={() => onStateChange((current) => ({ ...current, submittedQuery: null }))}
+              >
+                Search history
+              </button>
             </div>
             {searchQuery.isLoading ? (
               <div className="message-search-panel__empty"><Loader2 className="h-5 w-5 animate-spin" /> Searching…</div>
             ) : searchQuery.isError ? (
               <p className="message-search-panel__empty">Message search is unavailable. Try again.</p>
-            ) : results.length ? results.map((result) => (
-              <article
-                className="message-search-result settings-card-surface settings-card-surface--embedded"
-                key={result.message_id}
-                role="link"
-                tabIndex={0}
-                aria-label={`Open message from ${result.agent.name}`}
-                onClick={(event) => {
-                  if (navigateToResult(event, resultUrl(result.agent.id, result.message_id))) {
-                    revealVisibleMessage(result.message_id)
-                    onResultSelect?.()
-                  }
-                }}
-                onKeyDown={(event: KeyboardEvent<HTMLElement>) => {
-                  if (event.key !== 'Enter' || typeof window === 'undefined') return
-                  event.preventDefault()
-                  const href = resultUrl(result.agent.id, result.message_id)
-                  window.history.pushState({ messageSearch: true }, '', href)
-                  window.dispatchEvent(new PopStateEvent('popstate'))
-                  revealVisibleMessage(result.message_id)
-                  onResultSelect?.()
-                }}
-              >
-                <AgentChatAvatar
-                  name={result.agent.name}
-                  avatarUrl={result.agent.avatar_url}
-                  className="message-search-result__avatar"
-                  imageClassName="message-search-result__avatar-image"
-                  textClassName="message-search-result__avatar-text"
-                />
-                <div className="message-search-result__content">
-                  <div className="message-search-result__meta">
-                    <strong>{result.agent.name}</strong>
-                    <time dateTime={result.timestamp}>{new Date(result.timestamp).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}</time>
-                    {result.attachment_count ? (
-                      <span title={result.has_images ? 'Includes image' : 'Includes file'}>
-                        {result.has_images ? <Image className="h-3.5 w-3.5" /> : result.attachment_count > 1 ? <Paperclip className="h-3.5 w-3.5" /> : <File className="h-3.5 w-3.5" />}
-                        {result.attachment_count}
-                      </span>
-                    ) : null}
+            ) : results.length ? results.map((result) => {
+              const href = resultUrl(result.agent.id, result.message_id)
+              return (
+                <a
+                  className="message-search-result settings-card-surface settings-card-surface--embedded flex items-start"
+                  key={result.message_id}
+                  href={href}
+                  aria-label={`Open message from ${result.agent.name}`}
+                  onClick={(event) => {
+                    if (handleAppAnchorClick(event, href)) {
+                      window.requestAnimationFrame(() => {
+                        revealTimelineMessage(result.message_id, { highlight: true })
+                      })
+                      onResultSelect?.()
+                    }
+                  }}
+                >
+                  <AgentChatAvatar
+                    name={result.agent.name}
+                    avatarUrl={result.agent.avatar_url}
+                    className="message-search-avatar"
+                    imageClassName="message-search-avatar__image"
+                    textClassName="message-search-avatar__text"
+                  />
+                  <div className="message-search-result__content flex min-w-0 flex-1 flex-col">
+                    <div className="message-search-result__meta flex min-w-0 items-center">
+                      <strong>{result.agent.name}</strong>
+                      <time dateTime={result.timestamp}>{new Date(result.timestamp).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}</time>
+                      {result.attachment_count ? (
+                        <span title={result.has_images ? 'Includes image' : 'Includes file'}>
+                          {result.has_images ? <Image className="h-3.5 w-3.5" /> : result.attachment_count > 1 ? <Paperclip className="h-3.5 w-3.5" /> : <File className="h-3.5 w-3.5" />}
+                          {result.attachment_count}
+                        </span>
+                      ) : null}
+                    </div>
+                    <div className="message-search-result__excerpt">
+                      <SearchExcerpt segments={result.excerpt} />
+                    </div>
                   </div>
-                  <div className="message-search-result__excerpt">
-                    <SearchExcerpt segments={result.excerpt} />
-                  </div>
-                </div>
-              </article>
-            )) : <p className="message-search-panel__empty">No matching messages.</p>}
+                </a>
+              )
+            }) : <p className="message-search-panel__empty">No matching messages.</p>}
             {searchQuery.hasNextPage ? (
               <button
                 type="button"
-                className="message-search-panel__load-more"
+                className="message-search-panel__load-more inline-flex w-full items-center justify-center"
                 disabled={searchQuery.isFetchingNextPage}
                 onClick={() => void searchQuery.fetchNextPage()}
               >
