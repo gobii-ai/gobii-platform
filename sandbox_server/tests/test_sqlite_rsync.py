@@ -9,10 +9,12 @@ from unittest.mock import patch
 
 from sandbox_server.asgi import application
 from sandbox_server.server.sqlite_rsync import (
+    _SQLITE_RSYNC_LOCKS,
     _authorized,
     _invalidate_replica,
     _quick_check,
     _receive_handshake,
+    _sqlite_rsync_lock,
     _sqlite_path,
 )
 
@@ -97,6 +99,21 @@ class SQLiteRsyncEndpointTests(unittest.TestCase):
 
         with patch.dict(os.environ, {"SANDBOX_AGENT_ID": "pod-agent"}, clear=False):
             self.assertEqual(asyncio.run(_receive_handshake(receive)), (None, None))
+
+    def test_shared_backend_scopes_sync_locks_per_agent(self):
+        _SQLITE_RSYNC_LOCKS.clear()
+        with tempfile.TemporaryDirectory() as tmp_dir, patch.dict(
+            os.environ,
+            {
+                "SANDBOX_WORKSPACE_ROOT": tmp_dir,
+                "SANDBOX_AGENT_WORKSPACE_LAYOUT": "shared",
+                "SANDBOX_AGENT_ID": "",
+            },
+            clear=False,
+        ):
+            agent_one_lock = _sqlite_rsync_lock("agent-one")
+            self.assertIs(agent_one_lock, _sqlite_rsync_lock("agent-one"))
+            self.assertIsNot(agent_one_lock, _sqlite_rsync_lock("agent-two"))
 
     def test_invalidating_replica_removes_database_and_sidecars(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

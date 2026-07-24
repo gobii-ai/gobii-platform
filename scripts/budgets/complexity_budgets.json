@@ -1,5 +1,5 @@
 {
-  "baseline_sha": "f065ad6f9b0592134bf6b7532987baec4a676607",
+  "baseline_sha": "98dad7c77bd44b4bf7dece3d753d1eb048359b20",
   "generated_by": "uv run python scripts/check_complexity_budgets.py --update-baselines",
   "prompt_size": {
     "description": "Rendered prompt messages plus JSON tool definitions for representative send/planning paths.",
@@ -149,6 +149,6 @@
       ".yml",
       ".zsh"
     ],
-    "limit": 252007
+    "limit": 252045
   }
 }

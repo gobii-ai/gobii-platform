@@ -11,7 +11,7 @@ from sandbox_server.server.internal_paths import CUSTOM_TOOL_SQLITE_FILESPACE_PA
 
 SQLITE_RSYNC_WEBSOCKET_PATH = "/sandbox/compute/sqlite_rsync"
 _CHUNK_BYTES = 64 * 1024
-_SQLITE_RSYNC_LOCK = asyncio.Lock()
+_SQLITE_RSYNC_LOCKS: dict[str, asyncio.Lock] = {}
 
 
 def _header(scope: dict[str, Any], name: bytes) -> str:
@@ -33,6 +33,11 @@ def _configured_agent_id() -> str:
 
 def _sqlite_path(agent_id: str) -> Path:
     return _agent_workspace(_configured_agent_id() or agent_id) / CUSTOM_TOOL_SQLITE_FILESPACE_PATH.lstrip("/")
+
+
+def _sqlite_rsync_lock(agent_id: str) -> asyncio.Lock:
+    lock_key = str(_sqlite_path(agent_id))
+    return _SQLITE_RSYNC_LOCKS.setdefault(lock_key, asyncio.Lock())
 
 
 def _quick_check(path: Path) -> tuple[bool, str]:
@@ -206,7 +211,7 @@ async def websocket_application(scope, receive, send) -> None:
         await send({"type": "websocket.close", "code": 4400})
         return
 
-    async with _SQLITE_RSYNC_LOCK:
+    async with _sqlite_rsync_lock(agent_id):
         await _send_json(send, {"status": "ready"})
         exit_code, message = await _run_remote_half(agent_id, mode, receive, send)
         try:

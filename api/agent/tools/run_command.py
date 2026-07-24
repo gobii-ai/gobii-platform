@@ -2,6 +2,7 @@ from typing import Any, Dict, Optional
 
 from api.agent.tools.sqlite_state import agent_sqlite_db, get_sqlite_db_path
 from api.models import PersistentAgent
+from api.services.agent_sqlite_coordination import AgentSQLiteBusy, agent_sqlite_busy_result
 from api.services.sandbox_compute import SandboxComputeService, SandboxComputeUnavailable, track_sandbox_unavailable
 
 
@@ -93,13 +94,16 @@ def execute_run_command(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[
             local_sqlite_db_path=current_db_path,
         )
 
-    with agent_sqlite_db(str(agent.id)) as db_path:
-        return service.run_command(
-            agent,
-            command,
-            cwd=cwd,
-            env=env,
-            timeout=timeout,
-            interactive=False,
-            local_sqlite_db_path=db_path,
-        )
+    try:
+        with agent_sqlite_db(str(agent.id)) as db_path:
+            return service.run_command(
+                agent,
+                command,
+                cwd=cwd,
+                env=env,
+                timeout=timeout,
+                interactive=False,
+                local_sqlite_db_path=db_path,
+            )
+    except AgentSQLiteBusy as exc:
+        return agent_sqlite_busy_result(exc)

@@ -1040,7 +1040,10 @@ def _restore_sqlite_file_content(db_path: str, content: bytes) -> tuple[bool, st
     try:
         with os.fdopen(stage_descriptor, "wb") as handle:
             handle.write(content)
-        valid, message = _check_sqlite_integrity(stage_path)
+        try:
+            valid, message = _check_sqlite_integrity(stage_path)
+        except sqlite3.Error as exc:
+            return False, str(exc)
         if not valid:
             return False, message
         _remove_sqlite_sidecars(db_path)
@@ -1975,6 +1978,9 @@ class SandboxComputeService:
             return {"status": "ok", "sqlite_synced": False, "workspace_synced": True}
 
         if bool(sqlite_change.get("is_deleted")):
+            workspace_result = self._apply_workspace_push_response(agent, session, response)
+            if workspace_result.get("status") != "ok":
+                return workspace_result
             return {
                 "status": "error",
                 "message": "Sandbox command deleted the shared agent SQLite database; canonical state was preserved.",
@@ -2213,7 +2219,7 @@ class SandboxComputeService:
                 return {
                     "status": "error",
                     "message": "Custom tool SQLite sync did not return the shared agent DB.",
-                }, "sqlite"
+                }, "required_sqlite"
             if sync_workspace and not sync_result.get("workspace_synced"):
                 workspace_result = self._sync_workspace_push(agent, session)
                 if not isinstance(workspace_result, dict) or workspace_result.get("status") != "ok":
@@ -2242,6 +2248,12 @@ class SandboxComputeService:
             raise
 
         sync_result, sync_target = _post_sync()
+        if sync_target == "required_sqlite":
+            if isinstance(result, dict) and result.get("status") == "error":
+                merged = dict(result)
+                merged["sqlite_sync_error"] = sync_result["message"]
+                return merged
+            return sync_result
         if sync_target:
             return _execution_result_with_sync_error(result, sync_result, target=sync_target)
         return result

@@ -20,6 +20,7 @@ from django.db.models import F
 from util.text_sanitizer import decode_unicode_escapes
 
 from api.agent.eval_agents import is_eval_agent
+from api.services.agent_sqlite_coordination import AgentSQLiteBusy, agent_sqlite_busy_result
 
 from ...models import PersistentAgent, PersistentAgentCustomTool, PersistentAgentEnabledTool, PersistentAgentSystemSkillState
 from ...services.sandbox_compute import SandboxComputeService, SandboxComputeUnavailable, sandbox_compute_enabled_for_agent, track_sandbox_unavailable
@@ -1576,13 +1577,16 @@ def execute_enabled_tool(
                             local_sqlite_db_path=current_sqlite_db_path,
                         )
                     else:
-                        with agent_sqlite_db(str(agent.id)) as db_path:
-                            sandbox_result = service.tool_request(
-                                agent,
-                                resolved_name,
-                                params,
-                                local_sqlite_db_path=db_path,
-                            )
+                        try:
+                            with agent_sqlite_db(str(agent.id)) as db_path:
+                                sandbox_result = service.tool_request(
+                                    agent,
+                                    resolved_name,
+                                    params,
+                                    local_sqlite_db_path=db_path,
+                                )
+                        except AgentSQLiteBusy as exc:
+                            return agent_sqlite_busy_result(exc)
                 else:
                     sandbox_result = service.tool_request(agent, resolved_name, params)
                 if (
@@ -1628,12 +1632,15 @@ def execute_enabled_tool(
                 "status": "error",
                 "message": f"Custom tool '{resolved_name}' is not available for this agent.",
             }
-        return execute_custom_tool(
-            agent,
-            custom_tool,
-            params,
-            current_sqlite_db_path=current_sqlite_db_path,
-        )
+        try:
+            return execute_custom_tool(
+                agent,
+                custom_tool,
+                params,
+                current_sqlite_db_path=current_sqlite_db_path,
+            )
+        except AgentSQLiteBusy as exc:
+            return agent_sqlite_busy_result(exc)
 
     return {"status": "error", "message": f"Tool '{resolved_name}' has no execution handler"}
 

@@ -20,6 +20,15 @@ class AgentSQLiteBusy(RuntimeError):
     pass
 
 
+def agent_sqlite_busy_result(exc: AgentSQLiteBusy) -> dict:
+    return {
+        "status": "error",
+        "error_code": "agent_sqlite_busy",
+        "message": str(exc),
+        "retryable": True,
+    }
+
+
 def _agent_sqlite_lock(agent_id: str) -> Redlock:
     return Redlock(
         key=f"agent-sqlite-execution:{agent_id}",

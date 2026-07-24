@@ -1692,14 +1692,23 @@ class SandboxComputeSyncTests(TestCase):
             db_path = handle.name
         self.addCleanup(lambda: os.path.exists(db_path) and os.remove(db_path))
         self._create_sqlite_db_file(db_path, rows=[("test", "Test")])
+        export_bytes = b"preserve this export"
+        sync_timestamp = timezone.now()
+
         def _sync_filespace(agent, session, *, direction, payload=None):
             if direction == "push":
                 return {
                     "status": "ok",
+                    "sync_timestamp": sync_timestamp.isoformat(),
                     "changes": [
                         {
                             "path": CUSTOM_TOOL_SQLITE_FILESPACE_PATH,
                             "is_deleted": True,
+                        },
+                        {
+                            "path": "/exports/preserved.txt",
+                            "content_b64": base64.b64encode(export_bytes).decode("ascii"),
+                            "mime_type": "text/plain",
                         },
                     ],
                 }
@@ -1720,8 +1729,11 @@ class SandboxComputeSyncTests(TestCase):
         finally:
             connection.close()
         self.assertEqual(rows, [("test", "Test")])
+        export_node = AgentFsNode.objects.get(path="/exports/preserved.txt")
+        with export_node.content.open("rb") as handle:
+            self.assertEqual(handle.read(), export_bytes)
         session.refresh_from_db()
-        self.assertEqual(session.last_filespace_sync_at, cursor)
+        self.assertEqual(session.last_filespace_sync_at, sync_timestamp)
 
     def test_run_custom_tool_command_requires_shared_sqlite_to_sync_back(self):
         backend = _DummyBackend()

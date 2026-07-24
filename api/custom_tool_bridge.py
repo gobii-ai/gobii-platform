@@ -210,7 +210,13 @@ def custom_tool_bridge_execute(request):
     tool_name = tool_name.strip()
     nested_sqlite_error = _nested_sqlite_tool_error(agent.id, tool_name)
     if nested_sqlite_error is not None:
-        return JsonResponse(nested_sqlite_error)
+        abort = _record_child_tool_failure(
+            cache_key=budget_cache_key,
+            agent=agent,
+            custom_tool=custom_tool,
+            failed_tool_name=tool_name,
+        )
+        return JsonResponse(abort or nested_sqlite_error)
 
     params = body.get("params")
     if params is None:
