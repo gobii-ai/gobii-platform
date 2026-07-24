@@ -3101,6 +3101,26 @@ def _find_successful_duplicate_http_request(
     return None
 
 
+def _record_duplicate_http_request_skip(
+    agent: PersistentAgent,
+    prior_call: PersistentAgentToolCall,
+    *,
+    attach_completion: Any,
+    attach_prompt_archive: Any,
+) -> None:
+    step_kwargs = {
+        "agent": agent,
+        "description": (
+            "Skipped duplicate http_request: this exact request already succeeded in this task. "
+            f"Use the prior tool result from step {prior_call.step_id}. "
+            "If it answers the request, send the final message next; do not refetch or inspect __tool_results just to reread it."
+        ),
+    }
+    attach_completion(step_kwargs)
+    step = PersistentAgentStep.objects.create(**step_kwargs)
+    attach_prompt_archive(step)
+
+
 _ToolExecutor = Callable[[PersistentAgent, Dict[str, Any]], Any]
 _ToolExecutorResolver = Callable[[], _ToolExecutor]
 
