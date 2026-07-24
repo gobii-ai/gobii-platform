@@ -103,6 +103,7 @@ from api.models import (
     BrowserUseAgentTaskStep,
     AgentOwnerCustomInstructions,
     AgentPeerLink,
+    GlobalSecret,
     MCPServerConfig,
     Organization,
     OrganizationMembership,
@@ -4290,6 +4291,24 @@ class HttpRequestSecretPlaceholderTests(TestCase):
         secret.save()
         return secret
 
+    def _create_global_secret(
+        self,
+        key,
+        value,
+        domain="https://api.example.com",
+        name=None,
+    ):
+        secret = GlobalSecret(
+            user=self.user,
+            domain_pattern=domain,
+            name=name or key,
+            key=key,
+            secret_type=GlobalSecret.SecretType.CREDENTIAL,
+        )
+        secret.set_value(value)
+        secret.save()
+        return secret
+
     @patch('requests.request')
     @patch('api.agent.tools.http_request.select_proxy_for_persistent_agent')
     def test_secret_substitution_in_headers(self, mock_proxy, mock_request):
@@ -4328,6 +4347,90 @@ class HttpRequestSecretPlaceholderTests(TestCase):
         headers = call_args[1]["headers"]
         self.assertEqual(headers["Authorization"], "Bearer secret-api-key-value")
         self.assertEqual(headers["X-API-Key"], "secret-api-key-value")
+
+    @patch('requests.request')
+    @patch('api.agent.tools.http_request.select_proxy_for_persistent_agent')
+    def test_dollar_secret_substitution_across_request_fields(self, mock_proxy, mock_request):
+        self._create_secret("base_url", "https://api.secret.com")
+        self._create_secret("api_token", "secret-token")
+
+        mock_proxy.return_value = type('ProxyServer', (), {'proxy_url': 'http://proxy:8080'})()
+        mock_response = type('Response', (), {
+            'status_code': 200,
+            'headers': {'Content-Type': 'application/json'},
+            'iter_content': lambda self, chunk_size: [b'{"success": true}'],
+            'close': lambda self: None
+        })()
+        mock_request.return_value = mock_response
+
+        params = {
+            "method": "POST",
+            "url": "$[secret: base_url ]/endpoint",
+            "headers": {
+                "Authorization": "Bearer $[secret:api_token]",
+                "X-Legacy-Token": "<<<api_token>>>",
+            },
+            "body": {
+                "token": "$[secret: api_token ]",
+                "callback": {
+                    "url": "$[secret:base_url]/callback",
+                    "legacy_token": "<<<api_token>>>",
+                },
+            },
+        }
+
+        result = _execute_http_request(self.agent, params)
+
+        self.assertEqual(result["status"], "ok", result)
+        call_args = mock_request.call_args
+        self.assertEqual(call_args[0][1], "https://api.secret.com/endpoint")
+        self.assertEqual(call_args[1]["headers"]["Authorization"], "Bearer secret-token")
+        self.assertEqual(call_args[1]["headers"]["X-Legacy-Token"], "secret-token")
+        body_data = json.loads(call_args[1]["data"])
+        self.assertEqual(body_data["token"], "secret-token")
+        self.assertEqual(body_data["callback"]["url"], "https://api.secret.com/callback")
+        self.assertEqual(body_data["callback"]["legacy_token"], "secret-token")
+
+    @patch('requests.request')
+    @patch('api.agent.tools.http_request.select_proxy_for_persistent_agent')
+    def test_dollar_secret_preserves_secret_resolution_rules(self, mock_proxy, mock_request):
+        self._create_global_secret("shared_token", "global-token")
+        self._create_global_secret("global_only", "global-only-token")
+        self._create_secret("shared_token", "agent-token")
+        self._create_secret(
+            "ENV_ONLY",
+            "env-var-token",
+            secret_type=PersistentAgentSecret.SecretType.ENV_VAR,
+        )
+
+        mock_proxy.return_value = type('ProxyServer', (), {'proxy_url': 'http://proxy:8080'})()
+        mock_response = type('Response', (), {
+            'status_code': 200,
+            'headers': {'Content-Type': 'text/plain'},
+            'iter_content': lambda self, chunk_size: [b'ok'],
+            'close': lambda self: None
+        })()
+        mock_request.return_value = mock_response
+
+        params = {
+            "method": "GET",
+            "url": "https://api.example.com/data",
+            "headers": {
+                "X-Agent-Override": "$[secret:shared_token]",
+                "X-Global": "$[secret:global_only]",
+                "X-Missing": "$[secret:missing_token]",
+                "X-Env": "$[secret:ENV_ONLY]",
+            },
+        }
+
+        result = _execute_http_request(self.agent, params)
+
+        self.assertEqual(result["status"], "ok", result)
+        headers = mock_request.call_args[1]["headers"]
+        self.assertEqual(headers["X-Agent-Override"], "agent-token")
+        self.assertEqual(headers["X-Global"], "global-only-token")
+        self.assertEqual(headers["X-Missing"], "$[secret:missing_token]")
+        self.assertEqual(headers["X-Env"], "$[secret:ENV_ONLY]")
 
     @patch('requests.request')
     @patch('api.agent.tools.http_request.select_proxy_for_persistent_agent')

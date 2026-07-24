@@ -32,6 +32,7 @@ RESPONSE_MAX_BYTES = 5 * 1024 * 1024
 PREVIEW_MAX_BYTES = RESPONSE_MAX_BYTES
 DOWNLOAD_CHUNK_SIZE = 64 * 1024
 API_ERROR_MESSAGE_MAX_CHARS = 1200
+_SECRET_PLACEHOLDER_RE = re.compile(r"\$\[secret:\s*(?P<bracket_key>[A-Za-z0-9_]+)\s*\]|<<<\s*(?P<legacy_key>[A-Za-z0-9_]+)\s*>>>")
 
 _JSON_PREFIXES = (
     ")]}',",
@@ -362,7 +363,7 @@ def get_http_request_tool() -> Dict[str, Any]:
                 "When this tool returns a successful payload that answers the user's request, answer from that payload; do not open a browser task just to verify the same data. "
                 "For weather, a geocoding endpoint only resolves coordinates; call a forecast/current-conditions endpoint before replying with weather. "
                 "Do NOT use this when the task is to read or verify what appears on a webpage; use `spawn_web_task` for user-visible pages even if they are simple HTML. "
-                "The URL, headers, and body can include secret placeholders using the unique pattern <<<my_api_key>>>. These placeholders will be replaced with the corresponding secret values at execution time. The response is truncated to 5MB. Text content is returned even if served with application/octet-stream; only truly binary data (images, etc.) is omitted. You may need to look up API docs using the mcp_brightdata_search_engine tool."
+                "The URL, headers, and body can include secret placeholders using `$[secret:my_api_key]`. These placeholders will be replaced with the corresponding secret values at execution time. The response is truncated to 5MB. Text content is returned even if served with application/octet-stream; only truly binary data (images, etc.) is omitted. You may need to look up API docs using the mcp_brightdata_search_engine tool."
             ),
             "parameters": {
                 "type": "object",
@@ -470,20 +471,18 @@ def execute_http_request(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
     # agent credentials override them on matching placeholder keys.
     secret_map = _resolved_credential_secret_map(agent)
 
-    UNIQUE_PATTERN_RE = re.compile(r"<<<\s*([A-Za-z0-9_]+)\s*>>>")
-    
     # Track which placeholders we find for logging
     found_placeholders = set()
 
     def _replace_placeholders(obj):
-        """Recursively replace <<<secret_key>>> placeholders in strings and collections."""
+        """Recursively replace secret placeholders in strings and collections."""
         if isinstance(obj, str):
             def _repl(match):
-                key = match.group(1)
+                key = match.group("bracket_key") or match.group("legacy_key")
                 found_placeholders.add(key)
                 return secret_map.get(key, match.group(0))
 
-            new_val = UNIQUE_PATTERN_RE.sub(_repl, obj)
+            new_val = _SECRET_PLACEHOLDER_RE.sub(_repl, obj)
             # If the whole string exactly matches a secret key, replace it outright (edge case)
             if new_val in secret_map:
                 found_placeholders.add(new_val)
