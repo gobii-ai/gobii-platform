@@ -1,5 +1,5 @@
 import { memo, useState, useCallback, useEffect, useMemo, useRef, type ReactNode } from 'react'
-import { ArrowLeftRight, Bell, BellOff, Check, LayoutGrid, List, PanelLeft, PanelLeftClose, PanelRightClose, Plus, Settings, X } from 'lucide-react'
+import { ArrowLeftRight, Bell, BellOff, Check, LayoutGrid, List, PanelLeft, PanelLeftClose, PanelRightClose, Plus, Search, Settings, X } from 'lucide-react'
 
 import type { ConsoleContext } from '../../api/context'
 import { useAppSelector } from '../../store/hooks'
@@ -15,6 +15,7 @@ import { ChatSidebarGallery } from './ChatSidebarGallery'
 import { SelectionShellPageSwitcher, SELECTION_SHELL_PAGE_LABELS, type SelectionShellPage } from './SelectionShellPageSwitcher'
 import { AgentEmptyState, AgentListItem, AgentListSectionHeader, AgentSearchInput, AgentSortToggle } from './ChatSidebarParts'
 import { ProductAnnouncementBell } from './ProductAnnouncementBell'
+import { MessageSearchPanel } from './MessageSearchPanel'
 import { SidebarSettingsMenu, type SidebarSettingsInfo } from './SidebarSettingsMenu'
 import { AgentInviteDetails, AgentInviteSidebarItem, type AgentInviteAction, type AgentInviteDialogState } from './AgentInviteSidebarItem'
 import { getNextAgentChatSidebarMode, getPreviousAgentChatSidebarMode, type AgentChatSidebarMode, SIDEBAR_MOBILE_BREAKPOINT_PX, type AgentDrawerViewMode } from './sidebarMode'
@@ -108,6 +109,7 @@ export const ChatSidebar = memo(function ChatSidebar({
     return window.innerWidth < SIDEBAR_MOBILE_BREAKPOINT_PX
   })
   const [drawerOpen, setDrawerOpen] = useState(false)
+  const [messageSearchOpen, setMessageSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [drawerViewMode, setDrawerViewMode] = useState<AgentDrawerViewMode>('list')
   const [agentContextMenu, setAgentContextMenu] = useState<AgentContextMenuState | null>(null)
@@ -120,7 +122,7 @@ export const ChatSidebar = memo(function ChatSidebar({
   const showCustomGalleryShellPanel = galleryShellPage !== 'agents' && Boolean(galleryShellPanel)
   const collapsed = desktopMode === 'collapsed' && !showSettingsView
   const galleryMode = desktopMode === 'gallery' || showSettingsView
-  const showSearch = agents.length >= SEARCH_THRESHOLD
+  const showSearch = true
   const filteredAgents = useMemo(() => {
     if (!searchQuery.trim()) {
       return agents
@@ -200,6 +202,7 @@ export const ChatSidebar = memo(function ChatSidebar({
   useEffect(() => {
     if (!drawerOpen) {
       setSearchQuery('')
+      setMessageSearchOpen(false)
     }
   }, [drawerOpen])
 
@@ -242,6 +245,13 @@ export const ChatSidebar = memo(function ChatSidebar({
     }
     onDesktopModeChange?.(getNextAgentChatSidebarMode(desktopMode))
   }, [desktopMode, onDesktopModeChange, showSettingsView])
+
+  const openMessageSearch = useCallback(() => {
+    if (!isMobile) {
+      onDesktopModeChange?.('list')
+    }
+    setMessageSearchOpen(true)
+  }, [isMobile, onDesktopModeChange])
 
   const handleAgentSelect = useCallback(
     (agent: AgentRosterEntry) => {
@@ -539,6 +549,17 @@ export const ChatSidebar = memo(function ChatSidebar({
       <>
       <div ref={setSidebarRootRef} className="chat-sidebar-mobile-content">
         <AgentChatButton
+          className="agent-message-search-fab"
+          variant="solid"
+          onClick={() => {
+            openMessageSearch()
+            setDrawerOpen(true)
+          }}
+          aria-label="Search agents and messages"
+        >
+          <Search className="h-4 w-4" />
+        </AgentChatButton>
+        <AgentChatButton
           className="agent-fab"
           variant="solid"
           onClick={() => setDrawerOpen(true)}
@@ -573,34 +594,50 @@ export const ChatSidebar = memo(function ChatSidebar({
             setDrawerOpen(false)
           }}
           title={
-            showSettingsView
+            messageSearchOpen
+              ? 'Search'
+              : showSettingsView
               ? embeddedSettingsTitle
               : (drawerViewMode === 'gallery' && galleryShellPage !== 'agents' ? shellTitle : 'Switch agent')
           }
           icon={PanelLeft}
           bodyPadding={false}
-          headerAccessory={!showSettingsView && mobileContextSwitcher ? (
+          headerAccessory={!messageSearchOpen && !showSettingsView && mobileContextSwitcher ? (
             <AgentChatContextSwitcher {...mobileContextSwitcher} variant="drawer" />
           ) : null}
-          ariaLabel={showSettingsView ? embeddedSettingsTitle : 'Switch agent'}
+          ariaLabel={messageSearchOpen ? 'Search agents and messages' : showSettingsView ? embeddedSettingsTitle : 'Switch agent'}
         >
-          {showSettingsView ? embeddedSettingsPanel : null}
-          {!showSettingsView && !showCustomGalleryShellPanel && showSearch ? (
+          {messageSearchOpen ? (
+            <MessageSearchPanel
+              key={`${contextSwitcher?.current.type ?? settings?.context?.type}:${contextSwitcher?.current.id ?? settings?.context?.id}`}
+              agents={agents}
+              context={contextSwitcher?.current ?? settings?.context ?? null}
+              viewerKey={settings?.viewerEmail ?? null}
+              agentsLoading={loading}
+              query={searchQuery}
+              onQueryChange={setSearchQuery}
+              onAgentSelect={handleAgentSelect}
+              onResultSelect={() => setDrawerOpen(false)}
+            />
+          ) : null}
+          {!messageSearchOpen && showSettingsView ? embeddedSettingsPanel : null}
+          {!messageSearchOpen && !showSettingsView && !showCustomGalleryShellPanel && showSearch ? (
             <AgentSearchInput
               variant="drawer"
               value={searchQuery}
               onChange={setSearchQuery}
               onClear={() => setSearchQuery('')}
+              onFocus={openMessageSearch}
             />
           ) : null}
-          {!showSettingsView && !showCustomGalleryShellPanel && showSortToggle ? (
+          {!messageSearchOpen && !showSettingsView && !showCustomGalleryShellPanel && showSortToggle ? (
             <AgentSortToggle
               variant="drawer"
               value={rosterSortMode}
               onChange={(mode) => onRosterSortModeChange?.(mode)}
             />
           ) : null}
-          {!showSettingsView && !showCustomGalleryShellPanel && hasAgents ? (
+          {!messageSearchOpen && !showSettingsView && !showCustomGalleryShellPanel && hasAgents ? (
             <div className="agent-drawer-view-toggle" role="group" aria-label="Agent roster view">
               <button
                 type="button"
@@ -623,7 +660,7 @@ export const ChatSidebar = memo(function ChatSidebar({
             </div>
           ) : null}
 
-          {!showSettingsView && showGalleryShellSwitcher ? (
+          {!messageSearchOpen && !showSettingsView && showGalleryShellSwitcher ? (
             <div className="agent-drawer-shell-switcher">
               <SelectionShellPageSwitcher
                 currentPage={galleryShellPage}
@@ -632,7 +669,7 @@ export const ChatSidebar = memo(function ChatSidebar({
               />
             </div>
           ) : null}
-          {!showSettingsView && drawerViewMode === 'gallery' ? (
+          {!messageSearchOpen && !showSettingsView && drawerViewMode === 'gallery' ? (
             showCustomGalleryShellPanel ? (
               <div className="agent-gallery-scroll" data-variant="drawer">
                 {galleryShellPanel}
@@ -658,12 +695,12 @@ export const ChatSidebar = memo(function ChatSidebar({
                 teamTemplateMenu={teamTemplateMenu}
               />
             )
-          ) : !showSettingsView ? (
+          ) : !messageSearchOpen && !showSettingsView ? (
             <div className="agent-drawer-list" role="list">
               {renderListContent('drawer', false)}
             </div>
           ) : null}
-          {!showSettingsView && settings ? (
+          {!messageSearchOpen && !showSettingsView && settings ? (
             <SidebarSettingsMenu
               {...settings}
               variant="drawer"
@@ -682,18 +719,18 @@ export const ChatSidebar = memo(function ChatSidebar({
     <>
     <aside
       ref={setSidebarRootRef}
-      className={`chat-sidebar chat-sidebar--${desktopMode}`}
-      data-collapsed={collapsed}
-      data-sidebar-mode={desktopMode}
+      className={`chat-sidebar chat-sidebar--${messageSearchOpen ? 'list' : desktopMode}`}
+      data-collapsed={messageSearchOpen ? false : collapsed}
+      data-sidebar-mode={messageSearchOpen ? 'list' : desktopMode}
     >
       <div className="chat-sidebar-inner">
         <div
           className="chat-sidebar-header"
-          data-collapsed={collapsed ? 'true' : 'false'}
+          data-collapsed={messageSearchOpen ? 'false' : collapsed ? 'true' : 'false'}
           data-has-center={showHeaderCenter ? 'true' : 'false'}
         >
           <div className="chat-sidebar-header-start">
-            {!collapsed ? (
+            {messageSearchOpen || !collapsed ? (
               <a href="/" className="chat-sidebar-logo-link">
                 <img src={sidebarLogoSrc} alt={sidebarLogoAlt} className="chat-sidebar-logo" />
               </a>
@@ -714,7 +751,22 @@ export const ChatSidebar = memo(function ChatSidebar({
             </div>
           ) : null}
           <div className="chat-sidebar-header-actions">
-            {!collapsed ? (
+            <button
+              type="button"
+              className="chat-sidebar-toggle"
+              onClick={() => {
+                if (messageSearchOpen) {
+                  setMessageSearchOpen(false)
+                  return
+                }
+                openMessageSearch()
+              }}
+              aria-label={messageSearchOpen ? 'Close search' : 'Search agents and messages'}
+              title={messageSearchOpen ? 'Close search' : 'Search agents and messages'}
+            >
+              {messageSearchOpen ? <X className="h-4 w-4" /> : <Search className="h-4 w-4" />}
+            </button>
+            {!messageSearchOpen && !collapsed ? (
               <button
                 type="button"
                 className="chat-sidebar-toggle"
@@ -725,7 +777,7 @@ export const ChatSidebar = memo(function ChatSidebar({
                 <PanelLeftClose className="h-4 w-4" />
               </button>
             ) : null}
-            {!galleryMode && !showSettingsView ? (
+            {!messageSearchOpen && !galleryMode && !showSettingsView ? (
               <button
                 type="button"
                 className="chat-sidebar-toggle"
@@ -739,7 +791,18 @@ export const ChatSidebar = memo(function ChatSidebar({
           </div>
         </div>
 
-        <div className="chat-sidebar-section">
+        {messageSearchOpen ? (
+          <MessageSearchPanel
+            key={`${contextSwitcher?.current.type ?? settings?.context?.type}:${contextSwitcher?.current.id ?? settings?.context?.id}`}
+            agents={agents}
+            context={contextSwitcher?.current ?? settings?.context ?? null}
+            viewerKey={settings?.viewerEmail ?? null}
+            agentsLoading={loading}
+            query={searchQuery}
+            onQueryChange={setSearchQuery}
+            onAgentSelect={handleAgentSelect}
+          />
+        ) : <div className="chat-sidebar-section">
           {showSettingsView ? (
             <div className="chat-sidebar-section-header">
               <span className="chat-sidebar-section-title">{embeddedSettingsTitle}</span>
@@ -764,6 +827,7 @@ export const ChatSidebar = memo(function ChatSidebar({
                   value={searchQuery}
                   onChange={setSearchQuery}
                   onClear={() => setSearchQuery('')}
+                  onFocus={openMessageSearch}
                 />
               ) : null}
               {showSortToggle ? (
@@ -809,9 +873,9 @@ export const ChatSidebar = memo(function ChatSidebar({
               {renderListContent('sidebar', collapsed)}
             </div>
           )}
-        </div>
+        </div>}
 
-        {!showSettingsView && settings ? (
+        {!messageSearchOpen && !showSettingsView && settings ? (
           <SidebarSettingsMenu
             {...settings}
             variant="sidebar"
