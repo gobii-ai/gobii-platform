@@ -1639,6 +1639,8 @@ def fetch_timeline_window_around_message(
         processing_snapshot=newer.processing_snapshot,
         current_plan=newer.current_plan,
     )
+
+
 def serialize_message_event(message: PersistentAgentMessage, *, viewer_user=None) -> dict:
     envelope = _envelop_messages([message])[0]
     return _serialize_message(

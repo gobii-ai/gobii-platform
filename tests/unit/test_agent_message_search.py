@@ -176,6 +176,30 @@ class AgentMessageSearchTests(TestCase):
         )
         self.assertEqual(self._excerpt_text(markdown_result), "Apollo needs a new API key.")
 
+    def test_excerpt_explains_matches_hidden_by_plain_text_normalization(self):
+        message = self._create_message(
+            self.agent,
+            '<span data-project="Apollo">See the <a href="/projects/Apollo">project</a>.</span>',
+        )
+
+        response = self._search(q="Apollo")
+
+        self.assertEqual(response.status_code, 200)
+        result = next(
+            item
+            for item in response.json()["results"]
+            if item["message_id"] == str(message.id)
+        )
+        excerpt_text = self._excerpt_text(result)
+        self.assertEqual(
+            excerpt_text,
+            "See the project. · Matched in link or formatting: Apollo",
+        )
+        self.assertNotIn("<span", excerpt_text)
+        self.assertTrue(
+            any(segment["highlighted"] and segment["text"] == "Apollo" for segment in result["excerpt"]),
+        )
+
     def test_search_includes_inbound_messages_and_excludes_tool_content(self):
         inbound = self._create_message(
             self.agent,
