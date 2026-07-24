@@ -95,7 +95,16 @@ class ConsoleUserPetsApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertEqual(payload["maxCustomPets"], settings.USER_PET_MAX_CUSTOM_PETS)
-        self.assertEqual(payload["pets"][0]["id"], BUILTIN_PET_ID)
+        self.assertEqual(
+            payload["pets"][0],
+            {
+                "id": BUILTIN_PET_ID,
+                "kind": "builtin",
+                "displayName": "Gobii",
+                "description": "The official mascot of Gobii.",
+                "spritesheetUrl": "/static/images/pets/gobii-fish-v2.webp",
+            },
+        )
         self.assertEqual(
             payload["pets"][1],
             {
