@@ -1,5 +1,5 @@
-import { useMemo, useState, type FormEvent } from 'react'
-import { Fish, RotateCcw, Save, Trash2, Upload } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Fish, Plus, RotateCcw, Save, Trash2 } from 'lucide-react'
 
 import { safeErrorMessage } from '../../api/safeErrorMessage'
 import type { UserPetSize } from '../../api/userPets'
@@ -7,9 +7,9 @@ import {
   useDeleteUserPet,
   useUpdateUserPet,
   useUpdateUserPetPreferences,
-  useUploadUserPet,
   useUserPets,
 } from '../../hooks/useUserPets'
+import { AddPetModal } from './AddPetModal'
 import { PetSprite } from './PetSprite'
 import './pets.css'
 
@@ -20,14 +20,12 @@ const PET_SIZE_LABELS: Record<UserPetSize, string> = {
 }
 
 export function PetProfileSection() {
+  const sectionRef = useRef<HTMLElement | null>(null)
   const petsQuery = useUserPets()
   const preferencesMutation = useUpdateUserPetPreferences()
-  const uploadMutation = useUploadUserPet()
   const updateMutation = useUpdateUserPet()
   const deleteMutation = useDeleteUserPet()
-  const [uploadName, setUploadName] = useState('')
-  const [uploadDescription, setUploadDescription] = useState('')
-  const [uploadFile, setUploadFile] = useState<File | null>(null)
+  const [addPetOpen, setAddPetOpen] = useState(false)
   const [editDraft, setEditDraft] = useState<{
     petId: string
     displayName: string
@@ -44,6 +42,23 @@ export function PetProfileSection() {
   ), [library])
   const customPetCount = library?.pets.filter((pet) => pet.kind === 'custom').length ?? 0
 
+  useEffect(() => {
+    const revealPetOptions = () => {
+      if (window.location.hash !== '#workspace-pet') return
+      window.requestAnimationFrame(() => {
+        sectionRef.current?.scrollIntoView({ block: 'start' })
+      })
+    }
+
+    revealPetOptions()
+    window.addEventListener('popstate', revealPetOptions)
+    window.addEventListener('hashchange', revealPetOptions)
+    return () => {
+      window.removeEventListener('popstate', revealPetOptions)
+      window.removeEventListener('hashchange', revealPetOptions)
+    }
+  }, [])
+
   const editName = selectedPet?.kind === 'custom' && editDraft?.petId === selectedPet.id
     ? editDraft.displayName
     : selectedPet?.kind === 'custom' ? selectedPet.displayName : ''
@@ -58,36 +73,6 @@ export function PetProfileSection() {
       await preferencesMutation.mutateAsync(patch)
     } catch (requestError) {
       setError(safeErrorMessage(requestError, 'Unable to save pet preferences.'))
-    }
-  }
-
-  async function handleUpload(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    const form = event.currentTarget
-    if (!uploadFile || !uploadName.trim()) {
-      setError('Choose a v2 WebP spritesheet and enter a pet name.')
-      return
-    }
-    setFeedback(null)
-    setError(null)
-    try {
-      const previousIds = new Set(library?.pets.map((pet) => pet.id) ?? [])
-      const nextLibrary = await uploadMutation.mutateAsync({
-        displayName: uploadName.trim(),
-        description: uploadDescription.trim(),
-        spritesheet: uploadFile,
-      })
-      const uploadedPet = nextLibrary.pets.find((pet) => !previousIds.has(pet.id))
-      if (uploadedPet) {
-        await preferencesMutation.mutateAsync({ selectedPetId: uploadedPet.id, enabled: true })
-      }
-      setUploadName('')
-      setUploadDescription('')
-      setUploadFile(null)
-      form.reset()
-      setFeedback('Custom pet uploaded and selected.')
-    } catch (requestError) {
-      setError(safeErrorMessage(requestError, 'Unable to upload that pet.'))
     }
   }
 
@@ -124,14 +109,14 @@ export function PetProfileSection() {
   }
 
   return (
-    <section className="profile-screen__section pet-profile">
+    <section id="workspace-pet" ref={sectionRef} className="profile-screen__section pet-profile">
       <div className="profile-screen__section-header">
         <div className="profile-screen__section-icon" aria-hidden="true">
           <Fish className="h-4 w-4" />
         </div>
         <div>
           <h2>Workspace Pet</h2>
-          <p>Choose the companion that appears in the immersive app.</p>
+          <p>Choose your chat companion</p>
         </div>
       </div>
 
@@ -211,6 +196,27 @@ export function PetProfileSection() {
                 <small>{pet.kind === 'builtin' ? 'Included' : 'Custom'}</small>
               </button>
             ))}
+            <button
+              type="button"
+              className="pet-profile__pet-option pet-profile__pet-option--add"
+              onClick={() => {
+                setFeedback(null)
+                setError(null)
+                setAddPetOpen(true)
+              }}
+              disabled={customPetCount >= library.maxCustomPets}
+              aria-label={customPetCount >= library.maxCustomPets ? 'Custom pet library full' : 'Add new pet'}
+            >
+              <span className="pet-profile__add-icon" aria-hidden="true">
+                <Plus className="h-5 w-5" />
+              </span>
+              <span>Add new</span>
+              <small>
+                {customPetCount >= library.maxCustomPets
+                  ? 'Library full'
+                  : `${customPetCount} of ${library.maxCustomPets}`}
+              </small>
+            </button>
           </div>
 
           {selectedPet.kind === 'custom' ? (
@@ -262,55 +268,22 @@ export function PetProfileSection() {
             </div>
           ) : null}
 
-          {customPetCount < library.maxCustomPets ? (
-            <form className="pet-profile__upload" onSubmit={(event) => void handleUpload(event)}>
-              <div>
-                <strong>Upload a custom pet</strong>
-                <p className="profile-screen__muted">
-                  {customPetCount} of {library.maxCustomPets} slots used. Use a transparent Codex v2
-                  WebP: 1536×2288 pixels and no more than 4 MB.
-                </p>
-              </div>
-              <div className="profile-screen__form-grid">
-                <label className="profile-screen__field">
-                  <span>Pet Name</span>
-                  <input value={uploadName} maxLength={80} onChange={(event) => setUploadName(event.target.value)} />
-                </label>
-                <label className="profile-screen__field">
-                  <span>Description</span>
-                  <input
-                    value={uploadDescription}
-                    maxLength={240}
-                    onChange={(event) => setUploadDescription(event.target.value)}
-                  />
-                </label>
-                <label className="profile-screen__field profile-screen__field--wide">
-                  <span>V2 WebP Spritesheet</span>
-                  <input
-                    type="file"
-                    accept=".webp,image/webp"
-                    onChange={(event) => setUploadFile(event.target.files?.[0] ?? null)}
-                  />
-                </label>
-              </div>
-              <button
-                type="submit"
-                className="profile-screen__button profile-screen__button--secondary"
-                disabled={uploadMutation.isPending || !uploadFile || !uploadName.trim()}
-              >
-                <Upload className="h-4 w-4" aria-hidden="true" />
-                {uploadMutation.isPending ? 'Uploading…' : `Upload Pet (${customPetCount}/${library.maxCustomPets})`}
-              </button>
-            </form>
-          ) : (
-            <p className="profile-screen__muted">
-              Your custom pet library is full. Delete one to upload another.
-            </p>
-          )}
-
           {feedback ? <p className="profile-screen__feedback profile-screen__feedback--success">{feedback}</p> : null}
           {error ? <p className="profile-screen__feedback profile-screen__feedback--error">{error}</p> : null}
         </>
+      ) : null}
+      {addPetOpen && library ? (
+        <AddPetModal
+          existingPetIds={library.pets.map((pet) => pet.id)}
+          customPetCount={customPetCount}
+          maxCustomPets={library.maxCustomPets}
+          onClose={() => setAddPetOpen(false)}
+          onUploaded={(displayName) => {
+            setAddPetOpen(false)
+            setFeedback(`${displayName} was added and selected.`)
+            setError(null)
+          }}
+        />
       ) : null}
     </section>
   )

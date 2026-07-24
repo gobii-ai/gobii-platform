@@ -7,12 +7,15 @@ import {
   type CSSProperties,
   type PointerEvent as ReactPointerEvent,
 } from 'react'
+import { createPortal } from 'react-dom'
+import { EyeOff, Settings } from 'lucide-react'
 
 import type { UserPetPosition, UserPetSize } from '../../api/userPets'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { useUpdateUserPetPreferences, useUserPets } from '../../hooks/useUserPets'
 import { selectActiveChatSession } from '../../store/chatSlice'
 import { useAppSelector } from '../../store/hooks'
+import { navigateWithinApp } from '../../util/appNavigation'
 import { PetSprite } from './PetSprite'
 import {
   PET_ANIMATIONS,
@@ -30,6 +33,10 @@ const PET_ASPECT_RATIO = 208 / 192
 const VIEWPORT_MARGIN = 16
 const DEFAULT_EDGE_GAP = 24
 const PET_LOOK_DEADZONE_PX = 1
+const CONTEXT_MENU_WIDTH = 208
+const CONTEXT_MENU_HEIGHT = 104
+const CONTEXT_MENU_MARGIN = 8
+const PET_PROFILE_PATH = '/app/profile#workspace-pet'
 
 type PixelPosition = {
   left: number
@@ -111,6 +118,7 @@ export function ImmersivePetLayer() {
   const isMobile = useIsMobile()
   const reducedMotion = useReducedMotion()
   const petRef = useRef<HTMLDivElement | null>(null)
+  const contextMenuRef = useRef<HTMLDivElement | null>(null)
   const dragRef = useRef<DragState | null>(null)
   const gazeFrameRef = useRef<number | null>(null)
   const [viewport, setViewport] = useState(() => ({
@@ -236,14 +244,26 @@ export function ImmersivePetLayer() {
   useEffect(() => {
     if (!contextMenu) return
     const close = () => setContextMenu(null)
+    const handlePointerDown = (event: PointerEvent) => {
+      if (contextMenuRef.current?.contains(event.target as Node)) {
+        return
+      }
+      close()
+    }
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') close()
     }
-    document.addEventListener('pointerdown', close)
-    document.addEventListener('keydown', handleKeyDown)
+    document.addEventListener('pointerdown', handlePointerDown, true)
+    document.addEventListener('keydown', handleKeyDown, true)
+    window.addEventListener('resize', close)
+    window.addEventListener('scroll', close, true)
+    contextMenuRef.current?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus()
+
     return () => {
-      document.removeEventListener('pointerdown', close)
-      document.removeEventListener('keydown', handleKeyDown)
+      document.removeEventListener('pointerdown', handlePointerDown, true)
+      document.removeEventListener('keydown', handleKeyDown, true)
+      window.removeEventListener('resize', close)
+      window.removeEventListener('scroll', close, true)
     }
   }, [contextMenu])
 
@@ -330,8 +350,16 @@ export function ImmersivePetLayer() {
           event.preventDefault()
           event.stopPropagation()
           setContextMenu({
-            x: clamp(event.clientX, 8, viewport.width - 168),
-            y: clamp(event.clientY, 8, viewport.height - 52),
+            x: clamp(
+              event.clientX,
+              CONTEXT_MENU_MARGIN,
+              viewport.width - CONTEXT_MENU_WIDTH - CONTEXT_MENU_MARGIN,
+            ),
+            y: clamp(
+              event.clientY,
+              CONTEXT_MENU_MARGIN,
+              viewport.height - CONTEXT_MENU_HEIGHT - CONTEXT_MENU_MARGIN,
+            ),
           })
         }}
         title={`Drag ${selectedPet.displayName}`}
@@ -343,25 +371,40 @@ export function ImmersivePetLayer() {
           label={`${selectedPet.displayName} workspace pet`}
         />
       </div>
-      {contextMenu ? (
+      {contextMenu && typeof document !== 'undefined' ? createPortal(
         <div
-          className="immersive-pet__context-menu"
+          ref={contextMenuRef}
+          className="immersive-pet__context-menu agent-roster-context-menu sidebar-settings__menu"
           role="menu"
           aria-label="Pet actions"
           style={{ left: contextMenu.x, top: contextMenu.y }}
-          onPointerDown={(event) => event.stopPropagation()}
         >
           <button
             type="button"
             role="menuitem"
+            className="sidebar-settings__link agent-roster-context-menu__item"
+            onClick={() => {
+              setContextMenu(null)
+              navigateWithinApp(PET_PROFILE_PATH)
+            }}
+          >
+            <Settings className="sidebar-settings__link-icon" aria-hidden="true" />
+            <span>Options</span>
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="sidebar-settings__link agent-roster-context-menu__item"
             onClick={() => {
               setContextMenu(null)
               preferencesMutation.mutate({ enabled: false })
             }}
           >
-            Dismiss pet
+            <EyeOff className="sidebar-settings__link-icon" aria-hidden="true" />
+            <span>Dismiss pet</span>
           </button>
-        </div>
+        </div>,
+        document.body,
       ) : null}
     </div>
   )
