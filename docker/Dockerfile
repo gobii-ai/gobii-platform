@@ -1,6 +1,26 @@
 # syntax=docker/dockerfile:1.7
 
 # ────────────────────────────────────────────────
+# sqlite tools stage – pinned sqlite3 + sqlite3_rsync
+# ────────────────────────────────────────────────
+FROM python:3.13-slim-bookworm AS sqlite-tools
+
+ARG SQLITE_VERSION_NUMBER=3530300
+ARG SQLITE_SOURCE_SHA256=bb80bf8a3bffc19241ce8aba5a4bc74e9c3980013cb0b5f0f0976a99516942af
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    rm -f /etc/apt/apt.conf.d/docker-clean && \
+    apt-get update && \
+    apt-get install --no-install-recommends -y build-essential curl tcl unzip ca-certificates && \
+    curl -fsSL "https://sqlite.org/2026/sqlite-src-${SQLITE_VERSION_NUMBER}.zip" -o /tmp/sqlite.zip && \
+    echo "${SQLITE_SOURCE_SHA256}  /tmp/sqlite.zip" | sha256sum -c - && \
+    unzip -q /tmp/sqlite.zip -d /tmp && \
+    cd "/tmp/sqlite-src-${SQLITE_VERSION_NUMBER}" && \
+    ./configure --disable-shared && \
+    make -j"$(nproc)" sqlite3 sqlite3_rsync && \
+    install -m 0755 sqlite3 sqlite3_rsync /usr/local/bin/
+
+# ────────────────────────────────────────────────
 # deps stage – OS libs, Python deps, Playwright
 # ────────────────────────────────────────────────
 FROM python:3.13-slim-bookworm AS deps
@@ -11,6 +31,9 @@ ENV PYTHONUNBUFFERED=1 \
     PLAYWRIGHT_BROWSERS_PATH=/usr/local/share/pw-browsers
 
 WORKDIR /app
+
+COPY --from=sqlite-tools /usr/local/bin/sqlite3 /usr/local/bin/sqlite3
+COPY --from=sqlite-tools /usr/local/bin/sqlite3_rsync /usr/local/bin/sqlite3_rsync
 
 # Keep downloaded debs in the BuildKit cache mount across rebuilds.
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
@@ -188,6 +211,7 @@ RUN echo "${GIT_COMMIT}" > /app/.git-commit
 
 # Create npm cache directory with proper permissions
 RUN mkdir -p /tmp/.npm && chown -R appuser:appgroup /tmp/.npm
+RUN chmod 0755 /app/api/services/sqlite_rsync_ssh.py
 
 USER appuser
 

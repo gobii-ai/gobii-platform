@@ -4,6 +4,7 @@ from typing import Any
 
 # Keep this path in sync with sandbox_server/server/internal_paths.py.
 CUSTOM_TOOL_SQLITE_FILESPACE_PATH = "/.gobii/internal/custom_tool_agent_state.sqlite3"
+GOBII_AGENT_SQLITE_PATH_ENV = "GOBII_AGENT_SQLITE_PATH"
 SCRATCH_DIR_FILESPACE_PATH = "/.scratch"
 SCRATCH_DIR_WORKSPACE_PATH = "/workspace/.scratch"
 REPO_WORKDIR_WORKSPACE_PATH = "/workspace/.scratch/repos"

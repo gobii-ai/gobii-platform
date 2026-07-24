@@ -8,6 +8,7 @@ import posixpath
 from typing import Any
 
 CUSTOM_TOOL_SQLITE_FILESPACE_PATH = "/.gobii/internal/custom_tool_agent_state.sqlite3"
+GOBII_AGENT_SQLITE_PATH_ENV = "GOBII_AGENT_SQLITE_PATH"
 SCRATCH_DIR_NAME = ".scratch"
 SCRATCH_DIR_FILESPACE_PATH = "/.scratch"
 GOBII_SCRATCH_DIR_ENV = "GOBII_SCRATCH_DIR"

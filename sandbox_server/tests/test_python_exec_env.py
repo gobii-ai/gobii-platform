@@ -59,7 +59,7 @@ class PythonExecEnvTests(unittest.TestCase):
             "sandbox_server.run._sandbox_env",
             return_value={"PATH": "/usr/bin", "OPENAI_API_KEY": "sk-test"},
         ) as sandbox_env_mock, patch(
-            "sandbox_server.run.subprocess.run",
+            "sandbox_server.run._run_managed_process",
             return_value=completed,
         ) as run_mock:
             result = _handle_python_exec(payload)
@@ -96,7 +96,7 @@ class PythonExecEnvTests(unittest.TestCase):
             "sandbox_server.run._sandbox_env",
             return_value={"PATH": "/usr/bin"},
         ), patch(
-            "sandbox_server.run.subprocess.run",
+            "sandbox_server.run._run_managed_process",
             return_value=completed,
         ) as run_mock:
             result = _handle_python_exec(payload)
@@ -126,7 +126,7 @@ class PythonExecEnvTests(unittest.TestCase):
             "sandbox_server.run._sandbox_env",
             return_value={"PATH": "/usr/bin", "UV_PROJECT_ENVIRONMENT": ".gobii/uv-project-env"},
         ), patch(
-            "sandbox_server.run.subprocess.run",
+            "sandbox_server.run._run_managed_process",
             return_value=completed,
         ) as run_mock:
             result = _handle_python_exec(payload)
@@ -156,7 +156,7 @@ class PythonExecEnvTests(unittest.TestCase):
             "sandbox_server.run._sandbox_env",
             return_value={"PATH": "/usr/bin"},
         ) as sandbox_env_mock, patch(
-            "sandbox_server.run.subprocess.run",
+            "sandbox_server.run._run_managed_process",
             return_value=completed,
         ):
             result = _handle_python_exec(payload)

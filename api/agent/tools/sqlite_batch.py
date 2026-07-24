@@ -2080,17 +2080,28 @@ def _execute_sqlite_batch_inner(
 
 def execute_sqlite_batch(agent: "PersistentAgent", params: Dict[str, Any]) -> Dict[str, Any]:
     """Execute one or more SQL queries against the agent's SQLite DB."""
+    from api.services.agent_sqlite_coordination import AgentSQLiteBusy, agent_sqlite_execution
+
     db_path = _sqlite_db_path_var.get(None)
     if not db_path:
         return {"status": "error", "message": "SQLite DB path unavailable"}
 
     limits = _resolve_sqlite_batch_limits()
-    return _run_sqlite_batch_in_subprocess(
-        agent_id=str(agent.id),
-        params=params,
-        db_path=db_path,
-        limits=limits,
-    )
+    try:
+        with agent_sqlite_execution(str(agent.id)):
+            return _run_sqlite_batch_in_subprocess(
+                agent_id=str(agent.id),
+                params=params,
+                db_path=db_path,
+                limits=limits,
+            )
+    except AgentSQLiteBusy as exc:
+        return {
+            "status": "error",
+            "error_code": "agent_sqlite_busy",
+            "message": str(exc),
+            "retryable": True,
+        }
 
 
 def get_sqlite_batch_tool() -> Dict[str, Any]:

@@ -36,6 +36,7 @@ from ...utils.json_schema import sanitize_tool_parameters_schema_for_llm
 from ..core.llm_config import AgentLLMTier, get_agent_llm_tier
 from .mcp_manager import MCPToolInfo, MCPToolManager, get_mcp_manager, execute_mcp_tool, execute_mcp_tool_isolated
 from .sqlite_batch import get_sqlite_batch_tool, execute_sqlite_batch
+from .sqlite_state import agent_sqlite_db
 from .http_request import get_http_request_tool, execute_http_request
 from .brightdata import (
     BRIGHTDATA_LINKEDIN_PERSON_PROFILE_TOOL_NAME,
@@ -1566,7 +1567,24 @@ def execute_enabled_tool(
                         tool_name=resolved_name,
                     )
                     return {"status": "error", "message": str(exc)}
-                sandbox_result = service.tool_request(agent, resolved_name, params)
+                if resolved_name == PYTHON_EXEC_TOOL_NAME:
+                    if current_sqlite_db_path:
+                        sandbox_result = service.tool_request(
+                            agent,
+                            resolved_name,
+                            params,
+                            local_sqlite_db_path=current_sqlite_db_path,
+                        )
+                    else:
+                        with agent_sqlite_db(str(agent.id)) as db_path:
+                            sandbox_result = service.tool_request(
+                                agent,
+                                resolved_name,
+                                params,
+                                local_sqlite_db_path=db_path,
+                            )
+                else:
+                    sandbox_result = service.tool_request(agent, resolved_name, params)
                 if (
                     isinstance(sandbox_result, dict)
                     and sandbox_result.get("error_code") == "sandbox_unsupported_tool"
