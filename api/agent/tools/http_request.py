@@ -32,10 +32,7 @@ RESPONSE_MAX_BYTES = 5 * 1024 * 1024
 PREVIEW_MAX_BYTES = RESPONSE_MAX_BYTES
 DOWNLOAD_CHUNK_SIZE = 64 * 1024
 API_ERROR_MESSAGE_MAX_CHARS = 1200
-_SECRET_PLACEHOLDER_RE = re.compile(
-    r"\$\[secret:\s*(?P<bracket_key>[A-Za-z0-9_]+)\s*\]"
-    r"|<<<\s*(?P<legacy_key>[A-Za-z0-9_]+)\s*>>>"
-)
+_SECRET_PLACEHOLDER_RE = re.compile(r"\$\[secret:\s*(?P<bracket_key>[A-Za-z0-9_]+)\s*\]|<<<\s*(?P<legacy_key>[A-Za-z0-9_]+)\s*>>>")
 
 _JSON_PREFIXES = (
     ")]}',",
@@ -366,11 +363,7 @@ def get_http_request_tool() -> Dict[str, Any]:
                 "When this tool returns a successful payload that answers the user's request, answer from that payload; do not open a browser task just to verify the same data. "
                 "For weather, a geocoding endpoint only resolves coordinates; call a forecast/current-conditions endpoint before replying with weather. "
                 "Do NOT use this when the task is to read or verify what appears on a webpage; use `spawn_web_task` for user-visible pages even if they are simple HTML. "
-                "The URL, headers, and body can include secret placeholders using `$[secret:my_api_key]`. "
-                "These placeholders will be replaced with the corresponding secret values at execution time. "
-                "The response is truncated to 5MB. Text content is returned even if served with "
-                "application/octet-stream; only truly binary data (images, etc.) is omitted. You may need to look "
-                "up API docs using the mcp_brightdata_search_engine tool."
+                "The URL, headers, and body can include secret placeholders using `$[secret:my_api_key]`. These placeholders will be replaced with the corresponding secret values at execution time. The response is truncated to 5MB. Text content is returned even if served with application/octet-stream; only truly binary data (images, etc.) is omitted. You may need to look up API docs using the mcp_brightdata_search_engine tool."
             ),
             "parameters": {
                 "type": "object",
