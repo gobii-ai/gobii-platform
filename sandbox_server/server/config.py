@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Dict, Optional, Sequence
 
 from sandbox_server.server.internal_paths import (
+    GOBII_AGENT_SQLITE_PATH_ENV,
     GOBII_REPO_WORKDIR_ENV,
     GOBII_SCRATCH_DIR_ENV,
     SCRATCH_DIR_NAME,
@@ -34,6 +35,7 @@ _DEFAULT_ALLOWED_ENV_KEYS = {
     "PIP_CACHE_DIR",
     GOBII_SCRATCH_DIR_ENV,
     GOBII_REPO_WORKDIR_ENV,
+    GOBII_AGENT_SQLITE_PATH_ENV,
 }
 
 _PROXY_ENV_KEYS = {

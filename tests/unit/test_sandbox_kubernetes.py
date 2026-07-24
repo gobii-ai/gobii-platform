@@ -793,6 +793,7 @@ class KubernetesSandboxMCPDiscoveryTests(SimpleTestCase):
                             "env": [
                                 {"name": "SANDBOX_RUNTIME_CACHE_ROOT", "value": "/runtime-cache"},
                                 {"name": "SANDBOX_AGENT_WORKSPACE_LAYOUT", "value": "isolated"},
+                                {"name": "SANDBOX_AGENT_ID", "value": "agent-resource-equivalent"},
                             ],
                             "resources": {},
                         }
@@ -1203,6 +1204,7 @@ class KubernetesSandboxPodManifestTests(SimpleTestCase):
         }
         self.assertEqual(env["SANDBOX_RUNTIME_CACHE_ROOT"], "/runtime-cache")
         self.assertEqual(env["SANDBOX_AGENT_WORKSPACE_LAYOUT"], "isolated")
+        self.assertEqual(env["SANDBOX_AGENT_ID"], "agent-1")
 
     def test_agent_pod_manifest_keeps_explicit_service_account_opt_in(self):
         manifest = _build_pod_manifest(

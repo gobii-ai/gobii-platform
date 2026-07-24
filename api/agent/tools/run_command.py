@@ -1,6 +1,8 @@
 from typing import Any, Dict, Optional
 
+from api.agent.tools.sqlite_state import agent_sqlite_db, get_sqlite_db_path
 from api.models import PersistentAgent
+from api.services.agent_sqlite_coordination import AgentSQLiteBusy, agent_sqlite_busy_result
 from api.services.sandbox_compute import SandboxComputeService, SandboxComputeUnavailable, track_sandbox_unavailable
 
 
@@ -19,7 +21,9 @@ def get_run_command_tool() -> Dict[str, Any]:
                 "Clone repositories under $GOBII_REPO_WORKDIR (for example, `git clone <url> $GOBII_REPO_WORKDIR/repo-name`). "
                 "Gobii filespace paths like /tools/foo.py or /reports/foo.txt are for Gobii tool arguments, not shell paths. "
                 "Inside command strings, use relative paths from the workspace root such as tools/foo.py or reports/foo.txt, "
-                "or absolute shell paths like /workspace/tools/foo.py. Do not run /tools/foo.py or /reports/foo.txt directly."
+                "or absolute shell paths like /workspace/tools/foo.py. Do not run /tools/foo.py or /reports/foo.txt directly. "
+                "The shared agent SQLite database is available at $GOBII_AGENT_SQLITE_PATH and may be queried or updated "
+                "with sqlite3 or another SQLite client."
             ),
             "parameters": {
                 "type": "object",
@@ -78,11 +82,28 @@ def execute_run_command(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[
         track_sandbox_unavailable(agent, request_source="run_command")
         return {"status": "error", "message": str(exc)}
 
-    return service.run_command(
-        agent,
-        command,
-        cwd=cwd,
-        env=env,
-        timeout=timeout,
-        interactive=False,
-    )
+    current_db_path = get_sqlite_db_path()
+    if current_db_path:
+        return service.run_command(
+            agent,
+            command,
+            cwd=cwd,
+            env=env,
+            timeout=timeout,
+            interactive=False,
+            local_sqlite_db_path=current_db_path,
+        )
+
+    try:
+        with agent_sqlite_db(str(agent.id)) as db_path:
+            return service.run_command(
+                agent,
+                command,
+                cwd=cwd,
+                env=env,
+                timeout=timeout,
+                interactive=False,
+                local_sqlite_db_path=db_path,
+            )
+    except AgentSQLiteBusy as exc:
+        return agent_sqlite_busy_result(exc)

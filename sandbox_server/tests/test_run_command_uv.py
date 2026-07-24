@@ -1,13 +1,26 @@
 import os
+import signal
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from sandbox_server.run import _handle_run_command
+from sandbox_server.run import _handle_run_command, _run_managed_process
 
 
 class RunCommandUvTests(unittest.TestCase):
+    def test_managed_process_terminates_background_children(self):
+        result = _run_managed_process(
+            "sleep 30 & echo $!",
+            shell=True,
+            cwd="/tmp",
+            env=os.environ.copy(),
+            timeout=5,
+        )
+        child_pid = int(result.stdout.strip())
+        with self.assertRaises(ProcessLookupError):
+            os.kill(child_pid, signal.SIGCONT)
+
     def test_run_command_creates_uv_project_env_under_gobii_instead_of_dot_venv(self):
         with tempfile.TemporaryDirectory() as tmp_dir, tempfile.TemporaryDirectory() as runtime_cache:
             workspace = Path(tmp_dir)

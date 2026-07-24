@@ -20,6 +20,7 @@ from django.db.models import F
 from util.text_sanitizer import decode_unicode_escapes
 
 from api.agent.eval_agents import is_eval_agent
+from api.services.agent_sqlite_coordination import AgentSQLiteBusy, agent_sqlite_busy_result
 
 from ...models import PersistentAgent, PersistentAgentCustomTool, PersistentAgentEnabledTool, PersistentAgentSystemSkillState
 from ...services.sandbox_compute import SandboxComputeService, SandboxComputeUnavailable, sandbox_compute_enabled_for_agent, track_sandbox_unavailable
@@ -36,6 +37,7 @@ from ...utils.json_schema import sanitize_tool_parameters_schema_for_llm
 from ..core.llm_config import AgentLLMTier, get_agent_llm_tier
 from .mcp_manager import MCPToolInfo, MCPToolManager, get_mcp_manager, execute_mcp_tool, execute_mcp_tool_isolated
 from .sqlite_batch import get_sqlite_batch_tool, execute_sqlite_batch
+from .sqlite_state import agent_sqlite_db
 from .http_request import get_http_request_tool, execute_http_request
 from .brightdata import (
     BRIGHTDATA_LINKEDIN_PERSON_PROFILE_TOOL_NAME,
@@ -1566,7 +1568,27 @@ def execute_enabled_tool(
                         tool_name=resolved_name,
                     )
                     return {"status": "error", "message": str(exc)}
-                sandbox_result = service.tool_request(agent, resolved_name, params)
+                if resolved_name == PYTHON_EXEC_TOOL_NAME:
+                    if current_sqlite_db_path:
+                        sandbox_result = service.tool_request(
+                            agent,
+                            resolved_name,
+                            params,
+                            local_sqlite_db_path=current_sqlite_db_path,
+                        )
+                    else:
+                        try:
+                            with agent_sqlite_db(str(agent.id)) as db_path:
+                                sandbox_result = service.tool_request(
+                                    agent,
+                                    resolved_name,
+                                    params,
+                                    local_sqlite_db_path=db_path,
+                                )
+                        except AgentSQLiteBusy as exc:
+                            return agent_sqlite_busy_result(exc)
+                else:
+                    sandbox_result = service.tool_request(agent, resolved_name, params)
                 if (
                     isinstance(sandbox_result, dict)
                     and sandbox_result.get("error_code") == "sandbox_unsupported_tool"
@@ -1610,12 +1632,15 @@ def execute_enabled_tool(
                 "status": "error",
                 "message": f"Custom tool '{resolved_name}' is not available for this agent.",
             }
-        return execute_custom_tool(
-            agent,
-            custom_tool,
-            params,
-            current_sqlite_db_path=current_sqlite_db_path,
-        )
+        try:
+            return execute_custom_tool(
+                agent,
+                custom_tool,
+                params,
+                current_sqlite_db_path=current_sqlite_db_path,
+            )
+        except AgentSQLiteBusy as exc:
+            return agent_sqlite_busy_result(exc)
 
     return {"status": "error", "message": f"Tool '{resolved_name}' has no execution handler"}
 

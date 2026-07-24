@@ -939,6 +939,12 @@ def get_sqlite_db_path() -> Optional[str]:
     return _sqlite_db_path_var.get(None)
 
 
+def _should_compact_sqlite(db_size_bytes: int, page_count: int, free_pages: int) -> bool:
+    if db_size_bytes < 90 * 1024 * 1024 or page_count <= 0:
+        return False
+    return free_pages / page_count >= 0.20
+
+
 def reset_sqlite_db_path(token: contextvars.Token) -> None:
     """Reset the SQLite DB path context variable."""
     try:
@@ -1029,11 +1035,20 @@ def _restore_sqlite_db_from_storage(storage_key: str, db_path: str, agent_uuid: 
 
 @contextlib.contextmanager
 def agent_sqlite_db(agent_uuid: str):  # noqa: D401 – simple generator context mgr
+    """Coordinate restore, access, maintenance, and persistence for an agent DB."""
+    from api.services.agent_sqlite_coordination import agent_sqlite_execution
+
+    with agent_sqlite_execution(agent_uuid), _agent_sqlite_db_uncoordinated(agent_uuid) as db_path:
+        yield db_path
+
+
+@contextlib.contextmanager
+def _agent_sqlite_db_uncoordinated(agent_uuid: str):
     """Context manager that restores/persists the per-agent SQLite DB.
 
     1. Attempts to download and decompress the DB from object storage.
     2. Yields the on-disk path to the SQLite file in a temporary directory.
-    3. On exit, runs maintenance (VACUUM/PRAGMA optimize), then compresses
+    3. On exit, runs PRAGMA optimize and conditional compaction, then compresses
        the DB with zstd and uploads to object storage, unless the DB grew
        beyond 100MB, in which case we wipe persisted state.
     """
@@ -1061,11 +1076,19 @@ def agent_sqlite_db(agent_uuid: str):  # noqa: D401 – simple generator context
                     conn = open_guarded_sqlite_connection(db_path, allow_attach=True)
                     try:
                         _drop_ephemeral_tables(conn)
-                        conn.execute("VACUUM;")
+                        conn.commit()
                         try:
                             conn.execute("PRAGMA optimize;")
                         except Exception:
                             pass
+                        page_count = int(conn.execute("PRAGMA page_count;").fetchone()[0])
+                        free_pages = int(conn.execute("PRAGMA freelist_count;").fetchone()[0])
+                        db_size_bytes = os.path.getsize(db_path)
+                        if _should_compact_sqlite(db_size_bytes, page_count, free_pages):
+                            # Routine VACUUM churns nearly every page and defeats
+                            # incremental sandbox replication. Compact only when
+                            # reclaiming space can prevent an oversize wipe.
+                            conn.execute("VACUUM;")
                         conn.commit()
                     finally:
                         try:

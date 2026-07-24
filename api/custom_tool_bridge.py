@@ -10,14 +10,25 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
 from api.agent.core.agent_judge import maybe_run_agent_judge
-from api.agent.tools.custom_tools import CUSTOM_TOOL_BRIDGE_TTL_SECONDS, load_custom_tool_bridge_payload, read_custom_tool_source_text
+from api.agent.tools.custom_tools import (
+    CUSTOM_TOOL_BRIDGE_TTL_SECONDS,
+    load_custom_tool_bridge_payload,
+    read_custom_tool_source_text,
+)
 from api.agent.tools.tracked_runtime import execute_tracked_runtime_tool_call
-from api.models import PersistentAgent, PersistentAgentCustomTool, PersistentAgentStep, PersistentAgentSystemStep
+from api.models import (
+    PersistentAgent,
+    PersistentAgentCustomTool,
+    PersistentAgentStep,
+    PersistentAgentSystemStep,
+)
+from api.services.agent_sqlite_coordination import agent_sqlite_execution_is_active
 
 logger = logging.getLogger(__name__)
 
 CUSTOM_TOOL_CHILD_FAILURE_TRIGGER_REASON = "custom_tool_child_failure_budget_exceeded"
 CUSTOM_TOOL_ABORT_MESSAGE_TEMPLATE = "Custom tool stopped after {threshold} failed child tool calls."
+_SQLITE_CAPABLE_CHILD_TOOL_NAMES = {"python_exec", "run_command", "sqlite_batch"}
 
 
 def _json_safe(value):
@@ -67,6 +78,24 @@ def _abort_payload(state: dict | None = None) -> dict:
 
 def _is_error_result(result) -> bool:
     return isinstance(result, dict) and str(result.get("status") or "").lower() == "error"
+
+
+def _nested_sqlite_tool_error(agent_id, tool_name: str) -> dict | None:
+    sqlite_capable = (
+        tool_name in _SQLITE_CAPABLE_CHILD_TOOL_NAMES
+        or tool_name.startswith("custom_")
+    )
+    if not sqlite_capable or not agent_sqlite_execution_is_active(str(agent_id)):
+        return None
+    return {
+        "status": "error",
+        "error_code": "nested_agent_sqlite_not_supported",
+        "message": (
+            "SQLite-capable child tools cannot run from an active sandbox execution. "
+            "Finish the current custom tool call before starting another SQLite-capable tool."
+        ),
+        "retryable": False,
+    }
 
 
 def _get_budget_state(cache_key: str) -> dict:
@@ -179,6 +208,15 @@ def custom_tool_bridge_execute(request):
     if not isinstance(tool_name, str) or not tool_name.strip():
         return JsonResponse({"status": "error", "message": "tool_name is required."}, status=400)
     tool_name = tool_name.strip()
+    nested_sqlite_error = _nested_sqlite_tool_error(agent.id, tool_name)
+    if nested_sqlite_error is not None:
+        abort = _record_child_tool_failure(
+            cache_key=budget_cache_key,
+            agent=agent,
+            custom_tool=custom_tool,
+            failed_tool_name=tool_name,
+        )
+        return JsonResponse(abort or nested_sqlite_error)
 
     params = body.get("params")
     if params is None:

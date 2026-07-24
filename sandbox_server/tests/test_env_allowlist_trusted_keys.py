@@ -59,7 +59,7 @@ class EnvAllowlistTrustedKeysTests(unittest.TestCase):
             "sandbox_server.run._sandbox_env",
             return_value={"PATH": "/usr/bin", "POSTGRES_CONNECTION_STRING": "postgres://example"},
         ) as sandbox_env_mock, patch(
-            "sandbox_server.run.subprocess.run",
+            "sandbox_server.run._run_managed_process",
             return_value=completed,
         ):
             result = _handle_run_command(payload)
@@ -92,7 +92,7 @@ class EnvAllowlistTrustedKeysTests(unittest.TestCase):
             "sandbox_server.run._sandbox_env",
             return_value={"PATH": "/usr/bin", "UV_PROJECT_ENVIRONMENT": ".gobii/uv-project-env"},
         ), patch(
-            "sandbox_server.run.subprocess.run",
+            "sandbox_server.run._run_managed_process",
             return_value=completed,
         ) as run_mock:
             result = _handle_run_command(payload)
