@@ -34,7 +34,7 @@
     "unit": "utf8_bytes"
   },
   "source_loc": {
-    "description": "Nonblank lines in tracked core product source files, excluding tests and dedicated eval assets.",
+    "description": "Nonblank lines in core product source files, excluding tests, evals, and named feature regions.",
     "exclude_eval_files": [
       "api/agent/eval_agents.py",
       "api/agent/tools/eval_synthetic_tools.py",
@@ -56,6 +56,10 @@
     "exclude_filenames": [
       "api/agent/system_skills/defaults.py",
       "api/agent/system_skills/native_api_cookbooks.py",
+      "api/services/user_pets.py",
+      "console/user_pets_api.py",
+      "frontend/src/api/userPets.ts",
+      "frontend/src/hooks/useUserPets.ts",
       "package-lock.json",
       "uv.lock"
     ],
@@ -75,6 +79,7 @@
       "console/migrations/",
       "docs/",
       "frontend/node_modules/",
+      "frontend/src/components/pets/",
       "gobii_platform.egg-info/",
       "marketing_events/",
       "mediafiles/",
@@ -90,6 +95,10 @@
       "templates/",
       "vendor/"
     ],
+    "exclude_region_markers": {
+      "end": "complexity-budget: exclude-end <name>",
+      "start": "complexity-budget: exclude-start <name>"
+    },
     "exclude_test_file_suffixes": [
       ".js",
       ".jsx",

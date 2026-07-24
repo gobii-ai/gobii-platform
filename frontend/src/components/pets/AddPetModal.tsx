@@ -2,12 +2,11 @@ import { useState, type FormEvent } from 'react'
 import { Fish, Upload } from 'lucide-react'
 
 import { safeErrorMessage } from '../../api/safeErrorMessage'
-import { useUpdateUserPetPreferences, useUploadUserPet } from '../../hooks/useUserPets'
+import { useUploadUserPet } from '../../hooks/useUserPets'
 import { FormField, TextareaInput, TextInput } from '../common/FormControls'
 import { ModalForm } from '../common/ModalForm'
 
 type AddPetModalProps = {
-  existingPetIds: string[]
   customPetCount: number
   maxCustomPets: number
   onClose: () => void
@@ -15,19 +14,17 @@ type AddPetModalProps = {
 }
 
 export function AddPetModal({
-  existingPetIds,
   customPetCount,
   maxCustomPets,
   onClose,
   onUploaded,
 }: AddPetModalProps) {
   const uploadMutation = useUploadUserPet()
-  const preferencesMutation = useUpdateUserPetPreferences()
   const [displayName, setDisplayName] = useState('')
   const [description, setDescription] = useState('')
   const [spritesheet, setSpritesheet] = useState<File | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const submitting = uploadMutation.isPending || preferencesMutation.isPending
+  const submitting = uploadMutation.isPending
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -35,20 +32,12 @@ export function AddPetModal({
 
     setError(null)
     try {
-      const previousIds = new Set(existingPetIds)
-      const nextLibrary = await uploadMutation.mutateAsync({
+      await uploadMutation.mutateAsync({
         displayName: displayName.trim(),
         description: description.trim(),
         spritesheet,
       })
-      const uploadedPet = nextLibrary.pets.find((pet) => !previousIds.has(pet.id))
-      if (uploadedPet) {
-        await preferencesMutation.mutateAsync({
-          selectedPetId: uploadedPet.id,
-          enabled: true,
-        })
-      }
-      onUploaded(uploadedPet?.displayName ?? displayName.trim())
+      onUploaded(displayName.trim())
     } catch (requestError) {
       setError(safeErrorMessage(requestError, 'Unable to upload that pet.'))
     }

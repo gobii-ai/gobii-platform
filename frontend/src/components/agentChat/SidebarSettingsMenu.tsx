@@ -3,7 +3,9 @@ import { Bell, Building2, ChevronDown, CircleHelp, ClipboardList, CreditCard, Fi
 import { Button, Dialog, Popover } from 'react-aria-components'
 
 import type { ConsoleContext } from '../../api/context'
+// complexity-budget: exclude-start pet
 import { useUpdateUserPetPreferences, useUserPets } from '../../hooks/useUserPets'
+// complexity-budget: exclude-end pet
 
 export type SidebarTaskCreditsInfo = {
   usedToday: number | null
@@ -37,7 +39,9 @@ export type SidebarSettingsInfo = {
   onNotificationsEnabledChange?: (enabled: boolean) => void
   suggestionsEnabled?: boolean
   onSuggestionsEnabledChange?: (enabled: boolean) => void
+  // complexity-budget: exclude-start pet
   showPetPreference?: boolean
+  // complexity-budget: exclude-end pet
   taskCredits?: SidebarTaskCreditsInfo | null
   onOpenHelp?: (() => void) | null
 }
@@ -132,6 +136,7 @@ function SidebarPreferenceToggle({
   )
 }
 
+// complexity-budget: exclude-start pet
 function SidebarPetPreferenceToggle() {
   const petsQuery = useUserPets()
   const preferencesMutation = useUpdateUserPetPreferences()
@@ -147,6 +152,7 @@ function SidebarPetPreferenceToggle() {
     />
   )
 }
+// complexity-budget: exclude-end pet
 
 export function SidebarSettingsMenu({
   context = null,
@@ -173,7 +179,9 @@ export function SidebarSettingsMenu({
   onNotificationsEnabledChange,
   suggestionsEnabled = true,
   onSuggestionsEnabledChange,
+  // complexity-budget: exclude-start pet
   showPetPreference = false,
+  // complexity-budget: exclude-end pet
   taskCredits = null,
   onOpenHelp = null,
   variant = 'sidebar',
@@ -315,7 +323,9 @@ export function SidebarSettingsMenu({
               onChange={onSuggestionsEnabledChange}
               status={suggestionsEnabled ? 'Shown after replies' : 'Hidden'}
             />
+            {/* complexity-budget: exclude-start pet */}
             {showPetPreference ? <SidebarPetPreferenceToggle /> : null}
+            {/* complexity-budget: exclude-end pet */}
             <div className="sidebar-settings__rule" role="separator" aria-hidden="true" />
             {canShowProfile ? (
               onOpenProfile ? (

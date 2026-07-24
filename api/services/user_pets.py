@@ -1,3 +1,4 @@
+import uuid
 from io import BytesIO
 
 from PIL import Image, UnidentifiedImageError
@@ -16,6 +17,33 @@ PET_MIN_VISIBLE_PIXELS = 50
 
 class UserPetValidationError(ValueError):
     pass
+
+
+def normalize_user_pet_selector(key: str, value: object) -> str:
+    if value == "builtin:gobii-fish":
+        return value
+    if not isinstance(value, str):
+        raise ValueError(f"Invalid value for '{key}'. Expected a pet identifier.")
+    try:
+        return str(uuid.UUID(value.strip()))
+    except (ValueError, AttributeError) as exc:
+        raise ValueError(f"Invalid value for '{key}'. Expected a pet identifier.") from exc
+
+
+def normalize_user_pet_position(key: str, value: object) -> dict[str, float] | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict) or set(value) != {"x", "y"}:
+        raise ValueError(f"Invalid value for '{key}'. Expected normalized x and y coordinates.")
+    normalized = {}
+    for axis in ("x", "y"):
+        coordinate = value[axis]
+        if isinstance(coordinate, bool) or not isinstance(coordinate, (int, float)):
+            raise ValueError(f"Invalid value for '{key}'. Expected normalized x and y coordinates.")
+        if not 0.0 <= (coordinate := float(coordinate)) <= 1.0:
+            raise ValueError(f"Invalid value for '{key}'. Coordinates must be between 0 and 1.")
+        normalized[axis] = round(coordinate, 6)
+    return normalized
 
 
 def validate_user_pet_spritesheet(uploaded_file, *, max_bytes: int) -> bytes:

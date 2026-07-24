@@ -114,6 +114,8 @@ class ConsoleUserPetsApiTests(TestCase):
         custom_pet = response.json()["pets"][1]
         self.assertEqual(custom_pet["id"], str(pet.id))
         self.assertEqual(custom_pet["displayName"], "Orbit")
+        self.assertTrue(response.json()["preferences"]["enabled"])
+        self.assertEqual(response.json()["preferences"]["selectedPetId"], str(pet.id))
 
         asset_response = self.client.get(custom_pet["spritesheetUrl"])
         self.assertEqual(asset_response.status_code, 200)

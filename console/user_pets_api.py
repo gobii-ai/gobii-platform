@@ -107,6 +107,13 @@ class UserPetListAPIView(ApiLoginRequiredMixin, View):
 
         pet = UserPet(user=user, display_name=display_name, description=description)
         pet.spritesheet.save("spritesheet.webp", ContentFile(payload), save=True)
+        UserPreference.update_known_preferences(
+            user,
+            {
+                UserPreference.KEY_USER_PET_ENABLED: True,
+                UserPreference.KEY_USER_PET_SELECTED_ID: str(pet.id),
+            },
+        )
         return JsonResponse(_serialize_pet_library(user), status=201)
 
     def patch(self, request: HttpRequest, *args, **kwargs):
