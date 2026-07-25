@@ -7,6 +7,7 @@ import shutil
 import random
 import stat
 import time
+from urllib.parse import urlsplit
 from decimal import Decimal, InvalidOperation
 from typing import Any, Awaitable, Callable, List, Dict, Tuple, Optional
 import tarfile
@@ -774,6 +775,45 @@ def _result_is_invalid(res: Any) -> bool:
     return False
 
 
+def _browser_profile_id_for_task(task: BrowserUseAgentTask) -> str | None:
+    if task.authenticate_to_gobii_ui or task.agent is None:
+        return None
+    return str(task.agent.id)
+
+
+async def _bootstrap_gobii_ui_session(
+    browser_session,
+    browser_task_id: str,
+) -> None:
+    from ..services.browser_session_tickets import (
+        issue_gobii_browser_task_session,
+    )
+
+    issued = await asyncio.to_thread(
+        issue_gobii_browser_task_session,
+        browser_task_id,
+    )
+    await browser_session.navigate_to(issued.login_url)
+    current_url = await browser_session.get_current_page_url()
+    current_parts = urlsplit(current_url)
+    expected_parts = urlsplit(settings.PUBLIC_SITE_URL)
+    if (
+        current_parts.netloc.lower() != expected_parts.netloc.lower()
+        or not (
+            current_parts.path == "/app"
+            or current_parts.path.startswith("/app/")
+        )
+    ):
+        raise RuntimeError(
+            "Gobii UI browser-session bootstrap did not reach the authenticated app."
+        )
+    logger.info(
+        "Bootstrapped Gobii UI browser session for task %s with ticket %s",
+        browser_task_id,
+        issued.ticket.id,
+    )
+
+
 # NOTE: We deliberately shard profiles two-levels deep (first four hex chars of the
 # UUID without hyphens) to avoid placing millions of objects in a single
 # directory/prefix while still keeping the layout human-navigable.  Example
@@ -869,6 +909,7 @@ async def _run_agent(
     extraction_max_output_tokens: Optional[int] = None,
     extraction_provider_key: Optional[str] = None,
     captcha_enabled: bool = False,
+    gobii_ui_browser_task_id: Optional[str] = None,
 ) -> Tuple[Optional[str], Optional[dict], list[dict[str, Any]]]:
     """Execute the Browser‑Use agent for a single provider."""
     if baggage:
@@ -1056,6 +1097,12 @@ async def _run_agent(
                 logger.warning("Failed to register download listener for task %s", task_id, exc_info=True)
 
             await browser_session.start()
+
+            if gobii_ui_browser_task_id:
+                await _bootstrap_gobii_ui_session(
+                    browser_session,
+                    gobii_ui_browser_task_id,
+                )
 
             llm_params = {"api_key": llm_api_key, "temperature": 0}
 
@@ -1487,6 +1534,7 @@ def _execute_agent_with_failover(
     max_steps: Optional[int] = None,
     vision_detail_level: Optional[str] = None,
     captcha_enabled: bool = False,
+    gobii_ui_browser_task_id: Optional[str] = None,
     include_filespace_artifacts: bool = False,
 ) -> Tuple[Optional[str], Optional[dict]] | Tuple[Optional[str], Optional[dict], list[dict[str, Any]]]:
     """
@@ -1674,6 +1722,7 @@ def _execute_agent_with_failover(
                         extraction_provider_key=extraction_provider,
                         vision_detail_level=vision_detail_level,
                         captcha_enabled=captcha_enabled,
+                        gobii_ui_browser_task_id=gobii_ui_browser_task_id,
                     )
                 )
                 if len(run_result) == 2:
@@ -1836,11 +1885,16 @@ def _process_browser_use_task_core(
             proxy_server = select_proxy_for_task(task_obj, override_proxy=override_proxy)
 
             # Get the browser use agent ID for profile persistence
-            browser_use_agent_id = None
-            if task_obj.agent:
-                browser_use_agent_id = str(task_obj.agent.id)
+            browser_use_agent_id = _browser_profile_id_for_task(task_obj)
+            if browser_use_agent_id:
                 span.set_attribute("browser_use_agent.id", browser_use_agent_id)
                 logger.info("Browser profile persistence enabled for task %s with agent %s", task_obj.id, browser_use_agent_id)
+            elif task_obj.authenticate_to_gobii_ui:
+                logger.info(
+                    "Using an ephemeral browser profile for authenticated Gobii UI QA task %s",
+                    task_obj.id,
+                )
+                span.set_attribute("browser_profile.ephemeral_gobii_ui_qa", True)
             else:
                 logger.info("Browser profile persistence disabled for task %s (no associated agent)", task_obj.id)
                 span.set_attribute("browser_use_agent.missing", True)
@@ -1987,6 +2041,11 @@ def _process_browser_use_task_core(
                     max_steps=plan_settings.max_browser_steps,
                     vision_detail_level=plan_settings.vision_detail_level,
                     captcha_enabled=captcha_enabled,
+                    gobii_ui_browser_task_id=(
+                        str(task_obj.id)
+                        if task_obj.authenticate_to_gobii_ui
+                        else None
+                    ),
                     include_filespace_artifacts=True,
                 )
                 if len(execute_result) == 2:

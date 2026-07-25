@@ -17,6 +17,10 @@ from ...services.persistent_agent_secrets import build_browser_task_secret_paylo
 from ...services.billing_snapshot import get_billing_snapshot_for_owner
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from ...services.browser_settings import get_browser_settings_for_owner
+from ...services.browser_session_tickets import (
+    browser_session_tickets_available,
+    canonical_browser_session_host,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +41,7 @@ def _create_simulated_eval_weather_task(
     *,
     prompt: str,
     requires_vision: bool,
+    authenticate_to_gobii_ui: bool,
     eval_run_id: str,
 ) -> dict[str, Any]:
     result_value = {
@@ -49,6 +54,7 @@ def _create_simulated_eval_weather_task(
         user=agent.user,
         prompt=prompt,
         requires_vision=requires_vision,
+        authenticate_to_gobii_ui=authenticate_to_gobii_ui,
         eval_run_id=eval_run_id,
         status=BrowserUseAgentTask.StatusChoices.COMPLETED,
         **get_billing_snapshot_for_owner(_get_plan_owner(agent)),
@@ -110,6 +116,8 @@ def get_spawn_web_task_tool(agent: Optional[PersistentAgent] = None) -> Dict[str
                 "For text-only public pages, prefer search/scrape/structured-data/API tools when they fully satisfy the request; if the user asks for a screenshot or visual proof of a webpage, use this tool. "
                 "Give detailed, realistic instructions; ask for URLs if needed. Mention secrets by direct name, e.g. google_username, not <<<google_username>>>. "
                 "Stored secrets are for classic username/password logins only; OAuth uses MCP connect/auth links. "
+                "For authorized QA of this deployment, set authenticate_to_gobii_ui=true "
+                "(staff-owned agents; local, preview, or staging only). "
                 f"Completion notifies you; do not poll. If blocked waiting, use sleep_until_next_trigger. {limit_sentence}"
             ),
             "parameters": {
@@ -129,6 +137,13 @@ def get_spawn_web_task_tool(agent: Optional[PersistentAgent] = None) -> Dict[str
                         "items": {"type": "string"},
                         "description": "Optional list of secret keys to provide to the web task. If not specified, all available secrets will be provided.",
                     },
+                    "authenticate_to_gobii_ui": {
+                        "type": "boolean",
+                        "description": (
+                            "Authenticate to this deployment's Gobii UI before starting "
+                            "(authorized QA only; the credential stays hidden)."
+                        ),
+                    },
                 },
                 "required": ["prompt"],
             },
@@ -145,6 +160,29 @@ def execute_spawn_web_task(agent: PersistentAgent, params: Dict[str, Any]) -> Di
         return {"status": "error", "message": "Missing required parameter: prompt"}
 
     requires_vision = bool(params.get("requires_vision", False))
+    authenticate_to_gobii_ui = bool(
+        params.get("authenticate_to_gobii_ui", False)
+    )
+
+    if authenticate_to_gobii_ui:
+        if not browser_session_tickets_available():
+            return {
+                "status": "error",
+                "message": (
+                    "Authenticated Gobii UI QA is available only in local development, preview, and staging."
+                ),
+            }
+        if not agent.user.is_active or not agent.user.is_staff:
+            return {
+                "status": "error",
+                "message": (
+                    "Authenticated Gobii UI QA requires an active staff owner."
+                ),
+            }
+        try:
+            canonical_browser_session_host()
+        except ValueError as exc:
+            return {"status": "error", "message": str(exc)}
 
     # Get optional secrets parameter
     requested_secrets = params.get("secrets", [])
@@ -211,6 +249,7 @@ def execute_spawn_web_task(agent: PersistentAgent, params: Dict[str, Any]) -> Di
             agent,
             prompt=prompt,
             requires_vision=requires_vision,
+            authenticate_to_gobii_ui=authenticate_to_gobii_ui,
             eval_run_id=eval_run_id,
         )
     
@@ -318,6 +357,7 @@ def execute_spawn_web_task(agent: PersistentAgent, params: Dict[str, Any]) -> Di
             user=agent.user,
             prompt=prompt,
             requires_vision=requires_vision,
+            authenticate_to_gobii_ui=authenticate_to_gobii_ui,
             eval_run_id=getattr(budget_ctx, "eval_run_id", None),
             encrypted_secrets=encrypted_secrets,
             secret_keys=secret_keys_by_domain,
