@@ -1,8 +1,12 @@
-"""Outbound Discord messages must not render literal backslash-n (#228, #289).
+"""Detection of literal backslash-n used where a line break was meant (#228, #289).
 
-A double-escaped body arrives as the two characters backslash and n, which Discord renders
-verbatim. Repair the unambiguous structural cases only: a lone \\n being discussed as text, such as
-a bug report about this very defect, must survive untouched.
+This backs two things: the eval assertion that fails a model whose message body uses the escape
+sequence instead of a real newline, and the one-off charter repair command. Nothing rewrites live
+message output -- the contract tells the model how to write a line break, and the eval measures
+whether it did.
+
+Only unambiguous positions count. A lone \\n discussed as text, such as a bug report about this
+very defect, must never be treated as a failure or rewritten.
 """
 from __future__ import annotations
 
