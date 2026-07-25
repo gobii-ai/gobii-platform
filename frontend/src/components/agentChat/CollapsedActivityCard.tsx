@@ -30,29 +30,35 @@ export const CollapsedActivityCard = memo(function CollapsedActivityCard({
     return null
   }
 
+  // Expanding in place can only ever show the tail of a long run, so the card would promise "N
+  // actions" and then reveal fewer, needing a second click to finish the job it advertised.
+  // Go straight to the full view in that case and keep the inline expand for runs that fit.
+  const exceedsInlineLimit = entries.length > INLINE_ACTIVITY_ENTRY_LIMIT
+  const showInlineList = expanded && !exceedsInlineLimit
+
   return (
     <div className="timeline-event collapsed-activity-cluster">
       <button
         type="button"
         className="collapsed-event-group"
-        aria-expanded={expanded ? 'true' : 'false'}
-        onClick={() => setExpanded((current) => !current)}
+        aria-expanded={exceedsInlineLimit ? undefined : (expanded ? 'true' : 'false')}
+        aria-haspopup={exceedsInlineLimit ? 'dialog' : undefined}
+        onClick={() => (exceedsInlineLimit ? setViewerOpen(true) : setExpanded((current) => !current))}
       >
         <span className="collapsed-event-group__label">{resolvedLabel}</span>
         <ChevronRight
           className="collapsed-event-group__chevron"
-          data-expanded={expanded ? 'true' : 'false'}
+          data-expanded={showInlineList ? 'true' : 'false'}
           size={14}
           strokeWidth={2}
         />
       </button>
-      {expanded ? (
+      {showInlineList ? (
         <div className="collapsed-activity-cluster__body">
           <ActivityEntryList
             entries={entries}
             limit={INLINE_ACTIVITY_ENTRY_LIMIT}
             limitStrategy="tail"
-            onViewAll={entries.length > INLINE_ACTIVITY_ENTRY_LIMIT ? () => setViewerOpen(true) : undefined}
           />
         </div>
       ) : null}
