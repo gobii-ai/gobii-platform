@@ -159,6 +159,7 @@ class SecureApiRequestTests(TestCase):
 
         self.assertIn("response may contain credentials", description)
         self.assertIn("secure credential delegation", description)
+        self.assertLess(description.index("response may contain credentials"), description.index("preferred tool"))
 
     def test_real_harness_eval_suite_is_registered(self):
         import api.evals.loader  # noqa: F401

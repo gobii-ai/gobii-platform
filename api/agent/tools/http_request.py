@@ -357,13 +357,13 @@ def get_http_request_tool() -> Dict[str, Any]:
         "function": {
             "name": "http_request",
             "description": (
-                "Perform a fast and efficient HTTP request to fetch raw structured data (JSON, XML, CSV) or interact with APIs. "
-                "This is the PREFERRED tool for programmatic data retrieval from known endpoints. "
+                "Fetch non-secret raw structured data (JSON, XML, CSV) or interact with APIs. "
+                "Never use this when a response may contain credentials, passwords, tokens, or OTPs; first search for `secure credential delegation` and use its secure request tool. "
+                "This is the PREFERRED tool for non-secret programmatic data retrieval from known endpoints. "
                 "If the user explicitly asks to scrape or read a known webpage, use the scraping/browser tool instead unless the URL clearly serves raw data. "
                 "When this tool returns a successful payload that answers the user's request, answer from that payload; do not open a browser task just to verify the same data. "
                 "For weather, a geocoding endpoint only resolves coordinates; call a forecast/current-conditions endpoint before replying with weather. "
                 "Do NOT use this when the task is to read or verify what appears on a webpage; use `spawn_web_task` for user-visible pages even if they are simple HTML. "
-                "Do NOT use this when a response may contain credentials, passwords, tokens, or OTPs; search for `secure credential delegation` and use its secure request tool before fetching. "
                 "The URL, headers, and body can include secret placeholders using `$[secret:my_api_key]`. These placeholders will be replaced with the corresponding secret values at execution time. The response is truncated to 5MB. Text content is returned even if served with application/octet-stream; only truly binary data (images, etc.) is omitted. You may need to look up API docs using the mcp_brightdata_search_engine tool."
             ),
             "parameters": {
