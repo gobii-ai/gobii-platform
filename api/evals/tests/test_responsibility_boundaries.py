@@ -17,6 +17,7 @@ from api.evals.scenarios.responsibility_boundaries import (
     RESPONSIBILITY_BOUNDARY_PEER_REQUEST_HANDOFF,
     RESPONSIBILITY_BOUNDARY_SCENARIO_SLUGS,
     RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_AUTHORED_CLAIM,
+    RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_FALSE_OWNERSHIP,
     RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_OWNER,
     RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_NOISY_YIELD,
     RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_OWNED_REPLY,
@@ -77,8 +78,30 @@ class ResponsibilityBoundaryScenarioTests(SimpleTestCase):
                 RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_OWNED_REPLY,
                 RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_NOISY_YIELD,
                 RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_AUTHORED_CLAIM,
+                RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_FALSE_OWNERSHIP,
             },
         )
+
+    def test_false_ownership_case_judges_only_a_posted_reply(self):
+        case = next(
+            case for case in RESPONSIBILITY_BOUNDARY_CASES if case.event_kind == "shared_channel_false_ownership"
+        )
+        self.assertEqual(case.slug, RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_FALSE_OWNERSHIP)
+        scenario = ResponsibilityBoundaryScenario(case)
+        recorded = []
+        scenario.record_task_result = lambda *args, **kwargs: recorded.append((args, kwargs))
+
+        scenario._verify_no_false_ownership("run", [])
+        self.assertEqual(recorded[-1][0][2], EvalRunTask.Status.PASSED)
+
+        channel_call = SimpleNamespace(
+            tool_name="send_discord_message",
+            tool_params={"message": "That was my formatting failure, fixing it now."},
+            step="discord-step",
+        )
+        scenario.llm_judge = lambda **kwargs: ("Claims another agent's mistake", "Takes the blame.")
+        scenario._verify_no_false_ownership("run", [channel_call])
+        self.assertEqual(recorded[-1][0][2], EvalRunTask.Status.FAILED)
 
     def test_scenarios_use_the_real_harness_and_low_cost_metadata(self):
         for slug in RESPONSIBILITY_BOUNDARY_SCENARIO_SLUGS:
