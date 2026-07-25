@@ -6169,8 +6169,11 @@
     }
 }
 @media (prefers-reduced-motion: reduce) {
-    .agent-roster-count-pending,
-    .agent-roster-item {
+    .agent-roster-count-pending {
+        animation: none;
+    }
+}
+.agent-roster-item {
     --roster-item-gap: 0.75rem;
     --roster-item-padding: 0.625rem 0.5rem;
     --roster-item-radius: 0.5rem;
