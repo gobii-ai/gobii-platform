@@ -56,6 +56,7 @@ export type AgentMessage = {
   senderAddress?: string | null
   recipientName?: string | null
   recipientAddress?: string | null
+  ccAddresses?: string[] | null
   sourceKind?: string | null
   sourceLabel?: string | null
   channelLabel?: string | null

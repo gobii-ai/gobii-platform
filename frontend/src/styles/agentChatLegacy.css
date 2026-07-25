@@ -3773,6 +3773,39 @@
     color: #94a3b8;
     font-weight: 700;
 }
+/* Sending mailbox and cc, kept off the author line so the header stays legible on a phone. */
+.chat-email-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem 0.75rem;
+    margin: -0.125rem 0 0.5rem;
+    font-size: 0.6875rem;
+    line-height: 1.4;
+    color: #64748b;
+    letter-spacing: 0;
+}
+.chat-email-meta__item {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.3125rem;
+    min-width: 0;
+    max-width: 100%;
+}
+.chat-email-meta__label {
+    flex: 0 0 auto;
+    font-weight: 700;
+    color: #94a3b8;
+    text-transform: uppercase;
+    font-size: 0.625rem;
+    letter-spacing: 0.04em;
+}
+.chat-email-meta__value {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 500;
+}
 .chat-email-recipient-text {
     min-width: 0;
     overflow: hidden;

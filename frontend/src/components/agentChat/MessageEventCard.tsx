@@ -185,6 +185,15 @@ export const MessageEventCard = memo(function MessageEventCard({
   const emailRecipientTitle = emailRecipientName
     ? `${emailRecipientName} <${emailRecipient}>`
     : emailRecipient
+  // Which mailbox actually sent it. Agents send from several custom domains, so "who sent this"
+  // is not answerable from the agent name alone.
+  const emailSender = channel === 'email' && message.isOutbound
+    ? message.senderAddress?.trim() || ''
+    : ''
+  const emailCc = channel === 'email'
+    ? (message.ccAddresses ?? []).map((address) => address.trim()).filter(Boolean)
+    : []
+  const showEmailMeta = Boolean(emailSender) || emailCc.length > 0
 
   const contentTone = isPeer ? 'text-slate-800' : isAgent ? 'text-slate-800' : ''
 
@@ -304,6 +313,22 @@ export const MessageEventCard = memo(function MessageEventCard({
             ) : null}
           </span>
         </div>
+        {showEmailMeta ? (
+          <div className="chat-email-meta">
+            {emailSender ? (
+              <span className="chat-email-meta__item">
+                <span className="chat-email-meta__label">From</span>
+                <span className="chat-email-meta__value" title={emailSender}>{emailSender}</span>
+              </span>
+            ) : null}
+            {emailCc.length > 0 ? (
+              <span className="chat-email-meta__item">
+                <span className="chat-email-meta__label">Cc</span>
+                <span className="chat-email-meta__value" title={emailCc.join(', ')}>{emailCc.join(', ')}</span>
+              </span>
+            ) : null}
+          </div>
+        ) : null}
         {isWebhook && webhookMetaBits.length > 0 ? (
           <div className="mb-2 flex flex-wrap gap-2 text-[11px] font-medium text-slate-500">
             {webhookMetaBits.map((bit) => (

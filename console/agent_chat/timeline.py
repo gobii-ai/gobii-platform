@@ -541,9 +541,21 @@ def _serialize_message(
     # the salutation, which leaves no reliable audit trail of who an agent contacted.
     recipient_address: str | None = None
     recipient_name: str | None = None
+    cc_addresses: list[str] = []
     if message.is_outbound and channel.lower() == CommsChannel.EMAIL and conversation is not None:
         recipient_address = (conversation.address or "").strip() or None
         recipient_name = (conversation.display_name or "").strip() or None
+    if channel.lower() == CommsChannel.EMAIL:
+        # Who else received it. Bcc is deliberately absent: it is never persisted on the message,
+        # so the card cannot claim to show a complete recipient list.
+        cc_addresses = [
+            address
+            for address in (
+                (endpoint.address or "").strip()
+                for endpoint in message.cc_endpoints.all()
+            )
+            if address
+        ]
     if not is_mcp and channel.lower() == "web" and sender_address:
         user_id, agent_id = parse_web_user_address(sender_address)
         if user_id is not None and (not agent_id or not message.owner_agent_id or str(message.owner_agent_id) == agent_id):
@@ -601,6 +613,7 @@ def _serialize_message(
             "senderAddress": None if is_mcp else sender_address,
             "recipientName": recipient_name,
             "recipientAddress": recipient_address,
+            "ccAddresses": cc_addresses,
             "sourceKind": source_kind,
             "sourceLabel": source_label,
             "channelLabel": discord_channel_label or None,
@@ -832,7 +845,7 @@ def _messages_queryset(agent: PersistentAgent, direction: TimelineDirection, cur
             "peer_agent",
             "owner_agent",
         )
-        .prefetch_related("attachments__filespace_node")
+        .prefetch_related("attachments__filespace_node", "cc_endpoints")
         .order_by("-timestamp", "-seq")
     )
     if direction == "older" and cursor is not None:
