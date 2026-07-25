@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type FormEvent, type KeyboardEvent, type SetStateAction } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type FormEvent, type KeyboardEvent, type SetStateAction } from 'react'
 import { useInfiniteQuery } from '@tanstack/react-query'
 import { File, History, Image, Loader2, Paperclip, Search, Trash2, UserRoundSearch } from 'lucide-react'
 
@@ -20,6 +20,7 @@ export type MessageSearchState = {
   open: boolean
   query: string
   submittedQuery: string | null
+  resultsScrollTop?: number
 }
 
 type MessageSearchPanelProps = {
@@ -208,6 +209,7 @@ export function MessageSearchPanel({
 }: MessageSearchPanelProps) {
   const { query, submittedQuery } = state
   const inputRef = useRef<HTMLInputElement | null>(null)
+  const resultsRef = useRef<HTMLDivElement | null>(null)
   const [highlightedShortcutIndex, setHighlightedShortcutIndex] = useState(0)
   const storageKey = historyStorageKey(viewerKey, context)
   const [history, setHistory] = useState<string[]>(() => readHistory(storageKey))
@@ -264,6 +266,12 @@ export function MessageSearchPanel({
     if (!agentsLoading) writeHistory(storageKey, availableHistory)
   }, [agentsLoading, availableHistory, storageKey])
 
+  useLayoutEffect(() => {
+    if (resultsRef.current && submittedQuery) {
+      resultsRef.current.scrollTop = state.resultsScrollTop ?? 0
+    }
+  }, [state.resultsScrollTop, submittedQuery])
+
   const searchQuery = useInfiniteQuery({
     queryKey: ['agent-message-search', context?.type, context?.id, submitted],
     queryFn: ({ pageParam, signal }) => fetchAgentMessageSearch(submitted!, {
@@ -290,7 +298,12 @@ export function MessageSearchPanel({
     const filters = searchFilters(parsed)
     if (!filters.q && !filters.agentId && filters.attachment === 'any') return
     const entry = displayQuery.trim()
-    onStateChange((current) => ({ ...current, query: displayQuery, submittedQuery: entry }))
+    onStateChange((current) => ({
+      ...current,
+      query: displayQuery,
+      submittedQuery: entry,
+      resultsScrollTop: 0,
+    }))
     const nextHistory = [
       entry,
       ...availableHistory.filter((item) => (
@@ -399,7 +412,7 @@ export function MessageSearchPanel({
         </button>
       </form>
 
-      <div className="message-search-panel__results flex min-h-0 flex-1 flex-col overflow-y-auto">
+      <div ref={resultsRef} className="message-search-panel__results flex min-h-0 flex-1 flex-col overflow-y-auto">
         {showInitialSuggestions ? (
           <div className="message-search-shortcuts flex flex-col">
             <div className="message-search-panel__section-title"><span>Filters</span></div>
@@ -536,7 +549,9 @@ export function MessageSearchPanel({
                   href={href}
                   aria-label={`Open message from ${result.agent.name}`}
                   onClick={(event) => {
+                    const resultsScrollTop = resultsRef.current?.scrollTop ?? 0
                     if (handleAppAnchorClick(event, href)) {
+                      onStateChange((current) => ({ ...current, resultsScrollTop }))
                       window.requestAnimationFrame(() => {
                         revealTimelineMessage(result.message_id, { highlight: true })
                       })

@@ -3,7 +3,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefCall
 import { revealTimelineMessage } from '../../util/timelineNavigation'
 
 const NEAR_BOTTOM_PX = 96
-const TOP_LOAD_PX = 160
+const PAGE_LOAD_EDGE_PX = 160
 // Older history is fetched while the reader still has this much of it left above them, measured
 // in viewports. A page of timeline renders far taller than the window and takes about a second to
 // arrive, so a small fixed trigger meant every reader scrolling back hit the top, stopped, waited,
@@ -27,10 +27,14 @@ type TimelineScrollControllerOptions = {
   autoScrollPinned: boolean
   contentVersion: string
   eventCount: number
+  fetchNextPage: () => Promise<unknown>
   fetchPreviousPage: () => Promise<unknown>
+  hasNextPage: boolean
   hasPreviousPage: boolean
   initialLoading: boolean
+  isFetchNextPageError: boolean
   isFetchPreviousPageError: boolean
+  isFetchingNextPage: boolean
   isFetchingPreviousPage: boolean
   isNewAgent: boolean
   pageCount: number
@@ -79,10 +83,14 @@ export function useTimelineScrollController({
   autoScrollPinned,
   contentVersion,
   eventCount,
+  fetchNextPage,
   fetchPreviousPage,
+  hasNextPage,
   hasPreviousPage,
   initialLoading,
+  isFetchNextPageError,
   isFetchPreviousPageError,
+  isFetchingNextPage,
   isFetchingPreviousPage,
   isNewAgent,
   pageCount,
@@ -93,6 +101,7 @@ export function useTimelineScrollController({
   const containerRef = useRef<HTMLDivElement | null>(null)
   const pinnedRef = useRef(autoScrollPinned)
   const didInitialJumpRef = useRef(false)
+  const fetchNewerInFlightRef = useRef(false)
   const fetchOlderInFlightRef = useRef(false)
   const scrollFrameRef = useRef<number | null>(null)
   const acrossFramesRafRef = useRef<number | null>(null)
@@ -355,6 +364,21 @@ export function useTimelineScrollController({
     setPinned,
   ])
 
+  const requestNextPage = useCallback(() => {
+    if (
+      fetchNewerInFlightRef.current
+      || !hasNextPage
+      || isFetchingNextPage
+      || isFetchNextPageError
+    ) {
+      return
+    }
+    fetchNewerInFlightRef.current = true
+    void fetchNextPage().finally(() => {
+      fetchNewerInFlightRef.current = false
+    })
+  }, [fetchNextPage, hasNextPage, isFetchNextPageError, isFetchingNextPage])
+
   const timelineRef: RefCallback<HTMLDivElement> = useCallback((node) => {
     containerRef.current = node
     lastScrollTopRef.current = node?.scrollTop ?? 0
@@ -372,6 +396,7 @@ export function useTimelineScrollController({
 
   useEffect(() => {
     didInitialJumpRef.current = false
+    fetchNewerInFlightRef.current = false
     fetchOlderInFlightRef.current = false
     prependAnchorRef.current = null
     stopAnchorHold()
@@ -483,12 +508,12 @@ export function useTimelineScrollController({
 
       if (meaningfulScrollUp && !contentLayoutChangingRef.current) {
         suspendAutoFollow()
-      } else if (scrollingDown && distance <= NEAR_BOTTOM_PX) {
+      } else if (scrollingDown && distance <= NEAR_BOTTOM_PX && !hasNextPage) {
         setPinned(true)
       }
 
       if (
-        container.scrollTop <= Math.max(TOP_LOAD_PX, container.clientHeight * TOP_LOAD_VIEWPORTS)
+        container.scrollTop <= Math.max(PAGE_LOAD_EDGE_PX, container.clientHeight * TOP_LOAD_VIEWPORTS)
         && canScroll(container)
         && didInitialJumpRef.current
         && !initialLoading
@@ -497,6 +522,17 @@ export function useTimelineScrollController({
         && eventCount > 0
       ) {
         requestPreviousPage()
+      }
+      if (
+        distance <= PAGE_LOAD_EDGE_PX
+        && hasNextPage
+        && didInitialJumpRef.current
+        && !initialLoading
+        && !isNewAgent
+        && !switchingAgentId
+        && eventCount > 0
+      ) {
+        requestNextPage()
       }
     }
 
@@ -526,8 +562,10 @@ export function useTimelineScrollController({
   }, [
     capturePrependAnchor,
     eventCount,
+    hasNextPage,
     initialLoading,
     isNewAgent,
+    requestNextPage,
     requestPreviousPage,
     setPinned,
     stopAnchorHold,
