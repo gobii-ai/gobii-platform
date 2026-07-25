@@ -167,7 +167,7 @@ class BrowserSessionTicketAPITests(APITestCase):
         self.assertEqual(landing_response["Cache-Control"], "no-store")
         self.assertIsNone(BrowserSessionTicket.objects.get().consumed_at)
 
-    def test_browser_redemption_uses_normal_csrf_protection(self):
+    def test_browser_redemption_accepts_headless_browser_null_origin(self):
         create_response = self._create_ticket()
         parsed_login_url = urlsplit(create_response.json()["login_url"])
         raw_token = parsed_login_url.fragment.removeprefix("token=")
@@ -187,7 +187,7 @@ class BrowserSessionTicketAPITests(APITestCase):
             },
             secure=True,
             HTTP_HOST="pr-99.ship.gobii.ai",
-            HTTP_ORIGIN="https://pr-99.ship.gobii.ai",
+            HTTP_ORIGIN="null",
         )
 
         self.assertEqual(landing_response.status_code, 200)

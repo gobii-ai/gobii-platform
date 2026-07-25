@@ -6,6 +6,7 @@ from django.http import HttpResponse
 from django.middleware.csrf import get_token
 from django.shortcuts import redirect
 from django.utils import timezone
+from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from rest_framework import serializers, status
 from rest_framework.decorators import api_view, permission_classes
@@ -150,6 +151,11 @@ def create_browser_session_ticket(request):
     )
 
 
+# The single-use fragment token authenticates this non-production login. Some
+# headless browsers serialize the form Origin as "null", so Django's
+# origin-based CSRF check would reject the intended browser while adding no
+# protection against a caller that already possesses the bearer token.
+@csrf_exempt
 @require_http_methods(["GET", "POST"])
 def consume_browser_session_ticket_view(request, ticket_id):
     if request.method == "GET":
