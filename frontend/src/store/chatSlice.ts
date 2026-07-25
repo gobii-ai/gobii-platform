@@ -713,6 +713,9 @@ export const sendMessage = createAsyncThunk<
   }
 
   const { event, clientId } = buildOptimisticMessageEvent(trimmed, attachments, requestedClientId)
+  // Sending is an explicit move to the live edge. Without this the optimistic event is routed to
+  // the invisible pending buffer and the sender never sees their own message (#287).
+  dispatch(setAutoScrollPinned(true))
   dispatch(chatActions.messageSendStarted({ agentId }))
   if (retry) {
     if (extra.queryClient) {
