@@ -1031,6 +1031,29 @@ class EmailContentRenderingTests(TestCase):
         self.assertIn("<strong>bold</strong>", html_snippet)
         self.assertNotIn("**bold**", html_snippet)
 
+    def test_html_technical_literals_do_not_become_emphasis(self):
+        body = (
+            "<p>Call _has_newer_background_trigger() and "
+            "get_current_inbound_message(); cron: 0 13 * * *.</p>"
+        )
+
+        html_snippet, plaintext = convert_body_to_html_and_plaintext(body)
+
+        self.assertEqual(html_snippet, body)
+        self.assertIn("_has_newer_background_trigger()", plaintext)
+        self.assertIn("get_current_inbound_message()", plaintext)
+        self.assertIn("0 13 * * *", plaintext)
+
+    def test_html_intentional_italic_markdown_is_repaired(self):
+        body = "<p>Use *automatic* or _manual_ mode.</p>"
+
+        html_snippet, _ = convert_body_to_html_and_plaintext(body)
+
+        self.assertEqual(
+            html_snippet,
+            "<p>Use <em>automatic</em> or <em>manual</em> mode.</p>",
+        )
+
     def test_html_block_with_markdown_list_is_converted(self):
         body = "<div>\n- First\n- Second\n</div>"
         html_snippet, _ = convert_body_to_html_and_plaintext(body)
