@@ -1,5 +1,3 @@
-import uuid
-
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.files.base import ContentFile
@@ -12,9 +10,9 @@ from django.views import View
 
 from api.models import UserPet, UserPreference
 from api.services.user_pets import (
-    BUILTIN_PET_IDS,
     DEFAULT_BUILTIN_PET_ID,
     UserPetValidationError,
+    selectable_user_pet_exists,
     validate_user_pet_spritesheet,
 )
 from console.api_helpers import ApiLoginRequiredMixin, _parse_json_body
@@ -39,22 +37,6 @@ BUILTIN_PETS = (
 )
 
 
-def _owned_pet_exists(user, pet_id: object) -> bool:
-    if not isinstance(pet_id, str):
-        return False
-    try:
-        normalized_id = uuid.UUID(pet_id.strip())
-    except (ValueError, AttributeError):
-        return False
-    return UserPet.objects.filter(user=user, pk=normalized_id).exists()
-
-
-def _selectable_pet_exists(user, pet_id: object) -> bool:
-    return isinstance(pet_id, str) and (
-        pet_id in BUILTIN_PET_IDS or _owned_pet_exists(user, pet_id)
-    )
-
-
 def _serialize_pet(pet: UserPet) -> dict[str, object]:
     return {
         "id": str(pet.id),
@@ -68,7 +50,7 @@ def _serialize_pet(pet: UserPet) -> dict[str, object]:
 def _resolved_pet_preferences(user) -> dict[str, object]:
     preferences = UserPreference.resolve_known_preferences(user)
     selected_id = preferences[UserPreference.KEY_USER_PET_SELECTED_ID]
-    if not _selectable_pet_exists(user, selected_id):
+    if not selectable_user_pet_exists(user, selected_id):
         selected_id = BUILTIN_PET_ID
     return {
         "enabled": preferences[UserPreference.KEY_USER_PET_ENABLED],
@@ -92,7 +74,7 @@ def _serialize_pet_library(user) -> dict[str, object]:
 
 
 class UserPetListAPIView(ApiLoginRequiredMixin, View):
-    http_method_names = ["get", "post", "patch"]
+    http_method_names = ["get", "post"]
 
     def get(self, request: HttpRequest, *args, **kwargs):
         return JsonResponse(_serialize_pet_library(request.user))
@@ -137,42 +119,6 @@ class UserPetListAPIView(ApiLoginRequiredMixin, View):
             },
         )
         return JsonResponse(_serialize_pet_library(user), status=201)
-
-    def patch(self, request: HttpRequest, *args, **kwargs):
-        try:
-            payload = _parse_json_body(request)
-        except ValueError as exc:
-            return HttpResponseBadRequest(str(exc))
-        if not isinstance(payload, dict):
-            return HttpResponseBadRequest("JSON body must be an object.")
-
-        allowed_fields = {"enabled", "selectedPetId", "size", "position"}
-        unknown_fields = sorted(set(payload) - allowed_fields)
-        if unknown_fields:
-            return HttpResponseBadRequest(f"Unknown fields: {', '.join(unknown_fields)}")
-        if not payload:
-            return HttpResponseBadRequest("Provide at least one pet preference.")
-
-        updates = {}
-        field_map = {
-            "enabled": UserPreference.KEY_USER_PET_ENABLED,
-            "selectedPetId": UserPreference.KEY_USER_PET_SELECTED_ID,
-            "size": UserPreference.KEY_USER_PET_SIZE,
-            "position": UserPreference.KEY_USER_PET_POSITION,
-        }
-        if "selectedPetId" in payload:
-            selected_id = payload["selectedPetId"]
-            if not _selectable_pet_exists(request.user, selected_id):
-                return JsonResponse({"error": "Select a pet from your library."}, status=400)
-        for field, preference_key in field_map.items():
-            if field in payload:
-                updates[preference_key] = payload[field]
-        try:
-            UserPreference.update_known_preferences(request.user, updates)
-        except ValueError as exc:
-            return JsonResponse({"error": str(exc)}, status=400)
-        return JsonResponse(_serialize_pet_library(request.user))
-
 
 class UserPetDetailAPIView(ApiLoginRequiredMixin, View):
     http_method_names = ["patch", "delete"]

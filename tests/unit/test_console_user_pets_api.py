@@ -89,6 +89,13 @@ class ConsoleUserPetsApiTests(TestCase):
             },
         )
 
+    def _update_preferences(self, preferences):
+        return self.client.patch(
+            reverse("console_user_preferences"),
+            data=json.dumps({"preferences": preferences}),
+            content_type="application/json",
+        )
+
     def test_get_returns_builtin_pets_and_default_preferences(self):
         response = self.client.get(self.url)
 
@@ -157,41 +164,35 @@ class ConsoleUserPetsApiTests(TestCase):
         self.assertEqual(self._upload().status_code, 201)
         pet = UserPet.objects.get(user=self.user)
 
-        response = self.client.patch(
-            self.url,
-            data=json.dumps(
-                {
-                    "enabled": False,
-                    "selectedPetId": str(pet.id),
-                    "size": "large",
-                    "position": {"x": 0.25, "y": 0.75},
-                }
-            ),
-            content_type="application/json",
+        response = self._update_preferences(
+            {
+                UserPreference.KEY_USER_PET_ENABLED: False,
+                UserPreference.KEY_USER_PET_SELECTED_ID: str(pet.id),
+                UserPreference.KEY_USER_PET_SIZE: "large",
+                UserPreference.KEY_USER_PET_POSITION: {"x": 0.25, "y": 0.75},
+            }
+        )
+
+        self.assertEqual(response.status_code, 200)
+        preferences = response.json()["preferences"]
+        self.assertFalse(preferences[UserPreference.KEY_USER_PET_ENABLED])
+        self.assertEqual(preferences[UserPreference.KEY_USER_PET_SELECTED_ID], str(pet.id))
+        self.assertEqual(preferences[UserPreference.KEY_USER_PET_SIZE], "large")
+        self.assertEqual(
+            preferences[UserPreference.KEY_USER_PET_POSITION],
+            {"x": 0.25, "y": 0.75},
+        )
+
+    def test_selects_an_included_non_default_pet(self):
+        response = self._update_preferences(
+            {UserPreference.KEY_USER_PET_SELECTED_ID: "builtin:eevee"}
         )
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
-            response.json()["preferences"],
-            {
-                "enabled": False,
-                "selectedPetId": str(pet.id),
-                "size": "large",
-                "position": {"x": 0.25, "y": 0.75},
-            },
+            response.json()["preferences"][UserPreference.KEY_USER_PET_SELECTED_ID],
+            "builtin:eevee",
         )
-        stored = UserPreference.resolve_known_preferences(self.user)
-        self.assertEqual(stored[UserPreference.KEY_USER_PET_POSITION], {"x": 0.25, "y": 0.75})
-
-    def test_selects_an_included_non_default_pet(self):
-        response = self.client.patch(
-            self.url,
-            data=json.dumps({"selectedPetId": "builtin:eevee"}),
-            content_type="application/json",
-        )
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["preferences"]["selectedPetId"], "builtin:eevee")
 
     def test_cannot_select_another_users_pet(self):
         other_pet = UserPet.objects.create(
@@ -200,14 +201,22 @@ class ConsoleUserPetsApiTests(TestCase):
             spritesheet="user_pets/private.webp",
         )
 
-        response = self.client.patch(
-            self.url,
-            data=json.dumps({"selectedPetId": str(other_pet.id)}),
-            content_type="application/json",
+        response = self._update_preferences(
+            {UserPreference.KEY_USER_PET_SELECTED_ID: str(other_pet.id)}
         )
 
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.json()["error"], "Select a pet from your library.")
+        self.assertEqual(response.content.decode(), "Select a pet from your library.")
+        self.assertFalse(UserPreference.objects.filter(user=self.user).exists())
+
+    def test_pet_library_endpoint_does_not_update_preferences(self):
+        response = self.client.patch(
+            self.url,
+            data=json.dumps({"enabled": False}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 405)
 
     def test_rejects_upload_after_ten_custom_pets(self):
         UserPet.objects.bulk_create(

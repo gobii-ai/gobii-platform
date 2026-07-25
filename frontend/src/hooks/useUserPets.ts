@@ -55,9 +55,6 @@ export function useUpdateUserPetPreferences() {
         queryClient.setQueryData(USER_PETS_QUERY_KEY, context.previous)
       }
     },
-    onSuccess: (data) => {
-      queryClient.setQueryData(USER_PETS_QUERY_KEY, data)
-    },
   })
 }
 

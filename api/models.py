@@ -76,7 +76,7 @@ from api.services.prompt_settings import (
 )
 from api.services.browser_settings import DEFAULT_MAX_ACTIVE_BROWSER_TASKS, DEFAULT_MAX_BROWSER_STEPS, DEFAULT_MAX_BROWSER_TASKS, DEFAULT_VISION_DETAIL_LEVEL
 # complexity-budget: exclude-start pet
-from api.services.user_pets import normalize_user_pet_position, normalize_user_pet_selector
+from api.services.user_pets import normalize_user_pet_position, normalize_user_pet_selector, selectable_user_pet_exists
 # complexity-budget: exclude-end pet
 from api.pipedream_app_utils import normalize_app_slugs as normalize_pipedream_app_slugs
 from util.attribution_referrers import first_meaningful_referrer_for_attribution, signup_source_bucket_for_attribution
@@ -1157,6 +1157,12 @@ class UserPreference(models.Model):
                 value,
                 cls.PREFERENCE_DEFINITIONS[key],
             )
+
+        # complexity-budget: exclude-start pet
+        selected_pet_id = normalized_updates.get(cls.KEY_USER_PET_SELECTED_ID)
+        if selected_pet_id is not None and not selectable_user_pet_exists(user, selected_pet_id):
+            raise ValueError("Select a pet from your library.")
+        # complexity-budget: exclude-end pet
 
         with transaction.atomic():
             try:

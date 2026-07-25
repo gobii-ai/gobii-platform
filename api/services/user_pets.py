@@ -21,6 +21,15 @@ class UserPetValidationError(ValueError):
     pass
 
 
+def selectable_user_pet_exists(user, pet_id: str) -> bool:
+    if pet_id in BUILTIN_PET_IDS:
+        return True
+
+    from api.models import UserPet
+
+    return UserPet.objects.filter(user=user, pk=pet_id).exists()
+
+
 def normalize_user_pet_selector(key: str, value: object) -> str:
     if not isinstance(value, str):
         raise ValueError(f"Invalid value for '{key}'. Expected a pet identifier.")

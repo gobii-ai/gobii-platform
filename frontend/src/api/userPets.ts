@@ -1,4 +1,5 @@
 import { jsonFetch, jsonRequest } from './http'
+import { updateUserPreferences } from './userPreferences'
 
 export type UserPetSize = 'small' | 'medium' | 'large'
 
@@ -30,6 +31,13 @@ export type UserPetLibrary = {
 
 export type UserPetPreferencesPatch = Partial<UserPetPreferences>
 
+const PET_PREFERENCE_KEYS: Record<keyof UserPetPreferences, string> = {
+  enabled: 'user.pet.enabled',
+  selectedPetId: 'user.pet.selected_id',
+  size: 'user.pet.size',
+  position: 'user.pet.position',
+}
+
 export function getSelectedUserPet(library?: UserPetLibrary | null): UserPet | null {
   return library?.pets.find((pet) => pet.id === library.preferences.selectedPetId)
     ?? library?.pets[0]
@@ -40,13 +48,16 @@ export function fetchUserPets(signal?: AbortSignal): Promise<UserPetLibrary> {
   return jsonFetch<UserPetLibrary>('/console/api/user/pets/', { signal })
 }
 
-export function updateUserPetPreferences(
+export async function updateUserPetPreferences(
   preferences: UserPetPreferencesPatch,
-): Promise<UserPetLibrary> {
-  return jsonRequest<UserPetLibrary>('/console/api/user/pets/', {
-    method: 'PATCH',
-    json: preferences,
-    includeCsrf: true,
+): Promise<void> {
+  await updateUserPreferences({
+    preferences: Object.fromEntries(
+      Object.entries(preferences).map(([key, value]) => [
+        PET_PREFERENCE_KEYS[key as keyof UserPetPreferences],
+        value,
+      ]),
+    ),
   })
 }
 
