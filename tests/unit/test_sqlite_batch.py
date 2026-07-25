@@ -458,12 +458,13 @@ class SqliteBatchCoreTests(SqliteBatchTestCase):
 
         for expected in (
             "SQLite world model + exact logic", "After a fetch, reconcile and SELECT",
-            "SOURCE ARRAYS lists paths", "Derive sourced SET/VALUES and write keys",
-            "evolve schema and SELECT before decisions", "INSERT ... SELECT / UPDATE ... FROM __tool_results/json_each",
-            "WHERE before ON CONFLICT", "only paths/current result_id/tool_name may be literals",
-            "Bind authored notes/classifications as :name", "For fuzzy text",
-            "json_each(:rows)", "Import same-shaped siblings in one set",
-            "separate different shapes",
+            "SOURCE ARRAYS lists paths", "Source fields/keys derive",
+            "Key/evolve/normalize/query", "INSERT SELECT/UPDATE FROM __tool_results",
+            "WHERE before ON CONFLICT", "only paths/tool_name/result_id are literals",
+            "Unstructured:", "bind JSON :rows",
+            "join __tool_results by result_id", "ONE IMPORT PER SHAPE",
+            "same-path results", "across vendors",
+            "source fields, URL, result_id",
         ):
             self.assertIn(expected, description)
         self.assertNotIn("before one terminal send", description)

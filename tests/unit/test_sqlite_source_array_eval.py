@@ -12,7 +12,9 @@ from api.evals.scenarios.sqlite_tool_results import (
     SQLITE_TOOL_RESULT_SCENARIO_SLUGS,
     SQLITE_TOOL_RESULT_SUITE_SLUG,
     SqliteIncrementalDomainModelScenario,
+    SqliteIntermediateWorkingTableScenario,
     SqliteSourceArrayFirstWriteScenario,
+    _repeated_source_import_tables,
     _source_array_first_write_failures,
     _uses_queryable_source_model,
 )
@@ -88,6 +90,25 @@ class SqliteSourceArrayEvalTests(SimpleTestCase):
 
         for leaked_term in ("sqlite", "__tool_results", "json_each", "insert", "select", "table"):
             self.assertNotIn(leaked_term, prompt)
+
+    def test_catalog_case_rejects_every_single_result_import_filter(self):
+        self.assertEqual(SqliteIntermediateWorkingTableScenario.max_single_result_filters, 0)
+
+    def test_catalog_case_rejects_repeated_same_table_imports_without_result_ids(self):
+        repeated = _repeated_source_import_tables([
+            """
+            INSERT INTO plans SELECT json_extract(item.value, '$.name')
+            FROM __tool_results, json_each(result_json, '$.content.plans') item
+            WHERE result_json LIKE '%AxonFlow%';
+            INSERT INTO plans SELECT json_extract(item.value, '$.name')
+            FROM __tool_results, json_each(result_json, '$.content.plans') item
+            WHERE result_json LIKE '%CareMesh%';
+            """
+        ])
+        aggregate = _repeated_source_import_tables([self.clean_sql])
+
+        self.assertEqual(repeated, ("plans",))
+        self.assertEqual(aggregate, ())
 
     def test_incremental_domain_model_case_is_registered_without_teaching_sql(self):
         suite = SuiteRegistry.get(SQLITE_TOOL_RESULT_SUITE_SLUG)

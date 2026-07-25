@@ -284,10 +284,11 @@ def get_send_chat_tool() -> Dict[str, Any]:
         "function": {
             "name": "send_chat_message",
             "description": (
-                "Send web chat for user-facing content. "
-                "Deep/exhaustive, large-batch, large implementation/deployment, or explicitly long work only: send scope + next checkpoint FIRST with will_continue_work=true, then one material milestone. "
-                "Do not use this to simulate or confirm an email/SMS delivery; if the user asked to email or text and the send_email/send_sms tool is available, call that tool instead. "
-                "No generic or internal progress."
+                "Send web chat; broad first-assignment choices use request_human_input cards. "
+                "Before work that clearly needs several tool rounds, the first response calls only this tool with a "
+                "brief acknowledgment: say what you're taking on and the first useful result you'll bring back, with "
+                "will_continue_work=true. Start work next response. If the work continues after meaningful evidence, one later update may share the strongest finding and what remains. Never narrate tools or phases. "
+                "Do not use this to simulate or confirm an email/SMS delivery; use available send_email/send_sms. No generic/internal progress."
             ),
             "parameters": {
                 "type": "object",
@@ -295,10 +296,10 @@ def get_send_chat_tool() -> Dict[str, Any]:
                     "body": {
                         "type": "string",
                         "description": (
-                            "No dash punctuation or pre-work status for short/finite work. Owner report with 4+ items: "
+                            "No dash punctuation/pre-work status for short work. Owner report with 4+ items: "
                             "include `Covered N/N` and one requested-field "
                             "Markdown table; link exact entity names only with provided tokens. Keep other chat/outreach light. "
-                            "Use Markdown only; raw HTML is rejected. Use code formatting to show HTML literally."
+                            "Markdown only; raw HTML is rejected. Use code formatting to show HTML literally."
                         ),
                     },
                     "to_address": {

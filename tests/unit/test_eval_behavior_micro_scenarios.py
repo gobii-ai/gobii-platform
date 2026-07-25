@@ -44,6 +44,7 @@ from api.evals.scenarios.behavior_micro import (
     COMMON_USE_CASE_MICRO_SCENARIO_SLUGS,
     GOOGLE_SHEETS_EVAL_SYNTHETIC_TOOL_NAMES,
     IGNORED_FIRST_ACTION_TOOL_NAMES,
+    GUIDED_FIRST_ASSIGNMENT_ASKS_USEFUL_QUESTIONS,
     GUIDED_PLANNING_BOUNDED_WHEN_REQUESTED,
     GUIDED_PLANNING_MICRO_SCENARIO_SLUGS,
     LEGACY_PLANNING_STATE_EXECUTES_DIRECTLY,
@@ -186,12 +187,17 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
             planning_suite.scenario_slugs,
             [
                 GUIDED_PLANNING_BOUNDED_WHEN_REQUESTED,
+                GUIDED_FIRST_ASSIGNMENT_ASKS_USEFUL_QUESTIONS,
                 LEGACY_PLANNING_STATE_EXECUTES_DIRECTLY,
             ],
         )
         self.assertEqual(
             [task.name for task in ScenarioRegistry.get(GUIDED_PLANNING_BOUNDED_WHEN_REQUESTED).tasks],
             ["inject_prompt", "verify_bounded_questions", "verify_no_execution_or_config"],
+        )
+        self.assertEqual(
+            [task.name for task in ScenarioRegistry.get(GUIDED_FIRST_ASSIGNMENT_ASKS_USEFUL_QUESTIONS).tasks],
+            ["inject_prompt", "verify_useful_discovery", "verify_no_premature_work"],
         )
         self.assertEqual(
             [task.name for task in ScenarioRegistry.get(LEGACY_PLANNING_STATE_EXECUTES_DIRECTLY).tasks],

@@ -2111,14 +2111,13 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
             "name": "sqlite_batch",
             "description": (
                 "SQLite world model + exact logic. After a fetch, reconcile and SELECT. SOURCE ARRAYS lists paths. "
-                "Never transcribe visible rows. Derive sourced SET/VALUES and write keys inside INSERT ... SELECT / "
-                "UPDATE ... FROM __tool_results/json_each; only paths/current result_id/tool_name may be literals. "
-                "Reconcile keyed entities/relations with provenance; evolve schema and SELECT before decisions. "
-                "Normalize children; use joins/sets/counts/ranking. Bind authored notes/classifications as :name; never "
-                "hand-escape. For fuzzy text, bind one JSON array and json_each(:rows), retaining result IDs. Import "
-                "same-shaped siblings in one set over tool_name or result_id IN (...); separate different shapes. CTAS is one-off. "
-                "http_request JSON: result_json $.content. INSERT SELECT needs WHERE before ON CONFLICT. No ATTACH. SQL uses "
-                "semicolons; apostrophe: 'O''Brien'. grep_context_all/split_sections arrays: json_each + ctx.value."
+                "ONE IMPORT PER SHAPE: same-path results across vendors use one INSERT SELECT/json_each over tool_name/multi-ID, "
+                "never per-result DML. SELECT source fields, URL, result_id. Unstructured: bind JSON :rows and join "
+                "__tool_results by result_id. Never transcribe visible rows. Source fields/keys derive in INSERT "
+                "SELECT/UPDATE FROM __tool_results; only paths/tool_name/result_id are literals. "
+                "Key/evolve/normalize/query. Bind authored values; never hand-escape. "
+                "http_request JSON: result_json $.content. INSERT SELECT needs WHERE before ON CONFLICT. No ATTACH. "
+                "Apostrophe: 'O''Brien'. grep_context_all/split_sections arrays: json_each + ctx.value."
             ),
             "parameters": {
                 "type": "object",

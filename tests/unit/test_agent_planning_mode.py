@@ -1,7 +1,11 @@
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings, tag
 
-from api.agent.core.prompt_context import _get_system_instruction
+from api.agent.core.prompt_context import (
+    _FirstRunWelcomeTarget,
+    _get_first_run_welcome_message_instruction,
+    _get_system_instruction,
+)
 from api.agent.tools.planning import execute_end_planning
 from api.agent.tools.schedule_updater import execute_update_schedule
 from api.agent.tools.static_tools import (
@@ -131,6 +135,56 @@ class PersistentAgentPlanningModeTests(TestCase):
         self.assertNotIn("## Planning Mode", prompt)
         self.assertNotIn("end_planning", prompt)
         self.assertIn("Use `update_plan` only for substantial multi-step work", prompt)
+
+    def test_normal_prompt_distinguishes_first_assignment_discovery_from_clear_work(self):
+        prompt = _get_system_instruction(
+            self.agent,
+            is_first_run=False,
+            implied_send_context={
+                "display_name": "Owner",
+                "tool_example": "send_chat_message(body=..., will_continue_work=...)",
+            },
+        )
+        definitions = get_static_tool_definitions(self.agent)
+        send_chat = next(
+            tool for tool in definitions if tool["function"]["name"] == "send_chat_message"
+        )
+
+        self.assertIn("Outside that first-assignment rule", prompt)
+        self.assertIn("send one brief same-channel acknowledgment as the entire first response", prompt)
+        self.assertIn("text beside work tools is not delivery", prompt)
+        self.assertIn("investment diligence, multi-entity comparisons", prompt)
+        self.assertIn("the first useful result you will bring back", prompt)
+        self.assertIn("continues after a meaningful evidence batch", prompt)
+        self.assertIn("strongest finding and what remains", prompt)
+        self.assertIn("Never announce phases", prompt)
+        self.assertIn("Work Updates require explicit", prompt)
+        self.assertIn("email=send_email in-thread", prompt)
+        self.assertIn("repair rejected/wrong channel first", prompt)
+        self.assertIn(
+            "first response calls only this tool",
+            send_chat["function"]["description"],
+        )
+        self.assertNotIn(
+            "pre-work status for short/finite work",
+            send_chat["function"]["parameters"]["properties"]["body"]["description"],
+        )
+
+    def test_first_run_prompt_asks_only_when_role_boundaries_materially_change_work(self):
+        prompt = _get_first_run_welcome_message_instruction(
+            welcome_target=_FirstRunWelcomeTarget(
+                channel=CommsChannel.WEB,
+                address="web:user:1",
+                send_tool_name="send_chat_message",
+            )
+        )
+
+        self.assertIn("Broad ongoing/substantial first work", prompt)
+        self.assertIn("ask the highest-leverage question", prompt)
+        self.assertIn("sole response is request_human_input", prompt)
+        self.assertIn("no response text, config change, or work", prompt)
+        self.assertIn("request_human_input with 2-3 real choices", prompt)
+        self.assertIn("Otherwise start the task", prompt)
 
     def test_agents_without_sms_endpoint_do_not_receive_send_sms_tool(self):
         names = _tool_names(get_static_tool_definitions(self.agent))

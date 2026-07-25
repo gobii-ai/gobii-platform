@@ -269,6 +269,17 @@ def _source_write_effect_failures(calls, expected_tables: Iterable[str]) -> list
     ]
 
 
+def _repeated_source_import_tables(sql_values: Iterable[str]) -> tuple[str, ...]:
+    """Find model tables populated by multiple source-derived statements."""
+
+    counts: dict[str, int] = {}
+    for sql in sql_values:
+        for statement in sqlparse.split(str(sql or "")):
+            for table in source_derived_model_mutation_tables((statement,)):
+                counts[table] = counts.get(table, 0) + 1
+    return tuple(sorted(table for table, count in counts.items() if count > 1))
+
+
 _DECISION_FIELD_RE = re.compile(r"\b(?:stage|status|owner|next_action|due_on)\b", re.I)
 _AGGREGATE_CALL_RE = re.compile(
     r"\b(?:avg|count|group_concat|json_group_array|json_group_object|max|min|sum|total)\s*\([^)]*\)",
@@ -1372,7 +1383,11 @@ class SqliteNaturalResultAccessScenario(SqliteToolResultScenario):
 @register_scenario
 class SqliteIntermediateWorkingTableScenario(SqliteToolResultScenario):
     slug = SQLITE_INTERMEDIATE_WORKING_TABLE
-    description = "Multi-turn catalog reasoning should model related domain entities once and reuse them."
+    description = (
+        "Multi-turn catalog reasoning should set-import same-shaped siblings into related domain entities once "
+        "and reuse them."
+    )
+    max_single_result_filters = 0
     tasks = [
         ScenarioTask(name="inject_prompt", assertion_type="agent_processing"),
         ScenarioTask(name="verify_domain_model", assertion_type="tool_call"),
@@ -1457,6 +1472,21 @@ class SqliteIntermediateWorkingTableScenario(SqliteToolResultScenario):
         reusable_tables = tuple(table for table in model_tables if table in identity_tables)
         row_derived_model_tables = set(read_tables).intersection(row_model_tables)
         manually_populated_model_tables = set(summary.manual_values_table_names).intersection(model_tables)
+        repeated_import_tables = _repeated_source_import_tables(
+            str((call.tool_params or {}).get("sql") or "") for call in successful_calls
+        )
+        model_advisories = sorted({
+            str(advisory.get("code") or "")
+            for call in successful_calls
+            for advisory in (_result_payload(call) or {}).get("advisories", ())
+            if isinstance(advisory, dict)
+            and advisory.get("code") in {
+                "bulk_manual_working_table_from_visible_results",
+                "manual_working_table_from_visible_results",
+                "source_facts_copied_into_model",
+                "tool_result_row_loop",
+            }
+        })
         failures = [message for failed, message in (
             (not successful_calls, "no successful sqlite_batch call observed"),
             (summary.tool_result_statement_count < 1 or summary.uses_json_functions < 1, "domain model was not derived from tool-result JSON"),
@@ -1466,6 +1496,10 @@ class SqliteIntermediateWorkingTableScenario(SqliteToolResultScenario):
                 f"domain model imported tool results one result at a time "
                 f"({summary.single_result_id_filters} > {self.max_single_result_filters})",
             ),
+            (
+                bool(repeated_import_tables),
+                f"same-shaped sibling rows used repeated imports into {repeated_import_tables}",
+            ),
             (not model_tables, "no reusable domain table was created"),
             (not has_stable_identity, "domain model lacked stable identity constraints"),
             (not row_derived_model_tables, "repeating child rows were not extracted into the domain model"),
@@ -1473,7 +1507,11 @@ class SqliteIntermediateWorkingTableScenario(SqliteToolResultScenario):
             (not read_tables, "initial decision did not query the reusable domain model"),
             (not re.search(r"\bwhere\b", successful_sql, re.I), "initial decision did not filter in SQL"),
             (not re.search(r"\border\s+by\b", successful_sql, re.I), "initial decision did not rank in SQL"),
-            (bool(manually_populated_model_tables), "domain rows were hand-entered with VALUES"),
+            (
+                bool(manually_populated_model_tables),
+                f"durable source rows were hand-entered with VALUES in {sorted(manually_populated_model_tables)}",
+            ),
+            (bool(model_advisories), f"SQLite reported unreliable model writes: {model_advisories}"),
         ) if failed]
         self.record_task_result(
             run_id,

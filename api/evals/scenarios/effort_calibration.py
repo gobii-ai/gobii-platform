@@ -118,6 +118,14 @@ _MARKDOWN_URL_LINK_RE = re.compile(
     re.IGNORECASE,
 )
 _URL_RE = re.compile(r"(?:https?://|www\.)\S+")
+_SQLITE_MODEL_ADVISORY_CODES = {
+    "bulk_manual_working_table_from_visible_results",
+    "manual_working_table_from_visible_results",
+    "single_tool_result_import",
+    "source_facts_copied_into_model",
+    "tool_result_blob_fetch_loop",
+    "tool_result_row_loop",
+}
 
 
 def _normalize_similarity_text(value: str) -> str:
@@ -126,6 +134,25 @@ def _normalize_similarity_text(value: str) -> str:
 
 def _token_set(value: str) -> set[str]:
     return set(_normalize_similarity_text(value).split())
+
+
+def _sqlite_advisory_codes(call: PersistentAgentToolCall) -> set[str]:
+    raw_result = call.result
+    if isinstance(raw_result, dict):
+        payload = raw_result
+    else:
+        try:
+            payload = json.loads(raw_result or "{}")
+        except (json.JSONDecodeError, TypeError):
+            return set()
+    advisories = payload.get("advisories") if isinstance(payload, dict) else None
+    if not isinstance(advisories, list):
+        return set()
+    return {
+        str(advisory.get("code") or "")
+        for advisory in advisories
+        if isinstance(advisory, dict) and advisory.get("code")
+    }
 
 
 def _near_duplicate_text(first: str, second: str) -> bool:
@@ -174,6 +201,8 @@ def _web_query_value(params: dict) -> str | None:
 
 def _message_call_body(call: PersistentAgentToolCall) -> str:
     params = call.tool_params or {}
+    if call.tool_name == "send_email":
+        return str(resolved_tool_param(call, "mobile_first_html") or "").strip()
     return str(params.get("body") or params.get("message") or "").strip()
 
 
@@ -843,7 +872,7 @@ class EffortCalibrationScenario(EvalScenario, ScenarioExecutionTools):
         task_name: str,
         work_tool_names: Iterable[str],
         update_tool_name: str,
-        min_updates: int = 2,
+        min_updates: int = 1,
         max_updates: int = 3,
     ) -> bool:
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name=task_name)
@@ -853,33 +882,55 @@ class EffortCalibrationScenario(EvalScenario, ScenarioExecutionTools):
         update_calls = [
             (index, call)
             for index, call in enumerate(calls)
-            if call.tool_name == update_tool_name and _message_call_continues(call)
+            if (
+                call.tool_name == update_tool_name
+                and _message_call_continues(call)
+                and work_positions
+                and index < work_positions[-1]
+            )
         ]
         bodies = [_message_call_body(call) for _index, call in update_calls]
-        malformed = [
-            body
-            for body in bodies
-            if not 40 <= len(body) <= 600
-            or "?" in body
-            or _looks_like_routine_progress_message(body)
-        ]
+        malformed = [body for body in bodies if not 40 <= len(body) <= 600]
         duplicates = _find_near_duplicate_texts(bodies)
         has_early_update = bool(work_positions and update_calls and update_calls[0][0] < work_positions[0])
-        has_midwork_update = bool(
-            len(work_positions) >= 3
-            and any(work_positions[1] < position < work_positions[-1] for position, _call in update_calls[1:])
+        later_updates_in_work = bool(work_positions) and all(
+            work_positions[0] < position < work_positions[-1] for position, _call in update_calls[1:]
         )
         count_ok = min_updates <= len(update_calls) <= max_updates
 
-        if count_ok and has_early_update and has_midwork_update and not malformed and not duplicates:
+        structurally_valid = (
+            count_ok
+            and has_early_update
+            and later_updates_in_work
+            and not malformed
+            and not duplicates
+        )
+        semantic_choice = ""
+        semantic_reasoning = ""
+        if structurally_valid:
+            semantic_choice, semantic_reasoning = self.llm_judge(
+                question=(
+                    "Are these user-facing work updates useful and natural? The first is a kickoff before research, "
+                    "so it must not invent a finding. Accept it when it clearly acknowledges the specific work and "
+                    "says what it will investigate or return; it does not need a finding or detailed checkpoint yet. "
+                    "Reject only a generic 'working on it' or internal tool narration. A single "
+                    "kickoff is enough when the bounded job finishes quickly. If later updates exist, each must report "
+                    "an actual evidence-backed finding and what remains, not announce a phase or narrate tools. Judge "
+                    "meaning, not exact wording."
+                ),
+                context=f"Ordered continuing updates:\n{json.dumps(bodies)}",
+                options=["Useful work updates", "Generic or unhelpful work updates"],
+            )
+
+        if structurally_valid and semantic_choice == "Useful work updates":
             self.record_task_result(
                 run_id,
                 None,
                 EvalRunTask.Status.PASSED,
                 task_name=task_name,
                 observed_summary=(
-                    f"Sent {len(update_calls)} useful deep-work updates: one before work and one after a material phase, "
-                    "with no generic narration or duplicate status spam."
+                    f"Sent {len(update_calls)} useful work update(s), beginning before work, with no duplicate status "
+                    f"spam. semantic_judge={semantic_choice}: {semantic_reasoning}"
                 ),
                 artifacts={"step": update_calls[0][1].step},
             )
@@ -890,12 +941,14 @@ class EffortCalibrationScenario(EvalScenario, ScenarioExecutionTools):
             failures.append(f"updates={len(update_calls)}, expected {min_updates}-{max_updates}")
         if not has_early_update:
             failures.append("no kickoff before the first work call")
-        if not has_midwork_update:
-            failures.append("no milestone update between substantive work calls")
+        if not later_updates_in_work:
+            failures.append("later update was not between substantive work calls")
         if malformed:
-            failures.append(f"generic, internal, interrogative, or badly sized update(s): {malformed[:2]}")
+            failures.append(f"badly sized update(s): {malformed[:2]}")
         if duplicates:
             failures.append(f"near-duplicate updates: {duplicates[:2]}")
+        if structurally_valid and semantic_choice != "Useful work updates":
+            failures.append(f"semantic_judge={semantic_choice}: {semantic_reasoning}")
         self.record_task_result(
             run_id,
             None,
@@ -967,7 +1020,17 @@ class EffortCalibrationScenario(EvalScenario, ScenarioExecutionTools):
         usage = summarize_sqlite_tool_result_calls(sqlite_calls)
         duplicate_reads = [first for first, _second in _find_near_duplicate_texts(reads)]
         duplicate_blob_fetches = usage.duplicate_direct_fetches
-        if len(reads) <= max_result_text_reads and not duplicate_reads and not duplicate_blob_fetches:
+        model_advisories = [
+            (call, sorted(_sqlite_advisory_codes(call).intersection(_SQLITE_MODEL_ADVISORY_CODES)))
+            for call in sqlite_calls
+        ]
+        model_advisories = [(call, codes) for call, codes in model_advisories if codes]
+        if (
+            len(reads) <= max_result_text_reads
+            and not duplicate_reads
+            and not duplicate_blob_fetches
+            and not model_advisories
+        ):
             self.record_task_result(
                 run_id,
                 None,
@@ -988,9 +1051,16 @@ class EffortCalibrationScenario(EvalScenario, ScenarioExecutionTools):
             task_name=task_name,
             observed_summary=(
                 f"Expected at most {max_result_text_reads} result_text read(s) and no duplicate reads; "
-                f"saw reads={reads[:8]}, duplicate_blob_fetches={duplicate_blob_fetches}."
+                f"saw reads={reads[:8]}, duplicate_blob_fetches={duplicate_blob_fetches}, "
+                f"model_advisories={[codes for _call, codes in model_advisories]}."
             ),
-            artifacts={"step": first_bad_call.step} if first_bad_call else {},
+            artifacts={
+                "step": (
+                    first_bad_call.step
+                    if first_bad_call
+                    else model_advisories[0][0].step
+                )
+            } if first_bad_call or model_advisories else {},
         )
         return False
 
@@ -2928,12 +2998,12 @@ class EffortExplicitDeepResearchRemainsCapableScenario(EffortCalibrationScenario
     slug = EFFORT_EXPLICIT_DEEP_RESEARCH_REMAINS_CAPABLE
     supports_simulation = True
     description = (
-        "An explicitly deep/exhaustive current-research ask may use a larger source budget and produce "
-        "a richer memo, proving bounded mode does not flatten true deep work."
+        "A clearly substantial current-research ask may use a larger source budget, communicate during work, and "
+        "produce a richer memo without relying on the user to label it deep research."
     )
     tasks = [
         ScenarioTask(name="inject_prompt", assertion_type="manual"),
-        ScenarioTask(name="verify_deep_work_updates", assertion_type="manual"),
+        ScenarioTask(name="verify_deep_work_updates", assertion_type="llm_judge"),
         ScenarioTask(name="verify_deep_research_budget", assertion_type="manual"),
         ScenarioTask(name="verify_rich_hierarchical_memo", assertion_type="manual"),
         ScenarioTask(name="verify_plan_budget", assertion_type="manual"),
@@ -3135,9 +3205,9 @@ class EffortExplicitDeepResearchRemainsCapableScenario(EffortCalibrationScenario
             "create_pdf": {"status": "error", "message": "The prompt requested no file artifacts."},
         }
         prompt = (
-            "Do deep, exhaustive current research on Northstar Robotics in warehouse automation. "
-            "Build a source-backed investment-style memo comparing Northstar with at least four competitors, "
-            "cite at least four sources, and include a compact table. I need enough depth to make an investment "
+            "Build a source-backed investment-style memo on Northstar Robotics in warehouse automation, comparing "
+            "Northstar with at least four competitors. Cite at least four sources and include a compact table. "
+            "I need enough depth to make an investment "
             "decision, not a quick summary. Keep the memo dense and under 4,800 characters. Do not create files or charts."
         )
 
@@ -3282,7 +3352,12 @@ class EffortExplicitDeepResearchRemainsCapableScenario(EffortCalibrationScenario
             run_id,
             after=inbound.timestamp,
             task_name="verify_deep_work_updates",
-            work_tool_names={"mcp_brightdata_search_engine", "mcp_brightdata_scrape_as_markdown"},
+            work_tool_names={
+                "mcp_brightdata_search_engine",
+                "mcp_brightdata_scrape_as_markdown",
+                "sqlite_batch",
+                "update_plan",
+            },
             update_tool_name="send_chat_message",
         )
 
