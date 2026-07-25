@@ -1132,23 +1132,36 @@ class RemoteMCPViewTests(TestCase):
         ]
         self.assertEqual(returned_message_ids, [str(target_message.id)])
 
-    def test_agent_debug_trace_timeline_excludes_out_of_window_step_clusters(self):
+    def test_agent_debug_trace_timeline_filters_out_of_window_step_cluster_entries(self):
         agent = self._create_agent(self.user, "Bounded Step Debug Trace Agent")
         target_timestamp = timezone.now() - timedelta(hours=2)
-        target_message = self._create_web_message(agent, "Historical target event")
-        PersistentAgentMessage.objects.filter(id=target_message.id).update(timestamp=target_timestamp)
 
-        recent_step = PersistentAgentStep.objects.create(
+        stale_step = PersistentAgentStep.objects.create(
             agent=agent,
-            description="Recent tool call outside requested window",
+            description="Stale tool call outside requested window",
         )
         PersistentAgentToolCall.objects.create(
-            step=recent_step,
+            step=stale_step,
             tool_name="sqlite_batch",
             tool_params={"sql": "SELECT 1"},
             result='{"status": "ok"}',
             status=PersistentAgentToolCall.Status.COMPLETE,
         )
+        in_window_step = PersistentAgentStep.objects.create(
+            agent=agent,
+            description="Tool call inside requested window",
+        )
+        PersistentAgentToolCall.objects.create(
+            step=in_window_step,
+            tool_name="sqlite_batch",
+            tool_params={"sql": "SELECT 2"},
+            result='{"status": "ok"}',
+            status=PersistentAgentToolCall.Status.COMPLETE,
+        )
+        PersistentAgentStep.objects.filter(id=stale_step.id).update(
+            created_at=target_timestamp - timedelta(minutes=5),
+        )
+        PersistentAgentStep.objects.filter(id=in_window_step.id).update(created_at=target_timestamp)
 
         response = self._call_tool(
             "gobii_get_agent_debug_trace",
@@ -1163,11 +1176,13 @@ class RemoteMCPViewTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         content = self._structured_content(response)
-        returned_events = content["timeline"]["events"]
-        self.assertFalse(
-            any(event.get("kind") == "steps" for event in returned_events),
-            returned_events,
-        )
+        returned_step_ids = [
+            entry["id"]
+            for event in content["timeline"]["events"]
+            if event.get("kind") == "steps"
+            for entry in event["entries"]
+        ]
+        self.assertEqual(returned_step_ids, [str(in_window_step.id)])
 
     def test_origin_validation_rejects_untrusted_browser_origins(self):
         response = self._post_mcp(
