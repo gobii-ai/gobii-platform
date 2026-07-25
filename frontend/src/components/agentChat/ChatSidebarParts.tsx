@@ -113,13 +113,28 @@ type AgentListSectionHeaderProps = {
   variant: 'drawer' | 'sidebar'
   label: string
   count: number
+  loading?: boolean
 }
 
-export function AgentListSectionHeader({ variant, label, count }: AgentListSectionHeaderProps) {
+export function AgentListSectionHeader({ variant, label, count, loading = false }: AgentListSectionHeaderProps) {
   return (
     <div className="agent-roster-section-header" data-variant={variant}>
       <span>{label}</span>
-      <span>{count}</span>
+      {/* Opening an agent URL renders that one agent before the roster answers, so publishing a
+          count here states a number that is about to change -- "All agents 1" while the rest are
+          still in flight. Withhold it until the list settles. */}
+      {loading ? <span className="agent-roster-count-pending" aria-hidden="true" /> : <span>{count}</span>}
+    </div>
+  )
+}
+
+/** Placeholder rows standing in for roster entries that have not arrived yet. */
+export function AgentListSkeletonRows({ variant, rows = 3 }: { variant: 'drawer' | 'sidebar'; rows?: number }) {
+  return (
+    <div className="agent-roster-skeleton" data-variant={variant} role="status" aria-label="Loading agents">
+      {Array.from({ length: rows }, (_, index) => (
+        <span key={index} className="agent-roster-skeleton__row" />
+      ))}
     </div>
   )
 }

@@ -13,7 +13,9 @@ import { AgentChatContextSwitcher, type AgentChatContextSwitcherData } from './A
 import { AgentChatMobileSheet } from './AgentChatMobileSheet'
 import { ChatSidebarGallery } from './ChatSidebarGallery'
 import { SelectionShellPageSwitcher, SELECTION_SHELL_PAGE_LABELS, type SelectionShellPage } from './SelectionShellPageSwitcher'
-import { AgentEmptyState, AgentListItem, AgentListSectionHeader, AgentSearchInput, AgentSortToggle } from './ChatSidebarParts'
+import { AgentEmptyState, AgentListItem, AgentListSectionHeader, AgentSearchInput, AgentSortToggle,
+  AgentListSkeletonRows,
+} from './ChatSidebarParts'
 import { ProductAnnouncementBell } from './ProductAnnouncementBell'
 import { SidebarSettingsMenu, type SidebarSettingsInfo } from './SidebarSettingsMenu'
 import { AgentInviteDetails, AgentInviteSidebarItem, type AgentInviteAction, type AgentInviteDialogState } from './AgentInviteSidebarItem'
@@ -556,8 +558,10 @@ export const ChatSidebar = memo(function ChatSidebar({
                   variant={variant}
                   label="All agents"
                   count={allFilteredAgents.length}
+                  loading={loading}
                 />
                 {allFilteredAgents.map((agent) => renderAgentItem(agent, false))}
+                {loading ? <AgentListSkeletonRows variant={variant} /> : null}
               </>
             ) : (
               <>
@@ -565,8 +569,10 @@ export const ChatSidebar = memo(function ChatSidebar({
                   variant={variant}
                   label="All agents"
                   count={sourceAgents.length}
+                  loading={loading}
                 />
                 {sourceAgents.map((agent) => renderAgentItem(agent, false))}
+                {loading ? <AgentListSkeletonRows variant={variant} /> : null}
               </>
             )}
           </>
@@ -824,7 +830,7 @@ export const ChatSidebar = memo(function ChatSidebar({
           ) : showCustomGalleryShellPanel ? null : (
             <div className="chat-sidebar-section-header">
               <span className="chat-sidebar-section-title">Agents</span>
-              {!collapsed && hasAgents ? (
+              {!collapsed && hasAgents && !loading ? (
                 <span className="chat-sidebar-section-count">{agents.length}</span>
               ) : null}
             </div>
