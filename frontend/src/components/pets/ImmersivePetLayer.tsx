@@ -85,11 +85,11 @@ function pixelPositionForPreference(
 }
 
 function useReducedMotion(): boolean {
-  const [reducedMotion, setReducedMotion] = useState(false)
+  const [reducedMotion, setReducedMotion] = useState(() => typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true)
   useEffect(() => {
-    const media = window.matchMedia('(prefers-reduced-motion: reduce)')
+    const media = window.matchMedia?.('(prefers-reduced-motion: reduce)')
+    if (!media) return
     const sync = () => setReducedMotion(media.matches)
-    sync()
     media.addEventListener('change', sync)
     return () => media.removeEventListener('change', sync)
   }, [])

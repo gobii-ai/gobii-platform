@@ -18,7 +18,7 @@ export function PetSprite({
   label,
 }: PetSpriteProps) {
   const style = {
-    '--pet-spritesheet-url': `url("${spritesheetUrl.replaceAll('"', '%22')}")`,
+    '--pet-spritesheet-url': `url("${(typeof window === 'undefined' ? spritesheetUrl : new URL(spritesheetUrl, window.location.origin).toString()).replaceAll('"', '%22')}")`,
     '--pet-frame-x': `${(column / (PET_SPRITESHEET_COLUMNS - 1)) * 100}%`,
     '--pet-frame-y': `${(row / (PET_SPRITESHEET_ROWS - 1)) * 100}%`,
   } as CSSProperties
