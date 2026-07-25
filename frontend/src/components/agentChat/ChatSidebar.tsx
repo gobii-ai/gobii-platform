@@ -54,6 +54,8 @@ export type ChatSidebarProps = {
   activeAgentId?: string | null
   switchingAgentId?: string | null
   loading?: boolean
+  /** True only while the roster request is genuinely in flight. */
+  fetching?: boolean
   errorMessage?: string | null
   desktopMode?: AgentChatSidebarMode
   onDesktopModeChange?: (mode: AgentChatSidebarMode) => void
@@ -89,6 +91,7 @@ export const ChatSidebar = memo(function ChatSidebar({
   activeAgentId: activeAgentIdOverride,
   switchingAgentId,
   loading = false,
+  fetching = false,
   errorMessage,
   desktopMode = 'list',
   onDesktopModeChange,
@@ -561,7 +564,7 @@ export const ChatSidebar = memo(function ChatSidebar({
                   loading={loading}
                 />
                 {allFilteredAgents.map((agent) => renderAgentItem(agent, false))}
-                {loading ? <AgentListSkeletonRows variant={variant} /> : null}
+                {fetching ? <AgentListSkeletonRows variant={variant} /> : null}
               </>
             ) : (
               <>
@@ -572,7 +575,7 @@ export const ChatSidebar = memo(function ChatSidebar({
                   loading={loading}
                 />
                 {sourceAgents.map((agent) => renderAgentItem(agent, false))}
-                {loading ? <AgentListSkeletonRows variant={variant} /> : null}
+                {fetching ? <AgentListSkeletonRows variant={variant} /> : null}
               </>
             )}
           </>
@@ -596,6 +599,7 @@ export const ChatSidebar = memo(function ChatSidebar({
     hasAgents,
     hasFavoritesInRoster,
     loading,
+    fetching,
     mutedAgentIdSet,
     onCreateAgent,
     inviteBusy,
