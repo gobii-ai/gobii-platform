@@ -1103,6 +1103,87 @@ class RemoteMCPViewTests(TestCase):
         self.assertEqual(invalid_response.status_code, 200)
         self.assertTrue(invalid_response.json()["result"]["isError"])
 
+    def test_agent_debug_trace_timeline_fetches_requested_historical_window(self):
+        agent = self._create_agent(self.user, "Historical Debug Trace Agent")
+        target_timestamp = timezone.now() - timedelta(hours=2)
+        target_message = self._create_web_message(agent, "Historical target event")
+        PersistentAgentMessage.objects.filter(id=target_message.id).update(timestamp=target_timestamp)
+
+        for index in range(6):
+            self._create_web_message(agent, f"Newer event {index}")
+
+        response = self._call_tool(
+            "gobii_get_agent_debug_trace",
+            {
+                "agent_id": str(agent.id),
+                "limit": 3,
+                "since": (target_timestamp - timedelta(seconds=1)).isoformat(),
+                "until": (target_timestamp + timedelta(seconds=1)).isoformat(),
+                "include": ["timeline"],
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        content = self._structured_content(response)
+        returned_message_ids = [
+            event["message"]["id"]
+            for event in content["timeline"]["events"]
+            if event.get("kind") == "message"
+        ]
+        self.assertEqual(returned_message_ids, [str(target_message.id)])
+
+    def test_agent_debug_trace_timeline_filters_out_of_window_step_cluster_entries(self):
+        agent = self._create_agent(self.user, "Bounded Step Debug Trace Agent")
+        target_timestamp = timezone.now() - timedelta(hours=2)
+
+        stale_step = PersistentAgentStep.objects.create(
+            agent=agent,
+            description="Stale tool call outside requested window",
+        )
+        PersistentAgentToolCall.objects.create(
+            step=stale_step,
+            tool_name="sqlite_batch",
+            tool_params={"sql": "SELECT 1"},
+            result='{"status": "ok"}',
+            status=PersistentAgentToolCall.Status.COMPLETE,
+        )
+        in_window_step = PersistentAgentStep.objects.create(
+            agent=agent,
+            description="Tool call inside requested window",
+        )
+        PersistentAgentToolCall.objects.create(
+            step=in_window_step,
+            tool_name="sqlite_batch",
+            tool_params={"sql": "SELECT 2"},
+            result='{"status": "ok"}',
+            status=PersistentAgentToolCall.Status.COMPLETE,
+        )
+        PersistentAgentStep.objects.filter(id=stale_step.id).update(
+            created_at=target_timestamp - timedelta(minutes=5),
+        )
+        PersistentAgentStep.objects.filter(id=in_window_step.id).update(created_at=target_timestamp)
+
+        response = self._call_tool(
+            "gobii_get_agent_debug_trace",
+            {
+                "agent_id": str(agent.id),
+                "limit": 10,
+                "since": (target_timestamp - timedelta(seconds=1)).isoformat(),
+                "until": (target_timestamp + timedelta(seconds=1)).isoformat(),
+                "include": ["timeline"],
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        content = self._structured_content(response)
+        returned_step_ids = [
+            entry["id"]
+            for event in content["timeline"]["events"]
+            if event.get("kind") == "steps"
+            for entry in event["entries"]
+        ]
+        self.assertEqual(returned_step_ids, [str(in_window_step.id)])
+
     def test_origin_validation_rejects_untrusted_browser_origins(self):
         response = self._post_mcp(
             "initialize",

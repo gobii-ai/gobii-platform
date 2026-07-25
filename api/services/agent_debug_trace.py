@@ -13,7 +13,7 @@ from api.agent.core.token_usage import completion_tokens_per_second
 from api.models import EvalRunTask, PersistentAgent, PersistentAgentCompletion, PersistentAgentStep
 from console.agent_audit.events import Cursor, fetch_audit_events
 from console.agent_audit.serializers import serialize_prompt_meta
-from console.agent_chat.timeline import MAX_PAGE_SIZE as TIMELINE_MAX_PAGE_SIZE, fetch_timeline_window, serialize_processing_snapshot
+from console.agent_chat.timeline import MAX_PAGE_SIZE as TIMELINE_MAX_PAGE_SIZE, CursorPayload as TimelineCursorPayload, fetch_timeline_window, serialize_processing_snapshot
 
 
 DEBUG_TRACE_TOOL_NAME = "gobii_get_agent_debug_trace"
@@ -154,7 +154,7 @@ def build_agent_debug_trace(
     }
 
     if "timeline" in include:
-        payload["timeline"] = _build_timeline_section(agent, limit=limit, cursor=cursor, bounds=bounds, detail=detail)
+        payload["timeline"] = _build_timeline_section(agent, limit=limit, bounds=bounds, detail=detail, anchor_to_until=until is not None)
     if "audit_events" in include:
         audit_section = _build_audit_events_section(agent, limit=limit, cursor=cursor, bounds=bounds, detail=detail)
         payload["audit_events"] = audit_section["events"]
@@ -289,22 +289,36 @@ def _build_timeline_section(
     agent: PersistentAgent,
     *,
     limit: int,
-    cursor: str | None,
     bounds: DebugTraceBounds,
     detail: str,
+    anchor_to_until: bool,
 ) -> dict[str, Any]:
-    timeline_limit = min(limit, TIMELINE_MAX_PAGE_SIZE)
+    timeline_cursor = (
+        TimelineCursorPayload(value=int(bounds.until.timestamp() * 1_000_000), kind="user_action", identifier=str(UUID(int=(1 << 128) - 1))).encode()
+        if anchor_to_until and bounds.until is not None
+        else None
+    )
     window = fetch_timeline_window(
         agent,
-        cursor=None,
-        direction="initial",
-        limit=timeline_limit,
+        cursor=timeline_cursor,
+        direction="older" if timeline_cursor else "initial",
+        limit=min(limit, TIMELINE_MAX_PAGE_SIZE),
     )
-    events = [
-        _sanitize_debug_value(event, detail=detail)
-        for event in window.events
-        if _event_in_bounds(event, bounds)
-    ]
+    events = []
+    for source_event in window.events:
+        event = dict(source_event)
+        if event.get("kind") == "steps":
+            entries = [entry for entry in event.get("entries") or [] if isinstance(entry, dict) and _event_in_bounds(entry, bounds)]
+            if not entries:
+                continue
+            event.update(
+                entries=entries, entryCount=len(entries), cursor=entries[0].get("cursor") or event.get("cursor"),
+                earliestTimestamp=entries[0].get("timestamp"), latestTimestamp=entries[-1].get("timestamp"),
+                collapsible=len(entries) >= int(event.get("collapseThreshold") or 1),
+            )
+        elif not _event_in_bounds(event, bounds):
+            continue
+        events.append(_sanitize_debug_value(event, detail=detail))
     return {
         "events": events,
         "latest_cursor": window.newest_cursor,
@@ -317,7 +331,7 @@ def _build_timeline_section(
             serialize_processing_snapshot(window.processing_snapshot),
             detail=detail,
         ),
-        "cursor_note": "Timeline events are always the latest bounded window; use gobii_get_agent_timeline for full timeline paging.",
+        "cursor_note": "Timeline events are anchored to the requested time bounds; use gobii_get_agent_timeline for full timeline paging.",
     }
 
 
@@ -696,24 +710,16 @@ def sanitize_text(value: Any, *, detail: str) -> str:
     text = _SECRET_ASSIGNMENT_RE.sub(lambda match: f"{match.group(1)}={REDACTED}", text)
     text = _HIGH_ENTROPY_ASSIGNMENT_RE.sub(lambda match: f"{match.group(1)}={REDACTED}", text)
     limit = _string_limit(detail)
-    if len(text) > limit:
-        return text[: limit - 15] + "...[truncated]"
-    return text
+    return text[: limit - 15] + "...[truncated]" if len(text) > limit else text
 
 
 def _is_sensitive_key(key: str) -> bool:
     normalized = re.sub(r"[^a-z0-9]+", "_", key.lower()).strip("_")
-    if normalized in _SENSITIVE_EXACT_KEYS:
-        return True
-    return normalized.endswith(("_api_key", "_access_token", "_refresh_token", "_secret", "_password", "_private_key"))
+    return normalized in _SENSITIVE_EXACT_KEYS or normalized.endswith(("_api_key", "_access_token", "_refresh_token", "_secret", "_password", "_private_key"))
 
 
 def _string_limit(detail: str) -> int:
-    if detail == "summary":
-        return 400
-    if detail == "verbose":
-        return 4000
-    return 1200
+    return 400 if detail == "summary" else 4000 if detail == "verbose" else 1200
 
 
 def _apply_created_bounds(queryset, field_name: str, bounds: DebugTraceBounds):
@@ -725,12 +731,9 @@ def _apply_created_bounds(queryset, field_name: str, bounds: DebugTraceBounds):
 
 
 def _event_in_bounds(event: dict[str, Any], bounds: DebugTraceBounds) -> bool:
-    timestamp = event.get("timestamp")
-    if not timestamp:
-        return True
-    parsed = parse_datetime(str(timestamp))
+    parsed = parse_datetime(str(event["timestamp"])) if event.get("timestamp") else None
     if parsed is None:
-        return True
+        return False
     if timezone.is_naive(parsed):
         parsed = timezone.make_aware(parsed, timezone.get_current_timezone())
     if bounds.since is not None and parsed < bounds.since:
@@ -749,6 +752,4 @@ def _iso(dt) -> str | None:
 
 
 def _decimal_to_string(value: Decimal | int | str | None) -> str | None:
-    if value is None:
-        return None
-    return str(value)
+    return None if value is None else str(value)
