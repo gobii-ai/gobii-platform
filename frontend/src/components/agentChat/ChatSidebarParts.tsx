@@ -128,16 +128,6 @@ export function AgentListSectionHeader({ variant, label, count, loading = false 
   )
 }
 
-/** Placeholder rows standing in for roster entries that have not arrived yet. */
-export function AgentListSkeletonRows({ variant, rows = 3 }: { variant: 'drawer' | 'sidebar'; rows?: number }) {
-  return (
-    <div className="agent-roster-skeleton" data-variant={variant} role="status" aria-label="Loading agents">
-      {Array.from({ length: rows }, (_, index) => (
-        <span key={index} className="agent-roster-skeleton__row" />
-      ))}
-    </div>
-  )
-}
 
 type AgentListItemProps = {
   agent: AgentRosterEntry

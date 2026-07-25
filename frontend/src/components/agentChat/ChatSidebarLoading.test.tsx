@@ -6,7 +6,7 @@
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 
-import { AgentListSectionHeader, AgentListSkeletonRows } from './ChatSidebarParts'
+import { AgentListSectionHeader } from './ChatSidebarParts'
 
 describe('roster section header while the roster is loading', () => {
   it('withholds the count instead of asserting a number that is about to change', () => {
@@ -29,16 +29,3 @@ describe('roster section header while the roster is loading', () => {
   })
 })
 
-describe('roster skeleton rows', () => {
-  it('announces itself as busy so the wait is not silent', () => {
-    render(<AgentListSkeletonRows variant="sidebar" />)
-
-    expect(screen.getByRole('status', { name: /loading agents/i })).toBeInTheDocument()
-  })
-
-  it('renders placeholder rows for the entries still in flight', () => {
-    const { container } = render(<AgentListSkeletonRows variant="drawer" rows={3} />)
-
-    expect(container.querySelectorAll('.agent-roster-skeleton__row')).toHaveLength(3)
-  })
-})
