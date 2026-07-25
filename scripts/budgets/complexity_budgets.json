@@ -1,34 +1,34 @@
 {
-  "baseline_sha": "2fea7b2fb18efe4767076707fafb0f8f87ddb121",
+  "baseline_sha": "fd853a0fa84c71c59f491e90518ecdd9e2afee6a",
   "generated_by": "uv run python scripts/check_complexity_budgets.py --update-baselines",
   "prompt_size": {
-    "description": "Rendered prompt messages plus JSON tool definitions for representative send/planning paths.",
+    "description": "Rendered prompt messages plus JSON tool definitions for representative send and first-run paths.",
     "limits": {
-      "normal_explicit_send": {
-        "fitted_tokens": 7919,
-        "system_bytes": 25846,
-        "tools_bytes": 21835,
-        "total_bytes": 59406,
-        "user_bytes": 11725
+      "first_run": {
+        "fitted_tokens": 8578,
+        "system_bytes": 28589,
+        "tools_bytes": 21801,
+        "total_bytes": 62041,
+        "user_bytes": 11651
       },
-      "planning_first_run": {
-        "fitted_tokens": 8760,
-        "system_bytes": 31516,
-        "tools_bytes": 12530,
-        "total_bytes": 54473,
-        "user_bytes": 10427
+      "normal_explicit_send": {
+        "fitted_tokens": 7907,
+        "system_bytes": 25846,
+        "tools_bytes": 21801,
+        "total_bytes": 59331,
+        "user_bytes": 11684
       },
       "web_chat_implied_send": {
-        "fitted_tokens": 8065,
+        "fitted_tokens": 8058,
         "system_bytes": 26346,
-        "tools_bytes": 21835,
-        "total_bytes": 59909,
-        "user_bytes": 11728
+        "tools_bytes": 21801,
+        "total_bytes": 59834,
+        "user_bytes": 11687
       }
     },
     "scenarios": {
+      "first_run": "First run with a verified preferred contact.",
       "normal_explicit_send": "No active web session; communication requires explicit send tools.",
-      "planning_first_run": "Planning mode on the first run with a verified preferred contact.",
       "web_chat_implied_send": "Active web-chat session; text replies can use implied send."
     },
     "unit": "utf8_bytes"
@@ -149,6 +149,6 @@
       ".yml",
       ".zsh"
     ],
-    "limit": 253805
+    "limit": 253404
   }
 }

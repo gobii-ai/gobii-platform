@@ -205,7 +205,7 @@ class TestParallelToolCallsExecution(TestCase):
         self.assertEqual(result["results"][0]["message"], "Query 0 affected 1 rows.")
         self.assertEqual(result["agent_config_update"]["updated_fields"], ["emotion"])
 
-    def test_config_reconciliation_is_aggregated_with_field_errors(self):
+    def test_config_reconciliation_ignores_legacy_planning_state(self):
         self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
         self.agent.schedule = "0 9 * * *"
         self.agent.save(update_fields=["planning_state", "schedule", "updated_at"])
@@ -227,10 +227,8 @@ class TestParallelToolCallsExecution(TestCase):
         first_result, second_result = (json.loads(call.result) for call in tool_calls)
         self.assertNotIn("agent_config_update", first_result)
         reconciliation = second_result["agent_config_update"]
-        self.assertEqual(reconciliation["updated_fields"], ["charter"])
-        self.assertEqual(reconciliation["unchanged_fields"], ["schedule"])
-        self.assertEqual(set(reconciliation["errors"]), {"schedule"})
-        self.assertIn("planning mode", reconciliation["errors"]["schedule"].lower())
+        self.assertEqual(reconciliation["updated_fields"], ["charter", "schedule"])
+        self.assertFalse(reconciliation["errors"])
 
     @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
     @patch("api.agent.core.event_processing.execute_send_sms", return_value={"status": "success", "auto_sleep_ok": True})

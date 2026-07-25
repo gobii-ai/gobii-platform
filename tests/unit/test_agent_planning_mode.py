@@ -1,44 +1,31 @@
-from unittest.mock import patch
-
-from allauth.account.models import EmailAddress
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings, tag
-from django.urls import reverse
 
-from api.agent.core.processing_flags import get_human_inbound_generation
-from api.agent.core.prompt_context import _get_system_instruction, build_prompt_context
+from api.agent.core.prompt_context import _get_system_instruction
 from api.agent.tools.planning import execute_end_planning
 from api.agent.tools.schedule_updater import execute_update_schedule
 from api.agent.tools.static_tools import (
-    PLANNING_MODE_DISABLED_TOOL_NAMES,
     _agent_has_sms_endpoint,
     get_static_tool_definitions,
 )
-from api.agent.tools.tool_runtime import execute_runtime_tool_call
 from api.models import (
     BrowserUseAgent,
     CommsChannel,
     PersistentAgent,
     PersistentAgentCommsEndpoint,
-    PersistentAgentConversation,
-    PersistentAgentHumanInputRequest,
-    PersistentAgentSecret,
-    build_web_agent_address,
-    build_web_user_address,
 )
-from api.serializers import PersistentAgentListSerializer, PersistentAgentSerializer
 from api.services.persistent_agents import PersistentAgentProvisioningService
 from api.services.tool_blacklist import invalidate_tool_blacklist_cache
 from tests.utils.llm_seed import get_intelligence_tier
 
 
 def _tool_names(tools: list[dict]) -> set[str]:
-    names: set[str] = set()
-    for tool in tools:
-        function = tool.get("function")
-        if isinstance(function, dict) and isinstance(function.get("name"), str):
-            names.add(function["name"])
-    return names
+    return {
+        function["name"]
+        for tool in tools
+        if isinstance((function := tool.get("function")), dict)
+        and isinstance(function.get("name"), str)
+    }
 
 
 @tag("batch_agent_chat")
@@ -65,47 +52,85 @@ class PersistentAgentPlanningModeTests(TestCase):
         tier.blacklisted_tools = []
         tier.save(update_fields=["blacklisted_tools"])
         invalidate_tool_blacklist_cache()
-        EmailAddress.objects.create(
-            user=self.user,
-            email=self.user.email,
-            verified=True,
-            primary=True,
-        )
 
-    def test_direct_agents_default_skipped_but_provisioning_starts_planning_by_default(self):
-        self.assertEqual(self.agent.planning_state, PersistentAgent.PlanningState.SKIPPED)
-
-        result = PersistentAgentProvisioningService.provision(
+    def test_provisioning_skips_legacy_planning_mode(self):
+        default_result = PersistentAgentProvisioningService.provision(
             user=self.user,
-            name="Provisioned Planning Agent",
+            name="Default Agent",
             charter="Research product leads",
         )
-
-        self.assertEqual(result.agent.planning_state, PersistentAgent.PlanningState.PLANNING)
-
-    def test_explicit_planning_state_overrides_default(self):
-        result = PersistentAgentProvisioningService.provision(
+        legacy_result = PersistentAgentProvisioningService.provision(
             user=self.user,
-            name="Explicitly Skipped Planning Agent",
+            name="Legacy Planning Agent",
             charter="Research product leads",
-            planning_state=PersistentAgent.PlanningState.SKIPPED,
+            planning_state=PersistentAgent.PlanningState.PLANNING,
         )
 
-        self.assertEqual(result.agent.planning_state, PersistentAgent.PlanningState.SKIPPED)
+        self.assertEqual(default_result.agent.planning_state, PersistentAgent.PlanningState.SKIPPED)
+        self.assertEqual(legacy_result.agent.planning_state, PersistentAgent.PlanningState.SKIPPED)
 
-    def test_planning_static_tools_hide_execution_tools_and_add_end_planning(self):
+    def test_legacy_planning_state_keeps_normal_tools(self):
         self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
         self.agent.save(update_fields=["planning_state", "updated_at"])
 
         names = _tool_names(get_static_tool_definitions(self.agent))
 
-        self.assertIn("end_planning", names)
-        self.assertIn("request_human_input", names)
-        self.assertIn("secure_credentials_request", names)
-        self.assertIn("search_tools", names)
-        self.assertNotIn("spawn_web_task", names)
-        self.assertIn("send_chat_message", names)
-        self.assertTrue(PLANNING_MODE_DISABLED_TOOL_NAMES.isdisjoint(names))
+        self.assertNotIn("end_planning", names)
+        self.assertTrue(
+            {
+                "apply_patch",
+                "request_human_input",
+                "search_tools",
+                "secure_credentials_request",
+                "spawn_web_task",
+                "update_plan",
+            }.issubset(names)
+        )
+
+    def test_legacy_planning_state_does_not_block_schedule_updates(self):
+        self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
+        self.agent.schedule = "@daily"
+        self.agent.save(update_fields=["planning_state", "schedule", "updated_at"])
+
+        response = execute_update_schedule(self.agent, {"new_schedule": "0 12 * * *"})
+
+        self.assertEqual(response["status"], "ok")
+        self.agent.refresh_from_db()
+        self.assertEqual(self.agent.schedule, "0 12 * * *")
+
+    def test_stale_end_planning_preserves_durable_charter(self):
+        self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
+        self.agent.save(update_fields=["planning_state", "updated_at"])
+        full_plan = "Goal: find qualified leads weekly. Delivery: send a Friday summary."
+
+        response = execute_end_planning(self.agent, {"full_plan": full_plan})
+
+        self.agent.refresh_from_db()
+        self.assertEqual(response["status"], "ok")
+        self.assertEqual(self.agent.planning_state, PersistentAgent.PlanningState.COMPLETED)
+        self.assertEqual(self.agent.planning_plan, full_plan)
+        self.assertEqual(self.agent.charter, "Initial charter")
+        self.assertIsNotNone(self.agent.planning_completed_at)
+
+    def test_stale_end_planning_is_a_noop_after_migration(self):
+        response = execute_end_planning(self.agent, {"full_plan": "An obsolete generated plan"})
+
+        self.agent.refresh_from_db()
+        self.assertEqual(response["status"], "ok")
+        self.assertEqual(response["planning_state"], PersistentAgent.PlanningState.SKIPPED)
+        self.assertEqual(self.agent.planning_state, PersistentAgent.PlanningState.SKIPPED)
+        self.assertEqual(self.agent.planning_plan, "")
+        self.assertEqual(self.agent.charter, "Initial charter")
+
+    def test_legacy_planning_state_uses_normal_prompt(self):
+        self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
+        self.agent.save(update_fields=["planning_state", "updated_at"])
+
+        prompt = _get_system_instruction(self.agent, is_first_run=False)
+
+        self.assertNotIn("## Planning Mode", prompt)
+        self.assertNotIn("end_planning", prompt)
+        self.assertIn("Use `update_plan` only for substantial multi-step work", prompt)
 
     def test_agents_without_sms_endpoint_do_not_receive_send_sms_tool(self):
         names = _tool_names(get_static_tool_definitions(self.agent))
@@ -156,258 +181,3 @@ class PersistentAgentPlanningModeTests(TestCase):
 
         self.assertIn("send_email", names)
         self.assertNotIn("send_sms", names)
-
-    def test_planning_runtime_rejects_disallowed_tools(self):
-        self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
-        self.agent.save(update_fields=["planning_state", "updated_at"])
-
-        for tool_name in PLANNING_MODE_DISABLED_TOOL_NAMES:
-            result, updated_tools = execute_runtime_tool_call(self.agent, tool_name=tool_name, exec_params={})
-
-            self.assertIsNone(updated_tools)
-            self.assertEqual(result["status"], "error")
-            self.assertIn("planning mode", result["message"])
-
-    def test_planning_runtime_allows_secure_credential_requests(self):
-        self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
-        self.agent.save(update_fields=["planning_state", "updated_at"])
-
-        result, updated_tools = execute_runtime_tool_call(
-            self.agent,
-            tool_name="secure_credentials_request",
-            exec_params={
-                "credentials": [
-                    {
-                        "name": "Aimfox API Key",
-                        "description": "API key for managing Aimfox avatars.",
-                        "key": "aimfox_api_key",
-                        "secret_type": "credential",
-                        "domain_pattern": "aimfox.com",
-                    }
-                ]
-            },
-        )
-
-        self.assertEqual(result["status"], "ok")
-        self.assertIsNone(updated_tools)
-        self.assertTrue(
-            PersistentAgentSecret.objects.filter(
-                agent=self.agent,
-                key="aimfox_api_key",
-                requested=True,
-            ).exists()
-        )
-
-    def test_end_planning_replaces_charter_and_removes_planning_tool(self):
-        self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
-        self.agent.save(update_fields=["planning_state", "updated_at"])
-        full_plan = "Goal: find qualified leads weekly. Delivery: send a Friday summary."
-
-        with patch("api.services.agent_planning._schedule_charter_metadata") as schedule_mock:
-            response = execute_end_planning(self.agent, {"full_plan": full_plan})
-
-        self.agent.refresh_from_db()
-        self.assertEqual(response["status"], "ok")
-        schedule_mock.assert_called_once()
-        self.assertEqual(self.agent.planning_state, PersistentAgent.PlanningState.COMPLETED)
-        self.assertEqual(self.agent.planning_plan, full_plan)
-        self.assertEqual(self.agent.charter, full_plan)
-        self.assertIsNotNone(self.agent.planning_completed_at)
-        self.assertNotIn("end_planning", _tool_names(get_static_tool_definitions(self.agent)))
-
-    def test_planning_prompt_is_inserted_before_first_run_welcome(self):
-        self._set_email_welcome_target()
-        self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
-        self.agent.save(update_fields=["planning_state", "updated_at"])
-
-        prompt = _get_system_instruction(
-            self.agent,
-            is_first_run=True,
-            implied_send_context={"display_name": "Matt"},
-        )
-
-        self.assertIn("You are a persistent AI agent.", prompt)
-        self.assertIn("## Durable Config", prompt)
-        self.assertIn("## Planning Mode", prompt)
-        self.assertIn(f"Contact channel: email at {self.user.email}", prompt)
-        self.assertNotIn("Start your response with a brief welcome message to Matt", prompt)
-        self.assertIn("end_planning", prompt)
-        self.assertIn("request_human_input", prompt)
-        self.assertIn(
-            "use secure_credentials_request for credentials, including in Planning Mode",
-            prompt,
-        )
-        self.assertIn("For clear requests other than named integration setup/use", prompt)
-        self.assertIn("before end_planning or asking how to connect, call search_tools(provider)", prompt)
-        self.assertNotIn("spawn_agent", prompt)
-        self.assertNotIn("Normal tools are available", prompt)
-        self.assertNotIn("## Then charter + runtime plan + everything else", prompt)
-        self.assertNotIn("### Execution Template", prompt)
-
-        normal_prompt_index = prompt.index("You are a persistent AI agent.")
-        planning_index = prompt.index("## Planning Mode")
-        welcome_index = prompt.index("This is your first run.")
-        self.assertLess(normal_prompt_index, planning_index)
-        self.assertLess(planning_index, welcome_index)
-
-    def test_planning_prompt_keeps_normal_context_without_first_run(self):
-        self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
-        self.agent.save(update_fields=["planning_state", "updated_at"])
-
-        prompt = _get_system_instruction(
-            self.agent,
-            is_first_run=False,
-            continuation_notice="Resume the pending planning turn.",
-        )
-
-        self.assertIn("You are a persistent AI agent.", prompt)
-        self.assertIn("## Durable Config", prompt)
-        self.assertIn("## Planning Mode", prompt)
-        self.assertIn("Resume the pending planning turn.", prompt)
-        self.assertEqual(prompt.count("Resume the pending planning turn."), 1)
-        self.assertNotIn("REQUIRED: First-Run Welcome", prompt)
-        self.assertNotIn("### Execution Template", prompt)
-
-    def test_planning_prompt_context_surfaces_pending_human_input_requests(self):
-        self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
-        self.agent.save(update_fields=["planning_state", "updated_at"])
-        conversation = self._create_web_conversation()
-        PersistentAgentHumanInputRequest.objects.create(
-            agent=self.agent,
-            conversation=conversation,
-            question="What locations should I search?",
-            requested_via_channel=CommsChannel.WEB,
-        )
-
-        with patch("api.agent.core.prompt_context.ensure_steps_compacted"), patch(
-            "api.agent.core.prompt_context.ensure_comms_compacted"
-        ):
-            context, _, _ = build_prompt_context(self.agent, is_first_run=False)
-
-        content = "\n".join(message["content"] for message in context)
-        self.assertIn("Pending human input requests", content)
-        self.assertIn("What locations should I search?", content)
-
-    def test_planning_prompt_context_avoids_schedule_setup_guidance(self):
-        self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
-        self.agent.schedule = "@daily"
-        self.agent.save(update_fields=["planning_state", "schedule", "updated_at"])
-
-        with patch("api.agent.core.prompt_context.ensure_steps_compacted"), patch(
-            "api.agent.core.prompt_context.ensure_comms_compacted"
-        ):
-            context, _, _ = build_prompt_context(self.agent, is_first_run=False)
-
-        system_message = next((m for m in context if m["role"] == "system"), None)
-        user_message = next((m for m in context if m["role"] == "user"), None)
-
-        self.assertIsNotNone(system_message)
-        self.assertIsNotNone(user_message)
-        self.assertNotIn("⚠️ NO SCHEDULE SET.", user_message["content"])
-        self.assertNotIn("UPDATE YOUR SCHEDULE if the timing no longer matches the job", user_message["content"])
-        self.assertIn("Planning Mode is active; schedule changes are deferred until planning ends", user_message["content"])
-        self.assertIn("defer __agent_config mutations until after end_planning", user_message["content"])
-        self.assertNotIn("You control your schedule.", system_message["content"])
-
-    def test_update_schedule_is_blocked_during_planning(self):
-        self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
-        self.agent.schedule = "@daily"
-        self.agent.save(update_fields=["planning_state", "schedule", "updated_at"])
-
-        response = execute_update_schedule(self.agent, {"new_schedule": "0 12 * * *"})
-
-        self.assertEqual(response["status"], "error")
-        self.assertIn("planning mode", response["message"].lower())
-        self.agent.refresh_from_db()
-        self.assertEqual(self.agent.schedule, "@daily")
-
-    def test_non_planning_first_run_keeps_existing_work_prompt(self):
-        self._set_email_welcome_target()
-
-        prompt = _get_system_instruction(self.agent, is_first_run=True)
-
-        self.assertIn("## Then calibrate setup to the task", prompt)
-        self.assertIn("### Execution Template", prompt)
-        self.assertNotIn("## Planning Mode", prompt)
-
-    def test_skip_endpoint_cancels_pending_questions_and_exposes_payloads(self):
-        self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
-        self.agent.save(update_fields=["planning_state", "updated_at"])
-        conversation = self._create_web_conversation()
-        pending_request = PersistentAgentHumanInputRequest.objects.create(
-            agent=self.agent,
-            conversation=conversation,
-            question="What locations should I search?",
-            requested_via_channel=CommsChannel.WEB,
-        )
-        self.client.force_login(self.user)
-        before_generation = get_human_inbound_generation(self.agent.id)
-        expected_generation = before_generation + 1
-
-        with patch("console.api_views.process_agent_events_task.delay") as delay_mock:
-            with self.captureOnCommitCallbacks(execute=True):
-                response = self.client.post(
-                    reverse("console_agent_planning_skip", kwargs={"agent_id": self.agent.id})
-                )
-
-        self.assertEqual(response.status_code, 200)
-        payload = response.json()
-        self.assertEqual(payload["planning_state"], PersistentAgent.PlanningState.SKIPPED)
-        self.assertEqual(payload["pending_action_requests"], [])
-        self.assertEqual(get_human_inbound_generation(self.agent.id), expected_generation)
-        delay_mock.assert_called_once_with(
-            str(self.agent.id),
-            inbound_generation=expected_generation,
-        )
-
-        self.agent.refresh_from_db()
-        pending_request.refresh_from_db()
-        self.assertEqual(self.agent.planning_state, PersistentAgent.PlanningState.SKIPPED)
-        self.assertEqual(self.agent.charter, "Initial charter")
-        self.assertEqual(pending_request.status, PersistentAgentHumanInputRequest.Status.CANCELLED)
-
-        timeline_response = self.client.get(
-            reverse("console_agent_timeline", kwargs={"agent_id": self.agent.id})
-        )
-        self.assertEqual(timeline_response.status_code, 200)
-        self.assertEqual(timeline_response.json()["planning_state"], PersistentAgent.PlanningState.SKIPPED)
-
-        roster_response = self.client.get(reverse("console_agent_roster"))
-        self.assertEqual(roster_response.status_code, 200)
-        roster_agent = next(
-            item for item in roster_response.json()["agents"] if item["id"] == str(self.agent.id)
-        )
-        self.assertEqual(roster_agent["planning_state"], PersistentAgent.PlanningState.SKIPPED)
-
-        detail_payload = PersistentAgentSerializer(self.agent).data
-        list_payload = PersistentAgentListSerializer(self.agent).data
-        self.assertEqual(detail_payload["planning_state"], PersistentAgent.PlanningState.SKIPPED)
-        self.assertEqual(list_payload["planning_state"], PersistentAgent.PlanningState.SKIPPED)
-
-    def _create_web_conversation(self) -> PersistentAgentConversation:
-        user_address = build_web_user_address(self.user.id, self.agent.id)
-        PersistentAgentCommsEndpoint.objects.create(
-            owner_agent=self.agent,
-            channel=CommsChannel.WEB,
-            address=build_web_agent_address(self.agent.id),
-            is_primary=True,
-        )
-        PersistentAgentCommsEndpoint.objects.create(
-            owner_agent=None,
-            channel=CommsChannel.WEB,
-            address=user_address,
-        )
-        return PersistentAgentConversation.objects.create(
-            owner_agent=self.agent,
-            channel=CommsChannel.WEB,
-            address=user_address,
-        )
-
-    def _set_email_welcome_target(self) -> None:
-        contact_endpoint = PersistentAgentCommsEndpoint.objects.create(
-            owner_agent=None,
-            channel=CommsChannel.EMAIL,
-            address=self.user.email,
-        )
-        self.agent.preferred_contact_endpoint = contact_endpoint
-        self.agent.save(update_fields=["preferred_contact_endpoint", "updated_at"])

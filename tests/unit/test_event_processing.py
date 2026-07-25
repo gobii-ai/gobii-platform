@@ -1465,7 +1465,7 @@ class PromptContextBuilderTests(TestCase):
             system_content,
         )
 
-    def test_planning_preview_prompt_excludes_signup_preview_handoff(self):
+    def test_signup_preview_first_run_uses_normal_welcome_with_legacy_planning_state(self):
         self.agent.charter = GENERIC_STARTER_CHARTER
         self.agent.preferred_contact_endpoint = self.external_endpoint
         self.agent.signup_preview_state = PersistentAgent.SignupPreviewState.AWAITING_FIRST_REPLY_PAUSE
@@ -1487,25 +1487,20 @@ class PromptContextBuilderTests(TestCase):
         system_message = next((m for m in context if m["role"] == "system"), None)
 
         self.assertIsNotNone(system_message)
-        self.assertIn("## Planning Mode", system_message["content"])
-        self.assertIn("If there is no concrete task to do yet, your first action should be one concise welcome message", system_message["content"])
-        self.assertIn("After the welcome, continue Planning Mode", system_message["content"])
-        self.assertIn("Stay in planning only until planning is completed or skipped", system_message["content"])
-        self.assertIn("Use read-only research during planning only when the scope is unclear", system_message["content"])
-        self.assertIn("substantive execution or deliverable work before planning ends", system_message["content"])
+        self.assertNotIn("## Planning Mode", system_message["content"])
+        self.assertNotIn("end_planning", system_message["content"])
+        self.assertNotIn("## Signup Preview Handoff", system_message["content"])
         self.assertIn(
-            "Do not ask planning questions about communication channels, delivery methods, integrations, accounts, or implementation approach unless the user explicitly asks to configure or choose them",
+            "If there is no concrete task to do yet, your first action should be one concise welcome message",
             system_message["content"],
         )
-        self.assertNotIn("delivery cadence", system_message["content"])
-        self.assertNotIn("## Signup Preview Handoff", system_message["content"])
         self.assertNotIn("## Signup Preview First-Run Override", system_message["content"])
         self.assertNotIn("limited preview", system_message["content"])
         self.assertIn(f"<charter>{GENERIC_STARTER_CHARTER}</charter>", next(
             m for m in context if m["role"] == "user"
         )["content"])
 
-    def test_signup_preview_handoff_prompt_runs_after_planning_without_first_run(self):
+    def test_signup_preview_does_not_inject_planning_handoff_on_later_runs(self):
         self.agent.charter = GENERIC_STARTER_CHARTER
         self.agent.preferred_contact_endpoint = self.external_endpoint
         for planning_state in (
@@ -1542,10 +1537,8 @@ class PromptContextBuilderTests(TestCase):
 
                 self.assertIsNotNone(system_message)
                 system_content = system_message["content"]
-                self.assertIn("## Signup Preview Handoff", system_content)
-                self.assertIn("Contact channel: email", system_content)
-                self.assertIn("the plan is ready", system_content)
-                self.assertIn("after they finish signup", system_content)
+                self.assertNotIn("## Signup Preview Handoff", system_content)
+                self.assertNotIn("the plan is ready", system_content)
                 self.assertNotIn("## Planning Mode", system_content)
                 self.assertNotIn("## REQUIRED: First-Run Welcome", system_content)
                 self.assertIn(f"<charter>{GENERIC_STARTER_CHARTER}</charter>", next(
@@ -5425,12 +5418,12 @@ class EventProcessingRuntimeGuardTests(TestCase):
 
         self.assertFalse(_should_continue_for_pending_progress_reply(True, finalized))
 
-    def test_signup_preview_processing_pause_is_suppressed_during_planning(self):
+    def test_signup_preview_processing_pause_ignores_legacy_planning_state(self):
         self.agent.signup_preview_state = PersistentAgent.SignupPreviewState.AWAITING_SIGNUP_COMPLETION
         self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
         self.agent.save(update_fields=["signup_preview_state", "planning_state", "updated_at"])
 
-        self.assertFalse(is_signup_preview_processing_paused(self.agent))
+        self.assertTrue(is_signup_preview_processing_paused(self.agent))
 
         self.agent.planning_state = PersistentAgent.PlanningState.COMPLETED
         self.agent.save(update_fields=["planning_state", "updated_at"])
@@ -6086,7 +6079,7 @@ class OrchestratorHumanInputInterruptTests(TestCase):
     @patch("api.agent.core.event_processing.get_agent_tools")
     @patch("api.agent.core.event_processing._completion_with_failover")
     @patch("api.agent.core.event_processing.build_prompt_context")
-    def test_skip_planning_refreshes_agent_and_tools_after_stale_completion(
+    def test_legacy_planning_state_does_not_change_tools_after_stale_completion(
         self,
         mock_build_prompt,
         mock_completion,
@@ -6107,18 +6100,10 @@ class OrchestratorHumanInputInterruptTests(TestCase):
             pending_drain_limit=50,
             pending_drain_schedule_ttl_seconds=60,
         )
-        planning_tools = [
-            {"type": "function", "function": {"name": "end_planning", "parameters": {"type": "object"}}},
-        ]
-        skipped_tools = [
+        normal_tools = [
             {"type": "function", "function": {"name": "update_plan", "parameters": {"type": "object"}}},
         ]
         prompt_planning_states = []
-
-        def _tools_for_agent(agent):
-            if agent.planning_state == PersistentAgent.PlanningState.PLANNING:
-                return planning_tools
-            return skipped_tools
 
         def _build_prompt(agent, *_args, **_kwargs):
             prompt_planning_states.append(agent.planning_state)
@@ -6157,7 +6142,7 @@ class OrchestratorHumanInputInterruptTests(TestCase):
                 },
             )
 
-        mock_get_tools.side_effect = _tools_for_agent
+        mock_get_tools.return_value = normal_tools
         mock_build_prompt.side_effect = _build_prompt
         mock_completion.side_effect = _completion
 
@@ -6168,14 +6153,13 @@ class OrchestratorHumanInputInterruptTests(TestCase):
 
         self.assertEqual(prompt_planning_states, [
             PersistentAgent.PlanningState.PLANNING,
-            PersistentAgent.PlanningState.SKIPPED,
+            PersistentAgent.PlanningState.PLANNING,
         ])
         first_tools = mock_completion.call_args_list[0].kwargs["tools"]
         second_tools = mock_completion.call_args_list[1].kwargs["tools"]
-        self.assertIn("end_planning", _tool_definition_names_for_completion(first_tools))
-        second_tool_names = _tool_definition_names_for_completion(second_tools)
-        self.assertNotIn("end_planning", second_tool_names)
-        self.assertIn("update_plan", second_tool_names)
+        self.assertEqual(_tool_definition_names_for_completion(first_tools), ["update_plan"])
+        self.assertEqual(_tool_definition_names_for_completion(second_tools), ["update_plan"])
+        mock_get_tools.assert_called_once()
         self.assertEqual(usage.get("total_tokens"), 2)
 
     @patch("api.agent.core.event_processing._close_active_cycle_for_skipped_agent")

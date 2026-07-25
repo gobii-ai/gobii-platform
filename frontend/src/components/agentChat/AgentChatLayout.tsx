@@ -516,12 +516,12 @@ export function AgentChatLayout({
       storeSignupPreviewState === 'awaiting_first_reply_pause'
       && !initialLoading
       && !processingActive
-      && (!awaitingResponse || hasAgentReply)
+      && hasAgentReply
     ) {
       return 'awaiting_signup_completion'
     }
     return storeSignupPreviewState
-  }, [awaitingResponse, hasAgentReply, initialLoading, processingActive, storeSignupPreviewState])
+  }, [hasAgentReply, initialLoading, processingActive, storeSignupPreviewState])
   const availableInsights = useMemo(() => {
     return runtimeInsights.filter((insight) => !runtimeDismissedInsightIds.has(insight.insightId))
   }, [runtimeDismissedInsightIds, runtimeInsights])
@@ -1033,8 +1033,7 @@ export function AgentChatLayout({
     Boolean(activeAgentId)
     && !agentIsOrgOwned
     && personalSignupPreviewAvailable
-    && signupPreviewState !== 'none'
-    && planningState !== 'planning'
+    && signupPreviewState === 'awaiting_signup_completion'
   )
   const effectiveShowSubscriptionExpiredPanel = showSubscriptionExpiredPanel && planningState !== 'planning'
   const composerUnavailable = spawnIntentLoading || effectiveShowSignupPreviewPanel || effectiveShowSubscriptionExpiredPanel

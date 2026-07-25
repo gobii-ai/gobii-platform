@@ -6,24 +6,6 @@ from django.db.models import Q
 
 from api.models import AgentPeerLink, CommsChannel, PersistentAgent
 from api.services.tool_blacklist import get_agent_tool_blacklist
-from .custom_tool_names import CREATE_CUSTOM_TOOL_NAME
-
-PLANNING_MODE_DISABLED_TOOL_NAMES = frozenset({
-    CREATE_CUSTOM_TOOL_NAME,
-    "apply_patch",
-    "request_contact_permission",
-    "spawn_web_task",
-    "update_plan",
-    "create_chart"
-})
-
-
-def planning_mode_disallows_tool(agent: Optional[PersistentAgent], tool_name: str) -> bool:
-    return (
-        bool(agent)
-        and agent.planning_state == PersistentAgent.PlanningState.PLANNING
-        and tool_name in PLANNING_MODE_DISABLED_TOOL_NAMES
-    )
 
 
 def _get_tool_name(tool: dict) -> Optional[str]:
@@ -32,15 +14,6 @@ def _get_tool_name(tool: dict) -> Optional[str]:
         return None
     tool_name = function_block.get("name")
     return tool_name if isinstance(tool_name, str) and tool_name else None
-
-
-def _filter_planning_mode_tools(agent: PersistentAgent, tools: List[dict]) -> List[dict]:
-    if agent.planning_state != PersistentAgent.PlanningState.PLANNING:
-        return tools
-    return [
-        tool for tool in tools
-        if (_get_tool_name(tool) not in PLANNING_MODE_DISABLED_TOOL_NAMES)
-    ]
 
 
 def _filter_tier_blacklisted_tools(agent: PersistentAgent, tools: List[dict]) -> List[dict]:
@@ -79,7 +52,6 @@ def get_static_tool_definitions(agent: Optional[PersistentAgent]) -> List[dict]:
     """Return static (always-present) tool definitions for an agent."""
     from .apply_patch import get_apply_patch_tool
     from .email_sender import get_send_email_tool
-    from .planning import get_end_planning_tool
     from .request_human_input import get_request_human_input_tool
     from .request_contact_permission import get_request_contact_permission_tool
     from .search_tools import get_search_tools_tool
@@ -109,9 +81,6 @@ def get_static_tool_definitions(agent: Optional[PersistentAgent]) -> List[dict]:
     if not agent:
         return static_tools
 
-    if agent.planning_state == PersistentAgent.PlanningState.PLANNING:
-        static_tools.append(get_end_planning_tool())
-
     static_tools.append(get_apply_patch_tool())
 
     has_peer_links = AgentPeerLink.objects.filter(
@@ -122,7 +91,7 @@ def get_static_tool_definitions(agent: Optional[PersistentAgent]) -> List[dict]:
     if has_peer_links:
         static_tools.append(get_send_agent_message_tool())
 
-    return _filter_tier_blacklisted_tools(agent, _filter_planning_mode_tools(agent, static_tools))
+    return _filter_tier_blacklisted_tools(agent, static_tools)
 
 
 def get_static_tool_names(agent: Optional[PersistentAgent]) -> Set[str]:

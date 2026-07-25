@@ -79,7 +79,7 @@ from .meta_gobii import execute_meta_gobii_tool, get_meta_gobii_tool_definition,
 from .meta_gobii_names import META_GOBII_SYSTEM_SKILL_KEY, META_GOBII_TOOL_NAMES
 from .autotool_heuristics import find_matching_tools
 from .sqlite_skills import get_required_skill_tool_ids
-from .static_tools import get_static_tool_names, planning_mode_disallows_tool
+from .static_tools import get_static_tool_names
 
 logger = logging.getLogger(__name__)
 
@@ -356,9 +356,6 @@ def _is_builtin_tool_available(
         return False
 
     if entry.get("search_hidden") and not include_hidden:
-        return False
-
-    if planning_mode_disallows_tool(agent, tool_name):
         return False
 
     if entry.get("sandbox_only"):

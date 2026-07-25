@@ -17,7 +17,6 @@ from api.agent.short_description import maybe_schedule_mini_description, maybe_s
 from api.agent.tags import maybe_schedule_agent_tags
 from api.models import BrowserUseAgent, CommsChannel, IntelligenceTier, PersistentAgent, PersistentAgentCommsEndpoint, PersistentAgentEmailEndpoint
 from api.services.agent_email_aliases import get_default_agent_email_endpoint
-from api.services.agent_planning import schedule_planning_timeout_processing
 from api.services.agent_schedules import create_default_onboarding_schedule
 from api.services.daily_credit_limits import calculate_default_daily_credit_limit, calculate_daily_credit_slider_bounds, get_tier_credit_multiplier
 from api.services.daily_credit_settings import get_daily_credit_settings_for_owner
@@ -43,10 +42,6 @@ class PersistentAgentProvisioningService:
 
     DEFAULT_MAX_NAME_ATTEMPTS = 10
     NAME_ERROR_KEY = "name"
-
-    @staticmethod
-    def _default_planning_state(user) -> str:
-        return PersistentAgent.PlanningState.PLANNING
 
     @classmethod
     def generate_unique_name(cls, user, *, max_attempts: int | None = None) -> str:
@@ -122,7 +117,12 @@ class PersistentAgentProvisioningService:
             except ValueError:
                 raise PersistentAgentProvisioningError("Unsupported intelligence tier selection.")
 
-            resolved_planning_state = planning_state or cls._default_planning_state(user)
+            resolved_planning_state = planning_state
+            if (
+                not resolved_planning_state
+                or resolved_planning_state == PersistentAgent.PlanningState.PLANNING
+            ):
+                resolved_planning_state = PersistentAgent.PlanningState.SKIPPED
             persistent_agent = PersistentAgent(
                 user=user,
                 organization=organization,
@@ -153,7 +153,6 @@ class PersistentAgentProvisioningService:
 
             persistent_agent.save()
             create_default_onboarding_schedule(persistent_agent)
-            schedule_planning_timeout_processing(persistent_agent)
 
             # Apply plan-specific default daily credit limits
             if settings.GOBII_PROPRIETARY_MODE:

@@ -509,12 +509,12 @@ class ImpliedSendTests(TestCase):
 
         self.assertIsNone(ep._direct_correction_context(self.agent))
 
-    def test_direct_correction_patch_is_disabled_in_planning_mode(self):
+    def test_direct_correction_patch_ignores_legacy_planning_state(self):
         self._add_feedback_followup()
         self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
         self.agent.save(update_fields=["planning_state", "updated_at"])
 
-        self.assertIsNone(ep._direct_correction_context(self.agent))
+        self.assertIsNotNone(ep._direct_correction_context(self.agent))
 
     def test_direct_correction_patch_is_required_for_followup_feedback(self):
         self._add_feedback_followup()
@@ -1276,7 +1276,37 @@ class ImpliedSendTests(TestCase):
             )
         )
 
-    def test_defaultable_setup_guard_allows_planning_questions_in_planning_mode(self):
+    def test_explicit_request_for_planning_questions_bypasses_defaultable_guard(self):
+        user_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=None,
+            channel=CommsChannel.WEB,
+            address=build_web_user_address(self.user.id, self.agent.id),
+            is_primary=False,
+        )
+        conversation = PersistentAgentConversation.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.WEB,
+            address=user_endpoint.address,
+        )
+        PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            is_outbound=False,
+            from_endpoint=user_endpoint,
+            conversation=conversation,
+            body=(
+                "Before implementation, help me shape the monitoring workflow. "
+                "Ask only the questions that materially change it, then wait."
+            ),
+        )
+
+        self.assertFalse(
+            ep._should_reject_defaultable_setup_question(
+                self.agent,
+                "Which competitors and update types should I monitor?",
+            )
+        )
+
+    def test_explicit_planning_request_allows_questions_with_legacy_planning_state(self):
         self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
         self.agent.save(update_fields=["planning_state", "updated_at"])
         user_endpoint = PersistentAgentCommsEndpoint.objects.create(
@@ -1337,7 +1367,10 @@ class ImpliedSendTests(TestCase):
         )
 
         self.assertFalse(prepared.followup_required)
-        self.assertEqual(len(prepared.prepared_calls), 1)
+        self.assertEqual(
+            [call.tool_name for call in prepared.prepared_calls],
+            ["request_human_input"],
+        )
         self.assertFalse(
             PersistentAgentStep.objects.filter(
                 agent=self.agent,
@@ -1503,7 +1536,7 @@ class ImpliedSendTests(TestCase):
         self.assertFalse(finalized.followup_required)
         self.assertIs(finalized.last_explicit_continue, True)
 
-    def test_terminal_planning_answer_skips_stale_planning_mode(self):
+    def test_terminal_answer_does_not_mutate_legacy_planning_state(self):
         self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
         self.agent.save(update_fields=["planning_state", "updated_at"])
         final_chat = ep._ToolExecutionOutcome(
@@ -1545,21 +1578,10 @@ class ImpliedSendTests(TestCase):
         )
 
         self.assertTrue(finalized.terminal_message_delivery_ok)
-        self.assertTrue(
-            ep._should_skip_stale_planning_mode_after_terminal_delivery(
-                self.agent,
-                finalized,
-                followup_required=finalized.followup_required,
-            )
-        )
-        with patch("console.agent_chat.signals.emit_agent_planning_state_update") as mock_emit:
-            self.assertTrue(ep._skip_stale_planning_mode_after_terminal_delivery(self.agent))
-
         self.agent.refresh_from_db()
-        self.assertEqual(self.agent.planning_state, PersistentAgent.PlanningState.SKIPPED)
-        mock_emit.assert_called_once()
+        self.assertEqual(self.agent.planning_state, PersistentAgent.PlanningState.PLANNING)
 
-    def test_terminal_planning_answer_waits_when_followup_required(self):
+    def test_followup_requirement_does_not_mutate_legacy_planning_state(self):
         self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
         self.agent.save(update_fields=["planning_state", "updated_at"])
         finalized = ep._FinalizedToolBatch(
@@ -1572,13 +1594,7 @@ class ImpliedSendTests(TestCase):
             terminal_message_delivery_ok=True,
         )
 
-        self.assertFalse(
-            ep._should_skip_stale_planning_mode_after_terminal_delivery(
-                self.agent,
-                finalized,
-                followup_required=True,
-            )
-        )
+        self.assertTrue(finalized.terminal_message_delivery_ok)
         self.agent.refresh_from_db()
         self.assertEqual(self.agent.planning_state, PersistentAgent.PlanningState.PLANNING)
 
@@ -1777,7 +1793,7 @@ class ImpliedSendTests(TestCase):
         self.assertFalse(ep._user_text_has_durable_config_intent("For this answer, prefer bullets."))
         self.assertTrue(ep._looks_like_one_off_user_task("Tell me the latest funding news for Acme."))
 
-    def test_planning_execute_now_search_tools_first_gets_runtime_correction(self):
+    def test_legacy_planning_state_allows_execute_now_tool_search(self):
         self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
         self.agent.save(update_fields=["planning_state", "updated_at"])
         self._add_inbound_web_message(
@@ -1811,17 +1827,10 @@ class ImpliedSendTests(TestCase):
                 attach_prompt_archive=lambda step: None,
             )
 
-        self.assertEqual(prepared.prepared_calls, [])
-        self.assertTrue(prepared.followup_required)
-        mock_rate_limit.assert_not_called()
-        mock_credit.assert_not_called()
-        self.assertEqual(PersistentAgentToolCall.objects.filter(tool_name="search_tools").count(), 0)
-        self.assertTrue(
-            PersistentAgentStep.objects.filter(
-                agent=self.agent,
-                description__startswith="Skipped search_tools before planning was completed",
-            ).exists()
-        )
+        self.assertEqual([call.tool_name for call in prepared.prepared_calls], ["search_tools"])
+        self.assertFalse(prepared.followup_required)
+        mock_rate_limit.assert_called_once()
+        mock_credit.assert_called_once()
 
     def test_planning_research_can_still_use_search_tools(self):
         self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
@@ -1862,7 +1871,7 @@ class ImpliedSendTests(TestCase):
         mock_rate_limit.assert_called_once()
         mock_credit.assert_called_once()
 
-    def test_planning_ready_chat_without_end_planning_gets_runtime_correction(self):
+    def test_legacy_planning_state_does_not_hold_ready_chat(self):
         self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
         self.agent.save(update_fields=["planning_state", "updated_at"])
         self._add_inbound_web_message(
@@ -1901,16 +1910,10 @@ class ImpliedSendTests(TestCase):
                 attach_prompt_archive=lambda step: None,
             )
 
-        self.assertEqual(prepared.prepared_calls, [])
-        self.assertTrue(prepared.followup_required)
-        mock_rate_limit.assert_not_called()
-        mock_credit.assert_not_called()
-        self.assertTrue(
-            PersistentAgentStep.objects.filter(
-                agent=self.agent,
-                description__startswith="Planning Mode is active and the plan appears clear",
-            ).exists()
-        )
+        self.assertEqual([call.tool_name for call in prepared.prepared_calls], ["send_chat_message"])
+        self.assertFalse(prepared.followup_required)
+        mock_rate_limit.assert_called_once()
+        mock_credit.assert_called_once()
 
     def test_planning_ready_chat_with_end_planning_is_allowed(self):
         self.agent.planning_state = PersistentAgent.PlanningState.PLANNING

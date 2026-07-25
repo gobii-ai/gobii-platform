@@ -105,7 +105,7 @@ class UpdatePlanResearchSuppressionTests(TestCase):
         self.assertIn("send the final delivery with true", prompt)
         self.assertIn("finish/defer all Doing/Todo via update_plan false", prompt)
 
-    def test_planning_mode_does_not_prompt_for_final_delivery(self):
+    def test_legacy_planning_state_still_prompts_for_final_delivery(self):
         self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
         self.agent.save(update_fields=["planning_state"])
         PersistentAgentKanbanCard.objects.create(
@@ -117,7 +117,7 @@ class UpdatePlanResearchSuppressionTests(TestCase):
 
         prompt = format_current_plan_for_prompt(self.agent)
 
-        self.assertNotIn("send the final delivery", prompt)
+        self.assertIn("send the final delivery", prompt)
 
     def test_redundant_research_progress_update_is_skipped(self):
         PersistentAgentKanbanCard.objects.create(

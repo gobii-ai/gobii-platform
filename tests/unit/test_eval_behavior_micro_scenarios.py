@@ -44,9 +44,9 @@ from api.evals.scenarios.behavior_micro import (
     COMMON_USE_CASE_MICRO_SCENARIO_SLUGS,
     GOOGLE_SHEETS_EVAL_SYNTHETIC_TOOL_NAMES,
     IGNORED_FIRST_ACTION_TOOL_NAMES,
-    PLANNING_MICRO_SCENARIO_SLUGS,
-    PLANNING_DISMISS_AFTER_GREETING_DOES_NOT_RESUME,
-    PLANNING_SECURE_CREDENTIAL_REQUEST,
+    GUIDED_PLANNING_BOUNDED_WHEN_REQUESTED,
+    GUIDED_PLANNING_MICRO_SCENARIO_SLUGS,
+    LEGACY_PLANNING_STATE_EXECUTES_DIRECTLY,
     TOOL_CHOICE_MICRO_SCENARIO_SLUGS,
     UPDATE_PLAN_POLICIES,
     UPDATE_PLAN_POLICY_EXPECT,
@@ -122,12 +122,12 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
     def test_behavior_micro_suites_include_expected_scenarios(self):
         agent_behavior_suite = SuiteRegistry.get("agent_behavior_micro")
         charter_memory_suite = SuiteRegistry.get("charter_memory_micro")
-        planning_suite = SuiteRegistry.get("planning_micro")
+        planning_suite = SuiteRegistry.get("guided_planning_micro")
         tool_choice_suite = SuiteRegistry.get("tool_choice_micro")
 
         self.assertEqual(agent_behavior_suite.scenario_slugs, BEHAVIOR_MICRO_SCENARIO_SLUGS)
         self.assertEqual(charter_memory_suite.scenario_slugs, CHARTER_MEMORY_MICRO_SCENARIO_SLUGS)
-        self.assertEqual(planning_suite.scenario_slugs, PLANNING_MICRO_SCENARIO_SLUGS)
+        self.assertEqual(planning_suite.scenario_slugs, GUIDED_PLANNING_MICRO_SCENARIO_SLUGS)
         self.assertEqual(tool_choice_suite.scenario_slugs, TOOL_CHOICE_MICRO_SCENARIO_SLUGS)
         self.assertFalse(set(CHARTER_MEMORY_MICRO_SCENARIO_SLUGS) & set(BEHAVIOR_MICRO_SCENARIO_SLUGS))
         self.assertFalse(set(CHARTER_MEMORY_MICRO_SCENARIO_SLUGS) & set(TOOL_CHOICE_MICRO_SCENARIO_SLUGS))
@@ -179,25 +179,23 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
             ["request_human_input", "secure_credentials_request"],
         )
 
-    def test_planning_secure_credential_scenario_uses_real_secure_flow(self):
-        scenario = ScenarioRegistry.get(PLANNING_SECURE_CREDENTIAL_REQUEST)
-        planning_suite = SuiteRegistry.get("planning_micro")
-        policy = scenario._eval_stop_policy()
+    def test_guided_planning_suite_covers_optional_planning_and_direct_execution(self):
+        planning_suite = SuiteRegistry.get("guided_planning_micro")
 
-        self.assertIn(PLANNING_SECURE_CREDENTIAL_REQUEST, planning_suite.scenario_slugs)
         self.assertEqual(
-            [task.name for task in scenario.tasks],
+            planning_suite.scenario_slugs,
             [
-                "inject_prompt",
-                "verify_secure_credential_request",
-                "verify_no_human_input_request",
+                GUIDED_PLANNING_BOUNDED_WHEN_REQUESTED,
+                LEGACY_PLANNING_STATE_EXECUTES_DIRECTLY,
             ],
         )
-        self.assertEqual(policy["allowed_tool_names"], ["secure_credentials_request"])
-        self.assertEqual(policy["stop_on_tool_names"], ["request_human_input"])
         self.assertEqual(
-            policy["stop_when_all_seen"],
-            [{"tool_name": "secure_credentials_request", "after_execution": True}],
+            [task.name for task in ScenarioRegistry.get(GUIDED_PLANNING_BOUNDED_WHEN_REQUESTED).tasks],
+            ["inject_prompt", "verify_bounded_questions", "verify_no_execution_or_config"],
+        )
+        self.assertEqual(
+            [task.name for task in ScenarioRegistry.get(LEGACY_PLANNING_STATE_EXECUTES_DIRECTLY).tasks],
+            ["inject_prompt", "verify_direct_action", "verify_charter_preserved"],
         )
 
     def test_common_use_case_micro_evals_are_complete_and_registered(self):
@@ -2254,38 +2252,6 @@ class BehaviorMicroHelperTests(TestCase):
         requests = get_pending_human_input_requests(self.agent.id, self.run.id)
 
         self.assertEqual(requests, [expected])
-
-    def test_planning_dismiss_after_greeting_scenario_covers_no_resume(self):
-        scenario = ScenarioRegistry.get(PLANNING_DISMISS_AFTER_GREETING_DOES_NOT_RESUME)
-        self.run.scenario_slug = scenario.slug
-        self.run.save(update_fields=["scenario_slug"])
-        for sequence, task in enumerate(scenario.tasks, start=1):
-            EvalRunTask.objects.create(
-                run=self.run,
-                sequence=sequence,
-                name=task.name,
-                assertion_type=task.assertion_type,
-            )
-
-        with (
-            patch("api.agent.comms.human_input_requests._emit_pending_human_input_updates"),
-            patch("api.agent.tasks.process_agent_events_task.delay") as mock_delay,
-        ):
-            scenario.run(self.run.id, self.agent.id)
-
-        self.assertEqual(
-            list(self.run.tasks.order_by("sequence").values_list("status", flat=True)),
-            [
-                EvalRunTask.Status.PASSED,
-                EvalRunTask.Status.PASSED,
-                EvalRunTask.Status.PASSED,
-            ],
-        )
-        request_obj = PersistentAgentHumanInputRequest.objects.get(agent=self.agent)
-        self.assertEqual(request_obj.status, PersistentAgentHumanInputRequest.Status.CANCELLED)
-        self.assertIsNone(request_obj.raw_reply_message_id)
-        self.assertFalse(PersistentAgentMessage.objects.filter(owner_agent=self.agent, is_outbound=False).exists())
-        mock_delay.assert_not_called()
 
     def test_all_requests_have_options_requires_nonempty_options(self):
         with_options = SimpleNamespace(

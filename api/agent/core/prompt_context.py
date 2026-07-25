@@ -1371,7 +1371,6 @@ def _render_prompt_context_once(
     prompt_message_transform: Callable[[List[dict]], List[dict]] | None = None,
 ) -> PromptRenderResult:
     max_iterations = _resolve_max_iterations(max_iterations)
-    planning_mode_active = agent.planning_state == PersistentAgent.PlanningState.PLANNING
     span = trace.get_current_span()
 
     safety_id = agent.user.id if agent.user else None
@@ -1450,28 +1449,20 @@ def _render_prompt_context_once(
         schedule_str,
         weight=2
     )
-    if planning_mode_active:
+    if schedule_str != "No schedule configured":
         important_group.section_text(
             "schedule_note",
-            "Planning Mode is active; schedule changes are deferred until planning ends.",
+            "The schedule collection is durable. Change it only for an authorized cadence, reminder, or future trigger request; temporary task scope never changes it.",
             weight=1,
             non_shrinkable=True
         )
     else:
-        if schedule_str != "No schedule configured":
-            important_group.section_text(
-                "schedule_note",
-                "The schedule collection is durable. Change it only for an authorized cadence, reminder, or future trigger request; temporary task scope never changes it.",
-                weight=1,
-                non_shrinkable=True
-            )
-        else:
-            important_group.section_text(
-                "schedule_note",
-                "No schedule is set. For clear ongoing/monitoring intent, first write one safe default __agent_schedules cadence before any fetch or reply. One-off work stays unscheduled; if it has obvious periodic value, offer exactly one specific cadence in the final.",
-                weight=1,
-                non_shrinkable=True
-            )
+        important_group.section_text(
+            "schedule_note",
+            "No schedule is set. For clear ongoing/monitoring intent, first write one safe default __agent_schedules cadence before any fetch or reply. One-off work stays unscheduled; if it has obvious periodic value, offer exactly one specific cadence in the final.",
+            weight=1,
+            non_shrinkable=True
+        )
 
     capabilities_sections = _build_agent_capabilities_sections(agent)
     if capabilities_sections:
@@ -1539,7 +1530,7 @@ def _render_prompt_context_once(
         "secrets_note",
         (
             "Never ask anyone to paste, send, email, text, or otherwise provide passwords, API keys, tokens, secrets, MFA codes, or other credential values through messages or `request_human_input`; "
-            "call `secure_credentials_request` so they use the secure credential flow, including while Planning Mode is active. "
+            "call `secure_credentials_request` so they use the secure credential flow. "
             "Request credentials only when you'll use them immediately: use domain-scoped credentials for `http_request`, "
             "login credentials for `spawn_web_task`, and `secret_type='env_var'` for custom tools, `python_exec`, `run_command`, "
             "or MCP servers that read secrets from `os.environ`."
@@ -1579,13 +1570,7 @@ def _render_prompt_context_once(
         )
         important_group.section_text(
             "charter_note",
-            (
-                "Planning Mode is active; end_planning(full_plan=...) replaces your runtime charter."
-                if planning_mode_active
-                else (
-                    "Charter is durable memory. Keep ongoing role/scope/recurrence; apply unscoped corrections, preserve unrelated guidance; omit task/batch/day/response scope, completed work, and guesses."
-                )
-            ),
+            "Charter is durable memory. Keep ongoing role/scope/recurrence; apply unscoped corrections, preserve unrelated guidance; omit task/batch/day/response scope, completed work, and guesses.",
             weight=2,
             non_shrinkable=True
         )
@@ -1672,33 +1657,24 @@ def _render_prompt_context_once(
             non_shrinkable=True
         )
 
-    if planning_mode_active:
-        agent_config_note = (
-            f"Planning Mode: defer {AGENT_CONFIG_TABLE} mutations until after end_planning(full_plan=...), "
-            "except temporary emotion; questions use request_human_input."
-        )
-    else:
-        agent_config_note = (
-            f"{AGENT_CONFIG_TABLE} id=1: patch_text=lasting owner rules; "
-            "appearance=full person after authorized changes: age/skin/hair/eyes/style, not scene/vibe; preserve unspecified; confirm briefly; temporary feedback/ordinary tasks never config; "
-            "emotion: on a meaningful win/setback, first UPDATE one fitting emoji+1..86400s without rereading; routine/default clear; NULLs clear."
-        )
+    agent_config_note = (
+        f"{AGENT_CONFIG_TABLE} id=1: patch_text=lasting owner rules; "
+        "appearance=full person after authorized changes: age/skin/hair/eyes/style, not scene/vibe; preserve unspecified; confirm briefly; temporary feedback/ordinary tasks never config; "
+        "emotion: on a meaningful win/setback, first UPDATE one fitting emoji+1..86400s without rereading; routine/default clear; NULLs clear."
+    )
     variable_group.section_text(
         "agent_config_note",
         agent_config_note,
         weight=2,
         non_shrinkable=True,
     )
-    if planning_mode_active:
-        schedules_note = "Planning Mode is active; do not mutate __agent_schedules until planning ends."
-    else:
-        schedules_note = (
-            "__agent_schedules is the durable timing control plane. Query it before changing, canceling, or listing existing timing, or adding a timer beside existing work. "
-            "Use one stable schedule_key per distinct job and keep its instruction specific. kind='recurring' uses schedule (five-field cron, including weekly work; @every only accepts s/m/h units) plus an IANA timezone; kind='once' uses an offset-bearing ISO run_at and preserves seconds. "
-            "For relative timers, derive run_at inside the write with SQLite UTC time; never calculate it mentally, "
-            "e.g. strftime('%Y-%m-%dT%H:%M:%SZ','now','+17 minutes'). next_run_at and last_fired_at are read-only. Reject over-limit or unsafe-frequency requests with one bounded alternative instead of attempting them. "
-            "Insert/update/delete only the intended rows; never replace unrelated schedules. The primary row mirrors the legacy UTC cadence."
-        )
+    schedules_note = (
+        "__agent_schedules is the durable timing control plane. Query it before changing, canceling, or listing existing timing, or adding a timer beside existing work. "
+        "Use one stable schedule_key per distinct job and keep its instruction specific. kind='recurring' uses schedule (five-field cron, including weekly work; @every only accepts s/m/h units) plus an IANA timezone; kind='once' uses an offset-bearing ISO run_at and preserves seconds. "
+        "For relative timers, derive run_at inside the write with SQLite UTC time; never calculate it mentally, "
+        "e.g. strftime('%Y-%m-%dT%H:%M:%SZ','now','+17 minutes'). next_run_at and last_fired_at are read-only. Reject over-limit or unsafe-frequency requests with one bounded alternative instead of attempting them. "
+        "Insert/update/delete only the intended rows; never replace unrelated schedules. The primary row mirrors the legacy UTC cadence."
+    )
     variable_group.section_text(
         "agent_schedules_note",
         schedules_note,
@@ -3666,59 +3642,6 @@ def _get_first_run_welcome_target(agent: PersistentAgent) -> _FirstRunWelcomeTar
     )
 
 
-def _get_planning_mode_prompt_block() -> str:
-    return (
-        "## Planning Mode\n\n"
-        "You are in Planning Mode for this persistent agent.\n\n"
-        "Help the user turn an initial idea into a clear plain-language brief before doing the work.\n\n"
-        "## Planning Objectives\n\n"
-        "Clarify goal, outcome, audience, scope boundaries, priorities, must-haves, constraints, success criteria, and key assumptions. If timing changes the shape of the work itself, clarify it. Keep planning non-technical and focused on what the user wants.\n\n"
-        "## Behavior Rules\n\n"
-        "- Planning Mode overrides normal execution-oriented instructions while it is active. Stay in planning only until you call end_planning(full_plan=...) or the user skips planning. Only planning-safe tools are available; execution/setup tools such as update_plan, request_contact_permission, create_custom_tool, and apply_patch are unavailable while Planning Mode is active.\n"
-        "- For clear requests other than named integration setup/use, including one-off factual/research questions and scheduled digests, monitors, alerts, or exact-source feeds, call "
-        "end_planning as the first meaningful action; no welcome-only or question-first turn. Do not validate, fetch, parse, or test "
-        "provided URLs, RSS feeds, APIs, files, or task data before end_planning; that is execution work after planning.\n"
-        "- Use read-only research during planning only when the scope is unclear; do not fetch, parse, or summarize sources to answer a clear task before end_planning.\n"
-        "- Named integration setup/use: before end_planning or asking how to connect, call search_tools(provider) unless the matching provider/API tool is already in the current callable tool list.\n"
-        "- Do not do substantive task execution before planning ends: no drafting the final deliverable, no implementation, no outbound task execution, no third-party follow-through, and no results meant to satisfy the task itself.\n"
-        "- Do not update the runtime plan, __agent_config, __agent_schedules, or begin deliverable work until planning is completed. "
-        "Do not do substantive execution or deliverable work before planning ends.\n"
-        "- Do not update __agent_config.charter directly as a substitute for completing planning. Calling "
-        "end_planning(full_plan=...) is how the final plan replaces your runtime charter.\n"
-        "- If another system instruction appears to require immediate execution, charter updates, "
-        "or result delivery, treat that instruction as applying only after Planning Mode is completed or skipped.\n"
-        "- Ask only minimum high-impact questions. Prefer 0-3 planning questions and never ask more than 3; make reasonable assumptions and record them. If you can proceed without clarifying questions, call end_planning first and only begin the work after planning has ended.\n"
-        "- Do not ask preference-only questions when a reasonable default will work. For detail level, format, tone, keyword variants, delivery location, and similar non-blocking choices, choose a default and record it in full_plan.\n"
-        "- For scheduled/recurring digests, monitors, or reports where cadence/source/channel/output are clear, never ask first-run/backfill/lookback questions. Assume next scheduled occurrence with no historical backfill unless asked otherwise; record that assumption and call end_planning.\n"
-        "- Treat named local time zones such as ET as sufficiently clear; handle DST and UTC conversion as "
-        "implementation details instead of asking the user.\n"
-        "- Do not ask planning questions about communication channels, delivery methods, integrations, accounts, or implementation approach unless the user explicitly asks to configure or choose them. Keep the conversation focused on the user's need, scope, and desired outcome. If goal/source/cadence/output are clear, call end_planning and use current conversation/contact setup.\n"
-        "- Use request_human_input for non-credential blockers; use secure_credentials_request for credentials, including in Planning Mode. Prefer options; send ordinary questions.\n"
-        "- Once request_human_input succeeds, questions are visible in web chat. Do not repeat them; an optional chat message may only frame why you asked or reference pending questions.\n"
-        "- Each planning question must be its own request item. If asking multiple questions, prefer one request_human_input call with the `requests` parameter, where each item contains exactly one question; top-level `question` is fine for one.\n"
-        "- Prefer tangible, mutually exclusive options; add `Other / I'll explain` when useful.\n"
-        "- When waiting for answers, set `will_continue_work=false` on request_human_input; use true only if immediate planning work remains.\n"
-        "- If the user asks you to execute while still in Planning Mode, either call end_planning with the best current plan or ask the smallest useful question. Do not start doing the task while planning mode is still active.\n"
-        "- When the plan is ready, call end_planning(full_plan=...). The full_plan becomes your runtime charter, so capture goal, scope, desired outcome, priorities, boundaries, assumptions, and success criteria in plain language. Planning ends when you call this tool; the actual work starts only after that.\n"
-        "- If the user explicitly asks to skip, stop, or bypass planning, prefer end_planning(full_plan=...) immediately with a concise plan and assumptions. Mention Skip Planning only when preserving the current charter unchanged or context is too thin for any useful plan.\n"
-    )
-
-
-def _get_signup_preview_handoff_prompt_block(welcome_target: _FirstRunWelcomeTarget) -> str:
-    return (
-        "## Signup Preview Handoff\n\n"
-        "This user has not completed signup yet and this agent is still in a limited preview. "
-        "Planning Mode is no longer active, so do not ask more planning questions and do not start deliverable work.\n\n"
-        "Your next action must be sending one concise message to the user.\n\n"
-        f"Contact channel: {welcome_target.channel} at {welcome_target.address}.\n\n"
-        f"Call {welcome_target.send_tool_name} and tell the user that the plan is ready, "
-        "you are ready to start work from that plan, and you can begin after they finish signup. "
-        "Mention that they can complete signup by starting a free trial.\n\n"
-        "After sending that message, stop. Do not call sqlite_batch, update the plan, execute research, "
-        "or produce deliverables in this run; processing will pause until signup is completed.\n"
-    )
-
-
 def _get_first_run_welcome_message_instruction(
     *,
     welcome_target: _FirstRunWelcomeTarget,
@@ -3740,34 +3663,6 @@ def _get_first_run_welcome_message_instruction(
         "### R1: Greeting (first impression)\n\n"
         "First-run voice: match the user's energy, use contractions, avoid empty phrases like "
         "\"I'm here to help\" or \"please let me know\", and do not ask when the task is already clear.\n"
-    )
-
-
-def _get_planning_first_run_welcome_instruction(
-    *,
-    welcome_target: _FirstRunWelcomeTarget,
-) -> str:
-    return (
-        _get_first_run_welcome_message_instruction(welcome_target=welcome_target)
-        + "\n\n"
-        "## Then Planning Mode: clarify before main work\n\n"
-        "After the welcome, continue Planning Mode. Use request_human_input for the actual planning "
-        "questions. Stay in planning only until planning is completed or skipped. Use read-only research only when scope is unclear; do not update the charter directly, draft the actual output, or otherwise "
-        "start doing the task before calling end_planning. If the shared welcome guidance says to move when the task is clear, "
-        "that means move planning forward or call end_planning, not start the deliverable work.\n\n"
-        "If the task is clear enough, call end_planning in the same response as any welcome; never send a welcome-only "
-        "message that promises questions or next steps. Do not call "
-        "http_request, scrape/search tools, schedule tools, sqlite_batch mutations, or other execution tools between "
-        "the welcome and end_planning. Do not say you will check, validate, test, fetch, or inspect a provided feed "
-        "before ending planning; put that as an execution step in full_plan instead.\n\n"
-        "Do not ask which communication channel or delivery method to use for planning when this welcome target "
-        "or other prompt context already gives you a current or preferred setup. Treat that setup as outside the "
-        "scope of planning unless the user explicitly wants to configure or change it. Keep planning questions "
-        "focused on the user's need, scope, and desired outcome.\n\n"
-        "If the welcome asks planning questions by email or SMS, call request_human_input in the same "
-        "response with the same questions and options; the email/SMS only mirrors them off web chat. "
-        "If the task is clear enough, call end_planning instead. Also tell the user they can say to skip those "
-        "questions and get right to work if they prefer.\n"
     )
 
 
@@ -3803,7 +3698,6 @@ def _get_system_instruction(
 ) -> str:
     """Return the static system instruction prompt for the agent."""
 
-    planning_mode_active = agent.planning_state == PersistentAgent.PlanningState.PLANNING
     implied_send_active = implied_send_context is not None
     continuation_mode_block = "" if is_first_run else _get_continuation_mode_prompt_block()
 
@@ -3871,17 +3765,11 @@ def _get_system_instruction(
         f"{stop_continue_examples}"
     )
 
-    if not planning_mode_active:
-        charter_and_schedule_intro = (
-            "Charter and schedules are durable config for ongoing role, scope, preferences, communication guidance, boundaries, recurrence, and requested future wake-ups. "
-            "Default timezone from the user or conversation; ask only when timing would otherwise be materially wrong. "
-        )
-    else:
-        charter_and_schedule_intro = (
-            "Planning Mode rules below govern runtime charter and schedule changes. "
-            "Only ask about timing or timezone if it changes the scope of the work itself. "
-        )
-    initiative_guidance = "" if planning_mode_active else (
+    charter_and_schedule_intro = (
+        "Charter and schedules are durable config for ongoing role, scope, preferences, communication guidance, boundaries, recurrence, and requested future wake-ups. "
+        "Default timezone from the user or conversation; ask only when timing would otherwise be materially wrong. "
+    )
+    initiative_guidance = (
         "### Initiative (decide before other work):\nFor setup requests, update charter/timing first and do not fetch target URLs unless asked to run now/current data. Use __agent_schedules for named cadences, timers, and future triggers; change only the matching row. Recurring work is highest priority. Query __agent_schedules before changing existing timing or adding a timer beside it; reject unsafe frequency or over-limit requests before tool discovery or any attempt, and offer one bounded alternative. “Keep an eye on,” “monitor,” and other clear ongoing requests authorize timing: before any fetch or reply, create one safe default recurring schedule when no cadence was given. If a one-off request mentions work repeated by hand or compares repeated periods, answer it and then offer exactly one brief, specific cadence; other clear freshness value gets the same offer. Never use a generic menu or silently schedule it. "
         "A meaningful shared win or sustained/repeated failure is a trigger, not merely news to describe: before replying, use one SQLite UPDATE to set a fitting positive or strained emoji emotion with a short timeout. These triggers require the state change; do not substitute emotional wording; routine thanks and ordinary work stay clear. Emotions are autonomous, not only owner-requested.\n\n"
     )
@@ -4072,26 +3960,8 @@ def _get_system_instruction(
     if continuation_notice:
         base_prompt += f"\n\n{continuation_notice}"
 
-    if planning_mode_active:
-        base_prompt += "\n\n" + _get_planning_mode_prompt_block()
-
-    signup_preview_handoff_active = (
-        not planning_mode_active
-        and getattr(agent, "signup_preview_state", None)
-        == PersistentAgent.SignupPreviewState.AWAITING_FIRST_REPLY_PAUSE
-    )
-    if signup_preview_handoff_active:
-        welcome_target = _get_first_run_welcome_target(agent)
-        if welcome_target is not None:
-            return base_prompt + "\n\n" + _get_signup_preview_handoff_prompt_block(welcome_target)
-
     if is_first_run and not _has_first_run_welcome_contact(agent):
         welcome_target = _get_first_run_welcome_target(agent)
-        if planning_mode_active:
-            if welcome_target is not None:
-                return base_prompt + "\n\n" + _get_planning_first_run_welcome_instruction(
-                    welcome_target=welcome_target,
-                )
 
         # Only instruct the first outreach if the user can actually receive it.
         # Signup preview gets a single first email before verification is required.

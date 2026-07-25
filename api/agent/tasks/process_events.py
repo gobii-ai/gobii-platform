@@ -445,42 +445,6 @@ def process_unseen_web_chat_followup_task(self, message_id: str) -> None:  # noq
     process_agent_events_task.delay(str(followup.agent.id))
 
 
-@shared_task(bind=True, name="api.agent.tasks.process_planning_timeout")
-def process_planning_timeout_task(self, persistent_agent_id: str) -> None:  # noqa: D401, ANN001
-    """Create a one-time planning timeout directive and queue agent processing."""
-    from api.models import PersistentAgent, PersistentAgentSystemMessage
-    from api.services.agent_planning import PLANNING_TIMEOUT_SYSTEM_MESSAGE_MARKER, build_planning_timeout_directive
-
-    queued_agent_id = None
-    with transaction.atomic():
-        agent = PersistentAgent.objects.select_for_update().filter(id=persistent_agent_id).first()
-        if agent is None:
-            return
-
-        directive = build_planning_timeout_directive(agent)
-        if directive is None:
-            return
-
-        already_exists = PersistentAgentSystemMessage.objects.filter(
-            agent=agent,
-            body__contains=PLANNING_TIMEOUT_SYSTEM_MESSAGE_MARKER,
-        ).exists()
-        if already_exists:
-            return
-
-        PersistentAgentSystemMessage.objects.create(
-            agent=agent,
-            body=directive,
-        )
-        queued_agent_id = str(agent.id)
-
-    logger.info(
-        "Queued planning-timeout processing for agent %s.",
-        queued_agent_id,
-    )
-    process_agent_events_task.delay(queued_agent_id)
-
-
 @shared_task(bind=True, name="api.agent.tasks.process_pending_agent_events")
 def process_pending_agent_events_task(
     self,

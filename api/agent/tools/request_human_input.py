@@ -81,7 +81,7 @@ def get_request_human_input_tool() -> dict[str, Any]:
                 "Use send_chat_message/send_email/send_sms/send_agent_message for non-blocking questions or capability/status/policy answers. "
                 "Include an Other / I'll explain option when choices are useful but not exhaustive. "
                 "Planning questions should use at most three options. "
-                "Outside Planning Mode, do not use for preference surveys, timezone/channel choices, optional formatting, category example choices such as which vendor/company, non-blocking backfill/lookback, or reversible defaults you can choose and disclose. "
+                "Do not use for preference surveys, timezone/channel choices, optional formatting, category example choices such as which vendor/company, non-blocking backfill/lookback, or reversible defaults you can choose and disclose. "
                 "Use it when the user explicitly asks you to ask for targets/scope before setup or missing targets/scope block a recurring monitor. "
                 f"Plain text only; max {MAX_HUMAN_INPUT_QUESTION_LENGTH} chars."
             ),
@@ -101,7 +101,7 @@ def get_request_human_input_tool() -> dict[str, Any]:
                     "requests": {
                         "type": "array",
                         "items": request_schema,
-                        "description": "Multiple requests with options; omit top-level question/options. Planning Mode: at most three.",
+                        "description": "Multiple genuinely blocking requests with options; omit top-level question/options.",
                     },
                     "recipient": {
                         "description": "Optional explicit recipient; omit for the current implicit conversation target.",
@@ -236,18 +236,7 @@ def execute_request_human_input(agent: PersistentAgent, params: dict[str, Any]) 
         ):
             return {"status": "error", "message": CREDENTIAL_SOLICITATION_ERROR_MESSAGE}
 
-        omitted_request_count = 0
-        if agent.planning_state == PersistentAgent.PlanningState.PLANNING and len(requests) > 3:
-            omitted_request_count = len(requests) - 3
-            requests = requests[:3]
-
         result = create_human_input_requests_batch(agent, requests=requests, recipient=recipient)
-        if omitted_request_count:
-            result["omitted_request_count"] = omitted_request_count
-            result["message"] = (
-                f"{result.get('message', '').rstrip()} Omitted {omitted_request_count} extra planning "
-                "request(s); Planning Mode allows at most 3 questions per round."
-            ).strip()
         if will_continue_work is True:
             result.pop("auto_sleep_ok", None)
         return result
@@ -266,11 +255,11 @@ def execute_request_human_input(agent: PersistentAgent, params: dict[str, Any]) 
     if request_solicits_credential_value(question, options):
         return {"status": "error", "message": CREDENTIAL_SOLICITATION_ERROR_MESSAGE}
 
-    if agent.planning_state != PersistentAgent.PlanningState.PLANNING and options and len(options) > 3:
+    if options and len(options) > 3:
         return {
             "status": "error",
             "message": (
-                "Outside Planning Mode, request_human_input is for one blocking decision, not preference surveys. "
+                "request_human_input is for one blocking decision, not preference surveys. "
                 "Ask at most one concise question with up to 3 options, or choose a reasonable default and disclose it."
             ),
         }

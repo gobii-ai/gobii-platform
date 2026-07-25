@@ -13,10 +13,9 @@ from api.evals.registry import ScenarioRegistry
 from api.evals.scenarios.behavior_micro import (
     BEHAVIOR_MICRO_SCENARIO_SLUGS,
     COMMON_USE_CASE_EVAL_CASES,
-    PLANNING_FIRST_TURN_ASKS_BOUNDED_QUESTIONS,
-    PLANNING_INTEGRATION_SETUP_SEARCHES_BEFORE_QUESTION,
-    PLANNING_MICRO_SCENARIO_SLUGS,
-    PLANNING_SECURE_CREDENTIAL_REQUEST,
+    GUIDED_PLANNING_BOUNDED_WHEN_REQUESTED,
+    GUIDED_PLANNING_MICRO_SCENARIO_SLUGS,
+    LEGACY_PLANNING_STATE_EXECUTES_DIRECTLY,
     TOOL_CHOICE_MICRO_SCENARIO_SLUGS,
 )
 from api.evals.suites import SuiteRegistry
@@ -30,23 +29,12 @@ MONITORING_SCOPE_QUESTION = "common_use_case_099_request_monitoring_scope"
 
 @tag("eval_sim")
 class BehaviorMicroScenarioTests(SimpleTestCase):
-    def test_final_report_eval_does_not_count_skipped_send_as_delivered(self):
-        scenario = ScenarioRegistry.get("planning_final_report_completes_visible_plan")
-        skipped_call = SimpleNamespace(result=json.dumps({"status": "ok", "skipped": True}))
-        delivered_call = SimpleNamespace(result=json.dumps({"status": "ok"}))
+    def test_guided_planning_scenarios_are_registered(self):
+        suite = SuiteRegistry.get("guided_planning_micro")
 
-        self.assertFalse(scenario._message_call_was_delivered(skipped_call))
-        self.assertTrue(scenario._message_call_was_delivered(delivered_call))
-
-    def test_planning_questions_eval_exercises_normal_wait_lifecycle(self):
-        scenario = ScenarioRegistry.get(PLANNING_FIRST_TURN_ASKS_BOUNDED_QUESTIONS)
-        policy = scenario._eval_stop_policy()
-
-        self.assertNotIn("stop_on_human_input_request", policy)
-        self.assertIn(
-            "verify_questions_remain_pending",
-            [task.name for task in scenario.tasks],
-        )
+        self.assertEqual(suite.scenario_slugs, GUIDED_PLANNING_MICRO_SCENARIO_SLUGS)
+        self.assertIn(GUIDED_PLANNING_BOUNDED_WHEN_REQUESTED, BEHAVIOR_MICRO_SCENARIO_SLUGS)
+        self.assertIn(LEGACY_PLANNING_STATE_EXECUTES_DIRECTLY, BEHAVIOR_MICRO_SCENARIO_SLUGS)
 
     def test_sqlite_export_case_seeds_exact_lead_fixture(self):
         scenario = ScenarioRegistry.get(SQLITE_EXPORT_QUERY_CSV)
@@ -132,43 +120,25 @@ class BehaviorMicroScenarioTests(SimpleTestCase):
         self.assertFalse(scenario._call_satisfies_expected_tool(chat_call, "request_human_input"))
 
     def test_integration_discovery_scenarios_are_registered_in_expected_suites(self):
-        planning_suite = SuiteRegistry.get("planning_micro")
         tool_choice_suite = SuiteRegistry.get("tool_choice_micro")
         behavior_suite = SuiteRegistry.get("agent_behavior_micro")
 
-        self.assertIn(PLANNING_INTEGRATION_SETUP_SEARCHES_BEFORE_QUESTION, PLANNING_MICRO_SCENARIO_SLUGS)
-        self.assertIn(PLANNING_INTEGRATION_SETUP_SEARCHES_BEFORE_QUESTION, planning_suite.scenario_slugs)
         self.assertIn(APOLLO_CONNECT_SEARCH, TOOL_CHOICE_MICRO_SCENARIO_SLUGS)
         self.assertIn(SLACK_CONNECT_SEARCH, TOOL_CHOICE_MICRO_SCENARIO_SLUGS)
         self.assertIn(APOLLO_CONNECT_SEARCH, tool_choice_suite.scenario_slugs)
         self.assertIn(SLACK_CONNECT_SEARCH, tool_choice_suite.scenario_slugs)
-        self.assertIn(PLANNING_INTEGRATION_SETUP_SEARCHES_BEFORE_QUESTION, BEHAVIOR_MICRO_SCENARIO_SLUGS)
         self.assertIn(APOLLO_CONNECT_SEARCH, behavior_suite.scenario_slugs)
         self.assertIn(SLACK_CONNECT_SEARCH, behavior_suite.scenario_slugs)
 
-    def test_planning_secure_credential_scenario_is_registered(self):
-        scenario = ScenarioRegistry.get(PLANNING_SECURE_CREDENTIAL_REQUEST)
-        planning_suite = SuiteRegistry.get("planning_micro")
-
-        self.assertIn(PLANNING_SECURE_CREDENTIAL_REQUEST, planning_suite.scenario_slugs)
-        self.assertIn("credentials", scenario.tags)
-        self.assertEqual(scenario._eval_stop_policy()["stop_on_tool_names"], ["request_human_input"])
-
-    def test_planning_integration_discovery_metadata_and_stop_policy(self):
-        scenario = ScenarioRegistry.get(PLANNING_INTEGRATION_SETUP_SEARCHES_BEFORE_QUESTION)
+    def test_guided_planning_metadata_is_explicitly_optional(self):
+        scenario = ScenarioRegistry.get(GUIDED_PLANNING_BOUNDED_WHEN_REQUESTED)
         metadata = scenario.get_metadata()
-        policy = scenario._eval_stop_policy()
-        mock_config = scenario._mock_config()
 
-        self.assertEqual(metadata.category, "planning")
+        self.assertEqual(metadata.category, "guided_planning")
         self.assertEqual(metadata.area, "agent_behavior")
         self.assertEqual(metadata.expected_runtime, "short")
         self.assertEqual(metadata.cost_class, "low")
-        self.assertIn("integration_discovery", metadata.tags)
-        self.assertTrue(policy["stop_on_first_relevant_tool"])
-        self.assertTrue(policy["stop_on_human_input_request"])
-        self.assertIn("send_chat_message", policy["ignored_tool_names"])
-        self.assertIn("search_tools", mock_config)
+        self.assertIn("guided_planning", metadata.tags)
 
     def test_common_integration_discovery_cases_expect_tool_search_not_questions(self):
         cases = {case.slug: case for case in COMMON_USE_CASE_EVAL_CASES}

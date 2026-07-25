@@ -470,7 +470,7 @@ def format_current_plan_for_prompt(agent) -> str:
         return "Current plan: none"
 
     heading = "Current plan:"
-    if (snapshot.todo_count or snapshot.doing_count) and agent.planning_state != agent.PlanningState.PLANNING:
+    if snapshot.todo_count or snapshot.doing_count:
         heading += " before stopping: send the final delivery with true, then finish/defer all Doing/Todo via update_plan false"
     lines = [
         heading,

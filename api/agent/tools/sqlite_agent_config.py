@@ -336,11 +336,6 @@ def apply_sqlite_agent_config_updates(
         schedule_error = _validate_schedule_mutation(baseline, current)
         if schedule_error:
             errors[schedule_error_key] = schedule_error
-        elif _planning_mode_active(agent):
-            errors[schedule_error_key] = (
-                "Schedule updates are unavailable while planning mode is active. "
-                "Complete or skip planning first."
-            )
         else:
             try:
                 _apply_schedule_mutation(
@@ -576,12 +571,6 @@ def _apply_schedule_mutation(
                 agent,
                 [_schedule_service_row(row) for row in current_additional],
             )
-
-
-def _planning_mode_active(agent) -> bool:
-    from api.models import PersistentAgent
-
-    return agent.planning_state == PersistentAgent.PlanningState.PLANNING
 
 
 def _schedule_service_row(row: AgentScheduleSnapshot) -> dict:

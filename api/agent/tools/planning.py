@@ -4,42 +4,13 @@ from api.models import PersistentAgent
 from api.services.agent_planning import complete_agent_planning
 
 
-def get_end_planning_tool() -> Dict[str, Any]:
-    """Return the planning-mode completion tool definition."""
-    return {
-        "type": "function",
-        "function": {
-            "name": "end_planning",
-            "description": (
-                "Complete planning mode once the user's need, scope, desired outcome, "
-                "constraints, assumptions, and success criteria are clear in plain language. "
-                "For clear one-off research, factual answers, or execute-now requests, call this before "
-                "search_tools, web/search tools, or result delivery."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "full_plan": {
-                        "type": "string",
-                        "description": "The full decision-complete plan to store as the agent charter before work begins.",
-                    },
-                },
-                "required": ["full_plan"],
-            },
-        },
-    }
-
-
 def execute_end_planning(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str, Any]:
-    """Execute the end_planning tool for a persistent agent."""
+    """Handle an in-flight legacy completion without changing durable config."""
     full_plan = params.get("full_plan")
     if not isinstance(full_plan, str) or not full_plan.strip():
         return {"status": "error", "message": "Missing or invalid required parameter: full_plan"}
 
-    try:
-        updated_agent = complete_agent_planning(agent, full_plan)
-    except ValueError as exc:
-        return {"status": "error", "message": str(exc)}
+    updated_agent = complete_agent_planning(agent, full_plan)
 
     from console.agent_chat.signals import emit_agent_planning_state_update
 
@@ -47,6 +18,6 @@ def execute_end_planning(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
 
     return {
         "status": "ok",
-        "message": "Planning completed.",
-        "planning_state": PersistentAgent.PlanningState.COMPLETED,
+        "message": "Legacy planning record completed; durable configuration was unchanged.",
+        "planning_state": updated_agent.planning_state,
     }
