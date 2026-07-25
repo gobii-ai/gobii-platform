@@ -10,7 +10,6 @@ from api.agent.files.attachment_helpers import AttachmentResolutionError, resolv
 from api.agent.comms.outbound_content_policy import markdown_only_error
 from api.agent.tools.attachment_guidance import SEND_TOOL_ATTACHMENTS_DESCRIPTION
 from api.agent.tools.agent_variables import substitute_variables_with_filespace
-from api.agent.tools.charter_text import repair_structural_literal_newlines
 from api.agent.core.link_references import handle_link_reference_errors
 from api.models import PersistentAgent
 from api.services.discord_bot import DiscordBotIntegrationError, send_channel_message
@@ -42,7 +41,11 @@ def get_send_discord_message_tool() -> Dict[str, Any]:
                                        "Discord cannot render tables: never send pipe-separated columns with a "
                                        "hyphen-divider row, even as a summary. "
                                        "Use Markdown only; raw HTML is rejected. Use code formatting to show HTML literally. "
-                                       "Do not pass tool-call/XML syntax; it is sent literally.",
+                                       "Do not pass tool-call/XML syntax; it is sent literally. "
+                                       "Write line breaks as real newlines in the string value. A backslash "
+                                       "followed by n is sent literally and the reader sees those two "
+                                       "characters instead of a line break, which breaks every heading, "
+                                       "bullet and paragraph above.",
                     },
                     "attachments": {
                         "type": "array",
@@ -68,16 +71,6 @@ def execute_send_discord_message(agent: PersistentAgent, params: Dict[str, Any])
     if not channel_id:
         return {"status": "error", "message": "channel_id is required."}
     body = substitute_variables_with_filespace(body, agent)
-    # A double-escaped body reaches us as the two characters backslash-n, which Discord renders
-    # verbatim. Repair only the unambiguous structural cases; a lone \n being discussed as text
-    # is left alone.
-    body, repaired_newlines, _ = repair_structural_literal_newlines(body)
-    if repaired_newlines:
-        logger.info(
-            "Repaired %d literal newline(s) in outbound Discord message for agent %s",
-            repaired_newlines,
-            agent.id,
-        )
     if content_error := markdown_only_error(body, surface="Discord"):
         return content_error
     try:
