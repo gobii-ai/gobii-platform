@@ -7765,6 +7765,14 @@
     .agent-fab {
         display: flex;
     }
+    /* The switcher is fixed over the bottom-right of the timeline, so whatever comes to rest
+       there is covered by it. At the default scroll position that is a suggested-follow-up row,
+       and tapping the row opens the switcher instead of running the prompt. Reserve the strip
+       the switcher occupies -- its own height plus the gap it leaves above the composer -- so
+       content can always scroll clear of it. Keep in step with .agent-fab. */
+    .agent-chat-workspace-main:has(.composer-shell) #timeline-inner {
+        padding-bottom: calc(env(safe-area-inset-bottom, 0px) + var(--composer-height, 6.5rem) + 1.625rem + 2.75rem);
+    }
 }
 .agent-fab:hover {
     transform: scale(1.08);
