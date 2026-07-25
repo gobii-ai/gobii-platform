@@ -37,13 +37,16 @@ MARKDOWN_EXTENSIONS = ["extra", "sane_lists", "smarty", "nl2br"]
 
 HTML_TAG_PATTERN = r"</?(?:p|br|hr|img|div|span|a|ul|ol|li|h[1-6]|strong|em|b|i|code|pre|blockquote|table|thead|tbody|tr|th|td)\b[^>]*>"
 
+INLINE_ITALIC_STAR_PATTERN = r"(?<!\*)\*(?![\s*])(.+?)(?<![\s*])\*(?!\*)"
+INLINE_ITALIC_UNDER_PATTERN = r"(?<![\w_])_(?![\s_])(.+?)(?<![\s_])_(?![\w_])"
+
 INLINE_MARKDOWN_PATTERNS = [
     re.compile(r"\*\*.+?\*\*"),
     re.compile(r"__.+?__"),
     re.compile(r"`{1,3}.+?`{1,3}"),
     re.compile(r"\[[^\]]+\]\([^)]+\)"),
-    re.compile(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)"),
-    re.compile(r"(?<!_)_(?!_)(.+?)(?<!_)_(?!_)"),
+    re.compile(INLINE_ITALIC_STAR_PATTERN),
+    re.compile(INLINE_ITALIC_UNDER_PATTERN),
 ]
 BLOCK_MARKDOWN_PATTERNS = [
     re.compile(r"^\s{0,3}#", re.MULTILINE),
@@ -99,8 +102,8 @@ INLINE_LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
 INLINE_CODE_RE = re.compile(r"`([^`]+)`")
 INLINE_BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
 INLINE_BOLD_UNDER_RE = re.compile(r"__(.+?)__")
-INLINE_ITALIC_STAR_RE = re.compile(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)")
-INLINE_ITALIC_UNDER_RE = re.compile(r"(?<!_)_(?!_)(.+?)(?<!_)_(?!_)")
+INLINE_ITALIC_STAR_RE = re.compile(INLINE_ITALIC_STAR_PATTERN)
+INLINE_ITALIC_UNDER_RE = re.compile(INLINE_ITALIC_UNDER_PATTERN)
 TABLE_CLOSE_RE = re.compile(r"</table>", re.IGNORECASE)
 
 
