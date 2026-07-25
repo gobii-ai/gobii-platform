@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings, tag
-from django.urls import reverse
+from django.urls import resolve, reverse
 from django.utils import timezone
 
 from api.models import (
@@ -15,6 +15,8 @@ from api.models import (
     AgentEmailOAuthSession,
     BrowserUseAgent,
     CommsChannel,
+    Organization,
+    OrganizationMembership,
     PersistentAgent,
     PersistentAgentCommsEndpoint,
 )
@@ -59,6 +61,12 @@ class AgentEmailOAuthApiTests(TestCase):
     def setUp(self):
         self.client.force_login(self.user)
 
+    def test_start_route_preserves_public_oauth_launch_url(self):
+        path = "/console/api/email/oauth/start/"
+
+        self.assertEqual(reverse("console-email-oauth-start"), path)
+        self.assertEqual(resolve(path).url_name, "console-email-oauth-start")
+
     def test_start_creates_session(self):
         url = reverse("console-email-oauth-start")
         response = self.client.post(
@@ -99,6 +107,73 @@ class AgentEmailOAuthApiTests(TestCase):
             content_type="application/json",
         )
         self.assertEqual(response.status_code, 404)
+
+    @patch.dict(
+        os.environ,
+        {
+            "MICROSOFT_CLIENT_ID": "managed-ms-client-id",
+            "MICROSOFT_CLIENT_SECRET": "managed-ms-secret",
+        },
+        clear=False,
+    )
+    def test_start_allows_organization_owner_to_manage_account(self):
+        organization = Organization.objects.create(
+            name="Email OAuth Org",
+            slug="email-oauth-org",
+            created_by=self.user,
+        )
+        OrganizationMembership.objects.create(
+            org=organization,
+            user=self.user,
+            role=OrganizationMembership.OrgRole.OWNER,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        )
+        with (
+            patch.object(BrowserUseAgent, "select_random_proxy", return_value=None),
+            patch.object(PersistentAgent, "_validate_org_seats", return_value=None),
+        ):
+            browser_agent = BrowserUseAgent.objects.create(
+                user=self.other_user,
+                name="Org BA",
+            )
+            agent = PersistentAgent.objects.create(
+                user=self.other_user,
+                organization=organization,
+                name="Org OAuth Agent",
+                charter="c",
+                browser_use_agent=browser_agent,
+            )
+        endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=agent,
+            channel=CommsChannel.EMAIL,
+            address="org-agent@example.com",
+            is_primary=True,
+        )
+        account = AgentEmailAccount.objects.create(endpoint=endpoint)
+        session = self.client.session
+        session["context_type"] = "organization"
+        session["context_id"] = str(organization.pk)
+        session["context_name"] = organization.name
+        session.save()
+
+        response = self.client.post(
+            "/console/api/email/oauth/start/",
+            data=json.dumps(
+                {
+                    "account_id": str(account.pk),
+                    "provider": "microsoft",
+                    "scope": "offline_access",
+                    "token_endpoint": "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+                    "use_gobii_app": True,
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.content)
+        oauth_session = AgentEmailOAuthSession.objects.get(id=response.json()["session_id"])
+        self.assertEqual(oauth_session.account, account)
+        self.assertEqual(oauth_session.organization, organization)
 
     @override_settings(GOOGLE_CLIENT_ID="managed-client-id", GOOGLE_CLIENT_SECRET="managed-secret")
     def test_start_uses_managed_app(self):
@@ -377,6 +452,7 @@ class AgentEmailOAuthApiTests(TestCase):
         self.assertIn("address", payload["defaultEndpoint"])
         self.assertIn("isInboundAliasActive", payload["defaultEndpoint"])
         self.assertEqual(payload["oauth"]["callbackPath"], reverse("app-email-oauth-callback-view"))
+        self.assertEqual(payload["oauth"]["startUrl"], "/console/api/email/oauth/start/")
         self.assertIn("gmail", payload["providerDefaults"])
         self.assertIn("microsoft", payload["providerDefaults"])
         self.assertIn("outlook", payload["providerDefaults"])
