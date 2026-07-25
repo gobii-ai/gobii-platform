@@ -79,6 +79,15 @@ function getBurnRateUsageLevel(metadata: BurnRateMetadata): 'normal' | 'warning'
 
 const DEFAULT_INSIGHT_TAB_COLOR = '#AA74CE'
 const INLINE_HTML_TAG_PATTERN = /<\/?[a-z][\s\S]*>/i
+const EDITABLE_TAG_PATTERN = /^(input|textarea|select)$/i
+
+// Focusing costs nothing with a fine pointer, but where touch is the primary input it raises the
+// on-screen keyboard over the conversation. Keyed to pointer rather than touch support, so a
+// touchscreen laptop keeps the convenience.
+function prefersPointerAutoFocus(): boolean {
+  return typeof window === 'undefined' || typeof window.matchMedia !== 'function'
+    || window.matchMedia('(hover: hover) and (pointer: fine)').matches
+}
 const GOOGLE_SHEETS_DRIVE_TAB_KEY = 'googleSheetsDrive'
 const APOLLO_NATIVE_TAB_KEY = 'apolloNative'
 const HUBSPOT_NATIVE_TAB_KEY = 'hubspotNative'
@@ -1318,9 +1327,13 @@ export const AgentComposer = memo(function AgentComposer({
 
   // Auto-focus after agent switches, including callers that still pass an explicit focus key.
   useEffect(() => {
-    if (!autoFocus) return
+    if (!autoFocus || !prefersPointerAutoFocus()) return
     // Use a small delay to ensure the DOM is ready after navigation
     const timer = setTimeout(() => {
+      // Leave focus where the user put it rather than pulling it out of another field.
+      const active = document.activeElement as HTMLElement | null
+      if (active && active !== document.body && active !== textareaRef.current
+        && (active.isContentEditable || EDITABLE_TAG_PATTERN.test(active.tagName))) return
       textareaRef.current?.focus()
       moveTextareaCursorToEnd()
     }, 100)
