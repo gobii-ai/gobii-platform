@@ -7,8 +7,8 @@
       "normal_explicit_send": {
         "fitted_tokens": 7909,
         "system_bytes": 25846,
-        "tools_bytes": 21536,
-        "total_bytes": 59107,
+        "tools_bytes": 21835,
+        "total_bytes": 59406,
         "user_bytes": 11725
       },
       "planning_first_run": {
@@ -21,8 +21,8 @@
       "web_chat_implied_send": {
         "fitted_tokens": 8083,
         "system_bytes": 26346,
-        "tools_bytes": 21536,
-        "total_bytes": 59610,
+        "tools_bytes": 21835,
+        "total_bytes": 59909,
         "user_bytes": 11728
       }
     },
@@ -109,7 +109,7 @@
       "frontend/src/test/",
       "tests/"
     ],
-    "file_count": 897,
+    "file_count": 899,
     "include_files": [
       "manage.py",
       "pyproject.toml",

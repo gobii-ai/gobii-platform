@@ -116,8 +116,8 @@ def get_spawn_web_task_tool(agent: Optional[PersistentAgent] = None) -> Dict[str
                 "For text-only public pages, prefer search/scrape/structured-data/API tools when they fully satisfy the request; if the user asks for a screenshot or visual proof of a webpage, use this tool. "
                 "Give detailed, realistic instructions; ask for URLs if needed. Mention secrets by direct name, e.g. google_username, not <<<google_username>>>. "
                 "Stored secrets are for classic username/password logins only; OAuth uses MCP connect/auth links. "
-                "For authorized QA of this deployment's own Gobii web UI, set authenticate_to_gobii_ui=true; "
-                "this securely starts the browser already signed in and is limited to staff-owned agents on local, preview, or staging. "
+                "For authorized QA of this deployment, set authenticate_to_gobii_ui=true "
+                "(staff-owned agents; local, preview, or staging only). "
                 f"Completion notifies you; do not poll. If blocked waiting, use sleep_until_next_trigger. {limit_sentence}"
             ),
             "parameters": {
@@ -140,8 +140,8 @@ def get_spawn_web_task_tool(agent: Optional[PersistentAgent] = None) -> Dict[str
                     "authenticate_to_gobii_ui": {
                         "type": "boolean",
                         "description": (
-                            "Set true only for authorized QA of this deployment's Gobii web UI. "
-                            "The backend signs the browser in before the browser model starts without exposing a credential."
+                            "Authenticate to this deployment's Gobii UI before starting "
+                            "(authorized QA only; the credential stays hidden)."
                         ),
                     },
                 },

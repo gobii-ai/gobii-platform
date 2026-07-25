@@ -359,7 +359,7 @@ class GobiiUIBrowserTaskTests(TestCase):
             "authenticate_to_gobii_ui"
         ]
         self.assertEqual(parameter["type"], "boolean")
-        self.assertIn("before the browser model starts", parameter["description"])
+        self.assertIn("credential stays hidden", parameter["description"])
 
     @patch(
         "api.models.TaskCreditService.check_and_consume_credit_for_owner",
