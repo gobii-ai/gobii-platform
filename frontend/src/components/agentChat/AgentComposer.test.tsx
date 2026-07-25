@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type React from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -326,6 +326,55 @@ describe('AgentComposer pending action insights panel', () => {
 
     expect(handleExpandedPreferenceChange).toHaveBeenCalledWith(false)
     expect(screen.queryByText('Which account should I use?')).not.toBeInTheDocument()
+  })
+
+  it('keeps a saved collapse when a native tab becomes available', async () => {
+    const handleExpandedPreferenceChange = vi.fn()
+    // The user already collapsed the panel for this agent and the preference is hydrated.
+    const { store } = renderAgentComposer({
+      insightsPanelExpandedPreference: false,
+      insightsPanelPreferenceHydrated: true,
+      discordNativeTabEnabled: false,
+      onInsightsPanelExpandedPreferenceChange: handleExpandedPreferenceChange,
+    })
+
+    expect(handleExpandedPreferenceChange).not.toHaveBeenCalled()
+
+    // Integration data finishes loading and the Discord tab flips available, as on every reload.
+    act(() => {
+      store.dispatch(chatActions.agentSelected({
+        agentId: 'agent-1',
+        options: {
+          agentName: 'Test Agent',
+          planningState: 'skipped',
+          enabledIntegrationTabs: { discordNative: true },
+        },
+      }))
+    })
+
+    // The tab is revealed and auto-selected, proving the auto-select effect ran...
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'View Discord connection' }))
+        .toHaveAttribute('data-active', 'true')
+    })
+    // ...while the panel honours the saved collapse.
+    expect(screen.getByRole('button', { name: /Ready/ })).toHaveAttribute('aria-expanded', 'false')
+    // ...but it must never write a preference the user did not ask for.
+    expect(handleExpandedPreferenceChange).not.toHaveBeenCalled()
+  })
+
+  it('still stores the preference when the user expands the panel themselves', async () => {
+    const handleExpandedPreferenceChange = vi.fn()
+    renderAgentComposer({
+      insightsPanelExpandedPreference: false,
+      insightsPanelPreferenceHydrated: true,
+      pendingActionRequests: [makeRequestedSecretsAction()],
+      onInsightsPanelExpandedPreferenceChange: handleExpandedPreferenceChange,
+    })
+
+    fireEvent.click(screen.getByText('Needs your input').closest('.composer-working-header-row') as HTMLElement)
+
+    expect(handleExpandedPreferenceChange).toHaveBeenCalledWith(true)
   })
 
   it('stays collapsed while a saved panel preference hydrates', () => {
