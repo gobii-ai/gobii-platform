@@ -34,6 +34,12 @@ const VIEWPORT_MARGIN = 16
 const DEFAULT_EDGE_GAP = 24
 const PET_LOOK_DEADZONE_PX = 1
 const POINTER_IDLE_DELAY_MS = 2_500
+const CLICK_HOLD_THRESHOLD_MS = 400
+const DRAG_THRESHOLD_PX = 5
+const CLICK_JUMP_DURATION_MS = PET_ANIMATIONS.jumping.durations.reduce(
+  (total, duration) => total + duration,
+  0,
+) * 3
 const PET_PROFILE_PATH = '/app/profile#workspace-pet'
 
 type PixelPosition = {
@@ -45,7 +51,12 @@ type DragState = {
   pointerId: number
   offsetX: number
   offsetY: number
+  startClientX: number
+  startClientY: number
   lastClientX: number
+  startedAt: number
+  moved: boolean
+  position: PixelPosition | null
 }
 
 function clamp(value: number, minimum: number, maximum: number): number {
@@ -83,7 +94,11 @@ function useReducedMotion(): boolean {
   return reducedMotion
 }
 
-function useAnimationColumn(animation: PetAnimationName, reducedMotion: boolean): number {
+function useAnimationColumn(
+  animation: PetAnimationName,
+  reducedMotion: boolean,
+  restartKey: number,
+): number {
   const [animationState, setAnimationState] = useState<{
     animation: PetAnimationName
     column: number
@@ -102,7 +117,7 @@ function useAnimationColumn(animation: PetAnimationName, reducedMotion: boolean)
     }
     schedule()
     return () => window.clearTimeout(timeoutId)
-  }, [animation, reducedMotion])
+  }, [animation, reducedMotion, restartKey])
   if (reducedMotion || animationState.animation !== animation) {
     return 0
   }
@@ -118,12 +133,16 @@ export function ImmersivePetLayer() {
   const petRef = useRef<HTMLDivElement | null>(null)
   const dragRef = useRef<DragState | null>(null)
   const gazeIdleTimerRef = useRef<number | null>(null)
+  const clickJumpTimerRef = useRef<number | null>(null)
   const [viewport, setViewport] = useState(() => ({
     width: typeof window === 'undefined' ? 0 : window.innerWidth,
     height: typeof window === 'undefined' ? 0 : window.innerHeight,
   }))
   const [dragPosition, setDragPosition] = useState<PixelPosition | null>(null)
   const [dragDirection, setDragDirection] = useState<'left' | 'right'>('right')
+  const [isHovered, setIsHovered] = useState(false)
+  const [isClickJumping, setIsClickJumping] = useState(false)
+  const [clickJumpVersion, setClickJumpVersion] = useState(0)
   const [lookIndex, setLookIndex] = useState<number | null>(null)
   const [pointerActive, setPointerActive] = useState(false)
   const [gazeEmotionKey, setGazeEmotionKey] = useState<string | null>(null)
@@ -189,10 +208,14 @@ export function ImmersivePetLayer() {
     ? semanticAnimation
     : isDragging
       ? (dragDirection === 'left' ? 'running-left' : 'running-right')
-      : canGaze
-        ? 'idle'
-        : semanticAnimation
-  const animatedColumn = useAnimationColumn(animation, reducedMotion)
+      : isClickJumping
+        ? 'jumping'
+        : isHovered
+          ? 'waiting'
+          : canGaze
+            ? 'idle'
+            : semanticAnimation
+  const animatedColumn = useAnimationColumn(animation, reducedMotion, clickJumpVersion)
   const frame = useMemo(() => {
     if (animation !== 'idle' || reducedMotion) {
       return {
@@ -247,6 +270,9 @@ export function ImmersivePetLayer() {
     if (gazeIdleTimerRef.current !== null) {
       window.clearTimeout(gazeIdleTimerRef.current)
     }
+    if (clickJumpTimerRef.current !== null) {
+      window.clearTimeout(clickJumpTimerRef.current)
+    }
   }, [])
 
   const handlePointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
@@ -256,22 +282,39 @@ export function ImmersivePetLayer() {
       pointerId: event.pointerId,
       offsetX: event.clientX - rect.left,
       offsetY: event.clientY - rect.top,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
       lastClientX: event.clientX,
+      startedAt: Date.now(),
+      moved: false,
+      position: null,
     }
     event.currentTarget.setPointerCapture(event.pointerId)
     setContextMenu(null)
-    setDragPosition({ left: rect.left, top: rect.top })
+    setIsClickJumping(false)
+    if (clickJumpTimerRef.current !== null) {
+      window.clearTimeout(clickJumpTimerRef.current)
+      clickJumpTimerRef.current = null
+    }
   }, [])
 
   const handlePointerMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     const drag = dragRef.current
     if (!drag || drag.pointerId !== event.pointerId) return
+    if (!drag.moved) {
+      const distance = Math.hypot(
+        event.clientX - drag.startClientX,
+        event.clientY - drag.startClientY,
+      )
+      if (distance < DRAG_THRESHOLD_PX) return
+      drag.moved = true
+    }
     const deltaX = event.clientX - drag.lastClientX
     if (Math.abs(deltaX) >= 1) {
       setDragDirection(deltaX < 0 ? 'left' : 'right')
     }
     drag.lastClientX = event.clientX
-    setDragPosition({
+    drag.position = {
       left: clamp(
         event.clientX - drag.offsetX,
         VIEWPORT_MARGIN,
@@ -282,23 +325,38 @@ export function ImmersivePetLayer() {
         VIEWPORT_MARGIN,
         viewport.height - petHeight - VIEWPORT_MARGIN,
       ),
-    })
+    }
+    setDragPosition(drag.position)
   }, [petHeight, petWidth, viewport.height, viewport.width])
 
-  const finishDrag = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+  const finishPointerGesture = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     const drag = dragRef.current
-    if (!drag || drag.pointerId !== event.pointerId || !dragPosition) return
+    if (!drag || drag.pointerId !== event.pointerId) return
     dragRef.current = null
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId)
     }
-    const position = {
-      x: (dragPosition.left + petWidth / 2) / viewport.width,
-      y: (dragPosition.top + petHeight / 2) / viewport.height,
+    if (event.type === 'pointerup' && drag.moved && drag.position) {
+      void preferencesMutation.mutateAsync({
+        position: {
+          x: (drag.position.left + petWidth / 2) / viewport.width,
+          y: (drag.position.top + petHeight / 2) / viewport.height,
+        },
+      })
+    } else if (
+      event.type === 'pointerup'
+      && !drag.moved
+      && Date.now() - drag.startedAt < CLICK_HOLD_THRESHOLD_MS
+    ) {
+      setIsClickJumping(true)
+      setClickJumpVersion((version) => version + 1)
+      clickJumpTimerRef.current = window.setTimeout(() => {
+        clickJumpTimerRef.current = null
+        setIsClickJumping(false)
+      }, CLICK_JUMP_DURATION_MS)
     }
-    void preferencesMutation.mutateAsync({ position })
     setDragPosition(null)
-  }, [dragPosition, petHeight, petWidth, preferencesMutation, viewport.height, viewport.width])
+  }, [petHeight, petWidth, preferencesMutation, viewport.height, viewport.width])
 
   if (
     isMobile
@@ -324,16 +382,18 @@ export function ImmersivePetLayer() {
         className="immersive-pet"
         data-dragging={isDragging ? 'true' : 'false'}
         style={style}
+        onPointerEnter={() => setIsHovered(true)}
+        onPointerLeave={() => setIsHovered(false)}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
-        onPointerUp={finishDrag}
-        onPointerCancel={finishDrag}
+        onPointerUp={finishPointerGesture}
+        onPointerCancel={finishPointerGesture}
         onContextMenu={(event) => {
           event.preventDefault()
           event.stopPropagation()
           setContextMenu({ x: event.clientX, y: event.clientY })
         }}
-        title={`Drag ${selectedPet.displayName}`}
+        title={`Click or drag ${selectedPet.displayName}`}
       >
         <PetSprite
           spritesheetUrl={selectedPet.spritesheetUrl}
