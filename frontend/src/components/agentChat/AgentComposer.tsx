@@ -914,9 +914,11 @@ export const AgentComposer = memo(function AgentComposer({
     onRequestScrollToBottom?.()
   }, [isTouchDevice, onRequestScrollToBottom])
 
-  const selectWorkingTab = useCallback((tabId: string, expandPanel = true) => {
+  const selectWorkingTab = useCallback((tabId: string, expandPanel = true, persistPreference = true) => {
     if (expandPanel && !resolvedWorkingExpanded) {
-      if (onInsightsPanelExpandedPreferenceChange) {
+      // Only a deliberate click may store a preference. Expanding on the user's behalf must stay
+      // local, or an automatic reveal overwrites the collapse they chose for this agent.
+      if (persistPreference && onInsightsPanelExpandedPreferenceChange) {
         onInsightsPanelExpandedPreferenceChange(true)
       } else {
         setAutoWorkingExpanded(true)
@@ -1011,7 +1013,7 @@ export const AgentComposer = memo(function AgentComposer({
       }
     }
     if (nextAutoSelectedTab) {
-      selectWorkingTab(nextAutoSelectedTab)
+      selectWorkingTab(nextAutoSelectedTab, true, false)
     }
   }, [activeWorkingTabId, agentId, focusKey, nativeTabAvailability, pendingActionTabs.length, selectWorkingTab])
 
