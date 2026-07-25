@@ -1,5 +1,7 @@
 import type { CSSProperties } from 'react'
 
+import { PET_SPRITESHEET_COLUMNS, PET_SPRITESHEET_ROWS } from './petAnimation'
+
 type PetSpriteProps = {
   spritesheetUrl: string
   row: number
@@ -17,8 +19,8 @@ export function PetSprite({
 }: PetSpriteProps) {
   const style = {
     '--pet-spritesheet-url': `url("${spritesheetUrl.replaceAll('"', '%22')}")`,
-    '--pet-frame-x': `${(column / 7) * 100}%`,
-    '--pet-frame-y': `${(row / 10) * 100}%`,
+    '--pet-frame-x': `${(column / (PET_SPRITESHEET_COLUMNS - 1)) * 100}%`,
+    '--pet-frame-y': `${(row / (PET_SPRITESHEET_ROWS - 1)) * 100}%`,
   } as CSSProperties
 
   return (

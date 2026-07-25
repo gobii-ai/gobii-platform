@@ -7,9 +7,7 @@ import { safeErrorMessage } from '../../api/safeErrorMessage'
 import { updateUserCustomInstructions, updateUserEmail, updateUserProfile } from '../../api/userProfile'
 import type { EmailVerificationState, UserProfileFormState, UserProfilePayload } from '../../api/userProfile'
 import { PhoneNumberInput, type SupportedPhoneRegion } from '../../components/common/PhoneNumberInput'
-// complexity-budget: exclude-start pet
 import { PetProfileSection } from '../../components/pets/PetProfileSection'
-// complexity-budget: exclude-end pet
 import { CustomInstructionsSection } from '../../components/settings/CustomInstructionsSection'
 import { useUserPhoneVerification } from '../../hooks/useUserPhoneVerification'
 
@@ -472,9 +470,7 @@ export function ProfileScreen({ initialData }: ProfileScreenProps) {
         </div>
       </section>
 
-      {/* complexity-budget: exclude-start pet */}
       <PetProfileSection />
-      {/* complexity-budget: exclude-end pet */}
 
       <CustomInstructionsSection
         value={data.customInstructions}

@@ -19,6 +19,8 @@ import { FixedContextMenu } from '../common/FixedContextMenu'
 import { PetSprite } from './PetSprite'
 import {
   PET_ANIMATIONS,
+  PET_SPRITESHEET_COLUMNS,
+  PET_SPRITESHEET_ROWS,
   resolvePetAnimation,
   type PetAnimationName,
 } from './petAnimation'
@@ -225,8 +227,8 @@ export function ImmersivePetLayer() {
     }
     if (canGaze && lookIndex !== null) {
       return {
-        row: lookIndex < 8 ? 9 : 10,
-        column: lookIndex % 8,
+        row: PET_SPRITESHEET_ROWS - 2 + Math.floor(lookIndex / PET_SPRITESHEET_COLUMNS),
+        column: lookIndex % PET_SPRITESHEET_COLUMNS,
       }
     }
     return {

@@ -75,9 +75,7 @@ from api.services.prompt_settings import (
     DEFAULT_UNIFIED_HISTORY_HYSTERESIS,
 )
 from api.services.browser_settings import DEFAULT_MAX_ACTIVE_BROWSER_TASKS, DEFAULT_MAX_BROWSER_STEPS, DEFAULT_MAX_BROWSER_TASKS, DEFAULT_VISION_DETAIL_LEVEL
-# complexity-budget: exclude-start pet
 from api.services.user_pets import normalize_user_pet_position, normalize_user_pet_selector, selectable_user_pet_exists
-# complexity-budget: exclude-end pet
 from api.pipedream_app_utils import normalize_app_slugs as normalize_pipedream_app_slugs
 from util.attribution_referrers import first_meaningful_referrer_for_attribution, signup_source_bucket_for_attribution
 from api.services.mcp_tool_cache import invalidate_mcp_tool_cache
@@ -891,12 +889,10 @@ class UserPreference(models.Model):
     KEY_AGENT_CHAT_INSIGHTS_PANEL_EXPANDED_BY_AGENT = "agent.chat.insights_panel.expanded_by_agent"
     KEY_AGENT_CHAT_NOTIFICATIONS_ENABLED = "agent.chat.notifications.enabled"
     KEY_AGENT_CHAT_SUGGESTIONS_ENABLED = "agent.chat.suggestions.enabled"
-    # complexity-budget: exclude-start pet
     KEY_USER_PET_ENABLED = "user.pet.enabled"
     KEY_USER_PET_SELECTED_ID = "user.pet.selected_id"
     KEY_USER_PET_SIZE = "user.pet.size"
     KEY_USER_PET_POSITION = "user.pet.position"
-    # complexity-budget: exclude-end pet
     KEY_USER_TIMEZONE = "user.timezone"
     PREFERENCE_DEFINITIONS = {
         KEY_AGENT_CHAT_ROSTER_SORT_MODE: {
@@ -929,7 +925,6 @@ class UserPreference(models.Model):
             "default": True,
             "type": "boolean",
         },
-        # complexity-budget: exclude-start pet
         KEY_USER_PET_ENABLED: {
             "default": True,
             "type": "boolean",
@@ -947,7 +942,6 @@ class UserPreference(models.Model):
             "default": None,
             "type": "normalized_point",
         },
-        # complexity-budget: exclude-end pet
         KEY_USER_TIMEZONE: {
             "default": "",
             "type": "timezone",
@@ -1078,13 +1072,11 @@ class UserPreference(models.Model):
         if preference_type == "uuid_boolean_map":
             return cls._normalize_uuid_boolean_map_preference_value(key, value)
 
-        # complexity-budget: exclude-start pet
         if preference_type == "pet_selector":
             return normalize_user_pet_selector(key, value)
 
         if preference_type == "normalized_point":
             return normalize_user_pet_position(key, value)
-        # complexity-budget: exclude-end pet
 
         if preference_type == "timezone":
             return cls._normalize_timezone_preference_value(key, value)
@@ -1158,11 +1150,9 @@ class UserPreference(models.Model):
                 cls.PREFERENCE_DEFINITIONS[key],
             )
 
-        # complexity-budget: exclude-start pet
         selected_pet_id = normalized_updates.get(cls.KEY_USER_PET_SELECTED_ID)
         if selected_pet_id is not None and not selectable_user_pet_exists(user, selected_pet_id):
             raise ValueError("Select a pet from your library.")
-        # complexity-budget: exclude-end pet
 
         with transaction.atomic():
             try:
@@ -1213,7 +1203,6 @@ class UserPreference(models.Model):
             return cls.resolve_known_preferences(user)
 
 
-# complexity-budget: exclude-start pet
 def user_pet_spritesheet_upload_to(instance, filename):
     return f"user_pets/{instance.user_id}/{instance.id}/spritesheet.webp"
 
@@ -1247,7 +1236,6 @@ def delete_user_pet_spritesheet(sender, instance, **kwargs):
     storage = instance.spritesheet.storage
     name = instance.spritesheet.name
     transaction.on_commit(lambda: storage.delete(name))
-# complexity-budget: exclude-end pet
 
 
 def validate_product_announcement_action_url(value: str) -> None:

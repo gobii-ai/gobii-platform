@@ -1,29 +1,29 @@
 {
-  "baseline_sha": "f30c2fb18",
+  "baseline_sha": "06815a0cf3fed22b0fdf3100a0d9ddbbe7b7c7c0",
   "generated_by": "uv run python scripts/check_complexity_budgets.py --update-baselines",
   "prompt_size": {
     "description": "Rendered prompt messages plus JSON tool definitions for representative send and first-run paths.",
     "limits": {
       "first_run": {
-        "fitted_tokens": 9065,
+        "fitted_tokens": 9142,
         "system_bytes": 31576,
         "tools_bytes": 23302,
-        "total_bytes": 66529,
-        "user_bytes": 11651
+        "total_bytes": 66839,
+        "user_bytes": 11961
       },
       "normal_explicit_send": {
-        "fitted_tokens": 8462,
+        "fitted_tokens": 8554,
         "system_bytes": 28533,
         "tools_bytes": 23302,
-        "total_bytes": 63519,
-        "user_bytes": 11684
+        "total_bytes": 63829,
+        "user_bytes": 11994
       },
       "web_chat_implied_send": {
-        "fitted_tokens": 8648,
+        "fitted_tokens": 8738,
         "system_bytes": 29170,
         "tools_bytes": 23302,
-        "total_bytes": 64159,
-        "user_bytes": 11687
+        "total_bytes": 64469,
+        "user_bytes": 11997
       }
     },
     "scenarios": {
@@ -34,7 +34,7 @@
     "unit": "utf8_bytes"
   },
   "source_loc": {
-    "description": "Nonblank lines in core product source files, excluding tests, evals, and named feature regions.",
+    "description": "Nonblank lines in tracked core product source files, excluding tests and dedicated eval assets.",
     "exclude_eval_files": [
       "api/agent/eval_agents.py",
       "api/agent/tools/eval_synthetic_tools.py",
@@ -56,10 +56,6 @@
     "exclude_filenames": [
       "api/agent/system_skills/defaults.py",
       "api/agent/system_skills/native_api_cookbooks.py",
-      "api/services/user_pets.py",
-      "console/user_pets_api.py",
-      "frontend/src/api/userPets.ts",
-      "frontend/src/hooks/useUserPets.ts",
       "package-lock.json",
       "uv.lock"
     ],
@@ -79,7 +75,6 @@
       "console/migrations/",
       "docs/",
       "frontend/node_modules/",
-      "frontend/src/components/pets/",
       "gobii_platform.egg-info/",
       "marketing_events/",
       "mediafiles/",
@@ -95,10 +90,6 @@
       "templates/",
       "vendor/"
     ],
-    "exclude_region_markers": {
-      "end": "complexity-budget: exclude-end <name>",
-      "start": "complexity-budget: exclude-start <name>"
-    },
     "exclude_test_file_suffixes": [
       ".js",
       ".jsx",
@@ -118,7 +109,7 @@
       "frontend/src/test/",
       "tests/"
     ],
-    "file_count": 900,
+    "file_count": 912,
     "include_files": [
       "manage.py",
       "pyproject.toml",
@@ -158,6 +149,6 @@
       ".yml",
       ".zsh"
     ],
-    "limit": 254704
+    "limit": 256243
   }
 }

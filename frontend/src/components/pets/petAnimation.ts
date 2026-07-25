@@ -3,6 +3,9 @@ type PetAnimationSpec = {
   durations: number[]
 }
 
+export const PET_SPRITESHEET_COLUMNS = 8
+export const PET_SPRITESHEET_ROWS = 11
+
 export const PET_ANIMATIONS = {
   idle: { row: 0, durations: [280, 110, 110, 140, 140, 320] },
   'running-right': { row: 1, durations: [120, 120, 120, 120, 120, 120, 120, 220] },

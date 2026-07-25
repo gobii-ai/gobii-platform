@@ -1,6 +1,3 @@
-from pathlib import Path
-from tempfile import TemporaryDirectory
-
 from django.test import SimpleTestCase, tag
 
 from scripts import check_complexity_budgets as budgets
@@ -86,7 +83,7 @@ class ComplexityBudgetSourceFilterTests(SimpleTestCase):
             with self.subTest(path=path):
                 self.assert_not_counted(path)
 
-    def test_excludes_dedicated_pet_assets(self):
+    def test_counts_pet_product_sources(self):
         pet_paths = (
             "api/services/user_pets.py",
             "console/user_pets_api.py",
@@ -97,28 +94,7 @@ class ComplexityBudgetSourceFilterTests(SimpleTestCase):
 
         for path in pet_paths:
             with self.subTest(path=path):
-                self.assert_not_counted(path)
-
-    def test_named_regions_are_excluded_from_source_loc(self):
-        with TemporaryDirectory() as directory:
-            path = Path(directory) / "source.py"
-            path.write_text(
-                "\n".join(
-                    (
-                        "counted = True",
-                        "# complexity-budget: exclude-start pet",
-                        "excluded = True",
-                        "# complexity-budget: exclude-end pet",
-                        "also_counted = True",
-                        "{/* complexity-budget: exclude-start pet */}",
-                        "also_excluded = True",
-                        "{/* complexity-budget: exclude-end pet */}",
-                    )
-                ),
-                encoding="utf-8",
-            )
-
-            self.assertEqual(budgets._count_nonblank_lines(path), 2)
+                self.assert_counted(path)
 
     def test_budget_file_source_metadata_matches_filter_constants(self):
         committed = budgets._load_budget()["source_loc"]
@@ -138,7 +114,6 @@ class ComplexityBudgetSourceFilterTests(SimpleTestCase):
             "exclude_test_file_suffixes",
             "exclude_eval_prefixes",
             "exclude_eval_files",
-            "exclude_region_markers",
         )
         for key in metadata_keys:
             with self.subTest(key=key):
