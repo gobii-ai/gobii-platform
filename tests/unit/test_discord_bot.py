@@ -471,6 +471,7 @@ class NativeDiscordBotTests(TestCase):
         self.assertEqual(gateway_message.reply_to["message_id"], "499")
         self.assertTrue(gateway_message.reply_to["unavailable"])
         prompt_context = _format_discord_reply_context({"discord_reply_to": gateway_message.reply_to})
+        self.assertIn("Discord reply addressee: the referenced message author", prompt_context)
         self.assertIn("Message ID: 499", prompt_context)
         self.assertIn("referenced message is unavailable or deleted", prompt_context)
 
@@ -558,6 +559,11 @@ class NativeDiscordBotTests(TestCase):
         self.assertIn("<discord_message_id>500</discord_message_id>", user_prompt)
         self.assertIn("<discord_channel_id>10</discord_channel_id>", user_prompt)
         self.assertIn("<discord_reply_context>", user_prompt)
+        self.assertIn("Discord reply addressee: Ada.", user_prompt)
+        self.assertIn("instructions and second-person language belong to this addressee", user_prompt)
+        self.assertIn("treat delivery as context, not an invitation", user_prompt)
+        self.assertIn("contribution only you can provide", user_prompt)
+        self.assertIn("announcing that you have no action", user_prompt)
         self.assertIn("Message ID: 499", user_prompt)
         self.assertIn("Author: Ada", user_prompt)
         self.assertIn("Ship the updated report", user_prompt)
@@ -1467,6 +1473,7 @@ class NativeDiscordBotTests(TestCase):
         self.assertIn("filespace paths or $[/path]", skill.prompt_instructions)
         self.assertIn("Body text never attaches files", skill.prompt_instructions)
         self.assertIn("Use `add_discord_reaction`", skill.prompt_instructions)
+        self.assertIn("A direct reply to someone else is not your social moment", skill.prompt_instructions)
         self.assertIn("Discord cannot render tables", skill.prompt_instructions)
         self.assertIn("never send pipe-separated columns with a hyphen-divider row", skill.prompt_instructions)
 

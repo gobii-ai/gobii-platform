@@ -931,7 +931,7 @@ DISCORD_NATIVE_SYSTEM_SKILL = SystemSkillDefinition(
         f"To upload files: {SEND_TOOL_ATTACHMENTS_DESCRIPTION} "
         "The backend sends through a channel webhook using the agent's name and avatar.\n"
         "Use `add_discord_reaction` for lightweight social moments such as acknowledgement, thanks, agreement, humor, congratulations, or a shared win, even when no reaction was explicitly requested. "
-        "For a lightweight Discord social moment, use one fitting reaction, then stop; do not also reply. Do not react to every message or stack reactions. Do not react to a serious question, request, blocker, or important nuance; give it a substantive reply instead. "
+        "For a lightweight Discord social moment, use one fitting reaction, then stop; do not also reply. A direct reply to someone else is not your social moment unless its text includes you or the room. Do not react to every message or stack reactions. Do not react to a serious question, request, blocker, or important nuance; give it a substantive reply instead. "
         "Pass the subscribed `channel_id`, the message's `discord_message_id` as `message_id`, one Unicode or Discord custom emoji, and the correct `will_continue_work` value. "
         "This tool only adds the Gobii bot's own reaction; it does not remove or manage other reactions.\n"
         "Use `list` before creating duplicates when the current subscription state is unclear. Use `disable` only when the user asks to stop receiving messages from a subscribed channel.\n"

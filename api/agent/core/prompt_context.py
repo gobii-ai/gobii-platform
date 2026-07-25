@@ -4230,8 +4230,22 @@ def _format_discord_reply_context(raw_payload: Mapping[str, Any]) -> str:
     message_id = str(reply_to.get("message_id") or "").strip()
     if not message_id:
         return ""
-    lines = [f"Message ID: {message_id}"]
     author_name = str(reply_to.get("author_name") or "").strip()
+    reply_target = author_name or "the referenced message author"
+    lines = [
+        f"Discord reply addressee: {reply_target}.",
+        (
+            "Unqualified instructions and second-person language belong to this addressee, "
+            "even when they overlap another subscriber's charter."
+        ),
+        (
+            "If you are not this participant, treat delivery as context, not an invitation; join only "
+            "when the text includes you or the room, or silence would drop a necessary, non-duplicative "
+            "contribution only you can provide. Otherwise stay silent without reacting, updating your own "
+            "records, or announcing that you have no action."
+        ),
+        f"Message ID: {message_id}",
+    ]
     if author_name:
         lines.append(f"Author: {author_name}")
     content = str(reply_to.get("content") or "").strip()
