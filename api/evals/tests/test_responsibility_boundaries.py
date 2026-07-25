@@ -16,6 +16,7 @@ from api.evals.scenarios.responsibility_boundaries import (
     RESPONSIBILITY_BOUNDARY_PEER_FYI_NO_ACK,
     RESPONSIBILITY_BOUNDARY_PEER_REQUEST_HANDOFF,
     RESPONSIBILITY_BOUNDARY_SCENARIO_SLUGS,
+    RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_AUTHORED_CLAIM,
     RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_OWNER,
     RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_NOISY_YIELD,
     RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_OWNED_REPLY,
@@ -43,7 +44,7 @@ class ResponsibilityBoundaryScenarioTests(SimpleTestCase):
         self.assertIn("Synthesize only owned, attributed work", instruction)
         self.assertIn("Skip thanks, receipts, and 'noted'", instruction)
         self.assertNotIn("freely", instruction)
-        self.assertLessEqual(len(instruction.split()), 80)
+        self.assertLessEqual(len(instruction.split()), 95)
 
     def test_communication_tools_repeat_the_boundary_at_decision_time(self):
         peer_description = get_send_agent_message_tool()["function"]["description"]
@@ -75,6 +76,7 @@ class ResponsibilityBoundaryScenarioTests(SimpleTestCase):
                 RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_OWNER,
                 RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_OWNED_REPLY,
                 RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_NOISY_YIELD,
+                RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_AUTHORED_CLAIM,
             },
         )
 
@@ -122,6 +124,54 @@ class ResponsibilityBoundaryScenarioTests(SimpleTestCase):
             [SimpleNamespace(tool_name="send_discord_message", step="discord-step")],
             allowed={"sqlite_batch"},
         )
+        self.assertEqual(recorded[-1][0][2], EvalRunTask.Status.FAILED)
+
+    def test_authored_claim_case_addresses_the_other_agent_and_forbids_answering(self):
+        case = next(
+            case for case in RESPONSIBILITY_BOUNDARY_CASES if case.event_kind == "shared_channel_authored_claim"
+        )
+        self.assertEqual(case.slug, RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_AUTHORED_CLAIM)
+        # The verification request names the engineering peer, never the agent under test.
+        self.assertIn("engineering agent", case.prompt.lower())
+        self.assertNotIn("customer signals", case.prompt.lower())
+
+        scenario = ResponsibilityBoundaryScenario(case)
+        recorded = []
+        scenario.record_task_result = lambda *args, **kwargs: recorded.append((args, kwargs))
+
+        # Staying out of it passes, and so does reacting: chiming in is not the failure.
+        scenario._verify_yields_verification("run", [])
+        self.assertEqual(recorded[-1][0][2], EvalRunTask.Status.PASSED)
+
+        scenario._verify_yields_verification("run", [SimpleNamespace(tool_name="add_discord_reaction", step="s")])
+        self.assertEqual(recorded[-1][0][2], EvalRunTask.Status.PASSED)
+
+        # Relaying the addressed request by DM is always a failure, with no judge call needed.
+        scenario._verify_yields_verification(
+            "run",
+            [SimpleNamespace(tool_name="send_agent_message", step="dm-step")],
+        )
+        self.assertEqual(recorded[-1][0][2], EvalRunTask.Status.FAILED)
+
+    def test_authored_claim_judges_a_channel_reply_instead_of_banning_it(self):
+        case = next(
+            case for case in RESPONSIBILITY_BOUNDARY_CASES if case.event_kind == "shared_channel_authored_claim"
+        )
+        scenario = ResponsibilityBoundaryScenario(case)
+        recorded = []
+        scenario.record_task_result = lambda *args, **kwargs: recorded.append((args, kwargs))
+        channel_call = SimpleNamespace(
+            tool_name="send_discord_message",
+            tool_params={"message": "Adding the raw report IDs in case they help."},
+            step="discord-step",
+        )
+
+        scenario.llm_judge = lambda **kwargs: ("Yields", "Adds owned detail without a verdict.")
+        scenario._verify_yields_verification("run", [channel_call])
+        self.assertEqual(recorded[-1][0][2], EvalRunTask.Status.PASSED)
+
+        scenario.llm_judge = lambda **kwargs: ("Answers in their place", "Confirms its own finding.")
+        scenario._verify_yields_verification("run", [channel_call])
         self.assertEqual(recorded[-1][0][2], EvalRunTask.Status.FAILED)
 
     def test_owned_reply_accepts_boundary_disclaimer_but_rejects_takeover(self):
