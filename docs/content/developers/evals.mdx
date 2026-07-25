@@ -345,7 +345,7 @@ Use this as the default gate shape for prompt, tool-choice, routing, and agent-b
 | Change risk | Minimum eval evidence |
 | --- | --- |
 | Narrow prompt or scoring-helper edit | Relevant unit tests plus one focused simulated or live scenario. |
-| Agent behavior, tool selection, or stop-policy change | Relevant unit tests plus the focused suite (`planning_micro`, `tool_choice_micro`, `meta_gobii`, or another owned suite). |
+| Agent behavior, tool selection, or stop-policy change | Relevant unit tests plus the focused suite (`guided_planning_micro`, `tool_choice_micro`, `meta_gobii`, or another owned suite). |
 | Routing profile or model change | Matrix run of the same scenario/suite across old and new profiles, compared by model/profile. |
 | Broad prompt/routing/system-skill release | `--suite all --n-runs 1` live run against the release candidate profile, with failures triaged or explicitly accepted. |
 

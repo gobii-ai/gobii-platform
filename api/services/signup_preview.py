@@ -229,8 +229,6 @@ def _resume_signup_preview_agents_if_user_eligible(
 def is_signup_preview_processing_paused(agent: PersistentAgent | None) -> bool:
     if agent is None:
         return False
-    if getattr(agent, "planning_state", None) == PersistentAgent.PlanningState.PLANNING:
-        return False
     return (
         getattr(agent, "signup_preview_state", None)
         == PersistentAgent.SignupPreviewState.AWAITING_SIGNUP_COMPLETION
@@ -243,7 +241,6 @@ def transition_agent_to_signup_preview_waiting(agent_id) -> bool:
             id=agent_id,
             signup_preview_state=PersistentAgent.SignupPreviewState.AWAITING_FIRST_REPLY_PAUSE,
         )
-        .exclude(planning_state=PersistentAgent.PlanningState.PLANNING)
         .update(
             signup_preview_state=PersistentAgent.SignupPreviewState.AWAITING_SIGNUP_COMPLETION,
         )

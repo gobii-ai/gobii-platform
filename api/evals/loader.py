@@ -2,7 +2,7 @@
 from api.evals.registry import ScenarioRegistry
 # Import scenarios here to ensure they are registered when the registry is imported elsewhere
 from api.evals.scenarios import * # noqa
-from api.evals.scenarios.behavior_micro import BEHAVIOR_MICRO_SCENARIO_SLUGS, CHARTER_MEMORY_MICRO_SCENARIO_SLUGS, PLANNING_MICRO_SCENARIO_SLUGS, TOOL_CHOICE_MICRO_SCENARIO_SLUGS
+from api.evals.scenarios.behavior_micro import BEHAVIOR_MICRO_SCENARIO_SLUGS, CHARTER_MEMORY_MICRO_SCENARIO_SLUGS, GUIDED_PLANNING_MICRO_SCENARIO_SLUGS, TOOL_CHOICE_MICRO_SCENARIO_SLUGS
 from api.evals.scenarios.effort_calibration import EFFORT_CALIBRATION_SCENARIO_SLUGS
 from api.evals.scenarios.custom_tool_result_contract import CUSTOM_TOOL_RESULT_CONTRACT_SCENARIO_SLUGS, CUSTOM_TOOL_RESULT_CONTRACT_SUITE_SLUG
 from api.evals.scenarios.daily_credit_prompt import DAILY_CREDIT_PROMPT_SCENARIO_SLUGS, DAILY_CREDIT_PROMPT_SUITE_SLUG
@@ -71,9 +71,9 @@ register_builtin_suites(
             scenario_slugs=CHARTER_MEMORY_MICRO_SCENARIO_SLUGS,
         ),
         EvalSuite(
-            slug="planning_micro",
-            description="Small deterministic planning-mode behavior checks.",
-            scenario_slugs=PLANNING_MICRO_SCENARIO_SLUGS,
+            slug="guided_planning_micro",
+            description="Optional guided-planning and direct-execution regression checks.",
+            scenario_slugs=GUIDED_PLANNING_MICRO_SCENARIO_SLUGS,
         ),
         EvalSuite(
             slug="tool_choice_micro",

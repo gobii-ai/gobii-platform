@@ -93,7 +93,7 @@ class SqliteAgentConfigTests(TestCase):
         self.assertIn("charter", result.updated_fields)
         self.assertIn("schedule", result.updated_fields)
 
-    def test_sqlite_agent_config_blocks_schedule_updates_during_planning(self):
+    def test_sqlite_agent_config_ignores_legacy_planning_state(self):
         self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
         self.agent.save(update_fields=["planning_state", "updated_at"])
 
@@ -122,11 +122,10 @@ class SqliteAgentConfigTests(TestCase):
 
         self.agent.refresh_from_db()
         self.assertEqual(self.agent.charter, "Updated planning charter")
-        self.assertEqual(self.agent.schedule, "0 9 * * *")
+        self.assertEqual(self.agent.schedule, "0 10 * * *")
         self.assertIn("charter", result.updated_fields)
-        self.assertNotIn("schedule", result.updated_fields)
-        self.assertEqual(len(result.errors), 1)
-        self.assertIn("planning mode", result.errors["schedule"].lower())
+        self.assertIn("schedule", result.updated_fields)
+        self.assertFalse(result.errors)
 
     def test_sqlite_agent_config_reports_attempted_noop(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

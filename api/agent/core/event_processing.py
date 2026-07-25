@@ -130,7 +130,6 @@ from ..tools.secure_credentials_request import execute_secure_credentials_reques
 from ..tools.request_contact_permission import execute_request_contact_permission
 from ..tools.request_human_input import execute_request_human_input
 from ..tools.search_tools import execute_search_tools
-from ..tools.static_tools import planning_mode_disallows_tool
 from ..tools.tool_manager import ToolCatalogEntry, execute_enabled_tool, auto_enable_heuristic_tools, get_parallel_safe_tool_rejection_reason, resolve_tool_entry, should_skip_auto_substitution
 from ...services.tool_blacklist import is_tool_blacklisted_for_agent, tool_blacklist_error
 from ..tools.web_chat_sender import execute_send_chat_message, _looks_like_routine_progress_message
@@ -351,11 +350,6 @@ ONE_OFF_TASK_RE = re.compile(
     r"report|latest|current|today|now|price|status|news|funding|one[- ](?:off|shot))\b",
     re.IGNORECASE,
 )
-PLANNING_EXECUTE_NOW_RE = re.compile(
-    r"\b(?:do not ask questions|don't ask questions|just execute(?: now)?|execute now|just run(?: it| this)?|run (?:it|this) now|start (?:it|this|the task) now|go ahead and (?:run|execute|start|do)|just do (?:it|this|the task)|do (?:it|this|the task) now)\b",
-    re.IGNORECASE,
-)
-PLANNING_READY_WITHOUT_GATE_RE = re.compile(r"\b(?:plan(?:'s| is) clear|scope(?:'s| is) clear|task(?:'s| is) clear|lock it in|get (?:this )?rolling)\b", re.IGNORECASE)
 SUBSTANTIAL_WORK_RE = re.compile(
     r"\b(?:deep|exhaustive|comprehensive|thorough|extensive|large[- ]batch|multi[- ]phase|end[- ]to[- ]end|"
     r"market map|implementation|deploy(?:ment|ing)?|migration|audit)\b",
@@ -472,8 +466,6 @@ def _deep_work_update_gate_context(
     agent: PersistentAgent,
     tool_calls: list[Any],
 ) -> str | None:
-    if agent.planning_state == PersistentAgent.PlanningState.PLANNING:
-        return None
     latest_inbound = (
         PersistentAgentMessage.objects.filter(owner_agent=agent, is_outbound=False)
         .order_by("-timestamp", "-seq")
@@ -570,6 +562,8 @@ def _user_asked_for_setup_question(text: str) -> bool:
     lower = " ".join((text or "").lower().split())
     if not lower:
         return False
+    if any(term in lower for term in ("don't ask", "do not ask", "without asking", "no questions")):
+        return False
     return (
         lower.startswith(("ask ", "ask me ", "ask which ", "ask what "))
         or "before setting up" in lower
@@ -577,6 +571,16 @@ def _user_asked_for_setup_question(text: str) -> bool:
         or "before you start" in lower
         or "ask me which" in lower
         or "ask which" in lower
+        or ("ask" in lower and ("question" in lower or "clarif" in lower))
+        or any(
+            term in lower
+            for term in (
+                "help me plan",
+                "help me shape",
+                "plan this with me",
+                "shape this with me",
+            )
+        )
     )
 
 
@@ -678,8 +682,6 @@ def _request_human_input_question_texts(tool_params: dict[str, Any]) -> list[str
 
 
 def _should_reject_defaultable_setup_question(agent: PersistentAgent, question_text: str) -> bool:
-    if agent.planning_state == PersistentAgent.PlanningState.PLANNING:
-        return False
     latest_user_text = _latest_inbound_message_text(agent)
     return _looks_like_defaultable_recurring_setup_request(
         latest_user_text
@@ -2304,56 +2306,6 @@ def _plan_has_unfinished_items(agent: PersistentAgent) -> bool:
     return snapshot.todo_count > 0 or snapshot.doing_count > 0
 
 
-def _should_skip_stale_planning_mode_after_terminal_delivery(
-    agent: PersistentAgent,
-    finalized_batch: _FinalizedToolBatch,
-    *,
-    followup_required: bool,
-) -> bool:
-    return (
-        agent.planning_state == PersistentAgent.PlanningState.PLANNING
-        and not followup_required and finalized_batch.terminal_message_delivery_ok
-        and not finalized_batch.human_input_request_ok
-        and not agent.human_input_requests.filter(status="pending").exclude(expires_at__lte=dj_timezone.now()).exists()
-    )
-
-
-def _skip_stale_planning_mode_after_terminal_delivery(agent: PersistentAgent) -> bool:
-    """Clear Planning Mode after a terminal answer slipped through without end_planning.
-
-    This preserves the existing charter instead of guessing a full plan from the answer body.
-    """
-    from api.services.agent_planning import skip_agent_planning
-    from console.agent_chat.signals import emit_agent_planning_state_update
-
-    try:
-        updated_agent, cancelled_count = skip_agent_planning(agent)
-    except (DatabaseError, PersistentAgent.DoesNotExist):
-        logger.exception(
-            "Agent %s: failed to clear stale Planning Mode after terminal message delivery.",
-            getattr(agent, "id", None),
-        )
-        return False
-
-    if updated_agent.planning_state == PersistentAgent.PlanningState.PLANNING:
-        logger.warning(
-            "Agent %s: terminal message delivered but Planning Mode remains active.",
-            updated_agent.id,
-        )
-        return False
-
-    if updated_agent.planning_state == PersistentAgent.PlanningState.SKIPPED:
-        emit_agent_planning_state_update(
-            updated_agent,
-            include_pending_actions=cancelled_count > 0,
-        )
-        logger.warning(
-            "Agent %s: cleared stale Planning Mode after terminal message delivery.",
-            updated_agent.id,
-        )
-    return True
-
-
 def _latest_inbound_message_needs_reply(agent: PersistentAgent) -> bool:
     latest_inbound = (
         PersistentAgentMessage.objects.filter(owner_agent=agent, is_outbound=False)
@@ -2583,8 +2535,7 @@ def _contact_permission_params_from_misrouted_human_input(
     text = str(tool_params.get("question") or "").strip()
     lowered = text.lower()
     if (
-        agent.planning_state == PersistentAgent.PlanningState.PLANNING
-        or tool_params.get("requests")
+        tool_params.get("requests")
         or tool_params.get("options")
         or not any(term in lowered for term in _CONTACT_APPROVAL_TERMS)
         or not any(term in lowered for term in _CONTACT_SEND_TERMS)
@@ -2867,7 +2818,7 @@ def _direct_correction_context(agent: PersistentAgent, latest_inbound=None):
         or _matches_behavior_feedback(normalized)
     ):
         return None
-    if agent.planning_state == PersistentAgent.PlanningState.PLANNING or not _ConfigAuthorityResolver(agent).endpoint_can_configure(latest_inbound.from_endpoint):
+    if not _ConfigAuthorityResolver(agent).endpoint_can_configure(latest_inbound.from_endpoint):
         return None
     prior_outbound = PersistentAgentMessage.objects.filter(owner_agent=agent, is_outbound=True, conversation_id=latest_inbound.conversation_id).filter(
         Q(timestamp__lt=latest_inbound.timestamp)
@@ -2918,15 +2869,6 @@ def _compile_charter_patch_tool_call(tool_call: Any, current_charter: str | None
 def _looks_like_one_off_user_task(text: str) -> bool:
     normalized = " ".join((text or "").split())
     return bool(normalized and ONE_OFF_TASK_RE.search(normalized) and not _user_text_has_durable_config_intent(normalized))
-
-
-def _should_skip_planning_execute_tool_search(agent: PersistentAgent, tool_name: str, prepared_calls: list[_PreparedToolExecution]) -> bool:
-    if tool_name != "search_tools" or agent.planning_state != PersistentAgent.PlanningState.PLANNING:
-        return False
-    if any(call.tool_name not in {"send_chat_message", "sleep_until_next_trigger"} for call in prepared_calls):
-        return False
-    latest_user_text = " ".join(_latest_inbound_message_text(agent).split())
-    return bool(latest_user_text and PLANNING_EXECUTE_NOW_RE.search(latest_user_text))
 
 
 def _message_tool_body_from_params(tool_name: str, tool_params: Dict[str, Any]) -> str:
@@ -3142,11 +3084,6 @@ def _execute_tool_call_runtime(
         return link_reference_error_response(exc), updated_tools
     mock_config = getattr(budget_ctx, "mock_config", None) if budget_ctx else None
     mock_result = _resolve_eval_mock_result(mock_config, tool_name, exec_params)
-    if planning_mode_disallows_tool(agent, tool_name):
-        return {
-            "status": "error",
-            "message": f"{tool_name} is unavailable while planning mode is active. Complete or skip planning first.",
-        }, updated_tools
     if is_tool_blacklisted_for_agent(agent, tool_name):
         return tool_blacklist_error(tool_name), updated_tools
     if mock_result is not None:
@@ -3357,7 +3294,6 @@ def _prepare_tool_batch(
         }
         step = _persist_attached_step(step_kwargs, attach_completion, attach_prompt_archive)
         return _PreparedToolBatch([], True, False, False, "sqlite_result_fanout_gate")
-    batch_has_planning_gate = any(_get_tool_call_name(call) in {"end_planning", "request_human_input"} for call in tool_calls)
     batch_has_terminal_message = any(_tool_call_likely_terminal_message(call) for call in tool_calls)
     skipped_plan_requested_sleep = False
 
@@ -3517,11 +3453,6 @@ def _prepare_tool_batch(
 
             if tool_name == "send_chat_message":
                 message_body = str(tool_params.get("body") or "")
-                if not batch_has_planning_gate and agent.planning_state == PersistentAgent.PlanningState.PLANNING and _coerce_optional_bool(tool_params.get("will_continue_work")) is True and PLANNING_READY_WITHOUT_GATE_RE.search(message_body):
-                    step_kwargs = {"agent": agent, "description": "Planning Mode is active and the plan appears clear. Call end_planning(full_plan=...) before ready/start-work chat."}
-                    step = _persist_attached_step(step_kwargs, attach_completion, attach_prompt_archive)
-                    followup_required = True
-                    break
                 if _should_reject_defaultable_setup_question(agent, message_body):
                     _record_defaultable_setup_question_correction(
                         agent,
@@ -3578,23 +3509,6 @@ def _prepare_tool_batch(
                 call_id = call.get("id")
             if tool_name == "search_tools":
                 tool_params.pop("will_continue_work", None)
-                if _should_skip_planning_execute_tool_search(agent, tool_name, prepared_calls):
-                    step_kwargs = {
-                        "agent": agent,
-                        "description": (
-                            "Skipped search_tools before planning was completed. The user asked to execute now, "
-                            "so first call end_planning(full_plan=...) if the plan is sufficient, or request_human_input if blocked."
-                        ),
-                    }
-                    step = _persist_attached_step(step_kwargs, attach_completion, attach_prompt_archive)
-                    logger.info(
-                        "Agent %s: skipped search_tools before planning gate for execute-now prompt.",
-                        agent.id,
-                    )
-                    if not batch_has_planning_gate:
-                        followup_required = True
-                        break
-                    continue
             normalized_tool_name, resolved_entry = _resolve_tool_for_execution(agent, tool_name)
             if normalized_tool_name != tool_name:
                 logger.info("Agent %s: normalized tool call %s -> %s", agent.id, tool_name, normalized_tool_name)
@@ -6393,7 +6307,6 @@ def _run_agent_loop(
     with tracer.start_as_current_span("Agent Bootstrap Tool Discovery") as tools_span:
         tools = get_agent_tools(agent)
         tools_span.set_attribute("persistent_agent.tools.count", len(tools))
-    current_planning_state = agent.planning_state
     owner = resolve_agent_owner(agent)
     # Completion billing metadata is effectively scoped to this processing run,
     # so resolve it once instead of repeating owner plan lookups each iteration.
@@ -6481,9 +6394,8 @@ def _run_agent_loop(
         )
         prompt_run_cache_token = bind_prompt_run_cache(prompt_run_cache)
         for i in range(max_remaining):
-            previous_planning_state = current_planning_state
             try:
-                agent.refresh_from_db(fields=["planning_state", "updated_at"])
+                agent.refresh_from_db(fields=["updated_at"])
             except PersistentAgent.DoesNotExist:
                 logger.info("Agent %s no longer exists; stopping loop.", agent.id)
                 clear_processing_work_state(agent.id, client=redis_client)
@@ -6494,10 +6406,6 @@ def _run_agent_loop(
                     check_context="loop_refresh_missing",
                 )
                 return cumulative_token_usage
-
-            current_planning_state = agent.planning_state
-            if current_planning_state != previous_planning_state:
-                tools = get_agent_tools(agent)
 
             iteration_prefers_low_latency = _resolve_low_latency_preference(
                 agent,
@@ -7434,8 +7342,7 @@ def _run_agent_loop(
                     followup_required = True
 
                 if (
-                    agent.planning_state != PersistentAgent.PlanningState.PLANNING
-                    and finalized_batch.terminal_message_delivery_ok
+                    finalized_batch.terminal_message_delivery_ok
                     and not followup_required
                     and not is_credit_message_only_mode(daily_state, task_credit_available)
                     and _plan_has_unfinished_items(agent)
@@ -7465,14 +7372,6 @@ def _run_agent_loop(
                     inferred_message_continue_streak += 1
                 else:
                     inferred_message_continue_streak = 0
-
-                if _should_skip_stale_planning_mode_after_terminal_delivery(
-                    agent,
-                    finalized_batch,
-                    followup_required=followup_required,
-                ):
-                    if not _skip_stale_planning_mode_after_terminal_delivery(agent):
-                        followup_required = True
 
                 if terminal_plan_cleanup_this_iteration:
                     logger.info("Agent %s: bounded terminal plan closeout turn finished; stopping.", agent.id)

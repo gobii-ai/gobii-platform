@@ -56,6 +56,8 @@ PLANNING_DISMISS_AFTER_GREETING_DOES_NOT_RESUME = "planning_dismiss_after_greeti
 PLANNING_FINAL_REPORT_COMPLETES_VISIBLE_PLAN = "planning_final_report_completes_visible_plan"
 PLANNING_INTEGRATION_SETUP_SEARCHES_BEFORE_QUESTION = "planning_integration_setup_searches_before_question"
 PLANNING_SECURE_CREDENTIAL_REQUEST = "planning_secure_credential_request"
+GUIDED_PLANNING_BOUNDED_WHEN_REQUESTED = "guided_planning_bounded_when_requested"
+LEGACY_PLANNING_STATE_EXECUTES_DIRECTLY = "legacy_planning_state_executes_directly"
 CHARTER_ADDS_DURABLE_PREFERENCE_PRESERVING_EXISTING = "charter_adds_durable_preference_preserving_existing"
 CHARTER_ADDS_INFERRED_PREFERENCE_PRESERVING_EXISTING = "charter_adds_inferred_preference_preserving_existing"
 CHARTER_EXPANDS_SPARSE_CHARTER_WITH_DETAIL = "charter_expands_sparse_charter_with_detail"
@@ -363,16 +365,9 @@ COMMON_USE_CASE_EVAL_CASES = tuple(
 
 COMMON_USE_CASE_MICRO_SCENARIO_SLUGS = [case.slug for case in COMMON_USE_CASE_EVAL_CASES]
 
-PLANNING_MICRO_SCENARIO_SLUGS = [
-    PLANNING_FIRST_TURN_ASKS_BOUNDED_QUESTIONS,
-    PLANNING_CLEAR_TASK_ENDS_PLANNING_FIRST,
-    PLANNING_EXECUTE_REQUEST_STAYS_IN_PLANNING,
-    PLANNING_ONE_OFF_RESEARCH_REPORT_ENDS_PLANNING_FIRST,
-    PLANNING_NO_DIRECT_SCHEDULE_OR_CONFIG_UPDATES,
-    PLANNING_DISMISS_AFTER_GREETING_DOES_NOT_RESUME,
-    PLANNING_FINAL_REPORT_COMPLETES_VISIBLE_PLAN,
-    PLANNING_INTEGRATION_SETUP_SEARCHES_BEFORE_QUESTION,
-    PLANNING_SECURE_CREDENTIAL_REQUEST,
+GUIDED_PLANNING_MICRO_SCENARIO_SLUGS = [
+    GUIDED_PLANNING_BOUNDED_WHEN_REQUESTED,
+    LEGACY_PLANNING_STATE_EXECUTES_DIRECTLY,
 ]
 
 CHARTER_MEMORY_MICRO_SCENARIO_SLUGS = [
@@ -401,7 +396,7 @@ TOOL_CHOICE_MICRO_SCENARIO_SLUGS = [
 ]
 
 BEHAVIOR_MICRO_SCENARIO_SLUGS = (
-    PLANNING_MICRO_SCENARIO_SLUGS
+    GUIDED_PLANNING_MICRO_SCENARIO_SLUGS
     + TOOL_CHOICE_MICRO_SCENARIO_SLUGS
 )
 
@@ -852,6 +847,197 @@ class BehaviorMicroScenario(EvalScenario, ScenarioExecutionTools):
 
 
 @register_scenario
+class GuidedPlanningBoundedWhenRequestedScenario(BehaviorMicroScenario):
+    slug = GUIDED_PLANNING_BOUNDED_WHEN_REQUESTED
+    description = "Explicit planning requests should produce a small set of decision-changing questions without starting work."
+    category = "guided_planning"
+    tags = ("agent_behavior", "micro", "guided_planning", "human_input")
+    tasks = [
+        ScenarioTask(name="inject_prompt", assertion_type="manual"),
+        ScenarioTask(name="verify_bounded_questions", assertion_type="llm_judge"),
+        ScenarioTask(name="verify_no_execution_or_config", assertion_type="manual"),
+    ]
+
+    def run(self, run_id, agent_id):
+        self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="inject_prompt")
+        with self.wait_for_agent_idle(agent_id, timeout=120):
+            inbound = self.inject_message(
+                agent_id,
+                (
+                    "Before doing any implementation, help me shape a competitor-monitoring workflow. "
+                    "I know I want useful change alerts, but I have not chosen the competitors or which "
+                    "changes matter. Ask only the questions that materially change the workflow, then wait."
+                ),
+                trigger_processing=True,
+                eval_run_id=run_id,
+                mock_config=self._planning_guardrail_mocks(),
+                eval_stop_policy={
+                    "ignore_sqlite_agent_config_mutations": False,
+                    "ignored_tool_names": list(IGNORED_FIRST_ACTION_TOOL_NAMES | {UPDATE_PLAN_TOOL_NAME}),
+                    "stop_on_human_input_request": True,
+                    "stop_on_sqlite_agent_config_mutation": True,
+                    "stop_on_tool_names": list(SUBSTANTIVE_WORK_TOOL_NAMES | AGENT_CONFIG_MUTATION_TOOL_NAMES),
+                    "stop_on_unexpected_relevant_tool": True,
+                    "allowed_tool_names": ["request_human_input"],
+                },
+            )
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED,
+            task_name="inject_prompt",
+            observed_summary="Explicit planning prompt injected and processing completed.",
+            artifacts={"message": inbound},
+        )
+
+        requests = list(get_pending_human_input_requests(agent_id, run_id, after=inbound.timestamp))
+        replies = list(
+            PersistentAgentMessage.objects.filter(
+                owner_agent_id=agent_id,
+                is_outbound=True,
+                timestamp__gte=inbound.timestamp,
+            )
+            .order_by("timestamp")
+            .values_list("body", flat=True)
+        )
+        structured_questions = [
+            {
+                "question": request.question,
+                "options": request.options_json,
+            }
+            for request in requests
+        ]
+        choice, reasoning = self.llm_judge(
+            question=(
+                "Did the agent ask a small, bounded set of one to three distinct questions whose answers "
+                "materially shape the requested workflow, and then stop without starting implementation? "
+                "Accept either ordinary chat questions or structured human-input questions. Judge the "
+                "behavior and meaning, not exact wording or which UI mechanism was used."
+            ),
+            context=(
+                f"User request:\n{inbound.body}\n\n"
+                f"Agent chat replies:\n{json.dumps(replies)}\n\n"
+                f"Structured questions:\n{json.dumps(structured_questions)}"
+            ),
+            options=["Bounded useful questions", "Missing, excessive, or premature work"],
+        )
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED if choice == "Bounded useful questions" else EvalRunTask.Status.FAILED,
+            task_name="verify_bounded_questions",
+            observed_summary=f"semantic_judge={choice}: {reasoning}",
+        )
+
+        calls = get_tool_calls_for_run(run_id, after=inbound.timestamp)
+        forbidden = [
+            call for call in calls
+            if call.tool_name in SUBSTANTIVE_WORK_TOOL_NAMES
+            or call.tool_name in AGENT_CONFIG_MUTATION_TOOL_NAMES
+            or (
+                call.tool_name == "sqlite_batch"
+                and any(
+                    sqlite_batch_mutates_agent_config_field(call, field)
+                    for field in ("charter", "schedule")
+                )
+            )
+        ]
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.FAILED if forbidden else EvalRunTask.Status.PASSED,
+            task_name="verify_no_execution_or_config",
+            observed_summary=(
+                f"Unexpected work/config calls: {[call.tool_name for call in forbidden]}."
+                if forbidden
+                else "No substantive work or durable configuration changes occurred."
+            ),
+            artifacts={"step": forbidden[0].step} if forbidden else {},
+        )
+
+
+@register_scenario
+class LegacyPlanningStateExecutesDirectlyScenario(BehaviorMicroScenario):
+    slug = LEGACY_PLANNING_STATE_EXECUTES_DIRECTLY
+    description = "A stale planning-state row must not gate a clear task or rewrite the existing charter."
+    category = "guided_planning"
+    tags = ("agent_behavior", "micro", "guided_planning", "regression", "tool_choice")
+    tasks = [
+        ScenarioTask(name="inject_prompt", assertion_type="manual"),
+        ScenarioTask(name="verify_direct_action", assertion_type="manual"),
+        ScenarioTask(name="verify_charter_preserved", assertion_type="manual"),
+    ]
+
+    def run(self, run_id, agent_id):
+        agent = PersistentAgent.objects.get(id=agent_id)
+        original_charter = agent.charter
+        self._set_planning_state(agent_id, PersistentAgent.PlanningState.PLANNING)
+        self._enable_builtin_tools(agent_id, ["mcp_brightdata_search_engine"])
+
+        self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="inject_prompt")
+        with self.wait_for_agent_idle(agent_id, timeout=120):
+            inbound = self.inject_message(
+                agent_id,
+                (
+                    "Find a representative customer-support AI vendor and summarize its current pricing. "
+                    "Choose a reasonable representative, state the assumption, and do not ask me to pick one."
+                ),
+                trigger_processing=True,
+                eval_run_id=run_id,
+                mock_config={
+                    "mcp_brightdata_search_engine": {
+                        "status": "ok",
+                        "results": [{"title": "Example pricing", "url": "https://example.test/pricing"}],
+                    },
+                },
+                eval_stop_policy={
+                    "ignored_tool_names": list(IGNORED_FIRST_ACTION_TOOL_NAMES),
+                    "stop_on_first_relevant_tool": True,
+                },
+            )
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED,
+            task_name="inject_prompt",
+            observed_summary="Clear task injected against a legacy planning-state row.",
+            artifacts={"message": inbound},
+        )
+
+        first_call = get_first_relevant_tool_call(
+            run_id,
+            after=inbound.timestamp,
+            ignored_tool_names=IGNORED_FIRST_ACTION_TOOL_NAMES,
+        )
+        direct = first_call is not None and first_call.tool_name == "mcp_brightdata_search_engine"
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED if direct else EvalRunTask.Status.FAILED,
+            task_name="verify_direct_action",
+            observed_summary=(
+                "Agent began the requested research directly."
+                if direct
+                else f"Expected direct search; first relevant tool was {first_call.tool_name if first_call else 'none'}."
+            ),
+            artifacts={"step": first_call.step} if first_call else {},
+        )
+
+        agent.refresh_from_db()
+        preserved = agent.charter == original_charter
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED if preserved else EvalRunTask.Status.FAILED,
+            task_name="verify_charter_preserved",
+            observed_summary=(
+                "Durable charter was preserved."
+                if preserved
+                else "Legacy planning behavior changed the durable charter."
+            ),
+        )
+
+
 class PlanningFirstTurnAsksBoundedQuestionsScenario(BehaviorMicroScenario):
     slug = PLANNING_FIRST_TURN_ASKS_BOUNDED_QUESTIONS
     description = (
@@ -972,7 +1158,6 @@ class PlanningFirstTurnAsksBoundedQuestionsScenario(BehaviorMicroScenario):
         )
 
 
-@register_scenario
 class PlanningIntegrationSetupSearchesBeforeQuestionScenario(BehaviorMicroScenario):
     slug = PLANNING_INTEGRATION_SETUP_SEARCHES_BEFORE_QUESTION
     description = "A named integration setup request should discover integration tools before asking how to connect."
@@ -1062,7 +1247,6 @@ class PlanningIntegrationSetupSearchesBeforeQuestionScenario(BehaviorMicroScenar
         )
 
 
-@register_scenario
 class PlanningSecureCredentialRequestScenario(BehaviorMicroScenario):
     slug = PLANNING_SECURE_CREDENTIAL_REQUEST
     description = "A credential needed during planning should use the secure request flow, never human input."
@@ -1185,7 +1369,6 @@ class PlanningSecureCredentialRequestScenario(BehaviorMicroScenario):
             )
 
 
-@register_scenario
 class PlanningClearTaskEndsPlanningFirstScenario(BehaviorMicroScenario):
     slug = PLANNING_CLEAR_TASK_ENDS_PLANNING_FIRST
     description = "A clear task in planning mode should call end_planning before doing substantive work."
@@ -1270,7 +1453,6 @@ class PlanningClearTaskEndsPlanningFirstScenario(BehaviorMicroScenario):
         )
 
 
-@register_scenario
 class PlanningExecuteRequestStaysInPlanningScenario(BehaviorMicroScenario):
     slug = PLANNING_EXECUTE_REQUEST_STAYS_IN_PLANNING
     description = "An execute-now prompt should still either ask planning questions or end planning before work."
@@ -1353,7 +1535,6 @@ class PlanningExecuteRequestStaysInPlanningScenario(BehaviorMicroScenario):
         )
 
 
-@register_scenario
 class PlanningOneOffResearchReportEndsPlanningFirstScenario(BehaviorMicroScenario):
     slug = PLANNING_ONE_OFF_RESEARCH_REPORT_ENDS_PLANNING_FIRST
     description = "A one-off research answer in planning mode should not deliver a final report before end_planning."
@@ -1580,7 +1761,6 @@ class PlanningOneOffResearchReportEndsPlanningFirstScenario(BehaviorMicroScenari
         )
 
 
-@register_scenario
 class PlanningFinalReportCompletesVisiblePlanScenario(BehaviorMicroScenario):
     slug = PLANNING_FINAL_REPORT_COMPLETES_VISIBLE_PLAN
     description = "A final report should not leave an existing visible plan with todo/doing items."
@@ -1759,7 +1939,6 @@ class PlanningFinalReportCompletesVisiblePlanScenario(BehaviorMicroScenario):
         )
 
 
-@register_scenario
 class PlanningNoDirectScheduleOrConfigUpdatesScenario(BehaviorMicroScenario):
     slug = PLANNING_NO_DIRECT_SCHEDULE_OR_CONFIG_UPDATES
     description = "Planning mode should not update schedule, charter, or runtime plan before end_planning."
@@ -1825,7 +2004,6 @@ class PlanningNoDirectScheduleOrConfigUpdatesScenario(BehaviorMicroScenario):
             )
 
 
-@register_scenario
 class PlanningDismissAfterGreetingDoesNotResumeScenario(BehaviorMicroScenario):
     slug = PLANNING_DISMISS_AFTER_GREETING_DOES_NOT_RESUME
     description = "Dismissing a completed planning prompt after a greeting should clear it without resuming the agent."

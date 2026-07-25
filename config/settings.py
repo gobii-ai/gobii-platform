@@ -922,11 +922,6 @@ WEB_CHAT_UNSEEN_FOLLOWUP_DELAY_SECONDS = env.int(
     "WEB_CHAT_UNSEEN_FOLLOWUP_DELAY_SECONDS",
     default=3600,
 )
-PERSISTENT_AGENT_PLANNING_TIMEOUT_SECONDS = env.int(
-    "PERSISTENT_AGENT_PLANNING_TIMEOUT_SECONDS",
-    default=3600,
-)
-
 # Multiple schedules are deliberately bounded. These caps prevent an agent from
 # turning a useful timer/cadence feature into an unbounded execution source.
 PERSISTENT_AGENT_SCHEDULE_MAX_ACTIVE = env.int(

@@ -273,7 +273,7 @@ def _daily_credit_state() -> dict[str, Any]:
     }
 
 
-def _create_agent(*, scenario: str, planning: bool = False):
+def _create_agent(*, scenario: str):
     from allauth.account.models import EmailAddress
     from django.contrib.auth import get_user_model
 
@@ -295,17 +295,12 @@ def _create_agent(*, scenario: str, planning: bool = False):
         user=user,
         name=f"{scenario} Browser Agent",
     )
-    planning_state = (
-        PersistentAgent.PlanningState.PLANNING
-        if planning
-        else PersistentAgent.PlanningState.COMPLETED
-    )
     agent = PersistentAgent.objects.create(
         user=user,
         name=f"{scenario} Agent",
         charter="Track exact-source updates and report concise findings.",
         browser_use_agent=browser_agent,
-        planning_state=planning_state,
+        planning_state=PersistentAgent.PlanningState.SKIPPED,
     )
     endpoint = PersistentAgentCommsEndpoint.objects.create(
         owner_agent=agent,
@@ -331,13 +326,12 @@ def _measure_prompt_scenario(
     *,
     name: str,
     is_first_run: bool = False,
-    planning: bool = False,
     web_session: bool = False,
 ) -> dict[str, int]:
     from api.agent.core.prompt_context import build_prompt_context_preview, get_agent_tools
     from api.services.web_sessions import start_web_session
 
-    agent, user, _endpoint = _create_agent(scenario=name, planning=planning)
+    agent, user, _endpoint = _create_agent(scenario=name)
     if web_session:
         start_web_session(agent, user)
 
@@ -413,10 +407,9 @@ def measure_prompt_sizes() -> dict[str, dict[str, int]]:
                             name="web-chat-implied-send",
                             web_session=True,
                         ),
-                        "planning_first_run": _measure_prompt_scenario(
-                            name="planning-first-run",
+                        "first_run": _measure_prompt_scenario(
+                            name="first-run",
                             is_first_run=True,
-                            planning=True,
                         ),
                     }
             finally:
@@ -461,12 +454,12 @@ def _budget_metadata(baseline_sha: str) -> dict[str, Any]:
             "exclude_eval_files": sorted(EVAL_EXCLUDED_FILES),
         },
         "prompt_size": {
-            "description": "Rendered prompt messages plus JSON tool definitions for representative send/planning paths.",
+            "description": "Rendered prompt messages plus JSON tool definitions for representative send and first-run paths.",
             "unit": "utf8_bytes",
             "scenarios": {
                 "normal_explicit_send": "No active web session; communication requires explicit send tools.",
                 "web_chat_implied_send": "Active web-chat session; text replies can use implied send.",
-                "planning_first_run": "Planning mode on the first run with a verified preferred contact.",
+                "first_run": "First run with a verified preferred contact.",
             },
         },
     }

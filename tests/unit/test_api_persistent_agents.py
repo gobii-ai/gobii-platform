@@ -584,6 +584,8 @@ class PersistentAgentAPITests(TestCase):
         self.assertEqual(agent.name, 'API @ Persistent Agent')
         self.assertEqual(agent.charter, 'Automate product updates')
         self.assertEqual(agent.schedule, '0 9 * * 1')
+        self.assertEqual(agent.planning_state, PersistentAgent.PlanningState.SKIPPED)
+        self.assertEqual(payload["planning_state"], PersistentAgent.PlanningState.SKIPPED)
         self.assertTrue(agent.is_active)
         self.assertEqual(agent.user_id, self.user.id)
         agent_email_endpoint = agent.comms_endpoints.get(channel=CommsChannel.EMAIL)

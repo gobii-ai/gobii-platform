@@ -371,7 +371,7 @@ class HumanInputRequestTests(TestCase):
         self.assertNotIn("relay_payload", result)
         self.assertNotIn("auto_sleep_ok", result)
 
-    def test_execute_request_human_input_allows_free_text_only_in_planning_mode(self):
+    def test_execute_request_human_input_allows_free_text_with_legacy_planning_state(self):
         self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
         self.agent.save(update_fields=["planning_state", "updated_at"])
 
@@ -532,7 +532,7 @@ class HumanInputRequestTests(TestCase):
         self.assertEqual(request_objects[0].input_mode, PersistentAgentHumanInputRequest.InputMode.FREE_TEXT_ONLY)
         self.assertEqual(request_objects[1].input_mode, PersistentAgentHumanInputRequest.InputMode.OPTIONS_PLUS_TEXT)
 
-    def test_execute_request_human_input_limits_planning_batch_to_three_questions(self):
+    def test_execute_request_human_input_does_not_special_case_legacy_planning_state(self):
         self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
         self.agent.save(update_fields=["planning_state", "updated_at"])
 
@@ -551,10 +551,9 @@ class HumanInputRequestTests(TestCase):
         )
 
         self.assertEqual(result["status"], "ok")
-        self.assertEqual(result["requests_count"], 3)
-        self.assertEqual(result["omitted_request_count"], 1)
-        self.assertIn("allows at most 3 questions", result["message"])
-        self.assertEqual(PersistentAgentHumanInputRequest.objects.filter(agent=self.agent).count(), 3)
+        self.assertEqual(result["requests_count"], 4)
+        self.assertNotIn("omitted_request_count", result)
+        self.assertEqual(PersistentAgentHumanInputRequest.objects.filter(agent=self.agent).count(), 4)
 
     def test_execute_request_human_input_accepts_questions_alias_for_batch(self):
         self.agent.planning_state = PersistentAgent.PlanningState.PLANNING

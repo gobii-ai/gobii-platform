@@ -330,7 +330,7 @@ class SqliteAgentSchedulesTests(TestCase):
         )
         self.assertIn("at most 2 active schedules", result.errors["schedule"])
 
-    def test_planning_mode_rejects_additional_schedule_mutation(self):
+    def test_legacy_planning_state_allows_additional_schedule_mutation(self):
         self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
         self.agent.save(update_fields=["planning_state", "updated_at"])
 
@@ -351,8 +351,13 @@ class SqliteAgentSchedulesTests(TestCase):
                 conn.close()
             result = apply_sqlite_agent_config_updates(self.agent, snapshot)
 
-        self.assertFalse(PersistentAgentSchedule.objects.filter(agent=self.agent).exists())
-        self.assertIn("planning mode", result.errors["schedules"].lower())
+        self.assertTrue(
+            PersistentAgentSchedule.objects.filter(
+                agent=self.agent,
+                schedule_key="planning_cadence",
+            ).exists()
+        )
+        self.assertFalse(result.errors)
 
     def test_derived_timing_fields_are_read_only(self):
         schedule = self._create_recurring("protected")

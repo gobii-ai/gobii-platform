@@ -56,7 +56,7 @@ def ensure_eval_local_compat_columns(stdout=None) -> int:
         "sms_contact_permission_attested_at",
     )
     compat_fields = (
-        (BrowserUseAgentTask, ("filespace_artifacts",)),
+        (BrowserUseAgentTask, ("filespace_artifacts", "authenticate_to_gobii_ui")),
         (EvalRunTask, ("debug_artifacts",)),
         (PersistentAgent, ("sms_disabled", "emotion", "emotion_expires_at")),
         (AgentAllowlistInvite, sms_contact_fields),

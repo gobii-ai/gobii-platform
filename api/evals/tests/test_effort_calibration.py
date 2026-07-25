@@ -2210,7 +2210,7 @@ class FirstRunPromptCalibrationTests(TestCase):
         self.assertNotIn("Schedule: When in doubt, set one", system_prompt)
         self.assertNotIn("Without a schedule, you die", system_prompt)
 
-    def test_planning_mode_prompt_ends_clear_feed_setup_before_execution(self):
+    def test_legacy_planning_state_uses_optional_planning_guidance(self):
         User = get_user_model()
         user = User.objects.create_user(
             username="planning-feed-effort@example.com",
@@ -2241,12 +2241,9 @@ class FirstRunPromptCalibrationTests(TestCase):
             context, _, _ = build_prompt_context_preview(agent, is_first_run=True)
 
         system_prompt = next(message["content"] for message in context if message["role"] == "system")
-        self.assertIn("For clear requests other than named integration setup/use", system_prompt)
-        self.assertIn("including one-off factual/research questions", system_prompt)
-        self.assertIn("Do not validate, fetch, parse, or test provided URLs", system_prompt)
-        self.assertIn("call end_planning in the same response as any welcome", system_prompt)
-        self.assertIn("Do not say you will check, validate, test, fetch, or inspect a provided feed", system_prompt)
-        self.assertIn("Prefer options", system_prompt)
+        self.assertNotIn("## Planning Mode", system_prompt)
+        self.assertNotIn("end_planning", system_prompt)
+        self.assertIn("Use `update_plan` only for substantial multi-step work", system_prompt)
 
     def test_system_prompt_has_delivery_and_config_guardrails(self):
         User = get_user_model()
