@@ -3492,8 +3492,12 @@
     overflow-wrap: anywhere;
     word-break: break-word;
 }
+/* Sized to its content so the surrounding overflow-x-auto wrapper can scroll. Pinning the table to
+   the container instead made every column shrink until the cells were unreadable on a phone. */
 .chat-content table {
-    width: 100%;
+    width: max-content;
+    min-width: 100%;
+    max-width: none;
     border-collapse: collapse;
     margin: 0.75rem 0;
     font-size: 0.875rem;
@@ -3503,6 +3507,9 @@
     padding: 0.5rem 0.75rem;
     text-align: left;
     border-bottom: 1px solid rgba(148, 163, 184, 0.25);
+    /* Prose wants long URLs to break anywhere; inside a cell that shatters ordinary words. */
+    overflow-wrap: normal;
+    word-break: normal;
 }
 .chat-content th {
     font-weight: 600;
