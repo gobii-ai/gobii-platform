@@ -556,6 +556,7 @@ export const ChatSidebar = memo(function ChatSidebar({
                   variant={variant}
                   label="All agents"
                   count={allFilteredAgents.length}
+                  loading={loading}
                 />
                 {allFilteredAgents.map((agent) => renderAgentItem(agent, false))}
               </>
@@ -565,6 +566,7 @@ export const ChatSidebar = memo(function ChatSidebar({
                   variant={variant}
                   label="All agents"
                   count={sourceAgents.length}
+                  loading={loading}
                 />
                 {sourceAgents.map((agent) => renderAgentItem(agent, false))}
               </>
@@ -824,7 +826,7 @@ export const ChatSidebar = memo(function ChatSidebar({
           ) : showCustomGalleryShellPanel ? null : (
             <div className="chat-sidebar-section-header">
               <span className="chat-sidebar-section-title">Agents</span>
-              {!collapsed && hasAgents ? (
+              {!collapsed && hasAgents && !loading ? (
                 <span className="chat-sidebar-section-count">{agents.length}</span>
               ) : null}
             </div>
