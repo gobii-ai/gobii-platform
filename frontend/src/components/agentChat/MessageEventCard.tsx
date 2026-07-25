@@ -176,6 +176,15 @@ export const MessageEventCard = memo(function MessageEventCard({
       : null,
   ].filter(Boolean)
   const emailSubject = channel === 'email' ? message.subject?.trim() : ''
+  // A sent email otherwise names its recipient only inside the body, which is not an audit trail.
+  const emailRecipient = channel === 'email' && message.isOutbound
+    ? message.recipientAddress?.trim() || ''
+    : ''
+  const emailRecipientName = message.recipientName?.trim() || ''
+  const emailRecipientLabel = emailRecipientName || emailRecipient
+  const emailRecipientTitle = emailRecipientName
+    ? `${emailRecipientName} <${emailRecipient}>`
+    : emailRecipient
 
   const contentTone = isPeer ? 'text-slate-800' : isAgent ? 'text-slate-800' : ''
 
@@ -260,6 +269,12 @@ export const MessageEventCard = memo(function MessageEventCard({
           ) : null}
           <span className="chat-author-name">{authorLabel}</span>
           {showChannelTag ? <span className={channelTagClass}>{channelIcon}{channelLabel}</span> : null}
+          {emailRecipient ? (
+            <span className="chat-email-recipient-inline" title={emailRecipientTitle}>
+              <span className="sr-only">Sent to </span>
+              <span className="chat-email-recipient-text">{emailRecipientLabel}</span>
+            </span>
+          ) : null}
           {emailSubject ? <span className="chat-email-subject-inline" title={emailSubject}>{emailSubject}</span> : null}
           <span className="chat-message-meta-slot">
             <span className="chat-timestamp" title={metaTitle}>{metaLabel}</span>

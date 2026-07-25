@@ -536,6 +536,14 @@ def _serialize_message(
     sender_user_id: int | None = None
     sender_name: str | None = None
     sender_address = message.from_endpoint.address if message.from_endpoint_id else None
+    # An email conversation is keyed by the human counterparty, so on an outbound message that
+    # address is who the agent wrote to. Without it a sent card only implies its recipient through
+    # the salutation, which leaves no reliable audit trail of who an agent contacted.
+    recipient_address: str | None = None
+    recipient_name: str | None = None
+    if message.is_outbound and channel.lower() == CommsChannel.EMAIL and conversation is not None:
+        recipient_address = (conversation.address or "").strip() or None
+        recipient_name = (conversation.display_name or "").strip() or None
     if not is_mcp and channel.lower() == "web" and sender_address:
         user_id, agent_id = parse_web_user_address(sender_address)
         if user_id is not None and (not agent_id or not message.owner_agent_id or str(message.owner_agent_id) == agent_id):
@@ -591,6 +599,8 @@ def _serialize_message(
             "senderUserId": None if is_mcp else sender_user_id,
             "senderName": sender_name,
             "senderAddress": None if is_mcp else sender_address,
+            "recipientName": recipient_name,
+            "recipientAddress": recipient_address,
             "sourceKind": source_kind,
             "sourceLabel": source_label,
             "channelLabel": discord_channel_label or None,

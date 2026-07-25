@@ -3742,6 +3742,36 @@
     color: #94a3b8;
     font-weight: 700;
 }
+/* Pairs with the channel badge as one routing unit, EMAIL → recipient. Capped so a long address
+   truncates before crowding out the subject; the full value stays in the title attribute. */
+.chat-email-recipient-inline {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 40%;
+    padding: 0.0625rem 0.5rem;
+    border: 1px solid rgba(15, 23, 42, 0.1);
+    border-radius: 9999px;
+    background: rgba(248, 250, 252, 0.9);
+    color: #475569;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0;
+}
+.chat-email-recipient-inline::before {
+    content: "→";
+    flex: 0 0 auto;
+    color: #94a3b8;
+    font-weight: 700;
+}
+.chat-email-recipient-text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
 .chat-author--user {
     color: #6366f1;
 }
