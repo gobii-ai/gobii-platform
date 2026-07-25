@@ -328,6 +328,81 @@ describe('AgentComposer pending action insights panel', () => {
     expect(screen.queryByText('Which account should I use?')).not.toBeInTheDocument()
   })
 
+  function setPointer(kind: 'fine' | 'coarse') {
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      writable: true,
+      value: (query: string) => ({
+        matches: kind === 'fine' && query.includes('pointer: fine'),
+        media: query,
+        onchange: null,
+        addListener: () => {},
+        removeListener: () => {},
+        addEventListener: () => {},
+        removeEventListener: () => {},
+        dispatchEvent: () => false,
+      }),
+    })
+  }
+
+  function switchAgent(rerender: (ui: React.ReactElement) => void, focusKey: string) {
+    rerender(
+      <AgentComposer
+        onSubmit={vi.fn(async () => undefined)}
+        pendingActionRequests={[]}
+        insightsLoading={false}
+        isProcessing={false}
+        autoFocus
+        focusKey={focusKey}
+      />,
+    )
+  }
+
+  it('does not raise the keyboard on a touch-primary device when switching agents', async () => {
+    setPointer('coarse')
+    const { rerender } = renderAgentComposer({ autoFocus: true })
+    const textarea = screen.getByRole('textbox') as HTMLTextAreaElement
+    const focusSpy = vi.spyOn(textarea, 'focus')
+
+    switchAgent(rerender, 'agent-2')
+    await new Promise((resolve) => setTimeout(resolve, 250))
+
+    expect(focusSpy).not.toHaveBeenCalled()
+    focusSpy.mockRestore()
+  })
+
+  it('still focuses the composer when switching agents with a fine pointer', async () => {
+    setPointer('fine')
+    const { rerender } = renderAgentComposer({ autoFocus: true })
+    const textarea = screen.getByRole('textbox') as HTMLTextAreaElement
+    const focusSpy = vi.spyOn(textarea, 'focus')
+
+    switchAgent(rerender, 'agent-2')
+
+    await waitFor(() => {
+      expect(focusSpy).toHaveBeenCalled()
+    })
+    focusSpy.mockRestore()
+  })
+
+  it('never pulls focus out of another field the user is typing in', async () => {
+    setPointer('fine')
+    const { rerender } = renderAgentComposer({ autoFocus: true })
+    const textarea = screen.getByRole('textbox') as HTMLTextAreaElement
+    const focusSpy = vi.spyOn(textarea, 'focus')
+    const other = document.createElement('input')
+    document.body.appendChild(other)
+
+    other.focus()
+    switchAgent(rerender, 'agent-2')
+    await new Promise((resolve) => setTimeout(resolve, 250))
+
+    expect(focusSpy).not.toHaveBeenCalled()
+    expect(document.activeElement).toBe(other)
+    focusSpy.mockRestore()
+    other.remove()
+  })
+
   it('keeps a saved collapse when a native tab becomes available', async () => {
     const handleExpandedPreferenceChange = vi.fn()
     // The user already collapsed the panel for this agent and the preference is hydrated.
