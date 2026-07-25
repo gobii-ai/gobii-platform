@@ -1,9 +1,11 @@
 import logging
+from datetime import timedelta
 
 from django.contrib.auth import login
 from django.http import HttpResponse
 from django.middleware.csrf import get_token
 from django.shortcuts import redirect
+from django.utils import timezone
 from django.views.decorators.http import require_http_methods
 from rest_framework import serializers, status
 from rest_framework.decorators import api_view, permission_classes
@@ -172,7 +174,9 @@ def consume_browser_session_ticket_view(request, ticket_id):
         ticket.user,
         backend="django.contrib.auth.backends.ModelBackend",
     )
-    request.session.set_expiry(session_ttl_seconds)
+    request.session.set_expiry(
+        timezone.now() + timedelta(seconds=session_ttl_seconds)
+    )
     logger.info(
         "Consumed browser session ticket %s for user %s in %s",
         ticket.id,

@@ -120,6 +120,7 @@ class BrowserSessionTicketAPITests(APITestCase):
             str(self.user.id),
         )
         self.assertGreaterEqual(self.client.session.get_expiry_age(), 3500)
+        self.assertIsInstance(self.client.session["_session_expiry"], str)
         session_cookie = consume_response.cookies["sessionid"]
         self.assertTrue(session_cookie["secure"])
         self.assertTrue(session_cookie["httponly"])
