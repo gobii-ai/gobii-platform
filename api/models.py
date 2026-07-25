@@ -592,6 +592,52 @@ class ApiKey(models.Model):
         return self.revoked_at is None
 
 
+class BrowserSessionTicket(models.Model):
+    """Auditable, single-use authorization for a non-production web session."""
+
+    class Source(models.TextChoices):
+        API = "api", "API"
+        GOBII_BROWSER_TASK = "gobii_browser_task", "Gobii browser task"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="browser_session_tickets",
+    )
+    api_key = models.ForeignKey(
+        ApiKey,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="browser_session_tickets",
+    )
+    browser_task = models.ForeignKey(
+        "BrowserUseAgentTask",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="browser_session_tickets",
+    )
+    source = models.CharField(max_length=32, choices=Source.choices)
+    purpose = models.CharField(max_length=200, blank=True)
+    token_hash = models.CharField(max_length=64, unique=True, editable=False)
+    environment = models.CharField(max_length=64)
+    host = models.CharField(max_length=255)
+    next_path = models.CharField(max_length=512, default="/app/")
+    expires_at = models.DateTimeField(db_index=True)
+    consumed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(
+                fields=["user", "created_at"],
+                name="bst_user_created_idx",
+            ),
+        ]
+
+
 class UserQuota(models.Model):
     INTELLIGENCE_TIER_CHOICES = (
         ("standard", "Standard"),
@@ -2568,6 +2614,10 @@ class BrowserUseAgentTask(models.Model):
     requires_vision = models.BooleanField(
         default=False,
         help_text="When true, restricts browser tasks to vision-capable LLM endpoints only.",
+    )
+    authenticate_to_gobii_ui = models.BooleanField(
+        default=False,
+        help_text="Log this authorized QA task into the current non-production Gobii UI before the browser model starts.",
     )
     # Optional JSON schema to define structured output from the agent
     output_schema = models.JSONField(
