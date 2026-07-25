@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { fetchProcessingStatus, sendAgentMessage } from '../api/agentChat'
 import { fetchAgentSpawnIntent, type AgentSpawnIntent } from '../api/agentSpawnIntent'
+import { timelineQueryKey } from '../hooks/useAgentTimeline'
 import type { TimelineEvent } from '../types/agentChat'
 import { createAppStore } from './appStore'
 import {
@@ -115,7 +116,23 @@ describe('chatSlice message sending', () => {
   })
 
   it('adds an optimistic sending message before the backend send resolves', async () => {
-    const store = createAppStore()
+    // Sending returns the session to the live edge (#287), so the optimistic event is observed in
+    // the timeline cache rather than the pending buffer that holds events while scrolled away.
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const store = createAppStore({ queryClient })
+    queryClient.setQueryData(timelineQueryKey('agent-1'), {
+      pages: [{
+        events: [],
+        hasMoreOlder: false,
+        hasMoreNewer: false,
+        oldestCursor: null,
+        newestCursor: null,
+        currentPlan: null,
+        pendingActionsStateOrder: 0,
+        raw: {},
+      }],
+      pageParams: [undefined],
+    })
     let resolveSend: (event: TimelineEvent) => void = () => {}
     vi.mocked(sendAgentMessage).mockReturnValue(new Promise<TimelineEvent>((resolve) => {
       resolveSend = resolve
@@ -126,15 +143,17 @@ describe('chatSlice message sending', () => {
     const sendResult = store.dispatch(sendMessage({ body: 'hello backend' }))
 
     expect(sendAgentMessage).toHaveBeenCalledWith('agent-1', 'hello backend', [])
-    const pendingEvents = selectActiveChatTestSnapshot(store.getState()).pendingEvents
-    expect(pendingEvents).toHaveLength(1)
-    expect(pendingEvents[0]).toMatchObject({
+    const cached = (queryClient.getQueryData(timelineQueryKey('agent-1')) as { pages: { events: TimelineEvent[] }[] })
+      .pages.flatMap((page) => page.events)
+    expect(cached).toHaveLength(1)
+    expect(cached[0]).toMatchObject({
       kind: 'message',
       message: {
         bodyText: 'hello backend',
         status: 'sending',
       },
     })
+    expect(selectActiveChatTestSnapshot(store.getState()).pendingEvents).toHaveLength(0)
     expect(selectActiveChatTestSnapshot(store.getState()).awaitingResponse).toBe(true)
 
     resolveSend({
