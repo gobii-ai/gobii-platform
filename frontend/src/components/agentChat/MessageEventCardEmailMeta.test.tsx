@@ -29,7 +29,7 @@ function emailMessage(overrides: Partial<AgentMessage> = {}): AgentMessage {
 }
 
 function renderCard(message: AgentMessage) {
-  return render(<MessageEventCard message={message} agentFirstName="Alpha" />)
+  return render(<MessageEventCard message={message} eventCursor={message.cursor ?? 'cursor-1'} agentFirstName="Alpha" />)
 }
 
 describe('email card sender and cc', () => {
