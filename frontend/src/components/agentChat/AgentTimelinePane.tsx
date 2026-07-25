@@ -213,7 +213,7 @@ export function AgentTimelinePane({
                   // re-render, so it can hold it still while older history loads above.
                   <div
                     key={timelineEventKey(event)}
-                    ref={event.kind === 'message' && event.message.id === targetMessageId ? targetMessageRef : undefined}
+                    ref={event.kind === 'message' && event.message?.id === targetMessageId ? targetMessageRef : undefined}
                     data-timeline-item="true"
                     data-timeline-key={timelineEventKey(event)}
                   >
