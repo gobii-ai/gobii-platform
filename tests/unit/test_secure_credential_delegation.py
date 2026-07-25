@@ -97,6 +97,34 @@ class SecureApiRequestTests(TestCase):
         self.assertTrue(all(b"password" not in bytes(value.encrypted_value) for value in stored))
 
     @patch("api.agent.tools.secure_api_request.execute_http_request")
+    def test_extracts_credentials_from_root_array(self, mock_http):
+        mock_http.return_value = {
+            "status": "ok",
+            "status_code": 200,
+            "content": [
+                {"id": "account-1", "token": "secret-one"},
+                {"id": "account-2", "token": "secret-two"},
+            ],
+        }
+
+        result = execute_secure_api_request(
+            self.agent,
+            {
+                "method": "GET",
+                "url": "https://accounts.example.test/v1/accounts",
+                "public_fields": {"account_id": "/id"},
+                "secret_fields": {"token": "/token"},
+                "will_continue_work": True,
+            },
+        )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["count"], 2)
+        self.assertEqual([item["account_id"] for item in result["items"]], ["account-1", "account-2"])
+        self.assertNotIn("secret-one", json.dumps(result))
+        self.assertNotIn("secret-two", json.dumps(result))
+
+    @patch("api.agent.tools.secure_api_request.execute_http_request")
     def test_rejects_sensitive_public_mapping_before_request(self, mock_http):
         result = execute_secure_api_request(
             self.agent,
@@ -402,6 +430,61 @@ class SecureValueMetaGobiiTests(TestCase):
         self.assertTrue(account.is_outbound_enabled)
         self.assertFalse(account.is_inbound_enabled)
         self.assertIsNotNone(account.connection_last_ok_at)
+
+    @patch("api.services.agent_email_provisioning.validate_agent_imap_connection")
+    @patch("api.services.agent_email_provisioning.validate_agent_smtp_connection")
+    def test_email_retry_reapplies_corrected_transport_without_reusing_secret(self, smtp, imap):
+        smtp.side_effect = lambda account: (
+            account.smtp_host == "smtp.correct.example",
+            "" if account.smtp_host == "smtp.correct.example" else "wrong SMTP host",
+        )
+        imap.side_effect = lambda account: (
+            account.imap_host == "imap.correct.example",
+            "" if account.imap_host == "imap.correct.example" else "wrong IMAP host",
+        )
+        secure_ref = create_delegated_secure_value(
+            self.manager,
+            label="mailbox_password",
+            value="mailbox-password",
+        )
+        params = {
+            "agent_id": str(self.worker.id),
+            "email_address": "retry@customer.example",
+            "connection_mode": "custom",
+            "secure_value_ref": secure_ref,
+            "smtp_host": "smtp.wrong.example",
+            "smtp_port": 587,
+            "smtp_security": "starttls",
+            "imap_host": "imap.wrong.example",
+            "imap_port": 993,
+            "imap_security": "ssl",
+            "enable_outbound": True,
+            "enable_inbound": True,
+            "user_confirmed": True,
+        }
+
+        first = execute_meta_gobii_tool(self.manager, "meta_gobii_configure_agent_email", params)
+        retry = execute_meta_gobii_tool(
+            self.manager,
+            "meta_gobii_configure_agent_email",
+            {
+                **params,
+                "smtp_host": "smtp.correct.example",
+                "imap_host": "imap.correct.example",
+            },
+        )
+
+        self.assertEqual(first["status"], "needs_attention")
+        self.assertEqual(retry["status"], "ok")
+        self.assertTrue(retry["already_applied"])
+        account = AgentEmailAccount.objects.get(
+            endpoint__owner_agent=self.worker,
+            endpoint__address="retry@customer.example",
+        )
+        self.assertEqual(account.smtp_host, "smtp.correct.example")
+        self.assertEqual(account.imap_host, "imap.correct.example")
+        self.assertEqual(account.get_smtp_password(), "mailbox-password")
+        self.assertEqual(account.get_imap_password(), "mailbox-password")
 
     @override_settings(PUBLIC_SITE_URL="https://app.gobii.test")
     def test_prepares_microsoft_oauth_without_accepting_plaintext(self):

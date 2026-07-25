@@ -58,7 +58,7 @@ def get_secure_api_request_tool() -> dict[str, Any]:
                     "collection_pointer": {
                         "type": "string",
                         "default": "",
-                        "description": "JSON Pointer to the response array. Leave empty for one response object.",
+                        "description": "JSON Pointer to a response array. Leave empty for a root object or root array.",
                     },
                     "public_fields": {
                         "type": "object",
@@ -159,10 +159,10 @@ def execute_secure_api_request(agent: PersistentAgent, params: dict[str, Any]) -
     collection = _resolve_json_pointer(content, collection_pointer)
     if collection is _MISSING:
         return {"status": "error", "message": "collection_pointer did not match the JSON response."}
-    if collection_pointer:
-        if not isinstance(collection, list):
-            return {"status": "error", "message": "collection_pointer must resolve to a JSON array."}
+    if isinstance(collection, list):
         source_items = collection[:max_items]
+    elif collection_pointer:
+        return {"status": "error", "message": "collection_pointer must resolve to a JSON array."}
     else:
         source_items = [collection]
 

@@ -35,7 +35,7 @@ def configure_custom_agent_email(
     agent: PersistentAgent,
     *,
     address: str,
-    password: str,
+    password: str | None,
     smtp_host: str,
     smtp_port: int,
     smtp_security: str,
@@ -54,7 +54,9 @@ def configure_custom_agent_email(
     )
     account.smtp_auth = AgentEmailAccount.AuthMode.LOGIN
     account.smtp_username = account.endpoint.address
-    account.set_smtp_password(password)
+    if password is not None:
+        account.set_smtp_password(password)
+        account.set_imap_password(password)
     account.imap_host = str(imap_host or "").strip()
     account.imap_port = _port(imap_port, "imap_port")
     account.imap_security = _choice(
@@ -64,7 +66,6 @@ def configure_custom_agent_email(
     )
     account.imap_auth = AgentEmailAccount.ImapAuthMode.LOGIN
     account.imap_username = account.endpoint.address
-    account.set_imap_password(password)
     account.imap_folder = "INBOX"
     account.imap_idle_enabled = True
     account.is_outbound_enabled = False

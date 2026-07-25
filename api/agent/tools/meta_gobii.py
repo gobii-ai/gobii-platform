@@ -40,7 +40,6 @@ from api.services.daily_credit_limits import calculate_daily_credit_slider_bound
 from api.services.daily_credit_settings import get_daily_credit_settings_for_owner
 from api.services.agent_email_provisioning import (
     configure_custom_agent_email,
-    ensure_agent_email_account,
     prepare_oauth_agent_email,
     test_and_enable_agent_email,
 )
@@ -2345,7 +2344,7 @@ def _tool_configure_agent_email(invoking_agent: PersistentAgent, params: dict[st
 
     account = account_holder.get("account")
     if account is None:
-        account = ensure_agent_email_account(target_agent, email_address)
+        account = configure_custom_agent_email(target_agent, address=email_address, password=None, **config)
     enable_outbound = _optional_bool(params.get("enable_outbound", True), "enable_outbound")
     enable_inbound = _optional_bool(params.get("enable_inbound", True), "enable_inbound")
     connection_result = test_and_enable_agent_email(
