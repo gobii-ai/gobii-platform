@@ -50,10 +50,12 @@ def _ticket_landing_response(request):
 <input id="browser-session-token" type="hidden" name="token">
 </form>
 <script>
-const token = new URLSearchParams(window.location.hash.slice(1)).get("token") || "";
-history.replaceState(null, "", window.location.pathname);
-document.getElementById("browser-session-token").value = token;
-document.getElementById("browser-session-form").submit();
+window.addEventListener("DOMContentLoaded", () => {{
+  const token = new URLSearchParams(window.location.hash.slice(1)).get("token") || "";
+  history.replaceState(null, "", window.location.pathname);
+  document.getElementById("browser-session-token").value = token;
+  setTimeout(() => document.getElementById("browser-session-form").submit(), 0);
+}}, {{ once: true }});
 </script>
 </body>
 </html>""",

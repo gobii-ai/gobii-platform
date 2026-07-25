@@ -5,7 +5,9 @@ from unittest.mock import AsyncMock, patch
 from urllib.parse import urlsplit
 
 from django.contrib.auth import get_user_model
+from django.db import connection
 from django.test import Client, TestCase, override_settings, tag
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils import timezone
 from asgiref.sync import async_to_sync
@@ -111,7 +113,8 @@ class BrowserSessionTicketAPITests(APITestCase):
         create_response = self._create_ticket(next_path="/app/agents/")
         login_url = create_response.json()["login_url"]
 
-        consume_response = self._consume(login_url)
+        with CaptureQueriesContext(connection) as queries:
+            consume_response = self._consume(login_url)
 
         self.assertEqual(consume_response.status_code, 302)
         self.assertEqual(consume_response["Location"], "/app/agents/")
@@ -126,6 +129,14 @@ class BrowserSessionTicketAPITests(APITestCase):
         self.assertTrue(session_cookie["httponly"])
         self.assertEqual(consume_response["Cache-Control"], "no-store")
         self.assertEqual(consume_response["Referrer-Policy"], "no-referrer")
+        ticket_selects = [
+            query["sql"]
+            for query in queries
+            if query["sql"].lstrip().upper().startswith("SELECT")
+            and "api_browsersessionticket" in query["sql"]
+        ]
+        self.assertTrue(ticket_selects)
+        self.assertNotIn(" JOIN ", ticket_selects[0].upper())
 
         ticket = BrowserSessionTicket.objects.get()
         self.assertIsNotNone(ticket.consumed_at)
@@ -147,6 +158,10 @@ class BrowserSessionTicketAPITests(APITestCase):
         self.assertNotIn(raw_token, landing_response.content.decode("utf-8"))
         self.assertIn(
             '"browser-session-form").submit()',
+            landing_response.content.decode("utf-8"),
+        )
+        self.assertIn(
+            'window.addEventListener("DOMContentLoaded"',
             landing_response.content.decode("utf-8"),
         )
         self.assertEqual(landing_response["Cache-Control"], "no-store")

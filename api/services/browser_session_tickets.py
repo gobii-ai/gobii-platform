@@ -202,9 +202,10 @@ def consume_browser_session_ticket(
     now = timezone.now()
 
     with transaction.atomic():
+        # Keep the locking query join-free: PostgreSQL cannot FOR UPDATE the
+        # nullable side of the optional API-key relationship.
         ticket = (
             BrowserSessionTicket.objects.select_for_update()
-            .select_related("user", "api_key")
             .filter(id=ticket_id)
             .first()
         )
