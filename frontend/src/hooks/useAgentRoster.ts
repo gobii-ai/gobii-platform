@@ -18,11 +18,16 @@ export function useAgentRoster(options?: UseAgentRosterOptions) {
   const contextKey = options?.contextKey ?? 'default'
   const refetchIntervalMs = options?.refetchIntervalMs ?? false
 
+  // The roster scoped to a specific agent comes back with that agent's own context, which can
+  // differ from the one the key describes. Leaving forAgentId out of the key filed that response
+  // under the wrong entry, and the caller then discarded it as a context mismatch.
+  const forAgentId = options?.forAgentId ?? null
+
   return useQuery({
-    queryKey: ['agent-roster', contextKey] as const,
+    queryKey: ['agent-roster', contextKey, forAgentId] as const,
     queryFn: () => fetchAgentRoster({
       context: context ?? undefined,
-      forAgentId: options?.forAgentId,
+      forAgentId: forAgentId ?? undefined,
       staffContext: options?.staffContext,
     }),
     placeholderData: keepPreviousData,
