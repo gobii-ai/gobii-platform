@@ -224,7 +224,8 @@ def resolve_link_reference_params(value, agent, *, tool_name: str = "", _path=()
         location = f"{tool_name}.{_param_path(_path)}" if tool_name else _param_path(_path) or "this value"
         raise LinkReferenceResolutionError(
             f"Query not executed: link references are unsupported in {location}. "
-            "Use a standalone token only where URL input is supported, move it to supported message/document content, or omit it."
+            "Use a standalone token only where URL input is supported, move it to supported message/document content, or omit it. "
+            "To write the destination out literally, read the raw URL from its source row in __tool_results and use that; a literal URL is accepted here."
         )
     return value
 
