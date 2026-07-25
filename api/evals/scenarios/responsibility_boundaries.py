@@ -21,6 +21,8 @@ from api.models import (
     PersistentAgent,
     PersistentAgentCommsEndpoint,
     PersistentAgentConversation,
+    PersistentAgentDiscordChannelSubscription,
+    PersistentAgentDiscordGuild,
     PersistentAgentEnabledTool,
     PersistentAgentMessage,
     PersistentAgentStep,
@@ -219,6 +221,22 @@ class ResponsibilityBoundaryScenario(EvalScenario, ScenarioExecutionTools):
         )
         link = AgentPeerLink.objects.create(agent_a=agent, agent_b=peer, created_by=agent.user)
         return peer, link
+
+    @classmethod
+    def _subscribe_both_to_channel(cls, agent: PersistentAgent, peer: PersistentAgent, run_id: str) -> None:
+        """Put both agents in the channel for real, as production teams are."""
+        _, _, _, channel_id, channel_name = cls._discord_channel(agent, run_id)
+        guild, _ = PersistentAgentDiscordGuild.objects.get_or_create(
+            guild_id=f"eval-guild-{str(run_id)[:8]}",
+            defaults={"name": "Eval Guild", "organization": agent.organization},
+        )
+        for member in (agent, peer):
+            PersistentAgentDiscordChannelSubscription.objects.get_or_create(
+                agent=member,
+                guild=guild,
+                channel_id=channel_id,
+                defaults={"channel_name": channel_name},
+            )
 
     @classmethod
     def _peer_inbound(cls, agent: PersistentAgent, run_id: str, body: str) -> PersistentAgentMessage:
@@ -432,7 +450,8 @@ class ResponsibilityBoundaryScenario(EvalScenario, ScenarioExecutionTools):
                 author_name="Engineering Agent",
             )
         if is_shared_channel:
-            self._create_peer_link(agent, run_id)
+            peer, _ = self._create_peer_link(agent, run_id)
+            self._subscribe_both_to_channel(agent, peer, run_id)
         terminal_tool = "send_discord_message" if is_shared_channel else "send_agent_message"
         with self.wait_for_agent_idle(agent_id, timeout=120):
             self.trigger_processing(

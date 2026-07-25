@@ -58,6 +58,7 @@ from ...models import (
     PersistentAgent,
     PersistentAgentCommsEndpoint,
     PersistentAgentCommsSnapshot,
+    PersistentAgentDiscordChannelSubscription,
     PersistentAgentHumanInputRequest,
     PersistentAgentMessage,
     PersistentAgentMessageAttachment,
@@ -983,6 +984,23 @@ def _resolve_max_iterations(max_iterations: Optional[int]) -> int:
 # --------------------------------------------------------------------------- #
 #  Prompt‑building helpers
 # --------------------------------------------------------------------------- #
+def _get_shared_channel_names(agent: PersistentAgent) -> dict:
+    """Map each other agent to the channel names it shares with this one.
+
+    Without this the peer roster reads as a list of agents to message, giving no sign that a
+    named teammate already saw the same request and can answer it.
+    """
+    active = PersistentAgentDiscordChannelSubscription.Status.ACTIVE
+    subscriptions = PersistentAgentDiscordChannelSubscription.objects.filter(status=active)
+    own = dict(subscriptions.filter(agent=agent).values_list("channel_id", "channel_name"))
+    shared: dict = {}
+    for other_id, channel_id in (
+        subscriptions.filter(channel_id__in=list(own)).exclude(agent_id=agent.id).values_list("agent_id", "channel_id")
+    ):
+        shared.setdefault(other_id, []).append(f"#{str(own.get(channel_id) or channel_id).lstrip('#')}")
+    return shared
+
+
 def _get_active_peer_dm_context(agent: PersistentAgent):
     """Return context about the latest inbound peer DM triggering this cycle."""
 
@@ -2602,8 +2620,10 @@ def _build_contacts_block(
 
     if peer_links:
         peer_lines: list[str] = [
-            "These are linked agents you can contact via the send_agent_message tool."
+            "These are linked agents you can contact via the send_agent_message tool. "
+            "Agents listed as sharing a channel already receive the same messages there that you do."
         ]
+        shared_channels = _get_shared_channel_names(agent)
         for link in peer_links:
             counterpart = link.get_other_agent(agent)
             if counterpart is None:
@@ -2625,8 +2645,10 @@ def _build_contacts_block(
             desc_part = ""
             if counterpart.short_description:
                 desc_part = f" - {counterpart.short_description}"
+            names = shared_channels.get(counterpart.id)
+            shared_part = " | shares {} with you".format(", ".join(names)) if names else ""
             peer_lines.append(
-                "- {} (id: {}){}| quota {} msgs / {} h | remaining: {} | next reset: {}".format(
+                "- {} (id: {}){}| quota {} msgs / {} h | remaining: {} | next reset: {}{}".format(
                     counterpart.name,
                     counterpart.id,
                     f"{desc_part} " if desc_part else "",
@@ -2634,6 +2656,7 @@ def _build_contacts_block(
                     link.window_hours,
                     remaining,
                     reset_at,
+                    shared_part,
                 )
             )
 
