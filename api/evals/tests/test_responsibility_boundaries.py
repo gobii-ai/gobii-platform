@@ -17,6 +17,8 @@ from api.evals.scenarios.responsibility_boundaries import (
     RESPONSIBILITY_BOUNDARY_PEER_REQUEST_HANDOFF,
     RESPONSIBILITY_BOUNDARY_SCENARIO_SLUGS,
     RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_AUTHORED_CLAIM,
+    RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_DIRECTED_REPLY,
+    RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_OPEN_REPLY,
     RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_OWNER,
     RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_NOISY_YIELD,
     RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_OWNED_REPLY,
@@ -77,6 +79,8 @@ class ResponsibilityBoundaryScenarioTests(SimpleTestCase):
                 RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_OWNED_REPLY,
                 RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_NOISY_YIELD,
                 RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_AUTHORED_CLAIM,
+                RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_DIRECTED_REPLY,
+                RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_OPEN_REPLY,
             },
         )
 
@@ -105,6 +109,27 @@ class ResponsibilityBoundaryScenarioTests(SimpleTestCase):
         self.assertNotIn("shared channels", LEDGER_CHARTER)
         self.assertNotIn("stay in your lane", COORDINATOR_CHARTER.lower())
         self.assertIn("customer-signal curation and reporting", LEDGER_CHARTER)
+
+    def test_directed_reply_case_relies_on_discord_reply_metadata(self):
+        case = next(
+            case for case in RESPONSIBILITY_BOUNDARY_CASES
+            if case.event_kind == "shared_channel_directed_reply"
+        )
+
+        self.assertEqual(case.slug, RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_DIRECTED_REPLY)
+        self.assertNotIn("engineering agent", case.prompt.lower())
+        self.assertNotIn("customer signals", case.prompt.lower())
+        self.assertIn("you", case.prompt.lower())
+
+    def test_open_reply_case_invites_owned_help_without_naming_the_agent(self):
+        case = next(
+            case for case in RESPONSIBILITY_BOUNDARY_CASES
+            if case.event_kind == "shared_channel_open_reply"
+        )
+
+        self.assertEqual(case.slug, RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_OPEN_REPLY)
+        self.assertNotIn("customer signals agent", case.prompt.lower())
+        self.assertIn("anyone with confirmed customer context", case.prompt.lower())
 
     def test_noisy_shared_channel_allows_silent_sqlite_tracking(self):
         case = next(case for case in RESPONSIBILITY_BOUNDARY_CASES if case.event_kind == "shared_channel_noisy")

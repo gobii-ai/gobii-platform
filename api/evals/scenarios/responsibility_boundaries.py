@@ -43,6 +43,8 @@ RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_OWNER = "responsibility_boundary_shared_c
 RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_OWNED_REPLY = "responsibility_boundary_shared_channel_owned_reply"
 RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_NOISY_YIELD = "responsibility_boundary_shared_channel_noisy_yield"
 RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_AUTHORED_CLAIM = "responsibility_boundary_shared_channel_authored_claim"
+RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_DIRECTED_REPLY = "responsibility_boundary_shared_channel_directed_reply"
+RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_OPEN_REPLY = "responsibility_boundary_shared_channel_open_reply"
 RESPONSIBILITY_BOUNDARY_SUITE_SLUG = "responsibility_boundaries"
 RESPONSIBILITY_BOUNDARY_SCENARIO_SLUGS = (
     RESPONSIBILITY_BOUNDARY_PEER_FYI_NO_ACK,
@@ -51,6 +53,8 @@ RESPONSIBILITY_BOUNDARY_SCENARIO_SLUGS = (
     RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_OWNED_REPLY,
     RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_NOISY_YIELD,
     RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_AUTHORED_CLAIM,
+    RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_DIRECTED_REPLY,
+    RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_OPEN_REPLY,
 )
 
 LEDGER_CHARTER = (
@@ -149,6 +153,30 @@ RESPONSIBILITY_BOUNDARY_CASES = (
         tasks=(
             ScenarioTask(name="inject_event", assertion_type="agent_processing"),
             ScenarioTask(name="verify_yields_verification", assertion_type="llm_judge"),
+        ),
+    ),
+    ResponsibilityBoundaryCase(
+        slug=RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_DIRECTED_REPLY,
+        description="A direct Discord reply to one teammate should not draw acknowledgment chatter from another.",
+        event_kind="shared_channel_directed_reply",
+        prompt="no need for you to investigate this one, just keep it logged for the interface team",
+        tasks=(
+            ScenarioTask(name="inject_event", assertion_type="agent_processing"),
+            ScenarioTask(name="verify_no_interference", assertion_type="tool_call"),
+        ),
+    ),
+    ResponsibilityBoundaryCase(
+        slug=RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_OPEN_REPLY,
+        description="A direct reply that invites relevant help from the room should still get an owned contribution.",
+        event_kind="shared_channel_open_reply",
+        prompt=(
+            "great, keep it logged for the interface team. anyone with confirmed customer context, check "
+            "https://api.example.test/customer-signals-summary.json and add the top theme and report count here"
+        ),
+        tasks=(
+            ScenarioTask(name="inject_event", assertion_type="agent_processing"),
+            ScenarioTask(name="verify_owned_work", assertion_type="tool_call"),
+            ScenarioTask(name="verify_channel_result", assertion_type="manual"),
         ),
     ),
 )
@@ -298,8 +326,22 @@ class ResponsibilityBoundaryScenario(EvalScenario, ScenarioExecutionTools):
         body: str,
         *,
         author_name: str = "Andrew",
+        discord_message_id: str = "",
+        reply_to: dict[str, Any] | None = None,
     ) -> PersistentAgentMessage:
         conversation, agent_endpoint, channel_endpoint, channel_id, channel_name = cls._discord_channel(agent, run_id)
+        raw_payload = {
+            "source": "discord_bot",
+            "source_kind": "discord",
+            "source_label": f"{author_name} in #{channel_name}",
+            "discord_channel_id": channel_id,
+            "discord_channel_name": channel_name,
+            "discord_author_name": author_name,
+        }
+        if discord_message_id:
+            raw_payload["discord_message_id"] = discord_message_id
+        if reply_to:
+            raw_payload["discord_reply_to"] = reply_to
         return PersistentAgentMessage.objects.create(
             owner_agent=agent,
             from_endpoint=channel_endpoint,
@@ -307,14 +349,7 @@ class ResponsibilityBoundaryScenario(EvalScenario, ScenarioExecutionTools):
             conversation=conversation,
             is_outbound=False,
             body=body,
-            raw_payload={
-                "source": "discord_bot",
-                "source_kind": "discord",
-                "source_label": f"{author_name} in #{channel_name}",
-                "discord_channel_id": channel_id,
-                "discord_channel_name": channel_name,
-                "discord_author_name": author_name,
-            },
+            raw_payload=raw_payload,
         )
 
     @classmethod
@@ -432,12 +467,33 @@ class ResponsibilityBoundaryScenario(EvalScenario, ScenarioExecutionTools):
                 "I'm fixing the account now and will update this channel when it is ready.",
                 author_name="Priya",
             )
+        reply_to = None
+        if self.case.event_kind in {"shared_channel_directed_reply", "shared_channel_open_reply"}:
+            peer_name = f"Engineering Agent {str(run_id)[:8]}"
+            referenced_message = self._discord_inbound(
+                agent,
+                run_id,
+                "I logged the report as a front-end issue and can investigate it.",
+                author_name=peer_name,
+                discord_message_id=f"eval-engineering-message-{str(run_id)[:8]}",
+            )
+            reply_to = {
+                "message_id": referenced_message.raw_payload["discord_message_id"],
+                "channel_id": referenced_message.raw_payload["discord_channel_id"],
+                "guild_id": "eval-guild",
+                "author_id": "engineering-agent",
+                "author_name": peer_name,
+                "content": referenced_message.body,
+                "attachment_filenames": [],
+                "unavailable": False,
+            }
         inbound = (
             self._discord_inbound(
                 agent,
                 run_id,
                 self.case.prompt.replace("Customer Signals Agent", agent.name),
                 author_name="Maya",
+                reply_to=reply_to,
             )
             if is_shared_channel
             else self._peer_inbound(agent, run_id, self.case.prompt)
@@ -460,7 +516,7 @@ class ResponsibilityBoundaryScenario(EvalScenario, ScenarioExecutionTools):
                 mock_config=self._mock_config(),
                 eval_stop_policy=self._stop_policy(
                     terminal_tool,
-                    allow_http=self.case.event_kind == "shared_channel_owned",
+                    allow_http=self.case.event_kind in {"shared_channel_owned", "shared_channel_open_reply"},
                 ),
             )
         self.record_task_result(
@@ -477,7 +533,7 @@ class ResponsibilityBoundaryScenario(EvalScenario, ScenarioExecutionTools):
             self._verify_silence(run_id, agent_id, inbound, calls)
         elif self.case.event_kind == "peer_request":
             self._verify_handoff(run_id, agent_id, inbound, calls)
-        elif self.case.event_kind == "shared_channel_owned":
+        elif self.case.event_kind in {"shared_channel_owned", "shared_channel_open_reply"}:
             self._verify_owned_request(run_id, inbound, calls)
         elif self.case.event_kind == "shared_channel_authored_claim":
             self._verify_yields_verification(run_id, calls)
