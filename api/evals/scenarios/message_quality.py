@@ -14,6 +14,7 @@ from api.agent.tools.web_chat_sender import WEB_CHAT_UNAVAILABLE_MESSAGE
 from api.evals.base import EvalScenario, ScenarioTask
 from api.evals.execution import ScenarioExecutionTools
 from api.evals.registry import ScenarioRegistry, register_scenario
+from api.agent.tools.charter_text import literal_newline_failure
 from api.evals.tool_params import resolved_tool_param
 from api.models import (
     AgentCollaborator,
@@ -861,6 +862,12 @@ class MessageQualityScenario(EvalScenario, ScenarioExecutionTools):
         result = self._tool_result(send_call) if send_call is not None else {}
         if params.get("will_continue_work") is not False and result.get("auto_sleep_ok") is not True:
             failures.append("will_continue_work should be false for final report delivery.")
+
+        if literal_newline_failure(body):
+            failures.append(
+                "Message body used literal backslash-n instead of real line breaks; "
+                "recipients see the escape sequence."
+            )
 
         if case.channel == "email":
             if params.get("to_address") != case.recipient:

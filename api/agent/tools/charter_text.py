@@ -29,3 +29,14 @@ def repair_structural_literal_newlines(value: str | None) -> tuple[str, int, int
     repaired = STRUCTURAL_LITERAL_NEWLINE_RE.sub("\n", repaired)
     remaining = count_literal_newlines(repaired)
     return repaired, before - remaining, remaining
+
+
+def literal_newline_failure(value: str | None) -> bool:
+    """True when a body uses literal backslash-n where a line break was meant.
+
+    Only the unambiguous positions count: a run of them, or one before a heading, bullet or
+    numbered item. A lone occurrence in prose -- someone writing about the escape sequence -- is
+    not a formatting failure.
+    """
+    text = value or ""
+    return bool(LITERAL_NEWLINE_RUN_RE.search(text) or STRUCTURAL_LITERAL_NEWLINE_RE.search(text))

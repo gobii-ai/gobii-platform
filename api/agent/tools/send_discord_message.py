@@ -42,7 +42,11 @@ def get_send_discord_message_tool() -> Dict[str, Any]:
                                        "Discord cannot render tables: never send pipe-separated columns with a "
                                        "hyphen-divider row, even as a summary. "
                                        "Use Markdown only; raw HTML is rejected. Use code formatting to show HTML literally. "
-                                       "Do not pass tool-call/XML syntax; it is sent literally.",
+                                       "Do not pass tool-call/XML syntax; it is sent literally. "
+                                       "Write line breaks as real newlines in the string value. A backslash "
+                                       "followed by n is sent literally and the reader sees those two "
+                                       "characters instead of a line break, which breaks every heading, "
+                                       "bullet and paragraph above.",
                     },
                     "attachments": {
                         "type": "array",
