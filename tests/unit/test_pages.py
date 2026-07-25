@@ -1088,7 +1088,7 @@ class HomePageTests(TestCase):
             normalized_page_text,
         )
         self.assertIn(
-            "Find leads, candidates, companies, and opportunities on schedule.",
+            "Find leads, candidates, companies, and opportunities on a schedule.",
             normalized_page_text,
         )
         self.assertIn(
@@ -3767,7 +3767,7 @@ class RestoredPublicMarketingSurfaceTests(TestCase):
             "Delegate qualified sourcing to AI employees",
         )
         self.assertIn(
-            "Find leads, candidates, companies, and opportunities on schedule.",
+            "Find leads, candidates, companies, and opportunities on a schedule.",
             page_text,
         )
         for retired_slug in ("health-care", "defense"):
