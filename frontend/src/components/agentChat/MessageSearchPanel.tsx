@@ -553,7 +553,7 @@ export function MessageSearchPanel({
                     if (handleAppAnchorClick(event, href)) {
                       onStateChange((current) => ({ ...current, resultsScrollTop }))
                       window.requestAnimationFrame(() => {
-                        revealTimelineMessage(result.message_id, { highlight: true })
+                        revealTimelineMessage(result.message_id, { behavior: 'auto', highlight: true })
                       })
                       onResultSelect?.()
                     }

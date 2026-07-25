@@ -84,6 +84,8 @@ type AgentTimelinePaneProps = {
   templateRecommendations?: TemplateRecommendation[]
   templateRecommendationSubmittingId?: string | null
   taskCreditsWarningVariant?: 'low' | 'out' | null
+  targetMessageId?: string | null
+  targetMessageRef?: Ref<HTMLDivElement>
   timelineContentRef?: Ref<HTMLDivElement>
   timelineRef?: Ref<HTMLDivElement>
   typingStatusText: string
@@ -141,6 +143,8 @@ export function AgentTimelinePane({
   templateRecommendations = [],
   templateRecommendationSubmittingId = null,
   taskCreditsWarningVariant = null,
+  targetMessageId = null,
+  targetMessageRef,
   timelineContentRef,
   timelineRef,
   typingStatusText,
@@ -207,7 +211,12 @@ export function AgentTimelinePane({
                 return (
                   // data-timeline-key lets the scroll controller find this row again after a
                   // re-render, so it can hold it still while older history loads above.
-                  <div key={timelineEventKey(event)} data-timeline-item="true" data-timeline-key={timelineEventKey(event)}>
+                  <div
+                    key={timelineEventKey(event)}
+                    ref={event.kind === 'message' && event.message.id === targetMessageId ? targetMessageRef : undefined}
+                    data-timeline-item="true"
+                    data-timeline-key={timelineEventKey(event)}
+                  >
                     <TimelineEventItem
                       event={event}
                       isLatestEvent={index === lastRenderedIndex}

@@ -103,6 +103,7 @@ export function useTimelineScrollController({
   const didInitialJumpRef = useRef(false)
   const fetchNewerInFlightRef = useRef(false)
   const fetchOlderInFlightRef = useRef(false)
+  const targetRevealFrameRef = useRef<number | null>(null)
   const scrollFrameRef = useRef<number | null>(null)
   const acrossFramesRafRef = useRef<number | null>(null)
   const contentLayoutGuardRafRef = useRef<number | null>(null)
@@ -390,11 +391,37 @@ export function useTimelineScrollController({
     setContentNode(node)
   }, [])
 
+  const targetMessageRef: RefCallback<HTMLDivElement> = useCallback((node) => {
+    if (targetRevealFrameRef.current !== null) {
+      window.cancelAnimationFrame(targetRevealFrameRef.current)
+      targetRevealFrameRef.current = null
+    }
+    if (!node || !targetMessageId) {
+      return
+    }
+    targetRevealFrameRef.current = window.requestAnimationFrame(() => {
+      targetRevealFrameRef.current = null
+      programmaticScrollUntilRef.current = Date.now() + PROGRAMMATIC_SCROLL_MS
+      if (
+        node.isConnected
+        && revealTimelineMessage(targetMessageId, {
+          root: node,
+          behavior: 'auto',
+          highlight: true,
+        }) !== null
+      ) {
+        didInitialJumpRef.current = true
+        lastScrollTopRef.current = containerRef.current?.scrollTop ?? 0
+        setPinned(false)
+      }
+    })
+  }, [setPinned, targetMessageId])
+
   const composerShellRef: RefCallback<HTMLDivElement> = useCallback((node) => {
     setComposerNode(node)
   }, [])
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     didInitialJumpRef.current = false
     fetchNewerInFlightRef.current = false
     fetchOlderInFlightRef.current = false
@@ -402,7 +429,10 @@ export function useTimelineScrollController({
     stopAnchorHold()
     pointerActiveRef.current = false
     touchYRef.current = null
-  }, [activeAgentId, targetMessageId])
+    if (targetMessageId) {
+      setPinned(false)
+    }
+  }, [activeAgentId, setPinned, targetMessageId])
 
   useEffect(() => {
     const container = timelineNode
@@ -605,7 +635,7 @@ export function useTimelineScrollController({
     }
   }, [contentVersion, isFetchingPreviousPage, pageCount, restorePrependAnchor])
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (isNewAgent) {
       didInitialJumpRef.current = true
       pinAndJumpToBottom()
@@ -613,20 +643,13 @@ export function useTimelineScrollController({
     }
 
     if (!initialLoading && eventCount > 0 && !didInitialJumpRef.current) {
-      didInitialJumpRef.current = true
-      if (targetMessageId && contentNode) {
-        const timeout = revealTimelineMessage(targetMessageId, {
-          root: contentNode,
-          highlight: true,
-        })
-        if (timeout !== null) {
-          setPinned(false)
-          return () => window.clearTimeout(timeout)
-        }
+      if (targetMessageId) {
+        return
       }
+      didInitialJumpRef.current = true
       pinAndJumpToBottom()
     }
-  }, [contentNode, eventCount, initialLoading, isNewAgent, pinAndJumpToBottom, setPinned, targetMessageId])
+  }, [eventCount, initialLoading, isNewAgent, pinAndJumpToBottom, targetMessageId])
 
   useEffect(() => {
     syncMeasurements()
@@ -713,6 +736,9 @@ export function useTimelineScrollController({
     if (contentLayoutGuardRafRef.current !== null) {
       window.cancelAnimationFrame(contentLayoutGuardRafRef.current)
     }
+    if (targetRevealFrameRef.current !== null) {
+      window.cancelAnimationFrame(targetRevealFrameRef.current)
+    }
     contentLayoutChangingRef.current = false
     followupScrollFramesRef.current = 0
   }, [])
@@ -735,6 +761,7 @@ export function useTimelineScrollController({
     scrollToBottom,
     timelineContentRef,
     timelineRef,
+    targetMessageRef,
     composerShellRef,
   }
 }

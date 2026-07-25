@@ -234,6 +234,8 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   onComposerFocus?: () => void
   onComposerRequestScrollToBottom?: () => void
   isNearBottom?: boolean
+  targetMessageId?: string | null
+  targetMessageRef?: Ref<HTMLDivElement>
   timelineRef?: Ref<HTMLDivElement>
   timelineContentRef?: Ref<HTMLDivElement>
   composerShellRef?: Ref<HTMLDivElement>
@@ -352,6 +354,8 @@ export function AgentChatLayout({
   onComposerFocus,
   onComposerRequestScrollToBottom,
   isNearBottom = true,
+  targetMessageId = null,
+  targetMessageRef,
   timelineRef,
   timelineContentRef,
   composerShellRef,
@@ -1566,6 +1570,8 @@ export function AgentChatLayout({
             templateRecommendations={templateRecommendations}
             templateRecommendationSubmittingId={templateRecommendationSubmittingId}
             taskCreditsWarningVariant={taskCreditsWarningVariant}
+            targetMessageId={targetMessageId}
+            targetMessageRef={targetMessageRef}
             timelineContentRef={timelineContentRef}
             timelineRef={timelineRef}
             typingStatusText={typingStatusText}
