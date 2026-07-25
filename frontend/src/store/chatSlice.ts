@@ -2,7 +2,7 @@ import { createAsyncThunk, createSlice, type PayloadAction } from '@reduxjs/tool
 import type { InfiniteData, QueryClient } from '@tanstack/react-query'
 
 import { sendAgentMessage, fetchProcessingStatus } from '../api/agentChat'
-import { flushPendingEventsToCache, injectRealtimeEventIntoCache, refreshLoadedTimelineVariantsInCache, refreshTimelineLatestInCache, replacePendingActionRequestsInCache, updateOptimisticEventInCache, updateRosterProcessingInCache } from '../hooks/useTimelineCacheInjector'
+import { flushPendingEventsToCache, injectRealtimeEventIntoCache, removeOptimisticEventFromCache, refreshLoadedTimelineVariantsInCache, refreshTimelineLatestInCache, replacePendingActionRequestsInCache, updateOptimisticEventInCache, updateRosterProcessingInCache } from '../hooks/useTimelineCacheInjector'
 import { timelineQueryKey, type TimelinePage } from '../hooks/useAgentTimeline'
 import { mergeTimelineEvents, normalizeTimelineEvent } from '../stores/agentChatTimeline'
 import type { AgentMessage, PendingActionRequest, ProcessingSnapshot, ProcessingWebTask, StreamEventPayload, StreamState, ThinkingEvent, TimelineEvent } from '../types/agentChat'
@@ -727,6 +727,22 @@ export const sendMessage = createAsyncThunk<
   }
   try {
     const serverEvent = await sendAgentMessage(agentId, trimmed, attachments)
+    // The echo is reconciled against the optimistic copy by guessing -- matching text, attachment
+    // count and a two minute timestamp window. Any disagreement leaves both on screen, one stuck
+    // on "Sending" (#48). Here the sender knows exactly which event it created, so settle it by
+    // clientId and let the guess remain only as the fallback for an echo that arrives on its own.
+    // Only settle once the response actually carries a replacement. A send that resolves without
+    // a message event still has to leave the sender looking at their own words.
+    const echoCarriesMessage = Boolean(
+      serverEvent && typeof serverEvent === 'object'
+      && (serverEvent as { kind?: unknown }).kind === 'message',
+    )
+    if (echoCarriesMessage) {
+      if (extra.queryClient) {
+        removeOptimisticEventFromCache(extra.queryClient, agentId, clientId)
+      }
+      dispatch(chatActions.optimisticMessageSettled({ agentId, clientId }))
+    }
     dispatch(receiveRealtimeEvent(agentId, serverEvent))
     return { clientId }
   } catch (error) {
@@ -975,6 +991,12 @@ const chatSlice = createSlice({
       )
       session.processing.awaitingResponse = false
       session.processing.processingStartedAt = null
+    },
+    optimisticMessageSettled(state, action: PayloadAction<{ agentId: string; clientId: string }>) {
+      const session = ensureSession(state, action.payload.agentId)
+      session.timelineUi.pendingEvents = session.timelineUi.pendingEvents.filter(
+        (event) => !(event.kind === 'message' && event.message.clientId === action.payload.clientId),
+      )
     },
     optimisticMessageRetryStarted(state, action: PayloadAction<{ agentId: string; clientId: string }>) {
       const session = ensureSession(state, action.payload.agentId)

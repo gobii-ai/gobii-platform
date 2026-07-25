@@ -448,6 +448,46 @@ export function updateOptimisticEventInCache(
   return found
 }
 
+/**
+ * Drop an optimistic event from the cache by clientId. The sender knows exactly which event its
+ * own request created, so settling it needs no content guessing.
+ */
+export function removeOptimisticEventFromCache(
+  queryClient: QueryClient,
+  agentId: string,
+  clientId: string,
+): boolean {
+  const key = timelineQueryKey(agentId)
+  let removed = false
+
+  queryClient.setQueryData<InfiniteData<TimelinePage>>(key, (old) => {
+    if (!old?.pages?.length) {
+      return old
+    }
+
+    const pages = [...old.pages]
+    for (let pageIdx = pages.length - 1; pageIdx >= 0; pageIdx--) {
+      const page = pages[pageIdx]
+      const eventIdx = page.events.findIndex(
+        (event) => event.kind === 'message' && event.message.clientId === clientId,
+      )
+      if (eventIdx < 0) {
+        continue
+      }
+      removed = true
+      pages[pageIdx] = {
+        ...page,
+        events: [...page.events.slice(0, eventIdx), ...page.events.slice(eventIdx + 1)],
+      }
+      break
+    }
+
+    return removed ? { ...old, pages } : old
+  })
+
+  return removed
+}
+
 function hasCursorAdvanced(previous: string | null, next: string | null): boolean {
   if (!next) {
     return false
