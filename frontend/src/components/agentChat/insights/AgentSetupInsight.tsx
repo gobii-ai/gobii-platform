@@ -123,6 +123,7 @@ export function AgentSetupInsight({
   const upsellItems = metadata.upsell?.items ?? []
   const upsellPlan = panel === 'upsell_pro' ? 'pro' : panel === 'upsell_scale' ? 'scale' : null
   const upsellItem = upsellPlan ? upsellItems.find((item) => item.plan === upsellPlan) : null
+  const [upsellPriceAmount, upsellPricePeriod] = (upsellItem?.price ?? '').split(/\s*\/\s*/, 2)
 
   const buildCheckoutUrl = useCallback((baseUrl?: string) => {
     if (!baseUrl) {
@@ -500,18 +501,8 @@ export function AgentSetupInsight({
     const accentClass = isPro ? 'upsell-hero--indigo' : 'upsell-hero--violet'
 
     // Fallback benefits if backend doesn't provide enough
-    const proBenefits = [
-      'More monthly tasks',
-      'Priority support',
-      'Advanced features',
-      'Faster responses',
-    ]
-    const scaleBenefits = [
-      'Highest task limits',
-      'Lowest per-task rate',
-      'Advanced intelligence',
-      'Priority processing',
-    ]
+    const proBenefits = ['More monthly tasks', 'Priority support', 'Advanced features', 'Faster responses']
+    const scaleBenefits = ['Highest task limits', 'Lowest per-task rate', 'Advanced intelligence', 'Priority processing']
 
     const backendBullets = upsellItem.bullets ?? []
     const fallbackBullets = isPro ? proBenefits : scaleBenefits
@@ -545,8 +536,8 @@ export function AgentSetupInsight({
           <div className="upsell-hero__plan-badge">{upsellItem.title}</div>
           {upsellItem.price && (
             <div className="upsell-hero__price">
-              <span className="upsell-hero__price-amount">{upsellItem.price}</span>
-              <span className="upsell-hero__price-period">/month</span>
+              <span className="upsell-hero__price-amount">{upsellPriceAmount}</span>
+              {upsellPricePeriod && <span className="upsell-hero__price-period">/{upsellPricePeriod}</span>}
             </div>
           )}
           <motion.a
