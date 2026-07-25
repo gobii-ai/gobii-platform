@@ -100,11 +100,13 @@ def consume_delegated_secure_value(
         secure_value.consumed_at = timezone.now()
         secure_value.consumed_by_agent = target_agent
         secure_value.consumption_destination = normalized_destination
+        secure_value.encrypted_value = b""
         secure_value.save(
             update_fields=[
                 "consumed_at",
                 "consumed_by_agent",
                 "consumption_destination",
+                "encrypted_value",
             ]
         )
 

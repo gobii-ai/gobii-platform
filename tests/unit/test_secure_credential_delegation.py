@@ -260,6 +260,8 @@ class SecureValueMetaGobiiTests(TestCase):
         secret = PersistentAgentSecret.objects.get(agent=self.worker, key="crm_token")
         self.assertEqual(secret.get_value(), "super-secret-token")
         self.assertNotIn("super-secret-token", json.dumps(result))
+        consumed = DelegatedSecureValue.objects.get(id=secure_ref.removeprefix("sv_"))
+        self.assertEqual(bytes(consumed.encrypted_value), b"")
 
         wrong_target = execute_meta_gobii_tool(
             self.manager,
