@@ -5,6 +5,10 @@ from django.conf import settings
 from api.agent.tools.custom_tool_names import CREATE_CUSTOM_TOOL_NAME, CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL_KEY
 from api.agent.tools.attachment_guidance import SEND_TOOL_ATTACHMENTS_DESCRIPTION
 from api.agent.tools.meta_gobii_names import META_GOBII_SYSTEM_SKILL_KEY, META_GOBII_TOOL_NAMES
+from api.agent.tools.secure_api_request import (
+    SECURE_API_REQUEST_TOOL_NAME,
+    SECURE_CREDENTIAL_DELEGATION_SYSTEM_SKILL_KEY,
+)
 from api.meta_ads_setup import META_ADS_SETUP_INSTRUCTIONS, META_ADS_SETUP_STEPS, META_ADS_TROUBLESHOOTING_TIPS
 
 from .image_generation import IMAGE_GENERATION_PROMPT_INSTRUCTIONS, IMAGE_GENERATION_SYSTEM_SKILL_KEY
@@ -1006,6 +1010,7 @@ META_GOBII_SYSTEM_SKILL = SystemSkillDefinition(
         "link Gobiis for peer briefings and read or wait on their timelines",
         "upload and list files in a Gobii filespace",
         "manage contacts, allowlists, pending contact requests, contact endpoints, and preferred owner-safe endpoints",
+        "assign opaque secure values and configure child Gobii email accounts",
     ),
     use_when=(
         "the user asks to create a team of Gobiis",
@@ -1075,7 +1080,8 @@ META_GOBII_SYSTEM_SKILL = SystemSkillDefinition(
         "Human approval boundary: before making any control-plane mutation, ask the human to approve a concise "
         "summary of the proposed change. Mutations include creating, updating, archiving, linking, unlinking, "
         "briefing or messaging Gobiis, uploading files, adding/removing/approving contacts, changing preferred "
-        "contact endpoints, and changing schedules, resources, or intelligence tiers. After explicit approval, set "
+        "contact endpoints, assigning secure values, configuring email, and changing schedules, resources, or "
+        "intelligence tiers. After explicit approval, set "
         "user_confirmed=true only on Meta Gobii tools that expose it. For broad multi-Gobii operations, first summarize the "
         "scope and wait for higher-level confirmation.\n"
         "For initial team creation or team-management capability tests, do not create, link, brief, schedule, or "
@@ -1113,8 +1119,72 @@ META_GOBII_SYSTEM_SKILL = SystemSkillDefinition(
         "work from a provided/uploaded file, place that file in this invoking Gobii's filespace and attach it through "
         "send_agent_message so normal peer transfer semantics deliver it. Uploads accept small base64 files; do not "
         "fetch arbitrary remote URLs through these tools.\n"
+        "When an API response contains credentials for another Gobii, discover and use the Secure credential "
+        "delegation skill; never retrieve those values with ordinary HTTP, browser tools, files, chat, or SQLite.\n"
         "Known unsupported MCP-equivalent surfaces in this direct skill: arbitrary URL file fetch, ad hoc runtime sessions, "
         "and separate task/run abstractions."
+    ),
+)
+
+SECURE_CREDENTIAL_DELEGATION_SYSTEM_SKILL = SystemSkillDefinition(
+    skill_key=SECURE_CREDENTIAL_DELEGATION_SYSTEM_SKILL_KEY,
+    name="Secure credential delegation",
+    search_summary=(
+        "Provision credentials from JSON APIs into other Gobiis without exposing returned secret values."
+    ),
+    tool_names=(SECURE_API_REQUEST_TOOL_NAME,),
+    enables=(
+        "extract selected API response fields into short-lived encrypted references",
+        "assign one-use secure references to another Gobii through Meta Gobii",
+        "configure child Gobii email accounts without copying passwords into chat or tool arguments",
+    ),
+    use_when=(
+        "an API creates or returns credentials that must be assigned to another Gobii",
+        "a manager Gobii needs to provision accounts for child Gobiis",
+        "mailbox passwords, app passwords, tokens, or API keys must move between systems securely",
+        "the user asks for automated credential distribution or secure secret handoff",
+    ),
+    query_aliases=(
+        "secure credential delegation",
+        "provision child credentials",
+        "assign secrets to gobiis",
+        "secure api response",
+        "mailbox provisioning",
+        "manager gobii credentials",
+        "deploy email workers",
+    ),
+    discovery_triggers=(
+        "secure credential delegation",
+        "provision credentials",
+        "assign secrets",
+        "mailbox provisioning",
+        "email workers",
+        "credential",
+        "credentials",
+        "mailbox",
+        "mailboxes",
+        "app password",
+        "api response",
+    ),
+    prompt_instructions=(
+        "Use `secure_api_request` when an API response may contain passwords, app passwords, tokens, OTPs, or other "
+        "credentials. Never fetch that response with ordinary `http_request`, a browser, a custom tool, or SQLite. "
+        "Map only safe scalar identifiers such as account ID, address, provider, and status under public_fields. "
+        "Map every credential-bearing path under secret_fields. The returned `sv_...` references are opaque, "
+        "short-lived, and one-use; never try to inspect, decode, persist, or send them to a human.\n"
+        "For child provisioning, enable Meta Gobii too. Create or identify the child, then pass each secure reference "
+        "directly to `meta_gobii_assign_agent_secret` or `meta_gobii_configure_agent_email`. A clear human request to "
+        "provision the described accounts is confirmation for that exact scope; keep using user_confirmed=true only "
+        "within it, and ask again before expanding the number of children or destinations.\n"
+        "For generic API credentials, choose the narrowest real domain_pattern supported by the destination API and "
+        "a stable secret key. Never install a mailbox credential as a generic agent secret; use "
+        "`meta_gobii_configure_agent_email` so Gobii's existing send/receive infrastructure is configured. Custom "
+        "SMTP/IMAP with an app password can be tested and activated automatically; OAuth mailboxes must be prepared "
+        "with connection_mode=oauth2 and the returned setup URL given to the owner for the provider login. Do not "
+        "substitute a mailbox login password when the provider requires OAuth or an app password.\n"
+        "Process paginated provider responses in bounded pages. Preserve stable public account IDs so retries reuse "
+        "the intended child. A secure reference may be retried only for the same destination; never reuse it for a "
+        "different Gobii or secret slot. Report counts and setup status, not credentials or secure references."
     ),
 )
 
@@ -1131,4 +1201,5 @@ DEFAULT_SYSTEM_SKILL_DEFINITIONS = {
     DISCORD_NATIVE_SYSTEM_SKILL.skill_key: DISCORD_NATIVE_SYSTEM_SKILL,
     WEBHOOKS_SYSTEM_SKILL.skill_key: WEBHOOKS_SYSTEM_SKILL,
     META_GOBII_SYSTEM_SKILL.skill_key: META_GOBII_SYSTEM_SKILL,
+    SECURE_CREDENTIAL_DELEGATION_SYSTEM_SKILL.skill_key: SECURE_CREDENTIAL_DELEGATION_SYSTEM_SKILL,
 }

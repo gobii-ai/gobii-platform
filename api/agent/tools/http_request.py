@@ -357,8 +357,9 @@ def get_http_request_tool() -> Dict[str, Any]:
         "function": {
             "name": "http_request",
             "description": (
-                "Perform a fast and efficient HTTP request to fetch raw structured data (JSON, XML, CSV) or interact with APIs. "
-                "This is the PREFERRED tool for programmatic data retrieval from known endpoints. "
+                "Fetch non-secret raw structured data (JSON, XML, CSV) or interact with APIs. "
+                "Never use this when a response may contain credentials, passwords, tokens, or OTPs; first search for `secure credential delegation` and use its secure request tool. "
+                "This is the PREFERRED tool for non-secret programmatic data retrieval from known endpoints. "
                 "If the user explicitly asks to scrape or read a known webpage, use the scraping/browser tool instead unless the URL clearly serves raw data. "
                 "When this tool returns a successful payload that answers the user's request, answer from that payload; do not open a browser task just to verify the same data. "
                 "For weather, a geocoding endpoint only resolves coordinates; call a forecast/current-conditions endpoint before replying with weather. "
@@ -413,6 +414,7 @@ def execute_http_request(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
     url = params.get("url")
     if not url:
         return {"status": "error", "message": "Missing required parameter: url"}
+    display_url = str(url)
 
     will_continue_work = _coerce_optional_bool(params.get("will_continue_work"))
     download_requested = _coerce_optional_bool(params.get("download")) is True
@@ -603,7 +605,7 @@ def execute_http_request(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
                     "provider_key": native_provider.key,
                     "provider_name": native_provider.display_name,
                     "method": method,
-                    "url": url,
+                    "url": display_url,
                     "retryable": resp.status_code >= 500 or resp.status_code == 429,
                     "guidance": _native_http_error_guidance(native_provider.key, resp.status_code, ""),
                 }
@@ -716,7 +718,7 @@ def execute_http_request(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
     response_size = len(content_str) if isinstance(content_str, str) else len(str(content_str))
     logger.info(
         "Agent %s HTTP response: %s %s - Status: %d, Size: %d chars%s",
-        agent.id, method, url, resp.status_code, response_size,
+        agent.id, method, display_url, resp.status_code, response_size,
         " (truncated)" if truncated else ""
     )
     
@@ -735,7 +737,7 @@ def execute_http_request(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
                 "provider_key": native_provider.key,
                 "provider_name": native_provider.display_name,
                 "method": method,
-                "url": url,
+                "url": display_url,
                 "retryable": resp.status_code >= 500 or resp.status_code == 429,
                 "guidance": _native_http_error_guidance(native_provider.key, resp.status_code, content_str),
             }

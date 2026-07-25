@@ -31,6 +31,10 @@ from api.evals.scenarios.agent_scheduling import (
 from api.evals.scenarios.agent_appearance import AGENT_APPEARANCE_SCENARIO_SLUGS, AGENT_APPEARANCE_SUITE_SLUG
 from api.evals.scenarios.meta_gobii import META_GOBII_REAL_HARNESS_SCENARIO_SLUGS, META_GOBII_REAL_HARNESS_SUITE_SLUG
 from api.evals.scenarios.webhooks import WEBHOOK_SCENARIO_SLUGS, WEBHOOKS_SUITE_SLUG
+from api.evals.scenarios.secure_credential_delegation import (
+    SECURE_CREDENTIAL_DELEGATION_SCENARIO_SLUGS,
+    SECURE_CREDENTIAL_DELEGATION_SUITE_SLUG,
+)
 from api.evals.meta_gobii import META_GOBII_EVAL_SCENARIO_SLUGS, META_GOBII_EVAL_SUITE_SLUG
 from api.evals.suites import EvalSuite, register_builtin_suites
 
@@ -140,6 +144,11 @@ register_builtin_suites(
             slug=WEBHOOKS_SUITE_SLUG,
             description="Native webhook discovery, configuration, sending, and explicit Pipedream routing regressions.",
             scenario_slugs=WEBHOOK_SCENARIO_SLUGS,
+        ),
+        EvalSuite(
+            slug=SECURE_CREDENTIAL_DELEGATION_SUITE_SLUG,
+            description="Secure API extraction and scoped child credential/email delegation over the real agent harness.",
+            scenario_slugs=SECURE_CREDENTIAL_DELEGATION_SCENARIO_SLUGS,
         ),
         EvalSuite(
             slug=IMAGE_GENERATION_SUITE_SLUG,

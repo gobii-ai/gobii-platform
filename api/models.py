@@ -8854,6 +8854,48 @@ class PersistentAgentSecret(SecretModelMixin, models.Model):
         return f"Secret '{self.name}' ({self.key}) for {self.agent.name} on {self.domain_pattern}"
 
 
+class DelegatedSecureValue(models.Model):
+    """Short-lived encrypted value that can be consumed without returning plaintext to an agent."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    source_agent = models.ForeignKey(
+        PersistentAgent,
+        on_delete=models.CASCADE,
+        related_name="delegated_secure_values",
+    )
+    label = models.CharField(max_length=128)
+    encrypted_value = models.BinaryField()
+    expires_at = models.DateTimeField(db_index=True)
+    consumed_at = models.DateTimeField(null=True, blank=True)
+    consumed_by_agent = models.ForeignKey(
+        PersistentAgent,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="consumed_secure_values",
+    )
+    consumption_destination = models.CharField(max_length=256, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(
+                fields=["source_agent", "expires_at"],
+                name="dsv_source_expires_idx",
+            ),
+        ]
+
+    def set_value(self, value: str) -> None:
+        from .encryption import SecretsEncryption
+
+        self.encrypted_value = SecretsEncryption.encrypt_value(value)
+
+    def get_value(self) -> str:
+        from .encryption import SecretsEncryption
+
+        return SecretsEncryption.decrypt_value(self.encrypted_value)
+
+
 class GlobalSecret(SecretModelMixin, models.Model):
 
     class SecretType(models.TextChoices):

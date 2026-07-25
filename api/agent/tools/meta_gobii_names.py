@@ -26,4 +26,6 @@ META_GOBII_TOOL_NAMES = (
     "meta_gobii_approve_pending_contact",
     "meta_gobii_list_contact_endpoints",
     "meta_gobii_set_preferred_contact_endpoint",
+    "meta_gobii_assign_agent_secret",
+    "meta_gobii_configure_agent_email",
 )

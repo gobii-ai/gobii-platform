@@ -7,11 +7,13 @@ import uuid
 from decimal import Decimal
 from typing import Any, Callable
 
+from django.conf import settings
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import IntegrityError, transaction
 from django.db.models import Q
 
 from agents.services import AgentService
+from api.domain_validation import DomainPatternValidator
 from api.agent.core.llm_config import (
     AgentLLMTier,
     get_allowed_tier_rank,
@@ -30,11 +32,21 @@ from api.models import (
     CommsChannel,
     PersistentAgent,
     PersistentAgentCommsEndpoint,
+    PersistentAgentSecret,
     PersistentAgentSystemSkillState,
     UserPhoneNumber,
 )
 from api.services.daily_credit_limits import calculate_daily_credit_slider_bounds, get_tier_credit_multiplier, scale_daily_credit_limit_for_tier_change
 from api.services.daily_credit_settings import get_daily_credit_settings_for_owner
+from api.services.agent_email_provisioning import (
+    configure_custom_agent_email,
+    prepare_oauth_agent_email,
+    test_and_enable_agent_email,
+)
+from api.services.delegated_secure_values import (
+    SecureValueError,
+    consume_delegated_secure_value,
+)
 from api.services.persistent_agents import ensure_default_agent_email_endpoint, PersistentAgentProvisioningError, PersistentAgentProvisioningService
 from console.agent_chat.timeline import (
     DEFAULT_PAGE_SIZE as TIMELINE_DEFAULT_PAGE_SIZE,
@@ -715,6 +727,108 @@ TOOL_DEFINITIONS: dict[str, dict[str, Any]] = {
                 "status": {"type": "string"},
                 "agent": _AGENT_OUTPUT,
                 "preferred_contact_endpoint": {"anyOf": [_ENDPOINT_OUTPUT, {"type": "null"}]},
+                **_confirmation_output_schema(),
+            },
+            required=("status",),
+        ),
+    },
+    "meta_gobii_assign_agent_secret": {
+        "description": (
+            "Consume one short-lived secure value reference into an accessible Gobii's encrypted, domain-scoped "
+            "credential store. Do not use this for email credentials; use meta_gobii_configure_agent_email. "
+            "The plaintext is never returned. Requires human approval via user_confirmed."
+        ),
+        "parameters": _object(
+            {
+                "agent_id": _agent_id("Target persistent agent UUID."),
+                "secure_value_ref": {
+                    "type": "string",
+                    "description": "Opaque sv_ reference returned by secure_api_request.",
+                },
+                "domain_pattern": {
+                    "type": "string",
+                    "description": "Narrow destination domain, such as https://api.example.com.",
+                },
+                "name": {"type": "string", "description": "Human-readable secret name."},
+                "key": {
+                    "type": "string",
+                    "description": "Stable placeholder key used as $[secret:key].",
+                },
+                "description": {"type": "string"},
+                "user_confirmed": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": _confirmation_description("secure credential assignment"),
+                },
+            },
+            required=("agent_id", "secure_value_ref", "domain_pattern", "name", "key"),
+        ),
+        "output": _output_object(
+            {
+                "status": {"type": "string"},
+                "agent_id": _UUID,
+                "secret": _output_object(
+                    {
+                        "name": {"type": "string"},
+                        "key": {"type": "string"},
+                        "domain_pattern": {"type": "string"},
+                    }
+                ),
+                "already_applied": {"type": "boolean"},
+                **_confirmation_output_schema(),
+            },
+            required=("status",),
+        ),
+    },
+    "meta_gobii_configure_agent_email": {
+        "description": (
+            "Configure an accessible Gobii's existing email account without exposing credentials. For custom "
+            "SMTP/IMAP or app-password mailboxes, consume one sv_ reference, test both transports, and enable only "
+            "successful directions. For OAuth mailboxes, prepare the account and return the owner setup URL. "
+            "Requires human approval via user_confirmed."
+        ),
+        "parameters": _object(
+            {
+                "agent_id": _agent_id("Target persistent agent UUID."),
+                "email_address": {"type": "string"},
+                "connection_mode": {"type": "string", "enum": ["custom", "oauth2"]},
+                "provider": {
+                    "type": "string",
+                    "description": "gmail, microsoft, outlook, or custom. Gmail custom mode uses app-password defaults.",
+                },
+                "secure_value_ref": {
+                    "type": "string",
+                    "description": "Required for custom mode; omitted for OAuth mode.",
+                },
+                "smtp_host": {"type": "string"},
+                "smtp_port": {"type": "integer", "minimum": 1, "maximum": 65535},
+                "smtp_security": {"type": "string", "enum": ["ssl", "starttls", "none"]},
+                "imap_host": {"type": "string"},
+                "imap_port": {"type": "integer", "minimum": 1, "maximum": 65535},
+                "imap_security": {"type": "string", "enum": ["ssl", "starttls", "none"]},
+                "enable_outbound": {"type": "boolean", "default": True},
+                "enable_inbound": {"type": "boolean", "default": True},
+                "user_confirmed": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": _confirmation_description("agent email configuration"),
+                },
+            },
+            required=("agent_id", "email_address", "connection_mode"),
+        ),
+        "output": _output_object(
+            {
+                "status": {"type": "string"},
+                "agent_id": _UUID,
+                "email_address": {"type": "string"},
+                "connection_mode": {"type": "string"},
+                "outbound_enabled": {"type": "boolean"},
+                "inbound_enabled": {"type": "boolean"},
+                "smtp_ok": {"type": ["boolean", "null"]},
+                "imap_ok": {"type": ["boolean", "null"]},
+                "errors": _array({"type": "string"}),
+                "oauth_setup_url": _STRING_OR_NULL,
+                "already_applied": {"type": "boolean"},
                 **_confirmation_output_schema(),
             },
             required=("status",),
@@ -2060,6 +2174,200 @@ def _parse_uuid(value: Any, key: str) -> uuid.UUID:
         raise MetaGobiiToolError(f"{key} must be a valid UUID.") from exc
 
 
+def _tool_assign_agent_secret(invoking_agent: PersistentAgent, params: dict[str, Any]) -> dict[str, Any]:
+    target_agent = _get_agent(invoking_agent, params.get("agent_id"))
+    name = _required_string(params, "name", allow_blank=False)
+    key = _required_string(params, "key", allow_blank=False)
+    domain_pattern = _required_string(params, "domain_pattern", allow_blank=False)
+    try:
+        DomainPatternValidator.validate_domain_pattern(domain_pattern)
+        domain_pattern = DomainPatternValidator.normalize_domain_pattern(domain_pattern)
+    except ValueError as exc:
+        raise MetaGobiiToolError(str(exc)) from exc
+    description = _optional_string(params.get("description"), "description") or ""
+    _require_user_confirmed(
+        params,
+        action=f"assign `{name}` to {target_agent.name}'s encrypted credential store",
+        proposed_actions=[
+            f"Consume one short-lived secure reference into `{key}` for `{domain_pattern}`.",
+            "Do not reveal the credential value in tool output, chat, files, or SQLite.",
+        ],
+    )
+
+    destination = f"agent_secret:{domain_pattern}:{key}"
+
+    def _apply(value: str) -> None:
+        secret = PersistentAgentSecret.objects.filter(
+            agent=target_agent,
+            secret_type=PersistentAgentSecret.SecretType.CREDENTIAL,
+            domain_pattern=domain_pattern,
+            key=key,
+        ).first()
+        if secret is None:
+            secret = PersistentAgentSecret(
+                agent=target_agent,
+                secret_type=PersistentAgentSecret.SecretType.CREDENTIAL,
+                domain_pattern=domain_pattern,
+                name=name,
+                key=key,
+            )
+        else:
+            secret.name = name
+        secret.description = description
+        secret.requested = False
+        secret.set_value(value)
+        secret.save()
+
+    try:
+        consumption = consume_delegated_secure_value(
+            invoking_agent,
+            target_agent,
+            secure_value_ref=params.get("secure_value_ref"),
+            destination=destination,
+            apply=_apply,
+        )
+    except SecureValueError as exc:
+        raise MetaGobiiToolError(str(exc)) from exc
+
+    return {
+        "status": "ok",
+        "agent_id": str(target_agent.id),
+        "secret": {
+            "name": name,
+            "key": key,
+            "domain_pattern": domain_pattern,
+        },
+        "already_applied": consumption.already_applied,
+    }
+
+
+def _tool_configure_agent_email(invoking_agent: PersistentAgent, params: dict[str, Any]) -> dict[str, Any]:
+    target_agent = _get_agent(invoking_agent, params.get("agent_id"))
+    email_address = _required_string(params, "email_address", allow_blank=False)
+    connection_mode = _optional_choice(
+        params.get("connection_mode"),
+        "connection_mode",
+        {"custom", "oauth2"},
+        allow_missing=False,
+    )
+    provider = (_optional_string(params.get("provider"), "provider") or "").lower()
+    provider = {
+        "google": "gmail",
+        "o365": "microsoft",
+        "office365": "microsoft",
+    }.get(provider, provider)
+    _require_user_confirmed(
+        params,
+        action=f"configure {target_agent.name}'s email account for {email_address}",
+        proposed_actions=[
+            "Use Gobii's existing encrypted email account and normal send/receive infrastructure.",
+            (
+                "Consume one short-lived credential reference and test the requested SMTP/IMAP directions."
+                if connection_mode == "custom"
+                else "Prepare an OAuth email account and leave it disabled until the owner completes provider login."
+            ),
+        ],
+    )
+
+    if connection_mode == "oauth2":
+        if provider not in {"gmail", "microsoft", "outlook"}:
+            raise MetaGobiiToolError("OAuth mode requires provider gmail, microsoft, or outlook.")
+        account = prepare_oauth_agent_email(
+            target_agent,
+            address=email_address,
+            provider=provider,
+        )
+        return {
+            "status": "oauth_required",
+            "agent_id": str(target_agent.id),
+            "email_address": account.endpoint.address,
+            "connection_mode": account.connection_mode,
+            "outbound_enabled": False,
+            "inbound_enabled": False,
+            "smtp_ok": None,
+            "imap_ok": None,
+            "errors": [],
+            "oauth_setup_url": (
+                f"{str(settings.PUBLIC_SITE_URL or '').rstrip('/')}/app/agents/{target_agent.id}/email"
+            ),
+            "already_applied": False,
+        }
+
+    secure_value_ref = _required_string(params, "secure_value_ref", allow_blank=False)
+    defaults = {
+        "smtp_host": "smtp.gmail.com",
+        "smtp_port": 587,
+        "smtp_security": "starttls",
+        "imap_host": "imap.gmail.com",
+        "imap_port": 993,
+        "imap_security": "ssl",
+    } if provider == "gmail" else {}
+    config = {
+        field: params.get(field, default)
+        for field, default in {
+            "smtp_host": defaults.get("smtp_host"),
+            "smtp_port": defaults.get("smtp_port"),
+            "smtp_security": defaults.get("smtp_security"),
+            "imap_host": defaults.get("imap_host"),
+            "imap_port": defaults.get("imap_port"),
+            "imap_security": defaults.get("imap_security"),
+        }.items()
+    }
+    missing = [field for field, value in config.items() if value in (None, "")]
+    if missing:
+        raise MetaGobiiToolError(
+            "Custom email mode requires transport settings.",
+            {"missing_fields": missing},
+        )
+
+    account_holder: dict[str, Any] = {}
+    destination = f"agent_email:{email_address.strip().lower()}"
+
+    def _apply(value: str) -> None:
+        account_holder["account"] = configure_custom_agent_email(
+            target_agent,
+            address=email_address,
+            password=value,
+            **config,
+        )
+
+    try:
+        consumption = consume_delegated_secure_value(
+            invoking_agent,
+            target_agent,
+            secure_value_ref=secure_value_ref,
+            destination=destination,
+            apply=_apply,
+        )
+    except SecureValueError as exc:
+        raise MetaGobiiToolError(str(exc)) from exc
+
+    account = account_holder.get("account")
+    if account is None:
+        account = configure_custom_agent_email(target_agent, address=email_address, password=None, **config)
+    enable_outbound = _optional_bool(params.get("enable_outbound", True), "enable_outbound")
+    enable_inbound = _optional_bool(params.get("enable_inbound", True), "enable_inbound")
+    connection_result = test_and_enable_agent_email(
+        account,
+        enable_outbound=enable_outbound,
+        enable_inbound=enable_inbound,
+    )
+    account.refresh_from_db()
+    return {
+        "status": "ok" if connection_result.ok else "needs_attention",
+        "agent_id": str(target_agent.id),
+        "email_address": account.endpoint.address,
+        "connection_mode": account.connection_mode,
+        "outbound_enabled": account.is_outbound_enabled,
+        "inbound_enabled": account.is_inbound_enabled,
+        "smtp_ok": connection_result.smtp_ok,
+        "imap_ok": connection_result.imap_ok,
+        "errors": list(connection_result.errors),
+        "oauth_setup_url": None,
+        "already_applied": consumption.already_applied,
+    }
+
+
 def _format_validation_error(exc: Exception) -> Any:
     if hasattr(exc, "message_dict"):
         return _json_safe(getattr(exc, "message_dict"))
@@ -2118,4 +2426,6 @@ _HANDLERS: dict[str, Callable[[PersistentAgent, dict[str, Any]], dict[str, Any]]
     "meta_gobii_approve_pending_contact": _tool_approve_pending_contact,
     "meta_gobii_list_contact_endpoints": _tool_list_contact_endpoints,
     "meta_gobii_set_preferred_contact_endpoint": _tool_set_preferred_contact_endpoint,
+    "meta_gobii_assign_agent_secret": _tool_assign_agent_secret,
+    "meta_gobii_configure_agent_email": _tool_configure_agent_email,
 }
