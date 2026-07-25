@@ -3977,6 +3977,18 @@
     }
     .chat-author {
         font-size: 0.6875rem;
+        flex-wrap: wrap;
+        row-gap: 0.25rem;
+    }
+    /* One line cannot hold name, channel, recipient, subject and time at this width. The two
+       parts carrying the information shrink first and collapse to a character or two, so give
+       them a floor and let the header wrap to a second line instead. */
+    .chat-email-recipient-inline {
+        min-width: 7.5rem;
+        max-width: 100%;
+    }
+    .chat-email-subject-inline {
+        min-width: 7.5rem;
     }
     .banner {
         padding: 0.5rem 0.875rem;
