@@ -180,10 +180,18 @@ class PersistentAgentPlanningModeTests(TestCase):
         )
 
         self.assertIn("Broad ongoing/substantial first work", prompt)
+        self.assertIn("at most four read-only public calls in two rounds", prompt)
+        self.assertIn("questions were requested first", prompt)
+        self.assertIn("No prose substitute", prompt)
         self.assertIn("ask the highest-leverage question", prompt)
-        self.assertIn("sole response is request_human_input", prompt)
-        self.assertIn("no response text, config change, or work", prompt)
-        self.assertIn("request_human_input with 2-3 real choices", prompt)
+        self.assertIn("Use the current inbound channel", prompt)
+        self.assertIn("native request_human_input card", prompt)
+        self.assertIn("2-3 evidence-informed choices", prompt)
+        self.assertIn("It stays pending if they leave", prompt)
+        self.assertIn("follow the result guidance", prompt)
+        self.assertIn("mirror the exact choices there", prompt)
+        self.assertIn("send the same numbered choices there", prompt)
+        self.assertIn("do no other work", prompt)
         self.assertIn("Otherwise start the task", prompt)
 
     def test_agents_without_sms_endpoint_do_not_receive_send_sms_tool(self):

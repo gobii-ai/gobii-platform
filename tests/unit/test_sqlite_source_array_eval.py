@@ -8,11 +8,13 @@ from api.agent.tools.sqlite_query_quality import summarize_sqlite_tool_result_sq
 from api.evals.registry import ScenarioRegistry
 from api.evals.scenarios.sqlite_tool_results import (
     SQLITE_INCREMENTAL_DOMAIN_MODEL,
+    SQLITE_SIBLING_RESULT_SET_FIRST_WRITE,
     SQLITE_SOURCE_ARRAY_FIRST_WRITE,
     SQLITE_TOOL_RESULT_SCENARIO_SLUGS,
     SQLITE_TOOL_RESULT_SUITE_SLUG,
     SqliteIncrementalDomainModelScenario,
     SqliteIntermediateWorkingTableScenario,
+    SqliteSiblingResultSetFirstWriteScenario,
     SqliteSourceArrayFirstWriteScenario,
     _repeated_source_import_tables,
     _source_array_first_write_failures,
@@ -126,6 +128,25 @@ class SqliteSourceArrayEvalTests(SimpleTestCase):
             ],
         )
         prompt = SqliteIncrementalDomainModelScenario.prompt.casefold()
+        for leaked_term in ("sqlite", "__tool_results", "json_each", "insert", "select", "table"):
+            self.assertNotIn(leaked_term, prompt)
+
+    def test_sibling_result_set_case_is_registered_without_teaching_sql(self):
+        suite = SuiteRegistry.get(SQLITE_TOOL_RESULT_SUITE_SLUG)
+        scenario = ScenarioRegistry.get(SQLITE_SIBLING_RESULT_SET_FIRST_WRITE)
+
+        self.assertIsNotNone(scenario)
+        self.assertIn(SQLITE_SIBLING_RESULT_SET_FIRST_WRITE, SQLITE_TOOL_RESULT_SCENARIO_SLUGS)
+        self.assertIn(SQLITE_SIBLING_RESULT_SET_FIRST_WRITE, suite.scenario_slugs)
+        self.assertEqual(
+            [task.name for task in scenario.tasks],
+            [
+                "inject_prompt",
+                "verify_first_shaped_model_write",
+                "verify_segment_answer",
+            ],
+        )
+        prompt = SqliteSiblingResultSetFirstWriteScenario.prompt.casefold()
         for leaked_term in ("sqlite", "__tool_results", "json_each", "insert", "select", "table"):
             self.assertNotIn(leaked_term, prompt)
 

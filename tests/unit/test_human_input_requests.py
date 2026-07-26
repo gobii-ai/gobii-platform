@@ -303,8 +303,13 @@ class HumanInputRequestTests(TestCase):
         self.assertIn("secure_credentials_request", function["description"])
         self.assertIn("Broad first assignment", function["description"])
         self.assertIn("highest-leverage question", function["description"])
-        self.assertIn("call alone", function["description"])
-        self.assertIn("2-3 real answer options", function["description"])
+        self.assertIn("2-3 real options", function["description"])
+        self.assertIn("four read calls in two rounds", function["description"])
+        self.assertIn("questions were requested first", function["description"])
+        self.assertIn("prose substitute", function["description"])
+        self.assertIn("Web always retains the card", function["description"])
+        self.assertIn("follow returned guidance", function["description"])
+        self.assertIn("separate preferred email/SMS", function["description"])
         self.assertNotIn("title", function["parameters"]["properties"])
         self.assertIn("options", function["parameters"]["properties"])
         self.assertIn("requests", function["parameters"]["properties"])
@@ -374,6 +379,33 @@ class HumanInputRequestTests(TestCase):
         self.assertNotIn("relay_mode", result)
         self.assertNotIn("relay_payload", result)
         self.assertNotIn("auto_sleep_ok", result)
+
+    def test_execute_request_human_input_can_keep_web_card_and_guide_preferred_email_backup(self):
+        preferred = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.EMAIL,
+            address="owner-fallback@example.com",
+        )
+        self.agent.preferred_contact_endpoint = preferred
+        self.agent.save(update_fields=["preferred_contact_endpoint", "updated_at"])
+
+        result = execute_request_human_input(
+            self.agent,
+            {
+                "question": "Which buyer should I prioritize?",
+                "options": [
+                    {"title": "Procurement", "description": "Target procurement leaders first."},
+                    {"title": "Operations", "description": "Target operations leaders first."},
+                ],
+                "will_continue_work": False,
+            },
+        )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertTrue(result["web_chat_visible"])
+        self.assertNotIn("auto_sleep_ok", result)
+        self.assertEqual(result["next_message_suggestion"]["send_tool"], "send_email")
+        self.assertEqual(result["next_message_suggestion"]["address"], preferred.address)
+        self.assertEqual(result["next_message_suggestion"]["questions"][0]["options"][0]["title"], "Procurement")
 
     def test_execute_request_human_input_allows_free_text_with_legacy_planning_state(self):
         self.agent.planning_state = PersistentAgent.PlanningState.PLANNING

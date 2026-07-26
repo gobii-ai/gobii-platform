@@ -58,6 +58,7 @@ PLANNING_INTEGRATION_SETUP_SEARCHES_BEFORE_QUESTION = "planning_integration_setu
 PLANNING_SECURE_CREDENTIAL_REQUEST = "planning_secure_credential_request"
 GUIDED_PLANNING_BOUNDED_WHEN_REQUESTED = "guided_planning_bounded_when_requested"
 GUIDED_FIRST_ASSIGNMENT_ASKS_USEFUL_QUESTIONS = "guided_first_assignment_asks_useful_questions"
+GUIDED_EMAIL_FIRST_ASSIGNMENT_PRESERVES_WEB_CHOICES = "guided_email_first_assignment_preserves_web_choices"
 LEGACY_PLANNING_STATE_EXECUTES_DIRECTLY = "legacy_planning_state_executes_directly"
 CHARTER_ADDS_DURABLE_PREFERENCE_PRESERVING_EXISTING = "charter_adds_durable_preference_preserving_existing"
 CHARTER_ADDS_INFERRED_PREFERENCE_PRESERVING_EXISTING = "charter_adds_inferred_preference_preserving_existing"
@@ -370,6 +371,7 @@ COMMON_USE_CASE_MICRO_SCENARIO_SLUGS = [case.slug for case in COMMON_USE_CASE_EV
 GUIDED_PLANNING_MICRO_SCENARIO_SLUGS = [
     GUIDED_PLANNING_BOUNDED_WHEN_REQUESTED,
     GUIDED_FIRST_ASSIGNMENT_ASKS_USEFUL_QUESTIONS,
+    GUIDED_EMAIL_FIRST_ASSIGNMENT_PRESERVES_WEB_CHOICES,
     LEGACY_PLANNING_STATE_EXECUTES_DIRECTLY,
 ]
 
@@ -964,15 +966,17 @@ class GuidedPlanningBoundedWhenRequestedScenario(BehaviorMicroScenario):
 class GuidedFirstAssignmentAsksUsefulQuestionsScenario(BehaviorMicroScenario):
     slug = GUIDED_FIRST_ASSIGNMENT_ASKS_USEFUL_QUESTIONS
     description = (
-        "A broad first assignment should ask the highest-leverage setup question in native web UI without reviving "
-        "mandatory planning or starting expensive work."
+        "A broad first assignment should do bounded orientation, then ask an evidence-informed setup question in "
+        "native web UI without reviving mandatory planning or starting the deliverable."
     )
     category = "guided_planning"
     tags = ("agent_behavior", "micro", "guided_planning", "human_input", "first_run")
+    preferred_contact_channel = CommsChannel.WEB
+    requires_fallback_copy = False
     tasks = [
         ScenarioTask(name="inject_prompt", assertion_type="manual"),
         ScenarioTask(name="verify_useful_discovery", assertion_type="llm_judge"),
-        ScenarioTask(name="verify_no_premature_work", assertion_type="manual"),
+        ScenarioTask(name="verify_orient_then_ask", assertion_type="manual"),
     ]
 
     def run(self, run_id, agent_id):
@@ -996,37 +1000,85 @@ class GuidedFirstAssignmentAsksUsefulQuestionsScenario(BehaviorMicroScenario):
             inbound = self.inject_message(
                 agent_id,
                 (
-                    "You're taking over outbound research for our new workflow product. Build us a strong sales "
-                    "lead pipeline and keep it moving."
+                    "Take over growth research for Northstar Flow. Build a strong pipeline and keep it moving."
                 ),
-                trigger_processing=True,
+                trigger_processing=False,
+                eval_run_id=run_id,
+            )
+            if self.preferred_contact_channel == CommsChannel.EMAIL:
+                endpoint = PersistentAgentCommsEndpoint.objects.create(
+                    channel=CommsChannel.EMAIL,
+                    address=f"guided-intake-{agent_id}@eval.local",
+                )
+                PersistentAgent.objects.filter(id=agent_id).update(preferred_contact_endpoint=endpoint)
+                CommsAllowlistEntry.objects.update_or_create(
+                    agent_id=agent_id,
+                    channel=CommsChannel.EMAIL,
+                    address=endpoint.address,
+                    defaults={
+                        "is_active": True,
+                        "allow_inbound": True,
+                        "allow_outbound": True,
+                        "verified": True,
+                        "can_configure": True,
+                    },
+                )
+            self.trigger_processing(
+                agent_id,
                 eval_run_id=run_id,
                 mock_config={
                     "mcp_brightdata_search_engine": {
                         "status": "ok",
-                        "results": [{"title": "Example result", "url": "https://example.test/result"}],
+                        "results": [
+                            {
+                                "title": "Northstar Flow product overview",
+                                "url": "https://northstar.example.test/product",
+                                "description": (
+                                    "Northstar Flow automates recurring vendor onboarding, compliance follow-up, "
+                                    "and evidence collection for operations teams."
+                                ),
+                            },
+                            {
+                                "title": "Northstar Flow customer stories",
+                                "url": "https://northstar.example.test/customers",
+                                "description": (
+                                    "Customer stories emphasize procurement leaders at 200-2,000 employee "
+                                    "companies; a smaller segment uses it for security reviews."
+                                ),
+                            },
+                        ],
                     },
                     "mcp_brightdata_scrape_as_markdown": {
                         "status": "ok",
-                        "url": "https://example.test/result",
-                        "result": "Example research result.",
+                        "url": "https://northstar.example.test/product",
+                        "result": (
+                            "Northstar Flow handles vendor onboarding and recurring compliance evidence. "
+                            "Its strongest public examples serve procurement and operations teams."
+                        ),
+                    },
+                    "send_email": {
+                        "status": "ok",
+                        "message": "Mocked email delivery for guided-intake regression eval.",
+                        "message_id": "eval-guided-intake-email",
                     },
                 },
                 eval_stop_policy={
-                    "stop_on_human_input_request": True,
+                    "stop_on_human_input_request": not self.requires_fallback_copy,
                     "stop_on_tool_names": list(
-                        SUBSTANTIVE_WORK_TOOL_NAMES | PLANNING_READ_ONLY_TOOL_NAMES | {"sqlite_batch"}
+                        (SUBSTANTIVE_WORK_TOOL_NAMES | {"sqlite_batch"})
+                        - ({"send_email"} if self.requires_fallback_copy else set())
                     ),
                     "stop_on_unexpected_relevant_tool": True,
                     "allowed_tool_names": [
                         "request_human_input",
                         "send_chat_message",
+                        "send_email",
                         "mcp_brightdata_search_engine",
                         "mcp_brightdata_scrape_as_markdown",
                         "sqlite_batch",
                     ],
                     "ignored_tool_names": ["send_chat_message"],
-                    "max_relevant_tool_calls": 3,
+                    "max_relevant_tool_calls": 8 if self.requires_fallback_copy else 6,
                 },
             )
         self.record_task_result(
@@ -1034,7 +1086,10 @@ class GuidedFirstAssignmentAsksUsefulQuestionsScenario(BehaviorMicroScenario):
             None,
             EvalRunTask.Status.PASSED,
             task_name="inject_prompt",
-            observed_summary="A broad first assignment was processed outside legacy Planning Mode.",
+            observed_summary=(
+                "A broad first assignment was processed outside legacy Planning Mode with a "
+                f"{self.preferred_contact_channel} preferred contact."
+            ),
             artifacts={"message": inbound},
         )
 
@@ -1052,18 +1107,45 @@ class GuidedFirstAssignmentAsksUsefulQuestionsScenario(BehaviorMicroScenario):
             {"question": request.question, "options": request.options_json}
             for request in requests
         ]
+        calls = get_tool_calls_for_run(run_id, after=inbound.timestamp)
+        fallback_calls = [call for call in calls if call.tool_name == "send_email"]
+        fallback_bodies = [
+            "\n\n".join(
+                str(resolved_tool_param(call, key) or "")
+                for key in ("subject", "mobile_first_html", "text_body", "body")
+                if resolved_tool_param(call, key)
+            )
+            for call in fallback_calls
+        ]
+        orientation_evidence = {
+            "product": (
+                "Northstar Flow automates recurring vendor onboarding, compliance follow-up, and evidence "
+                "collection for operations teams."
+            ),
+            "customer_signal": (
+                "Public examples emphasize procurement leaders at 200-2,000 employee companies, with a smaller "
+                "security-review segment."
+            ),
+        }
         choice, reasoning = self.llm_judge(
             question=(
                 "Did the agent-created native choice card ask one concise, high-leverage question whose answer "
-                "materially narrows this broad outbound role, such as the product/use case, target audience, "
-                "qualification boundary, or initial volume? One useful question is enough because further discovery "
-                "can happen after the answer. Its two or three choices should be real answers, not labels for several "
-                "different questions. Reject cosmetic preferences and judge intent, not exact wording."
+                "materially narrows this broad growth-research role? The question and its two or three real answer "
+                "choices should make intelligent use of the orientation evidence, not merely ask a generic question "
+                "that could have been written before research. One useful question is enough because further "
+                "discovery can happen after the answer. Reject cosmetic preferences and judge intent, not exact wording. "
+                + (
+                    "The backup email must clearly carry the same decision and choices, not a kickoff or a different question."
+                    if self.requires_fallback_copy
+                    else "No backup message is needed when no separate fallback channel is configured."
+                )
             ),
             context=(
                 f"User request:\n{inbound.body}\n\n"
+                f"Orientation evidence available to the agent:\n{json.dumps(orientation_evidence)}\n\n"
                 f"Agent chat replies:\n{json.dumps(replies)}\n\n"
-                f"Native choice cards created by the agent:\n{json.dumps(questions)}"
+                f"Native choice cards created by the agent:\n{json.dumps(questions)}\n\n"
+                f"Backup email bodies:\n{json.dumps(fallback_bodies)}"
             ),
             options=["Useful bounded discovery", "Missing or low-value discovery"],
         )
@@ -1079,32 +1161,90 @@ class GuidedFirstAssignmentAsksUsefulQuestionsScenario(BehaviorMicroScenario):
             observed_summary=f"semantic_judge={choice}: {reasoning}",
         )
 
-        calls = get_tool_calls_for_run(run_id, after=inbound.timestamp)
-        work_calls = [
+        orientation_calls = [
             call
             for call in calls
-            if call.tool_name in SUBSTANTIVE_WORK_TOOL_NAMES
-            or call.tool_name in PLANNING_READ_ONLY_TOOL_NAMES
+            if call.tool_name in PLANNING_READ_ONLY_TOOL_NAMES
+        ]
+        work_calls = [
+            call for call in calls
+            if (
+                call.tool_name in SUBSTANTIVE_WORK_TOOL_NAMES
+                and not (self.requires_fallback_copy and call.tool_name == "send_email")
+            )
             or call.tool_name == "sqlite_batch"
         ]
+        request_positions = [
+            index for index, call in enumerate(calls)
+            if call.tool_name == "request_human_input"
+        ]
+        request_calls = [call for call in calls if call.tool_name == "request_human_input"]
+        orientation_positions = [
+            index for index, call in enumerate(calls)
+            if call.tool_name in PLANNING_READ_ONLY_TOOL_NAMES
+        ]
+        fallback_positions = [
+            index for index, call in enumerate(calls)
+            if call.tool_name == "send_email"
+        ]
+        chat_calls = []
+        for call in calls:
+            if call.tool_name != "send_chat_message":
+                continue
+            try:
+                chat_result = call.result if isinstance(call.result, dict) else json.loads(call.result or "{}")
+            except (TypeError, ValueError):
+                chat_result = {}
+            if chat_result.get("skipped") is not True:
+                chat_calls.append(call)
         has_bounded_choices = len(requests) == 1 and 2 <= len(requests[0].options_json) <= 3
-        passed = has_bounded_choices and not work_calls
+        fallback_ok = (
+            len(request_calls) == 1
+            and len(fallback_calls) == 1
+            and bool(orientation_positions)
+            and fallback_positions[0] > orientation_positions[-1]
+            and str(fallback_calls[0].status).lower() == "complete"
+        ) if self.requires_fallback_copy else not fallback_calls
+        passed = (
+            has_bounded_choices
+            and 1 <= len(orientation_calls) <= 4
+            and len(request_positions) == 1
+            and request_positions[0] > orientation_positions[-1]
+            and not work_calls
+            and not chat_calls
+            and fallback_ok
+        )
         self.record_task_result(
             run_id,
             None,
             EvalRunTask.Status.PASSED if passed else EvalRunTask.Status.FAILED,
-            task_name="verify_no_premature_work",
+            task_name="verify_orient_then_ask",
             observed_summary=(
-                "Tracked discovery remained answerable and no research began."
+                "Agent used a bounded orientation pass, then left one native choice card pending without starting work."
                 if passed
                 else (
                     f"pending_questions={len(requests)}, "
                     f"option_counts={[len(request.options_json) for request in requests]}, "
-                    f"premature_tools={[call.tool_name for call in work_calls]}."
+                    f"orientation_tools={[call.tool_name for call in orientation_calls]}, "
+                    f"premature_tools={[call.tool_name for call in work_calls]}, "
+                    f"fallback_emails={len(fallback_calls)}, chat_messages={len(chat_calls)}."
                 )
             ),
-            artifacts={"step": work_calls[0].step} if work_calls else {},
+            artifacts={"step": (work_calls or orientation_calls or calls)[0].step} if calls else {},
         )
+
+
+@register_scenario
+class GuidedEmailFirstAssignmentPreservesWebChoicesScenario(
+    GuidedFirstAssignmentAsksUsefulQuestionsScenario
+):
+    slug = GUIDED_EMAIL_FIRST_ASSIGNMENT_PRESERVES_WEB_CHOICES
+    description = (
+        "A broad first assignment with email as the preferred contact should still leave evidence-informed native "
+        "choices answerable in web UI."
+    )
+    preferred_contact_channel = CommsChannel.EMAIL
+    requires_fallback_copy = True
 
 
 @register_scenario

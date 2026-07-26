@@ -75,8 +75,8 @@ def get_request_human_input_tool() -> dict[str, Any]:
         "function": {
             "name": "request_human_input",
             "description": (
-                "Tracked non-credential web input; no email/SMS. Credentials: secure_credentials_request. "
-                "Broad first assignment: call alone with the highest-leverage question and 2-3 real answer options; no response text/config/work. Ask another after the answer only if needed. Otherwise omit options for free-text blockers. "
+                "Tracked non-credential input/card; credentials use secure_credentials_request. "
+                "Broad first assignment: orient with at most four read calls in two rounds (none if questions were requested first), then call with one evidence-informed, highest-leverage question and 2-3 real options; no kickoff/config/model/work or prose substitute. Use the inbound channel. Web always retains the card; follow returned guidance to mirror its exact choices once to a separate preferred email/SMS. Email/SMS: send those numbered choices there. Ask another only if needed. Otherwise omit options for free-text blockers. "
                 "Use message tools for non-blocking questions/answers. Include Other / I'll explain if needed. "
                 "Do not use for preference surveys, timezone/channel/formatting, category example choices like which vendor/company, non-blocking lookback, or reversible defaults you can choose and disclose. "
                 "Use for role-defining discovery when audience/scope/volume/success bounds materially change substantial ongoing first work; otherwise only if the user asks for targets/scope before setup or they block a recurring monitor. "

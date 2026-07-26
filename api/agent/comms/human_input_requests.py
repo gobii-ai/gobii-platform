@@ -396,12 +396,12 @@ def _build_next_message_suggestion(
     target: HumanInputTarget,
 ) -> dict[str, Any] | None:
     if target.channel == CommsChannel.WEB:
-        return None
+        preferred = request_objects[0].agent.preferred_contact_endpoint if request_objects else None
+        if not preferred or preferred.channel not in {CommsChannel.EMAIL, CommsChannel.SMS}:
+            return None
+        target = HumanInputTarget(preferred.channel, preferred.address, target.conversation)
 
-    send_tool = {
-        CommsChannel.EMAIL: "send_email",
-        CommsChannel.SMS: "send_sms",
-    }.get(target.channel)
+    send_tool = {CommsChannel.EMAIL: "send_email", CommsChannel.SMS: "send_sms"}.get(target.channel)
     if send_tool is None:
         return None
 
@@ -410,17 +410,14 @@ def _build_next_message_suggestion(
         "address": target.address,
         "send_tool": send_tool,
         "instruction": (
-            f"Include these questions in your next normal {target.channel} message to {target.address}. "
+            f"Include these exact questions and numbered choices in your next normal {target.channel} message to {target.address}. "
             f"If you already sent or are sending a {target.channel} message in the same tool-call batch, "
-            "that message must include the questions because request_human_input cannot inject them into "
+            "that message must include the questions and choices because request_human_input cannot inject them into "
             f"another tool call. The user may not be actively viewing the web chat. Do not call request_human_input again "
             "for the same questions. The user's reply on that channel will be processed as answers."
         ),
         "questions": [
-            {
-                "number": index,
-                "question": request_obj.question,
-            }
+            {"number": index, "question": request_obj.question, "options": request_obj.options_json}
             for index, request_obj in enumerate(request_objects, start=1)
         ],
     }
@@ -464,7 +461,7 @@ def _build_request_result(
         result["next_message_suggestion"] = next_message_suggestion
     if partial_success:
         result["partial_success"] = True
-    if status == "ok" and target.channel == CommsChannel.WEB:
+    if status == "ok" and target.channel == CommsChannel.WEB and next_message_suggestion is None:
         result["auto_sleep_ok"] = True
     return result
 

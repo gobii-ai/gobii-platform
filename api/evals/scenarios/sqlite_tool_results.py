@@ -32,6 +32,7 @@ from api.models import (
     PersistentAgentEnabledTool,
     PersistentAgentStep,
     PersistentAgentSystemStep,
+    PersistentAgentToolCall,
 )
 
 
@@ -46,6 +47,7 @@ SQLITE_DOMAIN_TRUTH_OVER_STALE_HISTORY = "sqlite_domain_truth_over_stale_history
 SQLITE_DOMAIN_MODEL_REFRESHES_AND_EVOLVES = "sqlite_domain_model_refreshes_and_evolves"
 SQLITE_SCHEMA_GROUNDED_EXISTING_TABLE = "sqlite_schema_grounded_existing_table"
 SQLITE_SOURCE_ARRAY_FIRST_WRITE = "sqlite_source_array_first_write"
+SQLITE_SIBLING_RESULT_SET_FIRST_WRITE = "sqlite_sibling_result_set_first_write"
 SQLITE_INCREMENTAL_DOMAIN_MODEL = "sqlite_incremental_domain_model"
 SQLITE_PROSPECT_PIPELINE_COMPLETES = "sqlite_prospect_pipeline_completes"
 SQLITE_TOOL_RESULT_SCENARIO_SLUGS = [
@@ -59,6 +61,7 @@ SQLITE_TOOL_RESULT_SCENARIO_SLUGS = [
     SQLITE_DOMAIN_MODEL_REFRESHES_AND_EVOLVES,
     SQLITE_SCHEMA_GROUNDED_EXISTING_TABLE,
     SQLITE_SOURCE_ARRAY_FIRST_WRITE,
+    SQLITE_SIBLING_RESULT_SET_FIRST_WRITE,
     SQLITE_INCREMENTAL_DOMAIN_MODEL,
     SQLITE_PROSPECT_PIPELINE_COMPLETES,
 ]
@@ -111,6 +114,29 @@ DOMAIN_LEGACY_ACCOUNT = (
 DOMAIN_WORKSTREAMS = (
     ("ws-security-17", "Security packet", "complete", "Maya Chen", "2026-07-22"),
     ("ws-legal-04", "Contract redlines", "open", "Noah Reed", "2026-07-24"),
+)
+SIBLING_ACCOUNT_BATCHES = (
+    (
+        "https://exports.example.test/accounts/northeast",
+        (
+            ("acct-101", "Harbor Supply", "procurement", 2),
+            ("acct-102", "Aster Freight", "operations", 1),
+        ),
+    ),
+    (
+        "https://exports.example.test/accounts/central",
+        (
+            ("acct-201", "Cinder Works", "procurement", 3),
+            ("acct-202", "Bramble Health", "security", 2),
+        ),
+    ),
+    (
+        "https://exports.example.test/accounts/west",
+        (
+            ("acct-301", "Lattice Foods", "operations", 2),
+            ("acct-302", "Quarry Labs", "security", 1),
+        ),
+    ),
 )
 HANDOFF_LEDGER_TABLE = "z_handoff_ledger"
 HANDOFF_ROWS = (
@@ -940,7 +966,8 @@ def _decision_model_tables(sql: str, model_tables: Iterable[str]) -> tuple[str, 
         parsed = sqlparse.parse(statement)
         if not parsed or parsed[0].get_type() != "SELECT":
             continue
-        if re.search(r"\bwhere\b", statement, re.I) and re.search(r"\border\s+by\b", statement, re.I):
+        narrows_rows = re.search(r"\bwhere\b", statement, re.I) or re.search(r"\bgroup\s+by\b", statement, re.I)
+        if narrows_rows and re.search(r"\border\s+by\b", statement, re.I):
             decisions.update(table for table in tables if _reads_table(statement, table))
     return tuple(table for table in tables if table in decisions)
 
@@ -1849,6 +1876,140 @@ class SqliteSourceArrayFirstWriteScenario(SqliteDomainModelScenario):
             source_urls=(RELEASE_CALENDAR_URL,),
             required_terms=("Search index", "blocked", "Mateo Ruiz", "Mobile client", "canceled"),
             min_sources=1,
+        )
+
+
+@register_scenario
+class SqliteSiblingResultSetFirstWriteScenario(SqliteDomainModelScenario):
+    slug = SQLITE_SIBLING_RESULT_SET_FIRST_WRITE
+    description = (
+        "Completed same-shaped source calls should become one keyed domain model in one set-wise first write."
+    )
+    expected_runtime = "short"
+    tags = (*SqliteToolResultScenario.tags, "trajectory_regression", "set_wise_import")
+    tasks = [
+        ScenarioTask(name="inject_prompt", assertion_type="agent_processing"),
+        ScenarioTask(name="verify_first_shaped_model_write", assertion_type="tool_call"),
+        ScenarioTask(name="verify_segment_answer", assertion_type="manual"),
+    ]
+    prompt = (
+        "The three account export calls have finished. Turn that evidence into the reusable account picture we'll "
+        "use for follow-ups, then tell me which buyer segment has the most verified contacts and the count. Include "
+        "the source links behind the winning segment."
+    )
+
+    def run(self, run_id: str, agent_id: str) -> None:
+        self._ready_agent(agent_id)
+        PersistentAgent.objects.filter(id=agent_id).update(
+            charter="Maintain a sourced account and buyer model for pipeline decisions and follow-up questions."
+        )
+        for source_url, accounts in SIBLING_ACCOUNT_BATCHES:
+            step = PersistentAgentStep.objects.create(
+                agent_id=agent_id,
+                description="Completed account export call.",
+            )
+            PersistentAgentToolCall.objects.create(
+                step=step,
+                tool_name="http_request",
+                tool_params={"url": source_url},
+                result=json.dumps({
+                    "status": "ok",
+                    "content": {
+                        "accounts": [
+                            {
+                                "account_id": account_id,
+                                "company": company,
+                                "buyer_segment": buyer_segment,
+                                "verified_contacts": verified_contacts,
+                                "source_url": source_url,
+                                "observed_at": "2026-07-26T14:00:00Z",
+                            }
+                            for account_id, company, buyer_segment, verified_contacts in accounts
+                        ],
+                    },
+                }),
+                status="complete",
+            )
+
+        inbound = self._inject_and_wait(
+            run_id,
+            agent_id,
+            self.prompt,
+            {},
+            allowed_tool_names={"sqlite_batch", "send_chat_message"},
+            max_relevant_tool_calls=5,
+        )
+        calls = _tool_calls_for_run(run_id, after=inbound.timestamp)
+        sqlite_attempts = [call for call in calls if call.tool_name == "sqlite_batch"]
+        successful_calls, strategy_calls = _sqlite_calls_with_persisted_effects(sqlite_attempts)
+        summary = summarize_sqlite_tool_result_calls(strategy_calls)
+        sql_values = [str((call.tool_params or {}).get("sql") or "") for call in successful_calls]
+        sql = "\n".join(sql_values)
+        model_write_calls = [
+            call for call in successful_calls
+            if source_derived_model_mutation_tables(
+                (str((call.tool_params or {}).get("sql") or ""),)
+            )
+        ]
+        model_tables = set(source_derived_model_mutation_tables(sql_values))
+        _all_models, _row_models, identity_tables = _domain_model_lineage(
+            sql,
+            direct_tables=model_tables,
+            row_direct_tables=summary.row_derived_working_table_names,
+            candidate_tables=summary.working_table_names,
+        )
+        decision_tables = _decision_model_tables(sql, model_tables)
+        relevant_advisories = sorted({
+            str(advisory.get("code") or "")
+            for call in successful_calls
+            for advisory in (_result_payload(call) or {}).get("advisories", ())
+            if isinstance(advisory, dict)
+            and advisory.get("code") in {
+                "bulk_manual_working_table_from_visible_results",
+                "manual_working_table_from_visible_results",
+                "source_facts_copied_into_model",
+                "tool_result_row_loop",
+            }
+        })
+        failures = _sqlite_attempt_failures(sqlite_attempts)
+        failures.extend(message for failed, message in (
+            (
+                not 1 <= len(sqlite_attempts) <= 2,
+                f"expected one set-wise write and at most one model read, found {len(sqlite_attempts)} SQLite attempts",
+            ),
+            (
+                len(model_write_calls) != 1,
+                f"expected one source-derived model write, found {len(model_write_calls)}",
+            ),
+            (summary.aggregate_tool_result_queries < 1, "source siblings were not read as one set"),
+            (
+                summary.single_result_id_filters > 0,
+                f"source siblings were handled one result_id at a time ({summary.single_result_id_filters})",
+            ),
+            (not model_tables, "no source-derived named account model was written"),
+            (
+                not model_tables.issubset(identity_tables),
+                f"account model lacked stable identity: {sorted(model_tables - identity_tables)}",
+            ),
+            (not decision_tables, "the new account model was not queried after import"),
+            (not re.search(r"\bgroup\s+by\b", sql, re.I), "buyer segments were not aggregated in SQL"),
+            (bool(summary.manual_values_working_tables), "source rows were copied into a VALUES table"),
+            (bool(relevant_advisories), f"SQLite reported inefficient source handling: {relevant_advisories}"),
+        ) if failed)
+        self._record_check(
+            run_id,
+            "verify_first_shaped_model_write",
+            failures,
+            f"Imported all sibling results into {sorted(model_tables)} in one set-wise write and queried only the model.",
+        )
+        self._record_sourced_answer(
+            run_id,
+            agent_id=agent_id,
+            after=inbound.timestamp,
+            task_name="verify_segment_answer",
+            source_urls=(SIBLING_ACCOUNT_BATCHES[0][0], SIBLING_ACCOUNT_BATCHES[1][0]),
+            required_terms=("procurement", "5"),
+            min_sources=2,
         )
 
 

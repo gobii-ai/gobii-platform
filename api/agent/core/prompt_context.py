@@ -682,9 +682,9 @@ def _get_sqlite_guidance() -> str:
     """Return the compact contract for data retrieval, storage, and analysis."""
     return (
         "## SQLite Data\n\n"
-        "SCHEMA FIRST: for an existing table whose full current definition is absent, search the catalog by a task-relevant name fragment, not a full table listing. Then make one metadata-only call with no target-table read and read its result. Only afterward query using confirmed tables, columns, and join keys. After a schema error inspect, don't guess again; for external SQL, roll back or reconnect before another statement. "
+        "SCHEMA FIRST: if an existing definition is absent, search the catalog by a relevant name fragment; never list every table. Inspect metadata alone, then query confirmed fields and joins. Never combine schema inspection with its data SELECT or repeat an unchanged SELECT. After a schema error inspect, don't guess; for external SQL, roll back/reconnect first. "
         "Named tables are the world model: query, don't remember; fetch stale/missing facts only. Tool results don't update it. "
-        "Same-path results across vendors form one set: one batch evolves/imports via INSERT SELECT/json_each over tool_name/multi-ID, then queries coverage. No per-result import or source literals. SELECT fields/URL/result_id; unstructured work uses bound JSON :rows joined by result_id. "
+        "Same-shaped tool results are one set. First sqlite_batch: evolve the keyed model; set-wise import all siblings; SELECT decisions, evidence, and raw URLs. If shape is unknown, inspect all siblings once, then run that complete batch; never a third call. Pattern: `FROM __tool_results t,json_each(t.result_json,'$.content.items') i WHERE t.tool_name=:tool` (adjust path). Source facts never use VALUES or per-result_id loops; derive URL/result_id and don't store link tokens. Later reads use the model. Unstructured work binds JSON :rows joined by result_id. "
         "Key entities, children, relations, evidence, coverage; normalize/evolve, refresh provenance, query gaps/joins/counts/ranks. Authored values bind :name; source facts derive from __tool_results. "
         "Different shapes may use separate statements in that batch. Custom tools may write keyed models. CTAS/TEMP is one-off. "
         "Locate payloads with analysis_json/top_keys; http_request JSON is result_json $.content. Prefer known-path result_json, else result_text.\n\n"
@@ -3653,8 +3653,8 @@ def _get_first_run_welcome_message_instruction(
 
         "If there is no concrete task to do yet, your first action should be one concise welcome message.\n"
         "Broad ongoing/substantial first work missing material audience, scope, volume, or success boundaries: "
-        "ask the highest-leverage question, then wait. Web: sole response is request_human_input with 2-3 real choices; "
-        "no response text, config change, or work. Ask another after the answer only if still material. Email/SMS: matching send tool. "
+        "orient with at most four read-only public calls in two rounds, then ask the highest-leverage question; if questions were requested first, ask now. Use the current inbound channel and do no other work. "
+        "Web: leave one native request_human_input card with 2-3 evidence-informed choices. It stays pending if they leave; if a separate preferred email/SMS exists, follow the result guidance to mirror the exact choices there. Email/SMS: send the same numbered choices there. No prose substitute. Ask another after the answer only if still material. "
         "Otherwise start the task. Finish ordinary work silently and send one result; Discord research and "
         "substantial work follow Work Updates, never an empty greeting.\n\n"
 
@@ -3773,6 +3773,7 @@ def _get_system_instruction(
     )
     work_updates_guidance = (
         "## Work Updates (CRITICAL)\n\n"
+        "Required first-run intake precedes work updates; no kickoff, SQLite, config, or deliverable until answered. "
         "Substantial work includes investment diligence, multi-entity comparisons, list building, and research whose "
         "requested scope clearly needs several sources or tool rounds. Before it, send one brief "
         "same-channel acknowledgment as the entire first response, with will_continue_work=true. Say what you are "
