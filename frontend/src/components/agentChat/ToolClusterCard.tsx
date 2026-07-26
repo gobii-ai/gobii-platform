@@ -2,6 +2,7 @@ import { memo, useCallback, useMemo, useState } from 'react'
 import { transformToolCluster, isClusterRenderable } from './tooling/toolRegistry'
 import { ToolClusterTimelineOverlay } from './ToolClusterTimelineOverlay'
 import { ToolIconSlot } from './ToolIconSlot'
+import { MoodShiftCard } from './MoodShiftCard'
 import { ToolProviderBadge } from './ToolProviderBadge'
 import { ToolClusterLivePreview } from './ToolClusterLivePreview'
 import type { ToolClusterEvent } from './types'
@@ -149,6 +150,11 @@ export const ToolClusterCard = memo(function ToolClusterCard({
   }
 
   const renderSeparatedEntry = (entry: ToolEntryDisplay) => {
+    // A mood has no result to inspect and no parameters worth showing; the feeling is the whole
+    // event. Giving it the standard icon-label-detail card would bury it again.
+    if (entry.emotion !== undefined) {
+      return <MoodShiftCard key={entry.id} entry={entry} />
+    }
     const DetailComponent = entry.detailComponent
     const detailRelative = formatRelativeTimestamp(entry.timestamp) || entry.timestamp || ''
     return (

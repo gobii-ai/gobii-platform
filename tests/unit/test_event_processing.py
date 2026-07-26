@@ -195,6 +195,8 @@ class ToolDisplayMetadataTests(TestCase):
         mock_read_snapshot.return_value = SimpleNamespace(
             charter="Updated full assignment",
             schedule="0 9 * * *",
+            emotion="\U0001F60A",
+            emotion_timeout_seconds=3600,
         )
         patch_call = SimpleNamespace(
             tool_name="sqlite_batch",
@@ -212,6 +214,8 @@ class ToolDisplayMetadataTests(TestCase):
                 "agent_config": {
                     "charter": "Updated full assignment",
                     "schedule": "0 9 * * *",
+                    "emotion": "\U0001F60A",
+                    "emotion_timeout_seconds": 3600,
                 },
             },
         )
@@ -231,6 +235,8 @@ class ToolDisplayMetadataTests(TestCase):
                 "agent_config": {
                     "charter": "Updated full assignment",
                     "schedule": "0 9 * * *",
+                    "emotion": "\U0001F60A",
+                    "emotion_timeout_seconds": 3600,
                 },
             },
         )
@@ -264,6 +270,8 @@ class ToolDisplayMetadataTests(TestCase):
                 "agent_config": {
                     "charter": "Updated full assignment",
                     "schedule": "0 9 * * *",
+                    "emotion": "\U0001F60A",
+                    "emotion_timeout_seconds": 3600,
                 },
             },
         )

@@ -806,6 +806,13 @@ def _serialize_step_entry(env: StepEnvelope, labels: Mapping[str, str]) -> dict:
             schedule_value = agent_config.get("schedule")
             if schedule_value is None or isinstance(schedule_value, str):
                 entry["scheduleValue"] = schedule_value
+        if "emotion" in agent_config:
+            emotion_value = agent_config.get("emotion")
+            if emotion_value is None or isinstance(emotion_value, str):
+                entry["emotion"] = emotion_value
+            timeout_value = agent_config.get("emotion_timeout_seconds")
+            if isinstance(timeout_value, int):
+                entry["emotionTimeoutSeconds"] = timeout_value
     preview_url = _extract_tool_preview_url(tool_call)
     if preview_url:
         lowered_tool_name = tool_name.lower()
