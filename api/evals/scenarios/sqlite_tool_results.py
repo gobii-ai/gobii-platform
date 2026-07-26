@@ -256,7 +256,8 @@ def _sqlite_attempt_failures(calls) -> list[str]:
     failures = _tool_attempt_failures(calls, "SQLite", reject_auto_correction=True)
     for index, call in enumerate(calls, start=1):
         payload = _result_payload(call)
-        if (isinstance(payload, dict) and payload.get("advisories")) or "SQLITE QUERY ADVICE" in str(call.result or ""):
+        raw_result = getattr(call, "result", None)
+        if (isinstance(payload, dict) and payload.get("advisories")) or "SQLITE QUERY ADVICE" in str(raw_result or ""):
             failures.append(f"SQLite attempt {index} returned a query advisory")
     return failures
 

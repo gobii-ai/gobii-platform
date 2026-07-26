@@ -1062,7 +1062,7 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
         self.assertFalse(passed)
         self.assertIn("no aggregate __tool_results query", recorded[-1][1]["observed_summary"])
 
-    def test_sqlite_usage_counts_persisted_aggregate_from_partially_failed_batch(self):
+    def test_sqlite_usage_rejects_persisted_aggregate_from_partially_failed_batch(self):
         scenario, recorded = SqliteToolResultScenario(), []
         scenario.record_task_result = lambda *args, **kwargs: recorded.append((args, kwargs))
         calls = [
@@ -1097,8 +1097,8 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
                 require_working_table=True,
             )
 
-        self.assertTrue(passed, recorded[-1][1]["observed_summary"])
-        self.assertEqual(recorded[-1][1]["artifacts"]["step"], "partial")
+        self.assertFalse(passed)
+        self.assertIn("SQLite attempt 1 had execution status error", recorded[-1][1]["observed_summary"])
 
     def test_sqlite_domain_model_counts_persisted_schema_from_partially_failed_batch(self):
         scenario, recorded = SqliteIntermediateWorkingTableScenario(), []
@@ -1139,7 +1139,7 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
         self.assertEqual(model_tables, ("catalog",))
         self.assertEqual(recorded[-1][0][2], EvalRunTask.Status.PASSED)
 
-    def test_sqlite_usage_does_not_count_preflight_rejected_loop(self):
+    def test_sqlite_usage_rejects_preflight_rejected_loop(self):
         scenario, recorded = SqliteToolResultScenario(), []
         scenario.record_task_result = lambda *args, **kwargs: recorded.append((args, kwargs))
         calls = [
@@ -1179,14 +1179,17 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
                 max_single_result_filters=0,
             )
 
-        self.assertTrue(passed, recorded[-1][1]["observed_summary"])
+        self.assertFalse(passed)
+        self.assertIn("SQLite attempt 1 had execution status error", recorded[-1][1]["observed_summary"])
 
-    def test_sqlite_dedupe_usage_allows_bounded_schema_probe(self):
+    def test_sqlite_dedupe_usage_rejects_single_result_schema_probes(self):
         scenario, recorded = SqliteDedupeRequeryScenario(), []
         scenario.record_task_result = lambda *args, **kwargs: recorded.append((args, kwargs))
         calls = [
             SimpleNamespace(
                 step="step",
+                status="complete",
+                result='{"status":"ok"}',
                 tool_name="sqlite_batch",
                 tool_params={
                     "sql": """
@@ -1209,7 +1212,8 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
                 task_name="verify_dedupe_sqlite_usage",
                 max_single_result_filters=scenario.max_single_result_filters,
             )
-        self.assertTrue(passed, recorded[-1][1]["observed_summary"])
+        self.assertFalse(passed)
+        self.assertIn("single-result filters 2 > 0", recorded[-1][1]["observed_summary"])
 
     def test_sqlite_domain_model_accepts_related_constrained_tables(self):
         scenario, recorded = SqliteIntermediateWorkingTableScenario(), []
