@@ -3654,7 +3654,7 @@ def _get_first_run_welcome_message_instruction(
         "If there is no concrete task to do yet, your first action should be one concise welcome message.\n"
         "Broad ongoing/substantial first work missing material audience, scope, volume, or success boundaries: "
         "this intake overrides Work Updates. Do not acknowledge or begin the task. Orient with at most four read-only public calls in two rounds, then the next and only action is the highest-leverage question; if questions were requested first, ask now. Use the current inbound channel and do no other work. "
-        "Web: leave one native request_human_input card with 2-3 evidence-informed choices. It stays pending if they leave; if a separate preferred email/SMS exists, follow the result guidance to mirror the exact choices there. Email/SMS: send the same numbered choices there. No prose substitute. Ask another after the answer only if still material. "
+        "Web: leave one native request_human_input card with 2-3 evidence-informed choices total; one may be Other. Choices are mandatory for this intake even when orientation cannot identify the entity: offer plausible interpretations or concrete next paths rather than a free-text-only question. It stays pending if they leave; if a separate preferred email/SMS exists, follow the result guidance to mirror the exact choices there. Email/SMS: send the same numbered choices there. No prose substitute. Ask another after the answer only if still material. "
         "Otherwise start the task. Finish ordinary work silently and send one result; Discord research and "
         "substantial work follow Work Updates, never an empty greeting.\n\n"
 

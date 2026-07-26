@@ -47,6 +47,7 @@ from api.evals.scenarios.behavior_micro import (
     IGNORED_FIRST_ACTION_TOOL_NAMES,
     GUIDED_EMAIL_FIRST_ASSIGNMENT_PRESERVES_WEB_CHOICES,
     GUIDED_FIRST_ASSIGNMENT_ASKS_USEFUL_QUESTIONS,
+    GUIDED_UNKNOWN_FIRST_ASSIGNMENT_OFFERS_CHOICE_PATHS,
     GUIDED_PLANNING_BOUNDED_WHEN_REQUESTED,
     GUIDED_PLANNING_MICRO_SCENARIO_SLUGS,
     LEGACY_PLANNING_STATE_EXECUTES_DIRECTLY,
@@ -193,6 +194,7 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
                 GUIDED_PLANNING_BOUNDED_WHEN_REQUESTED,
                 GUIDED_FIRST_ASSIGNMENT_ASKS_USEFUL_QUESTIONS,
                 GUIDED_EMAIL_FIRST_ASSIGNMENT_PRESERVES_WEB_CHOICES,
+                GUIDED_UNKNOWN_FIRST_ASSIGNMENT_OFFERS_CHOICE_PATHS,
                 LEGACY_PLANNING_STATE_EXECUTES_DIRECTLY,
             ],
         )
@@ -209,6 +211,15 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
                 task.name
                 for task in ScenarioRegistry.get(
                     GUIDED_EMAIL_FIRST_ASSIGNMENT_PRESERVES_WEB_CHOICES
+                ).tasks
+            ],
+            ["inject_prompt", "verify_useful_discovery", "verify_orient_then_ask"],
+        )
+        self.assertEqual(
+            [
+                task.name
+                for task in ScenarioRegistry.get(
+                    GUIDED_UNKNOWN_FIRST_ASSIGNMENT_OFFERS_CHOICE_PATHS
                 ).tasks
             ],
             ["inject_prompt", "verify_useful_discovery", "verify_orient_then_ask"],

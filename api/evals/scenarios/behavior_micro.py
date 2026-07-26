@@ -59,6 +59,7 @@ PLANNING_SECURE_CREDENTIAL_REQUEST = "planning_secure_credential_request"
 GUIDED_PLANNING_BOUNDED_WHEN_REQUESTED = "guided_planning_bounded_when_requested"
 GUIDED_FIRST_ASSIGNMENT_ASKS_USEFUL_QUESTIONS = "guided_first_assignment_asks_useful_questions"
 GUIDED_EMAIL_FIRST_ASSIGNMENT_PRESERVES_WEB_CHOICES = "guided_email_first_assignment_preserves_web_choices"
+GUIDED_UNKNOWN_FIRST_ASSIGNMENT_OFFERS_CHOICE_PATHS = "guided_unknown_first_assignment_offers_choice_paths"
 LEGACY_PLANNING_STATE_EXECUTES_DIRECTLY = "legacy_planning_state_executes_directly"
 CHARTER_ADDS_DURABLE_PREFERENCE_PRESERVING_EXISTING = "charter_adds_durable_preference_preserving_existing"
 CHARTER_ADDS_INFERRED_PREFERENCE_PRESERVING_EXISTING = "charter_adds_inferred_preference_preserving_existing"
@@ -372,6 +373,7 @@ GUIDED_PLANNING_MICRO_SCENARIO_SLUGS = [
     GUIDED_PLANNING_BOUNDED_WHEN_REQUESTED,
     GUIDED_FIRST_ASSIGNMENT_ASKS_USEFUL_QUESTIONS,
     GUIDED_EMAIL_FIRST_ASSIGNMENT_PRESERVES_WEB_CHOICES,
+    GUIDED_UNKNOWN_FIRST_ASSIGNMENT_OFFERS_CHOICE_PATHS,
     LEGACY_PLANNING_STATE_EXECUTES_DIRECTLY,
 ]
 
@@ -973,6 +975,41 @@ class GuidedFirstAssignmentAsksUsefulQuestionsScenario(BehaviorMicroScenario):
     tags = ("agent_behavior", "micro", "guided_planning", "human_input", "first_run")
     preferred_contact_channel = CommsChannel.WEB
     requires_fallback_copy = False
+    unknown_orientation = False
+    assignment_prompt = "Take over growth research for Northstar Flow. Build a strong pipeline and keep it moving."
+    orientation_search_results = (
+        {
+            "title": "Northstar Flow product overview",
+            "url": "https://northstar.example.test/product",
+            "description": (
+                "Northstar Flow automates recurring vendor onboarding, compliance follow-up, "
+                "and evidence collection for operations teams."
+            ),
+        },
+        {
+            "title": "Northstar Flow customer stories",
+            "url": "https://northstar.example.test/customers",
+            "description": (
+                "Customer stories emphasize procurement leaders at 200-2,000 employee "
+                "companies; a smaller segment uses it for security reviews."
+            ),
+        },
+    )
+    orientation_scrape_result = (
+        "Northstar Flow handles vendor onboarding and recurring compliance evidence. "
+        "Its strongest public examples serve procurement and operations teams."
+    )
+    orientation_scrape_url = "https://northstar.example.test/product"
+    orientation_evidence = {
+        "product": (
+            "Northstar Flow automates recurring vendor onboarding, compliance follow-up, and evidence "
+            "collection for operations teams."
+        ),
+        "customer_signal": (
+            "Public examples emphasize procurement leaders at 200-2,000 employee companies, with a smaller "
+            "security-review segment."
+        ),
+    }
     tasks = [
         ScenarioTask(name="inject_prompt", assertion_type="manual"),
         ScenarioTask(name="verify_useful_discovery", assertion_type="llm_judge"),
@@ -999,9 +1036,7 @@ class GuidedFirstAssignmentAsksUsefulQuestionsScenario(BehaviorMicroScenario):
         with self.wait_for_agent_idle(agent_id, timeout=120):
             inbound = self.inject_message(
                 agent_id,
-                (
-                    "Take over growth research for Northstar Flow. Build a strong pipeline and keep it moving."
-                ),
+                self.assignment_prompt,
                 trigger_processing=False,
                 eval_run_id=run_id,
             )
@@ -1029,32 +1064,12 @@ class GuidedFirstAssignmentAsksUsefulQuestionsScenario(BehaviorMicroScenario):
                 mock_config={
                     "mcp_brightdata_search_engine": {
                         "status": "ok",
-                        "results": [
-                            {
-                                "title": "Northstar Flow product overview",
-                                "url": "https://northstar.example.test/product",
-                                "description": (
-                                    "Northstar Flow automates recurring vendor onboarding, compliance follow-up, "
-                                    "and evidence collection for operations teams."
-                                ),
-                            },
-                            {
-                                "title": "Northstar Flow customer stories",
-                                "url": "https://northstar.example.test/customers",
-                                "description": (
-                                    "Customer stories emphasize procurement leaders at 200-2,000 employee "
-                                    "companies; a smaller segment uses it for security reviews."
-                                ),
-                            },
-                        ],
+                        "results": deepcopy(self.orientation_search_results),
                     },
                     "mcp_brightdata_scrape_as_markdown": {
                         "status": "ok",
-                        "url": "https://northstar.example.test/product",
-                        "result": (
-                            "Northstar Flow handles vendor onboarding and recurring compliance evidence. "
-                            "Its strongest public examples serve procurement and operations teams."
-                        ),
+                        "url": self.orientation_scrape_url,
+                        "result": self.orientation_scrape_result,
                     },
                     "send_email": {
                         "status": "ok",
@@ -1117,22 +1132,19 @@ class GuidedFirstAssignmentAsksUsefulQuestionsScenario(BehaviorMicroScenario):
             )
             for call in fallback_calls
         ]
-        orientation_evidence = {
-            "product": (
-                "Northstar Flow automates recurring vendor onboarding, compliance follow-up, and evidence "
-                "collection for operations teams."
-            ),
-            "customer_signal": (
-                "Public examples emphasize procurement leaders at 200-2,000 employee companies, with a smaller "
-                "security-review segment."
-            ),
-        }
+        orientation_evidence = self.orientation_evidence
         choice, reasoning = self.llm_judge(
             question=(
                 "Did the agent-created native choice card ask one concise, high-leverage question whose answer "
                 "materially narrows this broad growth-research role? The question and its two or three real answer "
-                "choices should make intelligent use of the orientation evidence, not merely ask a generic question "
-                "that could have been written before research. One useful question is enough because further "
+                "choices should make intelligent use of the orientation evidence. "
+                + (
+                    "Because orientation could not identify the named entity, useful choices should offer plausible "
+                    "interpretations or concrete next paths instead of falling back to a free-text-only question. "
+                    if self.unknown_orientation
+                    else "They should not merely ask a generic question that could have been written before research. "
+                )
+                + "One useful question is enough because further "
                 "discovery can happen after the answer. Reject cosmetic preferences and judge intent, not exact wording. "
                 + (
                     "The backup email must clearly carry the same decision and choices, not a kickoff or a different question."
@@ -1245,6 +1257,34 @@ class GuidedEmailFirstAssignmentPreservesWebChoicesScenario(
     )
     preferred_contact_channel = CommsChannel.EMAIL
     requires_fallback_copy = True
+
+
+@register_scenario
+class GuidedUnknownFirstAssignmentOffersChoicePathsScenario(
+    GuidedFirstAssignmentAsksUsefulQuestionsScenario
+):
+    slug = GUIDED_UNKNOWN_FIRST_ASSIGNMENT_OFFERS_CHOICE_PATHS
+    description = (
+        "When bounded orientation cannot identify a named entity, a broad first assignment should still offer "
+        "answerable choice paths instead of degrading to a free-text-only question."
+    )
+    unknown_orientation = True
+    assignment_prompt = "Take over market development for Mercury Loom. Build a strong pipeline and keep it moving."
+    orientation_search_results = (
+        {
+            "title": "Unrelated Mercury textile equipment",
+            "url": "https://irrelevant.example.test/mercury-textiles",
+            "description": "A similarly named industrial loom with no connection to a company or software product.",
+        },
+    )
+    orientation_scrape_result = "No authoritative company or product page for Mercury Loom was found."
+    orientation_scrape_url = "https://irrelevant.example.test/mercury-textiles"
+    orientation_evidence = {
+        "search_outcome": (
+            "Bounded public orientation found only an unrelated similarly named product, so the requested entity "
+            "and intended pipeline remain ambiguous."
+        ),
+    }
 
 
 @register_scenario
