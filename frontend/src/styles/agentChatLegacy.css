@@ -2866,27 +2866,35 @@
 /* The older-history indicator floats over the timeline instead of sitting in it. It toggles while
    the reader is scrolling back, and occupying layout space above the content would shift whatever
    they are reading by its own height every time it appeared or disappeared. */
+/* The timeline region starts at the top of the window and the banner floats over it, which is
+   what #timeline-spacer reserves room for. Sitting at the region's top put this underneath the
+   banner, where it was invisible; clear the banner the same way the spacer does. */
 .timeline-load-control[data-side="older"] {
     position: absolute;
-    top: 0;
+    top: calc(var(--agent-chat-banner-height, 4rem) + 0.5rem);
     left: 0;
     right: 0;
     z-index: 4;
     pointer-events: none;
     margin: 0;
+    min-height: 0;
 }
 /* Idle it answers "is there more above"; loading it answers "is it arriving". Both float, so the
-   toggle between them never moves a pixel of the conversation. */
+   toggle between them never moves a pixel of the conversation. It sits over live text, so it has
+   to be opaque -- a translucent pill lets the message underneath read straight through it. */
+.timeline-load-control[data-side="older"] .timeline-load-button {
+    background: #ffffff;
+    backdrop-filter: none;
+}
 .timeline-load-control[data-side="older"][data-state="idle"] .timeline-load-button {
-    opacity: 0.72;
-    color: #64748b;
-    border-color: rgba(148, 163, 184, 0.28);
-    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+    color: #475569;
+    border-color: rgba(148, 163, 184, 0.45);
+    box-shadow: 0 2px 10px rgba(15, 23, 42, 0.1);
 }
 .timeline-load-control[data-side="older"][data-state="loading"] .timeline-load-button {
-    color: #4f46e5;
-    border-color: rgba(99, 102, 241, 0.3);
-    box-shadow: 0 2px 8px rgba(79, 70, 229, 0.16);
+    color: #4338ca;
+    border-color: rgba(99, 102, 241, 0.45);
+    box-shadow: 0 3px 12px rgba(79, 70, 229, 0.22);
 }
 .timeline-load-chevron {
     flex: 0 0 auto;
