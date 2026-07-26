@@ -75,14 +75,11 @@ def get_request_human_input_tool() -> dict[str, Any]:
         "function": {
             "name": "request_human_input",
             "description": (
-                "Create tracked non-credential web-chat input; no email/SMS. "
-                "Use secure_credentials_request for credentials. "
-                "Use options for concrete decisions; omit options for free-text-only blocking questions. "
-                "Use send_chat_message/send_email/send_sms/send_agent_message for non-blocking questions or capability/status/policy answers. "
-                "Include an Other / I'll explain option when choices are useful but not exhaustive. "
-                "Planning questions should use at most three options. "
-                "Do not use for preference surveys, timezone/channel choices, optional formatting, category example choices such as which vendor/company, non-blocking backfill/lookback, or reversible defaults you can choose and disclose. "
-                "Use it when the user explicitly asks you to ask for targets/scope before setup or missing targets/scope block a recurring monitor. "
+                "Tracked non-credential web input; no email/SMS. Credentials: secure_credentials_request. "
+                "Broad first assignment: call alone with the highest-leverage question and 2-3 real answer options; no response text/config/work. Ask another after the answer only if needed. Otherwise omit options for free-text blockers. "
+                "Use message tools for non-blocking questions/answers. Include Other / I'll explain if needed. "
+                "Do not use for preference surveys, timezone/channel/formatting, category example choices like which vendor/company, non-blocking lookback, or reversible defaults you can choose and disclose. "
+                "Use for role-defining discovery when audience/scope/volume/success bounds materially change substantial ongoing first work; otherwise only if the user asks for targets/scope before setup or they block a recurring monitor. "
                 f"Plain text only; max {MAX_HUMAN_INPUT_QUESTION_LENGTH} chars."
             ),
             "parameters": {

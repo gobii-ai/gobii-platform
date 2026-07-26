@@ -13,6 +13,7 @@ from .behavior_micro import (
     BEHAVIOR_MICRO_SCENARIO_SLUGS,
     CHARTER_MEMORY_MICRO_SCENARIO_SLUGS,
     GUIDED_PLANNING_MICRO_SCENARIO_SLUGS,
+    GuidedFirstAssignmentAsksUsefulQuestionsScenario,
     GuidedPlanningBoundedWhenRequestedScenario,
     LegacyPlanningStateExecutesDirectlyScenario,
     TOOL_CHOICE_MICRO_SCENARIO_SLUGS,

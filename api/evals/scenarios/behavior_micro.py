@@ -57,6 +57,7 @@ PLANNING_FINAL_REPORT_COMPLETES_VISIBLE_PLAN = "planning_final_report_completes_
 PLANNING_INTEGRATION_SETUP_SEARCHES_BEFORE_QUESTION = "planning_integration_setup_searches_before_question"
 PLANNING_SECURE_CREDENTIAL_REQUEST = "planning_secure_credential_request"
 GUIDED_PLANNING_BOUNDED_WHEN_REQUESTED = "guided_planning_bounded_when_requested"
+GUIDED_FIRST_ASSIGNMENT_ASKS_USEFUL_QUESTIONS = "guided_first_assignment_asks_useful_questions"
 LEGACY_PLANNING_STATE_EXECUTES_DIRECTLY = "legacy_planning_state_executes_directly"
 CHARTER_ADDS_DURABLE_PREFERENCE_PRESERVING_EXISTING = "charter_adds_durable_preference_preserving_existing"
 CHARTER_ADDS_INFERRED_PREFERENCE_PRESERVING_EXISTING = "charter_adds_inferred_preference_preserving_existing"
@@ -367,6 +368,7 @@ COMMON_USE_CASE_MICRO_SCENARIO_SLUGS = [case.slug for case in COMMON_USE_CASE_EV
 
 GUIDED_PLANNING_MICRO_SCENARIO_SLUGS = [
     GUIDED_PLANNING_BOUNDED_WHEN_REQUESTED,
+    GUIDED_FIRST_ASSIGNMENT_ASKS_USEFUL_QUESTIONS,
     LEGACY_PLANNING_STATE_EXECUTES_DIRECTLY,
 ]
 
@@ -953,6 +955,153 @@ class GuidedPlanningBoundedWhenRequestedScenario(BehaviorMicroScenario):
                 else "No substantive work or durable configuration changes occurred."
             ),
             artifacts={"step": forbidden[0].step} if forbidden else {},
+        )
+
+
+@register_scenario
+class GuidedFirstAssignmentAsksUsefulQuestionsScenario(BehaviorMicroScenario):
+    slug = GUIDED_FIRST_ASSIGNMENT_ASKS_USEFUL_QUESTIONS
+    description = (
+        "A broad first assignment should ask the highest-leverage setup question in native web UI without reviving "
+        "mandatory planning or starting expensive work."
+    )
+    category = "guided_planning"
+    tags = ("agent_behavior", "micro", "guided_planning", "human_input", "first_run")
+    tasks = [
+        ScenarioTask(name="inject_prompt", assertion_type="manual"),
+        ScenarioTask(name="verify_useful_discovery", assertion_type="llm_judge"),
+        ScenarioTask(name="verify_no_premature_work", assertion_type="manual"),
+    ]
+
+    def run(self, run_id, agent_id):
+        PersistentAgent.objects.filter(id=agent_id).update(
+            charter="Build and maintain a qualified outbound pipeline for the owner's company.",
+            planning_state=PersistentAgent.PlanningState.SKIPPED,
+        )
+        agent = PersistentAgent.objects.get(id=agent_id)
+        for tool_name in ("mcp_brightdata_search_engine", "mcp_brightdata_scrape_as_markdown"):
+            mark_tool_enabled_without_discovery(agent, tool_name)
+            PersistentAgentEnabledTool.objects.filter(
+                agent=agent,
+                tool_full_name=tool_name,
+            ).update(
+                tool_server=EVAL_SYNTHETIC_TOOL_SERVER,
+                tool_name=tool_name,
+            )
+
+        self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="inject_prompt")
+        with self.wait_for_agent_idle(agent_id, timeout=120):
+            inbound = self.inject_message(
+                agent_id,
+                (
+                    "You're taking over outbound research for our new workflow product. Build us a strong sales "
+                    "lead pipeline and keep it moving."
+                ),
+                trigger_processing=True,
+                eval_run_id=run_id,
+                mock_config={
+                    "mcp_brightdata_search_engine": {
+                        "status": "ok",
+                        "results": [{"title": "Example result", "url": "https://example.test/result"}],
+                    },
+                    "mcp_brightdata_scrape_as_markdown": {
+                        "status": "ok",
+                        "url": "https://example.test/result",
+                        "result": "Example research result.",
+                    },
+                },
+                eval_stop_policy={
+                    "stop_on_human_input_request": True,
+                    "stop_on_tool_names": list(
+                        SUBSTANTIVE_WORK_TOOL_NAMES | PLANNING_READ_ONLY_TOOL_NAMES | {"sqlite_batch"}
+                    ),
+                    "stop_on_unexpected_relevant_tool": True,
+                    "allowed_tool_names": [
+                        "request_human_input",
+                        "send_chat_message",
+                        "mcp_brightdata_search_engine",
+                        "mcp_brightdata_scrape_as_markdown",
+                        "sqlite_batch",
+                    ],
+                    "ignored_tool_names": ["send_chat_message"],
+                    "max_relevant_tool_calls": 3,
+                },
+            )
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED,
+            task_name="inject_prompt",
+            observed_summary="A broad first assignment was processed outside legacy Planning Mode.",
+            artifacts={"message": inbound},
+        )
+
+        requests = list(get_pending_human_input_requests(agent_id, run_id, after=inbound.timestamp))
+        replies = list(
+            PersistentAgentMessage.objects.filter(
+                owner_agent_id=agent_id,
+                is_outbound=True,
+                timestamp__gte=inbound.timestamp,
+            )
+            .order_by("timestamp")
+            .values_list("body", flat=True)
+        )
+        questions = [
+            {"question": request.question, "options": request.options_json}
+            for request in requests
+        ]
+        choice, reasoning = self.llm_judge(
+            question=(
+                "Did the agent-created native choice card ask one concise, high-leverage question whose answer "
+                "materially narrows this broad outbound role, such as the product/use case, target audience, "
+                "qualification boundary, or initial volume? One useful question is enough because further discovery "
+                "can happen after the answer. Its two or three choices should be real answers, not labels for several "
+                "different questions. Reject cosmetic preferences and judge intent, not exact wording."
+            ),
+            context=(
+                f"User request:\n{inbound.body}\n\n"
+                f"Agent chat replies:\n{json.dumps(replies)}\n\n"
+                f"Native choice cards created by the agent:\n{json.dumps(questions)}"
+            ),
+            options=["Useful bounded discovery", "Missing or low-value discovery"],
+        )
+        self.record_task_result(
+            run_id,
+            None,
+            (
+                EvalRunTask.Status.PASSED
+                if choice == "Useful bounded discovery"
+                else EvalRunTask.Status.FAILED
+            ),
+            task_name="verify_useful_discovery",
+            observed_summary=f"semantic_judge={choice}: {reasoning}",
+        )
+
+        calls = get_tool_calls_for_run(run_id, after=inbound.timestamp)
+        work_calls = [
+            call
+            for call in calls
+            if call.tool_name in SUBSTANTIVE_WORK_TOOL_NAMES
+            or call.tool_name in PLANNING_READ_ONLY_TOOL_NAMES
+            or call.tool_name == "sqlite_batch"
+        ]
+        has_bounded_choices = len(requests) == 1 and 2 <= len(requests[0].options_json) <= 3
+        passed = has_bounded_choices and not work_calls
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED if passed else EvalRunTask.Status.FAILED,
+            task_name="verify_no_premature_work",
+            observed_summary=(
+                "Tracked discovery remained answerable and no research began."
+                if passed
+                else (
+                    f"pending_questions={len(requests)}, "
+                    f"option_counts={[len(request.options_json) for request in requests]}, "
+                    f"premature_tools={[call.tool_name for call in work_calls]}."
+                )
+            ),
+            artifacts={"step": work_calls[0].step} if work_calls else {},
         )
 
 

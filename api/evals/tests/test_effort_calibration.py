@@ -579,6 +579,36 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
 
         self.assertEqual(reads, ["abc123", "def456"])
 
+    def test_sqlite_quality_check_rejects_structured_model_advisory(self):
+        scenario, recorded = EffortCalibrationScenario(), []
+        scenario.record_task_result = lambda *args, **kwargs: recorded.append((args, kwargs))
+        calls = [
+            SimpleNamespace(
+                step="advised",
+                result=(
+                    '{"status":"ok","advisories":[{"code":"tool_result_row_loop",'
+                    '"message":"Use one shaped query."}]}'
+                ),
+                tool_name="sqlite_batch",
+                tool_params={
+                    "sql": (
+                        "INSERT INTO sources SELECT result_json FROM __tool_results "
+                        "WHERE result_id IN ('one');"
+                    )
+                },
+            )
+        ]
+        with patch("api.evals.scenarios.effort_calibration._tool_calls_for_run", return_value=calls):
+            passed = scenario._record_no_sqlite_result_text_reread_loop(
+                "run",
+                after=None,
+                task_name="verify_no_query_or_sqlite_loops",
+                max_result_text_reads=1,
+            )
+
+        self.assertFalse(passed)
+        self.assertIn("tool_result_row_loop", recorded[-1][1]["observed_summary"])
+
     def test_hierarchical_report_shape_requires_sources_and_structure(self):
         ok, summary = _hierarchical_report_shape(
             (
@@ -1163,6 +1193,41 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
         self.assertEqual(recorded[-1][0][2], EvalRunTask.Status.PASSED)
         self.assertEqual(set(model_tables), {"vendors", "plans"})
 
+    def test_sqlite_domain_model_rejects_unused_literal_source_table(self):
+        scenario, recorded = SqliteIntermediateWorkingTableScenario(), []
+        scenario.record_task_result = lambda *args, **kwargs: recorded.append((args, kwargs))
+        calls = [
+            SimpleNamespace(
+                step="step",
+                status="complete",
+                result=(
+                    '{"status":"ok","advisories":[{"code":"manual_working_table_from_visible_results",'
+                    '"message":"Use a source-derived set import."}]}'
+                ),
+                tool_name="sqlite_batch",
+                tool_params={
+                    "sql": """
+                    CREATE TABLE copied_vendors(vendor TEXT PRIMARY KEY, source_url TEXT);
+                    INSERT INTO copied_vendors VALUES ('AxonFlow', 'https://source.example/axon');
+                    CREATE TABLE plans(vendor TEXT, plan TEXT, price INTEGER, source_url TEXT,
+                                       PRIMARY KEY(vendor, plan));
+                    INSERT INTO plans
+                    SELECT json_extract(t.result_json, '$.content.vendor'),
+                           json_extract(p.value, '$.plan'),
+                           json_extract(p.value, '$.monthly_price_usd'),
+                           json_extract(t.result_json, '$.content.source_url')
+                    FROM __tool_results t JOIN json_each(t.result_json, '$.content.plans') p;
+                    SELECT vendor, plan FROM plans WHERE price <= 900 ORDER BY price;
+                    """
+                },
+            )
+        ]
+        with patch("api.evals.scenarios.sqlite_tool_results._tool_calls_for_run", return_value=calls):
+            scenario._record_domain_model("run", after=None)
+
+        self.assertEqual(recorded[-1][0][2], EvalRunTask.Status.FAILED)
+        self.assertIn("unreliable model writes", recorded[-1][1]["observed_summary"])
+
     def test_sqlite_domain_model_reuses_downstream_shaped_table(self):
         scenario, recorded = SqliteIntermediateWorkingTableScenario(), []
         scenario.record_task_result = lambda *args, **kwargs: recorded.append((args, kwargs))
@@ -1461,9 +1526,10 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
         self.assertFalse(passed)
         self.assertIn("progress_messages=1", recorded[-1][1]["observed_summary"])
 
-    def test_deep_work_update_check_requires_useful_kickoff_and_milestone(self):
+    def test_deep_work_update_check_uses_semantic_judgment_for_updates(self):
         scenario, recorded = EffortCalibrationScenario(), []
         scenario.record_task_result = lambda *args, **kwargs: recorded.append((args, kwargs))
+        scenario.llm_judge = lambda **_kwargs: ("Useful work updates", "Scoped kickoff and evidence milestone.")
         calls = [
             SimpleNamespace(
                 tool_name="send_chat_message",
@@ -1491,6 +1557,14 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
                 step="milestone",
             ),
             SimpleNamespace(tool_name="mcp_brightdata_scrape_as_markdown", tool_params={}, step="source-three"),
+            SimpleNamespace(
+                tool_name="send_chat_message",
+                tool_params={
+                    "body": "## Final memo\n\n" + ("Evidence-backed conclusion. " * 30),
+                    "will_continue_work": True,
+                },
+                step="final-before-plan-cleanup",
+            ),
         ]
         with patch("api.evals.scenarios.effort_calibration._tool_calls_for_run", return_value=calls):
             passed = scenario._record_deep_work_updates(
@@ -1502,7 +1576,7 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
             )
 
         self.assertTrue(passed, recorded[-1][1]["observed_summary"])
-        self.assertIn("one before work and one after a material phase", recorded[-1][1]["observed_summary"])
+        self.assertIn("semantic_judge=Useful work updates", recorded[-1][1]["observed_summary"])
 
     def test_ordinary_continuation_prompt_does_not_prescribe_retry_internals(self):
         prompt = EffortOrdinaryContinuationAvoidsCorrectiveChurnScenario.prompt.casefold()
@@ -1578,8 +1652,8 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
         self.assertIn("category example choices", description)
         self.assertIn("which vendor/company", description)
         self.assertIn("choose and disclose", description)
-        self.assertIn("explicitly asks you to ask for targets/scope before setup", description)
-        self.assertIn("missing targets/scope block a recurring monitor", description)
+        self.assertIn("user asks for targets/scope before setup", description)
+        self.assertIn("block a recurring monitor", description)
 
     def test_linkedin_jobs_synthetic_tool_accepts_category_queries(self):
         description = EVAL_SYNTHETIC_TOOL_DEFINITIONS["mcp_brightdata_web_data_linkedin_job_listings"][
@@ -2295,7 +2369,7 @@ class FirstRunPromptCalibrationTests(TestCase):
         self.assertIn("enabled tool fits -> use directly", system_prompt)
         self.assertIn("credential-returning API -> search_tools('secure credential delegation') first", system_prompt)
         self.assertIn("named model + explicit fresh non-secret source/URL -> http_request only, no text/send/plan; WAIT", system_prompt)
-        self.assertIn("query them, not memory", system_prompt)
+        self.assertIn("query, don't remember", system_prompt)
         self.assertIn("data/api/feed/file URL -> http_request", system_prompt)
         self.assertIn("reconcile+SELECT there before use", system_prompt)
         self.assertIn("spawn_web_task only after access/render/login blockage", system_prompt)
@@ -2311,10 +2385,19 @@ class FirstRunPromptCalibrationTests(TestCase):
         )
         self.assertIn("Email/SMS imperatives map directly to send_email/send_sms", system_prompt)
         self.assertIn("Do not downgrade requested email/SMS delivery to chat", system_prompt)
-        self.assertIn("Don't repeat updates", system_prompt)
-        self.assertIn("later updates need new evidence", system_prompt)
-        self.assertIn("Kickoff isn't a milestone", system_prompt)
+        self.assertIn(
+            "Never announce phases, narrate tools, or repeat updates",
+            system_prompt,
+        )
+        self.assertIn(
+            "If substantial work continues after a meaningful evidence batch",
+            system_prompt,
+        )
+        self.assertIn(
+            "send one brief same-channel acknowledgment as the entire first response",
+            system_prompt,
+        )
         self.assertIn("upsert both in a normal domain-progress table", system_prompt)
-        self.assertIn("Do not inspect or mutate charter/schedules/config", system_prompt)
+        self.assertIn("inspect or mutate charter/schedules/config unless", system_prompt)
         self.assertIn("the next call must send the report", system_prompt)
         self.assertIn("Never send 'I'll save/update it' with will_continue_work=false", system_prompt)
