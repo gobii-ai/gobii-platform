@@ -735,6 +735,12 @@
 }
 .banner-name-button {
     overflow: hidden;
+    /* The text line box alone is under the 24px minimum. Pad the target and take the same amount
+       back as negative margin, so it grows without moving the header around it. */
+    padding-top: 0.25rem;
+    padding-bottom: 0.25rem;
+    margin-top: -0.25rem;
+    margin-bottom: -0.25rem;
 }
 .banner-emotion {
     font-size: 0.875rem;
@@ -750,8 +756,9 @@
 }
 .banner-contact-link {
     display: inline-flex;
-    width: 1.25rem;
-    height: 1.25rem;
+    /* 24px is the minimum target size; the icon inside keeps its own dimensions. */
+    width: 1.5rem;
+    height: 1.5rem;
     align-items: center;
     justify-content: center;
     border-radius: 999px;
@@ -2499,9 +2506,9 @@
     align-items: center;
     justify-content: center;
     gap: 0.25rem;
-    height: 22px;
+    height: 24px;
     border: none;
-    border-radius: 11px;
+    border-radius: 12px;
     background: rgba(255, 255, 255, 0.54);
     cursor: pointer;
     padding: 0 10px;
@@ -3877,8 +3884,8 @@
     pointer-events: auto;
 }
 .chat-message-action-button {
-    width: 1.45rem;
-    height: 1.45rem;
+    width: 1.5rem;
+    height: 1.5rem;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -5655,6 +5662,9 @@
     display: flex;
     align-items: center;
     justify-content: center;
+    /* Declared square, but a flex parent was compressing the width to 16px, which put it under the
+       24px minimum target size. Hold the declared width. */
+    flex-shrink: 0;
     width: 1.9rem;
     height: 1.9rem;
     border-radius: 0.45rem;
@@ -6473,6 +6483,8 @@
     outline-offset: 1px;
 }
 .agent-roster-item__favorite {
+    /* Same compression as the sidebar toggle: declared square, squeezed to 14px wide by the row. */
+    flex-shrink: 0;
     width: var(--roster-favorite-size);
     height: var(--roster-favorite-size);
     border-radius: var(--roster-favorite-radius);
