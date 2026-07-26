@@ -2863,6 +2863,18 @@
     font-size: 0.75rem;
     color: #64748b;
 }
+/* The older-history indicator floats over the timeline instead of sitting in it. It toggles while
+   the reader is scrolling back, and occupying layout space above the content would shift whatever
+   they are reading by its own height every time it appeared or disappeared. */
+.timeline-load-control[data-side="older"] {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 4;
+    pointer-events: none;
+    margin: 0;
+}
 .timeline-load-control[hidden] {
     display: none;
 }

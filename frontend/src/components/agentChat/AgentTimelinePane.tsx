@@ -177,19 +177,23 @@ export function AgentTimelinePane({
   return (
     <>
       <div className="agent-chat-timeline-region">
+        {/*
+          Floated above the timeline rather than placed in it. This appears and disappears while
+          the reader is scrolling back, and anything occupying layout space above the content
+          moves what they are reading by its own height each time it toggles.
+        */}
+        {loadingOlder ? (
+          <div className="timeline-load-control" data-side="older" data-state="loading">
+            <div className="timeline-load-button" role="status">
+              <span className="timeline-load-indicator" data-loading="true" aria-hidden="true" />
+              <span className="timeline-load-label">Loading…</span>
+            </div>
+          </div>
+        ) : null}
         <div ref={timelineRef} id="timeline-shell" data-scroll-pinned={autoScrollPinned ? 'true' : 'false'}>
           <div id="timeline-spacer" aria-hidden="true" />
           <div id="timeline-inner">
             <div ref={timelineContentRef} id="timeline-events" className="flex flex-col" data-has-jump-button={showJumpButton ? 'true' : 'false'} data-has-working-panel={showProcessingIndicator ? 'true' : 'false'}>
-              {loadingOlder ? (
-                <div className="timeline-load-control" data-side="older" data-state="loading">
-                  <div className="timeline-load-button" role="status">
-                    <span className="timeline-load-indicator" data-loading="true" aria-hidden="true" />
-                    <span className="timeline-load-label">Loading…</span>
-                  </div>
-                </div>
-              ) : null}
-
               {initialLoading ? (
                 <div className="flex items-center justify-center py-10" aria-live="polite" aria-busy="true">
                   <div className="flex flex-col items-center gap-3 text-center">

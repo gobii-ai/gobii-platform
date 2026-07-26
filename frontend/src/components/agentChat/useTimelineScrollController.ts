@@ -314,6 +314,8 @@ export function useTimelineScrollController({
     }
 
     cancelPendingBottomScroll()
+    // A hold from the previous page must not keep asserting an old offset against this one.
+    stopAnchorHold()
     const shouldRestorePinned = Boolean(options?.preservePinned && pinnedRef.current)
     prependAnchorRef.current = capturePrependAnchor()
     if (!options?.preservePinned) {
@@ -329,6 +331,7 @@ export function useTimelineScrollController({
   }, [
     fetchPreviousPage,
     hasPreviousPage,
+    stopAnchorHold,
     isFetchPreviousPageError,
     isFetchingPreviousPage,
     cancelPendingBottomScroll,
@@ -532,7 +535,11 @@ export function useTimelineScrollController({
       return
     }
 
-    if (!isFetchingPreviousPage) {
+    // fetchOlderInFlightRef is set synchronously when the fetch is requested, while the query's
+    // own flag only turns true a tick later. Consulting the flag alone let any re-render landing
+    // in that gap throw the anchor away, so the page arrived with nothing holding the reader's
+    // place -- one of the intermittent jumps.
+    if (!isFetchingPreviousPage && !fetchOlderInFlightRef.current) {
       prependAnchorRef.current = null
     }
   }, [contentVersion, isFetchingPreviousPage, pageCount, restorePrependAnchor])
