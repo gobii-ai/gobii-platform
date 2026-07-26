@@ -71,6 +71,7 @@ CHARTER_PATCHES_DIRECT_STYLE_CORRECTION = "charter_patches_direct_style_correcti
 CHARTER_PATCHES_EVALUATIVE_OUTPUT_FEEDBACK = "charter_patches_evaluative_output_feedback"
 CHARTER_INTERPRETS_AMBIGUOUS_OPERATING_FEEDBACK = "charter_interprets_ambiguous_operating_feedback"
 CHARTER_INTERPRETS_ROLE_BOUNDARY_CORRECTION = "charter_interprets_role_boundary_correction"
+CHARTER_INFERS_IMPLICIT_OWNERSHIP_CORRECTION = "charter_infers_implicit_ownership_correction"
 CHARTER_RECORDS_CLI_GITHUB_SECRETS_CORRECTION = "charter_records_cli_github_secrets_correction"
 CHARTER_JUDGE_PRESERVES_CLI_GITHUB_SECRET_WORKFLOW = "charter_judge_preserves_cli_github_secret_workflow"
 
@@ -385,6 +386,7 @@ CHARTER_MEMORY_MICRO_SCENARIO_SLUGS = [
     CHARTER_PATCHES_EVALUATIVE_OUTPUT_FEEDBACK,
     CHARTER_INTERPRETS_AMBIGUOUS_OPERATING_FEEDBACK,
     CHARTER_INTERPRETS_ROLE_BOUNDARY_CORRECTION,
+    CHARTER_INFERS_IMPLICIT_OWNERSHIP_CORRECTION,
     CHARTER_RECORDS_CLI_GITHUB_SECRETS_CORRECTION,
     CHARTER_JUDGE_PRESERVES_CLI_GITHUB_SECRET_WORKFLOW,
 ]
@@ -3178,6 +3180,39 @@ class CharterInterpretsRoleBoundaryCorrectionScenario(CharterMemoryScenario):
             eval_run_id=run_id,
         )
         return super()._inject_charter_prompt(run_id, agent_id)
+
+    def _charter_check(self, agent, mutation_calls):
+        focused_patch = _uses_one_focused_charter_patch(mutation_calls, self.existing_charter)
+        passed = focused_patch and agent.charter != self.existing_charter
+        return passed, f"mutation_count={len(mutation_calls)}, focused={focused_patch}, charter={agent.charter!r}."
+
+
+@register_scenario
+class CharterInfersImplicitOwnershipCorrectionScenario(CharterMemoryScenario):
+    slug = CHARTER_INFERS_IMPLICIT_OWNERSHIP_CORRECTION
+    description = "Plain-language ownership feedback should durably narrow the agent's role without save wording."
+    tasks = [
+        ScenarioTask(name="inject_prompt", assertion_type="manual"),
+        ScenarioTask(name="verify_implicit_ownership_boundary_saved", assertion_type="llm_judge"),
+    ]
+    existing_charter = (
+        "Coordinate release readiness across the team. Track operational blockers and summarize open risks. "
+        "Proactively offer useful follow-up work. Keep a concise weekly readiness digest."
+    )
+    prior_outbound_body = (
+        "I can inspect the deployment logs and rerun Priya's reconciliation to identify the missing records."
+    )
+    prompt = "I didn't ask you to take over Priya's reconciliation."
+    verification_task_name = "verify_implicit_ownership_boundary_saved"
+    success_summary = "Agent inferred the ownership correction and saved a focused role boundary."
+    failure_summary = "Expected one focused patch that preserves coordination while preventing unassigned takeovers"
+    verify_feedback_reply = True
+    semantic_judge_question = (
+        "Does the updated charter preserve release coordination, blocker tracking, risk reporting, and the weekly "
+        "digest while making clear that the agent should not take over another person's assigned work merely because "
+        "it can help, unless an authorized human reassigns or requests that work? Does the reply naturally acknowledge "
+        "the correction without claiming the one incident is a universal ban on collaboration?"
+    )
 
     def _charter_check(self, agent, mutation_calls):
         focused_patch = _uses_one_focused_charter_patch(mutation_calls, self.existing_charter)

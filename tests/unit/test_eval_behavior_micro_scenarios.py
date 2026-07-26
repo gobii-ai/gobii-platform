@@ -29,6 +29,7 @@ from api.evals.scenarios.behavior_micro import (
     CHARTER_ADDS_PLAIN_PREFERENCE_WITHOUT_SAVE_WORD,
     CHARTER_EXPANDS_SPARSE_CHARTER_WITH_DETAIL,
     CHARTER_IGNORES_ONE_OFF_PREFERENCE,
+    CHARTER_INFERS_IMPLICIT_OWNERSHIP_CORRECTION,
     CHARTER_INTERPRETS_AMBIGUOUS_OPERATING_FEEDBACK,
     CHARTER_PATCHES_DIRECT_STYLE_CORRECTION,
     CHARTER_PATCHES_EVALUATIVE_OUTPUT_FEEDBACK,
@@ -142,6 +143,7 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
             CHARTER_ADDS_PLAIN_PREFERENCE_WITHOUT_SAVE_WORD,
             CHARTER_PATCHES_DIRECT_STYLE_CORRECTION,
             CHARTER_INTERPRETS_ROLE_BOUNDARY_CORRECTION,
+            CHARTER_INFERS_IMPLICIT_OWNERSHIP_CORRECTION,
             CHARTER_RECORDS_CLI_GITHUB_SECRETS_CORRECTION,
             CHARTER_JUDGE_PRESERVES_CLI_GITHUB_SECRET_WORKFLOW,
         ):
@@ -153,6 +155,7 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
             CHARTER_PATCHES_EVALUATIVE_OUTPUT_FEEDBACK,
             CHARTER_INTERPRETS_AMBIGUOUS_OPERATING_FEEDBACK,
             CHARTER_INTERPRETS_ROLE_BOUNDARY_CORRECTION,
+            CHARTER_INFERS_IMPLICIT_OWNERSHIP_CORRECTION,
         ):
             prompt = ScenarioRegistry.get(slug).prompt.casefold()
             for forbidden in ("charter", "sqlite", "patch_text", "save this", "update your instructions"):
@@ -915,6 +918,7 @@ class BehaviorMicroHelperTests(TestCase):
             CHARTER_ADDS_FEEDBACK_RULE_FROM_CORRECTION,
             CHARTER_PATCHES_DIRECT_STYLE_CORRECTION,
             CHARTER_INTERPRETS_ROLE_BOUNDARY_CORRECTION,
+            CHARTER_INFERS_IMPLICIT_OWNERSHIP_CORRECTION,
             CHARTER_RECORDS_CLI_GITHUB_SECRETS_CORRECTION,
         ):
             scenario = ScenarioRegistry.get(slug)
@@ -947,6 +951,7 @@ class BehaviorMicroHelperTests(TestCase):
             CHARTER_ADDS_FEEDBACK_RULE_FROM_CORRECTION,
             CHARTER_PATCHES_DIRECT_STYLE_CORRECTION,
             CHARTER_INTERPRETS_ROLE_BOUNDARY_CORRECTION,
+            CHARTER_INFERS_IMPLICIT_OWNERSHIP_CORRECTION,
         ):
             scenario = ScenarioRegistry.get(slug)
             rule = "Apply the durable correction."

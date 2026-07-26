@@ -249,6 +249,9 @@ class ImpliedSendTests(TestCase):
             "Your job isn't tracking content ideas.",
             "Your job is tracking infrastructure and resource blockers.",
             "Stay in your lane.",
+            "I didn't ask you to do that. Priya was handling the reconciliation.",
+            "We never assigned you to take the migration work over.",
+            "I did not authorize you to own Morgan's investigation.",
         )
         for text in durable_feedback:
             with self.subTest(durable=text):
@@ -280,6 +283,8 @@ class ImpliedSendTests(TestCase):
             "Constraint: do not imply a prior relationship or make unsupported claims. Send the email now.",
             "Your job is done for today.",
             "Your job isn't done yet.",
+            "I didn't ask you to send this email yet.",
+            "I didn't ask you to summarize this report.",
         )
         for text in one_off_or_content:
             with self.subTest(not_durable=text):
