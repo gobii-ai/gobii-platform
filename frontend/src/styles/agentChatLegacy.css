@@ -3888,6 +3888,36 @@
     color: #64748b;
     transition: border-color 0.15s ease, color 0.15s ease, background-color 0.15s ease;
 }
+/* WCAG 2.5.8 sets a 24x24 CSS px minimum for pointer targets. Several chat controls sit under it,
+   which matters most on a phone: the four message actions were 23.2px with 4px between them, so a
+   fingertip covered three at once and a mis-tap recorded the wrong feedback rather than missing.
+   Grow the hit area on coarse pointers; precise pointers keep the denser layout. */
+@media (pointer: coarse) {
+    .banner-contact-link {
+        width: 1.5rem;
+        height: 1.5rem;
+    }
+    .composer-insight-tab {
+        height: 24px;
+        border-radius: 12px;
+    }
+    /* A text control's height comes from its line box, which here is under 24px. Pad it out and
+       pull the same amount back as negative margin, so the target grows without moving anything
+       around it. Vertical only, so it cannot reach a neighbouring control. */
+    .banner-name-button {
+        padding-top: 0.25rem;
+        padding-bottom: 0.25rem;
+        margin-top: -0.25rem;
+        margin-bottom: -0.25rem;
+    }
+    .chat-message-actions {
+        gap: 0.5rem;
+    }
+    .chat-message-action-button {
+        width: 1.75rem;
+        height: 1.75rem;
+    }
+}
 .chat-message-action-button:hover,
 .chat-message-action-button:focus-visible {
     border-color: rgba(100, 116, 139, 0.32);

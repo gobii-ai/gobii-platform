@@ -120,7 +120,9 @@ export function TruncatedMarkdown({ content, maxLines = 3 }: { content: string; 
       <button
         type="button"
         onClick={() => setIsExpanded(!isExpanded)}
-        className="inline-flex items-center gap-1 text-xs font-medium text-indigo-600 hover:text-indigo-700 transition-colors"
+        // py-1/-my-1 lifts the target to the 24px minimum without moving the card's layout: the
+        // text alone gives a 16px line box, which is under it.
+        className="inline-flex items-center gap-1 py-1 -my-1 text-xs font-medium text-indigo-600 hover:text-indigo-700 transition-colors"
       >
         {isExpanded ? (
           <>
