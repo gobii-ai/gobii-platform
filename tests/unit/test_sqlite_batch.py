@@ -172,19 +172,30 @@ class SqliteBatchCoreTests(SqliteBatchTestCase):
             "notes": bindings["notes"],
         }])
 
-    def test_named_bindings_reject_nested_values(self):
+    def test_named_bindings_encode_nested_json_for_sql_json_functions(self):
         with self._with_temp_db():
             out = execute_sqlite_batch(
                 self.agent,
                 {
-                    "sql": "SELECT :value",
-                    "bindings": {"value": {"nested": "not a SQLite scalar"}},
+                    "sql": (
+                        "SELECT json_extract(value, '$.name') AS name "
+                        "FROM json_each(:rows) ORDER BY name;"
+                    ),
+                    "bindings": {
+                        "rows": [
+                            {"name": "O'Brien & Sons"},
+                            {"name": "Northstar\nFlow"},
+                        ],
+                    },
                     "will_continue_work": True,
                 },
             )
 
-        self.assertEqual(out.get("status"), "error")
-        self.assertIn("JSON scalar", out.get("message", ""))
+        self.assertEqual(out.get("status"), "ok", out.get("message"))
+        self.assertEqual(
+            out["results"][0]["result"],
+            [{"name": "Northstar\nFlow"}, {"name": "O'Brien & Sons"}],
+        )
 
     def test_cte_insert_reports_actual_changed_rows(self):
         with self._with_temp_db():

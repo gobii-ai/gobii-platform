@@ -365,7 +365,7 @@ class AgentChatAPITests(TestCase):
 
     @override_settings(ENABLE_DEFAULT_AGENT_EMAIL=True, DEFAULT_AGENT_EMAIL_DOMAIN="agents.test")
     @tag("batch_agent_chat")
-    def test_quick_create_allows_email_preference_override(self):
+    def test_quick_create_keeps_browser_task_on_web_with_email_preference(self):
         message_text = "Build me an agent from a stored CTA intent"
         response = self.client.post(
             "/console/api/agents/create/",
@@ -392,12 +392,22 @@ class AgentChatAPITests(TestCase):
             .first()
         )
         self.assertIsNotNone(seeded_message)
-        self.assertEqual(seeded_message.from_endpoint.channel, CommsChannel.EMAIL)
-        self.assertEqual(seeded_message.from_endpoint.address, self.user.email)
+        self.assertEqual(seeded_message.from_endpoint.channel, CommsChannel.WEB)
+        self.assertEqual(
+            seeded_message.from_endpoint.address,
+            build_web_user_address(self.user.id, created_agent.id),
+        )
         self.assertIsNotNone(seeded_message.to_endpoint)
-        self.assertEqual(seeded_message.to_endpoint.channel, CommsChannel.EMAIL)
-        self.assertEqual(seeded_message.conversation.channel, CommsChannel.EMAIL)
-        self.assertEqual(seeded_message.conversation.address, self.user.email)
+        self.assertEqual(seeded_message.to_endpoint.channel, CommsChannel.WEB)
+        self.assertEqual(
+            seeded_message.to_endpoint.address,
+            build_web_agent_address(created_agent.id),
+        )
+        self.assertEqual(seeded_message.conversation.channel, CommsChannel.WEB)
+        self.assertEqual(
+            seeded_message.conversation.address,
+            build_web_user_address(self.user.id, created_agent.id),
+        )
 
     @tag("batch_agent_chat")
     def test_quick_create_without_account_email(self):

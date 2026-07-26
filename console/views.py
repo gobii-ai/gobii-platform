@@ -1245,6 +1245,8 @@ class AgentQuickSpawnView(LoginRequiredMixin, View):
                 email_enabled=True,
                 sms_enabled=False,
                 preferred_contact_method='email',
+                web_enabled=True,
+                initial_message_channel=CommsChannel.WEB.value,
                 preferred_llm_tier_key=request.session.get("agent_preferred_llm_tier"),
                 charter_override=request.session.get('agent_charter_override'),
             )

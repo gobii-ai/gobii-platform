@@ -44,8 +44,8 @@ TOOL_PAYLOAD_RE = re.compile(r"\b(?:result_json|result_text|analysis_json)\b", r
 URL_RE = re.compile(r"https?://[^\s'\",)]+", re.I)
 BULK_MANUAL_VALUES_ROW_LIMIT = 4
 BULK_COPY_MESSAGE = (
-    "This literal-row import copied visible tool output. Next time derive rows from all relevant __tool_results in "
-    "one INSERT ... SELECT/json_each query."
+    "This literal-row import copied visible tool output. Use one INSERT ... SELECT: extract structured fields from all "
+    "relevant __tool_results, or pass unstructured interpretations in one bound rows array keyed by result_id and join it."
 )
 BLOB_LOOP_MESSAGE = (
     "Full result blobs were fetched one at a time. Next time combine prior outputs in one shaped query "
@@ -65,9 +65,9 @@ SINGLE_IMPORT_MESSAGE = (
     "with one shaped query over tool_name or result_id IN (...)."
 )
 SOURCE_LITERAL_COPY_MESSAGE = (
-    "This model write copied visible source facts or URLs as SQL literals. Next time derive sourced fields in the "
-    "INSERT/UPDATE SELECT/json_each over all relevant __tool_results, use stable keys, refresh provenance, and then "
-    "query the model."
+    "This model write copied visible source facts or URLs as SQL literals. Next time derive sourced fields with one "
+    "set-wise INSERT/UPDATE SELECT: extract structured fields from __tool_results, or pass unstructured interpretations "
+    "in one bound rows array keyed by result_id and join it for provenance, refresh provenance, then query the keyed model."
 )
 GROUNDED_LITERAL_IMPORT_MESSAGE = (
     "Executed this literal INSERT because every inserted value was found in recent stored tool results. Prefer one "

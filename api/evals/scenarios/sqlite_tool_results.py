@@ -119,7 +119,7 @@ SIBLING_ACCOUNT_BATCHES = (
     (
         "https://exports.example.test/accounts/northeast",
         (
-            ("acct-101", "Harbor Supply", "procurement", 2),
+            ("acct-101", "Harbor O'Brien Supply", "procurement", 2),
             ("acct-102", "Aster Freight", "operations", 1),
         ),
     ),

@@ -147,9 +147,9 @@ LINK_REFERENCE_PROMPT_NOTE = (
     "SQLite source rows derive raw URLs from __tool_results; for an unavoidable agent-authored URL value, pass the "
     "exact handle through a named binding, never SQL text. Items without a token stay plain; source/feed tokens link only themselves. A report "
     "is unfinished while a token-backed entity name is plain: `Atlas URL [link_ref: $[link:L1]]` becomes "
-    "`[Atlas]($[link:L1])`. Outreach links only if useful/requested. Cite beside the supported "
-    "claim; a source name alone is not a citation. Before sending, the "
-    "body must contain the exact tokens for linked claims."
+    "`[Atlas]($[link:L1])`. Table form is `| [Atlas]($[link:L1]) | requested facts |`: use each item destination once "
+    "on its name and omit a separate Link/Source column. Outreach links only if useful/requested. Cite beside the supported "
+    "claim; a source name alone is not a citation. Before sending, each linked item token must occur exactly once in the body."
 )
 SQLITE_EFFICIENCY_WARNING = (
     "SQLite efficiency warning: you've been handling __tool_results one result_id at a time. "
@@ -682,10 +682,11 @@ def _get_sqlite_guidance() -> str:
     """Return the compact contract for data retrieval, storage, and analysis."""
     return (
         "## SQLite Data\n\n"
-        "SCHEMA FIRST: for an existing table whose full current definition is absent, search the catalog by a task-relevant name fragment; listing every table is a failure. Then make a separate metadata-only call with no target-table read and read its result. Never combine PRAGMA/schema inspection with a target-table SELECT. Only afterward query using confirmed tables, columns, and join keys. Never repeat an unchanged SELECT in the same turn; use the rows already returned. After a schema error inspect, don't guess again; for external SQL, roll back or reconnect before another statement. "
         "Named tables are the world model: query, don't remember; fetch stale/missing facts only. Tool results don't update it. "
-        "Same-shaped tool results are one set. FIRST SHOT: in one sqlite_batch call, evolve the keyed model, import every sibling, and run the decision/evidence SELECTs needed next. If the payload shape is genuinely unknown, use at most two calls: one inspection covering all siblings, then one complete model/import/decision batch; never a third. Before calling, map each requested output—including supporting rows and URLs—to a SELECT in that batch; later reads query only the model. Shape imports as `FROM __tool_results t, json_each(t.result_json,'$.content.items') item WHERE t.tool_name=:tool`; change only the real array path. Never put tool-returned facts in VALUES, even when visible or few; never loop over result_id. Do not store `$[link:...]` tokens or invent a source_token column; derive raw source_url and t.result_id in the set-wise SELECT. Unstructured work uses bound JSON :rows joined by result_id. "
-        "Key entities, children, relations, evidence, coverage; normalize/evolve, refresh provenance, query gaps/joins/counts/ranks. Authored values bind :name; source facts derive from __tool_results. "
+        "SOURCE WRITES: never type tool facts or URLs into SQL literals. Never put tool-returned facts in VALUES. Structured rows derive set-wise from __tool_results. Unstructured work uses bound JSON :rows: pass all interpreted entities as one native array keyed by result_id, expand it with json_each(:rows), and keep them joined by result_id to __tool_results for raw URLs/provenance. Never parse prose in SQL or stage placeholder NULLs. "
+        "SCHEMA FIRST: for an existing table whose full current definition is absent, search the catalog by a task-relevant name fragment; listing every table is a failure. Then make a separate metadata-only call with no target-table read and read its result. Never combine PRAGMA/schema inspection with a target-table SELECT. Only afterward query using confirmed tables, columns, and join keys. Never repeat an unchanged SELECT in the same turn; use the rows already returned. After a schema error inspect, don't guess again; for external SQL, roll back or reconnect before another statement. "
+        "Same-shaped tool results are one set. FIRST SHOT: in one sqlite_batch call, evolve the keyed model, import every sibling, and run the decision/evidence SELECTs needed next. Use one INSERT over tool_name, never one INSERT per result_id. If the payload shape is genuinely unknown, use at most two calls: one inspection covering all siblings, then one complete model/import/decision batch; never a third. Before calling, map each requested output—including supporting rows and URLs—to a SELECT in that batch; later reads query only the model. Shape imports as `FROM __tool_results t, json_each(t.result_json,'$.content.items') item WHERE t.tool_name=:tool`; replace items with the actual array key. For http_request target the child array (for example $.content.accounts), never its $.content object. Extract fields where they live: derive raw source_url and t.result_id where item source_url comes from item.value and t.result_id supplies provenance; never loop over result_id. Do not store `$[link:...]` tokens or invent source_token. "
+        "Key entities, children, relations, evidence, coverage; normalize/evolve, refresh provenance, query gaps/joins/counts/ranks. Authored values bind :name. "
         "Different shapes may use separate statements in that batch. Custom tools may write keyed models. CTAS/TEMP is one-off. "
         "Locate payloads with analysis_json/top_keys; http_request JSON is result_json $.content. Prefer known-path result_json, else result_text.\n\n"
         "Snapshots:\n"
@@ -3468,13 +3469,14 @@ def _build_unreconciled_source_model_warning(
             "KEY/UNIQUE and provenance (not TEMP/CTAS), reconcile this source batch directly from __tool_results, then "
             "query coverage gaps and next work. Import same-shaped siblings in one set query over tool_name or "
             "result_id IN (...), never one INSERT per result_id; use separate statements only for different entity "
-            "shapes. Do not answer or act from transient results. Bind only agent-authored "
-            "notes or classifications; derive source facts and URLs in SQL."
+            "shapes. Do not answer or act from transient results. Structured fields derive from result_json; "
+            "unstructured interpretations use one bound rows array keyed by result_id and joined for provenance."
         )
     return (
         "Fresh source evidence is not reconciled with the named model you read. If it belongs there, the next SQLite "
         "call must use INSERT ... SELECT or UPDATE ... FROM __tool_results/json_each. Every sourced field, including IDs, "
-        "names, dates, and URLs, must be extracted; only JSON paths and current result_id/tool_name may be literals. "
+        "must be derived: extract structured fields directly; bind unstructured rows as one result_id-keyed array and join for provenance; "
+        "only JSON paths and current result_id/tool_name may be literals. "
         "Refresh mutable/provenance fields, add relations, and query the model in that batch. Otherwise answer it directly."
     )
 
@@ -3653,7 +3655,8 @@ def _get_first_run_welcome_message_instruction(
 
         "If there is no concrete task to do yet, your first action should be one concise welcome message.\n"
         "Broad ongoing/substantial first work missing material audience, scope, volume, or success boundaries: "
-        "this intake overrides Work Updates. Do not acknowledge or begin the task. Orient with at most four read-only public calls in two rounds, then the next and only action is the highest-leverage question; if questions were requested first, ask now. Use the current inbound channel and do no other work. "
+        "this intake overrides Work Updates. Do not acknowledge or begin the task. Orient silently with at most four read-only public calls in two rounds, using empty response content, then the next and only action is the highest-leverage question via request_human_input; if questions were requested first, ask now. Use the current inbound channel and do no other work. "
+        "For prospecting or list research, naming the requester or their product does not define the target: absent target population, qualification rule, or requested quantity still requires intake. Orientation evidence refines the choices; it never authorizes silently choosing them. "
         "Web: leave one native request_human_input card with 2-3 evidence-informed choices total; one may be Other. Choices are mandatory for this intake even when orientation cannot identify the entity: offer plausible interpretations or concrete next paths rather than a free-text-only question. It stays pending if they leave; if a separate preferred email/SMS exists, follow the result guidance to mirror the exact choices there. Email/SMS: send the same numbered choices there. No prose substitute. Ask another after the answer only if still material. "
         "Otherwise start the task. Finish ordinary work silently and send one result; Discord research and "
         "substantial work follow Work Updates, never an empty greeting.\n\n"
@@ -3773,7 +3776,7 @@ def _get_system_instruction(
     )
     work_updates_guidance = (
         "## Work Updates (CRITICAL)\n\n"
-        "FIRST-RUN INTAKE OVERRIDES ACKNOWLEDGMENT: broad substantial first work missing a material audience, scope, volume, or success bound is intake, not executable work. Orient with at most four read-only calls, then use request_human_input and wait. Until answered: no kickoff, fifth call, SQLite, config, deliverable, or prose question. "
+        "FIRST-RUN INTAKE OVERRIDES ACKNOWLEDGMENT: broad substantial first work missing a material audience, scope, volume, or success bound is intake, not executable work. “Find/help me find prospects/leads for this company/product” is broad: the requester/product is not the target, and orientation evidence informs choices rather than silently resolving missing target population, qualification, or quantity. Orient silently with at most four read-only calls using empty content, then call request_human_input alone and wait. Until answered: no kickoff, fifth call, SQLite, config, deliverable, or prose question. "
         "After required intake—or when sufficiently bounded—substantial work includes investment diligence, multi-entity comparisons, list building, and research whose "
         "requested scope clearly needs several sources or tool rounds. Before it, send one brief "
         "same-channel acknowledgment as the entire first response, with will_continue_work=true. Say what you are "
@@ -3849,7 +3852,7 @@ def _get_system_instruction(
         "Do not invent work, results, preferences, or personal experiences.\n\n"
 
         "## Output Rules\n\n"
-        "Keep chat/outreach light. For finite sets, grouped discovery isn't coverage: resolve/source each requested field. Label blockers partial; separate sourced unavailability from research gaps. An owner report on 4+ items is unfinished without `Covered N/N` and every item/requested field in one channel-appropriate structured comparison: a table where supported, headings and bullets where not. Ground facts, numbers, units, and URLs in tool results; never relabel/convert units unless asked. Present requested data directly; omit unrelated/unavailable fields and follow-up offers after simple facts, prices, statuses, or lookups. "
+        "Keep chat/outreach light. For finite sets, grouped discovery isn't coverage: resolve/source each requested field. Label blockers partial; separate sourced unavailability from research gaps. An owner report on 4+ items is unfinished without `Covered N/N` and every item/requested field in one channel-appropriate structured comparison: a table where supported, headings and bullets where not. Ground facts, numbers, units, and URLs in tool results; when evidence supplies an item URL with an adjacent $[link:...] handle, link the item name once in its result row using that handle copied character-for-character. Do not repeat the destination in a Link/Source column. Never invent, edit, or substitute a destination. Present requested data directly; omit unrelated/unavailable fields and follow-up offers after simple facts, prices, statuses, or lookups. "
         "Charts: create only when requested/materially useful. "
         "Paste create_chart result.inline/result.inline_html in the message; do not attach/read charts or invent paths, hashes, image tags, or <img> URLs. "
         "Use create_csv for tabular exports, create_pdf for PDFs, and create_file for other text/doc formats; create_file query mode must return exactly one row and one column.\n\n"

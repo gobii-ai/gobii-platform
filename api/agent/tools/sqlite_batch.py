@@ -1825,8 +1825,10 @@ def _normalize_named_bindings(params: Dict[str, Any]) -> tuple[dict[str, object]
     for key, value in raw.items():
         if not isinstance(key, str) or not re.fullmatch(r"[A-Za-z_]\w*", key):
             return None, "Every binding name must be a plain SQL parameter name such as `company_name`."
-        if value is not None and not isinstance(value, (str, int, float, bool)):
-            return None, f"Binding `{key}` must be a JSON scalar (string, number, boolean, or null)."
+        if isinstance(value, (dict, list)):
+            value = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+        elif value is not None and not isinstance(value, (str, int, float, bool)):
+            return None, f"Binding `{key}` must be a JSON value."
         bindings[key] = value
     return bindings, None
 
@@ -2110,14 +2112,14 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
         "function": {
             "name": "sqlite_batch",
             "description": (
-                "SQLite world model + exact logic. SCHEMA FIRST: if an existing schema is absent/stale, query sqlite_master by a "
+                "SQLite world model + exact logic. SOURCE WRITES: never type tool facts/URLs into SQL literals. Never put tool-returned facts in VALUES. Derive structured rows set-wise from __tool_results. Unstructured: bind JSON :rows as one native array keyed by result_id, expand with json_each(:rows), and join __tool_results by result_id for raw URLs/provenance; never parse prose in SQL or stage NULLs. "
+                "SCHEMA FIRST: if an existing schema is absent/stale, query sqlite_master by a "
                 "task-relevant name fragment; listing every table is a failure. Then use one separate PRAGMA-only call with no target-table SELECT; "
                 "read its result before querying confirmed fields. Never combine schema inspection and a target-table read, or repeat an unchanged SELECT in one turn. "
                 "After a fetch, reconcile and SELECT. SOURCE ARRAYS lists paths. "
-                "ONE CALL PER SHAPE: put model DDL, one set-wise import, and every decision/evidence SELECT needed for the requested output—including supporting rows and URLs—in this sqlite_batch call. If the payload shape is unknown, use at most two calls: one all-sibling inspection, then this complete batch; never a third. Later reads query only the model. "
-                "Read all same-shaped siblings with `FROM __tool_results t, json_each(t.result_json,'$.content.items') item WHERE t.tool_name=:tool`; change only the actual array path. "
-                "Never put tool-returned facts in VALUES, even when visible or few; never loop or filter one result_id at a time. Do not store `$[link:...]` tokens or invent source_token; derive raw source_url and t.result_id in the set-wise SELECT. Unstructured: bind JSON :rows and join "
-                "__tool_results by result_id. Never transcribe visible rows. Source fields/keys derive in INSERT "
+                "ONE CALL PER SHAPE: put model DDL, one set-wise import, and every decision/evidence SELECT needed for the requested output—including supporting rows and URLs—in this sqlite_batch call. Use one INSERT over tool_name, never one INSERT per result_id. If the payload shape is unknown, use at most two calls: one all-sibling inspection, then this complete batch; never a third. Later reads query only the model. "
+                "Read all same-shaped siblings with `FROM __tool_results t, json_each(t.result_json,'$.content.items') item WHERE t.tool_name=:tool`; replace items with the actual array key. For http_request target its child array, never the $.content object. Extract fields where they live: item source_url comes from item.value; t.result_id supplies provenance. "
+                "For same-shaped siblings, never loop or filter one result_id at a time. Do not store `$[link:...]` tokens or invent source_token; derive raw source_url and t.result_id in the set-wise SELECT. Source fields/keys derive directly in INSERT "
                 "SELECT/UPDATE FROM __tool_results; only paths/tool_name or a true multi-ID set are literals. "
                 "Key/evolve/normalize/query. "
                 "Bind authored values; never hand-escape. "
@@ -2135,12 +2137,11 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
                         "type": "object",
                         "description": (
                             "Optional named SQL values. Use :name in SQL and {\"name\": value} here; keys omit the colon. "
-                            "Values must be strings, numbers, booleans, or null. Source facts should still derive directly "
-                            "from __tool_results."
+                            "JSON scalars, arrays, and objects are accepted; arrays/objects are safely encoded for "
+                            "json_each/json_extract. For prose, pass one rows array with result_id per row and join "
+                            "__tool_results; e.g. {\"rows\":[{\"result_id\":\"abc\",\"entity_id\":\"e1\"}]}."
                         ),
-                        "additionalProperties": {
-                            "type": ["string", "number", "boolean", "null"],
-                        },
+                        "additionalProperties": {},
                     },
                     "will_continue_work": {
                         "type": "boolean",

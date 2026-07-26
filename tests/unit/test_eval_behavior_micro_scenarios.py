@@ -45,6 +45,7 @@ from api.evals.scenarios.behavior_micro import (
     COMMON_USE_CASE_MICRO_SCENARIO_SLUGS,
     GOOGLE_SHEETS_EVAL_SYNTHETIC_TOOL_NAMES,
     IGNORED_FIRST_ACTION_TOOL_NAMES,
+    GUIDED_BROAD_PROSPECTING_FIRST_ASSIGNMENT_ASKS_CHOICES,
     GUIDED_EMAIL_FIRST_ASSIGNMENT_PRESERVES_WEB_CHOICES,
     GUIDED_FIRST_ASSIGNMENT_ASKS_USEFUL_QUESTIONS,
     GUIDED_UNKNOWN_FIRST_ASSIGNMENT_OFFERS_CHOICE_PATHS,
@@ -132,6 +133,10 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
         self.assertEqual(agent_behavior_suite.scenario_slugs, BEHAVIOR_MICRO_SCENARIO_SLUGS)
         self.assertEqual(charter_memory_suite.scenario_slugs, CHARTER_MEMORY_MICRO_SCENARIO_SLUGS)
         self.assertEqual(planning_suite.scenario_slugs, GUIDED_PLANNING_MICRO_SCENARIO_SLUGS)
+        self.assertIn(
+            GUIDED_BROAD_PROSPECTING_FIRST_ASSIGNMENT_ASKS_CHOICES,
+            planning_suite.scenario_slugs,
+        )
         self.assertEqual(tool_choice_suite.scenario_slugs, TOOL_CHOICE_MICRO_SCENARIO_SLUGS)
         self.assertFalse(set(CHARTER_MEMORY_MICRO_SCENARIO_SLUGS) & set(BEHAVIOR_MICRO_SCENARIO_SLUGS))
         self.assertFalse(set(CHARTER_MEMORY_MICRO_SCENARIO_SLUGS) & set(TOOL_CHOICE_MICRO_SCENARIO_SLUGS))
@@ -193,6 +198,7 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
             [
                 GUIDED_PLANNING_BOUNDED_WHEN_REQUESTED,
                 GUIDED_FIRST_ASSIGNMENT_ASKS_USEFUL_QUESTIONS,
+                GUIDED_BROAD_PROSPECTING_FIRST_ASSIGNMENT_ASKS_CHOICES,
                 GUIDED_EMAIL_FIRST_ASSIGNMENT_PRESERVES_WEB_CHOICES,
                 GUIDED_UNKNOWN_FIRST_ASSIGNMENT_OFFERS_CHOICE_PATHS,
                 LEGACY_PLANNING_STATE_EXECUTES_DIRECTLY,

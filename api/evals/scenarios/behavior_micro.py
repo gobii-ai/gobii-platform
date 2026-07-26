@@ -58,6 +58,9 @@ PLANNING_INTEGRATION_SETUP_SEARCHES_BEFORE_QUESTION = "planning_integration_setu
 PLANNING_SECURE_CREDENTIAL_REQUEST = "planning_secure_credential_request"
 GUIDED_PLANNING_BOUNDED_WHEN_REQUESTED = "guided_planning_bounded_when_requested"
 GUIDED_FIRST_ASSIGNMENT_ASKS_USEFUL_QUESTIONS = "guided_first_assignment_asks_useful_questions"
+GUIDED_BROAD_PROSPECTING_FIRST_ASSIGNMENT_ASKS_CHOICES = (
+    "guided_broad_prospecting_first_assignment_asks_choices"
+)
 GUIDED_EMAIL_FIRST_ASSIGNMENT_PRESERVES_WEB_CHOICES = "guided_email_first_assignment_preserves_web_choices"
 GUIDED_UNKNOWN_FIRST_ASSIGNMENT_OFFERS_CHOICE_PATHS = "guided_unknown_first_assignment_offers_choice_paths"
 LEGACY_PLANNING_STATE_EXECUTES_DIRECTLY = "legacy_planning_state_executes_directly"
@@ -360,6 +363,7 @@ COMMON_USE_CASE_RAW_EVAL_CASES = [
     {"slug": "common_use_case_136_apollo_connect_tool_search", "category": "integration_discovery", "prompt": "Connect my Apollo.io account so you can use it for lead sourcing.", "expected_tools": ["search_tools"], "forbidden_tools": ["request_human_input", "secure_credentials_request", "spawn_web_task"], "plan_expected": False},
     {"slug": "common_use_case_137_slack_connect_tool_search", "category": "integration_discovery", "prompt": "Connect Slack so you can read and summarize customer feedback from our support channel.", "expected_tools": ["search_tools"], "forbidden_tools": ["request_human_input", "secure_credentials_request", "spawn_web_task"], "plan_expected": False},
     {"slug": "common_use_case_138_intercom_notes_capability_answer", "category": "tool_choice", "prompt": "Are you able to add internal notes to Intercom threads, different from replies?", "expected_tools": ["send_chat_message"], "forbidden_tools": ["request_human_input"], "accepted_tool_alternatives": {"send_chat_message": ["search_tools"]}, "plan_expected": False},
+    {"slug": "common_use_case_139_simple_greeting", "category": "conversation", "prompt": "Hi", "expected_tools": ["send_chat_message"], "forbidden_tools": ["request_human_input", "sqlite_batch", "mcp_brightdata_search_engine", "mcp_brightdata_scrape_as_markdown"], "plan_expected": False},
 ]
 
 COMMON_USE_CASE_EVAL_CASES = tuple(
@@ -372,6 +376,7 @@ COMMON_USE_CASE_MICRO_SCENARIO_SLUGS = [case.slug for case in COMMON_USE_CASE_EV
 GUIDED_PLANNING_MICRO_SCENARIO_SLUGS = [
     GUIDED_PLANNING_BOUNDED_WHEN_REQUESTED,
     GUIDED_FIRST_ASSIGNMENT_ASKS_USEFUL_QUESTIONS,
+    GUIDED_BROAD_PROSPECTING_FIRST_ASSIGNMENT_ASKS_CHOICES,
     GUIDED_EMAIL_FIRST_ASSIGNMENT_PRESERVES_WEB_CHOICES,
     GUIDED_UNKNOWN_FIRST_ASSIGNMENT_OFFERS_CHOICE_PATHS,
     LEGACY_PLANNING_STATE_EXECUTES_DIRECTLY,
@@ -1199,16 +1204,7 @@ class GuidedFirstAssignmentAsksUsefulQuestionsScenario(BehaviorMicroScenario):
             index for index, call in enumerate(calls)
             if call.tool_name == "send_email"
         ]
-        chat_calls = []
-        for call in calls:
-            if call.tool_name != "send_chat_message":
-                continue
-            try:
-                chat_result = call.result if isinstance(call.result, dict) else json.loads(call.result or "{}")
-            except (TypeError, ValueError):
-                chat_result = {}
-            if chat_result.get("skipped") is not True:
-                chat_calls.append(call)
+        chat_calls = [call for call in calls if call.tool_name == "send_chat_message"]
         has_bounded_choices = len(requests) == 1 and 2 <= len(requests[0].options_json) <= 3
         fallback_ok = (
             len(request_calls) == 1
@@ -1257,6 +1253,18 @@ class GuidedEmailFirstAssignmentPreservesWebChoicesScenario(
     )
     preferred_contact_channel = CommsChannel.EMAIL
     requires_fallback_copy = True
+
+
+@register_scenario
+class GuidedBroadProspectingFirstAssignmentAsksChoicesScenario(
+    GuidedFirstAssignmentAsksUsefulQuestionsScenario
+):
+    slug = GUIDED_BROAD_PROSPECTING_FIRST_ASSIGNMENT_ASKS_CHOICES
+    description = (
+        "A broad prospecting request without a target or qualification boundary should produce researched native "
+        "choices instead of being mistaken for an executable list-building task."
+    )
+    assignment_prompt = "Help me find sales prospects for Northstar Flow."
 
 
 @register_scenario
