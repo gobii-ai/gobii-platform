@@ -32,6 +32,7 @@ from api.models import (
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from util.text_sanitizer import normalize_llm_output
 
+from .email_endpoint_routing import can_agent_send_to
 from .routing import get_latest_inbound_human_message
 
 OPTION_NUMBER_RE = re.compile(r"^\s*(?:option\s+)?(?P<number>\d{1,2})(?:[\)\.\:\-\s]|$)", re.IGNORECASE)
@@ -396,8 +397,11 @@ def _build_next_message_suggestion(
     target: HumanInputTarget,
 ) -> dict[str, Any] | None:
     if target.channel == CommsChannel.WEB:
-        preferred = request_objects[0].agent.preferred_contact_endpoint if request_objects else None
+        agent = request_objects[0].agent if request_objects else None
+        preferred = agent.preferred_contact_endpoint if agent else None
         if not preferred or preferred.channel not in {CommsChannel.EMAIL, CommsChannel.SMS}:
+            return None
+        if not can_agent_send_to(agent, preferred.channel, preferred.address):
             return None
         target = HumanInputTarget(preferred.channel, preferred.address, target.conversation)
 

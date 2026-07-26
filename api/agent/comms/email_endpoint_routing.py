@@ -21,6 +21,10 @@ def get_agent_primary_endpoint(
     )
 
 
+def can_agent_send_to(agent, channel: str | CommsChannel, address: str) -> bool:
+    return get_agent_primary_endpoint(agent, channel) is not None and agent.is_recipient_whitelisted(channel, address)
+
+
 def resolve_agent_email_sender_endpoint(
     agent,
     *,

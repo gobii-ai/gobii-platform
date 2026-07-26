@@ -390,7 +390,12 @@ class HumanInputRequestTests(TestCase):
     def test_execute_request_human_input_can_keep_web_card_and_guide_preferred_email_backup(self):
         preferred = PersistentAgentCommsEndpoint.objects.create(
             channel=CommsChannel.EMAIL,
-            address="owner-fallback@example.com",
+            address=self.user.email,
+        )
+        PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address="human-input-agent@example.com",
         )
         self.agent.preferred_contact_endpoint = preferred
         self.agent.save(update_fields=["preferred_contact_endpoint", "updated_at"])
@@ -413,6 +418,69 @@ class HumanInputRequestTests(TestCase):
         self.assertEqual(result["next_message_suggestion"]["send_tool"], "send_email")
         self.assertEqual(result["next_message_suggestion"]["address"], preferred.address)
         self.assertEqual(result["next_message_suggestion"]["questions"][0]["options"][0]["title"], "Procurement")
+
+    def test_execute_request_human_input_keeps_web_card_when_preferred_email_is_not_allowed(self):
+        preferred = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.EMAIL,
+            address="blocked-fallback@example.com",
+        )
+        PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address="human-input-agent@example.com",
+        )
+        self.agent.preferred_contact_endpoint = preferred
+        self.agent.whitelist_policy = PersistentAgent.WhitelistPolicy.MANUAL
+        self.agent.save(update_fields=["preferred_contact_endpoint", "whitelist_policy", "updated_at"])
+
+        result = execute_request_human_input(
+            self.agent,
+            {
+                "question": "Which buyer should I prioritize?",
+                "options": [{"title": "Procurement", "description": "Target procurement leaders first."}],
+                "will_continue_work": False,
+            },
+        )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertTrue(result["web_chat_visible"])
+        self.assertNotIn("next_message_suggestion", result)
+        self.assertTrue(result["auto_sleep_ok"])
+
+    def test_execute_request_human_input_keeps_web_card_when_org_preferred_sms_is_unsupported(self):
+        organization = Organization.objects.create(name="Human Input Org", created_by=self.user)
+        OrganizationMembership.objects.create(
+            org=organization,
+            user=self.user,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        )
+        preferred = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.SMS,
+            address="+15555550199",
+        )
+        PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.SMS,
+            address="+15555550100",
+        )
+        self.agent.organization = organization
+        self.agent.preferred_contact_endpoint = preferred
+        with patch.object(PersistentAgent, "_validate_org_seats", return_value=None):
+            self.agent.save(update_fields=["organization", "preferred_contact_endpoint", "updated_at"])
+
+        result = execute_request_human_input(
+            self.agent,
+            {
+                "question": "Which buyer should I prioritize?",
+                "options": [{"title": "Procurement", "description": "Target procurement leaders first."}],
+                "will_continue_work": False,
+            },
+        )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertTrue(result["web_chat_visible"])
+        self.assertNotIn("next_message_suggestion", result)
+        self.assertTrue(result["auto_sleep_ok"])
 
     def test_execute_request_human_input_allows_free_text_with_legacy_planning_state(self):
         self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
