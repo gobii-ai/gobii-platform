@@ -406,7 +406,10 @@ def prepare_tool_results_for_prompt(
                 "\nSCRAPE MARKDOWN: result_text is plain page text, never JSON. If its preview is incomplete, inspect all current sibling scrapes once: known edge facts may use "
                 "head/tail; repeated records use `SELECT t.result_id,c.value AS snippet FROM __tool_results t,"
                 "json_each(grep_context_all(t.result_text,:pattern,250,20)) c WHERE t.tool_name=:tool` (c exposes only value). "
-                "Then model with one result_id-keyed bound rows array in sqlite_batch's `rows` argument. Always store result_id; also store only the exact known page URL when available. "
+                "Next sqlite_batch call: put all interpreted sibling records in top-level `rows` as "
+                "`[{result_id, <fields>, source_url}]`; SQL creates/evolves the model, imports with "
+                "`INSERT ... SELECT ... FROM json_each(:rows)`, stores result_id plus each exact known URL, then queries the model. "
+                "Source facts belong in bound rows, not SQL text. "
                 "Never json_each(result_text), read_file, inspect analysis_json/result_json, repeat raw reads, or fetch blobs."
             )
 
