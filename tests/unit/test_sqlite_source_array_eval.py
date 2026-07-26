@@ -19,6 +19,7 @@ from api.evals.scenarios.sqlite_tool_results import (
     SqliteSourceArrayFirstWriteScenario,
     SqliteUnstructuredBindingsFirstWriteScenario,
     _repeated_source_import_tables,
+    _sqlite_attempt_failures,
     _source_array_first_write_failures,
     _uses_queryable_source_model,
 )
@@ -97,6 +98,24 @@ class SqliteSourceArrayEvalTests(SimpleTestCase):
 
     def test_catalog_case_rejects_every_single_result_import_filter(self):
         self.assertEqual(SqliteIntermediateWorkingTableScenario.max_single_result_filters, 0)
+
+    def test_sqlite_attempt_scorer_rejects_success_with_query_advisory(self):
+        call = _sqlite_call(
+            self.clean_sql,
+            result=json.dumps({
+                "status": "ok",
+                "results": [{"result": [{"release_id": "rel-search-18"}]}],
+                "advisories": [{
+                    "code": "tool_result_row_loop",
+                    "message": "Use one shaped query over every sibling.",
+                }],
+            }),
+        )
+
+        self.assertEqual(
+            _sqlite_attempt_failures([call]),
+            ["SQLite attempt 1 returned a query advisory"],
+        )
 
     def test_catalog_case_rejects_repeated_same_table_imports_without_result_ids(self):
         repeated = _repeated_source_import_tables([

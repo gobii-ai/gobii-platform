@@ -2134,11 +2134,11 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
                 "read its result before querying confirmed fields. Never combine schema inspection and a target-table read, or repeat an unchanged SELECT in one turn. "
                 "After a fetch, reconcile and SELECT. SOURCE ARRAYS lists paths. "
                 "ONE CALL PER SHAPE: put model DDL, one set-wise import, and every decision/evidence SELECT needed for the requested output—including supporting rows and URLs—in this sqlite_batch call. Use one INSERT over tool_name, never one INSERT per result_id. If the payload shape is unknown, use at most two calls: one all-sibling inspection, then this complete batch; never a third. Later reads query only the model. "
-                "For a large unstructured result, one pattern inspection is `SELECT t.result_id,c.value AS snippet FROM __tool_results t,json_each(grep_context_all(t.result_text,:pattern,250,20)) c WHERE t.tool_name=:tool`; c exposes only `value`. For http_request target its child array, never the $.content object. Extract fields where they live: item source_url comes from item.value; t.result_id supplies provenance. "
+                "For http_request target its child array, never the $.content object. Extract fields where they live: item fields from item.value, parent metadata/URLs from t.result_json, provenance from t.result_id. "
                 "For same-shaped siblings, never loop or filter one result_id at a time. Do not store `$[link:...]` tokens or invent source_token. Structured source fields/keys derive in INSERT SELECT/UPDATE FROM __tool_results; unstructured fields use one provenance-keyed bound-row import. Only paths/tool_name or a true multi-ID set are SQL literals. "
                 "Key/evolve/normalize/query. "
                 "Bind authored values and unstructured rows; never hand-escape. "
-                "http_request JSON: result_json $.content. INSERT SELECT needs WHERE before ON CONFLICT. No ATTACH. "
+                "http_request JSON: result_json $.content. INSERT SELECT needs WHERE before ON CONFLICT. For independently ordered/limited cuts, use separate SELECT statements or subqueries, not ORDER BY/LIMIT inside UNION branches. No ATTACH. "
                 "Apostrophe: 'O''Brien'. grep_context_all/split_sections arrays expose only alias.value."
             ),
             "parameters": {

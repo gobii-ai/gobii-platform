@@ -252,7 +252,13 @@ def _tool_attempt_failures(calls, label: str, *, reject_auto_correction: bool = 
 
 
 def _sqlite_attempt_failures(calls) -> list[str]:
-    return _tool_attempt_failures(calls, "SQLite", reject_auto_correction=True)
+    calls = list(calls)
+    failures = _tool_attempt_failures(calls, "SQLite", reject_auto_correction=True)
+    for index, call in enumerate(calls, start=1):
+        payload = _result_payload(call)
+        if (isinstance(payload, dict) and payload.get("advisories")) or "SQLITE QUERY ADVICE" in str(call.result or ""):
+            failures.append(f"SQLite attempt {index} returned a query advisory")
+    return failures
 
 
 def _first_shot_source_phase_failures(calls, *, expected_url=DOMAIN_REFRESH_URL) -> list[str]:
@@ -1364,6 +1370,7 @@ class SqliteToolResultScenario(EvalScenario, ScenarioExecutionTools):
             (max_single_result_filters is not None and summary.single_result_id_filters > max_single_result_filters, f"single-result filters {summary.single_result_id_filters} > {max_single_result_filters}"),
             (require_working_table and not (summary.creates_working_table and summary.reads_working_table), "no durable working table created from __tool_results and queried"),
         ) if bad]
+        failures[:0] = _sqlite_attempt_failures(calls)
         status = EvalRunTask.Status.FAILED if failures else EvalRunTask.Status.PASSED
         usage = summary.__dict__
         observed = "; ".join(failures) if failures else f"Observed smart sqlite/tool-result usage: {usage}"
@@ -2503,7 +2510,7 @@ class SqliteDedupeRequeryScenario(SqliteToolResultScenario):
     answer_source_urls = SOURCE_URLS
     required_terms = ()
     min_sources = 2
-    max_single_result_filters = 2
+    max_single_result_filters = 0
 
 
 @register_scenario
@@ -2518,7 +2525,7 @@ class SqliteItemLinkReportScenario(SqliteToolResultScenario):
     answer_source_urls = LISTING_URLS
     required_terms = ("Model Y", "Harrisburg", "$27,455")
     min_sources = 2
-    max_single_result_filters = 2
+    max_single_result_filters = 0
     require_working_table = True
     accept_queryable_source_model = True
     sourced_answer_task_name = "verify_listing_links_in_report"

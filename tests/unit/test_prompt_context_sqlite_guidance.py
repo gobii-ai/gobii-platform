@@ -36,7 +36,7 @@ class PromptContextSqliteGuidanceTests(SimpleTestCase):
         self.assertIn("Never put tool-returned facts in VALUES", guidance)
         self.assertIn("never loop over result_id", guidance)
         self.assertIn("Same-shaped tool results are one set", guidance)
-        self.assertIn("derive raw source_url and t.result_id", guidance)
+        self.assertIn("parent metadata/URLs from t.result_json, provenance from t.result_id", guidance)
         self.assertIn("Do not store `$[link:...]` tokens", guidance)
         self.assertIn("Unstructured result_text is plain text", guidance)
         self.assertIn("never json_each(result_text)", guidance)

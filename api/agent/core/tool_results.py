@@ -180,27 +180,23 @@ def _optional_source_array_schemas(analysis: ResultAnalysis | None) -> tuple[tup
     return tuple(schemas)
 
 
-def _build_optional_source_write_hint(
-    result_id: str,
-    tool_name: str,
-    analysis: ResultAnalysis | None,
-) -> str:
+def _build_optional_source_write_hint(tool_name: str, analysis: ResultAnalysis | None) -> str:
     """Give safe first-write mechanics without requiring a model for one-off work."""
     schemas = _optional_source_array_schemas(analysis)
     if not schemas or len(tool_name) > 100:
         return ""
 
-    first_path = schemas[0][0].replace("'", "''")
-    escaped_tool_name = tool_name.replace("'", "''")
-    short_result_id = str(result_id)[:32]
+    first_path, escaped_tool_name = schemas[0][0].replace("'", "''"), tool_name.replace("'", "''")
     hint = (
-        f"[SOURCE WRITE HINT result_id={short_result_id}; exact stored arrays: "
+        f"[SOURCE SET; exact stored arrays: "
         f"{'; '.join(schema for _path, schema in schemas)}. "
         "If modeling/persisting this evidence, derive the write from all relevant stored rows, never copied "
-        "visible literals: INSERT ... SELECT json_extract(j.value,'$.field') ... "
+        "visible literals: INSERT ... SELECT json_extract(j.value,'$.field'),"
+        "json_extract(t.result_json,'$.content.source_url'),t.result_id "
         f"FROM __tool_results AS t, json_each(t.result_json,'{first_path}') AS j "
-        f"WHERE t.tool_name='{escaped_tool_name}'. Use each exact path above in the same batch and derive "
-        "stable keys and fields from j.value. For an ordinary one-off answer, use the visible evidence directly.]\n"
+        f"WHERE t.tool_name='{escaped_tool_name}'. Do not filter by result_id. Use each exact path above in the same batch; "
+        "distinguish siblings by derived parent metadata, not authored labels. "
+        "For an ordinary one-off answer, use the visible evidence directly.]\n"
     )
     return hint if len(hint) <= MAX_OPTIONAL_SOURCE_HINT_CHARS else ""
 
@@ -257,6 +253,7 @@ def prepare_tool_results_for_prompt(
         fresh_step_ids.add(fresh_tool_call_step_id)
     paired_step_ids = set(paired_url_step_ids or ())
     model_tables = {table.casefold() for table in (named_model_tables or ())}
+    emitted_source_write_hints: set[str] = set()
     short_id_map = build_short_result_id_map(
         [
             record.step_id
@@ -265,7 +262,7 @@ def prepare_tool_results_for_prompt(
         ]
     )
 
-    for record in records:
+    for record in sorted(records, key=lambda item: item.created_at):
         if record.result_text is None:
             continue
         result_text = record.result_text
@@ -323,8 +320,7 @@ def prepare_tool_results_for_prompt(
             tool_name=record.tool_name,
             is_fresh_tool_call=is_fresh_tool_call,
         )
-        source_import_prefix = ""
-        source_write_hint_prefix = ""
+        source_import_prefix, source_write_hint_prefix, hide_literal_result_id = "", "", False
         keep_source_import_hint = is_source_bearing_tool(record.tool_name) and is_fresh_tool_call
         if keep_source_import_hint:
             arrays = _entity_arrays(analysis)
@@ -345,16 +341,17 @@ def prepare_tool_results_for_prompt(
                     "NEXT: output one sqlite_batch only. In that single batch, create/evolve keyed model tables for "
                     "every listed entity array, import each exact path with INSERT ... SELECT/json_each, then SELECT "
                     "bounded task-relevant rows from every updated table using stable-ID filters/joins—not counts or "
-                    "whole-table dumps. Derive all facts, URLs, and write keys from j.value. This ordinary evidence "
+                    "whole-table dumps. Derive item fields from j.value, parent metadata/URLs from t.result_json, and provenance from t.result_id. This ordinary evidence "
                     "task never changes __agent_config/__agent_skills. No pre-read, refetch, blob inspection, copied "
                     "literals, or splitting arrays across calls.]\n"
                 )
             else:
-                source_write_hint_prefix = _build_optional_source_write_hint(
-                    result_id,
-                    record.tool_name,
-                    analysis,
-                )
+                source_write_hint_prefix = _build_optional_source_write_hint(record.tool_name, analysis)
+                hide_literal_result_id = bool(source_write_hint_prefix)
+                if source_write_hint_prefix in emitted_source_write_hints:
+                    source_write_hint_prefix = ""
+                else:
+                    emitted_source_write_hints.add(source_write_hint_prefix)
         has_focus = "\nFOCUS:\n" in (context_hint or "")
         if has_focus and not is_inline:
             preview_text = None
@@ -388,9 +385,6 @@ def prepare_tool_results_for_prompt(
             )
         if source_import_prefix:
             preview_text = f"{source_import_prefix}{preview_text or ''}"
-        elif source_write_hint_prefix:
-            preview_text = f"{source_write_hint_prefix}{preview_text or ''}"
-
         is_scrape_markdown = _is_scrape_as_markdown_tool(record.tool_name)
         meta_text = _format_meta_text(
             result_id,
@@ -400,7 +394,10 @@ def prepare_tool_results_for_prompt(
             result_is_inline=is_inline or has_focus,
             context_hint=context_hint,
             allow_fallback_query_hints=not is_scrape_markdown,
+            include_result_id=not hide_literal_result_id,
         )
+        if source_write_hint_prefix:
+            meta_text = f"{source_write_hint_prefix.strip()}\n{meta_text}"
         if is_scrape_markdown and stored_in_db:
             meta_text += (
                 "\nSCRAPE MARKDOWN: result_text is plain page text, never JSON. If its preview is incomplete, inspect all current sibling scrapes once: known edge facts may use "
@@ -877,12 +874,14 @@ def _format_meta_text(
     result_is_inline: bool = False,
     context_hint: Optional[str] = None,
     allow_fallback_query_hints: bool = True,
+    include_result_id: bool = True,
 ) -> str:
     parts = [
-        f"result_id={result_id}",
         f"in_db={1 if stored_in_db else 0}",
         f"bytes={meta['bytes']}",
     ]
+    if include_result_id:
+        parts.insert(0, f"result_id={result_id}")
 
     if meta.get("is_binary"):
         parts.append("is_binary=1")
@@ -905,7 +904,7 @@ def _format_meta_text(
 
     meta_line = ", ".join(parts)
 
-    show_query_hints = stored_in_db and not result_is_inline
+    show_query_hints = stored_in_db and not result_is_inline and include_result_id
 
     if analysis and analysis.compact_summary and show_query_hints:
         meta_line += "\n" + analysis.compact_summary

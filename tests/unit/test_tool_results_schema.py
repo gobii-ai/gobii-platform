@@ -746,7 +746,8 @@ class PreviewByteLimitTests(SimpleTestCase):
         )
         for expected in (
             "$.content.items", '"content":{', "one sqlite_batch only", "every listed entity array",
-            "INSERT ... SELECT/json_each", "Derive all facts, URLs, and write keys from j.value",
+            "INSERT ... SELECT/json_each", "Derive item fields from j.value",
+            "parent metadata/URLs from t.result_json", "provenance from t.result_id",
             "never changes __agent_config/__agent_skills", "No pre-read, refetch, blob inspection, copied literals",
         ):
             self.assertIn(expected, info.preview_text)
@@ -781,7 +782,8 @@ class PreviewByteLimitTests(SimpleTestCase):
             "does not change the requested audience or action",
         ):
             self.assertIn(expected, linked.preview_text)
-        self.assertIn("SOURCE WRITE HINT", linked.preview_text)
+        self.assertIn("SOURCE SET", linked.meta)
+        self.assertIn("Do not filter by result_id", linked.meta)
         self.assertNotIn("Without a preceding SOURCE ARRAYS directive", linked.preview_text)
         self.assertNotIn("NEVER OUTREACH", linked.preview_text)
         self.assertNotIn("[SOURCE ARRAYS result_id=", linked.preview_text)
@@ -859,7 +861,7 @@ class PreviewByteLimitTests(SimpleTestCase):
             "step-scalar",
             {"status": "ok", "content": {"answer": "ready", "count": 4}},
         )
-        self.assertNotIn("SOURCE WRITE HINT", scalar.preview_text)
+        self.assertNotIn("SOURCE SET", scalar.meta)
 
     def test_fresh_source_array_without_model_gets_optional_safe_write_shape(self):
         payload = {
@@ -886,19 +888,22 @@ class PreviewByteLimitTests(SimpleTestCase):
         )
 
         for expected in (
-            "[SOURCE WRITE HINT result_id=step-first-model",
+            "[SOURCE SET; exact stored arrays:",
             "exact stored arrays: $.content.prospects(name,title,profile_url)",
             "If modeling/persisting this evidence",
-            "INSERT ... SELECT json_extract(j.value,'$.field')",
+            "INSERT ... SELECT json_extract(j.value,'$.field'),json_extract(t.result_json,'$.content.source_url'),t.result_id",
             "FROM __tool_results AS t, json_each(t.result_json,'$.content.prospects') AS j",
             "WHERE t.tool_name='http_request'",
-            "derive stable keys and fields from j.value",
+            "Do not filter by result_id",
+            "distinguish siblings by derived parent metadata",
+            "not authored labels",
             "ordinary one-off answer",
         ):
-            self.assertIn(expected, info.preview_text)
+            self.assertIn(expected, info.meta)
         self.assertNotIn("[SOURCE ARRAYS", info.preview_text)
         self.assertNotIn(" VALUES ", info.preview_text)
-        self.assertEqual(info.preview_text.count("[SOURCE WRITE HINT"), 1)
+        self.assertEqual(info.meta.count("[SOURCE SET"), 1)
+        self.assertNotIn("result_id=", info.meta)
         self.assertIsNone(info.source_reconciliation_directive)
 
     def test_optional_source_write_hint_has_bounded_overhead_and_array_count(self):
@@ -921,17 +926,12 @@ class PreviewByteLimitTests(SimpleTestCase):
             named_model_tables=set(),
         )
 
-        hint = info.preview_text.split("]\n", 1)[0] + "]\n"
+        hint = info.meta.split("]\n", 1)[0] + "]\n"
         schema_list = hint.split("exact stored arrays: ", 1)[1].split(
             ". If modeling/persisting", 1
         )[0]
         self.assertLessEqual(len(schema_list.split("; ")), tool_results.MAX_OPTIONAL_SOURCE_ARRAYS)
         self.assertLessEqual(len(hint), tool_results.MAX_OPTIONAL_SOURCE_HINT_CHARS)
-        compact_payload = json.dumps(payload, separators=(",", ":"))
-        self.assertLessEqual(
-            len(info.preview_text) - len(compact_payload),
-            tool_results.MAX_OPTIONAL_SOURCE_HINT_CHARS,
-        )
 
     def test_fresh_tool_call_under_threshold_shown_inline(self):
         """Fresh tool calls under 40KB should be shown fully inline with SQLite wrapper."""
