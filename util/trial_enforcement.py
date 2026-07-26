@@ -1,13 +1,12 @@
 import logging
 
 from django.conf import settings
-from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.db.utils import DatabaseError, OperationalError, ProgrammingError
 
 from constants.plans import PlanNames
 from util.subscription_helper import get_active_subscription, get_customer_subscription_candidate, get_stripe_customer
-from waffle import get_waffle_switch_model
+from waffle import get_waffle_switch_model, switch_is_active
 
 logger = logging.getLogger(__name__)
 
@@ -22,11 +21,7 @@ class TrialRequiredValidationError(ValidationError):
 
 
 PERSONAL_FREE_TRIAL_ENFORCEMENT_WAFFLE_SWITCH = "personal_free_trial_enforcement"
-# The switch is global and the answer identical for every caller in a request. Without a
-# cache the agent roster queried it once per agent: 116 round trips to decide one boolean.
-# Short enough that a runtime flip still takes effect promptly.
-_ENFORCEMENT_SWITCH_CACHE_KEY = "trial_enforcement:personal_switch_active"
-_ENFORCEMENT_SWITCH_CACHE_SECONDS = 10
+
 # Chat-only recovery path: include incomplete so users with an unfinished checkout
 # can get back into chat long enough to resolve billing, without reopening broader
 # personal-agent creation or API-key access. Canceled users can still inspect their
@@ -41,15 +36,11 @@ def is_personal_trial_enforcement_enabled() -> bool:
     if env_enabled:
         return True
 
-    cached = cache.get(_ENFORCEMENT_SWITCH_CACHE_KEY)
-    if cached is not None:
-        return bool(cached)
-
+    # Ask waffle rather than querying the table directly: it caches switches and invalidates on
+    # save. Querying the model here bypassed that cache, so the agent roster resolved this single
+    # global boolean once per agent -- a hundred round trips to answer one question.
     try:
-        Switch = get_waffle_switch_model()
-        switch = Switch.objects.filter(
-            name=PERSONAL_FREE_TRIAL_ENFORCEMENT_WAFFLE_SWITCH,
-        ).only("active").first()
+        return bool(switch_is_active(PERSONAL_FREE_TRIAL_ENFORCEMENT_WAFFLE_SWITCH)) or env_enabled
     except (DatabaseError, OperationalError, ProgrammingError):
         logger.exception(
             "Failed loading waffle switch '%s' for personal trial enforcement",
@@ -57,11 +48,7 @@ def is_personal_trial_enforcement_enabled() -> bool:
         )
         return env_enabled
 
-    # Cache the absent case too: a missing switch row is the common state, and without caching it
-    # the lookup repeats for every caller.
-    active = env_enabled if switch is None else bool(switch.active)
-    cache.set(_ENFORCEMENT_SWITCH_CACHE_KEY, active, _ENFORCEMENT_SWITCH_CACHE_SECONDS)
-    return active
+
 
 
 def is_user_freemium_grandfathered(user) -> bool:
