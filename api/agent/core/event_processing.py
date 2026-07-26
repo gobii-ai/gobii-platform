@@ -466,13 +466,7 @@ def _deep_work_update_gate_context(
     agent: PersistentAgent,
     tool_calls: list[Any],
 ) -> str | None:
-    latest_inbound = (
-        PersistentAgentMessage.objects.filter(owner_agent=agent, is_outbound=False)
-        .order_by("-timestamp", "-seq")
-        .select_related("conversation")
-        .only("timestamp", "body", "conversation__channel", "conversation__is_peer_dm")
-        .first()
-    )
+    latest_inbound = get_current_inbound_message(agent)
     if latest_inbound is None or latest_inbound.conversation is None:
         return None
     expected_message_tool = _same_channel_reply_tool_name(latest_inbound)

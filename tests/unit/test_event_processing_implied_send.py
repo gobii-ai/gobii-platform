@@ -143,6 +143,50 @@ class ImpliedSendTests(TestCase):
 
         self.assertIsNone(reason)
 
+    def test_deep_work_gate_uses_bound_inbound_when_newer_channel_message_exists(self):
+        task_message = self._add_inbound_web_message(
+            "Run a comprehensive audit of the release evidence."
+        )
+        task_scope = capture_inbound_routing_scope(self.agent)
+        discord_conversation = PersistentAgentConversation.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.DISCORD,
+            address=f"discord://agent/{self.agent.id}/channel/infra",
+        )
+        discord_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.DISCORD,
+            address="discord://guild/example/channel/infra",
+        )
+        PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            is_outbound=False,
+            from_endpoint=discord_endpoint,
+            conversation=discord_conversation,
+            body="Research the unrelated infrastructure alert.",
+        )
+        tool_calls = [
+            {
+                "function": {
+                    "name": "send_chat_message",
+                    "arguments": json.dumps(
+                        {
+                            "body": "I’m starting the release audit and will return with the first evidence.",
+                            "will_continue_work": True,
+                        }
+                    ),
+                }
+            },
+            {"function": {"name": "mcp_brightdata_search_engine", "arguments": "{}"}},
+        ]
+
+        self.assertEqual(ep._deep_work_update_gate_context(self.agent, tool_calls), "kickoff")
+        token = bind_inbound_routing_scope(task_scope)
+        try:
+            self.assertEqual(task_scope.message_id, task_message.id)
+            self.assertIsNone(ep._deep_work_update_gate_context(self.agent, tool_calls))
+        finally:
+            reset_inbound_routing_scope(token)
+
     def test_explicit_research_detection_excludes_negated_requests(self):
         self.assertTrue(ep._is_explicit_research_request("Please research this account restriction."))
         self.assertTrue(ep._is_explicit_research_request("Could you look into this?"))
