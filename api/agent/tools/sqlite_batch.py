@@ -1595,7 +1595,7 @@ def _get_error_hint(error_msg: str, sql: str = "") -> str:
             for alias in aliases:
                 if _is_typo(missing, alias):
                     return f" FIX: Typo? You defined alias '{alias}' but referenced '{missing}'."
-        return " FIX: Check column name spelling matches your SELECT aliases or table schema."
+        return " FIX: Do not guess another field. In a separate call, run PRAGMA table_info for each referenced table, then retry using only returned columns."
     if "no such table" in error_lower:
         # Extract the missing table name
         match = re.search(r'no such table:\s*(\w+)', error_msg, re.IGNORECASE)
@@ -1605,7 +1605,7 @@ def _get_error_hint(error_msg: str, sql: str = "") -> str:
             for cte in cte_names:
                 if _is_typo(missing, cte):
                     return f" FIX: Typo? You defined CTE '{cte}' but referenced '{missing}'."
-        return " FIX: Create the table first with CREATE TABLE before querying it."
+        return " FIX: Do not assume the table name or create a replacement yet. Query sqlite_master to find existing tables, inspect the intended table with PRAGMA table_info, then retry."
     if "syntax error" in error_lower:
         # Check if it might be a quote escaping issue
         if "'" in sql and ("regexp" in sql.lower() or "pattern" in sql.lower()):
@@ -2110,12 +2110,16 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
         "function": {
             "name": "sqlite_batch",
             "description": (
-                "SQLite world model + exact logic. After a fetch, reconcile and SELECT. SOURCE ARRAYS lists paths. "
+                "SQLite world model + exact logic. SCHEMA FIRST: if an existing schema is absent/stale, query sqlite_master by a "
+                "task-relevant name fragment, never list every table. Then use one PRAGMA-only call with no target-table SELECT; "
+                "read its result before querying confirmed fields. "
+                "After a fetch, reconcile and SELECT. SOURCE ARRAYS lists paths. "
                 "ONE IMPORT PER SHAPE: same-path results across vendors use one INSERT SELECT/json_each over tool_name/multi-ID, "
                 "never per-result DML. SELECT source fields, URL, result_id. Unstructured: bind JSON :rows and join "
                 "__tool_results by result_id. Never transcribe visible rows. Source fields/keys derive in INSERT "
                 "SELECT/UPDATE FROM __tool_results; only paths/tool_name/result_id are literals. "
-                "Key/evolve/normalize/query. Bind authored values; never hand-escape. "
+                "Key/evolve/normalize/query. "
+                "Bind authored values; never hand-escape. "
                 "http_request JSON: result_json $.content. INSERT SELECT needs WHERE before ON CONFLICT. No ATTACH. "
                 "Apostrophe: 'O''Brien'. grep_context_all/split_sections arrays: json_each + ctx.value."
             ),

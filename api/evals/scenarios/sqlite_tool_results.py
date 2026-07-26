@@ -44,6 +44,7 @@ SQLITE_NATURAL_RESULT_ACCESS = "sqlite_tool_results_natural_result_access"
 SQLITE_BOUNDED_PORTFOLIO_REPORT = "sqlite_tool_results_bounded_portfolio_report"
 SQLITE_DOMAIN_TRUTH_OVER_STALE_HISTORY = "sqlite_domain_truth_over_stale_history"
 SQLITE_DOMAIN_MODEL_REFRESHES_AND_EVOLVES = "sqlite_domain_model_refreshes_and_evolves"
+SQLITE_SCHEMA_GROUNDED_EXISTING_TABLE = "sqlite_schema_grounded_existing_table"
 SQLITE_SOURCE_ARRAY_FIRST_WRITE = "sqlite_source_array_first_write"
 SQLITE_INCREMENTAL_DOMAIN_MODEL = "sqlite_incremental_domain_model"
 SQLITE_PROSPECT_PIPELINE_COMPLETES = "sqlite_prospect_pipeline_completes"
@@ -56,6 +57,7 @@ SQLITE_TOOL_RESULT_SCENARIO_SLUGS = [
     SQLITE_BOUNDED_PORTFOLIO_REPORT,
     SQLITE_DOMAIN_TRUTH_OVER_STALE_HISTORY,
     SQLITE_DOMAIN_MODEL_REFRESHES_AND_EVOLVES,
+    SQLITE_SCHEMA_GROUNDED_EXISTING_TABLE,
     SQLITE_SOURCE_ARRAY_FIRST_WRITE,
     SQLITE_INCREMENTAL_DOMAIN_MODEL,
     SQLITE_PROSPECT_PIPELINE_COMPLETES,
@@ -109,6 +111,13 @@ DOMAIN_LEGACY_ACCOUNT = (
 DOMAIN_WORKSTREAMS = (
     ("ws-security-17", "Security packet", "complete", "Maya Chen", "2026-07-22"),
     ("ws-legal-04", "Contract redlines", "open", "Noah Reed", "2026-07-24"),
+)
+HANDOFF_LEDGER_TABLE = "z_handoff_ledger"
+HANDOFF_ROWS = (
+    ("handoff-01", "agent-red", "open"),
+    ("handoff-02", "agent-red", "blocked"),
+    ("handoff-03", "agent-blue", "open"),
+    ("handoff-04", "agent-green", "resolved"),
 )
 RELEASE_CALENDAR_URL = "https://ops.example.test/releases/calendar.json"
 RELEASE_CALENDAR_OBSERVED_AT = "2026-07-22T14:15:00Z"
@@ -974,6 +983,62 @@ def _seed_domain_account(
             conn.close()
 
 
+def _seed_hidden_handoff_ledger(agent_id: str) -> None:
+    with agent_sqlite_db(str(agent_id)) as db_path:
+        conn = open_guarded_sqlite_connection(db_path)
+        try:
+            for index in range(28):
+                conn.execute(
+                    f"CREATE TABLE a_reference_{index:02d} "
+                    "(record_key TEXT PRIMARY KEY, recorded_value TEXT);"
+                )
+            conn.execute(
+                f"CREATE TABLE {HANDOFF_LEDGER_TABLE} ("
+                "handoff_key TEXT PRIMARY KEY, worker_ref TEXT NOT NULL, "
+                "resolution_code TEXT NOT NULL);"
+            )
+            conn.executemany(
+                f"INSERT INTO {HANDOFF_LEDGER_TABLE} "
+                "(handoff_key, worker_ref, resolution_code) VALUES (?, ?, ?);",
+                HANDOFF_ROWS,
+            )
+            conn.commit()
+        finally:
+            clear_guarded_connection(conn)
+            conn.close()
+
+
+def _schema_grounded_read_failures(calls) -> list[str]:
+    calls = list(calls)
+    failures = _sqlite_attempt_failures(calls)
+    schema_call_indexes = []
+    data_reads = []
+    for call_index, call in enumerate(calls):
+        sql = str((call.tool_params or {}).get("sql") or "")
+        schema_evidence = json.dumps(_result_payload(call) or {})
+        if (
+            HANDOFF_LEDGER_TABLE.casefold() in sql.casefold()
+            and all(field in schema_evidence.casefold() for field in (
+                "handoff_key",
+                "worker_ref",
+                "resolution_code",
+            ))
+        ):
+            schema_call_indexes.append(call_index)
+        for statement in sqlparse.split(sql):
+            structural = _structural_sql(statement)
+            if _reads_table(structural, HANDOFF_LEDGER_TABLE):
+                data_reads.append((call_index, structural))
+
+    if not schema_call_indexes:
+        failures.append("existing ledger schema was not inspected")
+    if not data_reads:
+        failures.append("existing ledger was not queried")
+    if schema_call_indexes and data_reads and min(schema_call_indexes) >= min(item[0] for item in data_reads):
+        failures.append("ledger columns were referenced before schema inspection completed")
+    return failures
+
+
 def _inspect_domain_refresh_state(agent_id: str) -> tuple[list[str], str | None]:
     expected_ids = {row[0] for row in DOMAIN_WORKSTREAMS}
     failures = []
@@ -1567,6 +1632,58 @@ class SqliteDomainModelScenario(SqliteToolResultScenario):
             task_name=task_name,
             observed_summary="; ".join(failures) if failures else success,
             artifacts={},
+        )
+
+
+@register_scenario
+class SqliteSchemaGroundedExistingTableScenario(SqliteDomainModelScenario):
+    slug = SQLITE_SCHEMA_GROUNDED_EXISTING_TABLE
+    description = "Existing database work should inspect an unavailable schema before referencing its fields."
+    expected_runtime = "short"
+    tags = (*SqliteToolResultScenario.tags, "schema_discovery", "trajectory_regression")
+    tasks = [
+        ScenarioTask(name="inject_prompt", assertion_type="agent_processing"),
+        ScenarioTask(name="verify_schema_grounded_query", assertion_type="tool_call"),
+        ScenarioTask(name="verify_unresolved_handoff_answer", assertion_type="manual"),
+    ]
+    prompt = (
+        "Check the existing handoff ledger and tell me who still has unfinished work, "
+        "with the count for each. Use the ledger as the source of truth."
+    )
+
+    def run(self, run_id: str, agent_id: str) -> None:
+        self._ready_agent(agent_id)
+        PersistentAgent.objects.filter(id=agent_id).update(
+            charter="Own internal operations and treat established ledger state as the source of truth."
+        )
+        _seed_hidden_handoff_ledger(agent_id)
+        inbound = self._inject_and_wait(
+            run_id,
+            agent_id,
+            self.prompt,
+            {},
+            allowed_tool_names={"sqlite_batch", "send_chat_message"},
+            max_relevant_tool_calls=6,
+        )
+        calls = _tool_calls_for_run(
+            run_id,
+            after=inbound.timestamp,
+            tool_names={"sqlite_batch"},
+        )
+        self._record_check(
+            run_id,
+            "verify_schema_grounded_query",
+            _schema_grounded_read_failures(calls),
+            "Inspected the live ledger schema before querying it, without a failed attempt.",
+        )
+        self._record_sourced_answer(
+            run_id,
+            agent_id=agent_id,
+            after=inbound.timestamp,
+            task_name="verify_unresolved_handoff_answer",
+            source_urls=(),
+            required_terms=("agent-red", "2", "agent-blue", "1"),
+            min_sources=0,
         )
 
 

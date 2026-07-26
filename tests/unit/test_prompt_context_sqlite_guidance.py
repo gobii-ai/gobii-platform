@@ -37,7 +37,12 @@ class PromptContextSqliteGuidanceTests(SimpleTestCase):
         self.assertIn("fields/URL/result_id", guidance)
         self.assertIn("unstructured work uses bound JSON :rows", guidance)
         self.assertIn("joined by result_id", guidance)
-        self.assertIn("Inspect unknown structure once", guidance)
+        self.assertIn("SCHEMA FIRST: for an existing table", guidance)
+        self.assertIn("task-relevant name fragment, not a full table listing", guidance)
+        self.assertIn("one metadata-only call with no target-table read", guidance)
+        self.assertIn("Only afterward query using confirmed tables, columns, and join keys", guidance)
+        self.assertIn("After a schema error inspect, don't guess again", guidance)
+        self.assertIn("roll back or reconnect before another statement", guidance)
         self.assertNotIn("Copy names/paths/values/URLs", guidance)
 
     def test_low_iteration_warning_keeps_unfinished_work_active(self):

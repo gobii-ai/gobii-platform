@@ -682,10 +682,12 @@ def _get_sqlite_guidance() -> str:
     """Return the compact contract for data retrieval, storage, and analysis."""
     return (
         "## SQLite Data\n\n"
+        "SCHEMA FIRST: for an existing table whose full current definition is absent, search the catalog by a task-relevant name fragment, not a full table listing. Then make one metadata-only call with no target-table read and read its result. Only afterward query using confirmed tables, columns, and join keys. After a schema error inspect, don't guess again; for external SQL, roll back or reconnect before another statement. "
         "Named tables are the world model: query, don't remember; fetch stale/missing facts only. Tool results don't update it. "
         "Same-path results across vendors form one set: one batch evolves/imports via INSERT SELECT/json_each over tool_name/multi-ID, then queries coverage. No per-result import or source literals. SELECT fields/URL/result_id; unstructured work uses bound JSON :rows joined by result_id. "
         "Key entities, children, relations, evidence, coverage; normalize/evolve, refresh provenance, query gaps/joins/counts/ranks. Authored values bind :name; source facts derive from __tool_results. "
-        "Different shapes may use separate statements in that batch. Custom tools may write keyed models. CTAS/TEMP is one-off. Inspect unknown structure once. Locate payloads with analysis_json/top_keys; http_request JSON is result_json $.content. Prefer known-path result_json, else result_text.\n\n"
+        "Different shapes may use separate statements in that batch. Custom tools may write keyed models. CTAS/TEMP is one-off. "
+        "Locate payloads with analysis_json/top_keys; http_request JSON is result_json $.content. Prefer known-path result_json, else result_text.\n\n"
         "Snapshots:\n"
         "* __tool_results: result_id, tool_name, created_at, result_json, result_text, analysis_json, is_truncated, top_keys.\n"
         "* __messages: message_id, seq, timestamp, channel, is_outbound, from_address, to_address, subject, body, "

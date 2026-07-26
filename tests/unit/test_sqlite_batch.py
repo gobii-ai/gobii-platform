@@ -465,6 +465,10 @@ class SqliteBatchCoreTests(SqliteBatchTestCase):
             "join __tool_results by result_id", "ONE IMPORT PER SHAPE",
             "same-path results", "across vendors",
             "source fields, URL, result_id",
+            "SCHEMA FIRST: if an existing", "task-relevant name fragment",
+            "never list every table", "one PRAGMA-only call",
+            "no target-table SELECT",
+            "querying confirmed fields",
         ):
             self.assertIn(expected, description)
         self.assertNotIn("before one terminal send", description)
@@ -2492,6 +2496,23 @@ class SqliteBatchAutocorrectTests(SqliteBatchTestCase):
         self.assertIn("SQLite string literals do not use backslash escaping", hint)
         self.assertIn('"AI Engineer"', hint)
         self.assertIn("O''Brien", hint)
+
+    def test_missing_schema_hints_require_inspection_before_retry(self):
+        column_hint = _get_error_hint(
+            "no such column: owner_name",
+            "SELECT owner_name FROM handoff_ledger",
+        )
+        table_hint = _get_error_hint(
+            "no such table: handoffs",
+            "SELECT * FROM handoffs",
+        )
+
+        self.assertIn("Do not guess another field", column_hint)
+        self.assertIn("PRAGMA table_info", column_hint)
+        self.assertIn("only returned columns", column_hint)
+        self.assertIn("Do not assume the table name", table_hint)
+        self.assertIn("sqlite_master", table_hint)
+        self.assertIn("PRAGMA table_info", table_hint)
 
     def test_fix_unescaped_single_quote_runs(self):
         """Balances odd-length runs of single quotes."""
