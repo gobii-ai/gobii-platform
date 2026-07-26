@@ -2879,26 +2879,14 @@
     margin: 0;
     min-height: 0;
 }
-/* Idle it answers "is there more above"; loading it answers "is it arriving". Both float, so the
-   toggle between them never moves a pixel of the conversation. It sits over live text, so it has
-   to be opaque -- a translucent pill lets the message underneath read straight through it. */
+/* Shown only while a fetch is in flight. It sits over live text, so it is opaque: a translucent
+   pill lets the message underneath read straight through it. */
 .timeline-load-control[data-side="older"] .timeline-load-button {
     background: #ffffff;
     backdrop-filter: none;
-}
-.timeline-load-control[data-side="older"][data-state="idle"] .timeline-load-button {
-    color: #475569;
-    border-color: rgba(148, 163, 184, 0.45);
-    box-shadow: 0 2px 10px rgba(15, 23, 42, 0.1);
-}
-.timeline-load-control[data-side="older"][data-state="loading"] .timeline-load-button {
     color: #4338ca;
     border-color: rgba(99, 102, 241, 0.45);
     box-shadow: 0 3px 12px rgba(79, 70, 229, 0.22);
-}
-.timeline-load-chevron {
-    flex: 0 0 auto;
-    opacity: 0.8;
 }
 @media (prefers-reduced-motion: no-preference) {
     .timeline-load-control[data-side="older"][data-state="loading"] .timeline-load-button {
@@ -3807,6 +3795,14 @@
     border-radius: 0.5rem;
     background: linear-gradient(180deg, rgba(248, 250, 252, 0.92), rgba(241, 245, 249, 0.6));
 }
+/* With no addresses to show there is nothing to frame, and the panel then reads as an empty
+   input sitting inside the card. Leave the subject as a plain line. */
+.chat-email-header--bare {
+    padding: 0;
+    border: 0;
+    background: none;
+    margin: 0 0 0.4375rem;
+}
 .chat-email-header__subject {
     margin: 0;
     color: #1e293b;
@@ -3893,8 +3889,13 @@
     font-weight: 400;
     letter-spacing: 0.01em;
     color: #94a3b8;
-    opacity: 0.7;
-    transition: opacity 0.15s ease;
+}
+/* Sits at the foot of the card, always visible. It used to share the header slot with the hover
+   actions, which meant it faded in and out as they animated and was missing at rest. */
+.chat-message-footer {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 0.375rem;
 }
 .chat-message-actions {
     position: absolute;
@@ -3977,13 +3978,6 @@
 .chat-message-action-button[data-feedback][data-active="true"] svg {
     fill: currentColor;
 }
-.chat-bubble:hover .chat-timestamp {
-    opacity: 1;
-}
-.chat-bubble--agent:hover .chat-message-meta-slot .chat-timestamp,
-.chat-bubble--agent:focus-within .chat-message-meta-slot .chat-timestamp {
-    opacity: 0;
-}
 .chat-bubble--agent:hover .chat-message-actions,
 .chat-bubble--agent:focus-within .chat-message-actions {
     opacity: 1;
@@ -3992,10 +3986,6 @@
 .chat-author--user .chat-timestamp {
     color: currentColor;
     opacity: 0.5;
-}
-.chat-author--user:hover .chat-timestamp,
-.chat-bubble:hover .chat-author--user .chat-timestamp {
-    opacity: 0.7;
 }
 .chat-author--peer .chat-timestamp {
     color: #a78bfa;

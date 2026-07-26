@@ -291,7 +291,6 @@ export const MessageEventCard = memo(function MessageEventCard({
           <span className="chat-author-name">{authorLabel}</span>
           {showChannelTag ? <span className={channelTagClass}>{channelIcon}{channelLabel}</span> : null}
           <span className="chat-message-meta-slot">
-            <span className="chat-timestamp" title={metaTitle}>{metaLabel}</span>
             {showMessageActions ? (
               <span className="chat-message-actions" aria-label="Message actions">
                 <button
@@ -319,7 +318,7 @@ export const MessageEventCard = memo(function MessageEventCard({
           </span>
         </div>
         {showEmailHeader ? (
-          <div className="chat-email-header">
+          <div className={`chat-email-header${emailFields.length ? '' : ' chat-email-header--bare'}`}>
             {emailSubject ? (
               <p className="chat-email-header__subject" title={emailSubject}>{emailSubject}</p>
             ) : null}
@@ -403,6 +402,11 @@ export const MessageEventCard = memo(function MessageEventCard({
                 </span>
               )
             })}
+          </div>
+        ) : null}
+        {metaLabel ? (
+          <div className="chat-message-footer">
+            <span className="chat-timestamp" title={metaTitle}>{metaLabel}</span>
           </div>
         ) : null}
       </div>

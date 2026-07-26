@@ -1,5 +1,5 @@
 import { useCallback, useMemo, type Ref } from 'react'
-import { ChevronUp, Loader2 } from 'lucide-react'
+import { Loader2 } from 'lucide-react'
 import { TimelineEventItem } from './TimelineEventItem'
 import { StreamingReplyCard } from './StreamingReplyCard'
 import { StreamingThinkingCard } from './StreamingThinkingCard'
@@ -39,7 +39,6 @@ type AgentTimelinePaneProps = {
   hardLimitShowUpsell?: boolean
   hardLimitUpgradeUrl?: string | null
   hasMoreNewer?: boolean
-  hasMoreOlder?: boolean
   hasStreamingContent?: boolean
   hideTypingIndicator?: boolean
   initialLoading?: boolean
@@ -98,7 +97,6 @@ export function AgentTimelinePane({
   hardLimitShowUpsell = false,
   hardLimitUpgradeUrl = null,
   hasMoreNewer = false,
-  hasMoreOlder = false,
   hasStreamingContent = false,
   hideTypingIndicator = false,
   initialLoading = false,
@@ -180,27 +178,15 @@ export function AgentTimelinePane({
     <>
       <div className="agent-chat-timeline-region">
         {/*
-          Floated above the timeline rather than placed in it. This appears and disappears while
-          the reader is scrolling back, and anything occupying layout space above the content
-          moves what they are reading by its own height each time it toggles.
-
-          It also has to answer two questions the timeline otherwise leaves unanswered: whether
-          there is any earlier history at all, and whether it is arriving right now.
+          Floated above the timeline rather than placed in it. It appears and disappears while the
+          reader is scrolling back, and anything occupying layout space above the content moves
+          what they are reading by its own height each time it toggles.
         */}
-        {loadingOlder || hasMoreOlder ? (
-          <div className="timeline-load-control" data-side="older" data-state={loadingOlder ? 'loading' : 'idle'}>
-            <div className="timeline-load-button" role={loadingOlder ? 'status' : undefined}>
-              {loadingOlder ? (
-                <>
-                  <span className="timeline-load-indicator" data-loading="true" aria-hidden="true" />
-                  <span className="timeline-load-label">Loading earlier messages…</span>
-                </>
-              ) : (
-                <>
-                  <ChevronUp className="timeline-load-chevron" size={13} strokeWidth={2.5} aria-hidden="true" />
-                  <span className="timeline-load-label">Earlier messages above</span>
-                </>
-              )}
+        {loadingOlder ? (
+          <div className="timeline-load-control" data-side="older" data-state="loading">
+            <div className="timeline-load-button" role="status">
+              <span className="timeline-load-indicator" data-loading="true" aria-hidden="true" />
+              <span className="timeline-load-label">Loading earlier messages…</span>
             </div>
           </div>
         ) : null}
