@@ -7,6 +7,7 @@ import { ToolIconSlot } from './ToolIconSlot'
 import { ToolProviderBadge } from './ToolProviderBadge'
 import { deriveActivityEntryPresentation } from './tooling/activityPresentation'
 import { deriveEntryCaption, deriveThinkingPreview } from './tooling/clusterPreviewText'
+import { MoodShiftCard } from './MoodShiftCard'
 import type { ToolEntryDisplay } from './tooling/types'
 
 type ActivityEntryListProps = {
@@ -71,6 +72,24 @@ export function ActivityEntryList({
           const presentationEntry = presentation.icon === entry.icon && presentation.label === entry.label
             ? entry
             : { ...entry, label: presentation.label, icon: presentation.icon ?? entry.icon }
+
+          // A mood is not a tool call with a result to inspect; it is one fact, already fully
+          // visible. Giving it a disclosure row to expand would be giving it nothing to show.
+          if (entry.emotion !== undefined) {
+            return (
+              <li
+                key={entry.id}
+                className="tool-cluster-timeline-item"
+                data-kind="mood"
+                data-entry-id={entry.id}
+                ref={(node) => {
+                  entryRowRefs.current[entry.id] = node
+                }}
+              >
+                <MoodShiftCard entry={entry} />
+              </li>
+            )
+          }
 
           return (
             <li

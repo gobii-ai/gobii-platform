@@ -83,6 +83,9 @@ export type ToolCallEntry = {
   result?: unknown
   charterText?: string | null
   scheduleValue?: string | null
+  /** Set only when the step changed the agent's mood; null means it was cleared. */
+  emotion?: string | null
+  emotionTimeoutSeconds?: number | null
   status?: ToolCallStatus | null
   cursor?: string
   chartImageUrl?: string | null
