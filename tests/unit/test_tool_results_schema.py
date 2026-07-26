@@ -933,7 +933,6 @@ class PreviewByteLimitTests(SimpleTestCase):
         info = tool_results.prepare_tool_results_for_prompt(
             records,
             recency_positions={record.step_id: index for index, record in enumerate(reversed(records))},
-            fresh_tool_call_step_ids={records[-2].step_id, records[-1].step_id},
         )
 
         for record in records:

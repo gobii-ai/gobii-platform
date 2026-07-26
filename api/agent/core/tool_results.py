@@ -346,12 +346,12 @@ def prepare_tool_results_for_prompt(
                     "ordinary evidence task never changes __agent_config/__agent_skills. No pre-read, refetch, blob "
                     "inspection, copied literals, or splitting arrays across calls.]\n"
                 )
-            else:
-                source_write_hint_prefix = _build_optional_source_write_hint(record.tool_name, analysis)
-                if source_write_hint_prefix in emitted_source_write_hints:
-                    source_write_hint_prefix = ""
-                else:
-                    emitted_source_write_hints.add(source_write_hint_prefix)
+        if not source_import_prefix and hide_literal_result_id:
+            source_write_hint_prefix = _build_optional_source_write_hint(record.tool_name, analysis)
+        if source_write_hint_prefix in emitted_source_write_hints:
+            source_write_hint_prefix = ""
+        elif source_write_hint_prefix:
+            emitted_source_write_hints.add(source_write_hint_prefix)
         has_focus = "\nFOCUS:\n" in (context_hint or "")
         if has_focus and not is_inline:
             preview_text = None
