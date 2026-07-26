@@ -2,6 +2,13 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefCall
 
 const NEAR_BOTTOM_PX = 96
 const TOP_LOAD_PX = 160
+// Older history is fetched while the reader still has this much of it left above them, measured
+// in viewports. A page of timeline renders far taller than the window and takes about a second to
+// arrive, so a small fixed trigger meant every reader scrolling back hit the top, stopped, waited,
+// and was then repositioned once the page landed. Starting the fetch with runway to spare keeps
+// the content arriving before they get there. It also keeps the insert off scrollTop 0, where the
+// browser suspends its own scroll anchoring because there is nothing above to anchor to.
+const TOP_LOAD_VIEWPORTS = 1.5
 const PROGRAMMATIC_SCROLL_MS = 180
 const SCROLLABLE_EPSILON_PX = 1
 const PREPEND_RESTORE_GUARD_MS = 250
@@ -367,7 +374,7 @@ export function useTimelineScrollController({
       }
 
       if (
-        container.scrollTop <= TOP_LOAD_PX
+        container.scrollTop <= Math.max(TOP_LOAD_PX, container.clientHeight * TOP_LOAD_VIEWPORTS)
         && canScroll(container)
         && didInitialJumpRef.current
         && !initialLoading
