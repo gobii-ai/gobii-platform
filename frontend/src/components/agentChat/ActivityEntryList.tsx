@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { formatRelativeTimestamp } from '../../util/time'
 import { slugify } from '../../util/slugify'
@@ -12,31 +12,16 @@ import type { ToolEntryDisplay } from './tooling/types'
 type ActivityEntryListProps = {
   entries: ToolEntryDisplay[]
   initialOpenEntryId?: string | null
-  limit?: number
-  limitStrategy?: 'head' | 'tail'
-  onViewAll?: () => void
 }
 
 export function ActivityEntryList({
   entries,
   initialOpenEntryId = null,
-  limit,
-  limitStrategy = 'head',
-  onViewAll,
 }: ActivityEntryListProps) {
   const entryRowRefs = useRef<Record<string, HTMLLIElement | null>>({})
   const initialOpenEntryIdRef = useRef<string | null>(null)
   const [openEntryId, setOpenEntryId] = useState<string | null>(null)
-  const visibleEntries = useMemo(
-    () => {
-      if (typeof limit !== 'number') {
-        return entries
-      }
-      return limitStrategy === 'tail' ? entries.slice(-limit) : entries.slice(0, limit)
-    },
-    [entries, limit, limitStrategy],
-  )
-  const hasMoreEntries = typeof limit === 'number' && entries.length > limit
+  const visibleEntries = entries
 
   useEffect(() => {
     if (!initialOpenEntryId || initialOpenEntryIdRef.current === initialOpenEntryId) {
@@ -143,13 +128,6 @@ export function ActivityEntryList({
           )
         })}
       </ol>
-      {hasMoreEntries && onViewAll ? (
-        <div className="collapsed-activity-cluster__footer">
-          <button type="button" className="collapsed-activity-cluster__view-all" onClick={onViewAll}>
-            View all actions
-          </button>
-        </div>
-      ) : null}
     </>
   )
 }

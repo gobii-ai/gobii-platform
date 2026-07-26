@@ -2,22 +2,11 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 import { CollapsedActivityCard } from './CollapsedActivityCard'
-import { INLINE_ACTIVITY_ENTRY_LIMIT } from './activityEntryUtils'
 import type { ToolEntryDisplay } from './tooling/types'
 
 vi.mock('./ToolClusterTimelineOverlay', () => ({
   ToolClusterTimelineOverlay: ({ open, entries }: { open: boolean; entries: unknown[] }) => (
     open ? <div data-testid="overlay">overlay with {entries.length} entries</div> : null
-  ),
-}))
-
-// Rendering entry internals is not what these tests are about; the click path is.
-vi.mock('./ActivityEntryList', () => ({
-  ActivityEntryList: ({ entries, onViewAll }: { entries: unknown[]; onViewAll?: () => void }) => (
-    <div data-testid="inline-list">
-      inline list with {entries.length} entries
-      {onViewAll ? <button type="button" onClick={onViewAll}>View all actions</button> : null}
-    </div>
   ),
 }))
 
@@ -34,31 +23,40 @@ function makeEntries(count: number): ToolEntryDisplay[] {
 }
 
 describe('CollapsedActivityCard', () => {
-  it('opens the full view in one click when the run is too long to show inline', () => {
-    const entries = makeEntries(INLINE_ACTIVITY_ENTRY_LIMIT + 4)
-    render(<CollapsedActivityCard overlayId="overlay-1" entries={entries} />)
+  // One control, one behaviour. A reader cannot tell how many actions are behind the label before
+  // they click, so the click must not do two different things depending on that count.
+  for (const count of [1, 3, 10, 14]) {
+    it(`opens the full view in one click for a run of ${count}`, () => {
+      const entries = makeEntries(count)
+      render(<CollapsedActivityCard overlayId={`overlay-${count}`} entries={entries} />)
 
-    fireEvent.click(screen.getByRole('button', { name: /actions/i }))
+      fireEvent.click(screen.getByRole('button', { name: /action/i }))
 
-    // No truncated intermediate list that would need a second click.
-    expect(screen.queryByText('View all actions')).not.toBeInTheDocument()
-    expect(screen.getByTestId('overlay')).toHaveTextContent(`overlay with ${entries.length} entries`)
+      expect(screen.getByTestId('overlay')).toHaveTextContent(`overlay with ${count} entries`)
+    })
+  }
+
+  it('always announces that the control opens a dialog', () => {
+    render(<CollapsedActivityCard overlayId="overlay-aria" entries={makeEntries(2)} />)
+
+    const toggle = screen.getByRole('button', { name: /action/i })
+    expect(toggle).toHaveAttribute('aria-haspopup', 'dialog')
+    // It no longer toggles a region, so it must not claim to.
+    expect(toggle).not.toHaveAttribute('aria-expanded')
   })
 
-  it('announces that the control opens a dialog when it will not expand inline', () => {
-    render(<CollapsedActivityCard overlayId="overlay-2" entries={makeEntries(INLINE_ACTIVITY_ENTRY_LIMIT + 1)} />)
+  it('never grows the timeline in place', () => {
+    render(<CollapsedActivityCard overlayId="overlay-inline" entries={makeEntries(3)} />)
 
-    expect(screen.getByRole('button', { name: /actions/i })).toHaveAttribute('aria-haspopup', 'dialog')
+    fireEvent.click(screen.getByRole('button', { name: /action/i }))
+
+    // Inline expansion moved every row below the card; the overlay does not.
+    expect(screen.queryByTestId('inline-list')).not.toBeInTheDocument()
   })
 
-  it('still expands in place when every action fits', () => {
-    render(<CollapsedActivityCard overlayId="overlay-3" entries={makeEntries(3)} />)
-    const toggle = screen.getByRole('button', { name: /actions/i })
-    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+  it('renders nothing when there are no actions', () => {
+    const { container } = render(<CollapsedActivityCard overlayId="overlay-empty" entries={[]} />)
 
-    fireEvent.click(toggle)
-
-    expect(toggle).toHaveAttribute('aria-expanded', 'true')
-    expect(screen.queryByTestId('overlay')).not.toBeInTheDocument()
+    expect(container).toBeEmptyDOMElement()
   })
 })

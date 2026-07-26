@@ -2,7 +2,6 @@ import type { ThinkingEvent, TimelineEvent, ToolClusterEvent } from '../../types
 import type { ToolEntryDisplay } from './tooling/types'
 import { transformToolCluster } from './tooling/toolRegistry'
 
-export const INLINE_ACTIVITY_ENTRY_LIMIT = 10
 
 export function buildActionCountLabel(count: number): string {
   return `${count} action${count === 1 ? '' : 's'}`

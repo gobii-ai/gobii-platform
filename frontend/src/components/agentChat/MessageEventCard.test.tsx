@@ -46,21 +46,23 @@ describe('MessageEventCard email recipient', () => {
     expect(screen.getByTitle('Derraleigh Vance <derraleigh@example.com>')).toBeInTheDocument()
   })
 
-  it('announces the recipient to assistive tech rather than relying on the visual label', () => {
+  it('labels the recipient so it is not just a bare address on the card', () => {
     renderCard(emailMessage())
 
-    expect(screen.getByText('Sent to')).toBeInTheDocument()
+    // The envelope pairs a visible To label with the value, which reads correctly to assistive
+    // tech as well; the old sr-only "Sent to" existed only because the chip had no visible label.
+    expect(screen.getByText('To')).toBeInTheDocument()
   })
 
   it('does not label a received email with a recipient', () => {
     renderCard(emailMessage({ isOutbound: false, recipientAddress: null }))
 
-    expect(screen.queryByText('Sent to')).not.toBeInTheDocument()
+    expect(screen.queryByText('To')).not.toBeInTheDocument()
   })
 
   it('stays quiet when no recipient is available', () => {
     renderCard(emailMessage({ recipientAddress: null }))
 
-    expect(screen.queryByText('Sent to')).not.toBeInTheDocument()
+    expect(screen.queryByText('To')).not.toBeInTheDocument()
   })
 })

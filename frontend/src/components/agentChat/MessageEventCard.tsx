@@ -1,5 +1,5 @@
 import ReactJsonView from '@microlink/react-json-view'
-import { memo, useCallback, useMemo, useState } from 'react'
+import { Fragment, memo, useCallback, useMemo, useState } from 'react'
 import { Check, Copy, Flag, RotateCcw } from 'lucide-react'
 import type { AgentMessage } from './types'
 import { trackAgentMessageCopy } from '../../api/agentChat'
@@ -193,7 +193,19 @@ export const MessageEventCard = memo(function MessageEventCard({
   const emailCc = channel === 'email'
     ? (message.ccAddresses ?? []).map((address) => address.trim()).filter(Boolean)
     : []
-  const showEmailMeta = Boolean(emailSender) || emailCc.length > 0
+  // One envelope block instead of recipient and subject squeezed into the author row with From
+  // and Cc trailing underneath in a different style. Labels share a column so the addresses line
+  // up and can be read down, the way a mail client presents them.
+  const emailFields = [
+    emailSender ? { label: 'From', value: emailSender, title: emailSender } : null,
+    emailRecipient
+      ? { label: 'To', value: emailRecipientLabel, title: emailRecipientTitle }
+      : null,
+    emailCc.length > 0
+      ? { label: 'Cc', value: emailCc.join(', '), title: emailCc.join(', ') }
+      : null,
+  ].filter(Boolean) as Array<{ label: string; value: string; title: string }>
+  const showEmailHeader = Boolean(emailSubject) || emailFields.length > 0
 
   const contentTone = isPeer ? 'text-slate-800' : isAgent ? 'text-slate-800' : ''
 
@@ -278,15 +290,7 @@ export const MessageEventCard = memo(function MessageEventCard({
           ) : null}
           <span className="chat-author-name">{authorLabel}</span>
           {showChannelTag ? <span className={channelTagClass}>{channelIcon}{channelLabel}</span> : null}
-          {emailRecipient ? (
-            <span className="chat-email-recipient-inline" title={emailRecipientTitle}>
-              <span className="sr-only">Sent to </span>
-              <span className="chat-email-recipient-text">{emailRecipientLabel}</span>
-            </span>
-          ) : null}
-          {emailSubject ? <span className="chat-email-subject-inline" title={emailSubject}>{emailSubject}</span> : null}
           <span className="chat-message-meta-slot">
-            <span className="chat-timestamp" title={metaTitle}>{metaLabel}</span>
             {showMessageActions ? (
               <span className="chat-message-actions" aria-label="Message actions">
                 <button
@@ -313,19 +317,20 @@ export const MessageEventCard = memo(function MessageEventCard({
             ) : null}
           </span>
         </div>
-        {showEmailMeta ? (
-          <div className="chat-email-meta">
-            {emailSender ? (
-              <span className="chat-email-meta__item">
-                <span className="chat-email-meta__label">From</span>
-                <span className="chat-email-meta__value" title={emailSender}>{emailSender}</span>
-              </span>
+        {showEmailHeader ? (
+          <div className={`chat-email-header${emailFields.length ? '' : ' chat-email-header--bare'}`}>
+            {emailSubject ? (
+              <p className="chat-email-header__subject" title={emailSubject}>{emailSubject}</p>
             ) : null}
-            {emailCc.length > 0 ? (
-              <span className="chat-email-meta__item">
-                <span className="chat-email-meta__label">Cc</span>
-                <span className="chat-email-meta__value" title={emailCc.join(', ')}>{emailCc.join(', ')}</span>
-              </span>
+            {emailFields.length > 0 ? (
+              <dl className="chat-email-header__fields">
+                {emailFields.map((field) => (
+                  <Fragment key={field.label}>
+                    <dt className="chat-email-header__label">{field.label}</dt>
+                    <dd className="chat-email-header__value" title={field.title}>{field.value}</dd>
+                  </Fragment>
+                ))}
+              </dl>
             ) : null}
           </div>
         ) : null}
@@ -397,6 +402,11 @@ export const MessageEventCard = memo(function MessageEventCard({
                 </span>
               )
             })}
+          </div>
+        ) : null}
+        {metaLabel ? (
+          <div className="chat-message-footer">
+            <span className="chat-timestamp" title={metaTitle}>{metaLabel}</span>
           </div>
         ) : null}
       </div>
