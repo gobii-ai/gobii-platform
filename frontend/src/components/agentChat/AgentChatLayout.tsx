@@ -236,6 +236,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   timelineRef?: Ref<HTMLDivElement>
   timelineContentRef?: Ref<HTMLDivElement>
   composerShellRef?: Ref<HTMLDivElement>
+  hasMoreOlder?: boolean
   loadingOlder?: boolean
   loadingNewer?: boolean
   initialLoading?: boolean
@@ -354,6 +355,7 @@ export function AgentChatLayout({
   timelineRef,
   timelineContentRef,
   composerShellRef,
+  hasMoreOlder = false,
   loadingOlder = false,
   loadingNewer = false,
   initialLoading = false,
@@ -1526,6 +1528,7 @@ export function AgentChatLayout({
             hideTypingIndicator={hideTypingIndicator}
             initialLoading={initialLoading}
             isStreaming={isStreaming}
+            hasMoreOlder={hasMoreOlder}
             loadingNewer={loadingNewer}
             loadingOlder={loadingOlder}
             onContactCapDismiss={handleContactCapDismiss}

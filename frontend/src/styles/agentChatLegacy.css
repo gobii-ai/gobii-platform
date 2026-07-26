@@ -2875,6 +2875,41 @@
     pointer-events: none;
     margin: 0;
 }
+/* Idle it answers "is there more above"; loading it answers "is it arriving". Both float, so the
+   toggle between them never moves a pixel of the conversation. */
+.timeline-load-control[data-side="older"][data-state="idle"] .timeline-load-button {
+    opacity: 0.72;
+    color: #64748b;
+    border-color: rgba(148, 163, 184, 0.28);
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+}
+.timeline-load-control[data-side="older"][data-state="loading"] .timeline-load-button {
+    color: #4f46e5;
+    border-color: rgba(99, 102, 241, 0.3);
+    box-shadow: 0 2px 8px rgba(79, 70, 229, 0.16);
+}
+.timeline-load-chevron {
+    flex: 0 0 auto;
+    opacity: 0.8;
+}
+@media (prefers-reduced-motion: no-preference) {
+    .timeline-load-control[data-side="older"][data-state="loading"] .timeline-load-button {
+        animation: timeline-load-pulse 1.6s ease-in-out infinite;
+    }
+}
+@keyframes timeline-load-pulse {
+    0%, 100% { box-shadow: 0 2px 8px rgba(79, 70, 229, 0.16); }
+    50% { box-shadow: 0 2px 14px rgba(79, 70, 229, 0.3); }
+}
+/* Collapsed runs are otherwise a column of identical chips with nothing placing them in time. */
+.collapsed-event-group__time {
+    flex: 0 0 auto;
+    margin-left: 0.4375rem;
+    color: #94a3b8;
+    font-size: 0.6875rem;
+    font-weight: 500;
+    white-space: nowrap;
+}
 .timeline-load-control[hidden] {
     display: none;
 }
@@ -3752,81 +3787,54 @@
 .chat-author-name {
     flex: 0 0 auto;
 }
-.chat-email-subject-inline {
-    min-width: 0;
-    flex: 1 1 auto;
-    overflow: hidden;
-    color: #334155;
-    font-weight: 700;
-    letter-spacing: 0;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+/* The envelope: subject, then From / To / Cc sharing a label column so the addresses line up and
+   read as one block. Previously the recipient and subject were squeezed into the author row as
+   chips while From and Cc trailed underneath in a different style, which read as two competing
+   headers and wrapped badly once an address was long. */
+.chat-email-header {
+    margin: 0.125rem 0 0.625rem;
+    padding: 0.5rem 0.6875rem;
+    border: 1px solid rgba(99, 102, 241, 0.14);
+    border-left: 2.5px solid rgba(99, 102, 241, 0.4);
+    border-radius: 0.5rem;
+    background: linear-gradient(180deg, rgba(248, 250, 252, 0.92), rgba(241, 245, 249, 0.6));
 }
-.chat-email-subject-inline::before {
-    content: "•";
-    margin-right: 0.5rem;
-    color: #94a3b8;
+.chat-email-header__subject {
+    margin: 0;
+    color: #1e293b;
+    font-size: 0.8125rem;
     font-weight: 700;
+    line-height: 1.35;
+    letter-spacing: -0.006em;
+    overflow-wrap: anywhere;
 }
-/* Pairs with the channel badge as one routing unit, EMAIL → recipient. Capped so a long address
-   truncates before crowding out the subject; the full value stays in the title attribute. */
-.chat-email-recipient-inline {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.25rem;
-    flex: 0 1 auto;
-    min-width: 0;
-    max-width: 40%;
-    padding: 0.0625rem 0.5rem;
-    border: 1px solid rgba(15, 23, 42, 0.1);
-    border-radius: 9999px;
-    background: rgba(248, 250, 252, 0.9);
-    color: #475569;
+.chat-email-header__subject + .chat-email-header__fields {
+    margin-top: 0.375rem;
+    padding-top: 0.375rem;
+    border-top: 1px solid rgba(15, 23, 42, 0.06);
+}
+/* auto column keeps every label the same width, so the values form a single left edge. */
+.chat-email-header__fields {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 0.1875rem 0.5rem;
+    margin: 0;
     font-size: 0.6875rem;
-    font-weight: 600;
-    letter-spacing: 0;
+    line-height: 1.45;
 }
-.chat-email-recipient-inline::before {
-    content: "→";
-    flex: 0 0 auto;
+.chat-email-header__label {
     color: #94a3b8;
-    font-weight: 700;
-}
-/* Sending mailbox and cc, kept off the author line so the header stays legible on a phone. */
-.chat-email-meta {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.25rem 0.75rem;
-    margin: -0.125rem 0 0.5rem;
-    font-size: 0.6875rem;
-    line-height: 1.4;
-    color: #64748b;
-    letter-spacing: 0;
-}
-.chat-email-meta__item {
-    display: inline-flex;
-    align-items: baseline;
-    gap: 0.3125rem;
-    min-width: 0;
-    max-width: 100%;
-}
-.chat-email-meta__label {
-    flex: 0 0 auto;
-    font-weight: 700;
-    color: #94a3b8;
-    text-transform: uppercase;
     font-size: 0.625rem;
-    letter-spacing: 0.04em;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    line-height: 1.6;
 }
-.chat-email-meta__value {
+.chat-email-header__value {
     min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    margin: 0;
+    color: #475569;
     font-weight: 500;
-}
-.chat-email-recipient-text {
-    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -4062,15 +4070,16 @@
         flex-wrap: wrap;
         row-gap: 0.25rem;
     }
-    /* One line cannot hold name, channel, recipient, subject and time at this width. The two
-       parts carrying the information shrink first and collapse to a character or two, so give
-       them a floor and let the header wrap to a second line instead. */
-    .chat-email-recipient-inline {
-        min-width: 7.5rem;
-        max-width: 100%;
+    /* Addresses get the full width on a phone and wrap rather than truncate to nothing. */
+    .chat-email-header {
+        padding: 0.4375rem 0.5625rem;
     }
-    .chat-email-subject-inline {
-        min-width: 7.5rem;
+    .chat-email-header__fields {
+        gap: 0.125rem 0.4375rem;
+    }
+    .chat-email-header__value {
+        white-space: normal;
+        overflow-wrap: anywhere;
     }
     .banner {
         padding: 0.5rem 0.875rem;
