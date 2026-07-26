@@ -303,7 +303,7 @@ class HumanInputRequestTests(TestCase):
         self.assertIn("secure_credentials_request", function["description"])
         self.assertIn("Broad first assignment", function["description"])
         self.assertIn("highest-leverage question", function["description"])
-        self.assertIn("2-3 real options total; one may be Other", function["description"])
+        self.assertIn("2-3 real options total, including any Other option; never send a fourth", function["description"])
         self.assertIn("mandatory even when evidence cannot identify an entity", function["description"])
         self.assertIn("plausible interpretations or concrete next paths", function["description"])
         self.assertIn("four read calls in two rounds", function["description"])
@@ -314,7 +314,12 @@ class HumanInputRequestTests(TestCase):
         self.assertIn("separate preferred email/SMS", function["description"])
         self.assertNotIn("title", function["parameters"]["properties"])
         self.assertIn("options", function["parameters"]["properties"])
+        self.assertEqual(function["parameters"]["properties"]["options"]["maxItems"], 3)
         self.assertIn("requests", function["parameters"]["properties"])
+        self.assertEqual(
+            function["parameters"]["properties"]["requests"]["items"]["properties"]["options"]["maxItems"],
+            3,
+        )
         self.assertIn("recipient", function["parameters"]["properties"])
         self.assertIn("will_continue_work", function["parameters"]["properties"])
         self.assertEqual(function["parameters"]["properties"]["question"]["maxLength"], 500)

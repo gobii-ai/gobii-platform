@@ -41,11 +41,18 @@ MANUAL_INSERT_VALUES_RE = re.compile(r'\binsert\s+(?:or\s+\w+\s+)?into\s+"?(?P<n
 JSON_FUNCTION_RE = re.compile(r"\bjson_(?:extract|each)\s*\(", re.I)
 JSON_EACH_RE = re.compile(r"\bjson_each\s*\(", re.I)
 TOOL_PAYLOAD_RE = re.compile(r"\b(?:result_json|result_text|analysis_json)\b", re.I)
+BOUND_ROWS_RE = re.compile(r"\bjson_each\s*\(\s*[:@$][a-z_]\w*\s*\)", re.I)
+BOUND_ROWS_PROVENANCE_RE = re.compile(
+    r"(?:\b(?:[a-z_]\w*\.)?result_id\s*=\s*json_extract\s*\(|"
+    r"\bjson_extract\s*\([^)]*\)\s*=\s*(?:[a-z_]\w*\.)?result_id\b)",
+    re.I | re.S,
+)
+PROVENANCE_COLUMN_RE = re.compile(r"^(?:(?:source_|tool_)?result_id|source_url)$", re.I)
 URL_RE = re.compile(r"https?://[^\s'\",)]+", re.I)
 BULK_MANUAL_VALUES_ROW_LIMIT = 4
 BULK_COPY_MESSAGE = (
     "This literal-row import copied visible tool output. Use one INSERT ... SELECT: extract structured fields from all "
-    "relevant __tool_results, or pass unstructured interpretations in one bound rows array keyed by result_id and join it."
+    "relevant __tool_results, or pass unstructured interpretations in sqlite_batch's top-level rows keyed by result_id."
 )
 BLOB_LOOP_MESSAGE = (
     "Full result blobs were fetched one at a time. Next time combine prior outputs in one shaped query "
@@ -67,7 +74,7 @@ SINGLE_IMPORT_MESSAGE = (
 SOURCE_LITERAL_COPY_MESSAGE = (
     "This model write copied visible source facts or URLs as SQL literals. Next time derive sourced fields with one "
     "set-wise INSERT/UPDATE SELECT: extract structured fields from __tool_results, or pass unstructured interpretations "
-    "in one bound rows array keyed by result_id and join it for provenance, refresh provenance, then query the keyed model."
+    "in sqlite_batch's top-level rows keyed by result_id and store result_id or source_url as provenance, refresh provenance, then query the keyed model."
 )
 GROUNDED_LITERAL_IMPORT_MESSAGE = (
     "Executed this literal INSERT because every inserted value was found in recent stored tool results. Prefer one "
@@ -260,14 +267,12 @@ def build_tool_result_query_advisories(
 
 
 def source_derived_model_mutation_tables(sql_values: Iterable[str]) -> tuple[str, ...]:
-    """Return durable DML targets whose rows come from __tool_results in the same statement."""
+    """Return durable DML targets derived from tool results or provenance-keyed bound rows."""
 
     tables: list[str] = []
     for sql in sql_values:
         for raw_statement in sqlparse.split(str(sql or "")):
             statement = _structural_sql(raw_statement)
-            if not TOOL_RESULTS_RE.search(statement):
-                continue
             match = MODEL_MUTATION_RE.search(statement)
             if (
                 match
@@ -319,7 +324,14 @@ def _is_named_model_table(table_name: str) -> bool:
 
 
 def _mutation_derives_payload(statement: str, match: re.Match) -> bool:
-    if not TOOL_PAYLOAD_RE.search(statement):
+    bound_source_rows = BOUND_ROWS_RE.search(statement) and (
+        (
+            TOOL_RESULTS_RE.search(statement)
+            and BOUND_ROWS_PROVENANCE_RE.search(statement)
+        )
+        or _bound_rows_retain_provenance(statement, match)
+    )
+    if not TOOL_PAYLOAD_RE.search(statement) and not bound_source_rows:
         return False
     operation = match.group("operation").casefold()
     if operation.startswith(("insert", "replace")):
@@ -340,6 +352,20 @@ def _mutation_derives_payload(statement: str, match: re.Match) -> bool:
         re.search(rf"\b{re.escape(cte_name)}\b", value_clause, re.I)
         for cte_name in _tool_result_cte_names(statement)
     )
+
+
+def _bound_rows_retain_provenance(statement: str, match: re.Match) -> bool:
+    if not match.group("operation").casefold().startswith(("insert", "replace")):
+        return False
+    remainder = statement[match.end():]
+    columns_match = re.match(r'\s*\((?P<columns>[^)]*)\)', remainder)
+    if not columns_match:
+        return False
+    columns = (
+        column.strip().strip('"`[]')
+        for column in columns_match.group("columns").split(",")
+    )
+    return any(PROVENANCE_COLUMN_RE.fullmatch(column) for column in columns)
 
 
 def _tool_result_cte_names(statement: str) -> tuple[str, ...]:

@@ -6,6 +6,7 @@ from typing import Iterable
 import sqlparse
 from django.utils import timezone
 
+from api.agent.core.tool_results import build_short_result_id_map
 from api.agent.tools.eval_synthetic_tools import EVAL_SYNTHETIC_TOOL_SERVER
 from api.agent.tools.sqlite_guardrails import clear_guarded_connection, open_guarded_sqlite_connection
 from api.agent.tools.sqlite_query_quality import (
@@ -15,6 +16,7 @@ from api.agent.tools.sqlite_query_quality import (
     _reads_table,
     _structural_sql,
     source_derived_model_mutation_tables,
+    source_derived_model_reconciled_tables,
     summarize_sqlite_tool_result_calls,
 )
 from api.agent.tools.sqlite_state import agent_sqlite_db
@@ -48,6 +50,7 @@ SQLITE_DOMAIN_MODEL_REFRESHES_AND_EVOLVES = "sqlite_domain_model_refreshes_and_e
 SQLITE_SCHEMA_GROUNDED_EXISTING_TABLE = "sqlite_schema_grounded_existing_table"
 SQLITE_SOURCE_ARRAY_FIRST_WRITE = "sqlite_source_array_first_write"
 SQLITE_SIBLING_RESULT_SET_FIRST_WRITE = "sqlite_sibling_result_set_first_write"
+SQLITE_UNSTRUCTURED_BINDINGS_FIRST_WRITE = "sqlite_unstructured_bindings_first_write"
 SQLITE_INCREMENTAL_DOMAIN_MODEL = "sqlite_incremental_domain_model"
 SQLITE_PROSPECT_PIPELINE_COMPLETES = "sqlite_prospect_pipeline_completes"
 SQLITE_TOOL_RESULT_SCENARIO_SLUGS = [
@@ -62,6 +65,7 @@ SQLITE_TOOL_RESULT_SCENARIO_SLUGS = [
     SQLITE_SCHEMA_GROUNDED_EXISTING_TABLE,
     SQLITE_SOURCE_ARRAY_FIRST_WRITE,
     SQLITE_SIBLING_RESULT_SET_FIRST_WRITE,
+    SQLITE_UNSTRUCTURED_BINDINGS_FIRST_WRITE,
     SQLITE_INCREMENTAL_DOMAIN_MODEL,
     SQLITE_PROSPECT_PIPELINE_COMPLETES,
 ]
@@ -136,6 +140,23 @@ SIBLING_ACCOUNT_BATCHES = (
             ("acct-301", "Lattice Foods", "operations", 2),
             ("acct-302", "Quarry Labs", "security", 1),
         ),
+    ),
+)
+UNSTRUCTURED_INTERVIEW_NOTES = (
+    (
+        "https://research.example.test/interviews/northstar-growth",
+        "# Customer interview\nInterview ID: int-101\nCompany: Northstar Growth\n"
+        "Primary pain point: manual research handoffs\nDecision stage: evaluating\nPriority: high\n",
+    ),
+    (
+        "https://research.example.test/interviews/obrien-advisory",
+        "# Customer interview\nInterview ID: int-102\nCompany: O'Brien Advisory\n"
+        "Primary pain point: manual research handoffs\nDecision stage: piloting\nPriority: high\n",
+    ),
+    (
+        "https://research.example.test/interviews/harbor-creative",
+        "# Customer interview\nInterview ID: int-103\nCompany: Harbor Creative\n"
+        "Primary pain point: manual research handoffs\nDecision stage: exploring\nPriority: medium\n",
     ),
 )
 HANDOFF_LEDGER_TABLE = "z_handoff_ledger"
@@ -2009,6 +2030,150 @@ class SqliteSiblingResultSetFirstWriteScenario(SqliteDomainModelScenario):
             task_name="verify_segment_answer",
             source_urls=(SIBLING_ACCOUNT_BATCHES[0][0], SIBLING_ACCOUNT_BATCHES[1][0]),
             required_terms=("procurement", "5"),
+            min_sources=2,
+        )
+
+
+@register_scenario
+class SqliteUnstructuredBindingsFirstWriteScenario(SqliteDomainModelScenario):
+    slug = SQLITE_UNSTRUCTURED_BINDINGS_FIRST_WRITE
+    description = (
+        "Unstructured sibling evidence should become one bound, provenance-linked domain model without literal rows."
+    )
+    expected_runtime = "short"
+    tags = (*SqliteToolResultScenario.tags, "trajectory_regression", "bound_unstructured_import")
+    tasks = [
+        ScenarioTask(name="inject_prompt", assertion_type="agent_processing"),
+        ScenarioTask(name="verify_bound_model_write", assertion_type="tool_call"),
+        ScenarioTask(name="verify_evidence_answer", assertion_type="manual"),
+    ]
+    prompt = (
+        "The completed customer interview notes are ready. Turn them into the reusable customer-evidence picture "
+        "we'll use for product decisions, then tell me the most common primary pain point, its count, and the affected "
+        "companies. Include the interview links."
+    )
+
+    def run(self, run_id: str, agent_id: str) -> None:
+        self._ready_agent(agent_id)
+        PersistentAgent.objects.filter(id=agent_id).update(
+            charter="Maintain a sourced customer-evidence model for product decisions and follow-up questions."
+        )
+        source_step_ids = []
+        for source_url, note in UNSTRUCTURED_INTERVIEW_NOTES:
+            step = PersistentAgentStep.objects.create(
+                agent_id=agent_id,
+                description="Completed customer interview scrape.",
+            )
+            source_step_ids.append(str(step.id))
+            PersistentAgentToolCall.objects.create(
+                step=step,
+                tool_name="mcp_brightdata_scrape_as_markdown",
+                tool_params={"url": source_url},
+                result=json.dumps({"status": "success", "result": note}),
+                status="complete",
+            )
+
+        inbound = self._inject_and_wait(
+            run_id,
+            agent_id,
+            self.prompt,
+            {},
+            allowed_tool_names={"sqlite_batch", "send_chat_message"},
+            max_relevant_tool_calls=4,
+        )
+        calls = _tool_calls_for_run(run_id, after=inbound.timestamp)
+        sqlite_attempts = [call for call in calls if call.tool_name == "sqlite_batch"]
+        successful_calls, strategy_calls = _sqlite_calls_with_persisted_effects(sqlite_attempts)
+        summary = summarize_sqlite_tool_result_calls(strategy_calls)
+        sql_values = [str((call.tool_params or {}).get("sql") or "") for call in successful_calls]
+        sql = "\n".join(sql_values)
+        model_write_calls = [
+            call for call in successful_calls
+            if source_derived_model_mutation_tables(
+                (str((call.tool_params or {}).get("sql") or ""),)
+            )
+        ]
+        model_tables = set(source_derived_model_mutation_tables(sql_values))
+        _all_models, _row_models, identity_tables = _domain_model_lineage(
+            sql,
+            direct_tables=model_tables,
+            row_direct_tables=summary.row_derived_working_table_names,
+            candidate_tables=summary.working_table_names,
+        )
+        decision_tables = set(source_derived_model_reconciled_tables(sql_values)).intersection(model_tables)
+        bound_rows = []
+        if len(model_write_calls) == 1:
+            model_params = model_write_calls[0].tool_params or {}
+            if isinstance(model_params.get("rows"), list):
+                bound_rows = model_params["rows"]
+            else:
+                bindings = model_params.get("bindings")
+                if isinstance(bindings, dict) and isinstance(bindings.get("rows"), list):
+                    bound_rows = bindings["rows"]
+        bound_result_ids = {
+            str(row.get("result_id") or "")
+            for row in bound_rows
+            if isinstance(row, dict)
+        }
+        bound_source_urls = {
+            str(value)
+            for row in bound_rows
+            if isinstance(row, dict)
+            for value in row.values()
+            if isinstance(value, str) and value.startswith(("https://", "http://"))
+        }
+        expected_result_ids = set(build_short_result_id_map(source_step_ids).values())
+        expected_source_urls = {
+            source_url for source_url, _note in UNSTRUCTURED_INTERVIEW_NOTES
+        }
+        relevant_advisories = sorted({
+            str(advisory.get("code") or "")
+            for call in successful_calls
+            for advisory in (_result_payload(call) or {}).get("advisories", ())
+            if isinstance(advisory, dict)
+        })
+        failures = _sqlite_attempt_failures(sqlite_attempts)
+        failures.extend(message for failed, message in (
+            (
+                not 1 <= len(sqlite_attempts) <= 2,
+                f"expected one aggregate inspection plus one model batch at most, found {len(sqlite_attempts)} attempts",
+            ),
+            (len(model_write_calls) != 1, f"expected one provenance-linked model write, found {len(model_write_calls)}"),
+            (len(bound_rows) != len(UNSTRUCTURED_INTERVIEW_NOTES), f"expected {len(UNSTRUCTURED_INTERVIEW_NOTES)} bound rows, found {len(bound_rows)}"),
+            (
+                bound_result_ids != expected_result_ids,
+                f"bound rows contained incomplete or incorrect source result IDs: {sorted(bound_result_ids)}",
+            ),
+            (
+                bound_source_urls != expected_source_urls,
+                f"bound rows did not preserve the exact source URLs: {sorted(bound_source_urls)}",
+            ),
+            (
+                not re.search(r"\bjson_each\s*\(\s*:rows\s*\)", sql, re.I),
+                "model write did not expand native source rows",
+            ),
+            (summary.single_result_id_filters > 0, "unstructured siblings were inspected one result_id at a time"),
+            (not model_tables, "no sourced customer-evidence model was written"),
+            (not model_tables.issubset(identity_tables), f"evidence model lacked stable identity: {sorted(model_tables - identity_tables)}"),
+            (not decision_tables, "the new evidence model was not queried after import"),
+            (bool(summary.manual_values_working_tables), "visible interview facts were copied into SQL VALUES"),
+            (bool(relevant_advisories), f"SQLite reported avoidable advice/errors: {relevant_advisories}"),
+        ) if failed)
+        if model_tables:
+            failures.extend(_source_write_effect_failures(model_write_calls, model_tables))
+        self._record_check(
+            run_id,
+            "verify_bound_model_write",
+            failures,
+            "Inspected sibling notes as a set, bound every interpreted row once with exact provenance, and queried the model.",
+        )
+        self._record_sourced_answer(
+            run_id,
+            agent_id=agent_id,
+            after=inbound.timestamp,
+            task_name="verify_evidence_answer",
+            source_urls=tuple(source_url for source_url, _note in UNSTRUCTURED_INTERVIEW_NOTES),
+            required_terms=("manual research handoffs", "3", "O'Brien Advisory"),
             min_sources=2,
         )
 

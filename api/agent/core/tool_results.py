@@ -403,10 +403,11 @@ def prepare_tool_results_for_prompt(
         )
         if is_scrape_markdown and stored_in_db:
             meta_text += (
-                "\nSCRAPE MARKDOWN: result_text is the page text. For large pages, first query all needed rows with "
-                "both substr(result_text,1,500) AS head and substr(result_text,-1500) AS tail; facts may be at the end. "
-                "If that returns the facts, answer. Never read_file, inspect analysis_json/result_json, or fetch whole blobs; "
-                "use grep_context_all only for a missing named term."
+                "\nSCRAPE MARKDOWN: result_text is plain page text, never JSON. If its preview is incomplete, inspect all current sibling scrapes once: known edge facts may use "
+                "head/tail; repeated records use `SELECT t.result_id,c.value AS snippet FROM __tool_results t,"
+                "json_each(grep_context_all(t.result_text,:pattern,250,20)) c WHERE t.tool_name=:tool` (c exposes only value). "
+                "Then model with sqlite_batch's result_id-keyed top-level rows, including only the exact known page URL, and store result_id or source_url as provenance. "
+                "Never json_each(result_text), read_file, inspect analysis_json/result_json, repeat raw reads, or fetch blobs."
             )
 
         prompt_info[record.step_id] = ToolResultPromptInfo(

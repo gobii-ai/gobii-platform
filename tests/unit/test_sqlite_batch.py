@@ -197,6 +197,95 @@ class SqliteBatchCoreTests(SqliteBatchTestCase):
             [{"name": "Northstar\nFlow"}, {"name": "O'Brien & Sons"}],
         )
 
+    def test_top_level_rows_rejects_invalid_or_duplicate_input(self):
+        with self._with_temp_db():
+            invalid = execute_sqlite_batch(
+                self.agent,
+                {"sql": "SELECT 1", "rows": {"name": "not-an-array"}},
+            )
+            duplicate = execute_sqlite_batch(
+                self.agent,
+                {
+                    "sql": "SELECT 1 FROM json_each(:rows)",
+                    "rows": [{"result_id": "r1"}],
+                    "bindings": {"rows": [{"result_id": "r2"}]},
+                },
+            )
+
+        self.assertEqual(invalid.get("status"), "error")
+        self.assertIn("array of objects", invalid.get("message", ""))
+        self.assertEqual(duplicate.get("status"), "error")
+        self.assertIn("not both", duplicate.get("message", ""))
+
+    def test_unstructured_rows_bind_once_and_join_tool_result_provenance(self):
+        with self._with_temp_db() as (db_path, _token, _tmp):
+            with sqlite3.connect(db_path) as conn:
+                conn.execute(
+                    "CREATE TABLE __tool_results ("
+                    "result_id TEXT PRIMARY KEY, legacy_result_id TEXT, tool_name TEXT, result_text TEXT)"
+                )
+                conn.executemany(
+                    "INSERT INTO __tool_results VALUES (?, ?, ?, ?)",
+                    (
+                        ("source-a", "legacy-a", "page_scrape", "Company: Northstar Growth"),
+                        ("source-b", "legacy-b", "page_scrape", "Company: O'Brien Advisory"),
+                    ),
+                )
+
+            out = execute_sqlite_batch(
+                self.agent,
+                {
+                    "sql": (
+                        "CREATE TABLE interviews("
+                        "interview_id TEXT PRIMARY KEY, company TEXT NOT NULL, source_url TEXT NOT NULL, "
+                        "source_result_id TEXT NOT NULL);"
+                        "INSERT INTO interviews(interview_id,company,source_url,source_result_id) "
+                        "SELECT json_extract(r.value,'$.interview_id'),"
+                        "json_extract(r.value,'$.company'),json_extract(r.value,'$.source_url'),t.result_id "
+                        "FROM json_each(:rows) r JOIN __tool_results t "
+                        "ON t.result_id=json_extract(r.value,'$.result_id') "
+                        "WHERE t.tool_name=:tool;"
+                        "SELECT interview_id,company,source_url,source_result_id "
+                        "FROM interviews ORDER BY interview_id;"
+                    ),
+                    "bindings": {"tool": "page_scrape"},
+                    "rows": [
+                        {
+                            "result_id": "source-a",
+                            "interview_id": "int-1",
+                            "company": "Northstar Growth",
+                            "source_url": "https://research.example.test/northstar",
+                        },
+                        {
+                            "result_id": "legacy-b",
+                            "interview_id": "int-2",
+                            "company": "O'Brien Advisory",
+                            "source_url": "https://research.example.test/obrien",
+                        },
+                    ],
+                },
+            )
+
+        self.assertEqual(out.get("status"), "ok", out.get("message"))
+        self.assertNotIn("advisories", out)
+        self.assertEqual(
+            out["results"][-1]["result"],
+            [
+                {
+                    "interview_id": "int-1",
+                    "company": "Northstar Growth",
+                    "source_url": "https://research.example.test/northstar",
+                    "source_result_id": "source-a",
+                },
+                {
+                    "interview_id": "int-2",
+                    "company": "O'Brien Advisory",
+                    "source_url": "https://research.example.test/obrien",
+                    "source_result_id": "source-b",
+                },
+            ],
+        )
+
     def test_cte_insert_reports_actual_changed_rows(self):
         with self._with_temp_db():
             out = execute_sqlite_batch(self.agent, {"sql": (
@@ -469,21 +558,30 @@ class SqliteBatchCoreTests(SqliteBatchTestCase):
 
         for expected in (
             "SQLite world model + exact logic", "After a fetch, reconcile and SELECT",
-            "SOURCE ARRAYS lists paths", "Source fields/keys derive",
+            "SOURCE ARRAYS lists paths",
             "Key/evolve/normalize/query", "INSERT SELECT/UPDATE FROM __tool_results",
-            "WHERE before ON CONFLICT", "only paths/tool_name or a true multi-ID set are literals",
-            "Unstructured:", "bind JSON :rows",
-            "join __tool_results by result_id", "ONE CALL PER SHAPE",
+            "WHERE before ON CONFLICT", "Only paths/tool_name or a true multi-ID set are SQL literals",
+            "Unstructured result_text", "top-level `rows` argument",
+            "storing result_id or source_url as row provenance", "ONE CALL PER SHAPE",
+            "never `json_each(result_text)`",
+            "containing only exact known URLs", "Join __tool_results only to validate existence",
             "same-shaped siblings", "never loop or filter one result_id",
-            "Never put tool-returned facts in VALUES",
-            "derive raw source_url and t.result_id", "Do not store `$[link:...]` tokens",
+            "never type a fetched fact, ID, or URL in SQL VALUES/literals",
+            "Structured source fields/keys derive", "Do not store `$[link:...]` tokens",
             "decision/evidence SELECT", "supporting rows and URLs", "t.tool_name=:tool",
+            "c.value AS snippet", "c exposes only `value`",
+            "top-level `rows` argument",
             "SCHEMA FIRST: if an existing", "task-relevant name fragment",
             "listing every table is a failure", "one separate PRAGMA-only call",
             "never a third", "repeat an unchanged SELECT",
             "querying confirmed fields",
         ):
             self.assertIn(expected, description)
+        rows_schema = definition["function"]["parameters"]["properties"]["rows"]
+        self.assertEqual(rows_schema["type"], "array")
+        self.assertIn("automatically bound to SQL as :rows", rows_schema["description"])
+        self.assertEqual(rows_schema["items"]["required"], ["result_id"])
+        self.assertIn("source_url", rows_schema["items"]["properties"])
         self.assertNotIn("before one terminal send", description)
 
     def test_tool_result_ctas_warns_that_identity_is_disposable(self):
@@ -1423,11 +1521,35 @@ class SqliteBatchQualityTests(SqliteBatchTestCase):
             "INSERT INTO workstreams(workstream_id) SELECT json_extract(value, '$.id') "
             "FROM __tool_results, json_each(result_json, '$.workstreams')"
         ]
+        bound_insert = [
+            "INSERT INTO interviews(interview_id,source_result_id) "
+            "SELECT json_extract(r.value,'$.interview_id'),t.result_id "
+            "FROM json_each(:rows) r JOIN __tool_results t "
+            "ON t.result_id=json_extract(r.value,'$.result_id')"
+        ]
+        ungrounded_bound_insert = [
+            "INSERT INTO interviews(interview_id) "
+            "SELECT json_extract(r.value,'$.interview_id') FROM json_each(:rows) r"
+        ]
+        provenance_bound_insert = [
+            "INSERT INTO interviews(interview_id, source_result_id) "
+            "SELECT json_extract(r.value,'$.interview_id'), json_extract(r.value,'$.result_id') "
+            "FROM json_each(:rows) r"
+        ]
+        url_provenance_bound_insert = [
+            "INSERT INTO interviews(interview_id, source_url) "
+            "SELECT json_extract(r.value,'$.interview_id'), json_extract(r.value,'$.source_url') "
+            "FROM json_each(:rows) r"
+        ]
 
         self.assertEqual(source_derived_model_mutation_tables(copied_literals), ())
         self.assertEqual(source_derived_model_mutation_tables(guarded_literal), ())
         self.assertEqual(source_derived_model_mutation_tables(derived_update), ("accounts",))
         self.assertEqual(source_derived_model_mutation_tables(derived_insert), ("workstreams",))
+        self.assertEqual(source_derived_model_mutation_tables(bound_insert), ("interviews",))
+        self.assertEqual(source_derived_model_mutation_tables(provenance_bound_insert), ("interviews",))
+        self.assertEqual(source_derived_model_mutation_tables(url_provenance_bound_insert), ("interviews",))
+        self.assertEqual(source_derived_model_mutation_tables(ungrounded_bound_insert), ())
         self.assertEqual(
             source_derived_model_reconciled_tables([
                 f"{derived_update[0]}; SELECT stage FROM accounts WHERE account_id='acct-1'"
@@ -2200,6 +2322,25 @@ class SqliteBatchAutocorrectTests(SqliteBatchTestCase):
             )
             self.assertEqual(out.get("status"), "ok", out.get("message"))
             self.assertEqual(out["results"][0]["result"], [{"result_id": "abc123"}])
+
+            out = execute_sqlite_batch(
+                self.agent,
+                {
+                    "sql": (
+                        "INSERT INTO saved (result_id) "
+                        "SELECT t.result_id FROM json_each(:rows) r "
+                        "JOIN __tool_results t "
+                        "ON t.result_id=json_extract(r.value,'$.result_id');"
+                        "SELECT result_id FROM saved ORDER BY result_id;"
+                    ),
+                    "bindings": {"rows": [{"result_id": legacy_id}]},
+                },
+            )
+            self.assertEqual(out.get("status"), "ok", out.get("message"))
+            self.assertEqual(
+                out["results"][-1]["result"],
+                [{"result_id": legacy_id}, {"result_id": "abc123"}],
+            )
 
             out = execute_sqlite_batch(
                 self.agent,

@@ -12,10 +12,12 @@ from api.evals.scenarios.sqlite_tool_results import (
     SQLITE_SOURCE_ARRAY_FIRST_WRITE,
     SQLITE_TOOL_RESULT_SCENARIO_SLUGS,
     SQLITE_TOOL_RESULT_SUITE_SLUG,
+    SQLITE_UNSTRUCTURED_BINDINGS_FIRST_WRITE,
     SqliteIncrementalDomainModelScenario,
     SqliteIntermediateWorkingTableScenario,
     SqliteSiblingResultSetFirstWriteScenario,
     SqliteSourceArrayFirstWriteScenario,
+    SqliteUnstructuredBindingsFirstWriteScenario,
     _repeated_source_import_tables,
     _source_array_first_write_failures,
     _uses_queryable_source_model,
@@ -148,6 +150,25 @@ class SqliteSourceArrayEvalTests(SimpleTestCase):
         )
         prompt = SqliteSiblingResultSetFirstWriteScenario.prompt.casefold()
         for leaked_term in ("sqlite", "__tool_results", "json_each", "insert", "select", "table"):
+            self.assertNotIn(leaked_term, prompt)
+
+    def test_unstructured_binding_case_is_registered_without_teaching_sql(self):
+        suite = SuiteRegistry.get(SQLITE_TOOL_RESULT_SUITE_SLUG)
+        scenario = ScenarioRegistry.get(SQLITE_UNSTRUCTURED_BINDINGS_FIRST_WRITE)
+
+        self.assertIsNotNone(scenario)
+        self.assertIn(SQLITE_UNSTRUCTURED_BINDINGS_FIRST_WRITE, SQLITE_TOOL_RESULT_SCENARIO_SLUGS)
+        self.assertIn(SQLITE_UNSTRUCTURED_BINDINGS_FIRST_WRITE, suite.scenario_slugs)
+        self.assertEqual(
+            [task.name for task in scenario.tasks],
+            [
+                "inject_prompt",
+                "verify_bound_model_write",
+                "verify_evidence_answer",
+            ],
+        )
+        prompt = SqliteUnstructuredBindingsFirstWriteScenario.prompt.casefold()
+        for leaked_term in ("sqlite", "__tool_results", "json_each", "insert", "select", "table", "bindings"):
             self.assertNotIn(leaked_term, prompt)
 
     def test_existing_item_report_accepts_a_queried_source_model(self):

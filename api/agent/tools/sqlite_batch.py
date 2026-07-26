@@ -1148,13 +1148,22 @@ def _rewrite_result_id_comparisons(
         col_pattern = rf"(?<!\.)\b{re.escape(column_ref)}\b"
 
     placeholder_sql, literals = _placeholder_sql_literals(sql)
+    simple_operand = (
+        r"(?:"
+        r"json_extract\s*\(\s*(?:[A-Za-z_]\w*\.)?[A-Za-z_]\w*\s*,\s*__lit_\d+__\s*\)"
+        r"|:[A-Za-z_]\w*"
+        r"|__lit_\d+__"
+        r"|(?:[A-Za-z_]\w*\.)?[A-Za-z_]\w*(?!\s*\()"
+        r"|\d+(?:\.\d+)?"
+        r")"
+    )
     patterns = [
         (
-            rf"{col_pattern}\s*=\s*([^\s),;]+)",
+            rf"{col_pattern}\s*=\s*({simple_operand})",
             rf"({column_ref} = \1 OR {compat_ref} = \1)",
         ),
         (
-            rf"([^\s(,;]+)\s*=\s*{col_pattern}",
+            rf"({simple_operand})\s*=\s*{col_pattern}",
             rf"(\1 = {column_ref} OR \1 = {compat_ref})",
         ),
         (
@@ -1816,13 +1825,11 @@ def _normalize_queries(params: Dict[str, Any]) -> Optional[List[str]]:
 
 def _normalize_named_bindings(params: Dict[str, Any]) -> tuple[dict[str, object] | None, str | None]:
     raw = params.get("bindings")
-    if raw is None:
-        return {}, None
-    if not isinstance(raw, dict):
+    if raw is not None and not isinstance(raw, dict):
         return None, "Provide `bindings` as an object keyed by SQL parameter name."
 
     bindings: dict[str, object] = {}
-    for key, value in raw.items():
+    for key, value in (raw or {}).items():
         if not isinstance(key, str) or not re.fullmatch(r"[A-Za-z_]\w*", key):
             return None, "Every binding name must be a plain SQL parameter name such as `company_name`."
         if isinstance(value, (dict, list)):
@@ -1830,6 +1837,15 @@ def _normalize_named_bindings(params: Dict[str, Any]) -> tuple[dict[str, object]
         elif value is not None and not isinstance(value, (str, int, float, bool)):
             return None, f"Binding `{key}` must be a JSON value."
         bindings[key] = value
+
+    rows = params.get("rows")
+    if rows is not None:
+        if not isinstance(rows, list) or not all(isinstance(row, dict) for row in rows):
+            return None, "Provide `rows` as an array of objects."
+        if "rows" in bindings:
+            return None, "Provide source rows with the top-level `rows` field, not both `rows` and `bindings.rows`."
+        bindings["rows"] = json.dumps(rows, ensure_ascii=False, separators=(",", ":"))
+
     return bindings, None
 
 
@@ -2112,34 +2128,59 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
         "function": {
             "name": "sqlite_batch",
             "description": (
-                "SQLite world model + exact logic. SOURCE WRITES: never type tool facts/URLs into SQL literals. Never put tool-returned facts in VALUES. Derive structured rows set-wise from __tool_results. Unstructured: bind JSON :rows as one native array keyed by result_id, expand with json_each(:rows), and join __tool_results by result_id for raw URLs/provenance; never parse prose in SQL or stage NULLs. "
+                "SQLite world model + exact logic. Model fetched evidence before relying on it. SOURCE WRITES: never type a fetched fact, ID, or URL in SQL VALUES/literals. Structured JSON derives every value set-wise from `__tool_results t, json_each(t.result_json,'$.content.<actual_array>') row WHERE t.tool_name=:tool`. Unstructured result_text is plain text, never `json_each(result_text)` or literal VALUES: put every interpreted row in the top-level `rows` argument keyed by result_id and containing only exact known URLs; then `INSERT ... SELECT json_extract(r.value,'$.field'),json_extract(r.value,'$.source_url'),json_extract(r.value,'$.result_id') FROM json_each(:rows) r`, storing result_id or source_url as row provenance. Join __tool_results only to validate existence or derive structured fields. If a visible preview is incomplete, inspect all siblings once before that write. Never parse prose in SQL or stage NULLs. "
                 "SCHEMA FIRST: if an existing schema is absent/stale, query sqlite_master by a "
                 "task-relevant name fragment; listing every table is a failure. Then use one separate PRAGMA-only call with no target-table SELECT; "
                 "read its result before querying confirmed fields. Never combine schema inspection and a target-table read, or repeat an unchanged SELECT in one turn. "
                 "After a fetch, reconcile and SELECT. SOURCE ARRAYS lists paths. "
                 "ONE CALL PER SHAPE: put model DDL, one set-wise import, and every decision/evidence SELECT needed for the requested output—including supporting rows and URLs—in this sqlite_batch call. Use one INSERT over tool_name, never one INSERT per result_id. If the payload shape is unknown, use at most two calls: one all-sibling inspection, then this complete batch; never a third. Later reads query only the model. "
-                "Read all same-shaped siblings with `FROM __tool_results t, json_each(t.result_json,'$.content.items') item WHERE t.tool_name=:tool`; replace items with the actual array key. For http_request target its child array, never the $.content object. Extract fields where they live: item source_url comes from item.value; t.result_id supplies provenance. "
-                "For same-shaped siblings, never loop or filter one result_id at a time. Do not store `$[link:...]` tokens or invent source_token; derive raw source_url and t.result_id in the set-wise SELECT. Source fields/keys derive directly in INSERT "
-                "SELECT/UPDATE FROM __tool_results; only paths/tool_name or a true multi-ID set are literals. "
+                "For a large unstructured result, one pattern inspection is `SELECT t.result_id,c.value AS snippet FROM __tool_results t,json_each(grep_context_all(t.result_text,:pattern,250,20)) c WHERE t.tool_name=:tool`; c exposes only `value`. For http_request target its child array, never the $.content object. Extract fields where they live: item source_url comes from item.value; t.result_id supplies provenance. "
+                "For same-shaped siblings, never loop or filter one result_id at a time. Do not store `$[link:...]` tokens or invent source_token. Structured source fields/keys derive in INSERT SELECT/UPDATE FROM __tool_results; unstructured fields use one provenance-keyed bound-row import. Only paths/tool_name or a true multi-ID set are SQL literals. "
                 "Key/evolve/normalize/query. "
-                "Bind authored values; never hand-escape. "
+                "Bind authored values and unstructured rows; never hand-escape. "
                 "http_request JSON: result_json $.content. INSERT SELECT needs WHERE before ON CONFLICT. No ATTACH. "
-                "Apostrophe: 'O''Brien'. grep_context_all/split_sections arrays: json_each + ctx.value."
+                "Apostrophe: 'O''Brien'. grep_context_all/split_sections arrays expose only alias.value."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "sql": {
                         "type": "string",
-                        "description": "SQL string; use semicolons between statements.",
+                        "description": (
+                            "SQL string; use semicolons between statements. REQUIRED for facts interpreted from page/prose "
+                            "results: INSERT SELECT from json_each(:rows), storing result_id or source_url as provenance. "
+                            "A literal INSERT is wrong even when every value is visible."
+                        ),
+                    },
+                    "rows": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "result_id": {
+                                    "type": "string",
+                                    "description": "Exact result_id of the source row.",
+                                },
+                                "source_url": {
+                                    "type": "string",
+                                    "description": "Exact known source URL, when the source provides one.",
+                                },
+                            },
+                            "required": ["result_id"],
+                            "additionalProperties": True,
+                        },
+                        "description": (
+                            "Rows interpreted from unstructured source results, automatically bound to SQL as :rows. "
+                            "Include result_id, interpreted fields, and only exact known URLs; expand once with "
+                            "json_each(:rows) and store result_id or source_url as provenance."
+                        ),
                     },
                     "bindings": {
                         "type": "object",
                         "description": (
                             "Optional named SQL values. Use :name in SQL and {\"name\": value} here; keys omit the colon. "
-                            "JSON scalars, arrays, and objects are accepted; arrays/objects are safely encoded for "
-                            "json_each/json_extract. For prose, pass one rows array with result_id per row and join "
-                            "__tool_results; e.g. {\"rows\":[{\"result_id\":\"abc\",\"entity_id\":\"e1\"}]}."
+                            "JSON scalars, arrays, and objects are safely encoded. Use the top-level rows argument for "
+                            "unstructured source results."
                         ),
                         "additionalProperties": {},
                     },

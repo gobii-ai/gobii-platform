@@ -64,7 +64,8 @@ def get_request_human_input_tool() -> dict[str, Any]:
             "options": {
                 "type": "array",
                 "items": option_schema,
-                "description": "Required for broad first-assignment intake; otherwise omit or pass [] only when the blocker needs unconstrained text.",
+                "maxItems": 3,
+                "description": "Broad intake requires 2-3 options total, including Other; never send a fourth. Otherwise omit or pass [] only when the blocker needs unconstrained text.",
             },
         },
         "required": ["question"],
@@ -76,7 +77,7 @@ def get_request_human_input_tool() -> dict[str, Any]:
             "name": "request_human_input",
             "description": (
                 "Tracked non-credential input/card; credentials use secure_credentials_request. "
-                "Broad first assignment: orient with at most four read calls in two rounds (none if questions were requested first), then call with one evidence-informed, highest-leverage question and 2-3 real options total; one may be Other. These options are mandatory even when evidence cannot identify an entity, so offer plausible interpretations or concrete next paths. Call this tool alone with empty response content: no kickoff/config/model/work, send tool, or prose substitute. Use the inbound channel. Web always retains the card; follow returned guidance to mirror its exact choices once to a separate preferred email/SMS. Email/SMS: send those numbered choices there. Ask another only if needed. Otherwise omit options for free-text blockers. "
+                "Broad first assignment: orient with at most four read calls in two rounds (none if questions were requested first), then call with one evidence-informed, highest-leverage question and 2-3 real options total, including any Other option; never send a fourth. These options are mandatory even when evidence cannot identify an entity, so offer plausible interpretations or concrete next paths. Call this tool alone with empty response content: no kickoff/config/model/work, send tool, or prose substitute. Use the inbound channel. Web always retains the card; follow returned guidance to mirror its exact choices once to a separate preferred email/SMS. Email/SMS: send those numbered choices there. Ask another only if needed. Otherwise omit options for free-text blockers. "
                 "Use message tools for non-blocking questions/answers. Include Other / I'll explain if needed. "
                 "Do not use for preference surveys, timezone/channel/formatting, category example choices like which vendor/company, non-blocking lookback, or reversible defaults you can choose and disclose. "
                 "Use for role-defining discovery when audience/scope/volume/success bounds materially change substantial ongoing first work; otherwise only if the user asks for targets/scope before setup or they block a recurring monitor. "
@@ -93,7 +94,8 @@ def get_request_human_input_tool() -> dict[str, Any]:
                     "options": {
                         "type": "array",
                         "items": option_schema,
-                        "description": "Required for broad first-assignment intake; otherwise omit or pass [] only when the blocker needs unconstrained text.",
+                        "maxItems": 3,
+                        "description": "Broad intake requires 2-3 options total, including Other; never send a fourth. Otherwise omit or pass [] only when the blocker needs unconstrained text.",
                     },
                     "requests": {
                         "type": "array",

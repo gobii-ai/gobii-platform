@@ -683,10 +683,10 @@ def _get_sqlite_guidance() -> str:
     return (
         "## SQLite Data\n\n"
         "Named tables are the world model: query, don't remember; fetch stale/missing facts only. Tool results don't update it. "
-        "SOURCE WRITES: never type tool facts or URLs into SQL literals. Never put tool-returned facts in VALUES. Structured rows derive set-wise from __tool_results. Unstructured work uses bound JSON :rows: pass all interpreted entities as one native array keyed by result_id, expand it with json_each(:rows), and keep them joined by result_id to __tool_results for raw URLs/provenance. Never parse prose in SQL or stage placeholder NULLs. "
+        "SOURCE WRITES: structured rows derive set-wise from __tool_results. Unstructured result_text is plain text, never json_each(result_text). If its preview is incomplete, inspect all siblings once; then pass every interpreted entity in sqlite_batch's top-level rows argument keyed by result_id, with only exact known source URLs. Use `INSERT ... SELECT json_extract(r.value,'$.field'),json_extract(r.value,'$.source_url'),json_extract(r.value,'$.result_id') FROM json_each(:rows) r`, storing result_id or source_url as row provenance. Join __tool_results only when validating existence or deriving structured fields. Never put tool-returned facts in VALUES or visible facts/URLs in SQL literals, parse prose in SQL, or stage placeholder NULLs. "
         "SCHEMA FIRST: for an existing table whose full current definition is absent, search the catalog by a task-relevant name fragment; listing every table is a failure. Then make a separate metadata-only call with no target-table read and read its result. Never combine PRAGMA/schema inspection with a target-table SELECT. Only afterward query using confirmed tables, columns, and join keys. Never repeat an unchanged SELECT in the same turn; use the rows already returned. After a schema error inspect, don't guess again; for external SQL, roll back or reconnect before another statement. "
         "Same-shaped tool results are one set. FIRST SHOT: in one sqlite_batch call, evolve the keyed model, import every sibling, and run the decision/evidence SELECTs needed next. Use one INSERT over tool_name, never one INSERT per result_id. If the payload shape is genuinely unknown, use at most two calls: one inspection covering all siblings, then one complete model/import/decision batch; never a third. Before calling, map each requested output—including supporting rows and URLs—to a SELECT in that batch; later reads query only the model. Shape imports as `FROM __tool_results t, json_each(t.result_json,'$.content.items') item WHERE t.tool_name=:tool`; replace items with the actual array key. For http_request target the child array (for example $.content.accounts), never its $.content object. Extract fields where they live: derive raw source_url and t.result_id where item source_url comes from item.value and t.result_id supplies provenance; never loop over result_id. Do not store `$[link:...]` tokens or invent source_token. "
-        "Key entities, children, relations, evidence, coverage; normalize/evolve, refresh provenance, query gaps/joins/counts/ranks. Authored values bind :name. "
+        "Key entities, children, relations, evidence, coverage; normalize/evolve, refresh provenance, query gaps/joins/counts/ranks. Authored values bind :name. grep_context_all/split_sections aliases expose only .value. "
         "Different shapes may use separate statements in that batch. Custom tools may write keyed models. CTAS/TEMP is one-off. "
         "Locate payloads with analysis_json/top_keys; http_request JSON is result_json $.content. Prefer known-path result_json, else result_text.\n\n"
         "Snapshots:\n"
@@ -3459,8 +3459,8 @@ def _build_unreconciled_source_model_warning(
             return (
                 "You already inspected this source batch. Do not query raw __tool_results again. The next action must "
                 "create or evolve the durable keyed model, then query it. For fuzzy interpretation of unstructured "
-                "text, bind one JSON array and expand it with json_each(:rows), retaining source result IDs and "
-                "provenance; do not build literal INSERTs. Import same-shaped siblings with one set query over "
+                "text, bind one JSON array keyed by result_id, include only exact known source URLs, expand it with "
+                "json_each(:rows), and store result_id or source_url as provenance; do not build literal INSERTs. Import same-shaped siblings with one set query over "
                 "tool_name or result_id IN (...), not one statement per result_id."
             )
         return (
@@ -3469,13 +3469,16 @@ def _build_unreconciled_source_model_warning(
             "KEY/UNIQUE and provenance (not TEMP/CTAS), reconcile this source batch directly from __tool_results, then "
             "query coverage gaps and next work. Import same-shaped siblings in one set query over tool_name or "
             "result_id IN (...), never one INSERT per result_id; use separate statements only for different entity "
-            "shapes. Do not answer or act from transient results. Structured fields derive from result_json; "
-            "unstructured interpretations use one bound rows array keyed by result_id and joined for provenance."
+            "shapes. Do not answer or act from transient results. Structured fields derive from result_json. "
+            "For prose, pass sqlite_batch's top-level rows keyed by result_id with only exact known source URLs, then use "
+            "`json_each(:rows) r`, including result_id or source_url in the model; never VALUES."
         )
     return (
         "Fresh source evidence is not reconciled with the named model you read. If it belongs there, the next SQLite "
         "call must use INSERT ... SELECT or UPDATE ... FROM __tool_results/json_each. Every sourced field, including IDs, "
-        "must be derived: extract structured fields directly; bind unstructured rows as one result_id-keyed array and join for provenance; "
+        "must be derived: extract structured fields directly; for prose pass sqlite_batch's top-level rows keyed by result_id with "
+        "only exact known source URLs and use "
+        "`json_each(:rows) r`, storing result_id or source_url as provenance; never VALUES; "
         "only JSON paths and current result_id/tool_name may be literals. "
         "Refresh mutable/provenance fields, add relations, and query the model in that batch. Otherwise answer it directly."
     )
