@@ -248,7 +248,7 @@ DIRECT_USER_CORRECTION_RE = re.compile(
     r"\b(?:changed|changes|blockers?|next (?:move|step|action))\b|"
     r"(?:^|[.!?]\s+)never\s+(?:store|share|send|include|reveal|expose)\b[^.!?]{0,80}"
     r"\b(?:secrets?|credentials?|passwords?|private|confidential|customer data)\b|"
-    r"\b(?:make (?:that|this|it) a rule|do i have to\b.{0,80}\b(?:each|every) time)\b|"
+    r"\b(?:make (?:that|this|it) a rule|do i have to\b.{0,80}\b(?:each|every) time)\b|\b(?:i|we)\s+(?:did(?:n['’]?t| not)|never)\s+(?:ask|tell|assign|authoriz)\w*\s+you\s+to\s+(?:do\s+(?:that|this|it)|take(?:\s+\w+){0,4}\s+over|own|handle)\b|"
     r"\b(?:(?:(?:that|this|it)(?:['’]?s| is)\s+)?not\s+your\s+(?:job|role|responsibility|lane)|(?:your|the agent['’]?s)\s+(?:job|role|responsibility|scope)\s+(?:(?:isn['’]?t|is not)(?!\s+(?:done|complete|finished)\b)|(?:is to|is|should be)(?!\s+(?:done|complete|finished)\b))|stay (?:in|within) your (?:lane|role|scope))\b",
     re.IGNORECASE,
 )
