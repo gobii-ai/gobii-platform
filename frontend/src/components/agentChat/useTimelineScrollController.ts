@@ -18,6 +18,7 @@ const USER_SCROLL_DELTA_PX = 2
 // the commit that inserted them. Any reader input ends the hold immediately.
 const ANCHOR_HOLD_MS = 1200
 const ANCHOR_DRIFT_EPSILON_PX = 0.5
+const ANCHOR_SETTLED_FRAMES = 4
 
 type TimelineScrollControllerOptions = {
   activeAgentId: string | null
@@ -98,6 +99,7 @@ export function useTimelineScrollController({
   const previousContentVersionRef = useRef(contentVersion)
   const prependAnchorRef = useRef<PrependAnchor | null>(null)
   const anchorHoldRef = useRef<AnchorHold | null>(null)
+  const anchorRefreshFrameRef = useRef<number | null>(null)
   const ignorePinUntilRef = useRef(0)
   const lastScrollTopRef = useRef(0)
   const pointerActiveRef = useRef(false)
@@ -217,7 +219,7 @@ export function useTimelineScrollController({
     }
   }, [contentNode, pageCount])
 
-  /** Put the anchored row back at the exact offset it occupied. Returns false if it is gone. */
+  /** Put the anchored row back where it was. Returns true when it had to be moved. */
   const applyPrependAnchor = useCallback((anchor: PrependAnchor): boolean => {
     const container = containerRef.current
     if (!container) {
@@ -234,10 +236,11 @@ export function useTimelineScrollController({
 
     const containerTop = container.getBoundingClientRect().top
     const drift = (element.getBoundingClientRect().top - containerTop) - anchor.offsetTop
-    if (Math.abs(drift) >= ANCHOR_DRIFT_EPSILON_PX) {
-      container.scrollTop += drift
-      lastScrollTopRef.current = container.scrollTop
+    if (Math.abs(drift) < ANCHOR_DRIFT_EPSILON_PX) {
+      return false
     }
+    container.scrollTop += drift
+    lastScrollTopRef.current = container.scrollTop
     return true
   }, [])
 
@@ -262,12 +265,16 @@ export function useTimelineScrollController({
     const hold: AnchorHold = { anchor, expiresAt: Date.now() + ANCHOR_HOLD_MS, frame: null }
     anchorHoldRef.current = hold
 
+    let settledFrames = 0
     const step = () => {
       if (anchorHoldRef.current !== hold) {
         return
       }
-      applyPrependAnchor(anchor)
-      if (Date.now() >= hold.expiresAt) {
+      const moved = applyPrependAnchor(anchor)
+      settledFrames = moved ? 0 : settledFrames + 1
+      // Once nothing has shifted for several frames the prepended content has finished
+      // measuring, so there is no reason to keep reading layout every frame.
+      if (settledFrames >= ANCHOR_SETTLED_FRAMES || Date.now() >= hold.expiresAt) {
         anchorHoldRef.current = null
         return
       }
@@ -283,7 +290,12 @@ export function useTimelineScrollController({
       return
     }
 
-    if (!applyPrependAnchor(anchor) && anchor.scrollHeight > 0) {
+    const anchorStillRendered = Boolean(
+      (anchor.element && anchor.element.isConnected)
+      || (anchor.key && container.querySelector(`[data-timeline-key="${CSS.escape(anchor.key)}"]`)),
+    )
+    applyPrependAnchor(anchor)
+    if (!anchorStillRendered && anchor.scrollHeight > 0) {
       // The row is gone entirely; preserving distance from the bottom is the best remaining guess.
       container.scrollTop += container.scrollHeight - anchor.scrollHeight
       lastScrollTopRef.current = container.scrollTop
@@ -440,8 +452,15 @@ export function useTimelineScrollController({
       // are, and restoring it would drag them back by everything they scrolled in between.
       // Re-measure on every scroll so the restore uses the last frame before the insert.
       const pendingAnchor = prependAnchorRef.current
-      if (pendingAnchor) {
-        prependAnchorRef.current = { ...capturePrependAnchor(), pageCount: pendingAnchor.pageCount }
+      if (pendingAnchor && anchorRefreshFrameRef.current === null) {
+        // Scroll events can outpace frames; one refresh per frame is all the restore can use.
+        anchorRefreshFrameRef.current = window.requestAnimationFrame(() => {
+          anchorRefreshFrameRef.current = null
+          const stillPending = prependAnchorRef.current
+          if (stillPending) {
+            prependAnchorRef.current = { ...capturePrependAnchor(), pageCount: stillPending.pageCount }
+          }
+        })
       }
 
       const distance = bottomDistance(container)

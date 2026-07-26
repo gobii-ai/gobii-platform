@@ -183,11 +183,8 @@ export function AgentTimelinePane({
           what they are reading by its own height each time it toggles.
         */}
         {loadingOlder ? (
-          <div className="timeline-load-control" data-side="older" data-state="loading">
-            <div className="timeline-load-button" role="status">
-              <span className="timeline-load-indicator" data-loading="true" aria-hidden="true" />
-              <span className="timeline-load-label">Loading earlier messages…</span>
-            </div>
+          <div className="timeline-load-control" data-side="older" role="status" aria-label="Loading earlier messages">
+            <span className="timeline-load-bar" aria-hidden="true" />
           </div>
         ) : null}
         <div ref={timelineRef} id="timeline-shell" data-scroll-pinned={autoScrollPinned ? 'true' : 'false'}>

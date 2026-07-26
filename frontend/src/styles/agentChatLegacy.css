@@ -2879,23 +2879,44 @@
     margin: 0;
     min-height: 0;
 }
-/* Shown only while a fetch is in flight. It sits over live text, so it is opaque: a translucent
-   pill lets the message underneath read straight through it. */
-.timeline-load-control[data-side="older"] .timeline-load-button {
-    background: #ffffff;
-    backdrop-filter: none;
-    color: #4338ca;
-    border-color: rgba(99, 102, 241, 0.45);
-    box-shadow: 0 3px 12px rgba(79, 70, 229, 0.22);
+/* An indeterminate line rather than a pill. A pill floating over the conversation reads as a
+   dialog interrupting it; a line at the edge of the scrollport is the conventional "more is on
+   its way" signal, costs no layout, and cannot obscure a message. */
+.timeline-load-control[data-side="older"] {
+    height: 2px;
+    min-height: 0;
+    padding: 0;
+    display: block;
+    overflow: hidden;
+    background: rgba(99, 102, 241, 0.1);
+    border-radius: 9999px;
 }
-@media (prefers-reduced-motion: no-preference) {
-    .timeline-load-control[data-side="older"][data-state="loading"] .timeline-load-button {
-        animation: timeline-load-pulse 1.6s ease-in-out infinite;
+.timeline-load-bar {
+    display: block;
+    height: 100%;
+    width: 34%;
+    border-radius: 9999px;
+    background: linear-gradient(
+        90deg,
+        rgba(99, 102, 241, 0) 0%,
+        rgba(99, 102, 241, 0.9) 50%,
+        rgba(99, 102, 241, 0) 100%
+    );
+    transform: translate3d(-40%, 0, 0);
+    will-change: transform;
+    animation: timeline-load-sweep 1.15s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+@keyframes timeline-load-sweep {
+    0% { transform: translate3d(-40%, 0, 0); }
+    100% { transform: translate3d(340%, 0, 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+    .timeline-load-bar {
+        animation: none;
+        width: 100%;
+        opacity: 0.65;
+        transform: none;
     }
-}
-@keyframes timeline-load-pulse {
-    0%, 100% { box-shadow: 0 2px 8px rgba(79, 70, 229, 0.16); }
-    50% { box-shadow: 0 2px 14px rgba(79, 70, 229, 0.3); }
 }
 /* Collapsed runs are otherwise a column of identical chips with nothing placing them in time. */
 .collapsed-event-group__time {
@@ -3897,20 +3918,16 @@
     justify-content: flex-end;
     margin-top: 0.375rem;
 }
+/* Always present. Revealing these on hover meant they appeared and vanished as the pointer
+   crossed the conversation, they were unreachable by touch until something else was tapped, and
+   the reader could not tell which actions a message even had without hovering it. */
 .chat-message-actions {
     position: absolute;
     inset: 50% 0 auto auto;
     display: inline-flex;
     align-items: center;
     gap: 0.25rem;
-    opacity: 0;
-    pointer-events: none;
     transform: translateY(-50%);
-    transition: opacity 0.15s ease;
-}
-.chat-message-actions:has(.chat-message-feedback-error) {
-    opacity: 1;
-    pointer-events: auto;
 }
 .chat-message-action-button {
     width: 1.5rem;
@@ -3977,11 +3994,6 @@
 }
 .chat-message-action-button[data-feedback][data-active="true"] svg {
     fill: currentColor;
-}
-.chat-bubble--agent:hover .chat-message-actions,
-.chat-bubble--agent:focus-within .chat-message-actions {
-    opacity: 1;
-    pointer-events: auto;
 }
 .chat-author--user .chat-timestamp {
     color: currentColor;
