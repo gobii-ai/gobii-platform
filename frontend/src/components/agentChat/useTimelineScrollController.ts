@@ -432,6 +432,15 @@ export function useTimelineScrollController({
         suspendAutoFollow()
       }
 
+      // Older history takes about a second to arrive and the reader keeps scrolling the whole
+      // time. An anchor measured when the fetch started describes where they were, not where they
+      // are, and restoring it would drag them back by everything they scrolled in between.
+      // Re-measure on every scroll so the restore uses the last frame before the insert.
+      const pendingAnchor = prependAnchorRef.current
+      if (pendingAnchor) {
+        prependAnchorRef.current = { ...capturePrependAnchor(), pageCount: pendingAnchor.pageCount }
+      }
+
       const distance = bottomDistance(container)
       // A bottom-follow write cannot leave the viewport beyond the live-edge threshold.
       const movedAwayFromLiveEdge = meaningfulScrollUp && distance > NEAR_BOTTOM_PX
@@ -489,6 +498,7 @@ export function useTimelineScrollController({
       window.removeEventListener('pointercancel', handlePointerEnd)
     }
   }, [
+    capturePrependAnchor,
     eventCount,
     initialLoading,
     isNewAgent,
