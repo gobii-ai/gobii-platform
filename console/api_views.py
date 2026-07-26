@@ -3136,7 +3136,7 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
             to_attr="enabled_system_skill_states_for_roster",
         )
         if staff_override:
-            agents_qs = PersistentAgent.objects.non_eval().alive().select_related("browser_use_agent")
+            agents_qs = PersistentAgent.objects.non_eval().alive().select_related("browser_use_agent", "preferred_llm_tier")
             if context_info.current_context.type == "organization":
                 agents_qs = agents_qs.filter(organization_id=context_info.current_context.id)
             else:
@@ -3156,6 +3156,7 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
                     context_info.current_context,
                     allow_delinquent_personal_chat=True,
                 )
+                .select_related("browser_use_agent", "preferred_llm_tier")
                 .prefetch_related(email_prefetch, sms_prefetch, enabled_system_skills_prefetch)
                 .order_by("name")
             )
@@ -3176,7 +3177,7 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
         if staff_override and for_agent_id and all(str(agent.id) != str(for_agent_id) for agent in agents):
             requested_agent = (
                 PersistentAgent.objects
-                .select_related("browser_use_agent")
+                .select_related("browser_use_agent", "preferred_llm_tier")
                 .prefetch_related(email_prefetch, sms_prefetch, enabled_system_skills_prefetch)
                 .filter(id=for_agent_id)
                 .first()
