@@ -562,7 +562,7 @@ class SqliteBatchCoreTests(SqliteBatchTestCase):
             "Key/evolve/normalize/query", "INSERT SELECT/UPDATE FROM __tool_results",
             "WHERE before ON CONFLICT", "Only paths/tool_name or a true multi-ID set are SQL literals",
             "Unstructured result_text", "top-level `rows` argument",
-            "storing result_id or source_url as row provenance", "ONE CALL PER SHAPE",
+            "Always store result_id; also store source_url when known", "ONE CALL PER SHAPE",
             "never `json_each(result_text)`",
             "containing only exact known URLs", "Join __tool_results only to validate existence",
             "same-shaped siblings", "never loop or filter one result_id",
@@ -581,7 +581,13 @@ class SqliteBatchCoreTests(SqliteBatchTestCase):
         self.assertEqual(rows_schema["type"], "array")
         self.assertIn("automatically bound to SQL as :rows", rows_schema["description"])
         self.assertEqual(rows_schema["items"]["required"], ["result_id"])
+        self.assertEqual(
+            rows_schema["items"]["properties"]["result_id"]["minLength"],
+            1,
+        )
         self.assertIn("source_url", rows_schema["items"]["properties"])
+        self.assertIn("always store result_id", rows_schema["description"])
+        self.assertIn("\"result_id\":\"abc123\"", rows_schema["description"])
         self.assertNotIn("before one terminal send", description)
 
     def test_tool_result_ctas_warns_that_identity_is_disposable(self):

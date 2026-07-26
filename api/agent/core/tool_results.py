@@ -406,7 +406,7 @@ def prepare_tool_results_for_prompt(
                 "\nSCRAPE MARKDOWN: result_text is plain page text, never JSON. If its preview is incomplete, inspect all current sibling scrapes once: known edge facts may use "
                 "head/tail; repeated records use `SELECT t.result_id,c.value AS snippet FROM __tool_results t,"
                 "json_each(grep_context_all(t.result_text,:pattern,250,20)) c WHERE t.tool_name=:tool` (c exposes only value). "
-                "Then model with sqlite_batch's result_id-keyed top-level rows, including only the exact known page URL, and store result_id or source_url as provenance. "
+                "Then model with one result_id-keyed bound rows array in sqlite_batch's `rows` argument. Always store result_id; also store only the exact known page URL when available. "
                 "Never json_each(result_text), read_file, inspect analysis_json/result_json, repeat raw reads, or fetch blobs."
             )
 

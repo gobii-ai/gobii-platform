@@ -2128,7 +2128,7 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
         "function": {
             "name": "sqlite_batch",
             "description": (
-                "SQLite world model + exact logic. Model fetched evidence before relying on it. SOURCE WRITES: never type a fetched fact, ID, or URL in SQL VALUES/literals. Structured JSON derives every value set-wise from `__tool_results t, json_each(t.result_json,'$.content.<actual_array>') row WHERE t.tool_name=:tool`. Unstructured result_text is plain text, never `json_each(result_text)` or literal VALUES: put every interpreted row in the top-level `rows` argument keyed by result_id and containing only exact known URLs; then `INSERT ... SELECT json_extract(r.value,'$.field'),json_extract(r.value,'$.source_url'),json_extract(r.value,'$.result_id') FROM json_each(:rows) r`, storing result_id or source_url as row provenance. Join __tool_results only to validate existence or derive structured fields. If a visible preview is incomplete, inspect all siblings once before that write. Never parse prose in SQL or stage NULLs. "
+                "SQLite world model + exact logic. Model fetched evidence before relying on it. SOURCE WRITES: never type a fetched fact, ID, or URL in SQL VALUES/literals. Structured JSON derives every value set-wise from `__tool_results t, json_each(t.result_json,'$.content.<actual_array>') row WHERE t.tool_name=:tool`. Unstructured result_text is plain text, never `json_each(result_text)` or literal VALUES: put every interpreted row in the top-level `rows` argument keyed by result_id and containing only exact known URLs; then `INSERT ... SELECT json_extract(r.value,'$.field'),json_extract(r.value,'$.source_url'),json_extract(r.value,'$.result_id') FROM json_each(:rows) r`. Always store result_id; also store source_url when known. Join __tool_results only to validate existence or derive structured fields. If a visible preview is incomplete, inspect all siblings once before that write. Never parse prose in SQL or stage NULLs. "
                 "SCHEMA FIRST: if an existing schema is absent/stale, query sqlite_master by a "
                 "task-relevant name fragment; listing every table is a failure. Then use one separate PRAGMA-only call with no target-table SELECT; "
                 "read its result before querying confirmed fields. Never combine schema inspection and a target-table read, or repeat an unchanged SELECT in one turn. "
@@ -2148,7 +2148,7 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
                         "type": "string",
                         "description": (
                             "SQL string; use semicolons between statements. REQUIRED for facts interpreted from page/prose "
-                            "results: INSERT SELECT from json_each(:rows), storing result_id or source_url as provenance. "
+                            "results: INSERT SELECT from json_each(:rows), always storing result_id and also source_url when known. "
                             "A literal INSERT is wrong even when every value is visible."
                         ),
                     },
@@ -2160,6 +2160,7 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
                                 "result_id": {
                                     "type": "string",
                                     "description": "Exact result_id of the source row.",
+                                    "minLength": 1,
                                 },
                                 "source_url": {
                                     "type": "string",
@@ -2172,7 +2173,9 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
                         "description": (
                             "Rows interpreted from unstructured source results, automatically bound to SQL as :rows. "
                             "Include result_id, interpreted fields, and only exact known URLs; expand once with "
-                            "json_each(:rows) and store result_id or source_url as provenance."
+                            "json_each(:rows), always store result_id, and also store source_url when known. Example row: "
+                            "{\"result_id\":\"abc123\",\"entity_id\":\"e1\",\"name\":\"O'Brien\","
+                            "\"source_url\":\"https://source.example/item\"}."
                         ),
                     },
                     "bindings": {
