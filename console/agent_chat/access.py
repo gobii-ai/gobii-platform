@@ -10,9 +10,33 @@ from util.trial_enforcement import PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE, can_us
 
 
 def _can_access_personal_agent(user, *, allow_delinquent_personal_chat: bool = False) -> bool:
+    """Whether the user may reach personal agents at all.
+
+    The answer depends on the user, never on the agent, but callers ask it once per agent while
+    building a roster. Resolving it consults a global waffle switch, so a hundred agents meant a
+    hundred queries to answer one question. Memoize on the user instance, which lives exactly as
+    long as the request: no shared cache, and nothing to invalidate.
+    """
+    cache_attr = "_gobii_personal_agent_access_cache"
+    cached = getattr(user, cache_attr, None)
+    if cached is None:
+        cached = {}
+        try:
+            setattr(user, cache_attr, cached)
+        except (AttributeError, TypeError):  # pragma: no cover - exotic user objects
+            cached = None
+
+    if cached is not None and allow_delinquent_personal_chat in cached:
+        return cached[allow_delinquent_personal_chat]
+
     if allow_delinquent_personal_chat:
-        return can_user_access_personal_agent_chat(user)
-    return can_user_use_personal_agents_and_api(user)
+        result = can_user_access_personal_agent_chat(user)
+    else:
+        result = can_user_use_personal_agents_and_api(user)
+
+    if cached is not None:
+        cached[allow_delinquent_personal_chat] = result
+    return result
 
 
 def _is_blocked_personal_owner(
