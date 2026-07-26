@@ -682,9 +682,9 @@ def _get_sqlite_guidance() -> str:
     """Return the compact contract for data retrieval, storage, and analysis."""
     return (
         "## SQLite Data\n\n"
-        "SCHEMA FIRST: if an existing definition is absent, search the catalog by a relevant name fragment; never list every table. Inspect metadata alone, then query confirmed fields and joins. Never combine schema inspection with its data SELECT or repeat an unchanged SELECT. After a schema error inspect, don't guess; for external SQL, roll back/reconnect first. "
+        "SCHEMA FIRST: for an existing table whose full current definition is absent, search the catalog by a task-relevant name fragment; listing every table is a failure. Then make a separate metadata-only call with no target-table read and read its result. Never combine PRAGMA/schema inspection with a target-table SELECT. Only afterward query using confirmed tables, columns, and join keys. Never repeat an unchanged SELECT in the same turn; use the rows already returned. After a schema error inspect, don't guess again; for external SQL, roll back or reconnect before another statement. "
         "Named tables are the world model: query, don't remember; fetch stale/missing facts only. Tool results don't update it. "
-        "Same-shaped tool results are one set. First sqlite_batch: evolve the keyed model; set-wise import all siblings; SELECT decisions, evidence, and raw URLs. If shape is unknown, inspect all siblings once, then run that complete batch; never a third call. Pattern: `FROM __tool_results t,json_each(t.result_json,'$.content.items') i WHERE t.tool_name=:tool` (adjust path). Source facts never use VALUES or per-result_id loops; derive URL/result_id and don't store link tokens. Later reads use the model. Unstructured work binds JSON :rows joined by result_id. "
+        "Same-shaped tool results are one set. FIRST SHOT: in one sqlite_batch call, evolve the keyed model, import every sibling, and run the decision/evidence SELECTs needed next. If the payload shape is genuinely unknown, use at most two calls: one inspection covering all siblings, then one complete model/import/decision batch; never a third. Before calling, map each requested output—including supporting rows and URLs—to a SELECT in that batch; later reads query only the model. Shape imports as `FROM __tool_results t, json_each(t.result_json,'$.content.items') item WHERE t.tool_name=:tool`; change only the real array path. Never put tool-returned facts in VALUES, even when visible or few; never loop over result_id. Do not store `$[link:...]` tokens or invent a source_token column; derive raw source_url and t.result_id in the set-wise SELECT. Unstructured work uses bound JSON :rows joined by result_id. "
         "Key entities, children, relations, evidence, coverage; normalize/evolve, refresh provenance, query gaps/joins/counts/ranks. Authored values bind :name; source facts derive from __tool_results. "
         "Different shapes may use separate statements in that batch. Custom tools may write keyed models. CTAS/TEMP is one-off. "
         "Locate payloads with analysis_json/top_keys; http_request JSON is result_json $.content. Prefer known-path result_json, else result_text.\n\n"
@@ -3653,7 +3653,7 @@ def _get_first_run_welcome_message_instruction(
 
         "If there is no concrete task to do yet, your first action should be one concise welcome message.\n"
         "Broad ongoing/substantial first work missing material audience, scope, volume, or success boundaries: "
-        "orient with at most four read-only public calls in two rounds, then ask the highest-leverage question; if questions were requested first, ask now. Use the current inbound channel and do no other work. "
+        "this intake overrides Work Updates. Do not acknowledge or begin the task. Orient with at most four read-only public calls in two rounds, then the next and only action is the highest-leverage question; if questions were requested first, ask now. Use the current inbound channel and do no other work. "
         "Web: leave one native request_human_input card with 2-3 evidence-informed choices. It stays pending if they leave; if a separate preferred email/SMS exists, follow the result guidance to mirror the exact choices there. Email/SMS: send the same numbered choices there. No prose substitute. Ask another after the answer only if still material. "
         "Otherwise start the task. Finish ordinary work silently and send one result; Discord research and "
         "substantial work follow Work Updates, never an empty greeting.\n\n"
@@ -3773,8 +3773,8 @@ def _get_system_instruction(
     )
     work_updates_guidance = (
         "## Work Updates (CRITICAL)\n\n"
-        "Required first-run intake precedes work updates; no kickoff, SQLite, config, or deliverable until answered. "
-        "Substantial work includes investment diligence, multi-entity comparisons, list building, and research whose "
+        "FIRST-RUN INTAKE OVERRIDES ACKNOWLEDGMENT: broad substantial first work missing a material audience, scope, volume, or success bound is intake, not executable work. Orient with at most four read-only calls, then use request_human_input and wait. Until answered: no kickoff, fifth call, SQLite, config, deliverable, or prose question. "
+        "After required intake—or when sufficiently bounded—substantial work includes investment diligence, multi-entity comparisons, list building, and research whose "
         "requested scope clearly needs several sources or tool rounds. Before it, send one brief "
         "same-channel acknowledgment as the entire first response, with will_continue_work=true. Say what you are "
         "taking on and the first useful result you will bring back; start the work in the next response. "

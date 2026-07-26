@@ -463,14 +463,14 @@ class SqliteBatchCoreTests(SqliteBatchTestCase):
             "WHERE before ON CONFLICT", "only paths/tool_name or a true multi-ID set are literals",
             "Unstructured:", "bind JSON :rows",
             "join __tool_results by result_id", "ONE CALL PER SHAPE",
-            "every sibling", "per-result_id loops",
-            "Source facts never use VALUES",
-            "derive raw URL/result_id", "store no link tokens/source_token",
-            "decision/evidence SELECT", "supporting rows/URLs", "t.tool_name=:tool",
-            "SCHEMA FIRST: if an existing", "relevant name fragment",
-            "never list every table", "metadata alone",
+            "same-shaped siblings", "never loop or filter one result_id",
+            "Never put tool-returned facts in VALUES",
+            "derive raw source_url and t.result_id", "Do not store `$[link:...]` tokens",
+            "decision/evidence SELECT", "supporting rows and URLs", "t.tool_name=:tool",
+            "SCHEMA FIRST: if an existing", "task-relevant name fragment",
+            "listing every table is a failure", "one separate PRAGMA-only call",
             "never a third", "repeat an unchanged SELECT",
-            "query confirmed fields/joins",
+            "querying confirmed fields",
         ):
             self.assertIn(expected, description)
         self.assertNotIn("before one terminal send", description)

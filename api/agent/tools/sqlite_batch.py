@@ -2111,12 +2111,12 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
             "name": "sqlite_batch",
             "description": (
                 "SQLite world model + exact logic. SCHEMA FIRST: if an existing schema is absent/stale, query sqlite_master by a "
-                "relevant name fragment; never list every table. Inspect metadata alone, then query confirmed fields/joins. "
-                "Never combine schema inspection with its data SELECT or repeat an unchanged SELECT. "
+                "task-relevant name fragment; listing every table is a failure. Then use one separate PRAGMA-only call with no target-table SELECT; "
+                "read its result before querying confirmed fields. Never combine schema inspection and a target-table read, or repeat an unchanged SELECT in one turn. "
                 "After a fetch, reconcile and SELECT. SOURCE ARRAYS lists paths. "
-                "ONE CALL PER SHAPE: DDL; set-wise import every sibling; all decision/evidence SELECTs with supporting rows/URLs. If unknown, inspect all siblings once then run that complete batch; never a third call. Later reads use the model. "
-                "Pattern: `FROM __tool_results t,json_each(t.result_json,'$.content.items') i WHERE t.tool_name=:tool` (adjust path). "
-                "Source facts never use VALUES or per-result_id loops; derive raw URL/result_id, and store no link tokens/source_token. Unstructured: bind JSON :rows and join "
+                "ONE CALL PER SHAPE: put model DDL, one set-wise import, and every decision/evidence SELECT needed for the requested output—including supporting rows and URLs—in this sqlite_batch call. If the payload shape is unknown, use at most two calls: one all-sibling inspection, then this complete batch; never a third. Later reads query only the model. "
+                "Read all same-shaped siblings with `FROM __tool_results t, json_each(t.result_json,'$.content.items') item WHERE t.tool_name=:tool`; change only the actual array path. "
+                "Never put tool-returned facts in VALUES, even when visible or few; never loop or filter one result_id at a time. Do not store `$[link:...]` tokens or invent source_token; derive raw source_url and t.result_id in the set-wise SELECT. Unstructured: bind JSON :rows and join "
                 "__tool_results by result_id. Never transcribe visible rows. Source fields/keys derive in INSERT "
                 "SELECT/UPDATE FROM __tool_results; only paths/tool_name or a true multi-ID set are literals. "
                 "Key/evolve/normalize/query. "

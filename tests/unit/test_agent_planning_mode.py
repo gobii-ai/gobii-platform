@@ -159,6 +159,8 @@ class PersistentAgentPlanningModeTests(TestCase):
         self.assertIn("strongest finding and what remains", prompt)
         self.assertIn("Never announce phases", prompt)
         self.assertIn("Work Updates require explicit", prompt)
+        self.assertIn("FIRST-RUN INTAKE OVERRIDES ACKNOWLEDGMENT", prompt)
+        self.assertIn("no kickoff, fifth call, SQLite, config, deliverable, or prose question", prompt)
         self.assertIn("email=send_email in-thread", prompt)
         self.assertIn("repair rejected/wrong channel first", prompt)
         self.assertIn(
@@ -183,7 +185,7 @@ class PersistentAgentPlanningModeTests(TestCase):
         self.assertIn("at most four read-only public calls in two rounds", prompt)
         self.assertIn("questions were requested first", prompt)
         self.assertIn("No prose substitute", prompt)
-        self.assertIn("ask the highest-leverage question", prompt)
+        self.assertIn("next and only action is the highest-leverage question", prompt)
         self.assertIn("Use the current inbound channel", prompt)
         self.assertIn("native request_human_input card", prompt)
         self.assertIn("2-3 evidence-informed choices", prompt)
