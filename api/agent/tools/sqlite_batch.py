@@ -1556,7 +1556,7 @@ def _execute_with_autocorrections(
                 query_upper = current_query.upper()
                 if affected <= 0 and "WITH" in query_upper and "INSERT" in query_upper:
                     msg += " (Normal for CTE INSERT - check sqlite_schema for actual row count)"
-                elif affected == 0 and ("UPDATE" in query_upper or "DELETE" in query_upper):
+                elif affected == 0 and sqlparse.parse(current_query)[0].get_type().upper() in {"UPDATE", "DELETE"}:
                     zero_rows_warning = True
                     msg += (
                         " (No match—verify WHERE values against ground truth: "

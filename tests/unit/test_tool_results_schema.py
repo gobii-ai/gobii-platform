@@ -119,7 +119,7 @@ class ToolResultSchemaTests(SimpleTestCase):
 
         prompt_info = info.get("step-1")
         self.assertIsNotNone(prompt_info)
-        self.assertIn("result_id=step-1", prompt_info.meta)
+        self.assertNotIn("result_id=step-1", prompt_info.meta)
         self.assertIn("result_json_path=$.content", prompt_info.meta)
         self.assertTrue(prompt_info.is_inline)
         self.assertIn("First", prompt_info.preview_text)
@@ -736,12 +736,12 @@ class PreviewByteLimitTests(SimpleTestCase):
         )
 
         self.assertTrue(info.is_inline)
-        self.assertIn("result_id=step-http", info.meta)
+        self.assertNotIn("result_id=step-http", info.meta)
         self.assertIn("parsed_with=json", info.meta)
         self.assertIn("Central bank signals rate hold", info.preview_text)
-        self.assertIn("SOURCE ARRAYS result_id=step-http; stored paths", info.preview_text)
+        self.assertIn("SOURCE ARRAYS; stored paths", info.preview_text)
         self.assertLess(
-            info.preview_text.index("SOURCE ARRAYS result_id=step-http"),
+            info.preview_text.index("SOURCE ARRAYS; stored paths"),
             info.preview_text.index("Central bank signals rate hold"),
         )
         for expected in (
@@ -905,6 +905,43 @@ class PreviewByteLimitTests(SimpleTestCase):
         self.assertEqual(info.meta.count("[SOURCE SET"), 1)
         self.assertNotIn("result_id=", info.meta)
         self.assertIsNone(info.source_reconciliation_directive)
+
+    def test_structured_sibling_source_set_hides_stale_result_ids(self):
+        payload = {
+            "status": "success",
+            "result": {
+                "organic": [
+                    {
+                        "title": "Example company",
+                        "link": "https://example.test/company",
+                        "description": "A sourced company result.",
+                    }
+                ]
+            },
+        }
+        tool_name = "mcp_brightdata_search_engine"
+        records = [
+            tool_results.ToolCallResultRecord(
+                step_id=f"search-result-{index}",
+                tool_name=tool_name,
+                created_at=datetime(2026, 7, 26, 12, index, tzinfo=timezone.utc),
+                result_text=json.dumps(payload),
+            )
+            for index in range(3)
+        ]
+
+        info = tool_results.prepare_tool_results_for_prompt(
+            records,
+            recency_positions={record.step_id: index for index, record in enumerate(reversed(records))},
+            fresh_tool_call_step_ids={records[-2].step_id, records[-1].step_id},
+        )
+
+        for record in records:
+            self.assertNotIn("result_id=", info[record.step_id].meta)
+            self.assertNotIn(f"result_id='{record.step_id}'", info[record.step_id].meta)
+        source_set_meta = "\n".join(item.meta for item in info.values())
+        self.assertIn("Use one INSERT over tool_name across the complete source set", source_set_meta)
+        self.assertIn("Result IDs are row provenance, not dataset boundaries", source_set_meta)
 
     def test_optional_source_write_hint_has_bounded_overhead_and_array_count(self):
         payload = {

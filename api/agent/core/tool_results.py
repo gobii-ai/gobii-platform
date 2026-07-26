@@ -194,7 +194,9 @@ def _build_optional_source_write_hint(tool_name: str, analysis: ResultAnalysis |
         "visible literals: INSERT ... SELECT json_extract(j.value,'$.field'),"
         "json_extract(t.result_json,'$.content.source_url'),t.result_id "
         f"FROM __tool_results AS t, json_each(t.result_json,'{first_path}') AS j "
-        f"WHERE t.tool_name='{escaped_tool_name}'. Do not filter by result_id. Use each exact path above in the same batch; "
+        f"WHERE t.tool_name='{escaped_tool_name}'. Use one INSERT over tool_name across the complete source set. "
+        "Result IDs are row provenance, not dataset boundaries. Do not filter by result_id. "
+        "Use each exact path above in the same batch; "
         "distinguish siblings by derived parent metadata, not authored labels. "
         "For an ordinary one-off answer, use the visible evidence directly.]\n"
     )
@@ -263,8 +265,6 @@ def prepare_tool_results_for_prompt(
     )
 
     for record in sorted(records, key=lambda item: item.created_at):
-        if record.result_text is None:
-            continue
         result_text = record.result_text
         if not result_text:
             continue
@@ -320,7 +320,7 @@ def prepare_tool_results_for_prompt(
             tool_name=record.tool_name,
             is_fresh_tool_call=is_fresh_tool_call,
         )
-        source_import_prefix, source_write_hint_prefix, hide_literal_result_id = "", "", False
+        source_import_prefix, source_write_hint_prefix, hide_literal_result_id = "", "", bool(_optional_source_array_schemas(analysis))
         keep_source_import_hint = is_source_bearing_tool(record.tool_name) and is_fresh_tool_call
         if keep_source_import_hint:
             arrays = _entity_arrays(analysis)
@@ -337,17 +337,17 @@ def prepare_tool_results_for_prompt(
             )
             if schemas and matching_arrays:
                 source_import_prefix = (
-                    f"[SOURCE ARRAYS result_id={result_id}; stored paths: {'; '.join(schemas)}. "
-                    "NEXT: output one sqlite_batch only. In that single batch, create/evolve keyed model tables for "
-                    "every listed entity array, import each exact path with INSERT ... SELECT/json_each, then SELECT "
-                    "bounded task-relevant rows from every updated table using stable-ID filters/joins—not counts or "
-                    "whole-table dumps. Derive item fields from j.value, parent metadata/URLs from t.result_json, and provenance from t.result_id. This ordinary evidence "
-                    "task never changes __agent_config/__agent_skills. No pre-read, refetch, blob inspection, copied "
-                    "literals, or splitting arrays across calls.]\n"
+                    f"[SOURCE ARRAYS; stored paths: {'; '.join(schemas)}. NEXT: output one sqlite_batch only. In that "
+                    "single batch, create/evolve keyed model tables for every listed entity array, import every relevant "
+                    f"sibling with one INSERT ... SELECT/json_each over tool_name='{record.tool_name}', then SELECT bounded "
+                    "task-relevant rows from every updated table using stable entity filters/joins—not counts or whole-table "
+                    "dumps. Result IDs are row provenance, not dataset boundaries; never filter by result_id. Derive item "
+                    "fields from j.value, parent metadata/URLs from t.result_json, and provenance from t.result_id. This "
+                    "ordinary evidence task never changes __agent_config/__agent_skills. No pre-read, refetch, blob "
+                    "inspection, copied literals, or splitting arrays across calls.]\n"
                 )
             else:
                 source_write_hint_prefix = _build_optional_source_write_hint(record.tool_name, analysis)
-                hide_literal_result_id = bool(source_write_hint_prefix)
                 if source_write_hint_prefix in emitted_source_write_hints:
                     source_write_hint_prefix = ""
                 else:

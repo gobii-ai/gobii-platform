@@ -2073,6 +2073,17 @@ class SqliteBatchQualityTests(SqliteBatchTestCase):
             self.assertEqual(results[2].get("warning_code"), "zero_rows_affected")
             self.assertIn("No match", results[2].get("message", ""))
 
+    def test_create_table_updated_at_column_is_not_a_zero_row_update(self):
+        with self._with_temp_db():
+            query = "CREATE TABLE IF NOT EXISTS prospects(id INTEGER PRIMARY KEY, updated_at TEXT)"
+
+            first = execute_sqlite_batch(self.agent, {"sql": query})
+            second = execute_sqlite_batch(self.agent, {"sql": query})
+
+            for output in (first, second):
+                self.assertEqual(output.get("status"), "ok", output.get("message"))
+                self.assertNotIn("warning", output["results"][0])
+
     def test_autocorrect_insert_value_keyword(self):
         with self._with_temp_db():
             queries = [
