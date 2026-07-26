@@ -13,6 +13,11 @@ const PROGRAMMATIC_SCROLL_MS = 180
 const SCROLLABLE_EPSILON_PX = 1
 const PREPEND_RESTORE_GUARD_MS = 250
 const USER_SCROLL_DELTA_PX = 2
+// How long the anchored row is held in place after older history is inserted. It covers the late
+// measurement of prepended cards -- highlighting, JSON viewers, images, charts -- which lands after
+// the commit that inserted them. Any reader input ends the hold immediately.
+const ANCHOR_HOLD_MS = 1200
+const ANCHOR_DRIFT_EPSILON_PX = 0.5
 
 type TimelineScrollControllerOptions = {
   activeAgentId: string | null
@@ -53,9 +58,16 @@ function isEditableTarget(target: EventTarget | null): boolean {
 
 type PrependAnchor = {
   element: HTMLElement | null
+  key: string | null
   offsetTop: number
   pageCount: number
   scrollHeight: number
+}
+
+type AnchorHold = {
+  anchor: PrependAnchor
+  expiresAt: number
+  frame: number | null
 }
 
 export function useTimelineScrollController({
@@ -85,6 +97,7 @@ export function useTimelineScrollController({
   const contentLayoutChangingRef = useRef(false)
   const previousContentVersionRef = useRef(contentVersion)
   const prependAnchorRef = useRef<PrependAnchor | null>(null)
+  const anchorHoldRef = useRef<AnchorHold | null>(null)
   const ignorePinUntilRef = useRef(0)
   const lastScrollTopRef = useRef(0)
   const pointerActiveRef = useRef(false)
@@ -187,7 +200,7 @@ export function useTimelineScrollController({
     const container = containerRef.current
     const content = contentNode
     if (!container || !content) {
-      return { element: null, offsetTop: 0, pageCount, scrollHeight: 0 }
+      return { element: null, key: null, offsetTop: 0, pageCount, scrollHeight: 0 }
     }
 
     const containerTop = container.getBoundingClientRect().top
@@ -195,11 +208,73 @@ export function useTimelineScrollController({
     const element = items.find((item) => item.getBoundingClientRect().bottom >= containerTop) ?? items[0] ?? null
     return {
       element,
+      // Remembered by identity as well as by node: merging older history can re-render the row,
+      // and a detached node cannot tell us where the reader was looking.
+      key: element?.dataset.timelineKey ?? null,
       offsetTop: element ? element.getBoundingClientRect().top - containerTop : 0,
       pageCount,
       scrollHeight: container.scrollHeight,
     }
   }, [contentNode, pageCount])
+
+  /** Put the anchored row back at the exact offset it occupied. Returns false if it is gone. */
+  const applyPrependAnchor = useCallback((anchor: PrependAnchor): boolean => {
+    const container = containerRef.current
+    if (!container) {
+      return false
+    }
+
+    let element = anchor.element && anchor.element.isConnected ? anchor.element : null
+    if (!element && anchor.key) {
+      element = container.querySelector<HTMLElement>(`[data-timeline-key="${CSS.escape(anchor.key)}"]`)
+    }
+    if (!element) {
+      return false
+    }
+
+    const containerTop = container.getBoundingClientRect().top
+    const drift = (element.getBoundingClientRect().top - containerTop) - anchor.offsetTop
+    if (Math.abs(drift) >= ANCHOR_DRIFT_EPSILON_PX) {
+      container.scrollTop += drift
+      lastScrollTopRef.current = container.scrollTop
+    }
+    return true
+  }, [])
+
+  const stopAnchorHold = useCallback(() => {
+    const hold = anchorHoldRef.current
+    if (hold?.frame != null) {
+      window.cancelAnimationFrame(hold.frame)
+    }
+    anchorHoldRef.current = null
+  }, [])
+
+  /**
+   * Keep the anchored row pinned while the newly inserted history settles.
+   *
+   * A single correction at commit time is not enough: prepended cards finish measuring after that
+   * commit -- code highlighting, JSON viewers, images, charts -- and every late resize above the
+   * reader moves the content under them with nothing to put it back. Re-assert the offset each
+   * frame for a short window instead, and stop the moment the reader scrolls.
+   */
+  const startAnchorHold = useCallback((anchor: PrependAnchor) => {
+    stopAnchorHold()
+    const hold: AnchorHold = { anchor, expiresAt: Date.now() + ANCHOR_HOLD_MS, frame: null }
+    anchorHoldRef.current = hold
+
+    const step = () => {
+      if (anchorHoldRef.current !== hold) {
+        return
+      }
+      applyPrependAnchor(anchor)
+      if (Date.now() >= hold.expiresAt) {
+        anchorHoldRef.current = null
+        return
+      }
+      hold.frame = window.requestAnimationFrame(step)
+    }
+    hold.frame = window.requestAnimationFrame(step)
+  }, [applyPrependAnchor, stopAnchorHold])
 
   const restorePrependAnchor = useCallback(() => {
     const container = containerRef.current
@@ -208,19 +283,18 @@ export function useTimelineScrollController({
       return
     }
 
-    if (anchor.element && anchor.element.isConnected) {
-      const containerTop = container.getBoundingClientRect().top
-      const nextOffsetTop = anchor.element.getBoundingClientRect().top - containerTop
-      container.scrollTop += nextOffsetTop - anchor.offsetTop
-    } else if (anchor.scrollHeight > 0) {
+    if (!applyPrependAnchor(anchor) && anchor.scrollHeight > 0) {
+      // The row is gone entirely; preserving distance from the bottom is the best remaining guess.
       container.scrollTop += container.scrollHeight - anchor.scrollHeight
+      lastScrollTopRef.current = container.scrollTop
     }
-    lastScrollTopRef.current = container.scrollTop
+
+    startAnchorHold(anchor)
 
     ignorePinUntilRef.current = Date.now() + PREPEND_RESTORE_GUARD_MS
     prependAnchorRef.current = null
     syncMeasurements(container)
-  }, [syncMeasurements])
+  }, [applyPrependAnchor, startAnchorHold, syncMeasurements])
 
   const pinAndJumpToBottom = useCallback(() => {
     pinnedRef.current = true
@@ -281,6 +355,7 @@ export function useTimelineScrollController({
     didInitialJumpRef.current = false
     fetchOlderInFlightRef.current = false
     prependAnchorRef.current = null
+    stopAnchorHold()
     pointerActiveRef.current = false
     touchYRef.current = null
   }, [activeAgentId])
@@ -292,12 +367,15 @@ export function useTimelineScrollController({
     }
 
     const handleWheel = (event: WheelEvent) => {
+      // The reader is driving again; never move the viewport out from under them.
+      stopAnchorHold()
       if (event.deltaY < 0 && canScrollUp(container)) {
         suspendAutoFollow()
       }
     }
 
     const handleTouchStart = (event: TouchEvent) => {
+      stopAnchorHold()
       touchYRef.current = event.touches[0]?.clientY ?? null
     }
 
@@ -320,6 +398,7 @@ export function useTimelineScrollController({
     }
 
     const handlePointerDown = () => {
+      stopAnchorHold()
       pointerActiveRef.current = true
     }
 
@@ -415,6 +494,7 @@ export function useTimelineScrollController({
     isNewAgent,
     requestPreviousPage,
     setPinned,
+    stopAnchorHold,
     switchingAgentId,
     suspendAutoFollow,
     syncMeasurements,
