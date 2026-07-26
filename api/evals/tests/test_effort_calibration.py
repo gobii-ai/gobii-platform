@@ -57,6 +57,7 @@ from api.evals.scenarios.sqlite_tool_results import (
     SQLITE_BOUNDED_PORTFOLIO_REPORT,
     SQLITE_ITEM_LINK_REPORT,
     SQLITE_NATURAL_RESULT_ACCESS,
+    SQLITE_SCHEMA_GROUNDED_EXISTING_TABLE,
     SQLITE_TOOL_RESULT_SCENARIO_SLUGS,
     SQLITE_TOOL_RESULT_SUITE_SLUG,
     SqliteBoundedPortfolioReportScenario,
@@ -70,6 +71,7 @@ from api.evals.scenarios.sqlite_tool_results import (
     _first_shot_source_phase_failures,
     _portfolio_mock,
     _source_write_effect_failures,
+    _schema_grounded_read_failures,
     _sqlite_attempt_failures,
 )
 from api.evals.stop_policy import should_stop_for_eval_policy
@@ -152,6 +154,7 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
         self.assertIn(SQLITE_BOUNDED_PORTFOLIO_REPORT, suite.scenario_slugs)
         self.assertIn(sqlite_evals.SQLITE_DOMAIN_TRUTH_OVER_STALE_HISTORY, suite.scenario_slugs)
         self.assertIn(sqlite_evals.SQLITE_DOMAIN_MODEL_REFRESHES_AND_EVOLVES, suite.scenario_slugs)
+        self.assertIn(SQLITE_SCHEMA_GROUNDED_EXISTING_TABLE, suite.scenario_slugs)
         self.assertIn(sqlite_evals.SQLITE_PROSPECT_PIPELINE_COMPLETES, suite.scenario_slugs)
 
     def test_trajectory_regression_prompts_do_not_prescribe_tools_or_format(self):
@@ -159,6 +162,7 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
             SqliteMultiResultWebSynthesisScenario.prompt,
             SqliteNaturalResultAccessScenario.prompt,
             SqliteBoundedPortfolioReportScenario.prompt,
+            sqlite_evals.SqliteSchemaGroundedExistingTableScenario.prompt,
             sqlite_evals.SqliteProspectPipelineCompletesScenario.prompt,
         )
 
@@ -171,6 +175,53 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
         self.assertNotIn("every company", portfolio_scenario.prompt.casefold())
         self.assertNotIn("llm_judge", portfolio_scenario.tags)
         self.assertEqual(portfolio_scenario.tasks[-1].assertion_type, "manual")
+
+    def test_schema_grounded_query_requires_successful_inspection_before_data_read(self):
+        good_calls = [
+            _eval_tool_call(
+                "sqlite_batch",
+                {"sql": "PRAGMA table_info('z_handoff_ledger')"},
+                result=(
+                    '{"status":"ok","results":[{"result":['
+                    '{"name":"handoff_key"},{"name":"worker_ref"},{"name":"resolution_code"}]}]}'
+                ),
+            ),
+            _eval_tool_call(
+                "sqlite_batch",
+                {
+                    "sql": (
+                        "SELECT worker_ref, COUNT(*) AS unresolved_count "
+                        "FROM z_handoff_ledger WHERE resolution_code <> 'resolved' "
+                        "GROUP BY worker_ref ORDER BY unresolved_count DESC"
+                    )
+                },
+            ),
+        ]
+
+        self.assertEqual(_schema_grounded_read_failures(good_calls), [])
+
+        sqlite_master_calls = [
+            _eval_tool_call(
+                "sqlite_batch",
+                {"sql": "SELECT sql FROM sqlite_master WHERE name='z_handoff_ledger'"},
+                result=(
+                    '{"status":"ok","results":[{"result":[{"sql":"CREATE TABLE z_handoff_ledger '
+                    '(handoff_key TEXT, worker_ref TEXT, resolution_code TEXT)"}]}]}'
+                ),
+            ),
+            good_calls[1],
+        ]
+        self.assertEqual(_schema_grounded_read_failures(sqlite_master_calls), [])
+
+        guessed = _eval_tool_call(
+            "sqlite_batch",
+            {"sql": "SELECT owner_name, COUNT(*) FROM z_handoff_ledger GROUP BY owner_name"},
+            result='{"status":"error","message":"no such column: owner_name"}',
+        )
+        failures = _schema_grounded_read_failures([guessed, *good_calls])
+
+        self.assertTrue(any("SQLite attempt 1" in failure for failure in failures))
+        self.assertIn("ledger columns were referenced before schema inspection completed", failures)
 
     def test_natural_result_access_requires_aggregate_sqlite_for_large_fixture(self):
         scenario, recorded = SqliteNaturalResultAccessScenario(), []
