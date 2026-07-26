@@ -264,6 +264,9 @@ export function collapseTimeline(events: TimelineEvent[]): SimplifiedTimelineIte
   return result
 }
 
+/** Above this many actions, expanding a run to reveal a mood would hide it in noise instead. */
+const MOOD_EXPANSION_MAX_ENTRIES = 8
+
 export function collapseDetailedStatusRuns(
   events: TimelineEvent[],
   targets: StatusExpansionTargets,
@@ -276,8 +279,16 @@ export function collapseDetailedStatusRuns(
     if (buffer.length === 0) return
     const meaningful = buffer.filter(isRenderableCollapsedEvent)
     const actionCount = visibleActivityCount(meaningful)
-    if (actionCount === 1 || (forceExpanded && actionCount > 0)) {
-      result.push(...expandedRenderableEvents(meaningful, forceExpanded))
+    // A mood is the one event whose entire purpose is to be seen. Folding it into "N actions"
+    // hides it behind a click, which is how it went unnoticed as a database write. Show the run
+    // it happened in, unless that run is long enough that expanding it would bury the mood in
+    // noise instead -- there it stays collapsed and the mood is still on the card inside.
+    const carriesMood = meaningful.length > 0
+      && actionCount <= MOOD_EXPANSION_MAX_ENTRIES
+      && flattenTimelineEventsToEntries(meaningful).some((entry) => entry.emotion !== undefined)
+    const expand = forceExpanded || carriesMood
+    if (actionCount === 1 || (expand && actionCount > 0)) {
+      result.push(...expandedRenderableEvents(meaningful, expand))
     } else if (actionCount > 1) {
       result.push(makeCollapsedGroup(meaningful))
     }

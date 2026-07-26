@@ -3149,6 +3149,10 @@ def _capture_tool_display_metadata(
         "agent_config": {
             "charter": snapshot.charter,
             "schedule": snapshot.schedule,
+            # Carried so the timeline can show a mood change as a mood change. Without it the
+            # write is indistinguishable from any other row update by the time it reaches the UI.
+            "emotion": snapshot.emotion,
+            "emotion_timeout_seconds": snapshot.emotion_timeout_seconds,
         },
     }
 

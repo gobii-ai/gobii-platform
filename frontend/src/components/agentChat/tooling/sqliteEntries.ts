@@ -1,4 +1,4 @@
-import { CalendarClock, FileCheck2, Workflow } from 'lucide-react'
+import { CalendarClock, FileCheck2, Sparkles, Workflow } from 'lucide-react'
 
 import type { ToolCallEntry } from '../../../types/agentChat'
 import { parseResultObject } from '../../../util/objectUtils'
@@ -23,7 +23,7 @@ function parseAgentConfigUpdateConfirmation(result: unknown): AgentConfigUpdateC
   const unchanged = new Set(Array.isArray(update.unchanged_fields) ? update.unchanged_fields : [])
   const errors = parseResultObject(update.errors)
   const confirmation: AgentConfigUpdateConfirmation = {}
-  for (const field of ['charter', 'schedule'] as const) {
+  for (const field of ['charter', 'schedule', 'emotion'] as const) {
     if (!errors?.[field] && updated.has(field)) confirmation[field] = 'updated'
     else if (!errors?.[field] && unchanged.has(field)) confirmation[field] = 'unchanged'
   }
@@ -44,15 +44,25 @@ export function buildAgentConfigEntry(
   const confirmation = entry.status === 'complete'
     ? parseAgentConfigUpdateConfirmation(entry.result)
     : null
-  if (!confirmation) {
+  // The serializer sets `emotion` only for writes that actually changed the mood, so it is a
+  // sufficient signal on its own. Requiring the result envelope to parse as well would drop the
+  // card whenever the tool's own reporting shape drifts, which is how this stayed invisible.
+  const carriesEmotion = entry.emotion !== undefined
+  if (!confirmation && !carriesEmotion) {
     return null
   }
 
-  const charterConfirmation = confirmation.charter ?? null
-  const scheduleConfirmation = confirmation.schedule ?? null
+  const charterConfirmation = confirmation?.charter ?? null
+  const scheduleConfirmation = confirmation?.schedule ?? null
   const updatesCharter = charterConfirmation !== null
   const updatesSchedule = scheduleConfirmation !== null
-  if (!updatesCharter && !updatesSchedule) {
+  // The mood is known only when the step actually carried one; an absent key means this write had
+  // nothing to do with mood, which is different from a mood that was deliberately cleared.
+  // Only when the value itself travelled. A confirmation saying "emotion" without the value -- an
+  // older step, or a write whose snapshot failed -- tells us a mood changed but not to what, and
+  // rendering that as "mood cleared" would assert something untrue.
+  const updatesEmotion = carriesEmotion
+  if (!updatesCharter && !updatesSchedule && !updatesEmotion) {
     return null
   }
 
@@ -100,6 +110,15 @@ export function buildAgentConfigEntry(
         : label
     summary = `${label}.`
     icon = FileCheck2
+  } else if (updatesEmotion && !updatesCharter && !updatesSchedule) {
+    // A mood is the one config value whose whole point is to be felt rather than read, so it gets
+    // its own card instead of a row that says a table was written.
+    label = entry.emotion ? 'Mood shifted' : 'Mood cleared'
+    caption = entry.emotion ?? null
+    summary = entry.emotion ? `Feeling ${entry.emotion}.` : 'Mood cleared.'
+    icon = Sparkles
+    iconBgClass = 'bg-violet-100'
+    iconColorClass = 'text-violet-600'
   } else if (updatesSchedule) {
     label = scheduleConfirmation === 'updated' ? 'Schedule updated' : 'Schedule already current'
     caption = scheduleCaption
@@ -130,6 +149,8 @@ export function buildAgentConfigEntry(
     summary,
     charterText: updatesCharter ? resolvedCharter ?? null : null,
     scheduleValue: updatesSchedule ? entry.scheduleValue : undefined,
+    emotion: updatesEmotion ? entry.emotion ?? null : undefined,
+    emotionTimeoutSeconds: updatesEmotion ? entry.emotionTimeoutSeconds ?? null : undefined,
     agentConfigCharterChange: charterChange,
     agentConfigConfirmation: confirmation,
     sqlStatements: statements,

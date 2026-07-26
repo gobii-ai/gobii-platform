@@ -4,7 +4,7 @@ import type { ToolCallEntry } from '../../../types/agentChat'
 import type { AgentConfigCharterChange, SqliteInternalTableKind, SqliteStatementOperation } from '../../tooling/agentConfigSql'
 
 export type AgentConfigUpdateConfirmation = Partial<
-  Record<'charter' | 'schedule', 'updated' | 'unchanged'>
+  Record<'charter' | 'schedule' | 'emotion', 'updated' | 'unchanged'>
 >
 
 export type ToolDetailComponent = (props: ToolDetailProps) => ReactElement
@@ -28,6 +28,9 @@ export type ToolEntryDisplay = {
   summary?: string | null
   charterText?: string | null
   scheduleValue?: string | null
+  /** Present only when this entry changed the agent's mood. null means the mood was cleared. */
+  emotion?: string | null
+  emotionTimeoutSeconds?: number | null
   agentConfigCharterChange?: AgentConfigCharterChange | null
   agentConfigConfirmation?: AgentConfigUpdateConfirmation | null
   sqlStatements?: string[]
