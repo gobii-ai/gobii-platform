@@ -1,6 +1,7 @@
 from typing import Any, Mapping
 
 from bleach.css_sanitizer import CSSSanitizer
+from bleach.linkifier import Linker
 from bleach.sanitizer import ALLOWED_ATTRIBUTES, ALLOWED_PROTOCOLS, ALLOWED_TAGS, Cleaner
 
 from api.agent.comms.email_content import convert_body_to_html_and_plaintext
@@ -76,6 +77,9 @@ def _build_html_cleaner(*, allow_cid: bool = False) -> Cleaner:
 HTML_CLEANER = _build_html_cleaner()
 HTML_CID_CLEANER = _build_html_cleaner(allow_cid=True)
 
+# Code shows text exactly as written, so an address quoted as a sample stays text.
+LINKIFY_SKIP_TAGS = {"code", "pre"}
+
 
 def normalize_explicit_email_html(explicit_html: Any) -> str | None:
     if not isinstance(explicit_html, str):
@@ -86,7 +90,19 @@ def normalize_explicit_email_html(explicit_html: Any) -> str | None:
 def sanitize_chat_email_html(html: str | None, *, allow_cid: bool = False) -> str:
     if not html:
         return ""
-    return (HTML_CID_CLEANER if allow_cid else HTML_CLEANER).clean(html)
+    cleaned = (HTML_CID_CLEANER if allow_cid else HTML_CLEANER).clean(html)
+    # Markdown bodies are autolinked on the client by remark-gfm, but HTML reaches the timeline
+    # already rendered and bypasses that entirely, leaving addresses readable but not actionable.
+    # Linkifying here rather than at a call site covers explicit agent HTML, cached bodies, and
+    # cid-rewritten forwards alike, since all of them come through this function.
+    #
+    # A Linker is built per call because it wraps a stateful html5lib parser; sharing one across
+    # concurrently served requests would interleave parses.
+    return Linker(
+        callbacks=[],
+        skip_tags=LINKIFY_SKIP_TAGS,
+        parse_email=True,
+    ).linkify(cleaned)
 
 
 def render_chat_email_body_html(
