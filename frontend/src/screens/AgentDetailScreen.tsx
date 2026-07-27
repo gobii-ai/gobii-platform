@@ -53,6 +53,11 @@ import type { AllowlistInput, AllowlistTableRow, CollaboratorTableRow, PendingAl
 import { useModal } from '../hooks/useModal'
 import { HttpError } from '../api/http'
 import { safeErrorMessage } from '../api/safeErrorMessage'
+import {
+  EMAIL_SENDING_MODE_OPTIONS,
+  EMAIL_SENDING_MODE_STRICTNESS,
+  type EmailSendingMode,
+} from '../constants/emailSendingModes'
 import { readStoredConsoleContext } from '../util/consoleContextStorage'
 import type { IntelligenceTierKey } from '../types/llmIntelligence'
 import type {
@@ -150,6 +155,7 @@ type FormState = {
   dedicatedProxyId: string
   preferredTier: IntelligenceTierKey
   contactApprovalMode: ContactApprovalMode
+  emailSendingMode: EmailSendingMode
 }
 
 function transitionDailyCreditState(
@@ -485,6 +491,7 @@ export function AgentSettingsWorkspace({
       dedicatedProxyId: initialData.dedicatedIps.selectedId ?? '',
       preferredTier: (initialData.agent.preferredLlmTier || 'standard') as IntelligenceTierKey,
       contactApprovalMode: initialData.agent.contactApprovalMode,
+      emailSendingMode: initialData.agent.emailSendingMode,
     }),
     [
       initialData.agent.name,
@@ -494,6 +501,7 @@ export function AgentSettingsWorkspace({
       initialData.agent.isActive,
       initialData.agent.preferredLlmTier,
       initialData.agent.contactApprovalMode,
+      initialData.agent.emailSendingMode,
       initialData.dailyCredits.limit,
       initialData.dailyCredits.sliderValue,
       initialData.dedicatedIps.selectedId,
@@ -576,6 +584,7 @@ export function AgentSettingsWorkspace({
       formState.dedicatedProxyId !== savedFormState.dedicatedProxyId ||
       formState.preferredTier !== savedFormState.preferredTier ||
       formState.contactApprovalMode !== savedFormState.contactApprovalMode ||
+      formState.emailSendingMode !== savedFormState.emailSendingMode ||
       avatarFile !== null ||
       (removeAvatar && Boolean(savedAvatarUrl))
     )
@@ -1225,6 +1234,9 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
         }
         if (data?.contactApprovalMode === 'require_approval' || data?.contactApprovalMode === 'auto_approve_email') {
           nextFormState.contactApprovalMode = data.contactApprovalMode
+        }
+        if (EMAIL_SENDING_MODE_OPTIONS.some((option) => option.value === data?.emailSendingMode)) {
+          nextFormState.emailSendingMode = data.emailSendingMode as EmailSendingMode
         }
         if (serverTierRaw && (initialData.llmIntelligence?.options ?? []).some((option) => option.key === serverTierRaw)) {
           const serverTier = serverTierRaw as IntelligenceTierKey
@@ -1887,6 +1899,7 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
         <input type="hidden" name="whitelist_policy" value={initialData.agent.whitelistPolicy} />
       )}
       <input type="hidden" name="contact_approval_mode" value={formState.contactApprovalMode} />
+      <input type="hidden" name="email_sending_mode" value={formState.emailSendingMode} />
         <CollapsibleSettingsSection
           id="agent-identity"
           title="General Settings"
@@ -2134,6 +2147,10 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
                 || savedFormState.contactApprovalMode === 'auto_approve_email'
               }
               contactApprovalMode={formState.contactApprovalMode}
+              emailReviewOutboxEnabled={initialData.features.emailReviewOutbox}
+              emailSendingMode={formState.emailSendingMode}
+              effectiveEmailSendingMode={initialData.agent.effectiveEmailSendingMode}
+              organizationMinimumEmailSendingMode={initialData.agent.organizationMinimumEmailSendingMode}
               saving={saving}
               onAddContact={openAddContactModal}
               onEditContact={openEditContactModal}
@@ -2141,6 +2158,10 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
               onContactApprovalModeChange={(contactApprovalMode) => setFormState((prev) => ({
                 ...prev,
                 contactApprovalMode,
+              }))}
+              onEmailSendingModeChange={(emailSendingMode) => setFormState((prev) => ({
+                ...prev,
+                emailSendingMode,
               }))}
               contactRequestsUrl={initialData.urls.contactRequests}
               onOpenContactRequests={onOpenContactRequests}
@@ -2403,11 +2424,16 @@ type AllowlistManagerProps = {
   projectedSlotsUsed: number
   contactAutoApproveEmailEnabled: boolean
   contactApprovalMode: ContactApprovalMode
+  emailReviewOutboxEnabled: boolean
+  emailSendingMode: EmailSendingMode
+  effectiveEmailSendingMode: EmailSendingMode
+  organizationMinimumEmailSendingMode: EmailSendingMode | null
   saving: boolean
   onAddContact: () => void
   onEditContact: (row: AllowlistTableRow) => void
   onRemoveRows: (rows: AllowlistTableRow[]) => void
   onContactApprovalModeChange: (mode: ContactApprovalMode) => void
+  onEmailSendingModeChange: (mode: EmailSendingMode) => void
   contactRequestsUrl: string
   onOpenContactRequests?: () => void
 }
@@ -2418,11 +2444,16 @@ function AllowlistManager({
   projectedSlotsUsed,
   contactAutoApproveEmailEnabled,
   contactApprovalMode,
+  emailReviewOutboxEnabled,
+  emailSendingMode,
+  effectiveEmailSendingMode,
+  organizationMinimumEmailSendingMode,
   saving,
   onAddContact,
   onEditContact,
   onRemoveRows,
   onContactApprovalModeChange,
+  onEmailSendingModeChange,
   contactRequestsUrl,
   onOpenContactRequests,
 }: AllowlistManagerProps) {
@@ -2431,10 +2462,13 @@ function AllowlistManager({
   const embeddedInfoCardClassName = 'rounded-xl border border-slate-200/20 bg-slate-950/35 px-4 py-4'
   const embeddedInfoIconClassName = 'flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200/20 bg-slate-900/45 text-slate-300'
   const embeddedPrimaryActionClassName = getSettingsActionButtonClassName({ tone: 'primary' })
+  const automaticallyAllowsEmailContacts = emailReviewOutboxEnabled
+    ? effectiveEmailSendingMode === 'send_automatically'
+    : contactApprovalMode === 'auto_approve_email'
 
   return (
     <div className="space-y-5">
-      {contactAutoApproveEmailEnabled && (
+      {!emailReviewOutboxEnabled && contactAutoApproveEmailEnabled && (
         <fieldset className="space-y-3">
           <legend className="text-sm font-semibold text-slate-700">New contact approval</legend>
           <p className="text-xs text-slate-500">Choose how this agent handles email addresses that are not already listed.</p>
@@ -2484,6 +2518,64 @@ function AllowlistManager({
         </fieldset>
       )}
 
+      {emailReviewOutboxEnabled && (
+        <fieldset className="space-y-3">
+          <legend className="text-sm font-semibold text-slate-700">External email autonomy</legend>
+          <p className="text-xs text-slate-500">Choose when a manager must review this agent's external email before it is sent.</p>
+          {organizationMinimumEmailSendingMode && (
+            <p className="text-xs text-blue-300">
+              Your organization enforces at least {EMAIL_SENDING_MODE_OPTIONS.find((option) => option.value === organizationMinimumEmailSendingMode)?.title}.
+            </p>
+          )}
+          <div className="grid gap-3 lg:grid-cols-3">
+            {EMAIL_SENDING_MODE_OPTIONS.map((option) => {
+              const Icon = option.value === 'review_all_external' ? ShieldAlert : Mail
+              const Badge = option.value === 'send_automatically' ? Zap : null
+              const selected = emailSendingMode === option.value
+              const prohibited = organizationMinimumEmailSendingMode
+                ? EMAIL_SENDING_MODE_STRICTNESS[option.value] < EMAIL_SENDING_MODE_STRICTNESS[organizationMinimumEmailSendingMode]
+                : false
+              return (
+                <label
+                  key={option.value}
+                  className={`flex cursor-pointer items-start gap-3 rounded-xl border px-4 py-4 text-left transition-colors ${
+                    selected
+                      ? 'border-blue-400/60 bg-blue-950/30'
+                      : 'border-slate-200/20 bg-transparent hover:border-slate-300/40'
+                  } ${saving || prohibited ? 'cursor-not-allowed opacity-60' : ''}`}
+                >
+                  <span className="relative flex size-9 shrink-0 items-center justify-center rounded-lg border border-slate-200/20 bg-slate-900/45 text-slate-300">
+                    <Icon className="size-4" aria-hidden="true" />
+                    {Badge && <Badge className="absolute -right-1 -top-1 size-3 text-amber-300" aria-hidden="true" />}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm font-semibold text-slate-100">{option.title}</span>
+                    <span className="mt-1 block text-xs leading-5 text-slate-400">{option.description}</span>
+                  </span>
+                  <input
+                    type="radio"
+                    name="email-sending-mode-choice"
+                    value={option.value}
+                    checked={selected}
+                    disabled={saving || prohibited}
+                    onChange={() => onEmailSendingModeChange(option.value)}
+                    className="mt-2 size-4 shrink-0 accent-blue-500"
+                  />
+                </label>
+              )
+            })}
+          </div>
+          {automaticallyAllowsEmailContacts && (
+            <div className="flex items-start gap-2 rounded-lg border border-amber-300/20 bg-amber-950/30 px-4 py-3 text-xs leading-5 text-amber-100">
+              <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-400" aria-hidden="true" />
+              <p>
+                This agent can send external email without human review. New contacts remain visible and removable below. SMS contacts always require approval.
+              </p>
+            </div>
+          )}
+        </fieldset>
+      )}
+
       {!state.emailVerified && (
         <div className={embeddedInfoBannerClassName}>
           <Mail className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" aria-hidden="true" />
@@ -2518,7 +2610,7 @@ function AllowlistManager({
               </a>
             )}
           </div>
-          {contactApprovalMode === 'auto_approve_email' && (
+          {automaticallyAllowsEmailContacts && (
             <p className="mt-2 pl-7 text-xs text-amber-200/80">
               Email requests shown here predate automatic approval; SMS requests always need your review.
             </p>

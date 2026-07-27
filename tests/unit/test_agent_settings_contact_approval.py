@@ -15,7 +15,7 @@ from api.models import (
     CommsChannel,
     PersistentAgent,
 )
-from constants.feature_flags import CONTACT_AUTO_APPROVE_EMAIL
+from constants.feature_flags import CONTACT_AUTO_APPROVE_EMAIL, EMAIL_REVIEW_OUTBOX
 
 
 @tag("batch_console_allowlist")
@@ -85,7 +85,10 @@ class AgentSettingsContactApprovalTests(TestCase):
         )
         self.client.force_login(self.owner)
 
-        with override_flag(CONTACT_AUTO_APPROVE_EMAIL, active=True):
+        with (
+            override_flag(CONTACT_AUTO_APPROVE_EMAIL, active=True),
+            override_flag(EMAIL_REVIEW_OUTBOX, active=False),
+        ):
             response = self.client.post(
                 self.url,
                 self._settings_form(contact_approval_mode="auto_approve_email"),
@@ -96,13 +99,20 @@ class AgentSettingsContactApprovalTests(TestCase):
         self.agent.refresh_from_db()
         pending.refresh_from_db()
         self.assertEqual(self.agent.contact_approval_mode, "auto_approve_email")
+        self.assertEqual(
+            self.agent.email_sending_mode,
+            PersistentAgent.EmailSendingMode.SEND_AUTOMATICALLY,
+        )
         self.assertEqual(pending.status, CommsAllowlistRequest.RequestStatus.PENDING)
         self.assertEqual(response.json()["contactApprovalMode"], "auto_approve_email")
 
     def test_settings_update_rejects_new_auto_approve_opt_in_when_flag_disabled(self):
         self.client.force_login(self.owner)
 
-        with override_flag(CONTACT_AUTO_APPROVE_EMAIL, active=False):
+        with (
+            override_flag(CONTACT_AUTO_APPROVE_EMAIL, active=False),
+            override_flag(EMAIL_REVIEW_OUTBOX, active=False),
+        ):
             response = self.client.post(
                 self.url,
                 self._settings_form(contact_approval_mode="auto_approve_email"),
@@ -119,10 +129,14 @@ class AgentSettingsContactApprovalTests(TestCase):
 
     def test_existing_auto_approve_mode_is_preserved_when_flag_disabled(self):
         self.agent.contact_approval_mode = PersistentAgent.ContactApprovalMode.AUTO_APPROVE_EMAIL
-        self.agent.save(update_fields=["contact_approval_mode"])
+        self.agent.email_sending_mode = PersistentAgent.EmailSendingMode.SEND_AUTOMATICALLY
+        self.agent.save(update_fields=["contact_approval_mode", "email_sending_mode"])
         self.client.force_login(self.owner)
 
-        with override_flag(CONTACT_AUTO_APPROVE_EMAIL, active=False):
+        with (
+            override_flag(CONTACT_AUTO_APPROVE_EMAIL, active=False),
+            override_flag(EMAIL_REVIEW_OUTBOX, active=False),
+        ):
             response = self.client.post(
                 self.url,
                 self._settings_form(name="Updated while rollout disabled"),
@@ -136,13 +150,21 @@ class AgentSettingsContactApprovalTests(TestCase):
             self.agent.contact_approval_mode,
             PersistentAgent.ContactApprovalMode.AUTO_APPROVE_EMAIL,
         )
+        self.assertEqual(
+            self.agent.email_sending_mode,
+            PersistentAgent.EmailSendingMode.SEND_AUTOMATICALLY,
+        )
 
     def test_existing_auto_approve_mode_can_be_disabled_when_flag_is_off(self):
         self.agent.contact_approval_mode = PersistentAgent.ContactApprovalMode.AUTO_APPROVE_EMAIL
-        self.agent.save(update_fields=["contact_approval_mode"])
+        self.agent.email_sending_mode = PersistentAgent.EmailSendingMode.SEND_AUTOMATICALLY
+        self.agent.save(update_fields=["contact_approval_mode", "email_sending_mode"])
         self.client.force_login(self.owner)
 
-        with override_flag(CONTACT_AUTO_APPROVE_EMAIL, active=False):
+        with (
+            override_flag(CONTACT_AUTO_APPROVE_EMAIL, active=False),
+            override_flag(EMAIL_REVIEW_OUTBOX, active=False),
+        ):
             response = self.client.post(
                 self.url,
                 self._settings_form(contact_approval_mode="require_approval"),
@@ -154,6 +176,10 @@ class AgentSettingsContactApprovalTests(TestCase):
         self.assertEqual(
             self.agent.contact_approval_mode,
             PersistentAgent.ContactApprovalMode.REQUIRE_APPROVAL,
+        )
+        self.assertEqual(
+            self.agent.email_sending_mode,
+            PersistentAgent.EmailSendingMode.REVIEW_NEW_CONTACTS,
         )
 
     def test_settings_update_rejects_invalid_mode(self):

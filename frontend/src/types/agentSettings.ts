@@ -1,3 +1,4 @@
+import type { EmailSendingMode } from '../constants/emailSendingModes'
 import type { LlmIntelligenceConfig } from './llmIntelligence'
 
 export type PrimaryEndpoint = {
@@ -29,6 +30,9 @@ export type AgentSummary = {
   pendingTransfer: PendingTransfer | null
   whitelistPolicy: string
   contactApprovalMode: ContactApprovalMode
+  emailSendingMode: EmailSendingMode
+  effectiveEmailSendingMode: EmailSendingMode
+  organizationMinimumEmailSendingMode: EmailSendingMode | null
   organization: AgentOrganization
   preferredLlmTier: string
 }
@@ -233,6 +237,7 @@ export type AgentSettingsData = {
   features: {
     organizations: boolean
     contactAutoApproveEmail: boolean
+    emailReviewOutbox: boolean
   }
   reassignment: AgentSettingsReassignmentInfo
   llmIntelligence: LlmIntelligenceConfig | null

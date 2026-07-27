@@ -38,6 +38,11 @@ from api.services.contact_authorization import (
     AutomaticContactAuthorizationError,
     authorize_email_contacts,
 )
+from api.services.outbound_email_policy import (
+    classify_email_recipients,
+    email_review_outbox_enabled,
+)
+from api.services.outbound_email_review import queue_message_for_review
 from .attachment_guidance import SEND_EMAIL_ATTACHMENTS_DESCRIPTION
 
 logger = logging.getLogger(__name__)
@@ -175,6 +180,7 @@ def get_send_email_tool() -> Dict[str, Any]:
             "description": (
                 "Body-only HTML: omit <html>/<head>/<body>, Markdown, and em/en/double dashes. "
                 "No <style> blocks/classes; inline CSS only. "
+                "A successful call may return pending_approval. When it does, the recipient has not received the email: tell the user it is awaiting human approval and never retry the send. "
                 "Report emails need distinct styled sections/tables and highlighted values, plus a tasteful icon marker and obvious inline-styled badge for key status/value. Never leave metrics in plain lists or use Markdown pipe tables."
             ),
             "parameters": {
@@ -269,13 +275,35 @@ def execute_send_email(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
         from django.db import close_old_connections
         from django.db.utils import OperationalError
         all_recipients = [to_address] + cc_addresses
-        if agent.contact_approval_mode == PersistentAgent.ContactApprovalMode.AUTO_APPROVE_EMAIL:
+        outbox_enabled = email_review_outbox_enabled()
+        policy_decision = classify_email_recipients(agent, all_recipients) if outbox_enabled else None
+        if policy_decision and policy_decision.blocked_recipients:
+            blocked = policy_decision.blocked_recipients[0]
+            return {
+                "status": "error",
+                "message": (
+                    f"Outbound email is disabled for contact '{blocked}'. "
+                    "The owner can enable it in Contacts & Access."
+                ),
+            }
+
+        requires_review = bool(policy_decision and policy_decision.requires_review)
+        should_auto_authorize = (
+            policy_decision is not None
+            and policy_decision.effective_mode == PersistentAgent.EmailSendingMode.SEND_AUTOMATICALLY
+        ) or (
+            not outbox_enabled
+            and agent.contact_approval_mode == PersistentAgent.ContactApprovalMode.AUTO_APPROVE_EMAIL
+        )
+        if should_auto_authorize:
             try:
                 authorize_email_contacts(agent, all_recipients)
             except AutomaticContactAuthorizationError as exc:
                 return {"status": "error", "message": str(exc)}
 
-        for recipient in all_recipients:
+        for recipient in (() if requires_review else all_recipients):
+            if policy_decision and recipient in policy_decision.internal_recipients:
+                continue
             if not agent.is_recipient_whitelisted(CommsChannel.EMAIL, recipient):
                 if CommsAllowlistEntry.objects.filter(
                     agent=agent,
@@ -391,27 +419,43 @@ def execute_send_email(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
                 except OperationalError as exc:
                     raise _EmailMessageCreateOperationalError from exc
 
-                # Immediately attempt delivery
+                if requires_review:
+                    review = queue_message_for_review(message)
+                    return message, review
+
                 deliver_agent_email(message)
 
                 # deliver_agent_email updates this instance before returning; checking it here lets
                 # the transaction roll back before message-created on_commit handlers can run.
                 if message.latest_status == DeliveryStatus.FAILED:
                     raise _EmailDeliveryFailed(message.latest_error_message)
-                return message
+                return message, None
 
         try:
             try:
-                message = _create_and_deliver_message()
+                message, review = _create_and_deliver_message()
             except _EmailMessageCreateOperationalError:
                 close_old_connections()
-                message = _create_and_deliver_message()
+                message, review = _create_and_deliver_message()
         except _EmailDeliveryFailed as exc:
             return {"status": "error", "message": f"Email failed to send: {exc}"}
 
         close_old_connections()
         if resolved_attachments:
             broadcast_message_attachment_update(str(message.id))
+
+        if review is not None:
+            return {
+                "status": "pending_approval",
+                "delivery_status": "not_sent",
+                "message": (
+                    "Email placed in Outbox for approval. The recipient has not received it. "
+                    "Do not retry or claim it was sent."
+                ),
+                "message_id": str(message.id),
+                "outbox_item_id": str(review.id),
+                "auto_sleep_ok": False,
+            }
 
         return {
             "status": "ok",

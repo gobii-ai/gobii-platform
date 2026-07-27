@@ -170,7 +170,7 @@ jobs:
           - batch: shard_08
             tag: batch_agent_tools sqlite_analysis batch_event_llm batch_agent_secrets_ctx batch_task_credits batch_allowlist_rules batch_api_decodo batch_llm_intelligence batch_llm_admin_cleanup batch_dedicated_proxy_service batch_pa_step_credits oss_readiness_batch batch_api_serializer batch_fbp_middleware batch_browser_task_db batch_console_email_oauth
           - batch: shard_09
-            tag: context_hints_batch batch_text_sanitization batch_billing batch_outbound_delivery batch_console_context batch_agent_limits batch_email_sender_db batch_secrets_profiles batch_contact_requests batch_outbound_dedupe batch_email_allowlist batch_redis_leaks batch_api_tasks batch_promptree batch_sqlite_quality
+            tag: context_hints_batch batch_text_sanitization batch_billing batch_outbound_delivery batch_console_context batch_agent_limits batch_email_sender_db batch_secrets_profiles batch_contact_requests batch_outbound_dedupe batch_email_allowlist batch_redis_leaks batch_api_tasks batch_promptree batch_sqlite_quality batch_outbox
           - batch: shard_10
             tag: batch_agent_filesystem batch_api_persistent_agents batch_console_agents_management batch_tool_results batch_owner_billing batch_attachment_guidance batch_link_shortener batch_step_compaction batch_browser_profile batch_email_footer batch_outbound_email batch_web_task_followup batch_user_flags
     env:
