@@ -38,6 +38,14 @@ from api.services.sandbox_internal_paths import (
 )
 from api.services.system_settings import get_sandbox_compute_enabled, get_sandbox_compute_require_proxy
 from api.sandbox_utils import monotonic_elapsed_ms as _elapsed_ms, normalize_timeout as _normalize_timeout
+from api.utils.sqlite_files import (
+    SQLiteFileValidationError,
+    backup_sqlite_file,
+    initialize_sqlite_file,
+    remove_sqlite_sidecars as _remove_sqlite_sidecars,
+    replace_sqlite_file,
+    validate_sqlite_file,
+)
 from config.redis_client import get_redis_client
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from waffle import get_waffle_flag_model
@@ -60,7 +68,6 @@ _NO_PROXY_ENV_KEYS = (
 )
 _SANDBOX_PROXY_CLEARED_ATTR = "_sandbox_proxy_cleared"
 _CUSTOM_TOOL_SQLITE_MIME_TYPE = "application/vnd.sqlite3"
-_SQLITE_SIDECAR_SUFFIXES = ("-wal", "-shm", "-journal")
 _ACTIVE_CONVERSATION_CHANNEL_CACHE_ATTR = "_sandbox_active_conversation_channel"
 _ACTIVE_CONVERSATION_CHANNEL_UNSET = object()
 
@@ -983,51 +990,13 @@ def _decode_sync_change_content(change: Dict[str, Any]) -> Optional[bytes]:
     return None
 
 
-def _sqlite_sidecar_paths(db_path: str) -> list[str]:
-    return [f"{db_path}{suffix}" for suffix in _SQLITE_SIDECAR_SUFFIXES]
-
-
-def _remove_sqlite_sidecars(db_path: str) -> None:
-    for sidecar_path in _sqlite_sidecar_paths(db_path):
-        try:
-            os.remove(sidecar_path)
-        except FileNotFoundError:
-            continue
-
-
 def _snapshot_sqlite_file_content(db_path: str) -> bytes:
     with tempfile.TemporaryDirectory(prefix="gobii-sqlite-sync-") as tmp_dir:
         snapshot_path = os.path.join(tmp_dir, "snapshot.db")
-        source_conn = sqlite3.connect(db_path, timeout=5)
-        snapshot_conn = sqlite3.connect(snapshot_path, timeout=5)
-        try:
-            try:
-                source_conn.execute("PRAGMA busy_timeout=5000;")
-            except sqlite3.Error:
-                pass
-            source_conn.backup(snapshot_conn)
-            snapshot_conn.commit()
-        finally:
-            snapshot_conn.close()
-            source_conn.close()
-
+        backup_sqlite_file(db_path, snapshot_path)
+        validate_sqlite_file(snapshot_path)
         with open(snapshot_path, "rb") as handle:
             return handle.read()
-
-
-def _check_sqlite_integrity(db_path: str) -> tuple[bool, str]:
-    conn = sqlite3.connect(db_path, timeout=5)
-    try:
-        try:
-            conn.execute("PRAGMA busy_timeout=5000;")
-        except sqlite3.Error:
-            pass
-        row = conn.execute("PRAGMA quick_check(1);").fetchone()
-    finally:
-        conn.close()
-
-    message = str(row[0]) if row and row[0] is not None else "empty quick_check result"
-    return message.lower() == "ok", message
 
 
 def _restore_sqlite_file_content(db_path: str, content: bytes) -> tuple[bool, str]:
@@ -1041,14 +1010,10 @@ def _restore_sqlite_file_content(db_path: str, content: bytes) -> tuple[bool, st
         with os.fdopen(stage_descriptor, "wb") as handle:
             handle.write(content)
         try:
-            valid, message = _check_sqlite_integrity(stage_path)
-        except sqlite3.Error as exc:
+            replace_sqlite_file(stage_path, db_path)
+        except SQLiteFileValidationError as exc:
             return False, str(exc)
-        if not valid:
-            return False, message
-        _remove_sqlite_sidecars(db_path)
-        os.replace(stage_path, db_path)
-        return True, message
+        return True, "ok"
     finally:
         try:
             os.remove(stage_path)
@@ -1058,11 +1023,9 @@ def _restore_sqlite_file_content(db_path: str, content: bytes) -> tuple[bool, st
 
 
 def _ensure_sqlite_database(db_path: str) -> None:
-    if os.path.exists(db_path):
+    if os.path.exists(db_path) and os.path.getsize(db_path) > 0:
         return
-    os.makedirs(os.path.dirname(db_path), exist_ok=True)
-    connection = sqlite3.connect(db_path, timeout=5)
-    connection.close()
+    initialize_sqlite_file(db_path)
 
 
 def _sqlite_sync_mode() -> str:
@@ -1920,7 +1883,7 @@ class SandboxComputeService:
         if os.path.exists(local_sqlite_db_path):
             try:
                 content = _snapshot_sqlite_file_content(local_sqlite_db_path)
-            except (OSError, sqlite3.Error) as exc:
+            except (OSError, sqlite3.Error, SQLiteFileValidationError) as exc:
                 return {"status": "error", "message": f"Failed to snapshot shared SQLite DB: {exc}"}
             content_size = len(content)
             entry.update(
@@ -2103,8 +2066,9 @@ class SandboxComputeService:
                     if result.get("status") == "ok":
                         break
                 if result.get("status") == "ok":
-                    valid, integrity_message = _check_sqlite_integrity(stage_path)
-                    if not valid:
+                    try:
+                        replace_sqlite_file(stage_path, local_sqlite_db_path)
+                    except SQLiteFileValidationError as exc:
                         logger.warning(
                             "Sandbox SQLite validation failed agent=%s direction=sandbox_to_worker "
                             "db_size_bytes=%s sqlite_version=%s",
@@ -2114,11 +2078,9 @@ class SandboxComputeService:
                         )
                         result = {
                             "status": "error",
-                            "message": f"Replicated SQLite DB failed integrity check: {integrity_message}",
+                            "message": f"Replicated SQLite DB failed integrity check: {exc}",
                         }
                     else:
-                        _remove_sqlite_sidecars(local_sqlite_db_path)
-                        os.replace(stage_path, local_sqlite_db_path)
                         synced_result = {
                             **result,
                             "sqlite_synced": True,
@@ -2150,7 +2112,7 @@ class SandboxComputeService:
                     agent.id,
                     result.get("status"),
                 )
-            except (OSError, sqlite3.Error) as exc:
+            except (OSError, sqlite3.Error, SQLiteFileValidationError) as exc:
                 if mode == "rsync":
                     return _record_sqlite_sync_result(
                         agent_id=agent.id,

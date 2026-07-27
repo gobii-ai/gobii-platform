@@ -19,6 +19,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import time
 from typing import Optional
 
 import zstandard as zstd
@@ -26,7 +27,20 @@ from django.core.files import File
 from django.core.files.storage import default_storage
 from opentelemetry import trace
 
+from api.utils.sqlite_files import create_validated_sqlite_snapshot, validate_sqlite_file
+
 from .sqlite_guardrails import clear_guarded_connection, open_guarded_sqlite_connection
+from .sqlite_recovery import (
+    SQLITE_STATE_RECOVERED_ERROR,
+    SQLITE_STATE_UNRECOVERABLE_ERROR,
+    SQLiteStateError,
+    SQLiteStatePersistenceError,
+    SQLiteStateSession,
+    SQLiteStateUnrecoverableError,
+    SQLiteStateValidationError,
+    reset_sqlite_state_session,
+    set_sqlite_state_session,
+)
 from . import sqlite_analysis, sqlite_digest
 
 logger = logging.getLogger(__name__)
@@ -1048,24 +1062,20 @@ def _restore_sqlite_db_from_storage(storage_key: str, db_path: str, agent_uuid: 
         with default_storage.open(storage_key, "rb") as src, open(archive_path, "wb") as dst:
             shutil.copyfileobj(src, dst)
         _decompress_sqlite_archive_in_subprocess(archive_path, db_path)
+        validate_sqlite_file(db_path)
         return True
-    except Exception:
-        logger.warning(
-            "Failed to restore SQLite DB for agent %s – starting fresh.",
+    except (OSError, RuntimeError, SQLiteStateValidationError, zstd.ZstdError):
+        logger.error(
+            "Failed to restore a valid SQLite DB for agent %s; refusing to start fresh.",
             agent_uuid,
             exc_info=True,
         )
-        try:
-            if os.path.exists(db_path):
-                os.remove(db_path)
-        except Exception:
-            logger.debug("Failed to delete partially restored SQLite DB for agent %s", agent_uuid, exc_info=True)
-        return False
+        raise
     finally:
         try:
             if os.path.exists(archive_path):
                 os.remove(archive_path)
-        except Exception:
+        except OSError:
             logger.debug("Failed to clean up restore archive for agent %s", agent_uuid, exc_info=True)
 
 
@@ -1082,102 +1092,225 @@ def agent_sqlite_db(agent_uuid: str):  # noqa: D401 – simple generator context
 def _agent_sqlite_db_uncoordinated(agent_uuid: str):
     """Context manager that restores/persists the per-agent SQLite DB.
 
-    1. Attempts to download and decompress the DB from object storage.
+    1. Downloads, decompresses, and validates the DB from object storage.
     2. Yields the on-disk path to the SQLite file in a temporary directory.
-    3. On exit, runs PRAGMA optimize and conditional compaction, then compresses
-       the DB with zstd and uploads to object storage, unless the DB grew
-       beyond 100MB, in which case we wipe persisted state.
+    3. On exit, snapshots the DB, performs maintenance on that copy, validates
+       it, and uploads without a delete window unless the existing 100MB wipe applies.
     """
     storage_key = sqlite_storage_key(agent_uuid)
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         db_path = os.path.join(tmp_dir, "state.db")
+        checkpoint_path = os.path.join(tmp_dir, "state.checkpoint.db")
 
         # ---------------- Restore phase ---------------- #
         with tracer.start_as_current_span("Restore Agent SQLite State") as restore_span:
             restored = False
             if default_storage.exists(storage_key):
                 restored = _restore_sqlite_db_from_storage(storage_key, db_path, agent_uuid)
+            session = SQLiteStateSession(
+                agent_uuid=agent_uuid,
+                db_path=db_path,
+                checkpoint_path=checkpoint_path,
+            )
+            if not restored:
+                session.initialize()
+            session.checkpoint(phase="initial_restore")
             restore_span.set_attribute("sqlite.restored", restored)
             if os.path.exists(db_path):
                 restore_span.set_attribute("sqlite.restored_bytes", os.path.getsize(db_path))
 
-        token = set_sqlite_db_path(db_path)
+        db_path_token = set_sqlite_db_path(db_path)
+        session_token = set_sqlite_state_session(session)
 
         try:
             yield db_path
         finally:
-            if os.path.exists(db_path):
+            try:
+                if os.path.exists(db_path):
+                    _persist_validated_sqlite_state(
+                        session=session,
+                        storage_key=storage_key,
+                        tmp_dir=tmp_dir,
+                    )
+            except SQLiteStateError as exc:
+                recovery_count_before = session.recovery_count
                 try:
-                    conn = open_guarded_sqlite_connection(db_path, allow_attach=True)
-                    try:
-                        _drop_ephemeral_tables(conn)
-                        conn.commit()
-                        try:
-                            conn.execute("PRAGMA optimize;")
-                        except Exception:
-                            pass
-                        page_count = int(conn.execute("PRAGMA page_count;").fetchone()[0])
-                        free_pages = int(conn.execute("PRAGMA freelist_count;").fetchone()[0])
-                        db_size_bytes = os.path.getsize(db_path)
-                        if _should_compact_sqlite(db_size_bytes, page_count, free_pages):
-                            # Routine VACUUM churns nearly every page and defeats
-                            # incremental sandbox replication. Compact only when
-                            # reclaiming space can prevent an oversize wipe.
-                            conn.execute("VACUUM;")
-                        conn.commit()
-                    finally:
-                        try:
-                            clear_guarded_connection(conn)
-                            conn.close()
-                        except Exception:
-                            pass
-                except Exception:  # noqa: BLE001
-                    logger.warning(
-                        "SQLite maintenance (VACUUM/optimize) failed for agent %s",
+                    session.protect(phase="final_persistence_failure")
+                except SQLiteStateError as recovery_exc:
+                    _log_sqlite_persistence_error(
                         agent_uuid,
-                        exc_info=True,
+                        recovery_exc,
+                        recovered=False,
                     )
+                    raise
+                _log_sqlite_persistence_error(
+                    agent_uuid,
+                    exc,
+                    recovered=session.recovery_count > recovery_count_before,
+                )
+                raise
+            finally:
+                reset_sqlite_state_session(session_token)
+                reset_sqlite_db_path(db_path_token)
 
-                db_size_bytes = os.path.getsize(db_path)
-                db_size_mb = db_size_bytes / (1024 * 1024)
 
-                if db_size_mb > 100:
-                    logger.info(
-                        "SQLite DB for agent %s exceeds 100MB (%.2f MB) - wiping database instead of persisting",
-                        agent_uuid,
-                        db_size_mb,
+def _maintain_sqlite_persistence_candidate(db_path: str) -> None:
+    conn = open_guarded_sqlite_connection(db_path, allow_attach=True)
+    try:
+        _drop_ephemeral_tables(conn)
+        conn.commit()
+        try:
+            conn.execute("PRAGMA optimize;")
+        except sqlite3.Error:
+            logger.debug("SQLite optimize failed for persistence candidate", exc_info=True)
+        page_count = int(conn.execute("PRAGMA page_count;").fetchone()[0])
+        free_pages = int(conn.execute("PRAGMA freelist_count;").fetchone()[0])
+        db_size_bytes = os.path.getsize(db_path)
+        if _should_compact_sqlite(db_size_bytes, page_count, free_pages):
+            # Compact only when reclaiming space can prevent the existing oversize wipe.
+            conn.execute("VACUUM;")
+        conn.commit()
+    finally:
+        clear_guarded_connection(conn)
+        conn.close()
+
+
+def _persist_validated_sqlite_state(
+    *,
+    session: SQLiteStateSession,
+    storage_key: str,
+    tmp_dir: str,
+) -> None:
+    candidate_path = os.path.join(tmp_dir, "state.persist.db")
+    archive_path = os.path.join(tmp_dir, "state.persist.db.zst")
+    with tracer.start_as_current_span("Persist Agent SQLite State") as persist_span:
+        started_at = time.monotonic()
+        try:
+            create_validated_sqlite_snapshot(session.db_path, candidate_path)
+            _maintain_sqlite_persistence_candidate(candidate_path)
+            validate_sqlite_file(candidate_path)
+
+            db_size_bytes = os.path.getsize(candidate_path)
+            db_size_mb = db_size_bytes / (1024 * 1024)
+            persist_span.set_attribute("sqlite.validation.ok", True)
+            persist_span.set_attribute("sqlite.persist_bytes", db_size_bytes)
+
+            if db_size_mb > 100:
+                logger.info(
+                    "SQLite DB for agent %s exceeds 100MB (%.2f MB) - wiping database instead of persisting",
+                    session.agent_uuid,
+                    db_size_mb,
+                )
+                if default_storage.exists(storage_key):
+                    default_storage.delete(storage_key)
+                return
+
+            cctx = zstd.ZstdCompressor(level=3)
+            with open(candidate_path, "rb") as source, open(archive_path, "wb") as archive:
+                cctx.copy_stream(source, archive)
+
+            # Opening the canonical key for writing lets overwrite-capable backends replace it
+            # without a delete window. GCS publishes the new generation only after upload.
+            _upload_sqlite_archive(storage_key, archive_path)
+            persist_span.set_attribute("sqlite.persistence.ok", True)
+        except (OSError, RuntimeError, sqlite3.Error, SQLiteStateError, zstd.ZstdError) as exc:
+            persist_span.set_attribute("sqlite.persistence.ok", False)
+            if not isinstance(exc, SQLiteStatePersistenceError):
+                persist_span.set_attribute("sqlite.validation.ok", False)
+            persist_span.record_exception(exc)
+            if isinstance(exc, SQLiteStateError):
+                raise
+            raise SQLiteStateValidationError(
+                f"Failed to create or persist a validated SQLite candidate: {exc}"
+            ) from exc
+        finally:
+            persist_span.set_attribute(
+                "sqlite.persist_duration_ms",
+                int(round((time.monotonic() - started_at) * 1000)),
+            )
+            for path in (candidate_path, archive_path):
+                try:
+                    os.remove(path)
+                except FileNotFoundError:
+                    pass
+
+
+def _upload_sqlite_archive(storage_key: str, archive_path: str) -> None:
+    try:
+        if default_storage.exists(storage_key):
+            with open(archive_path, "rb") as archive, default_storage.open(
+                storage_key, "wb"
+            ) as destination:
+                shutil.copyfileobj(archive, destination)
+            return
+
+        with open(archive_path, "rb") as archive:
+            saved_key = default_storage.save(storage_key, File(archive))
+        if saved_key != storage_key:
+            try:
+                default_storage.delete(saved_key)
+            finally:
+                raise OSError(
+                    f"SQLite storage backend saved an unexpected key: {saved_key}"
+                )
+    except Exception as exc:  # noqa: BLE001 - storage backends expose provider-specific errors.
+        if isinstance(exc, SQLiteStateError):
+            raise
+        raise SQLiteStatePersistenceError(f"SQLite archive upload failed: {exc}") from exc
+
+
+def _log_sqlite_persistence_error(
+    agent_uuid: str,
+    exc: BaseException,
+    *,
+    recovered: bool,
+) -> None:
+    from django.core.exceptions import ValidationError
+    from django.db import DatabaseError
+
+    from api.models import PersistentAgent, PersistentAgentError
+    from api.services.agent_error_logging import log_agent_error
+
+    try:
+        agent = PersistentAgent.objects.filter(id=agent_uuid).first()
+    except (DatabaseError, ValidationError, TypeError, ValueError):
+        logger.error(
+            "Failed to resolve agent %s while recording SQLite persistence failure",
+            agent_uuid,
+            exc_info=True,
+        )
+        return
+    if agent is None:
+        logger.error("Cannot record SQLite persistence failure for missing agent %s", agent_uuid)
+        return
+    log_agent_error(
+        agent,
+        category=PersistentAgentError.Category.TOOL_PERSISTENCE,
+        source="api.agent.tools.sqlite_state._persist_validated_sqlite_state",
+        message=f"SQLite persistence failed for agent {agent_uuid}",
+        exc=exc,
+        logger=logger,
+        context={
+            "agent_id": str(agent_uuid),
+            "error_code": (
+                SQLITE_STATE_UNRECOVERABLE_ERROR
+                if isinstance(exc, SQLiteStateUnrecoverableError)
+                else (
+                    "sqlite_persistence_upload_failed"
+                    if isinstance(exc, SQLiteStatePersistenceError)
+                    else (
+                        SQLITE_STATE_RECOVERED_ERROR
+                        if recovered
+                        else "sqlite_persistence_failed"
                     )
-                    if default_storage.exists(storage_key):
-                        default_storage.delete(storage_key)
-                else:
-                    tmp_zst_path = db_path + ".zst"
-                    try:
-                        cctx = zstd.ZstdCompressor(level=3)
-                        with open(db_path, "rb") as f_in, open(tmp_zst_path, "wb") as f_out:
-                            cctx.copy_stream(f_in, f_out)
-
-                        if default_storage.exists(storage_key):
-                            default_storage.delete(storage_key)
-
-                        with open(tmp_zst_path, "rb") as f_in:
-                            default_storage.save(storage_key, File(f_in))
-                    except Exception:  # noqa: BLE001
-                        logger.exception(
-                            "Failed to persist SQLite DB for agent %s", agent_uuid
-                        )
-                    finally:
-                        try:
-                            os.remove(tmp_zst_path)
-                        except Exception:
-                            pass
-
-            reset_sqlite_db_path(token)
+                )
+            ),
+            "recovered": recovered,
+        },
+    )
 
 
 def _drop_ephemeral_tables(conn) -> None:
     for table_name in EPHEMERAL_TABLES:
-        try:
-            conn.execute(f'DROP TABLE IF EXISTS "{table_name}";')
-        except Exception:
-            logger.debug("Failed to drop ephemeral table %s", table_name, exc_info=True)
+        conn.execute(f'DROP TABLE IF EXISTS "{table_name}";')

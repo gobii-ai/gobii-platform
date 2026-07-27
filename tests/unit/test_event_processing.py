@@ -3885,6 +3885,62 @@ class PromptContextBuilderTests(TestCase):
         self.assertTrue(seen_tool_names)
         self.assertIn("send_chat_message", seen_tool_names[0])
 
+    def test_sqlite_recovery_discards_completion_and_notifies_next_iteration(self):
+        response = make_completion_response(content="Recovered response")
+        token_usage = {
+            "prompt_tokens": 10,
+            "completion_tokens": 5,
+            "total_tokens": 15,
+            "model": "mock-model",
+            "provider": "mock-provider",
+            "cached_tokens": 0,
+        }
+        continuation_notices = []
+        discarded_stream = MagicMock()
+        accepted_stream = MagicMock()
+
+        def _build_prompt(*_args, **kwargs):
+            continuation_notices.append(kwargs.get("continuation_notice"))
+            return ([{"role": "system", "content": "sys"}], 1000, None, {})
+
+        with patch(
+            "api.agent.core.event_processing.build_prompt_context",
+            side_effect=_build_prompt,
+        ), patch(
+            "api.agent.core.event_processing.get_llm_config_with_failover",
+            return_value=[("mock", "mock-model", {})],
+        ), patch(
+            "api.agent.core.event_processing._completion_with_failover",
+            side_effect=[(response, token_usage), (response, token_usage)],
+        ) as mock_completion, patch(
+            "api.agent.core.event_processing.protect_current_sqlite_state",
+            side_effect=[False, True, False, False],
+        ), patch(
+            "api.agent.core.event_processing.resolve_web_stream_target",
+            return_value=object(),
+        ), patch(
+            "api.agent.core.event_processing.WebStreamBroadcaster",
+            side_effect=[discarded_stream, accepted_stream],
+        ):
+            from api.agent.core import event_processing as ep
+
+            with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 2):
+                usage = _run_agent_loop(self.agent, is_first_run=False)
+
+        self.assertEqual(mock_completion.call_count, 2)
+        self.assertTrue(mock_completion.call_args.kwargs["defer_stream_finish"])
+        discarded_stream.cancel.assert_called_once()
+        discarded_stream.finish.assert_not_called()
+        accepted_stream.finish.assert_called_once()
+        accepted_stream.cancel.assert_not_called()
+        self.assertEqual(continuation_notices[0], None)
+        self.assertIn("restored to the latest validated checkpoint", continuation_notices[1])
+        self.assertEqual(usage["total_tokens"], 15)
+        self.assertEqual(
+            PersistentAgentCompletion.objects.filter(agent=self.agent).count(),
+            1,
+        )
+
 
 @tag("batch_event_processing")
 class AgentRunSequenceHelperTests(TestCase):
