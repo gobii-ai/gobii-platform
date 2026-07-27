@@ -1499,9 +1499,10 @@ class PromptContextBuilderTests(TestCase):
         self.assertNotIn("end_planning", system_message["content"])
         self.assertNotIn("## Signup Preview Handoff", system_message["content"])
         self.assertIn(
-            "If there is no concrete task to do yet, your first action should be one concise welcome message",
+            "No concrete task: send one concise welcome.",
             system_message["content"],
         )
+        self.assertIn("Broad substantial work missing a material audience", system_message["content"])
         self.assertNotIn("## Signup Preview First-Run Override", system_message["content"])
         self.assertNotIn("limited preview", system_message["content"])
         self.assertIn(f"<charter>{GENERIC_STARTER_CHARTER}</charter>", next(

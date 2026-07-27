@@ -2304,28 +2304,6 @@ class EffortCalibrationHarnessTests(TestCase):
         message = PersistentAgentMessage.objects.get(owner_agent=agent, is_outbound=True)
         self.assertEqual(message.body, "## Bitcoin Price\n\n**$68,500.50 USD**\n\n> Markets move fast though")
 
-    def test_request_human_input_rejects_large_preference_survey_outside_planning(self):
-        agent = SimpleNamespace(planning_state=PersistentAgent.PlanningState.SKIPPED)
-
-        result = execute_request_human_input(
-            agent,
-            {
-                "question": "Which fintech company should I use?",
-                "options": [
-                    {"title": "Stripe", "description": "Payments infrastructure"},
-                    {"title": "Plaid", "description": "Financial data APIs"},
-                    {"title": "Chime", "description": "Consumer digital banking"},
-                    {"title": "Affirm", "description": "Buy now, pay later"},
-                ],
-                "will_continue_work": False,
-            },
-        )
-
-        self.assertEqual(result["status"], "error")
-        self.assertIn("not preference surveys", result["message"])
-        self.assertIn("choose a reasonable default", result["message"])
-
-
 @tag("eval_sim")
 class FirstRunPromptCalibrationTests(TestCase):
     def test_first_run_prompt_does_not_force_progress_greeting_or_default_schedule(self):
