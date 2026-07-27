@@ -75,6 +75,7 @@ from api.services.prompt_settings import (
     DEFAULT_UNIFIED_HISTORY_HYSTERESIS,
 )
 from api.services.browser_settings import DEFAULT_MAX_ACTIVE_BROWSER_TASKS, DEFAULT_MAX_BROWSER_STEPS, DEFAULT_MAX_BROWSER_TASKS, DEFAULT_VISION_DETAIL_LEVEL
+from api.services.user_pets import normalize_user_pet_position, normalize_user_pet_selector, selectable_user_pet_exists
 from api.pipedream_app_utils import normalize_app_slugs as normalize_pipedream_app_slugs
 from util.attribution_referrers import first_meaningful_referrer_for_attribution, signup_source_bucket_for_attribution
 from api.services.mcp_tool_cache import invalidate_mcp_tool_cache
@@ -888,6 +889,10 @@ class UserPreference(models.Model):
     KEY_AGENT_CHAT_INSIGHTS_PANEL_EXPANDED_BY_AGENT = "agent.chat.insights_panel.expanded_by_agent"
     KEY_AGENT_CHAT_NOTIFICATIONS_ENABLED = "agent.chat.notifications.enabled"
     KEY_AGENT_CHAT_SUGGESTIONS_ENABLED = "agent.chat.suggestions.enabled"
+    KEY_USER_PET_ENABLED = "user.pet.enabled"
+    KEY_USER_PET_SELECTED_ID = "user.pet.selected_id"
+    KEY_USER_PET_SIZE = "user.pet.size"
+    KEY_USER_PET_POSITION = "user.pet.position"
     KEY_USER_TIMEZONE = "user.timezone"
     PREFERENCE_DEFINITIONS = {
         KEY_AGENT_CHAT_ROSTER_SORT_MODE: {
@@ -919,6 +924,23 @@ class UserPreference(models.Model):
         KEY_AGENT_CHAT_SUGGESTIONS_ENABLED: {
             "default": True,
             "type": "boolean",
+        },
+        KEY_USER_PET_ENABLED: {
+            "default": True,
+            "type": "boolean",
+        },
+        KEY_USER_PET_SELECTED_ID: {
+            "default": "builtin:gobii-fish",
+            "type": "pet_selector",
+        },
+        KEY_USER_PET_SIZE: {
+            "default": "medium",
+            "type": "choice",
+            "allowed_values": frozenset({"small", "medium", "large"}),
+        },
+        KEY_USER_PET_POSITION: {
+            "default": None,
+            "type": "normalized_point",
         },
         KEY_USER_TIMEZONE: {
             "default": "",
@@ -1050,6 +1072,12 @@ class UserPreference(models.Model):
         if preference_type == "uuid_boolean_map":
             return cls._normalize_uuid_boolean_map_preference_value(key, value)
 
+        if preference_type == "pet_selector":
+            return normalize_user_pet_selector(key, value)
+
+        if preference_type == "normalized_point":
+            return normalize_user_pet_position(key, value)
+
         if preference_type == "timezone":
             return cls._normalize_timezone_preference_value(key, value)
 
@@ -1122,6 +1150,10 @@ class UserPreference(models.Model):
                 cls.PREFERENCE_DEFINITIONS[key],
             )
 
+        selected_pet_id = normalized_updates.get(cls.KEY_USER_PET_SELECTED_ID)
+        if selected_pet_id is not None and not selectable_user_pet_exists(user, selected_pet_id):
+            raise ValueError("Select a pet from your library.")
+
         with transaction.atomic():
             try:
                 preference, created = cls.objects.get_or_create(user=user)
@@ -1169,6 +1201,41 @@ class UserPreference(models.Model):
                 preference.save(update_fields=["preferences", "updated_at"])
 
             return cls.resolve_known_preferences(user)
+
+
+def user_pet_spritesheet_upload_to(instance, filename):
+    return f"user_pets/{instance.user_id}/{instance.id}/spritesheet.webp"
+
+
+class UserPet(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="custom_pets",
+    )
+    display_name = models.CharField(max_length=80)
+    description = models.CharField(max_length=240, blank=True)
+    spritesheet = models.FileField(upload_to=user_pet_spritesheet_upload_to, max_length=512)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("display_name", "created_at")
+        verbose_name = "User pet"
+        verbose_name_plural = "User pets"
+
+    def __str__(self):
+        return self.display_name
+
+
+@receiver(post_delete, sender=UserPet)
+def delete_user_pet_spritesheet(sender, instance, **kwargs):
+    if not instance.spritesheet:
+        return
+    storage = instance.spritesheet.storage
+    name = instance.spritesheet.name
+    transaction.on_commit(lambda: storage.delete(name))
 
 
 def validate_product_announcement_action_url(value: str) -> None:

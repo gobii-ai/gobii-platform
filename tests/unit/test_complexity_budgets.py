@@ -83,6 +83,19 @@ class ComplexityBudgetSourceFilterTests(SimpleTestCase):
             with self.subTest(path=path):
                 self.assert_not_counted(path)
 
+    def test_counts_pet_product_sources(self):
+        pet_paths = (
+            "api/services/user_pets.py",
+            "console/user_pets_api.py",
+            "frontend/src/api/userPets.ts",
+            "frontend/src/components/pets/ImmersivePetLayer.tsx",
+            "frontend/src/hooks/useUserPets.ts",
+        )
+
+        for path in pet_paths:
+            with self.subTest(path=path):
+                self.assert_counted(path)
+
     def test_budget_file_source_metadata_matches_filter_constants(self):
         committed = budgets._load_budget()["source_loc"]
         generated = budgets._budget_metadata("test-sha")["source_loc"]

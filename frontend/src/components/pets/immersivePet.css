@@ -1,0 +1,31 @@
+.immersive-pet-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  pointer-events: none;
+}
+
+.immersive-pet {
+  position: fixed;
+  aspect-ratio: 192 / 208;
+  cursor: grab;
+  pointer-events: auto;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.immersive-pet[data-dragging='true'] {
+  cursor: grabbing;
+}
+
+.immersive-pet .pet-sprite {
+  display: block;
+  pointer-events: none;
+}
+
+@media (max-width: 767px) {
+  .immersive-pet-layer {
+    display: none;
+  }
+}

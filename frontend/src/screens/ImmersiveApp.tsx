@@ -16,6 +16,7 @@ import { OrganizationInviteAcceptPage } from './organization/OrganizationInviteA
 import { ImmersiveProfilePage } from './profile/ImmersiveProfilePage'
 import { ImmersiveSecretsPage } from './secrets/ImmersiveSecretsPage'
 import { ImmersiveUsagePage } from './usage/ImmersiveUsagePage'
+import { ImmersivePetLayer } from '../components/pets/ImmersivePetLayer'
 import { ensureAuthenticated, selectSubscriptionState, subscriptionActions, type PlanTier } from '../store/subscriptionSlice'
 import { useAppDispatch, useAppSelector } from '../store/hooks'
 import { track } from '../util/analytics'
@@ -1007,6 +1008,7 @@ export function ImmersiveApp({
         ) : null}
         {route.kind === 'not-found' ? <NotFound /> : null}
       </div>
+      <ImmersivePetLayer />
       {showShellUpgradeModal ? (
         <SubscriptionUpgradeModal
           onUpgrade={handleUpgradeSelection}

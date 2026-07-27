@@ -56,6 +56,16 @@ class ConsoleUserPreferencesApiTests(TestCase):
             preferences.get(UserPreference.KEY_USER_TIMEZONE),
             "",
         )
+        self.assertTrue(preferences.get(UserPreference.KEY_USER_PET_ENABLED))
+        self.assertEqual(
+            preferences.get(UserPreference.KEY_USER_PET_SELECTED_ID),
+            "builtin:gobii-fish",
+        )
+        self.assertEqual(
+            preferences.get(UserPreference.KEY_USER_PET_SIZE),
+            "medium",
+        )
+        self.assertIsNone(preferences.get(UserPreference.KEY_USER_PET_POSITION))
 
     def test_patch_updates_preference_and_get_returns_persisted_value(self):
         patch_response = self.client.patch(
@@ -113,6 +123,22 @@ class ConsoleUserPreferencesApiTests(TestCase):
             data=json.dumps({"preferences": {"unknown.key": "anything"}}),
             content_type="application/json",
         )
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(UserPreference.objects.filter(user=self.user).exists())
+
+    def test_patch_rejects_pet_position_outside_viewport(self):
+        response = self.client.patch(
+            self.url,
+            data=json.dumps(
+                {
+                    "preferences": {
+                        UserPreference.KEY_USER_PET_POSITION: {"x": 1.1, "y": 0.5},
+                    }
+                }
+            ),
+            content_type="application/json",
+        )
+
         self.assertEqual(response.status_code, 400)
         self.assertFalse(UserPreference.objects.filter(user=self.user).exists())
 
