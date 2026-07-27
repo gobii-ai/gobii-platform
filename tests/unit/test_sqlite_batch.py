@@ -174,6 +174,21 @@ class SqliteBatchCoreTests(SqliteBatchTestCase):
             "notes": bindings["notes"],
         }])
 
+    def test_tool_contract_steers_messy_text_to_named_bindings(self):
+        function = get_sqlite_batch_tool()["function"]
+        sql_description = function["parameters"]["properties"]["sql"]["description"]
+
+        self.assertIn("Bind messy text via :name", function["description"])
+        self.assertIn("never backslash-escape SQLite strings", function["description"])
+        self.assertIn("Config patch: one UPDATE", sql_description)
+        self.assertIn("patch_text(charter,:old,:new)", sql_description)
+        self.assertIn("put old/new in bindings, never SQL", sql_description)
+        self.assertIn(
+            "For config patches, REQUIRED old/new keys",
+            function["parameters"]["properties"]["bindings"]["description"],
+        )
+        self.assertIn("End with decision/detail SELECTs", sql_description)
+
     def test_rows_schema_requires_source_specificity_without_enrichment(self):
         rows = (
             get_sqlite_batch_tool()["function"]["parameters"]["properties"]["rows"]
@@ -345,6 +360,7 @@ class SqliteBatchCoreTests(SqliteBatchTestCase):
 
         self.assertEqual(missing.get("status"), "error")
         self.assertIn("replacement target was not found", missing.get("message", ""))
+        self.assertIn("source text already in context", missing.get("message", ""))
         self.assertEqual(ambiguous.get("status"), "error")
         self.assertIn("matched 2 times", ambiguous.get("message", ""))
 

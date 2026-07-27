@@ -44,7 +44,7 @@ def _patch_text(value: Optional[str], old: Optional[str], new: Optional[str]) ->
         message = "patch_text requires old='' for append or a non-null exact replacement target."
         if old is not None:
             message = (
-                "patch_text replacement target was not found. Read the text and retry with an exact target."
+                "patch_text replacement target was not found. Use source text already in context, or read it once if absent, then retry with an exact target."
                 if match_count == 0
                 else f"patch_text replacement target matched {match_count} times; retry with a longer target."
             )

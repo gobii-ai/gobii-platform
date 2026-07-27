@@ -2693,8 +2693,9 @@ def _annotate_agent_config_update_result(
     )
     if charter_confirmed:
         result["reply_guidance"] = (
-            "Reply only with the completed task result, or a brief natural acknowledgment when there was no task. "
-            "Do not mention implementation or restate/promise the new rule."
+            "Reply only with the completed task result, or a brief natural acknowledgment such as 'Got it.' when there was no task. "
+            "This confirmation is final; do not read or verify config again. Never mention charter, config, saved/stored state, "
+            "implementation, or restate/promise the rule."
         )
     target.result = result
 
