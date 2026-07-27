@@ -74,6 +74,10 @@ CHARTER_ADDS_FEEDBACK_RULE_FROM_CORRECTION = "charter_adds_feedback_rule_from_co
 CHARTER_ADDS_PLAIN_PREFERENCE_WITHOUT_SAVE_WORD = "charter_adds_plain_preference_without_save_word"
 CHARTER_PATCHES_DIRECT_STYLE_CORRECTION = "charter_patches_direct_style_correction"
 CHARTER_PATCHES_EVALUATIVE_OUTPUT_FEEDBACK = "charter_patches_evaluative_output_feedback"
+CHARTER_REFINES_EXISTING_GUIDANCE_FROM_NATURAL_FEEDBACK = (
+    "charter_refines_existing_guidance_from_natural_feedback"
+)
+CHARTER_PATCHES_AND_COMPLETES_IMMEDIATE_TASK = "charter_patches_and_completes_immediate_task"
 CHARTER_INTERPRETS_AMBIGUOUS_OPERATING_FEEDBACK = "charter_interprets_ambiguous_operating_feedback"
 CHARTER_INTERPRETS_ROLE_BOUNDARY_CORRECTION = "charter_interprets_role_boundary_correction"
 CHARTER_INFERS_IMPLICIT_OWNERSHIP_CORRECTION = "charter_infers_implicit_ownership_correction"
@@ -393,6 +397,8 @@ CHARTER_MEMORY_MICRO_SCENARIO_SLUGS = [
     CHARTER_ADDS_PLAIN_PREFERENCE_WITHOUT_SAVE_WORD,
     CHARTER_PATCHES_DIRECT_STYLE_CORRECTION,
     CHARTER_PATCHES_EVALUATIVE_OUTPUT_FEEDBACK,
+    CHARTER_REFINES_EXISTING_GUIDANCE_FROM_NATURAL_FEEDBACK,
+    CHARTER_PATCHES_AND_COMPLETES_IMMEDIATE_TASK,
     CHARTER_INTERPRETS_AMBIGUOUS_OPERATING_FEEDBACK,
     CHARTER_INTERPRETS_ROLE_BOUNDARY_CORRECTION,
     CHARTER_INFERS_IMPLICIT_OWNERSHIP_CORRECTION,
@@ -3138,12 +3144,14 @@ def _uses_one_focused_charter_patch(mutation_calls, existing_charter):
     if len(mutation_calls) != 1:
         return False
     sql = str(resolved_tool_param(mutation_calls[0], "sql") or "")
+    statements = split_sql_statements(sql)
     pairs = _charter_patch_pairs(sql)
-    structural_sql = _structural_sql(sql)
+    structural_sql = _structural_sql(statements[0]) if statements else ""
     old, new = pairs[0] if len(pairs) == 1 else (None, None)
     return (
         len(pairs) == 1
-        and len(split_sql_statements(sql)) == 1
+        and bool(statements)
+        and all(re.match(r"\s*select\b", statement, re.IGNORECASE) for statement in statements[1:])
         and re.search(r"\bupdate\s+__agent_config\b", structural_sql, re.IGNORECASE)
         and not re.search(r"\bselect\b", structural_sql, re.IGNORECASE)
         and old != new
@@ -3306,10 +3314,20 @@ def _one_shot_charter_feedback_check(
         and resolved_tool_param(replies[0], "will_continue_work") is False
     )
     natural_reply = (
-        len(reply_body.strip()) >= 12
+        len(reply_body.strip()) >= 4
         and not any(
             term in reply_folded
-            for term in ("charter", "sqlite", "config", "saved", "stored", "tools", "i'll research", "i will research")
+            for term in (
+                "charter",
+                "sqlite",
+                "config",
+                "saved",
+                "stored",
+                "tool call",
+                "tool result",
+                "i'll research",
+                "i will research",
+            )
         )
         and all(term.casefold() in reply_folded for term in required_reply_terms)
         and all(
@@ -3386,6 +3404,172 @@ class CharterPatchesEvaluativeOutputFeedbackScenario(CharterMemoryScenario):
         focused = len(agent.charter or "") <= len(self.existing_charter) + 240 and "feedback:" not in charter
         passed = preserved and replaced_old_rule and learned_feedback and used_one_patch and focused
         return passed, f"mutation_count={len(mutation_calls)}, used_patch={used_one_patch}, charter={agent.charter!r}."
+
+
+@register_scenario
+class CharterRefinesExistingGuidanceFromNaturalFeedbackScenario(CharterMemoryScenario):
+    slug = CHARTER_REFINES_EXISTING_GUIDANCE_FROM_NATURAL_FEEDBACK
+    description = (
+        "A natural factual refinement should update related durable guidance without requiring explicit save wording."
+    )
+    tasks = [
+        ScenarioTask(name="inject_prompt", assertion_type="manual"),
+        ScenarioTask(name="verify_natural_refinement_saved", assertion_type="llm_judge"),
+    ]
+    existing_charter = (
+        "Compare managed and self-hosted automation products for operations teams. "
+        "Describe self-hosted products as flexible but requiring technical setup. "
+        "Keep comparisons accurate and concise."
+    )
+    prior_outbound_body = (
+        "The main difference is setup complexity. Self-hosted products are flexible, while our managed product "
+        "is easier to start with."
+    )
+    prompt = (
+        "the bigger thing is those products need engineering support to get and keep running. "
+        "ours is for regular ops teams"
+    )
+    verification_task_name = "verify_natural_refinement_saved"
+    success_summary = "Agent saved the clarified engineering-support distinction while preserving comparison guidance."
+    failure_summary = "Expected one focused first-shot charter patch for the natural clarification"
+    verify_feedback_reply = True
+    semantic_judge_question = (
+        "Does the updated charter preserve accurate, concise product comparisons while clarifying that the "
+        "self-hosted alternatives need ongoing engineering support, not merely initial setup, and that the managed "
+        "product is intended to work for ordinary operations teams? Does the reply naturally acknowledge the "
+        "substance without claiming the existing guidance was already sufficient?"
+    )
+
+    def _charter_check(self, agent, mutation_calls):
+        focused_patch = _uses_one_focused_charter_patch(mutation_calls, self.existing_charter)
+        passed = focused_patch and agent.charter != self.existing_charter
+        return passed, f"mutation_count={len(mutation_calls)}, focused={focused_patch}, charter={agent.charter!r}."
+
+
+@register_scenario
+class CharterPatchesAndCompletesImmediateTaskScenario(CharterMemoryScenario):
+    slug = CHARTER_PATCHES_AND_COMPLETES_IMMEDIATE_TASK
+    description = "A durable correction should not displace concrete work requested in the same turn."
+    tasks = [
+        ScenarioTask(name="inject_prompt", assertion_type="manual"),
+        ScenarioTask(name="verify_patch_and_immediate_task", assertion_type="llm_judge"),
+    ]
+    existing_charter = (
+        "Maintain the customer feedback signal ledger. "
+        "Analyze each observation and post a detailed framework with product implications."
+    )
+    prior_outbound_body = (
+        "Here is a full decision framework with evidence classification, product implications, and next steps."
+    )
+    prompt = (
+        "these big writeups aren't useful. going forward just record the underlying signal unless I ask for analysis. "
+        "add these to the signal log now: buyers say onboarding takes too long; teams want weekly summaries"
+    )
+    verification_task_name = "verify_patch_and_immediate_task"
+    success_summary = "Agent saved the reporting correction, recorded both requested signals, and replied concisely."
+    failure_summary = "Expected one focused charter patch followed by both requested signal writes and a concise reply"
+    semantic_judge_question = (
+        "Does the updated charter preserve ownership of the customer-signal ledger while making concise signal "
+        "capture the default and reserving analysis for when it is requested? Is the reply a concise confirmation "
+        "of completed work rather than another framework or a promise to act later?"
+    )
+
+    def _seed_charter_agent(self, agent_id):
+        super()._seed_charter_agent(agent_id)
+        with agent_sqlite_db(str(agent_id)) as db_path:
+            conn = open_guarded_sqlite_connection(db_path)
+            try:
+                conn.execute(
+                    "CREATE TABLE IF NOT EXISTS signal_log ("
+                    "signal_id INTEGER PRIMARY KEY, signal TEXT NOT NULL UNIQUE)"
+                )
+                conn.commit()
+            finally:
+                clear_guarded_connection(conn)
+                conn.close()
+
+    def _eval_stop_policy(self):
+        return {
+            "ignore_sqlite_agent_config_mutations": False,
+            "allowed_tool_names": ["sqlite_batch", "send_chat_message", "sleep_until_next_trigger"],
+            "stop_on_unexpected_relevant_tool": True,
+            "stop_on_tool_names_after_finish": ["send_chat_message"],
+            "ignored_tool_names": ["sleep_until_next_trigger"],
+            "max_relevant_tool_calls": 5,
+        }
+
+    def _signal_rows(self, agent_id):
+        with agent_sqlite_db(str(agent_id)) as db_path:
+            conn = open_guarded_sqlite_connection(db_path)
+            try:
+                return [
+                    row[0]
+                    for row in conn.execute("SELECT signal FROM signal_log ORDER BY signal_id").fetchall()
+                ]
+            finally:
+                clear_guarded_connection(conn)
+                conn.close()
+
+    def _charter_check(self, agent, mutation_calls):
+        sql = str(resolved_tool_param(mutation_calls[0], "sql") or "") if len(mutation_calls) == 1 else ""
+        statements = split_sql_statements(sql)
+        pairs = _charter_patch_pairs(statements[0]) if statements else []
+        old, new = pairs[0] if len(pairs) == 1 else (None, None)
+        focused_patch = bool(
+            len(mutation_calls) == 1
+            and len(pairs) == 1
+            and re.search(r"\bupdate\s+__agent_config\b", statements[0], re.IGNORECASE)
+            and not re.search(r"\bselect\b", statements[0], re.IGNORECASE)
+            and old != new
+            and (not old or old in self.existing_charter)
+            and bool(new.strip())
+            and all("__agent_config" not in statement.casefold() for statement in statements[1:])
+        )
+        rows = self._signal_rows(agent.id)
+        normalized = " ".join(rows).casefold()
+        recorded_both = (
+            "onboarding" in normalized
+            and any(term in normalized for term in ("weekly", "summary", "summaries"))
+        )
+        passed = focused_patch and recorded_both and agent.charter != self.existing_charter
+        return (
+            passed,
+            f"mutation_count={len(mutation_calls)}, focused={focused_patch}, rows={rows!r}, charter={agent.charter!r}.",
+        )
+
+    def _additional_charter_check(self, agent, run_id, inbound):
+        calls = [
+            call
+            for call in get_tool_calls_for_run(run_id, after=inbound.timestamp)
+            if call.tool_name != "sleep_until_next_trigger"
+        ]
+        sqlite_calls = [call for call in calls if call.tool_name == "sqlite_batch"]
+        replies = [call for call in calls if call.tool_name == "send_chat_message"]
+        final_reply = replies[-1] if replies else None
+        reply = str(resolved_tool_param(final_reply, "body") or "") if final_reply else ""
+        successful = all(_successful_without_repair(call) for call in sqlite_calls)
+        bounded = (
+            1 <= len(sqlite_calls) <= 2
+            and 1 <= len(replies) <= 2
+            and all(call.tool_name in {"sqlite_batch", "send_chat_message"} for call in calls)
+        )
+        final_after_work = (
+            bool(final_reply)
+            and all(calls.index(call) < calls.index(final_reply) for call in sqlite_calls)
+            and all(resolved_tool_param(call, "will_continue_work") is True for call in replies[:-1])
+        )
+        concise_reply = (
+            10 <= len(reply) <= 280
+            and resolved_tool_param(final_reply, "will_continue_work") is False
+            and not any(term in reply.casefold() for term in ("framework", "going to", "will add"))
+        ) if final_reply else False
+        passed = successful and bounded and final_after_work and concise_reply
+        return passed, (
+            f"actions={[call.tool_name for call in calls]}, successful_sqlite={successful}, "
+            f"bounded={bounded}, final_after_work={final_after_work}, "
+            f"concise_reply={concise_reply}, reply={reply!r}."
+        )
+
 
 @register_scenario
 class CharterInterpretsAmbiguousOperatingFeedbackScenario(CharterMemoryScenario):

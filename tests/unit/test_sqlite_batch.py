@@ -442,6 +442,36 @@ class SqliteBatchCoreTests(SqliteBatchTestCase):
         self.assertEqual(out.get("status"), "ok")
         self.assertEqual(charter, "New charter")
 
+    def test_agent_config_patch_append_persists_once(self):
+        with self._with_temp_db() as (db_path, _token, _tmp):
+            with sqlite3.connect(db_path) as conn:
+                conn.execute(
+                    "CREATE TABLE __agent_config(id INTEGER PRIMARY KEY, charter TEXT, schedule TEXT)"
+                )
+                conn.execute(
+                    "INSERT INTO __agent_config(id, charter) VALUES (1, 'Existing charter')"
+                )
+            sql = (
+                "UPDATE __agent_config SET charter=patch_text("
+                "charter, '', 'New durable rule') WHERE id=1"
+            )
+            first = execute_sqlite_batch(
+                self.agent,
+                {"sql": sql, "will_continue_work": True},
+            )
+            second = execute_sqlite_batch(
+                self.agent,
+                {"sql": sql, "will_continue_work": True},
+            )
+            with sqlite3.connect(db_path) as conn:
+                charter = conn.execute(
+                    "SELECT charter FROM __agent_config WHERE id=1"
+                ).fetchone()[0]
+
+        self.assertEqual(first.get("status"), "ok")
+        self.assertEqual(second.get("status"), "ok")
+        self.assertEqual(charter, "Existing charter\nNew durable rule")
+
     def test_single_query_field_is_normalized(self):
         with self._with_temp_db():
             out = execute_sqlite_batch(self.agent, {"sql": "SELECT 42 AS answer"})

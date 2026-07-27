@@ -679,6 +679,38 @@ class ImpliedSendTests(TestCase):
 
         self.assertIsNotNone(ep._direct_correction_context(self.agent))
 
+    def test_direct_correction_patch_does_not_claim_reply_to_another_participant(self):
+        _initial, outbound, correction = self._add_feedback_followup(
+            "These updates aren't useful. Going forward, include the owner and due date."
+        )
+        outbound.raw_payload = {"discord_message_id": "agent-message"}
+        outbound.save(update_fields=["raw_payload"])
+        correction.raw_payload = {
+            "discord_reply_to": {
+                "message_id": "other-participant-message",
+                "author_name": "Engineering Agent",
+            }
+        }
+        correction.save(update_fields=["raw_payload"])
+
+        self.assertIsNone(ep._direct_correction_context(self.agent))
+
+    def test_direct_correction_patch_accepts_reply_to_own_discord_message(self):
+        _initial, outbound, correction = self._add_feedback_followup(
+            "These updates aren't useful. Going forward, include the owner and due date."
+        )
+        outbound.raw_payload = {"discord_message_id": "agent-message"}
+        outbound.save(update_fields=["raw_payload"])
+        correction.raw_payload = {
+            "discord_reply_to": {
+                "message_id": "agent-message",
+                "author_name": self.agent.name,
+            }
+        }
+        correction.save(update_fields=["raw_payload"])
+
+        self.assertIsNotNone(ep._direct_correction_context(self.agent))
+
     def test_eval_mock_result_supports_url_rules(self):
         mock_config = {
             "http_request": {
