@@ -62,6 +62,7 @@ from .processing_flags import (
 from .llm_utils import EmptyLiteLLMResponseError, raise_if_empty_litellm_response, raise_if_invalid_litellm_response, run_completion
 from .multimodal_context import collect_fresh_read_file_image_attachments, prepare_multimodal_read_file_request
 from .llm_streaming import StreamAccumulator
+from .tool_arg_streaming import ChatBodyStreamExtractor
 from .token_usage import completion_kwargs_from_usage, extract_reasoning_content, extract_token_usage, set_usage_span_attributes
 from ..short_description import maybe_schedule_mini_description, maybe_schedule_short_description
 from ..avatar import maybe_schedule_agent_avatar
@@ -4463,6 +4464,7 @@ def _stream_completion_with_broadcast(
         stream_broadcaster.start()
 
     content_filter = _CanonicalContinuationStreamFilter() if stream_broadcaster else None
+    tool_body_extractor = ChatBodyStreamExtractor() if stream_broadcaster else None
     accumulator = StreamAccumulator()
     start_time = time.monotonic()
     time_to_first_token_ms = None
@@ -4501,11 +4503,18 @@ def _stream_completion_with_broadcast(
                 if stream_broadcaster:
                     stream_broadcaster.cancel()
                 raise OrchestratorPromptStale("Prompt became stale during streaming completion.")
-            reasoning_delta, content_delta = accumulator.ingest_chunk(chunk)
+            reasoning_delta, content_delta, tool_calls_delta = accumulator.ingest_chunk(chunk)
             if stream_broadcaster:
                 filtered_delta = None
                 if stream_content:
                     filtered_delta = content_filter.ingest(content_delta) if content_filter else content_delta
+                # A web reply written through send_chat_message streams its body from the
+                # tool-call arguments — otherwise only the thinking ever streams and the message
+                # itself pops in whole when the tool executes. Plain assistant content wins if a
+                # completion somehow produces both; interleaving them would garble the card.
+                body_delta = tool_body_extractor.ingest(tool_calls_delta) if tool_body_extractor else None
+                if body_delta and not accumulator.content_parts:
+                    filtered_delta = f"{filtered_delta}{body_delta}" if filtered_delta else body_delta
                 stream_broadcaster.push_delta(reasoning_delta, filtered_delta)
     finally:
         if stream_broadcaster and not canceled:
