@@ -160,7 +160,7 @@ jobs:
           - batch: shard_03
             tag: batch_pages_signals batch_console_agents batch_organizations referral_batch batch_subscription batch_email_body batch_support_turnstile batch_billing_rollup batch_agent_collaborators batch_api_org_keys batch_spawn_depth batch_compaction batch_browser_agent_max_tokens batch_sqlite_autocorrect
           - batch: shard_04
-            tag: batch_agent_chat batch_console_api batch_agent_webhooks batch_usage_api batch_forward_detection pipedream_connect http_request_batch batch_system_settings batch_schedule batch_plan_versioning smtp batch_browser_config batch_org_billing
+            tag: batch_agent_chat message_search_batch batch_console_api batch_agent_webhooks batch_usage_api batch_forward_detection pipedream_connect http_request_batch batch_system_settings batch_schedule batch_plan_versioning smtp batch_browser_config batch_org_billing
           - batch: shard_05
             tag: batch_event_processing batch_result_analysis llm_routing_profiles_batch global_secrets_batch batch_agent_invite batch_api_tasks_reads batch_celery_redbeat batch_setup_cookies batch_redis_budget_cleanup batch_dedicated_proxy_models batch_charter_tools
           - batch: shard_06

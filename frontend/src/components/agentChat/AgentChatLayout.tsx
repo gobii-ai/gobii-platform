@@ -38,6 +38,7 @@ import type { StatusExpansionTargets } from './statusExpansion'
 import { addInferredPlanFiles, filterChangedPlanSnapshot, hasCompletedPlanDeliverables } from './planSnapshotUtils'
 import type { AgentChatShellSubview } from '../../util/agentChatShellRoutes'
 import { useAppDispatch, useAppSelector } from '../../store/hooks'
+import { revealTimelineMessage } from '../../util/timelineNavigation'
 import { selectActiveChatSession } from '../../store/chatSlice'
 import { immersiveShellActions, selectImmersiveShellViewer, selectImmersiveSidebarMode } from '../../store/immersiveShellSlice'
 
@@ -233,6 +234,8 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   onComposerFocus?: () => void
   onComposerRequestScrollToBottom?: () => void
   isNearBottom?: boolean
+  targetMessageId?: string | null
+  targetMessageRef?: Ref<HTMLDivElement>
   timelineRef?: Ref<HTMLDivElement>
   timelineContentRef?: Ref<HTMLDivElement>
   composerShellRef?: Ref<HTMLDivElement>
@@ -351,6 +354,8 @@ export function AgentChatLayout({
   onComposerFocus,
   onComposerRequestScrollToBottom,
   isNearBottom = true,
+  targetMessageId = null,
+  targetMessageRef,
   timelineRef,
   timelineContentRef,
   composerShellRef,
@@ -1333,12 +1338,7 @@ export function AgentChatLayout({
   }, [clearPlanPreviewTimers])
 
   const handlePlanMessageClick = useCallback((messageId: string) => {
-    if (typeof document === 'undefined') {
-      return
-    }
-    const escaped = typeof window !== 'undefined' && window.CSS?.escape ? window.CSS.escape(messageId) : messageId.replace(/"/g, '\\"')
-    const target = document.querySelector<HTMLElement>(`[data-message-id="${escaped}"]`)
-    target?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    revealTimelineMessage(messageId, { block: 'center' })
     setPlanSheetOpen(false)
   }, [])
 
@@ -1570,6 +1570,8 @@ export function AgentChatLayout({
             templateRecommendations={templateRecommendations}
             templateRecommendationSubmittingId={templateRecommendationSubmittingId}
             taskCreditsWarningVariant={taskCreditsWarningVariant}
+            targetMessageId={targetMessageId}
+            targetMessageRef={targetMessageRef}
             timelineContentRef={timelineContentRef}
             timelineRef={timelineRef}
             typingStatusText={typingStatusText}

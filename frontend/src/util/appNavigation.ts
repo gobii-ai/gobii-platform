@@ -12,7 +12,7 @@ export function navigateWithinApp(path: string): boolean {
   return true
 }
 
-export function handleAppAnchorClick(event: MouseEvent<HTMLAnchorElement>, path: string): boolean {
+export function handleAppAnchorClick(event: MouseEvent<HTMLAnchorElement>, path: string, navigate = navigateWithinApp): boolean {
   if (
     event.defaultPrevented
     || event.button !== 0
@@ -23,8 +23,7 @@ export function handleAppAnchorClick(event: MouseEvent<HTMLAnchorElement>, path:
   ) {
     return false
   }
-
-  if (!navigateWithinApp(path)) {
+  if (!navigate(path)) {
     return false
   }
 
