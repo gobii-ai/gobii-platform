@@ -1,5 +1,5 @@
 import { memo, useState, useCallback, useEffect, useMemo, useRef, type Dispatch, type ReactNode, type SetStateAction } from 'react'
-import { ArrowLeftRight, Bell, BellOff, Check, LayoutGrid, List, PanelLeft, PanelLeftClose, PanelRightClose, Plus, Search, Settings, X } from 'lucide-react'
+import { ArrowLeftRight, Bell, BellOff, Check, LayoutGrid, List, PanelLeftClose, PanelRightClose, Plus, Search, Settings, X } from 'lucide-react'
 
 import type { ConsoleContext } from '../../api/context'
 import { useAppSelector } from '../../store/hooks'
@@ -18,6 +18,7 @@ import { MessageSearchPanel, type MessageSearchState } from './MessageSearchPane
 import { SidebarSettingsMenu, type SidebarSettingsInfo } from './SidebarSettingsMenu'
 import { AgentInviteDetails, AgentInviteSidebarItem, type AgentInviteAction, type AgentInviteDialogState } from './AgentInviteSidebarItem'
 import { getNextAgentChatSidebarMode, getPreviousAgentChatSidebarMode, type AgentChatSidebarMode, SIDEBAR_MOBILE_BREAKPOINT_PX, type AgentDrawerViewMode } from './sidebarMode'
+import { useMobileDrawerHistory } from './useMobileDrawerHistory'
 import { AgentChatAvatar, AgentChatButton } from './uiPrimitives'
 
 type AgentContextMenuState = FixedContextMenuPosition & {
@@ -132,6 +133,8 @@ export const ChatSidebar = memo(function ChatSidebar({
     ))
   }, [updateMessageSearchState])
   const [drawerViewMode, setDrawerViewMode] = useState<AgentDrawerViewMode>('list')
+  const closeDrawerFromHistory = useCallback(() => setDrawerOpen(false), [])
+  useMobileDrawerHistory(drawerOpen, isMobile, closeDrawerFromHistory)
   const [agentContextMenu, setAgentContextMenu] = useState<AgentContextMenuState | null>(null)
   const [inviteDialog, setInviteDialog] = useState<AgentInviteDialogState | null>(null)
   const [inviteBusy, setInviteBusy] = useState(false)
@@ -638,7 +641,9 @@ export const ChatSidebar = memo(function ChatSidebar({
               ? embeddedSettingsTitle
               : (drawerViewMode === 'gallery' && galleryShellPage !== 'agents' ? shellTitle : 'Switch agent')
           }
-          icon={PanelLeft}
+          // Not PanelLeft: that glyph is the interactive expand-sidebar control on desktop, and
+          // as inert sheet decoration it read as a dead button (bug #437).
+          icon={ArrowLeftRight}
           bodyPadding={false}
           headerAccessory={!messageSearchOpen && !showSettingsView && mobileContextSwitcher ? (
             <AgentChatContextSwitcher {...mobileContextSwitcher} variant="drawer" />

@@ -8169,14 +8169,17 @@
 @media (max-width: 767px) {
     .agent-fab {
         display: flex;
+        /* Hug the composer. The 1.625rem hover gap made the covered strip taller than the
+           switcher itself, and the full-width padding band that compensated for it was the
+           white gap of bug #430. */
+        bottom: calc(env(safe-area-inset-bottom, 0px) + var(--composer-height, 6.5rem) + 0.375rem);
     }
-    /* The switcher is fixed over the bottom-right of the timeline, so whatever comes to rest
-       there is covered by it. At the default scroll position that is a suggested-follow-up row,
-       and tapping the row opens the switcher instead of running the prompt. Reserve the strip
-       the switcher occupies -- its own height plus the gap it leaves above the composer -- so
-       content can always scroll clear of it. Keep in step with .agent-fab. */
-    .agent-chat-workspace-main:has(.composer-shell) #timeline-inner {
-        padding-bottom: calc(env(safe-area-inset-bottom, 0px) + var(--composer-height, 6.5rem) + 1.625rem + 2.75rem);
+    /* The switcher floats over the bottom-right corner, so the one interactive row that rests
+       there by default -- a suggested follow-up -- keeps its tap target and chevron clear of it
+       horizontally instead of the timeline reserving a full-width dead band (bug #430; the
+       band was added for bug #334). Keep the clearance in step with .agent-fab's right + width. */
+    .starter-prompts-card__row {
+        padding-right: 5rem;
     }
 }
 .agent-fab:hover {
