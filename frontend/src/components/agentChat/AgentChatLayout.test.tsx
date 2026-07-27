@@ -396,6 +396,10 @@ describe('AgentChatLayout upgrade modal gating', () => {
 
     expect(screen.queryByTestId('agent-composer')).not.toBeInTheDocument()
     expect(screen.getByText('Preparing your agent…')).toBeInTheDocument()
+    // The loader owns the timeline's space and centers in it; with the empty pane still mounted
+    // it sat pinned to the bottom of a blank phone screen (bug #338).
+    expect(document.querySelector('#timeline-events')).toBeNull()
+    expect(screen.getByText('Preparing your agent…').closest('div[aria-busy]')?.className).toContain('flex-1')
 
     fireEvent.click(screen.getByRole('button', { name: 'Skip Planning' }))
 

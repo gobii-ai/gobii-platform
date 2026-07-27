@@ -1517,6 +1517,11 @@ export function AgentChatLayout({
           data-plan-mode={workspacePlanMode}
         >
           <div className="agent-chat-workspace-main">
+          {/* While the spawn intent resolves there is nothing to show in the timeline; leaving
+              the empty pane in place pinned the loader to the bottom of a blank phone screen,
+              where it read as a broken page (bug #338). The loader takes the pane's space and
+              centers instead. */}
+          {spawnIntentLoading ? null : (
           <AgentTimelinePane
             composerDisabled={composerDisabled}
             contactCapOpenPacks={contactPackCanManageBilling ? () => handleAddonsOpen('contacts') : undefined}
@@ -1576,12 +1581,13 @@ export function AgentChatLayout({
             timelineRef={timelineRef}
             typingStatusText={typingStatusText}
           />
+          )}
 
           {/* Composer at bottom of flex layout */}
           {spawnIntentLoading ? (
             <div
               ref={composerShellRef}
-              className="flex items-center justify-center py-10"
+              className="flex flex-1 items-center justify-center py-10"
               aria-live="polite"
               aria-busy="true"
             >
