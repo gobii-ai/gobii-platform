@@ -30,7 +30,7 @@ class Migration(migrations.Migration):
     atomic = False
 
     dependencies = [
-        ("api", "0435_delegatedsecurevalue"),
+        ("api", "0438_userpet"),
     ]
 
     operations = [
