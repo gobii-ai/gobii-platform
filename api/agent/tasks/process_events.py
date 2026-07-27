@@ -13,6 +13,8 @@ from uuid import UUID
 from typing import Any, Dict, Optional, Sequence
 
 from celery import Task, shared_task
+from celery.exceptions import CeleryError
+from kombu.exceptions import OperationalError as KombuOperationalError
 from opentelemetry import baggage, metrics, trace
 import redis
 from waffle import switch_is_active
@@ -26,6 +28,8 @@ from api.services.owner_execution_pause import is_owner_execution_paused, resolv
 from ..core.event_processing import process_agent_events, _lock_storage_keys
 from ...services.referral_service import ReferralService
 from ..core.processing_flags import (
+    PendingAgentWork,
+    claim_pending_agents,
     claim_pending_drain_slot,
     clear_pending_drain_slot,
     clear_processing_lock_active,
@@ -35,7 +39,7 @@ from ..core.processing_flags import (
     get_pending_drain_settings,
     is_human_inbound_generation_consumed,
     is_agent_pending,
-    pop_pending_agents,
+    enqueue_pending_agent,
     set_processing_queued_flag,
 )
 
@@ -196,6 +200,19 @@ def enqueue_interactive_process_agent_events(
     )
 
 
+def enqueue_claimed_pending_work(pending_work: PendingAgentWork) -> None:
+    """Publish one atomically claimed pending record."""
+    kwargs: dict[str, Any] = {}
+    if pending_work.inbound_generation is not None and not pending_work.has_generic_work:
+        kwargs["inbound_generation"] = pending_work.inbound_generation
+    queue = pending_work.queue or AGENT_DEFAULT_PROCESSING_QUEUE
+    process_agent_events_task.apply_async(
+        args=[pending_work.agent_id],
+        kwargs=kwargs,
+        queue=queue,
+    )
+
+
 @shared_task(
     bind=True,
     base=ProcessAgentEventsTaskBase,
@@ -330,6 +347,7 @@ def process_agent_events_task(
         except Exception:
             logger.debug("Failed to look up routing profile for eval_run %s", eval_run_id, exc_info=True)
 
+    followup_queued = False
     try:
         set_current_eval_routing_profile(routing_profile)
         if is_human_inbound_generation_consumed(persistent_agent_id, inbound_generation):
@@ -341,7 +359,7 @@ def process_agent_events_task(
             span.add_event("Processing skipped - inbound generation already consumed")
             return
         # Delegate to core logic
-        process_agent_events(
+        followup_queued = bool(process_agent_events(
             persistent_agent_id,
             budget_id=budget_id,
             branch_id=branch_id,
@@ -356,7 +374,8 @@ def process_agent_events_task(
             max_iterations_followup_delay_seconds=max_iterations_followup_delay_seconds,
             max_iterations_followup_queue=max_iterations_followup_queue,
             worker_pid=current_worker_pid,
-        )
+            processing_queue=str(task_queue),
+        ))
     except ValidationError as exc:
         if _is_task_quota_error(exc):
             log_task_quota_exceeded(
@@ -371,7 +390,7 @@ def process_agent_events_task(
         set_current_eval_routing_profile(None)
         # Ensure queued flag clears even if processing short-circuits,
         # but keep it set when pending work is queued for retry.
-        if not is_agent_pending(persistent_agent_id):
+        if not followup_queued and not is_agent_pending(persistent_agent_id):
             clear_processing_queued_flag(persistent_agent_id)
         _broadcast_processing_state(persistent_agent_id)
 
@@ -457,18 +476,25 @@ def process_pending_agent_events_task(
 
     pending_settings = get_pending_drain_settings()
     limit = int(max_agents if max_agents is not None else pending_settings.pending_drain_limit)
-    agent_ids = pop_pending_agents(limit=limit, client=redis_client)
-    if not agent_ids:
+    pending_records = claim_pending_agents(limit=limit, client=redis_client)
+    if not pending_records:
         return
 
-    valid_agent_ids: list[str] = []
+    valid_records: list[PendingAgentWork] = []
     invalid_agent_ids: list[str] = []
-    for agent_id in agent_ids:
-        normalized = _normalize_agent_id(agent_id)
+    for pending_work in pending_records:
+        normalized = _normalize_agent_id(pending_work.agent_id)
         if normalized:
-            valid_agent_ids.append(normalized)
+            valid_records.append(
+                PendingAgentWork(
+                    agent_id=normalized,
+                    inbound_generation=pending_work.inbound_generation,
+                    queue=pending_work.queue,
+                    has_generic_work=pending_work.has_generic_work,
+                )
+            )
         else:
-            invalid_agent_ids.append(str(agent_id))
+            invalid_agent_ids.append(str(pending_work.agent_id))
 
     if invalid_agent_ids:
         logger.warning(
@@ -477,14 +503,29 @@ def process_pending_agent_events_task(
             invalid_agent_ids[:5],
         )
 
-    for agent_id in valid_agent_ids:
-        process_agent_events_task.delay(agent_id)
+    for pending_work in valid_records:
+        try:
+            enqueue_claimed_pending_work(pending_work)
+        except (CeleryError, KombuOperationalError):
+            logger.warning(
+                "Failed to publish claimed pending work for agent %s; restoring it for retry.",
+                pending_work.agent_id,
+                exc_info=True,
+            )
+            enqueue_pending_agent(
+                pending_work.agent_id,
+                inbound_generation=pending_work.inbound_generation,
+                queue=pending_work.queue,
+                has_generic_work=pending_work.has_generic_work,
+                ttl=pending_settings.pending_set_ttl_seconds,
+                client=redis_client,
+            )
 
     remaining = count_pending_agents(client=redis_client)
     if remaining <= 0:
         logger.info(
             "Pending drain processed: drained=%s skipped_invalid=%s remaining=0 rescheduled=False",
-            len(valid_agent_ids),
+            len(valid_records),
             len(invalid_agent_ids),
         )
         return
@@ -499,7 +540,7 @@ def process_pending_agent_events_task(
         rescheduled = True
     logger.info(
         "Pending drain processed: drained=%s skipped_invalid=%s remaining=%s rescheduled=%s delay=%s",
-        len(valid_agent_ids),
+        len(valid_records),
         len(invalid_agent_ids),
         remaining,
         rescheduled,

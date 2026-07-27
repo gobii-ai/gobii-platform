@@ -6,6 +6,7 @@ from django.test import TestCase, override_settings, tag
 
 from api.agent.core import event_processing as ep
 from api.agent.core.processing_flags import (
+    claim_pending_agent,
     get_processing_locked_agent_ids,
     pending_drain_schedule_key,
     pending_set_key,
@@ -91,13 +92,20 @@ class EventProcessingLockFallbackTests(TestCase):
     @patch("api.agent.tasks.process_events.process_pending_agent_events_task.apply_async")
     @patch("api.agent.core.event_processing.Redlock", new=_BlockedRedlock)
     def test_lock_busy_schedules_pending_drain(self, mock_apply_async):
-        ep.process_agent_events(self.agent.id)
+        ep.process_agent_events(
+            self.agent.id,
+            inbound_generation=9,
+            processing_queue="agent_interactive",
+        )
 
         self.assertTrue(mock_apply_async.called)
         call_kwargs = mock_apply_async.call_args.kwargs
         self.assertEqual(call_kwargs["countdown"], 65)
         self.assertTrue(self.redis.sismember(pending_set_key(), str(self.agent.id)))
         self.assertTrue(self.redis.exists(pending_drain_schedule_key()))
+        pending_work = claim_pending_agent(self.agent.id, client=self.redis)
+        self.assertEqual(pending_work.inbound_generation, 9)
+        self.assertEqual(pending_work.queue, "agent_interactive")
 
     @override_settings(CELERY_TASK_ALWAYS_EAGER=False)
     @patch("api.agent.tasks.process_events.process_pending_agent_events_task.apply_async")

@@ -11,6 +11,7 @@ from django.test import TestCase, tag
 from django.utils import timezone
 
 from api.agent.core.llm_config import AgentLLMTier
+from api.agent.core.processing_flags import get_human_inbound_generation
 from api.models import (
     AgentPeerLink,
     BrowserUseAgent,
@@ -789,8 +790,9 @@ class RemoteMCPViewTests(TestCase):
         paths = {node["path"] for node in self._structured_content(files_response)["nodes"]}
         self.assertIn("/uploads/hello.txt", paths)
 
+        before_generation = get_human_inbound_generation(agent.id)
         with (
-            patch("api.agent.tasks.process_agent_events_task.delay") as process_delay,
+            patch("api.agent.tasks.enqueue_interactive_process_agent_events") as process_enqueue,
             self.captureOnCommitCallbacks(execute=True),
         ):
             send_response = self._call_tool(
@@ -828,7 +830,13 @@ class RemoteMCPViewTests(TestCase):
         )
         attachment = message.attachments.get()
         self.assertEqual(str(attachment.filespace_node_id), node_id)
-        process_delay.assert_called_once_with(str(agent.id))
+        expected_generation = before_generation + 1
+        self.assertEqual(get_human_inbound_generation(agent.id), expected_generation)
+        process_enqueue.assert_called_once_with(
+            str(agent.id),
+            eval_run_id=None,
+            inbound_generation=expected_generation,
+        )
 
     @patch("api.services.remote_mcp.can_user_use_personal_agents_and_api", return_value=True)
     @patch("api.auth.can_user_use_personal_agents_and_api", return_value=True)
@@ -853,8 +861,9 @@ class RemoteMCPViewTests(TestCase):
         self.assertFalse(timeout_content["matched"])
         self.assertTrue(timeout_content["timed_out"])
 
+        before_generation = get_human_inbound_generation(agent.id)
         with (
-            patch("api.agent.tasks.process_agent_events_task.delay"),
+            patch("api.agent.tasks.enqueue_interactive_process_agent_events") as process_enqueue,
             self.captureOnCommitCallbacks(execute=True),
         ):
             send_response = self._call_tool(
@@ -867,6 +876,8 @@ class RemoteMCPViewTests(TestCase):
             )
         self.assertEqual(send_response.status_code, 200)
         send_content = self._structured_content(send_response)
+        self.assertEqual(get_human_inbound_generation(agent.id), before_generation)
+        process_enqueue.assert_not_called()
 
         newer_response = self._call_tool(
             "gobii_get_agent_timeline",

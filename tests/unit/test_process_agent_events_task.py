@@ -213,6 +213,7 @@ class ProcessAgentEventsTaskTests(SimpleTestCase):
         self.assertEqual(call_kwargs["max_iterations_followup_delay_seconds"], 0)
         self.assertEqual(call_kwargs["max_iterations_followup_queue"], AGENT_DEFAULT_PROCESSING_QUEUE)
         self.assertIs(call_kwargs["prefer_low_latency"], True)
+        self.assertEqual(call_kwargs["processing_queue"], AGENT_INTERACTIVE_PROCESSING_QUEUE)
 
     @tag("batch_agent_chat")
     def test_default_delivery_leaves_loop_controls_unset(self):
@@ -242,6 +243,33 @@ class ProcessAgentEventsTaskTests(SimpleTestCase):
         self.assertIsNone(call_kwargs["max_loop_iterations"])
         self.assertIsNone(call_kwargs["max_iterations_followup_delay_seconds"])
         self.assertIsNone(call_kwargs["max_iterations_followup_queue"])
+        self.assertEqual(call_kwargs["processing_queue"], AGENT_DEFAULT_PROCESSING_QUEUE)
+
+    @tag("batch_event_processing")
+    def test_followup_outcome_preserves_queued_flag(self):
+        agent_id = "77777777-7777-7777-7777-777777777777"
+
+        with patch(
+            "api.agent.tasks.process_events.is_human_inbound_generation_consumed",
+            return_value=False,
+        ), \
+             patch("api.agent.tasks.process_events.is_agent_pending", return_value=False), \
+             patch("api.agent.tasks.process_events.clear_processing_queued_flag") as mock_clear_flag, \
+             patch("api.agent.tasks.process_events._broadcast_processing_state"), \
+             patch("api.agent.tasks.process_events.ReferralService.check_and_grant_deferred_referral_credits"), \
+             patch("api.models.PersistentAgent.objects.select_related") as mock_select_related, \
+             patch("api.agent.tasks.process_events.process_agent_events", return_value=True):
+            mock_select_related.return_value.filter.return_value.first.return_value = None
+            process_agent_events_task.push_request(
+                delivery_info={"routing_key": AGENT_INTERACTIVE_PROCESSING_QUEUE},
+                id="followup-task",
+            )
+            try:
+                process_agent_events_task.run(agent_id, inbound_generation=8)
+            finally:
+                process_agent_events_task.pop_request()
+
+        mock_clear_flag.assert_not_called()
 
     @tag("batch_agent_chat")
     def test_redelivered_clears_stale_lock(self):

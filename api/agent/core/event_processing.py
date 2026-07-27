@@ -39,6 +39,7 @@ from observability import mark_span_failed_with_exception
 from .budget import AgentBudgetManager, BudgetContext, get_current_context as get_budget_context, set_current_context as set_budget_context
 from .burn_control import BurnRateAction, handle_burn_rate_limit
 from .processing_flags import (
+    claim_pending_agent,
     clear_processing_lock_active,
     claim_pending_drain_slot,
     clear_processing_heartbeat,
@@ -56,7 +57,6 @@ from .processing_flags import (
     mark_human_inbound_generation_consumed,
     mark_processing_lock_active,
     processing_lock_storage_keys,
-    remove_pending_agent,
     set_processing_heartbeat,
 )
 from .llm_utils import EmptyLiteLLMResponseError, raise_if_empty_litellm_response, raise_if_invalid_litellm_response, run_completion
@@ -369,6 +369,9 @@ NEGATED_RESEARCH_REQUEST_RE = re.compile(
     r"\b(?:don'?t|do not|no need to|without)\b.{0,24}\b(?:research|investigat|look|dig|find|figur)", re.IGNORECASE
 )
 DEEP_WORK_UPDATE_CORRECTION_PREFIX = "Deep-work communication correction:"
+STALE_TOOL_CANCELLATION_REASON = (
+    "Tool call was cancelled before execution because newer human input arrived."
+)
 # Canonical phrase the agent should use to signal continuation.
 # Prompts tell the agent to include this exact phrase when it has more work.
 CANONICAL_CONTINUATION_PHRASE = "CONTINUE_WORK_SIGNAL"
@@ -2090,6 +2093,7 @@ class _PreparedToolBatch:
     abort_after_execution: bool
     parallel_ineligible_reason: Optional[str]
     cancel_prepared_calls: bool = False
+    stale_cancellation: bool = False
 
 
 @dataclass
@@ -2105,6 +2109,7 @@ class _ExecutedToolBatch:
     execution_outcomes: list[_ToolExecutionOutcome]
     tools: List[dict]
     abort_after_execution: bool = False
+    stale_cancellation: bool = False
 
 
 def _mark_tool_call_started(
@@ -2236,12 +2241,13 @@ def _cancel_unstarted_tool_calls(
     prepared_calls: list[_PreparedToolExecution],
     *,
     reason: str,
+    retryable: bool = True,
 ) -> None:
     result_content = json.dumps(
         {
             "status": "error",
             "message": reason,
-            "retryable": True,
+            "retryable": retryable,
         }
     )
     for prepared in prepared_calls:
@@ -3279,7 +3285,23 @@ def _prepare_tool_batch(
     has_user_facing_message: bool,
     attach_completion: Any, attach_prompt_archive: Any,
     forced_message_continue: bool | None = None,
+    stale_prompt_checker: Callable[[], bool] | None = None,
 ) -> _PreparedToolBatch:
+    if stale_prompt_checker and stale_prompt_checker():
+        logger.info(
+            "Agent %s: cancelling stale tool batch before preparation because newer human input arrived.",
+            agent.id,
+        )
+        return _PreparedToolBatch(
+            prepared_calls=[],
+            followup_required=False,
+            all_calls_sleep=False,
+            abort_after_execution=True,
+            parallel_ineligible_reason="stale_human_input",
+            cancel_prepared_calls=True,
+            stale_cancellation=True,
+        )
+
     rate_limit_batch = (
         _build_tool_rate_limit_batch(
             agent,
@@ -3293,6 +3315,7 @@ def _prepare_tool_batch(
     all_calls_sleep = not has_non_sleep_calls
     abort_after_execution = False
     cancel_prepared_calls = False
+    stale_cancellation = False
     deep_work_update_reason = _deep_work_update_gate_context(agent, tool_calls)
     if deep_work_update_reason:
         _record_deep_work_update_correction(
@@ -3324,6 +3347,16 @@ def _prepare_tool_batch(
 
     for idx, call in enumerate(tool_calls, start=1):
         with tracer.start_as_current_span("Prepare Tool") as tool_span:
+            if stale_prompt_checker and stale_prompt_checker():
+                logger.info(
+                    "Agent %s: cancelling stale tool batch during preparation because newer human input arrived.",
+                    agent.id,
+                )
+                tool_span.add_event("Tool batch cancelled - newer human input")
+                abort_after_execution = True
+                cancel_prepared_calls = True
+                stale_cancellation = True
+                break
             if _should_abort_processing(
                 agent,
                 budget_ctx=budget_ctx,
@@ -3701,6 +3734,7 @@ def _prepare_tool_batch(
         abort_after_execution=abort_after_execution,
         parallel_ineligible_reason=_parallel_batch_ineligible_reason(prepared_calls),
         cancel_prepared_calls=cancel_prepared_calls,
+        stale_cancellation=stale_cancellation,
     )
 
 
@@ -3713,18 +3747,21 @@ def _execute_prepared_tool_batch_inner(
     tools: List[dict],
     heartbeat: Any,
     lock_extender: Any,
+    stale_prompt_checker: Callable[[], bool] | None = None,
 ) -> _ExecutedToolBatch:
     execution_outcomes: list[_ToolExecutionOutcome] = []
     run_parallel_batch = prepared_batch.parallel_ineligible_reason is None
     available_tools = tools
     abort_after_execution = prepared_batch.abort_after_execution
     execution_aborted = False
+    stale_cancellation = prepared_batch.stale_cancellation
 
     if prepared_batch.cancel_prepared_calls:
         return _ExecutedToolBatch(
             execution_outcomes=[],
             tools=available_tools,
             abort_after_execution=True,
+            stale_cancellation=stale_cancellation,
         )
 
     if run_parallel_batch:
@@ -3740,7 +3777,7 @@ def _execute_prepared_tool_batch_inner(
             next_prepared_index = 0
 
             def submit_available_calls() -> None:
-                nonlocal abort_after_execution, execution_aborted, next_prepared_index
+                nonlocal abort_after_execution, execution_aborted, next_prepared_index, stale_cancellation
                 while (
                     not execution_aborted
                     and len(futures) < max_workers
@@ -3748,6 +3785,17 @@ def _execute_prepared_tool_batch_inner(
                 ):
                     prepared = prepared_batch.prepared_calls[next_prepared_index]
                     with tracer.start_as_current_span("Execute Tool") as tool_span:
+                        if stale_prompt_checker and stale_prompt_checker():
+                            logger.info(
+                                "Agent %s: cancelling stale tool batch before executing %s because newer human input arrived.",
+                                agent.id,
+                                prepared.tool_name,
+                            )
+                            tool_span.add_event("Tool call cancelled - newer human input")
+                            abort_after_execution = True
+                            execution_aborted = True
+                            stale_cancellation = True
+                            return
                         if _should_abort_processing(
                             agent,
                             budget_ctx=budget_ctx,
@@ -3799,6 +3847,16 @@ def _execute_prepared_tool_batch_inner(
             )
         for prepared in prepared_batch.prepared_calls:
             with tracer.start_as_current_span("Execute Tool") as tool_span:
+                if stale_prompt_checker and stale_prompt_checker():
+                    logger.info(
+                        "Agent %s: cancelling stale tool batch before executing %s because newer human input arrived.",
+                        agent.id,
+                        prepared.tool_name,
+                    )
+                    tool_span.add_event("Tool call cancelled - newer human input")
+                    abort_after_execution = True
+                    stale_cancellation = True
+                    break
                 if _should_abort_processing(
                     agent,
                     budget_ctx=budget_ctx,
@@ -3856,6 +3914,7 @@ def _execute_prepared_tool_batch_inner(
         execution_outcomes=execution_outcomes,
         tools=available_tools,
         abort_after_execution=abort_after_execution,
+        stale_cancellation=stale_cancellation,
     )
 
 
@@ -3868,9 +3927,11 @@ def _execute_prepared_tool_batch(
     tools: List[dict],
     heartbeat: Any,
     lock_extender: Any,
+    stale_prompt_checker: Callable[[], bool] | None = None,
 ) -> _ExecutedToolBatch:
+    executed_batch: _ExecutedToolBatch | None = None
     try:
-        return _execute_prepared_tool_batch_inner(
+        executed_batch = _execute_prepared_tool_batch_inner(
             agent,
             prepared_batch,
             budget_ctx=budget_ctx,
@@ -3878,12 +3939,23 @@ def _execute_prepared_tool_batch(
             tools=tools,
             heartbeat=heartbeat,
             lock_extender=lock_extender,
+            stale_prompt_checker=stale_prompt_checker,
         )
+        return executed_batch
     finally:
+        stale_cancellation = bool(
+            executed_batch is not None and executed_batch.stale_cancellation
+        )
+        cancellation_reason = (
+            STALE_TOOL_CANCELLATION_REASON
+            if stale_cancellation
+            else "Tool call was cancelled before execution because batch processing stopped."
+        )
         _cancel_unstarted_tool_calls(
             agent,
             prepared_batch.prepared_calls,
-            reason="Tool call was cancelled before execution because batch processing stopped.",
+            reason=cancellation_reason,
+            retryable=not stale_cancellation,
         )
 
 
@@ -5617,7 +5689,8 @@ def process_agent_events(
     max_iterations_followup_delay_seconds: int | None = None,
     max_iterations_followup_queue: str | None = None,
     worker_pid: Optional[int] = None,
-) -> None:
+    processing_queue: str | None = None,
+) -> bool:
     """Process all outstanding events for a persistent agent."""
     normalized_agent_id = _normalize_persistent_agent_id(persistent_agent_id)
     if not normalized_agent_id:
@@ -5625,7 +5698,7 @@ def process_agent_events(
             "process_agent_events called with invalid agent id: %s",
             persistent_agent_id,
         )
-        return
+        return False
     persistent_agent_id = normalized_agent_id
 
     span = trace.get_current_span()
@@ -5647,7 +5720,7 @@ def process_agent_events(
         )
         span.add_event("Processing skipped - inbound generation already consumed")
         clear_processing_queued_flag(persistent_agent_id, client=redis_client)
-        return
+        return False
 
     if burn_follow_up_token:
         logger.info(
@@ -5661,7 +5734,7 @@ def process_agent_events(
         span=span,
         check_context="entry",
     ):
-        return
+        return False
 
     # Guard against reviving expired/closed cycles when a follow‑up arrives after TTL expiry
     if budget_id is not None:
@@ -5675,7 +5748,7 @@ def process_agent_events(
                 status or "expired",
                 active_id or "none",
             )
-            return
+            return False
 
     # ---------------- Budget context bootstrap ---------------- #
     # If this is a top-level trigger (no budget provided), start/reuse a cycle.
@@ -5757,6 +5830,7 @@ def process_agent_events(
     )
 
     lock_acquired = False
+    followup_queued = False
     processed_agent: Optional[PersistentAgent] = None
     heartbeat: Optional[_ProcessingHeartbeat] = None
 
@@ -5778,7 +5852,10 @@ def process_agent_events(
             if not lock_acquired:
                 enqueue_pending_agent(
                     persistent_agent_id,
+                    inbound_generation=inbound_generation,
+                    queue=processing_queue,
                     ttl=lock_settings.pending_set_ttl_seconds,
+                    client=redis_client,
                 )
 
                 logger.info(
@@ -5792,7 +5869,7 @@ def process_agent_events(
                     schedule_ttl_seconds=lock_settings.pending_drain_schedule_ttl_seconds,
                     span=span,
                 )
-                return
+                return False
 
         lock_acquired = True
         if is_processing_stop_requested(persistent_agent_id, client=redis_client):
@@ -5809,7 +5886,7 @@ def process_agent_events(
                 persistent_agent_id,
             )
             span.add_event("Processing skipped - stop requested after lock acquisition")
-            return
+            return False
         mark_processing_lock_active(persistent_agent_id, client=redis_client)
         clear_processing_queued_flag(persistent_agent_id)
         if lock_settings.heartbeat_ttl_seconds > 0:
@@ -5880,6 +5957,64 @@ def process_agent_events(
                 redis_client=redis_client,
             ):
                 clear_processing_lock_active(persistent_agent_id, client=redis_client)
+                if (
+                    not is_processing_stop_requested(persistent_agent_id, client=redis_client)
+                    and _get_processing_abort_reason(persistent_agent_id) is None
+                ):
+                    pending_work = claim_pending_agent(
+                        persistent_agent_id,
+                        client=redis_client,
+                    )
+                    if pending_work is not None:
+                        pending_generation_consumed = (
+                            pending_work.inbound_generation is not None
+                            and not pending_work.has_generic_work
+                            and is_human_inbound_generation_consumed(
+                                persistent_agent_id,
+                                pending_work.inbound_generation,
+                                client=redis_client,
+                            )
+                        )
+                        if pending_generation_consumed:
+                            logger.info(
+                                "Agent %s: discarded pending generation %s already consumed by the active turn.",
+                                persistent_agent_id,
+                                pending_work.inbound_generation,
+                            )
+                        else:
+                            try:
+                                from ..tasks.process_events import enqueue_claimed_pending_work
+
+                                enqueue_claimed_pending_work(pending_work)
+                                followup_queued = True
+                                logger.info(
+                                    "Agent %s: queued claimed pending follow-up after lock release "
+                                    "(generation=%s queue=%s generic=%s).",
+                                    persistent_agent_id,
+                                    pending_work.inbound_generation,
+                                    pending_work.queue,
+                                    pending_work.has_generic_work,
+                                )
+                                span.add_event("Pending follow-up queued after lock release")
+                            except (CeleryError, KombuOperationalError):
+                                logger.warning(
+                                    "Failed to queue claimed pending follow-up for agent %s; restoring pending work.",
+                                    persistent_agent_id,
+                                    exc_info=True,
+                                )
+                                enqueue_pending_agent(
+                                    pending_work.agent_id,
+                                    inbound_generation=pending_work.inbound_generation,
+                                    queue=pending_work.queue,
+                                    has_generic_work=pending_work.has_generic_work,
+                                    ttl=lock_settings.pending_set_ttl_seconds,
+                                    client=redis_client,
+                                )
+                                _schedule_pending_drain(
+                                    delay_seconds=lock_settings.pending_drain_delay_seconds,
+                                    schedule_ttl_seconds=lock_settings.pending_drain_schedule_ttl_seconds,
+                                    span=span,
+                                )
         if heartbeat:
             heartbeat.clear()
 
@@ -5897,6 +6032,8 @@ def process_agent_events(
                 _broadcast_processing(agent_obj)
         except Exception as e:
             logger.debug("Failed to broadcast processing state for agent %s: %s", persistent_agent_id, e)
+
+    return followup_queued
 
 
 def _maybe_enqueue_sandbox_warmup_for_recent_tool_history(agent: PersistentAgent, span) -> None:
@@ -6707,8 +6844,6 @@ def _run_agent_loop(
                         accepted_human_generation,
                         client=redis_client,
                     )
-                    if not _is_orchestrator_prompt_stale():
-                        remove_pending_agent(agent.id, client=redis_client)
 
                 def _finish_agent_loop(*, consume_human: bool = True) -> int:
                     if consume_human:
@@ -6872,6 +7007,10 @@ def _run_agent_loop(
                         allow_streamed_content=prompt_allows_implied_send and not source_reconciliation_directive,
                         stale_prompt_checker=_is_orchestrator_prompt_stale,
                     )
+                    if _is_orchestrator_prompt_stale():
+                        raise OrchestratorPromptStale(
+                            "Prompt became stale immediately after completion returned."
+                        )
                     empty_response_loop_retries = 0
                     if heartbeat:
                         heartbeat.touch("llm_response")
@@ -7281,6 +7420,7 @@ def _run_agent_loop(
                     has_user_facing_message=has_user_facing_message,
                     attach_completion=_attach_completion,
                     attach_prompt_archive=_attach_prompt_archive,
+                    stale_prompt_checker=_is_orchestrator_prompt_stale,
                 )
                 followup_required = prepared_batch.followup_required
                 all_calls_sleep = prepared_batch.all_calls_sleep
@@ -7301,6 +7441,7 @@ def _run_agent_loop(
                     tools=tools,
                     heartbeat=heartbeat,
                     lock_extender=lock_extender,
+                    stale_prompt_checker=_is_orchestrator_prompt_stale,
                 )
                 tools = executed_batch.tools
 
