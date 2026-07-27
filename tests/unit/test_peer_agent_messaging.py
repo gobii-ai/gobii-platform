@@ -123,7 +123,12 @@ class PeerMessagingServiceTests(TestCase):
         attachments = resolve_filespace_attachments(self.agent_a, [source_node.path])
         expected_prefix = f"/Inbox/{timezone.now().date().isoformat()}/peer-Agent_Alpha/"
 
-        def assert_processing_after_copy(agent_id: str, *, inbound_generation: int):
+        def assert_processing_after_copy(
+            agent_id: str,
+            *,
+            inbound_generation: int,
+            inbound_message_id: str,
+        ):
             copied_nodes = list(
                 AgentFsNode.objects.alive()
                 .filter(
@@ -134,6 +139,13 @@ class PeerMessagingServiceTests(TestCase):
             )
             self.assertEqual(agent_id, str(self.agent_b.id))
             self.assertGreater(inbound_generation, 0)
+            self.assertTrue(
+                PersistentAgentMessage.objects.filter(
+                    id=inbound_message_id,
+                    owner_agent=self.agent_b,
+                    is_outbound=False,
+                ).exists()
+            )
             self.assertEqual(len(copied_nodes), 1)
             self.assertEqual(copied_nodes[0].name, "summary.txt")
 
