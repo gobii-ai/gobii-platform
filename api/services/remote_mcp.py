@@ -1200,16 +1200,12 @@ def _tool_send_agent_message(request, arguments):
             body,
             sender_user_id=sender_user.id,
             attachments=[],
-            trigger_processing=False,
+            trigger_processing=trigger_processing,
             source="remote_mcp",
             source_kind="mcp",
             source_label="Gobii MCP",
         )
         create_message_attachments(message, resolved_attachments)
-        if trigger_processing:
-            from api.agent.tasks import process_agent_events_task
-
-            transaction.on_commit(lambda: process_agent_events_task.delay(str(agent.id)))
 
     event = serialize_message_event(message)
     cursor = event.get("cursor")

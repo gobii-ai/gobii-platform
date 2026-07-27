@@ -369,6 +369,9 @@ NEGATED_RESEARCH_REQUEST_RE = re.compile(
     r"\b(?:don'?t|do not|no need to|without)\b.{0,24}\b(?:research|investigat|look|dig|find|figur)", re.IGNORECASE
 )
 DEEP_WORK_UPDATE_CORRECTION_PREFIX = "Deep-work communication correction:"
+STALE_TOOL_CANCELLATION_REASON = (
+    "Tool call was cancelled before execution because newer human input arrived."
+)
 # Canonical phrase the agent should use to signal continuation.
 # Prompts tell the agent to include this exact phrase when it has more work.
 CANONICAL_CONTINUATION_PHRASE = "CONTINUE_WORK_SIGNAL"
@@ -3279,7 +3282,22 @@ def _prepare_tool_batch(
     has_user_facing_message: bool,
     attach_completion: Any, attach_prompt_archive: Any,
     forced_message_continue: bool | None = None,
+    stale_prompt_checker: Callable[[], bool] | None = None,
 ) -> _PreparedToolBatch:
+    if stale_prompt_checker and stale_prompt_checker():
+        logger.info(
+            "Agent %s: cancelling stale tool batch before preparation because newer human input arrived.",
+            agent.id,
+        )
+        return _PreparedToolBatch(
+            prepared_calls=[],
+            followup_required=False,
+            all_calls_sleep=False,
+            abort_after_execution=True,
+            parallel_ineligible_reason="stale_human_input",
+            cancel_prepared_calls=True,
+        )
+
     rate_limit_batch = (
         _build_tool_rate_limit_batch(
             agent,
@@ -3324,6 +3342,15 @@ def _prepare_tool_batch(
 
     for idx, call in enumerate(tool_calls, start=1):
         with tracer.start_as_current_span("Prepare Tool") as tool_span:
+            if stale_prompt_checker and stale_prompt_checker():
+                logger.info(
+                    "Agent %s: cancelling stale tool batch during preparation because newer human input arrived.",
+                    agent.id,
+                )
+                tool_span.add_event("Tool batch cancelled - newer human input")
+                abort_after_execution = True
+                cancel_prepared_calls = True
+                break
             if _should_abort_processing(
                 agent,
                 budget_ctx=budget_ctx,
@@ -3713,6 +3740,7 @@ def _execute_prepared_tool_batch_inner(
     tools: List[dict],
     heartbeat: Any,
     lock_extender: Any,
+    stale_prompt_checker: Callable[[], bool] | None = None,
 ) -> _ExecutedToolBatch:
     execution_outcomes: list[_ToolExecutionOutcome] = []
     run_parallel_batch = prepared_batch.parallel_ineligible_reason is None
@@ -3748,6 +3776,16 @@ def _execute_prepared_tool_batch_inner(
                 ):
                     prepared = prepared_batch.prepared_calls[next_prepared_index]
                     with tracer.start_as_current_span("Execute Tool") as tool_span:
+                        if stale_prompt_checker and stale_prompt_checker():
+                            logger.info(
+                                "Agent %s: cancelling stale tool batch before executing %s because newer human input arrived.",
+                                agent.id,
+                                prepared.tool_name,
+                            )
+                            tool_span.add_event("Tool call cancelled - newer human input")
+                            abort_after_execution = True
+                            execution_aborted = True
+                            return
                         if _should_abort_processing(
                             agent,
                             budget_ctx=budget_ctx,
@@ -3799,6 +3837,15 @@ def _execute_prepared_tool_batch_inner(
             )
         for prepared in prepared_batch.prepared_calls:
             with tracer.start_as_current_span("Execute Tool") as tool_span:
+                if stale_prompt_checker and stale_prompt_checker():
+                    logger.info(
+                        "Agent %s: cancelling stale tool batch before executing %s because newer human input arrived.",
+                        agent.id,
+                        prepared.tool_name,
+                    )
+                    tool_span.add_event("Tool call cancelled - newer human input")
+                    abort_after_execution = True
+                    break
                 if _should_abort_processing(
                     agent,
                     budget_ctx=budget_ctx,
@@ -3868,6 +3915,7 @@ def _execute_prepared_tool_batch(
     tools: List[dict],
     heartbeat: Any,
     lock_extender: Any,
+    stale_prompt_checker: Callable[[], bool] | None = None,
 ) -> _ExecutedToolBatch:
     try:
         return _execute_prepared_tool_batch_inner(
@@ -3878,12 +3926,18 @@ def _execute_prepared_tool_batch(
             tools=tools,
             heartbeat=heartbeat,
             lock_extender=lock_extender,
+            stale_prompt_checker=stale_prompt_checker,
         )
     finally:
+        cancellation_reason = (
+            STALE_TOOL_CANCELLATION_REASON
+            if stale_prompt_checker and stale_prompt_checker()
+            else "Tool call was cancelled before execution because batch processing stopped."
+        )
         _cancel_unstarted_tool_calls(
             agent,
             prepared_batch.prepared_calls,
-            reason="Tool call was cancelled before execution because batch processing stopped.",
+            reason=cancellation_reason,
         )
 
 
@@ -7281,6 +7335,7 @@ def _run_agent_loop(
                     has_user_facing_message=has_user_facing_message,
                     attach_completion=_attach_completion,
                     attach_prompt_archive=_attach_prompt_archive,
+                    stale_prompt_checker=_is_orchestrator_prompt_stale,
                 )
                 followup_required = prepared_batch.followup_required
                 all_calls_sleep = prepared_batch.all_calls_sleep
@@ -7301,6 +7356,7 @@ def _run_agent_loop(
                     tools=tools,
                     heartbeat=heartbeat,
                     lock_extender=lock_extender,
+                    stale_prompt_checker=_is_orchestrator_prompt_stale,
                 )
                 tools = executed_batch.tools
 
