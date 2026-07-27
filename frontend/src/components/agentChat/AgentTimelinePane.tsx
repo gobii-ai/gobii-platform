@@ -1,4 +1,4 @@
-import { useCallback, useMemo, type Ref } from 'react'
+import { memo, useCallback, useMemo, type Ref } from 'react'
 import { Loader2 } from 'lucide-react'
 import { TimelineEventItem } from './TimelineEventItem'
 import { StreamingReplyCard } from './StreamingReplyCard'
@@ -91,7 +91,9 @@ type AgentTimelinePaneProps = {
   typingStatusText: string
 }
 
-export function AgentTimelinePane({
+// Memoized: the chat page re-renders on every stream flush and near-bottom flip, and
+// re-running the full event map each time is the render-storm half of bug #267.
+export const AgentTimelinePane = memo(function AgentTimelinePane({
   composerDisabled = false,
   contactCapOpenPacks,
   contactCapShowUpgrade = false,
@@ -346,4 +348,4 @@ export function AgentTimelinePane({
       </button>
     </>
   )
-}
+})

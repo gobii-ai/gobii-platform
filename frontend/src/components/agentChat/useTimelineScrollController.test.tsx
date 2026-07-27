@@ -152,6 +152,9 @@ describe('useTimelineScrollController', () => {
     flushAnimationFrames()
     expect(viewport.scrollTop).toBe(300)
 
+    // Scrolling back to the live edge only re-pins when a real gesture drove it; a bare scroll
+    // event could just as well be a reflow moving the content under the reader.
+    fireEvent.wheel(viewport, { deltaY: 120 })
     viewport.scrollTop = 550
     fireEvent.scroll(viewport)
     expect(result.current.pinned).toBe(true)
@@ -159,5 +162,30 @@ describe('useTimelineScrollController', () => {
     rerender({ contentVersion: 'reply:1' })
     flushAnimationFrames()
     expect(viewport.scrollTop).toBe(600)
+  })
+
+  it('does not re-pin a parked reader when a reflow lands them near the bottom', () => {
+    const { result } = renderHook(
+      ({ contentVersion }: HarnessProps) => useScrollHarness({ contentVersion }),
+      { initialProps: { contentVersion: 'thinking:1' } },
+    )
+    const viewport = createScrollViewport()
+
+    act(() => result.current.controller.timelineRef(viewport))
+    flushNextAnimationFrame()
+
+    // The reader scrolls up and parks.
+    fireEvent.wheel(viewport, { deltaY: -120 })
+    viewport.scrollTop = 300
+    fireEvent.scroll(viewport)
+    expect(result.current.pinned).toBe(false)
+
+    // Time passes with no further input. A layout change — a stream card collapsing — fires a
+    // scroll event that leaves them near the bottom through no action of their own.
+    vi.spyOn(Date, 'now').mockReturnValue(60_000)
+    viewport.scrollTop = 560
+    fireEvent.scroll(viewport)
+
+    expect(result.current.pinned).toBe(false)
   })
 })
