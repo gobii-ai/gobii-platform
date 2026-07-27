@@ -4362,6 +4362,19 @@
     color: #0f4c81;
     line-height: 1.28;
 }
+/* A finished thought keeps the room a streaming one gets. Collapsing it to a single 0.6rem line
+   the instant it completed made the timeline lose the reasoning exactly when it became worth
+   reading, and left the planning step looking like a label with no content. This is the quiet
+   counterpart to the mood card: that one is a feeling shown at a glance, this one is a thought
+   given enough space to actually be read. */
+.tool-cluster-live-preview__entry-caption[data-activity-kind="thinking"] {
+    -webkit-line-clamp: 3;
+    font-size: 0.66rem;
+    line-height: 1.4;
+    color: #475569;
+    overflow-wrap: anywhere;
+}
+
 .tool-cluster-live-preview__entry[data-live-thinking="true"] {
     align-items: flex-start;
 }

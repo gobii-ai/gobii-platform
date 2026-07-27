@@ -7,7 +7,7 @@ import { formatRelativeTimestamp } from '../../util/time'
 import { getFriendlyToolInfo, type FriendlyToolInfo } from '../tooling/toolMetadata'
 import { extractBrightDataSearchQuery } from '../tooling/brightdata'
 import { ToolIconSlot } from './ToolIconSlot'
-import { deriveSemanticPreview } from './tooling/clusterPreviewText'
+import { deriveSemanticPreview, deriveThinkingSummary } from './tooling/clusterPreviewText'
 import type { ToolClusterTransform, ToolEntryDisplay } from './tooling/types'
 import { parseToolSearchResult } from './tooling/searchUtils'
 
@@ -997,7 +997,9 @@ function deriveActivityDescriptor(entry: ToolEntryDisplay): ActivityDescriptor {
   }
 
   if (kind === 'thinking') {
-    const thought = clampText(semantic ?? 'Planning next steps')
+    // A finished thought keeps the room a streaming one gets, instead of collapsing to its
+    // opening clause the moment it completes.
+    const thought = deriveThinkingSummary(entry) ?? clampText(semantic ?? 'Planning next steps')
     return {
       kind,
       label: 'Planning next step',
@@ -1450,6 +1452,7 @@ export function ToolClusterLivePreview({
                         <motion.span
                           key={`${entry.id}-profile-subtitle-${linkedInProfile.subtitle ?? item.activity.label}`}
                           className="tool-cluster-live-preview__entry-caption"
+                          data-activity-kind={item.activity.kind}
                           initial={!shouldAnimateIncoming ? { opacity: 1, y: 0 } : { opacity: 0, y: 2 }}
                           animate={!shouldAnimateIncoming ? { opacity: 1, y: 0 } : { opacity: 1, y: 0 }}
                           exit={reduceMotion ? { opacity: 1 } : { opacity: 0, y: -2 }}
@@ -1463,6 +1466,7 @@ export function ToolClusterLivePreview({
                         <motion.span
                           key={`${entry.id}-page-title-${visual.pageTitle}`}
                           className="tool-cluster-live-preview__entry-caption"
+                          data-activity-kind={item.activity.kind}
                           initial={!shouldAnimateIncoming ? { opacity: 1, y: 0 } : { opacity: 0, y: 2 }}
                           animate={!shouldAnimateIncoming ? { opacity: 1, y: 0 } : { opacity: 1, y: 0 }}
                           exit={reduceMotion ? { opacity: 1 } : { opacity: 0, y: -2 }}
@@ -1474,6 +1478,7 @@ export function ToolClusterLivePreview({
                         <motion.span
                           key={`${entry.id}-detail-${detailText}`}
                           className="tool-cluster-live-preview__entry-caption"
+                          data-activity-kind={item.activity.kind}
                           initial={!shouldAnimateIncoming ? { opacity: 1, y: 0 } : { opacity: 0, y: 2 }}
                           animate={!shouldAnimateIncoming ? { opacity: 1, y: 0 } : { opacity: 1, y: 0 }}
                           exit={reduceMotion ? { opacity: 1 } : { opacity: 0, y: -2 }}
