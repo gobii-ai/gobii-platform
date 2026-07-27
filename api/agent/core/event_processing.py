@@ -7269,6 +7269,10 @@ def _run_agent_loop(
                         )
                         _mark_accepted_human_generation_consumed()
                         continue
+                if not raw_tool_calls and raw_message_text == "sleep_until_next_trigger":
+                    raw_tool_calls = [_coerce_function_call_tool({"name": raw_message_text, "arguments": "{}"})]
+                    msg_content = raw_message_text = message_text = ""
+                    logger.info("Agent %s: normalized plain-text sleep_until_next_trigger into a tool call.", agent.id)
                 ready_tool_calls = _defer_tool_calls_behind_dependencies(raw_tool_calls)
                 if len(ready_tool_calls) != len(raw_tool_calls):
                     logger.info(
@@ -7276,12 +7280,10 @@ def _run_agent_loop(
                         agent.id,
                     )
                     raw_tool_calls = ready_tool_calls
-                raw_tool_names = [_get_tool_call_name(call) for call in raw_tool_calls]
-                has_explicit_send = any(name in MESSAGE_TOOL_NAMES for name in raw_tool_names if name)
-                has_explicit_sleep = any(name == "sleep_until_next_trigger" for name in raw_tool_names if name)
-                has_other_tool_calls = any(
-                    name and name != "sleep_until_next_trigger" for name in raw_tool_names
-                )
+                raw_tool_names = {_get_tool_call_name(call) for call in raw_tool_calls}
+                has_explicit_send = not raw_tool_names.isdisjoint(MESSAGE_TOOL_NAMES)
+                has_explicit_sleep = "sleep_until_next_trigger" in raw_tool_names
+                has_other_tool_calls = bool(raw_tool_names - {None, "sleep_until_next_trigger"})
 
                 implied_send = False
                 tool_calls = list(raw_tool_calls)
@@ -7332,15 +7334,16 @@ def _run_agent_loop(
                         )
                         if implied_error:
                             try:
-                                step_kwargs = {
-                                    "agent": agent,
-                                    "description": (
-                                        "The answer below was not delivered. Send that same answer now with the explicit tool "
-                                        "for the requester's inbound channel; do not research or call other tools first.\n\n"
-                                        f"UNDLIVERED ANSWER:\n{message_text}"
-                                    ),
-                                }
-                                _persist_attached_step(step_kwargs, _attach_completion, _attach_prompt_archive)
+                                _record_policy_step(
+                                    agent,
+                                    "The answer below was not delivered. This mode requires an explicit tool. If it is "
+                                    "user-facing, send that same content unchanged now with the explicit tool for the requester's "
+                                    "inbound channel; do not research or call other tools first. If it represents silence, "
+                                    "completion, or a tool/control instruction, do not send it; call sleep_until_next_trigger "
+                                    f"with empty response content.\n\nUNDELIVERED ANSWER:\n{message_text}",
+                                    attach_completion=_attach_completion,
+                                    attach_prompt_archive=_attach_prompt_archive,
+                                )
                             except Exception:
                                 logger.debug("Failed to persist implied-send correction step", exc_info=True)
                         # Don't continue here - still execute any other tool calls that were returned
