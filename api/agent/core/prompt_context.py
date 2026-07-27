@@ -4910,7 +4910,7 @@ def _get_unified_history_prompt(
         files = _browser_task_files_payload(t)
         components = {
             "meta": f"[{t.updated_at.isoformat()}] Browser task completed with status '{t.status}' (id={t.id}).",
-            "prompt": rewrite_prompt_urls(t.prompt or "", agent, create=False),
+            "prompt": rewrite_prompt_urls(t.prompt or "", agent, create=True),
         }
         result_info = tool_result_prompt_info.get(
             browser_task_result_record_ids.get(str(t.id), "")

@@ -301,12 +301,21 @@ def _first_shot_source_phase_failures(calls, *, expected_url=DOMAIN_REFRESH_URL)
     fetches = [call for call in calls if call.tool_name == "http_request"]
     sqlite_calls = [call for call in calls if call.tool_name == "sqlite_batch"]
     sends = [call for call in calls if call.tool_name == "send_chat_message"]
+    terminal_sends = [
+        call for call in sends
+        if resolved_tool_param(call, "will_continue_work") is False
+    ]
+    core_calls = [
+        call for call in calls
+        if call.tool_name != "send_chat_message"
+        or resolved_tool_param(call, "will_continue_work") is False
+    ]
     failures = _tool_attempt_failures(fetches, "Source fetch")
-    failures.extend(_tool_attempt_failures(sends, "Final send"))
+    failures.extend(_tool_attempt_failures(sends, "Source workflow message"))
     failures.extend(message for failed, message in (
         (
-            [call.tool_name for call in calls] != ["http_request", "sqlite_batch", "send_chat_message"],
-            f"expected fetch, one SQLite batch, then one send; found {[call.tool_name for call in calls]}",
+            [call.tool_name for call in core_calls] != ["http_request", "sqlite_batch", "send_chat_message"],
+            f"expected fetch, one SQLite batch, then one terminal send; found {[call.tool_name for call in calls]}",
         ),
         (
             len(fetches) != 1
@@ -316,12 +325,12 @@ def _first_shot_source_phase_failures(calls, *, expected_url=DOMAIN_REFRESH_URL)
         ),
         (len(sqlite_calls) != 1, f"expected one SQLite batch, found {len(sqlite_calls)}"),
         (
-            len(sends) != 1 or resolved_tool_param(sends[0], "will_continue_work") is not False,
-            f"expected one successful terminal send, found {len(sends)} send attempt(s)",
+            len(terminal_sends) != 1,
+            f"expected one successful terminal send, found {len(terminal_sends)} terminal send attempt(s)",
         ),
     ) if failed)
 
-    completion_ids = [getattr(getattr(call, "step", None), "completion_id", None) for call in calls]
+    completion_ids = [getattr(getattr(call, "step", None), "completion_id", None) for call in core_calls]
     if any(completion_id is None for completion_id in completion_ids):
         failures.append("every source, SQLite, and send phase must link to an orchestrator completion")
     elif len(set(completion_ids)) != len(completion_ids):

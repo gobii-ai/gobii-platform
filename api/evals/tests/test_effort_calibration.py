@@ -886,11 +886,20 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
             {"body": "Done", "will_continue_work": False},
         )
         clean = [fetch, sqlite, send]
+        work_update = call(
+            "send_chat_message",
+            "update",
+            {"body": "I have the source and am modeling it now.", "will_continue_work": True},
+        )
         failed_fetch = call(
             "http_request", "failed", {"url": sqlite_evals.DOMAIN_REFRESH_URL}, status="error",
         )
 
         self.assertEqual(_first_shot_source_phase_failures(clean), [])
+        self.assertEqual(
+            _first_shot_source_phase_failures([fetch, work_update, sqlite, send]),
+            [],
+        )
         cases = (
             ([sqlite, fetch, send], "expected fetch"),
             ([fetch, fetch, sqlite, send], "expected one exact CRM snapshot fetch"),

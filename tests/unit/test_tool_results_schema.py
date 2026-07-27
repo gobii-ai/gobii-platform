@@ -769,11 +769,11 @@ class PreviewByteLimitTests(SimpleTestCase):
         self.assertNotIn("result_id=step-http", info.meta)
         self.assertIn("parsed_with=json", info.meta)
         self.assertNotIn("Central bank signals rate hold", info.preview_text)
-        self.assertIn("SOURCE ARRAYS; stored paths", info.preview_text)
+        self.assertIn("SOURCE ARRAYS; paths", info.preview_text)
         for expected in (
-            "$.content.items", "one sqlite_batch only", "every listed entity array",
-            "INSERT ... SELECT/json_each", "Derive item fields, including item URLs, from j.value",
-            "derive only actual parent fields from t.result_json", "provenance from t.result_id",
+            "$.content.items", "exactly one sqlite_batch call", "keyed tables for all arrays",
+            "INSERT ... SELECT/json_each", "Derive item fields/URLs from j.value",
+            "parent fields from t.result_json", "provenance from t.result_id",
             "is_current_batch=1",
             "never changes __agent_config/__agent_skills", "No pre-read, refetch, blob inspection, copied literals",
         ):
@@ -854,7 +854,7 @@ class PreviewByteLimitTests(SimpleTestCase):
         self.assertIn("$.content.accounts(account_id,name)", preview)
         self.assertIn("$.content.workstreams(workstream_id,account_id,status)", preview)
         self.assertNotIn("$.content.alerts", preview)
-        self.assertIn("every listed entity array", preview)
+        self.assertIn("keyed tables for all arrays", preview)
         self.assertIn("INSERT ... SELECT/json_each", preview)
         self.assertEqual(preview.count("[SOURCE ARRAYS"), 1)
         self.assertNotIn('"account_id":"acct-1"', preview)
@@ -916,16 +916,16 @@ class PreviewByteLimitTests(SimpleTestCase):
         for expected in (
             "[SOURCE SET; exact stored arrays:",
             "exact stored arrays: $.content.prospects(name,title,profile_url)",
-            "If persisting, derive one write from stored rows",
-            "INSERT ... SELECT json_extract(j.value,'$.field'),t.result_id",
+            "New table first: CREATE TABLE IF NOT EXISTS with stable item ID PRIMARY KEY",
+            "Then upsert in this call; never clear/copy",
+            "INSERT ... SELECT json_extract(j.value,'$.id'),json_extract(j.value,'$.source_url'),t.result_id",
             "FROM __tool_results AS t, json_each(t.result_json,'$.content.prospects') AS j",
             "WHERE t.is_current_batch=1 AND t.tool_name='http_request'",
             "Current source_batch_id=step-first-model",
             "is_current_batch is the set boundary",
             "Ignore other batches; add no result_id predicate",
-            "item fields/URLs from j.value",
-            "distinguish siblings by derived parent data",
-            "not authored labels",
+            "Every item field/URL comes from j.value",
+            "siblings differ by derived parent fields",
             "Otherwise answer the visible evidence directly",
         ):
             self.assertIn(expected, info.meta)
@@ -987,7 +987,7 @@ class PreviewByteLimitTests(SimpleTestCase):
         self.assertIn("source_batch_id=batch-current", source_set_meta)
         self.assertNotIn("source_batch_id=batch-historical", source_set_meta)
         self.assertIn("is_current_batch=1", source_set_meta)
-        self.assertIn("result_id is row provenance", source_set_meta)
+        self.assertIn("t.result_id is shared row provenance, never item identity", source_set_meta)
 
         modeled = tool_results.prepare_tool_results_for_prompt(
             records,
@@ -1001,6 +1001,7 @@ class PreviewByteLimitTests(SimpleTestCase):
         )
         self.assertEqual(modeled_preview.count("[SOURCE ARRAYS"), 1)
         self.assertNotIn("Example company", modeled_preview)
+        self.assertIn("Never delete/clear the model", modeled_preview)
         self.assertEqual(
             sum(bool(item.source_reconciliation_directive) for item in modeled.values()),
             1,
@@ -1036,6 +1037,9 @@ class PreviewByteLimitTests(SimpleTestCase):
                         "entity_name": f"Entity {index}",
                         "profile_url": f"https://example.test/{index}",
                         "role": "Owner",
+                        "qualification_signal_with_a_deliberately_long_name": "verified",
+                        "relationship_context_with_a_deliberately_long_name": "direct",
+                        "evidence_observation_with_a_deliberately_long_name": "current",
                     }
                 ]
                 for index in range(12)
@@ -1049,9 +1053,38 @@ class PreviewByteLimitTests(SimpleTestCase):
 
         hint = info.meta.split("]\n", 1)[0] + "]\n"
         schema_list = hint.split("exact stored arrays: ", 1)[1].split(
-            ". If persisting", 1
+            ". New table first", 1
         )[0]
         self.assertLessEqual(len(schema_list.split("; ")), tool_results.MAX_OPTIONAL_SOURCE_ARRAYS)
+        self.assertLessEqual(len(hint), tool_results.MAX_OPTIONAL_SOURCE_HINT_CHARS)
+
+    def test_optional_source_write_hint_survives_rich_array_schema(self):
+        payload = {
+            "status": "ok",
+            "content": {
+                "events": [{
+                    "release_id": "rel-1",
+                    "service": "Checkout API",
+                    "starts_at": "2026-07-23T15:30:17Z",
+                    "owner": "Priya Shah",
+                    "status": "approved",
+                    "source_url": "https://example.test/releases.json",
+                    "observed_at": "2026-07-22T14:15:00Z",
+                }],
+            },
+        }
+        info, _record = self._prepare_http_result(
+            "step-release-array",
+            payload,
+            named_model_tables=set(),
+        )
+
+        hint = info.meta.split("]\n", 1)[0] + "]\n"
+        self.assertIn("[SOURCE SET", hint)
+        self.assertIn("$.content.events", hint)
+        self.assertIn("CREATE TABLE IF NOT EXISTS with stable item ID PRIMARY KEY", hint)
+        self.assertIn("upsert in this call; never clear/copy", hint)
+        self.assertIn("json_extract(j.value,'$.source_url')", hint)
         self.assertLessEqual(len(hint), tool_results.MAX_OPTIONAL_SOURCE_HINT_CHARS)
 
     def test_fresh_tool_call_under_threshold_shown_inline(self):

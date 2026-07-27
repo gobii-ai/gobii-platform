@@ -2463,7 +2463,7 @@ class PromptContextBuilderTests(TestCase):
         content = user_message["content"]
         self.assertIn("[SOURCE ARRAYS;", content)
         self.assertNotIn("Current Account", content)
-        self.assertIn("[SOURCE ARRAYS; stored paths: $.content.accounts", content)
+        self.assertIn("[SOURCE ARRAYS; paths: $.content.accounts", content)
         self.assertNotIn("archived.example.test", content)
         self.assertNotIn("Legacy Account", content)
         self.assertNotIn("HISTORICAL SOURCE BATCH", content)

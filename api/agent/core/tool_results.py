@@ -194,18 +194,24 @@ def _build_optional_source_write_hint(
 
     first_path = schemas[0][0].replace("'", "''")
     escaped_batch_id, escaped_tool_name = source_batch_id.replace("'", "''"), tool_name.replace("'", "''")
-    hint = (
-        f"[SOURCE SET; exact stored arrays: {'; '.join(schema for _path, schema in schemas)}. "
-        "If persisting, derive one write from stored rows, never copied literals: "
-        "INSERT ... SELECT json_extract(j.value,'$.field'),t.result_id "
-        f"FROM __tool_results AS t, json_each(t.result_json,'{first_path}') AS j "
-        f"WHERE t.is_current_batch=1 AND t.tool_name='{escaped_tool_name}'. "
-        f"Current source_batch_id={escaped_batch_id}; is_current_batch is the set boundary. "
-        "Ignore other batches; add no result_id predicate. "
-        "result_id is row provenance. Read item fields/URLs from j.value and actual parent fields from t.result_json; "
-        "use each path above in the same batch and distinguish siblings by derived parent data, not authored labels. "
-        "Otherwise answer the visible evidence directly.]\n"
-    )
+    def render_hint(schema_text: str) -> str:
+        return (
+            f"[SOURCE SET; exact stored arrays: {schema_text}. "
+            "New table first: CREATE TABLE IF NOT EXISTS with stable item ID PRIMARY KEY. "
+            "Then upsert in this call; never clear/copy: "
+            "INSERT ... SELECT json_extract(j.value,'$.id'),json_extract(j.value,'$.source_url'),t.result_id "
+            f"FROM __tool_results AS t, json_each(t.result_json,'{first_path}') AS j "
+            f"WHERE t.is_current_batch=1 AND t.tool_name='{escaped_tool_name}'. "
+            f"Current source_batch_id={escaped_batch_id}; is_current_batch is the set boundary. "
+            "Ignore other batches; add no result_id predicate. "
+            "Every item field/URL comes from j.value; t.result_id is shared row provenance, never item identity. "
+            "Parent-only fields use t.result_json; siblings differ by derived parent fields. Use all listed paths together. "
+            "Otherwise answer the visible evidence directly.]\n"
+        )
+
+    hint = render_hint("; ".join(schema for _path, schema in schemas))
+    if len(hint) > MAX_OPTIONAL_SOURCE_HINT_CHARS:
+        hint = render_hint("; ".join(path for path, _schema in schemas))
     return hint if len(hint) <= MAX_OPTIONAL_SOURCE_HINT_CHARS else ""
 
 
@@ -386,16 +392,15 @@ def prepare_tool_results_for_prompt(
                 source_import_key = (source_batch_id, record.tool_name)
                 if source_import_key not in emitted_source_import_sets:
                     source_import_prefix = (
-                        f"[SOURCE ARRAYS; stored paths: {'; '.join(schemas)}. NEXT: output one sqlite_batch only. In that "
-                        "single batch, create/evolve keyed model tables for every listed entity array, import every relevant "
-                        f"sibling with one INSERT ... SELECT/json_each over is_current_batch=1 and "
-                        f"tool_name='{record.tool_name}' (source_batch_id={source_batch_id}), then SELECT bounded "
-                        "task-relevant rows from every updated table using stable entity filters/joins—not counts or whole-table "
-                        "dumps. This source_batch_id is the current-set boundary: ignore other batches and add no result_id "
-                        "predicate. Result IDs are row provenance. Derive item fields, including item URLs, from j.value; "
-                        "derive only actual parent fields from t.result_json and provenance from t.result_id. This "
-                        "ordinary evidence task never changes __agent_config/__agent_skills. No pre-read, refetch, blob "
-                        "inspection, copied literals, or splitting arrays across calls.]\n"
+                        f"[SOURCE ARRAYS; paths: {'; '.join(schemas)}. NEXT: exactly one sqlite_batch call—no parallel/second "
+                        "call. In it, create/evolve keyed tables for all arrays; upsert every sibling set-wise with "
+                        f"INSERT ... SELECT/json_each over is_current_batch=1 AND tool_name='{record.tool_name}' "
+                        f"(batch {source_batch_id}); then SELECT bounded task rows with entity filters/joins, not counts/dumps. "
+                        "is_current_batch is the set boundary: ignore older batches and do not filter result_id. Each item's "
+                        "source ID is its key; t.result_id is row provenance, never item identity. Derive item fields/URLs from "
+                        "j.value, parent fields from t.result_json, and provenance from t.result_id. Evidence work never changes "
+                        "__agent_config/__agent_skills; reports there corrupt durable config. Never delete/clear the model. "
+                        "No pre-read, refetch, blob inspection, copied literals, or split calls.]\n"
                     )
                     emitted_source_import_sets.add(source_import_key)
         if not requires_source_import and hide_literal_result_id:
