@@ -4169,6 +4169,18 @@ def _build_implied_send_tool_call(
         None,
     )
 
+
+def _implied_send_correction_description(message_text: str) -> str:
+    return (
+        "The answer below was not delivered. This mode requires an explicit tool. "
+        "If it is user-facing, send that same content unchanged now with the explicit tool "
+        "for the requester's inbound channel; do not research or call other tools first. "
+        "If it represents silence, completion, or a tool/control instruction, do not send it; "
+        "call sleep_until_next_trigger with empty response content.\n\n"
+        f"UNDELIVERED ANSWER:\n{message_text}"
+    )
+
+
 def _attempt_cycle_close_for_sleep(agent: PersistentAgent, budget_ctx: Optional[BudgetContext]) -> None:
     """Best-effort attempt to close the budget cycle when the agent goes idle."""
 
@@ -7226,6 +7238,26 @@ def _run_agent_loop(
                         )
                         _mark_accepted_human_generation_consumed()
                         continue
+                if not raw_tool_calls and message_text == "sleep_until_next_trigger":
+                    # Some tool-capable models occasionally emit the terminal tool name as
+                    # response text. Consume only the exact token so it cannot be delivered.
+                    raw_tool_calls = [
+                        {
+                            "id": "normalized_sleep_until_next_trigger",
+                            "type": "function",
+                            "function": {
+                                "name": "sleep_until_next_trigger",
+                                "arguments": "{}",
+                            },
+                        }
+                    ]
+                    msg_content = ""
+                    raw_message_text = ""
+                    message_text = ""
+                    logger.info(
+                        "Agent %s: normalized plain-text sleep_until_next_trigger into a tool call.",
+                        agent.id,
+                    )
                 ready_tool_calls = _defer_tool_calls_behind_dependencies(raw_tool_calls)
                 if len(ready_tool_calls) != len(raw_tool_calls):
                     logger.info(
@@ -7291,11 +7323,7 @@ def _run_agent_loop(
                             try:
                                 step_kwargs = {
                                     "agent": agent,
-                                    "description": (
-                                        "The answer below was not delivered. Send that same answer now with the explicit tool "
-                                        "for the requester's inbound channel; do not research or call other tools first.\n\n"
-                                        f"UNDLIVERED ANSWER:\n{message_text}"
-                                    ),
+                                    "description": _implied_send_correction_description(message_text),
                                 }
                                 _persist_attached_step(step_kwargs, _attach_completion, _attach_prompt_archive)
                             except Exception:
