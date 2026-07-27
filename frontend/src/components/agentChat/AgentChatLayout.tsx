@@ -481,7 +481,6 @@ export function AgentChatLayout({
   const runtimeSkipPlanningBusy = runtimeSession.processing.skipPlanningBusy
   const runtimeStreaming = runtimeSession.stream.streaming
   const runtimeAutoScrollPinned = runtimeSession.timelineUi.autoScrollPinned
-  const runtimeHasUnseenActivity = runtimeSession.timelineUi.hasUnseenActivity
   const runtimeSignupPreviewState = runtimeSession.identity.signupPreviewState
   const runtimePlanningState = runtimeSession.identity.planningState
   const runtimeInsights = useMemo(
@@ -502,7 +501,6 @@ export function AgentChatLayout({
   const skipPlanningBusy = runtimeSkipPlanningBusy
   const streaming = runtimeStreaming
   const autoScrollPinned = runtimeAutoScrollPinned
-  const hasUnseenActivity = runtimeHasUnseenActivity
   const planningState = runtimePlanningState
   const storeSignupPreviewState = runtimeSignupPreviewState
   const agentName = runtimeAgentName ?? bannerAgentName
@@ -925,11 +923,16 @@ export function AgentChatLayout({
     onSidebarSuggestionsEnabledChange?.(false)
   }, [onSidebarSuggestionsEnabledChange])
   const hasTimelineEvents = timelineRenderEvents.length > 0
+  // Unseen activity on its own used to be enough to show this, so an arriving message raised it
+  // while the reader was already at the bottom -- a button offering to take you where you already
+  // are, which then appeared to do nothing when tapped. Unread still styles it; only distance
+  // from the latest justifies showing it. hasMoreNewer stays unconditional because newer pages
+  // exist beyond the loaded content, so there genuinely is somewhere to jump to.
   const showJumpButton = !initialLoading
     && hasTimelineEvents
     && (
       hasMoreNewer
-      || (!autoScrollPinned && (hasUnseenActivity || !isNearBottom))
+      || (!autoScrollPinned && !isNearBottom)
     )
 
   const showBanner = Boolean(agentName)
