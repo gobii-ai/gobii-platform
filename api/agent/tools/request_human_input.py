@@ -64,7 +64,8 @@ def get_request_human_input_tool() -> dict[str, Any]:
             "options": {
                 "type": "array",
                 "items": option_schema,
-                "description": "Optional choices; omit or pass [] for a free-text-only answer.",
+                "maxItems": MAX_OPTION_COUNT,
+                "description": f"Distinct choices, usually 2-3 and at most {MAX_OPTION_COUNT}; omit only for a free-text blocker.",
             },
         },
         "required": ["question"],
@@ -75,11 +76,16 @@ def get_request_human_input_tool() -> dict[str, Any]:
         "function": {
             "name": "request_human_input",
             "description": (
-                "Tracked non-credential web input; no email/SMS. Credentials: secure_credentials_request. "
-                "Broad first assignment: call alone with the highest-leverage question and 2-3 real answer options; no response text/config/work. Ask another after the answer only if needed. Otherwise omit options for free-text blockers. "
-                "Use message tools for non-blocking questions/answers. Include Other / I'll explain if needed. "
-                "Do not use for preference surveys, timezone/channel/formatting, category example choices like which vendor/company, non-blocking lookback, or reversible defaults you can choose and disclose. "
-                "Use for role-defining discovery when audience/scope/volume/success bounds materially change substantial ongoing first work; otherwise only if the user asks for targets/scope before setup or they block a recurring monitor. "
+                "Tracked non-credential choices; credentials use secure_credentials_request. Guided intake makes one "
+                "tool call after orientation, alone with empty content: top-level question/options for one decision or "
+                "requests for several independent decisions. Count follows the real ambiguity, not a quota. Each intake "
+                f"card has 2-{MAX_OPTION_COUNT} options (usually 2-3), each with title and one-sentence description; "
+                "never bundle decisions, say select-all, mix free text, survey preferences, or silently default a "
+                "material boundary. category example choices are not blockers: when a user asks for targets/scope "
+                "before setup or they would block a recurring monitor, choose and disclose a sensible example rather "
+                "than asking which vendor/company. Web cards stay pending; follow result guidance to mirror exact cards "
+                "to a separate preferred email/SMS. Ask later only when evidence reveals a consequential choice. Outside intake, "
+                "omit options only for a genuine free-text blocker; use message tools for non-blocking questions. "
                 f"Plain text only; max {MAX_HUMAN_INPUT_QUESTION_LENGTH} chars."
             ),
             "parameters": {
@@ -93,12 +99,13 @@ def get_request_human_input_tool() -> dict[str, Any]:
                     "options": {
                         "type": "array",
                         "items": option_schema,
-                        "description": "Optional choices; omit or pass [] for a free-text-only answer.",
+                        "maxItems": MAX_OPTION_COUNT,
+                        "description": f"Intake requires 2-{MAX_OPTION_COUNT} distinct choices; omit only for a free-text blocker.",
                     },
                     "requests": {
                         "type": "array",
                         "items": request_schema,
-                        "description": "Multiple genuinely blocking requests with options; omit top-level question/options.",
+                        "description": "Several independent questions; omit top-level question/options.",
                     },
                     "recipient": {
                         "description": "Optional explicit recipient; omit for the current implicit conversation target.",
@@ -251,15 +258,6 @@ def execute_request_human_input(agent: PersistentAgent, params: dict[str, Any]) 
 
     if request_solicits_credential_value(question, options):
         return {"status": "error", "message": CREDENTIAL_SOLICITATION_ERROR_MESSAGE}
-
-    if options and len(options) > 3:
-        return {
-            "status": "error",
-            "message": (
-                "request_human_input is for one blocking decision, not preference surveys. "
-                "Ask at most one concise question with up to 3 options, or choose a reasonable default and disclose it."
-            ),
-        }
 
     result = create_human_input_request(
         agent,

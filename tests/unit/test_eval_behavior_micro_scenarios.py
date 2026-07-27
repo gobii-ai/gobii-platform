@@ -45,7 +45,10 @@ from api.evals.scenarios.behavior_micro import (
     COMMON_USE_CASE_MICRO_SCENARIO_SLUGS,
     GOOGLE_SHEETS_EVAL_SYNTHETIC_TOOL_NAMES,
     IGNORED_FIRST_ACTION_TOOL_NAMES,
+    GUIDED_BROAD_PROSPECTING_FIRST_ASSIGNMENT_ASKS_CHOICES,
+    GUIDED_EMAIL_FIRST_ASSIGNMENT_PRESERVES_WEB_CHOICES,
     GUIDED_FIRST_ASSIGNMENT_ASKS_USEFUL_QUESTIONS,
+    GUIDED_UNKNOWN_FIRST_ASSIGNMENT_OFFERS_CHOICE_PATHS,
     GUIDED_PLANNING_BOUNDED_WHEN_REQUESTED,
     GUIDED_PLANNING_MICRO_SCENARIO_SLUGS,
     LEGACY_PLANNING_STATE_EXECUTES_DIRECTLY,
@@ -130,6 +133,10 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
         self.assertEqual(agent_behavior_suite.scenario_slugs, BEHAVIOR_MICRO_SCENARIO_SLUGS)
         self.assertEqual(charter_memory_suite.scenario_slugs, CHARTER_MEMORY_MICRO_SCENARIO_SLUGS)
         self.assertEqual(planning_suite.scenario_slugs, GUIDED_PLANNING_MICRO_SCENARIO_SLUGS)
+        self.assertIn(
+            GUIDED_BROAD_PROSPECTING_FIRST_ASSIGNMENT_ASKS_CHOICES,
+            planning_suite.scenario_slugs,
+        )
         self.assertEqual(tool_choice_suite.scenario_slugs, TOOL_CHOICE_MICRO_SCENARIO_SLUGS)
         self.assertFalse(set(CHARTER_MEMORY_MICRO_SCENARIO_SLUGS) & set(BEHAVIOR_MICRO_SCENARIO_SLUGS))
         self.assertFalse(set(CHARTER_MEMORY_MICRO_SCENARIO_SLUGS) & set(TOOL_CHOICE_MICRO_SCENARIO_SLUGS))
@@ -191,6 +198,9 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
             [
                 GUIDED_PLANNING_BOUNDED_WHEN_REQUESTED,
                 GUIDED_FIRST_ASSIGNMENT_ASKS_USEFUL_QUESTIONS,
+                GUIDED_BROAD_PROSPECTING_FIRST_ASSIGNMENT_ASKS_CHOICES,
+                GUIDED_EMAIL_FIRST_ASSIGNMENT_PRESERVES_WEB_CHOICES,
+                GUIDED_UNKNOWN_FIRST_ASSIGNMENT_OFFERS_CHOICE_PATHS,
                 LEGACY_PLANNING_STATE_EXECUTES_DIRECTLY,
             ],
         )
@@ -200,7 +210,25 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
         )
         self.assertEqual(
             [task.name for task in ScenarioRegistry.get(GUIDED_FIRST_ASSIGNMENT_ASKS_USEFUL_QUESTIONS).tasks],
-            ["inject_prompt", "verify_useful_discovery", "verify_no_premature_work"],
+            ["inject_prompt", "verify_useful_discovery", "verify_orient_then_ask"],
+        )
+        self.assertEqual(
+            [
+                task.name
+                for task in ScenarioRegistry.get(
+                    GUIDED_EMAIL_FIRST_ASSIGNMENT_PRESERVES_WEB_CHOICES
+                ).tasks
+            ],
+            ["inject_prompt", "verify_useful_discovery", "verify_orient_then_ask"],
+        )
+        self.assertEqual(
+            [
+                task.name
+                for task in ScenarioRegistry.get(
+                    GUIDED_UNKNOWN_FIRST_ASSIGNMENT_OFFERS_CHOICE_PATHS
+                ).tasks
+            ],
+            ["inject_prompt", "verify_useful_discovery", "verify_orient_then_ask"],
         )
         self.assertEqual(
             [task.name for task in ScenarioRegistry.get(LEGACY_PLANNING_STATE_EXECUTES_DIRECTLY).tasks],
@@ -1063,12 +1091,21 @@ class BehaviorMicroHelperTests(TestCase):
             "SELECT stage,owner,next_action FROM accounts WHERE account_id='acct-aster-042';"
             "SELECT status,owner,due_on FROM workstreams WHERE account_id='acct-aster-042';"
         )
+        current_key_reads = imports + (
+            "SELECT account_id,stage,owner FROM accounts WHERE account_id IN "
+            "(SELECT json_extract(j.value,'$.account_id') FROM __tool_results r,"
+            "json_each(r.result_json,'$.content.accounts') j WHERE r.is_current_batch=1);"
+            "SELECT workstream_id,account_id,status,owner FROM workstreams WHERE account_id IN "
+            "(SELECT json_extract(j.value,'$.account_id') FROM __tool_results r,"
+            "json_each(r.result_json,'$.content.accounts') j WHERE r.is_current_batch=1);"
+        )
         count_only = imports + "SELECT count(*) FROM accounts; SELECT count(*) FROM workstreams;"
         unlinked_reads = imports + "SELECT stage FROM accounts; SELECT status FROM workstreams;"
 
         self.assertEqual(_source_relationship_read_failures([row_reads], "accounts", "workstreams"), [])
         self.assertEqual(_source_relationship_read_failures([joined_read], "accounts", "workstreams"), [])
         self.assertEqual(_source_relationship_read_failures([bounded_reads], "accounts", "workstreams"), [])
+        self.assertEqual(_source_relationship_read_failures([current_key_reads], "accounts", "workstreams"), [])
         self.assertIn(
             "did not return decision rows",
             _source_relationship_read_failures([count_only], "accounts", "workstreams")[0],
@@ -2294,7 +2331,7 @@ class BehaviorMicroHelperTests(TestCase):
         self.assertTrue(planning_requests_are_bounded([free_text, options, options]))
         self.assertTrue(planning_requests_are_bounded([free_text]))
         self.assertFalse(planning_requests_are_bounded([free_text, free_text]))
-        self.assertFalse(planning_requests_are_bounded([options] * 4))
+        self.assertTrue(planning_requests_are_bounded([options] * 4))
 
     def test_request_human_input_eval_tool_check_accepts_valid_options_or_free_text(self):
         valid_single = SimpleNamespace(

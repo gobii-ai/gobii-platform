@@ -1,5 +1,8 @@
 from decimal import Decimal
+from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from unittest.mock import patch
+from uuid import uuid4
 
 from allauth.account.models import EmailAddress
 from django.contrib.auth import get_user_model
@@ -18,31 +21,160 @@ from api.models import (
 
 @tag("batch_promptree")
 class PromptContextSqliteGuidanceTests(SimpleTestCase):
+    def test_active_source_batch_spans_completions_for_one_request(self):
+        process_started = datetime(2026, 7, 27, 9, 0, tzinfo=timezone.utc)
+        process_step = SimpleNamespace(
+            id=uuid4(),
+            created_at=process_started,
+            system_step=SimpleNamespace(code="PROCESS_EVENTS"),
+        )
+        inbound = SimpleNamespace(
+            id=uuid4(),
+            timestamp=process_started + timedelta(seconds=1),
+            is_outbound=False,
+        )
+        later_outbound = SimpleNamespace(
+            id=uuid4(),
+            timestamp=process_started + timedelta(seconds=2),
+            is_outbound=True,
+        )
+
+        batch_id, started_at = prompt_context._active_source_batch(
+            [process_step],
+            [inbound, later_outbound],
+        )
+
+        self.assertEqual(batch_id, str(inbound.id))
+        self.assertEqual(started_at, inbound.timestamp)
+
+    def test_new_inbound_message_starts_a_new_source_batch(self):
+        process_started = datetime(2026, 7, 27, 9, 0, tzinfo=timezone.utc)
+        process_step = SimpleNamespace(
+            id=uuid4(),
+            created_at=process_started,
+            system_step=SimpleNamespace(code="PROCESS_EVENTS"),
+        )
+        first_inbound = SimpleNamespace(
+            id=uuid4(),
+            timestamp=process_started + timedelta(seconds=1),
+            is_outbound=False,
+        )
+        correction = SimpleNamespace(
+            id=uuid4(),
+            timestamp=process_started + timedelta(seconds=8),
+            is_outbound=False,
+        )
+
+        batch_id, started_at = prompt_context._active_source_batch(
+            [process_step],
+            [correction, first_inbound],
+        )
+
+        self.assertEqual(batch_id, str(correction.id))
+        self.assertEqual(started_at, correction.timestamp)
+
+    def test_current_request_sources_share_batch_across_completions(self):
+        started_at = datetime(2026, 7, 27, 9, 0, tzinfo=timezone.utc)
+        source_time = started_at + timedelta(seconds=2)
+
+        first = prompt_context._source_batch_id_for_tool_result(
+            tool_name="mcp_brightdata_scrape_as_markdown",
+            created_at=source_time,
+            completion_id="completion-one",
+            active_batch_id="request-one",
+            active_started_at=started_at,
+        )
+        second = prompt_context._source_batch_id_for_tool_result(
+            tool_name="mcp_brightdata_scrape_as_markdown",
+            created_at=source_time + timedelta(seconds=2),
+            completion_id="completion-two",
+            active_batch_id="request-one",
+            active_started_at=started_at,
+        )
+        non_source = prompt_context._source_batch_id_for_tool_result(
+            tool_name="send_chat_message",
+            created_at=source_time,
+            completion_id="completion-one",
+            active_batch_id="request-one",
+            active_started_at=started_at,
+        )
+
+        self.assertEqual((first, second), ("request-one", "request-one"))
+        self.assertEqual(non_source, "completion-one")
+
+    def test_source_url_metadata_uses_one_exact_source_request_url(self):
+        self.assertEqual(
+            prompt_context._source_url_from_tool_params(
+                None,
+                "mcp_brightdata_scrape_as_markdown",
+                {"url": "https://research.example.test/interviews/one"},
+            ),
+            "https://research.example.test/interviews/one",
+        )
+        self.assertIsNone(
+            prompt_context._source_url_from_tool_params(
+                None,
+                "send_chat_message",
+                {"url": "https://research.example.test/interviews/one"},
+            )
+        )
+        self.assertIsNone(
+            prompt_context._source_url_from_tool_params(
+                None,
+                "http_request",
+                {"url": "compare https://one.example.test and https://two.example.test"},
+            )
+        )
+
     def test_sqlite_guidance_tracks_bounded_set_coverage(self):
         guidance = prompt_context._get_sqlite_guidance()
 
-        self.assertIn("Named tables are the world model", guidance)
-        self.assertIn("query, don't remember", guidance)
-        self.assertIn("fetch stale/missing facts only", guidance)
-        self.assertIn("Tool results don't update it", guidance)
-        self.assertIn("one batch evolves/imports via INSERT SELECT/json_each", guidance)
-        self.assertIn("Key entities, children, relations", guidance)
-        self.assertIn("queries coverage", guidance)
-        self.assertIn("refresh provenance", guidance)
-        self.assertIn("query gaps/joins/counts/ranks", guidance)
-        self.assertIn("Authored values bind :name", guidance)
-        self.assertIn("over tool_name/multi-ID", guidance)
-        self.assertIn("No per-result import", guidance)
-        self.assertIn("Same-path results across vendors form one set", guidance)
-        self.assertIn("fields/URL/result_id", guidance)
-        self.assertIn("unstructured work uses bound JSON :rows", guidance)
-        self.assertIn("joined by result_id", guidance)
-        self.assertIn("SCHEMA FIRST: for an existing table", guidance)
-        self.assertIn("task-relevant name fragment, not a full table listing", guidance)
-        self.assertIn("one metadata-only call with no target-table read", guidance)
-        self.assertIn("Only afterward query using confirmed tables, columns, and join keys", guidance)
-        self.assertIn("After a schema error inspect, don't guess again", guidance)
-        self.assertIn("roll back or reconnect before another statement", guidance)
+        self.assertIn("Named tables are the durable world model", guidance)
+        self.assertIn("exact logic layer", guidance)
+        self.assertIn("Query truth instead of remembering it", guidance)
+        self.assertIn("entities, relations, evidence, coverage, and provenance", guidance)
+        self.assertIn("Tool results do not update that model", guidance)
+        self.assertIn("CURRENT SOURCE SET", guidance)
+        self.assertIn("one set-wise upsert", guidance)
+        self.assertIn("decision/evidence SELECT", guidance)
+        self.assertIn(
+            "is_current_batch=1 AND tool_name='exact visible tool name'",
+            guidance,
+        )
+        self.assertIn("item.value", guidance)
+        self.assertIn("HTTP bodies are under $.content", guidance)
+        self.assertIn("request URL at $.url", guidance)
+        self.assertIn("For structured JSON pass `rows=[]`", guidance)
+        self.assertIn("add no source_url/result_id predicate", guidance)
+        self.assertIn("Store t.source_url/t.result_id as provenance", guidance)
+        self.assertIn("For prose only", guidance)
+        self.assertIn("one bounded set-wide inspection shown beside", guidance)
+        self.assertIn("Before a multi-source prose model write", guidance)
+        self.assertIn("never import from memory or previews alone", guidance)
+        self.assertIn("top-level `rows`", guidance)
+        self.assertIn("join `json_each(:rows)` to __tool_results by result_id", guidance)
+        self.assertIn("Store result_id/source_url provenance", guidance)
+        self.assertIn("Never put sourced facts, URLs, or link handles in SQL literals", guidance)
+        self.assertIn("Bound fields are evidence transcription, not enrichment", guidance)
+        self.assertIn("a qualitative claim never supports invented numbers", guidance)
+        self.assertIn("one result_id at a time", guidance)
+        self.assertIn("Upsert by stable key and refresh mutable fields", guidance)
+        self.assertIn("counts, joins, gaps, ranks", guidance)
+        self.assertIn("On that final batch set `will_continue_work=false`", guidance)
+        self.assertIn("unless a specific non-SQLite action remains", guidance)
+        self.assertIn("without validating or rereading the model", guidance)
+        self.assertIn("Bind authored or messy values as :name", guidance)
+        self.assertIn("inside the tool call's `bindings` object", guidance)
+        self.assertIn("exact tool_name may be a SQL literal", guidance)
+        self.assertIn("put `WHERE 1=1` before `ON CONFLICT`", guidance)
+        self.assertIn("call 1 only targeted sqlite_master", guidance)
+        self.assertIn("meaningful domain noun from the request", guidance)
+        self.assertIn("call 2 is PRAGMA table_info alone", guidance)
+        self.assertIn("columns do not exist in context until that call returns", guidance)
+        self.assertIn("call 3 uses only returned columns/keys", guidance)
+        self.assertIn("`_` is a LIKE wildcard", guidance)
+        self.assertIn("json_each aliases expose key/value, not seq", guidance)
+        self.assertIn("group_concat(DISTINCT x)", guidance)
         self.assertNotIn("Copy names/paths/values/URLs", guidance)
 
     def test_low_iteration_warning_keeps_unfinished_work_active(self):
@@ -305,6 +437,7 @@ class PromptContextSqliteGuidanceTests(SimpleTestCase):
         self.assertIn("Import same-shaped siblings in one set query", warning)
         self.assertIn("separate statements only for different entity shapes", warning)
         self.assertIn("Do not answer or act from transient results", warning)
+        self.assertNotIn("FIRST-RUN GUIDED INTAKE", warning)
 
         inspection = (
             "sqlite_batch",
@@ -316,11 +449,13 @@ class PromptContextSqliteGuidanceTests(SimpleTestCase):
             second_source,
             inspection,
         ])
-        self.assertIn("already inspected this source batch", post_inspection)
+        self.assertIn("already inspected this complete source set", post_inspection)
         self.assertIn("Do not query raw __tool_results again", post_inspection)
-        self.assertIn("bind one JSON array", post_inspection)
+        self.assertIn("non-empty top-level `rows`", post_inspection)
         self.assertIn("json_each(:rows)", post_inspection)
-        self.assertIn("Import same-shaped siblings with one set query", post_inspection)
+        self.assertIn("r has no named fields", post_inspection)
+        self.assertIn("Empty rows", post_inspection)
+        self.assertIn("another inspection are invalid strategies", post_inspection)
 
         modeled_without_read = (
             "sqlite_batch",
@@ -408,6 +543,31 @@ class PromptContextContactsGuidanceTests(TestCase):
             charter="Test contacts guidance.",
             browser_use_agent=self.browser_agent,
         )
+
+    def test_source_url_metadata_registers_a_stable_link_reference(self):
+        source_url = "https://research.example.test/interviews/one"
+
+        extracted = prompt_context._source_url_from_tool_params(
+            self.agent,
+            "mcp_brightdata_scrape_as_markdown",
+            {"url": source_url},
+        )
+        prompt_context._register_source_url_references(
+            self.agent,
+            [
+                prompt_context.ToolCallResultRecord(
+                    step_id="source-one",
+                    tool_name="mcp_brightdata_scrape_as_markdown",
+                    created_at=prompt_context.dj_timezone.now(),
+                    result_text="Source one",
+                    source_url=extracted,
+                )
+            ],
+        )
+
+        self.assertEqual(extracted, source_url)
+        rendered = prompt_context.rewrite_prompt_urls(source_url, self.agent, create=False)
+        self.assertRegex(rendered, r"^\$\[link:L[0-9A-Z]{16}\]$")
 
     def test_runtime_config_note_does_not_direct_one_off_feedback_into_config(self):
         with patch("api.agent.core.prompt_context.ensure_steps_compacted"), patch(

@@ -8,13 +8,18 @@ from api.agent.tools.sqlite_query_quality import summarize_sqlite_tool_result_sq
 from api.evals.registry import ScenarioRegistry
 from api.evals.scenarios.sqlite_tool_results import (
     SQLITE_INCREMENTAL_DOMAIN_MODEL,
+    SQLITE_SIBLING_RESULT_SET_FIRST_WRITE,
     SQLITE_SOURCE_ARRAY_FIRST_WRITE,
     SQLITE_TOOL_RESULT_SCENARIO_SLUGS,
     SQLITE_TOOL_RESULT_SUITE_SLUG,
+    SQLITE_UNSTRUCTURED_BINDINGS_FIRST_WRITE,
     SqliteIncrementalDomainModelScenario,
     SqliteIntermediateWorkingTableScenario,
+    SqliteSiblingResultSetFirstWriteScenario,
     SqliteSourceArrayFirstWriteScenario,
+    SqliteUnstructuredBindingsFirstWriteScenario,
     _repeated_source_import_tables,
+    _sqlite_attempt_failures,
     _source_array_first_write_failures,
     _uses_queryable_source_model,
 )
@@ -94,6 +99,24 @@ class SqliteSourceArrayEvalTests(SimpleTestCase):
     def test_catalog_case_rejects_every_single_result_import_filter(self):
         self.assertEqual(SqliteIntermediateWorkingTableScenario.max_single_result_filters, 0)
 
+    def test_sqlite_attempt_scorer_rejects_success_with_query_advisory(self):
+        call = _sqlite_call(
+            self.clean_sql,
+            result=json.dumps({
+                "status": "ok",
+                "results": [{"result": [{"release_id": "rel-search-18"}]}],
+                "advisories": [{
+                    "code": "tool_result_row_loop",
+                    "message": "Use one shaped query over every sibling.",
+                }],
+            }),
+        )
+
+        self.assertEqual(
+            _sqlite_attempt_failures([call]),
+            ["SQLite attempt 1 returned a query advisory"],
+        )
+
     def test_catalog_case_rejects_repeated_same_table_imports_without_result_ids(self):
         repeated = _repeated_source_import_tables([
             """
@@ -127,6 +150,44 @@ class SqliteSourceArrayEvalTests(SimpleTestCase):
         )
         prompt = SqliteIncrementalDomainModelScenario.prompt.casefold()
         for leaked_term in ("sqlite", "__tool_results", "json_each", "insert", "select", "table"):
+            self.assertNotIn(leaked_term, prompt)
+
+    def test_sibling_result_set_case_is_registered_without_teaching_sql(self):
+        suite = SuiteRegistry.get(SQLITE_TOOL_RESULT_SUITE_SLUG)
+        scenario = ScenarioRegistry.get(SQLITE_SIBLING_RESULT_SET_FIRST_WRITE)
+
+        self.assertIsNotNone(scenario)
+        self.assertIn(SQLITE_SIBLING_RESULT_SET_FIRST_WRITE, SQLITE_TOOL_RESULT_SCENARIO_SLUGS)
+        self.assertIn(SQLITE_SIBLING_RESULT_SET_FIRST_WRITE, suite.scenario_slugs)
+        self.assertEqual(
+            [task.name for task in scenario.tasks],
+            [
+                "inject_prompt",
+                "verify_first_shaped_model_write",
+                "verify_segment_answer",
+            ],
+        )
+        prompt = SqliteSiblingResultSetFirstWriteScenario.prompt.casefold()
+        for leaked_term in ("sqlite", "__tool_results", "json_each", "insert", "select", "table"):
+            self.assertNotIn(leaked_term, prompt)
+
+    def test_unstructured_binding_case_is_registered_without_teaching_sql(self):
+        suite = SuiteRegistry.get(SQLITE_TOOL_RESULT_SUITE_SLUG)
+        scenario = ScenarioRegistry.get(SQLITE_UNSTRUCTURED_BINDINGS_FIRST_WRITE)
+
+        self.assertIsNotNone(scenario)
+        self.assertIn(SQLITE_UNSTRUCTURED_BINDINGS_FIRST_WRITE, SQLITE_TOOL_RESULT_SCENARIO_SLUGS)
+        self.assertIn(SQLITE_UNSTRUCTURED_BINDINGS_FIRST_WRITE, suite.scenario_slugs)
+        self.assertEqual(
+            [task.name for task in scenario.tasks],
+            [
+                "inject_prompt",
+                "verify_bound_model_write",
+                "verify_evidence_answer",
+            ],
+        )
+        prompt = SqliteUnstructuredBindingsFirstWriteScenario.prompt.casefold()
+        for leaked_term in ("sqlite", "__tool_results", "json_each", "insert", "select", "table", "bindings"):
             self.assertNotIn(leaked_term, prompt)
 
     def test_existing_item_report_accepts_a_queried_source_model(self):

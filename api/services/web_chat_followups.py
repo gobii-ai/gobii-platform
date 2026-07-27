@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from django.conf import settings
 from django.contrib.auth import get_user_model
 
+from api.agent.comms.email_endpoint_routing import can_agent_send_to
 from api.agent.comms.message_reads import latest_visible_outbound_message_queryset
 from api.models import CommsChannel, PersistentAgent, PersistentAgentCommsEndpoint, PersistentAgentMessage, PersistentAgentMessageRead, UserPhoneNumber, parse_web_user_address
 from api.services.email_verification import has_verified_email
@@ -110,12 +111,6 @@ def _message_has_been_read(message, user) -> bool:
     ).exists()
 
 
-def _agent_has_sending_endpoint(agent, channel: str) -> bool:
-    if channel == CommsChannel.SMS.value and agent.sms_disabled:
-        return False
-    return agent.comms_endpoints.filter(channel=channel).exists()
-
-
 def _verified_email_address_for_user(user) -> str | None:
     email = (getattr(user, "email", "") or "").strip()
     if email and has_verified_email(user):
@@ -141,18 +136,14 @@ def _preferred_non_web_followup_contact(agent, user) -> dict[str, str] | None:
         email = _verified_email_address_for_user(user)
         if not email or email.lower() != (endpoint.address or "").strip().lower():
             return None
-        if not _agent_has_sending_endpoint(agent, CommsChannel.EMAIL):
-            return None
-        if not agent.is_recipient_whitelisted(CommsChannel.EMAIL, endpoint.address):
+        if not can_agent_send_to(agent, CommsChannel.EMAIL, endpoint.address):
             return None
         return {"channel": CommsChannel.EMAIL, "address": endpoint.address, "tool": "send_email"}
 
     phone = _verified_phone_for_user(user, endpoint.address)
     if not phone:
         return None
-    if not _agent_has_sending_endpoint(agent, CommsChannel.SMS):
-        return None
-    if not agent.is_recipient_whitelisted(CommsChannel.SMS, endpoint.address):
+    if not can_agent_send_to(agent, CommsChannel.SMS, endpoint.address):
         return None
     return {"channel": CommsChannel.SMS, "address": endpoint.address, "tool": "send_sms"}
 
@@ -161,16 +152,14 @@ def _fallback_non_web_followup_contact(agent, user) -> dict[str, str] | None:
     email = _verified_email_address_for_user(user)
     if (
         email
-        and _agent_has_sending_endpoint(agent, CommsChannel.EMAIL)
-        and agent.is_recipient_whitelisted(CommsChannel.EMAIL, email)
+        and can_agent_send_to(agent, CommsChannel.EMAIL, email)
     ):
         return {"channel": CommsChannel.EMAIL, "address": email, "tool": "send_email"}
 
     phone = _verified_phone_for_user(user)
     if (
         phone
-        and _agent_has_sending_endpoint(agent, CommsChannel.SMS)
-        and agent.is_recipient_whitelisted(CommsChannel.SMS, phone)
+        and can_agent_send_to(agent, CommsChannel.SMS, phone)
     ):
         return {"channel": CommsChannel.SMS, "address": phone, "tool": "send_sms"}
 

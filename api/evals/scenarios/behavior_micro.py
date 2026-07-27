@@ -58,6 +58,11 @@ PLANNING_INTEGRATION_SETUP_SEARCHES_BEFORE_QUESTION = "planning_integration_setu
 PLANNING_SECURE_CREDENTIAL_REQUEST = "planning_secure_credential_request"
 GUIDED_PLANNING_BOUNDED_WHEN_REQUESTED = "guided_planning_bounded_when_requested"
 GUIDED_FIRST_ASSIGNMENT_ASKS_USEFUL_QUESTIONS = "guided_first_assignment_asks_useful_questions"
+GUIDED_BROAD_PROSPECTING_FIRST_ASSIGNMENT_ASKS_CHOICES = (
+    "guided_broad_prospecting_first_assignment_asks_choices"
+)
+GUIDED_EMAIL_FIRST_ASSIGNMENT_PRESERVES_WEB_CHOICES = "guided_email_first_assignment_preserves_web_choices"
+GUIDED_UNKNOWN_FIRST_ASSIGNMENT_OFFERS_CHOICE_PATHS = "guided_unknown_first_assignment_offers_choice_paths"
 LEGACY_PLANNING_STATE_EXECUTES_DIRECTLY = "legacy_planning_state_executes_directly"
 CHARTER_ADDS_DURABLE_PREFERENCE_PRESERVING_EXISTING = "charter_adds_durable_preference_preserving_existing"
 CHARTER_ADDS_INFERRED_PREFERENCE_PRESERVING_EXISTING = "charter_adds_inferred_preference_preserving_existing"
@@ -358,6 +363,7 @@ COMMON_USE_CASE_RAW_EVAL_CASES = [
     {"slug": "common_use_case_136_apollo_connect_tool_search", "category": "integration_discovery", "prompt": "Connect my Apollo.io account so you can use it for lead sourcing.", "expected_tools": ["search_tools"], "forbidden_tools": ["request_human_input", "secure_credentials_request", "spawn_web_task"], "plan_expected": False},
     {"slug": "common_use_case_137_slack_connect_tool_search", "category": "integration_discovery", "prompt": "Connect Slack so you can read and summarize customer feedback from our support channel.", "expected_tools": ["search_tools"], "forbidden_tools": ["request_human_input", "secure_credentials_request", "spawn_web_task"], "plan_expected": False},
     {"slug": "common_use_case_138_intercom_notes_capability_answer", "category": "tool_choice", "prompt": "Are you able to add internal notes to Intercom threads, different from replies?", "expected_tools": ["send_chat_message"], "forbidden_tools": ["request_human_input"], "accepted_tool_alternatives": {"send_chat_message": ["search_tools"]}, "plan_expected": False},
+    {"slug": "common_use_case_139_simple_greeting", "category": "conversation", "prompt": "Hi", "expected_tools": ["send_chat_message"], "forbidden_tools": ["request_human_input", "sqlite_batch", "mcp_brightdata_search_engine", "mcp_brightdata_scrape_as_markdown"], "plan_expected": False},
 ]
 
 COMMON_USE_CASE_EVAL_CASES = tuple(
@@ -370,6 +376,9 @@ COMMON_USE_CASE_MICRO_SCENARIO_SLUGS = [case.slug for case in COMMON_USE_CASE_EV
 GUIDED_PLANNING_MICRO_SCENARIO_SLUGS = [
     GUIDED_PLANNING_BOUNDED_WHEN_REQUESTED,
     GUIDED_FIRST_ASSIGNMENT_ASKS_USEFUL_QUESTIONS,
+    GUIDED_BROAD_PROSPECTING_FIRST_ASSIGNMENT_ASKS_CHOICES,
+    GUIDED_EMAIL_FIRST_ASSIGNMENT_PRESERVES_WEB_CHOICES,
+    GUIDED_UNKNOWN_FIRST_ASSIGNMENT_OFFERS_CHOICE_PATHS,
     LEGACY_PLANNING_STATE_EXECUTES_DIRECTLY,
 ]
 
@@ -626,7 +635,7 @@ def all_requests_have_options(requests):
 
 
 def planning_requests_are_bounded(requests):
-    if not 1 <= len(requests) <= 3:
+    if not requests:
         return False
     option_modes = [_valid_human_input_options(request.options_json) for request in requests]
     free_text_modes = [request.options_json == [] for request in requests]
@@ -853,7 +862,7 @@ class BehaviorMicroScenario(EvalScenario, ScenarioExecutionTools):
 @register_scenario
 class GuidedPlanningBoundedWhenRequestedScenario(BehaviorMicroScenario):
     slug = GUIDED_PLANNING_BOUNDED_WHEN_REQUESTED
-    description = "Explicit planning requests should produce a small set of decision-changing questions without starting work."
+    description = "Explicit planning requests should produce proportionate decision-changing questions without starting work."
     category = "guided_planning"
     tags = ("agent_behavior", "micro", "guided_planning", "human_input")
     tasks = [
@@ -874,7 +883,30 @@ class GuidedPlanningBoundedWhenRequestedScenario(BehaviorMicroScenario):
                 ),
                 trigger_processing=True,
                 eval_run_id=run_id,
-                mock_config=self._planning_guardrail_mocks(),
+                mock_config={
+                    **self._planning_guardrail_mocks(),
+                    "mcp_brightdata_search_engine": {
+                        "status": "ok",
+                        "results": [
+                            {
+                                "title": "Competitive monitoring workflow guide",
+                                "url": "https://example.test/competitive-monitoring",
+                                "description": (
+                                    "Useful programs define competitor scope, material signal types, "
+                                    "and alert urgency before implementation."
+                                ),
+                            }
+                        ],
+                    },
+                    "mcp_brightdata_scrape_as_markdown": {
+                        "status": "ok",
+                        "url": "https://example.test/competitive-monitoring",
+                        "result": (
+                            "Monitoring design depends on competitor scope, decision-changing signals, "
+                            "and how quickly a team must react."
+                        ),
+                    },
+                },
                 eval_stop_policy={
                     "ignore_sqlite_agent_config_mutations": False,
                     "ignored_tool_names": list(IGNORED_FIRST_ACTION_TOOL_NAMES | {UPDATE_PLAN_TOOL_NAME}),
@@ -882,7 +914,8 @@ class GuidedPlanningBoundedWhenRequestedScenario(BehaviorMicroScenario):
                     "stop_on_sqlite_agent_config_mutation": True,
                     "stop_on_tool_names": list(SUBSTANTIVE_WORK_TOOL_NAMES | AGENT_CONFIG_MUTATION_TOOL_NAMES),
                     "stop_on_unexpected_relevant_tool": True,
-                    "allowed_tool_names": ["request_human_input"],
+                    "allowed_tool_names": ["request_human_input", *sorted(PLANNING_READ_ONLY_TOOL_NAMES)],
+                    "max_relevant_tool_calls": 7,
                 },
             )
         self.record_task_result(
@@ -913,8 +946,8 @@ class GuidedPlanningBoundedWhenRequestedScenario(BehaviorMicroScenario):
         ]
         choice, reasoning = self.llm_judge(
             question=(
-                "Did the agent ask a small, bounded set of one to three distinct questions whose answers "
-                "materially shape the requested workflow, and then stop without starting implementation? "
+                "Did the agent ask the distinct questions whose answers materially shape the requested workflow, "
+                "without following a fixed numeric quota, padding the intake, or starting implementation? "
                 "Accept either ordinary chat questions or structured human-input questions. Judge the "
                 "behavior and meaning, not exact wording or which UI mechanism was used."
             ),
@@ -934,6 +967,10 @@ class GuidedPlanningBoundedWhenRequestedScenario(BehaviorMicroScenario):
         )
 
         calls = get_tool_calls_for_run(run_id, after=inbound.timestamp)
+        orientation_calls = [
+            call for call in calls
+            if call.tool_name in PLANNING_READ_ONLY_TOOL_NAMES
+        ]
         forbidden = [
             call for call in calls
             if call.tool_name in SUBSTANTIVE_WORK_TOOL_NAMES
@@ -946,17 +983,37 @@ class GuidedPlanningBoundedWhenRequestedScenario(BehaviorMicroScenario):
                 )
             )
         ]
+        rejected_intake_calls = [
+            call for call in calls
+            if call.tool_name == "request_human_input"
+            and str(call.status).lower() != "complete"
+        ]
+        bounded_orientation = len(orientation_calls) <= 4
         self.record_task_result(
             run_id,
             None,
-            EvalRunTask.Status.FAILED if forbidden else EvalRunTask.Status.PASSED,
+            (
+                EvalRunTask.Status.FAILED
+                if forbidden or rejected_intake_calls or not bounded_orientation
+                else EvalRunTask.Status.PASSED
+            ),
             task_name="verify_no_execution_or_config",
             observed_summary=(
                 f"Unexpected work/config calls: {[call.tool_name for call in forbidden]}."
                 if forbidden
-                else "No substantive work or durable configuration changes occurred."
+                else (
+                    "The first intake call was rejected instead of succeeding in one shot."
+                    if rejected_intake_calls
+                    else (
+                        f"Orientation used {len(orientation_calls)} read calls; expected at most 4."
+                        if not bounded_orientation
+                        else "No substantive work or durable configuration changes occurred."
+                    )
+                )
             ),
-            artifacts={"step": forbidden[0].step} if forbidden else {},
+            artifacts={
+                "step": (forbidden or rejected_intake_calls or orientation_calls)[0].step
+            } if forbidden or rejected_intake_calls or orientation_calls else {},
         )
 
 
@@ -964,15 +1021,52 @@ class GuidedPlanningBoundedWhenRequestedScenario(BehaviorMicroScenario):
 class GuidedFirstAssignmentAsksUsefulQuestionsScenario(BehaviorMicroScenario):
     slug = GUIDED_FIRST_ASSIGNMENT_ASKS_USEFUL_QUESTIONS
     description = (
-        "A broad first assignment should ask the highest-leverage setup question in native web UI without reviving "
-        "mandatory planning or starting expensive work."
+        "A broad first assignment should do bounded orientation, then ask proportionate evidence-informed setup questions in "
+        "native web UI without reviving mandatory planning or starting the deliverable."
     )
     category = "guided_planning"
     tags = ("agent_behavior", "micro", "guided_planning", "human_input", "first_run")
+    preferred_contact_channel = CommsChannel.WEB
+    requires_fallback_copy = False
+    unknown_orientation = False
+    assignment_prompt = "Take over growth research for Northstar Flow. Build a strong pipeline and keep it moving."
+    orientation_search_results = (
+        {
+            "title": "Northstar Flow product overview",
+            "url": "https://northstar.example.test/product",
+            "description": (
+                "Northstar Flow automates recurring vendor onboarding, compliance follow-up, "
+                "and evidence collection for operations teams."
+            ),
+        },
+        {
+            "title": "Northstar Flow customer stories",
+            "url": "https://northstar.example.test/customers",
+            "description": (
+                "Customer stories emphasize procurement leaders at 200-2,000 employee "
+                "companies; a smaller segment uses it for security reviews."
+            ),
+        },
+    )
+    orientation_scrape_result = (
+        "Northstar Flow handles vendor onboarding and recurring compliance evidence. "
+        "Its strongest public examples serve procurement and operations teams."
+    )
+    orientation_scrape_url = "https://northstar.example.test/product"
+    orientation_evidence = {
+        "product": (
+            "Northstar Flow automates recurring vendor onboarding, compliance follow-up, and evidence "
+            "collection for operations teams."
+        ),
+        "customer_signal": (
+            "Public examples emphasize procurement leaders at 200-2,000 employee companies, with a smaller "
+            "security-review segment."
+        ),
+    }
     tasks = [
         ScenarioTask(name="inject_prompt", assertion_type="manual"),
         ScenarioTask(name="verify_useful_discovery", assertion_type="llm_judge"),
-        ScenarioTask(name="verify_no_premature_work", assertion_type="manual"),
+        ScenarioTask(name="verify_orient_then_ask", assertion_type="manual"),
     ]
 
     def run(self, run_id, agent_id):
@@ -995,38 +1089,73 @@ class GuidedFirstAssignmentAsksUsefulQuestionsScenario(BehaviorMicroScenario):
         with self.wait_for_agent_idle(agent_id, timeout=120):
             inbound = self.inject_message(
                 agent_id,
-                (
-                    "You're taking over outbound research for our new workflow product. Build us a strong sales "
-                    "lead pipeline and keep it moving."
-                ),
-                trigger_processing=True,
+                self.assignment_prompt,
+                trigger_processing=False,
+                eval_run_id=run_id,
+            )
+            if self.preferred_contact_channel == CommsChannel.EMAIL:
+                PersistentAgentCommsEndpoint.objects.get_or_create(
+                    owner_agent=agent,
+                    channel=CommsChannel.EMAIL,
+                    defaults={
+                        "address": f"agent-{agent_id}@eval.local",
+                        "is_primary": True,
+                    },
+                )
+                endpoint = PersistentAgentCommsEndpoint.objects.create(
+                    channel=CommsChannel.EMAIL,
+                    address=f"guided-intake-{agent_id}@eval.local",
+                )
+                PersistentAgent.objects.filter(id=agent_id).update(preferred_contact_endpoint=endpoint)
+                CommsAllowlistEntry.objects.update_or_create(
+                    agent_id=agent_id,
+                    channel=CommsChannel.EMAIL,
+                    address=endpoint.address,
+                    defaults={
+                        "is_active": True,
+                        "allow_inbound": True,
+                        "allow_outbound": True,
+                        "verified": True,
+                        "can_configure": True,
+                    },
+                )
+            self.trigger_processing(
+                agent_id,
                 eval_run_id=run_id,
                 mock_config={
                     "mcp_brightdata_search_engine": {
                         "status": "ok",
-                        "results": [{"title": "Example result", "url": "https://example.test/result"}],
+                        "results": deepcopy(self.orientation_search_results),
                     },
                     "mcp_brightdata_scrape_as_markdown": {
                         "status": "ok",
-                        "url": "https://example.test/result",
-                        "result": "Example research result.",
+                        "url": self.orientation_scrape_url,
+                        "result": self.orientation_scrape_result,
+                    },
+                    "send_email": {
+                        "status": "ok",
+                        "message": "Mocked email delivery for guided-intake regression eval.",
+                        "message_id": "eval-guided-intake-email",
                     },
                 },
                 eval_stop_policy={
-                    "stop_on_human_input_request": True,
+                    "stop_on_human_input_request": not self.requires_fallback_copy,
                     "stop_on_tool_names": list(
-                        SUBSTANTIVE_WORK_TOOL_NAMES | PLANNING_READ_ONLY_TOOL_NAMES | {"sqlite_batch"}
+                        (SUBSTANTIVE_WORK_TOOL_NAMES | {"sqlite_batch"})
+                        - ({"send_email"} if self.requires_fallback_copy else set())
                     ),
                     "stop_on_unexpected_relevant_tool": True,
                     "allowed_tool_names": [
                         "request_human_input",
                         "send_chat_message",
+                        "send_email",
                         "mcp_brightdata_search_engine",
                         "mcp_brightdata_scrape_as_markdown",
                         "sqlite_batch",
                     ],
-                    "ignored_tool_names": ["send_chat_message"],
-                    "max_relevant_tool_calls": 3,
+                    # Let the trajectory finish so assertions can distinguish an overlong
+                    # orientation from a missing/rejected final card call.
+                    "max_relevant_tool_calls": 10,
                 },
             )
         self.record_task_result(
@@ -1034,7 +1163,10 @@ class GuidedFirstAssignmentAsksUsefulQuestionsScenario(BehaviorMicroScenario):
             None,
             EvalRunTask.Status.PASSED,
             task_name="inject_prompt",
-            observed_summary="A broad first assignment was processed outside legacy Planning Mode.",
+            observed_summary=(
+                "A broad first assignment was processed outside legacy Planning Mode with a "
+                f"{self.preferred_contact_channel} preferred contact."
+            ),
             artifacts={"message": inbound},
         )
 
@@ -1052,18 +1184,65 @@ class GuidedFirstAssignmentAsksUsefulQuestionsScenario(BehaviorMicroScenario):
             {"question": request.question, "options": request.options_json}
             for request in requests
         ]
+        calls = get_tool_calls_for_run(run_id, after=inbound.timestamp)
+        fallback_calls = [call for call in calls if call.tool_name == "send_email"]
+        fallback_bodies = [
+            "\n\n".join(
+                str(resolved_tool_param(call, key) or "")
+                for key in ("subject", "mobile_first_html", "text_body", "body")
+                if resolved_tool_param(call, key)
+            )
+            for call in fallback_calls
+        ]
+        chat_calls = [call for call in calls if call.tool_name == "send_chat_message"]
+        chat_bodies = [
+            str(resolved_tool_param(call, "body") or "")
+            for call in chat_calls
+        ]
+        orientation_evidence = self.orientation_evidence
         choice, reasoning = self.llm_judge(
             question=(
-                "Did the agent-created native choice card ask one concise, high-leverage question whose answer "
-                "materially narrows this broad outbound role, such as the product/use case, target audience, "
-                "qualification boundary, or initial volume? One useful question is enough because further discovery "
-                "can happen after the answer. Its two or three choices should be real answers, not labels for several "
-                "different questions. Reject cosmetic preferences and judge intent, not exact wording."
+                "Did the agent-created native choice cards ask a proportionate set of concise, decision-changing "
+                "questions needed to responsibly begin this broad growth-research role? The agent should not obey an "
+                "arbitrary one-question or three-question quota: it should cover material independent ambiguities while "
+                "avoiding cosmetic preferences, redundant questions, and an exhaustive survey. Every question should "
+                "use the fewest materially distinct answer choices, usually two or three and never more than the "
+                "supported eight, while making intelligent use of the orientation evidence. "
+                "Independent decisions must use separate cards; an umbrella card must not hide or silently default a "
+                "decision that would substantially change research cost, targeting, or the resulting deliverable. "
+                "A single card is valid when it resolves one specific highest-leverage decision and the remaining "
+                "dimensions are reversible, safely inferable, or sensibly depend on that answer; do not fail merely "
+                "because broad work could benefit from more preferences. A vague catch-all that bundles independent "
+                "decisions or silently defaults a known material blocker is still insufficient. "
+                "Every initial guided-intake question must be a choice card; a free-text request or asking the user to "
+                "restate which company/product is theirs after the task already named the seller is low-value discovery. "
+                + (
+                    "Because orientation could not identify the named entity, useful choices should offer plausible "
+                    "interpretations or concrete next paths instead of falling back to a free-text-only question. "
+                    "Broad but actionable categories such as company, product/brand, or internal project are valid "
+                    "interpretations when the public evidence cannot support more specific ones; do not require the "
+                    "agent to invent named entities. "
+                    if self.unknown_orientation
+                    else "They should not merely ask a generic question that could have been written before research. "
+                )
+                + "The set may be small or larger when the actual decision surface warrants it, and later discovered "
+                "blockers may be asked later. Judge consultant quality and intent, not exact wording or question count. "
+                "At most two concise chat sentences may transparently announce the bounded orientation and, only when "
+                "useful, frame its evidence before the cards. They must not claim the deliverable has started, ask the "
+                "decisions in prose, duplicate the cards, repeat each other, or promise results. "
+                + (
+                    "The backup email must clearly carry the same decisions and choices, not a kickoff or different questions."
+                    if self.requires_fallback_copy
+                    else "No backup message is needed when no separate fallback channel is configured."
+                )
             ),
             context=(
                 f"User request:\n{inbound.body}\n\n"
+                f"Orientation evidence available to the agent:\n{json.dumps(orientation_evidence)}\n\n"
                 f"Agent chat replies:\n{json.dumps(replies)}\n\n"
-                f"Native choice cards created by the agent:\n{json.dumps(questions)}"
+                f"Native choice cards created by the agent:\n{json.dumps(questions)}\n\n"
+                f"Optional chat framing attempted by the agent:\n{json.dumps(chat_bodies)}\n\n"
+                f"Backup email bodies:\n{json.dumps(fallback_bodies)}"
             ),
             options=["Useful bounded discovery", "Missing or low-value discovery"],
         )
@@ -1079,32 +1258,151 @@ class GuidedFirstAssignmentAsksUsefulQuestionsScenario(BehaviorMicroScenario):
             observed_summary=f"semantic_judge={choice}: {reasoning}",
         )
 
-        calls = get_tool_calls_for_run(run_id, after=inbound.timestamp)
-        work_calls = [
+        orientation_calls = [
             call
             for call in calls
-            if call.tool_name in SUBSTANTIVE_WORK_TOOL_NAMES
-            or call.tool_name in PLANNING_READ_ONLY_TOOL_NAMES
+            if call.tool_name in PLANNING_READ_ONLY_TOOL_NAMES
+        ]
+        orientation_completion_ids = {
+            getattr(getattr(call, "step", None), "completion_id", None)
+            for call in orientation_calls
+        }
+        orientation_batches_ok = (
+            None not in orientation_completion_ids
+            and len(orientation_completion_ids) == 1
+        )
+        work_calls = [
+            call for call in calls
+            if (
+                call.tool_name in SUBSTANTIVE_WORK_TOOL_NAMES
+                and not (self.requires_fallback_copy and call.tool_name == "send_email")
+            )
             or call.tool_name == "sqlite_batch"
         ]
-        has_bounded_choices = len(requests) == 1 and 2 <= len(requests[0].options_json) <= 3
-        passed = has_bounded_choices and not work_calls
+        request_positions = [
+            index for index, call in enumerate(calls)
+            if call.tool_name == "request_human_input"
+        ]
+        request_calls = [call for call in calls if call.tool_name == "request_human_input"]
+        rejected_request_calls = [
+            call for call in request_calls
+            if str(call.status).lower() != "complete"
+        ]
+        orientation_positions = [
+            index for index, call in enumerate(calls)
+            if call.tool_name in PLANNING_READ_ONLY_TOOL_NAMES
+        ]
+        fallback_positions = [
+            index for index, call in enumerate(calls)
+            if call.tool_name == "send_email"
+        ]
+        chat_positions = [
+            index for index, call in enumerate(calls)
+            if call.tool_name == "send_chat_message"
+        ]
+        has_bounded_choices = bool(requests) and all(
+            2 <= len(request.options_json) <= MAX_OPTION_COUNT
+            for request in requests
+        )
+        framing_order_ok = (
+            not chat_positions
+            or (
+                len(chat_positions) <= 2
+                and bool(orientation_positions)
+                and bool(request_positions)
+                and all(position < request_positions[0] for position in chat_positions)
+            )
+        )
+        fallback_ok = (
+            len(request_calls) == 1
+            and len(fallback_calls) == 1
+            and bool(orientation_positions)
+            and fallback_positions[0] > orientation_positions[-1]
+            and str(fallback_calls[0].status).lower() == "complete"
+        ) if self.requires_fallback_copy else not fallback_calls
+        passed = (
+            has_bounded_choices
+            and not rejected_request_calls
+            and len(orientation_calls) == 1
+            and orientation_batches_ok
+            and len(request_positions) == 1
+            and request_positions[0] > orientation_positions[-1]
+            and not work_calls
+            and framing_order_ok
+            and fallback_ok
+        )
         self.record_task_result(
             run_id,
             None,
             EvalRunTask.Status.PASSED if passed else EvalRunTask.Status.FAILED,
-            task_name="verify_no_premature_work",
+            task_name="verify_orient_then_ask",
             observed_summary=(
-                "Tracked discovery remained answerable and no research began."
+                "Agent used a bounded orientation pass, then left proportionate native choice cards pending without starting work."
                 if passed
                 else (
                     f"pending_questions={len(requests)}, "
                     f"option_counts={[len(request.options_json) for request in requests]}, "
-                    f"premature_tools={[call.tool_name for call in work_calls]}."
+                    f"orientation_tools={[call.tool_name for call in orientation_calls]}, "
+                    f"orientation_batches={len(orientation_completion_ids)}, "
+                    f"premature_tools={[call.tool_name for call in work_calls]}, "
+                    f"fallback_emails={len(fallback_calls)}, chat_messages={len(chat_calls)}."
                 )
             ),
-            artifacts={"step": work_calls[0].step} if work_calls else {},
+            artifacts={"step": (work_calls or orientation_calls or calls)[0].step} if calls else {},
         )
+
+
+@register_scenario
+class GuidedEmailFirstAssignmentPreservesWebChoicesScenario(
+    GuidedFirstAssignmentAsksUsefulQuestionsScenario
+):
+    slug = GUIDED_EMAIL_FIRST_ASSIGNMENT_PRESERVES_WEB_CHOICES
+    description = (
+        "A broad first assignment with email as the preferred contact should still leave evidence-informed native "
+        "choices answerable in web UI."
+    )
+    preferred_contact_channel = CommsChannel.EMAIL
+    requires_fallback_copy = True
+
+
+@register_scenario
+class GuidedBroadProspectingFirstAssignmentAsksChoicesScenario(
+    GuidedFirstAssignmentAsksUsefulQuestionsScenario
+):
+    slug = GUIDED_BROAD_PROSPECTING_FIRST_ASSIGNMENT_ASKS_CHOICES
+    description = (
+        "A broad prospecting request without a target or qualification boundary should produce researched native "
+        "choices instead of being mistaken for an executable list-building task."
+    )
+    assignment_prompt = "Help me find sales prospects for Northstar Flow."
+
+
+@register_scenario
+class GuidedUnknownFirstAssignmentOffersChoicePathsScenario(
+    GuidedFirstAssignmentAsksUsefulQuestionsScenario
+):
+    slug = GUIDED_UNKNOWN_FIRST_ASSIGNMENT_OFFERS_CHOICE_PATHS
+    description = (
+        "When bounded orientation cannot identify a named entity, a broad first assignment should still offer "
+        "answerable choice paths instead of degrading to a free-text-only question."
+    )
+    unknown_orientation = True
+    assignment_prompt = "Take over market development for Mercury Loom. Build a strong pipeline and keep it moving."
+    orientation_search_results = (
+        {
+            "title": "Unrelated Mercury textile equipment",
+            "url": "https://irrelevant.example.test/mercury-textiles",
+            "description": "A similarly named industrial loom with no connection to a company or software product.",
+        },
+    )
+    orientation_scrape_result = "No authoritative company or product page for Mercury Loom was found."
+    orientation_scrape_url = "https://irrelevant.example.test/mercury-textiles"
+    orientation_evidence = {
+        "search_outcome": (
+            "Bounded public orientation found only an unrelated similarly named product, so the requested entity "
+            "and intended pipeline remain ambiguous."
+        ),
+    }
 
 
 @register_scenario
@@ -1192,7 +1490,7 @@ class LegacyPlanningStateExecutesDirectlyScenario(BehaviorMicroScenario):
 class PlanningFirstTurnAsksBoundedQuestionsScenario(BehaviorMicroScenario):
     slug = PLANNING_FIRST_TURN_ASKS_BOUNDED_QUESTIONS
     description = (
-        "Planning mode should ask 1-3 tracked questions, leave them pending for an answer, and not start work."
+        "Planning mode should ask the tracked questions the task needs, leave them pending, and not start work."
     )
     category = "planning"
     tags = ("agent_behavior", "micro", "planning", "human_input")
@@ -1253,7 +1551,7 @@ class PlanningFirstTurnAsksBoundedQuestionsScenario(BehaviorMicroScenario):
                 EvalRunTask.Status.FAILED,
                 task_name="verify_bounded_questions",
                 observed_summary=(
-                    f"Expected 1-3 bounded tracked planning requests to remain pending; "
+                    f"Expected proportionate tracked planning requests to remain pending; "
                     f"found {len(requests)} with bounded_modes={planning_requests_are_bounded(requests)}."
                 ),
             )

@@ -1,10 +1,13 @@
 import base64
 import json
+import sqlite3
+import tempfile
 from datetime import datetime, timezone
 
 from django.test import SimpleTestCase, tag
 
 from api.agent.core import tool_results
+from api.agent.tools.sqlite_state import reset_sqlite_db_path, set_sqlite_db_path
 
 
 @tag("batch_tool_results")
@@ -26,6 +29,43 @@ class ToolResultSchemaTests(SimpleTestCase):
         self.assertIsNotNone(stored_text)
         self.assertIsNotNone(analysis)
         self.assertTrue(analysis.is_json)
+
+    def test_stores_source_batch_id_with_tool_result(self):
+        record = tool_results.ToolCallResultRecord(
+            step_id="source-result",
+            tool_name="http_request",
+            created_at=datetime.now(timezone.utc),
+            result_text=json.dumps({"content": {"items": [{"id": "one"}]}}),
+            source_batch_id="completion-batch",
+            source_url="https://api.example.test/items",
+        )
+
+        with tempfile.NamedTemporaryFile(suffix=".sqlite3") as db_file:
+            token = set_sqlite_db_path(db_file.name)
+            try:
+                tool_results.prepare_tool_results_for_prompt(
+                    [record],
+                    recency_positions={"source-result": 0},
+                    fresh_tool_call_step_id="source-result",
+                )
+            finally:
+                reset_sqlite_db_path(token)
+
+            with sqlite3.connect(db_file.name) as conn:
+                stored = conn.execute(
+                    "SELECT result_id, source_batch_id, is_current_batch, tool_name, source_url FROM __tool_results"
+                ).fetchone()
+
+        self.assertEqual(
+            stored,
+            (
+                "source-result",
+                "completion-batch",
+                1,
+                "http_request",
+                "https://api.example.test/items",
+            ),
+        )
 
     def test_analyzes_array_result(self):
         payload = [{"id": 1, "name": "Alpha"}, {"id": 2, "name": "Beta"}]
@@ -376,11 +416,49 @@ class ToolResultSchemaTests(SimpleTestCase):
             json.dumps(payload), "test-id", "mcp_brightdata_scrape_as_markdown"
         )
 
-        self.assertTrue(meta["is_json"])
-        self.assertIsNotNone(stored_json)
-        self.assertEqual(json.loads(stored_json)["result"], markdown)
+        self.assertFalse(meta["is_json"])
+        self.assertIsNone(stored_json)
+        self.assertEqual(meta["top_keys"], "")
         self.assertEqual(stored_text, markdown)
         self.assertIsNotNone(analysis)
+
+    def test_http_text_content_is_searchable_without_losing_structured_envelope(self):
+        markdown = "# Source\n\n- Claim: grounded evidence"
+        payload = {
+            "status": "ok",
+            "url": "https://example.test/source",
+            "content": {"url": "https://example.test/source", "text": markdown},
+        }
+
+        meta, stored_json, stored_text, _analysis = tool_results._summarize_result(
+            json.dumps(payload), "test-id", "http_request"
+        )
+
+        self.assertTrue(meta["is_json"])
+        self.assertEqual(meta["result_json_path"], "$.content")
+        self.assertIsNotNone(stored_json)
+        self.assertEqual(stored_text, markdown)
+
+    def test_terminal_sqlite_result_requires_delivery_next(self):
+        record = tool_results.ToolCallResultRecord(
+            step_id="sqlite-step",
+            tool_name="sqlite_batch",
+            created_at=datetime.now(timezone.utc),
+            result_text=json.dumps({
+                "status": "ok",
+                "results": [{"result": [{"count": 2}]}],
+            }),
+            will_continue_work=False,
+        )
+
+        info = tool_results.prepare_tool_results_for_prompt(
+            [record],
+            recency_positions={},
+            fresh_tool_call_step_id="sqlite-step",
+        )
+
+        self.assertIn("NEXT ACTION MUST deliver", info["sqlite-step"].meta)
+        self.assertIn("do not call SQLite", info["sqlite-step"].meta)
 
     def test_scrape_as_markdown_preview_uses_plain_markdown_and_meta_guidance(self):
         markdown = "# Gemma 4\n\nBenchmark table"
@@ -399,16 +477,138 @@ class ToolResultSchemaTests(SimpleTestCase):
 
         prompt_info = info.get("step-scrape")
         self.assertIsNotNone(prompt_info)
-        self.assertIn("SCRAPE MARKDOWN:", prompt_info.meta)
-        self.assertIn("first query all needed rows", prompt_info.meta)
-        self.assertIn("substr(result_text,-1500)", prompt_info.meta)
-        self.assertIn("facts may be at the end", prompt_info.meta)
-        self.assertIn("grep_context_all", prompt_info.meta)
-        self.assertIn("inspect analysis_json/result_json", prompt_info.meta)
-        self.assertIn("Never read_file", prompt_info.meta)
+        self.assertIn(
+            "SCRAPE MARKDOWN WORK SET (1 result; exact source result IDs:",
+            prompt_info.meta,
+        )
+        self.assertIn("unstructured prose; this is the complete set", prompt_info.meta)
+        self.assertIn("This single-source preview is complete", prompt_info.meta)
+        self.assertIn("Do not query __tool_results to reread it", prompt_info.meta)
+        self.assertIn("next SQLite call is the final import/decision call", prompt_info.meta)
+        self.assertIn("top-level `rows=[", prompt_info.meta)
+        self.assertIn('`["step-scrape"]`', prompt_info.meta)
+        self.assertIn('`rows=[{"result_id":"exact ID","fields":{...}},...]`', prompt_info.meta)
+        self.assertIn("ID-only rows", prompt_info.meta)
+        self.assertIn("INSERT SELECT from `json_each(:rows)", prompt_info.meta)
+        self.assertIn("provenance from t", prompt_info.meta)
+        self.assertIn("End with decision-ready SELECTs", prompt_info.meta)
+        self.assertIn("no sourced SQL literals", prompt_info.meta)
+        self.assertNotIn("For an unrelated one-off", prompt_info.meta)
         self.assertNotIn("CSV DATA", prompt_info.meta)
         self.assertIn("# Gemma 4", prompt_info.preview_text)
         self.assertNotIn('"status":"success"', prompt_info.preview_text)
+
+    def test_scrape_as_markdown_guidance_is_emitted_once_per_visible_work_set(self):
+        records = [
+            tool_results.ToolCallResultRecord(
+                step_id=f"step-scrape-{index}",
+                tool_name="mcp_brightdata_scrape_as_markdown",
+                created_at=datetime(2026, 7, 26, 12, index, tzinfo=timezone.utc),
+                result_text=json.dumps({"status": "success", "result": f"# Source {index}"}),
+                source_batch_id="scrape-batch",
+            )
+            for index in range(3)
+        ]
+
+        info = tool_results.prepare_tool_results_for_prompt(
+            records,
+            recency_positions={record.step_id: index for index, record in enumerate(records)},
+            fresh_tool_call_step_ids={record.step_id for record in records},
+        )
+
+        combined_meta = "\n".join(item.meta for item in info.values())
+        self.assertEqual(combined_meta.count("SCRAPE MARKDOWN WORK SET"), 1)
+        self.assertIn(
+            '["step-scrape-0","step-scrape-1","step-scrape-2"]',
+            combined_meta,
+        )
+        self.assertIn("SELECT t.result_id,t.source_url", combined_meta)
+        self.assertIn("GROUP BY t.result_id,t.source_url", combined_meta)
+        self.assertIn(
+            "will_continue_work=false unless a specific non-SQLite action remains",
+            combined_meta,
+        )
+        self.assertEqual(combined_meta.count("no sourced SQL literals"), 1)
+
+    def test_sqlite_result_tells_agent_to_use_decision_rows_without_reread(self):
+        record = tool_results.ToolCallResultRecord(
+            step_id="sqlite-decision",
+            tool_name="sqlite_batch",
+            created_at=datetime.now(timezone.utc),
+            result_text=json.dumps({
+                "status": "ok",
+                "results": [{"result": [{"company": "Aster Labs", "stage": "contracting"}]}],
+            }),
+        )
+
+        info = tool_results.prepare_tool_results_for_prompt(
+            [record],
+            recency_positions={},
+            fresh_tool_call_step_id="sqlite-decision",
+        )
+
+        self.assertIn("use returned rows directly", info["sqlite-decision"].meta)
+        self.assertIn("If they satisfy the requested decision, deliver now", info["sqlite-decision"].meta)
+        self.assertIn("do not reread the same model", info["sqlite-decision"].meta)
+
+    def test_scrape_guidance_groups_visible_legacy_siblings_without_batch_ids(self):
+        records = [
+            tool_results.ToolCallResultRecord(
+                step_id=f"legacy-scrape-{index}",
+                tool_name="mcp_brightdata_scrape_as_markdown",
+                created_at=datetime(2026, 7, 26, 12, index, tzinfo=timezone.utc),
+                result_text=json.dumps({
+                    "status": "success",
+                    "result": f"# Interview {index}\nCompany: Example {index}",
+                }),
+            )
+            for index in range(3)
+        ]
+
+        info = tool_results.prepare_tool_results_for_prompt(
+            records,
+            recency_positions={record.step_id: index for index, record in enumerate(records)},
+        )
+
+        combined_meta = "\n".join(item.meta for item in info.values())
+        self.assertEqual(combined_meta.count("SCRAPE MARKDOWN WORK SET"), 1)
+        self.assertIn(
+            '["legacy-scrape-0","legacy-scrape-1","legacy-scrape-2"]',
+            combined_meta,
+        )
+        self.assertEqual(
+            combined_meta.count("Before any multi-source prose model write"),
+            1,
+        )
+        self.assertIn("do not import from memory or previews alone", combined_meta)
+
+    def test_http_prose_siblings_get_one_bound_row_work_set(self):
+        records = [
+            tool_results.ToolCallResultRecord(
+                step_id=f"profile-{index}",
+                tool_name="http_request",
+                created_at=datetime(2026, 7, 26, 12, index, tzinfo=timezone.utc),
+                result_text=json.dumps({
+                    "status": "ok",
+                    "url": f"https://profiles.example.test/{index}",
+                    "content": f"# Company {index}\n\nFounder: Person {index}",
+                }),
+                source_batch_id="profile-batch",
+            )
+            for index in range(3)
+        ]
+
+        info = tool_results.prepare_tool_results_for_prompt(
+            records,
+            recency_positions={record.step_id: index for index, record in enumerate(reversed(records))},
+            fresh_tool_call_step_ids={record.step_id for record in records},
+        )
+
+        combined_meta = "\n".join(item.meta for item in info.values())
+        self.assertEqual(combined_meta.count("PROSE SOURCE WORK SET"), 1)
+        self.assertIn('["profile-0","profile-1","profile-2"]', combined_meta)
+        self.assertIn("top-level `rows=[", combined_meta)
+        self.assertIn("no sourced SQL literals", combined_meta)
 
     def test_scrape_as_markdown_meta_does_not_misclassify_comma_heavy_page_as_csv(self):
         markdown = "# Operations report\n\n" + "\n".join(
@@ -433,7 +633,7 @@ class ToolResultSchemaTests(SimpleTestCase):
         self.assertNotIn("[JSON", prompt_info.meta)
         self.assertNotIn("json_extract(result_json", prompt_info.meta)
         self.assertIn("SCRAPE MARKDOWN", prompt_info.meta)
-        self.assertIn("result_text is the page text", prompt_info.meta)
+        self.assertIn("unstructured prose; this is the complete set", prompt_info.meta)
 
 
 @tag("batch_tool_results")
@@ -668,8 +868,29 @@ class PreviewByteLimitTests(SimpleTestCase):
         self.assertFalse(is_inline)
         # Should include KB size in truncation message
         self.assertIn("KB", preview)
-        self.assertIn("search or sample both ends", preview)
+        self.assertIn("query only if the visible evidence is insufficient", preview)
         self.assertNotIn("substr(col,1", preview)
+
+    def test_large_external_preview_preserves_late_facts(self):
+        from api.agent.core.tool_results import _build_prompt_preview
+
+        page = "# Product\n" + ("background context\n" * 4_000) + (
+            "## Current details\n"
+            "Best fit: regulated healthcare\n"
+            "Strengths: PHI redaction and audit exports\n"
+        )
+
+        preview, is_inline = _build_prompt_preview(
+            page,
+            len(page.encode("utf-8")),
+            recency_position=0,
+            tool_name="mcp_brightdata_scrape_as_markdown",
+        )
+
+        self.assertFalse(is_inline)
+        self.assertIn("# Product", preview)
+        self.assertIn("middle omitted", preview)
+        self.assertIn("PHI redaction and audit exports", preview)
 
     def test_sqlite_results_not_capped(self):
         """SQLite results should not have aggressive preview caps."""
@@ -728,19 +949,21 @@ class PreviewByteLimitTests(SimpleTestCase):
             named_model_tables={"items"},
         )
 
-        self.assertTrue(info.is_inline)
-        self.assertIn("result_id=step-http", info.meta)
+        self.assertFalse(info.is_inline)
+        self.assertNotIn("result_id=step-http", info.meta)
         self.assertIn("parsed_with=json", info.meta)
-        self.assertIn("Central bank signals rate hold", info.preview_text)
-        self.assertIn("SOURCE ARRAYS result_id=step-http; stored paths", info.preview_text)
-        self.assertLess(
-            info.preview_text.index("SOURCE ARRAYS result_id=step-http"),
-            info.preview_text.index("Central bank signals rate hold"),
-        )
+        self.assertNotIn("Central bank signals rate hold", info.preview_text)
+        self.assertIn("SOURCE ARRAYS; paths", info.preview_text)
         for expected in (
-            "$.content.items", '"content":{', "one sqlite_batch only", "every listed entity array",
-            "INSERT ... SELECT/json_each", "Derive all facts, URLs, and write keys from j.value",
-            "never changes __agent_config/__agent_skills", "No pre-read, refetch, blob inspection, copied literals",
+            "$.content.items", "one sqlite_batch", "keyed tables",
+            "INSERT ... SELECT/json_each", "Derive item fields/URLs from j.value",
+            "parent fields from t.result_json", "provenance from t.result_id",
+            "is_current_batch=1",
+            "[no_stable_key]",
+            "exact stable_key values",
+            "Never filter freshness by a mutable name, even one the user named",
+            "literal ID/history",
+            "No pre-read, refetch, blob inspection, copied literals",
         ):
             self.assertIn(expected, info.preview_text)
         self.assertEqual(info.preview_text.count("[SOURCE ARRAYS"), 1)
@@ -752,8 +975,7 @@ class PreviewByteLimitTests(SimpleTestCase):
             named_model_tables={"news_items"},
         )["step-http"]
         self.assertTrue(aliased.source_reconciliation_directive)
-        compact_payload = json.dumps(payload, separators=(",", ":"))
-        self.assertLess(len(info.preview_text) - len(compact_payload), 1_000)
+        self.assertLess(len(info.preview_text), 1_000)
         for absent in ("QUERY:", "PATH:", "SAMPLE:", "JSON_DIGEST:", "__tool_results"):
             self.assertNotIn(absent, info.meta)
 
@@ -774,7 +996,8 @@ class PreviewByteLimitTests(SimpleTestCase):
             "does not change the requested audience or action",
         ):
             self.assertIn(expected, linked.preview_text)
-        self.assertIn("SOURCE WRITE HINT", linked.preview_text)
+        self.assertIn("SOURCE SET", linked.meta)
+        self.assertIn("is_current_batch=1", linked.meta)
         self.assertNotIn("Without a preceding SOURCE ARRAYS directive", linked.preview_text)
         self.assertNotIn("NEVER OUTREACH", linked.preview_text)
         self.assertNotIn("[SOURCE ARRAYS result_id=", linked.preview_text)
@@ -791,7 +1014,7 @@ class PreviewByteLimitTests(SimpleTestCase):
             named_model_tables={"items"},
         )["step-http"]
         self.assertTrue(linked_model.source_reconciliation_directive)
-        self.assertIn("https://news.example.test/rate-hold", linked_model.preview_text)
+        self.assertNotIn("https://news.example.test/rate-hold", linked_model.preview_text)
         self.assertNotIn("$[link:LEXACT]", linked_model.preview_text)
 
         recent = tool_results.prepare_tool_results_for_prompt(
@@ -818,11 +1041,13 @@ class PreviewByteLimitTests(SimpleTestCase):
 
         self.assertIn("$.content.accounts(account_id,name)", preview)
         self.assertIn("$.content.workstreams(workstream_id,account_id,status)", preview)
+        self.assertIn("[stable_key=account_id]", preview)
+        self.assertIn("[stable_key=workstream_id]", preview)
         self.assertNotIn("$.content.alerts", preview)
-        self.assertIn("every listed entity array", preview)
+        self.assertIn("Create/evolve keyed tables", preview)
         self.assertIn("INSERT ... SELECT/json_each", preview)
         self.assertEqual(preview.count("[SOURCE ARRAYS"), 1)
-        self.assertLess(preview.index("SOURCE ARRAYS"), preview.index('"workstreams"'))
+        self.assertNotIn('"account_id":"acct-1"', preview)
 
         payload["content"]["notes"] = "context " * 10_000
         large, _record = self._prepare_http_result(
@@ -852,7 +1077,7 @@ class PreviewByteLimitTests(SimpleTestCase):
             "step-scalar",
             {"status": "ok", "content": {"answer": "ready", "count": 4}},
         )
-        self.assertNotIn("SOURCE WRITE HINT", scalar.preview_text)
+        self.assertNotIn("SOURCE SET", scalar.meta)
 
     def test_fresh_source_array_without_model_gets_optional_safe_write_shape(self):
         payload = {
@@ -879,20 +1104,144 @@ class PreviewByteLimitTests(SimpleTestCase):
         )
 
         for expected in (
-            "[SOURCE WRITE HINT result_id=step-first-model",
+            "[SOURCE SET; exact stored arrays:",
             "exact stored arrays: $.content.prospects(name,title,profile_url)",
-            "If modeling/persisting this evidence",
-            "INSERT ... SELECT json_extract(j.value,'$.field')",
+            "New table first: CREATE TABLE IF NOT EXISTS with a stable key",
+            "Use the shown stable key `profile_url`",
+            "`json_extract(j.value,'$.profile_url')`",
+            "Use rows=[]",
+            "never invent result IDs",
+            "Then upsert in this call with `INSERT ... SELECT`",
             "FROM __tool_results AS t, json_each(t.result_json,'$.content.prospects') AS j",
-            "WHERE t.tool_name='http_request'",
-            "derive stable keys and fields from j.value",
-            "ordinary one-off answer",
+            "WHERE t.is_current_batch=1 AND t.tool_name='http_request'",
+            "Current batch plus tool_name is the exact set",
+            "Add no source_url/result_id predicate",
+            "store t.source_url/t.result_id as provenance",
+            "Every item field/URL comes from j.value",
+            "siblings differ by derived parent fields",
         ):
-            self.assertIn(expected, info.preview_text)
+            self.assertIn(expected, info.meta)
         self.assertNotIn("[SOURCE ARRAYS", info.preview_text)
         self.assertNotIn(" VALUES ", info.preview_text)
-        self.assertEqual(info.preview_text.count("[SOURCE WRITE HINT"), 1)
+        self.assertEqual(info.meta.count("[SOURCE SET"), 1)
+        self.assertNotIn("result_id=", info.meta)
+        self.assertNotIn("json_extract(j.value,'$.id')", info.meta)
         self.assertIsNone(info.source_reconciliation_directive)
+
+    def test_source_write_hint_uses_the_actual_array_identity(self):
+        payload = {
+            "status": "ok",
+            "content": {
+                "events": [{
+                    "release_id": "rel-1",
+                    "service": "Search index",
+                    "source_url": "https://example.test/releases",
+                }]
+            },
+        }
+        info, _record = self._prepare_http_result(
+            "step-release-model",
+            payload,
+            named_model_tables=set(),
+        )
+
+        self.assertIn("$.content.events(release_id,service,source_url)", info.meta)
+        self.assertIn("Use the shown stable key `release_id`", info.meta)
+        self.assertIn("json_extract(j.value,'$.release_id')", info.meta)
+        self.assertNotIn("json_extract(j.value,'$.id')", info.meta)
+
+    def test_structured_source_sets_are_scoped_to_their_completion_batch(self):
+        payload = {
+            "status": "success",
+            "result": {
+                "organic": [
+                    {
+                        "title": "Example company",
+                        "link": "https://example.test/company",
+                        "description": "A sourced company result.",
+                    }
+                ]
+            },
+        }
+        tool_name = "mcp_brightdata_search_engine"
+        records = [
+            tool_results.ToolCallResultRecord(
+                step_id=f"search-result-{index}",
+                tool_name=tool_name,
+                created_at=datetime(2026, 7, 26, 12, index, tzinfo=timezone.utc),
+                result_text=json.dumps(payload),
+                source_batch_id="batch-current",
+            )
+            for index in range(3)
+        ]
+        historical = tool_results.ToolCallResultRecord(
+            step_id="search-result-historical",
+            tool_name=tool_name,
+            created_at=datetime(2026, 7, 25, 12, 0, tzinfo=timezone.utc),
+            result_text=json.dumps(payload),
+            source_batch_id="batch-historical",
+        )
+        records.append(historical)
+
+        info = tool_results.prepare_tool_results_for_prompt(
+            records,
+            recency_positions={record.step_id: index for index, record in enumerate(reversed(records))},
+            fresh_tool_call_step_ids={record.step_id for record in records},
+        )
+
+        for record in records[:3]:
+            self.assertNotIn("result_id=", info[record.step_id].meta)
+            self.assertNotIn(f"result_id='{record.step_id}'", info[record.step_id].meta)
+        self.assertNotIn("result_id=search-result-historical", info[historical.step_id].meta)
+        self.assertIn("HISTORICAL SOURCE BATCH", info[historical.step_id].meta)
+        self.assertIsNone(info[historical.step_id].preview_text)
+        self.assertTrue(info[historical.step_id].suppress_from_prompt)
+        self.assertFalse(info[records[0].step_id].suppress_from_prompt)
+        source_set_meta = "\n".join(item.meta for item in info.values())
+        self.assertEqual(source_set_meta.count("[SOURCE SET"), 1)
+        self.assertIn("source_batch_id=batch-current", source_set_meta)
+        self.assertNotIn("source_batch_id=batch-historical", source_set_meta)
+        self.assertIn("is_current_batch=1", source_set_meta)
+        self.assertIn("t.result_id is shared row provenance, never item identity", source_set_meta)
+
+        modeled = tool_results.prepare_tool_results_for_prompt(
+            records,
+            recency_positions={record.step_id: index for index, record in enumerate(reversed(records))},
+            fresh_tool_call_step_ids={record.step_id for record in records},
+            named_model_tables={"organic"},
+        )
+        modeled_preview = "\n".join(
+            item.preview_text or ""
+            for item in modeled.values()
+        )
+        self.assertEqual(modeled_preview.count("[SOURCE ARRAYS"), 1)
+        self.assertNotIn("Example company", modeled_preview)
+        self.assertIn("Never delete/clear the model", modeled_preview)
+        self.assertEqual(
+            sum(bool(item.source_reconciliation_directive) for item in modeled.values()),
+            1,
+        )
+
+    def test_control_plane_array_does_not_get_source_write_guidance(self):
+        record = tool_results.ToolCallResultRecord(
+            step_id="request-input-result",
+            tool_name="request_human_input",
+            created_at=datetime.now(timezone.utc),
+            result_text=json.dumps({
+                "status": "ok",
+                "requests": [{"request_id": "question-1", "question": "Which market?"}],
+            }),
+        )
+
+        info = tool_results.prepare_tool_results_for_prompt(
+            [record],
+            recency_positions={"request-input-result": 0},
+            fresh_tool_call_step_id="request-input-result",
+        )["request-input-result"]
+
+        self.assertIn("result_id=request-input-result", info.meta)
+        self.assertNotIn("SOURCE SET", info.meta)
+        self.assertNotIn("SOURCE ARRAYS", info.preview_text)
 
     def test_optional_source_write_hint_has_bounded_overhead_and_array_count(self):
         payload = {
@@ -903,6 +1252,9 @@ class PreviewByteLimitTests(SimpleTestCase):
                         "entity_name": f"Entity {index}",
                         "profile_url": f"https://example.test/{index}",
                         "role": "Owner",
+                        "qualification_signal_with_a_deliberately_long_name": "verified",
+                        "relationship_context_with_a_deliberately_long_name": "direct",
+                        "evidence_observation_with_a_deliberately_long_name": "current",
                     }
                 ]
                 for index in range(12)
@@ -914,17 +1266,113 @@ class PreviewByteLimitTests(SimpleTestCase):
             named_model_tables=set(),
         )
 
-        hint = info.preview_text.split("]\n", 1)[0] + "]\n"
+        hint = info.meta.split("]\n", 1)[0] + "]\n"
         schema_list = hint.split("exact stored arrays: ", 1)[1].split(
-            ". If modeling/persisting", 1
+            ". New table first", 1
         )[0]
         self.assertLessEqual(len(schema_list.split("; ")), tool_results.MAX_OPTIONAL_SOURCE_ARRAYS)
         self.assertLessEqual(len(hint), tool_results.MAX_OPTIONAL_SOURCE_HINT_CHARS)
-        compact_payload = json.dumps(payload, separators=(",", ":"))
-        self.assertLessEqual(
-            len(info.preview_text) - len(compact_payload),
-            tool_results.MAX_OPTIONAL_SOURCE_HINT_CHARS,
+
+    def test_optional_source_write_hint_survives_rich_array_schema(self):
+        payload = {
+            "status": "ok",
+            "content": {
+                "events": [{
+                    "release_id": "rel-1",
+                    "service": "Checkout API",
+                    "starts_at": "2026-07-23T15:30:17Z",
+                    "owner": "Priya Shah",
+                    "status": "approved",
+                    "source_url": "https://example.test/releases.json",
+                    "observed_at": "2026-07-22T14:15:00Z",
+                }],
+            },
+        }
+        info, _record = self._prepare_http_result(
+            "step-release-array",
+            payload,
+            named_model_tables=set(),
         )
+
+        hint = info.meta.split("]\n", 1)[0] + "]\n"
+        self.assertIn("[SOURCE SET", hint)
+        self.assertIn("$.content.events", hint)
+        self.assertIn("CREATE TABLE IF NOT EXISTS with a stable key", hint)
+        self.assertIn("Use the shown stable key `release_id`", hint)
+        self.assertIn("upsert in this call with `INSERT ... SELECT`", hint)
+        self.assertIn("Every item field/URL comes from j.value", hint)
+        self.assertLessEqual(len(hint), tool_results.MAX_OPTIONAL_SOURCE_HINT_CHARS)
+
+    def test_four_source_parallel_batch_keeps_each_brief_preview_visible(self):
+        records = [
+            tool_results.ToolCallResultRecord(
+                step_id=f"source-{index}",
+                tool_name="mcp_brightdata_scrape_as_markdown",
+                created_at=datetime(2026, 7, 26, 12, index, tzinfo=timezone.utc),
+                result_text=json.dumps({
+                    "status": "success",
+                    "result": f"# Product {index}\n\nDistinct evidence {index}\n" + ("appendix " * 8_000),
+                }),
+                source_batch_id="parallel-batch",
+            )
+            for index in range(4)
+        ]
+
+        info = tool_results.prepare_tool_results_for_prompt(
+            records,
+            recency_positions={record.step_id: index for index, record in enumerate(reversed(records))},
+            fresh_tool_call_step_ids={record.step_id for record in records},
+        )
+
+        for index, record in enumerate(records):
+            self.assertIn(f"Distinct evidence {index}", info[record.step_id].preview_text or "")
+        combined_meta = "\n".join(item.meta for item in info.values())
+        self.assertIn("at most 2000 evidence characters per source", combined_meta)
+        self.assertIn(
+            r"grep_context_all(t.result_text,'^(?:#{1,6}\s|[-*]\s*[^:\n]{1,64}:)',160,6)",
+            combined_meta,
+        )
+        self.assertIn(
+            "tool_name='mcp_brightdata_scrape_as_markdown'",
+            combined_meta,
+        )
+        self.assertNotIn(":tool", combined_meta)
+        self.assertNotIn(":pattern", combined_meta)
+        self.assertIn("do not turn them into undeclared bindings or enumerate labels", combined_meta)
+        self.assertIn("exact result_id and source_url", combined_meta)
+        self.assertIn("do not look either up again", combined_meta)
+        self.assertIn("`fields` is evidence transcription, not enrichment", combined_meta)
+        self.assertIn("Never turn a qualitative claim into a number", combined_meta)
+
+    def test_active_eight_source_prose_set_keeps_late_facts_visible(self):
+        records = [
+            tool_results.ToolCallResultRecord(
+                step_id=f"source-{index}",
+                tool_name="mcp_brightdata_scrape_as_markdown",
+                created_at=datetime(2026, 7, 26, 12, index, tzinfo=timezone.utc),
+                result_text=json.dumps({
+                    "status": "success",
+                    "result": (
+                        f"# Company {index}\n"
+                        + ("background context\n" * 4_000)
+                        + f"Founder: Person {index}\n"
+                    ),
+                }),
+                source_batch_id="parallel-batch",
+            )
+            for index in range(8)
+        ]
+
+        info = tool_results.prepare_tool_results_for_prompt(
+            records,
+            recency_positions={record.step_id: index for index, record in enumerate(reversed(records))},
+            fresh_tool_call_step_ids={record.step_id for record in records},
+        )
+
+        for index, record in enumerate(records):
+            preview = info[record.step_id].preview_text or ""
+            self.assertIn(f"# Company {index}", preview)
+            self.assertIn(f"Founder: Person {index}", preview)
 
     def test_fresh_tool_call_under_threshold_shown_inline(self):
         """Fresh tool calls under 40KB should be shown fully inline with SQLite wrapper."""
@@ -969,7 +1417,7 @@ class PreviewByteLimitTests(SimpleTestCase):
 
         self.assertFalse(is_inline)
         self.assertLess(len(preview), len(large_text))
-        self.assertIn("search or sample both ends", preview)
+        self.assertIn("query only if the visible evidence is insufficient", preview)
         self.assertNotIn("substr(col,1,2000)", preview)
 
     def test_non_fresh_tool_call_still_truncated(self):

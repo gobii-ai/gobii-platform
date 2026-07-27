@@ -16,8 +16,9 @@ logger = logging.getLogger(__name__)
 
 PREVIEW_TIERS_EXTERNAL = [
     512,    # Position 0: 512B - Structure hint only
-    256,    # Position 1: 256B - Brief hint
-    256,    # Position 2: 256B - Brief hint
+    512,    # Position 1: enough to preserve a compact source's leading facts
+    512,    # Position 2: enough to preserve a compact source's leading facts
+    512,    # Position 3: keep a four-source parallel batch visible
 ]
 
 LARGE_RESULT_THRESHOLD = 15_000   # 15KB - start capping here
@@ -39,6 +40,7 @@ PREVIEW_TIERS_SQLITE = [
 ]
 
 PREVIEW_TIER_COUNT = max(len(PREVIEW_TIERS_EXTERNAL), len(PREVIEW_TIERS_SQLITE))
+MAX_ACTIVE_PROSE_PREVIEWS = 12
 
 MAX_TOOL_RESULT_BYTES = 5_000_000
 MAX_TOP_KEYS = 20
@@ -71,6 +73,9 @@ MAX_OPTIONAL_SOURCE_PATH_CHARS = 160
 MAX_OPTIONAL_SOURCE_FIELDS = 6
 MAX_OPTIONAL_SOURCE_FIELD_CHARS = 48
 MAX_OPTIONAL_SOURCE_HINT_CHARS = 900
+PROSE_INSPECTION_TOTAL_CHARS = 8_000
+PROSE_INSPECTION_MIN_CHARS = 400
+PROSE_INSPECTION_MAX_CHARS = 2_000
 
 
 def _is_scrape_as_markdown_tool(tool_name: str) -> bool:
@@ -108,6 +113,9 @@ class ToolCallResultRecord:
     created_at: datetime
     result_text: str
     result_id: Optional[str] = None
+    source_batch_id: Optional[str] = None
+    source_url: Optional[str] = None
+    will_continue_work: Optional[bool] = None
 
 
 @dataclass(frozen=True)
@@ -117,6 +125,7 @@ class ToolResultPromptInfo:
     preview_text: Optional[str]
     is_inline: bool
     source_reconciliation_directive: Optional[str]
+    suppress_from_prompt: bool = False
 
 
 def entity_name_stem(value: str) -> str:
@@ -151,13 +160,31 @@ def source_array_entity_groups(result_text: str, tool_name: str) -> tuple[set[st
     )
 
 
-def _optional_source_array_schemas(analysis: ResultAnalysis | None) -> tuple[tuple[str, str], ...]:
+def _source_item_key(fields: Sequence[str]) -> str | None:
+    for predicate in (
+        lambda field: field == "id",
+        lambda field: field.endswith("_id"),
+        lambda field: field == "url",
+        lambda field: field.endswith("_url") and field != "source_url",
+        lambda field: field == "key",
+        lambda field: field.endswith("_key"),
+        lambda field: field == "slug",
+    ):
+        match = next((field for field in fields if predicate(field)), None)
+        if match:
+            return match
+    return None
+
+
+def _optional_source_array_schemas(
+    analysis: ResultAnalysis | None,
+) -> tuple[tuple[str, str, str | None], ...]:
     json_analysis = analysis.json_analysis if analysis else None
     if not json_analysis:
         return ()
 
     ordered = (json_analysis.primary_array, *json_analysis.secondary_arrays)
-    schemas: list[tuple[str, str]] = []
+    schemas: list[tuple[str, str, str | None]] = []
     seen_paths: set[str] = set()
     for item in ordered:
         if (
@@ -173,7 +200,7 @@ def _optional_source_array_schemas(analysis: ResultAnalysis | None) -> tuple[tup
             if len(field) <= MAX_OPTIONAL_SOURCE_FIELD_CHARS
         ][:MAX_OPTIONAL_SOURCE_FIELDS]
         field_summary = ",".join(fields)
-        schemas.append((item.path, f"{item.path}({field_summary})"))
+        schemas.append((item.path, f"{item.path}({field_summary})", _source_item_key(fields)))
         seen_paths.add(item.path)
         if len(schemas) >= MAX_OPTIONAL_SOURCE_ARRAYS:
             break
@@ -181,7 +208,7 @@ def _optional_source_array_schemas(analysis: ResultAnalysis | None) -> tuple[tup
 
 
 def _build_optional_source_write_hint(
-    result_id: str,
+    source_batch_id: str,
     tool_name: str,
     analysis: ResultAnalysis | None,
 ) -> str:
@@ -190,18 +217,33 @@ def _build_optional_source_write_hint(
     if not schemas or len(tool_name) > 100:
         return ""
 
-    first_path = schemas[0][0].replace("'", "''")
+    first_path, _first_schema, first_key = schemas[0]
+    first_path = first_path.replace("'", "''")
+    escaped_batch_id = source_batch_id.replace("'", "''")
     escaped_tool_name = tool_name.replace("'", "''")
-    short_result_id = str(result_id)[:32]
-    hint = (
-        f"[SOURCE WRITE HINT result_id={short_result_id}; exact stored arrays: "
-        f"{'; '.join(schema for _path, schema in schemas)}. "
-        "If modeling/persisting this evidence, derive the write from all relevant stored rows, never copied "
-        "visible literals: INSERT ... SELECT json_extract(j.value,'$.field') ... "
-        f"FROM __tool_results AS t, json_each(t.result_json,'{first_path}') AS j "
-        f"WHERE t.tool_name='{escaped_tool_name}'. Use each exact path above in the same batch and derive "
-        "stable keys and fields from j.value. For an ordinary one-off answer, use the visible evidence directly.]\n"
-    )
+    def render_hint(schema_text: str) -> str:
+        key_guidance = (
+            f"Use the shown stable key `{first_key}`; canonical row expression "
+            f"`json_extract(j.value,'$.{first_key}')`."
+            if first_key
+            else "Choose a stable PRIMARY KEY or composite UNIQUE key only from the shown item fields."
+        )
+        return (
+            f"[SOURCE SET; exact stored arrays: {schema_text}. "
+            f"New table first: CREATE TABLE IF NOT EXISTS with a stable key. {key_guidance} "
+            "Use rows=[]; never invent result IDs. "
+            "Then upsert in this call with `INSERT ... SELECT` "
+            f"FROM __tool_results AS t, json_each(t.result_json,'{first_path}') AS j "
+            f"WHERE t.is_current_batch=1 AND t.tool_name='{escaped_tool_name}'. "
+            f"source_batch_id={escaped_batch_id}; do not filter it. Current batch plus tool_name is the exact set. "
+            "Add no source_url/result_id predicate; store t.source_url/t.result_id as provenance. "
+            "Every item field/URL comes from j.value; t.result_id is shared row provenance, never item identity. "
+            "Parent-only fields use t.result_json; siblings differ by derived parent fields. Use all listed paths together.]\n"
+        )
+
+    hint = render_hint("; ".join(schema for _path, schema, _key in schemas))
+    if len(hint) > MAX_OPTIONAL_SOURCE_HINT_CHARS:
+        hint = render_hint("; ".join(path for path, _schema, _key in schemas))
     return hint if len(hint) <= MAX_OPTIONAL_SOURCE_HINT_CHARS else ""
 
 
@@ -257,6 +299,10 @@ def prepare_tool_results_for_prompt(
         fresh_step_ids.add(fresh_tool_call_step_id)
     paired_step_ids = set(paired_url_step_ids or ())
     model_tables = {table.casefold() for table in (named_model_tables or ())}
+    emitted_source_write_hints: set[str] = set()
+    emitted_source_import_sets: set[tuple[str, str]] = set()
+    emitted_prose_guidance: set[tuple[str, tuple[str, ...]]] = set()
+    emitted_link_guidance: set[tuple[str, str]] = set()
     short_id_map = build_short_result_id_map(
         [
             record.step_id
@@ -264,15 +310,47 @@ def prepare_tool_results_for_prompt(
             if record.result_text and not record.result_id
         ]
     )
-
-    for record in records:
-        if record.result_text is None:
+    source_records = [
+        record
+        for record in records
+        if is_source_bearing_tool(record.tool_name)
+    ]
+    current_source_record = (
+        max(source_records, key=lambda record: record.created_at)
+        if source_records
+        else None
+    )
+    current_source_batch_id = (
+        current_source_record.source_batch_id
+        or current_source_record.result_id
+        or short_id_map.get(current_source_record.step_id, current_source_record.step_id)
+        if current_source_record
+        else None
+    )
+    current_source_tool_name = current_source_record.tool_name if current_source_record else None
+    source_work_set_ids: Dict[str, List[str]] = {}
+    for record in sorted(records, key=lambda item: item.created_at):
+        if (
+            not record.result_text
+            or not is_source_bearing_tool(record.tool_name)
+            or (
+                record.source_batch_id is not None
+                and record.tool_name == current_source_tool_name
+                and record.source_batch_id != current_source_batch_id
+            )
+        ):
             continue
+        source_work_set_ids.setdefault(record.tool_name, []).append(
+            record.result_id or short_id_map.get(record.step_id, record.step_id)
+        )
+
+    for record in sorted(records, key=lambda item: item.created_at):
         result_text = record.result_text
         if not result_text:
             continue
 
         result_id = record.result_id or short_id_map.get(record.step_id, record.step_id)
+        source_batch_id = record.source_batch_id or result_id
         legacy_result_id = None
         if record.result_id and record.result_id != record.step_id:
             legacy_result_id = record.step_id
@@ -285,6 +363,10 @@ def prepare_tool_results_for_prompt(
 
         recency_position = recency_positions.get(record.step_id)
         is_fresh_tool_call = record.step_id in fresh_step_ids
+        is_current_source_batch = (
+            record.source_batch_id is None
+            or source_batch_id == current_source_batch_id
+        )
 
         context_hint = None
         if is_analysis_eligible and (stored_json or (is_fresh_tool_call and meta.get("is_json"))):
@@ -316,16 +398,45 @@ def prepare_tool_results_for_prompt(
             else analysis.prepared_text if analysis and analysis.prepared_text is not None
             else result_text
         )
+        work_set = source_work_set_ids.get(record.tool_name, ())
+        preview_recency_position = recency_position
+        if (
+            stored_in_db
+            and is_current_source_batch
+            and is_source_bearing_tool(record.tool_name)
+            and not _entity_arrays(analysis)
+            and 1 < len(work_set) <= MAX_ACTIVE_PROSE_PREVIEWS
+            and (
+                preview_recency_position is None
+                or preview_recency_position >= len(PREVIEW_TIERS_EXTERNAL)
+            )
+        ):
+            preview_recency_position = len(PREVIEW_TIERS_EXTERNAL) - 1
         preview_text, is_inline = _build_prompt_preview(
             preview_source,
             meta["bytes"],
-            recency_position=recency_position,
+            recency_position=preview_recency_position,
             tool_name=record.tool_name,
             is_fresh_tool_call=is_fresh_tool_call,
         )
-        source_import_prefix = ""
-        source_write_hint_prefix = ""
-        keep_source_import_hint = is_source_bearing_tool(record.tool_name) and is_fresh_tool_call
+        is_historical_same_tool_source = (
+            current_source_batch_id is not None
+            and not is_current_source_batch
+            and record.tool_name == current_source_tool_name
+            and is_source_bearing_tool(record.tool_name)
+        )
+        if is_historical_same_tool_source:
+            context_hint = None
+            preview_text = None
+            is_inline = False
+        keep_source_import_hint = (
+            is_source_bearing_tool(record.tool_name)
+            and is_fresh_tool_call
+            and is_current_source_batch
+        )
+        source_import_prefix, source_write_hint_prefix = "", ""
+        requires_source_import = False
+        hide_literal_result_id = keep_source_import_hint and bool(_optional_source_array_schemas(analysis))
         if keep_source_import_hint:
             arrays = _entity_arrays(analysis)
             model_entities = {entity_name_stem(table) for table in model_tables}
@@ -334,27 +445,49 @@ def prepare_tool_results_for_prompt(
                 if any(_is_entity_key(field) for field in item.item_fields)
                 or entity_name_stem(item.path.rsplit(".", 1)[-1]) in model_entities
             )
-            schemas = [f"{item.path}({','.join(item.item_fields[:10])})" for item in relevant_arrays]
+            array_specs = tuple(
+                (item, _source_item_key(item.item_fields))
+                for item in relevant_arrays
+            )
+            schemas = [
+                f"{item.path}({','.join(item.item_fields[:10])})"
+                + (f"[stable_key={stable_key}]" if stable_key else "[no_stable_key]")
+                for item, stable_key in array_specs
+            ]
             matching_arrays = tuple(
                 item for item in relevant_arrays
                 if entity_name_stem(item.path.rsplit(".", 1)[-1]) in model_entities
             )
             if schemas and matching_arrays:
-                source_import_prefix = (
-                    f"[SOURCE ARRAYS result_id={result_id}; stored paths: {'; '.join(schemas)}. "
-                    "NEXT: output one sqlite_batch only. In that single batch, create/evolve keyed model tables for "
-                    "every listed entity array, import each exact path with INSERT ... SELECT/json_each, then SELECT "
-                    "bounded task-relevant rows from every updated table using stable-ID filters/joins—not counts or "
-                    "whole-table dumps. Derive all facts, URLs, and write keys from j.value. This ordinary evidence "
-                    "task never changes __agent_config/__agent_skills. No pre-read, refetch, blob inspection, copied "
-                    "literals, or splitting arrays across calls.]\n"
-                )
-            else:
-                source_write_hint_prefix = _build_optional_source_write_hint(
-                    result_id,
-                    record.tool_name,
-                    analysis,
-                )
+                requires_source_import = True
+                source_import_key = (source_batch_id, record.tool_name)
+                if source_import_key not in emitted_source_import_sets:
+                    source_import_prefix = (
+                        f"[SOURCE ARRAYS; paths: {'; '.join(schemas)}. NEXT: one sqlite_batch—no parallel/second call. "
+                        "Pass top-level rows=[]; never invent or inspect result IDs. "
+                        "Create/evolve keyed tables; upsert every sibling set-wise with "
+                        f"INSERT ... SELECT/json_each over is_current_batch=1 AND tool_name='{record.tool_name}' "
+                        "then SELECT bounded task rows. Final SELECTs constrain each entity to the exact stable_key values "
+                        "in its same current source path. Never filter freshness by a mutable name, even one the user named, "
+                        "or by a literal ID/history. "
+                        "With no stable key, use newest observed_at. "
+                        "Current batch plus tool_name is the exact set: add no source_url/result_id predicate. Each item's "
+                        "source ID is its key; t.result_id is row provenance, never item identity. Derive item fields/URLs from "
+                        "j.value, parent fields from t.result_json, and provenance from t.result_id. Never delete/clear the model. "
+                        "No pre-read, refetch, blob inspection, copied literals, or split calls.]\n"
+                    )
+                    emitted_source_import_sets.add(source_import_key)
+        if not requires_source_import and hide_literal_result_id:
+            source_write_hint_prefix = _build_optional_source_write_hint(source_batch_id, record.tool_name, analysis)
+        if source_write_hint_prefix in emitted_source_write_hints:
+            source_write_hint_prefix = ""
+        elif source_write_hint_prefix:
+            emitted_source_write_hints.add(source_write_hint_prefix)
+        if requires_source_import:
+            # A second visible copy invites literal transcription and wastes prompt space.
+            context_hint = None
+            preview_text = source_import_prefix or None
+            is_inline = False
         has_focus = "\nFOCUS:\n" in (context_hint or "")
         if has_focus and not is_inline:
             preview_text = None
@@ -372,7 +505,15 @@ def prepare_tool_results_for_prompt(
         if has_link_tokens:
             context_hint = _mark_missing_item_links(context_hint or "") or None
             preview_text = _mark_missing_item_links(preview_text or "")
-        if preview_text and has_link_tokens and keep_source_import_hint and not source_import_prefix:
+        link_guidance_key = (source_batch_id, record.tool_name)
+        if (
+            preview_text
+            and has_link_tokens
+            and keep_source_import_hint
+            and not source_import_prefix
+            and link_guidance_key not in emitted_link_guidance
+        ):
+            emitted_link_guidance.add(link_guidance_key)
             preview_text = (
                 "[VERIFIED LINK PRESENTATION: when presenting these sourced items, anchor each token on its exact "
                 "entity name using the active "
@@ -386,28 +527,130 @@ def prepare_tool_results_for_prompt(
                 "requested audience or action.]\n"
                 f"{preview_text}"
             )
-        if source_import_prefix:
-            preview_text = f"{source_import_prefix}{preview_text or ''}"
-        elif source_write_hint_prefix:
-            preview_text = f"{source_write_hint_prefix}{preview_text or ''}"
-
         is_scrape_markdown = _is_scrape_as_markdown_tool(record.tool_name)
+        is_prose_work_set = (
+            stored_in_db
+            and is_current_source_batch
+            and not _entity_arrays(analysis)
+            and (is_scrape_markdown or len(work_set) > 1)
+        )
+        if is_scrape_markdown:
+            # The page preview is the useful context; a repeated title digest competes
+            # with the single work-set import instruction.
+            context_hint = None
         meta_text = _format_meta_text(
             result_id,
             meta,
-            analysis=None if is_scrape_markdown else analysis if is_analysis_eligible else None,
+            analysis=(
+                None
+                if is_scrape_markdown or is_historical_same_tool_source
+                else analysis if is_analysis_eligible else None
+            ),
             stored_in_db=stored_in_db,
             result_is_inline=is_inline or has_focus,
             context_hint=context_hint,
-            allow_fallback_query_hints=not is_scrape_markdown,
+            allow_fallback_query_hints=not is_scrape_markdown and not is_historical_same_tool_source,
+            include_result_id=not hide_literal_result_id and not is_historical_same_tool_source,
         )
-        if is_scrape_markdown and stored_in_db:
+        if record.tool_name == "sqlite_batch":
+            if record.will_continue_work is False and _tool_result_succeeded(result_text):
+                meta_text += (
+                    "\nSQLITE RESULT: you marked this query terminal. Its returned rows are the answer source. "
+                    "NEXT ACTION MUST deliver the user-facing answer; do not call SQLite or another research tool."
+                )
+            else:
+                meta_text += (
+                    "\nSQLITE RESULT: use returned rows directly. If they satisfy the requested decision, deliver now; "
+                    "do not reread the same model merely to validate them."
+                )
+        if source_write_hint_prefix:
+            meta_text = f"{source_write_hint_prefix.strip()}\n{meta_text}"
+        if is_historical_same_tool_source:
             meta_text += (
-                "\nSCRAPE MARKDOWN: result_text is the page text. For large pages, first query all needed rows with "
-                "both substr(result_text,1,500) AS head and substr(result_text,-1500) AS tail; facts may be at the end. "
-                "If that returns the facts, answer. Never read_file, inspect analysis_json/result_json, or fetch whole blobs; "
-                "use grep_context_all only for a missing named term."
+                "\nHISTORICAL SOURCE BATCH: excluded from is_current_batch=1 and kept in SQLite only. "
+                "Query its source_batch_id only when the task explicitly requires older evidence."
             )
+        if is_prose_work_set and not is_historical_same_tool_source:
+            work_set = work_set or (result_id,)
+            prose_guidance_key = (record.tool_name, tuple(work_set))
+            if prose_guidance_key not in emitted_prose_guidance:
+                emitted_prose_guidance.add(prose_guidance_key)
+                source_ids = json.dumps(list(work_set), separators=(",", ":"))
+                result_label = "result" if len(work_set) == 1 else "results"
+                work_set_label = (
+                    "SCRAPE MARKDOWN WORK SET"
+                    if is_scrape_markdown
+                    else "PROSE SOURCE WORK SET"
+                )
+                work_set_records = [
+                    candidate
+                    for candidate in records
+                    if (
+                        candidate.tool_name == record.tool_name
+                        and (
+                            candidate.result_id
+                            or short_id_map.get(candidate.step_id, candidate.step_id)
+                        ) in work_set
+                    )
+                ]
+                previews_are_complete = bool(work_set_records) and all(
+                    len(candidate.result_text.encode("utf-8")) <= SMALL_RESULT_ALWAYS_INLINE
+                    for candidate in work_set_records
+                )
+                evidence_chars = max(
+                    PROSE_INSPECTION_MIN_CHARS,
+                    min(
+                        PROSE_INSPECTION_MAX_CHARS,
+                        PROSE_INSPECTION_TOTAL_CHARS // max(len(work_set), 1),
+                    ),
+                )
+                escaped_tool_name = record.tool_name.replace("'", "''")
+                inspection_query = (
+                    f"`SELECT t.result_id,t.source_url,"
+                    f"substr(group_concat(c.value,'\\n'),1,{evidence_chars}) AS evidence FROM "
+                    "__tool_results t,json_each(grep_context_all(t.result_text,"
+                    "'^(?:#{1,6}\\s|[-*]\\s*[^:\\n]{1,64}:)',160,6)) c "
+                    f"WHERE t.is_current_batch=1 AND t.tool_name='{escaped_tool_name}' "
+                    "GROUP BY t.result_id,t.source_url`"
+                )
+                inspection_contract = (
+                    "(json_each aliases expose key and value, never seq). This structural Markdown pattern and exact "
+                    "tool name are ready to use; do not turn them into undeclared bindings or enumerate labels. "
+                    "Never select raw blobs or use read_file. These rows already give exact result_id and source_url; "
+                    "do not look either up again. The next SQLite call is the final import/decision call; set "
+                    "will_continue_work=false unless a specific non-SQLite action remains. "
+                )
+                if len(work_set) > 1:
+                    inspection_guidance = (
+                        "Before any multi-source prose model write, make exactly one compact set-wide evidence "
+                        "inspection; do not import from memory or previews alone. Use it even when previews look "
+                        "complete. Do not inventory IDs, URLs, tool names, or shape. Return one output row and at most "
+                        f"{evidence_chars} evidence characters per source: {inspection_query} {inspection_contract}"
+                    )
+                elif previews_are_complete:
+                    inspection_guidance = (
+                        "This single-source preview is complete. Do not query __tool_results to reread it or inventory "
+                        "IDs/URLs/shape; the next SQLite call is the final import/decision call. "
+                    )
+                else:
+                    inspection_guidance = (
+                        "If this preview covers the decision, make the final import/decision SQLite call immediately. "
+                        "Otherwise make exactly one compact inspection with one output row and at most "
+                        f"{evidence_chars} evidence characters: {inspection_query} {inspection_contract}"
+                    )
+                meta_text += (
+                    f"\n{work_set_label} ({len(work_set)} {result_label}; exact source result IDs: "
+                    f"`{source_ids}`): unstructured prose; this is the complete set. "
+                    f"{inspection_guidance}"
+                    "Final import: top-level `rows=[{\"result_id\":\"exact ID\",\"fields\":{...}},...]`, one non-empty "
+                    "record per source; INSERT SELECT from `json_each(:rows) r JOIN __tool_results t ON "
+                    "t.result_id=json_extract(r.value,'$.result_id')`, reading facts at $.fields.<name> and provenance "
+                    "from t. End with decision-ready SELECTs. Upsert stable keys; no sourced SQL literals, ID-only "
+                    "rows, destructive rebuild, dump, or later reread. `fields` is evidence transcription, not "
+                    "enrichment: preserve each source's specificity and omit unsupported fields. Never turn a "
+                    "qualitative claim into a number, feature variant, certification level, integration, or "
+                    "availability detail."
+                )
 
         prompt_info[record.step_id] = ToolResultPromptInfo(
             result_id=result_id,
@@ -415,6 +658,7 @@ def prepare_tool_results_for_prompt(
             preview_text=preview_text,
             is_inline=is_inline,
             source_reconciliation_directive=source_import_prefix or None,
+            suppress_from_prompt=is_historical_same_tool_source,
         )
 
         if stored_in_db:
@@ -434,6 +678,9 @@ def prepare_tool_results_for_prompt(
                     result_id,
                     legacy_result_id,
                     record.tool_name,
+                    source_batch_id,
+                    1 if is_current_source_batch else 0,
+                    record.source_url,
                     record.created_at.isoformat(),
                     meta["bytes"],
                     meta["line_count"],
@@ -519,6 +766,9 @@ def _store_tool_results(rows: Sequence[Tuple]) -> None:
                     result_id,
                     legacy_result_id,
                     tool_name,
+                    source_batch_id,
+                    is_current_batch,
+                    source_url,
                     created_at,
                     bytes,
                     line_count,
@@ -534,7 +784,7 @@ def _store_tool_results(rows: Sequence[Tuple]) -> None:
                     analysis_json,
                     result_text
                 ) VALUES (
-                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
                 )
                 """,
                 rows,
@@ -558,6 +808,9 @@ def _ensure_tool_results_table(conn) -> None:
             result_id TEXT PRIMARY KEY,
             legacy_result_id TEXT,
             tool_name TEXT,
+            source_batch_id TEXT,
+            is_current_batch INTEGER NOT NULL DEFAULT 0,
+            source_url TEXT,
             created_at TEXT,
             bytes INTEGER,
             line_count INTEGER,
@@ -592,6 +845,18 @@ def _ensure_tool_results_columns(conn) -> None:
     if "analysis_json" not in existing:
         conn.execute(
             f'ALTER TABLE "{TOOL_RESULTS_TABLE}" ADD COLUMN analysis_json TEXT;'
+        )
+    if "source_batch_id" not in existing:
+        conn.execute(
+            f'ALTER TABLE "{TOOL_RESULTS_TABLE}" ADD COLUMN source_batch_id TEXT;'
+        )
+    if "is_current_batch" not in existing:
+        conn.execute(
+            f'ALTER TABLE "{TOOL_RESULTS_TABLE}" ADD COLUMN is_current_batch INTEGER NOT NULL DEFAULT 0;'
+        )
+    if "source_url" not in existing:
+        conn.execute(
+            f'ALTER TABLE "{TOOL_RESULTS_TABLE}" ADD COLUMN source_url TEXT;'
         )
 
 
@@ -786,8 +1051,24 @@ def _summarize_result(
 
             if isinstance(content, str):
                 result_text_store = content
+                if _is_scrape_as_markdown_tool(tool_name):
+                    # The wrapper is transport metadata, not a structured domain
+                    # payload. Keeping both shapes invites guessed JSON paths.
+                    result_json = None
+                    is_json = False
+                    json_type = ""
+                    top_keys = []
             elif content is not None:
-                result_text_store = json.dumps(content, ensure_ascii=False)
+                if (
+                    tool_name == "http_request"
+                    and isinstance(content, dict)
+                    and isinstance(content.get("text"), str)
+                ):
+                    # Keep the structured envelope for JSON paths while making
+                    # authored page text directly searchable as text.
+                    result_text_store = content["text"]
+                else:
+                    result_text_store = json.dumps(content, ensure_ascii=False)
         except Exception:
             pass  # Keep original on any error
 
@@ -812,6 +1093,14 @@ def _summarize_result(
         meta["parsed_from"] = analysis.parse_info.source
         meta["parsed_with"] = analysis.parse_info.mode
     return meta, result_json, result_text_store, analysis
+
+
+def _tool_result_succeeded(result_text: str) -> bool:
+    try:
+        payload = json.loads(result_text)
+    except (json.JSONDecodeError, TypeError):
+        return False
+    return isinstance(payload, dict) and payload.get("status") == "ok"
 
 
 def _build_prompt_preview(
@@ -846,7 +1135,10 @@ def _build_prompt_preview(
     if full_bytes <= max_bytes:
         return result_text, True
 
-    preview_text, truncated_bytes = _truncate_to_bytes(result_text, max_bytes)
+    if is_sqlite:
+        preview_text, truncated_bytes = _truncate_to_bytes(result_text, max_bytes)
+    else:
+        preview_text, truncated_bytes = _truncate_head_tail_to_bytes(result_text, max_bytes)
     if truncated_bytes > 0:
         if is_sqlite:
             preview_text = f"{preview_text}\n... [{truncated_bytes} more bytes truncated]"
@@ -854,12 +1146,12 @@ def _build_prompt_preview(
             kb_size = full_bytes // 1024
             preview_text = (
                 f"{preview_text}\n"
-                f"... [{kb_size}KB total - USE QUERY ABOVE to search or sample both ends]"
+                f"... [{kb_size}KB total - query only if the visible evidence is insufficient]"
             )
         else:
             preview_text = (
                 f"{preview_text}\n"
-                f"... [{truncated_bytes} more bytes - USE QUERY ABOVE to access full data]"
+                f"... [{truncated_bytes} more bytes - query only if the visible evidence is insufficient]"
             )
     return preview_text, False
 
@@ -873,12 +1165,14 @@ def _format_meta_text(
     result_is_inline: bool = False,
     context_hint: Optional[str] = None,
     allow_fallback_query_hints: bool = True,
+    include_result_id: bool = True,
 ) -> str:
     parts = [
-        f"result_id={result_id}",
         f"in_db={1 if stored_in_db else 0}",
         f"bytes={meta['bytes']}",
     ]
+    if include_result_id:
+        parts.insert(0, f"result_id={result_id}")
 
     if meta.get("is_binary"):
         parts.append("is_binary=1")
@@ -901,7 +1195,7 @@ def _format_meta_text(
 
     meta_line = ", ".join(parts)
 
-    show_query_hints = stored_in_db and not result_is_inline
+    show_query_hints = stored_in_db and not result_is_inline and include_result_id
 
     if analysis and analysis.compact_summary and show_query_hints:
         meta_line += "\n" + analysis.compact_summary
@@ -936,6 +1230,21 @@ def _truncate_to_bytes(text: str, max_bytes: int) -> Tuple[str, int]:
         return text, 0
     truncated = encoded[:max_bytes].decode("utf-8", errors="ignore")
     return truncated, len(encoded) - max_bytes
+
+
+def _truncate_head_tail_to_bytes(text: str, max_bytes: int) -> Tuple[str, int]:
+    encoded = text.encode("utf-8")
+    if len(encoded) <= max_bytes:
+        return text, 0
+
+    marker = b"\n... [middle omitted] ...\n"
+    content_budget = max(2, max_bytes - len(marker))
+    head_bytes = max(1, content_budget // 4)
+    tail_bytes = max(1, content_budget - head_bytes)
+    head = encoded[:head_bytes].decode("utf-8", errors="ignore")
+    tail = encoded[-tail_bytes:].decode("utf-8", errors="ignore")
+    omitted_bytes = max(0, len(encoded) - head_bytes - tail_bytes)
+    return f"{head}{marker.decode()}{tail}", omitted_bytes
 
 
 def _is_probably_binary(text: str) -> bool:

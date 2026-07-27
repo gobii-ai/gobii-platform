@@ -1,3 +1,5 @@
+from unittest.mock import patch
+
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings, tag
 
@@ -152,17 +154,25 @@ class PersistentAgentPlanningModeTests(TestCase):
 
         self.assertIn("Outside that first-assignment rule", prompt)
         self.assertIn("send one brief same-channel acknowledgment as the entire first response", prompt)
-        self.assertIn("text beside work tools is not delivery", prompt)
+        self.assertIn("With any tool call, leave response content empty", prompt)
+        self.assertIn("Response content with tool calls is user-facing", prompt)
         self.assertIn("investment diligence, multi-entity comparisons", prompt)
         self.assertIn("the first useful result you will bring back", prompt)
         self.assertIn("continues after a meaningful evidence batch", prompt)
         self.assertIn("strongest finding and what remains", prompt)
+        self.assertIn("A decision-ready tool result means the work does not continue", prompt)
         self.assertIn("Never announce phases", prompt)
-        self.assertIn("Work Updates require explicit", prompt)
+        self.assertIn("explicit sends for Work Updates", prompt)
+        self.assertIn("First-run intake and executable work are mutually exclusive", prompt)
+        self.assertIn("before any acknowledgment, work update, SQLite write, or deliverable", prompt)
         self.assertIn("email=send_email in-thread", prompt)
         self.assertIn("repair rejected/wrong channel first", prompt)
         self.assertIn(
-            "first response calls only this tool",
+            "Follow Work Updates for acknowledgment and milestone timing",
+            send_chat["function"]["description"],
+        )
+        self.assertIn(
+            "at most one concise orientation note",
             send_chat["function"]["description"],
         )
         self.assertNotIn(
@@ -179,12 +189,50 @@ class PersistentAgentPlanningModeTests(TestCase):
             )
         )
 
-        self.assertIn("Broad ongoing/substantial first work", prompt)
-        self.assertIn("ask the highest-leverage question", prompt)
-        self.assertIn("sole response is request_human_input", prompt)
-        self.assertIn("no response text, config change, or work", prompt)
-        self.assertIn("request_human_input with 2-3 real choices", prompt)
-        self.assertIn("Otherwise start the task", prompt)
+        self.assertIn("Choose one route before acting", prompt)
+        self.assertIn("Broad substantial work missing a material audience", prompt)
+        self.assertIn("make exactly one focused read-only public lookup", prompt)
+        self.assertIn("Any result ends orientation", prompt)
+        self.assertIn("no second lookup or sequential top-up", prompt)
+        self.assertIn("A failed or irrelevant result becomes an interpretation/next-path choice", prompt)
+        self.assertIn("Count across the whole first-run cycle", prompt)
+        self.assertIn("never a reason to keep searching for certainty", prompt)
+        self.assertIn("never authorizes silently deciding a missing boundary", prompt)
+        self.assertIn("names no entity/source worth orienting on", prompt)
+        self.assertIn("make exactly one request_human_input tool call", prompt)
+        self.assertIn("Put all cards in that call's requests array", prompt)
+        self.assertIn("never emit several request_human_input tool calls", prompt)
+        self.assertIn("one card for each unresolved independent decision", prompt)
+        self.assertIn("First decompose the task into independently answerable decisions", prompt)
+        self.assertIn("the right count may be none, one, several, or more than three", prompt)
+        self.assertIn("Never pad to a quota", prompt)
+        self.assertIn("Each card records one choice", prompt)
+        self.assertIn("each initial-intake card must contain at least 2 non-empty options", prompt)
+        self.assertIn("every option object must have a non-empty title", prompt)
+        self.assertIn("a non-empty one-sentence description", prompt)
+        self.assertIn("Never mix free-text fields into this batch", prompt)
+        self.assertIn("8 is the hard tool limit", prompt)
+        self.assertIn("turn that ambiguity into choices", prompt)
+        self.assertIn("They stay pending if the user leaves", prompt)
+        self.assertIn("mirror every exact question and choice", prompt)
+        self.assertIn("keep the card call continuing, send the mirror next", prompt)
+        self.assertIn("gets the same numbered questions and choices", prompt)
+        self.assertIn("Otherwise: start the task", prompt)
+
+    @patch("api.agent.core.prompt_context.has_verified_email", return_value=True)
+    def test_first_run_prompt_places_active_intake_after_stable_core(self, _has_verified_email):
+        endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.WEB,
+            address="web://user/1/agent/planning-agent",
+        )
+        self.agent.preferred_contact_endpoint = endpoint
+        self.agent.save(update_fields=["preferred_contact_endpoint", "updated_at"])
+
+        prompt = _get_system_instruction(self.agent, is_first_run=True)
+
+        self.assertLess(prompt.index("<sqlite_guidance>"), prompt.index("This is your first run."))
+        self.assertNotIn("### R2: Charter Construction", prompt)
+        self.assertNotIn("### R3: Schedule Selection", prompt)
 
     def test_agents_without_sms_endpoint_do_not_receive_send_sms_tool(self):
         names = _tool_names(get_static_tool_definitions(self.agent))

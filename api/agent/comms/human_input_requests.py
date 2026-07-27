@@ -32,11 +32,12 @@ from api.models import (
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from util.text_sanitizer import normalize_llm_output
 
+from .email_endpoint_routing import can_agent_send_to
 from .routing import get_latest_inbound_human_message
 
 OPTION_NUMBER_RE = re.compile(r"^\s*(?:option\s+)?(?P<number>\d{1,2})(?:[\)\.\:\-\s]|$)", re.IGNORECASE)
 BATCH_ANSWER_ENTRY_RE = re.compile(r"^\s*(?P<number>\d{1,2})[\)\.\:\-]\s*(?P<body>.*)$")
-MAX_OPTION_COUNT = 6
+MAX_OPTION_COUNT = 8
 MAX_HUMAN_INPUT_QUESTION_LENGTH = 500
 DEFAULT_HUMAN_INPUT_REQUEST_EXPIRATION_DAYS = 3
 HUMAN_INPUT_LLM_MAX_CANDIDATES = 20
@@ -396,12 +397,15 @@ def _build_next_message_suggestion(
     target: HumanInputTarget,
 ) -> dict[str, Any] | None:
     if target.channel == CommsChannel.WEB:
-        return None
+        agent = request_objects[0].agent if request_objects else None
+        preferred = agent.preferred_contact_endpoint if agent else None
+        if not preferred or preferred.channel not in {CommsChannel.EMAIL, CommsChannel.SMS}:
+            return None
+        if not can_agent_send_to(agent, preferred.channel, preferred.address):
+            return None
+        target = HumanInputTarget(preferred.channel, preferred.address, target.conversation)
 
-    send_tool = {
-        CommsChannel.EMAIL: "send_email",
-        CommsChannel.SMS: "send_sms",
-    }.get(target.channel)
+    send_tool = {CommsChannel.EMAIL: "send_email", CommsChannel.SMS: "send_sms"}.get(target.channel)
     if send_tool is None:
         return None
 
@@ -410,17 +414,14 @@ def _build_next_message_suggestion(
         "address": target.address,
         "send_tool": send_tool,
         "instruction": (
-            f"Include these questions in your next normal {target.channel} message to {target.address}. "
+            f"Include these exact questions and numbered choices in your next normal {target.channel} message to {target.address}. "
             f"If you already sent or are sending a {target.channel} message in the same tool-call batch, "
-            "that message must include the questions because request_human_input cannot inject them into "
+            "that message must include the questions and choices because request_human_input cannot inject them into "
             f"another tool call. The user may not be actively viewing the web chat. Do not call request_human_input again "
             "for the same questions. The user's reply on that channel will be processed as answers."
         ),
         "questions": [
-            {
-                "number": index,
-                "question": request_obj.question,
-            }
+            {"number": index, "question": request_obj.question, "options": request_obj.options_json}
             for index, request_obj in enumerate(request_objects, start=1)
         ],
     }
@@ -464,7 +465,7 @@ def _build_request_result(
         result["next_message_suggestion"] = next_message_suggestion
     if partial_success:
         result["partial_success"] = True
-    if status == "ok" and target.channel == CommsChannel.WEB:
+    if status == "ok" and target.channel == CommsChannel.WEB and next_message_suggestion is None:
         result["auto_sleep_ok"] = True
     return result
 

@@ -284,10 +284,11 @@ def get_send_chat_tool() -> Dict[str, Any]:
         "function": {
             "name": "send_chat_message",
             "description": (
-                "Send web chat; broad first-assignment choices use request_human_input cards. "
-                "Before work that clearly needs several tool rounds, the first response calls only this tool with a "
-                "brief acknowledgment: say what you're taking on and the first useful result you'll bring back, with "
-                "will_continue_work=true. Start work next response. If the work continues after meaningful evidence, one later update may share the strongest finding and what remains. Never narrate tools or phases. "
+                "Send a web-chat message. Follow Work Updates for acknowledgment and milestone timing. "
+                "Tracked blocking choices use request_human_input cards, never prose. During GUIDED INTAKE, at most "
+                "one concise orientation note is allowed; "
+                "if one is already in history, the next user-visible action must be the choice cards, not another note. "
+                "Never narrate tools or phases. "
                 "Do not use this to simulate or confirm an email/SMS delivery; use available send_email/send_sms. No generic/internal progress."
             ),
             "parameters": {

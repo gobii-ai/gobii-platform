@@ -143,6 +143,17 @@ class ImpliedSendTests(TestCase):
 
         self.assertIsNone(reason)
 
+    def test_explicit_planning_questions_do_not_trigger_deep_work_gate(self):
+        self._add_inbound_web_message(
+            "Before implementation, help me shape the monitoring workflow. "
+            "Ask only the questions that materially change it, then wait."
+        )
+        tool_calls = [
+            {"function": {"name": "mcp_brightdata_search_engine", "arguments": "{}"}},
+        ]
+
+        self.assertIsNone(ep._deep_work_update_gate_context(self.agent, tool_calls))
+
     def test_deep_work_gate_uses_bound_inbound_when_newer_channel_message_exists(self):
         task_message = self._add_inbound_web_message(
             "Run a comprehensive audit of the release evidence."
@@ -3137,7 +3148,7 @@ class ImpliedSendTests(TestCase):
             True,
         )
         sqlite_parameters = kwargs["tools"][0]["function"]["parameters"]
-        self.assertEqual(sqlite_parameters["required"], ["sql", "will_continue_work"])
+        self.assertEqual(sqlite_parameters["required"], ["rows", "sql", "will_continue_work"])
         self.assertIn("result_id=abc123", sqlite_parameters["properties"]["sql"]["description"])
         self.assertNotIn("queries", sqlite_parameters["properties"])
         self.assertEqual(

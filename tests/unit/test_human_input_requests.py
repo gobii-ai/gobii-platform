@@ -301,13 +301,25 @@ class HumanInputRequestTests(TestCase):
         self.assertEqual(function["name"], "request_human_input")
         self.assertIn("non-credential", function["description"])
         self.assertIn("secure_credentials_request", function["description"])
-        self.assertIn("Broad first assignment", function["description"])
-        self.assertIn("highest-leverage question", function["description"])
-        self.assertIn("call alone", function["description"])
-        self.assertIn("2-3 real answer options", function["description"])
+        self.assertIn("Guided intake makes one tool call after orientation", function["description"])
+        self.assertIn("requests for several independent decisions", function["description"])
+        self.assertIn("not a quota", function["description"])
+        self.assertIn("2-8 options", function["description"])
+        self.assertIn("one-sentence description", function["description"])
+        self.assertIn("never bundle decisions", function["description"])
+        self.assertIn("category example choices are not blockers", function["description"])
+        self.assertIn("Web cards stay pending", function["description"])
+        self.assertIn("separate preferred email/SMS", function["description"])
+        self.assertIn("Ask later only when evidence reveals a consequential choice", function["description"])
+        self.assertIn("free-text blocker", function["description"])
         self.assertNotIn("title", function["parameters"]["properties"])
         self.assertIn("options", function["parameters"]["properties"])
+        self.assertEqual(function["parameters"]["properties"]["options"]["maxItems"], 8)
         self.assertIn("requests", function["parameters"]["properties"])
+        self.assertEqual(
+            function["parameters"]["properties"]["requests"]["items"]["properties"]["options"]["maxItems"],
+            8,
+        )
         self.assertIn("recipient", function["parameters"]["properties"])
         self.assertIn("will_continue_work", function["parameters"]["properties"])
         self.assertEqual(function["parameters"]["properties"]["question"]["maxLength"], 500)
@@ -374,6 +386,101 @@ class HumanInputRequestTests(TestCase):
         self.assertNotIn("relay_mode", result)
         self.assertNotIn("relay_payload", result)
         self.assertNotIn("auto_sleep_ok", result)
+
+    def test_execute_request_human_input_can_keep_web_card_and_guide_preferred_email_backup(self):
+        preferred = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.EMAIL,
+            address=self.user.email,
+        )
+        PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address="human-input-agent@example.com",
+        )
+        self.agent.preferred_contact_endpoint = preferred
+        self.agent.save(update_fields=["preferred_contact_endpoint", "updated_at"])
+
+        result = execute_request_human_input(
+            self.agent,
+            {
+                "question": "Which buyer should I prioritize?",
+                "options": [
+                    {"title": "Procurement", "description": "Target procurement leaders first."},
+                    {"title": "Operations", "description": "Target operations leaders first."},
+                ],
+                "will_continue_work": False,
+            },
+        )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertTrue(result["web_chat_visible"])
+        self.assertNotIn("auto_sleep_ok", result)
+        self.assertEqual(result["next_message_suggestion"]["send_tool"], "send_email")
+        self.assertEqual(result["next_message_suggestion"]["address"], preferred.address)
+        self.assertEqual(result["next_message_suggestion"]["questions"][0]["options"][0]["title"], "Procurement")
+
+    def test_execute_request_human_input_keeps_web_card_when_preferred_email_is_not_allowed(self):
+        preferred = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.EMAIL,
+            address="blocked-fallback@example.com",
+        )
+        PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address="human-input-agent@example.com",
+        )
+        self.agent.preferred_contact_endpoint = preferred
+        self.agent.whitelist_policy = PersistentAgent.WhitelistPolicy.MANUAL
+        self.agent.save(update_fields=["preferred_contact_endpoint", "whitelist_policy", "updated_at"])
+
+        result = execute_request_human_input(
+            self.agent,
+            {
+                "question": "Which buyer should I prioritize?",
+                "options": [{"title": "Procurement", "description": "Target procurement leaders first."}],
+                "will_continue_work": False,
+            },
+        )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertTrue(result["web_chat_visible"])
+        self.assertNotIn("next_message_suggestion", result)
+        self.assertTrue(result["auto_sleep_ok"])
+
+    def test_execute_request_human_input_keeps_web_card_when_org_preferred_sms_is_unsupported(self):
+        organization = Organization.objects.create(name="Human Input Org", created_by=self.user)
+        OrganizationMembership.objects.create(
+            org=organization,
+            user=self.user,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        )
+        preferred = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.SMS,
+            address="+15555550199",
+        )
+        PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.SMS,
+            address="+15555550100",
+        )
+        self.agent.organization = organization
+        self.agent.preferred_contact_endpoint = preferred
+        with patch.object(PersistentAgent, "_validate_org_seats", return_value=None):
+            self.agent.save(update_fields=["organization", "preferred_contact_endpoint", "updated_at"])
+
+        result = execute_request_human_input(
+            self.agent,
+            {
+                "question": "Which buyer should I prioritize?",
+                "options": [{"title": "Procurement", "description": "Target procurement leaders first."}],
+                "will_continue_work": False,
+            },
+        )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertTrue(result["web_chat_visible"])
+        self.assertNotIn("next_message_suggestion", result)
+        self.assertTrue(result["auto_sleep_ok"])
 
     def test_execute_request_human_input_allows_free_text_with_legacy_planning_state(self):
         self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
@@ -584,20 +691,40 @@ class HumanInputRequestTests(TestCase):
         self.assertEqual(result["requests_count"], 2)
         self.assertEqual(PersistentAgentHumanInputRequest.objects.filter(agent=self.agent).count(), 2)
 
-    def test_execute_request_human_input_rejects_more_than_six_options(self):
+    def test_execute_request_human_input_rejects_more_than_eight_options(self):
         result = execute_request_human_input(
             self.agent,
             {
                 "question": "Which one?",
                 "options": [
                     {"title": f"Option {index}", "description": "Choice"}
-                    for index in range(1, 8)
+                    for index in range(1, 10)
                 ],
             },
         )
 
         self.assertEqual(result["status"], "error")
-        self.assertIn("cannot exceed 6", result["message"])
+        self.assertIn("cannot exceed 8", result["message"])
+
+    def test_execute_request_human_input_accepts_eight_distinct_options(self):
+        result = execute_request_human_input(
+            self.agent,
+            {
+                "question": "Which evidence-backed path should I pursue?",
+                "options": [
+                    {
+                        "title": f"Path {index}",
+                        "description": f"Pursue distinct path {index}.",
+                    }
+                    for index in range(1, 9)
+                ],
+                "will_continue_work": False,
+            },
+        )
+
+        self.assertEqual(result["status"], "ok")
+        request = PersistentAgentHumanInputRequest.objects.get(agent=self.agent)
+        self.assertEqual(len(request.options_json), 8)
 
     def test_execute_request_human_input_accepts_500_character_question(self):
         result = execute_request_human_input(

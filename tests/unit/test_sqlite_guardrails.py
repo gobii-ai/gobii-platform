@@ -46,6 +46,38 @@ class SqliteGuardrailsMaintenanceTests(SimpleTestCase):
         self.assertIn("A" * 80, snippets[0])
         self.assertIn("B" * 80, snippets[0])
 
+    def test_grep_context_all_matches_anchored_fields_across_lines_case_insensitively(self):
+        text = "# Product\n- Vendor: AxonFlow\n- Best fit: enterprise"
+
+        result = _grep_context_all(text, r"^- (vendor|best fit):", 40, 4)
+
+        snippets = json.loads(result)
+        self.assertEqual(len(snippets), 1)
+        self.assertIn("Vendor: AxonFlow", snippets[0])
+        self.assertIn("Best fit: enterprise", snippets[0])
+
+    def test_grep_context_all_merges_overlapping_context_instead_of_repeating_it(self):
+        text = (
+            "# Product\n"
+            "- Vendor: AxonFlow\n"
+            "- Best fit: enterprise\n"
+            "- Strengths: audit and analytics\n"
+            "- Tradeoff: annual pricing\n"
+            + ("Appendix details.\n" * 100)
+        )
+
+        result = _grep_context_all(
+            text,
+            r"^#|Best fit|Strengths|Tradeoff|analytics",
+            80,
+            5,
+        )
+
+        snippets = json.loads(result)
+        self.assertEqual(len(snippets), 1)
+        self.assertEqual(snippets[0].count("# Product"), 1)
+        self.assertIn("Tradeoff: annual pricing", snippets[0])
+
     def test_patch_text_replaces_or_appends_without_rewriting_other_text(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             conn = open_guarded_sqlite_connection(os.path.join(tmp_dir, "state.db"))

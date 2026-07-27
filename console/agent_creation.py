@@ -177,6 +177,7 @@ def create_persistent_agent_from_charter(
     sms_enabled: bool,
     preferred_contact_method: str,
     web_enabled: bool = False,
+    initial_message_channel: str | None = None,
     preferred_llm_tier_key: str | None = None,
     charter_override: str | None = None,
     selected_pipedream_app_slugs: Iterable[object] | None = None,
@@ -188,6 +189,9 @@ def create_persistent_agent_from_charter(
     charter_text = (charter_override or initial_message).strip()
 
     preferred_contact_method = (preferred_contact_method or "email").strip().lower()
+    initial_message_channel = (initial_message_channel or preferred_contact_method).strip().lower()
+    if initial_message_channel not in {"email", "sms", "web"}:
+        raise ValidationError("Unsupported initial message channel.")
     contact_email = (contact_email or "").strip()
 
     template_code = request.session.get(PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY)
@@ -271,7 +275,7 @@ def create_persistent_agent_from_charter(
     user_contact_sms = None
     sms_preferred = preferred_contact_method == "sms"
     web_preferred = preferred_contact_method == "web"
-    web_enabled = bool(web_enabled or web_preferred)
+    web_enabled = bool(web_enabled or web_preferred or initial_message_channel == "web")
 
     preferred_llm_tier = None
     if preferred_llm_tier_key:
@@ -397,24 +401,37 @@ def create_persistent_agent_from_charter(
         if sms_preferred:
             preferred_endpoint = user_sms_comms_endpoint
             user_contact = user_contact_sms
-            conversation_channel = CommsChannel.SMS.value
-            agent_channel_endpoint = agent_sms_endpoint
         elif web_preferred:
             preferred_endpoint = user_web_comms_endpoint
             user_contact = user_web_address
-            conversation_channel = CommsChannel.WEB.value
-            agent_channel_endpoint = agent_web_endpoint
         else:
             preferred_endpoint = user_email_comms_endpoint
             user_contact = user_contact_email
-            conversation_channel = CommsChannel.EMAIL.value
-            agent_channel_endpoint = agent_email_endpoint
 
         if preferred_endpoint is None or not user_contact:
             raise ValidationError("We could not determine your preferred contact channel.")
 
         persistent_agent.preferred_contact_endpoint = preferred_endpoint
         persistent_agent.save(update_fields=["preferred_contact_endpoint"])
+
+        if initial_message_channel == "sms":
+            initial_user_endpoint = user_sms_comms_endpoint
+            initial_agent_endpoint = agent_sms_endpoint
+            initial_address = user_contact_sms
+            conversation_channel = CommsChannel.SMS.value
+        elif initial_message_channel == "web":
+            initial_user_endpoint = user_web_comms_endpoint
+            initial_agent_endpoint = agent_web_endpoint
+            initial_address = user_web_address
+            conversation_channel = CommsChannel.WEB.value
+        else:
+            initial_user_endpoint = user_email_comms_endpoint
+            initial_agent_endpoint = agent_email_endpoint
+            initial_address = user_contact_email
+            conversation_channel = CommsChannel.EMAIL.value
+
+        if initial_user_endpoint is None or initial_agent_endpoint is None or not initial_address:
+            raise ValidationError("We could not determine the initial message channel.")
 
         if sms_enabled and user_contact_sms and agent_sms_endpoint:
             try:
@@ -432,7 +449,7 @@ def create_persistent_agent_from_charter(
 
         conversation = _get_or_create_conversation(
             channel=conversation_channel,
-            address=user_contact,
+            address=initial_address,
             owner_agent=persistent_agent,
         )
 
@@ -454,17 +471,16 @@ def create_persistent_agent_from_charter(
                 user_web_comms_endpoint,
                 PersistentAgentConversationParticipant.ParticipantRole.HUMAN_USER,
             )
-        if agent_channel_endpoint is not None:
-            _ensure_participant(
-                conversation,
-                agent_channel_endpoint,
-                PersistentAgentConversationParticipant.ParticipantRole.AGENT,
-            )
+        _ensure_participant(
+            conversation,
+            initial_agent_endpoint,
+            PersistentAgentConversationParticipant.ParticipantRole.AGENT,
+        )
 
         initial_message_obj = PersistentAgentMessage.objects.create(
             is_outbound=False,
-            from_endpoint=preferred_endpoint,
-            to_endpoint=agent_channel_endpoint,
+            from_endpoint=initial_user_endpoint,
+            to_endpoint=initial_agent_endpoint,
             conversation=conversation,
             body=initial_message,
             owner_agent=persistent_agent,

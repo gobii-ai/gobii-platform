@@ -388,6 +388,7 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
             (True, "Seven founders identified.\nOne company has an evidence-backed nondisclosure."),
             (True, "Seven of eight founders were identified; the remaining founder is not publicly disclosed."),
             (True, "I found founders for seven of the eight portfolio companies; Umbra's is not publicly disclosed."),
+            (True, "Here are the current portfolio companies, **Covered 8/8**:"),
             (False, "Here you go."),
             (False, "1 founder identified."),
             (False, "All 8 founders identified."),
@@ -886,16 +887,40 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
             {"body": "Done", "will_continue_work": False},
         )
         clean = [fetch, sqlite, send]
+        work_update = call(
+            "send_chat_message",
+            "update",
+            {"body": "I have the source and am modeling it now.", "will_continue_work": True},
+        )
         failed_fetch = call(
             "http_request", "failed", {"url": sqlite_evals.DOMAIN_REFRESH_URL}, status="error",
         )
 
         self.assertEqual(_first_shot_source_phase_failures(clean), [])
+        self.assertEqual(
+            _first_shot_source_phase_failures([fetch, work_update, sqlite, send]),
+            [],
+        )
+        model_logic = call(
+            "sqlite_batch",
+            "model-logic",
+            {"sql": "SELECT status, due_on, due_on < date('now') AS overdue FROM workstreams"},
+        )
+        self.assertEqual(
+            _first_shot_source_phase_failures([fetch, sqlite, model_logic, send]),
+            [],
+        )
+        source_reread = call(
+            "sqlite_batch",
+            "source-reread",
+            {"sql": "SELECT result_json FROM __tool_results"},
+        )
         cases = (
             ([sqlite, fetch, send], "expected fetch"),
             ([fetch, fetch, sqlite, send], "expected one exact CRM snapshot fetch"),
             ([failed_fetch, sqlite, send], "execution status error"),
             ([fetch, sqlite, send, send], "terminal send"),
+            ([fetch, sqlite, source_reread, send], "reread source results"),
         )
         for calls, expected_failure in cases:
             with self.subTest(expected_failure=expected_failure):
@@ -980,7 +1005,7 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
                     "different account", "; ".join(sqlite_evals._domain_refresh_state_failures("agent")),
                 )
 
-    def test_multi_result_sqlite_scorer_rejects_extra_or_hand_built_queries(self):
+    def test_multi_result_sqlite_scorer_rejects_retry_loops_or_hand_built_queries(self):
         scenario, recorded = SqliteMultiResultWebSynthesisScenario(), []
         scenario.record_task_result = lambda *args, **kwargs: recorded.append((args, kwargs))
         aggregate_sql = (
@@ -994,10 +1019,11 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
                 _eval_tool_call("sqlite_batch", {"sql": aggregate_sql}),
                 _eval_tool_call("sqlite_batch", {"sql": aggregate_sql}),
                 _eval_tool_call("sqlite_batch", {"sql": aggregate_sql}),
+                _eval_tool_call("sqlite_batch", {"sql": aggregate_sql}),
             ],
         ):
             self.assertFalse(scenario._record_sqlite_usage("run", after=None, task_name="verify"))
-        self.assertIn("sqlite_batch calls 3 > 2", recorded[-1][1]["observed_summary"])
+        self.assertIn("sqlite_batch calls 4 > 3", recorded[-1][1]["observed_summary"])
 
         rejected = _eval_tool_call(
             "sqlite_batch", {"sql": "SELECT result_json FROM __tool_results WHERE result_id IN ('r1')"},
@@ -1062,7 +1088,7 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
         self.assertFalse(passed)
         self.assertIn("no aggregate __tool_results query", recorded[-1][1]["observed_summary"])
 
-    def test_sqlite_usage_counts_persisted_aggregate_from_partially_failed_batch(self):
+    def test_sqlite_usage_rejects_persisted_aggregate_from_partially_failed_batch(self):
         scenario, recorded = SqliteToolResultScenario(), []
         scenario.record_task_result = lambda *args, **kwargs: recorded.append((args, kwargs))
         calls = [
@@ -1097,8 +1123,8 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
                 require_working_table=True,
             )
 
-        self.assertTrue(passed, recorded[-1][1]["observed_summary"])
-        self.assertEqual(recorded[-1][1]["artifacts"]["step"], "partial")
+        self.assertFalse(passed)
+        self.assertIn("SQLite attempt 1 had execution status error", recorded[-1][1]["observed_summary"])
 
     def test_sqlite_domain_model_counts_persisted_schema_from_partially_failed_batch(self):
         scenario, recorded = SqliteIntermediateWorkingTableScenario(), []
@@ -1139,7 +1165,7 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
         self.assertEqual(model_tables, ("catalog",))
         self.assertEqual(recorded[-1][0][2], EvalRunTask.Status.PASSED)
 
-    def test_sqlite_usage_does_not_count_preflight_rejected_loop(self):
+    def test_sqlite_usage_rejects_preflight_rejected_loop(self):
         scenario, recorded = SqliteToolResultScenario(), []
         scenario.record_task_result = lambda *args, **kwargs: recorded.append((args, kwargs))
         calls = [
@@ -1179,14 +1205,17 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
                 max_single_result_filters=0,
             )
 
-        self.assertTrue(passed, recorded[-1][1]["observed_summary"])
+        self.assertFalse(passed)
+        self.assertIn("SQLite attempt 1 had execution status error", recorded[-1][1]["observed_summary"])
 
-    def test_sqlite_dedupe_usage_allows_bounded_schema_probe(self):
+    def test_sqlite_dedupe_usage_rejects_single_result_schema_probes(self):
         scenario, recorded = SqliteDedupeRequeryScenario(), []
         scenario.record_task_result = lambda *args, **kwargs: recorded.append((args, kwargs))
         calls = [
             SimpleNamespace(
                 step="step",
+                status="complete",
+                result='{"status":"ok"}',
                 tool_name="sqlite_batch",
                 tool_params={
                     "sql": """
@@ -1209,7 +1238,8 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
                 task_name="verify_dedupe_sqlite_usage",
                 max_single_result_filters=scenario.max_single_result_filters,
             )
-        self.assertTrue(passed, recorded[-1][1]["observed_summary"])
+        self.assertFalse(passed)
+        self.assertIn("single-result filters 2 > 0", recorded[-1][1]["observed_summary"])
 
     def test_sqlite_domain_model_accepts_related_constrained_tables(self):
         scenario, recorded = SqliteIntermediateWorkingTableScenario(), []
@@ -2274,28 +2304,6 @@ class EffortCalibrationHarnessTests(TestCase):
         message = PersistentAgentMessage.objects.get(owner_agent=agent, is_outbound=True)
         self.assertEqual(message.body, "## Bitcoin Price\n\n**$68,500.50 USD**\n\n> Markets move fast though")
 
-    def test_request_human_input_rejects_large_preference_survey_outside_planning(self):
-        agent = SimpleNamespace(planning_state=PersistentAgent.PlanningState.SKIPPED)
-
-        result = execute_request_human_input(
-            agent,
-            {
-                "question": "Which fintech company should I use?",
-                "options": [
-                    {"title": "Stripe", "description": "Payments infrastructure"},
-                    {"title": "Plaid", "description": "Financial data APIs"},
-                    {"title": "Chime", "description": "Consumer digital banking"},
-                    {"title": "Affirm", "description": "Buy now, pay later"},
-                ],
-                "will_continue_work": False,
-            },
-        )
-
-        self.assertEqual(result["status"], "error")
-        self.assertIn("not preference surveys", result["message"])
-        self.assertIn("choose a reasonable default", result["message"])
-
-
 @tag("eval_sim")
 class FirstRunPromptCalibrationTests(TestCase):
     def test_first_run_prompt_does_not_force_progress_greeting_or_default_schedule(self):
@@ -2420,7 +2428,7 @@ class FirstRunPromptCalibrationTests(TestCase):
         self.assertIn("enabled tool fits -> use directly", system_prompt)
         self.assertIn("credential-returning API -> search_tools('secure credential delegation') first", system_prompt)
         self.assertIn("named model + explicit fresh non-secret source/URL -> http_request only, no text/send/plan; WAIT", system_prompt)
-        self.assertIn("query, don't remember", system_prompt)
+        self.assertIn("Query truth instead of remembering it", system_prompt)
         self.assertIn("data/api/feed/file URL -> http_request", system_prompt)
         self.assertIn("reconcile+SELECT there before use", system_prompt)
         self.assertIn("spawn_web_task only after access/render/login blockage", system_prompt)
@@ -2442,6 +2450,10 @@ class FirstRunPromptCalibrationTests(TestCase):
         )
         self.assertIn(
             "If substantial work continues after a meaningful evidence batch",
+            system_prompt,
+        )
+        self.assertIn(
+            "A decision-ready tool result means the work does not continue",
             system_prompt,
         )
         self.assertIn(

@@ -1499,9 +1499,10 @@ class PromptContextBuilderTests(TestCase):
         self.assertNotIn("end_planning", system_message["content"])
         self.assertNotIn("## Signup Preview Handoff", system_message["content"])
         self.assertIn(
-            "If there is no concrete task to do yet, your first action should be one concise welcome message",
+            "No concrete task: send one concise welcome.",
             system_message["content"],
         )
+        self.assertIn("Broad substantial work missing a material audience", system_message["content"])
         self.assertNotIn("## Signup Preview First-Run Override", system_message["content"])
         self.assertNotIn("limited preview", system_message["content"])
         self.assertIn(f"<charter>{GENERIC_STARTER_CHARTER}</charter>", next(
@@ -2333,13 +2334,9 @@ class PromptContextBuilderTests(TestCase):
                  patch('api.agent.core.prompt_context.ensure_comms_compacted'):
                 context, _, _, metadata = build_prompt_context(self.agent, include_metadata=True)
 
-            self.assertIn("[SOURCE ARRAYS result_id=", metadata["source_reconciliation_directive"])
-            self.assertIn("[SOURCE ARRAYS result_id=", context[-1]["content"])
-            source_result_ids = re.findall(
-                r"SOURCE ARRAYS result_id=([^;]+)", metadata["source_reconciliation_directive"]
-            )
-            self.assertEqual(len(source_result_ids), 2)
-            source_result_id_sql = "','".join(source_result_ids)
+            self.assertIn("[SOURCE ARRAYS;", metadata["source_reconciliation_directive"])
+            self.assertIn("[SOURCE ARRAYS;", context[-1]["content"])
+            self.assertNotIn("SOURCE ARRAYS result_id=", metadata["source_reconciliation_directive"])
 
             sqlite_step = PersistentAgentStep.objects.create(agent=self.agent, description="reconciled CRM source")
             PersistentAgentToolCall.objects.create(
@@ -2353,8 +2350,8 @@ class PromptContextBuilderTests(TestCase):
                  patch('api.agent.core.prompt_context.ensure_comms_compacted'):
                 context, _, _, metadata = build_prompt_context(self.agent, include_metadata=True)
 
-            self.assertIn("[SOURCE ARRAYS result_id=", metadata["source_reconciliation_directive"])
-            self.assertIn("[SOURCE ARRAYS result_id=", context[-1]["content"])
+            self.assertIn("[SOURCE ARRAYS;", metadata["source_reconciliation_directive"])
+            self.assertIn("[SOURCE ARRAYS;", context[-1]["content"])
 
             reconciled_step = PersistentAgentStep.objects.create(agent=self.agent, description="modeled CRM source")
             PersistentAgentToolCall.objects.create(
@@ -2364,7 +2361,7 @@ class PromptContextBuilderTests(TestCase):
                     "INSERT INTO accounts(account_id,name) "
                     "SELECT json_extract(j.value,'$.account_id'),json_extract(j.value,'$.name') "
                     "FROM __tool_results r,json_each(r.result_json,'$.content.accounts') j "
-                    f"WHERE r.result_id IN ('{source_result_id_sql}') "
+                    "WHERE r.tool_name='http_request' "
                     "ON CONFLICT(account_id) DO UPDATE SET name=excluded.name; "
                     "SELECT * FROM accounts;"
                 )},
@@ -2375,7 +2372,7 @@ class PromptContextBuilderTests(TestCase):
                  patch('api.agent.core.prompt_context.ensure_comms_compacted'):
                 context, _, _, metadata = build_prompt_context(self.agent, include_metadata=True)
 
-            self.assertIn("[SOURCE ARRAYS result_id=", metadata["source_reconciliation_directive"])
+            self.assertIn("[SOURCE ARRAYS;", metadata["source_reconciliation_directive"])
 
             with sqlite3.connect(f"{sqlite_tmp.name}/state.db") as conn:
                 conn.execute("CREATE TABLE workstreams(workstream_id TEXT PRIMARY KEY, account_id TEXT, name TEXT)")
@@ -2388,7 +2385,7 @@ class PromptContextBuilderTests(TestCase):
                     "SELECT json_extract(j.value,'$.workstream_id'),json_extract(j.value,'$.account_id'),"
                     "json_extract(j.value,'$.name') FROM __tool_results r,"
                     "json_each(r.result_json,'$.content.workstreams') j "
-                    f"WHERE r.result_id IN ('{source_result_id_sql}') "
+                    "WHERE r.tool_name='http_request' "
                     "ON CONFLICT(workstream_id) DO UPDATE SET name=excluded.name; "
                     "SELECT * FROM accounts; SELECT * FROM workstreams;"
                 )},
@@ -2400,11 +2397,124 @@ class PromptContextBuilderTests(TestCase):
                 context, _, _, metadata = build_prompt_context(self.agent, include_metadata=True)
 
             self.assertIsNone(metadata["source_reconciliation_directive"])
-            self.assertNotIn("[SOURCE ARRAYS result_id=", context[-1]["content"])
+            self.assertNotIn("[SOURCE ARRAYS;", context[-1]["content"])
             self.assertNotIn(str(scalar_step.id), metadata["fresh_tool_call_step_ids"])
         finally:
             reset_sqlite_db_path(token)
             sqlite_tmp.cleanup()
+
+    def test_current_source_batch_hides_stale_same_tool_event_from_prompt(self):
+        sqlite_tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(sqlite_tmp.cleanup)
+        token = set_sqlite_db_path(f"{sqlite_tmp.name}/state.db")
+        self.addCleanup(reset_sqlite_db_path, token)
+        with sqlite3.connect(f"{sqlite_tmp.name}/state.db") as conn:
+            conn.execute(
+                "CREATE TABLE accounts("
+                "account_id TEXT PRIMARY KEY, name TEXT, result_id TEXT)"
+            )
+
+        historical_completion = PersistentAgentCompletion.objects.create(agent=self.agent)
+        historical_step = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            completion=historical_completion,
+            description="older account export",
+        )
+        PersistentAgentToolCall.objects.create(
+            step=historical_step,
+            tool_name="http_request",
+            tool_params={"url": "https://archived.example.test/accounts"},
+            result=json.dumps({
+                "status": "ok",
+                "content": {
+                    "accounts": [{"account_id": "old-1", "name": "Legacy Account"}],
+                },
+            }),
+            status="complete",
+        )
+        PersistentAgentStep.objects.filter(pk=historical_step.pk).update(
+            created_at=timezone.now() - timedelta(days=1)
+        )
+
+        current_completion = PersistentAgentCompletion.objects.create(agent=self.agent)
+        current_step = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            completion=current_completion,
+            description="current account export",
+        )
+        PersistentAgentToolCall.objects.create(
+            step=current_step,
+            tool_name="http_request",
+            tool_params={"url": "https://current.example.test/accounts"},
+            result=json.dumps({
+                "status": "ok",
+                "content": {
+                    "accounts": [{"account_id": "new-1", "name": "Current Account"}],
+                },
+            }),
+            status="complete",
+        )
+
+        with patch("api.agent.core.prompt_context.ensure_steps_compacted"), patch(
+            "api.agent.core.prompt_context.ensure_comms_compacted"
+        ):
+            context, _, _ = build_prompt_context(self.agent)
+
+        user_message = next(message for message in context if message["role"] == "user")
+        content = user_message["content"]
+        self.assertIn("[SOURCE ARRAYS;", content)
+        self.assertNotIn("Current Account", content)
+        self.assertIn("[SOURCE ARRAYS; paths: $.content.accounts", content)
+        self.assertNotIn("archived.example.test", content)
+        self.assertNotIn("Legacy Account", content)
+        self.assertNotIn("HISTORICAL SOURCE BATCH", content)
+
+        modeled_completion = PersistentAgentCompletion.objects.create(agent=self.agent)
+        modeled_step = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            completion=modeled_completion,
+            description="modeled the current accounts",
+        )
+        PersistentAgentToolCall.objects.create(
+            step=modeled_step,
+            tool_name="sqlite_batch",
+            tool_params={"sql": (
+                "INSERT INTO accounts(account_id,name,result_id) "
+                "SELECT json_extract(j.value,'$.account_id'),"
+                "json_extract(j.value,'$.name'),t.result_id "
+                "FROM __tool_results t,json_each(t.result_json,'$.content.accounts') j "
+                "WHERE t.is_current_batch=1 AND t.tool_name='http_request' "
+                "ON CONFLICT(account_id) DO UPDATE SET "
+                "name=excluded.name,result_id=excluded.result_id; "
+                "SELECT account_id,name,result_id FROM accounts;"
+            )},
+            result=json.dumps({
+                "status": "ok",
+                "results": [{"result": [{"account_id": "new-1", "name": "Current Account"}]}],
+            }),
+            status="complete",
+        )
+
+        with patch("api.agent.core.prompt_context.ensure_steps_compacted"), patch(
+            "api.agent.core.prompt_context.ensure_comms_compacted"
+        ):
+            context, _, _, metadata = build_prompt_context(self.agent, include_metadata=True)
+
+        user_message = next(message for message in context if message["role"] == "user")
+        self.assertIsNone(metadata["source_reconciliation_directive"])
+        self.assertNotIn("[SOURCE ARRAYS;", user_message["content"])
+        with sqlite3.connect(f"{sqlite_tmp.name}/state.db") as conn:
+            current_batches = conn.execute(
+                "SELECT result_id, is_current_batch FROM __tool_results "
+                "WHERE tool_name = 'http_request' ORDER BY created_at"
+            ).fetchall()
+        self.assertEqual(
+            current_batches,
+            [
+                (str(historical_step.id)[:6], 0),
+                (str(current_step.id)[:6], 1),
+            ],
+        )
 
     def test_tool_call_history_includes_cost_component(self):
         """Tool-call unified history should include a dedicated <cost> component."""
