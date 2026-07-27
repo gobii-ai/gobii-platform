@@ -15,6 +15,11 @@ const PROGRAMMATIC_SCROLL_MS = 180
 const SCROLLABLE_EPSILON_PX = 1
 const PREPEND_RESTORE_GUARD_MS = 250
 const USER_SCROLL_DELTA_PX = 2
+// A downward scroll may only re-engage bottom-follow this soon after a real gesture. Scroll
+// events fired by reflow or browser scroll anchoring carry no user intent; long enough for
+// wheel momentum and scrollbar drags to keep counting, short enough that a reflow minutes into
+// reading cannot re-pin.
+const USER_INPUT_REPIN_WINDOW_MS = 1500
 // How long the anchored row is held in place after older history is inserted. It covers the late
 // measurement of prepended cards -- highlighting, JSON viewers, images, charts -- which lands after
 // the commit that inserted them. Any reader input ends the hold immediately.
@@ -117,6 +122,7 @@ export function useTimelineScrollController({
   const ignorePinUntilRef = useRef(0)
   const lastScrollTopRef = useRef(0)
   const pointerActiveRef = useRef(false)
+  const lastUserInputAtRef = useRef(0)
   const touchYRef = useRef<number | null>(null)
 
   const [timelineNode, setTimelineNode] = useState<HTMLDivElement | null>(null)
@@ -440,8 +446,13 @@ export function useTimelineScrollController({
       return
     }
 
+    const markUserInput = () => {
+      lastUserInputAtRef.current = Date.now()
+    }
+
     const handleWheel = (event: WheelEvent) => {
       // The reader is driving again; never move the viewport out from under them.
+      markUserInput()
       stopAnchorHold()
       if (event.deltaY < 0 && canScrollUp(container)) {
         suspendAutoFollow()
@@ -449,11 +460,13 @@ export function useTimelineScrollController({
     }
 
     const handleTouchStart = (event: TouchEvent) => {
+      markUserInput()
       stopAnchorHold()
       touchYRef.current = event.touches[0]?.clientY ?? null
     }
 
     const handleTouchMove = (event: TouchEvent) => {
+      markUserInput()
       const nextTouchY = event.touches[0]?.clientY ?? null
       const previousTouchY = touchYRef.current
       touchYRef.current = nextTouchY
@@ -472,6 +485,7 @@ export function useTimelineScrollController({
     }
 
     const handlePointerDown = () => {
+      markUserInput()
       stopAnchorHold()
       pointerActiveRef.current = true
     }
@@ -481,7 +495,11 @@ export function useTimelineScrollController({
     }
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (isEditableTarget(event.target) || !canScrollUp(container)) {
+      if (isEditableTarget(event.target)) {
+        return
+      }
+      markUserInput()
+      if (!canScrollUp(container)) {
         return
       }
       const scrollsUp = event.key === 'ArrowUp'
@@ -538,7 +556,21 @@ export function useTimelineScrollController({
 
       if (meaningfulScrollUp && !contentLayoutChangingRef.current) {
         suspendAutoFollow()
-      } else if (scrollingDown && distance <= NEAR_BOTTOM_PX && !hasNextPage) {
+      } else if (
+        scrollingDown
+        && distance <= NEAR_BOTTOM_PX
+        && !hasNextPage
+        // Scroll events also come from reflows and browser scroll-anchoring adjustments, not
+        // just people. Content shrinking under a parked reader — a stream card collapsing, a
+        // tool preview folding — can land them "near bottom" without any gesture, and re-pinning
+        // there means the next append yanks them to the live edge (the intermittent
+        // pulled-to-bottom-while-reading bug). Only a recent real input, or a scrollbar drag
+        // still in progress, may re-engage follow.
+        && (
+          pointerActiveRef.current
+          || Date.now() - lastUserInputAtRef.current <= USER_INPUT_REPIN_WINDOW_MS
+        )
+      ) {
         setPinned(true)
       }
 

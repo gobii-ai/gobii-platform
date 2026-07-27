@@ -57,12 +57,12 @@ class StreamAccumulator:
         choices = _read_attr(chunk, "choices") or []
         if not choices:
             self._capture_usage(chunk)
-            return None, None
+            return None, None, None
 
         choice = choices[0]
         delta = _read_attr(choice, "delta")
         if delta is None:
-            return None, None
+            return None, None, None
 
         reasoning_delta = _coerce_stream_text(_read_attr(delta, "reasoning_content"))
         content_delta = _coerce_stream_text(_read_attr(delta, "content"))
@@ -82,7 +82,9 @@ class StreamAccumulator:
 
         self._capture_usage(chunk)
 
-        return reasoning_delta, content_delta
+        # The raw tool-call delta travels back so the caller can stream tool-argument text
+        # (a web reply's body lives there); accumulation above is unaffected.
+        return reasoning_delta, content_delta, tool_calls_delta
 
     def _capture_usage(self, chunk: Any) -> None:
         usage = _read_attr(chunk, "usage")
