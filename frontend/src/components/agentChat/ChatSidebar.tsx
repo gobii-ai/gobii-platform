@@ -641,8 +641,8 @@ export const ChatSidebar = memo(function ChatSidebar({
               ? embeddedSettingsTitle
               : (drawerViewMode === 'gallery' && galleryShellPage !== 'agents' ? shellTitle : 'Switch agent')
           }
-          {/* Not PanelLeft: that glyph is the interactive expand-sidebar control on desktop, and as
-              inert sheet decoration it reads as a dead button (bug #437). */}
+          // Not PanelLeft: that glyph is the interactive expand-sidebar control on desktop, and
+          // as inert sheet decoration it read as a dead button (bug #437).
           icon={ArrowLeftRight}
           bodyPadding={false}
           headerAccessory={!messageSearchOpen && !showSettingsView && mobileContextSwitcher ? (
