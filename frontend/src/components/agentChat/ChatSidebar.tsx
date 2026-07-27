@@ -20,8 +20,6 @@ import { AgentInviteDetails, AgentInviteSidebarItem, type AgentInviteAction, typ
 import { getNextAgentChatSidebarMode, getPreviousAgentChatSidebarMode, type AgentChatSidebarMode, SIDEBAR_MOBILE_BREAKPOINT_PX, type AgentDrawerViewMode } from './sidebarMode'
 import { AgentChatAvatar, AgentChatButton } from './uiPrimitives'
 
-const SEARCH_THRESHOLD = 6
-
 type AgentContextMenuState = FixedContextMenuPosition & {
   agent: AgentRosterEntry
 }
