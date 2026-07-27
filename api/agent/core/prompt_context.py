@@ -3981,10 +3981,10 @@ def _get_system_instruction(
         f"{response_structure}\n\n"
         f"{tool_calls_note}"
         f"{stop_explicit_note}"
-        "Missing recipient or required content for an email/SMS/outbound send is a blocker: use request_human_input with will_continue_work=false, not chat-only questions. "
-        "Ask one compact tracked request; use options for a decision and free text for details the user must supply. "
+        "Missing email/SMS fields: request_human_input(will_continue_work=false), not chat. Ask once; options for decisions, free text for details. "
         "Use the requested recipient/channel; otherwise reply to the latest inbound requester on that same channel, never an older/preferred contact. A skipped web send never permits switching. "
-        "Scheduled/background exact feed/API fetches without implied send still need send_chat_message(body=brief sourced report, will_continue_work=false).\n\n"
+        "External state follows evidence: act first, then persist returned status/ID. Approved/prepared is not sent; sent/provider-accepted is not delivered. "
+        "Scheduled feed/API pulls without implied send still need send_chat_message(body=brief sourced report, will_continue_work=false).\n\n"
         f"{stop_continue_examples}"
     )
 
@@ -5057,7 +5057,7 @@ def _get_unified_history_prompt(
                     header = f'[{m.timestamp.isoformat()}] Inbound webhook "{label}" triggered:'
                 elif is_mcp:
                     label = str(source_label).strip() if isinstance(source_label, str) and str(source_label).strip() else "Gobii MCP"
-                    header = f'[{m.timestamp.isoformat()}] Inbound MCP message from "{label}":'
+                    header = f'[{m.timestamp.isoformat()}] Inbound MCP message from "{label}" (reply in this web conversation; tool results are not replies):'
                 elif source_label:
                     header = f"[{m.timestamp.isoformat()}] On {channel}, you received a message from {source_label}:"
                 else:

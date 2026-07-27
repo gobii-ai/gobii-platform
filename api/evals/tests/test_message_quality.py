@@ -6,6 +6,7 @@ from django.test import SimpleTestCase, tag
 import api.evals.loader  # noqa: F401 - registers scenarios and suites
 from api.evals.registry import ScenarioRegistry
 from api.evals.scenarios.message_quality import (
+    EMAIL_SENT_STATE_SEQUENCING_SLUG,
     EMAIL_REVIEW_OUTBOX_COMMUNICATION_SLUG,
     EmailReviewOutboxCommunicationScenario,
     FAILED_EMAIL_DELIVERY_RECOVERY_SLUG,
@@ -15,6 +16,7 @@ from api.evals.scenarios.message_quality import (
     MESSAGE_QUALITY_SUITE_SLUG,
     OWNER_UPDATE_QUALITY_CASES,
     PORTFOLIO_REPORT_QUALITY_CASES,
+    REMOTE_MCP_RESULT_DELIVERY_SLUG,
     REPLY_CHANNEL_CONTINUITY_SLUG,
     REPORT_MESSAGE_QUALITY_CASES,
     SIMPLE_EMAIL_QUALITY_CASES,
@@ -32,11 +34,13 @@ class MessageQualityScenarioTests(SimpleTestCase):
 
         self.assertIsNotNone(suite)
         self.assertEqual(tuple(suite.scenario_slugs), MESSAGE_QUALITY_SCENARIO_SLUGS)
-        self.assertEqual(len(suite.scenario_slugs), 20)
+        self.assertEqual(len(suite.scenario_slugs), 22)
         self.assertIn(REPLY_CHANNEL_CONTINUITY_SLUG, suite.scenario_slugs)
         self.assertIn(UNAVAILABLE_WEB_CHANNEL_CONTINUITY_SLUG, suite.scenario_slugs)
         self.assertIn(FAILED_EMAIL_DELIVERY_RECOVERY_SLUG, suite.scenario_slugs)
         self.assertIn(EMAIL_REVIEW_OUTBOX_COMMUNICATION_SLUG, suite.scenario_slugs)
+        self.assertIn(REMOTE_MCP_RESULT_DELIVERY_SLUG, suite.scenario_slugs)
+        self.assertIn(EMAIL_SENT_STATE_SEQUENCING_SLUG, suite.scenario_slugs)
 
     def test_generated_cases_cover_email_and_chat_for_each_real_world_domain(self):
         channels_by_brief = {}

@@ -115,6 +115,8 @@ class EmailSenderDbConnectionTests(TransactionTestCase):
         self.assertIn("distinct styled sections/tables", description)
         self.assertIn("Never leave metrics in plain lists", description)
         self.assertIn("Markdown pipe tables", description)
+        self.assertIn("Approval or preparation is not sent", description)
+        self.assertIn("never infer delivered", description)
         self.assertIn("reply_to_message_id", properties)
 
     def test_execute_send_email_retries_on_operational_error(self):
@@ -172,6 +174,7 @@ class EmailSenderDbConnectionTests(TransactionTestCase):
             result = execute_send_email(self.agent, params)
 
         self.assertEqual(result.get("status"), "ok")
+        self.assertEqual(result.get("delivery_status"), DeliveryStatus.DELIVERED)
         self.assertTrue(result.get("message_id"))
 
     def test_execute_send_email_strips_control_characters(self):

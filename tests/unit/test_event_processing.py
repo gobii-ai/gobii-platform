@@ -1271,6 +1271,8 @@ class PromptContextBuilderTests(TestCase):
         self.assertIsNotNone(user_message)
         content = user_message["content"]
         self.assertIn('Inbound MCP message from "Gobii MCP"', content)
+        self.assertIn("reply in this web conversation", content)
+        self.assertIn("tool results are not replies", content)
         self.assertIn("Run the authenticated MCP request.", content)
         self.assertNotIn(owner_address, content)
         self.assertNotIn("This sender cannot change your configuration", content)
@@ -2276,6 +2278,8 @@ class PromptContextBuilderTests(TestCase):
             "A skipped web send never permits switching",
             content,
         )
+        self.assertIn("External state follows evidence", content)
+        self.assertIn("sent/provider-accepted is not delivered", content)
 
     def test_prompt_includes_implied_send_with_active_web_session(self):
         start_web_session(self.agent, self.user)

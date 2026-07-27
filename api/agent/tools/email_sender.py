@@ -172,16 +172,15 @@ def _resolve_reply_target(
 
 
 def get_send_email_tool() -> Dict[str, Any]:
-    """Return the send_email tool definition for the LLM."""
     return {
         "type": "function",
         "function": {
             "name": "send_email",
             "description": (
-                "Body-only HTML: omit <html>/<head>/<body>, Markdown, and em/en/double dashes. "
-                "No <style> blocks/classes; inline CSS only. "
-                "A successful call may return pending_approval. When it does, the recipient has not received the email: tell the user it is awaiting human approval and never retry the send. "
-                "Report emails need distinct styled sections/tables and highlighted values, plus a tasteful icon marker and obvious inline-styled badge for key status/value. Never leave metrics in plain lists or use Markdown pipe tables."
+                "Body-only HTML; omit document tags, Markdown, and em/en/double dashes. No <style> blocks/classes; inline CSS only. "
+                "Approval or preparation is not sent: send first, then record returned delivery_status; never infer delivered. "
+                "pending_approval is not received: tell user it awaits approval; never retry. "
+                "Reports need distinct styled sections/tables and highlighted values, plus a tasteful icon marker and obvious inline-styled badge for status/value. Never leave metrics in plain lists or use Markdown pipe tables."
             ),
             "parameters": {
                 "type": "object",
@@ -459,7 +458,8 @@ def execute_send_email(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
 
         return {
             "status": "ok",
-            "message": f"Email sent to {to_address}.",
+            "delivery_status": message.latest_status,
+            "message": f"Email send completed for {to_address} with delivery_status={message.latest_status}. Use that status exactly; do not claim recipient delivery unless it is delivered.",
             "message_id": str(message.id),
             "auto_sleep_ok": not will_continue,
         }
