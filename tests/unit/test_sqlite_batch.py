@@ -466,6 +466,25 @@ class SqliteBatchCoreTests(SqliteBatchTestCase):
         self.assertIn("named `bindings` parameter", out.get("message", ""))
         self.assertEqual(charter, "Existing charter")
 
+    def test_postgres_escape_hint_ignores_literals_and_comments(self):
+        queries = (
+            "SELECT missing_column, 'Vitamin E' AS label",
+            "SELECT missing_column -- avoid E'...' syntax",
+        )
+        for sql in queries:
+            with self.subTest(sql=sql), self._with_temp_db():
+                out = execute_sqlite_batch(
+                    self.agent,
+                    {"sql": sql, "will_continue_work": True},
+                )
+
+            self.assertEqual(out.get("status"), "error")
+            self.assertIn("no such column: missing_column", out.get("message", ""))
+            self.assertNotIn(
+                "SQLite does not support PostgreSQL",
+                out.get("message", ""),
+            )
+
     def test_config_patch_preview_is_blocked_before_batch_execution(self):
         with self._with_temp_db() as (db_path, _token, _tmp):
             out = execute_sqlite_batch(

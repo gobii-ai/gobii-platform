@@ -1641,10 +1641,23 @@ def _execute_with_autocorrections(
     return None, last_error_query, base_corrections, last_error_message
 
 
+def _has_postgres_escape_string(sql: str) -> bool:
+    for statement in sqlparse.parse(sql):
+        tokens = list(statement.flatten())
+        for prefix, literal in zip(tokens, tokens[1:]):
+            if (
+                prefix.ttype in sql_tokens.Name
+                and prefix.value.casefold() == "e"
+                and literal.ttype in sql_tokens.Literal.String.Single
+            ):
+                return True
+    return False
+
+
 def _get_error_hint(error_msg: str, sql: str = "") -> str:
     """Return a helpful hint for common SQLite errors."""
     error_lower = error_msg.lower()
-    if re.search(r"\bE\s*'", sql, re.IGNORECASE):
+    if _has_postgres_escape_string(sql):
         return SQLITE_ESCAPE_STRING_HINT
     if (
         re.search(r"\bpatch_text\s*\(", sql, re.IGNORECASE)
@@ -2185,7 +2198,7 @@ def _execute_sqlite_batch_inner(
                 # mistake, so preserve PostgreSQL escape-string feedback.
                 hint_sql = (
                     original_query
-                    if re.search(r"\bE\s*'", original_query, re.IGNORECASE)
+                    if _has_postgres_escape_string(original_query)
                     else final_query
                 )
                 hint = _get_error_hint(failure_message, hint_sql)
