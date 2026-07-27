@@ -30,8 +30,14 @@ def _regexp(pattern: str, string: Optional[str]) -> bool:
         return False
 
 
-def _patch_text(value: Optional[str], old: Optional[str], new: Optional[str]) -> str:
+def _patch_text(*args: Optional[str]) -> str:
     """Apply one unambiguous replacement, or append once when old is empty."""
+    if len(args) != 3:
+        message = "patch_text requires exactly 3 arguments: patch_text(text, old, new)."
+        _PATCH_TEXT_ERROR.set(message)
+        raise sqlite3.OperationalError(message)
+
+    value, old, new = args
     text = value or ""
     replacement = (new or "").strip()
     if old == "":
@@ -1153,7 +1159,9 @@ def _make_progress_handler(conn_id: int):
 def _register_safe_functions(conn: sqlite3.Connection) -> None:
     """Register safe custom functions for text analysis."""
     conn.create_function("REGEXP", 2, _regexp)
-    conn.create_function("patch_text", 3, _patch_text)
+    # Variadic registration lets the function explain its contract instead of
+    # leaving SQLite to return a generic wrong-argument-count error.
+    conn.create_function("patch_text", -1, _patch_text)
     conn.create_function("regexp_extract", 2, _regexp_extract)
     conn.create_function("regexp_extract", 3, _regexp_extract)  # With group arg
     conn.create_function("regexp_find_all", 2, _regexp_find_all)

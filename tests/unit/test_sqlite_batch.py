@@ -417,6 +417,55 @@ class SqliteBatchCoreTests(SqliteBatchTestCase):
         self.assertEqual(ambiguous.get("status"), "error")
         self.assertIn("matched 2 times", ambiguous.get("message", ""))
 
+    def test_patch_text_reports_exact_contract_for_wrong_argument_count(self):
+        with self._with_temp_db():
+            out = execute_sqlite_batch(
+                self.agent,
+                {
+                    "sql": "SELECT patch_text('text', 'old', 'new', 'extra')",
+                    "will_continue_work": True,
+                },
+            )
+
+        self.assertEqual(out.get("status"), "error")
+        self.assertIn(
+            "patch_text requires exactly 3 arguments: patch_text(text, old, new)",
+            out.get("message", ""),
+        )
+        self.assertIn("with `bindings`", out.get("message", ""))
+
+    def test_patch_text_rejects_postgres_escape_string_with_sqlite_hint(self):
+        with self._with_temp_db() as (db_path, _token, _tmp):
+            with sqlite3.connect(db_path) as conn:
+                conn.execute(
+                    "CREATE TABLE __agent_config(id INTEGER PRIMARY KEY, charter TEXT)"
+                )
+                conn.execute(
+                    "INSERT INTO __agent_config(id, charter) VALUES (1, 'Existing charter')"
+                )
+            out = execute_sqlite_batch(
+                self.agent,
+                {
+                    "sql": (
+                        "UPDATE __agent_config SET charter=patch_text("
+                        "charter, '', E'New durable rule') WHERE id=1"
+                    ),
+                    "will_continue_work": True,
+                },
+            )
+            with sqlite3.connect(db_path) as conn:
+                charter = conn.execute(
+                    "SELECT charter FROM __agent_config WHERE id=1"
+                ).fetchone()[0]
+
+        self.assertEqual(out.get("status"), "error")
+        self.assertIn(
+            "SQLite does not support PostgreSQL E'...' string literals",
+            out.get("message", ""),
+        )
+        self.assertIn("named `bindings` parameter", out.get("message", ""))
+        self.assertEqual(charter, "Existing charter")
+
     def test_config_patch_preview_is_blocked_before_batch_execution(self):
         with self._with_temp_db() as (db_path, _token, _tmp):
             out = execute_sqlite_batch(

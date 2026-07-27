@@ -60,7 +60,18 @@ DEFAULT_SQLITE_BATCH_KILL_GRACE_SECONDS = 1.0
 CONFIG_PATCH_NOT_PERSISTED_ERROR = "config_patch_not_persisted"
 CONFIG_PATCH_NOT_PERSISTED_MESSAGE = (
     "Query not executed: SELECT patch_text(...) only computes a value and does not persist agent config. "
-    "Use UPDATE __agent_config SET charter=patch_text(charter, old, new) WHERE id=1."
+    "Use UPDATE __agent_config SET charter=patch_text(charter, :old_text, :new_text) WHERE id=1 "
+    "with `bindings`; set old_text='' to append."
+)
+PATCH_TEXT_USAGE_HINT = (
+    " FIX: patch_text takes exactly 3 arguments: patch_text(text, old, new). "
+    "For Charter updates use UPDATE __agent_config SET "
+    "charter=patch_text(charter, :old_text, :new_text) WHERE id=1 with `bindings`; "
+    "set old_text='' to append."
+)
+SQLITE_ESCAPE_STRING_HINT = (
+    " FIX: SQLite does not support PostgreSQL E'...' string literals. "
+    "Use an ordinary SQLite string or, for multiline/authored text, a named `bindings` parameter."
 )
 
 
@@ -1633,6 +1644,16 @@ def _execute_with_autocorrections(
 def _get_error_hint(error_msg: str, sql: str = "") -> str:
     """Return a helpful hint for common SQLite errors."""
     error_lower = error_msg.lower()
+    if re.search(r"\bE\s*'", sql, re.IGNORECASE):
+        return SQLITE_ESCAPE_STRING_HINT
+    if (
+        re.search(r"\bpatch_text\s*\(", sql, re.IGNORECASE)
+        and (
+            "wrong number of arguments" in error_lower
+            or "patch_text requires exactly 3 arguments" in error_lower
+        )
+    ):
+        return PATCH_TEXT_USAGE_HINT
     if _has_backslash_quote_issue(error_msg, sql):
         return _sqlite_quote_escape_hint()
     if "union" in error_lower and "column" in error_lower:
@@ -2160,7 +2181,14 @@ def _execute_sqlite_batch_inner(
             )
             if failure_message:
                 had_error = True
-                hint = _get_error_hint(failure_message, final_query)
+                # Autocorrection attempts can obscure the original dialect
+                # mistake, so preserve PostgreSQL escape-string feedback.
+                hint_sql = (
+                    original_query
+                    if re.search(r"\bE\s*'", original_query, re.IGNORECASE)
+                    else final_query
+                )
+                hint = _get_error_hint(failure_message, hint_sql)
                 error_message = f"Query {idx} failed: {failure_message}{hint}"
                 break
 
