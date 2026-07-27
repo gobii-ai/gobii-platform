@@ -26,6 +26,10 @@ const BACKGROUND_SYNC_INTERVAL_MS = 30000
 const PING_INTERVAL_MS = 20000
 const PONG_TIMEOUT_MS = 8000
 const CONNECT_TIMEOUT_MS = 10000
+// Stream deltas can arrive far faster than frames, and each dispatch renders the whole chat
+// page. Coalescing to this cadence keeps the typewriter visibly smooth while cutting renders
+// during streaming by an order of magnitude (the repaint-storm half of bug #267/#314).
+const STREAM_DELTA_FLUSH_MS = 50
 
 export type AgentChatSocketStatus = 'idle' | 'connecting' | 'connected' | 'reconnecting' | 'offline' | 'error'
 
@@ -92,6 +96,49 @@ export function useAgentChatSocket(
 ): AgentChatSocketSnapshot {
   const queryClient = useQueryClient()
   const dispatch = useAppDispatch()
+
+  type BufferedStreamDelta = { agentId: string; payload: Parameters<typeof receiveStreamEvent>[1] }
+  const streamDeltaBufferRef = useRef<BufferedStreamDelta | null>(null)
+  const streamDeltaTimerRef = useRef<number | null>(null)
+  const flushStreamDeltas = useCallback(() => {
+    if (streamDeltaTimerRef.current !== null) {
+      window.clearTimeout(streamDeltaTimerRef.current)
+      streamDeltaTimerRef.current = null
+    }
+    const buffered = streamDeltaBufferRef.current
+    streamDeltaBufferRef.current = null
+    if (buffered) {
+      dispatch(receiveStreamEvent(buffered.agentId, buffered.payload))
+    }
+  }, [dispatch])
+  useEffect(() => () => flushStreamDeltas(), [flushStreamDeltas])
+  const enqueueStreamEvent = useCallback((agentId: string, payload: Parameters<typeof receiveStreamEvent>[1]) => {
+    if (payload.status !== 'delta') {
+      // start/done/canceled are ordering-sensitive; deliver anything buffered first.
+      flushStreamDeltas()
+      dispatch(receiveStreamEvent(agentId, payload))
+      return
+    }
+    const buffered = streamDeltaBufferRef.current
+    if (
+      buffered
+      && buffered.agentId === agentId
+      && buffered.payload.stream_id === payload.stream_id
+    ) {
+      buffered.payload = {
+        ...buffered.payload,
+        reasoning_delta: `${buffered.payload.reasoning_delta ?? ''}${payload.reasoning_delta ?? ''}`,
+        content_delta: `${buffered.payload.content_delta ?? ''}${payload.content_delta ?? ''}`,
+      }
+    } else {
+      flushStreamDeltas()
+      streamDeltaBufferRef.current = { agentId, payload: { ...payload } }
+    }
+    if (streamDeltaTimerRef.current === null) {
+      streamDeltaTimerRef.current = window.setTimeout(flushStreamDeltas, STREAM_DELTA_FLUSH_MS)
+    }
+  }, [dispatch, flushStreamDeltas])
+
   const desiredSubscriptions = useMemo(
     () => normalizeAgentChatSocketSubscriptions(desiredSubscriptionsInput),
     [desiredSubscriptionsInput],
@@ -109,9 +156,7 @@ export function useAgentChatSocket(
     updateUsageInsight: (agentId: string, metadata: Parameters<typeof chatActions.usageInsightUpdated>[0]['metadata']) => {
       dispatch(chatActions.usageInsightUpdated({ agentId, metadata }))
     },
-    receiveStreamEvent: (agentId: string, payload: Parameters<typeof receiveStreamEvent>[1]) => {
-      dispatch(receiveStreamEvent(agentId, payload))
-    },
+    receiveStreamEvent: enqueueStreamEvent,
     replacePendingActions: (
       agentId: string,
       pendingActions: Parameters<typeof chatActions.pendingActionsSnapshotReceived>[0]['pendingActions'],
