@@ -34,6 +34,34 @@ BUILTIN_PETS = (
         "description": "Matt's runt-of-the-litter corgi.",
         "spritesheetUrl": "images/pets/eevee-v2.webp",
     },
+    {
+        "id": "builtin:grizzly",
+        "kind": "builtin",
+        "displayName": "Grizzly",
+        "description": "A brown dog named Grizzly.",
+        "spritesheetUrl": "images/pets/grizzly-v2.webp",
+    },
+    {
+        "id": "builtin:smudge",
+        "kind": "builtin",
+        "displayName": "Smudge",
+        "description": "A black cat named Smudge.",
+        "spritesheetUrl": "images/pets/smudge-v2.webp",
+    },
+    {
+        "id": "builtin:maggie",
+        "kind": "builtin",
+        "displayName": "Maggie",
+        "description": "A black-and-white dog named Maggie.",
+        "spritesheetUrl": "images/pets/maggie-v2.webp",
+    },
+    {
+        "id": "builtin:clementine",
+        "kind": "builtin",
+        "displayName": "Clementine",
+        "description": "A calico cat named Clementine.",
+        "spritesheetUrl": "images/pets/clementine-v2.webp",
+    },
 )
 
 

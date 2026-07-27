@@ -14,7 +14,16 @@ PET_SPRITESHEET_HEIGHT = PET_FRAME_HEIGHT * PET_ROWS
 PET_USED_COLUMNS_BY_ROW = (7, 8, 8, 4, 5, 8, 6, 6, 6, 8, 8)
 PET_MIN_VISIBLE_PIXELS = 50
 DEFAULT_BUILTIN_PET_ID = "builtin:gobii-fish"
-BUILTIN_PET_IDS = frozenset({DEFAULT_BUILTIN_PET_ID, "builtin:eevee"})
+BUILTIN_PET_IDS = frozenset(
+    {
+        DEFAULT_BUILTIN_PET_ID,
+        "builtin:eevee",
+        "builtin:grizzly",
+        "builtin:smudge",
+        "builtin:maggie",
+        "builtin:clementine",
+    }
+)
 
 
 class UserPetValidationError(ValueError):
