@@ -51,6 +51,8 @@ from api.models import (
     LLMProvider,
     Organization,
     PersistentAgent,
+    PersistentAgentCronTrigger,
+    PersistentAgentMessageAttachment,
     PersistentAgentDiscordGuild,
     PersistentModelEndpoint,
     ProfilePersistentTierEndpoint,
@@ -1455,17 +1457,133 @@ class MetaGobiiLocalEvalSetupTests(TestCase):
         with patch("api.evals.local_setup.connection", FakeConnection(schema_editor)):
             added = ensure_eval_local_compat_columns(stdout=stdout)
 
-        self.assertEqual(added, 3)
+        self.assertEqual(added, 4)
         self.assertEqual(
             schema_editor.added_fields,
             [
                 (PersistentAgent, PersistentAgent._meta.get_field("sms_disabled")),
+                (PersistentAgent, PersistentAgent._meta.get_field("email_sending_mode")),
                 (PersistentAgent, PersistentAgent._meta.get_field("emotion")),
                 (PersistentAgent, PersistentAgent._meta.get_field("emotion_expires_at")),
             ],
         )
         self.assertIn("api_persistentagent.sms_disabled", stdout.getvalue())
+        self.assertIn("api_persistentagent.email_sending_mode", stdout.getvalue())
         self.assertIn("api_persistentagent.emotion_expires_at", stdout.getvalue())
+
+    def test_local_eval_schema_compat_rechecks_columns_after_sqlite_table_rebuild(self):
+        existing_columns = {"id", "sms_disabled", "email_sending_mode"}
+
+        class FakeCursor:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, traceback):
+                return False
+
+        class FakeIntrospection:
+            def table_names(self):
+                return ["api_persistentagent"]
+
+            def get_table_description(self, cursor, table_name):
+                return [SimpleNamespace(name=name) for name in existing_columns]
+
+        class FakeSchemaEditor:
+            def __init__(self):
+                self.added_fields = []
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, traceback):
+                return False
+
+            def add_field(self, model, field):
+                self.added_fields.append((model, field))
+                existing_columns.update({"emotion", "emotion_expires_at"})
+
+        class FakeConnection:
+            def __init__(self, schema_editor):
+                self.introspection = FakeIntrospection()
+                self._schema_editor = schema_editor
+
+            def cursor(self):
+                return FakeCursor()
+
+            def schema_editor(self):
+                return self._schema_editor
+
+        schema_editor = FakeSchemaEditor()
+
+        with patch("api.evals.local_setup.connection", FakeConnection(schema_editor)):
+            added = ensure_eval_local_compat_columns()
+
+        self.assertEqual(added, 1)
+        self.assertEqual(
+            schema_editor.added_fields,
+            [(PersistentAgent, PersistentAgent._meta.get_field("emotion"))],
+        )
+
+    def test_local_eval_schema_compat_covers_recent_attachment_and_cron_columns(self):
+        class FakeCursor:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, traceback):
+                return False
+
+        class FakeIntrospection:
+            def table_names(self):
+                return [
+                    "api_persistentagentmessageattachment",
+                    "api_persistentagentcrontrigger",
+                ]
+
+            def get_table_description(self, cursor, table_name):
+                return [SimpleNamespace(name="id")]
+
+        class FakeSchemaEditor:
+            def __init__(self):
+                self.added_fields = []
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, traceback):
+                return False
+
+            def add_field(self, model, field):
+                self.added_fields.append((model, field))
+
+        class FakeConnection:
+            def __init__(self, schema_editor):
+                self.introspection = FakeIntrospection()
+                self._schema_editor = schema_editor
+
+            def cursor(self):
+                return FakeCursor()
+
+            def schema_editor(self):
+                return self._schema_editor
+
+        schema_editor = FakeSchemaEditor()
+
+        with patch("api.evals.local_setup.connection", FakeConnection(schema_editor)):
+            added = ensure_eval_local_compat_columns()
+
+        self.assertEqual(added, 7)
+        self.assertEqual(
+            [(model, field.column) for model, field in schema_editor.added_fields],
+            [
+                (PersistentAgentMessageAttachment, "content_sha256"),
+                (PersistentAgentCronTrigger, "schedule_id"),
+                (PersistentAgentCronTrigger, "schedule_key"),
+                (PersistentAgentCronTrigger, "schedule_name"),
+                (PersistentAgentCronTrigger, "schedule_instruction"),
+                (PersistentAgentCronTrigger, "scheduled_for"),
+                (PersistentAgentCronTrigger, "occurrence_key"),
+            ],
+        )
 
     def test_local_eval_schema_compat_adds_missing_allowlist_sms_columns(self):
         class FakeCursor:

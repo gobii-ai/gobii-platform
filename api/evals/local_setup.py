@@ -45,6 +45,8 @@ def ensure_eval_local_compat_columns(stdout=None) -> int:
         PersistentAgent,
         PersistentAgentCompletion,
         PersistentAgentDiscordGuild,
+        PersistentAgentCronTrigger,
+        PersistentAgentMessageAttachment,
         PersistentAgentToolCall,
         PersistentModelEndpoint,
         VideoGenerationModelEndpoint,
@@ -59,7 +61,22 @@ def ensure_eval_local_compat_columns(stdout=None) -> int:
     compat_fields = (
         (BrowserUseAgentTask, ("filespace_artifacts", "authenticate_to_gobii_ui")),
         (EvalRunTask, ("debug_artifacts",)),
-        (PersistentAgent, ("sms_disabled", "emotion", "emotion_expires_at")),
+        (
+            PersistentAgent,
+            ("sms_disabled", "email_sending_mode", "emotion", "emotion_expires_at"),
+        ),
+        (PersistentAgentMessageAttachment, ("content_sha256",)),
+        (
+            PersistentAgentCronTrigger,
+            (
+                "schedule",
+                "schedule_key",
+                "schedule_name",
+                "schedule_instruction",
+                "scheduled_for",
+                "occurrence_key",
+            ),
+        ),
         (PersistentAgentDiscordGuild, ("authorization_source",)),
         (AgentAllowlistInvite, sms_contact_fields),
         (CommsAllowlistEntry, sms_contact_fields),
@@ -73,37 +90,34 @@ def ensure_eval_local_compat_columns(stdout=None) -> int:
         (PersistentAgentCompletion, ("time_to_first_token_ms",)),
     )
     existing_tables = set(connection.introspection.table_names())
-    missing_by_model = []
     added = 0
 
-    with connection.cursor() as cursor:
-        for model, field_names in compat_fields:
-            table_name = model._meta.db_table
-            if table_name not in existing_tables:
+    for model, field_names in compat_fields:
+        table_name = model._meta.db_table
+        if table_name not in existing_tables:
+            continue
+
+        for field_name in field_names:
+            field = model._meta.get_field(field_name)
+            with connection.cursor() as cursor:
+                existing_columns = {
+                    column.name
+                    for column in connection.introspection.get_table_description(cursor, table_name)
+                }
+            if field.column in existing_columns:
                 continue
 
-            existing_columns = {
-                column.name
-                for column in connection.introspection.get_table_description(cursor, table_name)
-            }
-            missing_fields = [
-                model._meta.get_field(field_name)
-                for field_name in field_names
-                if model._meta.get_field(field_name).column not in existing_columns
-            ]
-            if not missing_fields:
-                continue
-            missing_by_model.append((model, table_name, missing_fields))
-
-    for model, table_name, missing_fields in missing_by_model:
-        with connection.schema_editor() as schema_editor:
-            for field in missing_fields:
+            # SQLite may rebuild the table from the current model when one field
+            # is added, which can create sibling fields too. Reopen the editor and
+            # introspect before every addition so a stale missing-field list cannot
+            # attempt to add one of those newly created columns again.
+            with connection.schema_editor() as schema_editor:
                 schema_editor.add_field(model, field)
-                added += 1
-                if stdout:
-                    stdout.write(
-                        f"Added missing local eval column {table_name}.{field.column}."
-                    )
+            added += 1
+            if stdout:
+                stdout.write(
+                    f"Added missing local eval column {table_name}.{field.column}."
+                )
 
     return added
 
