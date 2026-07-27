@@ -611,6 +611,7 @@ def _build_browser_task_tool_result_record(
         created_at=task.updated_at,
         result_text=json.dumps(normalized_payload, ensure_ascii=False),
         result_id=str(task.id),
+        source_batch_id=str(task.id),
     )
 
 
@@ -683,14 +684,14 @@ def _get_sqlite_guidance() -> str:
     return (
         "## SQLite Data\n\n"
         "Named tables are the world model: query, don't remember; fetch stale/missing facts only. Tool results don't update it. "
-        "SOURCE WRITES: structured rows derive set-wise from __tool_results. Unstructured result_text is plain text, never json_each(result_text). If its preview is incomplete, inspect all siblings once; then pass every interpreted entity in sqlite_batch's top-level rows argument keyed by result_id, with only exact known source URLs. Use `INSERT ... SELECT json_extract(r.value,'$.field'),json_extract(r.value,'$.source_url'),json_extract(r.value,'$.result_id') FROM json_each(:rows) r`, storing result_id or source_url as row provenance. Join __tool_results only when validating existence or deriving structured fields. Never put tool-returned facts in VALUES or visible facts/URLs in SQL literals, parse prose in SQL, or stage placeholder NULLs. "
+        "SOURCE WRITES: structured rows derive set-wise from __tool_results where is_current_batch=1 plus the shown tool_name; source_batch_id preserves history. Unstructured result_text is plain text, never json_each(result_text). If its preview is incomplete, inspect that source batch once; then pass every interpreted entity in sqlite_batch's top-level rows argument keyed by result_id, with only exact known source URLs. Use `INSERT ... SELECT json_extract(r.value,'$.field'),json_extract(r.value,'$.source_url'),json_extract(r.value,'$.result_id') FROM json_each(:rows) r`, storing result_id or source_url as row provenance. Never put tool-returned facts in VALUES or visible facts/URLs in SQL literals, parse prose in SQL, or stage placeholder NULLs. "
         "SCHEMA FIRST: for an existing table whose full current definition is absent, search the catalog by a task-relevant name fragment; listing every table is a failure. Then make a separate metadata-only call with no target-table read and read its result. Never combine PRAGMA/schema inspection with a target-table SELECT. Only afterward query using confirmed tables, columns, and join keys. Never repeat an unchanged SELECT in the same turn; use the rows already returned. After a schema error inspect, don't guess again; for external SQL, roll back or reconnect before another statement. "
-        "Same-shaped tool results are one set. FIRST SHOT: in one sqlite_batch call, evolve the keyed model, import every sibling, and run the decision/evidence SELECTs needed next. Use one INSERT over tool_name, never one INSERT per result_id. If the payload shape is genuinely unknown, use at most two calls: one inspection covering all siblings, then one complete model/import/decision batch; never a third. Before calling, map each requested output—including supporting rows and URLs—to a SELECT in that batch; later reads query only the model. Shape imports as `FROM __tool_results t, json_each(t.result_json,'$.content.items') item WHERE t.tool_name=:tool`; replace items with the actual array key. For http_request target the child array (for example $.content.accounts), never its $.content object. Extract fields where they live: item fields from item.value, parent metadata/URLs from t.result_json, provenance from t.result_id; never loop over result_id. Do not store `$[link:...]` tokens or invent source_token. "
+        "Same-batch, same-shaped tool results are one set. FIRST SHOT: in one sqlite_batch call, evolve the keyed model, import that set, and run the decision/evidence SELECTs needed next, including supporting rows and URLs. Use one INSERT over is_current_batch plus tool_name; never loop over result_id or include every historical call to a generic tool. If the shape is unknown, use at most two calls: one batch-wide inspection, then one complete model/import/decision batch. Shape imports as `FROM __tool_results t, json_each(t.result_json,'$.content.items') item WHERE t.is_current_batch=1 AND t.tool_name=:tool`; use the actual array key. Extract item fields, including item URLs, from item.value; derive only actual parent fields from t.result_json and provenance from t.result_id. Do not store `$[link:...]` tokens or invent source_token. "
         "Key entities, children, relations, evidence, coverage; normalize/evolve, refresh provenance, query gaps/joins/counts/ranks. Authored values bind :name. grep_context_all/split_sections aliases expose only .value. "
         "Different shapes may use separate statements in that batch. Custom tools may write keyed models. CTAS/TEMP is one-off. "
         "Locate payloads with analysis_json/top_keys; http_request JSON is result_json $.content. Prefer known-path result_json, else result_text.\n\n"
         "Snapshots:\n"
-        "* __tool_results: result_id, tool_name, created_at, result_json, result_text, analysis_json, is_truncated, top_keys.\n"
+        "* __tool_results: result_id, source_batch_id, is_current_batch, tool_name, created_at, result_json, result_text, analysis_json, is_truncated, top_keys.\n"
         "* __messages: message_id, seq, timestamp, channel, is_outbound, from_address, to_address, subject, body, "
         "attachment_paths_json, latest_status, latest_error_message. Structured history only, not freshness.\n"
         "* __files: node_id, path, name, mime_type, size_bytes, updated_at. Metadata only; read_file gets known-path contents.\n"
@@ -3467,7 +3468,7 @@ def _build_unreconciled_source_model_warning(
             "Multiple source results form a working set and remain transient. The next action must be sqlite_batch: "
             "create or evolve durable named entity/relationship tables with PRIMARY "
             "KEY/UNIQUE and provenance (not TEMP/CTAS), reconcile this source batch directly from __tool_results, then "
-            "query coverage gaps and next work. Import same-shaped siblings in one set query over tool_name or "
+            "query coverage gaps and next work. Import same-shaped siblings in one set query over source_batch_id plus tool_name or "
             "result_id IN (...), never one INSERT per result_id; use separate statements only for different entity "
             "shapes. Do not answer or act from transient results. Structured fields derive from result_json. "
             "For prose, pass sqlite_batch's top-level rows keyed by result_id with only exact known source URLs, then use "
@@ -4549,6 +4550,7 @@ def _get_unified_history_prompt(
                     tool_name=row.get("tool_name") or "",
                     created_at=step.created_at,
                     result_text=result_text,
+                    source_batch_id=str(completion_id) if completion_id else None,
                 )
             )
         missing_parent_ids = set(tool_call_parent_ids.values()) - {record.step_id for record in tool_call_records}
@@ -4571,6 +4573,7 @@ def _get_unified_history_prompt(
                         tool_name=row.get("tool_name") or "",
                         created_at=row["step__created_at"],
                         result_text=result_text,
+                        source_batch_id=str(completion_id) if completion_id else None,
                     )
                 )
         if tool_call_records:
@@ -4588,8 +4591,17 @@ def _get_unified_history_prompt(
                 short_ids = build_short_result_id_map([record.step_id for record in tool_call_records])
                 model_entities = {entity_name_stem(table) for table in named_model_tables}
 
+                def sql_filters_column(sql: str, column: str) -> bool:
+                    identifier = rf'(?:["`\[]?\w+["`\]]?\.)?["`\[]?{re.escape(column)}["`\]]?'
+                    return bool(re.search(
+                        rf"\b(?:WHERE|AND|OR)\s+\(*\s*{identifier}\s*(?:=|\bIN\b)",
+                        sql,
+                        re.IGNORECASE,
+                    ))
+
                 def source_is_reconciled(record):
                     result_id = short_ids.get(record.step_id, record.step_id)
+                    source_batch_id = record.source_batch_id or result_id
                     all_entities, keyed_entities = source_array_entity_groups(record.result_text, record.tool_name)
                     matching_entities = all_entities.intersection(model_entities)
                     if not matching_entities:
@@ -4599,11 +4611,13 @@ def _get_unified_history_prompt(
                     for reconciled_at, sql in source_reconciliations:
                         if reconciled_at <= record.created_at:
                             continue
-                        id_filter = re.search(r"\bresult_id\b\s*(?:=|\bIN\b)", sql, re.IGNORECASE)
-                        tool_filter = re.search(r"\btool_name\b\s*(?:=|\bIN\b)", sql, re.IGNORECASE)
+                        id_filter = sql_filters_column(sql, "result_id")
+                        batch_filter = sql_filters_column(sql, "source_batch_id")
+                        tool_filter = sql_filters_column(sql, "tool_name")
                         id_match = not id_filter or any(value in sql for value in (result_id, record.step_id))
+                        batch_match = not batch_filter or source_batch_id in sql
                         tool_match = not tool_filter or record.tool_name in sql
-                        if id_match and tool_match:
+                        if id_match and batch_match and tool_match:
                             reconciled_entities.update(
                                 entity_name_stem(table)
                                 for table in source_derived_model_reconciled_tables([sql])
@@ -4676,6 +4690,8 @@ def _get_unified_history_prompt(
             if getattr(s, "credits_cost", None) is not None:
                 components["cost"] = f"{s.credits_cost} credits"
             result_info = tool_result_prompt_info.get(str(s.id))
+            if result_info and result_info.suppress_from_prompt:
+                continue
             if result_info:
                 components["result_meta"] = result_info.meta
                 if result_info.preview_text:

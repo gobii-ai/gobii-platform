@@ -108,6 +108,7 @@ class ToolCallResultRecord:
     created_at: datetime
     result_text: str
     result_id: Optional[str] = None
+    source_batch_id: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -117,6 +118,7 @@ class ToolResultPromptInfo:
     preview_text: Optional[str]
     is_inline: bool
     source_reconciliation_directive: Optional[str]
+    suppress_from_prompt: bool = False
 
 
 def entity_name_stem(value: str) -> str:
@@ -180,25 +182,29 @@ def _optional_source_array_schemas(analysis: ResultAnalysis | None) -> tuple[tup
     return tuple(schemas)
 
 
-def _build_optional_source_write_hint(tool_name: str, analysis: ResultAnalysis | None) -> str:
+def _build_optional_source_write_hint(
+    source_batch_id: str,
+    tool_name: str,
+    analysis: ResultAnalysis | None,
+) -> str:
     """Give safe first-write mechanics without requiring a model for one-off work."""
     schemas = _optional_source_array_schemas(analysis)
     if not schemas or len(tool_name) > 100:
         return ""
 
-    first_path, escaped_tool_name = schemas[0][0].replace("'", "''"), tool_name.replace("'", "''")
+    first_path = schemas[0][0].replace("'", "''")
+    escaped_batch_id, escaped_tool_name = source_batch_id.replace("'", "''"), tool_name.replace("'", "''")
     hint = (
-        f"[SOURCE SET; exact stored arrays: "
-        f"{'; '.join(schema for _path, schema in schemas)}. "
-        "If modeling/persisting this evidence, derive the write from all relevant stored rows, never copied "
-        "visible literals: INSERT ... SELECT json_extract(j.value,'$.field'),"
-        "json_extract(t.result_json,'$.content.source_url'),t.result_id "
+        f"[SOURCE SET; exact stored arrays: {'; '.join(schema for _path, schema in schemas)}. "
+        "If persisting, derive one write from stored rows, never copied literals: "
+        "INSERT ... SELECT json_extract(j.value,'$.field'),t.result_id "
         f"FROM __tool_results AS t, json_each(t.result_json,'{first_path}') AS j "
-        f"WHERE t.tool_name='{escaped_tool_name}'. Use one INSERT over tool_name across the complete source set. "
-        "Result IDs are row provenance, not dataset boundaries. Do not filter by result_id. "
-        "Use each exact path above in the same batch; "
-        "distinguish siblings by derived parent metadata, not authored labels. "
-        "For an ordinary one-off answer, use the visible evidence directly.]\n"
+        f"WHERE t.is_current_batch=1 AND t.tool_name='{escaped_tool_name}'. "
+        f"Current source_batch_id={escaped_batch_id}; is_current_batch is the set boundary. "
+        "Ignore other batches; add no result_id predicate. "
+        "result_id is row provenance. Read item fields/URLs from j.value and actual parent fields from t.result_json; "
+        "use each path above in the same batch and distinguish siblings by derived parent data, not authored labels. "
+        "Otherwise answer the visible evidence directly.]\n"
     )
     return hint if len(hint) <= MAX_OPTIONAL_SOURCE_HINT_CHARS else ""
 
@@ -263,6 +269,24 @@ def prepare_tool_results_for_prompt(
             if record.result_text and not record.result_id
         ]
     )
+    fresh_source_records = [
+        record
+        for record in records
+        if record.step_id in fresh_step_ids and is_source_bearing_tool(record.tool_name)
+    ]
+    current_source_record = (
+        max(fresh_source_records, key=lambda record: record.created_at)
+        if fresh_source_records
+        else None
+    )
+    current_source_batch_id = (
+        current_source_record.source_batch_id
+        or current_source_record.result_id
+        or short_id_map.get(current_source_record.step_id, current_source_record.step_id)
+        if current_source_record
+        else None
+    )
+    current_source_tool_name = current_source_record.tool_name if current_source_record else None
 
     for record in sorted(records, key=lambda item: item.created_at):
         result_text = record.result_text
@@ -270,6 +294,7 @@ def prepare_tool_results_for_prompt(
             continue
 
         result_id = record.result_id or short_id_map.get(record.step_id, record.step_id)
+        source_batch_id = record.source_batch_id or result_id
         legacy_result_id = None
         if record.result_id and record.result_id != record.step_id:
             legacy_result_id = record.step_id
@@ -282,6 +307,10 @@ def prepare_tool_results_for_prompt(
 
         recency_position = recency_positions.get(record.step_id)
         is_fresh_tool_call = record.step_id in fresh_step_ids
+        is_current_source_batch = (
+            record.source_batch_id is None
+            or source_batch_id == current_source_batch_id
+        )
 
         context_hint = None
         if is_analysis_eligible and (stored_json or (is_fresh_tool_call and meta.get("is_json"))):
@@ -320,8 +349,23 @@ def prepare_tool_results_for_prompt(
             tool_name=record.tool_name,
             is_fresh_tool_call=is_fresh_tool_call,
         )
-        source_import_prefix, source_write_hint_prefix, hide_literal_result_id = "", "", bool(_optional_source_array_schemas(analysis))
-        keep_source_import_hint = is_source_bearing_tool(record.tool_name) and is_fresh_tool_call
+        is_historical_same_tool_source = (
+            current_source_batch_id is not None
+            and not is_current_source_batch
+            and record.tool_name == current_source_tool_name
+            and is_source_bearing_tool(record.tool_name)
+        )
+        if is_historical_same_tool_source:
+            context_hint = None
+            preview_text = None
+            is_inline = False
+        keep_source_import_hint = (
+            is_source_bearing_tool(record.tool_name)
+            and is_fresh_tool_call
+            and is_current_source_batch
+        )
+        source_import_prefix, source_write_hint_prefix = "", ""
+        hide_literal_result_id = keep_source_import_hint and bool(_optional_source_array_schemas(analysis))
         if keep_source_import_hint:
             arrays = _entity_arrays(analysis)
             model_entities = {entity_name_stem(table) for table in model_tables}
@@ -339,15 +383,17 @@ def prepare_tool_results_for_prompt(
                 source_import_prefix = (
                     f"[SOURCE ARRAYS; stored paths: {'; '.join(schemas)}. NEXT: output one sqlite_batch only. In that "
                     "single batch, create/evolve keyed model tables for every listed entity array, import every relevant "
-                    f"sibling with one INSERT ... SELECT/json_each over tool_name='{record.tool_name}', then SELECT bounded "
+                    f"sibling with one INSERT ... SELECT/json_each over is_current_batch=1 and "
+                    f"tool_name='{record.tool_name}' (source_batch_id={source_batch_id}), then SELECT bounded "
                     "task-relevant rows from every updated table using stable entity filters/joins—not counts or whole-table "
-                    "dumps. Result IDs are row provenance, not dataset boundaries; never filter by result_id. Derive item "
-                    "fields from j.value, parent metadata/URLs from t.result_json, and provenance from t.result_id. This "
+                    "dumps. This source_batch_id is the current-set boundary: ignore other batches and add no result_id "
+                    "predicate. Result IDs are row provenance. Derive item fields, including item URLs, from j.value; "
+                    "derive only actual parent fields from t.result_json and provenance from t.result_id. This "
                     "ordinary evidence task never changes __agent_config/__agent_skills. No pre-read, refetch, blob "
                     "inspection, copied literals, or splitting arrays across calls.]\n"
                 )
         if not source_import_prefix and hide_literal_result_id:
-            source_write_hint_prefix = _build_optional_source_write_hint(record.tool_name, analysis)
+            source_write_hint_prefix = _build_optional_source_write_hint(source_batch_id, record.tool_name, analysis)
         if source_write_hint_prefix in emitted_source_write_hints:
             source_write_hint_prefix = ""
         elif source_write_hint_prefix:
@@ -389,21 +435,32 @@ def prepare_tool_results_for_prompt(
         meta_text = _format_meta_text(
             result_id,
             meta,
-            analysis=None if is_scrape_markdown else analysis if is_analysis_eligible else None,
+            analysis=(
+                None
+                if is_scrape_markdown or is_historical_same_tool_source
+                else analysis if is_analysis_eligible else None
+            ),
             stored_in_db=stored_in_db,
             result_is_inline=is_inline or has_focus,
             context_hint=context_hint,
-            allow_fallback_query_hints=not is_scrape_markdown,
-            include_result_id=not hide_literal_result_id,
+            allow_fallback_query_hints=not is_scrape_markdown and not is_historical_same_tool_source,
+            include_result_id=not hide_literal_result_id and not is_historical_same_tool_source,
         )
         if source_write_hint_prefix:
             meta_text = f"{source_write_hint_prefix.strip()}\n{meta_text}"
-        if is_scrape_markdown and stored_in_db:
+        if is_historical_same_tool_source:
             meta_text += (
-                "\nSCRAPE MARKDOWN: result_text is plain page text, never JSON. If its preview is incomplete, inspect all current sibling scrapes once: known edge facts may use "
+                "\nHISTORICAL SOURCE BATCH: excluded from is_current_batch=1 and kept in SQLite only. "
+                "Query its source_batch_id only when the task explicitly requires older evidence."
+            )
+        if is_scrape_markdown and stored_in_db and not is_historical_same_tool_source:
+            meta_text += (
+                f"\nSCRAPE MARKDOWN source_batch_id={source_batch_id}: result_text is plain page text, never JSON. "
+                "If its preview is incomplete, inspect this source batch once: known edge facts may use "
                 "head/tail; repeated records use `SELECT t.result_id,c.value AS snippet FROM __tool_results t,"
-                "json_each(grep_context_all(t.result_text,:pattern,250,20)) c WHERE t.tool_name=:tool` (c exposes only value). "
-                "Next sqlite_batch call: put all interpreted sibling records in top-level `rows` as "
+                "json_each(grep_context_all(t.result_text,:pattern,250,20)) c "
+                "WHERE t.source_batch_id=:batch AND t.tool_name=:tool` (c exposes only value). "
+                "Next sqlite_batch call: put all interpreted records from that batch in top-level `rows` as "
                 "`[{result_id, <fields>, source_url}]`; SQL creates/evolves the model, imports with "
                 "`INSERT ... SELECT ... FROM json_each(:rows)`, stores result_id plus each exact known URL, then queries the model. "
                 "Source facts belong in bound rows, not SQL text. "
@@ -416,6 +473,7 @@ def prepare_tool_results_for_prompt(
             preview_text=preview_text,
             is_inline=is_inline,
             source_reconciliation_directive=source_import_prefix or None,
+            suppress_from_prompt=is_historical_same_tool_source,
         )
 
         if stored_in_db:
@@ -435,6 +493,8 @@ def prepare_tool_results_for_prompt(
                     result_id,
                     legacy_result_id,
                     record.tool_name,
+                    source_batch_id,
+                    1 if is_current_source_batch else 0,
                     record.created_at.isoformat(),
                     meta["bytes"],
                     meta["line_count"],
@@ -520,6 +580,8 @@ def _store_tool_results(rows: Sequence[Tuple]) -> None:
                     result_id,
                     legacy_result_id,
                     tool_name,
+                    source_batch_id,
+                    is_current_batch,
                     created_at,
                     bytes,
                     line_count,
@@ -535,7 +597,7 @@ def _store_tool_results(rows: Sequence[Tuple]) -> None:
                     analysis_json,
                     result_text
                 ) VALUES (
-                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
                 )
                 """,
                 rows,
@@ -559,6 +621,8 @@ def _ensure_tool_results_table(conn) -> None:
             result_id TEXT PRIMARY KEY,
             legacy_result_id TEXT,
             tool_name TEXT,
+            source_batch_id TEXT,
+            is_current_batch INTEGER NOT NULL DEFAULT 0,
             created_at TEXT,
             bytes INTEGER,
             line_count INTEGER,
@@ -593,6 +657,14 @@ def _ensure_tool_results_columns(conn) -> None:
     if "analysis_json" not in existing:
         conn.execute(
             f'ALTER TABLE "{TOOL_RESULTS_TABLE}" ADD COLUMN analysis_json TEXT;'
+        )
+    if "source_batch_id" not in existing:
+        conn.execute(
+            f'ALTER TABLE "{TOOL_RESULTS_TABLE}" ADD COLUMN source_batch_id TEXT;'
+        )
+    if "is_current_batch" not in existing:
+        conn.execute(
+            f'ALTER TABLE "{TOOL_RESULTS_TABLE}" ADD COLUMN is_current_batch INTEGER NOT NULL DEFAULT 0;'
         )
 
 

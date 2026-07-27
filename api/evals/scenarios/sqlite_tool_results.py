@@ -1,5 +1,6 @@
 import json
 import re
+from datetime import timedelta
 from decimal import Decimal
 from typing import Iterable
 
@@ -142,6 +143,10 @@ SIBLING_ACCOUNT_BATCHES = (
         ),
     ),
 )
+HISTORICAL_ACCOUNT_BATCH = (
+    "https://exports.example.test/accounts/archived",
+    (("acct-old", "Legacy Imports", "legacy", 40),),
+)
 UNSTRUCTURED_INTERVIEW_NOTES = (
     (
         "https://research.example.test/interviews/northstar-growth",
@@ -227,6 +232,35 @@ def _result_payload(call) -> dict | None:
     except (TypeError, ValueError):
         return None
     return payload if isinstance(payload, dict) else None
+
+
+def _seed_account_export(agent_id, completion, source_url, accounts, observed_at, description):
+    step = PersistentAgentStep.objects.create(
+        agent_id=agent_id,
+        completion=completion,
+        description=description,
+    )
+    PersistentAgentToolCall.objects.create(
+        step=step,
+        tool_name="http_request",
+        tool_params={"url": source_url},
+        result=json.dumps({
+            "status": "ok",
+            "content": {"accounts": [
+                {
+                    "account_id": account_id,
+                    "company": company,
+                    "buyer_segment": segment,
+                    "verified_contacts": contacts,
+                    "source_url": source_url,
+                    "observed_at": observed_at,
+                }
+                for account_id, company, segment, contacts in accounts
+            ]},
+        }),
+        status="complete",
+    )
+    return step
 
 
 def _contains_auto_correction(value) -> bool:
@@ -1932,32 +1966,23 @@ class SqliteSiblingResultSetFirstWriteScenario(SqliteDomainModelScenario):
         PersistentAgent.objects.filter(id=agent_id).update(
             charter="Maintain a sourced account and buyer model for pipeline decisions and follow-up questions."
         )
+        historical_completion = PersistentAgentCompletion.objects.create(
+            agent_id=agent_id,
+        )
+        historical_step = _seed_account_export(
+            agent_id, historical_completion, *HISTORICAL_ACCOUNT_BATCH,
+            "2026-06-01T14:00:00Z", "Completed an older account export call.",
+        )
+        PersistentAgentStep.objects.filter(id=historical_step.id).update(
+            created_at=timezone.now() - timedelta(days=1),
+        )
+        current_completion = PersistentAgentCompletion.objects.create(
+            agent_id=agent_id,
+        )
         for source_url, accounts in SIBLING_ACCOUNT_BATCHES:
-            step = PersistentAgentStep.objects.create(
-                agent_id=agent_id,
-                description="Completed account export call.",
-            )
-            PersistentAgentToolCall.objects.create(
-                step=step,
-                tool_name="http_request",
-                tool_params={"url": source_url},
-                result=json.dumps({
-                    "status": "ok",
-                    "content": {
-                        "accounts": [
-                            {
-                                "account_id": account_id,
-                                "company": company,
-                                "buyer_segment": buyer_segment,
-                                "verified_contacts": verified_contacts,
-                                "source_url": source_url,
-                                "observed_at": "2026-07-26T14:00:00Z",
-                            }
-                            for account_id, company, buyer_segment, verified_contacts in accounts
-                        ],
-                    },
-                }),
-                status="complete",
+            _seed_account_export(
+                agent_id, current_completion, source_url, accounts,
+                "2026-07-26T14:00:00Z", "Completed account export call.",
             )
 
         inbound = self._inject_and_wait(
@@ -2011,6 +2036,10 @@ class SqliteSiblingResultSetFirstWriteScenario(SqliteDomainModelScenario):
                 f"expected one source-derived model write, found {len(model_write_calls)}",
             ),
             (summary.aggregate_tool_result_queries < 1, "source siblings were not read as one set"),
+            (
+                not re.search(r"\bis_current_batch\b\s*=\s*1", sql, re.I),
+                "source import did not use the current-batch boundary",
+            ),
             (
                 summary.single_result_id_filters > 0,
                 f"source siblings were handled one result_id at a time ({summary.single_result_id_filters})",

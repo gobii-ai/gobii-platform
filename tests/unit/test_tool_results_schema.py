@@ -1,10 +1,13 @@
 import base64
 import json
+import sqlite3
+import tempfile
 from datetime import datetime, timezone
 
 from django.test import SimpleTestCase, tag
 
 from api.agent.core import tool_results
+from api.agent.tools.sqlite_state import reset_sqlite_db_path, set_sqlite_db_path
 
 
 @tag("batch_tool_results")
@@ -26,6 +29,33 @@ class ToolResultSchemaTests(SimpleTestCase):
         self.assertIsNotNone(stored_text)
         self.assertIsNotNone(analysis)
         self.assertTrue(analysis.is_json)
+
+    def test_stores_source_batch_id_with_tool_result(self):
+        record = tool_results.ToolCallResultRecord(
+            step_id="source-result",
+            tool_name="http_request",
+            created_at=datetime.now(timezone.utc),
+            result_text=json.dumps({"content": {"items": [{"id": "one"}]}}),
+            source_batch_id="completion-batch",
+        )
+
+        with tempfile.NamedTemporaryFile(suffix=".sqlite3") as db_file:
+            token = set_sqlite_db_path(db_file.name)
+            try:
+                tool_results.prepare_tool_results_for_prompt(
+                    [record],
+                    recency_positions={"source-result": 0},
+                    fresh_tool_call_step_id="source-result",
+                )
+            finally:
+                reset_sqlite_db_path(token)
+
+            with sqlite3.connect(db_file.name) as conn:
+                stored = conn.execute(
+                    "SELECT result_id, source_batch_id, is_current_batch, tool_name FROM __tool_results"
+                ).fetchone()
+
+        self.assertEqual(stored, ("source-result", "completion-batch", 1, "http_request"))
 
     def test_analyzes_array_result(self):
         payload = [{"id": 1, "name": "Alpha"}, {"id": 2, "name": "Beta"}]
@@ -119,7 +149,7 @@ class ToolResultSchemaTests(SimpleTestCase):
 
         prompt_info = info.get("step-1")
         self.assertIsNotNone(prompt_info)
-        self.assertNotIn("result_id=step-1", prompt_info.meta)
+        self.assertIn("result_id=step-1", prompt_info.meta)
         self.assertIn("result_json_path=$.content", prompt_info.meta)
         self.assertTrue(prompt_info.is_inline)
         self.assertIn("First", prompt_info.preview_text)
@@ -399,9 +429,9 @@ class ToolResultSchemaTests(SimpleTestCase):
 
         prompt_info = info.get("step-scrape")
         self.assertIsNotNone(prompt_info)
-        self.assertIn("SCRAPE MARKDOWN:", prompt_info.meta)
+        self.assertIn("SCRAPE MARKDOWN source_batch_id=step-scrape:", prompt_info.meta)
         self.assertIn("result_text is plain page text, never JSON", prompt_info.meta)
-        self.assertIn("inspect all current sibling scrapes once", prompt_info.meta)
+        self.assertIn("inspect this source batch once", prompt_info.meta)
         self.assertIn("head/tail", prompt_info.meta)
         self.assertIn("grep_context_all", prompt_info.meta)
         self.assertIn("c exposes only value", prompt_info.meta)
@@ -746,8 +776,9 @@ class PreviewByteLimitTests(SimpleTestCase):
         )
         for expected in (
             "$.content.items", '"content":{', "one sqlite_batch only", "every listed entity array",
-            "INSERT ... SELECT/json_each", "Derive item fields from j.value",
-            "parent metadata/URLs from t.result_json", "provenance from t.result_id",
+            "INSERT ... SELECT/json_each", "Derive item fields, including item URLs, from j.value",
+            "derive only actual parent fields from t.result_json", "provenance from t.result_id",
+            "is_current_batch=1",
             "never changes __agent_config/__agent_skills", "No pre-read, refetch, blob inspection, copied literals",
         ):
             self.assertIn(expected, info.preview_text)
@@ -783,7 +814,7 @@ class PreviewByteLimitTests(SimpleTestCase):
         ):
             self.assertIn(expected, linked.preview_text)
         self.assertIn("SOURCE SET", linked.meta)
-        self.assertIn("Do not filter by result_id", linked.meta)
+        self.assertIn("is_current_batch=1", linked.meta)
         self.assertNotIn("Without a preceding SOURCE ARRAYS directive", linked.preview_text)
         self.assertNotIn("NEVER OUTREACH", linked.preview_text)
         self.assertNotIn("[SOURCE ARRAYS result_id=", linked.preview_text)
@@ -890,14 +921,17 @@ class PreviewByteLimitTests(SimpleTestCase):
         for expected in (
             "[SOURCE SET; exact stored arrays:",
             "exact stored arrays: $.content.prospects(name,title,profile_url)",
-            "If modeling/persisting this evidence",
-            "INSERT ... SELECT json_extract(j.value,'$.field'),json_extract(t.result_json,'$.content.source_url'),t.result_id",
+            "If persisting, derive one write from stored rows",
+            "INSERT ... SELECT json_extract(j.value,'$.field'),t.result_id",
             "FROM __tool_results AS t, json_each(t.result_json,'$.content.prospects') AS j",
-            "WHERE t.tool_name='http_request'",
-            "Do not filter by result_id",
-            "distinguish siblings by derived parent metadata",
+            "WHERE t.is_current_batch=1 AND t.tool_name='http_request'",
+            "Current source_batch_id=step-first-model",
+            "is_current_batch is the set boundary",
+            "Ignore other batches; add no result_id predicate",
+            "item fields/URLs from j.value",
+            "distinguish siblings by derived parent data",
             "not authored labels",
-            "ordinary one-off answer",
+            "Otherwise answer the visible evidence directly",
         ):
             self.assertIn(expected, info.meta)
         self.assertNotIn("[SOURCE ARRAYS", info.preview_text)
@@ -906,7 +940,7 @@ class PreviewByteLimitTests(SimpleTestCase):
         self.assertNotIn("result_id=", info.meta)
         self.assertIsNone(info.source_reconciliation_directive)
 
-    def test_structured_sibling_source_set_hides_stale_result_ids(self):
+    def test_structured_source_sets_are_scoped_to_their_completion_batch(self):
         payload = {
             "status": "success",
             "result": {
@@ -926,21 +960,60 @@ class PreviewByteLimitTests(SimpleTestCase):
                 tool_name=tool_name,
                 created_at=datetime(2026, 7, 26, 12, index, tzinfo=timezone.utc),
                 result_text=json.dumps(payload),
+                source_batch_id="batch-current",
             )
             for index in range(3)
         ]
+        historical = tool_results.ToolCallResultRecord(
+            step_id="search-result-historical",
+            tool_name=tool_name,
+            created_at=datetime(2026, 7, 25, 12, 0, tzinfo=timezone.utc),
+            result_text=json.dumps(payload),
+            source_batch_id="batch-historical",
+        )
+        records.append(historical)
 
         info = tool_results.prepare_tool_results_for_prompt(
             records,
             recency_positions={record.step_id: index for index, record in enumerate(reversed(records))},
+            fresh_tool_call_step_ids={record.step_id for record in records},
         )
 
-        for record in records:
+        for record in records[:3]:
             self.assertNotIn("result_id=", info[record.step_id].meta)
             self.assertNotIn(f"result_id='{record.step_id}'", info[record.step_id].meta)
+        self.assertNotIn("result_id=search-result-historical", info[historical.step_id].meta)
+        self.assertIn("HISTORICAL SOURCE BATCH", info[historical.step_id].meta)
+        self.assertIsNone(info[historical.step_id].preview_text)
+        self.assertTrue(info[historical.step_id].suppress_from_prompt)
+        self.assertFalse(info[records[0].step_id].suppress_from_prompt)
         source_set_meta = "\n".join(item.meta for item in info.values())
-        self.assertIn("Use one INSERT over tool_name across the complete source set", source_set_meta)
-        self.assertIn("Result IDs are row provenance, not dataset boundaries", source_set_meta)
+        self.assertEqual(source_set_meta.count("[SOURCE SET"), 1)
+        self.assertIn("source_batch_id=batch-current", source_set_meta)
+        self.assertNotIn("source_batch_id=batch-historical", source_set_meta)
+        self.assertIn("is_current_batch=1", source_set_meta)
+        self.assertIn("result_id is row provenance", source_set_meta)
+
+    def test_control_plane_array_does_not_get_source_write_guidance(self):
+        record = tool_results.ToolCallResultRecord(
+            step_id="request-input-result",
+            tool_name="request_human_input",
+            created_at=datetime.now(timezone.utc),
+            result_text=json.dumps({
+                "status": "ok",
+                "requests": [{"request_id": "question-1", "question": "Which market?"}],
+            }),
+        )
+
+        info = tool_results.prepare_tool_results_for_prompt(
+            [record],
+            recency_positions={"request-input-result": 0},
+            fresh_tool_call_step_id="request-input-result",
+        )["request-input-result"]
+
+        self.assertIn("result_id=request-input-result", info.meta)
+        self.assertNotIn("SOURCE SET", info.meta)
+        self.assertNotIn("SOURCE ARRAYS", info.preview_text)
 
     def test_optional_source_write_hint_has_bounded_overhead_and_array_count(self):
         payload = {
@@ -964,7 +1037,7 @@ class PreviewByteLimitTests(SimpleTestCase):
 
         hint = info.meta.split("]\n", 1)[0] + "]\n"
         schema_list = hint.split("exact stored arrays: ", 1)[1].split(
-            ". If modeling/persisting", 1
+            ". If persisting", 1
         )[0]
         self.assertLessEqual(len(schema_list.split("; ")), tool_results.MAX_OPTIONAL_SOURCE_ARRAYS)
         self.assertLessEqual(len(hint), tool_results.MAX_OPTIONAL_SOURCE_HINT_CHARS)

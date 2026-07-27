@@ -2402,6 +2402,106 @@ class PromptContextBuilderTests(TestCase):
             reset_sqlite_db_path(token)
             sqlite_tmp.cleanup()
 
+    def test_current_source_batch_hides_stale_same_tool_event_from_prompt(self):
+        sqlite_tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(sqlite_tmp.cleanup)
+        token = set_sqlite_db_path(f"{sqlite_tmp.name}/state.db")
+        self.addCleanup(reset_sqlite_db_path, token)
+        with sqlite3.connect(f"{sqlite_tmp.name}/state.db") as conn:
+            conn.execute(
+                "CREATE TABLE accounts("
+                "account_id TEXT PRIMARY KEY, name TEXT, result_id TEXT)"
+            )
+
+        historical_completion = PersistentAgentCompletion.objects.create(agent=self.agent)
+        historical_step = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            completion=historical_completion,
+            description="older account export",
+        )
+        PersistentAgentToolCall.objects.create(
+            step=historical_step,
+            tool_name="http_request",
+            tool_params={"url": "https://archived.example.test/accounts"},
+            result=json.dumps({
+                "status": "ok",
+                "content": {
+                    "accounts": [{"account_id": "old-1", "name": "Legacy Account"}],
+                },
+            }),
+            status="complete",
+        )
+        PersistentAgentStep.objects.filter(pk=historical_step.pk).update(
+            created_at=timezone.now() - timedelta(days=1)
+        )
+
+        current_completion = PersistentAgentCompletion.objects.create(agent=self.agent)
+        current_step = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            completion=current_completion,
+            description="current account export",
+        )
+        PersistentAgentToolCall.objects.create(
+            step=current_step,
+            tool_name="http_request",
+            tool_params={"url": "https://current.example.test/accounts"},
+            result=json.dumps({
+                "status": "ok",
+                "content": {
+                    "accounts": [{"account_id": "new-1", "name": "Current Account"}],
+                },
+            }),
+            status="complete",
+        )
+
+        with patch("api.agent.core.prompt_context.ensure_steps_compacted"), patch(
+            "api.agent.core.prompt_context.ensure_comms_compacted"
+        ):
+            context, _, _ = build_prompt_context(self.agent)
+
+        user_message = next(message for message in context if message["role"] == "user")
+        content = user_message["content"]
+        self.assertIn("[SOURCE ARRAYS;", content)
+        self.assertIn("Current Account", content)
+        self.assertNotIn("archived.example.test", content)
+        self.assertNotIn("Legacy Account", content)
+        self.assertNotIn("HISTORICAL SOURCE BATCH", content)
+
+        modeled_completion = PersistentAgentCompletion.objects.create(agent=self.agent)
+        modeled_step = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            completion=modeled_completion,
+            description="modeled the current accounts",
+        )
+        PersistentAgentToolCall.objects.create(
+            step=modeled_step,
+            tool_name="sqlite_batch",
+            tool_params={"sql": (
+                "INSERT INTO accounts(account_id,name,result_id) "
+                "SELECT json_extract(j.value,'$.account_id'),"
+                "json_extract(j.value,'$.name'),t.result_id "
+                "FROM __tool_results t,json_each(t.result_json,'$.content.accounts') j "
+                "WHERE t.is_current_batch=1 AND t.tool_name='http_request' "
+                "ON CONFLICT(account_id) DO UPDATE SET "
+                "name=excluded.name,result_id=excluded.result_id; "
+                "SELECT account_id,name,result_id FROM accounts;"
+            )},
+            result=json.dumps({
+                "status": "ok",
+                "results": [{"result": [{"account_id": "new-1", "name": "Current Account"}]}],
+            }),
+            status="complete",
+        )
+
+        with patch("api.agent.core.prompt_context.ensure_steps_compacted"), patch(
+            "api.agent.core.prompt_context.ensure_comms_compacted"
+        ):
+            context, _, _, metadata = build_prompt_context(self.agent, include_metadata=True)
+
+        user_message = next(message for message in context if message["role"] == "user")
+        self.assertIsNone(metadata["source_reconciliation_directive"])
+        self.assertNotIn("[SOURCE ARRAYS;", user_message["content"])
+
     def test_tool_call_history_includes_cost_component(self):
         """Tool-call unified history should include a dedicated <cost> component."""
         with patch(
