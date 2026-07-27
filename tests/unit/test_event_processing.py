@@ -2462,7 +2462,8 @@ class PromptContextBuilderTests(TestCase):
         user_message = next(message for message in context if message["role"] == "user")
         content = user_message["content"]
         self.assertIn("[SOURCE ARRAYS;", content)
-        self.assertIn("Current Account", content)
+        self.assertNotIn("Current Account", content)
+        self.assertIn("[SOURCE ARRAYS; stored paths: $.content.accounts", content)
         self.assertNotIn("archived.example.test", content)
         self.assertNotIn("Legacy Account", content)
         self.assertNotIn("HISTORICAL SOURCE BATCH", content)
@@ -2501,6 +2502,18 @@ class PromptContextBuilderTests(TestCase):
         user_message = next(message for message in context if message["role"] == "user")
         self.assertIsNone(metadata["source_reconciliation_directive"])
         self.assertNotIn("[SOURCE ARRAYS;", user_message["content"])
+        with sqlite3.connect(f"{sqlite_tmp.name}/state.db") as conn:
+            current_batches = conn.execute(
+                "SELECT result_id, is_current_batch FROM __tool_results "
+                "WHERE tool_name = 'http_request' ORDER BY created_at"
+            ).fetchall()
+        self.assertEqual(
+            current_batches,
+            [
+                (str(historical_step.id)[:6], 0),
+                (str(current_step.id)[:6], 1),
+            ],
+        )
 
     def test_tool_call_history_includes_cost_component(self):
         """Tool-call unified history should include a dedicated <cost> component."""

@@ -262,6 +262,7 @@ def prepare_tool_results_for_prompt(
     paired_step_ids = set(paired_url_step_ids or ())
     model_tables = {table.casefold() for table in (named_model_tables or ())}
     emitted_source_write_hints: set[str] = set()
+    emitted_source_import_sets: set[tuple[str, str]] = set()
     short_id_map = build_short_result_id_map(
         [
             record.step_id
@@ -269,14 +270,14 @@ def prepare_tool_results_for_prompt(
             if record.result_text and not record.result_id
         ]
     )
-    fresh_source_records = [
+    source_records = [
         record
         for record in records
-        if record.step_id in fresh_step_ids and is_source_bearing_tool(record.tool_name)
+        if is_source_bearing_tool(record.tool_name)
     ]
     current_source_record = (
-        max(fresh_source_records, key=lambda record: record.created_at)
-        if fresh_source_records
+        max(source_records, key=lambda record: record.created_at)
+        if source_records
         else None
     )
     current_source_batch_id = (
@@ -365,6 +366,7 @@ def prepare_tool_results_for_prompt(
             and is_current_source_batch
         )
         source_import_prefix, source_write_hint_prefix = "", ""
+        requires_source_import = False
         hide_literal_result_id = keep_source_import_hint and bool(_optional_source_array_schemas(analysis))
         if keep_source_import_hint:
             arrays = _entity_arrays(analysis)
@@ -380,24 +382,33 @@ def prepare_tool_results_for_prompt(
                 if entity_name_stem(item.path.rsplit(".", 1)[-1]) in model_entities
             )
             if schemas and matching_arrays:
-                source_import_prefix = (
-                    f"[SOURCE ARRAYS; stored paths: {'; '.join(schemas)}. NEXT: output one sqlite_batch only. In that "
-                    "single batch, create/evolve keyed model tables for every listed entity array, import every relevant "
-                    f"sibling with one INSERT ... SELECT/json_each over is_current_batch=1 and "
-                    f"tool_name='{record.tool_name}' (source_batch_id={source_batch_id}), then SELECT bounded "
-                    "task-relevant rows from every updated table using stable entity filters/joins—not counts or whole-table "
-                    "dumps. This source_batch_id is the current-set boundary: ignore other batches and add no result_id "
-                    "predicate. Result IDs are row provenance. Derive item fields, including item URLs, from j.value; "
-                    "derive only actual parent fields from t.result_json and provenance from t.result_id. This "
-                    "ordinary evidence task never changes __agent_config/__agent_skills. No pre-read, refetch, blob "
-                    "inspection, copied literals, or splitting arrays across calls.]\n"
-                )
-        if not source_import_prefix and hide_literal_result_id:
+                requires_source_import = True
+                source_import_key = (source_batch_id, record.tool_name)
+                if source_import_key not in emitted_source_import_sets:
+                    source_import_prefix = (
+                        f"[SOURCE ARRAYS; stored paths: {'; '.join(schemas)}. NEXT: output one sqlite_batch only. In that "
+                        "single batch, create/evolve keyed model tables for every listed entity array, import every relevant "
+                        f"sibling with one INSERT ... SELECT/json_each over is_current_batch=1 and "
+                        f"tool_name='{record.tool_name}' (source_batch_id={source_batch_id}), then SELECT bounded "
+                        "task-relevant rows from every updated table using stable entity filters/joins—not counts or whole-table "
+                        "dumps. This source_batch_id is the current-set boundary: ignore other batches and add no result_id "
+                        "predicate. Result IDs are row provenance. Derive item fields, including item URLs, from j.value; "
+                        "derive only actual parent fields from t.result_json and provenance from t.result_id. This "
+                        "ordinary evidence task never changes __agent_config/__agent_skills. No pre-read, refetch, blob "
+                        "inspection, copied literals, or splitting arrays across calls.]\n"
+                    )
+                    emitted_source_import_sets.add(source_import_key)
+        if not requires_source_import and hide_literal_result_id:
             source_write_hint_prefix = _build_optional_source_write_hint(source_batch_id, record.tool_name, analysis)
         if source_write_hint_prefix in emitted_source_write_hints:
             source_write_hint_prefix = ""
         elif source_write_hint_prefix:
             emitted_source_write_hints.add(source_write_hint_prefix)
+        if requires_source_import:
+            # A second visible copy invites literal transcription and wastes prompt space.
+            context_hint = None
+            preview_text = source_import_prefix or None
+            is_inline = False
         has_focus = "\nFOCUS:\n" in (context_hint or "")
         if has_focus and not is_inline:
             preview_text = None
@@ -429,8 +440,6 @@ def prepare_tool_results_for_prompt(
                 "requested audience or action.]\n"
                 f"{preview_text}"
             )
-        if source_import_prefix:
-            preview_text = f"{source_import_prefix}{preview_text or ''}"
         is_scrape_markdown = _is_scrape_as_markdown_tool(record.tool_name)
         meta_text = _format_meta_text(
             result_id,

@@ -634,8 +634,16 @@ def all_requests_have_options(requests):
     return all(_valid_human_input_options(request.options_json) for request in requests)
 
 
+def tool_call_result_is_skipped(call):
+    try:
+        payload = json.loads(call.result or "{}")
+    except json.JSONDecodeError:
+        return False
+    return isinstance(payload, dict) and payload.get("skipped") is True
+
+
 def planning_requests_are_bounded(requests):
-    if not 1 <= len(requests) <= 3:
+    if not requests:
         return False
     option_modes = [_valid_human_input_options(request.options_json) for request in requests]
     free_text_modes = [request.options_json == [] for request in requests]
@@ -862,7 +870,7 @@ class BehaviorMicroScenario(EvalScenario, ScenarioExecutionTools):
 @register_scenario
 class GuidedPlanningBoundedWhenRequestedScenario(BehaviorMicroScenario):
     slug = GUIDED_PLANNING_BOUNDED_WHEN_REQUESTED
-    description = "Explicit planning requests should produce a small set of decision-changing questions without starting work."
+    description = "Explicit planning requests should produce proportionate decision-changing questions without starting work."
     category = "guided_planning"
     tags = ("agent_behavior", "micro", "guided_planning", "human_input")
     tasks = [
@@ -922,8 +930,8 @@ class GuidedPlanningBoundedWhenRequestedScenario(BehaviorMicroScenario):
         ]
         choice, reasoning = self.llm_judge(
             question=(
-                "Did the agent ask a small, bounded set of one to three distinct questions whose answers "
-                "materially shape the requested workflow, and then stop without starting implementation? "
+                "Did the agent ask the distinct questions whose answers materially shape the requested workflow, "
+                "without following a fixed numeric quota, padding the intake, or starting implementation? "
                 "Accept either ordinary chat questions or structured human-input questions. Judge the "
                 "behavior and meaning, not exact wording or which UI mechanism was used."
             ),
@@ -973,7 +981,7 @@ class GuidedPlanningBoundedWhenRequestedScenario(BehaviorMicroScenario):
 class GuidedFirstAssignmentAsksUsefulQuestionsScenario(BehaviorMicroScenario):
     slug = GUIDED_FIRST_ASSIGNMENT_ASKS_USEFUL_QUESTIONS
     description = (
-        "A broad first assignment should do bounded orientation, then ask an evidence-informed setup question in "
+        "A broad first assignment should do bounded orientation, then ask proportionate evidence-informed setup questions in "
         "native web UI without reviving mandatory planning or starting the deliverable."
     )
     category = "guided_planning"
@@ -1140,19 +1148,22 @@ class GuidedFirstAssignmentAsksUsefulQuestionsScenario(BehaviorMicroScenario):
         orientation_evidence = self.orientation_evidence
         choice, reasoning = self.llm_judge(
             question=(
-                "Did the agent-created native choice card ask one concise, high-leverage question whose answer "
-                "materially narrows this broad growth-research role? The question and its two or three real answer "
-                "choices should make intelligent use of the orientation evidence. "
+                "Did the agent-created native choice cards ask a proportionate set of concise, decision-changing "
+                "questions needed to responsibly begin this broad growth-research role? The agent should not obey an "
+                "arbitrary one-question or three-question quota: it should cover material independent ambiguities while "
+                "avoiding cosmetic preferences, redundant questions, and an exhaustive survey. Every question should "
+                "use the fewest materially distinct answer choices, usually two or three and never more than the "
+                "supported six, while making intelligent use of the orientation evidence. "
                 + (
                     "Because orientation could not identify the named entity, useful choices should offer plausible "
                     "interpretations or concrete next paths instead of falling back to a free-text-only question. "
                     if self.unknown_orientation
                     else "They should not merely ask a generic question that could have been written before research. "
                 )
-                + "One useful question is enough because further "
-                "discovery can happen after the answer. Reject cosmetic preferences and judge intent, not exact wording. "
+                + "The set may be small or larger when the actual decision surface warrants it, and later discovered "
+                "blockers may be asked later. Judge consultant quality and intent, not exact wording or question count. "
                 + (
-                    "The backup email must clearly carry the same decision and choices, not a kickoff or a different question."
+                    "The backup email must clearly carry the same decisions and choices, not a kickoff or different questions."
                     if self.requires_fallback_copy
                     else "No backup message is needed when no separate fallback channel is configured."
                 )
@@ -1204,8 +1215,14 @@ class GuidedFirstAssignmentAsksUsefulQuestionsScenario(BehaviorMicroScenario):
             index for index, call in enumerate(calls)
             if call.tool_name == "send_email"
         ]
-        chat_calls = [call for call in calls if call.tool_name == "send_chat_message"]
-        has_bounded_choices = len(requests) == 1 and 2 <= len(requests[0].options_json) <= 3
+        chat_calls = [
+            call for call in calls
+            if call.tool_name == "send_chat_message" and not tool_call_result_is_skipped(call)
+        ]
+        has_bounded_choices = bool(requests) and all(
+            2 <= len(request.options_json) <= MAX_OPTION_COUNT
+            for request in requests
+        )
         fallback_ok = (
             len(request_calls) == 1
             and len(fallback_calls) == 1
@@ -1228,7 +1245,7 @@ class GuidedFirstAssignmentAsksUsefulQuestionsScenario(BehaviorMicroScenario):
             EvalRunTask.Status.PASSED if passed else EvalRunTask.Status.FAILED,
             task_name="verify_orient_then_ask",
             observed_summary=(
-                "Agent used a bounded orientation pass, then left one native choice card pending without starting work."
+                "Agent used a bounded orientation pass, then left proportionate native choice cards pending without starting work."
                 if passed
                 else (
                     f"pending_questions={len(requests)}, "
@@ -1380,7 +1397,7 @@ class LegacyPlanningStateExecutesDirectlyScenario(BehaviorMicroScenario):
 class PlanningFirstTurnAsksBoundedQuestionsScenario(BehaviorMicroScenario):
     slug = PLANNING_FIRST_TURN_ASKS_BOUNDED_QUESTIONS
     description = (
-        "Planning mode should ask 1-3 tracked questions, leave them pending for an answer, and not start work."
+        "Planning mode should ask the tracked questions the task needs, leave them pending, and not start work."
     )
     category = "planning"
     tags = ("agent_behavior", "micro", "planning", "human_input")
@@ -1441,7 +1458,7 @@ class PlanningFirstTurnAsksBoundedQuestionsScenario(BehaviorMicroScenario):
                 EvalRunTask.Status.FAILED,
                 task_name="verify_bounded_questions",
                 observed_summary=(
-                    f"Expected 1-3 bounded tracked planning requests to remain pending; "
+                    f"Expected proportionate tracked planning requests to remain pending; "
                     f"found {len(requests)} with bounded_modes={planning_requests_are_bounded(requests)}."
                 ),
             )

@@ -59,6 +59,7 @@ from api.evals.scenarios.behavior_micro import (
     all_requests_have_options,
     has_single_recipient_request,
     planning_requests_are_bounded,
+    tool_call_result_is_skipped,
     get_agent_config_mutation_calls_for_run,
     get_forbidden_calls_before_end_planning,
     get_common_use_case_tool_calls_for_run,
@@ -2322,7 +2323,11 @@ class BehaviorMicroHelperTests(TestCase):
         self.assertTrue(planning_requests_are_bounded([free_text, options, options]))
         self.assertTrue(planning_requests_are_bounded([free_text]))
         self.assertFalse(planning_requests_are_bounded([free_text, free_text]))
-        self.assertFalse(planning_requests_are_bounded([options] * 4))
+        self.assertTrue(planning_requests_are_bounded([options] * 4))
+
+    def test_skipped_eval_chat_call_is_not_user_visible(self):
+        self.assertTrue(tool_call_result_is_skipped(SimpleNamespace(result='{"skipped": true}')))
+        self.assertFalse(tool_call_result_is_skipped(SimpleNamespace(result='{"status": "ok"}')))
 
     def test_request_human_input_eval_tool_check_accepts_valid_options_or_free_text(self):
         valid_single = SimpleNamespace(

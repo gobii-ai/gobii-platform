@@ -1257,6 +1257,24 @@ def _inspect_release_model(agent_id: str) -> tuple[list[str], str | None]:
     return failures, model_table
 
 
+def _persisted_identity_tables(agent_id: str, table_names: set[str]) -> set[str]:
+    identity_tables = set()
+    with agent_sqlite_db(str(agent_id)) as db_path:
+        conn = open_guarded_sqlite_connection(db_path)
+        try:
+            for table_name in table_names:
+                quoted = '"' + table_name.replace('"', '""') + '"'
+                columns = conn.execute(f"PRAGMA table_info({quoted});").fetchall()
+                if any(column[5] for column in columns) or any(
+                    row[2] for row in conn.execute(f"PRAGMA index_list({quoted});")
+                ):
+                    identity_tables.add(table_name)
+        finally:
+            clear_guarded_connection(conn)
+            conn.close()
+    return identity_tables
+
+
 def _source_array_first_write_failures(sqlite_calls, model_table: str | None) -> list[str]:
     calls = list(sqlite_calls)
     if len(calls) != 1:
@@ -1946,10 +1964,16 @@ class SqliteSourceArrayFirstWriteScenario(SqliteDomainModelScenario):
 class SqliteSiblingResultSetFirstWriteScenario(SqliteDomainModelScenario):
     slug = SQLITE_SIBLING_RESULT_SET_FIRST_WRITE
     description = (
-        "Completed same-shaped source calls should become one keyed domain model in one set-wise first write."
+        "The latest same-shaped source batch should remain importable after unrelated SQLite work and become one "
+        "keyed domain model in one set-wise write."
     )
     expected_runtime = "short"
-    tags = (*SqliteToolResultScenario.tags, "trajectory_regression", "set_wise_import")
+    tags = (
+        *SqliteToolResultScenario.tags,
+        "trajectory_regression",
+        "set_wise_import",
+        "current_batch_persistence",
+    )
     tasks = [
         ScenarioTask(name="inject_prompt", assertion_type="agent_processing"),
         ScenarioTask(name="verify_first_shaped_model_write", assertion_type="tool_call"),
@@ -1984,6 +2008,37 @@ class SqliteSiblingResultSetFirstWriteScenario(SqliteDomainModelScenario):
                 agent_id, current_completion, source_url, accounts,
                 "2026-07-26T14:00:00Z", "Completed account export call.",
             )
+        with agent_sqlite_db(str(agent_id)) as db_path:
+            conn = open_guarded_sqlite_connection(db_path)
+            try:
+                conn.executescript(
+                    "CREATE TABLE accounts("
+                    "account_id TEXT PRIMARY KEY, company TEXT NOT NULL, buyer_segment TEXT NOT NULL, "
+                    "verified_contacts INTEGER NOT NULL, source_url TEXT, observed_at TEXT, result_id TEXT NOT NULL);"
+                    "CREATE TABLE research_notes("
+                    "note_id TEXT PRIMARY KEY, note TEXT NOT NULL);"
+                )
+                conn.commit()
+            finally:
+                clear_guarded_connection(conn)
+                conn.close()
+        intervening_completion = PersistentAgentCompletion.objects.create(agent_id=agent_id)
+        intervening_step = PersistentAgentStep.objects.create(
+            agent_id=agent_id,
+            completion=intervening_completion,
+            description="Created an unrelated working-notes table.",
+        )
+        PersistentAgentToolCall.objects.create(
+            step=intervening_step,
+            tool_name="sqlite_batch",
+            tool_params={
+                "sql": "CREATE TABLE research_notes(note_id TEXT PRIMARY KEY, note TEXT NOT NULL);",
+            },
+            result=json.dumps(
+                {"status": "ok", "results": [{"message": "Query 0 affected 0 rows."}]}
+            ),
+            status="complete",
+        )
 
         inbound = self._inject_and_wait(
             run_id,
@@ -2012,6 +2067,7 @@ class SqliteSiblingResultSetFirstWriteScenario(SqliteDomainModelScenario):
             row_direct_tables=summary.row_derived_working_table_names,
             candidate_tables=summary.working_table_names,
         )
+        identity_tables.update(_persisted_identity_tables(agent_id, model_tables))
         decision_tables = _decision_model_tables(sql, model_tables)
         relevant_advisories = sorted({
             str(advisory.get("code") or "")

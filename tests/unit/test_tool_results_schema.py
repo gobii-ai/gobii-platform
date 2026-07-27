@@ -765,17 +765,13 @@ class PreviewByteLimitTests(SimpleTestCase):
             named_model_tables={"items"},
         )
 
-        self.assertTrue(info.is_inline)
+        self.assertFalse(info.is_inline)
         self.assertNotIn("result_id=step-http", info.meta)
         self.assertIn("parsed_with=json", info.meta)
-        self.assertIn("Central bank signals rate hold", info.preview_text)
+        self.assertNotIn("Central bank signals rate hold", info.preview_text)
         self.assertIn("SOURCE ARRAYS; stored paths", info.preview_text)
-        self.assertLess(
-            info.preview_text.index("SOURCE ARRAYS; stored paths"),
-            info.preview_text.index("Central bank signals rate hold"),
-        )
         for expected in (
-            "$.content.items", '"content":{', "one sqlite_batch only", "every listed entity array",
+            "$.content.items", "one sqlite_batch only", "every listed entity array",
             "INSERT ... SELECT/json_each", "Derive item fields, including item URLs, from j.value",
             "derive only actual parent fields from t.result_json", "provenance from t.result_id",
             "is_current_batch=1",
@@ -791,8 +787,7 @@ class PreviewByteLimitTests(SimpleTestCase):
             named_model_tables={"news_items"},
         )["step-http"]
         self.assertTrue(aliased.source_reconciliation_directive)
-        compact_payload = json.dumps(payload, separators=(",", ":"))
-        self.assertLess(len(info.preview_text) - len(compact_payload), 1_000)
+        self.assertLess(len(info.preview_text), 1_000)
         for absent in ("QUERY:", "PATH:", "SAMPLE:", "JSON_DIGEST:", "__tool_results"):
             self.assertNotIn(absent, info.meta)
 
@@ -831,7 +826,7 @@ class PreviewByteLimitTests(SimpleTestCase):
             named_model_tables={"items"},
         )["step-http"]
         self.assertTrue(linked_model.source_reconciliation_directive)
-        self.assertIn("https://news.example.test/rate-hold", linked_model.preview_text)
+        self.assertNotIn("https://news.example.test/rate-hold", linked_model.preview_text)
         self.assertNotIn("$[link:LEXACT]", linked_model.preview_text)
 
         recent = tool_results.prepare_tool_results_for_prompt(
@@ -862,7 +857,7 @@ class PreviewByteLimitTests(SimpleTestCase):
         self.assertIn("every listed entity array", preview)
         self.assertIn("INSERT ... SELECT/json_each", preview)
         self.assertEqual(preview.count("[SOURCE ARRAYS"), 1)
-        self.assertLess(preview.index("SOURCE ARRAYS"), preview.index('"workstreams"'))
+        self.assertNotIn('"account_id":"acct-1"', preview)
 
         payload["content"]["notes"] = "context " * 10_000
         large, _record = self._prepare_http_result(
@@ -993,6 +988,23 @@ class PreviewByteLimitTests(SimpleTestCase):
         self.assertNotIn("source_batch_id=batch-historical", source_set_meta)
         self.assertIn("is_current_batch=1", source_set_meta)
         self.assertIn("result_id is row provenance", source_set_meta)
+
+        modeled = tool_results.prepare_tool_results_for_prompt(
+            records,
+            recency_positions={record.step_id: index for index, record in enumerate(reversed(records))},
+            fresh_tool_call_step_ids={record.step_id for record in records},
+            named_model_tables={"organic"},
+        )
+        modeled_preview = "\n".join(
+            item.preview_text or ""
+            for item in modeled.values()
+        )
+        self.assertEqual(modeled_preview.count("[SOURCE ARRAYS"), 1)
+        self.assertNotIn("Example company", modeled_preview)
+        self.assertEqual(
+            sum(bool(item.source_reconciliation_directive) for item in modeled.values()),
+            1,
+        )
 
     def test_control_plane_array_does_not_get_source_write_guidance(self):
         record = tool_results.ToolCallResultRecord(
