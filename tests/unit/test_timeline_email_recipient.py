@@ -79,3 +79,43 @@ class TimelineEmailRecipientTests(TestCase):
 
         self.assertIsNone(payload["recipientAddress"])
         self.assertIsNone(payload["recipientName"])
+
+    def test_to_endpoint_wins_over_the_conversation_label(self):
+        """The conversation is keyed by its original counterparty, but a message records who it
+        actually went to. When they diverge the card must follow the message, not the thread —
+        showing the thread's label as "To" misattributes the send (bug #419)."""
+        message = self._email_message(
+            is_outbound=True,
+            address="original-counterparty@example.com",
+            display_name="Original Counterparty",
+        )
+        message.to_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.EMAIL,
+            address="actual-recipient@example.com",
+        )
+        message.save(update_fields=["to_endpoint"])
+
+        payload = serialize_message_event(message)["message"]
+
+        self.assertEqual(payload["recipientAddress"], "actual-recipient@example.com")
+        # The thread label belongs to someone else; naming the actual recipient with it would
+        # assert an identity the message does not carry.
+        self.assertIsNone(payload["recipientName"])
+
+    def test_matching_to_endpoint_keeps_the_conversation_display_name(self):
+        message = self._email_message(
+            is_outbound=True,
+            address="derraleigh@example.com",
+            display_name="Derraleigh Vance",
+        )
+        message.to_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.EMAIL,
+            address="Derraleigh@Example.com",
+        )
+        message.save(update_fields=["to_endpoint"])
+
+        payload = serialize_message_event(message)["message"]
+
+        self.assertEqual(payload["recipientName"], "Derraleigh Vance")
+        # Endpoint addresses are normalized on save.
+        self.assertEqual(payload["recipientAddress"], "derraleigh@example.com")
