@@ -7,12 +7,14 @@ import api.evals.loader  # noqa: F401 - registers scenarios and suites
 from api.agent.tools.sqlite_query_quality import summarize_sqlite_tool_result_sql
 from api.evals.registry import ScenarioRegistry
 from api.evals.scenarios.sqlite_tool_results import (
+    SQLITE_ENRICHMENT_REFRESH_UNDER_PRESSURE,
     SQLITE_INCREMENTAL_DOMAIN_MODEL,
     SQLITE_SIBLING_RESULT_SET_FIRST_WRITE,
     SQLITE_SOURCE_ARRAY_FIRST_WRITE,
     SQLITE_TOOL_RESULT_SCENARIO_SLUGS,
     SQLITE_TOOL_RESULT_SUITE_SLUG,
     SQLITE_UNSTRUCTURED_BINDINGS_FIRST_WRITE,
+    SqliteEnrichmentRefreshUnderPressureScenario,
     SqliteIncrementalDomainModelScenario,
     SqliteIntermediateWorkingTableScenario,
     SqliteSiblingResultSetFirstWriteScenario,
@@ -149,6 +151,25 @@ class SqliteSourceArrayEvalTests(SimpleTestCase):
             ],
         )
         prompt = SqliteIncrementalDomainModelScenario.prompt.casefold()
+        for leaked_term in ("sqlite", "__tool_results", "json_each", "insert", "select", "table"):
+            self.assertNotIn(leaked_term, prompt)
+
+    def test_pressure_refresh_case_is_registered_without_teaching_sql(self):
+        suite = SuiteRegistry.get(SQLITE_TOOL_RESULT_SUITE_SLUG)
+        scenario = ScenarioRegistry.get(SQLITE_ENRICHMENT_REFRESH_UNDER_PRESSURE)
+
+        self.assertIsNotNone(scenario)
+        self.assertIn(SQLITE_ENRICHMENT_REFRESH_UNDER_PRESSURE, SQLITE_TOOL_RESULT_SCENARIO_SLUGS)
+        self.assertIn(SQLITE_ENRICHMENT_REFRESH_UNDER_PRESSURE, suite.scenario_slugs)
+        self.assertEqual(
+            [task.name for task in scenario.tasks],
+            [
+                "inject_prompt",
+                "verify_pressure_refresh",
+                "verify_missing_contact_answer",
+            ],
+        )
+        prompt = SqliteEnrichmentRefreshUnderPressureScenario.prompt.casefold()
         for leaked_term in ("sqlite", "__tool_results", "json_each", "insert", "select", "table"):
             self.assertNotIn(leaked_term, prompt)
 

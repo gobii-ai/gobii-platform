@@ -29,9 +29,12 @@ from api.evals.registry import register_scenario
 from api.evals.tool_params import resolved_tool_param
 from api.evals.scenarios.effort_calibration import MESSAGE_TOOL_NAMES, STOP_TOOL_NAMES, _outbound_messages_after, _tool_calls_for_run
 from api.models import (
+    CommsChannel,
     EvalRunTask,
     PersistentAgent,
+    PersistentAgentCommsEndpoint,
     PersistentAgentCompletion,
+    PersistentAgentConversation,
     PersistentAgentEnabledTool,
     PersistentAgentMessage,
     PersistentAgentStep,
@@ -55,6 +58,7 @@ SQLITE_SIBLING_RESULT_SET_FIRST_WRITE = "sqlite_sibling_result_set_first_write"
 SQLITE_UNSTRUCTURED_BINDINGS_FIRST_WRITE = "sqlite_unstructured_bindings_first_write"
 SQLITE_INCREMENTAL_DOMAIN_MODEL = "sqlite_incremental_domain_model"
 SQLITE_PROSPECT_PIPELINE_COMPLETES = "sqlite_prospect_pipeline_completes"
+SQLITE_ENRICHMENT_REFRESH_UNDER_PRESSURE = "sqlite_enrichment_refresh_under_pressure"
 SQLITE_TOOL_RESULT_SCENARIO_SLUGS = [
     SQLITE_MULTI_RESULT_WEB_SYNTHESIS,
     SQLITE_INTERMEDIATE_WORKING_TABLE,
@@ -70,6 +74,7 @@ SQLITE_TOOL_RESULT_SCENARIO_SLUGS = [
     SQLITE_UNSTRUCTURED_BINDINGS_FIRST_WRITE,
     SQLITE_INCREMENTAL_DOMAIN_MODEL,
     SQLITE_PROSPECT_PIPELINE_COMPLETES,
+    SQLITE_ENRICHMENT_REFRESH_UNDER_PRESSURE,
 ]
 
 
@@ -195,6 +200,22 @@ PROSPECT_PROFILE_URLS = (
 PROSPECT_COMPANY_FEED_URL = "https://crm.example.test/staffing/companies.json"
 PROSPECT_PEOPLE_FEED_URL = "https://crm.example.test/staffing/people.json"
 PROSPECT_FEED_URLS = (PROSPECT_COMPANY_FEED_URL, PROSPECT_PEOPLE_FEED_URL)
+ENRICHMENT_FEED_URLS = (
+    "https://directory.example.test/enrichment/east.json",
+    "https://directory.example.test/enrichment/central.json",
+    "https://directory.example.test/enrichment/west.json",
+)
+ENRICHED_CONTACTS = (
+    ("contact-101", "Mina Patel", "Aster Forge", "Priya Shah", "mina@aster.example.test"),
+    ("contact-102", "Jonah Reed", "Bramble Health", "Priya Shah", None),
+    ("contact-103", "Leo Martin", "Cinderline", "Priya Shah", "leo@cinderline.example.test"),
+    ("contact-201", "Naomi Brooks", "Lattice Harbor", "Mateo Ruiz", "naomi@lattice.example.test"),
+    ("contact-202", "Evan Cho", "Quarry Labs", "Mateo Ruiz", None),
+    ("contact-203", "Sofia Alvarez", "Ternary Field", "Mateo Ruiz", "sofia@ternary.example.test"),
+    ("contact-301", "Maya Chen", "Umbra Works", "Hana Lee", "maya@umbra.example.test"),
+    ("contact-302", "Rowan Kim", "Driftwood Robotics", "Hana Lee", "rowan@driftwood.example.test"),
+    ("contact-303", "Avery Cole", "Northstar Systems", "Hana Lee", None),
+)
 INITIATIVES = (
     ("init-checkout", "Checkout Recovery", "active", "revenue"),
     ("init-search", "Search Relevance", "active", "discovery"),
@@ -987,6 +1008,97 @@ def _prospect_pipeline_mock() -> dict:
             "default": {"status": "error", "message": "Unknown eval URL."},
         }
     }
+
+
+def _enrichment_pressure_mock() -> dict:
+    rules = []
+    for index, url in enumerate(ENRICHMENT_FEED_URLS):
+        batch = ENRICHED_CONTACTS[index * 3:(index + 1) * 3]
+        rules.append({
+            "url_contains": url,
+            "result": {
+                "status": "ok",
+                "status_code": 200,
+                "url": url,
+                "content": {
+                    "matches": [
+                        {
+                            "provider_id": provider_id,
+                            "full_name": full_name,
+                            "account_name": account_name,
+                            "owner": owner,
+                            "verified_email": email,
+                            "profile_url": (
+                                "https://profiles.example.test/people/"
+                                f"{provider_id}"
+                            ),
+                        }
+                        for provider_id, full_name, account_name, owner, email in batch
+                    ],
+                },
+            },
+        })
+    return {
+        "http_request": {
+            "rules": rules,
+            "default": {"status": "error", "message": "Unknown eval URL."},
+        }
+    }
+
+
+def _seed_pressure_history(agent: PersistentAgent, run_id: str) -> None:
+    """Create realistic background traffic without making it part of the active request."""
+    run_token = str(run_id).replace("-", "")[:8]
+    thread_specs = (
+        (
+            CommsChannel.DISCORD,
+            f"discord://eval/launch-ops-{run_token}",
+            f"discord://eval/priya-{run_token}",
+            "Priya: I own the latency review and will post the verified cause here.",
+            24,
+        ),
+        (
+            CommsChannel.EMAIL,
+            f"renewals-{run_id}@eval.example.test",
+            f"finance-{run_id}@eval.example.test",
+            "For tomorrow: please reconcile the renewal forecast after today's launch roster is complete.",
+            20,
+        ),
+        (
+            CommsChannel.DISCORD,
+            f"discord://eval/customer-escalations-{run_token}",
+            f"discord://eval/mateo-{run_token}",
+            "Mateo: the customer escalation is contained; support owns the follow-up.",
+            16,
+        ),
+        (
+            CommsChannel.SMS,
+            f"+1555000{run_token[:4]}",
+            f"+1555111{run_token[:4]}",
+            "Hana: I uploaded the west-region export and am checking its source freshness.",
+            12,
+        ),
+    )
+    for channel, conversation_address, sender_address, body, age_minutes in thread_specs:
+        conversation = PersistentAgentConversation.objects.create(
+            channel=channel,
+            address=conversation_address,
+            owner_agent=agent,
+        )
+        sender = PersistentAgentCommsEndpoint.objects.create(
+            channel=channel,
+            address=sender_address,
+        )
+        message = PersistentAgentMessage.objects.create(
+            owner_agent=agent,
+            from_endpoint=sender,
+            conversation=conversation,
+            is_outbound=False,
+            body=body,
+        )
+        PersistentAgentMessage.objects.filter(id=message.id).update(
+            timestamp=timezone.now() - timedelta(minutes=age_minutes),
+        )
 
 
 MOCK_BUILDERS = {
@@ -2717,6 +2829,242 @@ class SqliteProspectPipelineCompletesScenario(SqliteDomainModelScenario):
             task_name,
             failures,
             f"Modeled {sorted(model_tables)}, queried the company-person relationship, and delivered after sourcing.",
+        )
+
+
+@register_scenario
+class SqliteEnrichmentRefreshUnderPressureScenario(SqliteDomainModelScenario):
+    slug = SQLITE_ENRICHMENT_REFRESH_UNDER_PRESSURE
+    description = (
+        "An agent carrying unrelated cross-channel traffic should refresh an existing domain model from every "
+        "same-shaped enrichment result in one clean set-wise pass."
+    )
+    expected_runtime = "medium"
+    tags = (
+        *SqliteToolResultScenario.tags,
+        "trajectory_regression",
+        "set_wise_import",
+        "multi_channel_pressure",
+        "existing_model_refresh",
+    )
+    tasks = [
+        ScenarioTask(name="inject_prompt", assertion_type="agent_processing"),
+        ScenarioTask(name="verify_pressure_refresh", assertion_type="tool_call"),
+        ScenarioTask(name="verify_missing_contact_answer", assertion_type="manual"),
+    ]
+    prompt = (
+        "I need the launch contact roster now. Refresh our existing contacts from all three completed regional "
+        "exports, then tell me which contacts still lack a verified email, give me the missing count by owner, and "
+        "link each missing contact's known profile. "
+        "Keep the other active threads intact; I'll return to those after this.\n\n"
+        + "\n".join(f"- {url}" for url in ENRICHMENT_FEED_URLS)
+    )
+
+    def run(self, run_id: str, agent_id: str) -> None:
+        self._ready_agent(agent_id)
+        agent = PersistentAgent.objects.get(id=agent_id)
+        PersistentAgent.objects.filter(id=agent_id).update(
+            charter=(
+                "Maintain the launch contact model while coordinating work across the owner, operations, support, "
+                "and finance channels. Preserve explicit ownership and priority."
+            ),
+        )
+        _seed_pressure_history(agent, run_id)
+        with agent_sqlite_db(str(agent_id)) as db_path:
+            conn = open_guarded_sqlite_connection(db_path)
+            try:
+                conn.execute(
+                    """
+                    CREATE TABLE contacts(
+                        provider_id TEXT PRIMARY KEY,
+                        full_name TEXT,
+                        account_name TEXT,
+                        owner TEXT NOT NULL,
+                        verified_email TEXT,
+                        profile_url TEXT,
+                        source_url TEXT,
+                        result_id TEXT
+                    );
+                    """
+                )
+                conn.executemany(
+                    """
+                    INSERT INTO contacts(provider_id, owner)
+                    VALUES (?, ?);
+                    """,
+                    [(provider_id, owner) for provider_id, _name, _account, owner, _email in ENRICHED_CONTACTS],
+                )
+                conn.commit()
+            finally:
+                clear_guarded_connection(conn)
+                conn.close()
+        self._enable_tools(agent_id, ("http_request",))
+        inbound = self._inject_and_wait(
+            run_id,
+            agent_id,
+            self.prompt,
+            _enrichment_pressure_mock(),
+            allowed_tool_names={
+                "http_request",
+                "sqlite_batch",
+                "send_chat_message",
+                "update_plan",
+            },
+            max_relevant_tool_calls=16,
+        )
+        self._record_pressure_refresh(run_id, agent_id=agent_id, after=inbound.timestamp)
+        missing = tuple(
+            f"https://profiles.example.test/people/{provider_id}"
+            for provider_id, _name, _account, _owner, email in ENRICHED_CONTACTS
+            if email is None
+        )
+        self._record_sourced_answer(
+            run_id,
+            agent_id=agent_id,
+            after=inbound.timestamp,
+            task_name="verify_missing_contact_answer",
+            source_urls=missing,
+            required_terms=("Jonah Reed", "Evan Cho", "Avery Cole", "3"),
+            min_sources=3,
+        )
+
+    def _record_pressure_refresh(self, run_id: str, *, agent_id: str, after) -> None:
+        task_name = "verify_pressure_refresh"
+        self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name=task_name)
+        calls = _tool_calls_for_run(run_id, after=after)
+        source_calls = [call for call in calls if call.tool_name == "http_request"]
+        sqlite_attempts = [call for call in calls if call.tool_name == "sqlite_batch"]
+        successful_sqlite = [
+            call for call in sqlite_attempts
+            if str(getattr(call, "status", "")).casefold() == "complete"
+            and str((_result_payload(call) or {}).get("status") or "").casefold() == "ok"
+        ]
+        sql_values = [str((call.tool_params or {}).get("sql") or "") for call in successful_sqlite]
+        combined_sql = "\n".join(sql_values)
+        model_write_calls = [
+            call for call in successful_sqlite
+            if "contacts" in source_derived_model_mutation_tables(
+                (str((call.tool_params or {}).get("sql") or ""),)
+            )
+        ]
+        summary = summarize_sqlite_tool_result_calls(successful_sqlite)
+        source_positions = [
+            index for index, call in enumerate(calls)
+            if call.tool_name == "http_request"
+            and str(getattr(call, "status", "")).casefold() == "complete"
+        ]
+        model_write_positions = [
+            index for index, call in enumerate(calls)
+            if call in model_write_calls
+        ]
+        terminal_positions = [
+            index for index, call in enumerate(calls)
+            if call.tool_name == "send_chat_message"
+            and resolved_tool_param(call, "will_continue_work") is False
+            and str(getattr(call, "status", "")).casefold() == "complete"
+            and not (_result_payload(call) or {}).get("skipped")
+        ]
+        fetch_counts = _source_fetch_counts(
+            source_calls,
+            tool_names={"http_request"},
+            source_urls=ENRICHMENT_FEED_URLS,
+        )
+        scalar_json_misuse = bool(
+            re.search(
+                r"\bjson\s*\(\s*(?:[a-z_]\w*\.)?(?:provider_id|result_id)\s*\)"
+                r"|\bjson_extract\s*\(\s*(?:[a-z_]\w*\.)?(?:provider_id|result_id)\b",
+                combined_sql,
+                re.I,
+            )
+        )
+        with agent_sqlite_db(str(agent_id)) as db_path:
+            conn = open_guarded_sqlite_connection(db_path)
+            try:
+                rows = conn.execute(
+                    """
+                    SELECT provider_id, full_name, account_name, owner, verified_email,
+                           profile_url, source_url, result_id
+                    FROM contacts
+                    ORDER BY provider_id;
+                    """
+                ).fetchall()
+            finally:
+                clear_guarded_connection(conn)
+                conn.close()
+        expected_rows = [
+            (
+                provider_id,
+                full_name,
+                account_name,
+                owner,
+                email,
+                f"https://profiles.example.test/people/{provider_id}",
+            )
+            for provider_id, full_name, account_name, owner, email in ENRICHED_CONTACTS
+        ]
+        modeled_rows_match = (
+            len(rows) == len(expected_rows)
+            and all(
+                row[:6] == expected
+                and row[6] in ENRICHMENT_FEED_URLS
+                and bool(row[7])
+                for row, expected in zip(rows, expected_rows)
+            )
+        )
+        failures = _tool_attempt_failures(source_calls, "Enrichment fetch")
+        failures.extend(_sqlite_attempt_failures(sqlite_attempts))
+        failures.extend(message for failed, message in (
+            (
+                any(count != 1 for count in fetch_counts.values()),
+                f"expected each enrichment feed once, found {fetch_counts}",
+            ),
+            (
+                len(model_write_calls) != 1,
+                f"expected one source-derived contact refresh, found {len(model_write_calls)}",
+            ),
+            (
+                bool(source_positions)
+                and bool(model_write_positions)
+                and model_write_positions[0] <= max(source_positions),
+                "contact refresh began before every regional result was available",
+            ),
+            (
+                summary.aggregate_tool_result_queries < 1,
+                "regional enrichment siblings were not handled as one source set",
+            ),
+            (
+                summary.single_result_id_filters > 0,
+                f"regional results were handled one result_id at a time ({summary.single_result_id_filters})",
+            ),
+            (
+                not re.search(r"\bis_current_batch\b\s*=\s*1", combined_sql, re.I)
+                or not re.search(r"\btool_name\b\s*=\s*'http_request'", combined_sql, re.I)
+                or not re.search(r"\bjson_each\s*\([^;]*\$\.(?:content\.)?matches", combined_sql, re.I),
+                "contact refresh did not use the complete typed current-source shape",
+            ),
+            (scalar_json_misuse, "plain scalar identity columns were treated as JSON"),
+            (not modeled_rows_match, "contact model was incomplete, stale, or missing row provenance"),
+            (
+                not re.search(r"\bgroup\s+by\s+(?:[a-z_]\w*\.)?owner\b", combined_sql, re.I)
+                or not re.search(r"\bverified_email\b[\s\S]*\bis\s+null\b", combined_sql, re.I),
+                "contact model was not queried for missing-email coverage by owner",
+            ),
+            (
+                len(terminal_positions) != 1,
+                f"expected one terminal roster report, found {len(terminal_positions)}",
+            ),
+            (
+                bool(terminal_positions)
+                and bool(model_write_positions)
+                and terminal_positions[0] <= model_write_positions[-1],
+                "agent reported before refreshing the contact model",
+            ),
+        ) if failed)
+        self._record_check(
+            run_id,
+            task_name,
+            failures,
+            "Kept cross-channel work intact and refreshed every contact from all sibling exports in one clean set.",
         )
 
 

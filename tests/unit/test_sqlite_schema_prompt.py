@@ -5,7 +5,12 @@ import tempfile
 
 from django.test import TestCase, tag
 
-from api.agent.tools.sqlite_state import get_sqlite_schema_prompt, reset_sqlite_db_path, set_sqlite_db_path
+from api.agent.tools.sqlite_state import (
+    get_sqlite_model_table_columns,
+    get_sqlite_schema_prompt,
+    reset_sqlite_db_path,
+    set_sqlite_db_path,
+)
 
 
 @tag("batch_sqlite")
@@ -69,3 +74,16 @@ class SqliteSchemaPromptTests(TestCase):
         self.assertRegex(prompt, r"csv_blob.*csv")
         # Notes column may or may not detect email pattern depending on analysis
         self.assertIn("notes", prompt)
+
+    def test_model_columns_include_durable_tables_only(self):
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.execute("CREATE TABLE __internal (secret TEXT)")
+            conn.commit()
+        finally:
+            conn.close()
+
+        self.assertEqual(
+            get_sqlite_model_table_columns(),
+            {"events": {"id", "payload", "notes", "csv_blob"}},
+        )

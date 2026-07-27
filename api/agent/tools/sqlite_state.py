@@ -15,6 +15,7 @@ import logging
 import os
 import re
 import shutil
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -181,6 +182,41 @@ def get_sqlite_schema_prompt() -> str:
                 conn.close()
             except Exception:
                 pass
+
+
+def get_sqlite_model_table_columns() -> dict[str, set[str]]:
+    """Return durable agent-model columns for matching source enrichment rows."""
+    db_path = _sqlite_db_path_var.get(None)
+    if not db_path or not os.path.exists(db_path):
+        return {}
+
+    conn = None
+    try:
+        conn = open_guarded_sqlite_connection(db_path)
+        table_rows = conn.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+        ).fetchall()
+        model_columns: dict[str, set[str]] = {}
+        for (table_name,) in table_rows[:MAX_TABLES]:
+            if table_name.startswith("__"):
+                continue
+            quoted_name = table_name.replace('"', '""')
+            column_rows = conn.execute(
+                f'PRAGMA table_info("{quoted_name}")'
+            ).fetchall()
+            model_columns[table_name] = {
+                str(row[1]).casefold() for row in column_rows
+            }
+        return model_columns
+    except (OSError, sqlite3.Error):
+        logger.debug("Failed to inspect SQLite model columns", exc_info=True)
+        return {}
+    finally:
+        if conn is not None:
+            with contextlib.suppress(sqlite3.Error):
+                clear_guarded_connection(conn)
+                conn.close()
 
 
 def get_sqlite_digest_prompt() -> str:

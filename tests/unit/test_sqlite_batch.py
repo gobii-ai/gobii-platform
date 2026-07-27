@@ -2502,6 +2502,75 @@ class SqliteBatchAutocorrectTests(SqliteBatchTestCase):
             self.assertEqual(out.get("status"), "ok", out.get("message"))
             self.assertEqual(out["results"][0]["result"], [{"vendor": "AxonFlow", "ok": 1}])
 
+    def test_tool_results_legacy_compat_does_not_rewrite_update_assignments(self):
+        with self._with_temp_db() as (db_path, _token, _tmp):
+            with sqlite3.connect(db_path) as conn:
+                conn.executescript(
+                    """
+                    CREATE TABLE __tool_results (
+                        result_id TEXT PRIMARY KEY,
+                        legacy_result_id TEXT,
+                        tool_name TEXT,
+                        is_current_batch INTEGER,
+                        source_url TEXT,
+                        result_json TEXT
+                    );
+                    CREATE TABLE contacts (
+                        provider_id TEXT PRIMARY KEY,
+                        full_name TEXT,
+                        source_url TEXT,
+                        result_id TEXT
+                    );
+                    INSERT INTO contacts(provider_id) VALUES ('contact-1');
+                    """
+                )
+                conn.execute(
+                    "INSERT INTO __tool_results VALUES (?, ?, ?, ?, ?, ?)",
+                    (
+                        "short-1",
+                        "legacy-1",
+                        "http_request",
+                        1,
+                        "https://source.example.test/one",
+                        json.dumps({
+                            "content": {
+                                "matches": [{
+                                    "provider_id": "contact-1",
+                                    "full_name": "Ari Bell",
+                                }],
+                            },
+                        }),
+                    ),
+                )
+
+            out = execute_sqlite_batch(
+                self.agent,
+                {
+                    "sql": (
+                        "UPDATE contacts SET "
+                        "full_name=json_extract(j.value,'$.full_name'),"
+                        "source_url=t.source_url,result_id=t.result_id "
+                        "FROM __tool_results AS t,"
+                        "json_each(t.result_json,'$.content.matches') AS j "
+                        "WHERE t.is_current_batch=1 "
+                        "AND contacts.provider_id=json_extract(j.value,'$.provider_id');"
+                        "SELECT provider_id,full_name,source_url,result_id FROM contacts;"
+                    ),
+                    "rows": [],
+                },
+            )
+
+        self.assertEqual(out.get("status"), "ok", out.get("message"))
+        self.assertEqual(
+            out["results"][-1]["result"],
+            [{
+                "provider_id": "contact-1",
+                "full_name": "Ari Bell",
+                "source_url": "https://source.example.test/one",
+                "result_id": "short-1",
+            }],
+        )
+
     def test_autocorrect_missing_column_with_schema_unqualified(self):
         """Auto-corrects unqualified column names using schema."""
         with self._with_temp_db():
@@ -2820,6 +2889,28 @@ class SqliteBatchAutocorrectTests(SqliteBatchTestCase):
         self.assertIn("r is a json_each alias", hint)
         self.assertIn("r.value", hint)
         self.assertIn("json_extract(r.value, '$.result_id')", hint)
+
+    def test_missing_qualified_alias_hint_does_not_misdiagnose_schema(self):
+        hint = _get_error_hint(
+            "no such column: m.value",
+            (
+                "UPDATE contacts SET full_name=json_extract(m.value,'$.full_name') "
+                "WHERE provider_id=json_extract(m.value,'$.provider_id')"
+            ),
+        )
+
+        self.assertIn("alias 'm' was never introduced", hint)
+        self.assertIn("FROM or JOIN", hint)
+        self.assertNotIn("PRAGMA table_info", hint)
+
+    def test_missing_qualified_column_hint_respects_declared_alias(self):
+        hint = _get_error_hint(
+            "no such column: m.value",
+            "UPDATE contacts AS m SET full_name=m.value",
+        )
+
+        self.assertNotIn("alias 'm' was never introduced", hint)
+        self.assertIn("PRAGMA table_info", hint)
 
     def test_fix_unescaped_single_quote_runs(self):
         """Balances odd-length runs of single quotes."""

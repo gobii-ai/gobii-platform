@@ -3,7 +3,7 @@ import logging
 import re
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Callable, Dict, List, Optional, Sequence, Set, Tuple
+from typing import Callable, Dict, List, Mapping, Optional, Sequence, Set, Tuple
 
 from ..tools.context_hints import URL_FIELD_PRIORITY, extract_context_hint, hint_from_unstructured_text
 from ..tools.sqlite_guardrails import clear_guarded_connection, open_guarded_sqlite_connection
@@ -208,37 +208,51 @@ def _optional_source_array_schemas(
 
 
 def _build_optional_source_write_hint(
-    source_batch_id: str,
     tool_name: str,
     analysis: ResultAnalysis | None,
+    model_tables: Sequence[str] = (),
 ) -> str:
-    """Give safe first-write mechanics without requiring a model for one-off work."""
+    """Give source-shape mechanics that fit both new and existing domain models."""
     schemas = _optional_source_array_schemas(analysis)
     if not schemas or len(tool_name) > 100:
         return ""
 
     first_path, _first_schema, first_key = schemas[0]
     first_path = first_path.replace("'", "''")
-    escaped_batch_id = source_batch_id.replace("'", "''")
     escaped_tool_name = tool_name.replace("'", "''")
     def render_hint(schema_text: str) -> str:
-        key_guidance = (
-            f"Use the shown stable key `{first_key}`; canonical row expression "
-            f"`json_extract(j.value,'$.{first_key}')`."
+        key_expr = (
+            f"`json_extract(j.value,'$.{first_key}')`"
             if first_key
-            else "Choose a stable PRIMARY KEY or composite UNIQUE key only from the shown item fields."
+            else "a stable key derived only from shown item fields"
         )
+        if model_tables:
+            table_list = ",".join(sorted(model_tables)[:4])
+            model_guidance = (
+                f"Existing durable tables: {table_list}. Refresh in place; never DELETE/rebuild; preserve schema and "
+                f"unrelated rows. Join its scalar key directly to {key_expr}; use JSON functions only on j.value/result_json, "
+                "not model columns. Introduce every UPDATE alias in FROM/JOIN. "
+            )
+        else:
+            stable_key_guidance = (
+                f" Use the shown stable key `{first_key}`; do not invent identity."
+                if first_key
+                else ""
+            )
+            model_guidance = (
+                f"No fitting durable model: create one with {key_expr} "
+                f"as PRIMARY KEY/UNIQUE, then upsert.{stable_key_guidance} "
+            )
         return (
             f"[SOURCE SET; exact stored arrays: {schema_text}. "
-            f"New table first: CREATE TABLE IF NOT EXISTS with a stable key. {key_guidance} "
-            "Use rows=[]; never invent result IDs. "
-            "Then upsert in this call with `INSERT ... SELECT` "
-            f"FROM __tool_results AS t, json_each(t.result_json,'{first_path}') AS j "
+            f"{model_guidance}"
+            "Use rows=[]. No pre-read, preview, or bound/copied rows. Current batch plus tool_name is exact; add no "
+            "source_url/result_id/source_batch_id filter. "
+            "Use one set-wise write plus decision SELECT: `FROM __tool_results AS t, "
+            f"json_each(t.result_json,'{first_path}') AS j "
             f"WHERE t.is_current_batch=1 AND t.tool_name='{escaped_tool_name}'. "
-            f"source_batch_id={escaped_batch_id}; do not filter it. Current batch plus tool_name is the exact set. "
-            "Add no source_url/result_id predicate; store t.source_url/t.result_id as provenance. "
-            "Every item field/URL comes from j.value; t.result_id is shared row provenance, never item identity. "
-            "Parent-only fields use t.result_json; siblings differ by derived parent fields. Use all listed paths together.]\n"
+            "Store t.source_url/t.result_id provenance. Item fields/URLs come from j.value; result_id is not item "
+            "identity. Use all paths; final SELECT returns every known item/source URL for links.]\n"
         )
 
     hint = render_hint("; ".join(schema for _path, schema, _key in schemas))
@@ -290,6 +304,7 @@ def prepare_tool_results_for_prompt(
     paired_url_rewriter: Optional[Callable[[str, ToolCallResultRecord], str]] = None,
     paired_url_step_ids: Optional[Set[str]] = None,
     named_model_tables: Optional[Set[str]] = None,
+    named_model_columns: Optional[Mapping[str, Set[str]]] = None,
 ) -> Dict[str, ToolResultPromptInfo]:
     prompt_info: Dict[str, ToolResultPromptInfo] = {}
     rows: List[Tuple] = []
@@ -299,6 +314,11 @@ def prepare_tool_results_for_prompt(
         fresh_step_ids.add(fresh_tool_call_step_id)
     paired_step_ids = set(paired_url_step_ids or ())
     model_tables = {table.casefold() for table in (named_model_tables or ())}
+    model_columns = {
+        table.casefold(): {column.casefold() for column in columns}
+        for table, columns in (named_model_columns or {}).items()
+        if table.casefold() in model_tables
+    }
     emitted_source_write_hints: set[str] = set()
     emitted_source_import_sets: set[tuple[str, str]] = set()
     emitted_prose_guidance: set[tuple[str, tuple[str, ...]]] = set()
@@ -435,6 +455,7 @@ def prepare_tool_results_for_prompt(
             and is_current_source_batch
         )
         source_import_prefix, source_write_hint_prefix = "", ""
+        refresh_model_tables: set[str] = set()
         requires_source_import = False
         hide_literal_result_id = keep_source_import_hint and bool(_optional_source_array_schemas(analysis))
         if keep_source_import_hint:
@@ -478,7 +499,21 @@ def prepare_tool_results_for_prompt(
                     )
                     emitted_source_import_sets.add(source_import_key)
         if not requires_source_import and hide_literal_result_id:
-            source_write_hint_prefix = _build_optional_source_write_hint(source_batch_id, record.tool_name, analysis)
+            source_schemas = _optional_source_array_schemas(analysis)
+            source_key = source_schemas[0][2] if source_schemas else None
+            if source_key:
+                refresh_model_tables = {
+                    table for table, columns in model_columns.items()
+                    if source_key.casefold() in columns
+                }
+            source_write_hint_prefix = _build_optional_source_write_hint(
+                record.tool_name,
+                analysis,
+                tuple(refresh_model_tables),
+            )
+        preserve_raw_model_source_values = bool(
+            source_write_hint_prefix and refresh_model_tables
+        )
         if source_write_hint_prefix in emitted_source_write_hints:
             source_write_hint_prefix = ""
         elif source_write_hint_prefix:
@@ -496,7 +531,7 @@ def prepare_tool_results_for_prompt(
             if paired_url_rewriter and record.step_id in paired_step_ids
             else url_rewriter
         )
-        if active_url_rewriter:
+        if active_url_rewriter and not preserve_raw_model_source_values:
             if context_hint:
                 context_hint = active_url_rewriter(context_hint, record)
             if preview_text and not source_import_prefix:

@@ -1178,13 +1178,22 @@ def _rewrite_result_id_comparisons(
         r"|\d+(?:\.\d+)?"
         r")"
     )
+    qualified_operand = (
+        r"(?:"
+        r"json_extract\s*\(\s*(?:[A-Za-z_]\w*\.)?[A-Za-z_]\w*\s*,\s*__lit_\d+__\s*\)"
+        r"|:[A-Za-z_]\w*"
+        r"|__lit_\d+__"
+        r"|[A-Za-z_]\w*\.[A-Za-z_]\w*"
+        r"|\d+(?:\.\d+)?"
+        r")"
+    )
     patterns = [
         (
             rf"{col_pattern}\s*=\s*({simple_operand})",
             rf"({column_ref} = \1 OR {compat_ref} = \1)",
         ),
         (
-            rf"({simple_operand})\s*=\s*{col_pattern}",
+            rf"({qualified_operand})\s*=\s*{col_pattern}",
             rf"(\1 = {column_ref} OR \1 = {compat_ref})",
         ),
         (
@@ -1628,6 +1637,20 @@ def _get_error_hint(error_msg: str, sql: str = "") -> str:
                 return (
                     f" FIX: {qualifier} is a json_each alias and exposes only {qualifier}.value. "
                     f"Use json_extract({qualifier}.value, '$.{missing_field}')."
+                )
+            if qualifier and not re.search(
+                rf"\b(?:WITH\s+{re.escape(qualifier)}\s+AS|"
+                rf"AS\s+{re.escape(qualifier)}\b|"
+                rf"(?:FROM|JOIN|UPDATE)\s+{re.escape(qualifier)}\b|"
+                rf"(?:FROM|JOIN)\s+[\w.\"`\[\]-]+\s+{re.escape(qualifier)}\b)",
+                sql,
+                re.IGNORECASE | re.DOTALL,
+            ):
+                return (
+                    f" FIX: alias '{qualifier}' was never introduced. Add its source in FROM or JOIN "
+                    f"before referencing {missing_raw}; for tool-result arrays, introduce it with "
+                    "json_each(t.result_json, '$.actual_array_path') AS "
+                    f"{qualifier}."
                 )
         match = re.search(r'no such column:\s*(\w+)', error_msg, re.IGNORECASE)
         if not match:
