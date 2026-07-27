@@ -57,12 +57,12 @@ class StreamAccumulator:
         choices = _read_attr(chunk, "choices") or []
         if not choices:
             self._capture_usage(chunk)
-            return None, None
+            return None, None, None
 
         choice = choices[0]
         delta = _read_attr(choice, "delta")
         if delta is None:
-            return None, None
+            return None, None, None
 
         reasoning_delta = _coerce_stream_text(_read_attr(delta, "reasoning_content"))
         content_delta = _coerce_stream_text(_read_attr(delta, "content"))
