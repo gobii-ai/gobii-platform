@@ -301,25 +301,24 @@ class HumanInputRequestTests(TestCase):
         self.assertEqual(function["name"], "request_human_input")
         self.assertIn("non-credential", function["description"])
         self.assertIn("secure_credentials_request", function["description"])
-        self.assertIn("Broad first assignment", function["description"])
-        self.assertIn("every independent decision question", function["description"])
-        self.assertIn("never a quota or preference survey", function["description"])
-        self.assertIn("fewest materially distinct options, usually 2-3 and at most 6", function["description"])
-        self.assertIn("mandatory even when evidence cannot identify an entity", function["description"])
-        self.assertIn("plausible interpretations or concrete next paths", function["description"])
-        self.assertIn("four read calls in two rounds", function["description"])
-        self.assertIn("questions were requested first", function["description"])
-        self.assertIn("prose substitute", function["description"])
-        self.assertIn("Web retains every card", function["description"])
-        self.assertIn("follow returned guidance", function["description"])
+        self.assertIn("Guided intake makes one tool call after orientation", function["description"])
+        self.assertIn("requests for several independent decisions", function["description"])
+        self.assertIn("not a quota", function["description"])
+        self.assertIn("2-8 options", function["description"])
+        self.assertIn("one-sentence description", function["description"])
+        self.assertIn("never bundle decisions", function["description"])
+        self.assertIn("category example choices are not blockers", function["description"])
+        self.assertIn("Web cards stay pending", function["description"])
         self.assertIn("separate preferred email/SMS", function["description"])
+        self.assertIn("Ask later only when evidence reveals a consequential choice", function["description"])
+        self.assertIn("free-text blocker", function["description"])
         self.assertNotIn("title", function["parameters"]["properties"])
         self.assertIn("options", function["parameters"]["properties"])
-        self.assertEqual(function["parameters"]["properties"]["options"]["maxItems"], 6)
+        self.assertEqual(function["parameters"]["properties"]["options"]["maxItems"], 8)
         self.assertIn("requests", function["parameters"]["properties"])
         self.assertEqual(
             function["parameters"]["properties"]["requests"]["items"]["properties"]["options"]["maxItems"],
-            6,
+            8,
         )
         self.assertIn("recipient", function["parameters"]["properties"])
         self.assertIn("will_continue_work", function["parameters"]["properties"])
@@ -692,20 +691,40 @@ class HumanInputRequestTests(TestCase):
         self.assertEqual(result["requests_count"], 2)
         self.assertEqual(PersistentAgentHumanInputRequest.objects.filter(agent=self.agent).count(), 2)
 
-    def test_execute_request_human_input_rejects_more_than_six_options(self):
+    def test_execute_request_human_input_rejects_more_than_eight_options(self):
         result = execute_request_human_input(
             self.agent,
             {
                 "question": "Which one?",
                 "options": [
                     {"title": f"Option {index}", "description": "Choice"}
-                    for index in range(1, 8)
+                    for index in range(1, 10)
                 ],
             },
         )
 
         self.assertEqual(result["status"], "error")
-        self.assertIn("cannot exceed 6", result["message"])
+        self.assertIn("cannot exceed 8", result["message"])
+
+    def test_execute_request_human_input_accepts_eight_distinct_options(self):
+        result = execute_request_human_input(
+            self.agent,
+            {
+                "question": "Which evidence-backed path should I pursue?",
+                "options": [
+                    {
+                        "title": f"Path {index}",
+                        "description": f"Pursue distinct path {index}.",
+                    }
+                    for index in range(1, 9)
+                ],
+                "will_continue_work": False,
+            },
+        )
+
+        self.assertEqual(result["status"], "ok")
+        request = PersistentAgentHumanInputRequest.objects.get(agent=self.agent)
+        self.assertEqual(len(request.options_json), 8)
 
     def test_execute_request_human_input_accepts_500_character_question(self):
         result = execute_request_human_input(

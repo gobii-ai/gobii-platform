@@ -65,7 +65,7 @@ def get_request_human_input_tool() -> dict[str, Any]:
                 "type": "array",
                 "items": option_schema,
                 "maxItems": MAX_OPTION_COUNT,
-                "description": f"Broad intake uses the fewest materially distinct options, usually 2-3 and at most {MAX_OPTION_COUNT}, including Other. Otherwise omit or pass [] only when the blocker needs unconstrained text.",
+                "description": f"Distinct choices, usually 2-3 and at most {MAX_OPTION_COUNT}; omit only for a free-text blocker.",
             },
         },
         "required": ["question"],
@@ -76,11 +76,16 @@ def get_request_human_input_tool() -> dict[str, Any]:
         "function": {
             "name": "request_human_input",
             "description": (
-                "Tracked non-credential input/card; credentials use secure_credentials_request. "
-                f"Broad first assignment: orient with at most four read calls in two rounds (none if questions were requested first), then use one call for every independent decision question needed to start responsibly. Use top-level question for one or requests for several; count follows the actual ambiguity, never a quota or preference survey. Give each the fewest materially distinct options, usually 2-3 and at most {MAX_OPTION_COUNT}, including any Other option. These options are mandatory even when evidence cannot identify an entity, so offer plausible interpretations or concrete next paths. Call this tool alone with empty response content: no kickoff/config/model/work, send tool, or prose substitute. Use the inbound channel. Web retains every card; follow returned guidance to mirror the exact questions and choices once to a separate preferred email/SMS. Email/SMS: send those numbered questions and choices there. Ask again during work only when new evidence exposes a consequential choice. Otherwise omit options for free-text blockers. "
-                "Use message tools for non-blocking questions/answers. Include Other / I'll explain if needed. "
-                "Do not use for preference surveys, timezone/channel/formatting, category example choices like which vendor/company, non-blocking lookback, or reversible defaults you can choose and disclose. "
-                "Use for role-defining discovery when audience/scope/volume/success bounds materially change substantial ongoing first work; otherwise only if the user asks for targets/scope before setup or they block a recurring monitor. "
+                "Tracked non-credential choices; credentials use secure_credentials_request. Guided intake makes one "
+                "tool call after orientation, alone with empty content: top-level question/options for one decision or "
+                "requests for several independent decisions. Count follows the real ambiguity, not a quota. Each intake "
+                f"card has 2-{MAX_OPTION_COUNT} options (usually 2-3), each with title and one-sentence description; "
+                "never bundle decisions, say select-all, mix free text, survey preferences, or silently default a "
+                "material boundary. category example choices are not blockers: when a user asks for targets/scope "
+                "before setup or they would block a recurring monitor, choose and disclose a sensible example rather "
+                "than asking which vendor/company. Web cards stay pending; follow result guidance to mirror exact cards "
+                "to a separate preferred email/SMS. Ask later only when evidence reveals a consequential choice. Outside intake, "
+                "omit options only for a genuine free-text blocker; use message tools for non-blocking questions. "
                 f"Plain text only; max {MAX_HUMAN_INPUT_QUESTION_LENGTH} chars."
             ),
             "parameters": {
@@ -95,12 +100,12 @@ def get_request_human_input_tool() -> dict[str, Any]:
                         "type": "array",
                         "items": option_schema,
                         "maxItems": MAX_OPTION_COUNT,
-                        "description": f"Broad intake uses the fewest materially distinct options, usually 2-3 and at most {MAX_OPTION_COUNT}, including Other. Otherwise omit or pass [] only when the blocker needs unconstrained text.",
+                        "description": f"Intake requires 2-{MAX_OPTION_COUNT} distinct choices; omit only for a free-text blocker.",
                     },
                     "requests": {
                         "type": "array",
                         "items": request_schema,
-                        "description": "Multiple genuinely blocking requests with options; omit top-level question/options.",
+                        "description": "Several independent questions; omit top-level question/options.",
                     },
                     "recipient": {
                         "description": "Optional explicit recipient; omit for the current implicit conversation target.",
@@ -253,15 +258,6 @@ def execute_request_human_input(agent: PersistentAgent, params: dict[str, Any]) 
 
     if request_solicits_credential_value(question, options):
         return {"status": "error", "message": CREDENTIAL_SOLICITATION_ERROR_MESSAGE}
-
-    if options and len(options) > 3:
-        return {
-            "status": "error",
-            "message": (
-                "request_human_input is for one blocking decision, not preference surveys. "
-                "Ask at most one concise question with up to 3 options, or choose a reasonable default and disclose it."
-            ),
-        }
 
     result = create_human_input_request(
         agent,

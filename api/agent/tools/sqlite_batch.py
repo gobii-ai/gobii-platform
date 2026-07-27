@@ -1048,6 +1048,7 @@ def _derive_result_json_bases(paths: list[str], missing: str) -> list[str]:
 def _autocorrect_missing_column_with_json_paths(
     sql: str,
     error_msg: str,
+    conn: sqlite3.Connection | None = None,
 ) -> list[tuple[str, str]]:
     match = re.search(r'no such column:\s*([^\s]+)', error_msg, re.IGNORECASE)
     if not match:
@@ -1074,13 +1075,33 @@ def _autocorrect_missing_column_with_json_paths(
 
     paths = _extract_result_json_paths(sql)
     bases = _derive_result_json_bases(paths, missing)
-    if not bases:
+    candidate_paths = [f"{base}{missing}" for base in bases]
+    for common_path in (f"$.{missing}", f"$.content.{missing}"):
+        if common_path not in candidate_paths:
+            candidate_paths.append(common_path)
+    if not candidate_paths:
         return []
+
+    if conn is not None:
+        present_paths: list[str] = []
+        for path in candidate_paths:
+            try:
+                row = conn.execute(
+                    'SELECT 1 FROM "__tool_results" '
+                    "WHERE json_type(result_json, ?) IS NOT NULL LIMIT 1",
+                    (path,),
+                ).fetchone()
+            except sqlite3.Error:
+                row = None
+            if row:
+                present_paths.append(path)
+        if present_paths:
+            candidate_paths = present_paths
 
     result_json_ref = f"{tool_alias}.result_json"
     candidates: list[tuple[str, str]] = []
-    for base in bases:
-        replacement_expr = f"json_extract({result_json_ref}, '{base}{missing}')"
+    for path in candidate_paths:
+        replacement_expr = f"json_extract({result_json_ref}, '{path}')"
         if qualifier:
             pattern = rf'(\b{re.escape(qualifier)}\s*\.\s*){re.escape(missing)}\b'
         else:
@@ -1496,7 +1517,7 @@ def _build_autocorrection_candidates(
     if fix and corrected != sql:
         candidates.append((corrected, [fix]))
 
-    for updated_sql, fix in _autocorrect_missing_column_with_json_paths(sql, error_msg):
+    for updated_sql, fix in _autocorrect_missing_column_with_json_paths(sql, error_msg, conn):
         if updated_sql != sql:
             candidates.append((updated_sql, [fix]))
 
@@ -1595,6 +1616,19 @@ def _get_error_hint(error_msg: str, sql: str = "") -> str:
         return " FIX: All SELECTs in UNION/UNION ALL must have the same number of columns."
     if "no column named" in error_lower or "no such column" in error_lower:
         # Extract the missing column name
+        qualified_match = re.search(r'no such column:\s*([\w]+\.[\w]+)', error_msg, re.IGNORECASE)
+        if qualified_match and sql:
+            missing_raw = qualified_match.group(1)
+            qualifier, missing_field = _split_qualified_identifier(missing_raw)
+            if qualifier and missing_field and re.search(
+                rf"\bjson_each\s*\([^;]*?\)\s+(?:AS\s+)?{re.escape(qualifier)}\b",
+                sql,
+                re.IGNORECASE | re.DOTALL,
+            ):
+                return (
+                    f" FIX: {qualifier} is a json_each alias and exposes only {qualifier}.value. "
+                    f"Use json_extract({qualifier}.value, '$.{missing_field}')."
+                )
         match = re.search(r'no such column:\s*(\w+)', error_msg, re.IGNORECASE)
         if not match:
             match = re.search(r'no column named\s+(\w+)', error_msg, re.IGNORECASE)
@@ -1651,15 +1685,26 @@ def _enforce_result_limits(rows: List[Dict[str, Any]], query: str) -> tuple[List
         rows = rows[:MAX_RESULT_ROWS]
         warning = f" [!] TRUNCATED: {total_rows} rows -> {MAX_RESULT_ROWS}. Add LIMIT to your query."
 
-    # Check byte size
+    # Check byte size. The old row-only reduction stopped at ten rows, so a
+    # handful of raw result_text cells could still inject hundreds of KB.
     try:
-        result_bytes = len(json.dumps(rows, default=str).encode('utf-8'))
+        result_bytes = len(json.dumps(rows, default=str).encode("utf-8"))
         if result_bytes > MAX_RESULT_BYTES:
-            # Progressively reduce until under limit
-            while len(rows) > 10 and len(json.dumps(rows, default=str).encode('utf-8')) > MAX_RESULT_BYTES:
-                rows = rows[:len(rows) // 2]
-            warning = f" [!] TRUNCATED to {len(rows)} rows (size limit). Use LIMIT and specific columns."
-    except Exception:
+            rows = _shrink_oversized_result_cells(rows, MAX_RESULT_BYTES)
+            if len(json.dumps(rows, default=str).encode("utf-8")) > MAX_RESULT_BYTES:
+                while len(rows) > 1 and len(json.dumps(rows, default=str).encode("utf-8")) > MAX_RESULT_BYTES:
+                    rows = rows[:max(1, len(rows) // 2)]
+                rows = _shrink_oversized_result_cells(rows, MAX_RESULT_BYTES)
+            coverage = (
+                f"all {total_rows} rows preserved; oversized cells shortened"
+                if len(rows) == total_rows
+                else f"{total_rows} rows -> {len(rows)}"
+            )
+            warning = (
+                f" [!] TRUNCATED: {coverage} within the result byte limit. "
+                "Select specific columns and use targeted substr/grep_context_all for source text; never read_file."
+            )
+    except (TypeError, ValueError, OverflowError):
         pass
 
     # Warn about missing LIMIT even if not truncated
@@ -1667,6 +1712,60 @@ def _enforce_result_limits(rows: List[Dict[str, Any]], query: str) -> tuple[List
         warning = f" [!] Large result ({total_rows} rows). Consider adding LIMIT for efficiency."
 
     return rows, warning
+
+
+def _truncate_utf8_head_tail(value: str, max_bytes: int) -> str:
+    raw = value.encode("utf-8")
+    if len(raw) <= max_bytes:
+        return value
+    marker = f"\n...[{len(raw) - max_bytes} bytes omitted]...\n".encode("utf-8")
+    if len(marker) >= max_bytes:
+        return raw[:max_bytes].decode("utf-8", "ignore")
+    kept = max_bytes - len(marker)
+    head = kept // 2
+    tail = kept - head
+    return (
+        raw[:head].decode("utf-8", "ignore")
+        + marker.decode("utf-8")
+        + raw[-tail:].decode("utf-8", "ignore")
+    )
+
+
+def _shrink_oversized_result_cells(
+    rows: List[Dict[str, Any]],
+    max_bytes: int,
+) -> List[Dict[str, Any]]:
+    """Bound a small result set whose individual cells are very large."""
+
+    copied = [dict(row) for row in rows]
+    string_cells: list[tuple[int, str, str]] = []
+    for row_index, row in enumerate(copied):
+        for key, value in row.items():
+            if isinstance(value, bytes):
+                row[key] = f"[binary value omitted: {len(value)} bytes]"
+            elif isinstance(value, str):
+                string_cells.append((row_index, key, value))
+
+    if len(json.dumps(copied, default=str).encode("utf-8")) <= max_bytes or not string_cells:
+        return copied
+
+    empty_strings = [dict(row) for row in copied]
+    for row_index, key, _value in string_cells:
+        empty_strings[row_index][key] = ""
+    fixed_bytes = len(json.dumps(empty_strings, default=str).encode("utf-8"))
+    per_cell_budget = max(32, (max_bytes - fixed_bytes - 64) // len(string_cells))
+
+    while per_cell_budget >= 16:
+        candidate = [dict(row) for row in copied]
+        for row_index, key, value in string_cells:
+            candidate[row_index][key] = _truncate_utf8_head_tail(value, per_cell_budget)
+        if len(json.dumps(candidate, default=str).encode("utf-8")) <= max_bytes:
+            return candidate
+        per_cell_budget = int(per_cell_budget * 0.8)
+
+    for row_index, key, value in string_cells:
+        copied[row_index][key] = _truncate_utf8_head_tail(value, 16)
+    return copied
 
 
 _NON_ITEM_URL_FIELD_NAMES = {"source_url", "feed_url", "page_url", "origin_url"}
@@ -2128,30 +2227,22 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
         "function": {
             "name": "sqlite_batch",
             "description": (
-                "SQLite world model + exact logic. Model fetched evidence before relying on it. SOURCE WRITES: never type fetched facts or URLs in SQL literals. Structured JSON derives set-wise from the current source set plus `tool_name`: `FROM __tool_results t, json_each(t.result_json,'$.content.<actual_array>') row WHERE t.is_current_batch=1 AND t.tool_name=:tool`; source_batch_id preserves history. Unstructured result_text is plain text, never json_each(result_text): put interpreted rows in top-level `rows`, keyed by result_id with only exact known URLs, then INSERT SELECT from json_each(:rows). Store result_id and known source_url; never literal VALUES, parse prose in SQL, or stage NULLs. "
-                "SCHEMA FIRST: if an existing schema is absent/stale, query sqlite_master by a "
-                "task-relevant name fragment; listing every table is a failure. Then use one separate PRAGMA-only call with no target-table SELECT; "
-                "read its result before querying confirmed fields. Never combine schema inspection and a target-table read, or repeat an unchanged SELECT in one turn. "
-                "After a fetch, reconcile and SELECT. SOURCE ARRAYS lists paths. "
-                "ONE CALL PER SHAPE: put model DDL, one set-wise import, and the decision/evidence SELECTs needed for the output, including supporting rows and URLs, in this call. Use one INSERT over is_current_batch plus tool_name, never one per result_id or every historical call to a generic tool. If the shape is unknown, use at most two calls: one batch-wide inspection, then this complete batch. Later reads query only the model. "
-                "For http_request target its child array, never the $.content object. Extract item fields, including item URLs, from item.value; derive only actual parent fields from t.result_json and provenance from t.result_id. "
-                "For same-batch siblings, never loop one result_id at a time. Do not store `$[link:...]` tokens or invent source_token. Structured fields derive from __tool_results; unstructured fields use one provenance-keyed bound-row import. "
-                "Key/evolve/normalize/query. "
-                "Bind authored values and unstructured rows; never hand-escape. "
-                "http_request JSON: result_json $.content. INSERT SELECT needs WHERE before ON CONFLICT. For independently ordered/limited cuts, use separate SELECT statements or subqueries, not ORDER BY/LIMIT inside UNION branches. No ATTACH. "
-                "Apostrophe: 'O''Brien'. grep_context_all/split_sections arrays expose only alias.value."
+                "Durable world model and exact logic. For each current source shape, use one call for keyed DDL, one "
+                "set-wise upsert, and decision-ready SELECTs. Structured fields derive across is_current_batch=1 plus "
+                "tool_name from result_json/item.value; provenance is t.result_id/t.source_url. Multi-source prose "
+                "modeling first uses the bounded set-wide inspection shown beside results, then top-level rows joined "
+                "by result_id. Structured JSON uses rows=[]; current batch plus tool_name is exact, so add no "
+                "source_url/result_id predicate and store t.source_url/t.result_id as provenance. For upserts, "
+                "put WHERE 1=1 before ON CONFLICT. group_concat(DISTINCT x) accepts no separator. Never copy sourced "
+                "facts/URLs into SQL, import per result_id, store link handles, mix historical generic-tool results, or "
+                "rebuild a durable table on refresh. Evolve normalized entities/relations, upsert stable keys, and "
+                "query counts, joins, coverage, gaps, and ranks. Return all supporting fields/URLs in the same batch; "
+                "after decision rows return, deliver without rereading. Unknown schema: targeted sqlite_master, then "
+                "PRAGMA alone in its own call, then query only returned columns. Bind authored values. No ATTACH."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "sql": {
-                        "type": "string",
-                        "description": (
-                            "SQL string; use semicolons between statements. REQUIRED for facts interpreted from page/prose "
-                            "results: INSERT SELECT from json_each(:rows), always storing result_id and also source_url when known. "
-                            "A literal INSERT is wrong even when every value is visible."
-                        ),
-                    },
                     "rows": {
                         "type": "array",
                         "items": {
@@ -2162,37 +2253,51 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
                                     "description": "Exact result_id of the source row.",
                                     "minLength": 1,
                                 },
-                                "source_url": {
-                                    "type": "string",
-                                    "description": "Exact known source URL, when the source provides one.",
+                                "fields": {
+                                    "type": "object",
+                                    "description": (
+                                        "Facts explicitly supported by that source, keyed by semantic field name. "
+                                        "Preserve the source's specificity. Omit unavailable fields; never enrich "
+                                        "or infer values to complete a schema."
+                                    ),
+                                    "minProperties": 1,
+                                    "additionalProperties": {},
                                 },
                             },
-                            "required": ["result_id"],
+                            "required": ["result_id", "fields"],
                             "additionalProperties": True,
                         },
                         "description": (
-                            "Rows interpreted from unstructured source results, automatically bound to SQL as :rows. "
-                            "Include result_id, interpreted fields, and only exact known URLs; expand once with "
-                            "json_each(:rows), always store result_id, and also store source_url when known. Example row: "
-                            "{\"result_id\":\"abc123\",\"entity_id\":\"e1\",\"name\":\"O'Brien\","
-                            "\"source_url\":\"https://source.example/item\"}."
+                            "Use [] for structured JSON, inspection, and model-only work; never invent structured "
+                            "result IDs. REQUIRED and non-empty for every prose-derived "
+                            "model write: include every source as exact result_id plus non-empty fields; SQL receives :rows."
+                        ),
+                    },
+                    "sql": {
+                        "type": "string",
+                        "description": (
+                            "Semicolon-separated SQL. Prose imports use `json_each(:rows) r JOIN __tool_results t ON "
+                            "t.result_id=json_extract(r.value,'$.result_id')`, facts at $.fields.<name>, and "
+                            "t.result_id/t.source_url provenance. A prose-derived write with rows=[] or sourced "
+                            "VALUES/literals is invalid. End with decision/detail SELECTs."
                         ),
                     },
                     "bindings": {
                         "type": "object",
                         "description": (
-                            "Optional named SQL values. Use :name in SQL and {\"name\": value} here; keys omit the colon. "
-                            "JSON scalars, arrays, and objects are safely encoded. Use the top-level rows argument for "
-                            "unstructured source results."
+                            "Optional values for :name parameters; keys omit the colon. JSON values are safely encoded."
                         ),
                         "additionalProperties": {},
                     },
                     "will_continue_work": {
                         "type": "boolean",
-                        "description": "REQUIRED. SQLite cannot deliver; use true so a reply/action follows.",
+                        "description": (
+                            "REQUIRED. Set false when this call's SELECTs are sufficient to answer; set true only when "
+                            "a specific non-SQLite action remains. Never set true merely to query SQLite again."
+                        ),
                     },
                 },
-                "required": ["sql", "will_continue_work"],
+                "required": ["rows", "sql", "will_continue_work"],
             },
         },
     }

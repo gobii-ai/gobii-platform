@@ -10,6 +10,7 @@ from django.test import TestCase, tag, override_settings
 from django.utils import timezone
 
 from api.agent.tools.sqlite_batch import (
+    MAX_RESULT_BYTES,
     execute_sqlite_batch,
     get_sqlite_batch_tool,
     _apply_resource_limits,
@@ -19,6 +20,7 @@ from api.agent.tools.sqlite_batch import (
     _extract_cte_names,
     _extract_select_aliases,
     _extract_table_refs,
+    _enforce_result_limits,
     _fix_dialect_functions,
     _fix_dialect_syntax,
     _fix_escaped_quotes,
@@ -171,6 +173,16 @@ class SqliteBatchCoreTests(SqliteBatchTestCase):
             "name": bindings["company_name"],
             "notes": bindings["notes"],
         }])
+
+    def test_rows_schema_requires_source_specificity_without_enrichment(self):
+        rows = (
+            get_sqlite_batch_tool()["function"]["parameters"]["properties"]["rows"]
+        )
+        fields_description = rows["items"]["properties"]["fields"]["description"]
+
+        self.assertIn("Facts explicitly supported by that source", fields_description)
+        self.assertIn("Preserve the source's specificity", fields_description)
+        self.assertIn("never enrich or infer values", fields_description)
 
     def test_named_bindings_encode_nested_json_for_sql_json_functions(self):
         with self._with_temp_db():
@@ -557,39 +569,60 @@ class SqliteBatchCoreTests(SqliteBatchTestCase):
         description = definition["function"]["description"]
 
         for expected in (
-            "SQLite world model + exact logic", "After a fetch, reconcile and SELECT",
-            "SOURCE ARRAYS lists paths",
-            "Key/evolve/normalize/query", "Structured fields derive from __tool_results",
-            "WHERE before ON CONFLICT", "is_current_batch plus tool_name",
-            "Unstructured result_text", "top-level `rows`",
-            "Store result_id and known source_url", "ONE CALL PER SHAPE",
-            "never json_each(result_text)",
-            "only exact known URLs",
-            "same-batch siblings", "never loop one result_id",
-            "never type fetched facts or URLs in SQL literals",
-            "Do not store `$[link:...]` tokens",
-            "decision/evidence SELECT", "supporting rows and URLs",
-            "t.is_current_batch=1 AND t.tool_name=:tool",
-            "item fields, including item URLs, from item.value",
-            "actual parent fields from t.result_json and provenance from t.result_id",
-            "separate SELECT statements or subqueries",
-            "SCHEMA FIRST: if an existing", "task-relevant name fragment",
-            "listing every table is a failure", "one separate PRAGMA-only call",
-            "use at most two calls", "repeat an unchanged SELECT",
-            "querying confirmed fields",
+            "Durable world model and exact logic",
+            "keyed DDL",
+            "set-wise upsert",
+            "is_current_batch=1 plus tool_name",
+            "result_json/item.value",
+            "t.result_id/t.source_url",
+            "Multi-source prose modeling first uses",
+            "bounded set-wide inspection shown beside results",
+            "top-level rows",
+            "Structured JSON uses rows=[]",
+            "add no source_url/result_id predicate",
+            "store t.source_url/t.result_id as provenance",
+            "WHERE 1=1 before ON CONFLICT",
+            "group_concat(DISTINCT x)",
+            "Never copy sourced facts/URLs into SQL",
+            "import per result_id",
+            "mix historical generic-tool results",
+            "Evolve normalized entities/relations",
+            "counts, joins, coverage, gaps, and ranks",
+            "Return all supporting fields/URLs in the same batch",
+            "after decision rows return, deliver without rereading",
+            "targeted sqlite_master",
+            "PRAGMA alone in its own call",
+            "query only returned columns",
         ):
             self.assertIn(expected, description)
+        continuation_description = (
+            definition["function"]["parameters"]["properties"]["will_continue_work"]["description"]
+        )
+        self.assertIn("Set false when this call's SELECTs are sufficient to answer", continuation_description)
+        self.assertIn("Never set true merely to query SQLite again", continuation_description)
         rows_schema = definition["function"]["parameters"]["properties"]["rows"]
         self.assertEqual(rows_schema["type"], "array")
-        self.assertIn("automatically bound to SQL as :rows", rows_schema["description"])
-        self.assertEqual(rows_schema["items"]["required"], ["result_id"])
+        self.assertIn("REQUIRED and non-empty", rows_schema["description"])
+        self.assertIn("Use [] for structured JSON", rows_schema["description"])
+        self.assertIn("SQL receives :rows", rows_schema["description"])
+        self.assertIn(
+            "rows=[]",
+            definition["function"]["parameters"]["properties"]["sql"]["description"],
+        )
+        self.assertEqual(rows_schema["items"]["required"], ["result_id", "fields"])
         self.assertEqual(
             rows_schema["items"]["properties"]["result_id"]["minLength"],
             1,
         )
-        self.assertIn("source_url", rows_schema["items"]["properties"])
-        self.assertIn("always store result_id", rows_schema["description"])
-        self.assertIn("\"result_id\":\"abc123\"", rows_schema["description"])
+        self.assertEqual(set(rows_schema["items"]["properties"]), {"result_id", "fields"})
+        self.assertEqual(
+            rows_schema["items"]["properties"]["fields"]["minProperties"],
+            1,
+        )
+        sql_description = definition["function"]["parameters"]["properties"]["sql"]["description"]
+        self.assertIn("json_each(:rows)", sql_description)
+        self.assertIn("$.fields.<name>", sql_description)
+        self.assertIn("t.result_id/t.source_url provenance", sql_description)
         self.assertNotIn("before one terminal send", description)
 
     def test_tool_result_ctas_warns_that_identity_is_disposable(self):
@@ -1787,6 +1820,24 @@ class SqliteBatchQualityTests(SqliteBatchTestCase):
             self.assertLessEqual(len(rows), 100)
             self.assertIn("TRUNCATED", results[0].get("message", ""))
 
+    def test_large_result_cells_are_bounded_even_with_few_rows(self):
+        rows = [
+            {"result_id": f"r{index}", "result_text": f"head-{index}\n" + ("x" * 50_000) + f"\ntail-{index}"}
+            for index in range(4)
+        ]
+
+        limited, warning = _enforce_result_limits(rows, "SELECT result_text FROM __tool_results")
+
+        self.assertLessEqual(len(json.dumps(limited).encode("utf-8")), MAX_RESULT_BYTES)
+        self.assertEqual([row["result_id"] for row in limited], ["r0", "r1", "r2", "r3"])
+        for index, row in enumerate(limited):
+            self.assertIn("bytes omitted", row["result_text"])
+            self.assertTrue(row["result_text"].startswith(f"head-{index}"))
+            self.assertTrue(row["result_text"].endswith(f"tail-{index}"))
+        self.assertIn("all 4 rows preserved", warning)
+        self.assertIn("targeted substr/grep_context_all", warning)
+        self.assertIn("never read_file", warning)
+
     def test_result_with_limit_not_warned(self):
         """Queries with explicit LIMIT don't trigger warnings."""
         with self._with_temp_db():
@@ -2269,6 +2320,49 @@ class SqliteBatchAutocorrectTests(SqliteBatchTestCase):
             auto_fix = out["results"][0].get("auto_correction")
             self.assertIsNotNone(auto_fix)
             self.assertIn("$.content.url", auto_fix["after"])
+
+    def test_autocorrect_uses_observed_root_json_path_before_inferred_nested_path(self):
+        with self._with_temp_db() as (db_path, _token, _tmp):
+            conn = sqlite3.connect(db_path)
+            try:
+                conn.execute(
+                    "CREATE TABLE __tool_results (result_id TEXT PRIMARY KEY, result_json TEXT)"
+                )
+                conn.execute(
+                    "INSERT INTO __tool_results (result_id, result_json) VALUES (?, ?)",
+                    (
+                        "r1",
+                        json.dumps({
+                            "url": "https://api.example.test/root.json",
+                            "content": {"source_url": "https://api.example.test/body.json"},
+                        }),
+                    ),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            out = execute_sqlite_batch(
+                self.agent,
+                {
+                    "sql": (
+                        "SELECT t.url AS request_url, "
+                        "json_extract(t.result_json, '$.content.source_url') AS source_url "
+                        "FROM __tool_results t"
+                    )
+                },
+            )
+
+            self.assertEqual(out.get("status"), "ok", out.get("message"))
+            auto_fix = out["results"][0].get("auto_correction")
+            self.assertIsNotNone(auto_fix)
+            self.assertIn("$.url", auto_fix["after"])
+            self.assertNotIn("$.content.url", auto_fix["after"])
+            self.assertEqual(
+                out["results"][0]["result"][0]["request_url"],
+                "https://api.example.test/root.json",
+            )
+
     def test_autocorrect_missing_table_with_schema(self):
         """Auto-corrects missing table using actual schema tables."""
         with self._with_temp_db():
@@ -2686,6 +2780,16 @@ class SqliteBatchAutocorrectTests(SqliteBatchTestCase):
         self.assertIn("Do not assume the table name", table_hint)
         self.assertIn("sqlite_master", table_hint)
         self.assertIn("PRAGMA table_info", table_hint)
+
+    def test_json_each_alias_error_hint_uses_value_extraction(self):
+        hint = _get_error_hint(
+            "no such column: r.result_id",
+            "SELECT r.result_id FROM json_each(:rows) r",
+        )
+
+        self.assertIn("r is a json_each alias", hint)
+        self.assertIn("r.value", hint)
+        self.assertIn("json_extract(r.value, '$.result_id')", hint)
 
     def test_fix_unescaped_single_quote_runs(self):
         """Balances odd-length runs of single quotes."""

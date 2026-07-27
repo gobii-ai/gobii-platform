@@ -634,14 +634,6 @@ def all_requests_have_options(requests):
     return all(_valid_human_input_options(request.options_json) for request in requests)
 
 
-def tool_call_result_is_skipped(call):
-    try:
-        payload = json.loads(call.result or "{}")
-    except json.JSONDecodeError:
-        return False
-    return isinstance(payload, dict) and payload.get("skipped") is True
-
-
 def planning_requests_are_bounded(requests):
     if not requests:
         return False
@@ -891,7 +883,30 @@ class GuidedPlanningBoundedWhenRequestedScenario(BehaviorMicroScenario):
                 ),
                 trigger_processing=True,
                 eval_run_id=run_id,
-                mock_config=self._planning_guardrail_mocks(),
+                mock_config={
+                    **self._planning_guardrail_mocks(),
+                    "mcp_brightdata_search_engine": {
+                        "status": "ok",
+                        "results": [
+                            {
+                                "title": "Competitive monitoring workflow guide",
+                                "url": "https://example.test/competitive-monitoring",
+                                "description": (
+                                    "Useful programs define competitor scope, material signal types, "
+                                    "and alert urgency before implementation."
+                                ),
+                            }
+                        ],
+                    },
+                    "mcp_brightdata_scrape_as_markdown": {
+                        "status": "ok",
+                        "url": "https://example.test/competitive-monitoring",
+                        "result": (
+                            "Monitoring design depends on competitor scope, decision-changing signals, "
+                            "and how quickly a team must react."
+                        ),
+                    },
+                },
                 eval_stop_policy={
                     "ignore_sqlite_agent_config_mutations": False,
                     "ignored_tool_names": list(IGNORED_FIRST_ACTION_TOOL_NAMES | {UPDATE_PLAN_TOOL_NAME}),
@@ -899,7 +914,8 @@ class GuidedPlanningBoundedWhenRequestedScenario(BehaviorMicroScenario):
                     "stop_on_sqlite_agent_config_mutation": True,
                     "stop_on_tool_names": list(SUBSTANTIVE_WORK_TOOL_NAMES | AGENT_CONFIG_MUTATION_TOOL_NAMES),
                     "stop_on_unexpected_relevant_tool": True,
-                    "allowed_tool_names": ["request_human_input"],
+                    "allowed_tool_names": ["request_human_input", *sorted(PLANNING_READ_ONLY_TOOL_NAMES)],
+                    "max_relevant_tool_calls": 7,
                 },
             )
         self.record_task_result(
@@ -951,6 +967,10 @@ class GuidedPlanningBoundedWhenRequestedScenario(BehaviorMicroScenario):
         )
 
         calls = get_tool_calls_for_run(run_id, after=inbound.timestamp)
+        orientation_calls = [
+            call for call in calls
+            if call.tool_name in PLANNING_READ_ONLY_TOOL_NAMES
+        ]
         forbidden = [
             call for call in calls
             if call.tool_name in SUBSTANTIVE_WORK_TOOL_NAMES
@@ -963,17 +983,37 @@ class GuidedPlanningBoundedWhenRequestedScenario(BehaviorMicroScenario):
                 )
             )
         ]
+        rejected_intake_calls = [
+            call for call in calls
+            if call.tool_name == "request_human_input"
+            and str(call.status).lower() != "complete"
+        ]
+        bounded_orientation = len(orientation_calls) <= 4
         self.record_task_result(
             run_id,
             None,
-            EvalRunTask.Status.FAILED if forbidden else EvalRunTask.Status.PASSED,
+            (
+                EvalRunTask.Status.FAILED
+                if forbidden or rejected_intake_calls or not bounded_orientation
+                else EvalRunTask.Status.PASSED
+            ),
             task_name="verify_no_execution_or_config",
             observed_summary=(
                 f"Unexpected work/config calls: {[call.tool_name for call in forbidden]}."
                 if forbidden
-                else "No substantive work or durable configuration changes occurred."
+                else (
+                    "The first intake call was rejected instead of succeeding in one shot."
+                    if rejected_intake_calls
+                    else (
+                        f"Orientation used {len(orientation_calls)} read calls; expected at most 4."
+                        if not bounded_orientation
+                        else "No substantive work or durable configuration changes occurred."
+                    )
+                )
             ),
-            artifacts={"step": forbidden[0].step} if forbidden else {},
+            artifacts={
+                "step": (forbidden or rejected_intake_calls or orientation_calls)[0].step
+            } if forbidden or rejected_intake_calls or orientation_calls else {},
         )
 
 
@@ -1054,6 +1094,14 @@ class GuidedFirstAssignmentAsksUsefulQuestionsScenario(BehaviorMicroScenario):
                 eval_run_id=run_id,
             )
             if self.preferred_contact_channel == CommsChannel.EMAIL:
+                PersistentAgentCommsEndpoint.objects.get_or_create(
+                    owner_agent=agent,
+                    channel=CommsChannel.EMAIL,
+                    defaults={
+                        "address": f"agent-{agent_id}@eval.local",
+                        "is_primary": True,
+                    },
+                )
                 endpoint = PersistentAgentCommsEndpoint.objects.create(
                     channel=CommsChannel.EMAIL,
                     address=f"guided-intake-{agent_id}@eval.local",
@@ -1105,8 +1153,9 @@ class GuidedFirstAssignmentAsksUsefulQuestionsScenario(BehaviorMicroScenario):
                         "mcp_brightdata_scrape_as_markdown",
                         "sqlite_batch",
                     ],
-                    "ignored_tool_names": ["send_chat_message"],
-                    "max_relevant_tool_calls": 8 if self.requires_fallback_copy else 6,
+                    # Let the trajectory finish so assertions can distinguish an overlong
+                    # orientation from a missing/rejected final card call.
+                    "max_relevant_tool_calls": 10,
                 },
             )
         self.record_task_result(
@@ -1145,6 +1194,11 @@ class GuidedFirstAssignmentAsksUsefulQuestionsScenario(BehaviorMicroScenario):
             )
             for call in fallback_calls
         ]
+        chat_calls = [call for call in calls if call.tool_name == "send_chat_message"]
+        chat_bodies = [
+            str(resolved_tool_param(call, "body") or "")
+            for call in chat_calls
+        ]
         orientation_evidence = self.orientation_evidence
         choice, reasoning = self.llm_judge(
             question=(
@@ -1153,15 +1207,29 @@ class GuidedFirstAssignmentAsksUsefulQuestionsScenario(BehaviorMicroScenario):
                 "arbitrary one-question or three-question quota: it should cover material independent ambiguities while "
                 "avoiding cosmetic preferences, redundant questions, and an exhaustive survey. Every question should "
                 "use the fewest materially distinct answer choices, usually two or three and never more than the "
-                "supported six, while making intelligent use of the orientation evidence. "
+                "supported eight, while making intelligent use of the orientation evidence. "
+                "Independent decisions must use separate cards; an umbrella card must not hide or silently default a "
+                "decision that would substantially change research cost, targeting, or the resulting deliverable. "
+                "A single card is valid when it resolves one specific highest-leverage decision and the remaining "
+                "dimensions are reversible, safely inferable, or sensibly depend on that answer; do not fail merely "
+                "because broad work could benefit from more preferences. A vague catch-all that bundles independent "
+                "decisions or silently defaults a known material blocker is still insufficient. "
+                "Every initial guided-intake question must be a choice card; a free-text request or asking the user to "
+                "restate which company/product is theirs after the task already named the seller is low-value discovery. "
                 + (
                     "Because orientation could not identify the named entity, useful choices should offer plausible "
                     "interpretations or concrete next paths instead of falling back to a free-text-only question. "
+                    "Broad but actionable categories such as company, product/brand, or internal project are valid "
+                    "interpretations when the public evidence cannot support more specific ones; do not require the "
+                    "agent to invent named entities. "
                     if self.unknown_orientation
                     else "They should not merely ask a generic question that could have been written before research. "
                 )
                 + "The set may be small or larger when the actual decision surface warrants it, and later discovered "
                 "blockers may be asked later. Judge consultant quality and intent, not exact wording or question count. "
+                "At most two concise chat sentences may transparently announce the bounded orientation and, only when "
+                "useful, frame its evidence before the cards. They must not claim the deliverable has started, ask the "
+                "decisions in prose, duplicate the cards, repeat each other, or promise results. "
                 + (
                     "The backup email must clearly carry the same decisions and choices, not a kickoff or different questions."
                     if self.requires_fallback_copy
@@ -1173,6 +1241,7 @@ class GuidedFirstAssignmentAsksUsefulQuestionsScenario(BehaviorMicroScenario):
                 f"Orientation evidence available to the agent:\n{json.dumps(orientation_evidence)}\n\n"
                 f"Agent chat replies:\n{json.dumps(replies)}\n\n"
                 f"Native choice cards created by the agent:\n{json.dumps(questions)}\n\n"
+                f"Optional chat framing attempted by the agent:\n{json.dumps(chat_bodies)}\n\n"
                 f"Backup email bodies:\n{json.dumps(fallback_bodies)}"
             ),
             options=["Useful bounded discovery", "Missing or low-value discovery"],
@@ -1194,6 +1263,14 @@ class GuidedFirstAssignmentAsksUsefulQuestionsScenario(BehaviorMicroScenario):
             for call in calls
             if call.tool_name in PLANNING_READ_ONLY_TOOL_NAMES
         ]
+        orientation_completion_ids = {
+            getattr(getattr(call, "step", None), "completion_id", None)
+            for call in orientation_calls
+        }
+        orientation_batches_ok = (
+            None not in orientation_completion_ids
+            and len(orientation_completion_ids) == 1
+        )
         work_calls = [
             call for call in calls
             if (
@@ -1207,6 +1284,10 @@ class GuidedFirstAssignmentAsksUsefulQuestionsScenario(BehaviorMicroScenario):
             if call.tool_name == "request_human_input"
         ]
         request_calls = [call for call in calls if call.tool_name == "request_human_input"]
+        rejected_request_calls = [
+            call for call in request_calls
+            if str(call.status).lower() != "complete"
+        ]
         orientation_positions = [
             index for index, call in enumerate(calls)
             if call.tool_name in PLANNING_READ_ONLY_TOOL_NAMES
@@ -1215,13 +1296,22 @@ class GuidedFirstAssignmentAsksUsefulQuestionsScenario(BehaviorMicroScenario):
             index for index, call in enumerate(calls)
             if call.tool_name == "send_email"
         ]
-        chat_calls = [
-            call for call in calls
-            if call.tool_name == "send_chat_message" and not tool_call_result_is_skipped(call)
+        chat_positions = [
+            index for index, call in enumerate(calls)
+            if call.tool_name == "send_chat_message"
         ]
         has_bounded_choices = bool(requests) and all(
             2 <= len(request.options_json) <= MAX_OPTION_COUNT
             for request in requests
+        )
+        framing_order_ok = (
+            not chat_positions
+            or (
+                len(chat_positions) <= 2
+                and bool(orientation_positions)
+                and bool(request_positions)
+                and all(position < request_positions[0] for position in chat_positions)
+            )
         )
         fallback_ok = (
             len(request_calls) == 1
@@ -1232,11 +1322,13 @@ class GuidedFirstAssignmentAsksUsefulQuestionsScenario(BehaviorMicroScenario):
         ) if self.requires_fallback_copy else not fallback_calls
         passed = (
             has_bounded_choices
-            and 1 <= len(orientation_calls) <= 4
+            and not rejected_request_calls
+            and len(orientation_calls) == 1
+            and orientation_batches_ok
             and len(request_positions) == 1
             and request_positions[0] > orientation_positions[-1]
             and not work_calls
-            and not chat_calls
+            and framing_order_ok
             and fallback_ok
         )
         self.record_task_result(
@@ -1251,6 +1343,7 @@ class GuidedFirstAssignmentAsksUsefulQuestionsScenario(BehaviorMicroScenario):
                     f"pending_questions={len(requests)}, "
                     f"option_counts={[len(request.options_json) for request in requests]}, "
                     f"orientation_tools={[call.tool_name for call in orientation_calls]}, "
+                    f"orientation_batches={len(orientation_completion_ids)}, "
                     f"premature_tools={[call.tool_name for call in work_calls]}, "
                     f"fallback_emails={len(fallback_calls)}, chat_messages={len(chat_calls)}."
                 )

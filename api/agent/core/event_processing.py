@@ -473,6 +473,8 @@ def _deep_work_update_gate_context(
     if expected_message_tool is None:
         return None
     latest_user_text = latest_inbound.body or ""
+    if _user_asked_for_setup_question(latest_user_text):
+        return None
     require_kickoff = latest_inbound.conversation.channel == CommsChannel.DISCORD and _is_explicit_research_request(latest_user_text)
 
     prior_calls = PersistentAgentToolCall.objects.filter(
@@ -1685,13 +1687,19 @@ def _source_reconciliation_parameters(directive: str) -> dict[str, Any]:
     return {
         "type": "object",
         "properties": {
+            "rows": {
+                "type": "array",
+                "items": {},
+                "maxItems": 0,
+                "description": "Use []; this source already has structured arrays, so derive fields directly from __tool_results.",
+            },
             "sql": {
                 "type": "string",
                 "description": directive + " Start with source-derived model DDL/upserts; end with bounded task-relevant rows. No pre-read or copied values.",
             },
             "will_continue_work": {"type": "boolean", "const": True},
         },
-        "required": ["sql", "will_continue_work"],
+        "required": ["rows", "sql", "will_continue_work"],
         "additionalProperties": False,
     }
 

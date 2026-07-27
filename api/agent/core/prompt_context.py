@@ -11,7 +11,7 @@ from datetime import datetime, timezone, timedelta
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from functools import partial
 from time import monotonic
-from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Set, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple
 from uuid import UUID
 
 from django.core.exceptions import ObjectDoesNotExist
@@ -109,7 +109,14 @@ from ..tools.sqlite_skills import format_recent_skills_for_prompt
 from ..tools.tool_manager import ensure_default_tools_enabled, ensure_skill_tools_enabled, get_enabled_tool_definitions
 from ..system_skills.discovery import format_system_skill_discovery_prompt
 from .tool_results import PREVIEW_TIER_COUNT, SPAWN_WEB_TASK_RESULT_TOOL_NAME, ToolCallResultRecord, ToolResultPromptInfo, build_short_result_id_map, entity_name_stem, prepare_tool_results_for_prompt, source_array_entity_groups
-from .link_references import is_source_bearing_tool, pair_prompt_urls, rewrite_prompt_urls
+from .link_references import (
+    LinkReferenceResolutionError,
+    extract_http_urls,
+    is_source_bearing_tool,
+    pair_prompt_urls,
+    resolve_link_references,
+    rewrite_prompt_urls,
+)
 from .daily_limit_mode import (
     CREDIT_MESSAGE_ONLY_ALLOWED_TOOL_NAMES_TEXT,
     is_credit_message_only_mode,
@@ -140,10 +147,11 @@ CONTACT_PROMPT_INLINE_LIMIT = 25
 CONTACT_PROMPT_SAMPLE_LIMIT = 10
 LINK_REFERENCE_PROMPT_NOTE = (
     "## Link References (CRITICAL)\n\n"
-    "Sources may pair `raw URL [link_ref: $[link:L…]]`: the raw URL is evidence; its adjacent token is only a "
-    "display/fetch handle. Keep pairs attached. Final Markdown is exactly `[item]($[link:LEXACT])`; HTML uses "
-    "`<a href=\"$[link:LEXACT]\">item</a>`; URL tools use `{\"url\":\"$[link:LEXACT]\"}`. The token is the whole "
-    "destination. Never encode, edit, reassign, combine, or guess it; never put it inside `[]` or search text. "
+    "Sources may pair `raw URL [link_ref: $[link:L…]]`: the raw URL is evidence; its adjacent token is a stable "
+    "link handle. Keep pairs attached. Final Markdown is exactly `[item]($[link:LEXACT])`; HTML uses "
+    "`<a href=\"$[link:LEXACT]\">item</a>`. For a URL tool, copy the exact raw URL shown beside the handle; never pass "
+    "the paired `raw URL [link_ref: …]` text. A handle used as a destination must be the whole destination. Never "
+    "encode, edit, reassign, combine, or guess it; never put it inside `[]` or search text. "
     "SQLite source rows derive raw URLs from __tool_results; for an unavoidable agent-authored URL value, pass the "
     "exact handle through a named binding, never SQL text. Items without a token stay plain; source/feed tokens link only themselves. A report "
     "is unfinished while a token-backed entity name is plain: `Atlas URL [link_ref: $[link:L1]]` becomes "
@@ -599,6 +607,88 @@ def _tool_result_status_is_ok(result: object) -> bool:
     return isinstance(payload, dict) and str(payload.get("status") or "").casefold() == "ok"
 
 
+def _source_url_from_tool_params(
+    agent: PersistentAgent,
+    tool_name: str,
+    tool_params: object,
+) -> Optional[str]:
+    if not is_source_bearing_tool(tool_name) or not isinstance(tool_params, dict):
+        return None
+    raw_url = tool_params.get("url")
+    if not isinstance(raw_url, str):
+        return None
+    try:
+        resolved_url = resolve_link_references(raw_url, agent)
+    except LinkReferenceResolutionError:
+        return None
+    urls = extract_http_urls(resolved_url)
+    return urls[0] if len(urls) == 1 else None
+
+
+def _register_source_url_references(
+    agent: PersistentAgent,
+    records: Iterable[ToolCallResultRecord],
+) -> None:
+    source_urls = tuple(dict.fromkeys(record.source_url for record in records if record.source_url))
+    if source_urls:
+        rewrite_prompt_urls("\n".join(source_urls), agent, create=True)
+
+
+def _active_source_batch(
+    steps: Sequence[PersistentAgentStep],
+    messages: Sequence[PersistentAgentMessage],
+) -> tuple[Optional[str], Optional[datetime]]:
+    """Identify the current request boundary for source results.
+
+    One user job can require several LLM completions to fetch all of its sources.
+    Completion IDs therefore make a poor set boundary: only the final fetch stays
+    current. The processing run is the fallback boundary, while a newer inbound
+    message starts a new request inside that run.
+    """
+    processing_steps = [
+        step
+        for step in steps
+        if (
+            (system_step := getattr(step, "system_step", None)) is not None
+            and system_step.code == PersistentAgentSystemStep.Code.PROCESS_EVENTS
+        )
+    ]
+    if not processing_steps:
+        return None, None
+
+    processing_step = max(processing_steps, key=lambda step: step.created_at)
+    marker_id = str(processing_step.id)
+    started_at = processing_step.created_at
+    inbound_messages = [
+        message
+        for message in messages
+        if not message.is_outbound and message.timestamp >= started_at
+    ]
+    if inbound_messages:
+        latest_inbound = max(inbound_messages, key=lambda message: message.timestamp)
+        marker_id = str(latest_inbound.id)
+        started_at = latest_inbound.timestamp
+    return marker_id, started_at
+
+
+def _source_batch_id_for_tool_result(
+    *,
+    tool_name: str,
+    created_at: datetime,
+    completion_id: object,
+    active_batch_id: Optional[str],
+    active_started_at: Optional[datetime],
+) -> Optional[str]:
+    if (
+        active_batch_id
+        and active_started_at
+        and created_at >= active_started_at
+        and is_source_bearing_tool(tool_name)
+    ):
+        return active_batch_id
+    return str(completion_id) if completion_id else None
+
+
 def _build_browser_task_tool_result_record(
     task: BrowserUseAgentTask,
     result_step: Optional[BrowserUseAgentTaskStep],
@@ -683,15 +773,38 @@ def _get_sqlite_guidance() -> str:
     """Return the compact contract for data retrieval, storage, and analysis."""
     return (
         "## SQLite Data\n\n"
-        "Named tables are the world model: query, don't remember; fetch stale/missing facts only. Tool results don't update it. "
-        "SOURCE WRITES: structured rows derive set-wise from __tool_results where is_current_batch=1 plus the shown tool_name; source_batch_id preserves history. Unstructured result_text is plain text, never json_each(result_text). If its preview is incomplete, inspect that source batch once; then pass every interpreted entity in sqlite_batch's top-level rows argument keyed by result_id, with only exact known source URLs. Use `INSERT ... SELECT json_extract(r.value,'$.field'),json_extract(r.value,'$.source_url'),json_extract(r.value,'$.result_id') FROM json_each(:rows) r`, storing result_id or source_url as row provenance. Never put tool-returned facts in VALUES or visible facts/URLs in SQL literals, parse prose in SQL, or stage placeholder NULLs. "
-        "SCHEMA FIRST: for an existing table whose full current definition is absent, search the catalog by a task-relevant name fragment; listing every table is a failure. Then make a separate metadata-only call with no target-table read and read its result. Never combine PRAGMA/schema inspection with a target-table SELECT. Only afterward query using confirmed tables, columns, and join keys. Never repeat an unchanged SELECT in the same turn; use the rows already returned. After a schema error inspect, don't guess again; for external SQL, roll back or reconnect before another statement. "
-        "Same-batch, same-shaped tool results are one set. FIRST SHOT: in one sqlite_batch call, evolve the keyed model, import that set, and run the decision/evidence SELECTs needed next, including supporting rows and URLs. Use one INSERT over is_current_batch plus tool_name; never loop over result_id or include every historical call to a generic tool. If the shape is unknown, use at most two calls: one batch-wide inspection, then one complete model/import/decision batch. Shape imports as `FROM __tool_results t, json_each(t.result_json,'$.content.items') item WHERE t.is_current_batch=1 AND t.tool_name=:tool`; use the actual array key. Extract item fields, including item URLs, from item.value; derive only actual parent fields from t.result_json and provenance from t.result_id. Do not store `$[link:...]` tokens or invent source_token. "
-        "Key entities, children, relations, evidence, coverage; normalize/evolve, refresh provenance, query gaps/joins/counts/ranks. Authored values bind :name. grep_context_all/split_sections aliases expose only .value. "
-        "Different shapes may use separate statements in that batch. Custom tools may write keyed models. CTAS/TEMP is one-off. "
-        "Locate payloads with analysis_json/top_keys; http_request JSON is result_json $.content. Prefer known-path result_json, else result_text.\n\n"
+        "Named tables are the durable world model and exact logic layer. Query truth instead of remembering it; keep "
+        "entities, relations, evidence, coverage, and provenance current as the domain changes. Tool results do not "
+        "update that model.\n"
+        "CURRENT SOURCE SET: use one sqlite_batch per source shape for keyed DDL, one set-wise upsert, and the "
+        "decision/evidence SELECT. Structured JSON derives child fields from item.value across "
+        "`is_current_batch=1 AND tool_name='exact visible tool name'`; that pair is the exact set, so add no "
+        "source_url/result_id predicate. Store t.source_url/t.result_id as provenance. HTTP bodies are under $.content "
+        "and request URL at $.url. For structured JSON pass `rows=[]`: never invent, inspect, or filter result IDs. "
+        "Before a multi-source prose model write, use the one bounded set-wide inspection shown beside "
+        "the results; never import from memory or previews alone. Single-source answers may use a complete preview "
+        "directly. For prose only, bind every interpretation in mandatory top-level `rows` and join `json_each(:rows)` to __tool_results by "
+        "result_id. Store result_id/source_url provenance. Never put sourced facts, URLs, or link handles in SQL "
+        "literals. Bound fields are evidence transcription, not enrichment: preserve source specificity and omit "
+        "anything not explicitly supported; a qualitative claim never supports invented numbers, feature variants, "
+        "certification levels, integrations, or availability. "
+        "Never import or inspect siblings one result_id at a time, mix historical generic-tool calls into "
+        "the set, or rebuild a durable table for refresh. Upsert by stable key and refresh mutable fields.\n"
+        "The same batch's final SELECT computes the requested counts, joins, gaps, ranks, or other decision and "
+        "returns every supporting field/URL needed to deliver. Exclude superseded rows. On that final batch set "
+        "`will_continue_work=false` unless a specific non-SQLite action remains; deliver its rows without validating "
+        "or rereading the model. Bind authored or messy values as :name and pass each "
+        "value inside the tool call's `bindings` object; structural metadata such as an exact tool_name may be a "
+        "SQL literal.\n"
+        "For `INSERT ... SELECT ... ON CONFLICT`, put `WHERE 1=1` before `ON CONFLICT` to disambiguate SQLite. "
+        "`group_concat(DISTINCT x)` takes no separator; dedupe in a subquery when a custom separator is needed.\n"
+        "UNKNOWN EXISTING SCHEMA: call 1 only targeted sqlite_master using a meaningful domain noun from the request "
+        "(for example `%handoff%`), not a guessed table prefix; call 2 is PRAGMA table_info alone because its columns "
+        "do not exist in context until that call returns; call 3 uses only returned columns/keys. `_` is a LIKE wildcard. Never list the whole "
+        "catalog, combine schema inspection with a table read, or guess after an error. CTAS/TEMP is not memory. "
+        "json_each aliases expose key/value, not seq.\n\n"
         "Snapshots:\n"
-        "* __tool_results: result_id, source_batch_id, is_current_batch, tool_name, created_at, result_json, result_text, analysis_json, is_truncated, top_keys.\n"
+        "* __tool_results: result_id, source_batch_id, is_current_batch, tool_name, source_url, created_at, result_json, result_text, analysis_json, is_truncated, top_keys.\n"
         "* __messages: message_id, seq, timestamp, channel, is_outbound, from_address, to_address, subject, body, "
         "attachment_paths_json, latest_status, latest_error_message. Structured history only, not freshness.\n"
         "* __files: node_id, path, name, mime_type, size_bytes, updated_at. Metadata only; read_file gets known-path contents.\n"
@@ -1617,6 +1730,7 @@ def _render_prompt_context_once(
         agent,
         unified_history_group,
         config_authority,
+        is_first_run=is_first_run,
         run_cache=run_cache,
         named_model_tables=named_model_tables,
     )
@@ -1736,7 +1850,10 @@ def _render_prompt_context_once(
             non_shrinkable=True,
         )
 
-    source_model_warning = _get_unreconciled_source_model_warning(agent)
+    # First-run routing may deliberately use source evidence only to sharpen intake
+    # choices. Its dedicated block owns that decision; a model-write warning here
+    # would contradict it.
+    source_model_warning = "" if is_first_run else _get_unreconciled_source_model_warning(agent)
     if source_model_warning:
         critical_group.section_text(
             "source_model_warning",
@@ -3458,11 +3575,15 @@ def _build_unreconciled_source_model_warning(
             return ""
         if inspected_source_batch:
             return (
-                "You already inspected this source batch. Do not query raw __tool_results again. The next action must "
-                "create or evolve the durable keyed model, then query it. For fuzzy interpretation of unstructured "
-                "text, bind one JSON array keyed by result_id, include only exact known source URLs, expand it with "
-                "json_each(:rows), and store result_id or source_url as provenance; do not build literal INSERTs. Import same-shaped siblings with one set query over "
-                "tool_name or result_id IN (...), not one statement per result_id."
+                "You already inspected this complete source set; its excerpts are sufficient. Do not query raw "
+                "__tool_results again. NEXT sqlite_batch: put every interpretation in non-empty top-level `rows` "
+                "objects keyed by result_id, then create/evolve and query the durable keyed model in that same call. "
+                "The INSERT must SELECT from `json_each(:rows) r JOIN __tool_results t ON "
+                "t.result_id=json_extract(r.value,'$.result_id')`; r has no named fields. Store "
+                "t.result_id/t.source_url as provenance and read interpreted facts from `$.fields.<name>`. Include only "
+                "facts stated in the inspected evidence; omit unavailable fields instead of completing or inferring "
+                "specifics. Empty rows, sourced VALUES/literals, result_id filters, and another inspection are invalid "
+                "strategies."
             )
         return (
             "Multiple source results form a working set and remain transient. The next action must be sqlite_batch: "
@@ -3471,15 +3592,20 @@ def _build_unreconciled_source_model_warning(
             "query coverage gaps and next work. Import same-shaped siblings in one set query over source_batch_id plus tool_name or "
             "result_id IN (...), never one INSERT per result_id; use separate statements only for different entity "
             "shapes. Do not answer or act from transient results. Structured fields derive from result_json. "
-            "For prose, pass sqlite_batch's top-level rows keyed by result_id with only exact known source URLs, then use "
-            "`json_each(:rows) r`, including result_id or source_url in the model; never VALUES."
+            "For prose, pass sqlite_batch's top-level rows keyed by result_id with interpreted facts inside each "
+            "row's non-empty `fields` object, then join `json_each(:rows) r` to "
+            "__tool_results t on that result_id; this join is the complete prose work set, so do not add result_id "
+            "literals or filters. r exposes only value. Include only facts stated in the evidence; omit unavailable "
+            "fields rather than filling them in. Store t.result_id/t.source_url in the model; never VALUES or link "
+            "handles."
         )
     return (
         "Fresh source evidence is not reconciled with the named model you read. If it belongs there, the next SQLite "
         "call must use INSERT ... SELECT or UPDATE ... FROM __tool_results/json_each. Every sourced field, including IDs, "
-        "must be derived: extract structured fields directly; for prose pass sqlite_batch's top-level rows keyed by result_id with "
-        "only exact known source URLs and use "
-        "`json_each(:rows) r`, storing result_id or source_url as provenance; never VALUES; "
+        "must be derived: extract structured fields directly; for prose pass sqlite_batch's top-level rows keyed by "
+        "result_id with interpreted facts inside each row's non-empty `fields` object, and join `json_each(:rows) r` "
+        "to __tool_results t on that result_id, storing "
+        "t.result_id/t.source_url as provenance; never VALUES; "
         "only JSON paths and current result_id/tool_name may be literals. "
         "Refresh mutable/provenance fields, add relations, and query the model in that batch. Otherwise answer it directly."
     )
@@ -3656,17 +3782,48 @@ def _get_first_run_welcome_message_instruction(
     return (
         "This is your first run.\n"
         f"Contact channel: {welcome_target.channel} at {welcome_target.address}.\n\n"
-
-        "If there is no concrete task to do yet, your first action should be one concise welcome message.\n"
-        "Broad ongoing/substantial first work missing material audience, scope, volume, or success boundaries: "
-        "this intake overrides Work Updates. Do not acknowledge or begin the task. Orient silently with at most four read-only public calls in two rounds, using empty response content, then ask the material decision questions together via request_human_input; if questions were requested first, ask now. Use the current inbound channel and do no other work. "
-        "For prospecting or list research, naming the requester or their product does not define the target: absent target population, qualification rule, or requested quantity still requires intake. Orientation evidence refines the choices; it never authorizes silently choosing them. "
-        "Web: use one native request_human_input call containing each independent, decision-changing question needed to start responsibly—often a small handful, but never a numeric quota or a preference survey. Give each question the fewest evidence-informed choices that cover the real paths, usually 2-3 and never more than 6; one may be Other. Choices are mandatory for this intake even when orientation cannot identify the entity: offer plausible interpretations or concrete next paths rather than a free-text-only question. They stay pending if the user leaves; if a separate preferred email/SMS exists, follow the result guidance to mirror every question and its exact choices there. Email/SMS: send the same numbered questions and choices there. No prose substitute. During later work, ask again only when new evidence exposes a consequential choice you cannot safely resolve. "
-        "Otherwise start the task. Finish ordinary work silently and send one result; Discord research and "
-        "substantial work follow Work Updates, never an empty greeting.\n\n"
-
-        "Welcome with first name; be warm, specific, concise. Match their energy; use contractions; avoid "
-        "\"I'm here to help\" or \"please let me know\", and do not ask when the task is already clear.\n"
+        "Choose one route before acting:\n"
+        "1. No concrete task: send one concise welcome. Use their first name, match their energy, and avoid "
+        "\"I'm here to help\" or \"please let me know\".\n"
+        "2. Broad substantial work missing a material audience, scope, volume, or success boundary: use GUIDED "
+        "INTAKE below. This route is not executable work and overrides Work Updates.\n"
+        "3. Otherwise: start the task. Finish ordinary work silently and send one result; Discord research and "
+        "substantial work follow Work Updates.\n\n"
+        "GUIDED INTAKE\n"
+        "- Prospecting/list research is still broad when only the requester or product is named; target population, "
+        "qualification, and quantity are separate decisions. Treat the named company/product as the seller; do not ask "
+        "the requester to restate which company is theirs.\n"
+        "- If the user forbids research, asks for questions before research, or names no entity/source worth "
+        "orienting on, ask now; do not research generic process advice. Otherwise make exactly one focused read-only "
+        "public lookup. Any result ends orientation: ask immediately, with no second lookup or sequential top-up. A "
+        "failed or irrelevant result becomes an interpretation/next-path choice, never a reason to keep searching for "
+        "certainty. Count across the whole first-run cycle: if history already shows the orientation lookup, your next "
+        "and only action is request_human_input, regardless of result quality. Evidence sharpens "
+        "the choices; it never authorizes silently deciding a missing boundary. One concise "
+        "note that you are taking a quick look is optional; after evidence, one brief framing sentence is also acceptable "
+        "only when it materially sharpens the cards. Neither may claim the deliverable has started. Otherwise orientation "
+        "has no response content, SQLite, config, or deliverable.\n"
+        "- Then make exactly one request_human_input tool call, alone with empty response content, and wait. Put all "
+        "cards in that call's requests array; never emit several request_human_input tool calls. Use one card for each "
+        "unresolved independent decision; do not "
+        "collapse materially different decisions into one umbrella card or silently default one that substantially "
+        "changes the work or output. First decompose the task into independently answerable decisions; a catch-all "
+        "question such as 'what kind of thing should I build?' is not a substitute for those decisions. Across "
+        "assignments the right count may be none, one, several, or more than three; this route applies only when at "
+        "least one material decision remains. Act like a diligent consultant. "
+        "Never pad to a quota or make a preference survey. Later, ask again "
+        "only if new evidence exposes a "
+        "consequential choice you cannot safely resolve.\n"
+        "- Each card records one choice. Never say 'select all.' Give the fewest evidence-informed choices that cover "
+        "the real paths, usually 2-3; 8 is the hard tool limit. One may be Other. Before calling, preflight every "
+        "question object: each initial-intake card must contain at least 2 non-empty options, and every option object "
+        "must have a non-empty title and a non-empty one-sentence description. Never mix free-text fields into this "
+        "batch. If research cannot identify the entity, turn that ambiguity into choices such as company, "
+        "product/brand, or internal project; omit a non-blocking question rather than leaving it open-ended.\n"
+        "- Web uses native cards. They stay pending if the user leaves. Follow the tool result guidance to mirror "
+        "every exact question and choice to a separate preferred email/SMS when one exists: keep the card call "
+        "continuing, send the mirror next, then stop. Email/SMS gets the same numbered questions and choices. Prose "
+        "never substitutes for the cards.\n"
     )
 
 
@@ -3712,8 +3869,8 @@ def _get_system_instruction(
             f"## Implied Send → {display_name}\n\n"
             "Text is user-facing: use only for questions, blockers, config changes, findings, finals, or deep-work updates. "
             "First-assignment choices use request_human_input only. "
-            f"Work Updates require explicit `{tool_example}` calls; text beside work tools is not delivery. "
-            "Ordinary work uses tools, no text. Never refetch a successful URL/result. "
+            f"With any tool call, leave response content empty; use explicit `{tool_example}` for a message that must "
+            "accompany tools. Ordinary work uses tools, no text. Never refetch a successful URL/result. "
             "Text-only messages auto-send and stop; add \"CONTINUE_WORK_SIGNAL\" alone to continue. "
             "To reach someone else, use explicit tools: "
             f"- `{tool_example}` ← what implied send does for you\n"
@@ -3725,7 +3882,7 @@ def _get_system_instruction(
             "Response structure: explicit sends for Work Updates; otherwise tools while working. Messages handle questions, findings, finals, or evidence updates; request_human_input handles tracked blockers; empty response sleeps. "
             "Use CONTINUE_WORK_SIGNAL only after a message that must continue."
         )
-        tool_calls_note = "Text + tools may carry user-facing evidence, never status narration. "
+        tool_calls_note = "Response content with tool calls is user-facing; keep it empty and use explicit sends. "
         stop_explicit_note = ""
     else:
         delivery_context = (
@@ -3780,13 +3937,16 @@ def _get_system_instruction(
     )
     work_updates_guidance = (
         "## Work Updates (CRITICAL)\n\n"
-        "FIRST-RUN INTAKE OVERRIDES ACKNOWLEDGMENT: broad substantial first work missing a material audience, scope, volume, or success bound is intake, not executable work. “Find/help me find prospects/leads for this company/product” is broad: the requester/product is not the target, and orientation evidence informs choices rather than silently resolving missing target population, qualification, or quantity. Orient silently with at most four read-only calls using empty content, then call request_human_input alone with the material decision questions and wait. Question count follows the real ambiguity: no numeric quota, no cosmetic survey, and no arbitrary one-question cap. Until answered: no kickoff, fifth call, SQLite, config, deliverable, or prose question. "
-        "After required intake—or when sufficiently bounded—substantial work includes investment diligence, multi-entity comparisons, list building, and research whose "
-        "requested scope clearly needs several sources or tool rounds. Before it, send one brief "
+        "First-run intake and executable work are mutually exclusive. Follow the first-run intake block before any "
+        "acknowledgment, work update, SQLite write, or deliverable. For an executable task, substantial work includes "
+        "investment diligence, multi-entity comparisons, list building, and research whose requested scope clearly "
+        "needs several sources or tool rounds. Before it, send one brief "
         "same-channel acknowledgment as the entire first response, with will_continue_work=true. Say what you are "
         "taking on and the first useful result you will bring back; start the work in the next response. "
         "Discord research always gets this acknowledgment. If substantial work continues after a meaningful evidence "
-        "batch, send one concise update with the strongest finding and what remains; otherwise finish without another update. "
+        "batch, send one concise update with the strongest finding and what remains; otherwise finish without another "
+        "update. A decision-ready tool result means the work does not continue: deliver it next without a progress "
+        "note or validation query. "
         "Short, one-shot work gets no pre-work status. "
         "Inbound: email=send_email in-thread, SMS=send_sms, web=send_chat_message, Discord=send_discord_message. "
         "Only delivery counts; repair rejected/wrong channel first. Never announce phases, narrate tools, or repeat updates. "
@@ -3978,67 +4138,12 @@ def _get_system_instruction(
         # Only instruct the first outreach if the user can actually receive it.
         # Signup preview gets a single first email before verification is required.
         if welcome_target is not None:
-            welcome_instruction = (
-                _get_first_run_welcome_message_instruction(welcome_target=welcome_target)
-                + "\n\n"
-
-                "## Then calibrate setup to the task\n\n"
-
-                "**Batch aggressively.** Every sqlite_batch call has overhead—combine as many operations as possible into one call.\n"
-                "Use sqlite_batch for durable analysis data and for configuration only when the user is actually changing "
-                "the agent's ongoing job:\n"
-                "```\n"
-                "sqlite_batch(sql=\"UPDATE __agent_config SET charter='Research competitor pricing for CRM tools', schedule=NULL WHERE id=1;\")\n"
-                "```\n"
-                "No concrete task yet? Send one welcome and stop. Do not create a placeholder schedule or do setup work "
-                "just to stay busy.\n\n"
-
-                "### R2: Charter Construction\n"
-                "```\n"
-                "charter = '{what} {scope} {action} {criteria}?'\n"
-                "  WHERE what     = verb + object (\"Track bitcoin\", \"Scout startups\", \"Compile list\")\n"
-                "  WHERE scope    = for whom / which subset (\"for user\", \"enterprise only\", \"downtown Seattle\")\n"
-                "  WHERE action   = ongoing behavior (\"Monitor daily\", \"Alert on changes\", \"Summarize weekly\")\n"
-                "  WHERE criteria = quality signals (\"early traction, strong teams\" | \"growing stars, commercial potential\")\n"
-                "```\n\n"
-
-                "### R3: Schedule Selection\n"
-                "```\n"
-                "WHEN task.type == 'one_time'           => schedule = NULL\n"
-                "WHEN task.type == 'monitoring'         => schedule = daily|every_6h unless user asked faster\n"
-                "WHEN task.type == 'research|scouting'  => schedule = weekly|biweekly\n"
-                "WHEN task.type == 'alerting'           => schedule = frequent_check\n"
-                "WHEN task.type == 'digest|summary'     => schedule = end_of_period\n"
-                "\n"
-                "Frequency reference:\n"
-                "  hourly:    '0 * * * *'       every_6h:  '0 */6 * * *'\n"
-                "  daily_am:  '0 9 * * *'       daily_pm:  '0 18 * * *'\n"
-                "  weekly:    '0 9 * * 1'       biweekly:  '0 9 * * 1,4'\n"
-                "```\n\n"
-                "Only change charter or schedule when the user asked for persistent behavior, monitoring, alerts, "
-                "or a recurring digest. For ordinary one-off lookups, research answers, and scheduled runs already "
-                "defined by the current charter, leave charter and schedule unchanged.\n\n"
-
-                "### R5: Continuation Logic\n"
-                "```\n"
-                "WHEN actionable_task AND known_noncredential_api => http_request(api_url), will_continue_work=true\n"
-                "WHEN actionable_task              => search_tools('{domain}')\n"
-                "WHEN role_only OR no_task         => will_continue_work=false, stop\n"
-                "```\n"
-                "**Role vs Task:** 'You are a Talent Scout' = role (no immediate action). 'Find 10 AI startups' = task (work to do now).\n\n"
-
-                "### Execution Template\n"
-                "Choose the smallest useful first action:\n"
-                "```\n"
-                "IF has_actionable_task:\n"
-                "  needed_tool_call(s) with NO text; then one final useful message\n"
-                "  update __agent_config only if the user changed ongoing behavior\n"
-                "ELSE:\n"
-                f"  {welcome_target.send_tool_name}(concise welcome, will_continue_work=false)\n"
-                "```\n"
-                "Schedule: when in doubt, leave schedule NULL. Stopping without a schedule is correct for one-time work.\n"
+            # Keep the stable core first for provider prefix caching, and put the active
+            # first-run mode next to the current work rather than thousands of tokens away.
+            base_prompt += (
+                "\n\n"
+                + _get_first_run_welcome_message_instruction(welcome_target=welcome_target)
             )
-            return welcome_instruction + "\n\n" + base_prompt
 
     return base_prompt
 
@@ -4394,6 +4499,7 @@ def _get_unified_history_prompt(
     history_group,
     config_authority: _ConfigAuthorityResolver,
     *,
+    is_first_run: bool = False,
     run_cache: PromptRunCache | None = None,
     named_model_tables: Set[str] | None = None,
 ) -> Tuple[Set[str], bool, Tuple[str, ...]]:
@@ -4480,6 +4586,7 @@ def _get_unified_history_prompt(
         .order_by("-timestamp")[:unified_fetch_span]
     )
     structured_events: List[Tuple[datetime, str, dict]] = []  # (timestamp, event_type, components)
+    active_source_batch_id, active_source_started_at = _active_source_batch(steps, messages)
 
     step_candidates: List[PersistentAgentStep] = []
     for step in steps:
@@ -4550,7 +4657,24 @@ def _get_unified_history_prompt(
                     tool_name=row.get("tool_name") or "",
                     created_at=step.created_at,
                     result_text=result_text,
-                    source_batch_id=str(completion_id) if completion_id else None,
+                    source_batch_id=_source_batch_id_for_tool_result(
+                        tool_name=row.get("tool_name") or "",
+                        created_at=step.created_at,
+                        completion_id=completion_id,
+                        active_batch_id=active_source_batch_id,
+                        active_started_at=active_source_started_at,
+                    ),
+                    source_url=_source_url_from_tool_params(
+                        agent,
+                        row.get("tool_name") or "",
+                        row.get("tool_params"),
+                    ),
+                    will_continue_work=(
+                        row["tool_params"].get("will_continue_work")
+                        if isinstance(row.get("tool_params"), dict)
+                        and isinstance(row["tool_params"].get("will_continue_work"), bool)
+                        else None
+                    ),
                 )
             )
         missing_parent_ids = set(tool_call_parent_ids.values()) - {record.step_id for record in tool_call_records}
@@ -4558,7 +4682,14 @@ def _get_unified_history_prompt(
             parent_tool_call_results = (
                 PersistentAgentToolCall.objects
                 .filter(step_id__in=missing_parent_ids)
-                .values("step_id", "result", "tool_name", "step__created_at", "step__completion_id")
+                .values(
+                    "step_id",
+                    "result",
+                    "tool_name",
+                    "tool_params",
+                    "step__created_at",
+                    "step__completion_id",
+                )
             )
             for row in parent_tool_call_results:
                 result_text = row.get("result") or ""
@@ -4573,10 +4704,28 @@ def _get_unified_history_prompt(
                         tool_name=row.get("tool_name") or "",
                         created_at=row["step__created_at"],
                         result_text=result_text,
-                        source_batch_id=str(completion_id) if completion_id else None,
+                        source_batch_id=_source_batch_id_for_tool_result(
+                            tool_name=row.get("tool_name") or "",
+                            created_at=row["step__created_at"],
+                            completion_id=completion_id,
+                            active_batch_id=active_source_batch_id,
+                            active_started_at=active_source_started_at,
+                        ),
+                        source_url=_source_url_from_tool_params(
+                            agent,
+                            row.get("tool_name") or "",
+                            row.get("tool_params"),
+                        ),
+                        will_continue_work=(
+                            row["tool_params"].get("will_continue_work")
+                            if isinstance(row.get("tool_params"), dict)
+                            and isinstance(row["tool_params"].get("will_continue_work"), bool)
+                            else None
+                        ),
                     )
                 )
         if tool_call_records:
+            _register_source_url_references(agent, tool_call_records)
             newest_record = max(tool_call_records, key=lambda record: record.created_at)
             newest_completion_id = tool_call_completion_ids.get(newest_record.step_id)
             if newest_completion_id:
@@ -4694,6 +4843,16 @@ def _get_unified_history_prompt(
                 continue
             if result_info:
                 components["result_meta"] = result_info.meta
+                if (
+                    is_first_run
+                    and str(s.id) in fresh_tool_call_step_ids
+                    and is_source_bearing_tool(tc.tool_name)
+                ):
+                    components["result_meta"] += (
+                        "\nFIRST-RUN ROUTE CHECK: if this was GUIDED INTAKE orientation, it consumed the one lookup. "
+                        "Regardless of relevance, call request_human_input next and do not look up again. "
+                        "If this is executable route 3, continue normally."
+                    )
                 if result_info.preview_text:
                     key = "result" if result_info.is_inline else "result_preview"
                     components[key] = result_info.preview_text

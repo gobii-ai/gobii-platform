@@ -144,12 +144,19 @@ def _grep_context_all(string: Optional[str], pattern: str, context_chars: int = 
     if string is None or pattern is None:
         return None
     try:
-        results = []
-        for i, match in enumerate(re.finditer(pattern, string)):
+        ranges: list[tuple[int, int]] = []
+        for i, match in enumerate(re.finditer(pattern, string, re.IGNORECASE | re.MULTILINE)):
             if i >= max_matches:
                 break
             start = max(0, match.start() - context_chars)
             end = min(len(string), match.end() + context_chars)
+            if ranges and start <= ranges[-1][1]:
+                ranges[-1] = (ranges[-1][0], max(ranges[-1][1], end))
+            else:
+                ranges.append((start, end))
+
+        results = []
+        for start, end in ranges:
             snippet = string[start:end].replace('\n', ' ')
             prefix = "..." if start > 0 else ""
             suffix = "..." if end < len(string) else ""

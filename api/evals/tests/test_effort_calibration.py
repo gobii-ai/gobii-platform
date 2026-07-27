@@ -388,6 +388,7 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
             (True, "Seven founders identified.\nOne company has an evidence-backed nondisclosure."),
             (True, "Seven of eight founders were identified; the remaining founder is not publicly disclosed."),
             (True, "I found founders for seven of the eight portfolio companies; Umbra's is not publicly disclosed."),
+            (True, "Here are the current portfolio companies, **Covered 8/8**:"),
             (False, "Here you go."),
             (False, "1 founder identified."),
             (False, "All 8 founders identified."),
@@ -900,11 +901,26 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
             _first_shot_source_phase_failures([fetch, work_update, sqlite, send]),
             [],
         )
+        model_logic = call(
+            "sqlite_batch",
+            "model-logic",
+            {"sql": "SELECT status, due_on, due_on < date('now') AS overdue FROM workstreams"},
+        )
+        self.assertEqual(
+            _first_shot_source_phase_failures([fetch, sqlite, model_logic, send]),
+            [],
+        )
+        source_reread = call(
+            "sqlite_batch",
+            "source-reread",
+            {"sql": "SELECT result_json FROM __tool_results"},
+        )
         cases = (
             ([sqlite, fetch, send], "expected fetch"),
             ([fetch, fetch, sqlite, send], "expected one exact CRM snapshot fetch"),
             ([failed_fetch, sqlite, send], "execution status error"),
             ([fetch, sqlite, send, send], "terminal send"),
+            ([fetch, sqlite, source_reread, send], "reread source results"),
         )
         for calls, expected_failure in cases:
             with self.subTest(expected_failure=expected_failure):
@@ -989,7 +1005,7 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
                     "different account", "; ".join(sqlite_evals._domain_refresh_state_failures("agent")),
                 )
 
-    def test_multi_result_sqlite_scorer_rejects_extra_or_hand_built_queries(self):
+    def test_multi_result_sqlite_scorer_rejects_retry_loops_or_hand_built_queries(self):
         scenario, recorded = SqliteMultiResultWebSynthesisScenario(), []
         scenario.record_task_result = lambda *args, **kwargs: recorded.append((args, kwargs))
         aggregate_sql = (
@@ -1003,10 +1019,11 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
                 _eval_tool_call("sqlite_batch", {"sql": aggregate_sql}),
                 _eval_tool_call("sqlite_batch", {"sql": aggregate_sql}),
                 _eval_tool_call("sqlite_batch", {"sql": aggregate_sql}),
+                _eval_tool_call("sqlite_batch", {"sql": aggregate_sql}),
             ],
         ):
             self.assertFalse(scenario._record_sqlite_usage("run", after=None, task_name="verify"))
-        self.assertIn("sqlite_batch calls 3 > 2", recorded[-1][1]["observed_summary"])
+        self.assertIn("sqlite_batch calls 4 > 3", recorded[-1][1]["observed_summary"])
 
         rejected = _eval_tool_call(
             "sqlite_batch", {"sql": "SELECT result_json FROM __tool_results WHERE result_id IN ('r1')"},
@@ -2433,7 +2450,7 @@ class FirstRunPromptCalibrationTests(TestCase):
         self.assertIn("enabled tool fits -> use directly", system_prompt)
         self.assertIn("credential-returning API -> search_tools('secure credential delegation') first", system_prompt)
         self.assertIn("named model + explicit fresh non-secret source/URL -> http_request only, no text/send/plan; WAIT", system_prompt)
-        self.assertIn("query, don't remember", system_prompt)
+        self.assertIn("Query truth instead of remembering it", system_prompt)
         self.assertIn("data/api/feed/file URL -> http_request", system_prompt)
         self.assertIn("reconcile+SELECT there before use", system_prompt)
         self.assertIn("spawn_web_task only after access/render/login blockage", system_prompt)
@@ -2455,6 +2472,10 @@ class FirstRunPromptCalibrationTests(TestCase):
         )
         self.assertIn(
             "If substantial work continues after a meaningful evidence batch",
+            system_prompt,
+        )
+        self.assertIn(
+            "A decision-ready tool result means the work does not continue",
             system_prompt,
         )
         self.assertIn(

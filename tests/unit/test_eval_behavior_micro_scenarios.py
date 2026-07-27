@@ -59,7 +59,6 @@ from api.evals.scenarios.behavior_micro import (
     all_requests_have_options,
     has_single_recipient_request,
     planning_requests_are_bounded,
-    tool_call_result_is_skipped,
     get_agent_config_mutation_calls_for_run,
     get_forbidden_calls_before_end_planning,
     get_common_use_case_tool_calls_for_run,
@@ -1092,12 +1091,21 @@ class BehaviorMicroHelperTests(TestCase):
             "SELECT stage,owner,next_action FROM accounts WHERE account_id='acct-aster-042';"
             "SELECT status,owner,due_on FROM workstreams WHERE account_id='acct-aster-042';"
         )
+        current_key_reads = imports + (
+            "SELECT account_id,stage,owner FROM accounts WHERE account_id IN "
+            "(SELECT json_extract(j.value,'$.account_id') FROM __tool_results r,"
+            "json_each(r.result_json,'$.content.accounts') j WHERE r.is_current_batch=1);"
+            "SELECT workstream_id,account_id,status,owner FROM workstreams WHERE account_id IN "
+            "(SELECT json_extract(j.value,'$.account_id') FROM __tool_results r,"
+            "json_each(r.result_json,'$.content.accounts') j WHERE r.is_current_batch=1);"
+        )
         count_only = imports + "SELECT count(*) FROM accounts; SELECT count(*) FROM workstreams;"
         unlinked_reads = imports + "SELECT stage FROM accounts; SELECT status FROM workstreams;"
 
         self.assertEqual(_source_relationship_read_failures([row_reads], "accounts", "workstreams"), [])
         self.assertEqual(_source_relationship_read_failures([joined_read], "accounts", "workstreams"), [])
         self.assertEqual(_source_relationship_read_failures([bounded_reads], "accounts", "workstreams"), [])
+        self.assertEqual(_source_relationship_read_failures([current_key_reads], "accounts", "workstreams"), [])
         self.assertIn(
             "did not return decision rows",
             _source_relationship_read_failures([count_only], "accounts", "workstreams")[0],
@@ -2324,10 +2332,6 @@ class BehaviorMicroHelperTests(TestCase):
         self.assertTrue(planning_requests_are_bounded([free_text]))
         self.assertFalse(planning_requests_are_bounded([free_text, free_text]))
         self.assertTrue(planning_requests_are_bounded([options] * 4))
-
-    def test_skipped_eval_chat_call_is_not_user_visible(self):
-        self.assertTrue(tool_call_result_is_skipped(SimpleNamespace(result='{"skipped": true}')))
-        self.assertFalse(tool_call_result_is_skipped(SimpleNamespace(result='{"status": "ok"}')))
 
     def test_request_human_input_eval_tool_check_accepts_valid_options_or_free_text(self):
         valid_single = SimpleNamespace(

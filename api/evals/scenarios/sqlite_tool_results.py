@@ -33,6 +33,7 @@ from api.models import (
     PersistentAgent,
     PersistentAgentCompletion,
     PersistentAgentEnabledTool,
+    PersistentAgentMessage,
     PersistentAgentStep,
     PersistentAgentSystemStep,
     PersistentAgentToolCall,
@@ -312,10 +313,30 @@ def _first_shot_source_phase_failures(calls, *, expected_url=DOMAIN_REFRESH_URL)
     ]
     failures = _tool_attempt_failures(fetches, "Source fetch")
     failures.extend(_tool_attempt_failures(sends, "Source workflow message"))
+    extra_model_reads = sqlite_calls[1:]
+    extra_read_failures = []
+    for call in extra_model_reads:
+        sql = str((call.tool_params or {}).get("sql") or "")
+        if (
+            "__tool_results" in _structural_sql(sql).casefold()
+            or source_derived_model_mutation_tables((sql,))
+            or not re.search(r"\bselect\b", sql, re.I)
+        ):
+            extra_read_failures.append(
+                "a follow-up SQLite call reread source results or mutated the model instead of applying model-only logic"
+            )
+
+    core_names = [call.tool_name for call in core_calls]
+    valid_core_order = (
+        len(core_names) >= 3
+        and core_names[0] == "http_request"
+        and core_names[-1] == "send_chat_message"
+        and all(name == "sqlite_batch" for name in core_names[1:-1])
+    )
     failures.extend(message for failed, message in (
         (
-            [call.tool_name for call in core_calls] != ["http_request", "sqlite_batch", "send_chat_message"],
-            f"expected fetch, one SQLite batch, then one terminal send; found {[call.tool_name for call in calls]}",
+            not valid_core_order,
+            f"expected fetch, SQLite model work, then one terminal send; found {[call.tool_name for call in calls]}",
         ),
         (
             len(fetches) != 1
@@ -323,12 +344,16 @@ def _first_shot_source_phase_failures(calls, *, expected_url=DOMAIN_REFRESH_URL)
             != expected_url.rstrip("/"),
             "expected one exact CRM snapshot fetch",
         ),
-        (len(sqlite_calls) != 1, f"expected one SQLite batch, found {len(sqlite_calls)}"),
+        (
+            not 1 <= len(sqlite_calls) <= 2,
+            f"expected one import/decision batch and at most one model-logic read, found {len(sqlite_calls)} SQLite calls",
+        ),
         (
             len(terminal_sends) != 1,
             f"expected one successful terminal send, found {len(terminal_sends)} terminal send attempt(s)",
         ),
     ) if failed)
+    failures.extend(extra_read_failures)
 
     completion_ids = [getattr(getattr(call, "step", None), "completion_id", None) for call in core_calls]
     if any(completion_id is None for completion_id in completion_ids):
@@ -375,6 +400,31 @@ def _source_write_effect_failures(calls, expected_tables: Iterable[str]) -> list
     ]
 
 
+def _modeled_source_urls(agent_id: str, table_names: Iterable[str]) -> set[str]:
+    urls = set()
+    with agent_sqlite_db(str(agent_id)) as db_path:
+        conn = open_guarded_sqlite_connection(db_path)
+        try:
+            for table_name in table_names:
+                escaped_table = table_name.replace('"', '""')
+                columns = {
+                    str(row[1]).casefold()
+                    for row in conn.execute(f'PRAGMA table_info("{escaped_table}")')
+                }
+                if "source_url" not in columns:
+                    continue
+                urls.update(
+                    str(row[0])
+                    for row in conn.execute(
+                        f'SELECT DISTINCT source_url FROM "{escaped_table}" WHERE source_url IS NOT NULL'
+                    )
+                )
+        finally:
+            clear_guarded_connection(conn)
+            conn.close()
+    return urls
+
+
 def _repeated_source_import_tables(sql_values: Iterable[str]) -> tuple[str, ...]:
     """Find model tables populated by multiple source-derived statements."""
 
@@ -409,7 +459,9 @@ def _source_relationship_read_failures(
             select_matches = tuple(re.finditer(r"\bselect\b(?P<projection>.*?)\bfrom\b", structural, re.I | re.S))
             if not select_matches:
                 continue
-            projection = _AGGREGATE_CALL_RE.sub("", select_matches[-1].group("projection"))
+            # Source-key filters commonly contain a nested SELECT. The decision
+            # fields are in the outer projection, not the final nested one.
+            projection = _AGGREGATE_CALL_RE.sub("", select_matches[0].group("projection"))
             if "*" not in projection and not _DECISION_FIELD_RE.search(projection):
                 continue
             for table in expected.intersection(mutated):
@@ -1523,7 +1575,12 @@ class SqliteToolResultScenario(EvalScenario, ScenarioExecutionTools):
 class SqliteMultiResultWebSynthesisScenario(SqliteToolResultScenario):
     slug = SQLITE_MULTI_RESULT_WEB_SYNTHESIS
     description = "Multi-result web research should synthesize prior tool outputs with efficient shaped SQLite queries."
-    tasks = [ScenarioTask(name="inject_prompt", assertion_type="agent_processing"), ScenarioTask(name="verify_smart_sqlite_synthesis", assertion_type="tool_call"), ScenarioTask(name="verify_sourced_answer", assertion_type="manual")]
+    tasks = [
+        ScenarioTask(name="inject_prompt", assertion_type="agent_processing"),
+        ScenarioTask(name="verify_smart_sqlite_synthesis", assertion_type="tool_call"),
+        ScenarioTask(name="verify_sourced_answer", assertion_type="manual"),
+        ScenarioTask(name="verify_answer_grounding", assertion_type="llm_judge"),
+    ]
     eval_synthetic_tools = ("mcp_brightdata_scrape_as_markdown",)
     prompt = (
         "Compare these support automation products for an enterprise team, a small team, and a regulated healthcare "
@@ -1535,9 +1592,57 @@ class SqliteMultiResultWebSynthesisScenario(SqliteToolResultScenario):
     answer_source_urls = SOURCE_URLS
     required_terms = ("enterprise", "SMB", "HIPAA")
     min_sources = 3
-    max_sqlite_usage_calls = 2
+    # Inspection + model write/read is ideal. One additional query of that
+    # durable model is still coherent; the regression is per-result probing or
+    # a retry loop, which the structural checks and attempt ceiling catch.
+    max_sqlite_usage_calls = 3
     max_sqlite_attempts = 3
     reject_result_id_case_rows = True
+
+    def run(self, run_id: str, agent_id: str) -> None:
+        super().run(run_id, agent_id)
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.RUNNING,
+            task_name="verify_answer_grounding",
+        )
+        inbound = (
+            PersistentAgentMessage.objects.filter(owner_agent_id=agent_id, is_outbound=False)
+            .order_by("-timestamp", "-id")
+            .first()
+        )
+        outbound = _outbound_messages_after(agent_id, inbound.timestamp) if inbound else []
+        body = outbound[-1].body if outbound else ""
+        evidence = "\n\n".join(
+            f"{heading}\n" + "\n".join(f"- {fact}" for fact in facts)
+            for heading, facts in WEB_SOURCE_FACTS
+        )
+        choice, reasoning = self.llm_judge(
+            question=(
+                "Is every concrete factual detail in the answer supported by the supplied source evidence? "
+                "Faithful normalization and paraphrase are supported (for example, 'annual pricing' may be shown as "
+                "'Annual'). Recommendations and clearly labeled reasoning are allowed. Fail invented prices, "
+                "capabilities, certifications, deployment modes, or other details that the evidence does not state."
+            ),
+            context=f"Source evidence:\n{evidence}\n\nAgent answer:\n{body}",
+            options=("Grounded", "Contains unsupported factual details"),
+            params={"temperature": 0.0, "max_tokens": 500, "reasoning_effort": "low"},
+        )
+        status = (
+            EvalRunTask.Status.PASSED
+            if choice == "Grounded"
+            else EvalRunTask.Status.ERRORED
+            if choice == "Error"
+            else EvalRunTask.Status.FAILED
+        )
+        self.record_task_result(
+            run_id,
+            None,
+            status,
+            task_name="verify_answer_grounding",
+            observed_summary=f"{choice}: {reasoning}",
+        )
 
 
 @register_scenario
@@ -1871,6 +1976,13 @@ class SqliteDomainModelRefreshesAndEvolvesScenario(SqliteDomainModelScenario):
             call for call in sqlite_attempts if str(call.status).lower() == "complete"
         ]
         sql_values = [str((call.tool_params or {}).get("sql") or "") for call in sqlite_calls]
+        source_write_attempts = [
+            call
+            for call in sqlite_attempts
+            if source_derived_model_mutation_tables(
+                (str((call.tool_params or {}).get("sql") or ""),)
+            )
+        ]
         source_mutations = set(source_derived_model_mutation_tables(sql_values))
         state_failures, child_table = _inspect_domain_refresh_state(agent_id)
         if PersistentAgent.objects.values_list("charter", flat=True).get(id=agent_id) != self.domain_charter:
@@ -1880,7 +1992,7 @@ class SqliteDomainModelRefreshesAndEvolvesScenario(SqliteDomainModelScenario):
             expected_tables.add(child_table.casefold())
         failures = _first_shot_source_phase_failures(calls)
         failures.extend(_sqlite_attempt_failures(sqlite_attempts))
-        failures.extend(_source_write_effect_failures(sqlite_attempts, expected_tables))
+        failures.extend(_source_write_effect_failures(source_write_attempts, expected_tables))
         if child_table:
             failures.extend(_source_relationship_read_failures(sql_values, "accounts", child_table))
         failures.extend(_orphan_completion_failures(run_id, inbound.timestamp))
@@ -1892,7 +2004,7 @@ class SqliteDomainModelRefreshesAndEvolvesScenario(SqliteDomainModelScenario):
         ) if failed)
         self._record_check(
             run_id, "verify_source_to_model_refresh", failures,
-            "Fetched the newer snapshot once, ingested it, and then replied.",
+            "Fetched the newer snapshot once, ingested it in one clean batch, and then replied.",
         )
         self._record_check(
             run_id, "verify_persisted_domain_evolution", state_failures,
@@ -2181,7 +2293,10 @@ class SqliteUnstructuredBindingsFirstWriteScenario(SqliteDomainModelScenario):
             self.prompt,
             {},
             allowed_tool_names={"sqlite_batch", "send_chat_message"},
-            max_relevant_tool_calls=4,
+            # A valid run may use a progress send, one model write, one bounded
+            # decision read, and the terminal answer. Leave one slot so the
+            # stop policy does not cancel that answer while it is being queued.
+            max_relevant_tool_calls=5,
         )
         calls = _tool_calls_for_run(run_id, after=inbound.timestamp)
         sqlite_attempts = [call for call in calls if call.tool_name == "sqlite_batch"]
@@ -2217,17 +2332,17 @@ class SqliteUnstructuredBindingsFirstWriteScenario(SqliteDomainModelScenario):
             for row in bound_rows
             if isinstance(row, dict)
         }
-        bound_source_urls = {
-            str(value)
+        bound_rows_have_fields = bool(bound_rows) and all(
+            isinstance(row, dict)
+            and isinstance(row.get("fields"), dict)
+            and bool(row["fields"])
             for row in bound_rows
-            if isinstance(row, dict)
-            for value in row.values()
-            if isinstance(value, str) and value.startswith(("https://", "http://"))
-        }
+        )
         expected_result_ids = set(build_short_result_id_map(source_step_ids).values())
         expected_source_urls = {
             source_url for source_url, _note in UNSTRUCTURED_INTERVIEW_NOTES
         }
+        modeled_source_urls = _modeled_source_urls(agent_id, model_tables)
         relevant_advisories = sorted({
             str(advisory.get("code") or "")
             for call in successful_calls
@@ -2247,12 +2362,24 @@ class SqliteUnstructuredBindingsFirstWriteScenario(SqliteDomainModelScenario):
                 f"bound rows contained incomplete or incorrect source result IDs: {sorted(bound_result_ids)}",
             ),
             (
-                bound_source_urls != expected_source_urls,
-                f"bound rows did not preserve the exact source URLs: {sorted(bound_source_urls)}",
+                not bound_rows_have_fields,
+                "bound rows did not keep interpreted source facts in non-empty fields objects",
+            ),
+            (
+                modeled_source_urls != expected_source_urls,
+                f"modeled rows did not preserve the trusted source URLs: {sorted(modeled_source_urls)}",
             ),
             (
                 not re.search(r"\bjson_each\s*\(\s*:rows\s*\)", sql, re.I),
                 "model write did not expand native source rows",
+            ),
+            (
+                not re.search(r"\$\.fields\.[a-z_]", sql, re.I),
+                "model write did not derive interpreted facts from bound row fields",
+            ),
+            (
+                not re.search(r"\b__tool_results\b.*\bsource_url\b|\bsource_url\b.*\b__tool_results\b", sql, re.I | re.S),
+                "model write did not derive source URLs from trusted tool-result metadata",
             ),
             (summary.single_result_id_filters > 0, "unstructured siblings were inspected one result_id at a time"),
             (not model_tables, "no sourced customer-evidence model was written"),
@@ -2850,6 +2977,11 @@ class SqliteBoundedPortfolioReportScenario(SqliteToolResultScenario):
             )
             or re.search(
                 rf"\b(?:8\s*/\s*8|all\s+{eight})\b[^\n]{{0,30}}\b{company}\b[^\n]{{0,40}}\b{state}\b",
+                body,
+                re.I,
+            )
+            or re.search(
+                rf"\b{state}\b[^\n]{{0,40}}\b(?:8\s*/\s*8|all\s+{eight})\b",
                 body,
                 re.I,
             )

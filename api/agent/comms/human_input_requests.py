@@ -37,7 +37,7 @@ from .routing import get_latest_inbound_human_message
 
 OPTION_NUMBER_RE = re.compile(r"^\s*(?:option\s+)?(?P<number>\d{1,2})(?:[\)\.\:\-\s]|$)", re.IGNORECASE)
 BATCH_ANSWER_ENTRY_RE = re.compile(r"^\s*(?P<number>\d{1,2})[\)\.\:\-]\s*(?P<body>.*)$")
-MAX_OPTION_COUNT = 6
+MAX_OPTION_COUNT = 8
 MAX_HUMAN_INPUT_QUESTION_LENGTH = 500
 DEFAULT_HUMAN_INPUT_REQUEST_EXPIRATION_DAYS = 3
 HUMAN_INPUT_LLM_MAX_CANDIDATES = 20
