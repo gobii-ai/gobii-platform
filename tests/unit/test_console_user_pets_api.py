@@ -18,8 +18,9 @@ from api.services.user_pets import (
     PET_SPRITESHEET_HEIGHT,
     PET_SPRITESHEET_WIDTH,
     PET_USED_COLUMNS_BY_ROW,
+    validate_user_pet_spritesheet,
 )
-from console.user_pets_api import BUILTIN_PET_ID
+from console.user_pets_api import BUILTIN_PET_ID, BUILTIN_PETS
 
 
 def _valid_pet_webp(*, populate_unused_frame=False):
@@ -103,24 +104,51 @@ class ConsoleUserPetsApiTests(TestCase):
         payload = response.json()
         self.assertEqual(payload["maxCustomPets"], settings.USER_PET_MAX_CUSTOM_PETS)
         self.assertEqual(
-            payload["pets"][0],
-            {
-                "id": BUILTIN_PET_ID,
-                "kind": "builtin",
-                "displayName": "Gobii",
-                "description": "The official mascot of Gobii.",
-                "spritesheetUrl": "/static/images/pets/gobii-fish-v2.webp",
-            },
-        )
-        self.assertEqual(
-            payload["pets"][1],
-            {
-                "id": "builtin:eevee",
-                "kind": "builtin",
-                "displayName": "Eevee",
-                "description": "Matt's runt-of-the-litter corgi.",
-                "spritesheetUrl": "/static/images/pets/eevee-v2.webp",
-            },
+            payload["pets"],
+            [
+                {
+                    "id": BUILTIN_PET_ID,
+                    "kind": "builtin",
+                    "displayName": "Gobii",
+                    "description": "The official mascot of Gobii.",
+                    "spritesheetUrl": "/static/images/pets/gobii-fish-v2.webp",
+                },
+                {
+                    "id": "builtin:eevee",
+                    "kind": "builtin",
+                    "displayName": "Eevee",
+                    "description": "Matt's runt-of-the-litter corgi.",
+                    "spritesheetUrl": "/static/images/pets/eevee-v2.webp",
+                },
+                {
+                    "id": "builtin:grizzly",
+                    "kind": "builtin",
+                    "displayName": "Grizzly",
+                    "description": "A brown dog named Grizzly.",
+                    "spritesheetUrl": "/static/images/pets/grizzly-v2.webp",
+                },
+                {
+                    "id": "builtin:smudge",
+                    "kind": "builtin",
+                    "displayName": "Smudge",
+                    "description": "A black cat named Smudge.",
+                    "spritesheetUrl": "/static/images/pets/smudge-v2.webp",
+                },
+                {
+                    "id": "builtin:maggie",
+                    "kind": "builtin",
+                    "displayName": "Maggie",
+                    "description": "A black-and-white dog named Maggie.",
+                    "spritesheetUrl": "/static/images/pets/maggie-v2.webp",
+                },
+                {
+                    "id": "builtin:clementine",
+                    "kind": "builtin",
+                    "displayName": "Clementine",
+                    "description": "A calico cat named Clementine.",
+                    "spritesheetUrl": "/static/images/pets/clementine-v2.webp",
+                },
+            ],
         )
         self.assertEqual(
             payload["preferences"],
@@ -131,6 +159,26 @@ class ConsoleUserPetsApiTests(TestCase):
                 "position": None,
             },
         )
+
+    def test_builtin_pet_spritesheets_are_valid(self):
+        for pet in BUILTIN_PETS:
+            with self.subTest(pet_id=pet["id"]):
+                asset_path = settings.BASE_DIR / "static" / pet["spritesheetUrl"]
+                self.assertTrue(asset_path.is_file())
+                payload = asset_path.read_bytes()
+                uploaded_file = SimpleUploadedFile(
+                    asset_path.name,
+                    payload,
+                    content_type="image/webp",
+                )
+
+                self.assertEqual(
+                    validate_user_pet_spritesheet(
+                        uploaded_file,
+                        max_bytes=settings.USER_PET_MAX_UPLOAD_BYTES,
+                    ),
+                    payload,
+                )
 
     def test_uploads_valid_pet_and_keeps_spritesheet_private(self):
         response = self._upload()
@@ -184,15 +232,23 @@ class ConsoleUserPetsApiTests(TestCase):
         )
 
     def test_selects_an_included_non_default_pet(self):
-        response = self._update_preferences(
-            {UserPreference.KEY_USER_PET_SELECTED_ID: "builtin:eevee"}
-        )
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(
-            response.json()["preferences"][UserPreference.KEY_USER_PET_SELECTED_ID],
+        for pet_id in (
             "builtin:eevee",
-        )
+            "builtin:grizzly",
+            "builtin:smudge",
+            "builtin:maggie",
+            "builtin:clementine",
+        ):
+            with self.subTest(pet_id=pet_id):
+                response = self._update_preferences(
+                    {UserPreference.KEY_USER_PET_SELECTED_ID: pet_id}
+                )
+
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(
+                    response.json()["preferences"][UserPreference.KEY_USER_PET_SELECTED_ID],
+                    pet_id,
+                )
 
     def test_cannot_select_another_users_pet(self):
         other_pet = UserPet.objects.create(
