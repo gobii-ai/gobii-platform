@@ -253,14 +253,14 @@ class ToolDisplayMetadataTests(TestCase):
             },
         )
 
+        # Emotion travels only on writes that assign it; a charter patch is not a mood event
+        # even when the agent happens to have one set (bug #462).
         self.assertEqual(
             _capture_tool_display_metadata(patch_call, {"status": "ok"}),
             {
                 "agent_config": {
                     "charter": "Updated full assignment",
                     "schedule": "0 9 * * *",
-                    "emotion": "\U0001F60A",
-                    "emotion_timeout_seconds": 3600,
                 },
             },
         )
@@ -280,8 +280,6 @@ class ToolDisplayMetadataTests(TestCase):
                 "agent_config": {
                     "charter": "Updated full assignment",
                     "schedule": "0 9 * * *",
-                    "emotion": "\U0001F60A",
-                    "emotion_timeout_seconds": 3600,
                 },
             },
         )
@@ -315,8 +313,6 @@ class ToolDisplayMetadataTests(TestCase):
                 "agent_config": {
                     "charter": "Updated full assignment",
                     "schedule": "0 9 * * *",
-                    "emotion": "\U0001F60A",
-                    "emotion_timeout_seconds": 3600,
                 },
             },
         )

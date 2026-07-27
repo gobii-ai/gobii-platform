@@ -117,7 +117,10 @@ from ..tools.sqlite_agent_config import (
     seed_sqlite_agent_config,
     sqlite_statement_mutates_agent_schedules,
 )
-from ..tools.sqlite_config_statements import sqlite_statement_assigns_agent_config_field
+from ..tools.sqlite_config_statements import (
+    sqlite_batch_statements as _sqlite_batch_statements,
+    sqlite_statement_assigns_agent_config_field,
+)
 from ..tools.sqlite_skills import apply_sqlite_skill_updates, refresh_skills_for_tool, seed_sqlite_skills
 from ..tools.custom_tools import execute_create_custom_tool
 from ..tools.custom_tool_names import CREATE_CUSTOM_TOOL_NAME
@@ -2586,17 +2589,6 @@ def _normalize_tool_params(tool_name: str, tool_params: Dict[str, Any]) -> Dict[
     return normalized_params
 
 
-def _sqlite_batch_statements(tool_params: Dict[str, Any]) -> list[str]:
-    raw_sql = tool_params.get("queries", tool_params.get("sql", tool_params.get("query")))
-    raw_items = raw_sql if isinstance(raw_sql, list) else [raw_sql]
-    statements: list[str] = []
-    for raw_item in raw_items:
-        if not isinstance(raw_item, str):
-            continue
-        statements.extend(statement.strip() for statement in sqlparse.split(raw_item) if statement.strip())
-    return statements
-
-
 def _sqlite_single_result_read_call_count(tool_calls: list[Any]) -> int:
     count = 0
     for call in tool_calls:
@@ -3170,26 +3162,26 @@ def _capture_tool_display_metadata(
     prepared: _PreparedToolExecution,
     result: Any,
 ) -> Dict[str, Any]:
-    if (
-        prepared.tool_name != "sqlite_batch"
-        or not _tool_result_is_success(result)
-        or not _sqlite_batch_agent_config_attempted_fields(prepared.exec_params)
-    ):
+    if prepared.tool_name != "sqlite_batch" or not _tool_result_is_success(result):
+        return {}
+    fields = _sqlite_batch_agent_config_attempted_fields(prepared.exec_params)
+    if not fields:
         return {}
 
     snapshot = read_sqlite_agent_config_snapshot()
     if snapshot is None:
         return {}
-    return {
-        "agent_config": {
-            "charter": snapshot.charter,
-            "schedule": snapshot.schedule,
-            # Carried so the timeline can show a mood change as a mood change. Without it the
-            # write is indistinguishable from any other row update by the time it reaches the UI.
-            "emotion": snapshot.emotion,
-            "emotion_timeout_seconds": snapshot.emotion_timeout_seconds,
-        },
+    agent_config: Dict[str, Any] = {
+        "charter": snapshot.charter,
+        "schedule": snapshot.schedule,
     }
+    # Carried so the timeline can show a mood change as a mood change — but only when this write
+    # actually touched the mood. Stamping every config write with an emotion slot made charter and
+    # schedule updates by a mood-less agent render as "let their mood settle" (bug #462).
+    if "emotion" in fields:
+        agent_config["emotion"] = snapshot.emotion
+        agent_config["emotion_timeout_seconds"] = snapshot.emotion_timeout_seconds
+    return {"agent_config": agent_config}
 
 
 def _mark_tool_outcome_failed(

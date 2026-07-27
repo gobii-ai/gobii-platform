@@ -49,6 +49,7 @@ from api.models import (
 )
 
 from api.agent.tools.plan import PlanSnapshot, build_plan_snapshot
+from api.agent.tools.sqlite_config_statements import sqlite_params_assign_emotion
 from .access import user_can_manage_agent_settings
 from .plan_events import ensure_plan_baseline_event
 
@@ -810,7 +811,10 @@ def _serialize_step_entry(env: StepEnvelope, labels: Mapping[str, str]) -> dict:
             schedule_value = agent_config.get("schedule")
             if schedule_value is None or isinstance(schedule_value, str):
                 entry["scheduleValue"] = schedule_value
-        if "emotion" in agent_config:
+        # Steps persisted during the #462 regression window carry an `emotion` slot on every
+        # config write, so the metadata alone can't distinguish a charter edit from a deliberate
+        # mood clear. The step's own SQL can — a mood travels only when the write assigned one.
+        if "emotion" in agent_config and sqlite_params_assign_emotion(tool_call.tool_params):
             emotion_value = agent_config.get("emotion")
             if emotion_value is None or isinstance(emotion_value, str):
                 entry["emotion"] = emotion_value
