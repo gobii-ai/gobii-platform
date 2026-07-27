@@ -2101,6 +2101,7 @@ class ImpliedSendTests(TestCase):
         resp.choices = [choice]
         return resp
 
+    @patch("api.agent.core.event_processing._attempt_cycle_close_for_sleep")
     @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
     @patch("api.agent.core.event_processing.build_prompt_context")
     @patch("api.agent.core.event_processing._completion_with_failover")
@@ -2109,6 +2110,7 @@ class ImpliedSendTests(TestCase):
         mock_completion,
         mock_build_prompt,
         _mock_credit,
+        mock_cycle_close,
     ):
         mock_build_prompt.return_value = ([{"role": "system", "content": "sys"}], 1000, None)
         mock_completion.return_value = (
@@ -2152,6 +2154,42 @@ class ImpliedSendTests(TestCase):
             PersistentAgentMessage.objects.filter(
                 owner_agent=self.agent,
                 is_outbound=True,
+            ).exists()
+        )
+        mock_cycle_close.assert_called_once_with(self.agent, None)
+
+    @patch("api.agent.core.event_processing.build_prompt_context")
+    @patch("api.agent.core.event_processing._completion_with_failover")
+    def test_sleep_text_with_continuation_signal_is_not_normalized(
+        self,
+        mock_completion,
+        mock_build_prompt,
+    ):
+        mock_build_prompt.return_value = ([{"role": "system", "content": "sys"}], 1000, None)
+        mock_completion.return_value = (
+            self._mock_completion("sleep_until_next_trigger CONTINUE_WORK_SIGNAL"),
+            {
+                "prompt_tokens": 10,
+                "completion_tokens": 5,
+                "total_tokens": 15,
+                "model": "m",
+                "provider": "p",
+            },
+        )
+
+        with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1):
+            ep._run_agent_loop(self.agent, is_first_run=False)
+
+        self.assertTrue(
+            PersistentAgentStep.objects.filter(
+                agent=self.agent,
+                description__startswith="The answer below was not delivered.",
+            ).exists()
+        )
+        self.assertFalse(
+            PersistentAgentStep.objects.filter(
+                agent=self.agent,
+                description="Decided to sleep until next trigger.",
             ).exists()
         )
 
