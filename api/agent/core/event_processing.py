@@ -129,6 +129,12 @@ from ..tools.plan import build_plan_snapshot, build_redundant_research_plan_skip
 from ..tools.planning import execute_end_planning
 from ..tools.runtime_execution_context import tool_execution_context
 from ..tools.sqlite_query_quality import summarize_sqlite_tool_result_sql
+from ..tools.sqlite_recovery import (
+    SQLITE_RECOVERY_NOTICE,
+    SQLiteStateUnrecoverableError,
+    checkpoint_current_sqlite_state,
+    validate_current_sqlite_state,
+)
 from ..tools.sqlite_state import agent_sqlite_db, get_sqlite_db_path
 from ..tools.secure_credentials_request import execute_secure_credentials_request
 from ..tools.request_contact_permission import execute_request_contact_permission
@@ -7070,6 +7076,16 @@ def _run_agent_loop(
                     logger.debug("Failed to resolve web stream target for agent %s", agent.id, exc_info=True)
 
                 try:
+                    recovered_before_completion = checkpoint_current_sqlite_state(
+                        phase="before_llm_completion"
+                    )
+                    if recovered_before_completion:
+                        continuation_notice = SQLITE_RECOVERY_NOTICE
+                        iter_span.set_attribute("sqlite.recovered", True)
+                        if heartbeat:
+                            heartbeat.touch("sqlite_recovered_before_llm")
+                        continue
+
                     response, token_usage = _completion_with_failover(
                         messages=request_history,
                         tools=request_tools,
@@ -7081,6 +7097,15 @@ def _run_agent_loop(
                         allow_streamed_content=prompt_allows_implied_send and not source_reconciliation_directive,
                         stale_prompt_checker=_is_orchestrator_prompt_stale,
                     )
+                    recovered_after_completion = validate_current_sqlite_state(
+                        phase="after_llm_completion"
+                    )
+                    if recovered_after_completion:
+                        continuation_notice = SQLITE_RECOVERY_NOTICE
+                        iter_span.set_attribute("sqlite.recovered", True)
+                        if heartbeat:
+                            heartbeat.touch("sqlite_recovered_after_llm")
+                        continue
                     if _is_orchestrator_prompt_stale():
                         raise OrchestratorPromptStale(
                             "Prompt became stale immediately after completion returned."
@@ -7130,6 +7155,21 @@ def _run_agent_loop(
                         "discard that stale response and answer using the latest conversation state."
                     )
                     continue
+                except SQLiteStateUnrecoverableError as exc:
+                    log_agent_error(
+                        agent,
+                        category=PersistentAgentError.Category.TOOL_PERSISTENCE,
+                        source="api.agent.core.event_processing._run_agent_loop",
+                        message=f"SQLite state recovery failed for agent {agent.id}",
+                        exc=exc,
+                        logger=logger,
+                        context={
+                            "agent_id": str(agent.id),
+                            "run_sequence_number": run_sequence_number,
+                            "iteration": i + 1,
+                        },
+                    )
+                    raise
                 except Exception as e:
                     if (
                         isinstance(e, EmptyLiteLLMResponseError)

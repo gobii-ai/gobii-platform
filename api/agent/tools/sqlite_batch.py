@@ -24,6 +24,14 @@ from .sqlite_guardrails import (
 )
 from .sqlite_autocorrect import build_cte_column_candidates, build_sqlglot_candidates
 from .sqlite_query_quality import build_tool_result_query_advisories
+from .sqlite_recovery import (
+    SQLITE_RECOVERY_NOTICE,
+    SQLITE_STATE_RECOVERED_ERROR,
+    SQLITE_STATE_UNRECOVERABLE_ERROR,
+    SQLiteStateUnrecoverableError,
+    checkpoint_current_sqlite_state,
+    validate_current_sqlite_state,
+)
 from .sqlite_state import AGENT_CONFIG_TABLE, EPHEMERAL_TABLES, _sqlite_db_path_var  # type: ignore
 
 if TYPE_CHECKING:
@@ -2233,14 +2241,46 @@ def execute_sqlite_batch(agent: "PersistentAgent", params: Dict[str, Any]) -> Di
     limits = _resolve_sqlite_batch_limits()
     try:
         with agent_sqlite_execution(str(agent.id)):
-            return _run_sqlite_batch_in_subprocess(
+            try:
+                recovered = validate_current_sqlite_state(phase="sqlite_batch_before_execution")
+            except SQLiteStateUnrecoverableError as exc:
+                return _sqlite_state_unrecoverable_result(exc)
+            if recovered:
+                return _sqlite_state_recovered_result()
+
+            result = _run_sqlite_batch_in_subprocess(
                 agent_id=str(agent.id),
                 params=params,
                 db_path=db_path,
                 limits=limits,
             )
+            try:
+                recovered = checkpoint_current_sqlite_state(phase="sqlite_batch_after_execution")
+            except SQLiteStateUnrecoverableError as exc:
+                return _sqlite_state_unrecoverable_result(exc)
+            if recovered:
+                return _sqlite_state_recovered_result()
+            return result
     except AgentSQLiteBusy as exc:
         return agent_sqlite_busy_result(exc)
+
+
+def _sqlite_state_recovered_result() -> Dict[str, Any]:
+    return {
+        "status": "error",
+        "error_code": SQLITE_STATE_RECOVERED_ERROR,
+        "message": SQLITE_RECOVERY_NOTICE,
+        "retryable": True,
+    }
+
+
+def _sqlite_state_unrecoverable_result(exc: SQLiteStateUnrecoverableError) -> Dict[str, Any]:
+    return {
+        "status": "error",
+        "error_code": SQLITE_STATE_UNRECOVERABLE_ERROR,
+        "message": str(exc),
+        "retryable": False,
+    }
 
 
 def get_sqlite_batch_tool() -> Dict[str, Any]:
