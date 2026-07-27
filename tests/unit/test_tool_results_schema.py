@@ -1106,19 +1106,19 @@ class PreviewByteLimitTests(SimpleTestCase):
         for expected in (
             "[SOURCE SET; exact stored arrays:",
             "exact stored arrays: $.content.prospects(name,title,profile_url)",
-            "New table first: CREATE TABLE IF NOT EXISTS with a stable key",
-            "Use the shown stable key `profile_url`",
+            "No fitting durable model: create one",
             "`json_extract(j.value,'$.profile_url')`",
             "Use rows=[]",
-            "never invent result IDs",
-            "Then upsert in this call with `INSERT ... SELECT`",
+            "No pre-read, preview, or bound/copied rows",
+            "add no source_url/result_id/source_batch_id filter",
+            "Use one set-wise write plus decision SELECT",
             "FROM __tool_results AS t, json_each(t.result_json,'$.content.prospects') AS j",
             "WHERE t.is_current_batch=1 AND t.tool_name='http_request'",
-            "Current batch plus tool_name is the exact set",
-            "Add no source_url/result_id predicate",
-            "store t.source_url/t.result_id as provenance",
-            "Every item field/URL comes from j.value",
-            "siblings differ by derived parent fields",
+            "Current batch plus tool_name is exact",
+            "Store t.source_url/t.result_id provenance",
+            "Item fields/URLs come from j.value",
+            "Use all paths",
+            "final SELECT returns every known item/source URL for links",
         ):
             self.assertIn(expected, info.meta)
         self.assertNotIn("[SOURCE ARRAYS", info.preview_text)
@@ -1127,6 +1127,61 @@ class PreviewByteLimitTests(SimpleTestCase):
         self.assertNotIn("result_id=", info.meta)
         self.assertNotIn("json_extract(j.value,'$.id')", info.meta)
         self.assertIsNone(info.source_reconciliation_directive)
+
+    def test_generic_enrichment_array_gets_existing_model_refresh_shape(self):
+        payload = {
+            "status": "ok",
+            "content": {
+                "matches": [{
+                    "provider_id": "contact-101",
+                    "full_name": "Ari Bell",
+                    "verified_email": "ari@example.test",
+                }],
+            },
+        }
+        info, _record = self._prepare_http_result(
+            "step-enrichment",
+            payload,
+            named_model_tables={"contacts"},
+        )
+
+        for expected in (
+            "Existing durable tables: contacts",
+            "Refresh in place",
+            "never DELETE/rebuild",
+            "preserve schema and unrelated rows",
+            "Join its scalar key directly to `json_extract(j.value,'$.provider_id')`",
+            "use JSON functions only on j.value/result_json, not model columns",
+            "Introduce every UPDATE alias in FROM/JOIN",
+            "WHERE t.is_current_batch=1 AND t.tool_name='http_request'",
+        ):
+            self.assertIn(expected, info.meta)
+        self.assertNotIn("New table first", info.meta)
+
+    def test_existing_model_source_preview_keeps_raw_urls_for_sql(self):
+        payload = {
+            "status": "ok",
+            "content": {
+                "matches": [{
+                    "provider_id": "contact-101",
+                    "profile_url": "https://example.test/people/contact-101",
+                }],
+            },
+        }
+        info, _record = self._prepare_http_result(
+            "step-enrichment-link",
+            payload,
+            named_model_tables={"contacts"},
+            paired_url_rewriter=lambda text, _record: text.replace(
+                "https://example.test/people/contact-101",
+                "https://example.test/people/contact-101 [link_ref: $[link:CONTACT]]",
+            ),
+            paired_url_step_ids={"step-enrichment-link"},
+        )
+
+        self.assertIn("https://example.test/people/contact-101", info.preview_text)
+        self.assertNotIn("link_ref", info.preview_text)
+        self.assertNotIn("VERIFIED LINK PRESENTATION", info.preview_text)
 
     def test_source_write_hint_uses_the_actual_array_identity(self):
         payload = {
@@ -1199,10 +1254,11 @@ class PreviewByteLimitTests(SimpleTestCase):
         self.assertFalse(info[records[0].step_id].suppress_from_prompt)
         source_set_meta = "\n".join(item.meta for item in info.values())
         self.assertEqual(source_set_meta.count("[SOURCE SET"), 1)
-        self.assertIn("source_batch_id=batch-current", source_set_meta)
+        self.assertNotIn("source_batch_id=batch-current", source_set_meta)
         self.assertNotIn("source_batch_id=batch-historical", source_set_meta)
+        self.assertIn("add no source_url/result_id/source_batch_id filter", source_set_meta)
         self.assertIn("is_current_batch=1", source_set_meta)
-        self.assertIn("t.result_id is shared row provenance, never item identity", source_set_meta)
+        self.assertIn("result_id is not item identity", source_set_meta)
 
         modeled = tool_results.prepare_tool_results_for_prompt(
             records,
@@ -1268,7 +1324,7 @@ class PreviewByteLimitTests(SimpleTestCase):
 
         hint = info.meta.split("]\n", 1)[0] + "]\n"
         schema_list = hint.split("exact stored arrays: ", 1)[1].split(
-            ". New table first", 1
+            ". No fitting durable model", 1
         )[0]
         self.assertLessEqual(len(schema_list.split("; ")), tool_results.MAX_OPTIONAL_SOURCE_ARRAYS)
         self.assertLessEqual(len(hint), tool_results.MAX_OPTIONAL_SOURCE_HINT_CHARS)
@@ -1297,10 +1353,10 @@ class PreviewByteLimitTests(SimpleTestCase):
         hint = info.meta.split("]\n", 1)[0] + "]\n"
         self.assertIn("[SOURCE SET", hint)
         self.assertIn("$.content.events", hint)
-        self.assertIn("CREATE TABLE IF NOT EXISTS with a stable key", hint)
-        self.assertIn("Use the shown stable key `release_id`", hint)
-        self.assertIn("upsert in this call with `INSERT ... SELECT`", hint)
-        self.assertIn("Every item field/URL comes from j.value", hint)
+        self.assertIn("No fitting durable model: create one", hint)
+        self.assertIn("`json_extract(j.value,'$.release_id')` as PRIMARY KEY/UNIQUE", hint)
+        self.assertIn("Use one set-wise write plus decision SELECT", hint)
+        self.assertIn("Item fields/URLs come from j.value", hint)
         self.assertLessEqual(len(hint), tool_results.MAX_OPTIONAL_SOURCE_HINT_CHARS)
 
     def test_four_source_parallel_batch_keeps_each_brief_preview_visible(self):

@@ -208,37 +208,45 @@ def _optional_source_array_schemas(
 
 
 def _build_optional_source_write_hint(
-    source_batch_id: str,
     tool_name: str,
     analysis: ResultAnalysis | None,
+    model_tables: Sequence[str] = (),
 ) -> str:
-    """Give safe first-write mechanics without requiring a model for one-off work."""
+    """Give source-shape mechanics that fit both new and existing domain models."""
     schemas = _optional_source_array_schemas(analysis)
     if not schemas or len(tool_name) > 100:
         return ""
 
     first_path, _first_schema, first_key = schemas[0]
     first_path = first_path.replace("'", "''")
-    escaped_batch_id = source_batch_id.replace("'", "''")
     escaped_tool_name = tool_name.replace("'", "''")
     def render_hint(schema_text: str) -> str:
-        key_guidance = (
-            f"Use the shown stable key `{first_key}`; canonical row expression "
-            f"`json_extract(j.value,'$.{first_key}')`."
+        key_expr = (
+            f"`json_extract(j.value,'$.{first_key}')`"
             if first_key
-            else "Choose a stable PRIMARY KEY or composite UNIQUE key only from the shown item fields."
+            else "a stable key derived only from shown item fields"
         )
+        if model_tables:
+            table_list = ",".join(sorted(model_tables)[:4])
+            model_guidance = (
+                f"Existing durable tables: {table_list}. Refresh in place; never DELETE/rebuild; preserve schema and "
+                f"unrelated rows. Join its scalar key directly to {key_expr}; use JSON functions only on j.value/result_json, "
+                "not model columns. Introduce every UPDATE alias in FROM/JOIN. "
+            )
+        else:
+            model_guidance = (
+                f"No fitting durable model: create one with {key_expr} as PRIMARY KEY/UNIQUE, then upsert. "
+            )
         return (
             f"[SOURCE SET; exact stored arrays: {schema_text}. "
-            f"New table first: CREATE TABLE IF NOT EXISTS with a stable key. {key_guidance} "
-            "Use rows=[]; never invent result IDs. "
-            "Then upsert in this call with `INSERT ... SELECT` "
-            f"FROM __tool_results AS t, json_each(t.result_json,'{first_path}') AS j "
+            f"{model_guidance}"
+            "Use rows=[]. No pre-read, preview, or bound/copied rows. Current batch plus tool_name is exact; add no "
+            "source_url/result_id/source_batch_id filter. "
+            "Use one set-wise write plus decision SELECT: `FROM __tool_results AS t, "
+            f"json_each(t.result_json,'{first_path}') AS j "
             f"WHERE t.is_current_batch=1 AND t.tool_name='{escaped_tool_name}'. "
-            f"source_batch_id={escaped_batch_id}; do not filter it. Current batch plus tool_name is the exact set. "
-            "Add no source_url/result_id predicate; store t.source_url/t.result_id as provenance. "
-            "Every item field/URL comes from j.value; t.result_id is shared row provenance, never item identity. "
-            "Parent-only fields use t.result_json; siblings differ by derived parent fields. Use all listed paths together.]\n"
+            "Store t.source_url/t.result_id provenance. Item fields/URLs come from j.value; result_id is not item "
+            "identity. Use all paths; final SELECT returns every known item/source URL for links.]\n"
         )
 
     hint = render_hint("; ".join(schema for _path, schema, _key in schemas))
@@ -478,7 +486,12 @@ def prepare_tool_results_for_prompt(
                     )
                     emitted_source_import_sets.add(source_import_key)
         if not requires_source_import and hide_literal_result_id:
-            source_write_hint_prefix = _build_optional_source_write_hint(source_batch_id, record.tool_name, analysis)
+            source_write_hint_prefix = _build_optional_source_write_hint(
+                record.tool_name,
+                analysis,
+                tuple(model_tables),
+            )
+        preserve_raw_model_source_values = bool(source_write_hint_prefix and model_tables)
         if source_write_hint_prefix in emitted_source_write_hints:
             source_write_hint_prefix = ""
         elif source_write_hint_prefix:
@@ -496,7 +509,7 @@ def prepare_tool_results_for_prompt(
             if paired_url_rewriter and record.step_id in paired_step_ids
             else url_rewriter
         )
-        if active_url_rewriter:
+        if active_url_rewriter and not preserve_raw_model_source_values:
             if context_hint:
                 context_hint = active_url_rewriter(context_hint, record)
             if preview_text and not source_import_prefix:
