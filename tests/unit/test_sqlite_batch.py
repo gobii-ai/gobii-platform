@@ -181,8 +181,12 @@ class SqliteBatchCoreTests(SqliteBatchTestCase):
         self.assertIn("Bind messy text via :name", function["description"])
         self.assertIn("never backslash-escape SQLite strings", function["description"])
         self.assertIn("Config patch: one UPDATE", sql_description)
-        self.assertIn("bind old/new as :old/:new", sql_description)
-        self.assertIn("no SELECT or embedded text", sql_description)
+        self.assertIn("patch_text(charter,:old,:new)", sql_description)
+        self.assertIn("put old/new in bindings, never SQL", sql_description)
+        self.assertIn(
+            "For config patches, REQUIRED old/new keys",
+            function["parameters"]["properties"]["bindings"]["description"],
+        )
         self.assertIn("End with decision/detail SELECTs", sql_description)
 
     def test_rows_schema_requires_source_specificity_without_enrichment(self):

@@ -821,8 +821,8 @@ def _get_sqlite_guidance() -> str:
         "permission from lead state or an empty request queue.\n\n"
         "SQLite provides csv_headers/csv_parse, extraction/cleaning helpers, and standard JSON/window functions; use names shown by schema/results. "
         "For patch_text(text,old,new), old='' appends; otherwise old must match exactly once. Persist config with "
-        "`UPDATE __agent_config SET charter=patch_text(charter,:old,:new) WHERE id=1` with bindings; never "
-        "backslash-escape SQLite strings, SELECT patch_text, or use E'...'. "
+        "`UPDATE __agent_config SET charter=patch_text(charter,:old,:new) WHERE id=1`; put old/new only in bindings, "
+        "never SQL literals; never SELECT patch_text or use E'...'. "
         "A browser task completion wakes you and adds its result; do "
         "not poll snapshots while it runs. Facts and URLs must come from evidence, not search terms."
     )

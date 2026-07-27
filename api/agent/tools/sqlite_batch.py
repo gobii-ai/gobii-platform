@@ -2344,13 +2344,13 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
                             "SQL statements. Prose: join `json_each(:rows) r` to __tool_results t on "
                             "t.result_id=json_extract(r.value,'$.result_id'); facts at $.fields.<name>, "
                             "t.result_id/t.source_url provenance. No sourced literals or prose writes with rows=[]. Config patch: "
-                            "one UPDATE; bind old/new as :old/:new; no SELECT or embedded text. End with decision/detail SELECTs."
+                            "one UPDATE with patch_text(charter,:old,:new); put old/new in bindings, never SQL. End with decision/detail SELECTs."
                         ),
                     },
                     "bindings": {
                         "type": "object",
                         "description": (
-                            "Optional values for :name parameters; keys omit the colon. JSON values are safely encoded."
+                            "For config patches, REQUIRED old/new keys. Otherwise optional :name values; keys omit colon."
                         ),
                         "additionalProperties": {},
                     },
