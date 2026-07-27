@@ -5,6 +5,7 @@ from django.test import TestCase, tag
 from google.oauth2 import service_account as google_service_account
 
 import api.evals.loader  # noqa: F401 - registers scenarios and suites
+from api.agent.core.event_processing import _resolve_eval_mock_result
 from api.agent.tools.eval_synthetic_tools import EVAL_SYNTHETIC_TOOL_DEFINITIONS
 from api.evals.registry import ScenarioRegistry
 from api.evals.scenarios.google_analytics_credential_retention import (
@@ -18,6 +19,7 @@ from api.evals.scenarios.google_analytics_credential_retention import (
     GOOGLE_ANALYTICS_DIRECT_CORRECTION_PERSISTS_CHARTER,
     GOOGLE_ANALYTICS_DIRECT_ROUTE_SURVIVES_HISTORY_LOSS,
     GOOGLE_ANALYTICS_DIRECT_SETUP_PERSISTS_CHARTER,
+    _direct_ga_mock_config,
     _eval_service_account,
     execution_uses_direct_google_analytics_route,
     google_analytics_charter_blocks_direct_route,
@@ -91,6 +93,12 @@ class GoogleAnalyticsCredentialRetentionEvalTests(TestCase):
         )
         self.assertEqual(history_scenario.existing_charter, GA4_EXISTING_CHARTER)
         self.assertNotEqual(history_scenario.existing_charter, GA4_DIRECT_CHARTER)
+        correction_scenario = ScenarioRegistry.get(
+            GOOGLE_ANALYTICS_DIRECT_CORRECTION_PERSISTS_CHARTER
+        )
+        self.assertTrue(
+            correction_scenario.feedback_reply_options["allow_rejected_completions"]
+        )
 
     def test_history_loss_compaction_preserves_model_written_charter(self):
         user = get_user_model().objects.create_user(username="ga4-history-eval")
@@ -131,6 +139,36 @@ class GoogleAnalyticsCredentialRetentionEvalTests(TestCase):
         self.assertTrue(google_analytics_charter_has_reusable_direct_route(GA4_DIRECT_CHARTER))
         self.assertFalse(google_analytics_charter_blocks_direct_route(GA4_DIRECT_CHARTER))
         self.assertIn(GA4_SERVICE_ACCOUNT_PATH, GA4_DIRECT_AUTH_RULE)
+        equivalent_route = (
+            f"Use the service-account JSON at {GA4_SERVICE_ACCOUNT_PATH}. Authenticate with an OAuth JWT using "
+            "analytics.readonly for GA4 API property 489999846. This takes precedence over any browser-based or "
+            "Pipedream route. Never copy the private key."
+        )
+        self.assertTrue(google_analytics_charter_has_reusable_direct_route(equivalent_route))
+        tool_named_route = (
+            f"Reusable GA4 access: service-account JSON at {GA4_SERVICE_ACCOUNT_PATH}; OAuth 2.0 service-account "
+            "flow with analytics.readonly scope; Google Analytics Data API v1beta targeting property ID "
+            "489999846. Do not use the google_analytics-run-report-in-ga4 Pipedream OAuth route. "
+            "Private-key contents must never be copied."
+        )
+        self.assertTrue(google_analytics_charter_has_reusable_direct_route(tool_named_route))
+        referenced_route = (
+            f"Use service-account JSON at {GA4_SERVICE_ACCOUNT_PATH} with OAuth JWT bearer flow and "
+            "analytics.readonly for Google Analytics Data API property 489999846. This takes precedence over "
+            "the Pipedream Google Analytics OAuth route; do not use that route. Never copy the private key."
+        )
+        self.assertTrue(google_analytics_charter_has_reusable_direct_route(referenced_route))
+        no_pipedream_route = (
+            f"Use service-account JSON at {GA4_SERVICE_ACCOUNT_PATH} with OAuth JWT bearer flow and "
+            "analytics.readonly for GA4 API property 489999846 (no Pipedream). Never copy the private key."
+        )
+        self.assertTrue(google_analytics_charter_has_reusable_direct_route(no_pipedream_route))
+        precedence_route = (
+            f"Use service-account JSON at {GA4_SERVICE_ACCOUNT_PATH} with OAuth JWT bearer flow and "
+            "analytics.readonly for analyticsdata.googleapis.com property 489999846. This route takes precedence "
+            "over any OAuth user-consent or Pipedream-based GA4 route. Never copy the private key."
+        )
+        self.assertTrue(google_analytics_charter_has_reusable_direct_route(precedence_route))
 
         reconnect_only = (
             f"{GA4_EXISTING_CHARTER} Google Analytics requires Pipedream. "
@@ -229,6 +267,30 @@ class GoogleAnalyticsCredentialRetentionEvalTests(TestCase):
                 require_property=True,
             )
         )
+
+    def test_direct_execution_mock_rejects_invalid_client_module(self):
+        valid_code = (
+            "from google.analytics.data_v1beta import BetaAnalyticsDataClient\n"
+            "from google.oauth2 import service_account\n"
+            "open('ga4-service-account.json')\n"
+            "scope='analytics.readonly'\n"
+        )
+        invalid_code = valid_code.replace("google.analytics.data_v1beta", "google.analytics_data_v1beta")
+        mock_config = _direct_ga_mock_config()
+
+        valid_result = _resolve_eval_mock_result(
+            mock_config,
+            "python_exec",
+            {"code": valid_code},
+        )
+        invalid_result = _resolve_eval_mock_result(
+            mock_config,
+            "python_exec",
+            {"code": invalid_code},
+        )
+
+        self.assertEqual(valid_result["status"], "ok")
+        self.assertEqual(invalid_result["status"], "error")
 
     def test_pipedream_ga4_tool_is_a_deterministic_eval_fixture(self):
         definition = EVAL_SYNTHETIC_TOOL_DEFINITIONS[GA4_PIPEDREAM_TOOL]

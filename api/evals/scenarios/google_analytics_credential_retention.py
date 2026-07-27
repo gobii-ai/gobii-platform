@@ -3,6 +3,7 @@ import re
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
+from django.utils import timezone
 
 from api.agent.files.filespace_service import write_bytes_to_dir
 from api.evals.base import ScenarioTask
@@ -137,16 +138,43 @@ def google_analytics_charter_blocks_direct_route(value):
 
 def google_analytics_charter_has_reusable_direct_route(value):
     normalized = re.sub(r"\s+", " ", str(value or "").casefold())
-    direct_over_pipedream = "pipedream" in normalized and any(
-        phrase in normalized
-        for phrase in (
-            "rather than pipedream",
-            "instead of pipedream",
-            "without pipedream",
-            "ignore that connection path",
-            "do not use pipedream",
-            "don't use pipedream",
-            "avoid pipedream",
+    direct_over_pipedream = "pipedream" in normalized and (
+        any(
+            phrase in normalized
+            for phrase in (
+                "rather than pipedream",
+                "instead of pipedream",
+                "without pipedream",
+                "no pipedream",
+                "ignore that connection path",
+                "do not use pipedream",
+                "do not use the pipedream",
+                "don't use pipedream",
+                "never use pipedream",
+                "never use the pipedream",
+                "avoid pipedream",
+                "preferred over pipedream",
+                "takes precedence over pipedream",
+                "takes precedence over any browser-based or pipedream",
+            )
+        )
+        or bool(
+            re.search(
+                r"\b(?:do not|don't|never|avoid)\s+use\b.{0,100}\bpipedream\b",
+                normalized,
+            )
+        )
+        or bool(
+            re.search(
+                r"\bpipedream\b.{0,160}\b(?:do not|don't|never|avoid)\s+use\s+(?:(?:that|this|the)\s+route|it)\b",
+                normalized,
+            )
+        )
+        or bool(
+            re.search(
+                r"\b(?:preferred|takes precedence)\b.{0,160}\bpipedream\b",
+                normalized,
+            )
         )
     )
     has_credential_locator = (
@@ -169,6 +197,7 @@ def google_analytics_charter_has_reusable_direct_route(value):
                 "analytics data api",
                 "analyticsdata.googleapis.com",
                 "google analytics data api",
+                "ga4 api",
             )
         )
     )
@@ -184,6 +213,21 @@ def google_analytics_charter_has_reusable_direct_route(value):
         and has_api_target
         and avoids_secret_copy
         and not google_analytics_charter_blocks_direct_route(normalized)
+    )
+
+
+def _reply_does_not_choose_pipedream(value):
+    normalized = re.sub(r"\s+", " ", str(value or "").casefold())
+    return "pipedream" not in normalized or any(
+        phrase in normalized
+        for phrase in (
+            "no pipedream",
+            "without pipedream",
+            "not pipedream",
+            "did not use pipedream",
+            "didn't use pipedream",
+            "skipped pipedream",
+        )
     )
 
 
@@ -245,9 +289,31 @@ def _seed_service_account_file(agent):
 
 
 def _direct_ga_mock_config():
+    valid_direct_rules = [
+        {
+            "param_contains": {
+                param_name: [
+                    "ga4-service-account.json",
+                    "analytics.readonly",
+                    api_marker,
+                ],
+            },
+            "result": _DIRECT_REPORT_RESULT,
+        }
+        for param_name in ("command", "code")
+        for api_marker in ("google.analytics.data", "analyticsdata.googleapis.com")
+    ]
+    invalid_direct_result = {
+        "status": "error",
+        "exit_code": 1,
+        "stderr": (
+            "ModuleNotFoundError: use the Google Analytics Data API client module "
+            "or its analyticsdata.googleapis.com REST endpoint."
+        ),
+    }
     return {
-        "run_command": _DIRECT_REPORT_RESULT,
-        "python_exec": _DIRECT_REPORT_RESULT,
+        "run_command": {"rules": valid_direct_rules, "default": invalid_direct_result},
+        "python_exec": {"rules": valid_direct_rules, "default": invalid_direct_result},
         GA4_PIPEDREAM_TOOL: {
             "status": "action_required",
             "result": "Authorization required. Connect the Pipedream Google Analytics OAuth account.",
@@ -384,7 +450,7 @@ class GoogleAnalyticsDirectSetupPersistsCharterScenario(GoogleAnalyticsCharterSc
             and resolved_tool_param(replies[0], "will_continue_work") is False
             and any(term in reply_folded for term in ("confirmed", "verified", "works", "access"))
             and GA4_PROPERTY_ID in reply_body
-            and "pipedream" not in reply_folded
+            and _reply_does_not_choose_pipedream(reply_body)
             and "reconnect" not in reply_folded
         )
         passed = bool(direct_calls) and not forbidden_calls and reported_success
@@ -413,7 +479,10 @@ class GoogleAnalyticsDirectCorrectionPersistsCharterScenario(GoogleAnalyticsChar
         f"The GA4 property {GA4_PROPERTY_ID} is present, but every report returned Authorization required. "
         "This looks like an expired Pipedream OAuth connection, so please reconnect it before I continue."
     )
-    prompt = "Don't use Pipedream. I gave you the key to log in directly with the Google Analytics API."
+    prompt = (
+        "Don't use Pipedream. I gave you the service-account key for direct "
+        "Google Analytics Data API access with the analytics.readonly scope."
+    )
     verification_task_name = "verify_direct_route_correction_saved"
     success_summary = (
         "Agent saved the direct GA4 service-account correction without requesting Pipedream reconnection."
@@ -421,6 +490,7 @@ class GoogleAnalyticsDirectCorrectionPersistsCharterScenario(GoogleAnalyticsChar
     failure_summary = "Expected one focused charter patch recording the direct GA4 route"
     verify_feedback_reply = True
     feedback_reply_options = {
+        "allow_rejected_completions": True,
         "required_reply_concepts": (("direct", "service account", "key"),),
     }
     semantic_judge_question = (
@@ -470,8 +540,8 @@ class GoogleAnalyticsDirectRouteSurvivesHistoryLossScenario(BehaviorMicroScenari
         _seed_service_account_file(PersistentAgent.objects.get(id=agent_id))
 
     @staticmethod
-    def _report_stop_policy():
-        return {
+    def _report_stop_policy(tool_calls_after=None):
+        policy = {
             "ignore_sqlite_agent_config_mutations": False,
             "ignored_tool_names": ["sleep_until_next_trigger", "update_plan"],
             "allowed_tool_names": [
@@ -497,6 +567,9 @@ class GoogleAnalyticsDirectRouteSurvivesHistoryLossScenario(BehaviorMicroScenari
             ],
             "max_relevant_tool_calls": 8,
         }
+        if tool_calls_after:
+            policy["tool_calls_after"] = tool_calls_after
+        return policy
 
     @staticmethod
     def _compact_setup_history(agent_id):
@@ -643,6 +716,7 @@ class GoogleAnalyticsDirectRouteSurvivesHistoryLossScenario(BehaviorMicroScenari
             EvalRunTask.Status.RUNNING,
             task_name="inject_report_request",
         )
+        report_phase_started_at = timezone.now().isoformat()
         with self.wait_for_agent_idle(agent_id, timeout=120):
             inbound = self.inject_message(
                 agent_id,
@@ -650,7 +724,9 @@ class GoogleAnalyticsDirectRouteSurvivesHistoryLossScenario(BehaviorMicroScenari
                 trigger_processing=True,
                 eval_run_id=run_id,
                 mock_config=_direct_ga_mock_config(),
-                eval_stop_policy=self._report_stop_policy(),
+                eval_stop_policy=self._report_stop_policy(
+                    tool_calls_after=report_phase_started_at,
+                ),
             )
         self.record_task_result(
             run_id,
@@ -710,9 +786,10 @@ class GoogleAnalyticsDirectRouteSurvivesHistoryLossScenario(BehaviorMicroScenari
             and "277" in reply_body
             and "203" in reply_body
             and any(term in reply_folded for term in ("26.7", "27%", "27 percent"))
+            and _reply_does_not_choose_pipedream(reply_body)
             and not any(
                 term in reply_folded
-                for term in ("pipedream", "reconnect", "authorization required", "cannot access")
+                for term in ("reconnect", "authorization required", "cannot access")
             )
         )
         self.record_task_result(

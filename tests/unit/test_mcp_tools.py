@@ -4556,7 +4556,7 @@ class MCPToolExecutorsTests(TestCase):
         self.assertNotIn("will_continue_work", tool_def["function"]["parameters"]["properties"])
         self.assertEqual(tool_def["function"]["parameters"]["required"], ["query"])
         description = tool_def["function"]["description"]
-        self.assertIn("no enabled tool clearly fits", description)
+        self.assertIn("no enabled tool or user/charter-specified route clearly fits", description)
         self.assertIn("do not rediscover", description)
         self.assertNotIn("NOT for web search", description)
         

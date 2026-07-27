@@ -3601,6 +3601,7 @@ def _one_shot_charter_feedback_check(
     inbound,
     *,
     existing_charter,
+    allow_rejected_completions=False,
     require_result=False,
     required_reply_terms=(),
     required_reply_concepts=(),
@@ -3614,6 +3615,13 @@ def _one_shot_charter_feedback_check(
     one_shot, completion_detail = _completion_actions_match(
         run_id, inbound, calls, ("sqlite_batch", "send_chat_message")
     )
+    if allow_rejected_completions:
+        action_completion_ids = [call.step.completion_id for call in calls]
+        one_shot = (
+            [call.tool_name for call in calls] == ["sqlite_batch", "send_chat_message"]
+            and None not in action_completion_ids
+            and len(set(action_completion_ids)) == len(action_completion_ids)
+        )
     reply_body = str(resolved_tool_param(replies[0], "body") or "") if len(replies) == 1 else ""
     reply_folded = reply_body.casefold()
     terminal_reply = (

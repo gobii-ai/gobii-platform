@@ -7,6 +7,7 @@ loop with LLM‑powered reasoning and tool execution using tiered failover.
 """
 from __future__ import annotations
 
+import ast
 import json
 import os
 import logging
@@ -259,6 +260,8 @@ DIRECT_USER_CORRECTION_RE = re.compile(
     r"\b(?:stop|quit)[\s,:;-]+(?:(?:always|automatically|constantly|continually|continuously|frequently|"
     r"just|regularly|repeatedly|routinely)[\s,:;-]+){0,2}(?:writ\w*|say\w*|send\w*|sound\w*|us(?:e|ed|es|ing)|"
     r"includ\w*|format\w*|reply\w*|respond\w*|messag\w*|introduc\w*)\b|"
+    r"\b(?:do not|don['’]?t|never|stop)\s+use(?:ing)?\s+"
+    r"(?!this\b|that\b|the current\b)[^.!?\n]{1,80}(?=[.!?]|$)|"
     r"\b(?:too|overly)\s+(?:formal|informal|generic|spammy|salesy|corporate|product[ -]?y)\b|"
     r"\b(?:no\s+(?:more\s+)?|(?:don'?t|do not|never)\s+use\s+)(?:em|en|unicode|double)[ -]?"
     r"(?:dashes|hyphens)\b|"
@@ -341,7 +344,23 @@ OPERATIONAL_CAPABILITY_CORRECTION_RE = re.compile(
     r"(?:have|has|can\s+use|can\s+access)\b[^.!?]{0,120}"
     r"\b(?:access|credentials?|secrets?|tools?|integrations?|permissions?|environment variables?|env vars?)\b|"
     r"\b(?:you|the agent)\s+(?:should\s+have|have|has|should\s+be\s+able\s+to\s+use)\b"
-    r"[^.!?]{0,120}\b(?:credentials?|secrets?|integrations?|permissions?|environment variables?|env vars?)\b",
+    r"[^.!?]{0,120}\b(?:credentials?|secrets?|integrations?|permissions?|environment variables?|env vars?)\b|"
+    r"\b(?:i|we)\s+(?:gave|provided|supplied)\s+you\b[^.!?]{0,120}"
+    r"\b(?:access|credentials?|secrets?|tokens?|keys?|service[ -]?accounts?|permissions?)\b"
+    r"[^.!?]{0,120}\b(?:api|access|authenticate|connect|log in|use)\b",
+    re.IGNORECASE,
+)
+REUSABLE_ACCESS_SETUP_RE = re.compile(
+    r"\b(?:added|attached|configured|gave|provided|set up|supplied|uploaded)\b"
+    r"[^.!?]{0,180}\b(?:access|credentials?|keys?|secrets?|service[ -]?accounts?|tokens?)\b|"
+    r"\b(?:access|credentials?|keys?|secrets?|service[ -]?accounts?|tokens?)\b"
+    r"[^.!?]{0,180}\b(?:confirm|test|verify|work|working)\b",
+    re.IGNORECASE,
+)
+DIRECT_ACCESS_VERIFICATION_RE = re.compile(
+    r"\b(?:credentials?|keys?|secrets?|service[ -]?accounts?|tokens?)\b"
+    r"[^.!?]{0,180}(?:\$\[/[^]]+\]|\b(?:file|path|environment variable|env var)\b|"
+    r"\.(?:json|pem|key)\b)",
     re.IGNORECASE,
 )
 EXPLICIT_CHARTER_CHANGE_RE = re.compile(
@@ -1770,6 +1789,24 @@ def _focused_charter_patch_history(
     prior_output: str,
 ) -> list[dict[str, Any]]:
     system_messages = [message for message in history if message.get("role") == "system"]
+    file_context = ""
+    if re.search(
+        r"\b(?:access|api|credentials?|secrets?|tokens?|keys?|service[ -]?accounts?|files?)\b",
+        " ".join(lasting_feedback),
+        re.IGNORECASE,
+    ):
+        prompt_text = "\n".join(
+            str(message.get("content") or "")
+            for message in history
+            if message.get("role") == "user"
+        )
+        match = re.search(r"<agent_filesystem>(.*?)</agent_filesystem>", prompt_text, re.DOTALL)
+        if match:
+            file_context = (
+                "<available_files_context>"
+                + match.group(1).strip()[-2000:]
+                + "</available_files_context>\n"
+            )
     return system_messages + [{
         "role": "user",
         "content": (
@@ -1777,7 +1814,8 @@ def _focused_charter_patch_history(
             "<current_turn>" + feedback_text + "</current_turn>\n"
             "<lasting_feedback_hint>" + json.dumps(lasting_feedback) + "</lasting_feedback_hint>\n"
             "<prior_output_context>" + prior_output[:1000] + "</prior_output_context>\n"
-            "Decide whether the charter needs one patch for the operative lasting behavior in current_turn. "
+            + file_context
+            + "Decide whether the charter needs one patch for the operative lasting behavior in current_turn. "
             "lasting_feedback_hint is a routing hint, not the complete rule: interpret current_turn together with "
             "prior_output_context to understand the behavior the user wants repeated. The prior output is evidence "
             "of the gap, never text to copy into the charter. Judge equivalence against the rule that would have "
@@ -1787,6 +1825,15 @@ def _focused_charter_patch_history(
             "If the charter already expresses the same behavior, choose already_satisfied and make no edit."
         ),
     }]
+
+
+def _focused_access_verification_history(history: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    system_messages = [message for message in history if message.get("role") == "system"]
+    latest_user = next(
+        (message for message in reversed(history) if message.get("role") == "user"),
+        None,
+    )
+    return [*system_messages, latest_user] if latest_user is not None else system_messages
 
 
 def _promote_source_reconciliation_history(history: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -1839,9 +1886,36 @@ CHARTER_PATCH_PARAMETERS = {
             ),
         },
         "target_charter_text": {"type": "string", "description": "Smallest exact contiguous span copied from <charter> that covers every adjacent rule conflicting with the lasting feedback. Preserve lookalikes for other actors/contexts. A general role/workflow and prior output are not targets. Empty if no charter rule controls the behavior."},
-        "replacement_charter_text": {"type": "string", "description": "Complete operational replacement for the target. Apply only the operative lasting behavior, leave no contradiction, and preserve unrelated text inside the target span verbatim. Empty when decision is already_satisfied."},
+        "replacement_charter_text": {
+            "type": "string",
+            "description": (
+                "Complete operational replacement for the target. Apply only the operative lasting behavior, leave "
+                "no contradiction, and preserve unrelated text inside the target span verbatim. For reusable access, "
+                "name the credential type and safe locator, OAuth/JWT or bearer-token flow, least-privilege scope, "
+                "full provider API/endpoint and target ID, and rejected route/provider. For key-backed access, "
+                "explicitly prohibit copying private-key or secret contents into the charter or messages. Empty when "
+                "decision is already_satisfied."
+            ),
+        },
     },
     "required": ["decision", "target_charter_text", "replacement_charter_text"],
+    "additionalProperties": False,
+}
+
+DIRECT_ACCESS_VERIFICATION_PARAMETERS = {
+    "type": "object",
+    "properties": {
+        "code": {
+            "type": "string",
+            "description": (
+                "One script that loads the supplied credential internally and makes an authenticated provider API "
+                "request. Credential parsing, metadata printing, or token minting alone is not verification. Never "
+                "print secret contents."
+            ),
+        },
+        "timeout_seconds": {"type": "integer", "description": "Optional timeout in seconds (max 120)."},
+    },
+    "required": ["code"],
     "additionalProperties": False,
 }
 
@@ -2812,6 +2886,565 @@ def _annotate_agent_config_update_result(
             "implementation, or restate/promise the rule."
         )
     target.result = result
+
+
+def _annotate_verified_access_setup_result(
+    agent: PersistentAgent,
+    outcomes: list[_ToolExecutionOutcome],
+) -> bool:
+    inbound = get_current_inbound_message(agent)
+    if inbound is None or not REUSABLE_ACCESS_SETUP_RE.search(inbound.body or ""):
+        return False
+    outcome = _verified_access_execution_outcome(outcomes)
+    if outcome is None:
+        return False
+    result = dict(outcome.result) if isinstance(outcome.result, dict) else {
+        "status": "ok",
+        "result": outcome.result,
+    }
+    result["durable_setup_guidance"] = (
+        "This authenticated API call verified a user-supplied reusable access route. If the charter does not "
+        "already contain it, next persist one non-secret operational rule with its safe credential locator, "
+        "auth/API method, target ID, and precedence over rejected alternatives before replying."
+    )
+    outcome.result = result
+    return True
+
+
+@dataclass(frozen=True)
+class _AccessExecutionEvidence:
+    request_text: str
+
+
+class _AccessExecutionVisitor(ast.NodeVisitor):
+    def __init__(self) -> None:
+        self.assignments: dict[str, list[ast.AST]] = {}
+        self.calls: list[ast.Call] = []
+        self.functions: dict[str, ast.FunctionDef | ast.AsyncFunctionDef] = {}
+        self._visited_functions: set[str] = set()
+
+    def visit_Module(self, node: ast.Module) -> None:
+        self.functions = {
+            statement.name: statement
+            for statement in node.body
+            if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef))
+        }
+        for statement in node.body:
+            if not isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                self.visit(statement)
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        return
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        return
+
+    def visit_If(self, node: ast.If) -> None:
+        if isinstance(node.test, ast.Constant):
+            branch = node.body if bool(node.test.value) else node.orelse
+            for statement in branch:
+                self.visit(statement)
+            return
+        self.generic_visit(node)
+
+    def visit_Assign(self, node: ast.Assign) -> None:
+        for target in node.targets:
+            if isinstance(target, ast.Name):
+                self.assignments.setdefault(target.id, []).append(node.value)
+        self.visit(node.value)
+
+    def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
+        if isinstance(node.target, ast.Name) and node.value is not None:
+            self.assignments.setdefault(node.target.id, []).append(node.value)
+            self.visit(node.value)
+
+    def visit_NamedExpr(self, node: ast.NamedExpr) -> None:
+        if isinstance(node.target, ast.Name):
+            self.assignments.setdefault(node.target.id, []).append(node.value)
+        self.visit(node.value)
+
+    def visit_Call(self, node: ast.Call) -> None:
+        self.calls.append(node)
+        if (
+            isinstance(node.func, ast.Name)
+            and node.func.id in self.functions
+            and node.func.id not in self._visited_functions
+        ):
+            self._visited_functions.add(node.func.id)
+            for statement in self.functions[node.func.id].body:
+                self.visit(statement)
+        self.generic_visit(node)
+
+
+_ACCESS_AUTH_MARKERS = (
+    "api_key",
+    "authorization",
+    "bearer",
+    "credential",
+    "jwt",
+    "oauth",
+    "service_account",
+    "token",
+)
+_ACCESS_REQUEST_METHODS = {
+    "batch_run_reports",
+    "delete",
+    "execute",
+    "fetch",
+    "get",
+    "get_metadata",
+    "list_account_summaries",
+    "list_accounts",
+    "list_properties",
+    "patch",
+    "post",
+    "put",
+    "query",
+    "request",
+    "run_report",
+    "search",
+    "urlopen",
+}
+_ACCESS_REQUEST_METHOD_PREFIXES = ("batch_", "fetch_", "get_", "list_", "query_", "run_", "search_")
+_ACCESS_NETWORK_CLIENT_MARKERS = ("client", "httpx", "requests", "session", "urllib")
+
+
+def _access_expression_parts(
+    node: ast.AST,
+    assignments: dict[str, list[ast.AST]],
+    *,
+    expanding: frozenset[str] = frozenset(),
+) -> tuple[str, ...]:
+    parts: list[str] = []
+
+    def _collect(item: ast.AST, active: frozenset[str]) -> None:
+        if isinstance(item, ast.Name):
+            parts.append(item.id)
+            if item.id not in active:
+                for value in assignments.get(item.id, ()):
+                    _collect(value, active | {item.id})
+            return
+        if isinstance(item, ast.Attribute):
+            _collect(item.value, active)
+            parts.append(item.attr)
+            return
+        if isinstance(item, ast.Constant):
+            if isinstance(item.value, (str, int, float)):
+                parts.append(str(item.value))
+            return
+        if isinstance(item, ast.FormattedValue):
+            _collect(item.value, active)
+            return
+        if isinstance(item, ast.keyword):
+            if item.arg:
+                parts.append(item.arg)
+            _collect(item.value, active)
+            return
+        for child in ast.iter_child_nodes(item):
+            _collect(child, active)
+
+    _collect(node, expanding)
+    return tuple(parts)
+
+
+def _access_execution_evidence(execution_text: str) -> _AccessExecutionEvidence | None:
+    try:
+        tree = ast.parse(execution_text or "")
+    except (SyntaxError, TypeError, ValueError):
+        return None
+
+    visitor = _AccessExecutionVisitor()
+    visitor.visit(tree)
+    authenticated_requests = []
+    for call in visitor.calls:
+        if isinstance(call.func, ast.Attribute):
+            method_name = call.func.attr.casefold()
+            receiver_parts = _access_expression_parts(
+                call.func.value,
+                visitor.assignments,
+            )
+        elif isinstance(call.func, ast.Name):
+            method_name = call.func.id.casefold()
+            receiver_parts = (call.func.id,)
+        else:
+            continue
+        if (
+            method_name not in _ACCESS_REQUEST_METHODS
+            and not method_name.startswith(_ACCESS_REQUEST_METHOD_PREFIXES)
+        ):
+            continue
+
+        request_parts = _access_expression_parts(call, visitor.assignments)
+        folded_request = " ".join(request_parts).casefold()
+        if not any(marker in folded_request for marker in _ACCESS_AUTH_MARKERS):
+            continue
+        if method_name in {"delete", "get", "patch", "post", "put", "request"}:
+            folded_receiver = " ".join(receiver_parts).casefold()
+            if not any(
+                marker in folded_receiver
+                for marker in _ACCESS_NETWORK_CLIENT_MARKERS
+            ):
+                continue
+        authenticated_requests.append("\n".join(request_parts))
+    if not authenticated_requests:
+        return None
+    return _AccessExecutionEvidence(
+        request_text="\n--- authenticated request ---\n".join(
+            authenticated_requests
+        )
+    )
+
+
+def _execution_verifies_reusable_access(execution_text: str) -> bool:
+    return _access_execution_evidence(execution_text) is not None
+
+
+def _access_target_id(value: Any) -> str:
+    def _plain_text(item: Any) -> str:
+        if isinstance(item, dict):
+            return "\n".join(
+                f"{key}: {_plain_text(nested)}"
+                for key, nested in item.items()
+            )
+        if isinstance(item, (list, tuple, set)):
+            return "\n".join(_plain_text(nested) for nested in item)
+        return str(item)
+
+    text = _plain_text(value)
+    match = re.search(
+        r"\b(?:property|target|workspace|tenant|account)(?:[ _-]?id)?\b"
+        r"[^A-Z0-9]{0,8}([0-9][A-Z0-9_-]{3,})",
+        text,
+        re.IGNORECASE,
+    )
+    return match.group(1) if match else ""
+
+
+def _verified_access_execution_outcome(
+    outcomes: list[_ToolExecutionOutcome],
+) -> _ToolExecutionOutcome | None:
+    for outcome in outcomes:
+        if outcome.prepared.tool_name != "python_exec":
+            continue
+        if not _tool_result_is_success(outcome.result):
+            continue
+        execution_text = str(
+            outcome.prepared.exec_params.get("code")
+            or outcome.prepared.exec_params.get("command")
+            or ""
+        )
+        evidence = _access_execution_evidence(execution_text)
+        if evidence is None:
+            continue
+        target_id = _access_target_id(outcome.result)
+        if target_id and target_id.casefold() not in evidence.request_text.casefold():
+            continue
+        return outcome
+    return None
+
+
+def _successful_access_target_id(outcomes: list[_ToolExecutionOutcome]) -> str:
+    for outcome in outcomes:
+        if outcome.prepared.tool_name != "python_exec":
+            continue
+        if not _tool_result_is_success(outcome.result):
+            continue
+        execution_text = str(outcome.prepared.exec_params.get("code") or "")
+        if _access_execution_evidence(execution_text) is None:
+            continue
+        target_id = _access_target_id(outcome.result)
+        if target_id:
+            return target_id
+    return ""
+
+
+def _matching_connected_access_routes(tools: list[dict[str, Any]], inbound_text: str) -> str:
+    ignored = {
+        "access", "account", "added", "api", "configured", "confirm", "credential",
+        "data", "direct", "file", "json", "property", "service", "should", "working",
+    }
+    subject_terms = {
+        term
+        for term in re.findall(r"[a-z0-9]+", (inbound_text or "").casefold())
+        if len(term) > 3 and term not in ignored
+    }
+    matches = []
+    for tool in tools:
+        function = tool.get("function", {}) if isinstance(tool, dict) else {}
+        name = str(function.get("name") or "")
+        description = str(function.get("description") or "")
+        folded = f"{name} {description}".casefold()
+        if not ({"connected", "integration", "oauth"} & set(re.findall(r"[a-z]+", folded))):
+            continue
+        if len({term for term in subject_terms if term in folded}) < 2:
+            continue
+        matches.append(f"{name}: {description.splitlines()[0]}")
+    return " | ".join(matches[:3])
+
+
+_ACCESS_ROUTE_IGNORED_TERMS = {
+    "access", "account", "accounts", "activity", "added", "and", "api", "auth",
+    "authenticate", "authentication", "bearer", "can", "compare", "configured",
+    "confirm", "credential", "credentials", "data", "direct", "file", "for", "from",
+    "has", "have", "into", "json", "key", "oauth", "path", "please", "property",
+    "report", "request", "result", "return", "scope", "search", "secret", "service",
+    "sessions", "should", "show", "summarize", "target", "tell", "that", "the", "their",
+    "this", "token", "use", "using", "verified", "with", "working", "works", "your",
+}
+_ACCESS_ROUTE_PROVIDER_ALIASES = {
+    "google_analytics": ("google analytics", "ga4"),
+    "google_drive": ("google drive",),
+    "google_search_console": ("google search console", "search console", "gsc"),
+    "github": ("github",),
+    "microsoft_teams": ("microsoft teams",),
+    "pipedream": ("pipedream",),
+    "salesforce": ("salesforce",),
+    "slack": ("slack",),
+    "stripe": ("stripe",),
+}
+
+
+def _access_route_provider_ids(text: str) -> set[str]:
+    folded = " ".join((text or "").casefold().split())
+    return {
+        provider
+        for provider, aliases in _ACCESS_ROUTE_PROVIDER_ALIASES.items()
+        if any(re.search(rf"\b{re.escape(alias)}\b", folded) for alias in aliases)
+    }
+
+
+def _access_route_identity_terms(text: str) -> set[str]:
+    return {
+        term
+        for term in re.findall(r"[a-z0-9]+", (text or "").casefold())
+        if len(term) >= 3 and term not in _ACCESS_ROUTE_IGNORED_TERMS
+    }
+
+
+def _chartered_file_access_route_applies(charter: str, inbound_text: str) -> bool:
+    if not DIRECT_ACCESS_VERIFICATION_RE.search(charter or ""):
+        return False
+    charter_providers = _access_route_provider_ids(charter)
+    inbound_providers = _access_route_provider_ids(inbound_text)
+    if charter_providers and inbound_providers:
+        return bool(charter_providers & inbound_providers)
+    shared_terms = (
+        _access_route_identity_terms(charter)
+        & _access_route_identity_terms(inbound_text)
+    )
+    return len(shared_terms) >= 2
+
+
+def _charter_has_access_method_clause(charter: str) -> bool:
+    return bool(
+        re.search(
+            r"\b(?:authenticate|authentication|bearer token|credentials?|oauth|pipedream|"
+            r"service[ -]?account|api key)\b",
+            charter or "",
+            re.IGNORECASE,
+        )
+    )
+
+
+def _access_credential_locator(context: str) -> str:
+    matches = tuple(re.finditer(
+        r"\$\[(/[^\]\n]+\.(?:json|pem|key))\]|(/[^\s<>'\"]+\.(?:json|pem|key)\b)",
+        context or "",
+        re.IGNORECASE,
+    ))
+    locator_scores: dict[str, tuple[str, int]] = {}
+    for match in matches:
+        locator = next((group for group in match.groups() if group), "")
+        if not locator:
+            continue
+        basename = locator.rsplit("/", 1)[-1]
+        score = 3 if re.search(
+            r"(?:credential|oauth|secret|service[ _-]?account|token|key)",
+            basename,
+            re.IGNORECASE,
+        ) else 0
+        nearby = (context or "")[
+            max(0, match.start() - 100):match.end() + 100
+        ]
+        if re.search(
+            r"\b(?:credential|secret|service[ -]?account|token|key)\b",
+            nearby,
+            re.IGNORECASE,
+        ):
+            score += 1
+        before = (context or "")[max(0, match.start() - 80):match.start()]
+        if re.search(
+            r"\b(?:credential|secret|service[ -]?account|token|key)\b"
+            r"[^.!?\n]{0,60}(?:\bas\b|\bat\b|\bfrom\b|\bin\b|\bpath\b)?\s*$",
+            before,
+            re.IGNORECASE,
+        ):
+            score += 2
+        folded_locator = locator.casefold()
+        existing = locator_scores.get(folded_locator)
+        if existing is None or score > existing[1]:
+            locator_scores[folded_locator] = (locator, score)
+    locators = list(locator_scores.values())
+    if len(locators) == 1:
+        return locators[0][0]
+    if not locators:
+        return ""
+    best_score = max(score for _locator, score in locators)
+    best = [locator for locator, score in locators if score == best_score]
+    return best[0] if best_score > 0 and len(best) == 1 else ""
+
+
+_ACCESS_PROVIDER_API_IDENTITIES = (
+    (
+        ("analyticsadmin.googleapis.com", "google analytics admin api"),
+        "Google Analytics Admin API (analyticsadmin.googleapis.com)",
+    ),
+    (
+        ("analyticsdata.googleapis.com", "google analytics data api"),
+        "Google Analytics Data API (analyticsdata.googleapis.com)",
+    ),
+)
+
+
+def _access_provider_api_identity(context: str) -> str:
+    folded = (context or "").casefold()
+    identities = {
+        identity
+        for markers, identity in _ACCESS_PROVIDER_API_IDENTITIES
+        if any(marker in folded for marker in markers)
+    }
+    return next(iter(identities)) if len(identities) == 1 else ""
+
+
+def _access_scope_identity(context: str) -> str:
+    matches = {
+        match.group(1)
+        for match in re.finditer(
+            r"(?:https://www\.googleapis\.com/auth/)?([a-z][a-z0-9_-]*(?:\.[a-z0-9_-]+)+)",
+            context or "",
+            re.IGNORECASE,
+        )
+        if "readonly" in match.group(1).casefold()
+    }
+    return next(iter(matches)) if len(matches) == 1 else ""
+
+
+def _access_rule_has_explicit_scope(replacement: str) -> bool:
+    return bool(
+        re.search(
+            r"\b(?:https://www\.googleapis\.com/auth/)?"
+            r"[a-z][a-z0-9_-]*(?:\.[a-z0-9_-]+)+\b[^.!?\n]{0,24}\bscope\b|"
+            r"\bscope\b[^.!?\n]{0,24}\b(?:https?://[^\s,;]+|"
+            r"[a-z][a-z0-9_-]*(?:[.:/][a-z0-9_-]+)+)\b|"
+            r"\b(?:read[ -]?only|read/write|read and write|write)\b"
+            r"[^.!?\n]{0,24}\bscope\b",
+            replacement or "",
+            re.IGNORECASE,
+        )
+    )
+
+
+def _access_patch_missing_requirements(
+    replacement: str,
+    *,
+    context: str,
+    target_id: str = "",
+    connected_routes: str = "",
+) -> tuple[str, ...]:
+    folded = (replacement or "").casefold()
+    context_folded = (context or "").casefold()
+    missing = []
+    if target_id and target_id.casefold() not in folded:
+        missing.append("verified target ID")
+    if "pipedream" in f"{context_folded} {connected_routes.casefold()}" and "pipedream" not in folded:
+        missing.append("named rejected route")
+    provider_api = _access_provider_api_identity(context)
+    if provider_api and not any(
+        marker in folded
+        for markers, identity in _ACCESS_PROVIDER_API_IDENTITIES
+        if identity == provider_api
+        for marker in markers
+    ):
+        missing.append("full provider API")
+    scope = _access_scope_identity(context)
+    if scope and scope.casefold() not in folded:
+        missing.append("least-privilege scope")
+    if any(term in context_folded for term in ("service account", "service-account")):
+        if not any(term in folded for term in ("service account", "service-account")):
+            missing.append("credential type")
+        if (
+            not any(term in folded for term in ("oauth", "jwt", "bearer"))
+            or not _access_rule_has_explicit_scope(replacement)
+        ):
+            missing.append("token flow and scope")
+        expected_locator = _access_credential_locator(context)
+        if (
+            expected_locator
+            and expected_locator.casefold() not in folded
+        ) or (
+            not expected_locator
+            and not any(term in folded for term in (".json", "$[/"))
+        ):
+            missing.append("safe credential locator")
+        if not (
+            "private" in folded
+            and "key" in folded
+            and any(term in folded for term in ("never", "do not", "don't", "avoid"))
+        ):
+            missing.append("private-key safety")
+    return tuple(missing)
+
+
+def _repair_access_patch_candidate(
+    replacement: str,
+    missing: tuple[str, ...],
+    *,
+    context: str,
+    target_id: str = "",
+    connected_routes: str = "",
+) -> str:
+    context_folded = (context or "").casefold()
+    missing_set = set(missing)
+    clauses = []
+    if "verified target ID" in missing_set and target_id:
+        clauses.append(f"Use target ID {target_id}.")
+    if "named rejected route" in missing_set and "pipedream" in (
+        context_folded + " " + connected_routes.casefold()
+    ):
+        clauses.append("Do not use the Pipedream route.")
+    if "full provider API" in missing_set:
+        provider_api = _access_provider_api_identity(context)
+        if provider_api:
+            clauses.append(f"Use the {provider_api}.")
+    if "least-privilege scope" in missing_set:
+        scope = _access_scope_identity(context)
+        if scope:
+            clauses.append(f"Use the {scope} scope.")
+    if "credential type" in missing_set and any(
+        term in context_folded for term in ("service account", "service-account")
+    ):
+        clauses.append("Use service-account credentials.")
+    if "token flow and scope" in missing_set and any(
+        term in context_folded for term in ("service account", "service-account")
+    ):
+        scope = _access_scope_identity(context)
+        clauses.append(
+            "Authenticate with an OAuth JWT bearer token using "
+            + (
+                f"the {scope} scope."
+                if scope
+                else "an explicit least-privilege scope identifier."
+            )
+        )
+    if "safe credential locator" in missing_set:
+        locator = _access_credential_locator(context)
+        if locator:
+            clauses.append(f"Load credentials from {locator}.")
+    if "private-key safety" in missing_set:
+        clauses.append(
+            "Never copy private-key or other secret contents into the charter or messages."
+        )
+    return " ".join((replacement.strip(), *clauses)).strip()
 
 
 def _tool_result_confirms_charter_patch(result: Any) -> bool:
@@ -6896,6 +7529,13 @@ def _run_agent_loop(
     direct_correction_reply_pending = False
     direct_feedback_reply_completed = False
     direct_correction_prior_output = ""
+    verified_access_setup_pending = False
+    verified_access_reply_pending = False
+    direct_access_verification_pending = None
+    verified_access_target_id = ""
+    connected_access_routes = ""
+    access_patch_retry_requirements = ()
+    access_patch_retry_candidate = ""
     terminal_plan_cleanup_pending = False
     explicit_prefer_low_latency = prefer_low_latency
     judge_trigger_reasons: list[str] = []
@@ -6938,6 +7578,10 @@ def _run_agent_loop(
             nonlocal active_routing_scope
             nonlocal routing_scope_generation, direct_correction_reply_pending
             nonlocal direct_feedback_reply_completed, direct_correction_prior_output
+            nonlocal verified_access_setup_pending, verified_access_reply_pending
+            nonlocal direct_access_verification_pending
+            nonlocal verified_access_target_id, connected_access_routes
+            nonlocal access_patch_retry_requirements, access_patch_retry_candidate
             nonlocal terminal_plan_cleanup_pending
             next_scope = (
                 advance_inbound_routing_scope(agent, active_routing_scope)
@@ -6952,6 +7596,13 @@ def _run_agent_loop(
             direct_correction_reply_pending = False
             direct_feedback_reply_completed = False
             direct_correction_prior_output = ""
+            verified_access_setup_pending = False
+            verified_access_reply_pending = False
+            direct_access_verification_pending = None
+            verified_access_target_id = ""
+            connected_access_routes = ""
+            access_patch_retry_requirements = ()
+            access_patch_retry_candidate = ""
             terminal_plan_cleanup_pending = False
             return True
 
@@ -7096,6 +7747,25 @@ def _run_agent_loop(
                 iter_span.set_attribute("persistent_agent.tools.count", len(iteration_tools))
                 tool_names = _tool_definition_names_for_completion(iteration_tools)
                 feedback_text = feedback_inbound.body if feedback_inbound is not None else ""
+                if direct_access_verification_pending is None:
+                    direct_access_verification_pending = bool(
+                        "python_exec" in tool_names
+                        and (
+                            (
+                                REUSABLE_ACCESS_SETUP_RE.search(feedback_text)
+                                and DIRECT_ACCESS_VERIFICATION_RE.search(feedback_text)
+                            )
+                            or _chartered_file_access_route_applies(
+                                agent.charter or "",
+                                feedback_text,
+                            )
+                        )
+                    )
+                    if direct_access_verification_pending:
+                        connected_access_routes = _matching_connected_access_routes(
+                            iteration_tools,
+                            feedback_text,
+                        )
                 direct_correction_context = None if direct_correction_reply_pending else _direct_correction_context(agent, feedback_inbound)
                 if direct_correction_context:
                     direct_correction_prior_output = direct_correction_context.prior_output
@@ -7133,6 +7803,17 @@ def _run_agent_loop(
                     if direct_feedback_reply_pending else
                     "Current-turn feedback acknowledgement only. Send one brief natural first-person reply on this inbound channel with will_continue_work=false. " + ("Use exactly one sentence: begin 'For this <stated scope>,'; state the requested changes inside that finite scope, then end without another timing phrase. " if transient_feedback_reply_pending else "State what you will do and cover each distinct adjustment, for example 'Got it. I'll <specific behaviors>.' ") + "Do not mention saving, config, charter, instructions, or tools; do not research, ask a question, or promise more work."
                 ) if feedback_reply_pending else ""
+                if (
+                    feedback_reply_pending
+                    and not direct_feedback_reply_pending
+                    and OPERATIONAL_CAPABILITY_CORRECTION_RE.search(feedback_text)
+                ):
+                    feedback_reply_instruction = (
+                        "Send one short, natural first-person acknowledgment with will_continue_work=false. Say you "
+                        "will use the direct service-account/key route and skip the rejected provider, without "
+                        "restating credential paths, target IDs, scopes, API versions, safety rules, persistence, "
+                        "config, charter, instructions, or tools."
+                    )
                 prompt_notice = current_notice
                 if direct_correction_pending:
                     charter_patch_instruction = (
@@ -7144,7 +7825,7 @@ def _run_agent_loop(
                         "Otherwise patch only that lasting behavior; temporary scope and immediate work must not appear in the replacement. "
                         "CURRENT CHARTER (<charter>), the only source for a nonempty target: "
                         + json.dumps(agent.charter or "")
-                        + ". Scope ordinary corrections to the criticized actor, audience, workflow, and condition; preserve similar rules elsewhere. For role/ownership feedback, state what is owned and remove or qualify conflicting ownership/direction; a named incident is evidence, not scope, and only explicit human reassignment expands the role. If no charter rule controls it, use an empty target and one concise operational rule, not copied feedback or prior output. Otherwise replace the smallest exact contiguous span covering conflicts, preserving unrelated text inside it verbatim."
+                        + ". Scope ordinary corrections to the criticized actor, audience, workflow, and condition; preserve similar rules elsewhere. Access methods are separate operational rules: append unless an existing access-method clause conflicts; a role/provider mention is unrelated. Capture safe locators, auth/API method, target IDs, and precedence from available context, never secret values. For role/ownership feedback, state what is owned and remove or qualify conflicting ownership/direction; a named incident is evidence, not scope, and only explicit human reassignment expands the role. If no charter rule controls it, use an empty target and one concise operational rule, not copied feedback or prior output. Otherwise replace the smallest exact contiguous span covering conflicts, preserving unrelated text inside it verbatim."
                     )
                     prompt_notice = "\n\n".join(filter(None, (
                         prompt_notice,
@@ -7392,6 +8073,7 @@ def _run_agent_loop(
                         )
                 request_tools = iteration_tools
                 focused_feedback_reply_tool_name = None
+                verified_access_reply_tool_name = None
                 source_reconciliation_directive = prompt_metadata.get("source_reconciliation_directive")
                 terminal_plan_cleanup_this_iteration = terminal_plan_cleanup_pending
                 if terminal_plan_cleanup_this_iteration:
@@ -7415,12 +8097,101 @@ def _run_agent_loop(
                             feedback_analysis.lasting,
                             direct_correction_prior_output,
                         )
+                    correction_instruction = charter_patch_instruction
+                    if access_patch_retry_requirements:
+                        correction_instruction += (
+                            " Repair this previous access-rule candidate while preserving its valid details: "
+                            + json.dumps(access_patch_retry_candidate)
+                            + ". Add: "
+                            + ", ".join(access_patch_retry_requirements)
+                            + "."
+                        )
                     request_tools, request_failover_configs = _focused_tool_completion_request(
                         iteration_tools,
                         request_failover_configs,
                         "sqlite_batch",
-                        charter_patch_instruction,
+                        correction_instruction,
                         parameters=CHARTER_PATCH_PARAMETERS,
+                    )
+                elif verified_access_setup_pending:
+                    competing_route_instruction = (
+                        " The original catalog exposed this matching connected route: "
+                        + connected_access_routes
+                        + '. Name its provider and explicitly say "do not use" that route.'
+                        if connected_access_routes else ""
+                    )
+                    request_tools, request_failover_configs = _focused_tool_completion_request(
+                        iteration_tools,
+                        request_failover_configs,
+                        "sqlite_batch",
+                        (
+                            "Return only decision, target_charter_text, and replacement_charter_text; never SQL or "
+                            "will_continue_work. The prior successful authenticated API call verified a reusable "
+                            "access route. Choose already_satisfied with both text fields empty only if the current "
+                            "charter already captures every required access detail. Otherwise choose update and add "
+                            "one separate operational rule that preserves the current charter and "
+                            "captures the exact safe credential locator and type, explicitly names the OAuth/JWT or "
+                            "bearer-token flow and least-privilege scope, spells out the full provider API/endpoint "
+                            "from the setup request without abbreviating it and the target ID, records precedence "
+                            "over rejected routes, and includes an explicit "
+                            "final safety sentence that private-key or other secret contents must never be copied "
+                            "into the charter or messages. Append with an empty target unless an existing "
+                            "access-method clause conflicts."
+                            + (
+                                " The successful provider result established target ID "
+                                + verified_access_target_id
+                                + "; use that exact ID, never an ID guessed in code."
+                                if verified_access_target_id else ""
+                            )
+                            + competing_route_instruction
+                            + (
+                                " Repair this previous candidate while preserving its valid details: "
+                                + json.dumps(access_patch_retry_candidate)
+                                + ". Add: "
+                                + ", ".join(access_patch_retry_requirements)
+                                + "."
+                                if access_patch_retry_requirements else ""
+                            )
+                        ),
+                        parameters=CHARTER_PATCH_PARAMETERS,
+                    )
+                elif verified_access_reply_pending:
+                    reply_tool_name = _same_channel_reply_tool_name(feedback_inbound)
+                    if reply_tool_name in tool_names:
+                        verified_access_reply_tool_name = reply_tool_name
+                        request_tools, request_failover_configs = _focused_tool_completion_request(
+                            iteration_tools,
+                            request_failover_configs,
+                            reply_tool_name,
+                            (
+                                "Send one concise final answer using the successful API result and satisfy the user's "
+                                "request, including its target ID or requested comparison when present. Do not mention "
+                                "the charter, config, persistence, tools, implementation, or future setup; do not say "
+                                "saved, stored, or updated."
+                            ),
+                            fixed_continue=False,
+                        )
+                elif direct_access_verification_pending:
+                    target_instruction = (
+                        " The provider result identified target ID "
+                        + verified_access_target_id
+                        + "; the retry must make the authenticated request against that exact target. Do not "
+                        "discover, guess, or reuse another target."
+                        if verified_access_target_id else ""
+                    )
+                    request_history = _focused_access_verification_history(request_history)
+                    request_tools, request_failover_configs = _focused_tool_completion_request(
+                        iteration_tools,
+                        request_failover_configs,
+                        "python_exec",
+                        (
+                            "A matching credential-backed direct route is specified by the user or charter. Load the "
+                            "credential only inside Python and make the requested authenticated provider API call in "
+                            "this first script. Never print or copy raw secret contents, inspect the credential "
+                            "separately, send a progress message, or use a competing integration."
+                            + target_instruction
+                        ),
+                        parameters=DIRECT_ACCESS_VERIFICATION_PARAMETERS,
                     )
                 elif source_reconciliation_directive and "sqlite_batch" in tool_names:
                     request_tools, request_failover_configs = _focused_tool_completion_request(
@@ -7667,15 +8438,198 @@ def _run_agent_loop(
 
                 raw_tool_calls = _normalize_tool_calls(msg)
                 direct_correction_patch_this_response = False
-                if direct_correction_pending:
+                verified_access_patch_this_response = False
+                direct_access_verification_this_response = bool(
+                    direct_access_verification_pending
+                    and len(raw_tool_calls) == 1
+                    and _get_tool_call_name(raw_tool_calls[0]) == "python_exec"
+                )
+                if direct_access_verification_this_response:
+                    try:
+                        _raw_args, verification_params = _parse_tool_call_params(
+                            _get_tool_call_arguments(raw_tool_calls[0])
+                        )
+                    except (TypeError, ValueError, json.JSONDecodeError):
+                        verification_params = {}
+                    verification_code = str(verification_params.get("code") or "")
+                    verification_evidence = _access_execution_evidence(
+                        verification_code
+                    )
+                    missing_exact_target = bool(
+                        verified_access_target_id
+                        and (
+                            verification_evidence is None
+                            or verified_access_target_id.casefold()
+                            not in verification_evidence.request_text.casefold()
+                        )
+                    )
+                    if (
+                        verification_evidence is None
+                        or missing_exact_target
+                    ):
+                        _record_policy_step(
+                            agent,
+                            (
+                                "Retry python_exec with one script that loads the credential internally and makes "
+                                "the authenticated provider API request"
+                                + (
+                                    " against exact target ID " + verified_access_target_id
+                                    if missing_exact_target else ""
+                                )
+                                + "; credential inspection is not verification, and do not print metadata or send "
+                                "a progress message."
+                            ),
+                            attach_completion=_attach_completion,
+                            attach_prompt_archive=_attach_prompt_archive,
+                        )
+                        _mark_accepted_human_generation_consumed()
+                        continue
+                if direct_correction_pending or verified_access_setup_pending:
                     focused_call = raw_tool_calls[0] if len(raw_tool_calls) == 1 else None
-                    already_satisfied = _charter_patch_is_already_satisfied(focused_call)
-                    compiled_call = _compile_charter_patch_tool_call(focused_call, agent.charter) if focused_call else None
-                    direct_correction_patch_this_response = compiled_call is not None
+                    already_satisfied = _charter_patch_is_already_satisfied(
+                        focused_call
+                    )
+                    compiled_call = (
+                        _compile_charter_patch_tool_call(
+                            focused_call,
+                            agent.charter,
+                        )
+                        if focused_call
+                        else None
+                    )
+                    access_patch_missing = ()
+                    access_correction = bool(
+                        verified_access_setup_pending
+                        or OPERATIONAL_CAPABILITY_CORRECTION_RE.search(feedback_text)
+                    )
+                    access_validation_context = ""
+                    access_target_id = ""
+                    if access_correction:
+                        access_context = " ".join(
+                            str(message.get("content") or "")
+                            for message in request_history
+                            if message.get("role") == "user"
+                        )
+                        access_validation_context = (
+                            f"{feedback_text} {access_context} "
+                            f"{direct_correction_prior_output}"
+                        )
+                        access_target_id = (
+                            verified_access_target_id
+                            or _access_target_id(direct_correction_prior_output)
+                        )
+                    if compiled_call is not None and access_correction:
+                        try:
+                            _raw_args, patch_params = _parse_tool_call_params(
+                                _get_tool_call_arguments(focused_call)
+                            )
+                        except (TypeError, ValueError, json.JSONDecodeError):
+                            patch_params = {}
+                        if not _charter_has_access_method_clause(agent.charter or ""):
+                            patch_params = {
+                                **patch_params,
+                                "target_charter_text": "",
+                            }
+                            normalized_access_call = {
+                                "id": _tool_call_field(focused_call, "id"),
+                                "type": "function",
+                                "function": {
+                                    "name": "sqlite_batch",
+                                    "arguments": json.dumps(patch_params),
+                                },
+                            }
+                            compiled_call = _compile_charter_patch_tool_call(
+                                normalized_access_call,
+                                agent.charter,
+                            )
+                        replacement = str(
+                            patch_params.get("replacement_charter_text") or ""
+                        )
+                        access_patch_missing = _access_patch_missing_requirements(
+                            replacement,
+                            context=access_validation_context,
+                            target_id=access_target_id,
+                            connected_routes=connected_access_routes,
+                        )
+                        if access_patch_missing:
+                            repaired_replacement = _repair_access_patch_candidate(
+                                replacement,
+                                access_patch_missing,
+                                context=access_validation_context,
+                                target_id=access_target_id,
+                                connected_routes=connected_access_routes,
+                            )
+                            repaired_params = {
+                                "decision": "update",
+                                "target_charter_text": patch_params.get("target_charter_text"),
+                                "replacement_charter_text": repaired_replacement,
+                            }
+                            repaired_call = {
+                                "id": _tool_call_field(focused_call, "id"),
+                                "type": "function",
+                                "function": {
+                                    "name": "sqlite_batch",
+                                    "arguments": json.dumps(repaired_params),
+                                },
+                            }
+                            repaired_missing = _access_patch_missing_requirements(
+                                repaired_replacement,
+                                context=access_validation_context,
+                                target_id=access_target_id,
+                                connected_routes=connected_access_routes,
+                            )
+                            repaired_compiled_call = _compile_charter_patch_tool_call(
+                                repaired_call,
+                                agent.charter,
+                            )
+                            if repaired_compiled_call is not None and not repaired_missing:
+                                compiled_call = repaired_compiled_call
+                                access_patch_missing = ()
+                            else:
+                                compiled_call = None
+                                access_patch_missing = repaired_missing
+                            access_patch_retry_candidate = repaired_replacement
+                            access_patch_retry_requirements = tuple(dict.fromkeys(
+                                (*access_patch_retry_requirements, *access_patch_missing)
+                            ))
+                            if compiled_call is not None:
+                                access_patch_retry_requirements = ()
+                                access_patch_retry_candidate = ""
+                        else:
+                            access_patch_retry_requirements = ()
+                            access_patch_retry_candidate = ""
+                    elif already_satisfied and access_correction:
+                        access_patch_missing = _access_patch_missing_requirements(
+                            agent.charter or "",
+                            context=access_validation_context,
+                            target_id=access_target_id,
+                            connected_routes=connected_access_routes,
+                        )
+                        already_satisfied = not access_patch_missing
+                        if access_patch_missing:
+                            access_patch_retry_requirements = tuple(dict.fromkeys(
+                                (
+                                    *access_patch_retry_requirements,
+                                    *access_patch_missing,
+                                )
+                            ))
+                    direct_correction_patch_this_response = bool(
+                        direct_correction_pending and compiled_call is not None
+                    )
+                    verified_access_patch_this_response = bool(
+                        verified_access_setup_pending and compiled_call is not None
+                    )
                     if compiled_call is not None:
                         raw_tool_calls = [compiled_call]
                     elif already_satisfied:
-                        direct_correction_reply_pending = True
+                        direct_correction_reply_pending = bool(
+                            direct_correction_pending
+                        )
+                        if verified_access_setup_pending:
+                            verified_access_setup_pending = False
+                            verified_access_reply_pending = True
+                        access_patch_retry_requirements = ()
+                        access_patch_retry_candidate = ""
                         _mark_accepted_human_generation_consumed()
                         continuation_notice = (
                             "Equivalent durable guidance is already present. Make no config edit; "
@@ -7686,8 +8640,14 @@ def _run_agent_loop(
                     else:
                         _record_policy_step(
                             agent,
-                            "Tool policy: resolve this direct user correction before replying. Return one valid "
-                            "structured update or already_satisfied decision, preserving unrelated guidance.",
+                            "Tool policy: resolve this durable instruction before replying. Return one valid "
+                            "structured update or already_satisfied decision, preserving unrelated guidance."
+                            + (
+                                " The access rule is incomplete; add: "
+                                + ", ".join(access_patch_missing)
+                                + "."
+                                if access_patch_missing else ""
+                            ),
                             attach_completion=_attach_completion,
                             attach_prompt_archive=_attach_prompt_archive,
                         )
@@ -7953,6 +8913,38 @@ def _run_agent_loop(
                         executed_batch.execution_outcomes,
                         config_apply,
                     )
+                    verified_access_outcome = _verified_access_execution_outcome(
+                        executed_batch.execution_outcomes,
+                    )
+                    observed_access_target_id = _successful_access_target_id(
+                        executed_batch.execution_outcomes,
+                    )
+                    verified_access_target_id = (
+                        observed_access_target_id
+                        or verified_access_target_id
+                    )
+                    if verified_access_outcome is not None:
+                        verified_access_target_id = (
+                            _access_target_id(verified_access_outcome.result)
+                            or verified_access_target_id
+                        )
+                    verified_access_now = _annotate_verified_access_setup_result(
+                        agent,
+                        executed_batch.execution_outcomes,
+                    )
+                    if direct_access_verification_this_response:
+                        direct_access_verification_pending = verified_access_outcome is None
+                        if verified_access_outcome is not None and not verified_access_now:
+                            verified_access_reply_pending = True
+                    verified_access_setup_pending = verified_access_now or verified_access_setup_pending
+                    if verified_access_patch_this_response:
+                        verified_access_patch_confirmed = any(
+                            outcome.prepared.tool_name == "sqlite_batch"
+                            and _tool_result_confirms_charter_patch(outcome.result)
+                            for outcome in executed_batch.execution_outcomes
+                        )
+                        verified_access_setup_pending = not verified_access_patch_confirmed
+                        verified_access_reply_pending = verified_access_patch_confirmed
                     if direct_correction_patch_this_response:
                         direct_correction_reply_pending = any(
                             outcome.prepared.tool_name == "sqlite_batch"
@@ -7977,10 +8969,17 @@ def _run_agent_loop(
                     attach_prompt_archive=_attach_prompt_archive,
                 )
                 executed_calls = finalized_batch.executed_calls
-                followup_required = followup_required or finalized_batch.followup_required or direct_correction_patch_this_response
+                followup_required = (
+                    followup_required
+                    or finalized_batch.followup_required
+                    or direct_correction_patch_this_response
+                    or verified_access_patch_this_response
+                )
                 message_delivery_ok = finalized_batch.message_delivery_ok
                 if direct_feedback_reply_pending and focused_feedback_reply_tool_name and message_delivery_ok:
                     direct_feedback_reply_completed = True
+                if verified_access_reply_tool_name and message_delivery_ok:
+                    verified_access_reply_pending = False
                 last_explicit_continue = finalized_batch.last_explicit_continue
                 inferred_message_continue_this_iteration = (
                     finalized_batch.inferred_message_continue_this_iteration

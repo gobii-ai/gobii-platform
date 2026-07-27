@@ -205,6 +205,9 @@ def _get_eval_tool_calls(eval_run_id: str, policy: dict[str, Any]):
         .select_related("step")
         .order_by("step__created_at", "step__id")
     )
+    tool_calls_after = policy.get("tool_calls_after")
+    if tool_calls_after:
+        calls = calls.filter(step__created_at__gte=tool_calls_after)
     return [call for call in calls if _is_relevant_call(call, policy)]
 
 

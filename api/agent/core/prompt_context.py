@@ -1743,7 +1743,7 @@ def _render_prompt_context_once(
         )
         important_group.section_text(
             "charter_note",
-            "Charter is durable memory. Keep ongoing role/scope/recurrence; apply unscoped corrections, preserve unrelated guidance; omit task/batch/day/response scope, completed work, and guesses.",
+            "Charter is durable memory. Keep ongoing role/scope/recurrence and verified reusable routes; apply unscoped corrections, preserve unrelated guidance; omit secrets, finite scope, completed work, and guesses.",
             weight=2,
             non_shrinkable=True
         )
@@ -1835,7 +1835,7 @@ def _render_prompt_context_once(
         )
 
     agent_config_note = (
-        f"{AGENT_CONFIG_TABLE} id=1: patch_text=lasting owner rules, including unscoped corrections/refinements, before reply; "
+        f"{AGENT_CONFIG_TABLE} id=1: patch_text=lasting owner rules and verified reusable routes, including unscoped corrections, before reply; "
         "appearance=full person after authorized changes: age/skin/hair/eyes/style, not scene/vibe; preserve unspecified; confirm briefly; temporary feedback/ordinary tasks never config; "
         "emotion: on a meaningful win/setback, first UPDATE one fitting emoji+1..86400s without rereading; routine/default clear; NULLs clear."
     )
@@ -4098,7 +4098,7 @@ def _get_system_instruction(
     )
 
     charter_and_schedule_intro = (
-        "Charter and schedules are durable config for ongoing role, scope, preferences, communication guidance, boundaries, recurrence, and requested future wake-ups. "
+        "Charter holds ongoing role, scope, preferences, boundaries, communication guidance, and verified reusable access routes; schedules hold future wake-ups. Store safe locators, auth/API method, target IDs, and precedence, never secret values. "
         "Default timezone from the user or conversation; ask only when timing would otherwise be materially wrong. "
     )
     initiative_guidance = (
@@ -4150,10 +4150,10 @@ def _get_system_instruction(
         "## Durable Config (CRITICAL)\n\n"
 
         "Resolve addressee and ownership first: feedback directed to another participant is not your correction. "
-        "Scope veto: finite task/batch/day/run/project/renewal/deal/case feedback is temporary. If it gives no separate task, only acknowledge briefly; do not research or change config. In mixed feedback, scope carries forward until another marker; persist only lasting clauses. Otherwise authorized behavior feedback is lasting: before replying, resolve the related clause with one sqlite_batch patch or an explicit no-op. Classify by function, not phrasing; factual or conversational corrections to recurring work still last. Patch narrowed or distinct emphasis even if broadly consistent. If equivalent behavior is explicit, make no edit and continue the task. Charter-edit mechanics are never charter content. "
+        "Scope veto: finite task/batch/day/run/project/renewal/deal/case feedback is temporary. If it gives no separate task, only acknowledge briefly; do not research or change config. In mixed feedback, scope carries forward until another marker; persist only lasting clauses. Otherwise authorized behavior feedback and reusable access-route corrections are lasting: before replying, resolve the related clause with one sqlite_batch patch or an explicit no-op. Classify by function, not phrasing; factual or conversational corrections to recurring work still last. Patch narrowed or distinct emphasis even if broadly consistent. If equivalent behavior is explicit, make no edit and continue the task. Charter-edit mechanics are never charter content. "
         "Replace conflicts/softened absolutes; preserve unrelated text; append only if no related clause. After target-not-found, patch from authoritative Current Charter below; don't reread or ask. "
         "Only agent_config_update confirming charter updated/unchanged proves persistence; status=ok alone does not. "
-        "Correction plus immediate task or recurrence means fulfill both before one final: patch behavior, do the task, and upsert each named schedule, in one SQLite batch when practical. After a successful patch, reply only with the completed task result, or a brief natural acknowledgment when there was no task; never mention implementation or restate/promise the new rule. Invite correction if unsure; never save transient facts/results/guesses.\n\n"
+        "Correction plus immediate task or recurrence means fulfill both before one final: patch behavior, do the task, and upsert each named schedule, in one SQLite batch when practical. After a successful patch, reply only with the completed task result, or a brief natural acknowledgment when there was no task; never mention implementation or restate/promise the new rule. Invite correction if unsure; never save transient facts/results/guesses. After first successful use, save the reusable access route, not its secret or result.\n\n"
 
         f"{initiative_guidance}"
 
@@ -4211,6 +4211,7 @@ def _get_system_instruction(
         "scheduled exact feed/API briefing -> http_request then send concise sourced report; no update_plan/files/charts unless asked\n"
         "localhost/private/rendered/login page -> spawn_web_task (or retry with it after scrape/http cannot access)\n"
         "webpage screenshot/visual capture/PDF/rendered artifact -> spawn_web_task\n"
+        "credential file path -> use inside python_exec/run_command; never read_file, print, or copy its contents\n"
         "provided filespace path -> pass directly; read_file only for requested contents, never URL/auth preflight\n"
         "non-secret data/api/feed/file URL -> http_request; if it belongs to a named model, reconcile+SELECT there before use; PDF may need read_file; spawn_web_task only after access/render/login blockage\n"
         "HTML page to read -> scrape_as_markdown or structured extractor; known platforms/social -> structured extractor first\n"
@@ -4218,7 +4219,7 @@ def _get_system_instruction(
         "weather geocoding -> forecast/current API before replying\n"
         "current prices/quotes -> known API or search for API/data endpoint, then http_request; avoid generic result pages\n"
         "create/launch/deploy/manage agent, specialist-agent, or entire research/analyst/scout team -> only search_tools('meta gobii control plane') first; never batch with update_plan/research/config\n"
-        "discovery hint -> search_tools(exact query); enabled tool fits -> use directly; no fit or task evolved -> search_tools(domain)\n"
+        "discovery hint -> search_tools(exact query); otherwise user/charter route or enabled tool fits -> use directly; only search when no fit or task evolved\n"
         "interactive/login/JS-only -> spawn_web_task; if active_browser_tasks >= 3 -> sleep_until_next_trigger\n"
         "store/query ad hoc data only when reuse, joins, filtering, chart input, aggregation, or size makes direct reading unreliable\n"
         "same URLs/items returned twice -> no new evidence; report result/shortfall, stop; no query variants\n"

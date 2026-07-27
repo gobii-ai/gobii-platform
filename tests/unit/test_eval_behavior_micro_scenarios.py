@@ -1995,6 +1995,24 @@ class BehaviorMicroHelperTests(TestCase):
         self.assertTrue(should_stop)
         self.assertIn("all terminal expected", reason)
 
+    def test_eval_stop_policy_can_scope_calls_to_current_phase(self):
+        self._add_tool_call("http_request", status="complete")
+        phase_started_at = timezone.now().isoformat()
+        policy = {
+            "tool_calls_after": phase_started_at,
+            "stop_when_all_seen": [
+                {"tool_name": "http_request", "after_execution": True},
+            ],
+        }
+
+        should_stop, _reason = should_stop_for_eval_policy(str(self.run.id), policy)
+
+        self.assertFalse(should_stop)
+        self._add_tool_call("http_request", status="complete")
+        should_stop, reason = should_stop_for_eval_policy(str(self.run.id), policy)
+        self.assertTrue(should_stop)
+        self.assertIn("all terminal expected", reason)
+
     def test_eval_stop_policy_can_wait_for_required_param_any(self):
         self._add_tool_call("custom_sync", {"mode": "status"}, status="complete")
         policy = {

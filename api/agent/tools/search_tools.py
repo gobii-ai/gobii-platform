@@ -1457,11 +1457,10 @@ def get_search_tools_tool() -> Dict[str, Any]:
             "name": "search_tools",
             "description": (
                 "Discover and enable tools and skills for the task; follow capability-discovery hints even when generic tools are enabled. "
-                "Use when no enabled tool clearly fits, including named integration requests. "
+                "Use when no enabled tool or user/charter-specified route clearly fits, including named integration requests. "
                 "Use for control-plane or agent/team-management requests that may require hidden system skills. "
                 "Use it when you need to choose between structured extractors, web search, scraping, browser automation, or a specialized integration. "
-                "Use already-enabled direct tools such as sqlite_batch, create_csv, or a named integration tool; do not rediscover a matching enabled app/tool. "
-                "Call it again when the task changes and you need different capabilities."
+                "Use already-enabled direct tools such as sqlite_batch, create_csv, or a named integration tool; do not rediscover a matching enabled app/tool."
             ),
             "parameters": {
                 "type": "object",

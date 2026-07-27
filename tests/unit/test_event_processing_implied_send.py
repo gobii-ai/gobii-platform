@@ -285,6 +285,11 @@ class ImpliedSendTests(TestCase):
             "you should have github secrets that allow you to use github.",
             "You already have credentials for that command-line workflow.",
             "The agent should be able to use the configured environment variables.",
+            "Don't use Pipedream. I gave you the key to log in directly with the Google Analytics API.",
+            (
+                "Don't use Pipedream. I gave you the service-account key for direct "
+                "Google Analytics Data API access with the analytics.readonly scope."
+            ),
             "Please stop - writing like a template.",
             "Please stop always writing like a template.",
             "Stop repeatedly sending generic replies.",
@@ -324,6 +329,7 @@ class ImpliedSendTests(TestCase):
             "Always use the Q3 figures in this report.",
             "Stop sending this email.",
             "Stop using this source for the report.",
+            "For this report, don't use Pipedream.",
             "Send a reply that sounds robotic for a demo.",
             "This is great news about Acme's strategy.",
             "Those customer messages are not helpful; categorize the complaints.",
@@ -405,6 +411,11 @@ class ImpliedSendTests(TestCase):
             ('"Curious what you think the biggest gap is right now." this is not so good. it makes the other person do the work', "Curious what you think the biggest gap is right now."),
             ("Great that you found leads, but you did not include links. Do I have to ask each time? Can we make that a rule?", ""),
             ("Going forward, keep the updates short and include source links.", ""),
+            (
+                "Don't use Pipedream. I gave you the service-account key for direct "
+                "Google Analytics Data API access with the analytics.readonly scope.",
+                "",
+            ),
         )
         for text, prior in feedback_only:
             with self.subTest(feedback_only=text):
@@ -2060,6 +2071,324 @@ class ImpliedSendTests(TestCase):
         self.assertFalse(ep._user_text_has_durable_config_intent("For this answer, prefer bullets."))
         self.assertTrue(ep._looks_like_one_off_user_task("Tell me the latest funding news for Acme."))
 
+    def test_successful_direct_access_setup_gets_persistence_guidance(self):
+        self._add_inbound_web_message(
+            "I added the service-account credentials. Please confirm API access."
+        )
+        direct = MagicMock()
+        direct.prepared.tool_name = "python_exec"
+        direct.prepared.exec_params = {
+            "code": (
+                "from google.oauth2 import service_account\n"
+                "credentials = service_account.Credentials.from_service_account_file('/workspace/key.json')\n"
+                "client = BetaAnalyticsDataClient(credentials=credentials)\n"
+                "client.run_report(request)"
+            )
+        }
+        direct.result = {"status": "ok", "stdout": "verified"}
+
+        annotated = ep._annotate_verified_access_setup_result(self.agent, [direct])
+
+        self.assertTrue(annotated)
+        self.assertIn("durable_setup_guidance", direct.result)
+
+    def test_credential_inspection_does_not_claim_verified_access(self):
+        self._add_inbound_web_message(
+            "I added the service-account credentials. Please confirm API access."
+        )
+        inspection = MagicMock()
+        inspection.prepared.tool_name = "python_exec"
+        inspection.prepared.exec_params = {
+            "code": "print(service_account_info['token_uri'])"
+        }
+        inspection.result = {"status": "ok", "stdout": "https://oauth2.example.test/token"}
+
+        annotated = ep._annotate_verified_access_setup_result(self.agent, [inspection])
+
+        self.assertFalse(annotated)
+        self.assertNotIn("durable_setup_guidance", inspection.result)
+        self.assertFalse(
+            ep._execution_verifies_reusable_access(
+                "token_uri = 'https://oauth2.googleapis.com/token'; print(token_uri)"
+            )
+        )
+        self.assertFalse(
+            ep._execution_verifies_reusable_access(
+                "# credentials client.run_report\nprint('ok')"
+            )
+        )
+        self.assertFalse(
+            ep._execution_verifies_reusable_access(
+                "if False:\n"
+                "    credentials = load_credentials()\n"
+                "    client = ApiClient(credentials=credentials)\n"
+                "    client.run_report(request)\n"
+                "print('ok')"
+            )
+        )
+
+    def test_file_backed_access_setup_uses_direct_verification_route(self):
+        prompt = (
+            "I added the service-account JSON as $[/Inbox/ga4-service-account.json]. "
+            "Please confirm Google Analytics access."
+        )
+
+        self.assertTrue(ep.REUSABLE_ACCESS_SETUP_RE.search(prompt))
+        self.assertTrue(ep.DIRECT_ACCESS_VERIFICATION_RE.search(prompt))
+        self.assertFalse(
+            ep.DIRECT_ACCESS_VERIFICATION_RE.search(
+                "I connected Slack OAuth. Please confirm it works."
+            )
+        )
+
+    def test_matching_connected_access_routes_keeps_provider_metadata(self):
+        tools = [
+            {
+                "function": {
+                    "name": "google_analytics-run-report",
+                    "description": "Run a report through connected Pipedream Google Analytics OAuth.",
+                }
+            },
+            {
+                "function": {
+                    "name": "slack-search",
+                    "description": "Search the connected Slack workspace.",
+                }
+            },
+        ]
+
+        context = ep._matching_connected_access_routes(
+            tools,
+            "Confirm the Google Analytics service-account JSON.",
+        )
+
+        self.assertIn("Pipedream Google Analytics", context)
+        self.assertNotIn("Slack", context)
+
+    def test_focused_access_verification_history_drops_failed_attempts(self):
+        history = [
+            {"role": "system", "content": "System context"},
+            {"role": "user", "content": "Confirm GA4 access."},
+            {"role": "assistant", "content": "Trying a guessed property."},
+            {"role": "tool", "content": "Wrong target."},
+        ]
+
+        focused = ep._focused_access_verification_history(history)
+
+        self.assertEqual(
+            focused,
+            [
+                {"role": "system", "content": "System context"},
+                {"role": "user", "content": "Confirm GA4 access."},
+            ],
+        )
+
+    def test_verified_access_requires_provider_target_from_result(self):
+        outcome = MagicMock()
+        outcome.prepared.tool_name = "python_exec"
+        outcome.prepared.exec_params = {
+            "code": (
+                "credentials = service_account.Credentials.from_service_account_info(info)\n"
+                "client = BetaAnalyticsDataClient(credentials=credentials)\n"
+                "client.run_report('properties/111111111')"
+            )
+        }
+        outcome.result = {
+            "status": "ok",
+            "stdout": (
+                "DIRECT_GA4_AUTH=service_account\n"
+                "PROPERTY_ID=489999846"
+            ),
+        }
+
+        self.assertIsNone(ep._verified_access_execution_outcome([outcome]))
+        self.assertEqual(ep._successful_access_target_id([outcome]), "489999846")
+        outcome.prepared.exec_params["code"] += "\nproperty_id = '489999846'"
+        self.assertIsNone(ep._verified_access_execution_outcome([outcome]))
+        outcome.prepared.exec_params["code"] = outcome.prepared.exec_params[
+            "code"
+        ].replace("properties/111111111", "properties/489999846")
+        self.assertIs(ep._verified_access_execution_outcome([outcome]), outcome)
+
+    def test_verified_access_checks_target_across_token_and_provider_requests(self):
+        outcome = MagicMock()
+        outcome.prepared.tool_name = "python_exec"
+        outcome.prepared.exec_params = {
+            "code": (
+                "credentials = load_credentials()\n"
+                "signed_jwt = credentials.create_jwt()\n"
+                "token_response = requests.post(\n"
+                "    'https://oauth.example.test/token',\n"
+                "    data={'assertion': signed_jwt},\n"
+                ")\n"
+                "access_token = token_response.json()['access_token']\n"
+                "headers = {'Authorization': f'Bearer {access_token}'}\n"
+                "report = requests.post(\n"
+                "    'https://api.example.test/properties/489999846:runReport',\n"
+                "    headers=headers,\n"
+                ")\n"
+            )
+        }
+        outcome.result = {
+            "status": "ok",
+            "stdout": "PROPERTY_ID=489999846",
+        }
+
+        self.assertIs(ep._verified_access_execution_outcome([outcome]), outcome)
+
+    def test_chartered_file_route_applies_to_matching_provider_request(self):
+        charter = (
+            "For GA4 API access, use the service-account JSON at "
+            "$[/Inbox/ga4-service-account.json]."
+        )
+
+        self.assertTrue(
+            ep._chartered_file_access_route_applies(
+                charter,
+                "Compare Organic Search sessions in GA4.",
+            )
+        )
+        self.assertFalse(
+            ep._chartered_file_access_route_applies(
+                charter,
+                "Summarize recent Slack feedback.",
+            )
+        )
+        self.assertFalse(
+            ep._chartered_file_access_route_applies(
+                charter,
+                "Show account activity in Stripe.",
+            )
+        )
+        self.assertFalse(
+            ep._chartered_file_access_route_applies(
+                charter,
+                "Tell me about the recent customer activity.",
+            )
+        )
+        self.assertTrue(ep._charter_has_access_method_clause(charter))
+        self.assertFalse(
+            ep._charter_has_access_method_clause(
+                "Monitor organic search performance through Google Analytics."
+            )
+        )
+
+    def test_access_patch_requirements_reject_incomplete_route(self):
+        context = (
+            "Attach files using the exact $[/path]. "
+            "Google Analytics service-account setup using Pipedream or "
+            "$[/Inbox/ga4-service-account.json] with analytics.readonly scope."
+        )
+        self.assertEqual(
+            ep._access_credential_locator(context),
+            "/Inbox/ga4-service-account.json",
+        )
+        self.assertEqual(
+            ep._access_credential_locator(
+                "<agent_filesystem>/Inbox/report.json\n"
+                "/Inbox/ga4-service-account.json</agent_filesystem>"
+            ),
+            "/Inbox/ga4-service-account.json",
+        )
+        self.assertEqual(
+            ep._access_credential_locator(
+                "<agent_filesystem>/Inbox/primary-key.json\n"
+                "/Inbox/backup-key.json</agent_filesystem>"
+            ),
+            "",
+        )
+        incomplete = (
+            "Use the service-account JSON at $[/Inbox/ga4-service-account.json] "
+            "for GA4 API property 489999846 instead of Pipedream."
+        )
+        complete = (
+            incomplete
+            + " Use an OAuth JWT bearer flow with analytics.readonly scope. "
+            "Never copy the private key into the charter or messages."
+        )
+
+        self.assertIn(
+            "token flow and scope",
+            ep._access_patch_missing_requirements(
+                incomplete,
+                context=context,
+                target_id="489999846",
+            ),
+        )
+        self.assertIn(
+            "token flow and scope",
+            ep._access_patch_missing_requirements(
+                incomplete
+                + " Authenticate with an OAuth JWT bearer token using the required scope.",
+                context=context.replace(" with analytics.readonly scope", ""),
+                target_id="489999846",
+            ),
+        )
+        self.assertIn(
+            "safe credential locator",
+            ep._access_patch_missing_requirements(
+                incomplete.replace(
+                    "$[/Inbox/ga4-service-account.json]",
+                    "$[/path]",
+                ),
+                context=context,
+                target_id="489999846",
+            ),
+        )
+        self.assertEqual(
+            ep._access_patch_missing_requirements(
+                complete,
+                context=context,
+                target_id="489999846",
+            ),
+            (),
+        )
+        missing = ep._access_patch_missing_requirements(
+            incomplete,
+            context=context,
+            target_id="489999846",
+        )
+        repaired = ep._repair_access_patch_candidate(
+            incomplete,
+            missing,
+            context=context,
+            target_id="489999846",
+        )
+        self.assertEqual(
+            ep._access_patch_missing_requirements(
+                repaired,
+                context=context,
+                target_id="489999846",
+            ),
+            (),
+        )
+
+    def test_access_patch_preserves_explicit_google_analytics_api(self):
+        admin_context = (
+            "Use the Google Analytics Admin API "
+            "(analyticsadmin.googleapis.com) with the service-account key at "
+            "/Inbox/admin-key.json and analytics.readonly scope."
+        )
+        admin_route = (
+            "Use service-account credentials from /Inbox/admin-key.json with "
+            "an OAuth JWT bearer flow and analytics.readonly scope for the "
+            "Google Analytics Admin API. Never copy the private key."
+        )
+
+        missing = ep._access_patch_missing_requirements(
+            admin_route,
+            context=admin_context,
+        )
+        repaired = ep._repair_access_patch_candidate(
+            admin_route,
+            missing,
+            context=admin_context,
+        )
+
+        self.assertEqual(missing, ())
+        self.assertNotIn("analyticsdata.googleapis.com", repaired)
+        self.assertNotIn("Google Analytics Data API", repaired)
+
     def test_legacy_planning_state_allows_execute_now_tool_search(self):
         self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
         self.agent.save(update_fields=["planning_state", "updated_at"])
@@ -3434,6 +3763,89 @@ class ImpliedSendTests(TestCase):
             "using its task-relevant tool directly",
             build_prompt.call_args_list[1].kwargs["continuation_notice"],
         )
+
+    def test_incomplete_access_route_rejects_already_satisfied_decision(self):
+        tools = [
+            {"type": "function", "function": {"name": "sqlite_batch", "parameters": {"type": "object", "properties": {}}}},
+            {"type": "function", "function": {"name": "send_chat_message", "parameters": {"type": "object", "properties": {"body": {"type": "string"}, "will_continue_work": {"type": "boolean"}}}}},
+        ]
+        feedback = (
+            "Don't use Pipedream. I gave you the service-account key at "
+            "$[/Inbox/ga4-service-account.json] for direct Google Analytics "
+            "Data API access with the analytics.readonly scope."
+        )
+        complete_route = (
+            "Use service-account credentials from /Inbox/ga4-service-account.json. "
+            "Authenticate with an OAuth JWT bearer token using the analytics.readonly "
+            "scope for the Google Analytics Data API (analyticsdata.googleapis.com). "
+            "Do not use the Pipedream route. Never copy private-key or other secret "
+            "contents into the charter or messages."
+        )
+        responses = [
+            self._tool_completion("sqlite_batch", {
+                "decision": "already_satisfied",
+                "target_charter_text": "",
+                "replacement_charter_text": "",
+            }),
+            self._tool_completion("sqlite_batch", {
+                "decision": "update",
+                "target_charter_text": "",
+                "replacement_charter_text": complete_route,
+            }),
+            self._tool_completion("send_chat_message", {
+                "body": "Got it. I'll use the direct service-account route.",
+                "will_continue_work": False,
+            }),
+        ]
+
+        completion, _build_prompt, executed_tools = self._run_feedback_flow(
+            feedback,
+            responses,
+            tools,
+        )
+
+        self.assertEqual(executed_tools, ["sqlite_batch", "send_chat_message"])
+        self.assertEqual(completion.call_count, 3)
+
+    def test_complete_access_route_accepts_already_satisfied_decision(self):
+        self.agent.charter = (
+            "Use service-account credentials from /Inbox/ga4-service-account.json. "
+            "Authenticate with an OAuth JWT bearer token using the analytics.readonly "
+            "scope for the Google Analytics Data API (analyticsdata.googleapis.com). "
+            "Do not use the Pipedream route. Never copy private-key or other secret "
+            "contents into the charter or messages."
+        )
+        self.agent.save(update_fields=["charter", "updated_at"])
+        tools = [
+            {"type": "function", "function": {"name": "sqlite_batch", "parameters": {"type": "object", "properties": {}}}},
+            {"type": "function", "function": {"name": "send_chat_message", "parameters": {"type": "object", "properties": {"body": {"type": "string"}, "will_continue_work": {"type": "boolean"}}}}},
+        ]
+        feedback = (
+            "Don't use Pipedream. I gave you the service-account key at "
+            "$[/Inbox/ga4-service-account.json] for direct Google Analytics "
+            "Data API access with the analytics.readonly scope."
+        )
+        responses = [
+            self._tool_completion("sqlite_batch", {
+                "decision": "already_satisfied",
+                "target_charter_text": "",
+                "replacement_charter_text": "",
+            }),
+            self._tool_completion("send_chat_message", {
+                "body": "Got it. I'll use the direct service-account route.",
+                "will_continue_work": False,
+            }),
+        ]
+
+        completion, _build_prompt, executed_tools = self._run_feedback_flow(
+            feedback,
+            responses,
+            tools,
+        )
+
+        self.assertEqual(executed_tools, ["send_chat_message"])
+        self.assertEqual(completion.call_count, 2)
+
     def test_charter_patch_requires_confirmed_config_result_before_replying(self):
         tools = [
             {"type": "function", "function": {"name": "sqlite_batch", "parameters": {"type": "object", "properties": {}}}},
@@ -3544,6 +3956,32 @@ class ImpliedSendTests(TestCase):
         self.assertIn("Going forward, send outcomes.", focused[1]["content"])
         self.assertIn("legal review first", focused[1]["content"])
         self.assertIn("routing hint, not the complete rule", focused[1]["content"])
+
+    def test_focused_access_correction_keeps_metadata_only_file_context(self):
+        history = [
+            {"role": "system", "content": "system"},
+            {
+                "role": "user",
+                "content": (
+                    "<agent_filesystem>- $[/Inbox/service-account.json] "
+                    "(2 KB, application/json)</agent_filesystem>"
+                ),
+            },
+        ]
+
+        focused = ep._focused_charter_patch_history(
+            history,
+            "Monitor analytics.",
+            (
+                "Don't use the legacy integration. I gave you the "
+                "service-account key for direct API access."
+            ),
+            ("Don't use the legacy integration.", "I gave you the service-account key for direct API access."),
+            "Reconnect the legacy integration.",
+        )
+
+        self.assertIn("<available_files_context>", focused[1]["content"])
+        self.assertIn("$[/Inbox/service-account.json]", focused[1]["content"])
 
     def test_source_reconciliation_contract_is_promoted_without_hiding_context(self):
         history = [
