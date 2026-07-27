@@ -836,6 +836,7 @@ class RemoteMCPViewTests(TestCase):
             str(agent.id),
             eval_run_id=None,
             inbound_generation=expected_generation,
+            inbound_message_id=str(message.id),
         )
 
     @patch("api.services.remote_mcp.can_user_use_personal_agents_and_api", return_value=True)

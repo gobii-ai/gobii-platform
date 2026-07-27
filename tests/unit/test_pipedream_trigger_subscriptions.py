@@ -243,7 +243,11 @@ class PipedreamTriggerSubscriptionWebhookTests(TestCase):
         self.assertEqual(message.raw_payload["discord_author_id"], "u1")
         self.assertEqual(message.raw_payload["discord_attachments"], [{"url": "https://cdn.example/file.png"}])
         mock_max_file_size.assert_called()
-        mock_delay.assert_called_once_with(str(self.agent.id), inbound_generation=ANY)
+        mock_delay.assert_called_once_with(
+            str(self.agent.id),
+            inbound_generation=ANY,
+            inbound_message_id=str(message.id),
+        )
 
     @tag("batch_agent_webhooks")
     @patch("api.agent.comms.message_service.get_max_file_size", return_value=None)
@@ -312,7 +316,11 @@ class PipedreamTriggerSubscriptionWebhookTests(TestCase):
             auth=None,
         )
         mock_max_file_size.assert_called()
-        mock_delay.assert_called_once_with(str(self.agent.id), inbound_generation=ANY)
+        mock_delay.assert_called_once_with(
+            str(self.agent.id),
+            inbound_generation=ANY,
+            inbound_message_id=str(message.id),
+        )
 
     @tag("batch_agent_webhooks")
     @patch("api.agent.comms.message_service.requests.get")
@@ -347,7 +355,11 @@ class PipedreamTriggerSubscriptionWebhookTests(TestCase):
         self.assertEqual(message.raw_payload["discord_attachments"], ["1504906484096696551"])
         self.assertFalse(PersistentAgentMessageAttachment.objects.filter(message=message).exists())
         mock_get.assert_not_called()
-        mock_delay.assert_called_once_with(str(self.agent.id), inbound_generation=ANY)
+        mock_delay.assert_called_once_with(
+            str(self.agent.id),
+            inbound_generation=ANY,
+            inbound_message_id=str(message.id),
+        )
 
     @tag("batch_agent_webhooks")
     @override_settings(DISCORD_INBOUND_DEBOUNCE_SECONDS=15, CELERY_TASK_ALWAYS_EAGER=False)
@@ -553,7 +565,11 @@ class PipedreamTriggerSubscriptionWebhookTests(TestCase):
         self.assertEqual(message.raw_payload["source_label"], "_the_juicer_ in #general")
         self.assertEqual(message.raw_payload["discord_author_id"], "177593384389705729")
         self.assertEqual(message.raw_payload["discord_author_name"], "_the_juicer_")
-        mock_delay.assert_called_once_with(str(self.agent.id), inbound_generation=ANY)
+        mock_delay.assert_called_once_with(
+            str(self.agent.id),
+            inbound_generation=ANY,
+            inbound_message_id=str(message.id),
+        )
 
     @tag("batch_agent_webhooks")
     @patch("api.agent.tasks.process_agent_events_task.delay")

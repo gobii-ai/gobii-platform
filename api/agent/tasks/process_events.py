@@ -182,6 +182,7 @@ def enqueue_interactive_process_agent_events(
     persistent_agent_id: str,
     *,
     inbound_generation: int | str | None = None,
+    inbound_message_id: str | None = None,
     eval_run_id: str | None = None,
     prefer_low_latency: bool | None = None,
 ) -> None:
@@ -189,6 +190,8 @@ def enqueue_interactive_process_agent_events(
     kwargs: dict[str, Any] = {}
     if inbound_generation is not None:
         kwargs["inbound_generation"] = inbound_generation
+    if inbound_message_id:
+        kwargs["inbound_message_id"] = inbound_message_id
     if eval_run_id is not None:
         kwargs["eval_run_id"] = eval_run_id
     if prefer_low_latency is not None:
@@ -205,6 +208,8 @@ def enqueue_claimed_pending_work(pending_work: PendingAgentWork) -> None:
     kwargs: dict[str, Any] = {}
     if pending_work.inbound_generation is not None and not pending_work.has_generic_work:
         kwargs["inbound_generation"] = pending_work.inbound_generation
+    if pending_work.inbound_message_id:
+        kwargs["inbound_message_id"] = pending_work.inbound_message_id
     queue = pending_work.queue or AGENT_DEFAULT_PROCESSING_QUEUE
     process_agent_events_task.apply_async(
         args=[pending_work.agent_id],
@@ -231,6 +236,7 @@ def process_agent_events_task(
     eval_stop_policy: Optional[Dict[str, Any]] = None,
     burn_follow_up_token: str | None = None,
     inbound_generation: int | str | None = None,
+    inbound_message_id: str | None = None,
     max_loop_iterations: int | None = None,
     max_iterations_followup_delay_seconds: int | None = None,
     max_iterations_followup_queue: str | None = None,
@@ -369,6 +375,7 @@ def process_agent_events_task(
             eval_stop_policy=eval_stop_policy,
             burn_follow_up_token=burn_follow_up_token,
             inbound_generation=inbound_generation,
+            inbound_message_id=inbound_message_id,
             prefer_low_latency=prefer_low_latency,
             max_loop_iterations=max_loop_iterations,
             max_iterations_followup_delay_seconds=max_iterations_followup_delay_seconds,
@@ -489,6 +496,7 @@ def process_pending_agent_events_task(
                 PendingAgentWork(
                     agent_id=normalized,
                     inbound_generation=pending_work.inbound_generation,
+                    inbound_message_id=pending_work.inbound_message_id,
                     queue=pending_work.queue,
                     has_generic_work=pending_work.has_generic_work,
                 )
@@ -515,6 +523,7 @@ def process_pending_agent_events_task(
             enqueue_pending_agent(
                 pending_work.agent_id,
                 inbound_generation=pending_work.inbound_generation,
+                inbound_message_id=pending_work.inbound_message_id,
                 queue=pending_work.queue,
                 has_generic_work=pending_work.has_generic_work,
                 ttl=pending_settings.pending_set_ttl_seconds,

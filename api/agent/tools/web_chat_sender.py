@@ -316,7 +316,11 @@ def get_send_chat_tool() -> Dict[str, Any]:
                     },
                     "will_continue_work": {
                         "type": "boolean",
-                        "description": "REQUIRED. true if immediate work follows, including any progress update/promise of more results; false only when this turn and current plan are done. Never message solely to justify continuation.",
+                        "description": (
+                            "REQUIRED. true only if work for this active request remains after this message; false "
+                            "for a complete answer. Plan cleanup or queued work never justify true. Never message "
+                            "just to continue."
+                        ),
                     },
                 },
                 "required": ["body", "will_continue_work"],

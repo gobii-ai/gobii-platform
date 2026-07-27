@@ -148,13 +148,21 @@ class ProcessAgentEventsTaskTests(SimpleTestCase):
     @tag("batch_agent_chat")
     def test_enqueue_interactive_process_agent_events_uses_interactive_queue(self):
         agent_id = "33333333-3333-3333-3333-333333333333"
+        message_id = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
 
         with patch("api.agent.tasks.process_events.process_agent_events_task.apply_async") as mock_apply_async:
-            enqueue_interactive_process_agent_events(agent_id, inbound_generation=7)
+            enqueue_interactive_process_agent_events(
+                agent_id,
+                inbound_generation=7,
+                inbound_message_id=message_id,
+            )
 
         mock_apply_async.assert_called_once_with(
             args=[agent_id],
-            kwargs={"inbound_generation": 7},
+            kwargs={
+                "inbound_generation": 7,
+                "inbound_message_id": message_id,
+            },
             queue=AGENT_INTERACTIVE_PROCESSING_QUEUE,
         )
 

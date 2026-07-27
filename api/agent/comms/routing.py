@@ -21,9 +21,24 @@ _inbound_routing_scope: ContextVar[InboundRoutingScope | None] = ContextVar("inb
 
 
 def capture_inbound_routing_scope(
-    agent: PersistentAgent, *, pending_inbound: bool = False, background_before: datetime | None = None
+    agent: PersistentAgent,
+    *,
+    message_id: UUID | str | None = None,
+    pending_inbound: bool = False,
+    background_before: datetime | None = None,
 ) -> InboundRoutingScope:
-    message = _latest_inbound_message(agent, exclude_webhooks=pending_inbound)
+    message = (
+        PersistentAgentMessage.objects.filter(
+            id=message_id,
+            owner_agent=agent,
+            is_outbound=False,
+            conversation__isnull=False,
+        )
+        .select_related("conversation", "from_endpoint")
+        .first()
+        if message_id
+        else _latest_inbound_message(agent, exclude_webhooks=pending_inbound)
+    )
     is_background = bool(
         message
         and not pending_inbound
@@ -33,6 +48,43 @@ def capture_inbound_routing_scope(
         )
     )
     return InboundRoutingScope(agent_id=agent.id, message_id=None if is_background or message is None else message.id)
+
+
+def advance_inbound_routing_scope(
+    agent: PersistentAgent,
+    scope: InboundRoutingScope,
+) -> InboundRoutingScope:
+    """Advance only within the conversation that owns the active turn."""
+    if scope.agent_id != agent.id or scope.message_id is None:
+        return scope
+
+    active_message = (
+        PersistentAgentMessage.objects.filter(
+            id=scope.message_id,
+            owner_agent=agent,
+            is_outbound=False,
+            conversation__isnull=False,
+        )
+        .only("id", "seq", "conversation_id")
+        .first()
+    )
+    if active_message is None:
+        return scope
+
+    newer_message = (
+        PersistentAgentMessage.objects.filter(
+            owner_agent=agent,
+            conversation_id=active_message.conversation_id,
+            is_outbound=False,
+            seq__gt=active_message.seq,
+        )
+        .order_by("-seq")
+        .only("id")
+        .first()
+    )
+    if newer_message is None:
+        return scope
+    return InboundRoutingScope(agent_id=agent.id, message_id=newer_message.id)
 
 
 def bind_inbound_routing_scope(scope: InboundRoutingScope) -> Token:

@@ -238,7 +238,7 @@ class _FakeRedis:
     def eval(self, script: str, numkeys: int, *args):
         normalized_script = " ".join(script.split()).lower()
         if "gobii_pending_enqueue_v1" in normalized_script:
-            pending_key, generation_key, queue_key, generic_key = args[:numkeys]
+            pending_key, generation_key, queue_key, generic_key, message_key = args[:numkeys]
             (
                 agent_id,
                 generation_raw,
@@ -246,6 +246,7 @@ class _FakeRedis:
                 ttl_raw,
                 interactive_queue,
                 has_generic_work,
+                inbound_message_id,
             ) = args[numkeys:]
             added = self.sadd(pending_key, agent_id)
             generation = max(0, int(generation_raw or 0))
@@ -269,25 +270,31 @@ class _FakeRedis:
                 )
             ):
                 self.hset(queue_key, agent_id, queue)
+            if inbound_message_id and (
+                generation_advanced or self.hget(message_key, agent_id) is None
+            ):
+                self.hset(message_key, agent_id, inbound_message_id)
             ttl = int(ttl_raw or 0)
             if ttl > 0:
-                for key in (pending_key, generation_key, queue_key, generic_key):
+                for key in (pending_key, generation_key, queue_key, generic_key, message_key):
                     self.expire(key, ttl)
             return added
         if "gobii_pending_claim_v1" in normalized_script:
-            pending_key, generation_key, queue_key, generic_key = args[:numkeys]
+            pending_key, generation_key, queue_key, generic_key, message_key = args[:numkeys]
             agent_id = str(args[numkeys])
             if not self.srem(pending_key, agent_id):
                 return []
             generation = self.hget(generation_key, agent_id)
             queue = self.hget(queue_key, agent_id)
             generic = self.sismember(generic_key, agent_id)
+            inbound_message_id = self.hget(message_key, agent_id)
             self.hdel(generation_key, agent_id)
             self.hdel(queue_key, agent_id)
             self.srem(generic_key, agent_id)
-            return [agent_id, generation or "", queue or "", generic]
+            self.hdel(message_key, agent_id)
+            return [agent_id, generation or "", queue or "", generic, inbound_message_id or ""]
         if "gobii_pending_claim_many_v1" in normalized_script:
-            pending_key, generation_key, queue_key, generic_key = args[:numkeys]
+            pending_key, generation_key, queue_key, generic_key, message_key = args[:numkeys]
             limit = max(0, int(args[numkeys] or 0))
             agent_ids = self.spop(pending_key, count=limit) or []
             claimed = []
@@ -296,10 +303,12 @@ class _FakeRedis:
                 generation = self.hget(generation_key, agent_id)
                 queue = self.hget(queue_key, agent_id)
                 generic = self.sismember(generic_key, agent_id)
+                inbound_message_id = self.hget(message_key, agent_id)
                 self.hdel(generation_key, agent_id)
                 self.hdel(queue_key, agent_id)
                 self.srem(generic_key, agent_id)
-                claimed.extend([agent_id, generation or "", queue or "", generic])
+                self.hdel(message_key, agent_id)
+                claimed.extend([agent_id, generation or "", queue or "", generic, inbound_message_id or ""])
             return claimed
 
         # Implement the specific check-then-increment used by AgentBudgetManager

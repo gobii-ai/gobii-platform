@@ -66,18 +66,21 @@ class PendingDrainValidationTests(TestCase):
         enqueue_pending_agent(
             self.agent.id,
             inbound_generation=2,
+            inbound_message_id="00000000-0000-0000-0000-000000000002",
             queue=AGENT_DEFAULT_PROCESSING_QUEUE,
             client=self.redis,
         )
         enqueue_pending_agent(
             self.agent.id,
             inbound_generation=4,
+            inbound_message_id="00000000-0000-0000-0000-000000000004",
             queue=AGENT_INTERACTIVE_PROCESSING_QUEUE,
             client=self.redis,
         )
         enqueue_pending_agent(
             self.agent.id,
             inbound_generation=3,
+            inbound_message_id="00000000-0000-0000-0000-000000000003",
             queue=AGENT_DEFAULT_PROCESSING_QUEUE,
             client=self.redis,
         )
@@ -87,6 +90,10 @@ class PendingDrainValidationTests(TestCase):
         self.assertIsNotNone(pending_work)
         self.assertEqual(pending_work.inbound_generation, 4)
         self.assertEqual(pending_work.queue, AGENT_INTERACTIVE_PROCESSING_QUEUE)
+        self.assertEqual(
+            pending_work.inbound_message_id,
+            "00000000-0000-0000-0000-000000000004",
+        )
         self.assertFalse(pending_work.has_generic_work)
         self.assertIsNone(claim_pending_agent(self.agent.id, client=self.redis))
 
@@ -154,6 +161,7 @@ class PendingDrainValidationTests(TestCase):
         enqueue_pending_agent(
             self.agent.id,
             inbound_generation=7,
+            inbound_message_id="00000000-0000-0000-0000-000000000007",
             queue=AGENT_INTERACTIVE_PROCESSING_QUEUE,
             client=self.redis,
         )
@@ -162,7 +170,10 @@ class PendingDrainValidationTests(TestCase):
 
         mock_apply_async.assert_called_once_with(
             args=[str(self.agent.id)],
-            kwargs={"inbound_generation": 7},
+            kwargs={
+                "inbound_generation": 7,
+                "inbound_message_id": "00000000-0000-0000-0000-000000000007",
+            },
             queue=AGENT_INTERACTIVE_PROCESSING_QUEUE,
         )
 

@@ -113,10 +113,14 @@ class _ProcessingDispatch:
                 enqueue_interactive_process_agent_events(
                     str(self.owner_id),
                     inbound_generation=inbound_generation,
+                    inbound_message_id=self.message_id,
                 )
             else:
                 kwargs = (
-                    {"inbound_generation": inbound_generation}
+                    {
+                        "inbound_generation": inbound_generation,
+                        "inbound_message_id": self.message_id,
+                    }
                     if inbound_generation is not None
                     else {}
                 )
@@ -853,6 +857,7 @@ def inject_internal_web_message(
             str(agent.id),
             eval_run_id=eval_run_id,
             inbound_generation=inbound_generation,
+            inbound_message_id=str(message.id),
         )
 
     if attachments:

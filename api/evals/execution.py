@@ -363,6 +363,7 @@ class ScenarioExecutionTools:
         if trigger_processing:
             self._dispatch_agent_processing(
                 agent_id,
+                inbound_message_id=str(msg.id),
                 eval_run_id=current_run_id,
                 mock_config=mock_config,
                 eval_stop_policy=eval_stop_policy,
@@ -374,6 +375,7 @@ class ScenarioExecutionTools:
         self,
         agent_id: str,
         *,
+        inbound_message_id: str | None = None,
         eval_run_id: str | None = None,
         mock_config: dict | None = None,
         eval_stop_policy: dict | None = None,
@@ -384,6 +386,7 @@ class ScenarioExecutionTools:
         current_run_id = eval_run_id or get_current_eval_run_id()
         self._dispatch_agent_processing(
             agent_id,
+            inbound_message_id=inbound_message_id,
             eval_run_id=current_run_id,
             mock_config=mock_config,
             eval_stop_policy=eval_stop_policy,
@@ -393,6 +396,7 @@ class ScenarioExecutionTools:
         self,
         agent_id: str,
         *,
+        inbound_message_id: str | None = None,
         eval_run_id: str | None = None,
         mock_config: dict | None = None,
         eval_stop_policy: dict | None = None,
@@ -410,6 +414,8 @@ class ScenarioExecutionTools:
                 "eval_run_id": eval_run_id,
                 "mock_config": mock_config,
             }
+            if inbound_message_id:
+                kwargs["inbound_message_id"] = inbound_message_id
             if eval_stop_policy is not None:
                 kwargs["eval_stop_policy"] = eval_stop_policy
 
