@@ -429,7 +429,7 @@ class SqliteBatchCoreTests(SqliteBatchTestCase):
 
         self.assertEqual(out.get("status"), "error")
         self.assertIn(
-            "patch_text requires exactly 3 arguments: patch_text(text, old, new)",
+            "patch_text takes exactly 3 arguments: patch_text(text, old, new)",
             out.get("message", ""),
         )
         self.assertIn("with `bindings`", out.get("message", ""))
