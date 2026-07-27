@@ -8,7 +8,13 @@ from uuid import UUID
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 
-from api.agent.comms.message_service import _ensure_participant, _get_or_create_conversation
+from api.agent.comms.message_service import (
+    _ensure_participant,
+    _get_or_create_conversation,
+    inject_internal_web_message,
+)
+from api.agent.tools.sqlite_guardrails import clear_guarded_connection, open_guarded_sqlite_connection
+from api.agent.tools.sqlite_state import agent_sqlite_db
 from api.agent.tools.tool_manager import mark_tool_enabled_without_discovery
 from api.agent.tools.web_chat_sender import WEB_CHAT_UNAVAILABLE_MESSAGE
 from api.evals.base import EvalScenario, ScenarioTask
@@ -38,6 +44,8 @@ REPLY_CHANNEL_CONTINUITY_SLUG = "message_quality_reply_stays_in_web_chat"
 UNAVAILABLE_WEB_CHANNEL_CONTINUITY_SLUG = "message_quality_unavailable_web_does_not_switch_channels"
 FAILED_EMAIL_DELIVERY_RECOVERY_SLUG = "message_quality_failed_email_reports_failure"
 EMAIL_REVIEW_OUTBOX_COMMUNICATION_SLUG = "message_quality_email_review_outbox_communication"
+REMOTE_MCP_RESULT_DELIVERY_SLUG = "message_quality_remote_mcp_result_is_delivered"
+EMAIL_SENT_STATE_SEQUENCING_SLUG = "message_quality_email_sent_state_after_provider_acceptance"
 
 
 @dataclass(frozen=True)
@@ -284,6 +292,8 @@ MESSAGE_QUALITY_SCENARIO_SLUGS = (
     UNAVAILABLE_WEB_CHANNEL_CONTINUITY_SLUG,
     FAILED_EMAIL_DELIVERY_RECOVERY_SLUG,
     EMAIL_REVIEW_OUTBOX_COMMUNICATION_SLUG,
+    REMOTE_MCP_RESULT_DELIVERY_SLUG,
+    EMAIL_SENT_STATE_SEQUENCING_SLUG,
 )
 
 
@@ -1469,6 +1479,334 @@ class UnavailableWebChannelContinuityScenario(EvalScenario, ScenarioExecutionToo
                 else f"Agent changed channels via {[call.tool_name for call in cross_channel_calls]}."
             ),
             artifacts={"step": cross_channel_calls[0].step} if cross_channel_calls else {},
+        )
+
+
+def _seed_lifecycle_eval_table(agent_id: str, statements: tuple[str, ...]) -> None:
+    with agent_sqlite_db(str(agent_id)) as db_path:
+        connection = open_guarded_sqlite_connection(db_path)
+        try:
+            for statement in statements:
+                connection.execute(statement)
+            connection.commit()
+        finally:
+            clear_guarded_connection(connection)
+            connection.close()
+
+
+def _sqlite_call_text(call: PersistentAgentToolCall) -> str:
+    params = MessageQualityScenario._tool_params(call)
+    raw_sql = params.get("queries", params.get("sql") or "")
+    if isinstance(raw_sql, list):
+        return "\n".join(str(query) for query in raw_sql)
+    return str(raw_sql)
+
+
+@register_scenario
+class RemoteMcpResultDeliveryScenario(EvalScenario, ScenarioExecutionTools):
+    slug = REMOTE_MCP_RESULT_DELIVERY_SLUG
+    version = "1.0"
+    description = "A remote MCP request should receive the decision-ready result after internal SQLite work."
+    tier = "core"
+    category = "message_quality"
+    expected_runtime = "short"
+    cost_class = "low"
+    owner = "agent-platform"
+    area = "agent_behavior"
+    tags = ("message_quality", "remote_mcp", "sqlite_batch", "send_chat_message")
+    tasks = [
+        ScenarioTask(name="inject_remote_mcp_request", assertion_type="agent_processing"),
+        ScenarioTask(name="verify_internal_result_queried", assertion_type="tool_call"),
+        ScenarioTask(name="verify_requester_received_result", assertion_type="persisted_state"),
+    ]
+
+    def run(self, run_id: str, agent_id: str) -> None:
+        agent = PersistentAgent.objects.get(id=agent_id)
+        mark_tool_enabled_without_discovery(agent, "sqlite_batch")
+        mark_tool_enabled_without_discovery(agent, "send_chat_message")
+        _seed_lifecycle_eval_table(
+            agent_id,
+            (
+                "CREATE TABLE current_office_snapshot ("
+                "snapshot_key TEXT PRIMARY KEY, total_open_cases INTEGER NOT NULL, "
+                "busiest_region TEXT NOT NULL, busiest_region_open_cases INTEGER NOT NULL);",
+                "INSERT INTO current_office_snapshot VALUES ('latest', 16, 'South', 7);",
+            ),
+        )
+
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.RUNNING,
+            task_name="inject_remote_mcp_request",
+        )
+        with self.wait_for_agent_idle(agent_id, timeout=120):
+            inbound, _ = inject_internal_web_message(
+                agent_id,
+                (
+                    "Return one concise office-hours snapshot with the total open case count and the busiest "
+                    "region. Use the current modeled operations state rather than memory."
+                ),
+                sender_user_id=agent.user_id,
+                trigger_processing=False,
+                eval_run_id=run_id,
+                source="remote_mcp",
+                source_kind="mcp",
+                source_label="Gobii MCP",
+            )
+            CommsAllowlistEntry.objects.update_or_create(
+                agent=agent,
+                channel=CommsChannel.WEB,
+                address=inbound.from_endpoint.address,
+                defaults={"is_active": True, "allow_inbound": True, "allow_outbound": True},
+            )
+            agent.preferred_contact_endpoint = inbound.from_endpoint
+            agent.save(update_fields=["preferred_contact_endpoint"])
+            self.trigger_processing(
+                agent_id,
+                inbound_message_id=str(inbound.id),
+                eval_run_id=run_id,
+                eval_stop_policy={
+                    "stop_on_tool_names_after_execution": ["send_chat_message"],
+                    "stop_on_unexpected_relevant_tool": True,
+                    "allowed_tool_names": [
+                        "sqlite_batch",
+                        "send_chat_message",
+                        "update_plan",
+                        "sleep_until_next_trigger",
+                    ],
+                    "ignored_tool_names": ["update_plan"],
+                    "max_relevant_tool_calls": 5,
+                },
+            )
+
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED,
+            task_name="inject_remote_mcp_request",
+            observed_summary="Remote MCP request processed through the real agent harness.",
+            artifacts={"message": inbound},
+        )
+        calls = MessageQualityScenario._tool_calls_for_run(run_id, after=inbound.timestamp)
+        sqlite_calls = [call for call in calls if call.tool_name == "sqlite_batch" and call.status == "complete"]
+        queried_state = any("current_office_snapshot" in _sqlite_call_text(call).lower() for call in sqlite_calls)
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED if queried_state else EvalRunTask.Status.FAILED,
+            task_name="verify_internal_result_queried",
+            expected_summary="Agent should query the modeled operations state before answering.",
+            observed_summary=(
+                "Agent queried current_office_snapshot."
+                if queried_state
+                else f"No successful current_office_snapshot query; tool sequence was {[call.tool_name for call in calls]}."
+            ),
+            artifacts={"step": sqlite_calls[0].step} if sqlite_calls else {},
+        )
+
+        delivered = [
+            call
+            for call in calls
+            if call.tool_name == "send_chat_message"
+            and str(MessageQualityScenario._tool_result(call).get("status") or "").lower()
+            in {"ok", "sent", "success"}
+            and MessageQualityScenario._tool_result(call).get("skipped") is not True
+        ]
+        body = str(MessageQualityScenario._tool_params(delivered[0]).get("body") or "") if delivered else ""
+        exact_answer = len(delivered) == 1 and "16" in body and "south" in body.casefold()
+        outbound = list(
+            PersistentAgentMessage.objects.filter(
+                owner_agent_id=agent_id,
+                conversation_id=inbound.conversation_id,
+                is_outbound=True,
+                timestamp__gt=inbound.timestamp,
+            )
+        )
+        requester_received = exact_answer and len(outbound) == 1
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED if requester_received else EvalRunTask.Status.FAILED,
+            task_name="verify_requester_received_result",
+            expected_summary="The MCP requester should receive one concise snapshot after the SQLite result.",
+            observed_summary=(
+                "Requester received one correct snapshot."
+                if requester_received
+                else (
+                    f"Saw {len(delivered)} successful chat delivery call(s), {len(outbound)} persisted reply/replies, "
+                    f"and body={body[:300]!r}."
+                )
+            ),
+            artifacts={"message": outbound[0]} if outbound else {},
+        )
+
+
+@register_scenario
+class EmailSentStateSequencingScenario(EvalScenario, ScenarioExecutionTools):
+    slug = EMAIL_SENT_STATE_SEQUENCING_SLUG
+    version = "1.0"
+    description = "An agent should send first, then record the provider's exact sent state without claiming delivery."
+    tier = "core"
+    category = "message_quality"
+    expected_runtime = "short"
+    cost_class = "low"
+    owner = "agent-platform"
+    area = "agent_behavior"
+    tags = ("message_quality", "send_email", "sqlite_batch", "delivery_state")
+    tasks = [
+        ScenarioTask(name="inject_approved_send", assertion_type="agent_processing"),
+        ScenarioTask(name="verify_send_precedes_sent_state", assertion_type="tool_call"),
+        ScenarioTask(name="verify_exact_provider_state", assertion_type="persisted_state"),
+    ]
+
+    def run(self, run_id: str, agent_id: str) -> None:
+        agent = PersistentAgent.objects.get(id=agent_id)
+        mark_tool_enabled_without_discovery(agent, "sqlite_batch")
+        mark_tool_enabled_without_discovery(agent, "send_email")
+        mark_tool_enabled_without_discovery(agent, "send_chat_message")
+        CommsAllowlistEntry.objects.update_or_create(
+            agent=agent,
+            channel=CommsChannel.EMAIL,
+            address="finance@example.test",
+            defaults={
+                "is_active": True,
+                "allow_inbound": True,
+                "allow_outbound": True,
+                "verified": True,
+            },
+        )
+        _seed_lifecycle_eval_table(
+            agent_id,
+            (
+                "CREATE TABLE outbound_actions ("
+                "action_key TEXT PRIMARY KEY, approval_status TEXT NOT NULL, "
+                "delivery_status TEXT NOT NULL, recipient TEXT NOT NULL, "
+                "subject TEXT NOT NULL, body TEXT NOT NULL, provider_message_id TEXT);",
+                "INSERT INTO outbound_actions VALUES ("
+                "'forecast-q3', 'approved', 'not_sent', 'finance@example.test', 'Q3 forecast ready', "
+                "'The approved Q3 forecast is ready for review.', NULL);",
+            ),
+        )
+
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.RUNNING,
+            task_name="inject_approved_send",
+        )
+        with self.wait_for_agent_idle(agent_id, timeout=120):
+            inbound = self.inject_message(
+                agent_id,
+                "Send the approved Q3 forecast note to finance and keep the outbound tracker accurate.",
+                trigger_processing=True,
+                eval_run_id=run_id,
+                mock_config={
+                    "send_email": {
+                        "status": "ok",
+                        "delivery_status": "sent",
+                        "message": (
+                            "Email send completed for finance@example.test with delivery_status=sent. "
+                            "Use that status exactly; do not claim recipient delivery unless it is delivered."
+                        ),
+                        "message_id": "eval-provider-message-301",
+                        "auto_sleep_ok": False,
+                    },
+                },
+                eval_stop_policy={
+                    "stop_on_tool_names_after_execution": ["send_chat_message"],
+                    "stop_on_unexpected_relevant_tool": True,
+                    "allowed_tool_names": [
+                        "sqlite_batch",
+                        "send_email",
+                        "send_chat_message",
+                        "update_plan",
+                        "sleep_until_next_trigger",
+                    ],
+                    "ignored_tool_names": ["update_plan", "sleep_until_next_trigger"],
+                    "max_relevant_tool_calls": 7,
+                },
+            )
+
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED,
+            task_name="inject_approved_send",
+            observed_summary="Approved send processed through the real agent harness.",
+            artifacts={"message": inbound},
+        )
+        calls = MessageQualityScenario._tool_calls_for_run(run_id, after=inbound.timestamp)
+        email_calls = [call for call in calls if call.tool_name == "send_email"]
+        sqlite_calls = [call for call in calls if call.tool_name == "sqlite_batch"]
+        email_index = calls.index(email_calls[0]) if len(email_calls) == 1 else -1
+        premature_writes = [
+            call
+            for call in sqlite_calls
+            if calls.index(call) < email_index
+            and re.search(r"\b(?:insert|update|replace)\b", _sqlite_call_text(call), re.I)
+            and re.search(r"\b(?:sent|delivered)\b", _sqlite_call_text(call), re.I)
+        ]
+        send_precedes_state = len(email_calls) == 1 and not premature_writes
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED if send_precedes_state else EvalRunTask.Status.FAILED,
+            task_name="verify_send_precedes_sent_state",
+            expected_summary="No sent or delivered tracker state should be written before send_email succeeds.",
+            observed_summary=(
+                "The provider call preceded any sent-state write."
+                if send_precedes_state
+                else (
+                    f"Saw {len(email_calls)} email call(s) and {len(premature_writes)} premature state write(s); "
+                    f"tool sequence was {[call.tool_name for call in calls]}."
+                )
+            ),
+            artifacts={"step": (premature_writes or email_calls)[0].step} if premature_writes or email_calls else {},
+        )
+
+        with agent_sqlite_db(str(agent_id)) as db_path:
+            connection = open_guarded_sqlite_connection(db_path)
+            try:
+                row = connection.execute(
+                    "SELECT approval_status, delivery_status, provider_message_id "
+                    "FROM outbound_actions WHERE action_key = ?",
+                    ("forecast-q3",),
+                ).fetchone()
+            finally:
+                clear_guarded_connection(connection)
+                connection.close()
+        chat_bodies = [
+            str(MessageQualityScenario._tool_params(call).get("body") or "")
+            for call in calls
+            if call.tool_name == "send_chat_message"
+        ]
+        inflated_delivery_claim = any(
+            re.search(
+                r"\bdelivered\b|\bdelivery (?:confirmed|complete|successful)\b|"
+                r"\brecipient (?:received|has received)\b",
+                body,
+                re.I,
+            )
+            for body in chat_bodies
+        )
+        exact_state = (
+            row is not None
+            and tuple(row) == ("approved", "sent", "eval-provider-message-301")
+            and not inflated_delivery_claim
+        )
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED if exact_state else EvalRunTask.Status.FAILED,
+            task_name="verify_exact_provider_state",
+            expected_summary="Tracker should record sent plus the provider message id, without inflating it to delivered.",
+            observed_summary=(
+                "Tracker preserved the provider's exact sent state."
+                if exact_state
+                else f"Tracker row was {tuple(row) if row is not None else None}; chat bodies were {chat_bodies!r}."
+            ),
+            artifacts={"step": sqlite_calls[-1].step} if sqlite_calls else {},
         )
 
 

@@ -2414,7 +2414,7 @@ class FirstRunPromptCalibrationTests(TestCase):
             system_prompt,
         )
         self.assertIn("A skipped web send never permits switching", system_prompt)
-        self.assertIn("one compact tracked request; use options for a decision and free text", system_prompt)
+        self.assertIn("Ask once; options for decisions, free text for details", system_prompt)
         self.assertIn("Replace conflicts/softened absolutes", system_prompt)
         self.assertIn("append only if no related clause", system_prompt)
         self.assertIn("finite task/batch/day/run/project/renewal/deal/case feedback is temporary", system_prompt)
