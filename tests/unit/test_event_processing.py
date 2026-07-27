@@ -5434,6 +5434,73 @@ class EventProcessingRuntimeGuardTests(TestCase):
         self.assertTrue(prepared_batch.cancel_prepared_calls)
         self.assertEqual(prepared_batch.prepared_calls, [])
 
+    @patch(
+        "api.agent.core.event_processing._ensure_credit_for_tool",
+        return_value={"cost": None, "credit": None},
+    )
+    @patch("api.agent.core.event_processing._enforce_tool_rate_limit", return_value=True)
+    def test_prepare_tool_batch_cancels_calls_prepared_before_input_arrives(
+        self,
+        _mock_rate_limit,
+        _mock_credit,
+    ):
+        peer_agent_ids = [str(uuid.uuid4()), str(uuid.uuid4())]
+        stale_prompt_checker = MagicMock(side_effect=[False, False, True])
+
+        prepared_batch = _prepare_tool_batch(
+            self.agent,
+            tool_calls=[
+                {
+                    "id": f"call-{index}",
+                    "function": {
+                        "name": "send_agent_message",
+                        "arguments": json.dumps(
+                            {
+                                "peer_agent_id": peer_agent_id,
+                                "message": "APPROVED",
+                            }
+                        ),
+                    },
+                }
+                for index, peer_agent_id in enumerate(peer_agent_ids)
+            ],
+            budget_ctx=None,
+            eval_run_id=None,
+            heartbeat=None,
+            lock_extender=None,
+            credit_snapshot={},
+            allow_inferred_message_continue=True,
+            has_non_sleep_calls=True,
+            has_user_facing_message=True,
+            attach_completion=lambda _kwargs: None,
+            attach_prompt_archive=lambda _step: None,
+            stale_prompt_checker=stale_prompt_checker,
+        )
+
+        self.assertEqual(len(prepared_batch.prepared_calls), 1)
+        self.assertTrue(prepared_batch.abort_after_execution)
+        self.assertTrue(prepared_batch.cancel_prepared_calls)
+        self.assertTrue(prepared_batch.stale_cancellation)
+
+        executed_batch = _execute_prepared_tool_batch(
+            self.agent,
+            prepared_batch,
+            budget_ctx=None,
+            eval_run_id=None,
+            tools=[],
+            heartbeat=None,
+            lock_extender=None,
+            stale_prompt_checker=lambda: False,
+        )
+
+        self.assertTrue(executed_batch.stale_cancellation)
+        tool_call = PersistentAgentToolCall.objects.get(
+            step=prepared_batch.prepared_calls[0].pending_step
+        )
+        result = json.loads(tool_call.result)
+        self.assertFalse(result["retryable"])
+        self.assertIn("newer human input arrived", result["message"])
+
     @patch("api.agent.core.event_processing._execute_prepared_tool_call")
     def test_execute_prepared_tool_batch_cancels_all_calls_when_stale_before_start(
         self,
@@ -5467,7 +5534,9 @@ class EventProcessingRuntimeGuardTests(TestCase):
         for prepared in prepared_calls:
             tool_call = PersistentAgentToolCall.objects.get(step=prepared.pending_step)
             self.assertEqual(tool_call.status, PersistentAgentToolCall.Status.ERROR)
-            self.assertIn("newer human input arrived", tool_call.result)
+            result = json.loads(tool_call.result)
+            self.assertFalse(result["retryable"])
+            self.assertIn("newer human input arrived", result["message"])
 
     @patch("api.agent.core.event_processing._execute_prepared_tool_call")
     def test_execute_prepared_tool_batch_cancels_remaining_calls_when_input_arrives_between_calls(
@@ -5514,7 +5583,42 @@ class EventProcessingRuntimeGuardTests(TestCase):
         second_tool_call = PersistentAgentToolCall.objects.get(step=prepared_calls[1].pending_step)
         self.assertEqual(first_tool_call.status, PersistentAgentToolCall.Status.COMPLETE)
         self.assertEqual(second_tool_call.status, PersistentAgentToolCall.Status.ERROR)
-        self.assertIn("newer human input arrived", second_tool_call.result)
+        result = json.loads(second_tool_call.result)
+        self.assertFalse(result["retryable"])
+        self.assertIn("newer human input arrived", result["message"])
+
+    @patch("api.agent.core.event_processing._should_abort_processing", return_value=True)
+    def test_unrelated_batch_abort_is_not_misattributed_to_newer_input(
+        self,
+        _mock_should_abort,
+    ):
+        prepared = self._queued_prepared_message_call(index=0)
+        prepared_batch = _PreparedToolBatch(
+            prepared_calls=[prepared],
+            followup_required=False,
+            all_calls_sleep=False,
+            abort_after_execution=False,
+            parallel_ineligible_reason="unsafe_tool:send_agent_message",
+        )
+        stale_prompt_checker = MagicMock(side_effect=[False, True])
+
+        executed_batch = _execute_prepared_tool_batch(
+            self.agent,
+            prepared_batch,
+            budget_ctx=None,
+            eval_run_id=None,
+            tools=[],
+            heartbeat=None,
+            lock_extender=None,
+            stale_prompt_checker=stale_prompt_checker,
+        )
+
+        self.assertFalse(executed_batch.stale_cancellation)
+        self.assertEqual(stale_prompt_checker.call_count, 1)
+        tool_call = PersistentAgentToolCall.objects.get(step=prepared.pending_step)
+        result = json.loads(tool_call.result)
+        self.assertTrue(result["retryable"])
+        self.assertNotIn("newer human input arrived", result["message"])
 
     def _queued_prepared_message_call(self, *, index: int) -> _PreparedToolExecution:
         step = PersistentAgentStep.objects.create(agent=self.agent)
@@ -6368,6 +6472,69 @@ class OrchestratorHumanInputInterruptTests(TestCase):
         self.assertEqual(usage.get("total_tokens"), 0)
         mock_execute_tool.assert_not_called()
         self.assertFalse(PersistentAgentCompletion.objects.filter(agent=self.agent).exists())
+
+    @patch("api.agent.core.event_processing._schedule_agent_follow_up")
+    @patch("api.agent.core.event_processing.get_pending_drain_settings")
+    @patch("api.agent.core.event_processing.handle_burn_rate_limit", return_value="none")
+    @patch("api.agent.core.event_processing.resolve_web_stream_target", return_value=None)
+    @patch("api.agent.core.event_processing.seed_sqlite_skills", return_value=None)
+    @patch("api.agent.core.event_processing.seed_sqlite_agent_config", return_value=None)
+    @patch("api.agent.core.event_processing.get_agent_tools", return_value=[])
+    @patch("api.agent.core.event_processing.get_llm_config_with_failover", return_value=[("mock", "mock-model", {})])
+    @patch("api.agent.core.event_processing.build_prompt_context")
+    @patch("api.agent.core.event_processing._completion_with_failover")
+    def test_input_after_completion_return_is_discarded_before_reasoning_persists(
+        self,
+        mock_completion,
+        mock_build_prompt,
+        _mock_failover,
+        _mock_tools,
+        _mock_seed_config,
+        _mock_seed_skills,
+        _mock_stream_target,
+        _mock_burn_control,
+        mock_pending_settings,
+        _mock_follow_up,
+    ):
+        mock_pending_settings.return_value = PendingDrainSettings(
+            pending_set_ttl_seconds=123,
+            pending_drain_delay_seconds=10,
+            pending_drain_limit=50,
+            pending_drain_schedule_ttl_seconds=60,
+        )
+        mock_build_prompt.return_value = self._prompt_context()
+        response = make_completion_response(tool_names=["sqlite_batch"])
+        response.choices[0].message.reasoning_content = "Stale private reasoning"
+
+        def _return_after_input_arrives(*_args, **_kwargs):
+            bump_human_inbound_generation(self.agent.id)
+            return (
+                response,
+                {
+                    "prompt_tokens": 10,
+                    "completion_tokens": 5,
+                    "total_tokens": 15,
+                    "cached_tokens": 0,
+                    "model": "mock-model",
+                    "provider": "mock",
+                },
+            )
+
+        mock_completion.side_effect = _return_after_input_arrives
+
+        from api.agent.core import event_processing as ep
+
+        with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1):
+            usage = _run_agent_loop(self.agent, is_first_run=False)
+
+        self.assertEqual(usage.get("total_tokens"), 0)
+        self.assertFalse(PersistentAgentCompletion.objects.filter(agent=self.agent).exists())
+        self.assertFalse(
+            PersistentAgentStep.objects.filter(
+                agent=self.agent,
+                description__contains="Stale private reasoning",
+            ).exists()
+        )
 
     @patch("api.agent.core.event_processing._schedule_agent_follow_up")
     @patch("api.agent.core.event_processing.get_pending_drain_settings")

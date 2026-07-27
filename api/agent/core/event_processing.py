@@ -2093,6 +2093,7 @@ class _PreparedToolBatch:
     abort_after_execution: bool
     parallel_ineligible_reason: Optional[str]
     cancel_prepared_calls: bool = False
+    stale_cancellation: bool = False
 
 
 @dataclass
@@ -2108,6 +2109,7 @@ class _ExecutedToolBatch:
     execution_outcomes: list[_ToolExecutionOutcome]
     tools: List[dict]
     abort_after_execution: bool = False
+    stale_cancellation: bool = False
 
 
 def _mark_tool_call_started(
@@ -2239,12 +2241,13 @@ def _cancel_unstarted_tool_calls(
     prepared_calls: list[_PreparedToolExecution],
     *,
     reason: str,
+    retryable: bool = True,
 ) -> None:
     result_content = json.dumps(
         {
             "status": "error",
             "message": reason,
-            "retryable": True,
+            "retryable": retryable,
         }
     )
     for prepared in prepared_calls:
@@ -3296,6 +3299,7 @@ def _prepare_tool_batch(
             abort_after_execution=True,
             parallel_ineligible_reason="stale_human_input",
             cancel_prepared_calls=True,
+            stale_cancellation=True,
         )
 
     rate_limit_batch = (
@@ -3311,6 +3315,7 @@ def _prepare_tool_batch(
     all_calls_sleep = not has_non_sleep_calls
     abort_after_execution = False
     cancel_prepared_calls = False
+    stale_cancellation = False
     deep_work_update_reason = _deep_work_update_gate_context(agent, tool_calls)
     if deep_work_update_reason:
         _record_deep_work_update_correction(
@@ -3350,6 +3355,7 @@ def _prepare_tool_batch(
                 tool_span.add_event("Tool batch cancelled - newer human input")
                 abort_after_execution = True
                 cancel_prepared_calls = True
+                stale_cancellation = True
                 break
             if _should_abort_processing(
                 agent,
@@ -3728,6 +3734,7 @@ def _prepare_tool_batch(
         abort_after_execution=abort_after_execution,
         parallel_ineligible_reason=_parallel_batch_ineligible_reason(prepared_calls),
         cancel_prepared_calls=cancel_prepared_calls,
+        stale_cancellation=stale_cancellation,
     )
 
 
@@ -3747,12 +3754,14 @@ def _execute_prepared_tool_batch_inner(
     available_tools = tools
     abort_after_execution = prepared_batch.abort_after_execution
     execution_aborted = False
+    stale_cancellation = prepared_batch.stale_cancellation
 
     if prepared_batch.cancel_prepared_calls:
         return _ExecutedToolBatch(
             execution_outcomes=[],
             tools=available_tools,
             abort_after_execution=True,
+            stale_cancellation=stale_cancellation,
         )
 
     if run_parallel_batch:
@@ -3768,7 +3777,7 @@ def _execute_prepared_tool_batch_inner(
             next_prepared_index = 0
 
             def submit_available_calls() -> None:
-                nonlocal abort_after_execution, execution_aborted, next_prepared_index
+                nonlocal abort_after_execution, execution_aborted, next_prepared_index, stale_cancellation
                 while (
                     not execution_aborted
                     and len(futures) < max_workers
@@ -3785,6 +3794,7 @@ def _execute_prepared_tool_batch_inner(
                             tool_span.add_event("Tool call cancelled - newer human input")
                             abort_after_execution = True
                             execution_aborted = True
+                            stale_cancellation = True
                             return
                         if _should_abort_processing(
                             agent,
@@ -3845,6 +3855,7 @@ def _execute_prepared_tool_batch_inner(
                     )
                     tool_span.add_event("Tool call cancelled - newer human input")
                     abort_after_execution = True
+                    stale_cancellation = True
                     break
                 if _should_abort_processing(
                     agent,
@@ -3903,6 +3914,7 @@ def _execute_prepared_tool_batch_inner(
         execution_outcomes=execution_outcomes,
         tools=available_tools,
         abort_after_execution=abort_after_execution,
+        stale_cancellation=stale_cancellation,
     )
 
 
@@ -3917,8 +3929,9 @@ def _execute_prepared_tool_batch(
     lock_extender: Any,
     stale_prompt_checker: Callable[[], bool] | None = None,
 ) -> _ExecutedToolBatch:
+    executed_batch: _ExecutedToolBatch | None = None
     try:
-        return _execute_prepared_tool_batch_inner(
+        executed_batch = _execute_prepared_tool_batch_inner(
             agent,
             prepared_batch,
             budget_ctx=budget_ctx,
@@ -3928,16 +3941,21 @@ def _execute_prepared_tool_batch(
             lock_extender=lock_extender,
             stale_prompt_checker=stale_prompt_checker,
         )
+        return executed_batch
     finally:
+        stale_cancellation = bool(
+            executed_batch is not None and executed_batch.stale_cancellation
+        )
         cancellation_reason = (
             STALE_TOOL_CANCELLATION_REASON
-            if stale_prompt_checker and stale_prompt_checker()
+            if stale_cancellation
             else "Tool call was cancelled before execution because batch processing stopped."
         )
         _cancel_unstarted_tool_calls(
             agent,
             prepared_batch.prepared_calls,
             reason=cancellation_reason,
+            retryable=not stale_cancellation,
         )
 
 
@@ -6989,6 +7007,10 @@ def _run_agent_loop(
                         allow_streamed_content=prompt_allows_implied_send and not source_reconciliation_directive,
                         stale_prompt_checker=_is_orchestrator_prompt_stale,
                     )
+                    if _is_orchestrator_prompt_stale():
+                        raise OrchestratorPromptStale(
+                            "Prompt became stale immediately after completion returned."
+                        )
                     empty_response_loop_retries = 0
                     if heartbeat:
                         heartbeat.touch("llm_response")
