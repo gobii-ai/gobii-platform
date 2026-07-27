@@ -234,8 +234,12 @@ def _build_optional_source_write_hint(
                 "not model columns. Introduce every UPDATE alias in FROM/JOIN. "
             )
         else:
+            stable_key_guidance = (
+                f"Use the shown stable key `{first_key}`. " if first_key else ""
+            )
             model_guidance = (
-                f"No fitting durable model: create one with {key_expr} as PRIMARY KEY/UNIQUE, then upsert. "
+                f"No fitting durable model: {stable_key_guidance}create one with {key_expr} "
+                "as PRIMARY KEY/UNIQUE, then upsert. "
             )
         return (
             f"[SOURCE SET; exact stored arrays: {schema_text}. "
