@@ -812,7 +812,9 @@ def _get_sqlite_guidance() -> str:
         "relevance_at. Safe outbound requires status='allowed' and allow_outbound=1; never infer "
         "permission from lead state or an empty request queue.\n\n"
         "SQLite provides csv_headers/csv_parse, extraction/cleaning helpers, and standard JSON/window functions; use names shown by schema/results. "
-        "For patch_text(text,old,new), old='' appends; otherwise old must match exactly once. "
+        "For patch_text(text,old,new), old='' appends; otherwise old must match exactly once. Persist config with "
+        "`UPDATE __agent_config SET charter=patch_text(charter, old, new) WHERE id=1`; use ordinary SQLite strings "
+        "with doubled internal quotes, never SELECT patch_text or E'...'. "
         "A browser task completion wakes you and adds its result; do "
         "not poll snapshots while it runs. Facts and URLs must come from evidence, not search terms."
     )
@@ -1775,7 +1777,7 @@ def _render_prompt_context_once(
         )
 
     agent_config_note = (
-        f"{AGENT_CONFIG_TABLE} id=1: patch_text=lasting owner rules; "
+        f"{AGENT_CONFIG_TABLE} id=1: patch_text=lasting owner rules, including unscoped corrections/refinements, before reply; "
         "appearance=full person after authorized changes: age/skin/hair/eyes/style, not scene/vibe; preserve unspecified; confirm briefly; temporary feedback/ordinary tasks never config; "
         "emotion: on a meaningful win/setback, first UPDATE one fitting emoji+1..86400s without rereading; routine/default clear; NULLs clear."
     )
@@ -3976,10 +3978,11 @@ def _get_system_instruction(
         "\n\n"
         "## Durable Config (CRITICAL)\n\n"
 
-        "Scope veto: finite task/batch/day/run/project/renewal/deal/case feedback is temporary. If it gives no separate task, only acknowledge briefly; do not research or change config. In mixed feedback, scope carries forward until another marker; persist only lasting clauses. Otherwise authorized behavior feedback is lasting: before any reply, first call sqlite_batch with one patch_text UPDATE of the related clause. "
+        "Resolve addressee and ownership first: feedback directed to another participant is not your correction. "
+        "Scope veto: finite task/batch/day/run/project/renewal/deal/case feedback is temporary. If it gives no separate task, only acknowledge briefly; do not research or change config. In mixed feedback, scope carries forward until another marker; persist only lasting clauses. Otherwise authorized behavior feedback is lasting: before any reply, first call sqlite_batch with one patch_text UPDATE of the related clause. Classify by function, not phrasing: a follow-up that corrects the substance or emphasis of your recurring work is lasting even when factual or conversational. If it narrows, adds a distinction, or changes emphasis, patch the related clause even when broadly consistent. Never merely agree or call it already covered. "
         "Replace conflicts/softened absolutes; preserve unrelated text; append only if no related clause; don't reread/ask. "
         "A generic status=ok does not prove persistence; only agent_config_update confirming charter as updated or unchanged means the patch was saved or was already present. "
-        "Confirm naturally; invite correction if unsure; never mention internals or save transient facts/results/guesses.\n\n"
+        "A correction plus an immediate task is two obligations, never a choice: patch and do the task, in one SQLite batch when practical, then send one final reply. After a successful patch, reply only with the completed task result, or a brief natural acknowledgment when there was no task; never mention implementation or restate/promise the new rule. Invite correction if unsure; never save transient facts/results/guesses.\n\n"
 
         f"{initiative_guidance}"
 
@@ -4229,7 +4232,7 @@ def _format_discord_reply_context(raw_payload: Mapping[str, Any]) -> str:
             "If you are not this participant, treat delivery as context, not an invitation; join only "
             "when the text includes you or the room, or silence would drop a necessary, non-duplicative "
             "contribution only you can provide. Otherwise stay silent without reacting, updating your own "
-            "records, or announcing that you have no action."
+            "records, or announcing that you have no action: call sleep_until_next_trigger with no response text."
         ),
         f"Message ID: {message_id}",
     ]
@@ -4895,6 +4898,18 @@ def _get_unified_history_prompt(
         if web_message_endpoints
         else {}
     )
+    latest_inbound_discord_id = next(
+        (
+            message.id
+            for message in messages
+            if (
+                not message.is_outbound
+                and message.from_endpoint
+                and message.from_endpoint.channel == CommsChannel.DISCORD
+            )
+        ),
+        None,
+    )
 
     def _format_web_party(address: str, endpoint_id: UUID | None) -> str:
         """Render web parties like recent contacts: address first, then display name."""
@@ -5038,6 +5053,12 @@ def _get_unified_history_prompt(
                 components["content"] = content
 
             if channel == CommsChannel.DISCORD:
+                if not m.is_outbound and m.id == latest_inbound_discord_id:
+                    components["discord_shared_channel_context"] = (
+                        "This is a multi-user channel. The message may or may not be for you. "
+                        "Use its addressee, reply target, mentions, current ownership, and whether your contribution "
+                        "is necessary before responding."
+                    )
                 discord_channel_id = str(raw_payload.get("discord_channel_id") or "").strip()
                 if discord_channel_id:
                     components["discord_channel_id"] = discord_channel_id

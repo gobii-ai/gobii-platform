@@ -157,6 +157,51 @@ User = get_user_model()
 
 @tag("batch_event_processing")
 class ToolDisplayMetadataTests(TestCase):
+    def test_charter_update_annotation_includes_natural_reply_guidance(self):
+        updated_charter = SimpleNamespace(
+            prepared=SimpleNamespace(
+                idx=0,
+                tool_name="sqlite_batch",
+                exec_params={
+                    "sql": (
+                        "UPDATE __agent_config "
+                        "SET charter=patch_text(charter, 'old', 'new') WHERE id=1"
+                    )
+                },
+            ),
+            result={"status": "ok"},
+        )
+
+        _annotate_agent_config_update_result(
+            [updated_charter],
+            SimpleNamespace(updated_fields=("charter",), errors={}),
+        )
+
+        self.assertIn("brief natural acknowledgment", updated_charter.result["reply_guidance"])
+        self.assertNotIn("reply_guidance", updated_charter.result["agent_config_update"])
+
+    def test_failed_charter_update_does_not_include_reply_guidance(self):
+        failed_charter = SimpleNamespace(
+            prepared=SimpleNamespace(
+                idx=0,
+                tool_name="sqlite_batch",
+                exec_params={
+                    "sql": (
+                        "UPDATE __agent_config "
+                        "SET charter=patch_text(charter, 'old', 'new') WHERE id=1"
+                    )
+                },
+            ),
+            result={"status": "ok"},
+        )
+
+        _annotate_agent_config_update_result(
+            [failed_charter],
+            SimpleNamespace(updated_fields=(), errors={"charter": "Charter update failed."}),
+        )
+
+        self.assertNotIn("reply_guidance", failed_charter.result)
+
     def test_failed_config_attempt_does_not_gain_confirmation_from_a_later_update(self):
         failed_charter = SimpleNamespace(
             prepared=SimpleNamespace(

@@ -2678,6 +2678,15 @@ def _annotate_agent_config_update_result(
     if warnings:
         config_update["warnings"] = warnings
     result["agent_config_update"] = config_update
+    charter_confirmed = (
+        "charter" in {*updated_fields, *config_update["unchanged_fields"]}
+        and "charter" not in errors
+    )
+    if charter_confirmed:
+        result["reply_guidance"] = (
+            "Reply only with the completed task result, or a brief natural acknowledgment when there was no task. "
+            "Do not mention implementation or restate/promise the new rule."
+        )
     target.result = result
 
 
@@ -2812,6 +2821,20 @@ def _user_text_is_direct_correction(text: str, *, prior_outbound_text: str = "")
     return bool(analysis.lasting and analysis.behavior and not analysis.transient_only)
 
 
+def _discord_reply_targets_agent(agent: PersistentAgent, inbound: PersistentAgentMessage) -> bool | None:
+    reply_to = (inbound.raw_payload or {}).get("discord_reply_to")
+    if not isinstance(reply_to, dict):
+        return None
+    message_id = str(reply_to.get("message_id") or "").strip()
+    if not message_id:
+        return None
+    return PersistentAgentMessage.objects.filter(
+        owner_agent=agent,
+        is_outbound=True,
+        raw_payload__discord_message_id=message_id,
+    ).exists()
+
+
 def _direct_correction_context(agent: PersistentAgent, latest_inbound=None):
     latest_inbound = latest_inbound or get_current_inbound_message(agent)
     normalized = " ".join(latest_inbound.body.split()) if latest_inbound is not None else ""
@@ -2821,6 +2844,10 @@ def _direct_correction_context(agent: PersistentAgent, latest_inbound=None):
     ):
         return None
     if not _ConfigAuthorityResolver(agent).endpoint_can_configure(latest_inbound.from_endpoint):
+        return None
+    # A shared Discord reply carries deterministic ownership. Do not let the correction fast path
+    # override that routing context and mutate a bystander's charter.
+    if _discord_reply_targets_agent(agent, latest_inbound) is False:
         return None
     prior_outbound = PersistentAgentMessage.objects.filter(owner_agent=agent, is_outbound=True, conversation_id=latest_inbound.conversation_id).filter(
         Q(timestamp__lt=latest_inbound.timestamp)

@@ -12,11 +12,15 @@ import api.evals.loader  # noqa: F401 - registers scenarios and suites
 from api.evals.registry import ScenarioRegistry
 from api.evals.scenarios.behavior_micro import (
     BEHAVIOR_MICRO_SCENARIO_SLUGS,
+    CHARTER_MEMORY_MICRO_SCENARIO_SLUGS,
+    CHARTER_PATCHES_AND_COMPLETES_IMMEDIATE_TASK,
+    CHARTER_REFINES_EXISTING_GUIDANCE_FROM_NATURAL_FEEDBACK,
     COMMON_USE_CASE_EVAL_CASES,
     GUIDED_PLANNING_BOUNDED_WHEN_REQUESTED,
     GUIDED_PLANNING_MICRO_SCENARIO_SLUGS,
     LEGACY_PLANNING_STATE_EXECUTES_DIRECTLY,
     TOOL_CHOICE_MICRO_SCENARIO_SLUGS,
+    _uses_one_focused_charter_patch,
 )
 from api.evals.suites import SuiteRegistry
 
@@ -35,6 +39,29 @@ class BehaviorMicroScenarioTests(SimpleTestCase):
         self.assertEqual(suite.scenario_slugs, GUIDED_PLANNING_MICRO_SCENARIO_SLUGS)
         self.assertIn(GUIDED_PLANNING_BOUNDED_WHEN_REQUESTED, BEHAVIOR_MICRO_SCENARIO_SLUGS)
         self.assertIn(LEGACY_PLANNING_STATE_EXECUTES_DIRECTLY, BEHAVIOR_MICRO_SCENARIO_SLUGS)
+
+    def test_natural_charter_refinement_is_in_memory_suite(self):
+        self.assertIn(
+            CHARTER_REFINES_EXISTING_GUIDANCE_FROM_NATURAL_FEEDBACK,
+            CHARTER_MEMORY_MICRO_SCENARIO_SLUGS,
+        )
+        self.assertIn(
+            CHARTER_PATCHES_AND_COMPLETES_IMMEDIATE_TASK,
+            CHARTER_MEMORY_MICRO_SCENARIO_SLUGS,
+        )
+
+    def test_focused_charter_patch_allows_same_batch_verification_read(self):
+        call = SimpleNamespace(
+            tool_params={
+                "sql": (
+                    "UPDATE __agent_config "
+                    "SET charter=patch_text(charter, 'old rule', 'new rule') WHERE id=1; "
+                    "SELECT charter FROM __agent_config WHERE id=1"
+                )
+            }
+        )
+
+        self.assertTrue(_uses_one_focused_charter_patch([call], "role. old rule."))
 
     def test_sqlite_export_case_seeds_exact_lead_fixture(self):
         scenario = ScenarioRegistry.get(SQLITE_EXPORT_QUERY_CSV)

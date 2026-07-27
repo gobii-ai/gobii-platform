@@ -24,6 +24,8 @@ from .behavior_micro import (
     CharterExpandsSparseCharterWithDetailScenario,
     CharterIgnoresOneOffPreferenceScenario,
     CharterNarrowsScopePreservingUnrelatedGuidanceScenario,
+    CharterPatchesAndCompletesImmediateTaskScenario,
+    CharterRefinesExistingGuidanceFromNaturalFeedbackScenario,
     ToolChoiceExactJsonUrlUsesHttpRequestScenario,
     ToolChoiceCsvDeliverableUsesCreateCsvScenario,
     ToolChoicePdfDeliverableUsesCreatePdfScenario,

@@ -44,6 +44,9 @@ RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_OWNED_REPLY = "responsibility_boundary_sh
 RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_NOISY_YIELD = "responsibility_boundary_shared_channel_noisy_yield"
 RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_AUTHORED_CLAIM = "responsibility_boundary_shared_channel_authored_claim"
 RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_DIRECTED_REPLY = "responsibility_boundary_shared_channel_directed_reply"
+RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_DIRECTED_CORRECTION = (
+    "responsibility_boundary_shared_channel_directed_correction"
+)
 RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_OPEN_REPLY = "responsibility_boundary_shared_channel_open_reply"
 RESPONSIBILITY_BOUNDARY_SUITE_SLUG = "responsibility_boundaries"
 RESPONSIBILITY_BOUNDARY_SCENARIO_SLUGS = (
@@ -54,6 +57,7 @@ RESPONSIBILITY_BOUNDARY_SCENARIO_SLUGS = (
     RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_NOISY_YIELD,
     RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_AUTHORED_CLAIM,
     RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_DIRECTED_REPLY,
+    RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_DIRECTED_CORRECTION,
     RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_OPEN_REPLY,
 )
 
@@ -160,6 +164,16 @@ RESPONSIBILITY_BOUNDARY_CASES = (
         description="A direct Discord reply to one teammate should not draw acknowledgment chatter from another.",
         event_kind="shared_channel_directed_reply",
         prompt="no need for you to investigate this one, just keep it logged for the interface team",
+        tasks=(
+            ScenarioTask(name="inject_event", assertion_type="agent_processing"),
+            ScenarioTask(name="verify_no_interference", assertion_type="tool_call"),
+        ),
+    ),
+    ResponsibilityBoundaryCase(
+        slug=RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_DIRECTED_CORRECTION,
+        description="A correction in a Discord reply should update only the agent being corrected.",
+        event_kind="shared_channel_directed_correction",
+        prompt="these updates aren't useful. going forward, include the owner and due date",
         tasks=(
             ScenarioTask(name="inject_event", assertion_type="agent_processing"),
             ScenarioTask(name="verify_no_interference", assertion_type="tool_call"),
@@ -353,7 +367,14 @@ class ResponsibilityBoundaryScenario(EvalScenario, ScenarioExecutionTools):
         )
 
     @classmethod
-    def _discord_outbound(cls, agent: PersistentAgent, run_id: str, body: str) -> PersistentAgentMessage:
+    def _discord_outbound(
+        cls,
+        agent: PersistentAgent,
+        run_id: str,
+        body: str,
+        *,
+        discord_message_id: str = "",
+    ) -> PersistentAgentMessage:
         """Seed a prior claim the agent itself posted, so the channel history shows it as the author."""
         conversation, agent_endpoint, channel_endpoint, channel_id, channel_name = cls._discord_channel(agent, run_id)
         return PersistentAgentMessage.objects.create(
@@ -368,6 +389,7 @@ class ResponsibilityBoundaryScenario(EvalScenario, ScenarioExecutionTools):
                 "source_kind": "discord",
                 "discord_channel_id": channel_id,
                 "discord_channel_name": channel_name,
+                "discord_message_id": discord_message_id,
             },
         )
 
@@ -468,7 +490,18 @@ class ResponsibilityBoundaryScenario(EvalScenario, ScenarioExecutionTools):
                 author_name="Priya",
             )
         reply_to = None
-        if self.case.event_kind in {"shared_channel_directed_reply", "shared_channel_open_reply"}:
+        if self.case.event_kind == "shared_channel_directed_correction":
+            self._discord_outbound(
+                agent,
+                run_id,
+                "I logged the report and will post a short update when anything changes.",
+                discord_message_id=f"eval-customer-signals-message-{str(run_id)[:8]}",
+            )
+        if self.case.event_kind in {
+            "shared_channel_directed_reply",
+            "shared_channel_directed_correction",
+            "shared_channel_open_reply",
+        }:
             peer_name = f"Engineering Agent {str(run_id)[:8]}"
             referenced_message = self._discord_inbound(
                 agent,
