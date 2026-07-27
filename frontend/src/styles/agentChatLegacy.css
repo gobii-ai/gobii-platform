@@ -3585,6 +3585,31 @@
     overflow-wrap: anywhere;
     word-break: break-word;
 }
+/* The quoted message a Discord reply answered (bug #248). Clamped: it is context, not content —
+   the full text belongs to the original card upthread. */
+.chat-reply-context {
+    display: block;
+    margin: 0 0 0.5rem;
+    padding: 0.375rem 0.625rem;
+    border-left: 3px solid rgba(99, 102, 241, 0.45);
+    border-radius: 0.375rem;
+    background: rgba(99, 102, 241, 0.06);
+    font-size: 0.8125rem;
+    color: #475569;
+    font-style: normal;
+}
+.chat-reply-context__author {
+    display: block;
+    font-weight: 600;
+    color: #4f46e5;
+    margin-bottom: 0.125rem;
+}
+.chat-reply-context__body {
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
 /* Sized to its content so the surrounding overflow-x-auto wrapper can scroll. Pinning the table to
    the container instead made every column shrink until the cells were unreadable on a phone. */
 .chat-content table {
@@ -6891,7 +6916,9 @@
     cursor: default;
 }
 .agent-invite[data-variant='drawer'] {
-    --agent-invite-bg: #ffffff;
+    /* Not solid white: on the drawer's near-white sheet a hard #ffffff card reads as a washed-out
+       highlight around the request badge (bug #339). The border stays as the accent. */
+    --agent-invite-bg: rgba(99, 102, 241, 0.05);
     --agent-invite-border: rgba(99, 102, 241, 0.18);
 }
 .agent-invite[data-variant='sidebar']:hover .agent-roster-item__avatar {

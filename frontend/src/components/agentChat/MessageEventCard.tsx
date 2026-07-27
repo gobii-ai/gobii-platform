@@ -373,6 +373,16 @@ export const MessageEventCard = memo(function MessageEventCard({
           <div
             className={`chat-content prose prose-sm max-w-none leading-relaxed ${contentTone}`}
           >
+            {message.replyTo ? (
+              // The reply's meaning lives in what it answered; without the quote a card like
+              // "have you been there?" says nothing (bug #248).
+              <blockquote className="chat-reply-context" data-testid="reply-context">
+                {message.replyTo.authorName ? (
+                  <span className="chat-reply-context__author">{message.replyTo.authorName}</span>
+                ) : null}
+                <span className="chat-reply-context__body">{message.replyTo.bodyText}</span>
+              </blockquote>
+            ) : null}
             <MessageContent
               bodyHtml={message.bodyHtml}
               bodyText={message.bodyText}

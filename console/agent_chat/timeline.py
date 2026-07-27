@@ -548,9 +548,23 @@ def _serialize_message(
     recipient_address: str | None = None
     recipient_name: str | None = None
     cc_addresses: list[str] = []
-    if message.is_outbound and channel.lower() == CommsChannel.EMAIL and conversation is not None:
-        recipient_address = (conversation.address or "").strip() or None
-        recipient_name = (conversation.display_name or "").strip() or None
+    if message.is_outbound and channel.lower() == CommsChannel.EMAIL:
+        # The message's own to_endpoint records who this email actually went to; the conversation
+        # only records the thread's original counterparty. When they diverge the card must follow
+        # the message — labelling the send with the thread's counterparty misattributes it, and
+        # the thread's display name must never be attached to a different address (bug #419).
+        to_endpoint_address = (
+            (message.to_endpoint.address or "").strip()
+            if message.to_endpoint_id and message.to_endpoint.channel == CommsChannel.EMAIL
+            else ""
+        )
+        conversation_address = ((conversation.address or "").strip() if conversation else "")
+        recipient_address = to_endpoint_address or conversation_address or None
+        if recipient_address and (
+            not to_endpoint_address
+            or to_endpoint_address.lower() == conversation_address.lower()
+        ):
+            recipient_name = ((conversation.display_name or "").strip() if conversation else "") or None
     if channel.lower() == CommsChannel.EMAIL:
         # Who else received it. Bcc is deliberately absent: it is never persisted on the message,
         # so the card cannot claim to show a complete recipient list.
@@ -594,6 +608,20 @@ def _serialize_message(
 
     body_html = _message_body_html(message, channel, attachments)
     subject = _message_subject(message, channel)
+
+    # A Discord reply's meaning lives in what it replied to; the ingestion payload carries the
+    # full quoted message and the agent's prompt already uses it, but the web card dropped it —
+    # "have you been there?" rendered with no indication of what "there" meant (bug #248).
+    reply_to_payload: dict | None = None
+    raw_message_payload = message.raw_payload if isinstance(message.raw_payload, Mapping) else {}
+    reply_raw = raw_message_payload.get("discord_reply_to")
+    if isinstance(reply_raw, Mapping) and not reply_raw.get("unavailable"):
+        reply_body = str(reply_raw.get("content") or "").strip()
+        if reply_body:
+            reply_to_payload = {
+                "authorName": str(reply_raw.get("author_name") or "").strip() or None,
+                "bodyText": reply_body,
+            }
     outbox_review = None
     try:
         review = message.outbound_email_review
@@ -629,6 +657,7 @@ def _serialize_message(
             "senderAddress": None if is_mcp else sender_address,
             "recipientName": recipient_name,
             "recipientAddress": recipient_address,
+            "replyTo": reply_to_payload,
             "ccAddresses": cc_addresses,
             "sourceKind": source_kind,
             "sourceLabel": source_label,

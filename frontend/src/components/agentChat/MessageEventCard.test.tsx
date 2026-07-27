@@ -66,3 +66,28 @@ describe('MessageEventCard email recipient', () => {
     expect(screen.queryByText('To')).not.toBeInTheDocument()
   })
 })
+
+describe('MessageEventCard reply context', () => {
+  // A Discord reply's meaning lives in what it answered; the card dropped it entirely and
+  // "have you been there?" rendered with no indication of what "there" meant (bug #248).
+  it('quotes the replied-to message above the body', () => {
+    renderCard(emailMessage({
+      channel: 'discord',
+      isOutbound: false,
+      bodyText: 'have you been there?',
+      subject: null,
+      recipientAddress: null,
+      replyTo: { authorName: 'Alyssa Perkins', bodyText: 'honestly maybe like a 30.' },
+    }))
+
+    expect(screen.getByTestId('reply-context')).toBeInTheDocument()
+    expect(screen.getByText('Alyssa Perkins')).toBeInTheDocument()
+    expect(screen.getByText('honestly maybe like a 30.')).toBeInTheDocument()
+  })
+
+  it('renders no quote block for a plain message', () => {
+    renderCard(emailMessage({ channel: 'discord', isOutbound: false, subject: null, recipientAddress: null }))
+
+    expect(screen.queryByTestId('reply-context')).not.toBeInTheDocument()
+  })
+})
