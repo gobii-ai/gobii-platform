@@ -2359,6 +2359,7 @@ class HumanInputRequestApiTests(TestCase):
         mock_delay.assert_called_once_with(
             str(self.agent.id),
             inbound_generation=expected,
+            inbound_message_id=str(self.request_obj.raw_reply_message_id),
         )
 
     @patch("api.agent.tasks.process_agent_events_task.delay")

@@ -25,6 +25,7 @@ _LOCKED_AGENT_SET_KEY = "agent-event-processing:index:locked"
 _PENDING_SET_KEY = "agent-event-processing:pending"
 _PENDING_GENERATION_HASH_KEY = "agent-event-processing:pending:generation"
 _PENDING_QUEUE_HASH_KEY = "agent-event-processing:pending:queue"
+_PENDING_MESSAGE_HASH_KEY = "agent-event-processing:pending:message"
 _PENDING_GENERIC_SET_KEY = "agent-event-processing:pending:generic"
 _PENDING_DRAIN_SCHEDULE_KEY = "agent-event-processing:pending:drain:schedule"
 _DEFAULT_PENDING_SET_TTL_SECONDS = 3600
@@ -54,12 +55,16 @@ if ARGV[3] ~= '' and current_queue ~= ARGV[5] and (
 ) then
     redis.call('HSET', KEYS[3], ARGV[1], ARGV[3])
 end
+if ARGV[7] ~= '' and (generation_advanced or not redis.call('HGET', KEYS[5], ARGV[1])) then
+    redis.call('HSET', KEYS[5], ARGV[1], ARGV[7])
+end
 local ttl = tonumber(ARGV[4]) or 0
 if ttl > 0 then
     redis.call('EXPIRE', KEYS[1], ttl)
     redis.call('EXPIRE', KEYS[2], ttl)
     redis.call('EXPIRE', KEYS[3], ttl)
     redis.call('EXPIRE', KEYS[4], ttl)
+    redis.call('EXPIRE', KEYS[5], ttl)
 end
 return added
 """
@@ -72,10 +77,12 @@ end
 local generation = redis.call('HGET', KEYS[2], ARGV[1]) or ''
 local queue = redis.call('HGET', KEYS[3], ARGV[1]) or ''
 local generic = redis.call('SISMEMBER', KEYS[4], ARGV[1])
+local message_id = redis.call('HGET', KEYS[5], ARGV[1]) or ''
 redis.call('HDEL', KEYS[2], ARGV[1])
 redis.call('HDEL', KEYS[3], ARGV[1])
 redis.call('SREM', KEYS[4], ARGV[1])
-return {ARGV[1], generation, queue, generic}
+redis.call('HDEL', KEYS[5], ARGV[1])
+return {ARGV[1], generation, queue, generic, message_id}
 """
 
 _CLAIM_PENDING_MANY_SCRIPT = """
@@ -86,13 +93,16 @@ for _, agent_id in ipairs(agent_ids) do
     local generation = redis.call('HGET', KEYS[2], agent_id) or ''
     local queue = redis.call('HGET', KEYS[3], agent_id) or ''
     local generic = redis.call('SISMEMBER', KEYS[4], agent_id)
+    local message_id = redis.call('HGET', KEYS[5], agent_id) or ''
     redis.call('HDEL', KEYS[2], agent_id)
     redis.call('HDEL', KEYS[3], agent_id)
     redis.call('SREM', KEYS[4], agent_id)
+    redis.call('HDEL', KEYS[5], agent_id)
     table.insert(result, agent_id)
     table.insert(result, generation)
     table.insert(result, queue)
     table.insert(result, generic)
+    table.insert(result, message_id)
 end
 return result
 """
@@ -112,6 +122,7 @@ class PendingAgentWork:
     inbound_generation: int | None = None
     queue: str | None = None
     has_generic_work: bool = False
+    inbound_message_id: str | None = None
 
 
 def _queued_key(agent_id: Union[str, UUID]) -> str:
@@ -345,6 +356,7 @@ def clear_processing_work_state(agent_id: Union[str, UUID], client=None) -> None
             pipe.srem(_PENDING_SET_KEY, str(agent_id))
             pipe.hdel(_PENDING_GENERATION_HASH_KEY, str(agent_id))
             pipe.hdel(_PENDING_QUEUE_HASH_KEY, str(agent_id))
+            pipe.hdel(_PENDING_MESSAGE_HASH_KEY, str(agent_id))
             pipe.srem(_PENDING_GENERIC_SET_KEY, str(agent_id))
             pipe.srem(_LOCKED_AGENT_SET_KEY, str(agent_id))
             pipe.srem(_HEARTBEAT_AGENT_SET_KEY, str(agent_id))
@@ -360,6 +372,7 @@ def clear_processing_work_state(agent_id: Union[str, UUID], client=None) -> None
         redis_client.srem(_PENDING_SET_KEY, str(agent_id))
         redis_client.hdel(_PENDING_GENERATION_HASH_KEY, str(agent_id))
         redis_client.hdel(_PENDING_QUEUE_HASH_KEY, str(agent_id))
+        redis_client.hdel(_PENDING_MESSAGE_HASH_KEY, str(agent_id))
         redis_client.srem(_PENDING_GENERIC_SET_KEY, str(agent_id))
         redis_client.srem(_LOCKED_AGENT_SET_KEY, str(agent_id))
         redis_client.srem(_HEARTBEAT_AGENT_SET_KEY, str(agent_id))
@@ -555,6 +568,7 @@ def enqueue_pending_agent(
     agent_id: Union[str, UUID],
     *,
     inbound_generation: int | str | None = None,
+    inbound_message_id: str | UUID | None = None,
     queue: str | None = None,
     has_generic_work: bool = False,
     ttl: int = _DEFAULT_PENDING_SET_TTL_SECONDS,
@@ -565,17 +579,19 @@ def enqueue_pending_agent(
         redis_client = client or get_redis_client()
         result = redis_client.eval(
             _ENQUEUE_PENDING_SCRIPT,
-            4,
+            5,
             _PENDING_SET_KEY,
             _PENDING_GENERATION_HASH_KEY,
             _PENDING_QUEUE_HASH_KEY,
             _PENDING_GENERIC_SET_KEY,
+            _PENDING_MESSAGE_HASH_KEY,
             str(agent_id),
             _coerce_generation(inbound_generation),
             str(queue or ""),
             max(0, int(ttl)),
             _INTERACTIVE_PROCESSING_QUEUE,
             "1" if has_generic_work else "0",
+            str(inbound_message_id or ""),
         )
         return bool(result)
     except Exception:
@@ -594,19 +610,22 @@ def is_agent_pending(agent_id: Union[str, UUID], client=None) -> bool:
 
 
 def _pending_work_from_script_result(result: Any) -> PendingAgentWork | None:
-    if not result or len(result) < 4:
+    if not result or len(result) < 5:
         return None
-    agent_id, generation, queue, generic = result[:4]
+    agent_id, generation, queue, generic, inbound_message_id = result[:5]
     if isinstance(agent_id, (bytes, bytearray)):
         agent_id = agent_id.decode("utf-8", "ignore")
     if isinstance(queue, (bytes, bytearray)):
         queue = queue.decode("utf-8", "ignore")
+    if isinstance(inbound_message_id, (bytes, bytearray)):
+        inbound_message_id = inbound_message_id.decode("utf-8", "ignore")
     parsed_generation = _coerce_generation(generation)
     return PendingAgentWork(
         agent_id=str(agent_id),
         inbound_generation=parsed_generation or None,
         queue=str(queue) or None,
         has_generic_work=bool(int(generic or 0)),
+        inbound_message_id=str(inbound_message_id) or None,
     )
 
 
@@ -620,11 +639,12 @@ def claim_pending_agent(
         redis_client = client or get_redis_client()
         result = redis_client.eval(
             _CLAIM_PENDING_SCRIPT,
-            4,
+            5,
             _PENDING_SET_KEY,
             _PENDING_GENERATION_HASH_KEY,
             _PENDING_QUEUE_HASH_KEY,
             _PENDING_GENERIC_SET_KEY,
+            _PENDING_MESSAGE_HASH_KEY,
             str(agent_id),
         )
         return _pending_work_from_script_result(result)
@@ -650,11 +670,12 @@ def claim_pending_agents(
         redis_client = client or get_redis_client()
         result = redis_client.eval(
             _CLAIM_PENDING_MANY_SCRIPT,
-            4,
+            5,
             _PENDING_SET_KEY,
             _PENDING_GENERATION_HASH_KEY,
             _PENDING_QUEUE_HASH_KEY,
             _PENDING_GENERIC_SET_KEY,
+            _PENDING_MESSAGE_HASH_KEY,
             limit,
         )
     except Exception:
@@ -662,8 +683,8 @@ def claim_pending_agents(
         return []
 
     claimed: list[PendingAgentWork] = []
-    for index in range(0, len(result or []), 4):
-        pending_work = _pending_work_from_script_result(result[index:index + 4])
+    for index in range(0, len(result or []), 5):
+        pending_work = _pending_work_from_script_result(result[index:index + 5])
         if pending_work is not None:
             claimed.append(pending_work)
     return claimed

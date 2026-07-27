@@ -35,8 +35,9 @@ class UpdatePlanValidationTests(SimpleTestCase):
         self.assertIn("send_sms", messages_description)
         self.assertIn("send_chat_message", messages_description)
         self.assertIn("not for every quick answer", messages_description)
-        self.assertIn("send it first with will_continue_work=true", messages_description)
-        self.assertIn("then call update_plan after the send tool returns", messages_description)
+        self.assertIn("omit its message deliverable", messages_description)
+        self.assertIn("update the plan first", messages_description)
+        self.assertIn("send that answer once", messages_description)
         self.assertIn("send the final answer with will_continue_work=false", messages_description)
         self.assertIn("Do not include peer messages", messages_description)
         self.assertIn("Exact UUID", message_id_description)
@@ -45,6 +46,7 @@ class UpdatePlanValidationTests(SimpleTestCase):
     def test_tool_description_guides_plan_reset_for_new_iterations(self):
         tool = get_update_plan_tool()
         description = tool["function"]["description"]
+        continue_description = tool["function"]["parameters"]["properties"]["will_continue_work"]["description"]
 
         self.assertIn("full current active plan", description)
         self.assertIn("usually 3-6 active steps", description)
@@ -52,6 +54,8 @@ class UpdatePlanValidationTests(SimpleTestCase):
         self.assertIn("new scheduled run", description)
         self.assertIn("do not create one step per day, hour, or recurrence slot", description)
         self.assertIn("represent the current run with compact reusable phases", description)
+        self.assertIn("this active request", continue_description)
+        self.assertIn("Queued requests and plan items run separately", continue_description)
 
     def test_invalid_message_deliverable_feedback_explains_user_facing_only(self):
         result = execute_update_plan(
@@ -74,7 +78,7 @@ class UpdatePlanValidationTests(SimpleTestCase):
         self.assertIn("send_email", result["message"])
         self.assertIn("send_sms", result["message"])
         self.assertIn("send_chat_message", result["message"])
-        self.assertIn("send it first with will_continue_work=true", result["message"])
+        self.assertIn("update the plan first", result["message"])
         self.assertIn("send the final answer with will_continue_work=false", result["message"])
         self.assertIn("Do not include peer messages from send_agent_message", result["message"])
 
@@ -102,8 +106,11 @@ class UpdatePlanResearchSuppressionTests(TestCase):
 
         prompt = format_current_plan_for_prompt(self.agent)
 
-        self.assertIn("send the final delivery with true", prompt)
-        self.assertIn("finish/defer all Doing/Todo via update_plan false", prompt)
+        self.assertIn("before final delivery", prompt)
+        self.assertIn("mark its delivery step done in update_plan", prompt)
+        self.assertIn("the following send completes it", prompt)
+        self.assertIn("send once with false", prompt)
+        self.assertIn("leave other requests parked", prompt)
 
     def test_legacy_planning_state_still_prompts_for_final_delivery(self):
         self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
@@ -117,7 +124,7 @@ class UpdatePlanResearchSuppressionTests(TestCase):
 
         prompt = format_current_plan_for_prompt(self.agent)
 
-        self.assertIn("send the final delivery", prompt)
+        self.assertIn("before final delivery", prompt)
 
     def test_redundant_research_progress_update_is_skipped(self):
         PersistentAgentKanbanCard.objects.create(

@@ -773,11 +773,16 @@ def _emit_pending_human_input_updates(agent_id) -> None:
     emit_pending_action_requests_update(agent)
 
 
-def _queue_human_input_processing(agent_id) -> None:
+def _queue_human_input_processing(
+    agent_id,
+    *,
+    inbound_message_id: str | None = None,
+) -> None:
     inbound_generation = bump_human_inbound_generation(agent_id)
     __import__("api.agent.tasks", fromlist=["process_agent_events_task"]).process_agent_events_task.delay(
         str(agent_id),
         inbound_generation=inbound_generation,
+        inbound_message_id=inbound_message_id,
     )
 
 
@@ -1912,7 +1917,12 @@ def submit_human_input_responses_batch(
                 ]
             )
 
-        transaction.on_commit(lambda: _queue_human_input_processing(agent.id))
+        transaction.on_commit(
+            lambda: _queue_human_input_processing(
+                agent.id,
+                inbound_message_id=str(message.id),
+            )
+        )
         transaction.on_commit(
             lambda: Analytics.track_event(
                 user_id=analytics_user_id,
@@ -2037,6 +2047,11 @@ def dismiss_human_input_request(
             ]
         )
 
-        transaction.on_commit(lambda: _queue_human_input_processing(request_obj.agent_id))
+        transaction.on_commit(
+            lambda: _queue_human_input_processing(
+                request_obj.agent_id,
+                inbound_message_id=str(message.id),
+            )
+        )
 
     return message

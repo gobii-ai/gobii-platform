@@ -11,13 +11,14 @@ from django.utils import timezone
 
 from api.agent.core import event_processing as ep
 from api.agent.comms.routing import (
+    advance_inbound_routing_scope,
     bind_inbound_routing_scope,
     capture_inbound_routing_scope,
     get_bound_inbound_routing_scope,
     reset_inbound_routing_scope,
 )
 from api.agent.core.internal_reasoning import INTERNAL_REASONING_PREFIX
-from api.agent.core.prompt_context import _get_implied_send_context
+from api.agent.core.prompt_context import _get_implied_send_context, _get_queued_workload_context
 from api.agent.core.web_streaming import resolve_web_stream_target
 from api.agent.tools.web_chat_sender import execute_send_chat_message
 from api.models import (
@@ -2462,6 +2463,58 @@ class ImpliedSendTests(TestCase):
         self.assertEqual(result["status"], "ok")
         outbound = PersistentAgentMessage.objects.get(body="Here is your answer.")
         self.assertEqual(outbound.to_endpoint.address, requester_message.from_endpoint.address)
+
+    def test_pinned_scope_queues_other_conversations_and_advances_same_conversation(self):
+        requester_message = self._add_inbound_web_message("Please finish the incident summary here.")
+        start_web_session(self.agent, self.user)
+
+        observer = get_user_model().objects.create_user(
+            username="pressure-observer@example.com",
+            email="pressure-observer@example.com",
+            password="password",
+        )
+        AgentCollaborator.objects.create(agent=self.agent, user=observer)
+        observer_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.WEB,
+            address=build_web_user_address(observer.id, self.agent.id),
+        )
+        observer_conversation = PersistentAgentConversation.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.WEB,
+            address=observer_endpoint.address,
+        )
+        PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            is_outbound=False,
+            from_endpoint=observer_endpoint,
+            conversation=observer_conversation,
+            body="Can you also investigate the billing queue?",
+        )
+
+        scope = capture_inbound_routing_scope(
+            self.agent,
+            message_id=requester_message.id,
+            pending_inbound=True,
+        )
+        token = bind_inbound_routing_scope(scope)
+        try:
+            self.assertEqual(_get_implied_send_context(self.agent)["to_address"], requester_message.from_endpoint.address)
+            workload = _get_queued_workload_context(self.agent)
+            self.assertIn("1 newer inbound message", workload)
+            self.assertIn("queued, not replacements", workload)
+            self.assertEqual(advance_inbound_routing_scope(self.agent, scope), scope)
+
+            follow_up = PersistentAgentMessage.objects.create(
+                owner_agent=self.agent,
+                is_outbound=False,
+                from_endpoint=requester_message.from_endpoint,
+                conversation=requester_message.conversation,
+                body="Correction: include the mitigation owner too.",
+            )
+            advanced = advance_inbound_routing_scope(self.agent, scope)
+            self.assertEqual(advanced.message_id, follow_up.id)
+        finally:
+            reset_inbound_routing_scope(token)
 
     def test_proactive_run_does_not_treat_historical_email_as_current_requester(self):
         start_web_session(self.agent, self.user)

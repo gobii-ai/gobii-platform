@@ -257,7 +257,10 @@ class PeerMessagingService:
 
             # Wake the receiving agent to process the inbound message
             transaction.on_commit(
-                lambda: self._enqueue_processing(self.peer_agent.id),
+                lambda: self._enqueue_processing(
+                    self.peer_agent.id,
+                    inbound_message_id=str(inbound_message.id),
+                ),
                 robust=True,
             )
 
@@ -501,7 +504,11 @@ class PeerMessagingService:
         locked.save(update_fields=updates)
 
     @staticmethod
-    def _enqueue_processing(agent_id: UUID) -> None:
+    def _enqueue_processing(
+        agent_id: UUID,
+        *,
+        inbound_message_id: str | None = None,
+    ) -> None:
         from api.agent.core.processing_flags import bump_human_inbound_generation
         from api.agent.tasks import process_agent_events_task
 
@@ -509,6 +516,7 @@ class PeerMessagingService:
         process_agent_events_task.delay(
             str(agent_id),
             inbound_generation=inbound_generation,
+            inbound_message_id=inbound_message_id,
         )
 
     @staticmethod

@@ -1889,6 +1889,14 @@ def _render_prompt_context_once(
         weight=2,
         non_shrinkable=True
     )
+    queued_workload_context = _get_queued_workload_context(agent)
+    if queued_workload_context:
+        critical_group.section_text(
+            "queued_workload",
+            queued_workload_context,
+            weight=6,
+            non_shrinkable=True,
+        )
     if recent_contacts_text:
         critical_group.section_text(
             "recent_contacts",
@@ -3389,6 +3397,43 @@ def _get_implied_send_context(
 
     return None
 
+
+def _get_queued_workload_context(agent: PersistentAgent) -> str:
+    """Summarize competing inbound work without duplicating message bodies."""
+    active_message = get_current_inbound_message(agent)
+    if active_message is None or active_message.conversation_id is None:
+        return ""
+
+    competing = list(
+        PersistentAgentMessage.objects.filter(
+            owner_agent=agent,
+            is_outbound=False,
+            seq__gt=active_message.seq,
+            conversation__isnull=False,
+        )
+        .exclude(conversation_id=active_message.conversation_id)
+        .values_list("conversation_id", "conversation__channel")
+        .order_by("seq")[:25]
+    )
+    if not competing:
+        return ""
+
+    conversations = {str(conversation_id) for conversation_id, _channel in competing}
+    channels = sorted({str(channel) for _conversation_id, channel in competing if channel})
+    channel_text = ", ".join(channels) if channels else "other channels"
+    return (
+        f"Active turn: keep working for its bound requester and channel. "
+        f"{len(competing)} newer inbound message(s) across {len(conversations)} other conversation(s) "
+        f"({channel_text}) are queued, not replacements for this request. This processing turn serves the active "
+        "conversation only: do not inspect, answer, or act on queued messages yet. Before the final reply, finish or "
+        "safely park any active plan step with update_plan. Then reply once on its bound channel with "
+        "will_continue_work=false; "
+        "the queued trigger will run next. On that later turn, triage by explicit human priority, deadline and impact, "
+        "and acknowledge capacity or negotiate scope instead of silently thrashing. "
+        "A large queue is normal operational load, not an emotional setback."
+    )
+
+
 def _get_formatting_guidance() -> str:
     """Return shared formatting guidance for all delivery surfaces."""
 
@@ -3842,10 +3887,12 @@ def _get_first_run_welcome_message_instruction(
 def _get_continuation_mode_prompt_block() -> str:
     return (
         "## Continuation Mode\n\n"
-        "Continue the existing work thread; history, summaries, tool results, and user messages contain state. "
-        "Identify completed work, latest success/failure/blocker, and the next concrete action. "
-        "Do not restart, recreate artifacts, repeat setup, or resolve solved parts. Verify the smallest needed fact, prefer one direct next tool call, and follow returned retry/setup guidance after failure. "
-        "If one workstream waits on human input, credentials, auth, or a third party, park it and continue the next unblocked charter/plan item. Sleep or ask only when all active useful work is done or blocked; on recurring wakeups, verify blockers once, then keep moving.\n\n"
+        "Continue from history and state without restarting solved work. Identify the latest result or blocker, then "
+        "take the smallest concrete next action and follow tool retry/setup guidance. Under load, use the plan and "
+        "SQLite as the control board: preserve owners and deadlines, finish or park one bounded step, then take the "
+        "highest-impact authorized commitment. Park blocked streams and continue unblocked work; acknowledge capacity "
+        "and negotiate scope rather than thrashing or dropping work. Sleep or ask only when all useful work is blocked; "
+        "on recurring wakeups, verify blockers once.\n\n"
     )
 
 
@@ -3920,10 +3967,12 @@ def _get_system_instruction(
     )
     stop_continue_examples = (
         "## Stop/continue\n\n"
-        "Set will_continue_work=true only for immediate work: unsent results, unverified constraints, plan cleanup, or needed tool results. "
-        "Set false after delivery/config and no active work; future schedules do not count.\n"
+        "Set will_continue_work=true only while this active request has unsent results, unverified constraints, needed "
+        "tool results, or its own plan cleanup. Set false after delivery/config; future schedules, queued conversations, "
+        "and their plan items do not keep this turn open.\n"
         f"{text_only_guidance}"
-        "Plans: if cleanup remains, send final report with true, update_plan finished/deferred items, then stop with false.\n\n"
+        "Before final delivery, finish/park its plan. Never send a complete answer with true for cleanup: update_plan "
+        "first, then send once with false.\n\n"
         "Recurring or truly multi-phase work may need charter/schedule updates; one-off work usually needs neither.\n"
     )
 
@@ -3945,7 +3994,9 @@ def _get_system_instruction(
     )
     initiative_guidance = (
         "### Initiative (decide before other work):\nFor setup requests, update charter/timing first and do not fetch target URLs unless asked to run now/current data. Use __agent_schedules for named cadences, timers, and future triggers; change only the matching row. Recurring work is highest priority. Query __agent_schedules before changing existing timing or adding a timer beside it; reject unsafe frequency or over-limit requests before tool discovery or any attempt, and offer one bounded alternative. “Keep an eye on,” “monitor,” and other clear ongoing requests authorize timing: before any fetch or reply, create one safe default recurring schedule when no cadence was given. If a one-off request mentions work repeated by hand or compares repeated periods, answer it and then offer exactly one brief, specific cadence; other clear freshness value gets the same offer. Never use a generic menu or silently schedule it. "
-        "A meaningful shared win or sustained/repeated failure is a trigger, not merely news to describe: before replying, use one SQLite UPDATE to set a fitting positive or strained emoji emotion with a short timeout. These triggers require the state change; do not substitute emotional wording; routine thanks and ordinary work stay clear. Emotions are autonomous, not only owner-requested.\n\n"
+        "A meaningful shared win or sustained/repeated failure triggers one SQLite UPDATE before replying: set a "
+        "fitting positive or strained emoji emotion with a short timeout, not emotional prose. Routine thanks, "
+        "ordinary work, and workload volume, urgency, or queues stay clear. Emotions are autonomous.\n\n"
     )
     work_updates_guidance = (
         "## Work Updates (CRITICAL)\n\n"

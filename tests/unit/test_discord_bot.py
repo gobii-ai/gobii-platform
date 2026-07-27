@@ -611,7 +611,11 @@ class NativeDiscordBotTests(TestCase):
         self.assertEqual(stored.raw_payload["discord_message_id"], "500")
         self.assertEqual(PersistentAgentMessageAttachment.objects.filter(message=stored).count(), 1)
         self.assertEqual(stored.conversation.channel, CommsChannel.DISCORD)
-        schedule_mock.assert_called_once_with(str(self.agent.id), typing_channel_id="10")
+        schedule_mock.assert_called_once_with(
+            str(self.agent.id),
+            inbound_message_id=str(stored.id),
+            typing_channel_id="10",
+        )
 
     @tag("batch_agent_webhooks")
     @patch("api.services.discord_bot.schedule_discord_inbound_processing")
@@ -774,7 +778,11 @@ class NativeDiscordBotTests(TestCase):
         self.assertEqual(result["deliveries"][0]["subscription_id"], str(active_subscription.id))
         self.assertEqual(PersistentAgentMessage.objects.filter(owner_agent=self.agent).count(), 1)
         self.assertFalse(PersistentAgentMessage.objects.filter(owner_agent=foreign_agent).exists())
-        schedule_mock.assert_called_once_with(str(self.agent.id), typing_channel_id="10")
+        schedule_mock.assert_called_once_with(
+            str(self.agent.id),
+            inbound_message_id=result["message_id"],
+            typing_channel_id="10",
+        )
 
     @tag("batch_agent_webhooks")
     @patch("api.services.discord_bot.schedule_discord_inbound_processing")
@@ -820,7 +828,11 @@ class NativeDiscordBotTests(TestCase):
         self.assertEqual(PersistentAgentMessage.objects.count(), 1)
         stored = PersistentAgentMessage.objects.get()
         self.assertEqual(stored.raw_payload["discord_webhook_id"], "wh")
-        schedule_mock.assert_called_once_with(str(self.agent.id), typing_channel_id="10")
+        schedule_mock.assert_called_once_with(
+            str(self.agent.id),
+            inbound_message_id=str(stored.id),
+            typing_channel_id="10",
+        )
 
     @tag("batch_agent_webhooks")
     @patch("api.services.discord_bot.schedule_discord_inbound_processing")
@@ -889,7 +901,11 @@ class NativeDiscordBotTests(TestCase):
         self.assertEqual(result["deliveries"][0]["subscription_id"], str(second_subscription.id))
         self.assertEqual(PersistentAgentMessage.objects.filter(owner_agent=self.agent, is_outbound=False).count(), 0)
         self.assertEqual(PersistentAgentMessage.objects.filter(owner_agent=second_agent, is_outbound=False).count(), 1)
-        schedule_mock.assert_called_once_with(str(second_agent.id), typing_channel_id="10")
+        schedule_mock.assert_called_once_with(
+            str(second_agent.id),
+            inbound_message_id=result["message_id"],
+            typing_channel_id="10",
+        )
 
     @tag("batch_agent_webhooks")
     @patch("api.services.discord_bot.schedule_discord_inbound_processing")

@@ -5862,7 +5862,7 @@ class HumanInboundGenerationTests(TestCase):
             is_primary=True,
         )
 
-    def _ingest(self, channel: str, sender: str, recipient: str, body: str = "hello") -> None:
+    def _ingest(self, channel: str, sender: str, recipient: str, body: str = "hello"):
         parsed = ParsedMessage(
             sender=sender,
             recipient=recipient,
@@ -5872,7 +5872,7 @@ class HumanInboundGenerationTests(TestCase):
             raw_payload={"source": "unit_test"},
             msg_channel=channel,
         )
-        ingest_inbound_message(channel, parsed)
+        return ingest_inbound_message(channel, parsed)
 
     def test_web_message_bumps_generation_and_queues_with_generation(self):
         self._owned_endpoint(CommsChannel.WEB, self.web_agent_address)
@@ -5881,12 +5881,13 @@ class HumanInboundGenerationTests(TestCase):
 
         with patch("api.agent.tasks.enqueue_interactive_process_agent_events") as mock_enqueue:
             with self.captureOnCommitCallbacks(execute=True):
-                self._ingest(CommsChannel.WEB, self.web_user_address, self.web_agent_address)
+                info = self._ingest(CommsChannel.WEB, self.web_user_address, self.web_agent_address)
 
         self.assertEqual(get_human_inbound_generation(self.agent.id), expected)
         mock_enqueue.assert_called_once_with(
             str(self.agent.id),
             inbound_generation=expected,
+            inbound_message_id=str(info.message.id),
         )
 
     def test_email_and_sms_messages_queue_with_generation(self):
@@ -5903,12 +5904,13 @@ class HumanInboundGenerationTests(TestCase):
 
                 with patch("api.agent.tasks.process_agent_events_task.delay") as mock_delay:
                     with self.captureOnCommitCallbacks(execute=True):
-                        self._ingest(channel, sender, recipient)
+                        info = self._ingest(channel, sender, recipient)
 
                 self.assertEqual(get_human_inbound_generation(self.agent.id), expected)
                 mock_delay.assert_called_once_with(
                     str(self.agent.id),
                     inbound_generation=expected,
+                    inbound_message_id=str(info.message.id),
                 )
 
     def test_web_human_input_panel_response_bumps_generation_and_queues_with_generation(self):
@@ -5933,7 +5935,7 @@ class HumanInboundGenerationTests(TestCase):
 
         with patch("api.agent.tasks.process_agent_events_task.delay") as mock_delay:
             with self.captureOnCommitCallbacks(execute=True):
-                submit_human_input_responses_batch(
+                message = submit_human_input_responses_batch(
                     self.agent,
                     [{"request_id": str(request_obj.id), "selected_option_key": "summary"}],
                     actor_user_id=self.user.id,
@@ -5943,6 +5945,7 @@ class HumanInboundGenerationTests(TestCase):
         mock_delay.assert_called_once_with(
             str(self.agent.id),
             inbound_generation=expected,
+            inbound_message_id=str(message.id),
         )
 
     def test_inbound_webhook_does_not_bump_human_generation(self):
@@ -5978,10 +5981,16 @@ class HumanInboundGenerationTests(TestCase):
             PeerMessagingService(self.agent, peer_agent).send_message("handoff")
 
         generation = get_human_inbound_generation(peer_agent.id)
+        inbound = PersistentAgentMessage.objects.get(
+            owner_agent=peer_agent,
+            is_outbound=False,
+            body="handoff",
+        )
         self.assertEqual(generation, 1)
         task_mock.delay.assert_called_once_with(
             str(peer_agent.id),
             inbound_generation=generation,
+            inbound_message_id=str(inbound.id),
         )
 
     def test_redundant_queued_task_skips_after_generation_is_consumed(self):

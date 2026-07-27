@@ -22,6 +22,10 @@ from api.evals.scenarios.image_generation import IMAGE_GENERATION_SCENARIO_SLUGS
 from api.evals.scenarios.responsibility_boundaries import RESPONSIBILITY_BOUNDARY_SCENARIO_SLUGS, RESPONSIBILITY_BOUNDARY_SUITE_SLUG
 from api.evals.scenarios.hallucinated_links import HALLUCINATED_LINK_SCENARIO_SLUGS, HALLUCINATED_LINKS_SUITE_SLUG
 from api.evals.scenarios.agent_emotions import AGENT_PROACTIVE_EMOTION_SCENARIO_SLUGS
+from api.evals.scenarios.pressure_resilience import (
+    PRESSURE_RESILIENCE_SCENARIO_SLUGS,
+    PRESSURE_RESILIENCE_SUITE_SLUG,
+)
 from api.evals.scenarios.agent_scheduling import (
     AGENT_SCHEDULING_SCENARIO_SLUGS,
     AGENT_SCHEDULING_SUITE_SLUG,
@@ -174,6 +178,11 @@ register_builtin_suites(
             slug=AGENT_INITIATIVE_SUITE_SLUG,
             description="Sensible initiative for recurring work, transient emotion, and Discord reactions.",
             scenario_slugs=AGENT_INITIATIVE_SCENARIO_SLUGS,
+        ),
+        EvalSuite(
+            slug=PRESSURE_RESILIENCE_SUITE_SLUG,
+            description="Calm prioritization, request affinity, and communication under near-limit multi-channel load.",
+            scenario_slugs=PRESSURE_RESILIENCE_SCENARIO_SLUGS,
         ),
         EvalSuite(
             slug=AGENT_APPEARANCE_SUITE_SLUG,

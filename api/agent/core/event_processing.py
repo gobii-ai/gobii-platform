@@ -67,6 +67,7 @@ from ..short_description import maybe_schedule_mini_description, maybe_schedule_
 from ..avatar import maybe_schedule_agent_avatar
 from ..tags import maybe_schedule_agent_tags
 from ..comms.routing import (
+    advance_inbound_routing_scope,
     bind_inbound_routing_scope,
     capture_inbound_routing_scope,
     get_current_inbound_message,
@@ -5715,6 +5716,7 @@ def process_agent_events(
     eval_stop_policy: Optional[Dict[str, Any]] = None,
     burn_follow_up_token: Optional[str] = None,
     inbound_generation: int | str | None = None,
+    inbound_message_id: str | None = None,
     prefer_low_latency: bool | None = None,
     max_loop_iterations: int | None = None,
     max_iterations_followup_delay_seconds: int | None = None,
@@ -5884,6 +5886,7 @@ def process_agent_events(
                 enqueue_pending_agent(
                     persistent_agent_id,
                     inbound_generation=inbound_generation,
+                    inbound_message_id=inbound_message_id,
                     queue=processing_queue,
                     ttl=lock_settings.pending_set_ttl_seconds,
                     client=redis_client,
@@ -5946,6 +5949,7 @@ def process_agent_events(
                 persistent_agent_id,
                 span,
                 inbound_generation=inbound_generation,
+                inbound_message_id=inbound_message_id,
                 lock_extender=lock_extender,
                 heartbeat=heartbeat,
                 prefer_low_latency=prefer_low_latency,
@@ -6036,6 +6040,7 @@ def process_agent_events(
                                 enqueue_pending_agent(
                                     pending_work.agent_id,
                                     inbound_generation=pending_work.inbound_generation,
+                                    inbound_message_id=pending_work.inbound_message_id,
                                     queue=pending_work.queue,
                                     has_generic_work=pending_work.has_generic_work,
                                     ttl=lock_settings.pending_set_ttl_seconds,
@@ -6098,6 +6103,7 @@ def _process_agent_events_locked(
     span,
     *,
     inbound_generation: int | str | None = None,
+    inbound_message_id: str | None = None,
     lock_extender: Optional[_LockExtender] = None,
     heartbeat: Optional[_ProcessingHeartbeat] = None,
     prefer_low_latency: bool | None = None,
@@ -6405,6 +6411,7 @@ def _process_agent_events_locked(
             agent,
             is_first_run=is_first_run,
             inbound_generation=inbound_generation,
+            inbound_message_id=inbound_message_id,
             process_started_at=processing_step.created_at,
             credit_snapshot=credit_snapshot,
             run_sequence_number=run_sequence_number,
@@ -6441,6 +6448,7 @@ def _run_agent_loop(
     *,
     is_first_run: bool,
     inbound_generation: int | str | None = None,
+    inbound_message_id: str | None = None,
     process_started_at: datetime | None = None,
     credit_snapshot: Optional[Dict[str, Any]] = None,
     run_sequence_number: Optional[int] = None,
@@ -6556,30 +6564,48 @@ def _run_agent_loop(
     def _current_human_inbound_generation() -> int:
         return get_human_inbound_generation(agent.id, client=redis_client)
 
-    routing_scope_generation = _current_human_inbound_generation()
-    consumed_inbound_generation = get_consumed_human_inbound_generation(agent.id, client=redis_client)
     try:
         queued_inbound_generation = max(0, int(inbound_generation or 0))
     except (TypeError, ValueError):
         queued_inbound_generation = 0
+    routing_scope_generation = max(
+        queued_inbound_generation,
+        _current_human_inbound_generation(),
+    )
+    consumed_inbound_generation = get_consumed_human_inbound_generation(agent.id, client=redis_client)
     routing_scope_tokens, prompt_run_cache_token = [], None
     try:
         has_pending_inbound = max(routing_scope_generation, queued_inbound_generation) > consumed_inbound_generation
         initial_routing_scope = capture_inbound_routing_scope(
-            agent, pending_inbound=has_pending_inbound, background_before=process_started_at
+            agent,
+            message_id=inbound_message_id,
+            pending_inbound=has_pending_inbound,
+            background_before=process_started_at,
         )
+        active_routing_scope = initial_routing_scope
+        routing_scope_is_pinned = bool(inbound_message_id and initial_routing_scope.message_id)
         routing_scope_tokens.append(bind_inbound_routing_scope(initial_routing_scope))
 
-        def _refresh_inbound_routing_scope(generation: int) -> None:
+        def _refresh_inbound_routing_scope(generation: int) -> bool:
+            nonlocal active_routing_scope
             nonlocal routing_scope_generation, direct_correction_reply_pending
             nonlocal direct_feedback_reply_completed, direct_correction_prior_output
             nonlocal terminal_plan_cleanup_pending
-            routing_scope_tokens.append(bind_inbound_routing_scope(capture_inbound_routing_scope(agent, pending_inbound=True)))
+            next_scope = (
+                advance_inbound_routing_scope(agent, active_routing_scope)
+                if routing_scope_is_pinned
+                else capture_inbound_routing_scope(agent, pending_inbound=True)
+            )
             routing_scope_generation = generation
+            if next_scope.message_id == active_routing_scope.message_id:
+                return False
+            active_routing_scope = next_scope
+            routing_scope_tokens.append(bind_inbound_routing_scope(next_scope))
             direct_correction_reply_pending = False
             direct_feedback_reply_completed = False
             direct_correction_prior_output = ""
             terminal_plan_cleanup_pending = False
+            return True
 
         prompt_run_cache = PromptRunCache(
             agent_id=str(agent.id),
@@ -6707,7 +6733,7 @@ def _run_agent_loop(
                     prompt_human_generation = _current_human_inbound_generation()
                     if prompt_human_generation > routing_scope_generation:
                         _refresh_inbound_routing_scope(prompt_human_generation)
-                    prompt_run_cache.observe_human_generation(prompt_human_generation)
+                    prompt_run_cache.observe_human_generation(routing_scope_generation)
                     config_snapshot = seed_sqlite_agent_config(agent)
                     skills_snapshot = seed_sqlite_skills(agent)
                 current_notice = continuation_notice
@@ -6827,24 +6853,23 @@ def _run_agent_loop(
                 prompt_archive_attached = False
                 latest_human_generation = _current_human_inbound_generation()
                 if latest_human_generation > prompt_human_generation:
-                    _refresh_inbound_routing_scope(latest_human_generation)
-                    prompt_run_cache.observe_human_generation(latest_human_generation)
-                    stale_prompt_system_directive_block = str(
-                        prompt_metadata.get("system_directive_block") or stale_prompt_system_directive_block or ""
-                    )
-                    logger.info(
-                        "Agent %s: human input generation changed from %s to %s while building prompt; rebuilding.",
-                        agent.id,
-                        prompt_human_generation,
-                        latest_human_generation,
-                    )
-                    continuation_notice = (
-                        "A newer user message arrived while the last prompt was being prepared; "
-                        "rebuild the prompt and answer the latest message."
-                    )
-                    continue
+                    routing_changed = _refresh_inbound_routing_scope(latest_human_generation)
+                    prompt_run_cache.observe_human_generation(routing_scope_generation)
+                    if routing_changed:
+                        stale_prompt_system_directive_block = str(
+                            prompt_metadata.get("system_directive_block") or stale_prompt_system_directive_block or ""
+                        )
+                        logger.info(
+                            "Agent %s: active conversation advanced while building the prompt; rebuilding.",
+                            agent.id,
+                        )
+                        continuation_notice = (
+                            "A newer message arrived in the active conversation while the last prompt was being "
+                            "prepared; rebuild from that correction or follow-up."
+                        )
+                        continue
 
-                accepted_human_generation = latest_human_generation
+                accepted_human_generation = routing_scope_generation
                 stale_prompt_system_directive_block = ""
 
                 # Atomically consume one global step only after accepting the prompt.
@@ -6862,17 +6887,35 @@ def _run_agent_loop(
                             logger.debug("Failed to close budget cycle on exhaustion", exc_info=True)
                         return cumulative_token_usage
 
+                stale_check_generation = accepted_human_generation
+                stale_check_result = False
+
                 def _is_orchestrator_prompt_stale() -> bool:
-                    return _current_human_inbound_generation() > accepted_human_generation
+                    nonlocal stale_check_generation, stale_check_result
+                    latest_generation = _current_human_inbound_generation()
+                    if latest_generation <= stale_check_generation:
+                        return stale_check_result
+                    stale_check_generation = latest_generation
+                    if not routing_scope_is_pinned:
+                        stale_check_result = True
+                        return True
+                    next_scope = advance_inbound_routing_scope(agent, active_routing_scope)
+                    stale_check_result = next_scope.message_id != active_routing_scope.message_id
+                    return stale_check_result
 
                 def _mark_accepted_human_generation_consumed() -> None:
-                    if accepted_human_generation <= 0:
+                    generation_to_consume = (
+                        queued_inbound_generation
+                        if routing_scope_is_pinned
+                        else accepted_human_generation
+                    )
+                    if generation_to_consume <= 0:
                         return
                     if _is_orchestrator_prompt_stale():
                         return
                     mark_human_inbound_generation_consumed(
                         agent.id,
-                        accepted_human_generation,
+                        generation_to_consume,
                         client=redis_client,
                     )
 

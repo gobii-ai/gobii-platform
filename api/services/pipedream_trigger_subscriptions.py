@@ -430,7 +430,10 @@ def ingest_trigger_delivery(
     )
     if info.message.conversation_id and display_name:
         PersistentAgentConversation.objects.filter(id=info.message.conversation_id).update(display_name=display_name)
-    debounce_result = schedule_discord_inbound_processing(str(subscription.agent_id))
+    debounce_result = schedule_discord_inbound_processing(
+        str(subscription.agent_id),
+        inbound_message_id=str(info.message.id),
+    )
     subscription.record_event()
     return {
         "message_id": str(info.message.id),

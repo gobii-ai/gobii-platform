@@ -34,9 +34,10 @@ _RESEARCH_PLAN_TERMS = (
 MESSAGE_DELIVERABLE_GUIDANCE = (
     "Use messages only for substantial final deliverables in existing multi-step work, not for every quick answer, "
     "lookup, briefing, or one-shot chart. Message deliverables must come from send_email, send_sms, or send_chat_message. "
-    "Use the exact returned message_id UUID, or omit messages. If you are sending the final message now and a completion "
-    "plan update is still needed, send it first with will_continue_work=true, then call update_plan after the send tool returns. "
-    "For explicit deep or exhaustive research with no file deliverables and no unfinished current plan items, send the final answer with will_continue_work=false. "
+    "Use the exact returned message_id UUID, or omit messages. If a completion plan update remains when the final answer "
+    "is ready, omit its message deliverable, update the plan first, then send that answer once with "
+    "will_continue_work=false. For explicit deep or exhaustive research with no file deliverables and no unfinished "
+    "current plan items, send the final answer with will_continue_work=false. "
     "Do not include peer messages from send_agent_message."
 )
 
@@ -164,7 +165,10 @@ def get_update_plan_tool() -> dict[str, Any]:
                     },
                     "will_continue_work": {
                         "type": "boolean",
-                        "description": "REQUIRED. true = continue after this plan update; false = stop because all work is done or deferred and no current plan items remain unfinished.",
+                        "description": (
+                            "REQUIRED. true only if this active request needs another action; false if done/deferred. "
+                            "Queued requests and plan items run separately."
+                        ),
                     },
                 },
                 "required": ["plan", "will_continue_work"],
@@ -471,7 +475,10 @@ def format_current_plan_for_prompt(agent) -> str:
 
     heading = "Current plan:"
     if snapshot.todo_count or snapshot.doing_count:
-        heading += " before stopping: send the final delivery with true, then finish/defer all Doing/Todo via update_plan false"
+        heading += (
+            " before final delivery: mark its delivery step done in update_plan (the following send completes it), "
+            "then send once with false; leave other requests parked"
+        )
     lines = [
         heading,
         f"- Doing: {snapshot.doing_count}",

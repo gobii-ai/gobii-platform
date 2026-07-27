@@ -752,7 +752,11 @@ def _finalize_gateway_subscription_delivery(
     display_name = f"#{message.channel_name.lstrip('#')}" if message.channel_name else f"Discord {message.channel_id}"
     if stored_message.conversation_id and display_name:
         PersistentAgentConversation.objects.filter(id=stored_message.conversation_id).update(display_name=display_name)
-    debounce_result = schedule_discord_inbound_processing(str(agent.id), typing_channel_id=message.channel_id)
+    debounce_result = schedule_discord_inbound_processing(
+        str(agent.id),
+        inbound_message_id=str(stored_message.id),
+        typing_channel_id=message.channel_id,
+    )
     subscription.record_message()
     return {
         "agent_id": str(agent.id),

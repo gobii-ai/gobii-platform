@@ -82,6 +82,9 @@ class AttachmentGuidanceTests(SimpleTestCase):
         self.assertIn("styled tables or metric blocks", email_tool["function"]["parameters"]["properties"]["mobile_first_html"]["description"])
         self.assertIn("false when this email is the requested final delivery", email_tool["function"]["parameters"]["properties"]["will_continue_work"]["description"])
         self.assertIn("Do not use this to simulate or confirm an email/SMS delivery", chat_tool["function"]["description"])
+        chat_continue_guidance = chat_tool["function"]["parameters"]["properties"]["will_continue_work"]["description"]
+        self.assertIn("this active request", chat_continue_guidance)
+        self.assertIn("queued work never justify true", chat_continue_guidance)
         self.assertIn("Start with the answer/main finding", surface_guidance)
         self.assertIn("Address known recipients once", surface_guidance)
         self.assertIn("agent-name self-intros", surface_guidance)
