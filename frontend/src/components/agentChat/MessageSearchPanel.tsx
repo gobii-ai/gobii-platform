@@ -30,7 +30,7 @@ type MessageSearchPanelProps = {
   agentsLoading?: boolean
   state: MessageSearchState
   onStateChange: Dispatch<SetStateAction<MessageSearchState>>
-  onAgentSelect?: (agent: AgentRosterEntry) => void
+  onAgentSelect?: (agent: AgentRosterEntry, messageId?: string) => void
   onResultSelect?: () => void
 }
 
@@ -542,6 +542,7 @@ export function MessageSearchPanel({
               <p className="message-search-panel__empty">Message search is unavailable. Try again.</p>
             ) : results.length ? results.map((result) => {
               const href = resultUrl(result.agent.id, result.message_id)
+              const rosterAgent = agents.find((agent) => agent.id === result.agent.id)
               return (
                 <a
                   className="message-search-result settings-card-surface settings-card-surface--embedded flex items-start"
@@ -550,11 +551,10 @@ export function MessageSearchPanel({
                   aria-label={`Open message from ${result.agent.name}`}
                   onClick={(event) => {
                     const resultsScrollTop = resultsRef.current?.scrollTop ?? 0
-                    if (handleAppAnchorClick(event, href)) {
+                    const navigateResult = rosterAgent && onAgentSelect && window.location.pathname.startsWith('/app') ? () => { onAgentSelect(rosterAgent, result.message_id); return true } : undefined
+                    if (handleAppAnchorClick(event, href, navigateResult)) {
                       onStateChange((current) => ({ ...current, resultsScrollTop }))
-                      window.requestAnimationFrame(() => {
-                        revealTimelineMessage(result.message_id, { behavior: 'auto', highlight: true })
-                      })
+                      window.requestAnimationFrame(() => revealTimelineMessage(result.message_id, { behavior: 'auto', highlight: true }))
                       onResultSelect?.()
                     }
                   }}

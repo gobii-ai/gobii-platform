@@ -39,7 +39,7 @@ export type ChatSidebarProps = {
   errorMessage?: string | null
   desktopMode?: AgentChatSidebarMode
   onDesktopModeChange?: (mode: AgentChatSidebarMode) => void
-  onSelectAgent?: (agent: AgentRosterEntry) => void
+  onSelectAgent?: (agent: AgentRosterEntry, messageId?: string) => void
   onRespondInvite?: (invite: AgentSidebarInvite, action: AgentInviteAction) => Promise<void>
   onConfigureAgent?: (agent: AgentRosterEntry) => void
   onToggleAgentFavorite?: (agentId: string) => void
@@ -293,8 +293,8 @@ export const ChatSidebar = memo(function ChatSidebar({
   }, [openAndFocusMessageSearch])
 
   const handleAgentSelect = useCallback(
-    (agent: AgentRosterEntry) => {
-      onSelectAgent?.(agent)
+    (agent: AgentRosterEntry, messageId?: string) => {
+      onSelectAgent?.(agent, messageId)
       if (isMobile) {
         setDrawerOpen(false)
       }

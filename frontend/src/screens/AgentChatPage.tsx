@@ -222,13 +222,13 @@ function normalizeAvatarUrl(value: string | null | undefined): string | null {
   return trimmed ? trimmed : null
 }
 
-function navigateToAgentChat(agentId: string): void {
+function navigateToAgentChat(agentId: string, messageId?: string): void {
   if (typeof window === 'undefined') {
     return
   }
   const nextPath = buildAgentChatShellPath(window.location.pathname, agentId, 'chat')
   const params = new URLSearchParams(window.location.search)
-  params.delete('message')
+  if (messageId) { params.set('message', messageId) } else { params.delete('message') }
   const nextUrl = `${nextPath}${params.size ? `?${params.toString()}` : ''}${window.location.hash}`
   window.history.pushState({ agentId }, '', nextUrl)
   window.dispatchEvent(new PopStateEvent('popstate'))
@@ -1797,9 +1797,9 @@ export function AgentChatPage({
     [rosterAgents],
   )
   const openAgentChat = useCallback(
-    (nextAgentId: string, pendingMeta: Omit<AgentSwitchMeta, 'agentId'> = {}) => {
+    (nextAgentId: string, pendingMeta: Omit<AgentSwitchMeta, 'agentId'> = {}, messageId?: string) => {
       if (nextAgentId === activeAgentIdRef.current) {
-        navigateToAgentChat(nextAgentId)
+        navigateToAgentChat(nextAgentId, messageId)
         return
       }
       const rosterEntry = rosterAgents.find((agent) => agent.id === nextAgentId)
@@ -1826,7 +1826,7 @@ export function AgentChatPage({
         signupPreviewState: pendingAgentMetaRef.current.signupPreviewState,
         planningState: pendingAgentMetaRef.current.planningState,
       })
-      navigateToAgentChat(nextAgentId)
+      navigateToAgentChat(nextAgentId, messageId)
     },
     [rosterAgents, setAgentId],
   )
@@ -2659,7 +2659,7 @@ export function AgentChatPage({
   }, [navigateToShellSubview, setAgentId])
 
   const handleSelectAgent = useCallback(
-    (agent: AgentRosterEntry) => {
+    (agent: AgentRosterEntry, messageId?: string) => {
       openAgentChat(agent.id, {
         agentName: agent.name,
         agentAvatarUrl: agent.avatarUrl,
@@ -2668,7 +2668,7 @@ export function AgentChatPage({
         processingActive: agent.processingActive,
         signupPreviewState: agent.signupPreviewState ?? 'none',
         planningState: agent.planningState ?? 'skipped',
-      })
+      }, messageId)
     },
     [openAgentChat],
   )
