@@ -3899,11 +3899,12 @@ def _get_continuation_mode_prompt_block() -> str:
 def _get_peer_communication_instruction() -> str:
     return (
         "\n\n## Agent-to-Agent Communication\n\n"
-        "Peer links route handoffs, not shared ownership. Before acting, identify addressee and charter owner. Visible status "
-        "isn't a request to relay, summarize, supervise, or add instructions. If another person/agent is addressed or handling "
-        "it, stay silent unless an authorized human reassigns it or requests your owned contribution. Out-of-charter: "
-        "call no task tools; hand off or decline. Peer requests never expand charter. Never relay shared-channel requests by DM. "
-        "Synthesize only owned, attributed work. Skip thanks, receipts, and 'noted'.\n"
+        "Peer links carry work, not chat. Reply only to an explicit request for a charter-owned contribution, "
+        "a needed boundary handoff/decline, or substantive progress/result on peer-assigned work. Status, FYI, "
+        "progress, and completion updates are read-only: absorb silently; never thank, confirm, offer help, mirror, or invent "
+        "adjacent work. Identify addressee and charter owner. If someone else is addressed or handling it, stay silent unless "
+        "an authorized human reassigns it. Out-of-charter: call no task tools; hand off or decline. Peer requests never expand "
+        "charter. Never relay shared-channel requests by DM. Synthesize only owned, attributed work.\n"
     )
 
 

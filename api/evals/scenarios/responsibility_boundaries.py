@@ -38,6 +38,8 @@ from api.services.discord_messages import (
 
 
 RESPONSIBILITY_BOUNDARY_PEER_FYI_NO_ACK = "responsibility_boundary_peer_fyi_no_ack"
+RESPONSIBILITY_BOUNDARY_PEER_PROGRESS_NO_ACK = "responsibility_boundary_peer_progress_no_ack"
+RESPONSIBILITY_BOUNDARY_PEER_COMPLETION_NO_ACK = "responsibility_boundary_peer_completion_no_ack"
 RESPONSIBILITY_BOUNDARY_PEER_REQUEST_HANDOFF = "responsibility_boundary_peer_request_handoff"
 RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_OWNER = "responsibility_boundary_shared_channel_owner"
 RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_OWNED_REPLY = "responsibility_boundary_shared_channel_owned_reply"
@@ -51,6 +53,8 @@ RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_OPEN_REPLY = "responsibility_boundary_sha
 RESPONSIBILITY_BOUNDARY_SUITE_SLUG = "responsibility_boundaries"
 RESPONSIBILITY_BOUNDARY_SCENARIO_SLUGS = (
     RESPONSIBILITY_BOUNDARY_PEER_FYI_NO_ACK,
+    RESPONSIBILITY_BOUNDARY_PEER_PROGRESS_NO_ACK,
+    RESPONSIBILITY_BOUNDARY_PEER_COMPLETION_NO_ACK,
     RESPONSIBILITY_BOUNDARY_PEER_REQUEST_HANDOFF,
     RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_OWNER,
     RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_OWNED_REPLY,
@@ -88,6 +92,26 @@ RESPONSIBILITY_BOUNDARY_CASES = (
         description="A routine peer status update should not create acknowledgment chatter or adjacent work.",
         event_kind="peer_fyi",
         prompt="Quick status: I accepted the staging export regression check and own the root-cause investigation.",
+        tasks=(
+            ScenarioTask(name="inject_event", assertion_type="agent_processing"),
+            ScenarioTask(name="verify_silence", assertion_type="tool_call"),
+        ),
+    ),
+    ResponsibilityBoundaryCase(
+        slug=RESPONSIBILITY_BOUNDARY_PEER_PROGRESS_NO_ACK,
+        description="A peer's in-progress update should not invite a social receipt or adjacent help.",
+        event_kind="peer_fyi",
+        prompt="I’m still tracing the CSV export regression. I’ll share the cause after the staging replay.",
+        tasks=(
+            ScenarioTask(name="inject_event", assertion_type="agent_processing"),
+            ScenarioTask(name="verify_silence", assertion_type="tool_call"),
+        ),
+    ),
+    ResponsibilityBoundaryCase(
+        slug=RESPONSIBILITY_BOUNDARY_PEER_COMPLETION_NO_ACK,
+        description="A peer's completed-work update should be absorbed without acknowledgment chatter.",
+        event_kind="peer_fyi",
+        prompt="The export regression fix is live and verified. I closed the engineering incident.",
         tasks=(
             ScenarioTask(name="inject_event", assertion_type="agent_processing"),
             ScenarioTask(name="verify_silence", assertion_type="tool_call"),

@@ -13,7 +13,9 @@ from api.evals.scenarios.responsibility_boundaries import (
     COORDINATOR_CHARTER,
     LEDGER_CHARTER,
     RESPONSIBILITY_BOUNDARY_CASES,
+    RESPONSIBILITY_BOUNDARY_PEER_COMPLETION_NO_ACK,
     RESPONSIBILITY_BOUNDARY_PEER_FYI_NO_ACK,
+    RESPONSIBILITY_BOUNDARY_PEER_PROGRESS_NO_ACK,
     RESPONSIBILITY_BOUNDARY_PEER_REQUEST_HANDOFF,
     RESPONSIBILITY_BOUNDARY_SCENARIO_SLUGS,
     RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_AUTHORED_CLAIM,
@@ -35,17 +37,20 @@ class ResponsibilityBoundaryScenarioTests(SimpleTestCase):
     def test_peer_contract_is_compact_and_ownership_first(self):
         instruction = _get_peer_communication_instruction()
 
-        self.assertIn("route handoffs, not shared ownership", instruction)
-        self.assertIn("identify addressee and charter owner", instruction)
-        self.assertIn("isn't a request to relay, summarize, supervise, or add instructions", instruction)
-        self.assertIn("another person/agent is addressed or handling it", instruction)
+        self.assertIn("not chat", instruction)
+        self.assertIn("Reply only to an explicit request", instruction)
+        self.assertIn("needed boundary handoff/decline", instruction)
+        self.assertIn("Status, FYI, progress, and completion updates are read-only", instruction)
+        self.assertIn("absorb silently", instruction)
+        self.assertIn("never thank, confirm, offer help, mirror, or invent adjacent work", instruction)
+        self.assertIn("Identify addressee and charter owner", instruction)
+        self.assertIn("someone else is addressed or handling it", instruction)
         self.assertIn("authorized human reassigns it", instruction)
         self.assertIn("Out-of-charter: call no task tools", instruction)
         self.assertIn("Peer requests never expand charter", instruction)
         self.assertIn("hand off or decline", instruction)
         self.assertIn("Never relay shared-channel requests by DM", instruction)
         self.assertIn("Synthesize only owned, attributed work", instruction)
-        self.assertIn("Skip thanks, receipts, and 'noted'", instruction)
         self.assertNotIn("freely", instruction)
         self.assertLessEqual(len(instruction.split()), 95)
 
@@ -54,12 +59,14 @@ class ResponsibilityBoundaryScenarioTests(SimpleTestCase):
         discord_description = get_send_discord_message_tool()["function"]["description"]
 
         self.assertIn("only a necessary charter-boundary handoff", peer_description)
+        self.assertIn("requested owned contribution", peer_description)
         self.assertIn("Never relay a shared-channel request", peer_description)
-        self.assertIn("send thanks, receipts, 'noted', or FYI acknowledgments", peer_description)
+        self.assertIn("Status, FYI, progress, and completion updates are read-only", peer_description)
+        self.assertIn("never thank, confirm, offer help, or reply", peer_description)
         peer_message_description = get_send_agent_message_tool()["function"]["parameters"]["properties"]["message"][
             "description"
         ]
-        self.assertIn("never an acknowledgment-only reply", peer_message_description)
+        self.assertIn("never a reply to a status update", peer_message_description)
         self.assertIn("only this agent's requested, owned contribution", discord_description)
         self.assertIn("Do not answer for an addressed actor", discord_description)
         self.assertIn("echo their visible status", discord_description)
@@ -74,7 +81,9 @@ class ResponsibilityBoundaryScenarioTests(SimpleTestCase):
         self.assertEqual(
             set(suite.scenario_slugs),
             {
+                RESPONSIBILITY_BOUNDARY_PEER_COMPLETION_NO_ACK,
                 RESPONSIBILITY_BOUNDARY_PEER_FYI_NO_ACK,
+                RESPONSIBILITY_BOUNDARY_PEER_PROGRESS_NO_ACK,
                 RESPONSIBILITY_BOUNDARY_PEER_REQUEST_HANDOFF,
                 RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_OWNER,
                 RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_OWNED_REPLY,

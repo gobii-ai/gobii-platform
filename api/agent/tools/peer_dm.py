@@ -79,10 +79,11 @@ def get_send_agent_message_tool() -> Dict[str, Any]:
         "function": {
             "name": "send_agent_message",
             "description": (
-                "Send only a necessary charter-boundary handoff or substantive peer-work update. Never relay a "
-                "shared-channel request to people already there, or send thanks, receipts, 'noted', or FYI acknowledgments. "
-                "For repeats, send with will_continue_work=true first and await its result; rapid same-peer "
-                "messages may be debounced."
+                "Send only a necessary charter-boundary handoff, a requested owned contribution, or substantive progress "
+                "on work the peer asked this agent to own. Status, FYI, progress, and completion updates are read-only: "
+                "never thank, confirm, offer help, or reply. Never relay a shared-channel request to people already there. "
+                "For repeats, send with will_continue_work=true first and await its result; rapid same-peer messages may be "
+                "debounced."
             ),
             "parameters": {
                 "type": "object",
@@ -94,7 +95,8 @@ def get_send_agent_message_tool() -> Dict[str, Any]:
                     "message": {
                         "type": "string",
                         "description": (
-                            "New information, question, or handoff the peer needs; never an acknowledgment-only reply. "
+                            "Requested owned information, a question, or a handoff the peer needs; never a reply to a "
+                            "status update. "
                             "Use Markdown only; raw HTML is rejected. Use code formatting to show HTML literally."
                         ),
                     },
