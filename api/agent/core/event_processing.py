@@ -39,6 +39,7 @@ from observability import mark_span_failed_with_exception
 from .budget import AgentBudgetManager, BudgetContext, get_current_context as get_budget_context, set_current_context as set_budget_context
 from .burn_control import BurnRateAction, handle_burn_rate_limit
 from .processing_flags import (
+    claim_pending_agent,
     clear_processing_lock_active,
     claim_pending_drain_slot,
     clear_processing_heartbeat,
@@ -56,7 +57,6 @@ from .processing_flags import (
     mark_human_inbound_generation_consumed,
     mark_processing_lock_active,
     processing_lock_storage_keys,
-    remove_pending_agent,
     set_processing_heartbeat,
 )
 from .llm_utils import EmptyLiteLLMResponseError, raise_if_empty_litellm_response, raise_if_invalid_litellm_response, run_completion
@@ -5671,7 +5671,8 @@ def process_agent_events(
     max_iterations_followup_delay_seconds: int | None = None,
     max_iterations_followup_queue: str | None = None,
     worker_pid: Optional[int] = None,
-) -> None:
+    processing_queue: str | None = None,
+) -> bool:
     """Process all outstanding events for a persistent agent."""
     normalized_agent_id = _normalize_persistent_agent_id(persistent_agent_id)
     if not normalized_agent_id:
@@ -5679,7 +5680,7 @@ def process_agent_events(
             "process_agent_events called with invalid agent id: %s",
             persistent_agent_id,
         )
-        return
+        return False
     persistent_agent_id = normalized_agent_id
 
     span = trace.get_current_span()
@@ -5701,7 +5702,7 @@ def process_agent_events(
         )
         span.add_event("Processing skipped - inbound generation already consumed")
         clear_processing_queued_flag(persistent_agent_id, client=redis_client)
-        return
+        return False
 
     if burn_follow_up_token:
         logger.info(
@@ -5715,7 +5716,7 @@ def process_agent_events(
         span=span,
         check_context="entry",
     ):
-        return
+        return False
 
     # Guard against reviving expired/closed cycles when a follow‑up arrives after TTL expiry
     if budget_id is not None:
@@ -5729,7 +5730,7 @@ def process_agent_events(
                 status or "expired",
                 active_id or "none",
             )
-            return
+            return False
 
     # ---------------- Budget context bootstrap ---------------- #
     # If this is a top-level trigger (no budget provided), start/reuse a cycle.
@@ -5811,6 +5812,7 @@ def process_agent_events(
     )
 
     lock_acquired = False
+    followup_queued = False
     processed_agent: Optional[PersistentAgent] = None
     heartbeat: Optional[_ProcessingHeartbeat] = None
 
@@ -5832,7 +5834,10 @@ def process_agent_events(
             if not lock_acquired:
                 enqueue_pending_agent(
                     persistent_agent_id,
+                    inbound_generation=inbound_generation,
+                    queue=processing_queue,
                     ttl=lock_settings.pending_set_ttl_seconds,
+                    client=redis_client,
                 )
 
                 logger.info(
@@ -5846,7 +5851,7 @@ def process_agent_events(
                     schedule_ttl_seconds=lock_settings.pending_drain_schedule_ttl_seconds,
                     span=span,
                 )
-                return
+                return False
 
         lock_acquired = True
         if is_processing_stop_requested(persistent_agent_id, client=redis_client):
@@ -5863,7 +5868,7 @@ def process_agent_events(
                 persistent_agent_id,
             )
             span.add_event("Processing skipped - stop requested after lock acquisition")
-            return
+            return False
         mark_processing_lock_active(persistent_agent_id, client=redis_client)
         clear_processing_queued_flag(persistent_agent_id)
         if lock_settings.heartbeat_ttl_seconds > 0:
@@ -5934,6 +5939,64 @@ def process_agent_events(
                 redis_client=redis_client,
             ):
                 clear_processing_lock_active(persistent_agent_id, client=redis_client)
+                if (
+                    not is_processing_stop_requested(persistent_agent_id, client=redis_client)
+                    and _get_processing_abort_reason(persistent_agent_id) is None
+                ):
+                    pending_work = claim_pending_agent(
+                        persistent_agent_id,
+                        client=redis_client,
+                    )
+                    if pending_work is not None:
+                        pending_generation_consumed = (
+                            pending_work.inbound_generation is not None
+                            and not pending_work.has_generic_work
+                            and is_human_inbound_generation_consumed(
+                                persistent_agent_id,
+                                pending_work.inbound_generation,
+                                client=redis_client,
+                            )
+                        )
+                        if pending_generation_consumed:
+                            logger.info(
+                                "Agent %s: discarded pending generation %s already consumed by the active turn.",
+                                persistent_agent_id,
+                                pending_work.inbound_generation,
+                            )
+                        else:
+                            try:
+                                from ..tasks.process_events import enqueue_claimed_pending_work
+
+                                enqueue_claimed_pending_work(pending_work)
+                                followup_queued = True
+                                logger.info(
+                                    "Agent %s: queued claimed pending follow-up after lock release "
+                                    "(generation=%s queue=%s generic=%s).",
+                                    persistent_agent_id,
+                                    pending_work.inbound_generation,
+                                    pending_work.queue,
+                                    pending_work.has_generic_work,
+                                )
+                                span.add_event("Pending follow-up queued after lock release")
+                            except (CeleryError, KombuOperationalError):
+                                logger.warning(
+                                    "Failed to queue claimed pending follow-up for agent %s; restoring pending work.",
+                                    persistent_agent_id,
+                                    exc_info=True,
+                                )
+                                enqueue_pending_agent(
+                                    pending_work.agent_id,
+                                    inbound_generation=pending_work.inbound_generation,
+                                    queue=pending_work.queue,
+                                    has_generic_work=pending_work.has_generic_work,
+                                    ttl=lock_settings.pending_set_ttl_seconds,
+                                    client=redis_client,
+                                )
+                                _schedule_pending_drain(
+                                    delay_seconds=lock_settings.pending_drain_delay_seconds,
+                                    schedule_ttl_seconds=lock_settings.pending_drain_schedule_ttl_seconds,
+                                    span=span,
+                                )
         if heartbeat:
             heartbeat.clear()
 
@@ -5951,6 +6014,8 @@ def process_agent_events(
                 _broadcast_processing(agent_obj)
         except Exception as e:
             logger.debug("Failed to broadcast processing state for agent %s: %s", persistent_agent_id, e)
+
+    return followup_queued
 
 
 def _maybe_enqueue_sandbox_warmup_for_recent_tool_history(agent: PersistentAgent, span) -> None:
@@ -6761,8 +6826,6 @@ def _run_agent_loop(
                         accepted_human_generation,
                         client=redis_client,
                     )
-                    if not _is_orchestrator_prompt_stale():
-                        remove_pending_agent(agent.id, client=redis_client)
 
                 def _finish_agent_loop(*, consume_human: bool = True) -> int:
                     if consume_human:

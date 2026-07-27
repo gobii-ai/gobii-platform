@@ -33,6 +33,10 @@ class _FakePipeline:
         self._ops.append(("hset", args, kwargs))
         return self
 
+    def hdel(self, *args, **kwargs):
+        self._ops.append(("hdel", args, kwargs))
+        return self
+
     def expire(self, *args, **kwargs):
         self._ops.append(("expire", args, kwargs))
         return self
@@ -210,6 +214,17 @@ class _FakeRedis:
     def hget(self, key: str, field: str) -> Optional[Any]:
         return self._hash.get(key, {}).get(field)
 
+    def hdel(self, key: str, *fields: str) -> int:
+        mapping = self._hash.get(key, {})
+        removed = 0
+        for field in fields:
+            if field in mapping:
+                del mapping[field]
+                removed += 1
+        if not mapping:
+            self._hash.pop(key, None)
+        return removed
+
     def hincrby(self, key: str, field: str, amount: int = 1) -> int:
         cur = self.hget(key, field)
         try:
@@ -221,6 +236,72 @@ class _FakeRedis:
         return n
 
     def eval(self, script: str, numkeys: int, *args):
+        normalized_script = " ".join(script.split()).lower()
+        if "gobii_pending_enqueue_v1" in normalized_script:
+            pending_key, generation_key, queue_key, generic_key = args[:numkeys]
+            (
+                agent_id,
+                generation_raw,
+                queue,
+                ttl_raw,
+                interactive_queue,
+                has_generic_work,
+            ) = args[numkeys:]
+            added = self.sadd(pending_key, agent_id)
+            generation = max(0, int(generation_raw or 0))
+            if generation > 0:
+                current_generation = self.hget(generation_key, agent_id)
+                current_generation = int(current_generation or 0)
+                generation_advanced = generation > current_generation
+                if generation > current_generation:
+                    self.hset(generation_key, agent_id, generation)
+            else:
+                generation_advanced = False
+            if generation == 0 or str(has_generic_work) == "1":
+                self.sadd(generic_key, agent_id)
+            current_queue = self.hget(queue_key, agent_id)
+            if queue and (
+                current_queue != interactive_queue
+                and (
+                    current_queue is None
+                    or generation_advanced
+                    or queue == interactive_queue
+                )
+            ):
+                self.hset(queue_key, agent_id, queue)
+            ttl = int(ttl_raw or 0)
+            if ttl > 0:
+                for key in (pending_key, generation_key, queue_key, generic_key):
+                    self.expire(key, ttl)
+            return added
+        if "gobii_pending_claim_v1" in normalized_script:
+            pending_key, generation_key, queue_key, generic_key = args[:numkeys]
+            agent_id = str(args[numkeys])
+            if not self.srem(pending_key, agent_id):
+                return []
+            generation = self.hget(generation_key, agent_id)
+            queue = self.hget(queue_key, agent_id)
+            generic = self.sismember(generic_key, agent_id)
+            self.hdel(generation_key, agent_id)
+            self.hdel(queue_key, agent_id)
+            self.srem(generic_key, agent_id)
+            return [agent_id, generation or "", queue or "", generic]
+        if "gobii_pending_claim_many_v1" in normalized_script:
+            pending_key, generation_key, queue_key, generic_key = args[:numkeys]
+            limit = max(0, int(args[numkeys] or 0))
+            agent_ids = self.spop(pending_key, count=limit) or []
+            claimed = []
+            for raw_agent_id in agent_ids:
+                agent_id = str(raw_agent_id)
+                generation = self.hget(generation_key, agent_id)
+                queue = self.hget(queue_key, agent_id)
+                generic = self.sismember(generic_key, agent_id)
+                self.hdel(generation_key, agent_id)
+                self.hdel(queue_key, agent_id)
+                self.srem(generic_key, agent_id)
+                claimed.extend([agent_id, generation or "", queue or "", generic])
+            return claimed
+
         # Implement the specific check-then-increment used by AgentBudgetManager
         # Args: KEYS[1] -> steps_key; ARGV[1] -> max_steps
         if numkeys != 1:

@@ -23,9 +23,79 @@ _QUEUED_AGENT_SET_KEY = "agent-event-processing:index:queued"
 _HEARTBEAT_AGENT_SET_KEY = "agent-event-processing:index:heartbeat"
 _LOCKED_AGENT_SET_KEY = "agent-event-processing:index:locked"
 _PENDING_SET_KEY = "agent-event-processing:pending"
+_PENDING_GENERATION_HASH_KEY = "agent-event-processing:pending:generation"
+_PENDING_QUEUE_HASH_KEY = "agent-event-processing:pending:queue"
+_PENDING_GENERIC_SET_KEY = "agent-event-processing:pending:generic"
 _PENDING_DRAIN_SCHEDULE_KEY = "agent-event-processing:pending:drain:schedule"
 _DEFAULT_PENDING_SET_TTL_SECONDS = 3600
 _DEFAULT_PENDING_DRAIN_SCHEDULE_TTL_SECONDS = 60
+_INTERACTIVE_PROCESSING_QUEUE = "agent_interactive"
+
+_ENQUEUE_PENDING_SCRIPT = """
+-- gobii_pending_enqueue_v1
+local added = redis.call('SADD', KEYS[1], ARGV[1])
+local generation = tonumber(ARGV[2]) or 0
+local generation_advanced = false
+if generation > 0 then
+    local current_generation = tonumber(redis.call('HGET', KEYS[2], ARGV[1]) or '0')
+    if generation > current_generation then
+        redis.call('HSET', KEYS[2], ARGV[1], generation)
+        generation_advanced = true
+    end
+end
+if generation == 0 or ARGV[6] == '1' then
+    redis.call('SADD', KEYS[4], ARGV[1])
+end
+local current_queue = redis.call('HGET', KEYS[3], ARGV[1])
+if ARGV[3] ~= '' and current_queue ~= ARGV[5] and (
+    not current_queue
+    or generation_advanced
+    or ARGV[3] == ARGV[5]
+) then
+    redis.call('HSET', KEYS[3], ARGV[1], ARGV[3])
+end
+local ttl = tonumber(ARGV[4]) or 0
+if ttl > 0 then
+    redis.call('EXPIRE', KEYS[1], ttl)
+    redis.call('EXPIRE', KEYS[2], ttl)
+    redis.call('EXPIRE', KEYS[3], ttl)
+    redis.call('EXPIRE', KEYS[4], ttl)
+end
+return added
+"""
+
+_CLAIM_PENDING_SCRIPT = """
+-- gobii_pending_claim_v1
+if redis.call('SREM', KEYS[1], ARGV[1]) == 0 then
+    return {}
+end
+local generation = redis.call('HGET', KEYS[2], ARGV[1]) or ''
+local queue = redis.call('HGET', KEYS[3], ARGV[1]) or ''
+local generic = redis.call('SISMEMBER', KEYS[4], ARGV[1])
+redis.call('HDEL', KEYS[2], ARGV[1])
+redis.call('HDEL', KEYS[3], ARGV[1])
+redis.call('SREM', KEYS[4], ARGV[1])
+return {ARGV[1], generation, queue, generic}
+"""
+
+_CLAIM_PENDING_MANY_SCRIPT = """
+-- gobii_pending_claim_many_v1
+local agent_ids = redis.call('SPOP', KEYS[1], tonumber(ARGV[1]))
+local result = {}
+for _, agent_id in ipairs(agent_ids) do
+    local generation = redis.call('HGET', KEYS[2], agent_id) or ''
+    local queue = redis.call('HGET', KEYS[3], agent_id) or ''
+    local generic = redis.call('SISMEMBER', KEYS[4], agent_id)
+    redis.call('HDEL', KEYS[2], agent_id)
+    redis.call('HDEL', KEYS[3], agent_id)
+    redis.call('SREM', KEYS[4], agent_id)
+    table.insert(result, agent_id)
+    table.insert(result, generation)
+    table.insert(result, queue)
+    table.insert(result, generic)
+end
+return result
+"""
 
 
 @dataclass(frozen=True)
@@ -34,6 +104,14 @@ class PendingDrainSettings:
     pending_drain_delay_seconds: int
     pending_drain_limit: int
     pending_drain_schedule_ttl_seconds: int
+
+
+@dataclass(frozen=True)
+class PendingAgentWork:
+    agent_id: str
+    inbound_generation: int | None = None
+    queue: str | None = None
+    has_generic_work: bool = False
 
 
 def _queued_key(agent_id: Union[str, UUID]) -> str:
@@ -265,6 +343,9 @@ def clear_processing_work_state(agent_id: Union[str, UUID], client=None) -> None
             pipe.delete(_queued_key(agent_id))
             pipe.srem(_QUEUED_AGENT_SET_KEY, str(agent_id))
             pipe.srem(_PENDING_SET_KEY, str(agent_id))
+            pipe.hdel(_PENDING_GENERATION_HASH_KEY, str(agent_id))
+            pipe.hdel(_PENDING_QUEUE_HASH_KEY, str(agent_id))
+            pipe.srem(_PENDING_GENERIC_SET_KEY, str(agent_id))
             pipe.srem(_LOCKED_AGENT_SET_KEY, str(agent_id))
             pipe.srem(_HEARTBEAT_AGENT_SET_KEY, str(agent_id))
             pipe.execute()
@@ -277,6 +358,9 @@ def clear_processing_work_state(agent_id: Union[str, UUID], client=None) -> None
 
     try:
         redis_client.srem(_PENDING_SET_KEY, str(agent_id))
+        redis_client.hdel(_PENDING_GENERATION_HASH_KEY, str(agent_id))
+        redis_client.hdel(_PENDING_QUEUE_HASH_KEY, str(agent_id))
+        redis_client.srem(_PENDING_GENERIC_SET_KEY, str(agent_id))
         redis_client.srem(_LOCKED_AGENT_SET_KEY, str(agent_id))
         redis_client.srem(_HEARTBEAT_AGENT_SET_KEY, str(agent_id))
     except Exception:
@@ -470,16 +554,30 @@ def get_pending_drain_settings(settings_obj=None) -> PendingDrainSettings:
 def enqueue_pending_agent(
     agent_id: Union[str, UUID],
     *,
+    inbound_generation: int | str | None = None,
+    queue: str | None = None,
+    has_generic_work: bool = False,
     ttl: int = _DEFAULT_PENDING_SET_TTL_SECONDS,
     client=None,
 ) -> bool:
-    """Add an agent to the pending processing set. Returns True if newly added."""
+    """Coalesce pending work for an agent. Returns True if newly added."""
     try:
         redis_client = client or get_redis_client()
-        added = redis_client.sadd(_PENDING_SET_KEY, str(agent_id))
-        if ttl > 0:
-            redis_client.expire(_PENDING_SET_KEY, ttl)
-        return bool(added)
+        result = redis_client.eval(
+            _ENQUEUE_PENDING_SCRIPT,
+            4,
+            _PENDING_SET_KEY,
+            _PENDING_GENERATION_HASH_KEY,
+            _PENDING_QUEUE_HASH_KEY,
+            _PENDING_GENERIC_SET_KEY,
+            str(agent_id),
+            _coerce_generation(inbound_generation),
+            str(queue or ""),
+            max(0, int(ttl)),
+            _INTERACTIVE_PROCESSING_QUEUE,
+            "1" if has_generic_work else "0",
+        )
+        return bool(result)
     except Exception:
         logger.exception("Failed to enqueue pending processing for agent %s", agent_id)
         return False
@@ -495,13 +593,80 @@ def is_agent_pending(agent_id: Union[str, UUID], client=None) -> bool:
         return False
 
 
-def remove_pending_agent(agent_id: Union[str, UUID], client=None) -> None:
-    """Remove an agent from the pending processing set."""
+def _pending_work_from_script_result(result: Any) -> PendingAgentWork | None:
+    if not result or len(result) < 4:
+        return None
+    agent_id, generation, queue, generic = result[:4]
+    if isinstance(agent_id, (bytes, bytearray)):
+        agent_id = agent_id.decode("utf-8", "ignore")
+    if isinstance(queue, (bytes, bytearray)):
+        queue = queue.decode("utf-8", "ignore")
+    parsed_generation = _coerce_generation(generation)
+    return PendingAgentWork(
+        agent_id=str(agent_id),
+        inbound_generation=parsed_generation or None,
+        queue=str(queue) or None,
+        has_generic_work=bool(int(generic or 0)),
+    )
+
+
+def claim_pending_agent(
+    agent_id: Union[str, UUID],
+    *,
+    client=None,
+) -> PendingAgentWork | None:
+    """Atomically claim one agent's coalesced pending work."""
     try:
         redis_client = client or get_redis_client()
-        redis_client.srem(_PENDING_SET_KEY, str(agent_id))
+        result = redis_client.eval(
+            _CLAIM_PENDING_SCRIPT,
+            4,
+            _PENDING_SET_KEY,
+            _PENDING_GENERATION_HASH_KEY,
+            _PENDING_QUEUE_HASH_KEY,
+            _PENDING_GENERIC_SET_KEY,
+            str(agent_id),
+        )
+        return _pending_work_from_script_result(result)
     except Exception:
-        logger.exception("Failed to remove pending processing for agent %s", agent_id)
+        logger.exception("Failed to claim pending processing for agent %s", agent_id)
+        return None
+
+
+def remove_pending_agent(agent_id: Union[str, UUID], client=None) -> None:
+    """Remove and discard one agent's pending work."""
+    claim_pending_agent(agent_id, client=client)
+
+
+def claim_pending_agents(
+    *,
+    limit: int,
+    client=None,
+) -> list[PendingAgentWork]:
+    """Atomically claim up to ``limit`` coalesced pending records."""
+    if limit <= 0:
+        return []
+    try:
+        redis_client = client or get_redis_client()
+        result = redis_client.eval(
+            _CLAIM_PENDING_MANY_SCRIPT,
+            4,
+            _PENDING_SET_KEY,
+            _PENDING_GENERATION_HASH_KEY,
+            _PENDING_QUEUE_HASH_KEY,
+            _PENDING_GENERIC_SET_KEY,
+            limit,
+        )
+    except Exception:
+        logger.exception("Failed to claim pending agents")
+        return []
+
+    claimed: list[PendingAgentWork] = []
+    for index in range(0, len(result or []), 4):
+        pending_work = _pending_work_from_script_result(result[index:index + 4])
+        if pending_work is not None:
+            claimed.append(pending_work)
+    return claimed
 
 
 def pop_pending_agents(
@@ -510,28 +675,10 @@ def pop_pending_agents(
     client=None,
 ) -> list[str]:
     """Pop up to limit agent IDs from the pending processing set."""
-    if limit <= 0:
-        return []
-    try:
-        redis_client = client or get_redis_client()
-        result = redis_client.spop(_PENDING_SET_KEY, count=limit)
-    except Exception:
-        logger.exception("Failed to pop pending agents")
-        return []
-
-    if not result:
-        return []
-    if isinstance(result, list):
-        items = result
-    else:
-        items = [result]
-    normalized: list[str] = []
-    for item in items:
-        if isinstance(item, (bytes, bytearray)):
-            normalized.append(item.decode("utf-8", "ignore"))
-        else:
-            normalized.append(str(item))
-    return normalized
+    return [
+        pending_work.agent_id
+        for pending_work in claim_pending_agents(limit=limit, client=client)
+    ]
 
 
 def count_pending_agents(client=None) -> int:

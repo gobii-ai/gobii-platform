@@ -1,14 +1,22 @@
-"""Ensure queued follow-up work keeps the budget cycle open on sleep."""
+"""Ensure queued follow-up work survives active processing."""
+from unittest.mock import MagicMock, patch
+
 from django.contrib.auth import get_user_model
 from django.test import TestCase, tag
 
+from api.agent.core import event_processing as ep
 from api.agent.core.budget import AgentBudgetManager, BudgetContext
 from api.agent.core.event_processing import _attempt_cycle_close_for_sleep
 from api.agent.core.processing_flags import (
+    bump_human_inbound_generation,
+    claim_pending_agent,
     enqueue_pending_agent,
+    mark_human_inbound_generation_consumed,
     pending_set_key,
+    remove_pending_agent,
     set_processing_queued_flag,
 )
+from api.agent.tasks.process_events import AGENT_INTERACTIVE_PROCESSING_QUEUE
 from api.models import BrowserUseAgent, PersistentAgent
 from config.redis_client import get_redis_client
 
@@ -39,6 +47,7 @@ class PendingFollowUpClosureTests(TestCase):
 
     def setUp(self) -> None:
         self.redis = get_redis_client()
+        remove_pending_agent(self.agent.id, client=self.redis)
         self.redis.delete(pending_set_key())
 
     def _build_budget_context(self) -> BudgetContext:
@@ -80,3 +89,80 @@ class PendingFollowUpClosureTests(TestCase):
             AgentBudgetManager.get_cycle_status(agent_id=str(self.agent.id)),
             "active",
         )
+
+    @patch("api.agent.tasks.process_events.enqueue_claimed_pending_work")
+    @patch("api.agent.core.event_processing._process_agent_events_locked")
+    @patch("api.agent.core.event_processing.Redlock")
+    def test_lock_release_queues_one_generation_aware_followup(
+        self,
+        mock_redlock,
+        mock_process_locked,
+        mock_enqueue_followup,
+    ) -> None:
+        accepted_generation = bump_human_inbound_generation(self.agent.id, client=self.redis)
+        lock = MagicMock()
+        lock.acquire.return_value = True
+        lock.release.return_value = True
+        mock_redlock.return_value = lock
+
+        def _record_pending(*_args, **_kwargs):
+            newer_generation = bump_human_inbound_generation(self.agent.id, client=self.redis)
+            enqueue_pending_agent(
+                self.agent.id,
+                inbound_generation=newer_generation,
+                queue=AGENT_INTERACTIVE_PROCESSING_QUEUE,
+                client=self.redis,
+            )
+            return self.agent
+
+        mock_process_locked.side_effect = _record_pending
+
+        followup_queued = ep.process_agent_events(
+            self.agent.id,
+            inbound_generation=accepted_generation,
+            processing_queue=AGENT_INTERACTIVE_PROCESSING_QUEUE,
+        )
+
+        self.assertTrue(followup_queued)
+        mock_enqueue_followup.assert_called_once()
+        pending_work = mock_enqueue_followup.call_args.args[0]
+        self.assertEqual(pending_work.inbound_generation, accepted_generation + 1)
+        self.assertEqual(pending_work.queue, AGENT_INTERACTIVE_PROCESSING_QUEUE)
+        self.assertIsNone(claim_pending_agent(self.agent.id, client=self.redis))
+
+    @patch("api.agent.tasks.process_events.enqueue_claimed_pending_work")
+    @patch("api.agent.core.event_processing._process_agent_events_locked")
+    @patch("api.agent.core.event_processing.Redlock")
+    def test_lock_release_discards_generation_consumed_by_active_turn(
+        self,
+        mock_redlock,
+        mock_process_locked,
+        mock_enqueue_followup,
+    ) -> None:
+        generation = bump_human_inbound_generation(self.agent.id, client=self.redis)
+        lock = MagicMock()
+        lock.acquire.return_value = True
+        lock.release.return_value = True
+        mock_redlock.return_value = lock
+
+        def _consume_and_record_pending(*_args, **_kwargs):
+            enqueue_pending_agent(
+                self.agent.id,
+                inbound_generation=generation,
+                queue=AGENT_INTERACTIVE_PROCESSING_QUEUE,
+                client=self.redis,
+            )
+            mark_human_inbound_generation_consumed(
+                self.agent.id,
+                generation,
+                client=self.redis,
+            )
+            return self.agent
+
+        mock_process_locked.side_effect = _consume_and_record_pending
+
+        followup_queued = ep.process_agent_events(self.agent.id)
+
+        self.assertFalse(followup_queued)
+        mock_enqueue_followup.assert_not_called()
+        self.assertIsNone(claim_pending_agent(self.agent.id, client=self.redis))
