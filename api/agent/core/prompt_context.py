@@ -97,7 +97,15 @@ from ..tools.attachment_guidance import SYSTEM_ATTACHMENT_PREFLIGHT_GUIDANCE
 from ..tools.plan import format_current_plan_for_prompt
 from ..tools.spawn_web_task import get_browser_daily_task_limit
 from ..tools.static_tools import get_static_tool_definitions
-from ..tools.sqlite_state import AGENT_CONFIG_TABLE, AGENT_SKILLS_TABLE, CONTACTS_TABLE, FILES_TABLE, get_sqlite_digest_prompt, get_sqlite_schema_prompt
+from ..tools.sqlite_state import (
+    AGENT_CONFIG_TABLE,
+    AGENT_SKILLS_TABLE,
+    CONTACTS_TABLE,
+    FILES_TABLE,
+    get_sqlite_digest_prompt,
+    get_sqlite_model_table_columns,
+    get_sqlite_schema_prompt,
+)
 from ..tools.sqlite_query_quality import (
     named_model_read_tables,
     source_derived_model_mutation_tables,
@@ -1720,6 +1728,7 @@ def _render_prompt_context_once(
         )
 
     sqlite_schema_block = get_sqlite_schema_prompt()
+    named_model_columns = get_sqlite_model_table_columns()
     named_model_tables = {
         match.group(1)
         for match in re.finditer(r"^Table ([^\s(]+)", sqlite_schema_block, re.MULTILINE)
@@ -1735,6 +1744,7 @@ def _render_prompt_context_once(
         is_first_run=is_first_run,
         run_cache=run_cache,
         named_model_tables=named_model_tables,
+        named_model_columns=named_model_columns,
     )
 
     variable_group = prompt.group("variable", weight=4)
@@ -4505,6 +4515,7 @@ def _get_unified_history_prompt(
     is_first_run: bool = False,
     run_cache: PromptRunCache | None = None,
     named_model_tables: Set[str] | None = None,
+    named_model_columns: Mapping[str, Set[str]] | None = None,
 ) -> Tuple[Set[str], bool, Tuple[str, ...]]:
     """Add summaries + interleaved recent steps & messages to the provided promptree group."""
     epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
@@ -4815,6 +4826,7 @@ def _get_unified_history_prompt(
         ),
         paired_url_step_ids=paired_url_step_ids,
         named_model_tables=named_model_tables,
+        named_model_columns=named_model_columns,
     )
 
     for s in steps:

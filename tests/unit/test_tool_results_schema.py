@@ -1143,6 +1143,9 @@ class PreviewByteLimitTests(SimpleTestCase):
             "step-enrichment",
             payload,
             named_model_tables={"contacts"},
+            named_model_columns={
+                "contacts": {"provider_id", "full_name", "verified_email"},
+            },
         )
 
         for expected in (
@@ -1172,6 +1175,7 @@ class PreviewByteLimitTests(SimpleTestCase):
             "step-enrichment-link",
             payload,
             named_model_tables={"contacts"},
+            named_model_columns={"contacts": {"provider_id", "profile_url"}},
             paired_url_rewriter=lambda text, _record: text.replace(
                 "https://example.test/people/contact-101",
                 "https://example.test/people/contact-101 [link_ref: $[link:CONTACT]]",
@@ -1182,6 +1186,26 @@ class PreviewByteLimitTests(SimpleTestCase):
         self.assertIn("https://example.test/people/contact-101", info.preview_text)
         self.assertNotIn("link_ref", info.preview_text)
         self.assertNotIn("VERIFIED LINK PRESENTATION", info.preview_text)
+
+    def test_generic_source_does_not_refresh_an_unrelated_model(self):
+        payload = {
+            "status": "ok",
+            "content": {
+                "prospects": [{
+                    "provider_id": "contact-101",
+                    "full_name": "Ari Bell",
+                }],
+            },
+        }
+        info, _record = self._prepare_http_result(
+            "step-unrelated-model",
+            payload,
+            named_model_tables={"accounts"},
+            named_model_columns={"accounts": {"account_id", "company_name"}},
+        )
+
+        self.assertIn("No fitting durable model", info.meta)
+        self.assertNotIn("Existing durable tables: accounts", info.meta)
 
     def test_source_write_hint_uses_the_actual_array_identity(self):
         payload = {

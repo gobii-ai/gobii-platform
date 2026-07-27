@@ -3,7 +3,7 @@ import logging
 import re
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Callable, Dict, List, Optional, Sequence, Set, Tuple
+from typing import Callable, Dict, List, Mapping, Optional, Sequence, Set, Tuple
 
 from ..tools.context_hints import URL_FIELD_PRIORITY, extract_context_hint, hint_from_unstructured_text
 from ..tools.sqlite_guardrails import clear_guarded_connection, open_guarded_sqlite_connection
@@ -235,11 +235,13 @@ def _build_optional_source_write_hint(
             )
         else:
             stable_key_guidance = (
-                f"Use the shown stable key `{first_key}`. " if first_key else ""
+                f" Use the shown stable key `{first_key}`; do not invent identity."
+                if first_key
+                else ""
             )
             model_guidance = (
-                f"No fitting durable model: {stable_key_guidance}create one with {key_expr} "
-                "as PRIMARY KEY/UNIQUE, then upsert. "
+                f"No fitting durable model: create one with {key_expr} "
+                f"as PRIMARY KEY/UNIQUE, then upsert.{stable_key_guidance} "
             )
         return (
             f"[SOURCE SET; exact stored arrays: {schema_text}. "
@@ -302,6 +304,7 @@ def prepare_tool_results_for_prompt(
     paired_url_rewriter: Optional[Callable[[str, ToolCallResultRecord], str]] = None,
     paired_url_step_ids: Optional[Set[str]] = None,
     named_model_tables: Optional[Set[str]] = None,
+    named_model_columns: Optional[Mapping[str, Set[str]]] = None,
 ) -> Dict[str, ToolResultPromptInfo]:
     prompt_info: Dict[str, ToolResultPromptInfo] = {}
     rows: List[Tuple] = []
@@ -311,6 +314,11 @@ def prepare_tool_results_for_prompt(
         fresh_step_ids.add(fresh_tool_call_step_id)
     paired_step_ids = set(paired_url_step_ids or ())
     model_tables = {table.casefold() for table in (named_model_tables or ())}
+    model_columns = {
+        table.casefold(): {column.casefold() for column in columns}
+        for table, columns in (named_model_columns or {}).items()
+        if table.casefold() in model_tables
+    }
     emitted_source_write_hints: set[str] = set()
     emitted_source_import_sets: set[tuple[str, str]] = set()
     emitted_prose_guidance: set[tuple[str, tuple[str, ...]]] = set()
@@ -447,6 +455,7 @@ def prepare_tool_results_for_prompt(
             and is_current_source_batch
         )
         source_import_prefix, source_write_hint_prefix = "", ""
+        refresh_model_tables: set[str] = set()
         requires_source_import = False
         hide_literal_result_id = keep_source_import_hint and bool(_optional_source_array_schemas(analysis))
         if keep_source_import_hint:
@@ -490,12 +499,21 @@ def prepare_tool_results_for_prompt(
                     )
                     emitted_source_import_sets.add(source_import_key)
         if not requires_source_import and hide_literal_result_id:
+            source_schemas = _optional_source_array_schemas(analysis)
+            source_key = source_schemas[0][2] if source_schemas else None
+            if source_key:
+                refresh_model_tables = {
+                    table for table, columns in model_columns.items()
+                    if source_key.casefold() in columns
+                }
             source_write_hint_prefix = _build_optional_source_write_hint(
                 record.tool_name,
                 analysis,
-                tuple(model_tables),
+                tuple(refresh_model_tables),
             )
-        preserve_raw_model_source_values = bool(source_write_hint_prefix and model_tables)
+        preserve_raw_model_source_values = bool(
+            source_write_hint_prefix and refresh_model_tables
+        )
         if source_write_hint_prefix in emitted_source_write_hints:
             source_write_hint_prefix = ""
         elif source_write_hint_prefix:
