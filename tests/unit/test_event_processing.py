@@ -3896,6 +3896,8 @@ class PromptContextBuilderTests(TestCase):
             "cached_tokens": 0,
         }
         continuation_notices = []
+        discarded_stream = MagicMock()
+        accepted_stream = MagicMock()
 
         def _build_prompt(*_args, **kwargs):
             continuation_notices.append(kwargs.get("continuation_notice"))
@@ -3913,6 +3915,12 @@ class PromptContextBuilderTests(TestCase):
         ) as mock_completion, patch(
             "api.agent.core.event_processing.protect_current_sqlite_state",
             side_effect=[False, True, False, False],
+        ), patch(
+            "api.agent.core.event_processing.resolve_web_stream_target",
+            return_value=object(),
+        ), patch(
+            "api.agent.core.event_processing.WebStreamBroadcaster",
+            side_effect=[discarded_stream, accepted_stream],
         ):
             from api.agent.core import event_processing as ep
 
@@ -3920,6 +3928,11 @@ class PromptContextBuilderTests(TestCase):
                 usage = _run_agent_loop(self.agent, is_first_run=False)
 
         self.assertEqual(mock_completion.call_count, 2)
+        self.assertTrue(mock_completion.call_args.kwargs["defer_stream_finish"])
+        discarded_stream.cancel.assert_called_once()
+        discarded_stream.finish.assert_not_called()
+        accepted_stream.finish.assert_called_once()
+        accepted_stream.cancel.assert_not_called()
         self.assertEqual(continuation_notices[0], None)
         self.assertIn("restored to the latest validated checkpoint", continuation_notices[1])
         self.assertEqual(usage["total_tokens"], 15)

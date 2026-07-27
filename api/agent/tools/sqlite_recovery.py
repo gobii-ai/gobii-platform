@@ -38,15 +38,31 @@ class SQLiteStateUnrecoverableError(SQLiteStateError):
     pass
 
 
+class SQLiteStatePersistenceError(SQLiteStateError):
+    pass
+
+
 @dataclass
 class SQLiteStateSession:
     agent_uuid: str
     db_path: str
     checkpoint_path: str
     recovery_count: int = 0
+    checkpoint_signature: Optional[tuple] = None
 
     def initialize(self) -> None:
         initialize_sqlite_file(self.db_path)
+
+    def _db_signature(self) -> tuple:
+        signature = []
+        for suffix in ("", "-wal", "-journal"):
+            path = f"{self.db_path}{suffix}"
+            with contextlib.suppress(FileNotFoundError):
+                stat = os.stat(path)
+                signature.append(
+                    (path, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
+                )
+        return tuple(signature)
 
     @contextlib.contextmanager
     def _observe(self, *, operation: str, phase: str):
@@ -55,7 +71,8 @@ class SQLiteStateSession:
         with tracer.start_as_current_span(f"{operation.title()} Agent SQLite State") as span:
             try:
                 yield
-            except (OSError, sqlite3.Error, SQLiteStateError) as exc:
+            except Exception as exc:
+                # Instrument unexpected failures without changing their propagation.
                 error = exc
                 span.record_exception(exc)
                 raise
@@ -100,6 +117,11 @@ class SQLiteStateSession:
 
     def checkpoint(self, *, phase: str) -> None:
         with self._observe(operation="checkpoint", phase=phase):
+            if (
+                os.path.exists(self.checkpoint_path)
+                and self._db_signature() == self.checkpoint_signature
+            ):
+                return
             validate_sqlite_file(self.db_path)
             try:
                 create_validated_sqlite_snapshot(self.db_path, self.checkpoint_path)
@@ -112,6 +134,7 @@ class SQLiteStateSession:
                     f"Failed to create a validated SQLite checkpoint during {phase}; "
                     "the current database remains valid."
                 ) from exc
+            self.checkpoint_signature = self._db_signature()
 
     def recover(self, *, phase: str, cause: BaseException) -> None:
         with self._observe(operation="recover", phase=phase):
@@ -139,6 +162,7 @@ class SQLiteStateSession:
                 except FileNotFoundError:
                     pass
             self.recovery_count += 1
+            self.checkpoint_signature = self._db_signature()
 
     def protect(self, *, phase: str, checkpoint: bool = False) -> bool:
         try:

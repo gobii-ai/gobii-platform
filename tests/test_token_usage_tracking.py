@@ -275,6 +275,41 @@ class TokenUsageTrackingTest(TestCase):
         self.assertEqual(completion.time_to_first_token_ms, 250)
         self.assertEqual(completion.request_duration_ms, 1000)
 
+    @patch("api.agent.core.event_processing.run_completion")
+    def test_stream_completion_can_defer_done_until_response_is_accepted(
+        self,
+        mock_run_completion,
+    ):
+        mock_run_completion.return_value = iter(
+            [
+                SimpleNamespace(
+                    id="stream_resp_123",
+                    choices=[
+                        SimpleNamespace(
+                            delta=SimpleNamespace(content="Hello"),
+                            finish_reason="stop",
+                        )
+                    ],
+                    usage=None,
+                )
+            ]
+        )
+        broadcaster = MagicMock()
+
+        _stream_completion_with_broadcast(
+            model="test-model",
+            messages=[{"role": "user", "content": "Hi"}],
+            params={},
+            tools=None,
+            provider="test-provider",
+            stream_broadcaster=broadcaster,
+            defer_stream_finish=True,
+        )
+
+        broadcaster.start.assert_called_once()
+        broadcaster.push_delta.assert_called_once_with(None, "Hello")
+        broadcaster.finish.assert_not_called()
+
     @patch(
         "api.services.billing_snapshot.get_billing_snapshot_for_owner",
         return_value={"billing_plan": "startup", "billing_is_trial": True},

@@ -34,6 +34,7 @@ from .sqlite_recovery import (
     SQLITE_STATE_RECOVERED_ERROR,
     SQLITE_STATE_UNRECOVERABLE_ERROR,
     SQLiteStateError,
+    SQLiteStatePersistenceError,
     SQLiteStateSession,
     SQLiteStateUnrecoverableError,
     SQLiteStateValidationError,
@@ -1212,8 +1213,11 @@ def _persist_validated_sqlite_state(
             # Opening the canonical key for writing lets overwrite-capable backends replace it
             # without a delete window. GCS publishes the new generation only after upload.
             _upload_sqlite_archive(storage_key, archive_path)
-        except (OSError, RuntimeError, sqlite3.Error, SQLiteStateValidationError, zstd.ZstdError) as exc:
-            persist_span.set_attribute("sqlite.validation.ok", False)
+            persist_span.set_attribute("sqlite.persistence.ok", True)
+        except (OSError, RuntimeError, sqlite3.Error, SQLiteStateError, zstd.ZstdError) as exc:
+            persist_span.set_attribute("sqlite.persistence.ok", False)
+            if not isinstance(exc, SQLiteStatePersistenceError):
+                persist_span.set_attribute("sqlite.validation.ok", False)
             persist_span.record_exception(exc)
             if isinstance(exc, SQLiteStateError):
                 raise
@@ -1253,7 +1257,7 @@ def _upload_sqlite_archive(storage_key: str, archive_path: str) -> None:
     except Exception as exc:  # noqa: BLE001 - storage backends expose provider-specific errors.
         if isinstance(exc, SQLiteStateError):
             raise
-        raise SQLiteStateValidationError(f"SQLite archive upload failed: {exc}") from exc
+        raise SQLiteStatePersistenceError(f"SQLite archive upload failed: {exc}") from exc
 
 
 def _log_sqlite_persistence_error(
@@ -1284,7 +1288,7 @@ def _log_sqlite_persistence_error(
         agent,
         category=PersistentAgentError.Category.TOOL_PERSISTENCE,
         source="api.agent.tools.sqlite_state._persist_validated_sqlite_state",
-        message=f"SQLite persistence validation failed for agent {agent_uuid}",
+        message=f"SQLite persistence failed for agent {agent_uuid}",
         exc=exc,
         logger=logger,
         context={
@@ -1293,9 +1297,13 @@ def _log_sqlite_persistence_error(
                 SQLITE_STATE_UNRECOVERABLE_ERROR
                 if isinstance(exc, SQLiteStateUnrecoverableError)
                 else (
-                    SQLITE_STATE_RECOVERED_ERROR
-                    if recovered
-                    else "sqlite_persistence_failed"
+                    "sqlite_persistence_upload_failed"
+                    if isinstance(exc, SQLiteStatePersistenceError)
+                    else (
+                        SQLITE_STATE_RECOVERED_ERROR
+                        if recovered
+                        else "sqlite_persistence_failed"
+                    )
                 )
             ),
             "recovered": recovered,

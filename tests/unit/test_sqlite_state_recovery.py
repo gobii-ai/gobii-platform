@@ -15,6 +15,7 @@ from api.agent.tools.sqlite_batch import execute_sqlite_batch
 from api.agent.tools.sqlite_recovery import (
     SQLITE_STATE_RECOVERED_ERROR,
     SQLITE_STATE_UNRECOVERABLE_ERROR,
+    SQLiteStatePersistenceError,
     SQLiteStateSession,
     SQLiteStateUnrecoverableError,
     SQLiteStateValidationError,
@@ -173,6 +174,29 @@ class SQLiteRecoveryFileTests(SimpleTestCase):
         self.assertEqual(values, ["first", "second"])
         self.assertEqual(session.recovery_count, 0)
 
+    def test_checkpoint_skips_unchanged_database_but_detects_wal_changes(self):
+        _create_test_database(self.db_path)
+        session = SQLiteStateSession(
+            agent_uuid="agent-id",
+            db_path=self.db_path,
+            checkpoint_path=self.checkpoint_path,
+        )
+        session.checkpoint(phase="initial")
+
+        with patch(
+            "api.agent.tools.sqlite_recovery.create_validated_sqlite_snapshot"
+        ) as create_snapshot:
+            session.checkpoint(phase="before_llm")
+        create_snapshot.assert_not_called()
+
+        with open(f"{self.db_path}-wal", "wb") as wal_file:
+            wal_file.write(b"changed")
+        with patch(
+            "api.agent.tools.sqlite_recovery.create_validated_sqlite_snapshot"
+        ) as create_snapshot:
+            session.checkpoint(phase="after_write")
+        create_snapshot.assert_called_once()
+
     def test_empty_live_database_is_restored_instead_of_reinitialized(self):
         _create_test_database(self.db_path, ("safe",))
         session = SQLiteStateSession(
@@ -290,6 +314,33 @@ class SQLitePersistenceSafetyTests(SimpleTestCase):
                         _overwrite_header_with_tls_record(db_path)
 
         self.assertEqual(self._stored_bytes(), original_bytes)
+
+    def test_upload_failure_is_distinct_and_preserves_canonical_archive(self):
+        with patch("api.agent.tools.sqlite_state.default_storage", self.storage):
+            with _agent_sqlite_db_uncoordinated(self.agent_uuid) as db_path:
+                _create_test_database(db_path, ("known-good",))
+            original_bytes = self._stored_bytes()
+
+            with patch(
+                "api.agent.tools.sqlite_state._upload_sqlite_archive",
+                side_effect=SQLiteStatePersistenceError("storage unavailable"),
+            ), patch(
+                "api.agent.tools.sqlite_state._log_sqlite_persistence_error"
+            ) as log_error:
+                with self.assertRaises(SQLiteStatePersistenceError):
+                    with _agent_sqlite_db_uncoordinated(self.agent_uuid) as db_path:
+                        conn = sqlite3.connect(db_path)
+                        try:
+                            conn.execute(
+                                "INSERT INTO durable_state (value) VALUES ('not-persisted');"
+                            )
+                            conn.commit()
+                        finally:
+                            conn.close()
+
+        self.assertEqual(self._stored_bytes(), original_bytes)
+        log_error.assert_called_once()
+        self.assertFalse(log_error.call_args.kwargs["recovered"])
 
 
 @tag("batch_sqlite")

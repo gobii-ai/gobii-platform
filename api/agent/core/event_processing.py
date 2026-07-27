@@ -4463,6 +4463,7 @@ def _stream_completion_with_broadcast(
     stream_broadcaster: Optional[WebStreamBroadcaster],
     stream_content: bool = True,
     stale_prompt_checker: Callable[[], bool] | None = None,
+    defer_stream_finish: bool = False,
 ) -> Any:
     if stream_broadcaster:
         stream_broadcaster.start()
@@ -4517,7 +4518,8 @@ def _stream_completion_with_broadcast(
             trailing = content_filter.flush() if content_filter and stream_content else None
             if trailing:
                 stream_broadcaster.push_delta(None, trailing)
-            stream_broadcaster.finish()
+            if not defer_stream_finish:
+                stream_broadcaster.finish()
 
     response = accumulator.build_response(model=model, provider=provider)
     response.request_duration_ms = int(round((time.monotonic() - start_time) * 1000))
@@ -4599,6 +4601,7 @@ def _completion_with_failover(
     stream_broadcaster: Optional[WebStreamBroadcaster] = None,
     allow_streamed_content: bool = True,
     stale_prompt_checker: Callable[[], bool] | None = None,
+    defer_stream_finish: bool = False,
 ) -> Tuple[dict, Optional[dict]]:
     """
     Execute LLM completion with a pre-determined, tiered failover configuration.
@@ -4612,6 +4615,7 @@ def _completion_with_failover(
         preferred_config: Optional tuple of (provider, model) to try first
         stream_broadcaster: Optional broadcaster for streaming deltas to web UI
         allow_streamed_content: Whether assistant message text is allowed to stream to the UI
+        defer_stream_finish: Leave the stream open until the caller accepts the response
         
     Returns:
         Tuple of (LiteLLM completion response or streaming aggregate, token usage dict)
@@ -4708,6 +4712,7 @@ def _completion_with_failover(
                             stream_broadcaster=active_stream_broadcaster,
                             stream_content=stream_content,
                             stale_prompt_checker=stale_prompt_checker,
+                            defer_stream_finish=defer_stream_finish,
                         )
                     except OrchestratorPromptStale:
                         raise
@@ -7103,15 +7108,20 @@ def _run_agent_loop(
                         stream_broadcaster=None if direct_correction_pending or feedback_reply_pending or source_reconciliation_directive else stream_broadcaster,
                         allow_streamed_content=prompt_allows_implied_send and not source_reconciliation_directive,
                         stale_prompt_checker=_is_orchestrator_prompt_stale,
+                        defer_stream_finish=True,
                     )
                     recovered = protect_current_sqlite_state(phase="after_llm_completion")
                     if _record_sqlite_recovery(recovered, iter_span, heartbeat, "after_llm"):
+                        if stream_broadcaster:
+                            stream_broadcaster.cancel()
                         continuation_notice = SQLITE_RECOVERY_NOTICE
                         continue
                     if _is_orchestrator_prompt_stale():
                         raise OrchestratorPromptStale(
                             "Prompt became stale immediately after completion returned."
                         )
+                    if stream_broadcaster:
+                        stream_broadcaster.finish()
                     empty_response_loop_retries = 0
                     if heartbeat:
                         heartbeat.touch("llm_response")
@@ -7134,6 +7144,8 @@ def _run_agent_loop(
                         )
 
                 except OrchestratorPromptStale:
+                    if stream_broadcaster:
+                        stream_broadcaster.cancel()
                     latest_human_generation = _current_human_inbound_generation()
                     if latest_human_generation > routing_scope_generation:
                         _refresh_inbound_routing_scope(latest_human_generation)
@@ -7158,6 +7170,8 @@ def _run_agent_loop(
                     )
                     continue
                 except SQLiteStateUnrecoverableError as exc:
+                    if stream_broadcaster:
+                        stream_broadcaster.cancel()
                     log_agent_error(
                         agent,
                         category=PersistentAgentError.Category.TOOL_PERSISTENCE,
