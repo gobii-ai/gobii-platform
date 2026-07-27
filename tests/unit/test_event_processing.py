@@ -6119,6 +6119,11 @@ class OrchestratorHumanInputInterruptTests(TestCase):
         )
 
         def _build_prompt_and_interrupt(*_args, **_kwargs):
+            inject_internal_web_message(
+                agent_id=self.agent.id,
+                body="A real follow-up arrived while the prompt was building.",
+                trigger_processing=False,
+            )
             bump_human_inbound_generation(self.agent.id)
             return self._prompt_context()
 
@@ -6164,6 +6169,11 @@ class OrchestratorHumanInputInterruptTests(TestCase):
         )
 
         def _build_prompt_and_interrupt(*_args, **_kwargs):
+            inject_internal_web_message(
+                agent_id=self.agent.id,
+                body="A real follow-up arrived while the prompt was building.",
+                trigger_processing=False,
+            )
             bump_human_inbound_generation(self.agent.id)
             return self._prompt_context()
 
@@ -6208,6 +6218,11 @@ class OrchestratorHumanInputInterruptTests(TestCase):
         def _build_prompt_and_interrupt_once(*_args, **kwargs):
             directive_blocks.append(kwargs.get("system_directive_block") or "")
             if len(directive_blocks) == 1:
+                inject_internal_web_message(
+                    agent_id=self.agent.id,
+                    body="A real follow-up arrived while the prompt was building.",
+                    trigger_processing=False,
+                )
                 bump_human_inbound_generation(self.agent.id)
                 return (
                     [{"role": "system", "content": "stale sys"}],

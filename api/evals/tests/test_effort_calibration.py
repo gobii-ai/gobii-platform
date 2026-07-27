@@ -2418,7 +2418,7 @@ class FirstRunPromptCalibrationTests(TestCase):
         self.assertIn("Replace conflicts/softened absolutes", system_prompt)
         self.assertIn("append only if no related clause", system_prompt)
         self.assertIn("finite task/batch/day/run/project/renewal/deal/case feedback is temporary", system_prompt)
-        self.assertIn("Set false after delivery/config and no active work", system_prompt)
+        self.assertIn("Set false after delivery/config; future schedules, queued conversations", system_prompt)
         self.assertIn(
             "Explicit or clearly implied ongoing work, reminders, and future triggers may be scheduled",
             system_prompt,

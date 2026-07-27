@@ -587,7 +587,7 @@ class PromptContextContactsGuidanceTests(TestCase):
             content,
         )
         self.assertIn("Recurring work is highest priority", content)
-        self.assertIn("Emotions are autonomous, not only owner-requested", content)
+        self.assertIn("Emotions are autonomous", content)
         self.assertNotIn("Without a schedule, you die", content)
 
     def test_runtime_schedule_note_keeps_temporary_scope_from_changing_cadence(self):

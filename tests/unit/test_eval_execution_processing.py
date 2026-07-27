@@ -58,17 +58,18 @@ class EvalExecutionProcessingTests(TestCase):
             eval_run_id="00000000-0000-0000-0000-000000000123",
             mock_config={"http_request": {"status": "ok"}},
         )
+        message = PersistentAgentMessage.objects.get(owner_agent=self.agent)
 
         mock_apply.assert_called_once_with(
             args=(str(self.agent.id),),
             kwargs={
                 "eval_run_id": "00000000-0000-0000-0000-000000000123",
                 "mock_config": {"http_request": {"status": "ok"}},
+                "inbound_message_id": str(message.id),
             },
             throw=True,
         )
         mock_delay.assert_not_called()
-        message = PersistentAgentMessage.objects.get(owner_agent=self.agent)
         self.assertEqual(
             message.from_endpoint.address,
             build_web_user_address(self.user.id, self.agent.id),
@@ -95,6 +96,7 @@ class EvalExecutionProcessingTests(TestCase):
             str(self.agent.id),
             eval_run_id=None,
             mock_config=None,
+            inbound_message_id=str(PersistentAgentMessage.objects.get(owner_agent=self.agent).id),
         )
 
     @patch("api.agent.tasks.process_agent_events_task.delay")
