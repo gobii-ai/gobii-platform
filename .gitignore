@@ -21,6 +21,9 @@ TEST-*.xml
 .coverage.*
 coverage.xml
 
+# Local production-data exports
+reports/
+
 # Editors/OS
 .DS_Store
 .idea/

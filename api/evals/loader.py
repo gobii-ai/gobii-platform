@@ -13,6 +13,10 @@ from api.evals.scenarios.daily_credit_prompt import DAILY_CREDIT_PROMPT_SCENARIO
 from api.evals.scenarios.sqlite_tool_results import SQLITE_TOOL_RESULT_SCENARIO_SLUGS, SQLITE_TOOL_RESULT_SUITE_SLUG
 from api.evals.scenarios.message_quality import MESSAGE_QUALITY_SCENARIO_SLUGS, MESSAGE_QUALITY_SUITE_SLUG
 from api.evals.scenarios.google_sheets_native import GOOGLE_SHEETS_NATIVE_SCENARIO_SLUGS, GOOGLE_SHEETS_NATIVE_SUITE_SLUG
+from api.evals.scenarios.google_analytics_credential_retention import (
+    GOOGLE_ANALYTICS_CREDENTIAL_RETENTION_SCENARIO_SLUGS,
+    GOOGLE_ANALYTICS_CREDENTIAL_RETENTION_SUITE_SLUG,
+)
 from api.evals.scenarios.apollo_native import APOLLO_NATIVE_SCENARIO_SLUGS, APOLLO_NATIVE_SUITE_SLUG
 from api.evals.scenarios.recruitment_sourcing import RECRUITMENT_SOURCING_SCENARIO_SLUGS, RECRUITMENT_SOURCING_SUITE_SLUG
 from api.evals.scenarios.hubspot_native import HUBSPOT_NATIVE_SCENARIO_SLUGS, HUBSPOT_NATIVE_SUITE_SLUG
@@ -163,6 +167,13 @@ register_builtin_suites(
             slug=GOOGLE_SHEETS_NATIVE_SUITE_SLUG,
             description="Native Google Sheets system-skill evals over mocked Drive and Sheets REST APIs.",
             scenario_slugs=GOOGLE_SHEETS_NATIVE_SCENARIO_SLUGS,
+        ),
+        EvalSuite(
+            slug=GOOGLE_ANALYTICS_CREDENTIAL_RETENTION_SUITE_SLUG,
+            description=(
+                "Google Analytics direct-service-account charter persistence and history-loss regressions."
+            ),
+            scenario_slugs=GOOGLE_ANALYTICS_CREDENTIAL_RETENTION_SCENARIO_SLUGS,
         ),
         EvalSuite(
             slug=APOLLO_NATIVE_SUITE_SLUG,

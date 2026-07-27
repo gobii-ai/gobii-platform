@@ -142,6 +142,29 @@ _GENERIC_SPREADSHEET_SCHEMA = {
     "additionalProperties": True,
 }
 
+_GOOGLE_ANALYTICS_REPORT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "property": {"type": "string"},
+        "startDate": {"type": "string"},
+        "endDate": {"type": "string"},
+        "metrics": {
+            "type": "array",
+            "items": {"type": "string"},
+        },
+        "dimensions": {
+            "type": "array",
+            "items": {"type": "string"},
+        },
+        "dimensionFilter": {
+            "type": "object",
+            "additionalProperties": True,
+        },
+    },
+    "required": ["property", "startDate", "endDate", "metrics"],
+    "additionalProperties": True,
+}
+
 _GOOGLE_SHEETS_TOOL_DESCRIPTIONS = {
     "google_sheets-get-values-in-range": "Read values from a Google Sheets range.",
     "google_sheets-find-row": "Find rows in Google Sheets matching criteria; use for requests like find the row where a column equals a value.",
@@ -288,6 +311,13 @@ EVAL_SYNTHETIC_TOOL_DEFINITIONS: Dict[str, Dict[str, Any]] = {
             "that guidance only makes sense when a schedule exists or is being set."
         ),
         "parameters": _GENERIC_BATCH_WORK_SCHEMA,
+    },
+    "google_analytics-run-report-in-ga4": {
+        "description": (
+            "Run a GA4 report through the connected Pipedream Google Analytics OAuth account. "
+            "If that account is not authorized, this tool returns a connection link."
+        ),
+        "parameters": _GOOGLE_ANALYTICS_REPORT_SCHEMA,
     },
     "custom_eval_incident_workflow": {
         "description": (

@@ -36,6 +36,13 @@ from .github_credential_retention import (
     CharterJudgePreservesCliGithubSecretWorkflowScenario,
     CharterRecordsCliGithubSecretsCorrectionScenario,
 )
+from .google_analytics_credential_retention import (
+    GOOGLE_ANALYTICS_CREDENTIAL_RETENTION_SCENARIO_SLUGS,
+    GOOGLE_ANALYTICS_CREDENTIAL_RETENTION_SUITE_SLUG,
+    GoogleAnalyticsDirectCorrectionPersistsCharterScenario,
+    GoogleAnalyticsDirectRouteSurvivesHistoryLossScenario,
+    GoogleAnalyticsDirectSetupPersistsCharterScenario,
+)
 from .lasting_feedback import (
     LASTING_FEEDBACK_SCENARIO_SLUGS,
     LASTING_FEEDBACK_SUITE_SLUG,
