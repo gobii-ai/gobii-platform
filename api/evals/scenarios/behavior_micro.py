@@ -89,6 +89,9 @@ CHARTER_INTERPRETS_ROLE_BOUNDARY_CORRECTION = "charter_interprets_role_boundary_
 CHARTER_INFERS_IMPLICIT_OWNERSHIP_CORRECTION = "charter_infers_implicit_ownership_correction"
 CHARTER_RECORDS_CLI_GITHUB_SECRETS_CORRECTION = "charter_records_cli_github_secrets_correction"
 CHARTER_JUDGE_PRESERVES_CLI_GITHUB_SECRET_WORKFLOW = "charter_judge_preserves_cli_github_secret_workflow"
+CHARTER_HILDA_SCOPE_PATCHES_FIRST_TRY = "charter_hilda_scope_patches_first_try"
+CHARTER_UNICODE_ROUTING_PATCHES_FIRST_TRY = "charter_unicode_routing_patches_first_try"
+CHARTER_CRLF_SECTION_PATCHES_FIRST_TRY = "charter_crlf_section_patches_first_try"
 
 TOOL_CHOICE_EXACT_JSON_URL_USES_HTTP_REQUEST = "tool_choice_exact_json_url_uses_http_request"
 TOOL_CHOICE_CSV_DELIVERABLE_USES_CREATE_CSV = "tool_choice_csv_deliverable_uses_create_csv"
@@ -412,6 +415,9 @@ CHARTER_MEMORY_MICRO_SCENARIO_SLUGS = [
     CHARTER_INFERS_IMPLICIT_OWNERSHIP_CORRECTION,
     CHARTER_RECORDS_CLI_GITHUB_SECRETS_CORRECTION,
     CHARTER_JUDGE_PRESERVES_CLI_GITHUB_SECRET_WORKFLOW,
+    CHARTER_HILDA_SCOPE_PATCHES_FIRST_TRY,
+    CHARTER_UNICODE_ROUTING_PATCHES_FIRST_TRY,
+    CHARTER_CRLF_SECTION_PATCHES_FIRST_TRY,
 ]
 
 TOOL_CHOICE_MICRO_SCENARIO_SLUGS = [
@@ -2826,6 +2832,197 @@ class CharterMemoryScenario(BehaviorMicroScenario):
             observed_summary=observed_summary,
             artifacts={"step": mutation_calls[0].step} if mutation_calls else {},
         )
+
+
+class CharterPatchFirstTryScenario(CharterMemoryScenario):
+    tags = ("agent_behavior", "micro", "charter", "memory", "real_harness", "regression")
+    tasks = [
+        ScenarioTask(name="inject_charter_update_goal", assertion_type="manual"),
+        ScenarioTask(name="verify_first_try_charter_patch", assertion_type="manual"),
+    ]
+    required_charter_fragments = ()
+
+    def _eval_stop_policy(self):
+        return {
+            "ignore_sqlite_agent_config_mutations": False,
+            "stop_when_all_seen": [
+                {
+                    "tool_name": "sqlite_batch",
+                    "agent_config_field": "charter",
+                    "after_execution": True,
+                }
+            ],
+            "max_relevant_tool_calls": 6,
+        }
+
+    @staticmethod
+    def _failed_sqlite_call(call):
+        try:
+            result = json.loads(call.result or "{}")
+        except (TypeError, ValueError):
+            result = {}
+        if "cancelled before execution by the evaluation stop policy" in str(result.get("message", "")):
+            return False
+        return str(call.status).lower() == "error" or result.get("status") == "error"
+
+    @staticmethod
+    def _is_charter_patch_attempt(call):
+        sql = str(resolved_tool_param(call, "sql") or "").casefold()
+        return sqlite_batch_mutates_agent_config_field(call, "charter") or (
+            "patch_text" in sql and ("charter" in sql or "__agent_config" in sql)
+        )
+
+    def run(self, run_id, agent_id):
+        self._seed_charter_agent(agent_id)
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.RUNNING,
+            task_name="inject_charter_update_goal",
+        )
+        with self.wait_for_agent_idle(agent_id, timeout=120):
+            inbound = self.inject_message(
+                agent_id,
+                self.directive,
+                trigger_processing=True,
+                eval_run_id=run_id,
+                eval_stop_policy=self._eval_stop_policy(),
+            )
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED,
+            task_name="inject_charter_update_goal",
+            observed_summary="The Charter update goal was processed by the real agent harness.",
+            artifacts={"message": inbound},
+        )
+
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.RUNNING,
+            task_name="verify_first_try_charter_patch",
+        )
+        calls = get_tool_calls_for_run(
+            run_id,
+            after=inbound.timestamp,
+            tool_names={"sqlite_batch"},
+        )
+        patch_attempts = [call for call in calls if self._is_charter_patch_attempt(call)]
+        failed_calls = [call for call in patch_attempts if self._failed_sqlite_call(call)]
+        mutation_calls = [
+            call for call in calls
+            if sqlite_batch_mutates_agent_config_field(call, "charter")
+            and str(call.status).lower() == "complete"
+        ]
+        agent = PersistentAgent.objects.get(id=agent_id)
+        normalized_charter = agent.charter.casefold()
+        rule_saved = all(
+            fragment.casefold() in normalized_charter
+            for fragment in self.required_charter_fragments
+        )
+        canonical_patch = (
+            len(mutation_calls) == 1
+            and "patch_text" in str(resolved_tool_param(mutation_calls[0], "sql") or "").casefold()
+            and str(mutation_calls[0].status).lower() == "complete"
+        )
+        passed = not failed_calls and canonical_patch and rule_saved
+        detail = (
+            f"sqlite_calls={len(calls)}, patch_attempts={len(patch_attempts)}, "
+            f"failed_patch_attempts={len(failed_calls)}, "
+            f"charter_mutations={len(mutation_calls)}, canonical_patch={canonical_patch}, "
+            f"rule_saved={rule_saved}"
+        )
+        if failed_calls:
+            detail += f", first_failure={failed_calls[0].result}"
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED if passed else EvalRunTask.Status.FAILED,
+            task_name="verify_first_try_charter_patch",
+            observed_summary=(
+                "The Charter update was persisted with one successful patch and no failed SQLite calls."
+                if passed
+                else f"Charter patch was not clean on the first try: {detail}"
+            ),
+            artifacts={"step": (failed_calls or mutation_calls or calls)[0].step}
+            if failed_calls or mutation_calls or calls
+            else {},
+        )
+
+
+@register_scenario
+class CharterHildaScopePatchesFirstTryScenario(CharterPatchFirstTryScenario):
+    slug = CHARTER_HILDA_SCOPE_PATCHES_FIRST_TRY
+    description = "Updating Hilda's CRLF Charter scope should preserve typographic punctuation in the target."
+    existing_charter = """I am Hilda Turing, Gobii’s outcome authority for enterprise sales.
+
+## Human CRM boundary — effective July 25, 2026
+
+My primary responsibility is Gobii’s actual human CRM: owned accounts and contacts, existing relationships, explicit do-not-contact records, qualified opportunities, and human or enterprise handoffs.
+
+Keep routine cold-prospect discovery, outbound dedupe, reservations, experiments, and send events in Keith’s outbound ledger.
+
+## Reporting
+
+Send material boundary exceptions and qualified handoffs to the responsible owner.""".replace("\n", "\r\n")
+    directive = (
+        "Revise the existing 'My primary responsibility is Gobii's actual human CRM' sentence in the "
+        "Human CRM boundary of your Charter so it explicitly includes renewals and expansion "
+        "opportunities, while routine cold-prospect discovery remains in Keith's outbound ledger."
+    )
+    required_charter_fragments = (
+        "renewals",
+        "expansion opportunities",
+    )
+
+
+@register_scenario
+class CharterUnicodeRoutingPatchesFirstTryScenario(CharterPatchFirstTryScenario):
+    slug = CHARTER_UNICODE_ROUTING_PATCHES_FIRST_TRY
+    description = "Updating a Charter clause with typographic punctuation should use an exact target."
+    existing_charter = """I triage agent-behavior bug reports and route specialized investigations.
+
+**Natalya routing for agent-behavior bugs (Jul 25):** When receiving screenshots or bug reports, capture all detail including agent name/ID, timestamps, and contextual hints useful for debugging.
+- Do not offer to perform Natalya’s assigned investigations or duplicate her tools. Route Natalya-domain questions to her rather than attempting them yourself. This includes logs, screenshots, agent IDs, timestamps, or bug-specific evidence — always defer those requests to Natalya, not to human reporters.
+
+Keep the handoff concise and preserve the reporter’s original evidence.""".replace("\n", "\r\n")
+    directive = (
+        "Revise the existing 'Do not offer to perform Natalya's assigned investigations' routing bullet "
+        "in your Charter so her agent-forensics domain explicitly includes trajectory analysis and "
+        "regression investigations, always handled by pinging Natalya directly via peer DM."
+    )
+    required_charter_fragments = (
+        "trajectory analysis",
+        "regression investigations",
+        "peer dm",
+    )
+
+
+@register_scenario
+class CharterCrlfSectionPatchesFirstTryScenario(CharterPatchFirstTryScenario):
+    slug = CHARTER_CRLF_SECTION_PATCHES_FIRST_TRY
+    description = "Updating a CRLF Charter section should preserve the exact replacement target."
+    existing_charter = """I source senior candidates for active recruiting clients.
+
+**Current Pipeline (as of July 26—PROJECT DORMANT):**
+- Per the client all-hands: the search is dormant while management aligns on next steps.
+- Hold all sourcing and outreach until further notice.
+- 66 NYC senior leaders sourced &amp; enriched (54 with emails).
+- Top 12 contact permission requests submitted — pending approval.
+- Stage 1 outreach blocked until contacts are approved.
+- Old 20-candidate shortlist already received Stages 1-3.
+
+Preserve the pipeline and monitor for an explicit reactivation.""".replace("\n", "\r\n")
+    directive = (
+        "The client reactivated this project. Update your Charter's Current Pipeline section to remove "
+        "the stale dormant and blocked lines, record that 12 contacts were approved and sent Stage 1, "
+        "and note that 42 remaining candidates are ready when directed."
+    )
+    required_charter_fragments = (
+        "12 contacts were approved",
+        "42 remaining candidates",
+    )
 
 
 @register_scenario
