@@ -13,6 +13,7 @@ from api.evals.registry import ScenarioRegistry
 from api.evals.scenarios.behavior_micro import (
     BEHAVIOR_MICRO_SCENARIO_SLUGS,
     CHARTER_MEMORY_MICRO_SCENARIO_SLUGS,
+    CHARTER_PATCHES_EXPLICIT_AMENDMENT_UNDER_PRESSURE,
     CHARTER_PATCHES_AND_COMPLETES_IMMEDIATE_TASK,
     CHARTER_REFINES_EXISTING_GUIDANCE_FROM_NATURAL_FEEDBACK,
     COMMON_USE_CASE_EVAL_CASES,
@@ -47,6 +48,10 @@ class BehaviorMicroScenarioTests(SimpleTestCase):
         )
         self.assertIn(
             CHARTER_PATCHES_AND_COMPLETES_IMMEDIATE_TASK,
+            CHARTER_MEMORY_MICRO_SCENARIO_SLUGS,
+        )
+        self.assertIn(
+            CHARTER_PATCHES_EXPLICIT_AMENDMENT_UNDER_PRESSURE,
             CHARTER_MEMORY_MICRO_SCENARIO_SLUGS,
         )
 

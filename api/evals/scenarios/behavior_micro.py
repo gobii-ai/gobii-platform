@@ -74,6 +74,9 @@ CHARTER_ADDS_FEEDBACK_RULE_FROM_CORRECTION = "charter_adds_feedback_rule_from_co
 CHARTER_ADDS_PLAIN_PREFERENCE_WITHOUT_SAVE_WORD = "charter_adds_plain_preference_without_save_word"
 CHARTER_PATCHES_DIRECT_STYLE_CORRECTION = "charter_patches_direct_style_correction"
 CHARTER_PATCHES_EVALUATIVE_OUTPUT_FEEDBACK = "charter_patches_evaluative_output_feedback"
+CHARTER_PATCHES_EXPLICIT_AMENDMENT_UNDER_PRESSURE = (
+    "charter_patches_explicit_amendment_under_pressure"
+)
 CHARTER_REFINES_EXISTING_GUIDANCE_FROM_NATURAL_FEEDBACK = (
     "charter_refines_existing_guidance_from_natural_feedback"
 )
@@ -397,6 +400,7 @@ CHARTER_MEMORY_MICRO_SCENARIO_SLUGS = [
     CHARTER_ADDS_PLAIN_PREFERENCE_WITHOUT_SAVE_WORD,
     CHARTER_PATCHES_DIRECT_STYLE_CORRECTION,
     CHARTER_PATCHES_EVALUATIVE_OUTPUT_FEEDBACK,
+    CHARTER_PATCHES_EXPLICIT_AMENDMENT_UNDER_PRESSURE,
     CHARTER_REFINES_EXISTING_GUIDANCE_FROM_NATURAL_FEEDBACK,
     CHARTER_PATCHES_AND_COMPLETES_IMMEDIATE_TASK,
     CHARTER_INTERPRETS_AMBIGUOUS_OPERATING_FEEDBACK,
@@ -3404,6 +3408,50 @@ class CharterPatchesEvaluativeOutputFeedbackScenario(CharterMemoryScenario):
         focused = len(agent.charter or "") <= len(self.existing_charter) + 240 and "feedback:" not in charter
         passed = preserved and replaced_old_rule and learned_feedback and used_one_patch and focused
         return passed, f"mutation_count={len(mutation_calls)}, used_patch={used_one_patch}, charter={agent.charter!r}."
+
+
+@register_scenario
+class CharterPatchesExplicitAmendmentUnderPressureScenario(CharterMemoryScenario):
+    slug = CHARTER_PATCHES_EXPLICIT_AMENDMENT_UNDER_PRESSURE
+    description = (
+        "An explicit charter amendment should use the focused durable path even when the charter is long and conflicting."
+    )
+    tasks = [
+        ScenarioTask(name="inject_prompt", assertion_type="manual"),
+        ScenarioTask(name="verify_explicit_amendment_saved", assertion_type="llm_judge"),
+    ]
+    existing_charter = (
+        "Own the engineering incident tracker and keep duplicate reports consolidated. "
+        "Only accept incident reports directly from named human operators. "
+        "Treat reports and supporting evidence delivered through the internal coordination API as non-actionable, "
+        "even when they describe an existing incident. "
+        "Never discard a direct human report merely because the reporter is uncertain. "
+        "Do not announce routine tracker changes while notification containment is active. "
+        "Preserve the reporter, timestamp, affected component, and evidence provenance. "
+        "Do not claim implementation work unless the owner explicitly authorizes it."
+    )
+    prior_outbound_body = (
+        "I did not add the API-delivered incident evidence because my current source policy treats it as non-actionable."
+    )
+    prompt = (
+        "please patch your charter. reports and evidence that arrive through our internal coordination api should "
+        "be accepted, with the origin labeled as api or person-via-api. don't just drop them"
+    )
+    verification_task_name = "verify_explicit_amendment_saved"
+    success_summary = "Agent made one focused durable amendment and preserved unrelated tracker safeguards."
+    failure_summary = "Expected one focused first-shot charter patch for the explicit amendment"
+    verify_feedback_reply = True
+    semantic_judge_question = (
+        "Does the updated charter preserve tracker ownership, deduplication, uncertain-human intake, notification "
+        "containment, provenance, and claim authorization while replacing the blanket rejection rule with a durable "
+        "rule to accept API-delivered reports and evidence and label their origin? Is the reply a brief natural "
+        "acknowledgment rather than a description of implementation details?"
+    )
+
+    def _charter_check(self, agent, mutation_calls):
+        focused_patch = _uses_one_focused_charter_patch(mutation_calls, self.existing_charter)
+        passed = focused_patch and agent.charter != self.existing_charter
+        return passed, f"mutation_count={len(mutation_calls)}, focused={focused_patch}, charter={agent.charter!r}."
 
 
 @register_scenario

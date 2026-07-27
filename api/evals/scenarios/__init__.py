@@ -24,6 +24,7 @@ from .behavior_micro import (
     CharterExpandsSparseCharterWithDetailScenario,
     CharterIgnoresOneOffPreferenceScenario,
     CharterNarrowsScopePreservingUnrelatedGuidanceScenario,
+    CharterPatchesExplicitAmendmentUnderPressureScenario,
     CharterPatchesAndCompletesImmediateTaskScenario,
     CharterRefinesExistingGuidanceFromNaturalFeedbackScenario,
     ToolChoiceExactJsonUrlUsesHttpRequestScenario,

@@ -581,6 +581,38 @@ class ImpliedSendTests(TestCase):
 
         self.assertIsNotNone(ep._direct_correction_context(self.agent))
 
+    def test_explicit_charter_amendment_requires_focused_patch(self):
+        feedback = "Please patch your charter. Accept API-delivered incident evidence and label its origin."
+        self._add_feedback_followup(feedback)
+
+        self.assertIsNotNone(ep._direct_correction_context(self.agent))
+        self.assertEqual(ep._analyze_feedback_turn(feedback).lasting, (
+            "Please patch your charter.",
+            "Accept API-delivered incident evidence and label its origin.",
+        ))
+
+    def test_explicit_charter_amendment_variants_carry_following_guidance(self):
+        for feedback in (
+            "Edit your instructions. Preserve known URLs in reports.",
+            "Revise your charter. Keep corrections separate from active work.",
+            "Amend the charter. Label evidence with its actual source.",
+        ):
+            with self.subTest(feedback=feedback):
+                analysis = ep._analyze_feedback_turn(feedback)
+                self.assertTrue(analysis.behavior)
+                self.assertEqual(len(analysis.lasting), 2)
+
+    def test_explicit_charter_amendment_does_not_absorb_followup_task(self):
+        feedback = "Please amend your instructions. Keep known source links. Then find three prospects."
+
+        analysis = ep._analyze_feedback_turn(feedback)
+
+        self.assertEqual(analysis.lasting, (
+            "Please amend your instructions.",
+            "Keep known source links.",
+        ))
+        self.assertTrue(analysis.separate_task)
+
     def test_quoted_feedback_across_a_newline_requires_a_patch(self):
         prior = "Curious what you think the biggest gap is right now."
         self._add_feedback_followup(f'"{prior}"\nthis is not so good.', prior_body=prior)
