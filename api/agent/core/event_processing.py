@@ -329,6 +329,11 @@ OPERATIONAL_CAPABILITY_CORRECTION_RE = re.compile(
     r"[^.!?]{0,120}\b(?:credentials?|secrets?|integrations?|permissions?|environment variables?|env vars?)\b",
     re.IGNORECASE,
 )
+EXPLICIT_CHARTER_CHANGE_RE = re.compile(
+    r"\b(?:update|change|patch|edit|revise|adjust|amend|rewrite)\s+(?:(?:your|the)\s+)?"
+    r"(?:charter|instructions)\b",
+    re.IGNORECASE,
+)
 STRONG_DURABLE_CONFIG_INTENT_RE = re.compile(
     r"\b(?:going forward|from now on|in the future|next time|always|never(?!\s+mind\b)|remember|"
     r"(?:my |this )?feedback:|each time|every time|make (?:that|this|it) a rule|should(?:n'?t| not) have to|"
@@ -2709,14 +2714,22 @@ def _user_text_has_durable_config_intent(text: str) -> bool:
     normalized = " ".join((text or "").split())
     if TRANSIENT_CONFIG_SCOPE_RE.search(normalized) and not STRONG_DURABLE_CONFIG_INTENT_RE.search(normalized):
         return False
-    return bool(STRONG_DURABLE_CONFIG_INTENT_RE.search(normalized) or PREFERENCE_CONFIG_INTENT_RE.search(normalized))
+    return bool(
+        EXPLICIT_CHARTER_CHANGE_RE.search(normalized)
+        or STRONG_DURABLE_CONFIG_INTENT_RE.search(normalized)
+        or PREFERENCE_CONFIG_INTENT_RE.search(normalized)
+    )
 
 
 def _matches_behavior_feedback(text: str, prior_outbound_text: str = "") -> bool:
     quote = QUOTED_OUTPUT_FEEDBACK_RE.search(text or "")
     if prior_outbound_text and quote and " ".join(quote.group("quote").casefold().split()) in " ".join(prior_outbound_text.casefold().split()):
         return True
-    direct = DIRECT_USER_CORRECTION_RE.search(text) or OPERATIONAL_CAPABILITY_CORRECTION_RE.search(text)
+    direct = (
+        DIRECT_USER_CORRECTION_RE.search(text)
+        or OPERATIONAL_CAPABILITY_CORRECTION_RE.search(text)
+        or EXPLICIT_CHARTER_CHANGE_RE.search(text)
+    )
     tone = TONE_CORRECTION_RE.search(text)
     evaluative = EVALUATIVE_BEHAVIOR_FEEDBACK_RE.search(text)
     preference = PREFERENCE_CONFIG_INTENT_RE.search(text) and BEHAVIOR_OUTPUT_NOUN_RE.search(text)
@@ -2745,11 +2758,19 @@ def _analyze_feedback_turn(text: str, prior_outbound_text: str = "") -> _Feedbac
     no_save_marker = NO_DURABLE_CONFIG_RE.search(normalized)
     transient_marker = TRANSIENT_CONFIG_SCOPE_RE.search(normalized)
     lasting: list[str] = []
-    temporary_scope = durable_scope_active = saw_feedback = direct_reply_task = separate_task = False
+    temporary_scope = durable_scope_active = explicit_charter_scope_active = False
+    saw_feedback = direct_reply_task = separate_task = False
     feedback_only = True
     for clause in clauses:
+        explicit_charter_change = EXPLICIT_CHARTER_CHANGE_RE.search(clause)
         direct_reply = DIRECT_FEEDBACK_REPLY_TASK_RE.search(clause)
-        separate_matches = tuple(SEPARATE_FEEDBACK_TASK_RE.finditer(clause))
+        if direct_reply and explicit_charter_change and direct_reply.start() < explicit_charter_change.end():
+            direct_reply = None
+        separate_matches = tuple(
+            match
+            for match in SEPARATE_FEEDBACK_TASK_RE.finditer(clause)
+            if not (explicit_charter_change and match.start() < explicit_charter_change.end())
+        )
         if separate_matches and EXPLICIT_DURABLE_SCOPE_RE.fullmatch(
             clause[:separate_matches[0].start()].strip(" ,:;")
         ):
@@ -2759,10 +2780,17 @@ def _analyze_feedback_turn(text: str, prior_outbound_text: str = "") -> _Feedbac
         task = direct_reply or separate
         candidate = clause[:task.start()].rstrip(" ,;") if task else clause
         candidate_behavior = _matches_behavior_feedback(candidate, prior_outbound_text)
-        continuation = bool(durable_scope_active and re.match(
-            r"\s*(?:and\s+)?(?:routine\b|only\b|just\b|never\b|always\b|remember\b|keep\b|do not\b|don['’]?t\b|no\b|the\b|these\b|those\b|my\b|your\b|i\b|when\b|if\b|for\b)",
-            candidate, re.IGNORECASE,
-        ))
+        continuation = bool(
+            explicit_charter_scope_active
+            or (
+                durable_scope_active
+                and re.match(
+                    r"\s*(?:and\s+)?(?:routine\b|only\b|just\b|never\b|always\b|remember\b|keep\b|do not\b|don['’]?t\b|no\b|the\b|these\b|those\b|my\b|your\b|i\b|when\b|if\b|for\b)",
+                    candidate,
+                    re.IGNORECASE,
+                )
+            )
+        )
         direct_reply_task = direct_reply_task or bool(direct_reply)
         separate_task = separate_task or distinct_task
         if direct_reply:
@@ -2774,6 +2802,9 @@ def _analyze_feedback_turn(text: str, prior_outbound_text: str = "") -> _Feedbac
         elif candidate_behavior:
             saw_feedback = True
             durable_scope_active = durable_scope_active or bool(EXPLICIT_DURABLE_SCOPE_RE.search(clause))
+            explicit_charter_scope_active = (
+                explicit_charter_scope_active or bool(EXPLICIT_CHARTER_CHANGE_RE.search(clause))
+            )
         elif NO_DURABLE_CONFIG_RE.search(clause) or TRANSIENT_CONFIG_SCOPE_RE.search(clause):
             saw_feedback = True
         elif DURABLE_SCOPE_SWITCH_RE.search(clause):
