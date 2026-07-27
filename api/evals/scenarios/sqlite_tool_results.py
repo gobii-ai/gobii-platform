@@ -2854,7 +2854,8 @@ class SqliteEnrichmentRefreshUnderPressureScenario(SqliteDomainModelScenario):
     ]
     prompt = (
         "I need the launch contact roster now. Refresh our existing contacts from all three completed regional "
-        "exports, then tell me which contacts still lack a verified email and give me the missing count by owner. "
+        "exports, then tell me which contacts still lack a verified email, give me the missing count by owner, and "
+        "link each missing contact's known profile. "
         "Keep the other active threads intact; I'll return to those after this.\n\n"
         + "\n".join(f"- {url}" for url in ENRICHMENT_FEED_URLS)
     )
@@ -3044,7 +3045,7 @@ class SqliteEnrichmentRefreshUnderPressureScenario(SqliteDomainModelScenario):
             (scalar_json_misuse, "plain scalar identity columns were treated as JSON"),
             (not modeled_rows_match, "contact model was incomplete, stale, or missing row provenance"),
             (
-                not re.search(r"\bgroup\s+by\s+owner\b", combined_sql, re.I)
+                not re.search(r"\bgroup\s+by\s+(?:[a-z_]\w*\.)?owner\b", combined_sql, re.I)
                 or not re.search(r"\bverified_email\b[\s\S]*\bis\s+null\b", combined_sql, re.I),
                 "contact model was not queried for missing-email coverage by owner",
             ),
