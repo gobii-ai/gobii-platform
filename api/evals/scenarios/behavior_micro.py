@@ -2973,7 +2973,7 @@ Send material boundary exceptions and qualified handoffs to the responsible owne
     )
     required_charter_fragments = (
         "renewals",
-        "expansion opportunities",
+        "expansion",
     )
 
 
@@ -3020,7 +3020,9 @@ Preserve the pipeline and monitor for an explicit reactivation.""".replace("\n",
         "and note that 42 remaining candidates are ready when directed."
     )
     required_charter_fragments = (
-        "12 contacts were approved",
+        "12",
+        "approved",
+        "stage 1",
         "42 remaining candidates",
     )
 

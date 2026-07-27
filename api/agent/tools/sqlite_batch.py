@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 import sqlparse
 from sqlparse import tokens as sql_tokens
-from sqlparse.sql import Statement
+from sqlparse.sql import Statement, Where
 from .sqlite_guardrails import (
     clear_guarded_connection,
     consume_patch_text_error,
@@ -724,6 +724,35 @@ def _fix_insert_select_upsert_ambiguity(sql: str) -> tuple[str, str | None]:
     return fixed, "added WHERE 1=1 to disambiguate INSERT ... SELECT ... ON CONFLICT"
 
 
+def _fix_agent_config_patch_where(sql: str) -> tuple[str, str | None]:
+    statements = sqlparse.parse(sql)
+    if len(statements) != 1:
+        return sql, None
+    statement = statements[0]
+    structural_sql = _structural_sql(statement, omit_strings=True)
+    if not (
+        re.search(r"\bUPDATE\s+__agent_config\b", structural_sql, re.IGNORECASE)
+        and re.search(
+            r"\bcharter\b\s*=\s*patch_text\s*\(",
+            structural_sql,
+            re.IGNORECASE,
+        )
+    ):
+        return sql, None
+
+    where = next((token for token in statement.tokens if isinstance(token, Where)), None)
+    if where is None:
+        return sql, None
+    structural_where = _structural_sql(where, omit_strings=True)
+    if not re.match(r"WHERE\s+id\s*=\s*1(?:\s|$)", structural_where, re.IGNORECASE):
+        return sql, None
+    if re.fullmatch(r"WHERE\s+id\s*=\s*1", structural_where, re.IGNORECASE):
+        return sql, None
+
+    fixed = "".join("WHERE id=1 " if token is where else str(token) for token in statement.tokens).rstrip()
+    return fixed, "removed redundant __agent_config Charter WHERE predicates"
+
+
 def _apply_all_sql_fixes(sql: str, error_msg: str = "") -> tuple[str, list[str]]:
     """Apply all SQL fixes and return (fixed_sql, list_of_corrections)."""
     corrections = []
@@ -757,6 +786,10 @@ def _apply_all_sql_fixes(sql: str, error_msg: str = "") -> tuple[str, list[str]]
         corrections.append(fix)
 
     sql, fix = _fix_insert_select_upsert_ambiguity(sql)
+    if fix:
+        corrections.append(fix)
+
+    sql, fix = _fix_agent_config_patch_where(sql)
     if fix:
         corrections.append(fix)
 
@@ -1913,20 +1946,25 @@ def _is_redundant_transaction_wrapper(sql: str) -> bool:
 
 
 def _non_persisting_agent_config_patch(queries: List[str]) -> Optional[str]:
+    persisted_patch_seen = False
     for query in queries:
         for statement in sqlparse.parse(query):
             if not _structural_sql(statement):
                 continue
             structural_sql = _structural_sql(statement, omit_strings=True)
-            if (
+            uses_config_patch = (
                 re.search(r"\bpatch_text\s*\(", structural_sql, re.IGNORECASE)
                 and re.search(r"\b__agent_config\b", structural_sql, re.IGNORECASE)
-                and not re.search(
-                    r"\bcharter\b\s*=\s*patch_text\s*\(",
-                    structural_sql,
-                    re.IGNORECASE,
-                )
+            )
+            if not uses_config_patch:
+                continue
+            if re.search(
+                r"\bcharter\b\s*=\s*patch_text\s*\(",
+                structural_sql,
+                re.IGNORECASE,
             ):
+                persisted_patch_seen = True
+            elif not persisted_patch_seen:
                 return str(statement).strip()
     return None
 

@@ -122,6 +122,57 @@ class SqliteGuardrailsMaintenanceTests(SimpleTestCase):
                 clear_guarded_connection(conn)
                 conn.close()
 
+    def test_patch_text_matches_equivalent_serializations_without_rewriting_other_text(self):
+        original = (
+            "Header\r\n"
+            "Natalya’s evidence — 66 leaders sourced &amp; enriched.\r\n"
+            "Footer"
+        )
+        target = "Natalya\\u2019s evidence — 66 leaders sourced & enriched.\\r\\n"
+        replacement = "Natalya's evidence includes trajectory analysis.\\nReady."
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            conn = open_guarded_sqlite_connection(os.path.join(tmp_dir, "state.db"))
+            try:
+                patched = conn.execute(
+                    "SELECT patch_text(?, ?, ?)",
+                    (original, target, replacement),
+                ).fetchone()[0]
+            finally:
+                clear_guarded_connection(conn)
+                conn.close()
+
+        self.assertEqual(
+            patched,
+            "Header\r\nNatalya's evidence includes trajectory analysis.\r\nReady.Footer",
+        )
+
+    def test_patch_text_preserves_literal_escapes_for_an_exact_match(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            conn = open_guarded_sqlite_connection(os.path.join(tmp_dir, "state.db"))
+            try:
+                patched = conn.execute(
+                    "SELECT patch_text(?, ?, ?)",
+                    (r"Use C:\new.", r"C:\new", r"D:\next"),
+                ).fetchone()[0]
+            finally:
+                clear_guarded_connection(conn)
+                conn.close()
+
+        self.assertEqual(patched, r"Use D:\next.")
+
+    def test_patch_text_still_rejects_ambiguity_after_representation_normalization(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            conn = open_guarded_sqlite_connection(os.path.join(tmp_dir, "state.db"))
+            try:
+                with self.assertRaises(sqlite3.OperationalError):
+                    conn.execute(
+                        "SELECT patch_text(?, ?, ?)",
+                        ("Natalya’s work. Natalya's work.", "Natalya's work.", "Her work."),
+                    )
+            finally:
+                clear_guarded_connection(conn)
+                conn.close()
+
     def test_statistical_aggregates_match_sample_and_population_semantics(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             db_path = os.path.join(tmp_dir, "state.db")

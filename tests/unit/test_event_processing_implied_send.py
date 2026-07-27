@@ -419,6 +419,7 @@ class ImpliedSendTests(TestCase):
             "For this response, don't use headings.",
             "For this message, that tone is too formal.",
             "For this batch, never use headings.",
+            "Only this batch, those long updates aren't useful. Put security reviews first and keep each note super short.",
             "Never store this customer secret.",
             "Never persist this API key.",
             "Never send this confidential email.",
@@ -429,6 +430,8 @@ class ImpliedSendTests(TestCase):
                 analysis = ep._analyze_feedback_turn(text)
                 self.assertTrue(analysis.transient_only)
                 self.assertFalse(ep._user_text_is_direct_correction(text))
+                if text.startswith("Only this batch"):
+                    self.assertTrue(analysis.feedback_only)
                 if text.startswith("Never"):
                     self.assertEqual(analysis.lasting, ())
 
