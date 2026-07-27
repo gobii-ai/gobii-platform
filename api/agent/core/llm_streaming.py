@@ -82,7 +82,9 @@ class StreamAccumulator:
 
         self._capture_usage(chunk)
 
-        return reasoning_delta, content_delta
+        # The raw tool-call delta travels back so the caller can stream tool-argument text
+        # (a web reply's body lives there); accumulation above is unaffected.
+        return reasoning_delta, content_delta, tool_calls_delta
 
     def _capture_usage(self, chunk: Any) -> None:
         usage = _read_attr(chunk, "usage")
