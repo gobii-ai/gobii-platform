@@ -77,6 +77,9 @@ CHARTER_PATCHES_EVALUATIVE_OUTPUT_FEEDBACK = "charter_patches_evaluative_output_
 CHARTER_PATCHES_EXPLICIT_AMENDMENT_UNDER_PRESSURE = (
     "charter_patches_explicit_amendment_under_pressure"
 )
+CHARTER_RECOVERS_FROM_NONRETRYABLE_PATCH_FAILURE = (
+    "charter_recovers_from_nonretryable_patch_failure"
+)
 CHARTER_REFINES_EXISTING_GUIDANCE_FROM_NATURAL_FEEDBACK = (
     "charter_refines_existing_guidance_from_natural_feedback"
 )
@@ -401,6 +404,7 @@ CHARTER_MEMORY_MICRO_SCENARIO_SLUGS = [
     CHARTER_PATCHES_DIRECT_STYLE_CORRECTION,
     CHARTER_PATCHES_EVALUATIVE_OUTPUT_FEEDBACK,
     CHARTER_PATCHES_EXPLICIT_AMENDMENT_UNDER_PRESSURE,
+    CHARTER_RECOVERS_FROM_NONRETRYABLE_PATCH_FAILURE,
     CHARTER_REFINES_EXISTING_GUIDANCE_FROM_NATURAL_FEEDBACK,
     CHARTER_PATCHES_AND_COMPLETES_IMMEDIATE_TASK,
     CHARTER_INTERPRETS_AMBIGUOUS_OPERATING_FEEDBACK,
@@ -3127,12 +3131,22 @@ def _requires_morgan_routing_boundary(value):
     return routine_to_morgan and blockers_to_owner and not reversed_boundary
 
 
-def _charter_patch_pairs(patch_sql):
+def _charter_patch_pairs(call):
+    sql = str(resolved_tool_param(call, "sql") or "")
+    bindings = resolved_tool_param(call, "bindings") or {}
+
+    def resolve(token):
+        if token.startswith(":"):
+            value = bindings.get(token[1:])
+            return value if isinstance(value, str) else None
+        return token[1:-1].replace("''", "'")
+
     return [
-        (old.replace("''", "'"), new.replace("''", "'"))
+        (resolve(old), resolve(new))
         for old, new in re.findall(
-            r"patch_text\s*\(\s*charter\s*,\s*'((?:''|[^'])*)'\s*,\s*'((?:''|[^'])*)'\s*\)",
-            patch_sql,
+            r"patch_text\s*\(\s*charter\s*,\s*('(?:''|[^'])*'|:[a-z_]\w*)\s*,\s*"
+            r"('(?:''|[^'])*'|:[a-z_]\w*)\s*\)",
+            sql,
             re.IGNORECASE | re.DOTALL,
         )
     ]
@@ -3149,7 +3163,7 @@ def _uses_one_focused_charter_patch(mutation_calls, existing_charter):
         return False
     sql = str(resolved_tool_param(mutation_calls[0], "sql") or "")
     statements = split_sql_statements(sql)
-    pairs = _charter_patch_pairs(sql)
+    pairs = _charter_patch_pairs(mutation_calls[0])
     structural_sql = _structural_sql(statements[0]) if statements else ""
     old, new = pairs[0] if len(pairs) == 1 else (None, None)
     return (
@@ -3158,6 +3172,8 @@ def _uses_one_focused_charter_patch(mutation_calls, existing_charter):
         and all(re.match(r"\s*select\b", statement, re.IGNORECASE) for statement in statements[1:])
         and re.search(r"\bupdate\s+__agent_config\b", structural_sql, re.IGNORECASE)
         and not re.search(r"\bselect\b", structural_sql, re.IGNORECASE)
+        and isinstance(old, str)
+        and isinstance(new, str)
         and old != new
         and (not old or old in existing_charter)
         and bool(new.strip())
@@ -3452,6 +3468,99 @@ class CharterPatchesExplicitAmendmentUnderPressureScenario(CharterMemoryScenario
         focused_patch = _uses_one_focused_charter_patch(mutation_calls, self.existing_charter)
         passed = focused_patch and agent.charter != self.existing_charter
         return passed, f"mutation_count={len(mutation_calls)}, focused={focused_patch}, charter={agent.charter!r}."
+
+
+@register_scenario
+class CharterRecoversFromNonretryablePatchFailureScenario(
+    CharterPatchesExplicitAmendmentUnderPressureScenario
+):
+    slug = CHARTER_RECOVERS_FROM_NONRETRYABLE_PATCH_FAILURE
+    description = "A non-retryable config failure should lead to an adapted first-shot recovery, not the same call."
+    tasks = [
+        ScenarioTask(name="inject_prompt", assertion_type="manual"),
+        ScenarioTask(name="verify_adaptive_patch_recovery", assertion_type="llm_judge"),
+    ]
+    prompt = (
+        "this still isn't fixed. accept reports and evidence that arrive through our internal coordination api, "
+        "and label the origin as api or person-via-api instead of dropping them"
+    )
+    verification_task_name = "verify_adaptive_patch_recovery"
+    success_summary = "Agent adapted after the non-retryable failure and saved one focused correction."
+    failure_summary = "Expected an adapted first-shot charter patch after the prior non-retryable failure"
+    semantic_judge_question = (
+        "Does the updated charter preserve tracker ownership, deduplication, uncertain-human intake, notification "
+        "containment, provenance, and claim authorization while replacing the blanket API rejection rule with a "
+        "durable rule to accept API-delivered reports and evidence and label their origin?"
+    )
+    failed_sql = (
+        "UPDATE __agent_config SET charter=patch_text(charter, "
+        "'Reject all reports delivered through the internal coordination API.', "
+        "'Accept reports delivered through the internal coordination API and label their origin.') "
+        "WHERE id=1"
+    )
+
+    def _seed_charter_agent(self, agent_id):
+        super()._seed_charter_agent(agent_id)
+        step = PersistentAgentStep.objects.create(
+            agent_id=agent_id,
+            description="Trajectory fixture: non-retryable charter patch failure",
+        )
+        PersistentAgentToolCall.objects.create(
+            step=step,
+            tool_name="sqlite_batch",
+            tool_params={"sql": self.failed_sql},
+            result=json.dumps(
+                {
+                    "status": "error",
+                    "message": (
+                        "Query not executed: patch_text replacement target was not found. "
+                        "Current agent config is already in context; do not query __agent_config. "
+                        "Retry with an exact target from Current Charter."
+                    ),
+                    "retryable": False,
+                }
+            ),
+            status=PersistentAgentToolCall.Status.COMPLETE,
+        )
+
+    def _eval_stop_policy(self):
+        return {
+            "ignore_sqlite_agent_config_mutations": False,
+            "stop_when_all_seen": [
+                {"tool_name": "sqlite_batch", "agent_config_field": "charter", "after_execution": True}
+            ],
+        }
+
+    def _additional_charter_check(self, agent, run_id, inbound):
+        calls = [
+            call for call in get_tool_calls_for_run(run_id, after=inbound.timestamp)
+            if call.tool_name != "sleep_until_next_trigger"
+        ]
+        sqlite_calls = [call for call in calls if call.tool_name == "sqlite_batch"]
+        mutation_calls = [
+            call for call in sqlite_calls
+            if sqlite_batch_mutates_agent_config_field(call, "charter")
+        ]
+        mutation_index = sqlite_calls.index(mutation_calls[0]) if len(mutation_calls) == 1 else -1
+        pre_reads = sqlite_calls[:mutation_index] if mutation_index >= 0 else sqlite_calls
+        post_patch_calls = sqlite_calls[mutation_index + 1:] if mutation_index >= 0 else []
+        repeated_failed_call = any(
+            str(resolved_tool_param(call, "sql") or "").strip() == self.failed_sql
+            for call in sqlite_calls
+        )
+        clean_recovery = (
+            len(mutation_calls) == 1
+            and _successful_without_repair(mutation_calls[0])
+            and not pre_reads
+            and not post_patch_calls
+            and not repeated_failed_call
+        )
+        passed = clean_recovery
+        return passed, (
+            f"actions={[call.tool_name for call in calls]}, pre_reads={len(pre_reads)}, "
+            f"post_patch_calls={len(post_patch_calls)}, repeated_failed_call={repeated_failed_call}, "
+            f"clean_recovery={clean_recovery}."
+        )
 
 
 @register_scenario

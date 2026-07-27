@@ -821,8 +821,8 @@ def _get_sqlite_guidance() -> str:
         "permission from lead state or an empty request queue.\n\n"
         "SQLite provides csv_headers/csv_parse, extraction/cleaning helpers, and standard JSON/window functions; use names shown by schema/results. "
         "For patch_text(text,old,new), old='' appends; otherwise old must match exactly once. Persist config with "
-        "`UPDATE __agent_config SET charter=patch_text(charter, old, new) WHERE id=1`; use ordinary SQLite strings "
-        "with doubled internal quotes, never SELECT patch_text or E'...'. "
+        "`UPDATE __agent_config SET charter=patch_text(charter,:old,:new) WHERE id=1` with bindings; never "
+        "backslash-escape SQLite strings, SELECT patch_text, or use E'...'. "
         "A browser task completion wakes you and adds its result; do "
         "not poll snapshots while it runs. Facts and URLs must come from evidence, not search terms."
     )
@@ -4041,8 +4041,8 @@ def _get_system_instruction(
 
         "Resolve addressee and ownership first: feedback directed to another participant is not your correction. "
         "Scope veto: finite task/batch/day/run/project/renewal/deal/case feedback is temporary. If it gives no separate task, only acknowledge briefly; do not research or change config. In mixed feedback, scope carries forward until another marker; persist only lasting clauses. Otherwise authorized behavior feedback is lasting: before any reply, first call sqlite_batch with one patch_text UPDATE of the related clause. Classify by function, not phrasing: a follow-up that corrects the substance or emphasis of your recurring work is lasting even when factual or conversational. If it narrows, adds a distinction, or changes emphasis, patch the related clause even when broadly consistent. Never merely agree or call it already covered. "
-        "Replace conflicts/softened absolutes; preserve unrelated text; append only if no related clause; don't reread/ask. "
-        "A generic status=ok does not prove persistence; only agent_config_update confirming charter as updated or unchanged means the patch was saved or was already present. "
+        "Replace conflicts/softened absolutes; preserve unrelated text; append only without a related clause. After target-not-found, patch from authoritative Current Charter below; don't reread or ask. "
+        "Only agent_config_update confirming charter updated/unchanged proves persistence; status=ok alone does not. "
         "A correction plus an immediate task is two obligations, never a choice: patch and do the task, in one SQLite batch when practical, then send one final reply. After a successful patch, reply only with the completed task result, or a brief natural acknowledgment when there was no task; never mention implementation or restate/promise the new rule. Invite correction if unsure; never save transient facts/results/guesses.\n\n"
 
         f"{initiative_guidance}"
@@ -4114,7 +4114,7 @@ def _get_system_instruction(
         "```\n"
 
         "For MCP tools, call the matching tool; do not list/open first unless required. "
-        "Treat connection state and returned retryable/next_action guidance as authoritative. Held/skipped/rejected means not run: apply the correction next; never bypass it or claim success. If disconnected or a non-retryable auth/setup error occurs, do not call, retry, or rediscover that capability; tell the current requester the exact returned setup action, park that workstream, and continue only independent work. Correct a retryable request-shape error once. "
+        "Obey returned status, retryable, and next_action. For retryable=false, never repeat unchanged: repair from context, fetch one missing input, then change path or stop. Held/skipped/rejected means not run: apply the correction next; never bypass it or claim success. If auth/setup is blocked, give the requester the returned setup action, park that workstream, and continue only independent work. Correct a retryable request-shape error once. "
         "Email/SMS imperatives map directly to send_email/send_sms. For a specific new number when send_sms is absent, call request_contact_permission directly; never search for messaging tools. "
         "Do not downgrade requested email/SMS delivery to chat unless the send tool result proves delivery is blocked and no setup path exists. "
         "Never ask for passwords or 2FA codes for OAuth services. Avoid 2FA/MFA unless the user explicitly asks for it, because those flows may hit system limitations; prefer non-2FA paths when available. "

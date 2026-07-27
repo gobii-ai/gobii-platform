@@ -2292,18 +2292,18 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
         "function": {
             "name": "sqlite_batch",
             "description": (
-                "Durable world model and exact logic. For each current source shape, use one call for keyed DDL, one "
-                "set-wise upsert, and decision-ready SELECTs. Structured fields derive across is_current_batch=1 plus "
-                "tool_name from result_json/item.value; provenance is t.result_id/t.source_url. Multi-source prose "
-                "modeling first uses the bounded set-wide inspection shown beside results, then top-level rows joined "
-                "by result_id. Structured JSON uses rows=[]; current batch plus tool_name is exact, so add no "
-                "source_url/result_id predicate and store t.source_url/t.result_id as provenance. For upserts, "
-                "put WHERE 1=1 before ON CONFLICT. group_concat(DISTINCT x) accepts no separator. Never copy sourced "
-                "facts/URLs into SQL, import per result_id, store link handles, mix historical generic-tool results, or "
-                "rebuild a durable table on refresh. Evolve normalized entities/relations, upsert stable keys, and "
-                "query counts, joins, coverage, gaps, and ranks. Return all supporting fields/URLs in the same batch; "
+                "Durable world model and exact logic: per source shape, one keyed DDL call, one set-wise upsert, "
+                "and decision-ready SELECTs. Derive fields across is_current_batch=1 plus "
+                "tool_name from result_json/item.value; provenance: t.result_id/t.source_url. Multi-source prose "
+                "modeling first uses the bounded set-wide inspection shown beside results; top-level rows join by "
+                "result_id. Structured JSON uses rows=[]; current batch plus tool_name is exact; add no "
+                "source_url/result_id predicate and store t.source_url/t.result_id as provenance. Upserts: WHERE 1=1 "
+                "before ON CONFLICT. group_concat(DISTINCT x) accepts no separator. Never copy sourced facts/URLs "
+                "into SQL, import per result_id, mix historical generic-tool results, or rebuild durable tables on "
+                "refresh. Evolve normalized entities/relations; query counts, joins, coverage, gaps, and ranks. Return all supporting fields/URLs in the same batch; "
                 "after decision rows return, deliver without rereading. Unknown schema: targeted sqlite_master, then "
-                "PRAGMA alone in its own call, then query only returned columns. Bind authored values. No ATTACH."
+                "PRAGMA alone in its own call, then query only returned columns. Bind messy text via :name; never "
+                "backslash-escape SQLite strings. No ATTACH"
             ),
             "parameters": {
                 "type": "object",
@@ -2341,10 +2341,10 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
                     "sql": {
                         "type": "string",
                         "description": (
-                            "Semicolon-separated SQL. Prose imports use `json_each(:rows) r JOIN __tool_results t ON "
-                            "t.result_id=json_extract(r.value,'$.result_id')`, facts at $.fields.<name>, and "
-                            "t.result_id/t.source_url provenance. A prose-derived write with rows=[] or sourced "
-                            "VALUES/literals is invalid. End with decision/detail SELECTs."
+                            "SQL statements. Prose: join `json_each(:rows) r` to __tool_results t on "
+                            "t.result_id=json_extract(r.value,'$.result_id'); facts at $.fields.<name>, "
+                            "t.result_id/t.source_url provenance. No sourced literals or prose writes with rows=[]. Config patch: "
+                            "one UPDATE; bind old/new as :old/:new; no SELECT or embedded text. End with decision/detail SELECTs."
                         ),
                     },
                     "bindings": {

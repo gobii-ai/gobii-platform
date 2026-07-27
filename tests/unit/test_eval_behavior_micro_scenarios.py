@@ -33,6 +33,7 @@ from api.evals.scenarios.behavior_micro import (
     CHARTER_INTERPRETS_AMBIGUOUS_OPERATING_FEEDBACK,
     CHARTER_PATCHES_DIRECT_STYLE_CORRECTION,
     CHARTER_PATCHES_EVALUATIVE_OUTPUT_FEEDBACK,
+    CHARTER_RECOVERS_FROM_NONRETRYABLE_PATCH_FAILURE,
     CHARTER_IGNORES_BATCH_SCOPED_PREFERENCE,
     CHARTER_JUDGE_PRESERVES_CLI_GITHUB_SECRET_WORKFLOW,
     CHARTER_INTERPRETS_ROLE_BOUNDARY_CORRECTION,
@@ -780,6 +781,24 @@ class BehaviorMicroHelperTests(TestCase):
 
     def _add_orchestrator_completion(self):
         return PersistentAgentCompletion.objects.create(agent=self.agent, eval_run=self.run)
+
+    def test_nonretryable_patch_recovery_scenario_seeds_real_failed_call(self):
+        scenario = ScenarioRegistry.get(CHARTER_RECOVERS_FROM_NONRETRYABLE_PATCH_FAILURE)
+
+        scenario._seed_charter_agent(self.agent.id)
+
+        call = PersistentAgentToolCall.objects.filter(
+            step__agent=self.agent,
+            tool_name="sqlite_batch",
+        ).latest("step__created_at")
+        result = json.loads(call.result)
+        self.assertEqual(call.tool_params, {"sql": scenario.failed_sql})
+        self.assertEqual(result["status"], "error")
+        self.assertIs(result["retryable"], False)
+        self.assertNotIn(
+            "Reject all reports delivered through the internal coordination API.",
+            scenario.existing_charter,
+        )
 
     def test_explicit_stop_allows_at_most_one_plan_closeout_completion(self):
         terminal_completion = self._add_orchestrator_completion()
