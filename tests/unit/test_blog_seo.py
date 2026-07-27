@@ -341,8 +341,10 @@ class BlogSeoTests(TestCase):
         self.assertEqual(nodes["Person"]["jobTitle"], "Full-stack Engineer")
         self.assertEqual(nodes["Person"]["email"], "mailto:matt@gobii.ai")
         self.assertTrue(nodes["Person"]["image"].endswith("/static/images/matt.jpg"))
-        self.assertTrue(nodes["Person"]["url"].endswith("/team/#matt-greathouse"))
-        self.assertEqual(nodes["Person"]["@id"], nodes["Person"]["url"])
+        self.assertTrue(nodes["Person"]["url"].endswith("/about/"))
+        self.assertEqual(
+            nodes["Person"]["@id"], f'{nodes["Person"]["url"].rstrip("/")}#person'
+        )
         self.assertEqual(len(nodes["FAQPage"]["mainEntity"]), 4)
         self.assertIn("what is an agentic api", nodes["BlogPosting"]["keywords"])
 

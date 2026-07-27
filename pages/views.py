@@ -4861,6 +4861,7 @@ class AgentAPIView(TemplateView):
             "suppress_htmx": True,
             "suppress_preline": True,
             "suppress_public_conversion_assets": True,
+            "enable_cta_tracking": True,
             "suppress_phone_format_js": True,
             "suppress_rewardful_js": True,
             "suppress_stripe_js": True,
@@ -4876,9 +4877,14 @@ class AgentAPIView(TemplateView):
             "agent_api_cluster_groups": [
                 {
                     **group,
-                    "links": [dict(link) for link in group["links"]],
+                    "links": [
+                        dict(link)
+                        for link in group["links"]
+                        if link["status"] == "live"
+                    ],
                 }
                 for group in AGENT_API_CLUSTER_GROUPS
+                if any(link["status"] == "live" for link in group["links"])
             ],
             "canonical_url": canonical_url,
         })

@@ -94,6 +94,27 @@ class AgentAPIPageTests(TestCase):
             all("Start free trial" in form.get_text(" ", strip=True) for form in cta_forms)
         )
 
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_page_enables_cta_tracking_without_other_conversion_assets(self):
+        response, soup = self._get_proprietary_page()
+
+        self.assertTrue(response.context["suppress_public_conversion_assets"])
+        self.assertTrue(response.context["enable_cta_tracking"])
+        self.assertEqual(
+            soup.body["data-analytics-cta-tracking-enabled"],
+            "true",
+        )
+
+        script_sources = {
+            script["src"]
+            for script in soup.find_all("script", src=True)
+        }
+        self.assertIn("/static/js/cta_tracking.js", script_sources)
+        self.assertNotIn("/static/js/account_identity_signals.js", script_sources)
+        self.assertNotIn("/static/js/account_auth_forms.js", script_sources)
+        self.assertNotIn("/static/js/cta_signup_modal.js", script_sources)
+        self.assertNotIn("/static/js/signup_tracking.js", script_sources)
+
     @override_settings(
         GOBII_PROPRIETARY_MODE=True,
         GOBII_RELEASE_ENV="prod",
@@ -146,8 +167,8 @@ class AgentAPIPageTests(TestCase):
         )
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
-    def test_page_links_live_resources_without_linking_planned_spokes(self):
-        _response, soup = self._get_proprietary_page()
+    def test_page_renders_only_live_cluster_resources(self):
+        response, soup = self._get_proprietary_page()
         rendered_hrefs = {
             anchor["href"]
             for anchor in soup.find_all("a", href=True)
@@ -162,14 +183,25 @@ class AgentAPIPageTests(TestCase):
             for link in group["links"]
             if link["status"] == "planned"
         }
+        planned_anchors = {
+            link["anchor"]
+            for group in AGENT_API_CLUSTER_GROUPS
+            for link in group["links"]
+            if link["status"] == "planned"
+        }
         live_urls = {
             link["url"]
             for group in AGENT_API_CLUSTER_GROUPS
             for link in group["links"]
             if link["status"] == "live"
         }
+        page_text = soup.get_text(" ", strip=True)
 
         self.assertTrue(planned_paths.isdisjoint(rendered_paths))
+        for anchor in planned_anchors:
+            with self.subTest(anchor=anchor):
+                self.assertNotIn(anchor, page_text)
+        self.assertNotIn("Planned", page_text)
         self.assertFalse(any(path.startswith("/compare/") for path in planned_paths))
         self.assertEqual(
             live_urls,
@@ -185,14 +217,22 @@ class AgentAPIPageTests(TestCase):
             reverse("pages:solution", kwargs={"slug": "engineering"}),
             rendered_paths,
         )
+        rendered_cluster_groups = response.context["agent_api_cluster_groups"]
         self.assertTrue(
             all(
-                link["status"] in {"live", "planned"}
-                for group in AGENT_API_CLUSTER_GROUPS
+                link["status"] == "live"
+                for group in rendered_cluster_groups
                 for link in group["links"]
             )
         )
-        self.assertNotIn("Live docs", soup.get_text(" ", strip=True))
+        self.assertEqual(
+            [group["title"] for group in rendered_cluster_groups],
+            [
+                "Understand the category",
+                "Build a delegated workflow",
+            ],
+        )
+        self.assertNotIn("Live docs", page_text)
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_existing_api_entry_points_link_to_agent_api_page(self):
