@@ -36,7 +36,7 @@ from api.models import (
     PersistentAgentSystemSkillState,
     UserPhoneNumber,
 )
-from api.services.daily_credit_limits import calculate_daily_credit_slider_bounds, get_tier_credit_multiplier, scale_daily_credit_limit_for_tier_change
+from api.services.daily_credit_limits import calculate_daily_credit_slider_bounds, get_tier_credit_multiplier
 from api.services.daily_credit_settings import get_daily_credit_settings_for_owner
 from api.services.agent_email_provisioning import (
     configure_custom_agent_email,
@@ -1060,7 +1060,6 @@ def _tool_update_agent(invoking_agent: PersistentAgent, params: dict[str, Any]) 
 
     previous_daily_credit_limit = agent.daily_credit_limit
     previous_tier_id = agent.preferred_llm_tier_id
-    previous_tier = agent.preferred_llm_tier
     previous_tier_key = getattr(getattr(agent, "preferred_llm_tier", None), "key", "standard")
     changed_fields: set[str] = set()
     browser_name_changed = False
@@ -1097,24 +1096,6 @@ def _tool_update_agent(invoking_agent: PersistentAgent, params: dict[str, Any]) 
         if agent.preferred_llm_tier_id != tier.id:
             agent.preferred_llm_tier = tier
             changed_fields.add("preferred_llm_tier")
-            if "daily_credit_limit" not in params:
-                owner = agent.organization or agent.user
-                credit_settings = get_daily_credit_settings_for_owner(owner)
-                new_tier_multiplier = get_tier_credit_multiplier(tier)
-                slider_bounds = calculate_daily_credit_slider_bounds(
-                    credit_settings,
-                    tier_multiplier=new_tier_multiplier,
-                )
-                scaled_limit = scale_daily_credit_limit_for_tier_change(
-                    agent.daily_credit_limit,
-                    from_multiplier=get_tier_credit_multiplier(previous_tier),
-                    to_multiplier=new_tier_multiplier,
-                    slider_min=slider_bounds["slider_min"],
-                    slider_max=slider_bounds["slider_limit_max"],
-                )
-                if agent.daily_credit_limit != scaled_limit:
-                    agent.daily_credit_limit = scaled_limit
-                    changed_fields.add("daily_credit_limit")
     if "daily_credit_limit" in params:
         daily_credit_limit = _normalize_daily_credit_limit(params.get("daily_credit_limit"))
         if agent.daily_credit_limit != daily_credit_limit:

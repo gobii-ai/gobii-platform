@@ -7,8 +7,6 @@ from django.db import transaction
 from rest_framework import serializers
 from api.agent.core.llm_config import resolve_intelligence_tier_for_owner
 from api.agent.short_description import build_listing_description, build_mini_description
-from api.services.daily_credit_limits import calculate_daily_credit_slider_bounds, get_tier_credit_multiplier, scale_daily_credit_limit_for_tier_change
-from api.services.daily_credit_settings import get_daily_credit_settings_for_owner
 from .models import ApiKey, BrowserUseAgent, BrowserUseAgentTask, CommsChannel, IntelligenceTier, PersistentAgent, PersistentAgentCommsEndpoint
 from jsonschema import Draft202012Validator, ValidationError as JSValidationError
 from util.analytics import AnalyticsSource
@@ -655,27 +653,6 @@ class PersistentAgentSerializer(serializers.ModelSerializer):
             preferred_endpoint = serializers.empty
 
         validated_data.pop('template_code', None)
-
-        preferred_tier = validated_data.get('preferred_llm_tier', serializers.empty)
-        preferred_tier_changed = (
-            preferred_tier is not serializers.empty
-            and preferred_tier != instance.preferred_llm_tier
-        )
-        if preferred_tier_changed and 'daily_credit_limit' not in validated_data:
-            owner = instance.organization or instance.user
-            credit_settings = get_daily_credit_settings_for_owner(owner)
-            new_tier_multiplier = get_tier_credit_multiplier(preferred_tier)
-            slider_bounds = calculate_daily_credit_slider_bounds(
-                credit_settings,
-                tier_multiplier=new_tier_multiplier,
-            )
-            validated_data['daily_credit_limit'] = scale_daily_credit_limit_for_tier_change(
-                instance.daily_credit_limit,
-                from_multiplier=get_tier_credit_multiplier(instance.preferred_llm_tier),
-                to_multiplier=new_tier_multiplier,
-                slider_min=slider_bounds["slider_min"],
-                slider_max=slider_bounds["slider_limit_max"],
-            )
 
         dirty_fields = set()
         for field, value in validated_data.items():

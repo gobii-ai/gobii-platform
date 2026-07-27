@@ -687,10 +687,12 @@ class PersistentAgentAPITests(TestCase):
         self.assertEqual(agent.charter, 'Refine outreach list')
         self.assertFalse(agent.is_active)
 
-    def test_update_agent_preferred_llm_tier_triggers_immediate_resume(self):
+    def test_update_agent_preferred_llm_tier_retains_credit_limit_and_triggers_immediate_resume(self):
         payload = self._create_agent_via_api()
         agent_id = payload['id']
         agent = PersistentAgent.objects.get(id=agent_id)
+        PersistentAgent.objects.filter(id=agent_id).update(daily_credit_limit=12000)
+        agent.refresh_from_db()
         self.process_events_mock.reset_mock()
         self.standard_process_events_mock.reset_mock()
         # Ensure target tier exists in lean test fixtures.
@@ -721,6 +723,7 @@ class PersistentAgentAPITests(TestCase):
 
         agent.refresh_from_db()
         self.assertEqual(getattr(agent.preferred_llm_tier, "key", None), 'premium')
+        self.assertEqual(agent.daily_credit_limit, 12000)
         self.standard_process_events_mock.assert_called_once_with(str(agent.id))
 
         latest_system_step = (
@@ -732,6 +735,7 @@ class PersistentAgentAPITests(TestCase):
         )
         self.assertIsNotNone(latest_system_step)
         self.assertIn("Intelligence level changed", latest_system_step.step.description)
+        self.assertNotIn("Daily credit soft target changed", latest_system_step.step.description)
 
     def test_update_agent_name_syncs_blank_email_display_name(self):
         payload = self._create_agent_via_api({'name': 'Original Agent'})

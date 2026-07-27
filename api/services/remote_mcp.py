@@ -382,7 +382,10 @@ TOOL_DEFINITIONS = [
     {
         "name": "gobii_update_agent",
         "title": "Update Gobii Agent",
-        "description": "Update mutable persistent agent settings such as name, charter, schedule, active state, or whitelist policy.",
+        "description": (
+            "Update only the supplied persistent agent settings; omitted mutable fields retain their current values. "
+            "Send null for schedule or daily_credit_limit to clear that field."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {

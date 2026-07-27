@@ -22,6 +22,7 @@ from api.models import (
     CommsAllowlistEntry,
     CommsAllowlistRequest,
     CommsChannel,
+    IntelligenceTier,
     PersistentAgent,
     PersistentAgentCommsEndpoint,
     PersistentAgentEmailEndpoint,
@@ -313,6 +314,51 @@ class MetaGobiiDirectToolTests(TestCase):
             },
         )
         self.assertEqual(denied["status"], "error")
+
+    @patch("api.services.agent_settings_resume.process_agent_events_task.delay")
+    def test_update_agent_preferred_tier_retains_omitted_credit_limit(self, _mock_delay):
+        standard_tier, _ = IntelligenceTier.objects.update_or_create(
+            key="standard",
+            defaults={
+                "display_name": "Standard",
+                "rank": 10,
+                "credit_multiplier": "1.00",
+                "is_default": True,
+            },
+        )
+        premium_tier, _ = IntelligenceTier.objects.update_or_create(
+            key="premium",
+            defaults={
+                "display_name": "Premium",
+                "rank": 20,
+                "credit_multiplier": "2.00",
+                "is_default": False,
+            },
+        )
+        PersistentAgent.objects.filter(id=self.peer.id).update(
+            preferred_llm_tier=standard_tier,
+            daily_credit_limit=12000,
+        )
+
+        with patch(
+            "api.agent.tools.meta_gobii._resolve_requested_tier_or_error",
+            return_value=premium_tier,
+        ):
+            updated = execute_meta_gobii_tool(
+                self.manager,
+                "meta_gobii_update_agent",
+                {
+                    "agent_id": str(self.peer.id),
+                    "preferred_llm_tier": "premium",
+                    "user_confirmed": True,
+                },
+            )
+
+        self.assertEqual(updated["status"], "ok")
+        self.peer.refresh_from_db()
+        self.assertEqual(self.peer.preferred_llm_tier, premium_tier)
+        self.assertEqual(self.peer.daily_credit_limit, 12000)
+        self.assertEqual(updated["changed_fields"], ["preferred_llm_tier"])
 
     def test_link_and_unlink_accessible_agents_only_after_confirmation(self):
         blocked_link = execute_meta_gobii_tool(

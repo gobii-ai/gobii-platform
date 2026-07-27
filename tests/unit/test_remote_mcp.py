@@ -1,6 +1,7 @@
 import base64
 import json
 import uuid
+from contextlib import ExitStack
 from decimal import Decimal
 from datetime import timedelta
 from unittest.mock import patch
@@ -9,6 +10,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase, tag
 from django.utils import timezone
 
+from api.agent.core.llm_config import AgentLLMTier
 from api.models import (
     AgentPeerLink,
     BrowserUseAgent,
@@ -159,6 +161,47 @@ class RemoteMCPViewTests(TestCase):
 
     def _structured_content(self, response):
         return response.json()["result"]["structuredContent"]
+
+    @staticmethod
+    def _mutable_agent_state(agent):
+        return {
+            "name": agent.name,
+            "charter": agent.charter,
+            "schedule": agent.schedule,
+            "is_active": agent.is_active,
+            "preferred_llm_tier": getattr(agent.preferred_llm_tier, "key", None),
+            "daily_credit_limit": agent.daily_credit_limit,
+            "whitelist_policy": agent.whitelist_policy,
+            "proactive_opt_in": agent.proactive_opt_in,
+        }
+
+    def _remote_update_context(self, *, allow_premium=False):
+        stack = ExitStack()
+        stack.enter_context(patch("api.auth.can_user_use_personal_agents_and_api", return_value=True))
+        stack.enter_context(
+            patch("api.services.remote_mcp.can_user_use_personal_agents_and_api", return_value=True)
+        )
+        stack.enter_context(patch("api.services.agent_settings_resume.process_agent_events_task.delay"))
+        if allow_premium:
+            stack.enter_context(
+                patch(
+                    "api.services.remote_mcp.resolve_preferred_tier_for_owner",
+                    return_value=AgentLLMTier.PREMIUM,
+                )
+            )
+            stack.enter_context(
+                patch(
+                    "api.services.remote_mcp.resolve_intelligence_tier_for_owner",
+                    return_value=self.premium_tier,
+                )
+            )
+            stack.enter_context(
+                patch(
+                    "api.serializers.resolve_intelligence_tier_for_owner",
+                    return_value=self.premium_tier,
+                )
+            )
+        return stack
 
     def test_requires_api_key(self):
         response = self.client.post(
@@ -506,32 +549,111 @@ class RemoteMCPViewTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertFalse(response.json()["result"]["isError"])
+        self.assertFalse(response.json()["result"]["isError"], response.content)
         agent.refresh_from_db()
         self.assertIsNone(agent.schedule)
         self.assertEqual(agent.preferred_llm_tier, self.premium_tier)
         self.assertEqual(agent.daily_credit_limit, 11)
 
-    def test_update_unscheduled_agent_with_explicit_null_schedule(self):
-        agent = self._create_agent(self.user, "Explicit Null Schedule Update")
-        PersistentAgent.objects.filter(id=agent.id).update(schedule="@daily")
-
-        response = self._call_tool(
-            "gobii_update_agent",
-            {
-                "agent_id": str(agent.id),
-                "schedule": None,
-                "preferred_llm_tier": "premium",
-                "daily_credit_limit": 13,
-            },
+    def test_update_agent_tier_and_explicit_null_schedule_retain_omitted_credit_limit(self):
+        agent = self._create_agent(self.user, "Retain Credit Limit Update")
+        PersistentAgent.objects.filter(id=agent.id).update(
+            schedule="@every 1h",
+            daily_credit_limit=12000,
         )
 
+        with self._remote_update_context(allow_premium=True):
+            response = self._call_tool(
+                "gobii_update_agent",
+                {
+                    "agent_id": str(agent.id),
+                    "schedule": None,
+                    "preferred_llm_tier": "premium",
+                },
+            )
+
         self.assertEqual(response.status_code, 200)
-        self.assertFalse(response.json()["result"]["isError"])
+        self.assertFalse(response.json()["result"]["isError"], response.content)
+        content = self._structured_content(response)["agent"]
         agent.refresh_from_db()
         self.assertIsNone(agent.schedule)
         self.assertEqual(agent.preferred_llm_tier, self.premium_tier)
-        self.assertEqual(agent.daily_credit_limit, 13)
+        self.assertEqual(agent.daily_credit_limit, 12000)
+        self.assertEqual(content["daily_credit_limit"], 12000)
+        self.assertIsNotNone(content["daily_credit_soft_target"])
+        self.assertIsNotNone(content["daily_credit_hard_limit"])
+
+    def test_update_agent_explicit_null_daily_credit_limit_clears_derived_limits(self):
+        agent = self._create_agent(self.user, "Explicit Null Credit Limit")
+        PersistentAgent.objects.filter(id=agent.id).update(
+            schedule="@every 1h",
+            daily_credit_limit=12000,
+        )
+
+        with self._remote_update_context():
+            response = self._call_tool(
+                "gobii_update_agent",
+                {
+                    "agent_id": str(agent.id),
+                    "daily_credit_limit": None,
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json()["result"]["isError"], response.content)
+        content = self._structured_content(response)["agent"]
+        agent.refresh_from_db()
+        self.assertEqual(agent.schedule, "@every 1h")
+        self.assertIsNone(agent.daily_credit_limit)
+        self.assertIsNone(content["daily_credit_limit"])
+        self.assertIsNone(content["daily_credit_soft_target"])
+        self.assertIsNone(content["daily_credit_hard_limit"])
+
+    def test_update_agent_only_changes_supplied_mutable_field(self):
+        cases = {
+            "name": "Updated Agent Name",
+            "charter": "Updated charter.",
+            "schedule": "@every 2h",
+            "is_active": False,
+            "preferred_llm_tier": "premium",
+            "daily_credit_limit": 37,
+            "whitelist_policy": "manual",
+            "proactive_opt_in": True,
+        }
+
+        with self._remote_update_context(allow_premium=True):
+            for index, (field, value) in enumerate(cases.items()):
+                with self.subTest(field=field):
+                    agent = self._create_agent(self.user, f"Mutable Field Agent {index}")
+                    PersistentAgent.objects.filter(id=agent.id).update(
+                        schedule="@every 1h",
+                        is_active=True,
+                        daily_credit_limit=12000,
+                        whitelist_policy="default",
+                        proactive_opt_in=False,
+                    )
+                    agent.refresh_from_db()
+                    before = self._mutable_agent_state(agent)
+
+                    response = self._call_tool(
+                        "gobii_update_agent",
+                        {
+                            "agent_id": str(agent.id),
+                            field: value,
+                        },
+                    )
+
+                    self.assertEqual(response.status_code, 200)
+                    self.assertFalse(response.json()["result"]["isError"], response.content)
+                    agent.refresh_from_db()
+                    after = self._mutable_agent_state(agent)
+                    self.assertEqual(after[field], value)
+                    for omitted_field in before.keys() - {field}:
+                        self.assertEqual(
+                            after[omitted_field],
+                            before[omitted_field],
+                            f"{omitted_field} changed when only {field} was supplied",
+                        )
 
     def test_update_agent_invalid_schedule_returns_structured_tool_error(self):
         agent = self._create_agent(self.user, "Invalid Schedule Update")
