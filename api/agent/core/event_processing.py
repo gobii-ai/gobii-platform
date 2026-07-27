@@ -132,8 +132,7 @@ from ..tools.sqlite_query_quality import summarize_sqlite_tool_result_sql
 from ..tools.sqlite_recovery import (
     SQLITE_RECOVERY_NOTICE,
     SQLiteStateUnrecoverableError,
-    checkpoint_current_sqlite_state,
-    validate_current_sqlite_state,
+    protect_current_sqlite_state,
 )
 from ..tools.sqlite_state import agent_sqlite_db, get_sqlite_db_path
 from ..tools.secure_credentials_request import execute_secure_credentials_request
@@ -6448,6 +6447,16 @@ def _process_agent_events_locked(
 
     return agent
 
+
+def _record_sqlite_recovery(recovered: bool, span, heartbeat, phase: str) -> bool:
+    if not recovered:
+        return False
+    span.set_attribute("sqlite.recovered", True)
+    if heartbeat:
+        heartbeat.touch(f"sqlite_recovered_{phase}")
+    return True
+
+
 @tracer.start_as_current_span("Agent Loop")
 def _run_agent_loop(
     agent: PersistentAgent,
@@ -7076,14 +7085,12 @@ def _run_agent_loop(
                     logger.debug("Failed to resolve web stream target for agent %s", agent.id, exc_info=True)
 
                 try:
-                    recovered_before_completion = checkpoint_current_sqlite_state(
-                        phase="before_llm_completion"
+                    recovered = protect_current_sqlite_state(
+                        phase="before_llm_completion",
+                        checkpoint=True,
                     )
-                    if recovered_before_completion:
+                    if _record_sqlite_recovery(recovered, iter_span, heartbeat, "before_llm"):
                         continuation_notice = SQLITE_RECOVERY_NOTICE
-                        iter_span.set_attribute("sqlite.recovered", True)
-                        if heartbeat:
-                            heartbeat.touch("sqlite_recovered_before_llm")
                         continue
 
                     response, token_usage = _completion_with_failover(
@@ -7097,14 +7104,9 @@ def _run_agent_loop(
                         allow_streamed_content=prompt_allows_implied_send and not source_reconciliation_directive,
                         stale_prompt_checker=_is_orchestrator_prompt_stale,
                     )
-                    recovered_after_completion = validate_current_sqlite_state(
-                        phase="after_llm_completion"
-                    )
-                    if recovered_after_completion:
+                    recovered = protect_current_sqlite_state(phase="after_llm_completion")
+                    if _record_sqlite_recovery(recovered, iter_span, heartbeat, "after_llm"):
                         continuation_notice = SQLITE_RECOVERY_NOTICE
-                        iter_span.set_attribute("sqlite.recovered", True)
-                        if heartbeat:
-                            heartbeat.touch("sqlite_recovered_after_llm")
                         continue
                     if _is_orchestrator_prompt_stale():
                         raise OrchestratorPromptStale(

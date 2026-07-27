@@ -27,6 +27,8 @@ from django.core.files import File
 from django.core.files.storage import default_storage
 from opentelemetry import trace
 
+from api.utils.sqlite_files import create_validated_sqlite_snapshot, validate_sqlite_file
+
 from .sqlite_guardrails import clear_guarded_connection, open_guarded_sqlite_connection
 from .sqlite_recovery import (
     SQLITE_STATE_RECOVERED_ERROR,
@@ -35,10 +37,8 @@ from .sqlite_recovery import (
     SQLiteStateSession,
     SQLiteStateUnrecoverableError,
     SQLiteStateValidationError,
-    create_validated_sqlite_snapshot,
     reset_sqlite_state_session,
     set_sqlite_state_session,
-    validate_sqlite_file,
 )
 from . import sqlite_analysis, sqlite_digest
 
@@ -1112,7 +1112,8 @@ def _agent_sqlite_db_uncoordinated(agent_uuid: str):
                 db_path=db_path,
                 checkpoint_path=checkpoint_path,
             )
-            session.ensure_initialized()
+            if not restored:
+                session.initialize()
             session.checkpoint(phase="initial_restore")
             restore_span.set_attribute("sqlite.restored", restored)
             if os.path.exists(db_path):
@@ -1134,7 +1135,7 @@ def _agent_sqlite_db_uncoordinated(agent_uuid: str):
             except SQLiteStateError as exc:
                 recovery_count_before = session.recovery_count
                 try:
-                    session.validate_or_recover(phase="final_persistence_failure")
+                    session.protect(phase="final_persistence_failure")
                 except SQLiteStateError as recovery_exc:
                     _log_sqlite_persistence_error(
                         agent_uuid,

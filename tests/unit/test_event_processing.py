@@ -3911,11 +3911,8 @@ class PromptContextBuilderTests(TestCase):
             "api.agent.core.event_processing._completion_with_failover",
             side_effect=[(response, token_usage), (response, token_usage)],
         ) as mock_completion, patch(
-            "api.agent.core.event_processing.checkpoint_current_sqlite_state",
-            return_value=False,
-        ), patch(
-            "api.agent.core.event_processing.validate_current_sqlite_state",
-            side_effect=[True, False],
+            "api.agent.core.event_processing.protect_current_sqlite_state",
+            side_effect=[False, True, False, False],
         ):
             from api.agent.core import event_processing as ep
 

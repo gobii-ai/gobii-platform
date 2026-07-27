@@ -69,6 +69,13 @@ class SQLiteRecoveryFileTests(SimpleTestCase):
         with self.assertRaisesMessage(SQLiteStateValidationError, "header is invalid"):
             validate_sqlite_file(self.db_path)
 
+    def test_empty_database_is_rejected(self):
+        with open(self.db_path, "wb"):
+            pass
+
+        with self.assertRaisesMessage(SQLiteStateValidationError, "file is empty"):
+            validate_sqlite_file(self.db_path)
+
     def test_non_header_page_corruption_is_rejected_by_quick_check(self):
         conn = sqlite3.connect(self.db_path)
         try:
@@ -114,7 +121,7 @@ class SQLiteRecoveryFileTests(SimpleTestCase):
             conn.close()
         _overwrite_header_with_tls_record(self.db_path)
 
-        self.assertTrue(session.validate_or_recover(phase="after_llm"))
+        self.assertTrue(session.protect(phase="after_llm"))
         conn = sqlite3.connect(self.db_path)
         try:
             values = [
@@ -129,7 +136,62 @@ class SQLiteRecoveryFileTests(SimpleTestCase):
 
         _overwrite_header_with_tls_record(self.db_path)
         with self.assertRaises(SQLiteStateUnrecoverableError):
-            session.validate_or_recover(phase="repeated_failure")
+            session.protect(phase="repeated_failure")
+
+    def test_checkpoint_io_failure_does_not_roll_back_valid_state(self):
+        _create_test_database(self.db_path, ("first",))
+        session = SQLiteStateSession(
+            agent_uuid="agent-id",
+            db_path=self.db_path,
+            checkpoint_path=self.checkpoint_path,
+        )
+        session.checkpoint(phase="initial")
+
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.execute("INSERT INTO durable_state (value) VALUES ('second');")
+            conn.commit()
+        finally:
+            conn.close()
+
+        with patch(
+            "api.agent.tools.sqlite_recovery.create_validated_sqlite_snapshot",
+            side_effect=OSError("checkpoint unavailable"),
+        ), self.assertRaises(SQLiteStateUnrecoverableError):
+            session.protect(phase="before_llm", checkpoint=True)
+
+        conn = sqlite3.connect(self.db_path)
+        try:
+            values = [
+                row[0]
+                for row in conn.execute(
+                    "SELECT value FROM durable_state ORDER BY rowid;"
+                ).fetchall()
+            ]
+        finally:
+            conn.close()
+        self.assertEqual(values, ["first", "second"])
+        self.assertEqual(session.recovery_count, 0)
+
+    def test_empty_live_database_is_restored_instead_of_reinitialized(self):
+        _create_test_database(self.db_path, ("safe",))
+        session = SQLiteStateSession(
+            agent_uuid="agent-id",
+            db_path=self.db_path,
+            checkpoint_path=self.checkpoint_path,
+        )
+        session.checkpoint(phase="initial")
+
+        with open(self.db_path, "wb"):
+            pass
+
+        self.assertTrue(session.protect(phase="before_llm", checkpoint=True))
+        conn = sqlite3.connect(self.db_path)
+        try:
+            value = conn.execute("SELECT value FROM durable_state;").fetchone()[0]
+        finally:
+            conn.close()
+        self.assertEqual(value, "safe")
 
 
 @tag("batch_sqlite")
@@ -177,6 +239,18 @@ class SQLitePersistenceSafetyTests(SimpleTestCase):
             with self.assertRaises(SQLiteStateValidationError):
                 with _agent_sqlite_db_uncoordinated(self.agent_uuid):
                     self.fail("Corrupt restored state must not be exposed.")
+
+        self.assertEqual(self._stored_bytes(), original_bytes)
+
+    def test_empty_stored_database_is_not_replaced_with_fresh_state(self):
+        empty_archive = zstd.ZstdCompressor(level=3).compress(b"")
+        self.storage.save(self.storage_key, ContentFile(empty_archive))
+        original_bytes = self._stored_bytes()
+
+        with patch("api.agent.tools.sqlite_state.default_storage", self.storage):
+            with self.assertRaisesMessage(SQLiteStateValidationError, "file is empty"):
+                with _agent_sqlite_db_uncoordinated(self.agent_uuid):
+                    self.fail("Empty restored state must not be exposed.")
 
         self.assertEqual(self._stored_bytes(), original_bytes)
 
