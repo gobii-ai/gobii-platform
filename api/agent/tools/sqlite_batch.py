@@ -2452,8 +2452,8 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
                     "will_continue_work": {
                         "type": "boolean",
                         "description": (
-                            "REQUIRED. Set false when this call's SELECTs are sufficient to answer; set true only when "
-                            "a specific non-SQLite action remains. Never set true merely to query SQLite again."
+                            "REQUIRED. True for any read that may trigger another tool; queue reads are true. "
+                            "false when its SELECTs are enough to answer. Never true only to query SQLite again."
                         ),
                     },
                 },

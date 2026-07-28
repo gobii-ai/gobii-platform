@@ -24,6 +24,10 @@ from api.evals.scenarios.structured_peer_handoffs import (
     STRUCTURED_PEER_HANDOFF_SCENARIO_SLUGS,
     STRUCTURED_PEER_HANDOFF_SUITE_SLUG,
 )
+from api.evals.scenarios.scheduled_work_cycles import (
+    SCHEDULED_WORK_CYCLE_SCENARIO_SLUGS,
+    SCHEDULED_WORK_CYCLE_SUITE_SLUG,
+)
 from api.evals.scenarios.hallucinated_links import HALLUCINATED_LINK_SCENARIO_SLUGS, HALLUCINATED_LINKS_SUITE_SLUG
 from api.evals.scenarios.lasting_feedback import LASTING_FEEDBACK_SCENARIO_SLUGS, LASTING_FEEDBACK_SUITE_SLUG
 from api.evals.scenarios.agent_emotions import AGENT_PROACTIVE_EMOTION_SCENARIO_SLUGS
@@ -178,6 +182,11 @@ register_builtin_suites(
             slug=STRUCTURED_PEER_HANDOFF_SUITE_SLUG,
             description="Schema-free structured peer handoffs and prose-only coordination over the real harness.",
             scenario_slugs=STRUCTURED_PEER_HANDOFF_SCENARIO_SLUGS,
+        ),
+        EvalSuite(
+            slug=SCHEDULED_WORK_CYCLE_SUITE_SLUG,
+            description="Scheduled owned-work dispatch and quiet empty-cycle regressions over the real harness.",
+            scenario_slugs=SCHEDULED_WORK_CYCLE_SCENARIO_SLUGS,
         ),
         EvalSuite(
             slug=HALLUCINATED_LINKS_SUITE_SLUG,
