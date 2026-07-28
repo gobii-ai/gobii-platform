@@ -33,6 +33,7 @@ class MessageSQLiteRecord:
     latest_error_code: Optional[str]
     latest_error_message: Optional[str]
     is_hidden_in_chat: bool
+    structured_payload_json: Optional[str] = None
 
 
 def store_messages_for_prompt(records: Sequence[MessageSQLiteRecord]) -> None:
@@ -79,6 +80,7 @@ def store_messages_for_prompt(records: Sequence[MessageSQLiteRecord]) -> None:
                     latest_error_code,
                     latest_error_message,
                     1 if record.is_hidden_in_chat else 0,
+                    record.structured_payload_json,
                 )
             )
         if rows:
@@ -110,9 +112,10 @@ def store_messages_for_prompt(records: Sequence[MessageSQLiteRecord]) -> None:
                     latest_delivered_at,
                     latest_error_code,
                     latest_error_message,
-                    is_hidden_in_chat
+                    is_hidden_in_chat,
+                    structured_payload_json
                 ) VALUES (
-                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
                 )
                 """,
                 rows,
@@ -159,7 +162,8 @@ def _recreate_messages_table(conn) -> None:
             latest_delivered_at TEXT,
             latest_error_code TEXT,
             latest_error_message TEXT,
-            is_hidden_in_chat INTEGER
+            is_hidden_in_chat INTEGER,
+            structured_payload_json TEXT
         );
         """
     )

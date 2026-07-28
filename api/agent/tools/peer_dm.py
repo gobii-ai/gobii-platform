@@ -1,5 +1,4 @@
 """Peer agent direct messaging tool definition and execution."""
-from __future__ import annotations
 
 import logging
 import re
@@ -82,6 +81,9 @@ def get_send_agent_message_tool() -> Dict[str, Any]:
                 "Send only a necessary charter-boundary handoff, a requested owned contribution, or substantive progress "
                 "on work the peer asked this agent to own. Status, FYI, progress, and completion updates are read-only: "
                 "never thank, confirm, offer help, or reply. Never relay a shared-channel request to people already there. "
+                "When transmitting a record, two or more named fields, a list of records, identifiers, statuses, or other "
+                "machine-consumed data, put the exact data in structured_payload; message may add prose context but must "
+                "not be its only carrier. Use message alone for an ordinary prose question or explanation. "
                 "For repeats, send with will_continue_work=true first and await its result; rapid same-peer messages may be "
                 "debounced."
             ),
@@ -92,11 +94,25 @@ def get_send_agent_message_tool() -> Dict[str, Any]:
                         "type": "string",
                         "description": "UUID of the linked agent you want to contact.",
                     },
+                    "structured_payload": {
+                        "description": (
+                            "Optional schema-free JSON object or array for exact records, identifiers, statuses, lists, "
+                            "or machine-consumed data. Use this whenever the handoff contains two or more named fields or "
+                            "multiple records. For example, a record can be {\"id\": \"123\", \"state\": \"ready\"}. "
+                            "Arbitrary keys and nesting are allowed. Maximum serialized size is 64 KB. Use an attached "
+                            "file for larger datasets."
+                        ),
+                        "anyOf": [
+                            {"type": "object", "additionalProperties": True},
+                            {"type": "array"},
+                        ],
+                    },
                     "message": {
                         "type": "string",
                         "description": (
-                            "Requested owned information, a question, or a handoff the peer needs; never a reply to a "
-                            "status update. "
+                            "Optional prose context, question, or handoff the peer needs; never a reply to a status update. "
+                            "Either a nonblank message or a non-empty structured_payload is required. "
+                            "Do not use message as the sole carrier for a fielded record or record batch. "
                             "Use Markdown only; raw HTML is rejected. Use code formatting to show HTML literally."
                         ),
                     },
@@ -110,7 +126,7 @@ def get_send_agent_message_tool() -> Dict[str, Any]:
                         "description": "REQUIRED. true = you'll take another action, false = you're done. Omitting this stops you for good—choose wisely.",
                     },
                 },
-                "required": ["peer_agent_id", "message", "will_continue_work"],
+                "required": ["peer_agent_id", "will_continue_work"],
             },
         },
     }
@@ -120,31 +136,24 @@ def get_send_agent_message_tool() -> Dict[str, Any]:
 def execute_send_agent_message(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str, Any]:
     """Execute the peer messaging tool for the active agent."""
     peer_agent_id_raw = params.get("peer_agent_id")
-    message = params.get("message")
+    message = str(params.get("message") or "")
+    structured_payload = params.get("structured_payload")
     will_continue = _should_continue_work(params)
     attachment_paths = params.get("attachments")
 
-    if not peer_agent_id_raw or not message:
-        return {
-            "status": "error",
-            "message": "Parameters 'peer_agent_id' and 'message' are required.",
-        }
+    if not peer_agent_id_raw:
+        return {"status": "error", "message": "Parameter 'peer_agent_id' is required."}
 
-    message = substitute_variables_with_filespace(str(message), agent)
+    if message:
+        message = substitute_variables_with_filespace(message, agent)
 
     try:
         peer_agent_uuid = UUID(str(peer_agent_id_raw))
     except ValueError:
-        return {
-            "status": "error",
-            "message": "peer_agent_id must be a valid UUID.",
-        }
+        return {"status": "error", "message": "peer_agent_id must be a valid UUID."}
 
     if peer_agent_uuid == agent.id:
-        return {
-            "status": "error",
-            "message": "Cannot send a peer message to the same agent.",
-        }
+        return {"status": "error", "message": "Cannot send a peer message to the same agent."}
 
     try:
         peer_agent = PersistentAgent.objects.get(id=peer_agent_uuid)
@@ -154,20 +163,18 @@ def execute_send_agent_message(agent: PersistentAgent, params: Dict[str, Any]) -
             agent.id,
             peer_agent_uuid,
         )
-        return {
-            "status": "error",
-            "message": "Target agent not found or inaccessible.",
-        }
+        return {"status": "error", "message": "Target agent not found or inaccessible."}
 
     try:
         resolved_attachments = resolve_filespace_attachments(agent, attachment_paths)
     except AttachmentResolutionError as exc:
-        return {
-            "status": "error",
-            "message": str(exc),
-        }
+        return {"status": "error", "message": str(exc)}
 
-    if not resolved_attachments and _is_acknowledgment_only_peer_reply(str(message)):
+    if (
+        not resolved_attachments
+        and not structured_payload
+        and _is_acknowledgment_only_peer_reply(message)
+    ):
         latest_inbound = (
             PersistentAgentMessage.objects.filter(
                 owner_agent=agent,
@@ -188,7 +195,10 @@ def execute_send_agent_message(agent: PersistentAgent, params: Dict[str, Any]) -
     service = PeerMessagingService(agent, peer_agent)
 
     try:
-        result = service.send_message(message, attachments=resolved_attachments)
+        send_kwargs = {"attachments": resolved_attachments}
+        if structured_payload is not None:
+            send_kwargs["structured_payload"] = structured_payload
+        result = service.send_message(message, **send_kwargs)
     except PeerMessagingDuplicateError as exc:
         response = dict(exc.duplicate_response)
         return response

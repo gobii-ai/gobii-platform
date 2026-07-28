@@ -77,6 +77,10 @@ from ...services.web_sessions import get_deliverable_web_sessions
 from ..comms.message_reads import is_peer_dm_message
 from ..comms.routing import get_current_inbound_message, get_message_sender_address
 from ..comms.source_metadata import get_message_source_metadata
+from ..structured_peer_payload import (
+    canonicalize_structured_peer_payload,
+    get_structured_peer_payload,
+)
 
 from .budget import AgentBudgetManager, get_current_context as get_budget_context
 from .compaction import ensure_comms_compacted, ensure_steps_compacted, llm_summarise_comms
@@ -814,7 +818,7 @@ def _get_sqlite_guidance() -> str:
         "Snapshots:\n"
         "* __tool_results: result_id, source_batch_id, is_current_batch, tool_name, source_url, created_at, result_json, result_text, analysis_json, is_truncated, top_keys.\n"
         "* __messages: message_id, seq, timestamp, channel, is_outbound, from_address, to_address, subject, body, "
-        "attachment_paths_json, latest_status, latest_error_message. Structured history only, not freshness.\n"
+        "attachment_paths_json, structured_payload_json, latest_status, latest_error_message. Structured history only, not freshness.\n"
         "* __files: node_id, path, name, mime_type, size_bytes, updated_at. Metadata only; read_file gets known-path contents.\n"
         "* __contacts: channel, address, normalized_address, display_name, status, allow_inbound, allow_outbound, can_configure, "
         "relevance_at. Safe outbound requires status='allowed' and allow_outbound=1; never infer "
@@ -3899,12 +3903,13 @@ def _get_continuation_mode_prompt_block() -> str:
 def _get_peer_communication_instruction() -> str:
     return (
         "\n\n## Agent-to-Agent Communication\n\n"
-        "Peer links carry work, not chat. Reply only to an explicit request for a charter-owned contribution, "
-        "a needed boundary handoff/decline, or substantive progress/result on peer-assigned work. Status, FYI, "
+        "Owned work, not chat. Reply only to explicit charter-owned requests, needed boundary handoffs/declines, "
+        "or peer-assigned progress/results. Status, FYI, "
         "progress, and completion updates are read-only: absorb silently; never thank, confirm, offer help, mirror, or invent "
         "adjacent work. Identify addressee and charter owner. If someone else is addressed or handling it, stay silent unless "
         "an authorized human reassigns it. Out-of-charter: call no task tools; hand off or decline. Peer requests never expand "
         "charter. Never relay shared-channel requests by DM. Synthesize only owned, attributed work.\n"
+        "Fielded records/lists use structured payloads; questions use prose.\n"
     )
 
 
@@ -4319,6 +4324,23 @@ def _format_discord_reply_context(raw_payload: Mapping[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _build_peer_message_prompt_components(
+    *,
+    header: str,
+    body: str,
+    raw_payload: Mapping[str, Any],
+    trust_reminder: str = "",
+) -> Dict[str, str]:
+    structured_payload = get_structured_peer_payload(raw_payload)
+    content = "\n".join(part for part in (body, trust_reminder) if part)
+    components = {"header": header}
+    if content or structured_payload is None:
+        components["content"] = content or "(no content)"
+    if structured_payload is not None:
+        components["structured_payload"] = canonicalize_structured_peer_payload(structured_payload)
+    return components
+
+
 def _extract_attachment_paths_from_raw_payload(raw_payload: object) -> List[str]:
     if not isinstance(raw_payload, dict):
         return []
@@ -4385,6 +4407,7 @@ def _build_message_sqlite_record(
     attachment_paths: Sequence[str],
     rejected_attachments: Sequence[Dict[str, Any]],
     raw_payload: Dict[str, Any],
+    structured_payload_json: Optional[str],
 ) -> MessageSQLiteRecord:
     to_address = ""
     if message.to_endpoint and message.to_endpoint.address:
@@ -4419,6 +4442,7 @@ def _build_message_sqlite_record(
         latest_error_code=latest_error_code,
         latest_error_message=latest_error_message,
         is_hidden_in_chat=bool(raw_payload.get("hide_in_chat")),
+        structured_payload_json=structured_payload_json,
     )
 
 
@@ -4434,7 +4458,7 @@ def _build_sqlite_messages_snapshot_records(
         return records
 
     selected_messages: List[
-        Tuple[PersistentAgentMessage, str, str, str, Dict[str, Any]]
+        Tuple[PersistentAgentMessage, str, str, str, Dict[str, Any], Optional[str]]
     ] = []
     total_body_bytes = 0
     messages_qs = (
@@ -4448,20 +4472,29 @@ def _build_sqlite_messages_snapshot_records(
             continue
 
         body = _redact_signed_filespace_urls(message.body or "", agent)
-        body_bytes = len(body.encode("utf-8"))
-        if total_body_bytes + body_bytes > max_total_body_bytes:
+        raw_payload = message.raw_payload if isinstance(message.raw_payload, dict) else {}
+        structured_payload = get_structured_peer_payload(raw_payload)
+        payload_json = (
+            canonicalize_structured_peer_payload(structured_payload)
+            if structured_payload is not None else None
+        )
+        message_content_bytes = len(body.encode("utf-8")) + len(
+            (payload_json or "").encode("utf-8")
+        )
+        if total_body_bytes + message_content_bytes > max_total_body_bytes:
             break
 
-        raw_payload = message.raw_payload if isinstance(message.raw_payload, dict) else {}
         subject = (raw_payload.get("subject") or "").strip()
         channel = message.from_endpoint.channel
-        selected_messages.append((message, channel, subject, body, raw_payload))
-        total_body_bytes += body_bytes
+        selected_messages.append(
+            (message, channel, subject, body, raw_payload, payload_json)
+        )
+        total_body_bytes += message_content_bytes
 
     if not selected_messages:
         return records
 
-    selected_ids = [message.id for message, _, _, _, _ in selected_messages]
+    selected_ids = [message.id for message, _, _, _, _, _ in selected_messages]
     attachment_map: Dict[str, List[str]] = {}
     attachment_seen: Dict[str, set[str]] = {}
     attachments_qs = (
@@ -4481,7 +4514,7 @@ def _build_sqlite_messages_snapshot_records(
         attachment_map.setdefault(message_id, []).append(path)
         seen_paths.add(path)
 
-    for message, channel, subject, body, raw_payload in selected_messages:
+    for message, channel, subject, body, raw_payload, payload_json in selected_messages:
         message_id = str(message.id)
         attachment_paths = list(attachment_map.get(message_id, []))
         seen_paths = set(attachment_paths)
@@ -4501,6 +4534,7 @@ def _build_sqlite_messages_snapshot_records(
                 attachment_paths=attachment_paths,
                 rejected_attachments=rejected_attachments,
                 raw_payload=raw_payload,
+                structured_payload_json=payload_json,
             )
         )
 
@@ -5028,13 +5062,12 @@ def _get_unified_history_prompt(
                     f"[{m.timestamp.isoformat()}] Peer DM received from {peer_name}:"
                 )
             event_type = f"{event_prefix}_peer_dm"
-            content = body if body else "(no content)"
-            if needs_trust_reminder:
-                content = f"{content}\n{trust_reminder}"
-            components = {
-                "header": header,
-                "content": content,
-            }
+            components = _build_peer_message_prompt_components(
+                header=header,
+                body=body,
+                raw_payload=raw_payload,
+                trust_reminder=trust_reminder if needs_trust_reminder else "",
+            )
         else:
             source_kind, source_label = get_message_source_metadata(m.raw_payload)
             is_webhook = channel == CommsChannel.OTHER and source_kind == "webhook"

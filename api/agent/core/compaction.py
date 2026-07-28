@@ -26,12 +26,18 @@ from opentelemetry import trace
 from .llm_config import get_summarization_llm_config
 from .llm_utils import run_completion
 from .token_usage import log_agent_completion, set_usage_span_attributes
+from ..structured_peer_payload import (
+    StructuredPeerPayload,
+    canonicalize_structured_peer_payload,
+    get_structured_peer_payload,
+)
 
 # --------------------------------------------------------------------------- #
 #  Tunables – can be overridden via Django settings for easy experimentation  #
 # --------------------------------------------------------------------------- #
 RAW_MSG_LIMIT: int = getattr(settings, "PA_RAW_MSG_LIMIT", 20)
 COMMS_COMPACTION_TAIL: int = max(0, getattr(settings, "PA_COMMS_COMPACTION_TAIL", 5))
+COMMS_COMPACTION_COMPONENT_CHAR_LIMIT = 4000
 
 # Tracer shared across backend codebase
 tracer = trace.get_tracer("gobii.utils")
@@ -206,6 +212,32 @@ def _default_summarise(
         + (f"[Called for {safety_identifier}]" if safety_identifier else "")
     )
 
+
+def _format_structured_payload_for_compaction(payload: StructuredPeerPayload) -> str:
+    serialized = canonicalize_structured_peer_payload(payload)
+    if len(serialized) <= COMMS_COMPACTION_COMPONENT_CHAR_LIMIT:
+        return serialized
+
+    preview = {
+        "_compaction_truncated": True,
+        "_original_char_count": len(serialized),
+        "_json_prefix": "",
+    }
+    low, high = 0, COMMS_COMPACTION_COMPONENT_CHAR_LIMIT
+    while low < high:
+        midpoint = (low + high + 1) // 2
+        preview["_json_prefix"] = serialized[:midpoint]
+        if (
+            len(canonicalize_structured_peer_payload(preview))
+            <= COMMS_COMPACTION_COMPONENT_CHAR_LIMIT
+        ):
+            low = midpoint
+        else:
+            high = midpoint - 1
+    preview["_json_prefix"] = serialized[:low]
+    return canonicalize_structured_peer_payload(preview)
+
+
 # --------------------------------------------------------------------------- #
 #  Optional LiteLLM-powered summariser                                          
 # --------------------------------------------------------------------------- #
@@ -238,9 +270,15 @@ def llm_summarise_comms(
     lines: list[str] = []
     for msg in messages:
         role = "Assistant" if msg.is_outbound else "User"
-        # Truncate each message body to avoid huge token usage (4k chars cap).
-        body_preview = msg.body[:4000]
-        lines.append(f"{role}: {body_preview}")
+        content_parts = [
+            (msg.body or "").strip()[:COMMS_COMPACTION_COMPONENT_CHAR_LIMIT]
+        ]
+        payload = get_structured_peer_payload(msg.raw_payload)
+        if payload is not None:
+            payload_preview = _format_structured_payload_for_compaction(payload)
+            content_parts.append(f"Structured payload:\n{payload_preview}")
+        content = "\n".join(part for part in content_parts if part)
+        lines.append(f"{role}: {content}")
 
     new_msgs_block = "\n".join(lines)
 

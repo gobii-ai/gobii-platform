@@ -859,6 +859,40 @@ class PeerMessageToolHandlingTests(SimpleTestCase):
         self.assertTrue(result["auto_sleep_ok"])
         service_cls.assert_not_called()
 
+    def test_structured_payload_prevents_acknowledgment_suppression(self):
+        agent = SimpleNamespace(id=uuid4())
+        peer_agent = SimpleNamespace(id=uuid4())
+
+        with patch(
+            "api.agent.tools.peer_dm.PersistentAgent.objects.get",
+            return_value=peer_agent,
+        ), patch(
+            "api.agent.tools.peer_dm.resolve_filespace_attachments",
+            return_value=[],
+        ), patch("api.agent.tools.peer_dm.PeerMessagingService") as service_cls:
+            service_cls.return_value.send_message.return_value = SimpleNamespace(
+                status="ok",
+                message="Peer message sent.",
+                remaining_credits=10,
+                window_reset_at=None,
+            )
+            result = execute_send_agent_message(
+                agent,
+                {
+                    "peer_agent_id": str(peer_agent.id),
+                    "message": "Received.",
+                    "structured_payload": {"record_id": "rec-17", "status": "ready"},
+                    "will_continue_work": False,
+                },
+            )
+
+        self.assertEqual(result["status"], "ok")
+        service_cls.return_value.send_message.assert_called_once_with(
+            "Received.",
+            structured_payload={"record_id": "rec-17", "status": "ready"},
+            attachments=[],
+        )
+
     def test_mcp_session_death_errors_are_retryable(self):
         self.assertTrue(_infer_retryable_from_text("Connection closed"))
         self.assertTrue(_infer_retryable_from_text("Event loop is closed"))

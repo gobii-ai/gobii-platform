@@ -31,6 +31,8 @@ export type WebhookMeta = {
   payload?: unknown
 }
 
+export type StructuredPeerPayload = Record<string, unknown> | unknown[]
+
 export type AgentMessageFeedback = 'up' | 'down'
 
 export type AgentMessage = {
@@ -62,6 +64,7 @@ export type AgentMessage = {
   sourceLabel?: string | null
   channelLabel?: string | null
   webhookMeta?: WebhookMeta | null
+  structuredPayload?: StructuredPeerPayload | null
   viewerFeedback?: AgentMessageFeedback | null
   deliveryStatus?: 'pending_approval' | 'queued' | 'sending' | 'sent' | 'delivered' | 'failed'
   outboxReview?: {

@@ -91,6 +91,11 @@ from .responsibility_boundaries import (
     RESPONSIBILITY_BOUNDARY_SUITE_SLUG,
     ResponsibilityBoundaryScenario,
 )
+from .structured_peer_handoffs import (
+    STRUCTURED_PEER_HANDOFF_SCENARIO_SLUGS,
+    STRUCTURED_PEER_HANDOFF_SUITE_SLUG,
+    StructuredPeerHandoffScenario,
+)
 from .hallucinated_links import (
     HALLUCINATED_LINK_SCENARIO_SLUGS,
     HALLUCINATED_LINKS_SUITE_SLUG,

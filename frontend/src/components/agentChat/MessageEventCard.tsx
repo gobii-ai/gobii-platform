@@ -25,6 +25,28 @@ function getChannelLabel(raw?: string) {
   return CHANNEL_LABELS[normalized] || raw.replace(/_/g, ' ').replace(/^\w/, (c) => c.toUpperCase())
 }
 
+function JsonTree({
+  value,
+  collapsed = 1,
+}: {
+  value: object
+  collapsed?: boolean | number
+}) {
+  return (
+    <ReactJsonView
+      src={value}
+      name={false}
+      collapsed={collapsed}
+      displayDataTypes={false}
+      displayObjectSize={false}
+      enableClipboard={false}
+      iconStyle="triangle"
+      sortKeys
+      style={{ backgroundColor: 'transparent', fontSize: '0.8125rem', lineHeight: 1.5 }}
+    />
+  )
+}
+
 type MessageEventCardProps = {
   eventCursor: string
   agentId?: string | null
@@ -94,6 +116,7 @@ export const MessageEventCard = memo(function MessageEventCard({
   const isWebhook = sourceKind === 'webhook'
   const hasPeerMetadata = Boolean(message.peerAgent || message.peerLinkId)
   const isPeer = Boolean(message.isPeer || hasPeerMetadata)
+  const structuredPayload = isPeer ? message.structuredPayload : null
 
   const selfName = message.selfAgentName || agentFirstName || 'Agent'
   const peerName = message.peerAgent?.name || 'Linked agent'
@@ -247,6 +270,9 @@ export const MessageEventCard = memo(function MessageEventCard({
     message.bodyText?.trim() || (clipboardHtml ? plainTextFromHtml(clipboardHtml) : '')
   ), [clipboardHtml, message.bodyText])
   const copyDisabled = !clipboardPlainText && !clipboardHtml
+  const shouldRenderMessageContent = Boolean(
+    message.bodyText?.trim() || message.bodyHtml?.trim() || message.replyTo || !structuredPayload,
+  )
 
   const handleCopyMessage = useCallback(async () => {
     if (copyDisabled) {
@@ -357,19 +383,9 @@ export const MessageEventCard = memo(function MessageEventCard({
         ) : null}
         {shouldRenderWebhookJson && webhookJsonSrc ? (
           <div className="chat-content overflow-hidden rounded-xl border border-slate-200/80 bg-white/80 p-3">
-            <ReactJsonView
-              src={webhookJsonSrc}
-              name={false}
-              collapsed={1}
-              displayDataTypes={false}
-              displayObjectSize={false}
-              enableClipboard={false}
-              iconStyle="triangle"
-              sortKeys
-              style={{ backgroundColor: 'transparent', fontSize: '0.8125rem', lineHeight: 1.5 }}
-            />
+            <JsonTree value={webhookJsonSrc} />
           </div>
-        ) : (
+        ) : shouldRenderMessageContent ? (
           <div
             className={`chat-content prose prose-sm max-w-none leading-relaxed ${contentTone}`}
           >
@@ -391,7 +407,13 @@ export const MessageEventCard = memo(function MessageEventCard({
               onLinkClick={onMessageLinkClick}
             />
           </div>
-        )}
+        ) : null}
+        {structuredPayload ? (
+          <div className="chat-content mt-3 overflow-auto border-l-2 border-indigo-200 pl-3">
+            <p className="mb-1 text-xs font-semibold text-indigo-700">Data</p>
+            <JsonTree value={structuredPayload} collapsed />
+          </div>
+        ) : null}
         {message.attachments && message.attachments.length > 0 ? (
           <div className="chat-attachments">
             {message.attachments.map((attachment) => {

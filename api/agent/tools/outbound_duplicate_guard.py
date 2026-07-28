@@ -24,10 +24,17 @@ from ...evals.execution import get_current_eval_routing_profile
 
 import litellm
 
+from api.agent.structured_peer_payload import (
+    canonicalize_structured_peer_payload,
+    get_structured_peer_payload,
+)
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_SIMILARITY_THRESHOLD = DEFAULT_DUPLICATE_SIMILARITY_THRESHOLD
 DEFAULT_DUPLICATE_LOOKBACK = timedelta(hours=1)
+# Distinguishes an omitted payload comparison from an explicit payload value.
+_NO_STRUCTURED_PAYLOAD = object()
 
 
 @dataclass
@@ -303,6 +310,7 @@ def detect_recent_duplicate_message(
         conversation_id: Optional[UUID] = None,
         similarity_threshold: Optional[float] = None,
         exact_only: bool = False,
+        structured_payload: Any = _NO_STRUCTURED_PAYLOAD,
 ) -> Optional[DuplicateDetectionResult]:
     """
     Check whether the pending outbound message is a recent duplicate.
@@ -312,7 +320,7 @@ def detect_recent_duplicate_message(
     2. Embeddings-based cosine similarity (with database-configured tiers) if no exact match is found.
        When no embeddings are available, the check falls back to a Levenshtein ratio.
     """
-    if not body:
+    if not body and structured_payload is _NO_STRUCTURED_PAYLOAD:
         return None
 
     qs = PersistentAgentMessage.objects.filter(
@@ -335,6 +343,17 @@ def detect_recent_duplicate_message(
         return None
 
     previous_body = (previous_message.body or "").strip()
+
+    if structured_payload is not _NO_STRUCTURED_PAYLOAD:
+        previous_payload = get_structured_peer_payload(previous_message.raw_payload)
+        if (
+            previous_body == current_body
+            and canonicalize_structured_peer_payload(previous_payload)
+            == canonicalize_structured_peer_payload(structured_payload)
+        ):
+            return DuplicateDetectionResult(reason="exact", previous_message=previous_message)
+        return None
+
     if not previous_body:
         return None
 
