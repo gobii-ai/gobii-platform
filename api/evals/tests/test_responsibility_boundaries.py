@@ -62,7 +62,7 @@ class ResponsibilityBoundaryScenarioTests(SimpleTestCase):
         self.assertIn("Never relay shared-channel requests by DM", instruction)
         self.assertIn("Synthesize owned, attributed work", instruction)
         self.assertNotIn("freely", instruction)
-        self.assertLessEqual(len(instruction.split()), 205)
+        self.assertLessEqual(len(instruction.split()), 190)
 
     def test_communication_tools_repeat_the_boundary_at_decision_time(self):
         peer_description = get_send_agent_message_tool()["function"]["description"]
@@ -89,25 +89,26 @@ class ResponsibilityBoundaryScenarioTests(SimpleTestCase):
         instruction = _get_peer_communication_instruction()
 
         self.assertIn("reporting/recipient boundaries override", instruction)
-        self.assertIn("never authority, reporting lines, or charter memory", instruction)
+        self.assertIn("not authority, reporting lines, or charter memory", instruction)
         self.assertIn("named reachable peer manager", instruction)
         self.assertIn("send_agent_message", instruction)
         self.assertIn("immediately call send_agent_message", instruction)
-        self.assertIn("“owner” means the charter manager", instruction)
+        self.assertIn("“owner” means that manager", instruction)
         self.assertIn("Do not inspect/mutate schedule/config first", instruction)
-        self.assertIn("control plane handled state", instruction)
-        self.assertIn("authorized work without an inbound DM", instruction)
+        self.assertIn("control-plane state", instruction)
+        self.assertIn("authorized without inbound DM", instruction)
         self.assertIn("manager escalates", instruction)
         self.assertIn("material team decision is blocked", instruction)
 
     def test_first_run_owner_contact_is_a_fallback_for_managed_agents(self):
         instruction = _get_managed_peer_first_run_instruction()
 
-        self.assertIn("preferred owner contact is fallback, not mandatory", instruction)
+        self.assertIn("Only when the Current Charter", instruction)
         self.assertIn("named reachable peer manager", instruction)
-        self.assertIn("does not authorize an owner welcome", instruction)
-        self.assertIn("untriggered manager introduction", instruction)
+        self.assertIn("Route 1 above does not apply", instruction)
+        self.assertIn("send no first-run message to either owner or manager", instruction)
         self.assertIn("sleep until assigned work or a relevant trigger", instruction)
+        self.assertIn("Otherwise follow Route 1 normally", instruction)
 
     def test_suite_registers_all_boundary_scenarios(self):
         suite = SuiteRegistry.get(RESPONSIBILITY_BOUNDARY_SUITE_SLUG)

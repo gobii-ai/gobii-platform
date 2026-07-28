@@ -1525,6 +1525,7 @@ def _render_prompt_context_once(
 
     prompt = Prompt(token_estimator=token_estimator)
     config_authority = _ConfigAuthorityResolver(agent)
+    has_peer_links = _has_enabled_peer_links(agent)
 
     # System instruction (highest priority, never shrinks)
     with tracer.start_as_current_span("Prompt System Sections"):
@@ -1542,6 +1543,7 @@ def _render_prompt_context_once(
             implied_send_context=implied_send_context,
             continuation_notice=continuation_notice,
             system_directive_block=system_directive_block,
+            has_peer_links=has_peer_links,
         )
         system_prompt = _append_agent_owner_custom_instructions(system_prompt, agent)
 
@@ -1749,6 +1751,7 @@ def _render_prompt_context_once(
         run_cache=run_cache,
         named_model_tables=named_model_tables,
         named_model_columns=named_model_columns,
+        has_peer_links=has_peer_links,
     )
 
     variable_group = prompt.group("variable", weight=4)
@@ -1908,9 +1911,6 @@ def _render_prompt_context_once(
             weight=1,
         )
 
-    has_peer_links = AgentPeerLink.objects.filter(is_enabled=True).filter(
-        Q(agent_a=agent) | Q(agent_b=agent)
-    ).exists()
     if has_peer_links:
         critical_group.section_text(
             "peer_responsibility_boundary",
@@ -3911,23 +3911,27 @@ def _get_peer_communication_instruction() -> str:
         "charter. Never relay shared-channel requests by DM. Synthesize owned, attributed work.\n"
         "Fielded records/lists use structured payloads; questions use prose.\n\n"
         "Charter reporting/recipient boundaries override generic lifecycle/schedule “owner.” Schedules add timing/work, "
-        "never authority, reporting lines, or charter memory; never persist fired actions/recipients. If the charter "
-        "routes routine coordination to a named reachable peer manager, send neither a first-run owner welcome nor an "
-        "untriggered manager introduction. On its scheduled check-in, immediately call send_agent_message to that "
-        "manager with one concise timing/cadence question. This is authorized work without an inbound DM; “owner” means "
-        "the charter manager. Do not inspect/mutate schedule/config first: the trigger supplies the task and the control "
-        "plane handled state. Use the account owner only if the charter requires it, the manager escalates, or a material "
-        "team decision is blocked.\n"
+        "not authority, reporting lines, or charter memory; never persist fired actions/recipients. If routine "
+        "coordination belongs to a named reachable peer manager, route a scheduled check-in there: immediately call "
+        "send_agent_message with one concise timing/cadence question. It is authorized without inbound DM; “owner” "
+        "means that manager. Do not inspect/mutate schedule/config first; the trigger supplies the task and control-plane "
+        "state. Contact the account owner only if the charter requires it, the manager escalates, or a material team "
+        "decision is blocked.\n"
     )
 
 
 def _get_managed_peer_first_run_instruction() -> str:
     return (
-        "FIRST-RUN RECIPIENT PRECEDENCE: The preferred owner contact is fallback, not mandatory. If the Current "
-        "Charter routes routine coordination to a named reachable peer manager, Route 1 above does not authorize an "
-        "owner welcome. Do not send an untriggered manager introduction either; sleep until assigned work or a "
-        "relevant trigger arrives."
+        "FIRST-RUN RECIPIENT PRECEDENCE: Only when the Current Charter routes routine coordination to a named reachable "
+        "peer manager, Route 1 above does not apply: send no first-run message to either owner or manager; sleep until "
+        "assigned work or a relevant trigger. Otherwise follow Route 1 normally."
     )
+
+
+def _has_enabled_peer_links(agent: PersistentAgent) -> bool:
+    return AgentPeerLink.objects.filter(is_enabled=True).filter(
+        Q(agent_a=agent) | Q(agent_b=agent)
+    ).exists()
 
 
 def _get_system_instruction(
@@ -3938,8 +3942,12 @@ def _get_system_instruction(
     implied_send_context: dict | None = None,
     continuation_notice: str | None = None,
     system_directive_block: str = "",
+    has_peer_links: bool | None = None,
 ) -> str:
     """Return the static system instruction prompt for the agent."""
+
+    if has_peer_links is None:
+        has_peer_links = is_first_run and _has_enabled_peer_links(agent)
 
     implied_send_active = implied_send_context is not None
     continuation_mode_block = "" if is_first_run else _get_continuation_mode_prompt_block()
@@ -4231,9 +4239,7 @@ def _get_system_instruction(
                 "\n\n"
                 + _get_first_run_welcome_message_instruction(welcome_target=welcome_target)
             )
-            if AgentPeerLink.objects.filter(is_enabled=True).filter(
-                Q(agent_a=agent) | Q(agent_b=agent)
-            ).exists():
+            if has_peer_links:
                 base_prompt += "\n\n" + _get_managed_peer_first_run_instruction()
 
     return base_prompt
@@ -4623,6 +4629,7 @@ def _get_unified_history_prompt(
     run_cache: PromptRunCache | None = None,
     named_model_tables: Set[str] | None = None,
     named_model_columns: Mapping[str, Set[str]] | None = None,
+    has_peer_links: bool = False,
 ) -> Tuple[Set[str], bool, Tuple[str, ...]]:
     """Add summaries + interleaved recent steps & messages to the provided promptree group."""
     epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
@@ -4667,11 +4674,6 @@ def _get_unified_history_prompt(
         )
 
     # Add trust context reminder when agent has multiple low-permission contacts or peer links
-    has_peer_links = AgentPeerLink.objects.filter(
-        is_enabled=True
-    ).filter(
-        Q(agent_a=agent) | Q(agent_b=agent)
-    ).exists()
     low_perm_contact_count = CommsAllowlistEntry.objects.filter(
         agent=agent, is_active=True, can_configure=False
     ).count()
