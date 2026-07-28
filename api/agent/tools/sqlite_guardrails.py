@@ -1,6 +1,7 @@
 """SQLite guardrails for agent-managed databases."""
 
 import csv
+import html
 import logging
 import math
 import re
@@ -14,6 +15,17 @@ from ..core.csv_utils import build_csv_sample, detect_csv_dialect, normalize_csv
 logger = logging.getLogger(__name__)
 
 _PATCH_TEXT_ERROR: ContextVar[Optional[str]] = ContextVar("sqlite_patch_text_error", default=None)
+_PATCH_ESCAPE_RE = re.compile(r"\\(?:[nrt'\"\\]|u[0-9a-fA-F]{4}|U[0-9a-fA-F]{8})")
+_PATCH_CANONICAL_TOKEN_RE = re.compile(
+    r"\r\n|&(?:#[0-9]+|#[xX][0-9a-fA-F]+|[A-Za-z][A-Za-z0-9]+);|.",
+    re.DOTALL,
+)
+_PATCH_EQUIVALENT_CHARACTERS = str.maketrans({
+    "\u2018": "'",
+    "\u2019": "'",
+    "\u201c": '"',
+    "\u201d": '"',
+})
 
 
 # ---------------------------------------------------------------------------
@@ -30,8 +42,32 @@ def _regexp(pattern: str, string: Optional[str]) -> bool:
         return False
 
 
+def _decode_patch_escapes(value: str) -> str:
+    def replace(match: re.Match) -> str:
+        token = match.group(0)[1:]
+        simple = {"n": "\n", "r": "\r", "t": "\t", "'": "'", '"': '"', "\\": "\\"}
+        if token in simple:
+            return simple[token]
+        codepoint = int(token[1:], 16)
+        return match.group(0) if 0xD800 <= codepoint <= 0xDFFF or codepoint > 0x10FFFF else chr(codepoint)
+
+    return _PATCH_ESCAPE_RE.sub(replace, value)
+
+
+def _canonical_patch_text(value: str) -> tuple[str, list[tuple[int, int]]]:
+    canonical: list[str] = []
+    source_spans: list[tuple[int, int]] = []
+    for match in _PATCH_CANONICAL_TOKEN_RE.finditer(value):
+        raw = match.group(0)
+        token = "\n" if raw in {"\r", "\r\n"} else html.unescape(raw)
+        token = token.translate(_PATCH_EQUIVALENT_CHARACTERS)
+        canonical.extend(token)
+        source_spans.extend([(match.start(), match.end())] * len(token))
+    return "".join(canonical), source_spans
+
+
 def _patch_text(value: Optional[str], old: Optional[str], new: Optional[str]) -> str:
-    """Apply one unambiguous replacement, or append once when old is empty."""
+    """Apply one unambiguous representation-tolerant replacement, or append once."""
     text = value or ""
     replacement = (new or "").strip()
     if old == "":
@@ -39,7 +75,23 @@ def _patch_text(value: Optional[str], old: Optional[str], new: Optional[str]) ->
             return text
         return "\n".join(filter(None, (text.rstrip(), replacement)))
 
-    match_count = text.count(old or "")
+    if old is not None:
+        raw_match_count = text.count(old)
+        target = old
+        if raw_match_count == 0:
+            target = _decode_patch_escapes(old)
+            replacement = _decode_patch_escapes(replacement)
+        canonical_text, source_spans = _canonical_patch_text(text)
+        canonical_target, _ = _canonical_patch_text(target)
+        match_count = canonical_text.count(canonical_target) if canonical_target else 0
+        if match_count == 1:
+            canonical_start = canonical_text.index(canonical_target)
+            canonical_end = canonical_start + len(canonical_target)
+            source_start = source_spans[canonical_start][0]
+            source_end = source_spans[canonical_end - 1][1]
+    else:
+        match_count = 0
+
     if old is None or match_count != 1:
         message = "patch_text requires old='' for append or a non-null exact replacement target."
         if old is not None:
@@ -50,7 +102,11 @@ def _patch_text(value: Optional[str], old: Optional[str], new: Optional[str]) ->
             )
         _PATCH_TEXT_ERROR.set(message)
         raise sqlite3.OperationalError(message)
-    return text.replace(old, replacement, 1)
+
+    matched_source = text[source_start:source_end]
+    if "\r\n" in matched_source and "\r\n" not in replacement:
+        replacement = replacement.replace("\r\n", "\n").replace("\n", "\r\n")
+    return text[:source_start] + replacement + text[source_end:]
 
 
 def consume_patch_text_error() -> Optional[str]:

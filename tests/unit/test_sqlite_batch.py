@@ -24,6 +24,7 @@ from api.agent.tools.sqlite_batch import (
     _fix_dialect_functions,
     _fix_dialect_syntax,
     _fix_escaped_quotes,
+    _fix_agent_config_patch_where,
     _get_error_hint,
     _fix_unescaped_single_quote_runs,
     _fix_json_key_vs_alias,
@@ -417,6 +418,74 @@ class SqliteBatchCoreTests(SqliteBatchTestCase):
         self.assertEqual(ambiguous.get("status"), "error")
         self.assertIn("matched 2 times", ambiguous.get("message", ""))
 
+    def test_patch_text_reports_exact_contract_for_wrong_argument_count(self):
+        with self._with_temp_db():
+            out = execute_sqlite_batch(
+                self.agent,
+                {
+                    "sql": "SELECT patch_text('text', 'old', 'new', 'extra')",
+                    "will_continue_work": True,
+                },
+            )
+
+        self.assertEqual(out.get("status"), "error")
+        self.assertIn(
+            "patch_text takes exactly 3 arguments: patch_text(text, old, new)",
+            out.get("message", ""),
+        )
+        self.assertIn("with `bindings`", out.get("message", ""))
+
+    def test_patch_text_rejects_postgres_escape_string_with_sqlite_hint(self):
+        with self._with_temp_db() as (db_path, _token, _tmp):
+            with sqlite3.connect(db_path) as conn:
+                conn.execute(
+                    "CREATE TABLE __agent_config(id INTEGER PRIMARY KEY, charter TEXT)"
+                )
+                conn.execute(
+                    "INSERT INTO __agent_config(id, charter) VALUES (1, 'Existing charter')"
+                )
+            out = execute_sqlite_batch(
+                self.agent,
+                {
+                    "sql": (
+                        "UPDATE __agent_config SET charter=patch_text("
+                        "charter, '', E'New durable rule') WHERE id=1"
+                    ),
+                    "will_continue_work": True,
+                },
+            )
+            with sqlite3.connect(db_path) as conn:
+                charter = conn.execute(
+                    "SELECT charter FROM __agent_config WHERE id=1"
+                ).fetchone()[0]
+
+        self.assertEqual(out.get("status"), "error")
+        self.assertIn(
+            "SQLite does not support PostgreSQL E'...' string literals",
+            out.get("message", ""),
+        )
+        self.assertIn("named `bindings` parameter", out.get("message", ""))
+        self.assertEqual(charter, "Existing charter")
+
+    def test_postgres_escape_hint_ignores_literals_and_comments(self):
+        queries = (
+            "SELECT missing_column, 'Vitamin E' AS label",
+            "SELECT missing_column -- avoid E'...' syntax",
+        )
+        for sql in queries:
+            with self.subTest(sql=sql), self._with_temp_db():
+                out = execute_sqlite_batch(
+                    self.agent,
+                    {"sql": sql, "will_continue_work": True},
+                )
+
+            self.assertEqual(out.get("status"), "error")
+            self.assertIn("no such column: missing_column", out.get("message", ""))
+            self.assertNotIn(
+                "SQLite does not support PostgreSQL",
+                out.get("message", ""),
+            )
+
     def test_config_patch_preview_is_blocked_before_batch_execution(self):
         with self._with_temp_db() as (db_path, _token, _tmp):
             out = execute_sqlite_batch(
@@ -439,6 +508,63 @@ class SqliteBatchCoreTests(SqliteBatchTestCase):
         self.assertIs(out.get("retryable"), True)
         self.assertIn("UPDATE __agent_config SET charter=patch_text", out.get("message", ""))
         self.assertIsNone(table)
+
+    def test_config_patch_preview_after_persisted_patch_does_not_block_batch(self):
+        with self._with_temp_db() as (db_path, _token, _tmp):
+            with sqlite3.connect(db_path) as conn:
+                conn.execute(
+                    "CREATE TABLE __agent_config(id INTEGER PRIMARY KEY, charter TEXT)"
+                )
+                conn.execute(
+                    "INSERT INTO __agent_config(id, charter) VALUES (1, 'Old charter')"
+                )
+            out = execute_sqlite_batch(
+                self.agent,
+                {
+                    "sql": (
+                        "UPDATE __agent_config SET charter=patch_text("
+                        "charter, 'Old charter', 'New charter') WHERE id=1;"
+                        "SELECT patch_text(charter, '', '') FROM __agent_config WHERE id=1"
+                    ),
+                    "will_continue_work": True,
+                },
+            )
+            with sqlite3.connect(db_path) as conn:
+                charter = conn.execute(
+                    "SELECT charter FROM __agent_config WHERE id=1"
+                ).fetchone()[0]
+
+        self.assertEqual(out.get("status"), "ok", out.get("message"))
+        self.assertEqual(charter, "New charter")
+
+    def test_agent_config_patch_relies_on_patch_target_instead_of_redundant_where(self):
+        sql = (
+            "UPDATE __agent_config SET charter=patch_text("
+            "charter, 'Gobii''s CRM', 'Gobii''s CRM and renewals') "
+            "WHERE id=1 AND charter LIKE '%Gobii''s CRM%' RETURNING charter"
+        )
+        fixed, correction = _fix_agent_config_patch_where(sql)
+
+        self.assertIn("WHERE id=1 RETURNING charter", fixed)
+        self.assertNotIn("charter LIKE", fixed)
+        self.assertIn("redundant", correction)
+
+    def test_agent_config_patch_does_not_retarget_another_config_row(self):
+        sql = (
+            "UPDATE __agent_config SET charter=patch_text("
+            "charter, 'Old', 'New') WHERE id=2 AND charter LIKE '%Old%'"
+        )
+
+        self.assertEqual(_fix_agent_config_patch_where(sql), (sql, None))
+
+    def test_agent_config_patch_does_not_use_nested_id_as_config_guard(self):
+        sql = (
+            "UPDATE __agent_config SET charter=patch_text("
+            "charter, 'Old', 'New') WHERE charter IN "
+            "(SELECT charter FROM __agent_config WHERE id=1)"
+        )
+
+        self.assertEqual(_fix_agent_config_patch_where(sql), (sql, None))
 
     def test_non_config_patch_text_preview_remains_available(self):
         with self._with_temp_db():

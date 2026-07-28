@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 import sqlparse
 from sqlparse import tokens as sql_tokens
-from sqlparse.sql import Statement
+from sqlparse.sql import Statement, Where
 from .sqlite_guardrails import (
     clear_guarded_connection,
     consume_patch_text_error,
@@ -60,7 +60,18 @@ DEFAULT_SQLITE_BATCH_KILL_GRACE_SECONDS = 1.0
 CONFIG_PATCH_NOT_PERSISTED_ERROR = "config_patch_not_persisted"
 CONFIG_PATCH_NOT_PERSISTED_MESSAGE = (
     "Query not executed: SELECT patch_text(...) only computes a value and does not persist agent config. "
-    "Use UPDATE __agent_config SET charter=patch_text(charter, old, new) WHERE id=1."
+    "Use UPDATE __agent_config SET charter=patch_text(charter, :old_text, :new_text) WHERE id=1 "
+    "with `bindings`; set old_text='' to append."
+)
+PATCH_TEXT_USAGE_HINT = (
+    " FIX: patch_text takes exactly 3 arguments: patch_text(text, old, new). "
+    "For Charter updates use UPDATE __agent_config SET "
+    "charter=patch_text(charter, :old_text, :new_text) WHERE id=1 with `bindings`; "
+    "set old_text='' to append."
+)
+SQLITE_ESCAPE_STRING_HINT = (
+    " FIX: SQLite does not support PostgreSQL E'...' string literals. "
+    "Use an ordinary SQLite string or, for multiline/authored text, a named `bindings` parameter."
 )
 
 
@@ -713,6 +724,35 @@ def _fix_insert_select_upsert_ambiguity(sql: str) -> tuple[str, str | None]:
     return fixed, "added WHERE 1=1 to disambiguate INSERT ... SELECT ... ON CONFLICT"
 
 
+def _fix_agent_config_patch_where(sql: str) -> tuple[str, str | None]:
+    statements = sqlparse.parse(sql)
+    if len(statements) != 1:
+        return sql, None
+    statement = statements[0]
+    structural_sql = _structural_sql(statement, omit_strings=True)
+    if not (
+        re.search(r"\bUPDATE\s+__agent_config\b", structural_sql, re.IGNORECASE)
+        and re.search(
+            r"\bcharter\b\s*=\s*patch_text\s*\(",
+            structural_sql,
+            re.IGNORECASE,
+        )
+    ):
+        return sql, None
+
+    where = next((token for token in statement.tokens if isinstance(token, Where)), None)
+    if where is None:
+        return sql, None
+    structural_where = _structural_sql(where, omit_strings=True)
+    if not re.match(r"WHERE\s+id\s*=\s*1(?:\s|$)", structural_where, re.IGNORECASE):
+        return sql, None
+    if re.fullmatch(r"WHERE\s+id\s*=\s*1", structural_where, re.IGNORECASE):
+        return sql, None
+
+    fixed = "".join("WHERE id=1 " if token is where else str(token) for token in statement.tokens).rstrip()
+    return fixed, "removed redundant __agent_config Charter WHERE predicates"
+
+
 def _apply_all_sql_fixes(sql: str, error_msg: str = "") -> tuple[str, list[str]]:
     """Apply all SQL fixes and return (fixed_sql, list_of_corrections)."""
     corrections = []
@@ -746,6 +786,10 @@ def _apply_all_sql_fixes(sql: str, error_msg: str = "") -> tuple[str, list[str]]
         corrections.append(fix)
 
     sql, fix = _fix_insert_select_upsert_ambiguity(sql)
+    if fix:
+        corrections.append(fix)
+
+    sql, fix = _fix_agent_config_patch_where(sql)
     if fix:
         corrections.append(fix)
 
@@ -1630,9 +1674,32 @@ def _execute_with_autocorrections(
     return None, last_error_query, base_corrections, last_error_message
 
 
+def _has_postgres_escape_string(sql: str) -> bool:
+    for statement in sqlparse.parse(sql):
+        tokens = list(statement.flatten())
+        for prefix, literal in zip(tokens, tokens[1:]):
+            if (
+                prefix.ttype in sql_tokens.Name
+                and prefix.value.casefold() == "e"
+                and literal.ttype in sql_tokens.Literal.String.Single
+            ):
+                return True
+    return False
+
+
 def _get_error_hint(error_msg: str, sql: str = "") -> str:
     """Return a helpful hint for common SQLite errors."""
     error_lower = error_msg.lower()
+    if _has_postgres_escape_string(sql):
+        return SQLITE_ESCAPE_STRING_HINT
+    if (
+        re.search(r"\bpatch_text\s*\(", sql, re.IGNORECASE)
+        and (
+            "wrong number of arguments" in error_lower
+            or "patch_text requires exactly 3 arguments" in error_lower
+        )
+    ):
+        return PATCH_TEXT_USAGE_HINT
     if _has_backslash_quote_issue(error_msg, sql):
         return _sqlite_quote_escape_hint()
     if "union" in error_lower and "column" in error_lower:
@@ -1879,20 +1946,25 @@ def _is_redundant_transaction_wrapper(sql: str) -> bool:
 
 
 def _non_persisting_agent_config_patch(queries: List[str]) -> Optional[str]:
+    persisted_patch_seen = False
     for query in queries:
         for statement in sqlparse.parse(query):
             if not _structural_sql(statement):
                 continue
             structural_sql = _structural_sql(statement, omit_strings=True)
-            if (
+            uses_config_patch = (
                 re.search(r"\bpatch_text\s*\(", structural_sql, re.IGNORECASE)
                 and re.search(r"\b__agent_config\b", structural_sql, re.IGNORECASE)
-                and not re.search(
-                    r"\bcharter\b\s*=\s*patch_text\s*\(",
-                    structural_sql,
-                    re.IGNORECASE,
-                )
+            )
+            if not uses_config_patch:
+                continue
+            if re.search(
+                r"\bcharter\b\s*=\s*patch_text\s*\(",
+                structural_sql,
+                re.IGNORECASE,
             ):
+                persisted_patch_seen = True
+            elif not persisted_patch_seen:
                 return str(statement).strip()
     return None
 
@@ -2160,7 +2232,14 @@ def _execute_sqlite_batch_inner(
             )
             if failure_message:
                 had_error = True
-                hint = _get_error_hint(failure_message, final_query)
+                # Autocorrection attempts can obscure the original dialect
+                # mistake, so preserve PostgreSQL escape-string feedback.
+                hint_sql = (
+                    original_query
+                    if _has_postgres_escape_string(original_query)
+                    else final_query
+                )
+                hint = _get_error_hint(failure_message, hint_sql)
                 error_message = f"Query {idx} failed: {failure_message}{hint}"
                 break
 

@@ -27,6 +27,7 @@ from api.evals.scenarios.behavior_micro import (
     CHARTER_ADDS_FEEDBACK_RULE_FROM_CORRECTION,
     CHARTER_ADDS_INFERRED_PREFERENCE_PRESERVING_EXISTING,
     CHARTER_ADDS_PLAIN_PREFERENCE_WITHOUT_SAVE_WORD,
+    CHARTER_CRLF_SECTION_PATCHES_FIRST_TRY,
     CHARTER_EXPANDS_SPARSE_CHARTER_WITH_DETAIL,
     CHARTER_IGNORES_ONE_OFF_PREFERENCE,
     CHARTER_INFERS_IMPLICIT_OWNERSHIP_CORRECTION,
@@ -35,11 +36,13 @@ from api.evals.scenarios.behavior_micro import (
     CHARTER_PATCHES_EVALUATIVE_OUTPUT_FEEDBACK,
     CHARTER_RECOVERS_FROM_NONRETRYABLE_PATCH_FAILURE,
     CHARTER_IGNORES_BATCH_SCOPED_PREFERENCE,
+    CHARTER_HILDA_SCOPE_PATCHES_FIRST_TRY,
     CHARTER_JUDGE_PRESERVES_CLI_GITHUB_SECRET_WORKFLOW,
     CHARTER_INTERPRETS_ROLE_BOUNDARY_CORRECTION,
     CHARTER_MEMORY_MICRO_SCENARIO_SLUGS,
     CHARTER_NARROWS_SCOPE_PRESERVING_UNRELATED_GUIDANCE,
     CHARTER_RECORDS_CLI_GITHUB_SECRETS_CORRECTION,
+    CHARTER_UNICODE_ROUTING_PATCHES_FIRST_TRY,
     CommonUseCaseEvalDefinition,
     CommonUseCaseToolChoiceScenario,
     COMMON_USE_CASE_EVAL_CASES,
@@ -190,6 +193,35 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
             charter_scenario._eval_stop_policy()["stop_on_tool_names"],
             ["request_human_input", "secure_credentials_request"],
         )
+
+    def test_charter_patch_regression_uses_real_harness_without_sql_guidance(self):
+        slugs = (
+            CHARTER_HILDA_SCOPE_PATCHES_FIRST_TRY,
+            CHARTER_UNICODE_ROUTING_PATCHES_FIRST_TRY,
+            CHARTER_CRLF_SECTION_PATCHES_FIRST_TRY,
+        )
+
+        for slug in slugs:
+            with self.subTest(slug=slug):
+                scenario = ScenarioRegistry.get(slug)
+                self.assertIn("real_harness", scenario.get_metadata().tags)
+                self.assertEqual(
+                    [task.name for task in scenario.tasks],
+                    ["inject_charter_update_goal", "verify_first_try_charter_patch"],
+                )
+                self.assertNotIn("patch_text", scenario.directive.casefold())
+                self.assertNotIn("sqlite", scenario.directive.casefold())
+                self.assertIn("\r\n", scenario.existing_charter)
+                self.assertEqual(
+                    scenario._eval_stop_policy()["stop_when_all_seen"],
+                    [
+                        {
+                            "tool_name": "sqlite_batch",
+                            "agent_config_field": "charter",
+                            "after_execution": True,
+                        }
+                    ],
+                )
 
     def test_guided_planning_suite_covers_optional_planning_and_direct_execution(self):
         planning_suite = SuiteRegistry.get("guided_planning_micro")

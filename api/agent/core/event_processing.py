@@ -2829,6 +2829,7 @@ def _analyze_feedback_turn(text: str, prior_outbound_text: str = "") -> _Feedbac
         candidate_behavior = _matches_behavior_feedback(candidate, prior_outbound_text)
         continuation = bool(
             explicit_charter_scope_active
+            or (temporary_scope and task is None)
             or (
                 durable_scope_active
                 and re.match(
