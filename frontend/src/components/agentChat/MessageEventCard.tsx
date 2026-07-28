@@ -25,12 +25,18 @@ function getChannelLabel(raw?: string) {
   return CHANNEL_LABELS[normalized] || raw.replace(/_/g, ' ').replace(/^\w/, (c) => c.toUpperCase())
 }
 
-function JsonTree({ value }: { value: object }) {
+function JsonTree({
+  value,
+  collapsed = 1,
+}: {
+  value: object
+  collapsed?: boolean | number
+}) {
   return (
     <ReactJsonView
       src={value}
       name={false}
-      collapsed={1}
+      collapsed={collapsed}
       displayDataTypes={false}
       displayObjectSize={false}
       enableClipboard={false}
@@ -403,14 +409,10 @@ export const MessageEventCard = memo(function MessageEventCard({
           </div>
         ) : null}
         {structuredPayload ? (
-          <details className="chat-content mt-3 border-l-2 border-indigo-200 pl-3">
-            <summary className="cursor-pointer select-none text-xs font-semibold text-indigo-700">
-              Structured payload
-            </summary>
-            <div className="mt-2 overflow-auto">
-              <JsonTree value={structuredPayload} />
-            </div>
-          </details>
+          <div className="chat-content mt-3 overflow-auto border-l-2 border-indigo-200 pl-3">
+            <p className="mb-1 text-xs font-semibold text-indigo-700">Data</p>
+            <JsonTree value={structuredPayload} collapsed />
+          </div>
         ) : null}
         {message.attachments && message.attachments.length > 0 ? (
           <div className="chat-attachments">

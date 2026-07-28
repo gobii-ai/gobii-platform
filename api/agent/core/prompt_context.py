@@ -818,7 +818,7 @@ def _get_sqlite_guidance() -> str:
         "Snapshots:\n"
         "* __tool_results: result_id, source_batch_id, is_current_batch, tool_name, source_url, created_at, result_json, result_text, analysis_json, is_truncated, top_keys.\n"
         "* __messages: message_id, seq, timestamp, channel, is_outbound, from_address, to_address, subject, body, "
-        "attachment_paths_json, latest_status, latest_error_message. Structured history only, not freshness.\n"
+        "attachment_paths_json, structured_payload_json, latest_status, latest_error_message. Structured history only, not freshness.\n"
         "* __files: node_id, path, name, mime_type, size_bytes, updated_at. Metadata only; read_file gets known-path contents.\n"
         "* __contacts: channel, address, normalized_address, display_name, status, allow_inbound, allow_outbound, can_configure, "
         "relevance_at. Safe outbound requires status='allowed' and allow_outbound=1; never infer "

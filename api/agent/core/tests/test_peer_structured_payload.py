@@ -2,11 +2,14 @@ import json
 
 from django.test import SimpleTestCase, tag
 
-from api.agent.core.prompt_context import _build_peer_message_prompt_components
+from api.agent.core.prompt_context import _build_peer_message_prompt_components, _get_sqlite_guidance
 
 
 @tag("batch_event_processing")
 class PeerStructuredPayloadPromptTests(SimpleTestCase):
+    def test_sqlite_guidance_advertises_structured_payload_column(self):
+        self.assertIn("structured_payload_json", _get_sqlite_guidance())
+
     def test_non_peer_raw_payload_field_is_ignored(self):
         components = _build_peer_message_prompt_components(
             header="Webhook received:",
