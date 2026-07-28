@@ -29,8 +29,10 @@ from api.agent.core.schedule_parser import ScheduleParser
 from api.agent.comms.chat_email_display_cache import get_cached_chat_body_html, normalize_explicit_email_html, render_chat_email_body_html, sanitize_chat_email_html
 from api.agent.comms.email_forwarding import is_forward_like
 from api.agent.comms.human_input_requests import serialize_human_input_tool_result
-from api.agent.comms.adapters import EMAIL_BODY_HTML_PAYLOAD_KEY
+from api.agent.comms.adapters import EMAIL_BODY_HTML_PAYLOAD_KEY, _html_to_text
 from api.agent.comms.cid_references import CID_SRC_REFERENCE_RE
+
+_HTML_TAG_RE = re.compile(r"<\s*(?:!doctype|[a-zA-Z][a-zA-Z0-9-]*)[\s>/]", re.IGNORECASE)
 from api.agent.comms.source_metadata import get_message_source_metadata, get_webhook_timeline_metadata
 from api.models import (
     BrowserUseAgentTask,
@@ -609,6 +611,13 @@ def _serialize_message(
     body_html = _message_body_html(message, channel, attachments)
     subject = _message_subject(message, channel)
 
+    # An outbound email's stored body IS its HTML. Handing that to the frontend as bodyText put
+    # raw tags on every surface that renders text — the markdown fallback when bodyHtml is
+    # empty, search previews, copy-to-clipboard (bug #371). bodyText is text, always.
+    body_text = message.body or ""
+    if channel.lower() == CommsChannel.EMAIL and _HTML_TAG_RE.search(body_text):
+        body_text = _html_to_text(body_text).strip()
+
     # A Discord reply's meaning lives in what it replied to; the ingestion payload carries the
     # full quoted message and the agent's prompt already uses it, but the web card dropped it —
     # "have you been there?" rendered with no indication of what "there" meant (bug #248).
@@ -641,7 +650,7 @@ def _serialize_message(
             "id": str(message.id),
             "cursor": env.cursor.encode(),
             "bodyHtml": body_html,
-            "bodyText": message.body or "",
+            "bodyText": body_text,
             "subject": subject,
             "isOutbound": bool(message.is_outbound),
             "channel": "mcp" if is_mcp else channel,

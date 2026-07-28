@@ -119,3 +119,59 @@ class TimelineEmailRecipientTests(TestCase):
         self.assertEqual(payload["recipientName"], "Derraleigh Vance")
         # Endpoint addresses are normalized on save.
         self.assertEqual(payload["recipientAddress"], "derraleigh@example.com")
+
+
+@tag("batch_agent_chat")
+class TimelineEmailBodyTextTests(TestCase):
+    """#371: an outbound email's stored body IS its HTML, and the serializer handed it to the
+    frontend as bodyText — every surface that renders text (markdown fallback, search previews)
+    showed raw tags. bodyText must be text."""
+
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+
+        from api.models import BrowserUseAgent, PersistentAgent
+
+        user = get_user_model().objects.create_user(
+            username="bodytext@example.test", email="bodytext@example.test",
+        )
+        self.agent = PersistentAgent.objects.create(
+            user=user,
+            name="Mailer",
+            charter="Send email.",
+            browser_use_agent=BrowserUseAgent.objects.create(user=user, name="browser"),
+        )
+        self.endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=self.agent, channel=CommsChannel.EMAIL, address="mailer@my.gobii.ai",
+        )
+        self.conversation = PersistentAgentConversation.objects.create(
+            channel=CommsChannel.EMAIL, address="reader@example.com",
+        )
+
+    def _email(self, body: str) -> PersistentAgentMessage:
+        return PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=self.endpoint,
+            conversation=self.conversation,
+            is_outbound=True,
+            body=body,
+            raw_payload={"subject": "hi"},
+        )
+
+    def test_html_email_bodies_serialize_as_text(self):
+        message = self._email(
+            "<html><body><p>Hello <strong>Reader</strong>,</p><p>Second paragraph.</p></body></html>"
+        )
+
+        payload = serialize_message_event(message)["message"]
+
+        self.assertNotIn("<", payload["bodyText"])
+        self.assertIn("Hello Reader", payload["bodyText"].replace("*", ""))
+        self.assertIn("Second paragraph.", payload["bodyText"])
+
+    def test_plain_text_email_bodies_pass_through(self):
+        message = self._email("Hello,\n\njust plain text with 2 < 3 math.")
+
+        payload = serialize_message_event(message)["message"]
+
+        self.assertEqual(payload["bodyText"], "Hello,\n\njust plain text with 2 < 3 math.")

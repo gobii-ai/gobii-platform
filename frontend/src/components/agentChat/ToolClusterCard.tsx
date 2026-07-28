@@ -1,4 +1,4 @@
-import { memo, useCallback, useMemo, useState } from 'react'
+import { memo, useCallback, useMemo } from 'react'
 import { transformToolCluster, isClusterRenderable } from './tooling/toolRegistry'
 import { ToolClusterTimelineOverlay } from './ToolClusterTimelineOverlay'
 import { ToolIconSlot } from './ToolIconSlot'
@@ -12,8 +12,9 @@ import { CollapsedActivityCard } from './CollapsedActivityCard'
 import { buildActionCountLabel } from './activityEntryUtils'
 import type { StatusExpansionTargets } from './statusExpansion'
 import { isStatusDisplayEntry, resolveEntrySeparation } from './statusExpansion'
-import { useAppSelector } from '../../store/hooks'
+import { useAppDispatch, useAppSelector } from '../../store/hooks'
 import { selectImmersiveShellViewer } from '../../store/immersiveShellSlice'
+import { chatActions, selectActiveChatSession } from '../../store/chatSlice'
 import { buildToolClusterRenderSegments } from './toolClusterSegments'
 
 type ToolClusterCardProps = {
@@ -91,19 +92,24 @@ export const ToolClusterCard = memo(function ToolClusterCard({
     [resolvedTransformed.entries],
   )
 
-  const [timelineOpen, setTimelineOpen] = useState(false)
-  const [timelineInitialEntryId, setTimelineInitialEntryId] = useState<string | null>(null)
+  // Keyed by the run's first entry id, not the cluster cursor: the cursor changes when
+  // thinking/tool events coalesce, and this component itself unmounts when the run flips
+  // between collapsed and expanded. Store-held state under a stable id survives both
+  // (bug #306 — the open panel closed whenever a new message arrived).
+  const stableOverlayId = resolvedTransformed.entries[0]?.id ?? resolvedTransformed.cursor
+  const dispatch = useAppDispatch()
+  const activityOverlay = useAppSelector(selectActiveChatSession).timelineUi.activityOverlay
+  const timelineOpen = activityOverlay?.overlayId === stableOverlayId
+  const timelineInitialEntryId = timelineOpen ? activityOverlay?.initialEntryId ?? null : null
   const handleToggleCluster = useCallback(() => {
-    setTimelineInitialEntryId(null)
-    setTimelineOpen(true)
-  }, [])
+    dispatch(chatActions.activityOverlayOpened({ overlayId: stableOverlayId }))
+  }, [dispatch, stableOverlayId])
 
   const handlePreviewEntrySelect = useCallback(
     (entry: ToolEntryDisplay) => {
-      setTimelineInitialEntryId(entry.id)
-      setTimelineOpen(true)
+      dispatch(chatActions.activityOverlayOpened({ overlayId: stableOverlayId, initialEntryId: entry.id }))
     },
-    [],
+    [dispatch, stableOverlayId],
   )
 
   const articleClasses = useMemo(() => {
@@ -142,7 +148,7 @@ export const ToolClusterCard = memo(function ToolClusterCard({
   if (shouldCollapse) {
     return (
       <CollapsedActivityCard
-        overlayId={resolvedTransformed.cursor}
+        overlayId={stableOverlayId}
         entries={resolvedTransformed.entries}
         label={buildActionCountLabel(resolvedTransformed.entryCount)}
       />
@@ -214,7 +220,7 @@ export const ToolClusterCard = memo(function ToolClusterCard({
             <div key={segment.key} className="tool-cluster-summary">
               {shouldCollapsePreviewEntries && segment.entries.length > 1 ? (
                 <CollapsedActivityCard
-                  overlayId={`${resolvedTransformed.cursor}:${segment.key}`}
+                  overlayId={segment.entries[0]?.id ?? `${stableOverlayId}:${segment.key}`}
                   entries={segment.entries}
                   label={buildActionCountLabel(segment.entries.length)}
                 />
@@ -236,14 +242,11 @@ export const ToolClusterCard = memo(function ToolClusterCard({
       </div>
       <ToolClusterTimelineOverlay
         open={timelineOpen}
-        overlayId={resolvedTransformed.cursor}
+        overlayId={stableOverlayId}
         title={buildActionCountLabel(resolvedTransformed.entryCount)}
         entries={resolvedTransformed.entries}
         initialOpenEntryId={timelineInitialEntryId}
-        onClose={() => {
-          setTimelineOpen(false)
-          setTimelineInitialEntryId(null)
-        }}
+        onClose={() => dispatch(chatActions.activityOverlayClosed())}
       />
     </article>
   )

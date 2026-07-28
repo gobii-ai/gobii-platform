@@ -566,24 +566,33 @@ export function AgentEmailSettingsScreen({
     const codeChallenge = base64UrlEncode(await sha256(codeVerifier))
     const callbackUrl = new URL(resolvedSettings.oauth.callbackPath, window.location.origin).toString()
 
-    const session = await startEmailOAuth(resolvedSettings.oauth.startUrl, {
-      account_id: resolvedSettings.account.id,
-      provider,
-      scope: providerConfig.scope,
-      token_endpoint: providerConfig.tokenEndpoint,
-      use_gobii_app: true,
-      redirect_uri: callbackUrl,
-      state,
-      code_verifier: codeVerifier,
-      code_challenge: codeChallenge,
-      code_challenge_method: 'S256',
-      metadata: {
+    // The popup had to open synchronously to keep the user gesture, so it is sitting on
+    // about:blank while the start call runs. If that call fails, close it — otherwise the
+    // user is left staring at a blank window with the error banner hidden behind it (#343).
+    let session
+    try {
+      session = await startEmailOAuth(resolvedSettings.oauth.startUrl, {
+        account_id: resolvedSettings.account.id,
         provider,
-        authorization_endpoint: providerConfig.authorizationEndpoint,
+        scope: providerConfig.scope,
         token_endpoint: providerConfig.tokenEndpoint,
-        sasl_mechanism: 'XOAUTH2',
-      },
-    })
+        use_gobii_app: true,
+        redirect_uri: callbackUrl,
+        state,
+        code_verifier: codeVerifier,
+        code_challenge: codeChallenge,
+        code_challenge_method: 'S256',
+        metadata: {
+          provider,
+          authorization_endpoint: providerConfig.authorizationEndpoint,
+          token_endpoint: providerConfig.tokenEndpoint,
+          sasl_mechanism: 'XOAUTH2',
+        },
+      })
+    } catch (error) {
+      popup.close()
+      throw error
+    }
 
     const stateKey = session.state || state
     localStorage.setItem(
