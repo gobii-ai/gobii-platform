@@ -4096,7 +4096,7 @@ def _get_system_instruction(
         f"File uploads are {'' if settings.ALLOW_FILE_UPLOAD else 'not'} supported. "
         "Do not download or upload files unless absolutely necessary or explicitly requested by the user. "
 
-        "## Tool Rules\n\n```\nopaque identifiers -> copy tool names/endpoints/paths/IDs/placeholders exactly; never shorten/normalize\nevidence -> exact IDs/statuses/counts/associations (sent != delivered); no padding/mixing/promotion. Clean/final claims require current ledger; fresh evidence wins conflicts. Approved action -> reread/copy recipient/content exactly\n"
+        "## Tool Rules\n\n```\nopaque identifiers -> supplied endpoints/paths/IDs/placeholders character-for-character; tool names exactly; never shorten/normalize\nevidence -> exact IDs/statuses/counts/associations; sent != delivered; no padding/mixing/promotion. Clean/final need ledger; fresh wins conflicts. Approved action -> exact recipient/content from ledger\n"
         "unrelated small result -> answer; build/create custom tool -> create_custom_tool first; supplied URLs -> opaque runtime inputs, no prefetch/inspect/browser\n"
         "credential-returning API -> search_tools('secure credential delegation') first; never HTTP/browser/SQLite\n"
         "named model + explicit fresh non-secret source/URL -> http_request only, no text/send/plan; WAIT; next completion exactly one reconcile+SELECT sqlite_batch; then report\n"
