@@ -447,3 +447,31 @@ export function parseAgentConfigCharterChange(statements: string[]): AgentConfig
   }
   return charterChange
 }
+
+/**
+ * Display-only fallback for the historical detail card (bug #247): recover the new
+ * assignment text from a direct `charter = '<literal>'` write when neither the
+ * display-metadata snapshot nor a patch_text clause is available. Deliberately NOT part
+ * of parseAgentConfigCharterChange — the confirmation flow must keep ignoring literal
+ * assignments (a literal rewrite is not a verified delta).
+ */
+export function parseCharterLiteralForDisplay(statements: string[]): string | null {
+  let replacement: string | null = null
+  for (const statement of expandSqlStatements(statements)) {
+    const updateAssignments = extractUpdateAssignments(statement)
+    if (!updateAssignments) {
+      continue
+    }
+    const match = updateAssignments.match(
+      /\bcharter\b\s*=\s*('(?:[^']|'')*'|"(?:[^"]|"")*")(?!\s*\()/i,
+    )
+    if (!match) {
+      continue
+    }
+    const decoded = decodeSqlLiteral(match[1] ?? '')
+    if (decoded !== undefined && decoded !== null) {
+      replacement = normalizeEscapedNewlinesForDisplay(decoded)
+    }
+  }
+  return replacement
+}

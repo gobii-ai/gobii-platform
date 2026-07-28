@@ -61,7 +61,12 @@ export function useConsoleContextSwitcher({
     queryFn: () => fetchConsoleContext({ forAgentId, staffContext }),
     enabled,
     staleTime: 60_000,
-    refetchOnWindowFocus: false,
+    // Everything downstream — timeline, subscriptions, web session — is gated on this
+    // query, and a cold-session failure used to wedge the whole chat with no retry
+    // path (bug #472). Keep retrying on focus/reconnect so the wedge self-heals.
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
+    retry: 3,
   })
   const { data: queryData, error: queryError, isLoading, refetch } = contextQuery
   const data = queryData ?? null

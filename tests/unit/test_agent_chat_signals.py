@@ -410,6 +410,74 @@ class AgentChatSignalTests(TestCase):
 
     @tag("batch_agent_chat")
     @patch("console.agent_chat.signals.transition_agent_to_signup_preview_waiting", return_value=False)
+    def test_outbound_email_to_external_recipient_notifies_nobody(self, _mock_transition):
+        """#491: an agent's email to a third party is not a message to the workspace —
+        broadcasting it leaked the email body as a browser notification on every send."""
+        conversation = PersistentAgentConversation.objects.create(
+            channel=CommsChannel.EMAIL,
+            address="lead@external-company.example",
+            owner_agent=self.agent,
+        )
+        email_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address="agent@my.gobii.ai",
+        )
+        with self.captureOnCommitCallbacks(execute=True):
+            PersistentAgentMessage.objects.create(
+                owner_agent=self.agent,
+                is_outbound=True,
+                from_endpoint=email_endpoint,
+                conversation=conversation,
+                body="Hi lead, following up on pricing.",
+                raw_payload={"subject": "Pricing"},
+            )
+
+        owner_events = [
+            event for event in self._drain_channel_events(self.owner_profile_channel_name)
+            if event.get("type") == "message_notification_event"
+        ]
+        collaborator_events = [
+            event for event in self._drain_channel_events(self.collaborator_profile_channel_name)
+            if event.get("type") == "message_notification_event"
+        ]
+        self.assertEqual(owner_events, [])
+        self.assertEqual(collaborator_events, [])
+
+    @tag("batch_agent_chat")
+    @patch("console.agent_chat.signals.transition_agent_to_signup_preview_waiting", return_value=False)
+    def test_outbound_email_to_owner_notifies_only_the_owner(self, _mock_transition):
+        """#491: an email actually addressed to a workspace member still notifies them."""
+        conversation = PersistentAgentConversation.objects.create(
+            channel=CommsChannel.EMAIL,
+            address=self.user.email,
+            owner_agent=self.agent,
+        )
+        email_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address="agent@my.gobii.ai",
+        )
+        with self.captureOnCommitCallbacks(execute=True):
+            PersistentAgentMessage.objects.create(
+                owner_agent=self.agent,
+                is_outbound=True,
+                from_endpoint=email_endpoint,
+                conversation=conversation,
+                body="Here is your weekly report.",
+                raw_payload={"subject": "Weekly report"},
+            )
+
+        owner_notification = self._receive_with_timeout(self.owner_profile_channel_name)
+        self.assertEqual(owner_notification.get("type"), "message_notification_event")
+        collaborator_events = [
+            event for event in self._drain_channel_events(self.collaborator_profile_channel_name)
+            if event.get("type") == "message_notification_event"
+        ]
+        self.assertEqual(collaborator_events, [])
+
+    @tag("batch_agent_chat")
+    @patch("console.agent_chat.signals.transition_agent_to_signup_preview_waiting", return_value=False)
     def test_visible_outbound_message_emits_message_notification_event(self, _mock_transition):
         with self.captureOnCommitCallbacks(execute=True):
             message = PersistentAgentMessage.objects.create(

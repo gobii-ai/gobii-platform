@@ -33,7 +33,14 @@ from api.services.signup_preview import transition_agent_to_signup_preview_waiti
 from console.agent_chat.realtime import send_developer_update, send_user_group_event, user_profile_group_name
 from console.insight_views import build_usage_metadata_for_agent
 from util.text_sanitizer import sanitize_notification_preview_text
-from api.agent.comms.message_reads import build_agent_message_read_state_for_users, is_peer_dm_message, serialize_latest_agent_message_read_state
+from api.agent.comms.message_reads import (
+    _resolve_unique_user_for_email,
+    _resolve_unique_user_for_phone,
+    build_agent_message_read_state_for_users,
+    is_peer_dm_message,
+    serialize_latest_agent_message_read_state,
+)
+from api.models import CommsChannel
 
 from .access import user_can_manage_agent_settings
 from .plan_events import persist_plan_event
@@ -151,7 +158,16 @@ def emit_message_notification(message: PersistentAgentMessage) -> None:
             "channel": channel,
         },
     }
+    # The audience must be who the message was addressed to, not who owns the agent:
+    # an email an agent sends to an external lead is not a message *to* the owner, and
+    # notifying every workspace member leaked the email body preview as a browser
+    # notification on each send (#491).
+    recipient_user_ids = _notification_recipient_user_ids(message, agent, channel)
     listener_user_ids = _resolve_profile_listener_user_ids(agent)
+    if recipient_user_ids is not None:
+        listener_user_ids &= recipient_user_ids
+        if not listener_user_ids:
+            return
     read_state_by_user_id = build_agent_message_read_state_for_users(agent, listener_user_ids)
     for user_id in listener_user_ids:
         payload = {
@@ -194,6 +210,46 @@ def _emit_processing_profile_update_if_changed(agent: PersistentAgent, processin
     if previous_processing_active is not None and previous_processing_active == normalized_processing_active:
         return
     emit_agent_profile_update(agent, processing_active=normalized_processing_active)
+
+
+def _notification_recipient_user_ids(
+    message: PersistentAgentMessage,
+    agent: PersistentAgent,
+    channel: str | None,
+) -> set[int] | None:
+    """Workspace user ids the outbound message was actually addressed to.
+
+    Only channels whose addresses map to verifiable workspace identities filter the
+    audience: email (verified allauth address) and SMS (verified phone). Returns None
+    for other channels — web chat is by definition addressed to console viewers, and
+    Discord identities have no workspace mapping — leaving their behavior unchanged.
+    """
+    channel_key = (channel or "").lower()
+    conversation_address = (
+        (message.conversation.address or "").strip() if message.conversation_id else ""
+    )
+    to_address = (
+        (message.to_endpoint.address or "").strip() if message.to_endpoint_id else ""
+    )
+    if channel_key == CommsChannel.EMAIL:
+        addresses = [address for address in {to_address or conversation_address} if address]
+        addresses.extend(
+            address
+            for address in (
+                (endpoint.address or "").strip() for endpoint in message.cc_endpoints.all()
+            )
+            if address
+        )
+        matched: set[int] = set()
+        for address in addresses:
+            user = _resolve_unique_user_for_email(agent, address)
+            if user is not None:
+                matched.add(user.id)
+        return matched
+    if channel_key == CommsChannel.SMS:
+        user = _resolve_unique_user_for_phone(agent, to_address or conversation_address)
+        return {user.id} if user is not None else set()
+    return None
 
 
 def _resolve_profile_listener_user_ids(agent: PersistentAgent) -> set[int]:

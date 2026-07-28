@@ -71,14 +71,44 @@ class TimelineEmailRecipientTests(TestCase):
         self.assertEqual(payload["recipientName"], "Derraleigh Vance")
         self.assertEqual(payload["recipientAddress"], "derraleigh@example.com")
 
-    def test_inbound_email_has_no_recipient(self):
-        """The counterparty address is the sender there, so labelling it "to" would be wrong."""
+    def test_inbound_email_reports_the_receiving_mailbox(self):
+        """Inbound, the To is the agent's own alias — meaningful because agents receive on
+        several custom-domain aliases (#495). Resolved from the provider envelope when the
+        endpoint was not persisted."""
         message = self._email_message(is_outbound=False, address="cantey@example.com")
+        message.raw_payload = {"Subject": "loved this", "To": "alpha.scout@my.gobii.ai"}
+        message.save(update_fields=["raw_payload"])
 
         payload = serialize_message_event(message)["message"]
 
-        self.assertIsNone(payload["recipientAddress"])
+        self.assertEqual(payload["recipientAddress"], "alpha.scout@my.gobii.ai")
         self.assertIsNone(payload["recipientName"])
+
+    def test_inbound_postmark_payload_yields_subject_and_cc(self):
+        """Postmark stores capitalised keys verbatim; the serializer must read them (#495)."""
+        message = self._email_message(is_outbound=False, address="cantey@example.com")
+        message.raw_payload = {
+            "Subject": "Q3 numbers",
+            "To": "alpha.scout@my.gobii.ai",
+            "Cc": "ops@example.com, boss@example.com",
+        }
+        message.save(update_fields=["raw_payload"])
+
+        payload = serialize_message_event(message)["message"]
+
+        self.assertEqual(payload["subject"], "Q3 numbers")
+        self.assertEqual(payload["ccAddresses"], ["ops@example.com", "boss@example.com"])
+
+    def test_inbound_imap_headers_yield_subject(self):
+        """IMAP payloads only carry headers; the subject must come from there (#495)."""
+        message = self._email_message(is_outbound=False, address="cantey@example.com")
+        message.raw_payload = {"headers": {"Subject": "Re: contract", "To": "alpha.scout@my.gobii.ai"}}
+        message.save(update_fields=["raw_payload"])
+
+        payload = serialize_message_event(message)["message"]
+
+        self.assertEqual(payload["subject"], "Re: contract")
+        self.assertEqual(payload["recipientAddress"], "alpha.scout@my.gobii.ai")
 
     def test_to_endpoint_wins_over_the_conversation_label(self):
         """The conversation is keyed by its original counterparty, but a message records who it

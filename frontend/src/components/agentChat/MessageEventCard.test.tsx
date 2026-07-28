@@ -54,7 +54,14 @@ describe('MessageEventCard email recipient', () => {
     expect(screen.getByText('To')).toBeInTheDocument()
   })
 
-  it('does not label a received email with a recipient', () => {
+  it('labels a received email with the mailbox that received it (#495)', () => {
+    renderCard(emailMessage({ isOutbound: false, recipientAddress: 'scout@my.gobii.ai' }))
+
+    expect(screen.getByText('To')).toBeInTheDocument()
+    expect(screen.getByText('scout@my.gobii.ai')).toBeInTheDocument()
+  })
+
+  it('stays quiet on a received email with no recipient data', () => {
     renderCard(emailMessage({ isOutbound: false, recipientAddress: null }))
 
     expect(screen.queryByText('To')).not.toBeInTheDocument()

@@ -544,6 +544,9 @@ def ingest_inbound_message(
             message = PersistentAgentMessage.objects.create(
                 is_outbound=False,
                 from_endpoint=from_ep,
+                # The receiving endpoint was always resolved but never persisted, leaving
+                # inbound cards unable to name the mailbox that received the message (#495).
+                to_endpoint=to_ep,
                 conversation=conv,
                 body=parsed.body,
                 raw_payload=parsed.raw_payload,
