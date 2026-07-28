@@ -956,14 +956,14 @@ class PreviewByteLimitTests(SimpleTestCase):
         self.assertIn("SOURCE ARRAYS; paths", info.preview_text)
         for expected in (
             "$.content.items", "one sqlite_batch", "keyed tables",
-            "INSERT ... SELECT/json_each", "Derive item fields/URLs from j.value",
-            "parent fields from t.result_json", "provenance from t.result_id",
+            "json_each(t.result_json,'$.content.items') AS j1",
+            "keep every wrapper segment such as $.content",
+            "t.result_id is provenance only",
             "is_current_batch=1",
             "[no_stable_key]",
-            "exact stable_key values",
-            "Never filter freshness by a mutable name, even one the user named",
-            "literal ID/history",
-            "No pre-read, refetch, blob inspection, copied literals",
+            "Final rows preserve exact source associations",
+            "mutable-name freshness filters",
+            "pre-read, refetch, blob inspection",
         ):
             self.assertIn(expected, info.preview_text)
         self.assertEqual(info.preview_text.count("[SOURCE ARRAYS"), 1)
@@ -1057,6 +1057,29 @@ class PreviewByteLimitTests(SimpleTestCase):
         self.assertFalse(large.is_inline)
         self.assertIn("SOURCE ARRAYS", large.preview_text)
         self.assertTrue(large.source_reconciliation_directive)
+
+    def test_exact_source_iterators_quote_json_keys_and_sql_apostrophes(self):
+        payload = {
+            "status": "ok",
+            "content": {
+                "v1.items": [{"item_id": "item-1", "name": "Acme"}],
+                "team's contacts": [{"contact_id": "contact-1", "name": "Mina"}],
+            },
+        }
+        info, _record = self._prepare_http_result(
+            "step-special-keys",
+            payload,
+            named_model_tables={"items"},
+        )
+
+        self.assertIn(
+            "json_each(t.result_json,'$.content.\"v1.items\"') AS j2",
+            info.preview_text,
+        )
+        self.assertIn(
+            "json_each(t.result_json,'$.content.\"team''s contacts\"') AS j1",
+            info.preview_text,
+        )
 
     def test_fresh_source_without_matching_entity_array_does_not_force_import(self):
         cases = (

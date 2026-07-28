@@ -8,16 +8,20 @@ from api.agent.tools.sqlite_query_quality import summarize_sqlite_tool_result_sq
 from api.evals.registry import ScenarioRegistry
 from api.evals.scenarios.sqlite_tool_results import (
     SQLITE_ENRICHMENT_REFRESH_UNDER_PRESSURE,
+    SQLITE_FRESH_PEER_FACT_OVER_EMPTY_MODEL,
     SQLITE_INCREMENTAL_DOMAIN_MODEL,
     SQLITE_SIBLING_RESULT_SET_FIRST_WRITE,
+    SQLITE_SOURCE_CARDINALITY_AND_IDENTITY,
     SQLITE_SOURCE_ARRAY_FIRST_WRITE,
     SQLITE_TOOL_RESULT_SCENARIO_SLUGS,
     SQLITE_TOOL_RESULT_SUITE_SLUG,
     SQLITE_UNSTRUCTURED_BINDINGS_FIRST_WRITE,
     SqliteEnrichmentRefreshUnderPressureScenario,
+    SqliteFreshPeerFactOverEmptyModelScenario,
     SqliteIncrementalDomainModelScenario,
     SqliteIntermediateWorkingTableScenario,
     SqliteSiblingResultSetFirstWriteScenario,
+    SqliteSourceCardinalityAndIdentityScenario,
     SqliteSourceArrayFirstWriteScenario,
     SqliteUnstructuredBindingsFirstWriteScenario,
     _repeated_source_import_tables,
@@ -91,6 +95,28 @@ class SqliteSourceArrayEvalTests(SimpleTestCase):
                 "verify_release_answer",
             ],
         )
+
+    def test_truth_integrity_cases_are_registered_without_teaching_sql(self):
+        suite = SuiteRegistry.get(SQLITE_TOOL_RESULT_SUITE_SLUG)
+        cases = (
+            (
+                SQLITE_SOURCE_CARDINALITY_AND_IDENTITY,
+                SqliteSourceCardinalityAndIdentityScenario,
+            ),
+            (
+                SQLITE_FRESH_PEER_FACT_OVER_EMPTY_MODEL,
+                SqliteFreshPeerFactOverEmptyModelScenario,
+            ),
+        )
+
+        for slug, scenario_class in cases:
+            with self.subTest(slug=slug):
+                self.assertIsNotNone(ScenarioRegistry.get(slug))
+                self.assertIn(slug, SQLITE_TOOL_RESULT_SCENARIO_SLUGS)
+                self.assertIn(slug, suite.scenario_slugs)
+                prompt = scenario_class.prompt.casefold()
+                for leaked_term in ("sqlite", "__tool_results", "json_each", "insert", "select", "table"):
+                    self.assertNotIn(leaked_term, prompt)
 
     def test_prompt_does_not_teach_the_sql_solution(self):
         prompt = SqliteSourceArrayFirstWriteScenario.prompt.casefold()
