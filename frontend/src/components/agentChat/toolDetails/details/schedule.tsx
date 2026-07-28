@@ -5,7 +5,7 @@ import { CalendarClock, Clock, Repeat } from 'lucide-react'
 import { describeSchedule } from '../../../../util/schedule'
 import type { ScheduleDescription } from '../../../../util/schedule'
 import type { ToolDetailProps } from '../../tooling/types'
-import type { AgentConfigCharterChange } from '../../../tooling/agentConfigSql'
+import { parseCharterLiteralForDisplay, type AgentConfigCharterChange } from '../../../tooling/agentConfigSql'
 import { KeyValueList, Section, TruncatedMarkdown } from '../shared'
 import { useAppSelector } from '../../../../store/hooks'
 import { selectImmersiveShellViewer } from '../../../../store/immersiveShellSlice'
@@ -216,7 +216,13 @@ function CharterChangeDetail({ change }: { change: AgentConfigCharterChange }) {
 
 export function AgentConfigUpdateDetail({ entry }: ToolDetailProps) {
   const timeZone = useAppSelector(selectImmersiveShellViewer).timeZone
-  const charterText = entry.charterText ?? null
+  // Historical events predate the display-metadata snapshot and often wrote the charter
+  // as a direct literal rather than patch_text; recover the text from the SQL rather
+  // than rendering "not available" (bug #247).
+  const literalCharterText = entry.charterText == null && !entry.agentConfigCharterChange
+    ? parseCharterLiteralForDisplay(entry.sqlStatements ?? [])
+    : null
+  const charterText = entry.charterText ?? literalCharterText
   const charterChange = entry.agentConfigCharterChange ?? null
   const charterConfirmation = entry.agentConfigConfirmation?.charter ?? null
   const hasCharterText = charterText !== null
