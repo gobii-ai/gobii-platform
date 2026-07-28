@@ -2223,7 +2223,7 @@ class AgentChatAPITests(TestCase):
             channel=CommsChannel.EMAIL,
             address=email_address,
         )
-        PersistentAgentMessage.objects.create(
+        email_message = PersistentAgentMessage.objects.create(
             is_outbound=False,
             from_endpoint=email_sender,
             conversation=email_conversation,
@@ -2238,7 +2238,8 @@ class AgentChatAPITests(TestCase):
         html_event = next(
             event
             for event in payload.get("events", [])
-            if event.get("kind") == "message" and event["message"].get("bodyText") == html_body
+            # bodyText is text now (#371); locate the email card by its message id instead
+            if event.get("kind") == "message" and event["message"].get("id") == str(email_message.id)
         )
 
         rendered_html = html_event["message"]["bodyHtml"]
@@ -2723,7 +2724,8 @@ class AgentChatAPITests(TestCase):
         cid_event = next(
             event
             for event in payload.get("events", [])
-            if event.get("kind") == "message" and event["message"].get("bodyText") == html_body
+            # bodyText is text now (#371); locate the email card by its message id instead
+            if event.get("kind") == "message" and event["message"].get("id") == str(message.id)
         )
 
         rendered_html = cid_event["message"]["bodyHtml"]
@@ -2769,7 +2771,8 @@ class AgentChatAPITests(TestCase):
         cid_event = next(
             event
             for event in payload.get("events", [])
-            if event.get("kind") == "message" and event["message"].get("bodyText") == html_body
+            # bodyText is text now (#371); locate the email card by its message id instead
+            if event.get("kind") == "message" and event["message"].get("id") == str(message.id)
         )
 
         rendered_html = cid_event["message"]["bodyHtml"]
@@ -2815,7 +2818,8 @@ class AgentChatAPITests(TestCase):
         cid_event = next(
             event
             for event in payload.get("events", [])
-            if event.get("kind") == "message" and event["message"].get("bodyText") == html_body
+            # bodyText is text now (#371); locate the email card by its message id instead
+            if event.get("kind") == "message" and event["message"].get("id") == str(message.id)
         )
 
         rendered_html = cid_event["message"]["bodyHtml"]
