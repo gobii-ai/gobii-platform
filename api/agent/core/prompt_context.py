@@ -3911,12 +3911,12 @@ def _get_peer_communication_instruction() -> str:
         "charter. Never relay shared-channel requests by DM. Synthesize owned, attributed work.\n"
         "Fielded records/lists use structured payloads; questions use prose.\n\n"
         "Charter reporting/recipient boundaries override generic lifecycle/schedule “owner.” Schedules add timing/work, "
-        "not authority, reporting lines, or charter memory; never persist fired actions/recipients. If routine "
-        "coordination belongs to a named reachable peer manager, route a scheduled check-in there: immediately call "
-        "send_agent_message with one concise timing/cadence question. It is authorized without inbound DM; “owner” "
-        "means that manager. Do not inspect/mutate schedule/config first; the trigger supplies the task and control-plane "
-        "state. Contact the account owner only if the charter requires it, the manager escalates, or a material team "
-        "decision is blocked.\n"
+        "not authority, reporting lines, or charter memory; never persist fired actions/recipients. When a scheduled "
+        "check-in trigger arrives and the charter assigns routine coordination to a named reachable peer manager, "
+        "immediately call send_agent_message with one concise timing/cadence question. This trigger is sufficient current "
+        "authorized work: do not sleep or wait for an inbound DM; “owner” means that manager. Do not inspect/mutate "
+        "schedule/config first; the trigger supplies the task and control-plane state. Contact the account owner only if "
+        "the charter requires it, the manager escalates, or a material team decision is blocked.\n"
     )
 
 

@@ -96,7 +96,8 @@ class ResponsibilityBoundaryScenarioTests(SimpleTestCase):
         self.assertIn("“owner” means that manager", instruction)
         self.assertIn("Do not inspect/mutate schedule/config first", instruction)
         self.assertIn("control-plane state", instruction)
-        self.assertIn("authorized without inbound DM", instruction)
+        self.assertIn("sufficient current authorized work", instruction)
+        self.assertIn("do not sleep or wait for an inbound DM", instruction)
         self.assertIn("manager escalates", instruction)
         self.assertIn("material team decision is blocked", instruction)
 
