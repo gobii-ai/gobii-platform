@@ -26,6 +26,7 @@ from opentelemetry import trace
 from .llm_config import get_summarization_llm_config
 from .llm_utils import run_completion
 from .token_usage import log_agent_completion, set_usage_span_attributes
+from ..structured_peer_payload import format_structured_peer_payload, get_structured_peer_payload
 
 # --------------------------------------------------------------------------- #
 #  Tunables – can be overridden via Django settings for easy experimentation  #
@@ -238,9 +239,13 @@ def llm_summarise_comms(
     lines: list[str] = []
     for msg in messages:
         role = "Assistant" if msg.is_outbound else "User"
-        # Truncate each message body to avoid huge token usage (4k chars cap).
-        body_preview = msg.body[:4000]
-        lines.append(f"{role}: {body_preview}")
+        payload = get_structured_peer_payload(msg.raw_payload)
+        parts = [msg.body or ""]
+        if payload is not None:
+            parts.append(f"Structured payload:\n{format_structured_peer_payload(payload)}")
+        # Keep the body and structured data under the same per-message compaction cap.
+        content_preview = "\n".join(part for part in parts if part)[:4000]
+        lines.append(f"{role}: {content_preview}")
 
     new_msgs_block = "\n".join(lines)
 

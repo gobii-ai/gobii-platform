@@ -20,6 +20,10 @@ from api.evals.scenarios.discord_native import (
 )
 from api.evals.scenarios.image_generation import IMAGE_GENERATION_SCENARIO_SLUGS, IMAGE_GENERATION_SUITE_SLUG
 from api.evals.scenarios.responsibility_boundaries import RESPONSIBILITY_BOUNDARY_SCENARIO_SLUGS, RESPONSIBILITY_BOUNDARY_SUITE_SLUG
+from api.evals.scenarios.structured_peer_handoffs import (
+    STRUCTURED_PEER_HANDOFF_SCENARIO_SLUGS,
+    STRUCTURED_PEER_HANDOFF_SUITE_SLUG,
+)
 from api.evals.scenarios.hallucinated_links import HALLUCINATED_LINK_SCENARIO_SLUGS, HALLUCINATED_LINKS_SUITE_SLUG
 from api.evals.scenarios.lasting_feedback import LASTING_FEEDBACK_SCENARIO_SLUGS, LASTING_FEEDBACK_SUITE_SLUG
 from api.evals.scenarios.agent_emotions import AGENT_PROACTIVE_EMOTION_SCENARIO_SLUGS
@@ -169,6 +173,11 @@ register_builtin_suites(
             slug=RESPONSIBILITY_BOUNDARY_SUITE_SLUG,
             description="Connected-agent ownership, handoff, and shared-channel responsibility regressions.",
             scenario_slugs=RESPONSIBILITY_BOUNDARY_SCENARIO_SLUGS,
+        ),
+        EvalSuite(
+            slug=STRUCTURED_PEER_HANDOFF_SUITE_SLUG,
+            description="Schema-free structured peer handoffs and prose-only coordination over the real harness.",
+            scenario_slugs=STRUCTURED_PEER_HANDOFF_SCENARIO_SLUGS,
         ),
         EvalSuite(
             slug=HALLUCINATED_LINKS_SUITE_SLUG,

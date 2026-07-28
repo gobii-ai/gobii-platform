@@ -19,6 +19,12 @@ from api.agent.comms.outbound_content_policy import markdown_only_error
 from api.agent.files.attachment_helpers import ResolvedAttachment, create_message_attachments
 from api.agent.files.filespace_service import dedupe_name, get_or_create_default_filespace, get_or_create_dir
 from api.agent.tools.outbound_duplicate_guard import detect_recent_duplicate_message
+from api.agent.structured_peer_payload import (
+    STRUCTURED_PEER_PAYLOAD_KEY,
+    StructuredPeerPayload,
+    structured_peer_payload_has_content,
+    validate_structured_peer_payload,
+)
 from api.models import (
     AgentCommPeerState,
     AgentFsNode,
@@ -128,16 +134,26 @@ class PeerMessagingService:
     @traced("Agent Peer DM Send")
     def send_message(
         self,
-        body: str,
+        body: str = "",
         *,
+        structured_payload: StructuredPeerPayload | None = None,
         attachments: Sequence[ResolvedAttachment] | None = None,
     ) -> PeerSendResult:
         """Send a peer DM, enforcing quotas and debouncing."""
-        if not body or not body.strip():
-            raise PeerMessagingError("Message body cannot be empty.")
+        try:
+            structured_payload = validate_structured_peer_payload(structured_payload)
+        except ValueError as exc:
+            raise PeerMessagingError(str(exc)) from exc
 
-        normalized_body = body.strip()
-        if content_error := markdown_only_error(normalized_body, surface="Peer messaging"):
+        normalized_body = (body or "").strip()
+        if not normalized_body and not structured_peer_payload_has_content(structured_payload):
+            raise PeerMessagingError(
+                "Either a nonblank message body or a non-empty structured payload is required."
+            )
+
+        if normalized_body and (
+            content_error := markdown_only_error(normalized_body, surface="Peer messaging")
+        ):
             raise PeerMessagingError(
                 str(content_error["message"]),
                 error_type=str(content_error["error_type"]),
@@ -173,6 +189,7 @@ class PeerMessagingService:
                 body=normalized_body,
                 conversation_id=conversation.id,
                 exact_only=True,
+                structured_payload=structured_payload,
             )
             if duplicate:
                 payload = duplicate.to_error_response()
@@ -214,6 +231,9 @@ class PeerMessagingService:
                 "direction": "inbound",
                 "peer_link_id": str(self.link.id),
             }
+            if structured_payload is not None:
+                outbound_payload[STRUCTURED_PEER_PAYLOAD_KEY] = structured_payload
+                inbound_payload[STRUCTURED_PEER_PAYLOAD_KEY] = structured_payload
 
             copied_attachments: list[AgentFsNode] = []
             try:

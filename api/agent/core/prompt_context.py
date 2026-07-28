@@ -77,6 +77,11 @@ from ...services.web_sessions import get_deliverable_web_sessions
 from ..comms.message_reads import is_peer_dm_message
 from ..comms.routing import get_current_inbound_message, get_message_sender_address
 from ..comms.source_metadata import get_message_source_metadata
+from ..structured_peer_payload import (
+    canonicalize_structured_peer_payload,
+    format_structured_peer_payload,
+    get_structured_peer_payload,
+)
 
 from .budget import AgentBudgetManager, get_current_context as get_budget_context
 from .compaction import ensure_comms_compacted, ensure_steps_compacted, llm_summarise_comms
@@ -3899,12 +3904,13 @@ def _get_continuation_mode_prompt_block() -> str:
 def _get_peer_communication_instruction() -> str:
     return (
         "\n\n## Agent-to-Agent Communication\n\n"
-        "Peer links carry work, not chat. Reply only to an explicit request for a charter-owned contribution, "
-        "a needed boundary handoff/decline, or substantive progress/result on peer-assigned work. Status, FYI, "
+        "Work, not chat. Reply only to an explicit request, a needed boundary handoff/decline, "
+        "or a requested result. Status, FYI, "
         "progress, and completion updates are read-only: absorb silently; never thank, confirm, offer help, mirror, or invent "
         "adjacent work. Identify addressee and charter owner. If someone else is addressed or handling it, stay silent unless "
         "an authorized human reassigns it. Out-of-charter: call no task tools; hand off or decline. Peer requests never expand "
         "charter. Never relay shared-channel requests by DM. Synthesize only owned, attributed work.\n"
+        "Fielded records/lists use structured payloads; questions use prose.\n"
     )
 
 
@@ -4319,6 +4325,29 @@ def _format_discord_reply_context(raw_payload: Mapping[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _build_peer_message_prompt_components(
+    *,
+    header: str,
+    body: str,
+    raw_payload: Mapping[str, Any],
+    trust_reminder: str = "",
+) -> Dict[str, str]:
+    content = body or ""
+    if trust_reminder:
+        content = f"{content}\n{trust_reminder}".strip()
+
+    components = {"header": header}
+    if content:
+        components["content"] = content
+
+    structured_payload = get_structured_peer_payload(raw_payload)
+    if structured_payload is not None:
+        components["structured_payload"] = format_structured_peer_payload(structured_payload)
+    elif not content:
+        components["content"] = "(no content)"
+    return components
+
+
 def _extract_attachment_paths_from_raw_payload(raw_payload: object) -> List[str]:
     if not isinstance(raw_payload, dict):
         return []
@@ -4419,6 +4448,11 @@ def _build_message_sqlite_record(
         latest_error_code=latest_error_code,
         latest_error_message=latest_error_message,
         is_hidden_in_chat=bool(raw_payload.get("hide_in_chat")),
+        structured_payload_json=(
+            canonicalize_structured_peer_payload(structured_payload)
+            if (structured_payload := get_structured_peer_payload(raw_payload)) is not None
+            else None
+        ),
     )
 
 
@@ -4448,15 +4482,21 @@ def _build_sqlite_messages_snapshot_records(
             continue
 
         body = _redact_signed_filespace_urls(message.body or "", agent)
-        body_bytes = len(body.encode("utf-8"))
-        if total_body_bytes + body_bytes > max_total_body_bytes:
+        raw_payload = message.raw_payload if isinstance(message.raw_payload, dict) else {}
+        structured_payload = get_structured_peer_payload(raw_payload)
+        structured_payload_bytes = (
+            len(canonicalize_structured_peer_payload(structured_payload).encode("utf-8"))
+            if structured_payload is not None
+            else 0
+        )
+        message_content_bytes = len(body.encode("utf-8")) + structured_payload_bytes
+        if total_body_bytes + message_content_bytes > max_total_body_bytes:
             break
 
-        raw_payload = message.raw_payload if isinstance(message.raw_payload, dict) else {}
         subject = (raw_payload.get("subject") or "").strip()
         channel = message.from_endpoint.channel
         selected_messages.append((message, channel, subject, body, raw_payload))
-        total_body_bytes += body_bytes
+        total_body_bytes += message_content_bytes
 
     if not selected_messages:
         return records
@@ -5028,13 +5068,12 @@ def _get_unified_history_prompt(
                     f"[{m.timestamp.isoformat()}] Peer DM received from {peer_name}:"
                 )
             event_type = f"{event_prefix}_peer_dm"
-            content = body if body else "(no content)"
-            if needs_trust_reminder:
-                content = f"{content}\n{trust_reminder}"
-            components = {
-                "header": header,
-                "content": content,
-            }
+            components = _build_peer_message_prompt_components(
+                header=header,
+                body=body,
+                raw_payload=raw_payload,
+                trust_reminder=trust_reminder if needs_trust_reminder else "",
+            )
         else:
             source_kind, source_label = get_message_source_metadata(m.raw_payload)
             is_webhook = channel == CommsChannel.OTHER and source_kind == "webhook"

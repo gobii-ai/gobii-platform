@@ -44,6 +44,7 @@ class SqliteMessagesTableTests(SimpleTestCase):
                 latest_error_code=None,
                 latest_error_message=None,
                 is_hidden_in_chat=False,
+                structured_payload_json='{"record_id":"rec-17","status":"ready"}',
             )
         ]
 
@@ -57,7 +58,8 @@ class SqliteMessagesTableTests(SimpleTestCase):
 
             cur.execute(
                 """
-                SELECT message_id, channel, is_outbound, direction, subject, attachment_paths_json, attachment_count, rejected_attachments_json
+                SELECT message_id, channel, is_outbound, direction, subject, attachment_paths_json,
+                       attachment_count, rejected_attachments_json, structured_payload_json
                 FROM "__messages"
                 WHERE message_id='msg-1';
                 """
@@ -73,6 +75,10 @@ class SqliteMessagesTableTests(SimpleTestCase):
             self.assertEqual(json.loads(row[5]), ["/reports/daily.csv"])
             self.assertEqual(row[6], 1)
             self.assertEqual(json.loads(row[7]), [])
+            self.assertEqual(
+                json.loads(row[8]),
+                {"record_id": "rec-17", "status": "ready"},
+            )
         finally:
             conn.close()
 

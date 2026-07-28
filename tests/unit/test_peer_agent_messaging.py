@@ -118,6 +118,98 @@ class PeerMessagingServiceTests(TestCase):
         self.assertEqual(queued_args, (str(self.agent_b.id),))
         self.assertGreater(queued_kwargs["inbound_generation"], 0)
 
+    def test_payload_only_message_is_preserved_for_both_agents(self):
+        payload = {
+            "record_id": "rec-17",
+            "status": "ready",
+            "dimensions": {"region": "west", "priority": 2},
+        }
+
+        with patch("api.agent.tasks.process_agent_events_task") as task_mock, patch(
+            "api.agent.peer_comm.transaction.on_commit", _run_on_commit_immediately
+        ):
+            task_mock.delay = MagicMock()
+            result = self.service.send_message(structured_payload=payload)
+
+        self.assertEqual(result.status, "ok")
+        outbound = PersistentAgentMessage.objects.get(owner_agent=self.agent_a, is_outbound=True)
+        inbound = PersistentAgentMessage.objects.get(owner_agent=self.agent_b, is_outbound=False)
+        self.assertEqual(outbound.body, "")
+        self.assertEqual(inbound.body, "")
+        self.assertEqual(outbound.raw_payload["structured_payload"], payload)
+        self.assertEqual(inbound.raw_payload["structured_payload"], payload)
+
+    def test_message_requires_text_or_non_empty_payload(self):
+        with self.assertRaisesMessage(
+            PeerMessagingError,
+            "Either a nonblank message body or a non-empty structured payload is required.",
+        ):
+            self.service.send_message("", structured_payload={})
+
+    def test_duplicate_payload_ignores_object_key_order(self):
+        first_payload = {
+            "record": {"id": "rec-17", "status": "ready"},
+            "tags": ["priority", "west"],
+        }
+        reordered_payload = {
+            "tags": ["priority", "west"],
+            "record": {"status": "ready", "id": "rec-17"},
+        }
+
+        with patch("api.agent.tasks.process_agent_events_task") as task_mock, patch(
+            "api.agent.peer_comm.transaction.on_commit", _run_on_commit_immediately
+        ):
+            task_mock.delay = MagicMock()
+            self.service.send_message("Ledger update", structured_payload=first_payload)
+
+        state = AgentCommPeerState.objects.get(link=self.link, channel=CommsChannel.OTHER)
+        state.last_message_at = timezone.now() - timedelta(seconds=10)
+        state.save(update_fields=["last_message_at"])
+
+        with self.assertRaises(PeerMessagingDuplicateError):
+            self.service.send_message("Ledger update", structured_payload=reordered_payload)
+
+    def test_same_text_with_different_payload_is_not_a_duplicate(self):
+        with patch("api.agent.tasks.process_agent_events_task") as task_mock, patch(
+            "api.agent.peer_comm.transaction.on_commit", _run_on_commit_immediately
+        ):
+            task_mock.delay = MagicMock()
+            self.service.send_message("Ledger update", structured_payload={"record_id": "rec-17"})
+
+        state = AgentCommPeerState.objects.get(link=self.link, channel=CommsChannel.OTHER)
+        state.last_message_at = timezone.now() - timedelta(seconds=10)
+        state.save(update_fields=["last_message_at"])
+
+        with patch("api.agent.tasks.process_agent_events_task") as task_mock, patch(
+            "api.agent.peer_comm.transaction.on_commit", _run_on_commit_immediately
+        ):
+            task_mock.delay = MagicMock()
+            result = self.service.send_message(
+                "Ledger update",
+                structured_payload={"record_id": "rec-18"},
+            )
+
+        self.assertEqual(result.status, "ok")
+
+    def test_same_text_with_payload_then_without_payload_is_not_a_duplicate(self):
+        with patch("api.agent.tasks.process_agent_events_task") as task_mock, patch(
+            "api.agent.peer_comm.transaction.on_commit", _run_on_commit_immediately
+        ):
+            task_mock.delay = MagicMock()
+            self.service.send_message("Ledger update", structured_payload={"record_id": "rec-17"})
+
+        state = AgentCommPeerState.objects.get(link=self.link, channel=CommsChannel.OTHER)
+        state.last_message_at = timezone.now() - timedelta(seconds=10)
+        state.save(update_fields=["last_message_at"])
+
+        with patch("api.agent.tasks.process_agent_events_task") as task_mock, patch(
+            "api.agent.peer_comm.transaction.on_commit", _run_on_commit_immediately
+        ):
+            task_mock.delay = MagicMock()
+            result = self.service.send_message("Ledger update")
+
+        self.assertEqual(result.status, "ok")
+
     def test_send_message_with_attachment_copies_file_before_processing(self):
         source_node = self._create_sender_attachment("/reports/summary.txt", b"Quarterly summary")
         attachments = resolve_filespace_attachments(self.agent_a, [source_node.path])
@@ -300,6 +392,46 @@ class PeerMessagingServiceTests(TestCase):
         self.assertEqual(PersistentAgentMessage.objects.count(), 0)
         self.assertEqual(PersistentAgentMessageAttachment.objects.count(), 0)
 
+    def test_execute_tool_rejects_invalid_and_oversized_structured_payloads(self):
+        from api.agent.tools.peer_dm import execute_send_agent_message
+
+        invalid = execute_send_agent_message(
+            self.agent_a,
+            {
+                "peer_agent_id": str(self.agent_b.id),
+                "structured_payload": "not structured",
+            },
+        )
+        oversized = execute_send_agent_message(
+            self.agent_a,
+            {
+                "peer_agent_id": str(self.agent_b.id),
+                "structured_payload": {"data": "x" * (64 * 1024)},
+            },
+        )
+
+        self.assertEqual(invalid["status"], "error")
+        self.assertIn("JSON object or array", invalid["message"])
+        self.assertEqual(oversized["status"], "error")
+        self.assertIn("64 KB limit", oversized["message"])
+        self.assertEqual(PersistentAgentMessage.objects.count(), 0)
+
+    def test_execute_tool_rejects_attachment_only_message(self):
+        from api.agent.tools.peer_dm import execute_send_agent_message
+
+        source_node = self._create_sender_attachment("/handoffs/brief.txt", b"brief")
+        response = execute_send_agent_message(
+            self.agent_a,
+            {
+                "peer_agent_id": str(self.agent_b.id),
+                "attachments": [source_node.path],
+            },
+        )
+
+        self.assertEqual(response["status"], "error")
+        self.assertIn("nonblank 'message'", response["message"])
+        self.assertEqual(PersistentAgentMessage.objects.count(), 0)
+
     def test_debounce_prevents_rapid_repeat(self):
         self._create_sender_attachment("/reports/loop.txt", b"First loop")
         attachments = resolve_filespace_attachments(self.agent_a, ["/reports/loop.txt"])
@@ -471,6 +603,33 @@ class PeerMessagingServiceTests(TestCase):
 
         self.assertEqual(response["status"], "ok")
         self.assertTrue(response.get("auto_sleep_ok"))
+
+    def test_execute_tool_delivers_payload_without_message(self):
+        from api.agent.tools.peer_dm import execute_send_agent_message
+
+        payload = {"record_id": "rec-17", "status": "ready"}
+        with patch("api.agent.tools.peer_dm.PeerMessagingService") as service_cls:
+            service_cls.return_value.send_message.return_value = PeerSendResult(
+                status="ok",
+                message="delivered",
+                remaining_credits=1,
+                window_reset_at=timezone.now(),
+            )
+
+            response = execute_send_agent_message(
+                self.agent_a,
+                {
+                    "peer_agent_id": str(self.agent_b.id),
+                    "structured_payload": payload,
+                },
+            )
+
+        self.assertEqual(response["status"], "ok")
+        service_cls.return_value.send_message.assert_called_once_with(
+            "",
+            structured_payload=payload,
+            attachments=[],
+        )
 
     def test_execute_tool_passes_resolved_attachments_to_service(self):
         from api.agent.tools.peer_dm import execute_send_agent_message

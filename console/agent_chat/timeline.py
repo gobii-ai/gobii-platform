@@ -32,6 +32,7 @@ from api.agent.comms.human_input_requests import serialize_human_input_tool_resu
 from api.agent.comms.adapters import EMAIL_BODY_HTML_PAYLOAD_KEY
 from api.agent.comms.cid_references import CID_SRC_REFERENCE_RE
 from api.agent.comms.source_metadata import get_message_source_metadata, get_webhook_timeline_metadata
+from api.agent.structured_peer_payload import get_structured_peer_payload
 from api.models import (
     BrowserUseAgentTask,
     BrowserUseAgentTaskQuerySet,
@@ -614,6 +615,7 @@ def _serialize_message(
     # "have you been there?" rendered with no indication of what "there" meant (bug #248).
     reply_to_payload: dict | None = None
     raw_message_payload = message.raw_payload if isinstance(message.raw_payload, Mapping) else {}
+    structured_payload = get_structured_peer_payload(raw_message_payload)
     reply_raw = raw_message_payload.get("discord_reply_to")
     if isinstance(reply_raw, Mapping) and not reply_raw.get("unavailable"):
         reply_body = str(reply_raw.get("content") or "").strip()
@@ -663,6 +665,7 @@ def _serialize_message(
             "sourceLabel": source_label,
             "channelLabel": discord_channel_label or None,
             "webhookMeta": webhook_meta,
+            "structuredPayload": structured_payload,
             "viewerFeedback": feedback_lookup.get(message.id) if feedback_lookup else None,
             "deliveryStatus": message.latest_status,
             "outboxReview": outbox_review,

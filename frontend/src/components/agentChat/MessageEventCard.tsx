@@ -94,6 +94,8 @@ export const MessageEventCard = memo(function MessageEventCard({
   const isWebhook = sourceKind === 'webhook'
   const hasPeerMetadata = Boolean(message.peerAgent || message.peerLinkId)
   const isPeer = Boolean(message.isPeer || hasPeerMetadata)
+  const structuredPayload = isPeer ? message.structuredPayload : null
+  const hasStructuredPayload = structuredPayload !== null && structuredPayload !== undefined
 
   const selfName = message.selfAgentName || agentFirstName || 'Agent'
   const peerName = message.peerAgent?.name || 'Linked agent'
@@ -247,6 +249,10 @@ export const MessageEventCard = memo(function MessageEventCard({
     message.bodyText?.trim() || (clipboardHtml ? plainTextFromHtml(clipboardHtml) : '')
   ), [clipboardHtml, message.bodyText])
   const copyDisabled = !clipboardPlainText && !clipboardHtml
+  const hasRenderableMessageBody = Boolean(
+    message.bodyText?.trim() || message.bodyHtml?.trim() || message.replyTo,
+  )
+  const shouldRenderMessageContent = hasRenderableMessageBody || !hasStructuredPayload
 
   const handleCopyMessage = useCallback(async () => {
     if (copyDisabled) {
@@ -369,7 +375,7 @@ export const MessageEventCard = memo(function MessageEventCard({
               style={{ backgroundColor: 'transparent', fontSize: '0.8125rem', lineHeight: 1.5 }}
             />
           </div>
-        ) : (
+        ) : shouldRenderMessageContent ? (
           <div
             className={`chat-content prose prose-sm max-w-none leading-relaxed ${contentTone}`}
           >
@@ -391,7 +397,27 @@ export const MessageEventCard = memo(function MessageEventCard({
               onLinkClick={onMessageLinkClick}
             />
           </div>
-        )}
+        ) : null}
+        {hasStructuredPayload && structuredPayload ? (
+          <details className="chat-content mt-3 border-l-2 border-indigo-200 pl-3">
+            <summary className="cursor-pointer select-none text-xs font-semibold text-indigo-700">
+              Structured payload
+            </summary>
+            <div className="mt-2 overflow-auto">
+              <ReactJsonView
+                src={structuredPayload}
+                name={false}
+                collapsed={1}
+                displayDataTypes={false}
+                displayObjectSize={false}
+                enableClipboard={false}
+                iconStyle="triangle"
+                sortKeys
+                style={{ backgroundColor: 'transparent', fontSize: '0.8125rem', lineHeight: 1.5 }}
+              />
+            </div>
+          </details>
+        ) : null}
         {message.attachments && message.attachments.length > 0 ? (
           <div className="chat-attachments">
             {message.attachments.map((attachment) => {
