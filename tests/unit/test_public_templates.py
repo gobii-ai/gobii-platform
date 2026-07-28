@@ -1160,6 +1160,46 @@ class PublicTemplateRouteTests(TestCase):
         self.assertLess(content.index("Alpha Related"), content.index("Beta Related"))
 
     @tag("batch_public_templates")
+    def test_public_template_detail_excludes_unlisted_specified_template(self):
+        template = self.create_public_template(
+            code="listed-related-source",
+            display_name="Listed Related Source",
+            handle="listed-related-source",
+        )
+        unlisted_template = PersistentAgentTemplate.objects.create(
+            code="private-campaign-related-target",
+            display_name="Private Campaign Related Target",
+            tagline="Private campaign template",
+            description="Private campaign template.",
+            charter="Run the private campaign workflow.",
+            category="Finance",
+            is_active=True,
+            is_listed=False,
+        )
+        link = PersistentAgentTemplateRelatedTemplate(
+            source_template=template,
+            related_template=unlisted_template,
+            position=1,
+        )
+
+        with self.assertRaisesMessage(ValidationError, "must be listed"):
+            link.full_clean()
+
+        # Existing links can outlive a later unlisting, so the rendering path
+        # must enforce visibility independently of model validation.
+        PersistentAgentTemplateRelatedTemplate.objects.create(
+            source_template=template,
+            related_template=unlisted_template,
+            position=1,
+        )
+
+        response = self.client.get("/library/finance/listed-related-source/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["related_templates"], [])
+        self.assertNotContains(response, "Private Campaign Related Target")
+
+    @tag("batch_public_templates")
     def test_curated_template_detail_uses_specified_related_templates(self):
         template = PersistentAgentTemplate.objects.create(
             code="real-estate-research-analyst",

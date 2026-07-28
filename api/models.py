@@ -6340,6 +6340,8 @@ class PersistentAgentTemplateRelatedTemplate(models.Model):
                 raise ValidationError({"related_template": "Related templates must be public-facing, not organization-scoped."})
             if not related_template.is_active:
                 raise ValidationError({"related_template": "Related templates must be active."})
+            if not related_template.is_listed:
+                raise ValidationError({"related_template": "Related templates must be listed."})
             if not (related_template.slug or related_template.code):
                 raise ValidationError({"related_template": "Related templates must have a public route slug or code."})
 

@@ -1209,7 +1209,9 @@ class SpecialAccessCheckoutTests(TestCase):
 
     def test_unlisted_campaign_template_is_not_publicly_resolvable(self):
         template = PersistentAgentTemplate.objects.create(
-            code="unlisted-private-worker",
+            # This deliberately shadows a legacy in-code template definition.
+            # The database visibility decision must take precedence over fallback.
+            code="sales-pipeline-whisperer",
             display_name="Unlisted private worker",
             tagline="Private",
             description="Private campaign template",
@@ -1225,6 +1227,13 @@ class SpecialAccessCheckoutTests(TestCase):
                 template.code,
                 include_unlisted=True,
             ),
+        )
+        self.assertNotIn(
+            template.code,
+            [
+                item.code
+                for item in PretrainedWorkerTemplateService.get_active_templates()
+            ],
         )
         response = self.client.get(
             reverse(

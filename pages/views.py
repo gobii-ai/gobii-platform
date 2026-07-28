@@ -1653,7 +1653,11 @@ def _is_public_related_template_candidate(
 ) -> bool:
     if not template or template.id == source_template_id:
         return False
-    if template.organization_id is not None or not template.is_active:
+    if (
+        template.organization_id is not None
+        or not template.is_active
+        or not template.is_listed
+    ):
         return False
     return bool(public_template_route_slug(template))
 
