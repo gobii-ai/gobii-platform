@@ -3670,7 +3670,7 @@ class CharterPatchesAndCompletesImmediateTaskScenario(CharterMemoryScenario):
     def _charter_check(self, agent, mutation_calls):
         sql = str(resolved_tool_param(mutation_calls[0], "sql") or "") if len(mutation_calls) == 1 else ""
         statements = split_sql_statements(sql)
-        pairs = _charter_patch_pairs(statements[0]) if statements else []
+        pairs = _charter_patch_pairs(mutation_calls[0]) if statements else []
         old, new = pairs[0] if len(pairs) == 1 else (None, None)
         focused_patch = bool(
             len(mutation_calls) == 1

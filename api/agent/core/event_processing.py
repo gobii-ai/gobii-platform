@@ -1670,16 +1670,28 @@ def _focused_tool_completion_request(
 
 
 def _focused_charter_patch_history(
-    history: list[dict[str, Any]], current_charter: str, lasting_feedback: tuple[str, ...], prior_output: str,
+    history: list[dict[str, Any]],
+    current_charter: str,
+    feedback_text: str,
+    lasting_feedback: tuple[str, ...],
+    prior_output: str,
 ) -> list[dict[str, Any]]:
     system_messages = [message for message in history if message.get("role") == "system"]
     return system_messages + [{
         "role": "user",
         "content": (
             "<charter>" + current_charter + "</charter>\n"
-            "<lasting_feedback>" + json.dumps(lasting_feedback) + "</lasting_feedback>\n"
+            "<current_turn>" + feedback_text + "</current_turn>\n"
+            "<lasting_feedback_hint>" + json.dumps(lasting_feedback) + "</lasting_feedback_hint>\n"
             "<prior_output_context>" + prior_output[:1000] + "</prior_output_context>\n"
-            "Patch only lasting_feedback. Every listed item is mandatory; combine them into one conflict-free patch. Other wording from the original turn is out of scope."
+            "Decide whether the charter needs one patch for the operative lasting behavior in current_turn. "
+            "lasting_feedback_hint is a routing hint, not the complete rule: interpret current_turn together with "
+            "prior_output_context to understand the behavior the user wants repeated. The prior output is evidence "
+            "of the gap, never text to copy into the charter. Judge equivalence against the rule that would have "
+            "prevented the corrected prior output, not merely shared words in current_turn. Instructions about "
+            "updating, rewriting, or preserving the charter describe this edit and must never become charter content. "
+            "Immediate work in current_turn is separate from the durable rule and remains due after this decision. "
+            "If the charter already expresses the same behavior, choose already_satisfied and make no edit."
         ),
     }]
 
@@ -1725,10 +1737,18 @@ def _source_reconciliation_parameters(directive: str) -> dict[str, Any]:
 CHARTER_PATCH_PARAMETERS = {
     "type": "object",
     "properties": {
+        "decision": {
+            "type": "string",
+            "enum": ["update", "already_satisfied"],
+            "description": (
+                "Use update only when the current charter lacks or conflicts with the operative lasting behavior. "
+                "Use already_satisfied when an equivalent rule is present; this is not a charter mutation."
+            ),
+        },
         "target_charter_text": {"type": "string", "description": "Smallest exact contiguous span copied from <charter> that covers every adjacent rule conflicting with the lasting feedback. Preserve lookalikes for other actors/contexts. A general role/workflow and prior output are not targets. Empty if no charter rule controls the behavior."},
-        "replacement_charter_text": {"type": "string", "description": "Complete operational replacement for the target. Apply only the listed lasting clauses, leave no contradiction, and preserve unrelated text inside the target span verbatim."},
+        "replacement_charter_text": {"type": "string", "description": "Complete operational replacement for the target. Apply only the operative lasting behavior, leave no contradiction, and preserve unrelated text inside the target span verbatim. Empty when decision is already_satisfied."},
     },
-    "required": ["target_charter_text", "replacement_charter_text"],
+    "required": ["decision", "target_charter_text", "replacement_charter_text"],
     "additionalProperties": False,
 }
 
@@ -2759,6 +2779,13 @@ class _FeedbackTurn:
     separate_task: bool
 
 
+@dataclass(frozen=True)
+class _DirectCorrectionContext:
+    prior_output: str
+    feedback: _FeedbackTurn
+    feedback_text: str
+
+
 def _analyze_feedback_turn(text: str, prior_outbound_text: str = "") -> _FeedbackTurn:
     normalized = " ".join((text or "").split())
     clauses = tuple(" ".join(clause.split()) for clause in re.split(r"(?<=[.!?;])\s+|[\r\n]+", text or "") if clause.strip())
@@ -2889,11 +2916,33 @@ def _direct_correction_context(agent: PersistentAgent, latest_inbound=None):
     prior_outbound = PersistentAgentMessage.objects.filter(owner_agent=agent, is_outbound=True, conversation_id=latest_inbound.conversation_id).filter(
         Q(timestamp__lt=latest_inbound.timestamp)
         | Q(timestamp=latest_inbound.timestamp, seq__lt=latest_inbound.seq)
-    ).order_by("-timestamp", "-seq").values_list("body", flat=True).first()
-    analysis = _analyze_feedback_turn(latest_inbound.body, prior_outbound or "")
-    if prior_outbound is None or not (analysis.lasting and analysis.behavior and not analysis.transient_only):
+    ).order_by("-timestamp", "-seq").first()
+    if prior_outbound is None:
         return None
-    return latest_inbound, prior_outbound, analysis
+    # Bound a rapid same-sender burst so the focused correction call keeps its cache-efficient shape.
+    feedback_messages = list(
+        PersistentAgentMessage.objects.filter(
+            owner_agent=agent,
+            is_outbound=False,
+            conversation_id=latest_inbound.conversation_id,
+            from_endpoint_id=latest_inbound.from_endpoint_id,
+        ).filter(
+            Q(timestamp__gt=prior_outbound.timestamp)
+            | Q(timestamp=prior_outbound.timestamp, seq__gt=prior_outbound.seq),
+        ).filter(
+            Q(timestamp__lt=latest_inbound.timestamp)
+            | Q(timestamp=latest_inbound.timestamp, seq__lte=latest_inbound.seq),
+        ).order_by("-timestamp", "-seq")[:6]
+    )
+    feedback_text = "\n".join(message.body for message in reversed(feedback_messages))
+    analysis = _analyze_feedback_turn(feedback_text, prior_outbound.body)
+    if not (analysis.lasting and analysis.behavior and not analysis.transient_only):
+        return None
+    return _DirectCorrectionContext(
+        prior_output=prior_outbound.body,
+        feedback=analysis,
+        feedback_text=feedback_text,
+    )
 
 
 def _compile_charter_patch_tool_call(tool_call: Any, current_charter: str | None = None) -> Any | None:
@@ -2904,6 +2953,8 @@ def _compile_charter_patch_tool_call(tool_call: Any, current_charter: str | None
     except (TypeError, ValueError, json.JSONDecodeError):
         return None
     if not isinstance(params, dict):
+        return None
+    if params.get("decision") != "update":
         return None
     old = params.get("target_charter_text")
     new = params.get("replacement_charter_text")
@@ -2930,6 +2981,21 @@ def _compile_charter_patch_tool_call(tool_call: Any, current_charter: str | None
     })
     call_id = tool_call.get("id") if isinstance(tool_call, dict) else getattr(tool_call, "id", None)
     return {"id": call_id, "type": "function", "function": {"name": "sqlite_batch", "arguments": arguments}}
+
+
+def _charter_patch_is_already_satisfied(tool_call: Any) -> bool:
+    if _get_tool_call_name(tool_call) != "sqlite_batch":
+        return False
+    try:
+        _raw_args, params = _parse_tool_call_params(_get_tool_call_arguments(tool_call))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return False
+    return bool(
+        isinstance(params, dict)
+        and params.get("decision") == "already_satisfied"
+        and params.get("target_charter_text") == ""
+        and params.get("replacement_charter_text") == ""
+    )
 
 
 def _looks_like_one_off_user_task(text: str) -> bool:
@@ -6775,8 +6841,13 @@ def _run_agent_loop(
                 feedback_text = feedback_inbound.body if feedback_inbound is not None else ""
                 direct_correction_context = None if direct_correction_reply_pending else _direct_correction_context(agent, feedback_inbound)
                 if direct_correction_context:
-                    direct_correction_prior_output = direct_correction_context[1]
-                feedback_analysis = direct_correction_context[2] if direct_correction_context else _analyze_feedback_turn(feedback_text, direct_correction_prior_output)
+                    direct_correction_prior_output = direct_correction_context.prior_output
+                    feedback_text = direct_correction_context.feedback_text
+                feedback_analysis = (
+                    direct_correction_context.feedback
+                    if direct_correction_context
+                    else _analyze_feedback_turn(feedback_text, direct_correction_prior_output)
+                )
                 feedback_only = feedback_analysis.feedback_only
                 direct_correction_pending = bool(
                     "sqlite_batch" in tool_names
@@ -6808,13 +6879,19 @@ def _run_agent_loop(
                 prompt_notice = current_notice
                 if direct_correction_pending:
                     charter_patch_instruction = (
-                        "Return only target_charter_text and replacement_charter_text; never SQL or will_continue_work. Patch ONLY the lasting clauses listed for this turn; all other current-turn text is temporary or separate and must not appear in the replacement. CURRENT CHARTER (<charter>), the only source for a nonempty target: "
+                        "Return only decision, target_charter_text, and replacement_charter_text; never SQL or will_continue_work. "
+                        "Identify the operative lasting behavior from the full current turn and the corrected prior output; "
+                        "lasting_feedback_hint may contain only the user's edit instruction. Never store instructions about "
+                        "updating, rewriting, or preserving the charter. If the charter already expresses equivalent behavior, "
+                        "choose already_satisfied with both text fields empty. "
+                        "Otherwise patch only that lasting behavior; temporary scope and immediate work must not appear in the replacement. "
+                        "CURRENT CHARTER (<charter>), the only source for a nonempty target: "
                         + json.dumps(agent.charter or "")
                         + ". Scope ordinary corrections to the criticized actor, audience, workflow, and condition; preserve similar rules elsewhere. For role/ownership feedback, state what is owned and remove or qualify conflicting ownership/direction; a named incident is evidence, not scope, and only explicit human reassignment expands the role. If no charter rule controls it, use an empty target and one concise operational rule, not copied feedback or prior output. Otherwise replace the smallest exact contiguous span covering conflicts, preserving unrelated text inside it verbatim."
                     )
                     prompt_notice = "\n\n".join(filter(None, (
                         prompt_notice,
-                        "Current-turn lasting feedback to patch, excluding temporary scope and separate tasks: "
+                        "Current-turn lasting feedback routing hint: "
                         + json.dumps(feedback_analysis.lasting),
                         "PRIOR OUTPUT (context only; never use its text as target_charter_text or replacement_charter_text): "
                         + json.dumps(direct_correction_prior_output[:1000]),
@@ -6822,7 +6899,13 @@ def _run_agent_loop(
                 elif feedback_reply_pending:
                     prompt_notice = "\n\n".join(filter(None, (prompt_notice, feedback_reply_instruction)))
                 elif separate_feedback_task and (direct_correction_reply_pending or transient_feedback_reply_pending):
-                    prompt_notice = "\n\n".join(filter(None, (prompt_notice, "Current turn: feedback scope is resolved. Execute the remaining explicit request now; acknowledge the adjustment naturally within the completed result, not as a separate progress message.")))
+                    prompt_notice = "\n\n".join(filter(None, (
+                        prompt_notice,
+                        "Current turn: feedback scope is resolved. Do not inspect config or reconsider the feedback. "
+                        "Execute the remaining explicit request now, using its task-relevant tool directly when "
+                        "available; acknowledge the adjustment naturally within the completed result, not as a "
+                        "separate progress message.",
+                    )))
                 try:
                     prompt_context_result = build_prompt_context(
                         agent,
@@ -6844,6 +6927,7 @@ def _run_agent_loop(
                                 lambda prompt_history: _focused_charter_patch_history(
                                     prompt_history,
                                     agent.charter or "",
+                                    feedback_text,
                                     feedback_analysis.lasting,
                                     direct_correction_prior_output,
                                 )
@@ -7066,7 +7150,11 @@ def _run_agent_loop(
                 elif direct_correction_pending:
                     if not prompt_metadata.get("prompt_message_transform_applied"):
                         request_history = _focused_charter_patch_history(
-                            history, agent.charter or "", feedback_analysis.lasting, direct_correction_prior_output,
+                            history,
+                            agent.charter or "",
+                            feedback_text,
+                            feedback_analysis.lasting,
+                            direct_correction_prior_output,
                         )
                     request_tools, request_failover_configs = _focused_tool_completion_request(
                         iteration_tools,
@@ -7321,15 +7409,26 @@ def _run_agent_loop(
                 raw_tool_calls = _normalize_tool_calls(msg)
                 direct_correction_patch_this_response = False
                 if direct_correction_pending:
-                    compiled_call = _compile_charter_patch_tool_call(raw_tool_calls[0], agent.charter) if len(raw_tool_calls) == 1 else None
+                    focused_call = raw_tool_calls[0] if len(raw_tool_calls) == 1 else None
+                    already_satisfied = _charter_patch_is_already_satisfied(focused_call)
+                    compiled_call = _compile_charter_patch_tool_call(focused_call, agent.charter) if focused_call else None
                     direct_correction_patch_this_response = compiled_call is not None
                     if compiled_call is not None:
                         raw_tool_calls = [compiled_call]
-                    if not direct_correction_patch_this_response:
+                    elif already_satisfied:
+                        direct_correction_reply_pending = True
+                        _mark_accepted_human_generation_consumed()
+                        continuation_notice = (
+                            "Equivalent durable guidance is already present. Make no config edit; "
+                            "do not inspect config or reconsider the feedback. Execute any separate request from "
+                            "the current turn now, using its task-relevant tool directly when available."
+                        )
+                        continue
+                    else:
                         _record_policy_step(
                             agent,
-                            "Tool policy: persist this direct user correction before replying. Return the required "
-                            "exact target/replacement charter span now, changing only the relevant clause and preserving unrelated guidance.",
+                            "Tool policy: resolve this direct user correction before replying. Return one valid "
+                            "structured update or already_satisfied decision, preserving unrelated guidance.",
                             attach_completion=_attach_completion,
                             attach_prompt_archive=_attach_prompt_archive,
                         )

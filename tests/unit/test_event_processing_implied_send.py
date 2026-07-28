@@ -459,6 +459,7 @@ class ImpliedSendTests(TestCase):
             "function": {
                 "name": "sqlite_batch",
                 "arguments": json.dumps({
+                    "decision": "update",
                     "target_charter_text": old,
                     "replacement_charter_text": new,
                 }),
@@ -474,6 +475,7 @@ class ImpliedSendTests(TestCase):
         self.assertIs(params["will_continue_work"], True)
 
         call["function"]["arguments"] = json.dumps({
+            "decision": "update",
             "target_charter_text": "Research prospects.",
             "replacement_charter_text": "Research prospects. Include verified source links.",
         })
@@ -484,6 +486,7 @@ class ImpliedSendTests(TestCase):
         )
 
         call["function"]["arguments"] = json.dumps({
+            "decision": "update",
             "target_charter_text": "",
             "replacement_charter_text": "Research prospects. Include verified source links.",
         })
@@ -503,14 +506,44 @@ class ImpliedSendTests(TestCase):
             {},
             [],
             "old/new",
+            {
+                "decision": "already_satisfied",
+                "target_charter_text": "",
+                "replacement_charter_text": "",
+            },
             {"target_charter_text": "Rule", "replacement_charter_text": ""},
-            {"target_charter_text": "Rule", "replacement_charter_text": "Rule"},
-            {"target_charter_text": "Rule\x00", "replacement_charter_text": "Better rule"},
-            {"target_charter_text": 1, "replacement_charter_text": "Better rule"},
+            {"decision": "update", "target_charter_text": "Rule", "replacement_charter_text": "Rule"},
+            {"decision": "update", "target_charter_text": "Rule\x00", "replacement_charter_text": "Better rule"},
+            {"decision": "update", "target_charter_text": 1, "replacement_charter_text": "Better rule"},
             {"preserve": "", "old": "Rule", "new": "Better rule"},
         ):
             with self.subTest(params=params):
                 self.assertIsNone(compile_params(params))
+
+    def test_structured_charter_patch_accepts_only_empty_already_satisfied_decision(self):
+        def call(params):
+            return {
+                "function": {
+                    "name": "sqlite_batch",
+                    "arguments": json.dumps(params),
+                },
+            }
+
+        self.assertTrue(ep._charter_patch_is_already_satisfied(call({
+            "decision": "already_satisfied",
+            "target_charter_text": "",
+            "replacement_charter_text": "",
+        })))
+        self.assertFalse(ep._charter_patch_is_already_satisfied(call({
+            "decision": "already_satisfied",
+            "target_charter_text": "Test charter",
+            "replacement_charter_text": "",
+        })))
+        self.assertFalse(ep._charter_patch_is_already_satisfied(call({
+            "decision": "update",
+            "target_charter_text": "",
+            "replacement_charter_text": "Write naturally.",
+        })))
 
     def _add_inbound_web_message(self, body):
         user_endpoint = PersistentAgentCommsEndpoint.objects.create(
@@ -581,6 +614,27 @@ class ImpliedSendTests(TestCase):
         self._add_feedback_followup()
 
         self.assertIsNotNone(ep._direct_correction_context(self.agent))
+
+    def test_direct_correction_patch_keeps_rapid_same_sender_feedback_together(self):
+        initial, _outbound, _correction = self._add_feedback_followup("That's not your job.")
+        latest = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            is_outbound=False,
+            from_endpoint=initial.from_endpoint,
+            conversation=initial.conversation,
+            body="Your job is tracking infrastructure and resource blockers for the team.",
+        )
+
+        context = ep._direct_correction_context(self.agent, latest)
+
+        self.assertEqual(
+            context.feedback_text,
+            "That's not your job.\nYour job is tracking infrastructure and resource blockers for the team.",
+        )
+        self.assertEqual(context.feedback.lasting, (
+            "That's not your job.",
+            "Your job is tracking infrastructure and resource blockers for the team.",
+        ))
 
     def test_explicit_charter_amendment_requires_focused_patch(self):
         feedback = "Please patch your charter. Accept API-delivered incident evidence and label its origin."
@@ -3222,6 +3276,7 @@ class ImpliedSendTests(TestCase):
         ]
         responses = [
             self._tool_completion("sqlite_batch", {
+                "decision": "update",
                 "target_charter_text": "",
                 "replacement_charter_text": "Write naturally.",
             }),
@@ -3241,6 +3296,36 @@ class ImpliedSendTests(TestCase):
         self.assertEqual(executed_tools, ["sqlite_batch", "send_chat_message"])
         self.assertEqual(completion.call_count, 2)
 
+    def test_already_satisfied_feedback_skips_charter_write_and_continues_work(self):
+        tools = [
+            {"type": "function", "function": {"name": "sqlite_batch", "parameters": {"type": "object", "properties": {}}}},
+            {"type": "function", "function": {"name": "search_tools", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}}}},
+        ]
+        responses = [
+            self._tool_completion("sqlite_batch", {
+                "decision": "already_satisfied",
+                "target_charter_text": "",
+                "replacement_charter_text": "",
+            }),
+            self._tool_completion("search_tools", {"query": "three prospects"}),
+        ]
+
+        completion, build_prompt, executed_tools = self._run_feedback_flow(
+            "You sound robotic, but that rule is already covered. Find three prospects now.",
+            responses,
+            tools,
+        )
+
+        self.assertEqual(executed_tools, ["search_tools"])
+        self.assertEqual(completion.call_count, 2)
+        self.assertIn(
+            "Equivalent durable guidance is already present",
+            build_prompt.call_args_list[1].kwargs["continuation_notice"],
+        )
+        self.assertIn(
+            "using its task-relevant tool directly",
+            build_prompt.call_args_list[1].kwargs["continuation_notice"],
+        )
     def test_charter_patch_requires_confirmed_config_result_before_replying(self):
         tools = [
             {"type": "function", "function": {"name": "sqlite_batch", "parameters": {"type": "object", "properties": {}}}},
@@ -3248,6 +3333,7 @@ class ImpliedSendTests(TestCase):
         ]
         responses = [
             self._tool_completion("sqlite_batch", {
+                "decision": "update",
                 "target_charter_text": "",
                 "replacement_charter_text": "Write naturally.",
             }),
@@ -3308,29 +3394,31 @@ class ImpliedSendTests(TestCase):
         sqlite_tool = completion_kwargs["tools"][0]["function"]
         self.assertEqual(sqlite_tool["name"], "sqlite_batch")
         self.assertIn('CURRENT CHARTER (<charter>), the only source for a nonempty target: "Test charter"', sqlite_tool["description"])
-        self.assertIn("Patch ONLY the lasting clauses", sqlite_tool["description"])
+        self.assertIn("operative lasting behavior", sqlite_tool["description"])
+        self.assertIn("Never store instructions about updating", sqlite_tool["description"])
         self.assertIn("smallest exact contiguous span", sqlite_tool["description"])
         self.assertIn("not copied feedback or prior output", sqlite_tool["description"])
         self.assertEqual(
             set(sqlite_tool["parameters"]["properties"]),
-            {"target_charter_text", "replacement_charter_text"},
+            {"decision", "target_charter_text", "replacement_charter_text"},
         )
         self.assertEqual(
             sqlite_tool["parameters"]["required"],
-            ["target_charter_text", "replacement_charter_text"],
+            ["decision", "target_charter_text", "replacement_charter_text"],
         )
         self.assertIs(sqlite_tool["parameters"]["additionalProperties"], False)
         self.assertNotIn("sql", sqlite_tool["parameters"]["properties"])
         self.assertEqual(completion_kwargs["messages"][0], {"role": "system", "content": "sys"})
         focused_feedback = completion_kwargs["messages"][1]["content"]
         self.assertIn("<charter>Test charter</charter>", focused_feedback)
+        self.assertIn("<current_turn>You sound robotic.</current_turn>", focused_feedback)
         self.assertIn("You sound robotic.", focused_feedback)
         self.assertIn("<prior_output_context>Here is the draft.</prior_output_context>", focused_feedback)
         self.assertIsNone(completion_kwargs["stream_broadcaster"])
         self.assertEqual(completion_kwargs["failover_configs"][0][2]["tool_choice"], {"type": "function", "function": {"name": "sqlite_batch"}})
         self.assertIs(completion_kwargs["failover_configs"][0][2]["use_parallel_tool_calls"], False)
 
-    def test_focused_charter_history_excludes_temporary_clauses(self):
+    def test_focused_charter_history_preserves_full_turn_and_labels_hint(self):
         history = [
             {"role": "system", "content": "system"},
             {"role": "user", "content": "For this renewal only, put legal review first. Going forward, send outcomes."},
@@ -3339,13 +3427,15 @@ class ImpliedSendTests(TestCase):
         focused = ep._focused_charter_patch_history(
             history,
             "Coordinate renewals.",
+            history[1]["content"],
             ("Going forward, send outcomes.",),
             "I will keep you posted.",
         )
 
         self.assertEqual(focused[0], history[0])
         self.assertIn("Going forward, send outcomes.", focused[1]["content"])
-        self.assertNotIn("legal review first", focused[1]["content"])
+        self.assertIn("legal review first", focused[1]["content"])
+        self.assertIn("routing hint, not the complete rule", focused[1]["content"])
 
     def test_source_reconciliation_contract_is_promoted_without_hiding_context(self):
         history = [
@@ -3427,6 +3517,7 @@ class ImpliedSendTests(TestCase):
             self._tool_completion(
                 "sqlite_batch",
                 {
+                    "decision": "update",
                     "target_charter_text": "Test charter",
                     "replacement_charter_text": "Test charter. Write naturally.",
                 },
@@ -3464,6 +3555,7 @@ class ImpliedSendTests(TestCase):
             self._tool_completion(
                 "sqlite_batch",
                 {
+                    "decision": "update",
                     "target_charter_text": "Test charter",
                     "replacement_charter_text": "Test charter. Write naturally.",
                 },
