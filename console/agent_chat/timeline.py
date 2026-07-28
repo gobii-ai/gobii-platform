@@ -694,6 +694,7 @@ def _serialize_message(
         "timestamp": _format_timestamp(timestamp),
         "message": {
             "id": str(message.id),
+            "inReplyToMessageId": str(message.parent_id) if message.parent_id else None,
             "cursor": env.cursor.encode(),
             "bodyHtml": body_html,
             "bodyText": body_text,

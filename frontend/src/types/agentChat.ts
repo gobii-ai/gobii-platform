@@ -38,6 +38,7 @@ export type AgentMessageFeedback = 'up' | 'down'
 export type AgentMessage = {
   id: string
   cursor?: string
+  inReplyToMessageId?: string | null
   bodyHtml?: string
   bodyText?: string
   subject?: string | null

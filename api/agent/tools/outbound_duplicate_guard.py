@@ -308,6 +308,7 @@ def detect_recent_duplicate_message(
         body: str,
         to_address: Optional[str] = None,
         conversation_id: Optional[UUID] = None,
+        source_kind: Optional[str] = None,
         similarity_threshold: Optional[float] = None,
         exact_only: bool = False,
         structured_payload: Any = _NO_STRUCTURED_PAYLOAD,
@@ -336,6 +337,8 @@ def detect_recent_duplicate_message(
         qs = qs.filter(conversation_id=conversation_id)
     elif to_address:
         qs = qs.filter(to_endpoint__address=to_address)
+    if source_kind:
+        qs = qs.filter(raw_payload__source_kind=source_kind)
 
     current_body = (body or "").strip()
     previous_message = qs.order_by("-timestamp").first()

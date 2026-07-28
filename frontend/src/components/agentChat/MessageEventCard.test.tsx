@@ -98,3 +98,37 @@ describe('MessageEventCard reply context', () => {
     expect(screen.queryByTestId('reply-context')).not.toBeInTheDocument()
   })
 })
+
+describe('MessageEventCard MCP direction', () => {
+  function mcpMessage(overrides: Partial<AgentMessage> = {}): AgentMessage {
+    return {
+      id: 'mcp-message-1',
+      cursor: 'cursor-mcp-1',
+      bodyText: 'Completed.',
+      isOutbound: false,
+      channel: 'mcp',
+      sourceKind: 'mcp',
+      sourceLabel: 'Gobii MCP',
+      timestamp: '2026-07-25T16:35:13Z',
+      relativeTimestamp: null,
+      ...overrides,
+    } as AgentMessage
+  }
+
+  it('renders an inbound MCP message from Gobii MCP on the requester side', () => {
+    const { container } = renderCard(mcpMessage())
+
+    expect(screen.getByText('Gobii MCP')).toBeInTheDocument()
+    expect(screen.getByText('MCP')).toBeInTheDocument()
+    expect(container.querySelector('article')).toHaveClass('is-user')
+  })
+
+  it('renders an outbound MCP reply from the agent on the agent side', () => {
+    const { container } = renderCard(mcpMessage({ isOutbound: true }))
+
+    expect(screen.getByText('Alpha')).toBeInTheDocument()
+    expect(screen.queryByText('Gobii MCP')).not.toBeInTheDocument()
+    expect(screen.getByText('MCP')).toBeInTheDocument()
+    expect(container.querySelector('article')).toHaveClass('is-agent')
+  })
+})

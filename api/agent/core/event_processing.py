@@ -72,8 +72,10 @@ from ..comms.routing import (
     bind_inbound_routing_scope,
     capture_inbound_routing_scope,
     get_current_inbound_message,
+    get_recent_mcp_inbound_message,
     reset_inbound_routing_scope,
 )
+from ..comms.source_metadata import is_mcp_message
 from tasks.services import TaskCreditService
 from util.tool_costs import get_tool_credit_cost, get_default_task_credit_cost, should_refund_tool_credit_on_error
 from util.constants.task_constants import TASKS_UNLIMITED
@@ -143,6 +145,7 @@ from ..tools.search_tools import execute_search_tools
 from ..tools.tool_manager import ToolCatalogEntry, execute_enabled_tool, auto_enable_heuristic_tools, get_parallel_safe_tool_rejection_reason, resolve_tool_entry, should_skip_auto_substitution
 from ...services.tool_blacklist import is_tool_blacklisted_for_agent, tool_blacklist_error
 from ..tools.web_chat_sender import execute_send_chat_message, _looks_like_routine_progress_message
+from ..tools.mcp_sender import execute_send_mcp_message, get_send_mcp_message_tool
 from ..tools.peer_dm import execute_send_agent_message
 from ..tools.agent_variables import clear_variables, get_all_variables, replace_all_variables, substitute_variables
 from ..tools.file_export_helpers import resolve_export_target
@@ -213,6 +216,7 @@ MESSAGE_TOOL_BODY_KEYS = {
     "send_email": "mobile_first_html",
     "send_sms": "body",
     "send_chat_message": "body",
+    "send_mcp_message": "body",
     "send_agent_message": "message",
     "send_discord_message": "message",
 }
@@ -477,6 +481,8 @@ def _tool_call_is_progress_update(call: Any, expected_tool_name: str) -> bool:
 def _same_channel_reply_tool_name(inbound: PersistentAgentMessage | None) -> str | None:
     if inbound is None or inbound.conversation is None:
         return None
+    if is_mcp_message(inbound):
+        return "send_mcp_message"
     return "send_agent_message" if inbound.conversation.is_peer_dm else REPLY_TOOL_BY_CHANNEL.get(inbound.conversation.channel)
 
 
@@ -1649,11 +1655,19 @@ def _tool_definition_names_for_completion(tools: list[dict] | None) -> list[str]
 def _filter_incompatible_reply_tools(
     tools: list[dict],
     inbound: PersistentAgentMessage | None,
+    *,
+    mcp_available: bool = False,
 ) -> list[dict]:
-    if inbound is None or inbound.conversation is None or not inbound.conversation.is_peer_dm:
-        return tools
-    return [
+    filtered = [
         tool for tool in tools
+        if tool.get("function", {}).get("name") != "send_mcp_message"
+    ]
+    if mcp_available:
+        filtered.append(get_send_mcp_message_tool())
+    if inbound is None or inbound.conversation is None or not inbound.conversation.is_peer_dm:
+        return filtered
+    return [
+        tool for tool in filtered
         if tool.get("function", {}).get("name") != "send_chat_message"
     ]
 
@@ -3194,6 +3208,7 @@ _DIRECT_TOOL_EXECUTORS: Dict[str, _ToolExecutorResolver] = {
     "send_email": lambda: execute_send_email,
     "send_sms": lambda: execute_send_sms,
     "send_chat_message": lambda: execute_send_chat_message,
+    "send_mcp_message": lambda: execute_send_mcp_message,
     "send_agent_message": lambda: execute_send_agent_message,
     "update_schedule": lambda: execute_update_schedule,
     "update_charter": lambda: execute_update_charter,
@@ -5440,7 +5455,7 @@ def _ensure_credit_for_tool(
     containing the consumed cost and the TaskCredit (if any), so callers can attach
     them to persisted steps for accurate usage attribution.
     """
-    if tool_name == "send_chat_message":
+    if tool_name in {"send_chat_message", "send_mcp_message"}:
         return {"cost": None, "credit": None}
 
     if is_eval_credit_exempt_context(agent=agent, eval_run_id=eval_run_id):
@@ -6854,7 +6869,11 @@ def _run_agent_loop(
                 routing_profile = get_current_eval_routing_profile()
                 prefer_low_latency = iteration_prefers_low_latency
                 feedback_inbound = get_current_inbound_message(agent)
-                iteration_tools = _filter_incompatible_reply_tools(iteration_tools, feedback_inbound)
+                iteration_tools = _filter_incompatible_reply_tools(
+                    iteration_tools,
+                    feedback_inbound,
+                    mcp_available=get_recent_mcp_inbound_message(agent) is not None,
+                )
                 iter_span.set_attribute("persistent_agent.tools.count", len(iteration_tools))
                 tool_names = _tool_definition_names_for_completion(iteration_tools)
                 feedback_text = feedback_inbound.body if feedback_inbound is not None else ""

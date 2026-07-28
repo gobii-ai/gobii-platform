@@ -17,6 +17,7 @@ from api.evals.scenarios.message_quality import (
     MESSAGE_QUALITY_SUITE_SLUG,
     OWNER_UPDATE_QUALITY_CASES,
     PORTFOLIO_REPORT_QUALITY_CASES,
+    REMOTE_MCP_NO_CONTACT_SLUG,
     REMOTE_MCP_RESULT_DELIVERY_SLUG,
     REPLY_CHANNEL_CONTINUITY_SLUG,
     REPORT_MESSAGE_QUALITY_CASES,
@@ -24,6 +25,7 @@ from api.evals.scenarios.message_quality import (
     UNAVAILABLE_WEB_CHANNEL_CONTINUITY_SLUG,
     HUMAN_MESSAGE_QUALITY_CASES,
     MessageQualityScenario,
+    _claims_no_human_contact,
 )
 from api.evals.suites import SuiteRegistry
 
@@ -35,12 +37,13 @@ class MessageQualityScenarioTests(SimpleTestCase):
 
         self.assertIsNotNone(suite)
         self.assertEqual(tuple(suite.scenario_slugs), MESSAGE_QUALITY_SCENARIO_SLUGS)
-        self.assertEqual(len(suite.scenario_slugs), 23)
+        self.assertEqual(len(suite.scenario_slugs), 24)
         self.assertIn(REPLY_CHANNEL_CONTINUITY_SLUG, suite.scenario_slugs)
         self.assertIn(UNAVAILABLE_WEB_CHANNEL_CONTINUITY_SLUG, suite.scenario_slugs)
         self.assertIn(FAILED_EMAIL_DELIVERY_RECOVERY_SLUG, suite.scenario_slugs)
         self.assertIn(EMAIL_REVIEW_OUTBOX_COMMUNICATION_SLUG, suite.scenario_slugs)
         self.assertIn(REMOTE_MCP_RESULT_DELIVERY_SLUG, suite.scenario_slugs)
+        self.assertIn(REMOTE_MCP_NO_CONTACT_SLUG, suite.scenario_slugs)
         self.assertIn(EMAIL_SENT_STATE_SEQUENCING_SLUG, suite.scenario_slugs)
         self.assertIn(EMAIL_APPROVED_ACTION_TUPLE_SLUG, suite.scenario_slugs)
 
@@ -114,6 +117,11 @@ class MessageQualityScenarioTests(SimpleTestCase):
                 "The email was sent successfully and is also in review."
             )
         )
+
+    def test_no_contact_claim_detection_catches_the_incident_assertion(self):
+        self.assertTrue(_claims_no_human_contact("No outbound contact made."))
+        self.assertTrue(_claims_no_human_contact("I didn't email or contact the owner."))
+        self.assertFalse(_claims_no_human_contact("The MCP timeline reply was recorded."))
 
     def test_simple_email_prompt_does_not_specify_formatting_style(self):
         case = SIMPLE_EMAIL_QUALITY_CASES[0]

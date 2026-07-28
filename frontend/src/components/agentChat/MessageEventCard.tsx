@@ -149,7 +149,7 @@ export const MessageEventCard = memo(function MessageEventCard({
       || isViewerEmailSender)
 
   let authorLabel = isAgent ? agentFirstName || 'Agent' : (isViewerSender ? 'You' : (message.senderName?.trim() || 'User'))
-  if (isWebhook || sourceKind === 'mcp') {
+  if (isWebhook || (sourceKind === 'mcp' && !isAgent)) {
     authorLabel = message.sourceLabel?.trim() || message.senderName?.trim() || (isWebhook ? 'Webhook' : 'Gobii MCP')
   }
   if (isPeer) {

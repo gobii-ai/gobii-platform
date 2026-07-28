@@ -1,4 +1,4 @@
-"""The reply an agent writes with send_chat_message must stream like its thinking does.
+"""A chat-style reply tool must stream like the agent's thinking does.
 
 Web replies are tool calls, so the body arrives token by token inside the JSON `arguments`
 fragment of the tool-call delta — and the streaming loop dropped those on the floor. Thinking
@@ -30,6 +30,14 @@ class ChatBodyStreamExtractorTests(SimpleTestCase):
         out.append(ex.ingest(_delta(0, args='lo the')))
         out.append(ex.ingest(_delta(0, args='re!", "will_continue_work": false}')))
         self.assertEqual("".join(part for part in out if part), "Hello there!")
+
+    def test_streams_the_body_of_a_send_mcp_message_call(self):
+        ex = ChatBodyStreamExtractor()
+        out = []
+        out.append(ex.ingest(_delta(0, name="send_mcp", args="")))
+        out.append(ex.ingest(_delta(0, name="_message", args='{"body": "MCP re')))
+        out.append(ex.ingest(_delta(0, args='ply", "will_continue_work": false}')))
+        self.assertEqual("".join(part for part in out if part), "MCP reply")
 
     def test_json_escapes_decode_across_fragment_boundaries(self):
         ex = ChatBodyStreamExtractor()

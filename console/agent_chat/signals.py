@@ -40,6 +40,7 @@ from api.agent.comms.message_reads import (
     is_peer_dm_message,
     serialize_latest_agent_message_read_state,
 )
+from api.agent.comms.source_metadata import is_mcp_message
 from api.models import CommsChannel
 
 from .access import user_can_manage_agent_settings
@@ -129,7 +130,7 @@ def _build_message_notification_preview(message: PersistentAgentMessage) -> str:
 def emit_message_notification(message: PersistentAgentMessage) -> None:
     """Broadcast a lightweight outbound-message notification to session listeners."""
     agent = getattr(message, "owner_agent", None)
-    if not message or not agent or not getattr(agent, "id", None):
+    if not message or is_mcp_message(message) or not agent or not getattr(agent, "id", None):
         return
 
     workspace_type = "organization" if agent.organization_id else "personal"
@@ -395,7 +396,7 @@ def broadcast_new_message(sender, instance: PersistentAgentMessage, created: boo
     message_id = instance.id
     is_hidden = is_chat_hidden_message(instance)
     preview_state_transitioned = False
-    if instance.is_outbound and not is_hidden:
+    if instance.is_outbound and not is_hidden and not is_mcp_message(instance):
         preview_state_transitioned = transition_agent_to_signup_preview_waiting(owner_agent_id)
 
     def _on_commit():
@@ -418,7 +419,7 @@ def broadcast_new_message(sender, instance: PersistentAgentMessage, created: boo
             return
         _send(_group_name(owner_agent_id), "timeline_event", payload, agent_id=str(owner_agent_id))
         emit_agent_usage_update(msg.owner_agent)
-        if msg.is_outbound and not is_peer_dm_message(msg):
+        if msg.is_outbound and not is_peer_dm_message(msg) and not is_mcp_message(msg):
             try:
                 emit_message_notification(msg)
             except Exception:
