@@ -12,6 +12,7 @@ from api.models import (
     TrialPromo,
     TrialPromoActivationModeChoices,
     TrialPromoDiscountStateChoices,
+    TrialPromoPlanChoices,
     TrialPromoRedemption,
     TrialPromoRedemptionStatusChoices,
     UserTrialEligibility,
@@ -37,6 +38,10 @@ TRIAL_PROMO_META_CREDIT_AMOUNT = "trial_promo_credit_amount"
 TRIAL_PROMO_META_REDEMPTION_ID = "trial_promo_redemption_id"
 TRIAL_PROMO_META_ACTIVATION_MODE = "trial_promo_activation_mode"
 TRIAL_PROMO_META_DISCOUNT_MONTHS = "trial_promo_discount_months"
+TRIAL_PROMO_META_DISCOUNT_ACTIVE = "trial_promo_discount_active"
+TRIAL_PROMO_META_DISCOUNT_COUPON = "trial_promo_discount_coupon"
+TRIAL_PROMO_REDEMPTION_COUPON_ID_KEY = "coupon_id"
+TRIAL_PROMO_REDEMPTION_DISCOUNT_MONTHS_KEY = "discount_months"
 TRIAL_PROMO_CONVERSION_ATTEMPT_KEY = "conversion_checkout_attempt"
 TRIAL_PROMO_CONVERSION_PENDING_KEY = "conversion_checkout_pending"
 
@@ -56,6 +61,13 @@ class TrialPromoError(Exception):
 class TrialPromoStartDecision:
     allowed: bool
     reason: str = ""
+
+
+@dataclass(frozen=True)
+class TrialPromoConversionOffer:
+    plan: str
+    coupon_id: str
+    discount_months: int
 
 
 def find_active_trial_promo_by_code(code: str | None, *, now=None) -> TrialPromo | None:
@@ -168,12 +180,20 @@ def build_trial_promo_metadata(
     promo: TrialPromo,
     *,
     redemption: TrialPromoRedemption | None = None,
+    plan: str | None = None,
+    discount_months: int | None = None,
 ) -> dict[str, str]:
+    resolved_plan = str(plan if plan is not None else promo.plan)
+    resolved_discount_months = (
+        int(discount_months)
+        if discount_months is not None
+        else promo.discount_months
+    )
     metadata = {
         TRIAL_PROMO_META_ID: str(promo.pk),
         TRIAL_PROMO_META_CODE: str(promo.code_label or ""),
         TRIAL_PROMO_META_NAME: str(promo.name or ""),
-        TRIAL_PROMO_META_PLAN: str(promo.plan or ""),
+        TRIAL_PROMO_META_PLAN: resolved_plan,
         TRIAL_PROMO_META_TRIAL_DAYS: str(promo.trial_days),
         TRIAL_PROMO_META_PAYMENT_REQUIRED: "true" if promo.payment_method_required else "false",
         TRIAL_PROMO_META_REPEAT_ALLOWED: "true" if promo.repeat_trials_allowed else "false",
@@ -183,7 +203,7 @@ def build_trial_promo_metadata(
         metadata.update(
             {
                 TRIAL_PROMO_META_ACTIVATION_MODE: str(promo.activation_mode),
-                TRIAL_PROMO_META_DISCOUNT_MONTHS: str(promo.discount_months),
+                TRIAL_PROMO_META_DISCOUNT_MONTHS: str(resolved_discount_months),
             },
         )
     if promo.trial_credit_amount is not None:
@@ -191,6 +211,34 @@ def build_trial_promo_metadata(
     if redemption is not None:
         metadata[TRIAL_PROMO_META_REDEMPTION_ID] = str(redemption.pk)
     return metadata
+
+
+def get_trial_promo_conversion_offer(
+    redemption: TrialPromoRedemption,
+) -> TrialPromoConversionOffer:
+    metadata = redemption.metadata or {}
+    plan = str(metadata.get(TRIAL_PROMO_META_PLAN) or "").strip().lower()
+    coupon_id = str(
+        metadata.get(TRIAL_PROMO_REDEMPTION_COUPON_ID_KEY) or "",
+    ).strip()
+    try:
+        discount_months = int(
+            metadata.get(TRIAL_PROMO_REDEMPTION_DISCOUNT_MONTHS_KEY) or 0,
+        )
+    except (TypeError, ValueError):
+        discount_months = 0
+
+    if plan not in TrialPromoPlanChoices.values or not coupon_id or discount_months <= 0:
+        raise TrialPromoError(
+            "conversion_offer_unavailable",
+            "This campaign's original conversion offer is unavailable. Please contact support.",
+        )
+
+    return TrialPromoConversionOffer(
+        plan=plan,
+        coupon_id=coupon_id,
+        discount_months=discount_months,
+    )
 
 
 def build_trial_promo_checkout_metadata(

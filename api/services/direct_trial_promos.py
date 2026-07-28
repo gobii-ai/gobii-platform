@@ -18,6 +18,10 @@ from api.models import (
     TrialPromoRedemptionStatusChoices,
 )
 from api.services.trial_promos import (
+    TRIAL_PROMO_META_DISCOUNT_ACTIVE,
+    TRIAL_PROMO_META_DISCOUNT_COUPON,
+    TRIAL_PROMO_REDEMPTION_COUPON_ID_KEY,
+    TRIAL_PROMO_REDEMPTION_DISCOUNT_MONTHS_KEY,
     TrialPromoError,
     build_trial_promo_metadata,
     mark_direct_trial_promo_completed,
@@ -34,9 +38,6 @@ from util.subscription_helper import (
 
 
 logger = logging.getLogger(__name__)
-
-TRIAL_PROMO_META_DISCOUNT_ACTIVE = "trial_promo_discount_active"
-TRIAL_PROMO_META_DISCOUNT_COUPON = "trial_promo_discount_coupon"
 
 
 @dataclass(frozen=True)
@@ -85,7 +86,19 @@ def validate_direct_trial_configuration(
     promo: TrialPromo,
     *,
     price_object,
+    conversion_coupon_id: str | None = None,
+    discount_months: int | None = None,
 ) -> DirectTrialCoupon:
+    expected_coupon_id = str(
+        conversion_coupon_id
+        if conversion_coupon_id is not None
+        else promo.conversion_coupon_id,
+    ).strip()
+    expected_discount_months = (
+        int(discount_months)
+        if discount_months is not None
+        else promo.discount_months
+    )
     if not settings.TRIAL_PROMO_DIRECT_ACTIVATION_ENABLED:
         raise TrialPromoError(
             "direct_activation_disabled",
@@ -106,7 +119,7 @@ def validate_direct_trial_configuration(
             "invalid_trial_end_behavior",
             "This campaign must cancel safely if no payment method is added.",
         )
-    if not promo.conversion_coupon_id:
+    if not expected_coupon_id:
         raise TrialPromoError(
             "discount_missing",
             "This campaign's conversion discount is not configured.",
@@ -131,7 +144,7 @@ def validate_direct_trial_configuration(
 
     try:
         coupon = stripe.Coupon.retrieve(
-            promo.conversion_coupon_id,
+            expected_coupon_id,
             api_key=stripe.api_key,
         )
     except stripe.error.StripeError as exc:
@@ -151,7 +164,7 @@ def validate_direct_trial_configuration(
     if (
         not valid
         or duration != "repeating"
-        or duration_in_months != promo.discount_months
+        or duration_in_months != expected_discount_months
     ):
         raise TrialPromoError(
             "discount_mismatch",
@@ -170,6 +183,19 @@ def validate_direct_trial_configuration(
         ) from exc
     coupon_currency = str(_stripe_value(coupon, "currency", "") or "").lower()
     price_currency = str(getattr(price_object, "currency", "") or "").lower()
+    applies_to = _stripe_value(coupon, "applies_to") or {}
+    eligible_product_ids = {
+        _stripe_id(product_id)
+        for product_id in (_stripe_value(applies_to, "products") or [])
+        if _stripe_id(product_id)
+    }
+    price_product_id = _stripe_id(getattr(price_object, "product_id", None))
+    if not price_product_id:
+        price_product_id = _stripe_id(getattr(price_object, "product", None))
+    if not price_product_id:
+        price_data = getattr(price_object, "stripe_data", None) or {}
+        if isinstance(price_data, Mapping):
+            price_product_id = _stripe_id(price_data.get("product"))
     if (
         (percent_off is None or percent_off <= 0)
         and (amount_off is None or amount_off <= 0)
@@ -180,13 +206,19 @@ def validate_direct_trial_configuration(
             or not price_currency
             or coupon_currency != price_currency
         )
+    ) or (
+        eligible_product_ids
+        and (
+            not price_product_id
+            or price_product_id not in eligible_product_ids
+        )
     ):
         raise TrialPromoError(
             "discount_mismatch",
             "This campaign's Stripe coupon is not valid for its plan price.",
         )
     return DirectTrialCoupon(
-        coupon_id=_stripe_id(coupon) or promo.conversion_coupon_id,
+        coupon_id=_stripe_id(coupon) or expected_coupon_id,
         duration_in_months=duration_in_months,
         percent_off=percent_off,
         amount_off=amount_off,
@@ -465,7 +497,10 @@ def _sync_direct_trial_entitlements(
         TaskCreditService.grant_subscription_credits(
             user,
             plan=plan,
-            invoice_id=f"trial:{_stripe_id(subscription)}:{trial_start.date().isoformat()}",
+            invoice_id=(
+                _stripe_id(_stripe_value(subscription, "latest_invoice"))
+                or f"trial:{_stripe_id(subscription)}:{trial_start.date().isoformat()}"
+            ),
             credit_override=credit_amount,
             expiration_date=trial_end + relativedelta(months=1),
             free_trial_start=True,
@@ -605,8 +640,8 @@ def activate_direct_trial_promo(
         stripe_subscription_schedule_id=schedule_id,
         trial_end=trial_end,
         metadata={
-            "coupon_id": coupon.coupon_id,
-            "discount_months": coupon.duration_in_months,
+            TRIAL_PROMO_REDEMPTION_COUPON_ID_KEY: coupon.coupon_id,
+            TRIAL_PROMO_REDEMPTION_DISCOUNT_MONTHS_KEY: coupon.duration_in_months,
             "percent_off": str(coupon.percent_off) if coupon.percent_off is not None else "",
             "amount_off": coupon.amount_off,
             "currency": coupon.currency,

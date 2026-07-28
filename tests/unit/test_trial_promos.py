@@ -35,7 +35,10 @@ from api.services.trial_promos import (
     TRIAL_PROMO_META_DISCOUNT_MONTHS,
     TRIAL_PROMO_META_ID,
     TRIAL_PROMO_META_PAYMENT_REQUIRED,
+    TRIAL_PROMO_META_PLAN,
     TRIAL_PROMO_META_REDEMPTION_ID,
+    TRIAL_PROMO_REDEMPTION_COUPON_ID_KEY,
+    TRIAL_PROMO_REDEMPTION_DISCOUNT_MONTHS_KEY,
     TRIAL_PROMO_REASON_EMAIL_NOT_ALLOWLISTED,
     TRIAL_PROMO_REASON_EMAIL_NOT_VERIFIED,
     TrialPromoError,
@@ -409,6 +412,7 @@ class DirectTrialPromoServiceTests(TestCase):
         mock_subscription_create.return_value = {
             "id": "sub_direct",
             "status": "trialing",
+            "latest_invoice": "in_direct_trial",
             "trial_start": 1_800_000_000,
             "trial_end": 1_801_209_600,
             "current_period_start": 1_800_000_000,
@@ -485,7 +489,7 @@ class DirectTrialPromoServiceTests(TestCase):
         mock_grant_credits.assert_called_once()
         self.assertEqual(
             mock_grant_credits.call_args.kwargs["invoice_id"],
-            "trial:sub_direct:2027-01-15",
+            "in_direct_trial",
         )
 
         retry_result = activate_direct_trial_promo(
@@ -719,6 +723,47 @@ class DirectTrialPromoServiceTests(TestCase):
                 ),
                 price_id="price_pro_monthly",
             )
+
+    @patch("api.services.direct_trial_promos.stripe.Coupon.retrieve")
+    def test_activation_rejects_coupon_restricted_to_another_product(
+        self,
+        mock_coupon_retrieve,
+    ):
+        promo = _create_promo(
+            code="DIRECT-WRONG-PRODUCT",
+            activation_mode=TrialPromoActivationModeChoices.DIRECT_STRIPE_TRIAL,
+            payment_method_required=False,
+            no_payment_method_end_behavior=TrialPromoNoPaymentMethodEndBehaviorChoices.CANCEL,
+            conversion_coupon_id="coupon_other_product",
+            discount_months=3,
+        )
+        mock_coupon_retrieve.return_value = {
+            "id": "coupon_other_product",
+            "duration": "repeating",
+            "duration_in_months": 3,
+            "percent_off": 40,
+            "valid": True,
+            "applies_to": {"products": ["prod_other"]},
+        }
+
+        with self.assertRaisesMessage(
+            TrialPromoError,
+            "not valid for its plan price",
+        ):
+            activate_direct_trial_promo(
+                promo=promo,
+                user=self.user,
+                price_object=SimpleNamespace(
+                    recurring={"interval": "month", "interval_count": 1},
+                    product_id="prod_campaign",
+                    currency="usd",
+                ),
+                price_id="price_pro_monthly",
+            )
+
+        self.assertFalse(
+            TrialPromoRedemption.objects.filter(promo=promo, user=self.user).exists(),
+        )
 
 
 @tag("batch_pages")
@@ -1085,10 +1130,23 @@ class SpecialAccessCheckoutTests(TestCase):
             discount_state=TrialPromoDiscountStateChoices.AVAILABLE,
             activated_at=timezone.now() - timedelta(days=15),
             late_conversion_expires_at=timezone.now() + timedelta(days=15),
+            metadata={
+                TRIAL_PROMO_META_PLAN: PlanNames.STARTUP,
+                TRIAL_PROMO_REDEMPTION_COUPON_ID_KEY: "coupon_three_months",
+                TRIAL_PROMO_REDEMPTION_DISCOUNT_MONTHS_KEY: 3,
+            },
+        )
+        promo.plan = PlanNames.SCALE
+        promo.conversion_coupon_id = "coupon_six_months"
+        promo.discount_months = 6
+        promo.save(
+            update_fields=["plan", "conversion_coupon_id", "discount_months"],
         )
         mock_stripe_settings.return_value = SimpleNamespace(
             startup_price_id="price_startup",
             startup_additional_task_price_id="",
+            scale_price_id="price_scale",
+            scale_additional_task_price_id="",
         )
         mock_price_get.return_value = SimpleNamespace(
             id="price_startup",
@@ -1113,10 +1171,31 @@ class SpecialAccessCheckoutTests(TestCase):
 
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response["Location"], "https://stripe.test/discounted")
+        mock_price_get.assert_called_once_with(id="price_startup")
+        self.assertEqual(
+            mock_validate.call_args.kwargs,
+            {
+                "price_object": mock_price_get.return_value,
+                "conversion_coupon_id": "coupon_three_months",
+                "discount_months": 3,
+            },
+        )
         checkout_kwargs = mock_create_checkout.call_args.kwargs["checkout_kwargs"]
+        self.assertEqual(
+            checkout_kwargs["line_items"],
+            [{"price": "price_startup", "quantity": 1}],
+        )
         self.assertEqual(
             checkout_kwargs["discounts"],
             [{"coupon": "coupon_three_months"}],
+        )
+        self.assertEqual(
+            checkout_kwargs["subscription_data"]["metadata"][TRIAL_PROMO_META_PLAN],
+            PlanNames.STARTUP,
+        )
+        self.assertEqual(
+            checkout_kwargs["subscription_data"]["metadata"][TRIAL_PROMO_META_DISCOUNT_MONTHS],
+            "3",
         )
         self.assertNotIn("trial_period_days", checkout_kwargs["subscription_data"])
         self.assertEqual(

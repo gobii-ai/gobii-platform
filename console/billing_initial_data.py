@@ -1,10 +1,15 @@
+import logging
 from decimal import Decimal, InvalidOperation
 
 from django.urls import reverse
 
-from api.models import Organization, UserBilling
+from api.models import Organization, TrialPromoPlanChoices, UserBilling
 from api.services.dedicated_proxy_service import DedicatedProxyService, is_multi_assign_enabled
-from api.services.trial_promos import get_eligible_late_conversion_for_user
+from api.services.trial_promos import (
+    TrialPromoError,
+    get_eligible_late_conversion_for_user,
+    get_trial_promo_conversion_offer,
+)
 from billing.addons import AddonEntitlementService
 from billing.churnkey import build_churnkey_cancel_flow_config
 from config.plans import PLAN_CONFIG, get_plan_config
@@ -14,6 +19,9 @@ from console.org_billing_helpers import build_org_billing_overview
 from console.role_constants import BILLING_MANAGE_ROLES
 from constants.plans import PlanNamesChoices
 from util.subscription_helper import get_active_subscription, get_stripe_customer, get_subscription_base_price, reconcile_user_plan_from_stripe
+
+
+logger = logging.getLogger(__name__)
 
 
 def _serialize_addon_context(addon_context: dict) -> dict[str, object]:
@@ -278,29 +286,38 @@ def build_billing_initial_data(request) -> dict[str, object]:
         )
     late_conversion_offer = None
     if late_conversion_redemption is not None:
-        promo = late_conversion_redemption.promo
-        offer_metadata = late_conversion_redemption.metadata or {}
-        percent_off = offer_metadata.get("percent_off")
-        amount_off = offer_metadata.get("amount_off")
-        discount_label = ""
-        if percent_off not in (None, ""):
-            discount_label = f"{percent_off}% off"
-        elif amount_off not in (None, ""):
-            currency = str(offer_metadata.get("currency") or "USD").upper()
-            discount_label = f"{currency} {Decimal(str(amount_off)) / Decimal(100):.2f} off"
-        promo_plan = get_plan_config(promo.plan) or {}
-        late_conversion_offer = {
-            "url": reverse(
-                "pages:special_access_convert",
-                kwargs={"redemption_id": late_conversion_redemption.pk},
-            ),
-            "planName": promo.get_plan_display(),
-            "discountLabel": discount_label,
-            "discountMonths": promo.discount_months,
-            "standardMonthlyPrice": float(promo_plan.get("price") or 0),
-            "currency": str(promo_plan.get("currency") or "USD").upper(),
-            "expiresAtIso": late_conversion_redemption.late_conversion_expires_at.isoformat(),
-        }
+        try:
+            conversion_offer = get_trial_promo_conversion_offer(
+                late_conversion_redemption,
+            )
+        except TrialPromoError:
+            logger.warning(
+                "Late conversion offer omitted because redemption %s has no valid original offer",
+                late_conversion_redemption.pk,
+            )
+        else:
+            offer_metadata = late_conversion_redemption.metadata or {}
+            percent_off = offer_metadata.get("percent_off")
+            amount_off = offer_metadata.get("amount_off")
+            discount_label = ""
+            if percent_off not in (None, ""):
+                discount_label = f"{percent_off}% off"
+            elif amount_off not in (None, ""):
+                currency = str(offer_metadata.get("currency") or "USD").upper()
+                discount_label = f"{currency} {Decimal(str(amount_off)) / Decimal(100):.2f} off"
+            promo_plan = get_plan_config(conversion_offer.plan) or {}
+            late_conversion_offer = {
+                "url": reverse(
+                    "pages:special_access_convert",
+                    kwargs={"redemption_id": late_conversion_redemption.pk},
+                ),
+                "planName": TrialPromoPlanChoices(conversion_offer.plan).label,
+                "discountLabel": discount_label,
+                "discountMonths": conversion_offer.discount_months,
+                "standardMonthlyPrice": float(promo_plan.get("price") or 0),
+                "currency": str(promo_plan.get("currency") or "USD").upper(),
+                "expiresAtIso": late_conversion_redemption.late_conversion_expires_at.isoformat(),
+            }
 
     return {
         "contextType": "personal",
