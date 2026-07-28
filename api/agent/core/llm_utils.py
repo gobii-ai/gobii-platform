@@ -4,6 +4,7 @@ import logging
 import queue
 import threading
 import time
+from contextvars import copy_context
 from typing import Any, Callable, Iterable
 
 from asgiref.sync import async_to_sync
@@ -235,6 +236,43 @@ def _wrap_stream_with_idle_timeout(
         max_attempts=max_attempts,
         backoff_seconds=backoff_seconds,
     )
+
+
+def _invoke_completion_with_timeout(
+    kwargs: dict[str, Any],
+    *,
+    model: str,
+    provider: str | None,
+) -> Any:
+    """Enforce the request timeout even when a provider client ignores it."""
+    try:
+        timeout_seconds = float(kwargs.get("timeout"))
+    except (TypeError, ValueError):
+        return litellm.completion(**kwargs)
+    if timeout_seconds <= 0:
+        return litellm.completion(**kwargs)
+
+    result_queue: queue.Queue[tuple[bool, Any]] = queue.Queue(maxsize=1)
+    context = copy_context()
+
+    def _invoke() -> None:
+        try:
+            result_queue.put((True, context.run(litellm.completion, **kwargs)))
+        except Exception as exc:
+            result_queue.put((False, exc))
+
+    threading.Thread(target=_invoke, daemon=True).start()
+    try:
+        succeeded, result = result_queue.get(timeout=timeout_seconds)
+    except queue.Empty:
+        raise litellm.Timeout(
+            message=f"LLM request did not return within {timeout_seconds:g} seconds",
+            model=model,
+            llm_provider=provider or "unknown",
+        )
+    if not succeeded:
+        raise result
+    return result
 
 
 def _first_message_from_response(response: Any) -> Any:
@@ -548,13 +586,25 @@ def run_completion(
             duration_ms = None
             if not kwargs.get("stream"):
                 start_time = time.monotonic()
-                response = litellm.completion(**kwargs)
+                response = _invoke_completion_with_timeout(
+                    kwargs,
+                    model=model,
+                    provider=provider_hint,
+                )
                 duration_ms = int(round((time.monotonic() - start_time) * 1000))
             else:
-                response = litellm.completion(**kwargs)
+                response = _invoke_completion_with_timeout(
+                    kwargs,
+                    model=model,
+                    provider=provider_hint,
+                )
                 response = _wrap_stream_with_idle_timeout(
                     response,
-                    create_stream=lambda: litellm.completion(**kwargs),
+                    create_stream=lambda: _invoke_completion_with_timeout(
+                        kwargs,
+                        model=model,
+                        provider=provider_hint,
+                    ),
                     model=model,
                     provider=provider_hint,
                     initial_attempt=attempt,
