@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { useEffect } from 'react'
+import { useEffect, useId, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import type { LucideIcon } from 'lucide-react'
 import { Info, X } from 'lucide-react'
@@ -35,6 +35,10 @@ export function Modal({
   panelClassName = '',
   dismissible = true,
 }: ModalProps) {
+  const historyKey = useId()
+  const onCloseRef = useRef(onClose)
+  onCloseRef.current = onClose
+
   useEffect(() => {
     const handleKey = (event: KeyboardEvent) => {
       if (dismissible && event.key === 'Escape') {
@@ -49,6 +53,33 @@ export function Modal({
       document.body.style.overflow = originalOverflow
     }
   }, [dismissible, onClose])
+
+  // Back (browser button or mobile swipe gesture) must dismiss the dialog in place
+  // rather than navigate the app underneath it. A sentinel history entry absorbs the
+  // gesture; closing any other way consumes the sentinel so history stays clean.
+  useEffect(() => {
+    if (!dismissible || typeof window === 'undefined') {
+      return
+    }
+    window.history.pushState({ ...(window.history.state ?? {}), __modalKey: historyKey }, '')
+    let closedByPop = false
+    const handlePop = () => {
+      // With stacked dialogs, one pop removes one sentinel: close only the modal whose
+      // sentinel is gone; a modal still on top of the stack keeps its entry and stays.
+      if (window.history.state?.__modalKey === historyKey) {
+        return
+      }
+      closedByPop = true
+      onCloseRef.current()
+    }
+    window.addEventListener('popstate', handlePop)
+    return () => {
+      window.removeEventListener('popstate', handlePop)
+      if (!closedByPop && window.history.state?.__modalKey === historyKey) {
+        window.history.back()
+      }
+    }
+  }, [dismissible, historyKey])
 
   if (typeof document === 'undefined') {
     return null
