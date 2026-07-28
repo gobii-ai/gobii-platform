@@ -343,6 +343,7 @@ def _parse_inbound_agent_webhook_request(request) -> tuple[str, dict[str, object
 @csrf_exempt
 @require_POST
 @tracer.start_as_current_span("COMM inbound_agent_webhook")
+@transaction.atomic
 def inbound_agent_webhook(request, webhook_id):
     secret = request.GET.get("t", "").strip()
     if not secret:
@@ -369,6 +370,12 @@ def inbound_agent_webhook(request, webhook_id):
         return JsonResponse({"accepted": False, "error": "Invalid webhook secret."}, status=403)
     if not webhook.is_active:
         return JsonResponse({"accepted": False, "error": "Webhook is inactive."}, status=409)
+    webhook.agent = (
+        PersistentAgent.objects.alive()
+        .select_for_update()
+        .select_related("user", "organization")
+        .get(pk=webhook.agent_id)
+    )
     if not webhook.agent.is_active:
         return JsonResponse(
             {
@@ -463,8 +470,6 @@ def pipedream_trigger_subscription_webhook(request, subscription_id):
         return JsonResponse({"accepted": False, "error": "Invalid webhook secret."}, status=403)
     if subscription.status != PersistentAgentPipedreamTriggerSubscription.Status.ACTIVE:
         return JsonResponse({"accepted": False, "error": "Subscription is inactive."}, status=409)
-    if not subscription.agent.is_active:
-        return JsonResponse({"accepted": False, "error": "Agent is inactive."}, status=409)
 
     try:
         verify_pipedream_signature(

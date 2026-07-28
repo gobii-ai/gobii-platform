@@ -666,7 +666,8 @@ def ingest_inbound_message(
             if agent_obj is not None and not agent_obj.is_active:
                 should_skip_processing = True
                 processing_blocked_reason = "agent_inactive"
-                mark_inbound_message_blocked_while_inactive(message)
+                if not blocked_while_inactive:
+                    mark_inbound_message_blocked_while_inactive(message)
                 if (
                     channel_val in {CommsChannel.EMAIL, CommsChannel.SMS}
                     and parsed.sender

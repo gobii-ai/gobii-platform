@@ -24,13 +24,15 @@ export function safeErrorMessage(error: unknown, fallback = DEFAULT_ERROR_MESSAG
     }
     return fallback
   }
-  if (error && typeof error === 'object' && 'message' in error) {
-    const message = (error as { message: unknown }).message
-    if (typeof message === 'string' && message.trim()) {
-      if (isHtmlResponse(message)) {
-        return fallback
+  if (error && typeof error === 'object') {
+    for (const key of ['message', 'detail', 'error']) {
+      const message = (error as Record<string, unknown>)[key]
+      if (typeof message === 'string' && message.trim()) {
+        if (isHtmlResponse(message)) {
+          return fallback
+        }
+        return message
       }
-      return message
     }
   }
   return fallback

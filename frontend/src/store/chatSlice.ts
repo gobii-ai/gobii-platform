@@ -727,7 +727,7 @@ export const sendMessage = createAsyncThunk<
   {
     state: RootState
     extra: { queryClient: QueryClient | null }
-    rejectValue: { status: number; statusText: string; body: unknown }
+    rejectValue: unknown
   }
 >('chat/sendMessage', async (
   { body, attachments = [], clientId: requestedClientId, retry = false },
@@ -782,11 +782,7 @@ export const sendMessage = createAsyncThunk<
     }
     dispatch(chatActions.optimisticMessageFailed({ agentId, clientId, message }))
     if (error instanceof HttpError) {
-      return rejectWithValue({
-        status: error.status,
-        statusText: error.statusText,
-        body: error.body,
-      })
+      return rejectWithValue(error.body)
     }
     throw error
   }

@@ -1177,9 +1177,15 @@ def _tool_unlink_agents(request, arguments):
     )
 
 
+@transaction.atomic
 def _tool_send_agent_message(request, arguments):
     access = _get_agent_access(request, arguments.get("agent_id"), arguments)
-    agent = access.agent
+    agent = (
+        PersistentAgent.objects.alive()
+        .select_for_update()
+        .select_related("user", "organization")
+        .get(pk=access.agent.pk)
+    )
     if not agent.is_active:
         payload = build_agent_inactive_payload(agent)
         raise MCPToolError(payload["message"], payload)

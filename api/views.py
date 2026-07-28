@@ -897,8 +897,10 @@ class PersistentAgentViewSet(viewsets.ModelViewSet):
         return Response(payload)
 
     @action(detail=True, methods=['post'], url_path='messages')
+    @transaction.atomic
     def create_message(self, request, id=None):
         agent = self.get_object()
+        agent = PersistentAgent.objects.alive().select_for_update().get(pk=agent.pk)
         if not agent.is_active:
             return Response(build_agent_inactive_payload(agent), status=status.HTTP_409_CONFLICT)
         serializer = PersistentAgentMessageCreateSerializer(data=request.data)

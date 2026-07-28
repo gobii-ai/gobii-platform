@@ -22,7 +22,6 @@ from api.agent.comms.adapters import ParsedMessage
 from api.agent.comms.message_service import ingest_inbound_message
 from api.models import (
     CommsChannel,
-    DeliveryStatus,
     PersistentAgent,
     PersistentAgentConversation,
     PersistentAgentDiscordChannelSubscription,
@@ -37,9 +36,9 @@ from api.models import (
 )
 from api.services.inactive_agent_notifications import (
     INACTIVE_AUTO_REPLY_KIND,
-    INACTIVE_AUTO_REPLY_COOLDOWN,
     INACTIVE_BLOCKED_INPUT_KIND,
     inactive_auto_reply_body,
+    send_inactive_notice_once,
 )
 from api.agent.system_skills.defaults import DISCORD_NATIVE_SYSTEM_SKILL_KEY
 from api.agent.files.attachment_helpers import ResolvedAttachment, create_message_attachments
@@ -1205,36 +1204,17 @@ def send_inactive_discord_auto_reply(
     channel_id: str,
     recipient_key: str,
 ) -> bool:
-    refreshed = PersistentAgent.objects.alive().filter(pk=agent.pk).only("is_active").first()
-    if refreshed is None or refreshed.is_active:
-        return False
-
     normalized_recipient_key = str(recipient_key or channel_id).strip()
-    recent_notice = PersistentAgentMessage.objects.filter(
-        owner_agent=agent,
-        is_outbound=True,
-        raw_payload__kind=INACTIVE_AUTO_REPLY_KIND,
-        raw_payload__inactive_recipient_key=normalized_recipient_key,
-        raw_payload__inactive_channel=CommsChannel.DISCORD,
-        latest_status__in={
-            DeliveryStatus.QUEUED,
-            DeliveryStatus.SENDING,
-            DeliveryStatus.SENT,
-            DeliveryStatus.DELIVERED,
-        },
-        timestamp__gte=timezone.now() - INACTIVE_AUTO_REPLY_COOLDOWN,
-    ).exists()
-    if recent_notice:
-        return False
-
-    send_channel_message(
+    return send_inactive_notice_once(
         agent,
-        channel_id=channel_id,
-        body=inactive_auto_reply_body(agent),
-        metadata={
-            "kind": INACTIVE_AUTO_REPLY_KIND,
-            "inactive_recipient_key": normalized_recipient_key,
-            "inactive_channel": CommsChannel.DISCORD,
-        },
+        channel=CommsChannel.DISCORD,
+        recipient_key=normalized_recipient_key,
+        send=lambda metadata: bool(
+            send_channel_message(
+                agent,
+                channel_id=channel_id,
+                body=inactive_auto_reply_body(agent),
+                metadata={"kind": INACTIVE_AUTO_REPLY_KIND, **metadata},
+            )
+        ),
     )
-    return True

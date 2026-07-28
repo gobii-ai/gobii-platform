@@ -22,6 +22,7 @@ import { useStarterPrompts } from './useStarterPrompts'
 import { SubscriptionUpgradeModal } from '../common/SubscriptionUpgradeModal'
 import { SubscriptionUpgradePlans } from '../common/SubscriptionUpgradePlans'
 import { TextareaSubmitDialog } from '../common/TextareaSubmitDialog'
+import { InlineStatusBanner } from '../common/InlineStatusBanner'
 import { ImmersiveDialog } from '../common/ImmersiveDialog'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import type { SelectionShellPage } from './SelectionShellPageSwitcher'
@@ -1597,10 +1598,15 @@ export function AgentChatLayout({
           )}
 
           {reactivationSuccess ? (
-            <div className="agent-reactivation-confirmation" role="status" aria-live="polite">
-              <CheckCircle2 aria-hidden="true" />
-              <span>{reactivationSuccess}</span>
-            </div>
+            <InlineStatusBanner
+              variant="success"
+              density="compact"
+              icon={CheckCircle2}
+              role="status"
+              className="absolute bottom-[calc(var(--composer-height,6.5rem)+env(safe-area-inset-bottom,0px)+1.75rem)] right-4 z-40 sm:right-6"
+            >
+              {reactivationSuccess}
+            </InlineStatusBanner>
           ) : null}
 
           {/* Composer at bottom of flex layout */}
@@ -1630,7 +1636,7 @@ export function AgentChatLayout({
               </div>
             </div>
           ) : !agentIsActive ? (
-            <div ref={composerShellRef} className="composer-shell agent-paused-shell">
+            <div ref={composerShellRef} className="composer-shell">
               <PausedAgentPanel
                 canReactivate={canReactivateAgent}
                 reactivating={reactivatingAgent}

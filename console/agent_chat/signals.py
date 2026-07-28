@@ -103,7 +103,6 @@ def emit_agent_profile_update(
         "signup_preview_state": agent.signup_preview_state,
         "planning_state": agent.planning_state,
         "is_active": bool(agent.is_active),
-        "life_state": agent.life_state,
         "timestamp": timezone.now().isoformat(),
         **serialize_agent_emotion(agent),
         **serialize_agent_schedule(agent),
@@ -673,7 +672,6 @@ def broadcast_agent_profile_update(sender, instance: PersistentAgent, created: b
         "emotion",
         "emotion_expires_at",
         "is_active",
-        "life_state",
     }
     update_fields = kwargs.get("update_fields")
     if not created and update_fields is not None:

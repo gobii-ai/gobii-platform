@@ -775,20 +775,6 @@
     align-items: center;
     gap: 0.125rem;
 }
-.banner-paused-badge {
-    display: inline-flex;
-    flex: 0 0 auto;
-    align-items: center;
-    min-height: 1.25rem;
-    padding: 0.125rem 0.45rem;
-    border: 1px solid rgba(180, 83, 9, 0.3);
-    border-radius: 999px;
-    color: #92400e;
-    background: #fffbeb;
-    font-size: 0.6875rem;
-    font-weight: 700;
-    line-height: 1;
-}
 .banner-contact-link {
     display: inline-flex;
     /* 24px is the minimum target size; the icon inside keeps its own dimensions. */
@@ -1710,103 +1696,6 @@
     z-index: 40;
     pointer-events: none;
     background: transparent;
-}
-.agent-paused-shell {
-    pointer-events: none;
-}
-.agent-paused-panel {
-    display: flex;
-    width: min(56rem, 100%);
-    align-items: center;
-    gap: 0.875rem;
-    padding: 0.875rem 1rem;
-    border: 1px solid rgba(180, 83, 9, 0.28);
-    border-radius: 0.875rem;
-    color: #451a03;
-    background: #fffbeb;
-    pointer-events: auto;
-}
-.agent-paused-panel__icon {
-    width: 1.35rem;
-    height: 1.35rem;
-    flex: 0 0 auto;
-    color: #b45309;
-}
-.agent-paused-panel__body {
-    min-width: 0;
-    flex: 1;
-}
-.agent-paused-panel__title,
-.agent-paused-panel__message,
-.agent-paused-panel__guidance,
-.agent-paused-panel__error {
-    margin: 0;
-}
-.agent-paused-panel__title {
-    font-size: 0.875rem;
-    font-weight: 700;
-}
-.agent-paused-panel__message,
-.agent-paused-panel__guidance {
-    margin-top: 0.125rem;
-    font-size: 0.8125rem;
-    line-height: 1.35;
-}
-.agent-paused-panel__guidance {
-    font-weight: 600;
-}
-.agent-paused-panel__error {
-    margin-top: 0.35rem;
-    color: #b91c1c;
-    font-size: 0.75rem;
-    font-weight: 600;
-}
-.agent-paused-panel__action {
-    flex: 0 0 auto;
-}
-.agent-paused-panel__action svg {
-    width: 0.9rem;
-    height: 0.9rem;
-}
-.agent-paused-panel__spinner {
-    animation: agent-paused-spin 0.8s linear infinite;
-}
-.agent-reactivation-confirmation {
-    position: absolute;
-    right: 1.5rem;
-    bottom: calc(var(--composer-height, 6.5rem) + env(safe-area-inset-bottom, 0px) + 1.75rem);
-    z-index: 41;
-    display: inline-flex;
-    align-items: center;
-    gap: 0.4rem;
-    padding: 0.5rem 0.7rem;
-    border: 1px solid #86efac;
-    border-radius: 0.65rem;
-    color: #166534;
-    background: #f0fdf4;
-    font-size: 0.75rem;
-    font-weight: 700;
-}
-.agent-reactivation-confirmation svg {
-    width: 0.9rem;
-    height: 0.9rem;
-}
-@keyframes agent-paused-spin {
-    to {
-        transform: rotate(360deg);
-    }
-}
-@media (max-width: 639px) {
-    .agent-paused-panel {
-        align-items: flex-start;
-        flex-wrap: wrap;
-    }
-    .agent-paused-panel__action {
-        margin-left: 2.225rem;
-    }
-    .agent-reactivation-confirmation {
-        right: 1rem;
-    }
 }
 .agent-chat-workspace-main:has(.composer-shell) #timeline-inner {
     padding-bottom: calc(var(--composer-height, 6.5rem) + 0.75rem);

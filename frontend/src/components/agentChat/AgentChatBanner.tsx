@@ -11,7 +11,7 @@ import type { PlanSnapshot } from '../../types/agentChat'
 import type { DailyCreditsStatus } from '../../types/dailyCredits'
 import { AgentEmotionIndicator } from '../common/AgentEmotionIndicator'
 import type { AgentChatSidebarMode } from './sidebarMode'
-import { AgentChatAvatar, AgentChatButton, AgentChatMenuItem } from './uiPrimitives'
+import { AgentChatAvatar, AgentChatButton, AgentChatMenuItem, AgentChatStatusBadge } from './uiPrimitives'
 
 export type ConnectionStatusTone = 'connected' | 'connecting' | 'reconnecting' | 'offline' | 'error'
 type DeveloperActionLayout = 'expanded' | 'partial' | 'overflow'
@@ -312,7 +312,7 @@ export const AgentChatBanner = memo(function AgentChatBanner({
                 </span>
               )}
               {!agentIsActive ? (
-                <span className="banner-paused-badge">Paused</span>
+                <AgentChatStatusBadge tone="warning">Paused</AgentChatStatusBadge>
               ) : null}
               {agentIsActive && (agentEmail || agentSms) ? (
                 <span className="banner-contact-links">

@@ -20,7 +20,6 @@ import {
   markLatestAgentMessageRead,
   normalizeAgentMessageReadState,
   activateAgent,
-  type AgentMessageReadState,
 } from '../api/agentChat'
 import type { AgentSpawnIntent, TemplateRecommendation } from '../api/agentSpawnIntent'
 import type { ConsoleContext, StaffViewContext } from '../api/context'
@@ -511,10 +510,10 @@ function mergeCreatedAgentProfile(
   return changed ? nextAgents : agents
 }
 
-function touchRosterEntryLastInteraction(
+function patchRosterAgent(
   current: AgentRosterQueryData | undefined,
   agentId: string,
-  isoTimestamp: string,
+  patch: Partial<AgentRosterEntry>,
 ): AgentRosterQueryData | undefined {
   if (!isAgentRosterQueryData(current) || !current.agents?.length) {
     return current
@@ -525,75 +524,15 @@ function touchRosterEntryLastInteraction(
     if (agent.id !== agentId) {
       return agent
     }
-    if (agent.lastInteractionAt === isoTimestamp) {
+    const isUnchanged = Object.entries(patch).every(
+      ([key, value]) => Object.is(agent[key as keyof AgentRosterEntry], value),
+    )
+    if (isUnchanged) {
       return agent
     }
     changed = true
-    return {
-      ...agent,
-      lastInteractionAt: isoTimestamp,
-    }
+    return { ...agent, ...patch }
   })
-
-  if (!changed) {
-    return current
-  }
-
-  return {
-    ...current,
-    agents: nextAgents,
-  }
-}
-
-function updateRosterAgentActiveState(
-  current: AgentRosterQueryData | undefined,
-  agentId: string,
-  isActive: boolean,
-): AgentRosterQueryData | undefined {
-  if (!isAgentRosterQueryData(current) || !current.agents?.length) {
-    return current
-  }
-
-  let changed = false
-  const nextAgents = current.agents.map((agent) => {
-    if (agent.id !== agentId || agent.isActive === isActive) {
-      return agent
-    }
-    changed = true
-    return { ...agent, isActive }
-  })
-  return changed ? { ...current, agents: nextAgents } : current
-}
-
-function applyRosterMessageReadState(
-  current: AgentRosterQueryData | undefined,
-  agentId: string,
-  readState: AgentMessageReadState,
-): AgentRosterQueryData | undefined {
-  if (!isAgentRosterQueryData(current) || !current.agents?.length) {
-    return current
-  }
-
-  let changed = false
-  const nextAgents = current.agents.map((agent) => {
-    if (agent.id !== agentId) {
-      return agent
-    }
-    if (
-      Boolean(agent.hasUnreadAgentMessage) === Boolean(readState.hasUnreadAgentMessage)
-      && (agent.latestAgentMessageId ?? null) === (readState.latestAgentMessageId ?? null)
-      && (agent.latestAgentMessageAt ?? null) === (readState.latestAgentMessageAt ?? null)
-      && (agent.latestAgentMessageReadAt ?? null) === (readState.latestAgentMessageReadAt ?? null)
-    ) {
-      return agent
-    }
-    changed = true
-    return {
-      ...agent,
-      ...readState,
-    }
-  })
-
   return changed ? { ...current, agents: nextAgents } : current
 }
 
@@ -683,8 +622,6 @@ type AgentSwitchMeta = {
   emotion?: string | null
   emotionExpiresAt?: string | null
   processingActive?: boolean
-  agentIsActive?: boolean
-  canReactivateAgent?: boolean
   signupPreviewState?: SignupPreviewState | null
   planningState?: PlanningState | null
 }
@@ -1236,16 +1173,6 @@ export function AgentChatPage({
         return result
       } catch (error) {
         retryPayloadsRef.current.set(clientId, { body, attachments })
-        if (!(error instanceof HttpError) && typeof error === 'object' && error !== null) {
-          const structuredError = error as {
-            status?: unknown
-            statusText?: unknown
-            body?: unknown
-          }
-          if (typeof structuredError.status === 'number' && typeof structuredError.statusText === 'string') {
-            throw new HttpError(structuredError.status, structuredError.statusText, structuredError.body)
-          }
-        }
         throw error
       }
     },
@@ -1392,23 +1319,33 @@ export function AgentChatPage({
   const [publicShareOpen, setPublicShareOpen] = useState(false)
   const [supportDialogOpen, setSupportDialogOpen] = useState(false)
   const [pendingCreatedProfileId, setPendingCreatedProfileId] = useState<string | null>(null)
-  const [reactivatingAgent, setReactivatingAgent] = useState(false)
-  const [reactivationError, setReactivationError] = useState<string | null>(null)
-  const [reactivationSuccess, setReactivationSuccess] = useState<string | null>(null)
+  const [reactivationFeedback, setReactivationFeedback] = useState<{
+    agentId: string
+    status: 'pending' | 'success' | 'error'
+    message?: string
+  } | null>(null)
+  const activeReactivationFeedback = reactivationFeedback?.agentId === activeAgentId
+    ? reactivationFeedback
+    : null
+  const reactivatingAgent = activeReactivationFeedback?.status === 'pending'
+  const reactivationError = activeReactivationFeedback?.status === 'error'
+    ? activeReactivationFeedback.message ?? null
+    : null
+  const reactivationSuccess = activeReactivationFeedback?.status === 'success'
+    ? activeReactivationFeedback.message ?? null
+    : null
 
   useEffect(() => {
-    setReactivatingAgent(false)
-    setReactivationError(null)
-    setReactivationSuccess(null)
-  }, [activeAgentId])
-
-  useEffect(() => {
-    if (!reactivationSuccess) {
+    if (!reactivationSuccess || !activeAgentId) {
       return
     }
-    const timeoutId = window.setTimeout(() => setReactivationSuccess(null), 4000)
+    const timeoutId = window.setTimeout(() => {
+      setReactivationFeedback((current) => (
+        current?.agentId === activeAgentId && current.status === 'success' ? null : current
+      ))
+    }, 4000)
     return () => window.clearTimeout(timeoutId)
-  }, [reactivationSuccess])
+  }, [activeAgentId, reactivationSuccess])
 
   const handleCreditEvent = useCallback(() => {
     if (activeAgentId) {
@@ -1874,8 +1811,6 @@ export function AgentChatPage({
           ? pendingMeta.emotionExpiresAt
           : rosterEntry?.emotionExpiresAt ?? null,
         processingActive: pendingMeta.processingActive ?? rosterEntry?.processingActive,
-        agentIsActive: pendingMeta.agentIsActive ?? rosterEntry?.isActive,
-        canReactivateAgent: pendingMeta.canReactivateAgent ?? rosterEntry?.canReactivateAgent,
         signupPreviewState: pendingMeta.signupPreviewState ?? rosterEntry?.signupPreviewState ?? 'none',
         planningState: pendingMeta.planningState ?? rosterEntry?.planningState ?? 'skipped',
       }
@@ -1887,8 +1822,6 @@ export function AgentChatPage({
         emotion: pendingAgentMetaRef.current.emotion,
         emotionExpiresAt: pendingAgentMetaRef.current.emotionExpiresAt,
         processingActive: pendingAgentMetaRef.current.processingActive,
-        agentIsActive: pendingAgentMetaRef.current.agentIsActive,
-        canReactivateAgent: pendingAgentMetaRef.current.canReactivateAgent,
         signupPreviewState: pendingAgentMetaRef.current.signupPreviewState,
         planningState: pendingAgentMetaRef.current.planningState,
       })
@@ -1918,7 +1851,7 @@ export function AgentChatPage({
     })
     queryClient.setQueriesData<AgentRosterQueryData>(
       { queryKey: ['agent-roster'] },
-      (current) => applyRosterMessageReadState(current, event.agent_id, readState),
+      (current) => patchRosterAgent(current, event.agent_id, readState),
     )
     handleMessageNotificationEvent(event)
   }, [handleMessageNotificationEvent, queryClient])
@@ -1935,7 +1868,7 @@ export function AgentChatPage({
       .then((readState) => {
         queryClient.setQueriesData<AgentRosterQueryData>(
           { queryKey: ['agent-roster'] },
-          (current) => applyRosterMessageReadState(current, activeAgentId, readState),
+          (current) => patchRosterAgent(current, activeAgentId, readState),
         )
       })
       .catch((error) => {
@@ -2059,8 +1992,8 @@ export function AgentChatPage({
         ? resolvedPendingMeta.emotionExpiresAt
         : activeRosterEmotionExpiresAt ?? null,
       processingActive: resolvedPendingMeta?.processingActive ?? activeRosterMeta?.processingActive,
-      agentIsActive: resolvedPendingMeta?.agentIsActive ?? activeRosterMeta?.isActive,
-      canReactivateAgent: resolvedPendingMeta?.canReactivateAgent ?? activeRosterMeta?.canReactivateAgent,
+      agentIsActive: activeRosterMeta?.isActive,
+      canReactivateAgent: activeRosterMeta?.canReactivateAgent,
       signupPreviewState: resolvedPendingMeta?.signupPreviewState ?? activeRosterSignupPreviewState,
       planningState: resolvedPendingMeta?.planningState ?? activeRosterPlanningState,
     })
@@ -2654,27 +2587,30 @@ export function AgentChatPage({
     if (!activeAgentId || reactivatingAgent || !activeCanReactivateAgent) {
       return
     }
-    setReactivatingAgent(true)
-    setReactivationError(null)
-    setReactivationSuccess(null)
+    const targetAgentId = activeAgentId
+    setReactivationFeedback({ agentId: targetAgentId, status: 'pending' })
     try {
-      const result = await activateAgent(activeAgentId)
+      const result = await activateAgent(targetAgentId)
       dispatch(chatActions.agentIdentityUpdated({
-        agentId: activeAgentId,
+        agentId: targetAgentId,
         agentIsActive: result.is_active,
       }))
       queryClient.setQueriesData<AgentRosterQueryData>(
         { queryKey: ['agent-roster'] },
-        (current) => updateRosterAgentActiveState(current, activeAgentId, result.is_active),
+        (current) => patchRosterAgent(current, targetAgentId, { isActive: result.is_active }),
       )
-      await queryClient.invalidateQueries({ queryKey: ['agent-timeline', activeAgentId], exact: false })
-      setReactivationSuccess(result.message || 'Agent reactivated and ready for messages.')
+      await queryClient.invalidateQueries({ queryKey: ['agent-timeline', targetAgentId], exact: false })
+      setReactivationFeedback({
+        agentId: targetAgentId,
+        status: 'success',
+        message: result.message || 'Agent reactivated and ready for messages.',
+      })
     } catch (error) {
-      setReactivationError(
-        safeErrorMessage(error, 'We couldn’t reactivate this agent. Please try again.'),
-      )
-    } finally {
-      setReactivatingAgent(false)
+      setReactivationFeedback({
+        agentId: targetAgentId,
+        status: 'error',
+        message: safeErrorMessage(error, 'We couldn’t reactivate this agent. Please try again.'),
+      })
     }
   }, [
     activeAgentId,
@@ -2755,8 +2691,6 @@ export function AgentChatPage({
       emotion: agent.emotion,
       emotionExpiresAt: agent.emotionExpiresAt,
       processingActive: agent.processingActive,
-      agentIsActive: agent.isActive,
-      canReactivateAgent: agent.canReactivateAgent,
       signupPreviewState: agent.signupPreviewState ?? 'none',
       planningState: agent.planningState ?? 'skipped',
     }
@@ -2769,8 +2703,6 @@ export function AgentChatPage({
         emotion: agent.emotion,
         emotionExpiresAt: agent.emotionExpiresAt,
         processingActive: agent.processingActive,
-        agentIsActive: agent.isActive,
-        canReactivateAgent: agent.canReactivateAgent,
         signupPreviewState: agent.signupPreviewState ?? 'none',
         planningState: agent.planningState ?? 'skipped',
       })
@@ -2786,8 +2718,6 @@ export function AgentChatPage({
         emotion: agent.emotion,
         emotionExpiresAt: agent.emotionExpiresAt,
         processingActive: agent.processingActive,
-        agentIsActive: agent.isActive,
-        canReactivateAgent: agent.canReactivateAgent,
         signupPreviewState: agent.signupPreviewState ?? 'none',
         planningState: agent.planningState ?? 'skipped',
       }, messageId)
@@ -3871,7 +3801,7 @@ export function AgentChatPage({
       const sentAt = new Date().toISOString()
       queryClient.setQueriesData<AgentRosterQueryData>(
         { queryKey: ['agent-roster'] },
-        (current) => touchRosterEntryLastInteraction(current, activeAgentId, sentAt),
+        (current) => patchRosterAgent(current, activeAgentId, { lastInteractionAt: sentAt }),
       )
     }
     pinAndJumpToBottom()
@@ -3879,11 +3809,9 @@ export function AgentChatPage({
       await sendMessage(body, attachments)
     } catch (error) {
       if (activeAgentId) {
-        const inactiveRace = error instanceof HttpError
-          && error.status === 409
-          && typeof error.body === 'object'
-          && error.body !== null
-          && (error.body as { code?: unknown }).code === 'agent_inactive'
+        const inactiveRace = typeof error === 'object'
+          && error !== null
+          && (error as { code?: unknown }).code === 'agent_inactive'
         if (inactiveRace) {
           dispatch(chatActions.agentIdentityUpdated({
             agentId: activeAgentId,
@@ -3891,7 +3819,7 @@ export function AgentChatPage({
           }))
           queryClient.setQueriesData<AgentRosterQueryData>(
             { queryKey: ['agent-roster'] },
-            (current) => updateRosterAgentActiveState(current, activeAgentId, false),
+            (current) => patchRosterAgent(current, activeAgentId, { isActive: false }),
           )
           void queryClient.invalidateQueries({ queryKey: ['agent-roster'], exact: false })
           void queryClient.invalidateQueries({ queryKey: ['agent-timeline', activeAgentId], exact: false })

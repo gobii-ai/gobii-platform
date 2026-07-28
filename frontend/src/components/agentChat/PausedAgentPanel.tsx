@@ -1,6 +1,6 @@
 import { CirclePause, Loader2, RotateCcw } from 'lucide-react'
 
-import { AgentChatButton } from './uiPrimitives'
+import { AgentChatButton, AgentChatSurface } from './uiPrimitives'
 
 type PausedAgentPanelProps = {
   canReactivate: boolean
@@ -16,38 +16,43 @@ export function PausedAgentPanel({
   onReactivate,
 }: PausedAgentPanelProps) {
   return (
-    <section className="agent-paused-panel" aria-labelledby="agent-paused-title">
-      <CirclePause className="agent-paused-panel__icon" aria-hidden="true" />
-      <div className="agent-paused-panel__body">
-        <p id="agent-paused-title" className="agent-paused-panel__title">This agent is paused</p>
-        <p className="agent-paused-panel__message">
+    <AgentChatSurface
+      as="section"
+      tone="warning"
+      className="pointer-events-auto flex w-full max-w-4xl flex-wrap items-start gap-3 px-4 py-3 text-amber-950 sm:flex-nowrap sm:items-center"
+      aria-labelledby="agent-paused-title"
+    >
+      <CirclePause className="h-5 w-5 shrink-0 text-amber-700" aria-hidden="true" />
+      <div className="min-w-0 flex-1">
+        <p id="agent-paused-title" className="m-0 text-sm font-bold">This agent is paused</p>
+        <p className="m-0 mt-0.5 text-[0.8125rem] leading-snug">
           This agent is paused and won’t respond or do work until it’s reactivated.
         </p>
         {!canReactivate ? (
-          <p className="agent-paused-panel__guidance">
+          <p className="m-0 mt-0.5 text-[0.8125rem] font-semibold leading-snug">
             Ask an owner or admin to reactivate it.
           </p>
         ) : null}
         {error ? (
-          <p className="agent-paused-panel__error" role="alert">{error}</p>
+          <p className="m-0 mt-1 text-xs font-semibold text-red-700" role="alert">{error}</p>
         ) : null}
       </div>
       {canReactivate ? (
         <AgentChatButton
-          className="agent-paused-panel__action"
-          variant="solid"
+          className="ml-8 shrink-0 sm:ml-0"
+          tone="warning"
           size="sm"
           onClick={() => void onReactivate?.()}
           disabled={reactivating}
         >
           {reactivating ? (
-            <Loader2 className="agent-paused-panel__spinner" aria-hidden="true" />
+            <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
           ) : (
-            <RotateCcw aria-hidden="true" />
+            <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
           )}
           {reactivating ? 'Reactivating…' : 'Reactivate agent'}
         </AgentChatButton>
       ) : null}
-    </section>
+    </AgentChatSurface>
   )
 }
