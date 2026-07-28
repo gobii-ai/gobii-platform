@@ -7,7 +7,11 @@ export type FixedContextMenuPosition = { x: number; y: number }
 export type FixedContextMenuItem = {
   label: string
   icon: LucideIcon
-  onSelect: () => void
+  /** Renders the item as a real link. A genuine user click on a real anchor is the only
+   *  open-in-new-tab shape no browser reclassifies as a popup window. */
+  href?: string
+  target?: string
+  onSelect?: () => void
   disabled?: boolean
 }
 
@@ -59,21 +63,39 @@ export function FixedContextMenu({ position, ariaLabel, items, onClose }: FixedC
       aria-label={ariaLabel}
       style={{ left: clampedPosition.x, top: clampedPosition.y }}
     >
-      {items.map(({ label, icon: Icon, onSelect, disabled }) => (
-        <button
-          key={label}
-          type="button"
-          role="menuitem"
-          className="fixed-context-menu__item sidebar-settings__link"
-          onClick={() => {
-            onClose()
-            onSelect()
-          }}
-          disabled={disabled}
-        >
-          <Icon className="sidebar-settings__link-icon" aria-hidden="true" />
-          <span>{label}</span>
-        </button>
+      {items.map(({ label, icon: Icon, href, target, onSelect, disabled }) => (
+        href && !disabled ? (
+          <a
+            key={label}
+            role="menuitem"
+            className="fixed-context-menu__item sidebar-settings__link"
+            href={href}
+            target={target}
+            rel={target === '_blank' ? 'noopener' : undefined}
+            onClick={() => {
+              onClose()
+              onSelect?.()
+            }}
+          >
+            <Icon className="sidebar-settings__link-icon" aria-hidden="true" />
+            <span>{label}</span>
+          </a>
+        ) : (
+          <button
+            key={label}
+            type="button"
+            role="menuitem"
+            className="fixed-context-menu__item sidebar-settings__link"
+            onClick={() => {
+              onClose()
+              onSelect?.()
+            }}
+            disabled={disabled}
+          >
+            <Icon className="sidebar-settings__link-icon" aria-hidden="true" />
+            <span>{label}</span>
+          </button>
+        )
       ))}
     </div>,
     document.body,

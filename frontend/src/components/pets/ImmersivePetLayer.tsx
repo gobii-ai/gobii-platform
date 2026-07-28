@@ -413,19 +413,11 @@ export function ImmersivePetLayer() {
               label: 'Options',
               icon: Settings,
               // The unchanged profile page, in a new tab: configuring the pet must not
-              // unload the conversation the user is in (bug #481). A real anchor click,
-              // not window.open — Safari (and Chrome with any features string) turns
-              // window.open into a separate popup window; a target=_blank link is the
-              // only shape every browser reliably opens as a tab.
-              onSelect: () => {
-                const anchor = document.createElement('a')
-                anchor.href = PET_PROFILE_PATH
-                anchor.target = '_blank'
-                anchor.rel = 'noopener'
-                document.body.appendChild(anchor)
-                anchor.click()
-                anchor.remove()
-              },
+              // unload the conversation the user is in (bug #481). A real link the user
+              // genuinely clicks — scripted opens (window.open, synthetic anchor clicks)
+              // get reclassified as popup windows by browser heuristics.
+              href: PET_PROFILE_PATH,
+              target: '_blank',
             },
             {
               label: 'Dismiss pet',

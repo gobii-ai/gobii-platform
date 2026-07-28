@@ -51,29 +51,17 @@ afterEach(() => {
 })
 
 describe('ImmersivePetLayer options', () => {
-  it('opens the unchanged profile page via a target=_blank link, leaving the chat alone', () => {
-    // A real anchor click, not window.open: Safari turns window.open into a popup
-    // window, and any features string does the same in Chrome. Only a _blank link is
-    // reliably a tab everywhere.
-    const openSpy = vi.spyOn(window, 'open').mockReturnValue(null)
-    const clicks: Array<{ href: string; target: string; rel: string }> = []
-    const recordClick = (event: MouseEvent) => {
-      const anchor = (event.target as Element | null)?.closest?.('a')
-      if (anchor) {
-        clicks.push({ href: anchor.getAttribute('href') ?? '', target: anchor.target, rel: anchor.rel })
-        event.preventDefault()
-      }
-    }
-    document.addEventListener('click', recordClick, true)
+  it('renders Options as a real _blank link to the unchanged profile page', () => {
+    // A real link the user genuinely clicks: scripted opens (window.open, synthetic
+    // anchor clicks) get reclassified as popup windows by browser heuristics.
     renderLayer()
-    const startPath = window.location.pathname
 
     fireEvent.contextMenu(screen.getByLabelText('Bubbles workspace pet'))
-    fireEvent.click(screen.getByText('Options'))
+    const options = screen.getByRole('menuitem', { name: 'Options' })
 
-    document.removeEventListener('click', recordClick, true)
-    expect(clicks).toEqual([{ href: '/app/profile#workspace-pet', target: '_blank', rel: 'noopener' }])
-    expect(openSpy).not.toHaveBeenCalled()
-    expect(window.location.pathname).toBe(startPath)
+    expect(options.tagName).toBe('A')
+    expect(options).toHaveAttribute('href', '/app/profile#workspace-pet')
+    expect(options).toHaveAttribute('target', '_blank')
+    expect(options).toHaveAttribute('rel', 'noopener')
   })
 })
