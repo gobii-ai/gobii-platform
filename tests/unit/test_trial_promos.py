@@ -1,5 +1,5 @@
 import re
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone as datetime_timezone
 from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -47,6 +47,7 @@ from api.services.trial_promos import (
     mark_trial_promo_redemption_from_checkout_session,
     mark_trial_promo_redemption_subscription,
     parse_trial_promo_credit_amount,
+    reserve_direct_trial_promo_redemption,
     reserve_trial_promo_redemption,
 )
 from constants.plans import PlanNames
@@ -298,6 +299,32 @@ class TrialPromoServiceTests(TestCase):
         )
 
         self.assertEqual(retry_redemption.status, TrialPromoRedemptionStatusChoices.CHECKOUT_STARTED)
+
+    def test_pending_direct_activation_can_be_reserved_after_campaign_expires(self):
+        promo = _create_promo(
+            code="DIRECT-EXPIRED-RETRY",
+            activation_mode=TrialPromoActivationModeChoices.DIRECT_STRIPE_TRIAL,
+        )
+        redemption = TrialPromoRedemption.objects.create(
+            promo=promo,
+            user=self.user,
+            status=TrialPromoRedemptionStatusChoices.DIRECT_ACTIVATION_PENDING,
+            event_id="trial-promo-direct-expired-retry",
+            stripe_customer_id="cus_expired_retry",
+        )
+        promo.is_active = False
+        promo.active_until = timezone.now() - timedelta(days=1)
+        promo.save()
+
+        reserved, created = reserve_direct_trial_promo_redemption(
+            promo=promo,
+            user=self.user,
+            stripe_customer_id="cus_new",
+        )
+
+        self.assertFalse(created)
+        self.assertEqual(reserved.pk, redemption.pk)
+        self.assertEqual(reserved.stripe_customer_id, "cus_expired_retry")
 
     def test_mark_redemption_from_checkout_session_sets_failed_timestamp(self):
         promo = _create_promo(code="FAILED-SESSION")
@@ -670,13 +697,20 @@ class DirectTrialPromoServiceTests(TestCase):
             TrialPromoRedemptionStatusChoices.DIRECT_ACTIVATION_PENDING,
         )
 
+        promo.plan = PlanNames.SCALE
+        promo.activation_mode = TrialPromoActivationModeChoices.HOSTED_CHECKOUT
+        promo.trial_days = 45
+        promo.trial_credit_amount = Decimal("999")
+        promo.conversion_coupon_id = "coupon_six_months"
+        promo.discount_months = 6
+        promo.late_conversion_grace_days = 90
+        promo.active_until = timezone.now() - timedelta(days=1)
+        promo.is_active = False
+        promo.save()
+
         result = activate_direct_trial_promo(
             promo=promo,
             user=self.user,
-            price_object=SimpleNamespace(
-                recurring={"interval": "month", "interval_count": 1},
-            ),
-            price_id="price_pro_monthly",
         )
 
         self.assertEqual(result.redemption.pk, redemption.pk)
@@ -689,6 +723,28 @@ class DirectTrialPromoServiceTests(TestCase):
         mock_schedule_create.assert_called_once()
         mock_schedule_modify.assert_called_once()
         mock_schedule_retrieve.assert_called_once()
+        mock_customer.assert_called_once()
+        mock_coupon_retrieve.assert_called_once_with(
+            "coupon_three_months",
+            api_key=stripe.api_key,
+        )
+        resumed_terms = mock_sync_entitlements.call_args_list[1].kwargs[
+            "activation_terms"
+        ]
+        self.assertEqual(resumed_terms.plan, PlanNames.STARTUP)
+        self.assertEqual(resumed_terms.price_id, "price_pro_monthly")
+        self.assertEqual(resumed_terms.trial_days, 14)
+        self.assertEqual(resumed_terms.coupon.coupon_id, "coupon_three_months")
+        self.assertEqual(resumed_terms.coupon.duration_in_months, 3)
+        completed_redemption = TrialPromoRedemption.objects.get(pk=redemption.pk)
+        self.assertEqual(
+            completed_redemption.late_conversion_expires_at,
+            datetime.fromtimestamp(
+                subscription["trial_end"],
+                tz=datetime_timezone.utc,
+            )
+            + timedelta(days=30),
+        )
         self.assertEqual(
             TrialPromoRedemption.objects.filter(promo=promo, user=self.user).count(),
             1,
@@ -1000,6 +1056,11 @@ class SpecialAccessCheckoutTests(TestCase):
             recurring={"interval": "month", "interval_count": 1},
         )
         self.client.force_login(self.user)
+        session = self.client.session
+        session["context_type"] = "organization"
+        session["context_id"] = "existing-org"
+        session["context_name"] = "Existing org"
+        session.save()
 
         response = self.client.post(
             reverse("pages:special_access_start"),
@@ -1007,11 +1068,22 @@ class SpecialAccessCheckoutTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(response["Location"], "/app/agents/new?spawn=1")
+        redirect_url = urlsplit(response["Location"])
+        self.assertEqual(redirect_url.path, "/app/agents/new")
+        self.assertEqual(
+            parse_qs(redirect_url.query),
+            {
+                "spawn": ["1"],
+                "context_type": ["personal"],
+                "context_id": [str(self.user.pk)],
+            },
+        )
         mock_activate.assert_called_once()
         session = self.client.session
         self.assertEqual(session["agent_charter"], template.charter)
         self.assertEqual(session["agent_template_source"], "trial_promo")
+        self.assertEqual(session["context_type"], "personal")
+        self.assertEqual(session["context_id"], str(self.user.pk))
 
     @override_settings(TRIAL_PROMO_DIRECT_ACTIVATION_ENABLED=True)
     @patch("pages.views.activate_direct_trial_promo")
@@ -1048,10 +1120,20 @@ class SpecialAccessCheckoutTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(response["Location"], "/app/agents/new?spawn=1")
+        redirect_url = urlsplit(response["Location"])
+        self.assertEqual(redirect_url.path, "/app/agents/new")
+        self.assertEqual(parse_qs(redirect_url.query)["spawn"], ["1"])
+        self.assertEqual(
+            parse_qs(redirect_url.query)["context_type"],
+            ["personal"],
+        )
+        self.assertEqual(
+            parse_qs(redirect_url.query)["context_id"],
+            [str(self.user.pk)],
+        )
         mock_activate.assert_not_called()
 
-    @override_settings(TRIAL_PROMO_DIRECT_ACTIVATION_ENABLED=True)
+    @override_settings(TRIAL_PROMO_DIRECT_ACTIVATION_ENABLED=False)
     @patch("pages.views.activate_direct_trial_promo")
     @patch("pages.views.Price.objects.get")
     @patch("pages.views.get_stripe_settings")
@@ -1092,20 +1174,38 @@ class SpecialAccessCheckoutTests(TestCase):
             id="price_startup",
             recurring={"interval": "month", "interval_count": 1},
         )
+        promo.activation_mode = TrialPromoActivationModeChoices.HOSTED_CHECKOUT
+        promo.is_active = False
+        promo.active_until = timezone.now() - timedelta(days=1)
+        promo.save()
         self.client.force_login(self.user)
+        session = self.client.session
+        session["special_access_trial_promo_id"] = str(promo.pk)
+        session.save()
 
-        response = self.client.post(
-            reverse("pages:special_access_start"),
-            {"code": promo.code_label},
-        )
+        response = self.client.post(reverse("pages:special_access_start"))
 
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(response["Location"], "/app/agents/new")
+        redirect_url = urlsplit(response["Location"])
+        self.assertEqual(redirect_url.path, "/app/agents/new")
+        self.assertEqual(
+            parse_qs(redirect_url.query),
+            {
+                "context_type": ["personal"],
+                "context_id": [str(self.user.pk)],
+            },
+        )
         mock_activate.assert_called_once()
         self.assertEqual(
             mock_activate.call_args.kwargs["promo"],
             redemption.promo,
         )
+        self.assertEqual(
+            set(mock_activate.call_args.kwargs),
+            {"promo", "user"},
+        )
+        mock_stripe_settings.assert_not_called()
+        mock_price_get.assert_not_called()
 
     def test_unlisted_campaign_template_is_not_publicly_resolvable(self):
         template = PersistentAgentTemplate.objects.create(

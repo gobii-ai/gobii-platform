@@ -1,6 +1,6 @@
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timezone as datetime_timezone
+from datetime import datetime, timedelta, timezone as datetime_timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, Mapping
 
@@ -20,10 +20,19 @@ from api.models import (
 from api.services.trial_promos import (
     TRIAL_PROMO_META_DISCOUNT_ACTIVE,
     TRIAL_PROMO_META_DISCOUNT_COUPON,
+    TRIAL_PROMO_META_CREDIT_AMOUNT,
+    TRIAL_PROMO_META_PLAN,
+    TRIAL_PROMO_META_REDEMPTION_ID,
+    TRIAL_PROMO_META_TRIAL_DAYS,
+    TRIAL_PROMO_REDEMPTION_ACTIVE_UNTIL_KEY,
+    TRIAL_PROMO_REDEMPTION_ADDITIONAL_PRICE_ID_KEY,
     TRIAL_PROMO_REDEMPTION_COUPON_ID_KEY,
     TRIAL_PROMO_REDEMPTION_DISCOUNT_MONTHS_KEY,
+    TRIAL_PROMO_REDEMPTION_LATE_CONVERSION_GRACE_DAYS_KEY,
+    TRIAL_PROMO_REDEMPTION_PRICE_ID_KEY,
     TrialPromoError,
     build_trial_promo_metadata,
+    get_direct_trial_promo_redemption,
     mark_direct_trial_promo_completed,
     mark_direct_trial_promo_failed,
     mark_direct_trial_promo_subscription,
@@ -56,6 +65,23 @@ class DirectTrialCoupon:
     currency: str
 
 
+@dataclass(frozen=True)
+class DirectTrialActivationTerms:
+    plan: str
+    price_id: str
+    additional_price_id: str
+    trial_days: int
+    trial_credit_amount: Decimal | None
+    coupon: DirectTrialCoupon
+    late_conversion_grace_days: int
+    active_until: datetime | None
+
+
+_REDEMPTION_PERCENT_OFF_KEY = "percent_off"
+_REDEMPTION_AMOUNT_OFF_KEY = "amount_off"
+_REDEMPTION_CURRENCY_KEY = "currency"
+
+
 def _stripe_value(value: Any, key: str, default=None):
     if isinstance(value, Mapping):
         return value.get(key, default)
@@ -80,6 +106,134 @@ def _stripe_datetime(value: Any) -> datetime:
             "stripe_trial_invalid",
             "Stripe did not return a valid trial schedule. Please try again.",
         ) from exc
+
+
+def _build_activation_snapshot(
+    *,
+    promo: TrialPromo,
+    price_id: str,
+    additional_price_id: str,
+    coupon: DirectTrialCoupon,
+) -> dict[str, str]:
+    metadata = build_trial_promo_metadata(promo)
+    metadata.update(
+        {
+            TRIAL_PROMO_REDEMPTION_PRICE_ID_KEY: str(price_id),
+            TRIAL_PROMO_REDEMPTION_ADDITIONAL_PRICE_ID_KEY: str(additional_price_id),
+            TRIAL_PROMO_REDEMPTION_COUPON_ID_KEY: coupon.coupon_id,
+            TRIAL_PROMO_REDEMPTION_DISCOUNT_MONTHS_KEY: str(coupon.duration_in_months),
+            TRIAL_PROMO_REDEMPTION_LATE_CONVERSION_GRACE_DAYS_KEY: str(
+                promo.late_conversion_grace_days,
+            ),
+            TRIAL_PROMO_REDEMPTION_ACTIVE_UNTIL_KEY: (
+                promo.active_until.isoformat() if promo.active_until else ""
+            ),
+            _REDEMPTION_PERCENT_OFF_KEY: (
+                str(coupon.percent_off) if coupon.percent_off is not None else ""
+            ),
+            _REDEMPTION_AMOUNT_OFF_KEY: (
+                str(coupon.amount_off) if coupon.amount_off is not None else ""
+            ),
+            _REDEMPTION_CURRENCY_KEY: coupon.currency,
+        },
+    )
+    return metadata
+
+
+def _parse_optional_decimal(value: Any) -> Decimal | None:
+    if value in (None, ""):
+        return None
+    return Decimal(str(value))
+
+
+def _activation_terms_from_redemption(
+    redemption: TrialPromoRedemption,
+) -> DirectTrialActivationTerms:
+    metadata = redemption.metadata or {}
+    try:
+        plan = str(metadata[TRIAL_PROMO_META_PLAN]).strip().lower()
+        price_id = str(metadata[TRIAL_PROMO_REDEMPTION_PRICE_ID_KEY]).strip()
+        additional_price_id = str(
+            metadata.get(TRIAL_PROMO_REDEMPTION_ADDITIONAL_PRICE_ID_KEY) or "",
+        ).strip()
+        trial_days = int(metadata[TRIAL_PROMO_META_TRIAL_DAYS])
+        credit_amount = _parse_optional_decimal(
+            metadata.get(TRIAL_PROMO_META_CREDIT_AMOUNT),
+        )
+        coupon_id = str(
+            metadata[TRIAL_PROMO_REDEMPTION_COUPON_ID_KEY],
+        ).strip()
+        discount_months = int(
+            metadata[TRIAL_PROMO_REDEMPTION_DISCOUNT_MONTHS_KEY],
+        )
+        percent_off = _parse_optional_decimal(
+            metadata.get(_REDEMPTION_PERCENT_OFF_KEY),
+        )
+        amount_off_value = metadata.get(_REDEMPTION_AMOUNT_OFF_KEY)
+        amount_off = (
+            int(amount_off_value)
+            if amount_off_value not in (None, "")
+            else None
+        )
+        late_conversion_grace_days = int(
+            metadata[TRIAL_PROMO_REDEMPTION_LATE_CONVERSION_GRACE_DAYS_KEY],
+        )
+        active_until_value = str(
+            metadata.get(TRIAL_PROMO_REDEMPTION_ACTIVE_UNTIL_KEY) or "",
+        ).strip()
+        active_until = (
+            datetime.fromisoformat(active_until_value)
+            if active_until_value
+            else None
+        )
+    except (
+        InvalidOperation,
+        KeyError,
+        OverflowError,
+        TypeError,
+        ValueError,
+    ) as exc:
+        raise TrialPromoError(
+            "activation_snapshot_invalid",
+            "This trial activation cannot be safely resumed. Please contact support.",
+        ) from exc
+
+    if active_until is not None and active_until.tzinfo is None:
+        active_until = active_until.replace(tzinfo=datetime_timezone.utc)
+    if (
+        plan not in (PlanNames.STARTUP, PlanNames.SCALE)
+        or not price_id
+        or not 1 <= trial_days <= 730
+        or not coupon_id
+        or not 1 <= discount_months <= 24
+        or not 1 <= late_conversion_grace_days <= 365
+        or (credit_amount is not None and credit_amount <= 0)
+        or (
+            (percent_off is None or percent_off <= 0)
+            and (amount_off is None or amount_off <= 0)
+        )
+    ):
+        raise TrialPromoError(
+            "activation_snapshot_invalid",
+            "This trial activation cannot be safely resumed. Please contact support.",
+        )
+
+    return DirectTrialActivationTerms(
+        plan=plan,
+        price_id=price_id,
+        additional_price_id=additional_price_id,
+        trial_days=trial_days,
+        trial_credit_amount=credit_amount,
+        coupon=DirectTrialCoupon(
+            coupon_id=coupon_id,
+            duration_in_months=discount_months,
+            percent_off=percent_off,
+            amount_off=amount_off,
+            currency=str(metadata.get(_REDEMPTION_CURRENCY_KEY) or "").lower(),
+        ),
+        late_conversion_grace_days=late_conversion_grace_days,
+        active_until=active_until,
+    )
 
 
 def validate_direct_trial_configuration(
@@ -238,7 +392,7 @@ def _create_or_retrieve_subscription(
     redemption: TrialPromoRedemption,
     customer_id: str,
     items: list[dict[str, Any]],
-    promo: TrialPromo,
+    trial_days: int,
     metadata: Mapping[str, str],
 ):
     if redemption.stripe_subscription_id:
@@ -252,7 +406,7 @@ def _create_or_retrieve_subscription(
         customer=customer_id,
         items=items,
         metadata=dict(metadata),
-        trial_period_days=promo.trial_days,
+        trial_period_days=trial_days,
         trial_settings={
             "end_behavior": {
                 "missing_payment_method": "cancel",
@@ -472,21 +626,21 @@ def _cancel_partial_subscription(
 def _sync_direct_trial_entitlements(
     *,
     user,
-    promo: TrialPromo,
+    activation_terms: DirectTrialActivationTerms,
     subscription,
 ) -> None:
     try:
         Subscription.sync_from_stripe_data(subscription)
         plan = reconcile_user_plan_from_stripe(user) or {}
         plan_id = str(plan.get("id") or "").strip().lower()
-        if plan_id != str(promo.plan).strip().lower():
+        if plan_id != activation_terms.plan:
             raise TrialPromoError(
                 "plan_sync_failed",
                 "Your trial was created, but account access is still syncing. Please try again.",
             )
 
         monthly_credits = int(plan["monthly_task_credits"])
-        credit_amount = promo.trial_credit_amount
+        credit_amount = activation_terms.trial_credit_amount
         if credit_amount is None:
             credit_amount = Decimal(monthly_credits)
             if plan_id == PlanNames.SCALE:
@@ -522,28 +676,51 @@ def activate_direct_trial_promo(
     *,
     promo: TrialPromo,
     user,
-    price_object,
-    price_id: str,
+    price_object=None,
+    price_id: str = "",
     additional_price_id: str = "",
 ) -> DirectTrialActivationResult:
-    coupon = validate_direct_trial_configuration(promo, price_object=price_object)
-    try:
-        customer = get_or_create_stripe_customer(user)
-    except stripe.error.StripeError as exc:
-        raise TrialPromoError(
-            "stripe_customer_unavailable",
-            "We couldn't prepare billing for this special trial. Please try again.",
-        ) from exc
-    base_metadata = build_trial_promo_metadata(promo)
-    redemption, _created = reserve_direct_trial_promo_redemption(
-        promo=promo,
-        user=user,
-        stripe_customer_id=customer.id,
-        metadata=base_metadata,
-    )
+    redemption = get_direct_trial_promo_redemption(promo=promo, user=user)
+    created = False
+    if redemption is None:
+        if price_object is None or not str(price_id).strip():
+            raise TrialPromoError(
+                "activation_terms_missing",
+                "This campaign's billing terms are not configured.",
+            )
+        coupon = validate_direct_trial_configuration(
+            promo,
+            price_object=price_object,
+        )
+        try:
+            customer = get_or_create_stripe_customer(user)
+        except stripe.error.StripeError as exc:
+            raise TrialPromoError(
+                "stripe_customer_unavailable",
+                "We couldn't prepare billing for this special trial. Please try again.",
+            ) from exc
+        customer_id = str(getattr(customer, "id", "") or "").strip()
+        if not customer_id:
+            raise TrialPromoError(
+                "stripe_customer_unavailable",
+                "We couldn't prepare billing for this special trial. Please try again.",
+            )
+        snapshot = _build_activation_snapshot(
+            promo=promo,
+            price_id=price_id,
+            additional_price_id=additional_price_id,
+            coupon=coupon,
+        )
+        redemption, created = reserve_direct_trial_promo_redemption(
+            promo=promo,
+            user=user,
+            stripe_customer_id=customer_id,
+            metadata=snapshot,
+        )
+
     logger.info(
         "Transparent trial activation %s for promo %s, user %s, redemption %s",
-        "reserved" if _created else "resumed",
+        "reserved" if created else "resumed",
         promo.pk,
         user.pk,
         redemption.pk,
@@ -559,21 +736,36 @@ def activate_direct_trial_promo(
             schedule_id=redemption.stripe_subscription_schedule_id,
         )
 
+    activation_terms = _activation_terms_from_redemption(redemption)
+    coupon = activation_terms.coupon
+    customer_id = str(redemption.stripe_customer_id or "").strip()
+    if not customer_id:
+        raise TrialPromoError(
+            "activation_snapshot_invalid",
+            "This trial activation cannot be safely resumed. Please contact support.",
+        )
+    base_metadata = {
+        str(key): str(value)
+        for key, value in (redemption.metadata or {}).items()
+    }
     metadata = {
         **base_metadata,
-        **build_trial_promo_metadata(promo, redemption=redemption),
+        TRIAL_PROMO_META_REDEMPTION_ID: str(redemption.pk),
         "gobii_event_id": redemption.event_id,
-        "plan": promo.plan,
+        "plan": activation_terms.plan,
         TRIAL_PROMO_META_DISCOUNT_COUPON: coupon.coupon_id,
     }
-    items = _subscription_items(price_id, additional_price_id)
+    items = _subscription_items(
+        activation_terms.price_id,
+        activation_terms.additional_price_id,
+    )
 
     try:
         subscription = _create_or_retrieve_subscription(
             redemption=redemption,
-            customer_id=customer.id,
+            customer_id=customer_id,
             items=items,
-            promo=promo,
+            trial_days=activation_terms.trial_days,
             metadata=metadata,
         )
         _confirm_subscription_trial_settings(subscription)
@@ -619,7 +811,7 @@ def activate_direct_trial_promo(
     try:
         _sync_direct_trial_entitlements(
             user=user,
-            promo=promo,
+            activation_terms=activation_terms,
             subscription=subscription,
         )
     except TrialPromoError:
@@ -633,18 +825,25 @@ def activate_direct_trial_promo(
         )
         raise
     trial_end = _stripe_datetime(_stripe_value(subscription, "trial_end"))
+    late_conversion_expires_at = activation_terms.active_until
+    if late_conversion_expires_at is None:
+        late_conversion_expires_at = trial_end + timedelta(
+            days=activation_terms.late_conversion_grace_days,
+        )
     schedule_id = _stripe_id(schedule)
     mark_direct_trial_promo_completed(
         redemption,
         stripe_subscription_id=_stripe_id(subscription),
         stripe_subscription_schedule_id=schedule_id,
-        trial_end=trial_end,
+        late_conversion_expires_at=late_conversion_expires_at,
         metadata={
             TRIAL_PROMO_REDEMPTION_COUPON_ID_KEY: coupon.coupon_id,
             TRIAL_PROMO_REDEMPTION_DISCOUNT_MONTHS_KEY: coupon.duration_in_months,
-            "percent_off": str(coupon.percent_off) if coupon.percent_off is not None else "",
-            "amount_off": coupon.amount_off,
-            "currency": coupon.currency,
+            _REDEMPTION_PERCENT_OFF_KEY: (
+                str(coupon.percent_off) if coupon.percent_off is not None else ""
+            ),
+            _REDEMPTION_AMOUNT_OFF_KEY: coupon.amount_off,
+            _REDEMPTION_CURRENCY_KEY: coupon.currency,
             "trial_end": trial_end.isoformat(),
         },
     )

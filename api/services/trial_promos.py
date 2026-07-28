@@ -1,6 +1,5 @@
 import uuid
 from dataclasses import dataclass
-from datetime import timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Any, Mapping
 
@@ -42,6 +41,10 @@ TRIAL_PROMO_META_DISCOUNT_ACTIVE = "trial_promo_discount_active"
 TRIAL_PROMO_META_DISCOUNT_COUPON = "trial_promo_discount_coupon"
 TRIAL_PROMO_REDEMPTION_COUPON_ID_KEY = "coupon_id"
 TRIAL_PROMO_REDEMPTION_DISCOUNT_MONTHS_KEY = "discount_months"
+TRIAL_PROMO_REDEMPTION_PRICE_ID_KEY = "price_id"
+TRIAL_PROMO_REDEMPTION_ADDITIONAL_PRICE_ID_KEY = "additional_price_id"
+TRIAL_PROMO_REDEMPTION_ACTIVE_UNTIL_KEY = "active_until"
+TRIAL_PROMO_REDEMPTION_LATE_CONVERSION_GRACE_DAYS_KEY = "late_conversion_grace_days"
 TRIAL_PROMO_CONVERSION_ATTEMPT_KEY = "conversion_checkout_attempt"
 TRIAL_PROMO_CONVERSION_PENDING_KEY = "conversion_checkout_pending"
 
@@ -100,7 +103,16 @@ def get_session_trial_promo(request) -> TrialPromo | None:
     except (TypeError, ValueError, ValidationError):
         clear_trial_promo_session(request)
         return None
-    if promo is None or not promo.is_available():
+    pending_activation_exists = (
+        promo is not None
+        and request.user.is_authenticated
+        and TrialPromoRedemption.objects.filter(
+            promo=promo,
+            user=request.user,
+            status=TrialPromoRedemptionStatusChoices.DIRECT_ACTIVATION_PENDING,
+        ).exists()
+    )
+    if promo is None or (not promo.is_available() and not pending_activation_exists):
         clear_trial_promo_session(request)
         return None
     return promo
@@ -352,9 +364,6 @@ def reserve_direct_trial_promo_redemption(
     now = timezone.now()
     with transaction.atomic():
         locked_promo = TrialPromo.objects.select_for_update().get(pk=promo.pk)
-        if not locked_promo.is_available(now=now):
-            raise TrialPromoError("inactive", "This special access code is no longer active.")
-
         existing_direct = (
             TrialPromoRedemption.objects.filter(
                 promo=locked_promo,
@@ -369,6 +378,9 @@ def reserve_direct_trial_promo_redemption(
         )
         if existing_direct is not None:
             return existing_direct, False
+
+        if not locked_promo.is_available(now=now):
+            raise TrialPromoError("inactive", "This special access code is no longer active.")
 
         existing_counted = (
             TrialPromoRedemption.objects.filter(
@@ -430,15 +442,10 @@ def mark_direct_trial_promo_completed(
     *,
     stripe_subscription_id: str,
     stripe_subscription_schedule_id: str,
-    trial_end,
+    late_conversion_expires_at,
     metadata: Mapping[str, Any] | None = None,
 ) -> None:
     now = timezone.now()
-    late_conversion_expires_at = redemption.promo.active_until
-    if late_conversion_expires_at is None:
-        late_conversion_expires_at = trial_end + timedelta(
-            days=redemption.promo.late_conversion_grace_days,
-        )
     merged_metadata = dict(redemption.metadata or {})
     merged_metadata.update(metadata or {})
     TrialPromoRedemption.objects.filter(pk=redemption.pk).update(

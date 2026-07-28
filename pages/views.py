@@ -2806,12 +2806,28 @@ class SpecialAccessStartView(View):
         if request.POST.get("action") == TRIAL_PROMO_RESEND_VERIFICATION_ACTION:
             return _resend_special_access_email_verification(request, promo)
 
+        pending_direct_activation = (
+            get_direct_trial_promo_redemption(
+                promo=promo,
+                user=request.user,
+            )
+            if request.user.is_authenticated
+            else None
+        )
+        is_direct_activation = (
+            promo.activation_mode == TrialPromoActivationModeChoices.DIRECT_STRIPE_TRIAL
+            or (
+                pending_direct_activation is not None
+                and pending_direct_activation.status
+                == TrialPromoRedemptionStatusChoices.DIRECT_ACTIVATION_PENDING
+            )
+        )
         try:
-            if promo.activation_mode == TrialPromoActivationModeChoices.DIRECT_STRIPE_TRIAL:
+            if is_direct_activation:
                 return _start_direct_trial_promo(request, promo)
             return _start_trial_promo_checkout(request, promo)
         except TrialPromoError as exc:
-            if promo.activation_mode == TrialPromoActivationModeChoices.DIRECT_STRIPE_TRIAL:
+            if is_direct_activation:
                 logger.warning(
                     "Transparent campaign request failed for promo %s and user %s (%s): %s",
                     promo.pk,
@@ -2887,11 +2903,35 @@ def _resend_special_access_email_verification(request, promo: TrialPromo):
     return redirect("pages:special_access")
 
 
+def _trial_promo_personal_agent_redirect(request, *, spawn: bool):
+    personal_context_name = (
+        request.user.get_full_name()
+        or request.user.username
+        or request.user.email
+        or "Personal"
+    )
+    request.session["context_type"] = "personal"
+    request.session["context_id"] = str(request.user.pk)
+    request.session["context_name"] = personal_context_name
+    redirect_params = {
+        "context_type": "personal",
+        "context_id": str(request.user.pk),
+    }
+    if spawn:
+        redirect_params["spawn"] = "1"
+    return redirect(
+        append_query_params(
+            f"{IMMERSIVE_APP_BASE_PATH}/agents/new",
+            redirect_params,
+        ),
+    )
+
+
 def _trial_promo_template_redirect(request, promo: TrialPromo):
     template = promo.linked_template
     if template is None:
         clear_trial_promo_session(request)
-        return redirect(f"{IMMERSIVE_APP_BASE_PATH}/agents/new")
+        return _trial_promo_personal_agent_redirect(request, spawn=False)
     if (
         not template.is_active
         or template.is_listed
@@ -2916,7 +2956,7 @@ def _trial_promo_template_redirect(request, promo: TrialPromo):
         request.user.pk,
     )
     clear_trial_promo_session(request)
-    return redirect(f"{IMMERSIVE_APP_BASE_PATH}/agents/new?spawn=1")
+    return _trial_promo_personal_agent_redirect(request, spawn=True)
 
 
 def _prepare_campaign_stripe() -> None:
@@ -2930,22 +2970,29 @@ def _prepare_campaign_stripe() -> None:
 
 
 def _start_direct_trial_promo(request, promo: TrialPromo):
-    if not settings.TRIAL_PROMO_DIRECT_ACTIVATION_ENABLED:
-        raise TrialPromoError(
-            "direct_activation_disabled",
-            "Transparent trial activation is temporarily unavailable.",
-        )
     user = request.user
-    if not is_user_email_allowed_for_trial_promo(user=user, promo=promo):
-        raise TrialPromoError(
-            TRIAL_PROMO_REASON_EMAIL_NOT_ALLOWLISTED,
-            "This invitation is tied to a different email address.",
-        )
-    if not is_user_email_verified_for_trial_promo(user=user, promo=promo):
-        raise TrialPromoError(
-            TRIAL_PROMO_REASON_EMAIL_NOT_VERIFIED,
-            "Please verify your email address to use this campaign invitation.",
-        )
+    existing_redemption = get_direct_trial_promo_redemption(promo=promo, user=user)
+    activation_pending = (
+        existing_redemption is not None
+        and existing_redemption.status
+        == TrialPromoRedemptionStatusChoices.DIRECT_ACTIVATION_PENDING
+    )
+    if not activation_pending:
+        if not settings.TRIAL_PROMO_DIRECT_ACTIVATION_ENABLED:
+            raise TrialPromoError(
+                "direct_activation_disabled",
+                "Transparent trial activation is temporarily unavailable.",
+            )
+        if not is_user_email_allowed_for_trial_promo(user=user, promo=promo):
+            raise TrialPromoError(
+                TRIAL_PROMO_REASON_EMAIL_NOT_ALLOWLISTED,
+                "This invitation is tied to a different email address.",
+            )
+        if not is_user_email_verified_for_trial_promo(user=user, promo=promo):
+            raise TrialPromoError(
+                TRIAL_PROMO_REASON_EMAIL_NOT_VERIFIED,
+                "Please verify your email address to use this campaign invitation.",
+            )
     try:
         plan = reconcile_user_plan_from_stripe(user) or {}
     except stripe.error.StripeError as exc:
@@ -2954,12 +3001,6 @@ def _start_direct_trial_promo(request, promo: TrialPromo):
             "We couldn't confirm your current plan. Please try again.",
         ) from exc
     plan_id = str(plan.get("id") or "").lower()
-    existing_redemption = get_direct_trial_promo_redemption(promo=promo, user=user)
-    activation_pending = (
-        existing_redemption is not None
-        and existing_redemption.status
-        == TrialPromoRedemptionStatusChoices.DIRECT_ACTIVATION_PENDING
-    )
 
     if plan_id and plan_id != PlanNames.FREE and not activation_pending:
         return _trial_promo_template_redirect(request, promo)
@@ -2994,6 +3035,13 @@ def _start_direct_trial_promo(request, promo: TrialPromo):
             raise TrialPromoError(decision.reason or "trial_unavailable", message)
 
     _prepare_campaign_stripe()
+    if activation_pending:
+        activate_direct_trial_promo(
+            promo=promo,
+            user=user,
+        )
+        return _trial_promo_template_redirect(request, promo)
+
     stripe_settings = get_stripe_settings()
     plan_config = _personal_plan_checkout_config(stripe_settings, promo.plan)
     price_id = plan_config["price_id"]
