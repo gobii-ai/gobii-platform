@@ -59,7 +59,8 @@ describe('ImmersivePetLayer options', () => {
     fireEvent.contextMenu(screen.getByLabelText('Bubbles workspace pet'))
     fireEvent.click(screen.getByText('Options'))
 
-    expect(openSpy).toHaveBeenCalledWith('/app/profile#workspace-pet', '_blank', 'noopener')
+    // No third argument: a features string makes browsers open a popup window, not a tab.
+    expect(openSpy).toHaveBeenCalledWith('/app/profile#workspace-pet', '_blank')
     expect(window.location.pathname).toBe(startPath)
   })
 })

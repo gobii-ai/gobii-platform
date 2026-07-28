@@ -413,8 +413,14 @@ export function ImmersivePetLayer() {
               label: 'Options',
               icon: Settings,
               // The unchanged profile page, in a new tab: configuring the pet must not
-              // unload the conversation the user is in (bug #481).
-              onSelect: () => window.open(PET_PROFILE_PATH, '_blank', 'noopener'),
+              // unload the conversation the user is in (bug #481). No features string —
+              // any features value makes browsers open a popup window instead of a tab.
+              onSelect: () => {
+                const opened = window.open(PET_PROFILE_PATH, '_blank')
+                if (opened) {
+                  opened.opener = null
+                }
+              },
             },
             {
               label: 'Dismiss pet',
