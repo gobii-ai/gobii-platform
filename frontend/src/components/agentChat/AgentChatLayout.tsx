@@ -1,6 +1,6 @@
 import type { KeyboardEvent, MouseEvent, ReactNode, Ref } from 'react'
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
-import { Flag, Loader2, Zap } from 'lucide-react'
+import { CheckCircle2, Flag, Loader2, Zap } from 'lucide-react'
 import '../../styles/agentChatLegacy.css'
 import { deriveTypingStatusText } from './TypingIndicator'
 import { track } from '../../util/analytics'
@@ -16,6 +16,7 @@ import { HighPriorityBanner, type HighPriorityBannerConfig } from './HighPriorit
 import { reportAgentMessageIssue, type PendingActionMutationResult } from '../../api/agentChat'
 import { AgentSignupPreviewPanel } from './AgentSignupPreviewPanel'
 import { AgentUpgradePlansPanel } from './AgentUpgradePlansPanel'
+import { PausedAgentPanel } from './PausedAgentPanel'
 import type { AgentChatSidebarMode } from './sidebarMode'
 import { useStarterPrompts } from './useStarterPrompts'
 import { SubscriptionUpgradeModal } from '../common/SubscriptionUpgradeModal'
@@ -225,6 +226,12 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   ) => void | Promise<void>
   onSendSystemMessage?: (body: string) => void | Promise<void>
   normalSendDisabledReason?: string | null
+  agentIsActive?: boolean
+  canReactivateAgent?: boolean
+  reactivatingAgent?: boolean
+  reactivationError?: string | null
+  reactivationSuccess?: string | null
+  onReactivateAgent?: () => void | Promise<void>
   showComposerActionMenu?: boolean
   developerMode?: boolean
   showDeveloperMode?: boolean
@@ -345,6 +352,12 @@ export function AgentChatLayout({
   onSendMessage,
   onSendSystemMessage,
   normalSendDisabledReason = null,
+  agentIsActive = true,
+  canReactivateAgent = false,
+  reactivatingAgent = false,
+  reactivationError = null,
+  reactivationSuccess = null,
+  onReactivateAgent,
   showComposerActionMenu = true,
   developerMode = false,
   showDeveloperMode = false,
@@ -1583,6 +1596,13 @@ export function AgentChatLayout({
           />
           )}
 
+          {reactivationSuccess ? (
+            <div className="agent-reactivation-confirmation" role="status" aria-live="polite">
+              <CheckCircle2 aria-hidden="true" />
+              <span>{reactivationSuccess}</span>
+            </div>
+          ) : null}
+
           {/* Composer at bottom of flex layout */}
           {spawnIntentLoading ? (
             <div
@@ -1608,6 +1628,15 @@ export function AgentChatLayout({
                   </button>
                 ) : null}
               </div>
+            </div>
+          ) : !agentIsActive ? (
+            <div ref={composerShellRef} className="composer-shell agent-paused-shell">
+              <PausedAgentPanel
+                canReactivate={canReactivateAgent}
+                reactivating={reactivatingAgent}
+                error={reactivationError}
+                onReactivate={onReactivateAgent}
+              />
             </div>
           ) : effectiveShowSignupPreviewPanel ? (
             <div ref={composerShellRef}>

@@ -32,6 +32,7 @@ export type AgentRosterEntry = {
   isOrgOwned?: boolean
   isCollaborator?: boolean
   canManageAgent?: boolean
+  canReactivateAgent?: boolean
   canManageCollaborators?: boolean
   canSendMessages?: boolean
   preferredLlmTier?: string | null

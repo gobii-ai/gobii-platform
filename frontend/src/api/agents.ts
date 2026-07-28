@@ -57,6 +57,7 @@ export type AgentProfilePayload = {
   is_org_owned: boolean
   is_collaborator: boolean
   can_manage_agent: boolean
+  can_reactivate_agent?: boolean
   can_manage_collaborators: boolean
   can_send_messages?: boolean
   developer_live_chat_url?: string | null
@@ -113,6 +114,7 @@ export function agentProfilePayloadToRosterEntry(agent: AgentProfilePayload): Ag
     isOrgOwned: agent.is_org_owned,
     isCollaborator: agent.is_collaborator,
     canManageAgent: agent.can_manage_agent,
+    canReactivateAgent: agent.can_reactivate_agent === true,
     canManageCollaborators: agent.can_manage_collaborators,
     canSendMessages: agent.can_send_messages !== false,
     preferredLlmTier: agent.preferred_llm_tier,

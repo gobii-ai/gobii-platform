@@ -92,6 +92,7 @@ export const AgentChatBanner = memo(function AgentChatBanner({
   const agentMiniDescription = activeSession.identity.agentMiniDescription
   const agentEmail = activeSession.identity.agentEmail?.trim() || ''
   const agentSms = activeSession.identity.agentSms?.trim() || ''
+  const agentIsActive = activeSession.identity.agentIsActive
   const isOrgOwned = activeSession.identity.agentIsOrgOwned
   const canManageAgent = activeSession.identity.canManageAgent
   const isCollaborator = activeSession.identity.isCollaborator
@@ -171,17 +172,13 @@ export const AgentChatBanner = memo(function AgentChatBanner({
 
   // Animate on first appearance only (not when switching agents)
   useEffect(() => {
-    if (planSnapshot && !hasAnimatedRef.current) {
-      hasAnimatedRef.current = true
-      setAnimate(false)
-      const timer = setTimeout(() => setAnimate(true), 30)
-      return () => clearTimeout(timer)
+    if (!planSnapshot || hasAnimatedRef.current) {
+      return
     }
-    // If we already have plan data, ensure animate stays true
-    if (planSnapshot && hasAnimatedRef.current && !animate) {
-      setAnimate(true)
-    }
-  }, [planSnapshot?.doneCount, planSnapshot?.todoCount, planSnapshot?.doingCount, animate])
+    hasAnimatedRef.current = true
+    const timer = setTimeout(() => setAnimate(true), 30)
+    return () => clearTimeout(timer)
+  }, [planSnapshot])
 
   const hasPlan = planSnapshot && (planSnapshot.todoCount + planSnapshot.doingCount + planSnapshot.doneCount) > 0
   const currentTask = hasPlan && planSnapshot.doingTitles.length > 0 ? planSnapshot.doingTitles[0] : null
@@ -314,7 +311,10 @@ export const AgentChatBanner = memo(function AgentChatBanner({
                   />
                 </span>
               )}
-              {agentEmail || agentSms ? (
+              {!agentIsActive ? (
+                <span className="banner-paused-badge">Paused</span>
+              ) : null}
+              {agentIsActive && (agentEmail || agentSms) ? (
                 <span className="banner-contact-links">
                   {agentEmail ? (
                     <a

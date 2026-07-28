@@ -7,6 +7,7 @@ import secrets
 import time
 from typing import Iterable, Mapping
 
+from django.db import transaction
 from django.utils import timezone
 
 from api.agent.comms.adapters import ParsedMessage
@@ -430,14 +431,32 @@ def ingest_trigger_delivery(
     )
     if info.message.conversation_id and display_name:
         PersistentAgentConversation.objects.filter(id=info.message.conversation_id).update(display_name=display_name)
-    debounce_result = schedule_discord_inbound_processing(
-        str(subscription.agent_id),
-        inbound_message_id=str(info.message.id),
-    )
+    if info.processing_blocked_reason == "agent_inactive":
+        raw_payload = parsed.raw_payload if isinstance(parsed.raw_payload, Mapping) else {}
+        channel_id = str(raw_payload.get("discord_channel_id") or subscription.platform_channel)
+        recipient_key = str(raw_payload.get("discord_author_id") or channel_id)
+
+        def _send_native_inactive_reply_if_available() -> None:
+            from api.services.discord_bot import send_inactive_discord_auto_reply
+
+            send_inactive_discord_auto_reply(
+                subscription.agent,
+                channel_id=channel_id,
+                recipient_key=recipient_key,
+            )
+
+        transaction.on_commit(_send_native_inactive_reply_if_available, robust=True)
+        debounce_result = {"debounced": False, "debounce_seconds": 0}
+    else:
+        debounce_result = schedule_discord_inbound_processing(
+            str(subscription.agent_id),
+            inbound_message_id=str(info.message.id),
+        )
     subscription.record_event()
     return {
         "message_id": str(info.message.id),
         "conversation_id": str(info.message.conversation_id) if info.message.conversation_id else "",
         "debounced": bool(debounce_result.get("debounced")),
         "debounce_seconds": debounce_result.get("debounce_seconds", 0),
+        "processing_blocked_reason": info.processing_blocked_reason,
     }

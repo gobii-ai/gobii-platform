@@ -24,6 +24,7 @@ from api.models import (
     BrowserUseAgent,
     CommsChannel,
     PersistentAgent,
+    PersistentAgentCommsEndpoint,
     PersistentAgentDiscordChannelSubscription,
     PersistentAgentDiscordGuild,
     PersistentAgentDiscordOAuthSession,
@@ -43,6 +44,7 @@ from api.services.discord_bot import (
     ensure_subscription,
     handle_discord_oauth_callback,
     ingest_gateway_message,
+    send_inactive_discord_auto_reply,
     send_channel_message,
     start_discord_oauth,
     _agent_webhook_username,
@@ -508,6 +510,98 @@ class NativeDiscordBotTests(TestCase):
         self.assertEqual(stored.raw_payload["source_label"], "Human")
         self.assertEqual(stored.raw_payload["discord_content"], "please help @Ada")
         self.assertEqual(stored.raw_payload["discord_raw_content"], "please help <@123456789012345678>")
+
+    @tag("batch_agent_webhooks")
+    @patch("api.services.discord_bot.schedule_discord_inbound_processing")
+    @patch("api.services.discord_bot.send_inactive_discord_auto_reply")
+    def test_inactive_agent_discord_attempt_is_stored_handled_and_not_dispatched(
+        self,
+        inactive_reply_mock,
+        schedule_mock,
+    ):
+        guild = self._guild()
+        PersistentAgentDiscordChannelSubscription.objects.create(
+            agent=self.agent,
+            guild=guild,
+            channel_id="10",
+            channel_name="general",
+        )
+        self.agent.is_active = False
+        self.agent.save(update_fields=["is_active"])
+        message = DiscordGatewayMessage(
+            message_id="paused-500",
+            channel_id="10",
+            channel_name="general",
+            guild_id="100",
+            guild_name="Guild",
+            author_id="300",
+            author_name="Human",
+            content="please help",
+            attachments=[],
+            embeds=[],
+        )
+
+        with self.captureOnCommitCallbacks(execute=True):
+            result = ingest_gateway_message(message)
+
+        self.assertEqual(result["processing_blocked_reason"], "agent_inactive")
+        stored = PersistentAgentMessage.objects.get(id=result["message_id"])
+        self.assertEqual(
+            stored.raw_payload["inactive_handling"],
+            "agent_inactive_blocked_input",
+        )
+        schedule_mock.assert_not_called()
+        inactive_reply_mock.assert_called_once_with(
+            self.agent,
+            channel_id="10",
+            recipient_key="300",
+        )
+
+    @tag("batch_agent_webhooks")
+    @patch("api.services.discord_bot.send_channel_message")
+    def test_inactive_discord_notice_is_friendly_and_deduplicated(self, send_message_mock):
+        self.agent.is_active = False
+        self.agent.save(update_fields=["is_active"])
+
+        sent = send_inactive_discord_auto_reply(
+            self.agent,
+            channel_id="10",
+            recipient_key="300",
+        )
+
+        self.assertTrue(sent)
+        self.assertIn("paused", send_message_mock.call_args.kwargs["body"].lower())
+        self.assertIn(
+            f"/app/agents/{self.agent.id}",
+            send_message_mock.call_args.kwargs["body"],
+        )
+
+        endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.DISCORD,
+            address=f"discord:agent:{self.agent.id}",
+        )
+        PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=endpoint,
+            is_outbound=True,
+            body="Already sent",
+            raw_payload={
+                "kind": "agent_inactive_auto_reply",
+                "inactive_recipient_key": "300",
+                "inactive_channel": CommsChannel.DISCORD,
+            },
+        )
+        send_message_mock.reset_mock()
+
+        sent_again = send_inactive_discord_auto_reply(
+            self.agent,
+            channel_id="10",
+            recipient_key="300",
+        )
+
+        self.assertFalse(sent_again)
+        send_message_mock.assert_not_called()
 
     @tag("batch_agent_webhooks")
     @patch("api.agent.core.prompt_context.ensure_steps_compacted")

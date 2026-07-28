@@ -161,6 +161,7 @@ from api.services.email_verification import (
     validate_email_change,
 )
 from api.services.agent_planning import skip_agent_planning
+from api.services.agent_lifecycle import activate_agent, build_agent_inactive_payload
 from api.services.referral_service import ReferralService
 from api.services.web_sessions import WEB_SESSION_TTL_SECONDS, end_web_session, heartbeat_web_session, start_web_session, touch_web_session
 from api.services.sms_contact_purpose import sms_contact_purpose_required, track_sms_contact_approval
@@ -2916,6 +2917,11 @@ def _serialize_agent_profile_payload(
             or agent.user_id == user.id
             or (agent.organization_id and agent.organization_id in org_ids)
         ),
+        "can_reactivate_agent": user_can_manage_agent_settings(
+            user,
+            agent,
+            allow_delinquent_personal_chat=True,
+        ),
         "can_manage_collaborators": bool(
             is_admin_user
             or agent.user_id == user.id
@@ -3996,6 +4002,7 @@ class AgentTimelineAPIView(LoginRequiredMixin, View):
             "current_plan": window.current_plan,
             "agent_name": agent.name,
             "agent_avatar_url": agent.get_avatar_thumbnail_url(),
+            "is_active": bool(agent.is_active),
             "signup_preview_state": agent.signup_preview_state,
             "planning_state": agent.planning_state,
             **serialize_agent_emotion(agent),
@@ -4005,6 +4012,27 @@ class AgentTimelineAPIView(LoginRequiredMixin, View):
         if direction == "initial":
             payload["critical_status"] = _build_agent_critical_status_payload(request, agent)
         return JsonResponse(payload)
+
+
+class AgentActivateAPIView(LoginRequiredMixin, View):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
+        agent = resolve_manageable_agent_for_request(
+            request,
+            agent_id,
+            allow_delinquent_personal_chat=True,
+        )
+        agent, updated = activate_agent(agent)
+        return JsonResponse(
+            {
+                "status": "active",
+                "updated": updated,
+                "message": f"{agent.name or 'Agent'} is active again.",
+                "is_active": bool(agent.is_active),
+                "life_state": agent.life_state,
+            }
+        )
 
 @method_decorator(csrf_exempt, name="dispatch")
 class AgentPlanningSkipAPIView(LoginRequiredMixin, View):
@@ -4883,6 +4911,8 @@ class AgentMessageCreateAPIView(LoginRequiredMixin, View):
         )
         if not user_has_natural_agent_chat_access(request.user, agent):
             return JsonResponse({"error": "This staff view is read-only for user messages."}, status=403)
+        if not agent.is_active:
+            return JsonResponse(build_agent_inactive_payload(agent), status=409)
         if (
             agent.organization_id is None
             and agent.user_id is not None

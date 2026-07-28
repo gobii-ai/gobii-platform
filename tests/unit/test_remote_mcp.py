@@ -841,6 +841,36 @@ class RemoteMCPViewTests(TestCase):
 
     @patch("api.services.remote_mcp.can_user_use_personal_agents_and_api", return_value=True)
     @patch("api.auth.can_user_use_personal_agents_and_api", return_value=True)
+    @patch("config.settings.PUBLIC_SITE_URL", "https://example.com")
+    def test_paused_agent_rejects_message_without_persisting_input(
+        self,
+        _mock_auth_access,
+        _mock_scope_access,
+    ):
+        agent = self._create_agent(self.user, "Paused MCP Agent")
+        agent.is_active = False
+        agent.save(update_fields=["is_active"])
+
+        response = self._call_tool(
+            "gobii_send_agent_message",
+            {
+                "agent_id": str(agent.id),
+                "body": "This must not be stored.",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["result"]["isError"])
+        content = self._structured_content(response)
+        self.assertEqual(content["details"]["code"], "agent_inactive")
+        self.assertEqual(
+            content["details"]["reactivation_url"],
+            f"https://example.com/app/agents/{agent.id}",
+        )
+        self.assertFalse(PersistentAgentMessage.objects.filter(owner_agent=agent).exists())
+
+    @patch("api.services.remote_mcp.can_user_use_personal_agents_and_api", return_value=True)
+    @patch("api.auth.can_user_use_personal_agents_and_api", return_value=True)
     def test_timeline_cursor_reads_and_wait_filters(self, _mock_auth_access, _mock_scope_access):
         agent = self._create_agent(self.user, "Timeline MCP Agent")
 

@@ -19,6 +19,7 @@ import {
   skipAgentPlanning,
   markLatestAgentMessageRead,
   normalizeAgentMessageReadState,
+  activateAgent,
   type AgentMessageReadState,
 } from '../api/agentChat'
 import type { AgentSpawnIntent, TemplateRecommendation } from '../api/agentSpawnIntent'
@@ -544,6 +545,26 @@ function touchRosterEntryLastInteraction(
   }
 }
 
+function updateRosterAgentActiveState(
+  current: AgentRosterQueryData | undefined,
+  agentId: string,
+  isActive: boolean,
+): AgentRosterQueryData | undefined {
+  if (!isAgentRosterQueryData(current) || !current.agents?.length) {
+    return current
+  }
+
+  let changed = false
+  const nextAgents = current.agents.map((agent) => {
+    if (agent.id !== agentId || agent.isActive === isActive) {
+      return agent
+    }
+    changed = true
+    return { ...agent, isActive }
+  })
+  return changed ? { ...current, agents: nextAgents } : current
+}
+
 function applyRosterMessageReadState(
   current: AgentRosterQueryData | undefined,
   agentId: string,
@@ -662,6 +683,8 @@ type AgentSwitchMeta = {
   emotion?: string | null
   emotionExpiresAt?: string | null
   processingActive?: boolean
+  agentIsActive?: boolean
+  canReactivateAgent?: boolean
   signupPreviewState?: SignupPreviewState | null
   planningState?: PlanningState | null
 }
@@ -1213,6 +1236,16 @@ export function AgentChatPage({
         return result
       } catch (error) {
         retryPayloadsRef.current.set(clientId, { body, attachments })
+        if (!(error instanceof HttpError) && typeof error === 'object' && error !== null) {
+          const structuredError = error as {
+            status?: unknown
+            statusText?: unknown
+            body?: unknown
+          }
+          if (typeof structuredError.status === 'number' && typeof structuredError.statusText === 'string') {
+            throw new HttpError(structuredError.status, structuredError.statusText, structuredError.body)
+          }
+        }
         throw error
       }
     },
@@ -1359,6 +1392,23 @@ export function AgentChatPage({
   const [publicShareOpen, setPublicShareOpen] = useState(false)
   const [supportDialogOpen, setSupportDialogOpen] = useState(false)
   const [pendingCreatedProfileId, setPendingCreatedProfileId] = useState<string | null>(null)
+  const [reactivatingAgent, setReactivatingAgent] = useState(false)
+  const [reactivationError, setReactivationError] = useState<string | null>(null)
+  const [reactivationSuccess, setReactivationSuccess] = useState<string | null>(null)
+
+  useEffect(() => {
+    setReactivatingAgent(false)
+    setReactivationError(null)
+    setReactivationSuccess(null)
+  }, [activeAgentId])
+
+  useEffect(() => {
+    if (!reactivationSuccess) {
+      return
+    }
+    const timeoutId = window.setTimeout(() => setReactivationSuccess(null), 4000)
+    return () => window.clearTimeout(timeoutId)
+  }, [reactivationSuccess])
 
   const handleCreditEvent = useCallback(() => {
     if (activeAgentId) {
@@ -1380,6 +1430,7 @@ export function AgentChatPage({
       const hasShortDescription = Object.prototype.hasOwnProperty.call(rawPayload, 'short_description')
       const hasMiniDescription = Object.prototype.hasOwnProperty.call(rawPayload, 'mini_description')
       const hasProcessingActive = Object.prototype.hasOwnProperty.call(rawPayload, 'processing_active')
+      const hasIsActive = Object.prototype.hasOwnProperty.call(rawPayload, 'is_active')
       const hasSignupPreviewState = Object.prototype.hasOwnProperty.call(rawPayload, 'signup_preview_state')
       const hasPlanningState = Object.prototype.hasOwnProperty.call(rawPayload, 'planning_state')
       const hasUnreadAgentMessage = Object.prototype.hasOwnProperty.call(rawPayload, 'has_unread_agent_message')
@@ -1398,6 +1449,7 @@ export function AgentChatPage({
         && !hasShortDescription
         && !hasMiniDescription
         && !hasProcessingActive
+        && !hasIsActive
         && !hasSignupPreviewState
         && !hasPlanningState
         && !hasMessageReadState
@@ -1475,6 +1527,13 @@ export function AgentChatPage({
               const nextProcessingActive = Boolean(rawPayload.processing_active)
               if (nextProcessingActive !== next.processingActive) {
                 next.processingActive = nextProcessingActive
+                changed = true
+              }
+            }
+            if (hasIsActive) {
+              const nextIsActive = rawPayload.is_active !== false
+              if (nextIsActive !== next.isActive) {
+                next.isActive = nextIsActive
                 changed = true
               }
             }
@@ -1815,6 +1874,8 @@ export function AgentChatPage({
           ? pendingMeta.emotionExpiresAt
           : rosterEntry?.emotionExpiresAt ?? null,
         processingActive: pendingMeta.processingActive ?? rosterEntry?.processingActive,
+        agentIsActive: pendingMeta.agentIsActive ?? rosterEntry?.isActive,
+        canReactivateAgent: pendingMeta.canReactivateAgent ?? rosterEntry?.canReactivateAgent,
         signupPreviewState: pendingMeta.signupPreviewState ?? rosterEntry?.signupPreviewState ?? 'none',
         planningState: pendingMeta.planningState ?? rosterEntry?.planningState ?? 'skipped',
       }
@@ -1826,6 +1887,8 @@ export function AgentChatPage({
         emotion: pendingAgentMetaRef.current.emotion,
         emotionExpiresAt: pendingAgentMetaRef.current.emotionExpiresAt,
         processingActive: pendingAgentMetaRef.current.processingActive,
+        agentIsActive: pendingAgentMetaRef.current.agentIsActive,
+        canReactivateAgent: pendingAgentMetaRef.current.canReactivateAgent,
         signupPreviewState: pendingAgentMetaRef.current.signupPreviewState,
         planningState: pendingAgentMetaRef.current.planningState,
       })
@@ -1996,6 +2059,8 @@ export function AgentChatPage({
         ? resolvedPendingMeta.emotionExpiresAt
         : activeRosterEmotionExpiresAt ?? null,
       processingActive: resolvedPendingMeta?.processingActive ?? activeRosterMeta?.processingActive,
+      agentIsActive: resolvedPendingMeta?.agentIsActive ?? activeRosterMeta?.isActive,
+      canReactivateAgent: resolvedPendingMeta?.canReactivateAgent ?? activeRosterMeta?.canReactivateAgent,
       signupPreviewState: resolvedPendingMeta?.signupPreviewState ?? activeRosterSignupPreviewState,
       planningState: resolvedPendingMeta?.planningState ?? activeRosterPlanningState,
     })
@@ -2007,6 +2072,8 @@ export function AgentChatPage({
     activeRosterMeta?.name,
     activeRosterMeta?.planningState,
     activeRosterMeta?.processingActive,
+    activeRosterMeta?.isActive,
+    activeRosterMeta?.canReactivateAgent,
     activeRosterMeta?.signupPreviewState,
     agentAvatarUrl,
     agentName,
@@ -2027,6 +2094,9 @@ export function AgentChatPage({
   const resolvedIsOrgOwned = activeRosterMeta?.isOrgOwned ?? false
   const activeIsCollaborator = activeRosterMeta?.isCollaborator ?? (isCollaborator ?? false)
   const activeCanManageAgent = activeRosterMeta?.canManageAgent ?? !activeIsCollaborator
+  const activeAgentIsActive = activeRosterMeta?.isActive ?? activeChatSession.identity.agentIsActive
+  const activeCanReactivateAgent = activeRosterMeta?.canReactivateAgent
+    ?? activeChatSession.identity.canReactivateAgent
   const activeCanSendMessages = activeRosterMeta?.canSendMessages ?? !staffContext
   const activeCanManageCollaborators = activeRosterMeta?.canManageCollaborators ?? (canManageCollaborators ?? true)
   const hasAgentReply = useMemo(() => hasAgentResponse(timelineEvents), [timelineEvents])
@@ -2360,7 +2430,8 @@ export function AgentChatPage({
       id: activeAgentId,
       name: resolvedAgentName || 'Agent',
       avatarUrl: resolvedAvatarUrl,
-      isActive: true,
+      isActive: activeAgentIsActive,
+      canReactivateAgent: activeCanReactivateAgent,
       processingActive: false,
       lastInteractionAt: null,
       miniDescription: '',
@@ -2375,7 +2446,13 @@ export function AgentChatPage({
       isOrgOwned: false,
       pendingActionRequestCount: 0,
     }
-  }, [activeAgentId, resolvedAgentName, resolvedAvatarUrl])
+  }, [
+    activeAgentId,
+    activeAgentIsActive,
+    activeCanReactivateAgent,
+    resolvedAgentName,
+    resolvedAvatarUrl,
+  ])
   const rosterAgentsWithActiveMeta = useMemo(() => {
     if (!activeAgentId) {
       return rosterAgents
@@ -2565,11 +2642,47 @@ export function AgentChatPage({
   )
   const sendMessageDisabledReason = !isNewAgent && !activeCanSendMessages
     ? 'This staff view is read-only. You can send a system message in Developer Mode.'
+    : !isNewAgent && !activeAgentIsActive
+      ? 'This agent is paused and won’t respond or do work until it’s reactivated.'
     : !isNewAgent && selectedAgentAccountPause?.paused
     ? resolveSendMessagePausedMessage(selectedAgentAccountPause.resumeAt)
     : (!isNewAgent && effectiveBillingStatus?.delinquent
       ? resolveSendMessageDisabledMessage(effectiveBillingStatus.reason)
       : null)
+
+  const handleReactivateAgent = useCallback(async () => {
+    if (!activeAgentId || reactivatingAgent || !activeCanReactivateAgent) {
+      return
+    }
+    setReactivatingAgent(true)
+    setReactivationError(null)
+    setReactivationSuccess(null)
+    try {
+      const result = await activateAgent(activeAgentId)
+      dispatch(chatActions.agentIdentityUpdated({
+        agentId: activeAgentId,
+        agentIsActive: result.is_active,
+      }))
+      queryClient.setQueriesData<AgentRosterQueryData>(
+        { queryKey: ['agent-roster'] },
+        (current) => updateRosterAgentActiveState(current, activeAgentId, result.is_active),
+      )
+      await queryClient.invalidateQueries({ queryKey: ['agent-timeline', activeAgentId], exact: false })
+      setReactivationSuccess(result.message || 'Agent reactivated and ready for messages.')
+    } catch (error) {
+      setReactivationError(
+        safeErrorMessage(error, 'We couldn’t reactivate this agent. Please try again.'),
+      )
+    } finally {
+      setReactivatingAgent(false)
+    }
+  }, [
+    activeAgentId,
+    activeCanReactivateAgent,
+    dispatch,
+    queryClient,
+    reactivatingAgent,
+  ])
   const previewCreateAgentBlocked = !currentContextBillingStatus?.delinquent
     && !currentContextAccountPause?.paused
     && personalSignupPreviewAvailable
@@ -2642,6 +2755,8 @@ export function AgentChatPage({
       emotion: agent.emotion,
       emotionExpiresAt: agent.emotionExpiresAt,
       processingActive: agent.processingActive,
+      agentIsActive: agent.isActive,
+      canReactivateAgent: agent.canReactivateAgent,
       signupPreviewState: agent.signupPreviewState ?? 'none',
       planningState: agent.planningState ?? 'skipped',
     }
@@ -2654,6 +2769,8 @@ export function AgentChatPage({
         emotion: agent.emotion,
         emotionExpiresAt: agent.emotionExpiresAt,
         processingActive: agent.processingActive,
+        agentIsActive: agent.isActive,
+        canReactivateAgent: agent.canReactivateAgent,
         signupPreviewState: agent.signupPreviewState ?? 'none',
         planningState: agent.planningState ?? 'skipped',
       })
@@ -2669,6 +2786,8 @@ export function AgentChatPage({
         emotion: agent.emotion,
         emotionExpiresAt: agent.emotionExpiresAt,
         processingActive: agent.processingActive,
+        agentIsActive: agent.isActive,
+        canReactivateAgent: agent.canReactivateAgent,
         signupPreviewState: agent.signupPreviewState ?? 'none',
         planningState: agent.planningState ?? 'skipped',
       }, messageId)
@@ -3760,6 +3879,23 @@ export function AgentChatPage({
       await sendMessage(body, attachments)
     } catch (error) {
       if (activeAgentId) {
+        const inactiveRace = error instanceof HttpError
+          && error.status === 409
+          && typeof error.body === 'object'
+          && error.body !== null
+          && (error.body as { code?: unknown }).code === 'agent_inactive'
+        if (inactiveRace) {
+          dispatch(chatActions.agentIdentityUpdated({
+            agentId: activeAgentId,
+            agentIsActive: false,
+          }))
+          queryClient.setQueriesData<AgentRosterQueryData>(
+            { queryKey: ['agent-roster'] },
+            (current) => updateRosterAgentActiveState(current, activeAgentId, false),
+          )
+          void queryClient.invalidateQueries({ queryKey: ['agent-roster'], exact: false })
+          void queryClient.invalidateQueries({ queryKey: ['agent-timeline', activeAgentId], exact: false })
+        }
         dispatch(chatActions.sendMessageErrorSet({ agentId: activeAgentId, message: safeErrorMessage(error) }))
       }
       throw error
@@ -4482,6 +4618,12 @@ export function AgentChatPage({
         composerDisabled={Boolean(sendMessageDisabledReason) && !developerModeEnabled}
         composerDisabledReason={developerModeEnabled ? null : sendMessageDisabledReason}
         normalSendDisabledReason={developerModeEnabled ? sendMessageDisabledReason : null}
+        agentIsActive={isNewAgent || activeAgentIsActive}
+        canReactivateAgent={activeCanReactivateAgent}
+        reactivatingAgent={reactivatingAgent}
+        reactivationError={reactivationError}
+        reactivationSuccess={reactivationSuccess}
+        onReactivateAgent={handleReactivateAgent}
         showComposerActionMenu={activeCanSendMessages}
         onSendSystemMessage={developerModeEnabled ? handleSendSystemMessage : undefined}
         showSubscriptionExpiredPanel={

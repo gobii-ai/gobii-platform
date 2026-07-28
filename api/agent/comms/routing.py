@@ -9,6 +9,7 @@ from django.utils import timezone
 
 from api.models import CommsChannel, PersistentAgent, PersistentAgentMessage
 from api.models import PersistentAgentStep, PersistentAgentSystemStep
+from api.services.inactive_agent_notifications import INACTIVE_BLOCKED_INPUT_KIND
 
 from .message_reads import is_peer_dm_message
 
@@ -41,6 +42,8 @@ def capture_inbound_routing_scope(
         if message_id
         else _latest_inbound_message(agent, exclude_webhooks=pending_inbound)
     )
+    if _is_inactive_blocked_input(message):
+        message = None
     is_background = bool(
         message
         and not pending_inbound
@@ -107,12 +110,18 @@ def get_current_inbound_message(agent: PersistentAgent) -> PersistentAgentMessag
     if scope is not None:
         if scope.message_id is None:
             return None
-        return PersistentAgentMessage.objects.filter(id=scope.message_id, owner_agent=agent).select_related(
+        message = PersistentAgentMessage.objects.filter(id=scope.message_id, owner_agent=agent).select_related(
             "conversation", "from_endpoint"
         ).first()
+        return None if _is_inactive_blocked_input(message) else message
 
     message = _latest_inbound_message(agent)
-    if message is None or _is_inbound_webhook(message) or _has_newer_background_trigger(agent, message):
+    if (
+        message is None
+        or _is_inactive_blocked_input(message)
+        or _is_inbound_webhook(message)
+        or _has_newer_background_trigger(agent, message)
+    ):
         return None
     return message
 
@@ -163,6 +172,12 @@ def _is_inbound_webhook(message: PersistentAgentMessage) -> bool:
     return message.conversation.channel == CommsChannel.OTHER and isinstance(payload, dict) and (
         str(payload.get("source_kind", "")).strip().lower() == "webhook"
     )
+
+
+def _is_inactive_blocked_input(message: PersistentAgentMessage | None) -> bool:
+    if message is None or not isinstance(message.raw_payload, dict):
+        return False
+    return message.raw_payload.get("inactive_handling") == INACTIVE_BLOCKED_INPUT_KIND
 
 
 def _has_newer_background_trigger(

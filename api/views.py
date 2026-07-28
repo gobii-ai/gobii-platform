@@ -29,6 +29,7 @@ from .tasks import process_browser_use_task
 from .services.task_webhooks import trigger_task_webhook
 from .services.persistent_agents import maybe_sync_agent_email_display_name
 from .services.agent_settings_resume import queue_settings_change_resume
+from .services.agent_lifecycle import activate_agent, build_agent_inactive_payload
 from opentelemetry import baggage, context, trace
 from tasks.services import TaskCreditService
 import logging
@@ -898,6 +899,8 @@ class PersistentAgentViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], url_path='messages')
     def create_message(self, request, id=None):
         agent = self.get_object()
+        if not agent.is_active:
+            return Response(build_agent_inactive_payload(agent), status=status.HTTP_409_CONFLICT)
         serializer = PersistentAgentMessageCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         payload = serializer.validated_data
@@ -953,17 +956,10 @@ class PersistentAgentViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], url_path='activate')
     def activate(self, request, id=None):
         agent = self.get_object()
-        updates: set[str] = set()
-        if not agent.is_active:
-            agent.is_active = True
-            updates.add('is_active')
-        if agent.life_state != PersistentAgent.LifeState.ACTIVE:
-            agent.life_state = PersistentAgent.LifeState.ACTIVE
-            updates.add('life_state')
-        if updates:
-            agent.save(update_fields=list(updates))
+        agent, updated = activate_agent(agent)
+        if updated:
             self._track_agent_event(agent, AnalyticsEvent.PERSISTENT_AGENT_UPDATED)
-        return Response({'status': 'activated', 'updated': bool(updates)})
+        return Response({'status': 'activated', 'updated': updated})
 
     @action(detail=True, methods=['post'], url_path='deactivate')
     def deactivate(self, request, id=None):

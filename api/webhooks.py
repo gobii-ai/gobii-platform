@@ -8,6 +8,7 @@ from django.utils import timezone
 from email.utils import getaddresses
 
 from api.agent.comms import ingest_inbound_message, ingest_inbound_webhook_message, TwilioSmsAdapter, PostmarkEmailAdapter, MailgunEmailAdapter
+from api.services.agent_lifecycle import build_agent_inactive_payload
 from api.models import (
     CommsChannel,
     PersistentAgent,
@@ -369,7 +370,13 @@ def inbound_agent_webhook(request, webhook_id):
     if not webhook.is_active:
         return JsonResponse({"accepted": False, "error": "Webhook is inactive."}, status=409)
     if not webhook.agent.is_active:
-        return JsonResponse({"accepted": False, "error": "Agent is inactive."}, status=409)
+        return JsonResponse(
+            {
+                "accepted": False,
+                **build_agent_inactive_payload(webhook.agent),
+            },
+            status=409,
+        )
 
     try:
         body, raw_payload, attachments = _parse_inbound_agent_webhook_request(request)

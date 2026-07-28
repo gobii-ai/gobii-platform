@@ -17,6 +17,7 @@ from api.models import (
     Organization,
     OrganizationMembership,
     PersistentAgent,
+    PersistentAgentMessage,
     TaskCredit,
     UserFlags,
     UserQuota,
@@ -1364,7 +1365,12 @@ class PersistentAgentActivationTests(APITestCase):
             life_state=PersistentAgent.LifeState.EXPIRED,
         )
 
-    def test_activate_sets_flags_and_returns_updated(self):
+    @patch("api.auth.can_user_use_personal_agents_and_api", return_value=True)
+    @patch("api.views.can_user_use_personal_agents_and_api", return_value=True)
+    def test_activate_sets_flags_and_returns_updated(self, _mock_view_access, _mock_auth_access):
+        self.agent.schedule = ""
+        self.agent.schedule_snapshot = "0 9 * * *"
+        self.agent.save(update_fields=["schedule", "schedule_snapshot"])
         url = reverse("api:persistentagent-activate", kwargs={"id": self.agent.id})
         response = self.client.post(url)
 
@@ -1376,6 +1382,23 @@ class PersistentAgentActivationTests(APITestCase):
         self.agent.refresh_from_db()
         self.assertTrue(self.agent.is_active)
         self.assertEqual(self.agent.life_state, PersistentAgent.LifeState.ACTIVE)
+        self.assertEqual(self.agent.schedule, "0 9 * * *")
+
+    @patch("api.auth.can_user_use_personal_agents_and_api", return_value=True)
+    @patch("api.views.can_user_use_personal_agents_and_api", return_value=True)
+    def test_message_endpoint_rejects_inactive_agent_without_persisting(
+        self,
+        _mock_view_access,
+        _mock_auth_access,
+    ):
+        url = reverse("api:persistentagent-create-message", kwargs={"id": self.agent.id})
+
+        response = self.client.post(url, {"body": "Do not store this."}, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
+        self.assertEqual(response.json()["code"], "agent_inactive")
+        self.assertIn(f"/app/agents/{self.agent.id}", response.json()["reactivation_url"])
+        self.assertFalse(PersistentAgentMessage.objects.filter(owner_agent=self.agent).exists())
 
     def test_destroy_soft_deletes_agent(self):
         url = reverse("api:persistentagent-detail", kwargs={"id": self.agent.id})

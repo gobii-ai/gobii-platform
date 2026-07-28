@@ -39,6 +39,10 @@ from ...models import (
 )
 from api.services.system_settings import get_max_file_size
 from api.services.billing_pause_notifications import is_billing_execution_pause_reason, send_billing_pause_auto_reply
+from api.services.inactive_agent_notifications import (
+    mark_inbound_message_blocked_while_inactive,
+    send_inactive_agent_auto_reply,
+)
 from api.services.owner_execution_pause import get_owner_execution_pause_state, resolve_agent_owner
 from marketing_events.custom_events import ConfiguredCustomEvent, emit_configured_custom_capi_event
 
@@ -61,6 +65,7 @@ class InboundMessageInfo:
     """Info about the stored message."""
 
     message: PersistentAgentMessage
+    processing_blocked_reason: str | None = None
 
 
 @dataclass
@@ -554,6 +559,12 @@ def ingest_inbound_message(
             )
             message_persisted_at = monotonic()
             persist_span.set_attribute("message.id", str(message.id))
+        blocked_while_inactive = bool(
+            agent_id
+            and PersistentAgent.objects.alive().filter(id=agent_id, is_active=False).exists()
+        )
+        if blocked_while_inactive:
+            mark_inbound_message_blocked_while_inactive(message)
         if channel_val in {CommsChannel.WEB, CommsChannel.EMAIL, CommsChannel.SMS}:
             agent_obj = PersistentAgent.objects.filter(id=message.owner_agent_id).first()
             read_user = resolve_inbound_read_user(agent_obj, channel_val, parsed.sender)
@@ -567,15 +578,16 @@ def ingest_inbound_message(
                     source=READ_SOURCE_INBOUND_REPLY,
                 )
 
-        try:
-            from api.agent.comms.human_input_requests import resolve_human_input_request_for_message
+        if not blocked_while_inactive:
+            try:
+                from api.agent.comms.human_input_requests import resolve_human_input_request_for_message
 
-            resolve_human_input_request_for_message(message)
-        except (DatabaseError, ValidationError, ValueError):
-            logging.exception(
-                "Failed resolving human input request for inbound message %s",
-                getattr(message, "id", None),
-            )
+                resolve_human_input_request_for_message(message)
+            except (DatabaseError, ValidationError, ValueError):
+                logging.exception(
+                    "Failed resolving human input request for inbound message %s",
+                    getattr(message, "id", None),
+                )
 
         with traced("AGENT MSG Save Attachments") as attachment_span:
             attachment_span.set_attribute("message.id", str(message.id))
@@ -645,13 +657,31 @@ def ingest_inbound_message(
                         )
                     )
 
-            # Before triggering agent processing, check if the agent owner's
-            # account is billing-paused. If so, send a one-off auto-reply to the
-            # current sender and skip processing for this inbound attempt.
+            # Before triggering agent processing, check whether the agent itself
+            # or its owner's account is paused. If so, send a one-off auto-reply
+            # to the current sender and skip processing for this inbound attempt.
             should_skip_processing = False
+            processing_blocked_reason = None
             pause_state = {"paused": False, "reason": "", "paused_at": None}
+            if agent_obj is not None and not agent_obj.is_active:
+                should_skip_processing = True
+                processing_blocked_reason = "agent_inactive"
+                mark_inbound_message_blocked_while_inactive(message)
+                if (
+                    channel_val in {CommsChannel.EMAIL, CommsChannel.SMS}
+                    and parsed.sender
+                    and agent_obj.is_sender_whitelisted(channel_val, parsed.sender)
+                ):
+                    transaction.on_commit(
+                        lambda agent=agent_obj, endpoint=from_ep: send_inactive_agent_auto_reply(agent, endpoint),
+                        robust=True,
+                    )
             try:
-                if agent_obj and (channel_val in {CommsChannel.EMAIL, CommsChannel.SMS} or is_inbound_webhook):
+                if (
+                    not should_skip_processing
+                    and agent_obj
+                    and (channel_val in {CommsChannel.EMAIL, CommsChannel.SMS} or is_inbound_webhook)
+                ):
                     owner = resolve_agent_owner(agent_obj)
                     pause_state = get_owner_execution_pause_state(owner)
                     pause_reason = pause_state["reason"] or ""
@@ -719,7 +749,10 @@ def ingest_inbound_message(
                 if not prioritize_processing_dispatch:
                     transaction.on_commit(processing_dispatch.dispatch)
 
-        return InboundMessageInfo(message=message)
+        return InboundMessageInfo(
+            message=message,
+            processing_blocked_reason=processing_blocked_reason if owner_id else None,
+        )
 
 
 @tracer.start_as_current_span("ingest_inbound_webhook_message")

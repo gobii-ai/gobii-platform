@@ -287,6 +287,13 @@ export function updateAgentIdentityInCache(
         changed = true
       }
     }
+    if (Object.prototype.hasOwnProperty.call(payload, 'is_active')) {
+      const isActive = payload.is_active !== false
+      if (isActive !== (current.is_active !== false)) {
+        next.is_active = isActive
+        changed = true
+      }
+    }
     if (Object.prototype.hasOwnProperty.call(payload, 'emotion')) {
       const emotion = typeof payload.emotion === 'string' ? payload.emotion : null
       if (emotion !== (current.emotion ?? null)) {

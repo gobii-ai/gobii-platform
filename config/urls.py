@@ -27,6 +27,7 @@ from console.api_views import (
     AgentMessageFeedbackAPIView,
     AgentMessageReportIssueAPIView,
     AgentMessageSearchAPIView,
+    AgentActivateAPIView,
     AgentLatestMessageReadAPIView,
     AgentHumanInputRequestBatchResponseAPIView,
     AgentHumanInputRequestDismissAPIView,
@@ -332,6 +333,7 @@ urlpatterns = [
     path("console/api/agents/create/", AgentQuickCreateAPIView.as_view(), name="console_agent_quick_create"),
     path("console/api/agents/spawn-intent/", AgentSpawnIntentAPIView.as_view(), name="console_agent_spawn_intent"),
     path("console/api/agents/<uuid:agent_id>/timeline/", AgentTimelineAPIView.as_view(), name="console_agent_timeline"),
+    path("console/api/agents/<uuid:agent_id>/activate/", AgentActivateAPIView.as_view(), name="console_agent_activate"),
     path("console/api/agents/<uuid:agent_id>/planning/skip/", AgentPlanningSkipAPIView.as_view(), name="console_agent_planning_skip"),
     path("console/api/agents/<uuid:agent_id>/suggestions/", AgentSuggestionsAPIView.as_view(), name="console_agent_suggestions"),
     path(

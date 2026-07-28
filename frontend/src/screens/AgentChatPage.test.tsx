@@ -7,6 +7,7 @@ import { AgentChatPage } from './AgentChatPage'
 import type { AppStore } from '../store/appStore'
 import { chatActions } from '../store/chatSlice'
 import { createTestAppStore, seedSubscriptionState, StoreProvider } from '../test/storeTestUtils'
+import { HttpError } from '../api/http'
 
 class FakeNotification {
   static permission: NotificationPermission = 'granted'
@@ -24,6 +25,8 @@ class FakeNotification {
 const {
   createAgentMock,
   createSystemMessageMock,
+  activateAgentMock,
+  sendAgentMessageMock,
   updateAgentMock,
   fetchAgentSpawnIntentMock,
   fetchProcessingStatusMock,
@@ -42,6 +45,8 @@ const {
 } = vi.hoisted(() => ({
   createAgentMock: vi.fn(),
   createSystemMessageMock: vi.fn(),
+  activateAgentMock: vi.fn(),
+  sendAgentMessageMock: vi.fn(),
   updateAgentMock: vi.fn(),
   fetchAgentSpawnIntentMock: vi.fn(),
   fetchProcessingStatusMock: vi.fn(),
@@ -141,6 +146,8 @@ vi.mock('../api/agentSpawnIntent', () => ({
 }))
 
 vi.mock('../api/agentChat', () => ({
+  activateAgent: activateAgentMock,
+  sendAgentMessage: sendAgentMessageMock,
   dismissHumanInputRequest: vi.fn(),
   fetchProcessingStatus: fetchProcessingStatusMock,
   fulfillRequestedSecrets: vi.fn(),
@@ -209,6 +216,13 @@ vi.mock('../components/agentChat/AgentChatLayout', async () => {
       showComposerActionMenu,
       onShare,
       onPublicShare,
+      agentIsActive,
+      canReactivateAgent,
+      reactivatingAgent,
+      reactivationError,
+      reactivationSuccess,
+      onReactivateAgent,
+      onSendMessage,
     }: {
       spawnIntentLoading?: boolean
       agentId?: string | null
@@ -259,6 +273,13 @@ vi.mock('../components/agentChat/AgentChatLayout', async () => {
       showComposerActionMenu?: boolean
       onShare?: () => void
       onPublicShare?: () => void
+      agentIsActive?: boolean
+      canReactivateAgent?: boolean
+      reactivatingAgent?: boolean
+      reactivationError?: string | null
+      reactivationSuccess?: string | null
+      onReactivateAgent?: () => void | Promise<void>
+      onSendMessage?: (body: string, attachments: File[]) => void | Promise<void>
     }) => {
       const {
         isUpgradeModalOpen,
@@ -310,6 +331,21 @@ vi.mock('../components/agentChat/AgentChatLayout', async () => {
           <div data-testid="composer-action-menu-visible">{String(showComposerActionMenu !== false)}</div>
           <div data-testid="collaborate-visible">{String(Boolean(onShare))}</div>
           <div data-testid="public-share-visible">{String(Boolean(onPublicShare))}</div>
+          <div data-testid="agent-is-active">{String(agentIsActive !== false)}</div>
+          <div data-testid="can-reactivate-agent">{String(Boolean(canReactivateAgent))}</div>
+          <div data-testid="reactivating-agent">{String(Boolean(reactivatingAgent))}</div>
+          <div data-testid="reactivation-error">{reactivationError ?? ''}</div>
+          <div data-testid="reactivation-success">{reactivationSuccess ?? ''}</div>
+          <button type="button" data-testid="reactivate-agent" onClick={() => void onReactivateAgent?.()}>
+            Reactivate
+          </button>
+          <button
+            type="button"
+            data-testid="send-message"
+            onClick={() => void Promise.resolve(onSendMessage?.('Hello', [])).catch(() => undefined)}
+          >
+            Send message
+          </button>
           <button type="button" data-testid="send-system-message" onClick={() => void onSendSystemMessage?.('Staff directive')}>
             Send system message
           </button>
@@ -662,6 +698,16 @@ describe('AgentChatPage trial onboarding', () => {
     createAgentMock.mockReset()
     createSystemMessageMock.mockReset()
     createSystemMessageMock.mockResolvedValue({})
+    activateAgentMock.mockReset()
+    activateAgentMock.mockResolvedValue({
+      status: 'active',
+      updated: true,
+      message: 'Test Agent is active again.',
+      is_active: true,
+      life_state: 'active',
+    })
+    sendAgentMessageMock.mockReset()
+    sendAgentMessageMock.mockResolvedValue(null)
     createAgentMock.mockResolvedValue({
       agent_id: 'agent-1',
       agent_name: 'Test Agent',
@@ -983,6 +1029,52 @@ describe('AgentChatPage trial onboarding', () => {
     })
     expect(quickSettingsRefetchMock).toHaveBeenCalled()
     expect(addonsRefetchMock).toHaveBeenCalled()
+  })
+
+  it('offers in-place reactivation only when the roster grants permission', async () => {
+    rosterState.agents = [
+      {
+        ...buildRosterAgent('agent-1', 'Test Agent'),
+        isActive: false,
+        canReactivateAgent: true,
+      },
+    ]
+
+    renderAgentChatPage({ agentId: 'agent-1' })
+
+    expect(await screen.findByTestId('agent-is-active')).toHaveTextContent('false')
+    expect(screen.getByTestId('can-reactivate-agent')).toHaveTextContent('true')
+    fireEvent.click(screen.getByTestId('reactivate-agent'))
+
+    await waitFor(() => {
+      expect(activateAgentMock).toHaveBeenCalledWith('agent-1')
+      expect(screen.getByTestId('reactivation-success')).toHaveTextContent('Test Agent is active again.')
+    })
+  })
+
+  it('switches to the paused state when a send loses a race with deactivation', async () => {
+    rosterState.agents = [buildRosterAgent('agent-1', 'Test Agent')]
+    sendAgentMessageMock.mockImplementation(async () => {
+      rosterState.agents = rosterState.agents.map((agent) => ({
+        ...(agent as Record<string, unknown>),
+        isActive: false,
+      }))
+      throw new HttpError(409, 'Conflict', {
+        code: 'agent_inactive',
+        message: 'This agent is paused and can’t receive messages right now.',
+        reactivation_url: 'http://testserver/app/agents/agent-1',
+      })
+    })
+
+    renderAgentChatPage({ agentId: 'agent-1' })
+
+    expect(await screen.findByTestId('agent-is-active')).toHaveTextContent('true')
+    fireEvent.click(screen.getByTestId('send-message'))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('agent-is-active')).toHaveTextContent('false')
+      expect(screen.getByTestId('composer-disabled')).toHaveTextContent('true')
+    })
   })
 
   it('keeps system messaging available in an override-only developer view', async () => {

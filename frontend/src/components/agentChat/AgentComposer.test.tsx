@@ -247,18 +247,16 @@ function renderAgentComposer(props: AgentComposerTestOptions = {}) {
     <StoreProvider store={store}>{children}</StoreProvider>
   )
 
-  const {
-    agentName: _agentName,
-    planningState: _planningState,
-    insights: _insights,
-    currentInsightIndex: _currentInsightIndex,
-    googleSheetsDriveTabEnabled: _googleSheetsDriveTabEnabled,
-    apolloNativeTabEnabled: _apolloNativeTabEnabled,
-    hubspotNativeTabEnabled: _hubspotNativeTabEnabled,
-    discordNativeTabEnabled: _discordNativeTabEnabled,
-    metaAdsTabEnabled: _metaAdsTabEnabled,
-    ...componentProps
-  } = props
+  const componentProps = { ...props }
+  delete componentProps.agentName
+  delete componentProps.planningState
+  delete componentProps.insights
+  delete componentProps.currentInsightIndex
+  delete componentProps.googleSheetsDriveTabEnabled
+  delete componentProps.apolloNativeTabEnabled
+  delete componentProps.hubspotNativeTabEnabled
+  delete componentProps.discordNativeTabEnabled
+  delete componentProps.metaAdsTabEnabled
 
   const result = render(
     <AgentComposer
@@ -569,6 +567,28 @@ describe('AgentComposer pending action insights panel', () => {
         freeText: 'done',
       })
     })
+  })
+
+  it('restores a saved message draft after the composer is hidden and remounted', () => {
+    const savedDrafts = new Map<string, string>()
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      value: {
+        getItem: vi.fn((key: string) => savedDrafts.get(key) ?? null),
+        setItem: vi.fn((key: string, value: string) => savedDrafts.set(key, value)),
+        removeItem: vi.fn((key: string) => savedDrafts.delete(key)),
+      },
+    })
+    const firstRender = renderAgentComposer()
+    const firstComposer = screen.getByPlaceholderText(/^Message/)
+
+    fireEvent.change(firstComposer, { target: { value: 'Keep this draft' } })
+    firstRender.unmount()
+
+    renderAgentComposer()
+
+    expect(screen.getByPlaceholderText(/^Message/)).toHaveValue('Keep this draft')
+    window.localStorage.removeItem('gobii:agent-chat:message-draft:agent-1')
   })
 
   it('returns to the normal composer when paging from free text input to a credential request', async () => {
