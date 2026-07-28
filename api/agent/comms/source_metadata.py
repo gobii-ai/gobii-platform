@@ -22,6 +22,13 @@ def get_message_source_metadata(raw_payload: object) -> tuple[str | None, str | 
     return normalized_kind or None, normalized_label or None
 
 
+def is_mcp_message(message: object) -> bool:
+    """Return whether a persisted message carries MCP source identity."""
+
+    source_kind, _ = get_message_source_metadata(getattr(message, "raw_payload", None))
+    return source_kind == "mcp"
+
+
 def get_webhook_timeline_metadata(raw_payload: object) -> dict[str, Any] | None:
     """Return timeline metadata for webhook-originated messages."""
 

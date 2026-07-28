@@ -373,6 +373,7 @@ class LinkReferenceTests(TestCase):
             ("create_file", {"content": f"Avery: {token}", "mime_type": "text/markdown", "file_path": "/exports/a.md"}),
             ("create_pdf", {"html": f"<a href='{token}'>Avery</a>", "file_path": "/exports/a.pdf"}),
             ("send_chat_message", {"body": f"[Avery]({token})", "will_continue_work": False}),
+            ("send_mcp_message", {"body": f"[Avery]({token})", "will_continue_work": False}),
         )
 
         for tool_name, params in cases:

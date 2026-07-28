@@ -19,6 +19,7 @@ from api.models import (
     UserPhoneNumber,
     parse_web_user_address,
 )
+from api.agent.comms.source_metadata import is_mcp_message
 
 HIDE_IN_CHAT_PAYLOAD_KEY = "hide_in_chat"
 
@@ -47,12 +48,17 @@ def is_peer_dm_message(message: PersistentAgentMessage | None) -> bool:
 
 
 def latest_visible_outbound_message_queryset():
+    non_mcp_source = (
+        Q(raw_payload__source_kind__isnull=True)
+        | ~Q(raw_payload__source_kind="mcp")
+    )
     return (
         PersistentAgentMessage.objects
         .select_related("conversation")
         .filter(is_outbound=True)
         .filter(visible_agent_message_filter())
         .exclude(peer_dm_message_filter())
+        .filter(non_mcp_source)
         .order_by("-timestamp", "-seq")
     )
 
@@ -175,7 +181,13 @@ def build_agent_message_read_state_for_users(
 
 def mark_message_read(message: PersistentAgentMessage | None, user: object, source: str) -> bool:
     user_id = _user_id(user)
-    if message is None or not message.is_outbound or is_peer_dm_message(message) or not user_id:
+    if (
+        message is None
+        or not message.is_outbound
+        or is_peer_dm_message(message)
+        or is_mcp_message(message)
+        or not user_id
+    ):
         return False
 
     read, created = PersistentAgentMessageRead.objects.get_or_create(

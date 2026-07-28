@@ -1,4 +1,4 @@
-"""Stream the body of a send_chat_message tool call as the model writes it.
+"""Stream the body of a chat-style message tool call as the model writes it.
 
 A web reply is a tool call, so its text arrives token by token inside the JSON ``arguments``
 fragments of the tool-call delta — invisible to the content stream. Thinking streams because it
@@ -8,13 +8,13 @@ executes, which reads as "streaming is broken" to anyone watching the chat.
 The extractor is a minimal incremental JSON lexer: it walks argument fragments character by
 character, tracks string/escape/depth state across fragment boundaries (including ``\\uXXXX``
 escapes and surrogate pairs split mid-escape), and emits the decoded value of the top-level
-``body`` key of the first send_chat_message call. Everything else is ignored.
+``body`` key of the first web-chat or MCP reply call. Everything else is ignored.
 """
 from __future__ import annotations
 
 from typing import Any, Iterable, Optional
 
-_CHAT_TOOL_NAME = "send_chat_message"
+_CHAT_TOOL_NAMES = ("send_chat_message", "send_mcp_message")
 
 _ESCAPE_MAP = {
     '"': '"',
@@ -156,7 +156,7 @@ class _ArgLexer:
 
 
 class ChatBodyStreamExtractor:
-    """Surface the body of the first send_chat_message call across streamed tool-call deltas."""
+    """Surface the body of the first chat-style message call across streamed tool-call deltas."""
 
     def __init__(self) -> None:
         self._names: dict[int, list[str]] = {}
@@ -180,9 +180,9 @@ class ChatBodyStreamExtractor:
                 if name_fragment:
                     name.append(str(name_fragment))
                 joined = "".join(name)
-                if joined == _CHAT_TOOL_NAME:
+                if joined in _CHAT_TOOL_NAMES:
                     self._chosen_index = index
-                elif not _CHAT_TOOL_NAME.startswith(joined):
+                elif not any(tool_name.startswith(joined) for tool_name in _CHAT_TOOL_NAMES):
                     self._rejected.add(index)
 
             if index == self._chosen_index and args_fragment and not self._lexer.done:

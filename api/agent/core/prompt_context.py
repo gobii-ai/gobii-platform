@@ -3109,7 +3109,7 @@ def add_budget_awareness_sections(
             "credit_message_only_mode",
             (
                 f"{' '.join(restrictions)} "
-                "Only message and sleep tools are available right now: "
+                "Available message/sleep tools: "
                 f"{CREDIT_MESSAGE_ONLY_ALLOWED_TOOL_NAMES_TEXT}. "
                 "Do not attempt any other tools or non-message work. "
                 f"{' '.join(recovery_actions)} "
@@ -3354,6 +3354,8 @@ def _get_implied_send_context(
         latest_inbound = get_current_inbound_message(agent)
         latest_address = None
         if latest_inbound is not None:
+            if get_message_source_metadata(latest_inbound.raw_payload)[0] == "mcp":
+                return None
             if is_peer_dm_message(latest_inbound) or latest_inbound.conversation.channel != CommsChannel.WEB:
                 return None
             latest_address = get_message_sender_address(latest_inbound)
@@ -5099,22 +5101,28 @@ def _get_unified_history_prompt(
             if channel == CommsChannel.WEB and m.from_endpoint_id and not is_mcp:
                 from_addr = _format_web_party(from_addr, m.from_endpoint_id)
             if m.is_outbound:
-                to_addr = m.to_endpoint.address if m.to_endpoint else "N/A"
-                if channel == CommsChannel.EMAIL and m.conversation and m.conversation.address:
-                    to_addr = m.conversation.address
-                if channel == CommsChannel.WEB and m.to_endpoint_id:
-                    to_addr = _format_web_party(to_addr, m.to_endpoint_id)
-                header = (
-                    f"[{m.timestamp.isoformat()}] On {channel}, "
-                    f"you sent a message to {to_addr}{attachment_status_suffix}:"
-                )
+                if is_mcp:
+                    header = (
+                        f"[{m.timestamp.isoformat()}] MCP timeline reply recorded"
+                        f"{attachment_status_suffix}:"
+                    )
+                else:
+                    to_addr = m.to_endpoint.address if m.to_endpoint else "N/A"
+                    if channel == CommsChannel.EMAIL and m.conversation and m.conversation.address:
+                        to_addr = m.conversation.address
+                    if channel == CommsChannel.WEB and m.to_endpoint_id:
+                        to_addr = _format_web_party(to_addr, m.to_endpoint_id)
+                    header = (
+                        f"[{m.timestamp.isoformat()}] On {channel}, "
+                        f"you sent a message to {to_addr}{attachment_status_suffix}:"
+                    )
             else:
                 if is_webhook:
                     label = str(source_label).strip() if isinstance(source_label, str) and str(source_label).strip() else "unknown webhook"
                     header = f'[{m.timestamp.isoformat()}] Inbound webhook "{label}" triggered:'
                 elif is_mcp:
                     label = str(source_label).strip() if isinstance(source_label, str) and str(source_label).strip() else "Gobii MCP"
-                    header = f'[{m.timestamp.isoformat()}] Inbound MCP message from "{label}" (reply in this web conversation; tool results are not replies):'
+                    header = f'[{m.timestamp.isoformat()}] Inbound MCP message from "{label}" (reply with send_mcp_message; tool results are not replies):'
                 elif source_label:
                     header = f"[{m.timestamp.isoformat()}] On {channel}, you received a message from {source_label}:"
                 else:

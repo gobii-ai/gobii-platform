@@ -9,6 +9,7 @@ from .custom_tools import execute_create_custom_tool
 from .custom_tool_names import CREATE_CUSTOM_TOOL_NAME
 from .email_sender import execute_send_email
 from .peer_dm import execute_send_agent_message
+from .mcp_sender import execute_send_mcp_message
 from .planning import execute_end_planning
 from .request_contact_permission import execute_request_contact_permission
 from .request_human_input import execute_request_human_input
@@ -49,6 +50,8 @@ def execute_runtime_tool_call(
         return execute_send_sms(agent, exec_params), updated_tools
     if tool_name == "send_chat_message":
         return execute_send_chat_message(agent, exec_params), updated_tools
+    if tool_name == "send_mcp_message":
+        return execute_send_mcp_message(agent, exec_params), updated_tools
     if tool_name == "send_agent_message":
         return execute_send_agent_message(agent, exec_params), updated_tools
     if tool_name == "update_schedule":

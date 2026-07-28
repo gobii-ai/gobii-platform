@@ -1,9 +1,11 @@
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from uuid import UUID
 
+from django.conf import settings
 from django.db.models import Q
+from django.utils import timezone
 
 from api.models import CommsChannel, PersistentAgent, PersistentAgentMessage
 from api.models import PersistentAgentStep, PersistentAgentSystemStep
@@ -113,6 +115,34 @@ def get_current_inbound_message(agent: PersistentAgent) -> PersistentAgentMessag
     if message is None or _is_inbound_webhook(message) or _has_newer_background_trigger(agent, message):
         return None
     return message
+
+
+def _recent_mcp_inbound_messages(agent: PersistentAgent):
+    cutoff = timezone.now() - timedelta(days=settings.WEB_SESSION_RETENTION_DAYS)
+    return PersistentAgentMessage.objects.filter(
+        owner_agent=agent,
+        is_outbound=False,
+        conversation__isnull=False,
+        raw_payload__source_kind="mcp",
+        timestamp__gte=cutoff,
+    )
+
+
+def agent_has_recent_mcp_inbound(agent: PersistentAgent) -> bool:
+    """Return whether MCP replies should be available for this agent."""
+
+    return _recent_mcp_inbound_messages(agent).exists()
+
+
+def get_recent_mcp_inbound_message(agent: PersistentAgent) -> PersistentAgentMessage | None:
+    """Return the newest MCP-origin message within the normal web-session recency window."""
+
+    return (
+        _recent_mcp_inbound_messages(agent)
+        .select_related("conversation", "from_endpoint")
+        .order_by("-timestamp", "-seq")
+        .first()
+    )
 
 
 def _latest_inbound_message(
