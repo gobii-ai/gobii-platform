@@ -1668,6 +1668,91 @@ class ImpliedSendTests(TestCase):
         self.assertFalse(finalized.followup_required)
         self.assertIs(finalized.last_explicit_continue, True)
 
+    @patch("api.agent.core.event_processing.execute_enabled_tool")
+    @patch("api.agent.core.event_processing.execute_send_agent_message")
+    @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
+    @patch("api.agent.core.event_processing.build_prompt_context")
+    @patch("api.agent.core.event_processing.get_agent_tools")
+    @patch("api.agent.core.event_processing._completion_with_failover")
+    def test_peer_progress_then_completed_check_stops_without_extra_turn(
+        self,
+        mock_completion,
+        mock_get_tools,
+        mock_build_prompt,
+        _mock_credit,
+        mock_send_peer,
+        mock_execute_tool,
+    ):
+        mock_get_tools.return_value = [
+            self._tool_definition("send_agent_message"),
+            self._tool_definition("sqlite_batch"),
+            self._tool_definition("sleep_until_next_trigger"),
+        ]
+        mock_build_prompt.return_value = ([{"role": "system", "content": "sys"}], 1000, None)
+        mock_send_peer.return_value = {
+            "status": "ok",
+            "message": "Peer message delivered.",
+            "auto_sleep_ok": False,
+        }
+        mock_execute_tool.return_value = {
+            "status": "ok",
+            "results": [{"result": [{"new_items": 0}]}],
+            "auto_sleep_ok": True,
+        }
+        usage = {
+            "prompt_tokens": 10,
+            "completion_tokens": 5,
+            "total_tokens": 15,
+            "model": "m",
+            "provider": "p",
+        }
+        mock_completion.side_effect = [
+            (
+                self._mock_completion(
+                    None,
+                    tool_calls=[
+                        self._mock_tool_call(
+                            "send_agent_message",
+                            {
+                                "message": "The send is complete. I am checking for replies next.",
+                                "will_continue_work": True,
+                            },
+                        )
+                    ],
+                ),
+                usage,
+            ),
+            (
+                self._mock_completion(
+                    None,
+                    tool_calls=[
+                        self._mock_tool_call(
+                            "sqlite_batch",
+                            {
+                                "sql": "SELECT 0 AS new_items",
+                                "will_continue_work": False,
+                            },
+                        )
+                    ],
+                ),
+                usage,
+            ),
+            (
+                self._mock_completion(
+                    None,
+                    tool_calls=[self._mock_tool_call("sleep_until_next_trigger", {})],
+                ),
+                usage,
+            ),
+        ]
+
+        with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 3):
+            ep._run_agent_loop(self.agent, is_first_run=False)
+
+        self.assertEqual(mock_completion.call_count, 2)
+        mock_send_peer.assert_called_once()
+        mock_execute_tool.assert_called_once()
+
     def test_terminal_chat_marked_continue_preserves_explicit_continue(self):
         final_chat = ep._ToolExecutionOutcome(
             prepared=ep._PreparedToolExecution(
@@ -2143,9 +2228,29 @@ class ImpliedSendTests(TestCase):
         self.assertEqual([call.tool_name for call in prepared.prepared_calls], ["send_chat_message", "end_planning"])
         self.assertFalse(prepared.followup_required)
 
-    def _mock_completion(self, content, *, reasoning_content=None):
+    @staticmethod
+    def _tool_definition(name):
+        return {
+            "type": "function",
+            "function": {
+                "name": name,
+                "description": name,
+                "parameters": {"type": "object", "properties": {}},
+            },
+        }
+
+    @staticmethod
+    def _mock_tool_call(name, arguments):
+        call = MagicMock()
+        call.id = f"call_{name}"
+        call.function = MagicMock()
+        call.function.name = name
+        call.function.arguments = json.dumps(arguments)
+        return call
+
+    def _mock_completion(self, content, *, reasoning_content=None, tool_calls=None):
         msg = MagicMock()
-        msg.tool_calls = None
+        msg.tool_calls = tool_calls
         msg.function_call = None
         msg.content = content
         if reasoning_content is not None:
