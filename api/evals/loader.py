@@ -21,6 +21,7 @@ from api.evals.scenarios.discord_native import (
 from api.evals.scenarios.image_generation import IMAGE_GENERATION_SCENARIO_SLUGS, IMAGE_GENERATION_SUITE_SLUG
 from api.evals.scenarios.responsibility_boundaries import RESPONSIBILITY_BOUNDARY_SCENARIO_SLUGS, RESPONSIBILITY_BOUNDARY_SUITE_SLUG
 from api.evals.scenarios.hallucinated_links import HALLUCINATED_LINK_SCENARIO_SLUGS, HALLUCINATED_LINKS_SUITE_SLUG
+from api.evals.scenarios.lasting_feedback import LASTING_FEEDBACK_SCENARIO_SLUGS, LASTING_FEEDBACK_SUITE_SLUG
 from api.evals.scenarios.agent_emotions import AGENT_PROACTIVE_EMOTION_SCENARIO_SLUGS
 from api.evals.scenarios.pressure_resilience import (
     PRESSURE_RESILIENCE_SCENARIO_SLUGS,
@@ -73,6 +74,11 @@ register_builtin_suites(
             slug="charter_memory_micro",
             description="Small deterministic charter memory behavior checks.",
             scenario_slugs=CHARTER_MEMORY_MICRO_SCENARIO_SLUGS,
+        ),
+        EvalSuite(
+            slug=LASTING_FEEDBACK_SUITE_SLUG,
+            description="Lasting feedback remains durable without starving active work.",
+            scenario_slugs=LASTING_FEEDBACK_SCENARIO_SLUGS,
         ),
         EvalSuite(
             slug="guided_planning_micro",

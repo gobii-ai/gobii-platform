@@ -36,6 +36,12 @@ from .github_credential_retention import (
     CharterJudgePreservesCliGithubSecretWorkflowScenario,
     CharterRecordsCliGithubSecretsCorrectionScenario,
 )
+from .lasting_feedback import (
+    LASTING_FEEDBACK_SCENARIO_SLUGS,
+    LASTING_FEEDBACK_SUITE_SLUG,
+    LastingFeedbackAlreadySatisfiedKeepsWorkScenario,
+    LastingFeedbackMetaInstructionKeepsWorkScenario,
+)
 from .effort_calibration import (
     EFFORT_CALIBRATION_SCENARIO_SLUGS,
     EffortTrivialAnswerStopsScenario,
