@@ -386,7 +386,7 @@ class TrialPromoAdmin(admin.ModelAdmin):
     def campaign_url(self, obj):
         if obj is None or not getattr(obj, "code_label", ""):
             return "Save the promo to generate its link."
-        path = f"{reverse('pages:special_access_start')}?{urlencode({'code': obj.code_label})}"
+        path = f"{reverse('pages:special_access')}?{urlencode({'code': obj.code_label})}"
         url = f"{settings.PUBLIC_SITE_URL.rstrip('/')}{path}"
         return format_html('<a href="{}" target="_blank" rel="noopener">{}</a>', url, url)
 

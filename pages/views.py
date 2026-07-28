@@ -2771,7 +2771,14 @@ class SpecialAccessStartView(View):
         return super().dispatch(request, *args, **kwargs)
 
     def get(self, request, *args, **kwargs):
-        return self._handle(request)
+        code = (request.GET.get("code") or "").strip()
+        if code:
+            promo = find_active_trial_promo_by_code(code)
+            if promo is None:
+                messages.error(request, "That special access code is not active.")
+            else:
+                store_trial_promo_in_session(request, promo)
+        return redirect("pages:special_access")
 
     def post(self, request, *args, **kwargs):
         return self._handle(request)
@@ -2792,7 +2799,7 @@ class SpecialAccessStartView(View):
 
         if not request.user.is_authenticated:
             return redirect_to_login(
-                next=request.get_full_path(),
+                next=reverse("pages:special_access"),
                 login_url=_cta_auth_url_with_utms(request),
             )
 

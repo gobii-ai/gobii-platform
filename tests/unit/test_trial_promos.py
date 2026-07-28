@@ -869,6 +869,21 @@ class TrialPromoAdminFormTests(TestCase):
         self.assertIn("conversion_coupon_id", form.errors)
         self.assertIn("linked_template", form.errors)
 
+    def test_generated_campaign_link_opens_terms_page(self):
+        from django.contrib.admin.sites import AdminSite
+
+        from api.admin import TrialPromoAdmin
+
+        promo = _create_promo(code="CAMPAIGN-LINK")
+
+        rendered_url = str(TrialPromoAdmin(TrialPromo, AdminSite()).campaign_url(promo))
+
+        self.assertIn(
+            f"{reverse('pages:special_access')}?code={promo.code_label}",
+            rendered_url,
+        )
+        self.assertNotIn(reverse("pages:special_access_start"), rendered_url)
+
 
 @tag("batch_pages")
 @override_settings(GOBII_PROPRIETARY_MODE=True)
@@ -889,7 +904,7 @@ class SpecialAccessCheckoutTests(TestCase):
         self.assertEqual(response.context["plan_label"], promo.get_plan_display())
         self.assertContains(response, "Scale")
 
-    def test_anonymous_campaign_link_preserves_code_through_auth(self):
+    def test_anonymous_campaign_link_shows_terms_and_preserves_code_through_auth(self):
         promo = _create_promo(
             code="DIRECT-ANONYMOUS",
             activation_mode=TrialPromoActivationModeChoices.DIRECT_STRIPE_TRIAL,
@@ -899,17 +914,49 @@ class SpecialAccessCheckoutTests(TestCase):
         )
 
         response = self.client.get(
+            reverse("pages:special_access"),
+            {"code": promo.code_label},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], reverse("pages:special_access"))
+        terms_response = self.client.get(response["Location"])
+        self.assertEqual(terms_response.status_code, 200)
+        self.assertContains(terms_response, f"{promo.discount_months} paid months")
+
+        start_response = self.client.post(reverse("pages:special_access_start"))
+
+        self.assertEqual(start_response.status_code, 302)
+        login_url = urlsplit(start_response["Location"])
+        next_url = parse_qs(login_url.query)["next"][0]
+        self.assertEqual(next_url, reverse("pages:special_access"))
+        self.assertEqual(
+            self.client.session["special_access_trial_promo_id"],
+            str(promo.pk),
+        )
+
+    @patch("pages.views._start_direct_trial_promo")
+    def test_authenticated_campaign_get_cannot_activate_subscription(
+        self,
+        mock_start_direct_trial,
+    ):
+        promo = _create_promo(
+            code="DIRECT-GET-SAFE",
+            activation_mode=TrialPromoActivationModeChoices.DIRECT_STRIPE_TRIAL,
+            payment_method_required=False,
+            no_payment_method_end_behavior=TrialPromoNoPaymentMethodEndBehaviorChoices.CANCEL,
+            conversion_coupon_id="coupon_three_months",
+        )
+        self.client.force_login(self.user)
+
+        response = self.client.get(
             reverse("pages:special_access_start"),
             {"code": promo.code_label},
         )
 
         self.assertEqual(response.status_code, 302)
-        login_url = urlsplit(response["Location"])
-        next_url = parse_qs(login_url.query)["next"][0]
-        self.assertEqual(
-            next_url,
-            f"{reverse('pages:special_access_start')}?code={promo.code_label}",
-        )
+        self.assertEqual(response["Location"], reverse("pages:special_access"))
+        mock_start_direct_trial.assert_not_called()
 
     @override_settings(TRIAL_PROMO_DIRECT_ACTIVATION_ENABLED=True)
     @patch("pages.views.activate_direct_trial_promo")
@@ -954,7 +1001,7 @@ class SpecialAccessCheckoutTests(TestCase):
         )
         self.client.force_login(self.user)
 
-        response = self.client.get(
+        response = self.client.post(
             reverse("pages:special_access_start"),
             {"code": promo.code_label},
         )
@@ -995,7 +1042,7 @@ class SpecialAccessCheckoutTests(TestCase):
         )
         self.client.force_login(self.user)
 
-        response = self.client.get(
+        response = self.client.post(
             reverse("pages:special_access_start"),
             {"code": promo.code_label},
         )
@@ -1047,7 +1094,7 @@ class SpecialAccessCheckoutTests(TestCase):
         )
         self.client.force_login(self.user)
 
-        response = self.client.get(
+        response = self.client.post(
             reverse("pages:special_access_start"),
             {"code": promo.code_label},
         )
@@ -1233,7 +1280,10 @@ class SpecialAccessCheckoutTests(TestCase):
         "pages.views._start_trial_promo_checkout",
         return_value=HttpResponseRedirect("https://stripe.test/special"),
     )
-    def test_special_access_start_accepts_code_query_without_entry_step(self, mock_start_checkout):
+    def test_special_access_get_stages_terms_before_post_starts_checkout(
+        self,
+        mock_start_checkout,
+    ):
         promo = _create_promo(
             code="DIRECT-START",
             email_allowlist_enabled=True,
@@ -1246,10 +1296,19 @@ class SpecialAccessCheckoutTests(TestCase):
         )
         self.client.force_login(self.user)
 
-        response = self.client.get(
+        terms_redirect = self.client.get(
             reverse("pages:special_access_start"),
             {"code": "direct-start"},
         )
+
+        self.assertEqual(terms_redirect.status_code, 302)
+        self.assertEqual(
+            terms_redirect["Location"],
+            reverse("pages:special_access"),
+        )
+        mock_start_checkout.assert_not_called()
+
+        response = self.client.post(reverse("pages:special_access_start"))
 
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response["Location"], "https://stripe.test/special")

@@ -27,12 +27,22 @@ from pages.public_template_urls import (
     public_template_route_slug,
 )
 
-LIBRARY_CACHE_KEY = "pages:library:payload:v1"
-LIBRARY_OFFICIAL_CACHE_KEY = "pages:library:payload:official:v2"
-LIBRARY_CATEGORY_SLUG_MAP_CACHE_KEY = "pages:library:category_slug_map:v1"
+LIBRARY_CACHE_KEY = "pages:library:payload:v2"
+LIBRARY_OFFICIAL_CACHE_KEY = "pages:library:payload:official:v3"
+LIBRARY_CATEGORY_SLUG_MAP_CACHE_KEY = "pages:library:category_slug_map:v2"
 LIBRARY_CACHE_TTL_SECONDS = 120
 LIBRARY_DEFAULT_PAGE_SIZE = 24
 LIBRARY_MAX_PAGE_SIZE = 100
+
+
+def invalidate_library_template_caches() -> None:
+    cache.delete_many(
+        [
+            LIBRARY_CACHE_KEY,
+            LIBRARY_OFFICIAL_CACHE_KEY,
+            LIBRARY_CATEGORY_SLUG_MAP_CACHE_KEY,
+        ]
+    )
 
 
 def _normalize_category(value: str | None) -> str:

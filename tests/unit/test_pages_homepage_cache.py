@@ -5,7 +5,7 @@ from django.core.cache import cache
 from django.test import TestCase, override_settings, tag
 from django.utils import timezone
 
-from api.models import MCPServerConfig
+from api.models import MCPServerConfig, PersistentAgentTemplate
 from pages.homepage_cache import (
     HOMEPAGE_INTEGRATIONS_CACHE_FRESH_SECONDS,
     HOMEPAGE_INTEGRATIONS_CACHE_STALE_SECONDS,
@@ -13,10 +13,16 @@ from pages.homepage_cache import (
     HOMEPAGE_PRETRAINED_CACHE_STALE_SECONDS,
     _build_homepage_integrations_payload,
     _homepage_integrations_cache_key,
+    _homepage_pretrained_cache_lock_key,
     _homepage_pretrained_cache_key,
     _serialize_template,
     get_homepage_integrations_payload,
     get_homepage_pretrained_payload,
+)
+from pages.library_views import (
+    LIBRARY_CACHE_KEY,
+    LIBRARY_CATEGORY_SLUG_MAP_CACHE_KEY,
+    LIBRARY_OFFICIAL_CACHE_KEY,
 )
 
 
@@ -125,6 +131,30 @@ class HomepagePretrainedCacheTests(TestCase):
         self.assertEqual(result, cached_data)
         mock_build.assert_not_called()
         mock_enqueue.assert_called_once()
+
+    def test_unlisting_template_invalidates_all_public_template_caches(self):
+        template = PersistentAgentTemplate.objects.create(
+            code="cached-public-template",
+            display_name="Cached public template",
+            tagline="Cached",
+            description="Cached public template",
+            charter="Run the cached workflow.",
+            is_listed=True,
+        )
+        cache_keys = [
+            _homepage_pretrained_cache_key(),
+            _homepage_pretrained_cache_lock_key(),
+            LIBRARY_CACHE_KEY,
+            LIBRARY_OFFICIAL_CACHE_KEY,
+            LIBRARY_CATEGORY_SLUG_MAP_CACHE_KEY,
+        ]
+        cache.set_many({key: "stale-public-data" for key in cache_keys})
+
+        with self.captureOnCommitCallbacks(execute=True):
+            template.is_listed = False
+            template.save(update_fields=["is_listed"])
+
+        self.assertEqual(cache.get_many(cache_keys), {})
 
 
 @tag("batch_pages")
