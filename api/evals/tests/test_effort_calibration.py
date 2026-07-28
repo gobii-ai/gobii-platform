@@ -155,6 +155,7 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
         self.assertIn(sqlite_evals.SQLITE_DOMAIN_TRUTH_OVER_STALE_HISTORY, suite.scenario_slugs)
         self.assertIn(sqlite_evals.SQLITE_DOMAIN_MODEL_REFRESHES_AND_EVOLVES, suite.scenario_slugs)
         self.assertIn(SQLITE_SCHEMA_GROUNDED_EXISTING_TABLE, suite.scenario_slugs)
+        self.assertIn(sqlite_evals.SQLITE_SCHEMA_GROUNDED_EXISTING_TABLE_WRITE, suite.scenario_slugs)
         self.assertIn(sqlite_evals.SQLITE_PROSPECT_PIPELINE_COMPLETES, suite.scenario_slugs)
 
     def test_trajectory_regression_prompts_do_not_prescribe_tools_or_format(self):
@@ -163,6 +164,7 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
             SqliteNaturalResultAccessScenario.prompt,
             SqliteBoundedPortfolioReportScenario.prompt,
             sqlite_evals.SqliteSchemaGroundedExistingTableScenario.prompt,
+            sqlite_evals.SqliteSchemaGroundedExistingTableWriteScenario.prompt,
             sqlite_evals.SqliteProspectPipelineCompletesScenario.prompt,
         )
 

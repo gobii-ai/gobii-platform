@@ -795,6 +795,9 @@ class SqliteBatchCoreTests(SqliteBatchTestCase):
 
         for expected in (
             "Durable world model and exact logic",
+            "Unknown table: sqlite_master gives names, not columns",
+            "For unknown columns, run PRAGMA table_info(table) alone",
+            "use its output",
             "keyed DDL",
             "set-wise upsert",
             "is_current_batch=1 plus tool_name",
@@ -815,9 +818,6 @@ class SqliteBatchCoreTests(SqliteBatchTestCase):
             "counts, joins, coverage, gaps, and ranks",
             "Return all supporting fields/URLs in the same batch",
             "after decision rows return, deliver without rereading",
-            "targeted sqlite_master",
-            "PRAGMA alone in its own call",
-            "query only returned columns",
         ):
             self.assertIn(expected, description)
         continuation_description = (

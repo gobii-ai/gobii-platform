@@ -2385,7 +2385,9 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
         "function": {
             "name": "sqlite_batch",
             "description": (
-                "Durable world model and exact logic: per source shape, one keyed DDL call, one set-wise upsert, "
+                "Durable world model and exact logic. Unknown table: sqlite_master gives names, not columns. "
+                "For unknown columns, run PRAGMA table_info(table) alone; use its output. "
+                "Per source shape: keyed DDL + set-wise upsert; "
                 "and decision-ready SELECTs. Derive fields across is_current_batch=1 plus "
                 "tool_name from result_json/item.value; provenance: t.result_id/t.source_url. Multi-source prose "
                 "modeling first uses the bounded set-wide inspection shown beside results; top-level rows join by "
@@ -2395,8 +2397,7 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
                 "into SQL, import per result_id, mix historical generic-tool results, or rebuild durable tables on "
                 "refresh. Evolve normalized entities/relations; query counts, joins, coverage, gaps, and ranks. "
                 "Return all supporting fields/URLs in the same batch; after decision rows return, deliver without "
-                "rereading. Unknown schema: targeted sqlite_master, then "
-                "PRAGMA alone in its own call, then query only returned columns. Bind messy text via :name; never "
+                "rereading. Bind messy text via :name; never "
                 "backslash-escape SQLite strings. Separate statements with semicolons. ON CONFLICT(cols) requires "
                 "those exact columns to be PRIMARY KEY or UNIQUE. bindings is an object; rows is an array. No ATTACH"
             ),
