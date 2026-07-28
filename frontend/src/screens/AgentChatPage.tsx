@@ -1956,6 +1956,9 @@ export function AgentChatPage({
     rosterAgents,
   })
   const socketSnapshot = useAgentChatSocket(desiredSocketSubscriptions, {
+    // No connection until an authenticated console context exists — an anonymous
+    // handshake is refused pre-accept and used to retry forever from every route.
+    enabled: contextReady,
     contextOverride: contextReady ? effectiveContext : null,
     staffContextOverride: staffContext,
     developerMode: developerModeEnabled,
@@ -4370,22 +4373,65 @@ export function AgentChatPage({
     || contextError
 
   if (isSelectionView) {
-    if (!contextReady || rosterLoading) {
-      return renderSelectionLayout(
-        <div className="flex min-h-[60vh] items-center justify-center">
-          <p className="text-sm font-medium text-slate-500">Loading workspace…</p>
-        </div>,
-      )
-    }
+    // Shell pages (billing, integrations, secrets, profile, …) fetch their own data and
+    // must not wait on the chat context/roster: gating them behind it rendered
+    // "Loading workspace…" forever whenever that load wedged, and the desktop column
+    // showed a blank pane because only mobile consumed selectionMainPanel. The column
+    // now always has a body — the same select-a-conversation state /app/agents shows —
+    // plus any recoverable context error.
     if (selectionPage !== 'agents') {
       return renderSelectionLayout(
-        selectionMainPanel ? (
-          <div className="flex min-h-full w-full flex-1 md:hidden">
-            {selectionMainPanel}
+        <>
+          {selectionMainPanel ? (
+            <div className="flex min-h-full w-full flex-1 md:hidden">
+              {selectionMainPanel}
+            </div>
+          ) : null}
+          <div className={`min-h-full w-full flex-1 flex-col items-center justify-center gap-3 px-4 ${selectionMainPanel ? 'hidden md:flex' : 'flex'}`}>
+            {topLevelError ? (
+              <div className="flex items-center gap-3 text-sm text-rose-600">
+                <span>{topLevelError}</span>
+                {contextError ? (
+                  <button
+                    type="button"
+                    className="rounded border border-rose-300 px-2 py-0.5 text-xs font-semibold text-rose-600 hover:bg-rose-50"
+                    onClick={() => { void refreshContext() }}
+                  >
+                    Retry
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
+            <AgentSelectState
+              hasAgents={rosterAgents.length > 0}
+              onCreateAgent={handleCreateAgent}
+              createAgentDisabledReason={createAgentDisabledReason}
+              onBlockedCreateAgent={previewCreateAgentBlocked ? () => handleBlockedCreateAgent('empty_state') : undefined}
+            />
           </div>
-        ) : (
-          <div className="flex min-h-full w-full flex-1" />
-        ),
+        </>,
+      )
+    }
+    if (!contextReady || rosterLoading) {
+      return renderSelectionLayout(
+        <div className="flex min-h-[60vh] flex-col items-center justify-center gap-3">
+          {topLevelError ? (
+            <div className="flex items-center gap-3 text-sm text-rose-600">
+              <span>{topLevelError}</span>
+              {contextError ? (
+                <button
+                  type="button"
+                  className="rounded border border-rose-300 px-2 py-0.5 text-xs font-semibold text-rose-600 hover:bg-rose-50"
+                  onClick={() => { void refreshContext() }}
+                >
+                  Retry
+                </button>
+              ) : null}
+            </div>
+          ) : (
+            <p className="text-sm font-medium text-slate-500">Loading workspace…</p>
+          )}
+        </div>,
       )
     }
     return renderSelectionLayout(
