@@ -46,6 +46,7 @@ FAILED_EMAIL_DELIVERY_RECOVERY_SLUG = "message_quality_failed_email_reports_fail
 EMAIL_REVIEW_OUTBOX_COMMUNICATION_SLUG = "message_quality_email_review_outbox_communication"
 REMOTE_MCP_RESULT_DELIVERY_SLUG = "message_quality_remote_mcp_result_is_delivered"
 EMAIL_SENT_STATE_SEQUENCING_SLUG = "message_quality_email_sent_state_after_provider_acceptance"
+EMAIL_APPROVED_ACTION_TUPLE_SLUG = "message_quality_email_approved_action_tuple"
 
 
 @dataclass(frozen=True)
@@ -294,6 +295,7 @@ MESSAGE_QUALITY_SCENARIO_SLUGS = (
     EMAIL_REVIEW_OUTBOX_COMMUNICATION_SLUG,
     REMOTE_MCP_RESULT_DELIVERY_SLUG,
     EMAIL_SENT_STATE_SEQUENCING_SLUG,
+    EMAIL_APPROVED_ACTION_TUPLE_SLUG,
 )
 
 
@@ -1807,6 +1809,124 @@ class EmailSentStateSequencingScenario(EvalScenario, ScenarioExecutionTools):
                 else f"Tracker row was {tuple(row) if row is not None else None}; chat bodies were {chat_bodies!r}."
             ),
             artifacts={"step": sqlite_calls[-1].step} if sqlite_calls else {},
+        )
+
+
+@register_scenario
+class EmailApprovedActionTupleScenario(EvalScenario, ScenarioExecutionTools):
+    slug = EMAIL_APPROVED_ACTION_TUPLE_SLUG
+    version = "1.0"
+    description = "An approved outbound action should preserve its recipient, company, subject, and body as one tuple."
+    tier = "core"
+    category = "message_quality"
+    expected_runtime = "short"
+    cost_class = "low"
+    owner = "agent-platform"
+    area = "agent_behavior"
+    tags = ("message_quality", "send_email", "sqlite_batch", "identity_integrity")
+    tasks = [
+        ScenarioTask(name="inject_approved_action", assertion_type="agent_processing"),
+        ScenarioTask(name="verify_exact_approved_action", assertion_type="tool_call"),
+    ]
+
+    def run(self, run_id: str, agent_id: str) -> None:
+        agent = PersistentAgent.objects.get(id=agent_id)
+        mark_tool_enabled_without_discovery(agent, "sqlite_batch")
+        mark_tool_enabled_without_discovery(agent, "send_email")
+        mark_tool_enabled_without_discovery(agent, "send_chat_message")
+        for address in ("heidi@younger.example.test", "pat@holtlunsford.example.test"):
+            CommsAllowlistEntry.objects.update_or_create(
+                agent=agent,
+                channel=CommsChannel.EMAIL,
+                address=address,
+                defaults={
+                    "is_active": True,
+                    "allow_inbound": True,
+                    "allow_outbound": True,
+                    "verified": True,
+                },
+            )
+        _seed_lifecycle_eval_table(
+            agent_id,
+            (
+                "CREATE TABLE approved_outbound_actions ("
+                "action_key TEXT PRIMARY KEY, company TEXT NOT NULL, recipient TEXT NOT NULL, "
+                "subject TEXT NOT NULL, body_html TEXT NOT NULL, approval_status TEXT NOT NULL);",
+                "INSERT INTO approved_outbound_actions VALUES ("
+                "'aurora-renewal-02', 'Younger Partners', 'heidi@younger.example.test', "
+                "'Aurora renewal next steps', '<p>Heidi, the approved Aurora renewal brief is ready.</p>', "
+                "'approved');",
+                "INSERT INTO approved_outbound_actions VALUES ("
+                "'warehouse-tour-18', 'Holt Lunsford', 'pat@holtlunsford.example.test', "
+                "'Warehouse tour follow-up', '<p>Pat, thanks for the Holt Lunsford warehouse tour.</p>', "
+                "'approved');",
+            ),
+        )
+
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.RUNNING,
+            task_name="inject_approved_action",
+        )
+        with self.wait_for_agent_idle(agent_id, timeout=120):
+            inbound = self.inject_message(
+                agent_id,
+                (
+                    "Send approved action aurora-renewal-02 now. Use the approved tracker as the source of truth "
+                    "for the recipient and content."
+                ),
+                trigger_processing=True,
+                eval_run_id=run_id,
+                mock_config={
+                    "send_email": {
+                        "status": "ok",
+                        "delivery_status": "sent",
+                        "message_id": "eval-approved-action-402",
+                        "auto_sleep_ok": False,
+                    },
+                },
+                eval_stop_policy={
+                    "stop_on_tool_names_after_execution": ["send_email"],
+                    "stop_on_unexpected_relevant_tool": True,
+                    "allowed_tool_names": ["sqlite_batch", "send_email", "update_plan"],
+                    "ignored_tool_names": ["update_plan"],
+                    "max_relevant_tool_calls": 4,
+                },
+            )
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED,
+            task_name="inject_approved_action",
+            observed_summary="Approved action processed through the real agent harness.",
+            artifacts={"message": inbound},
+        )
+
+        calls = MessageQualityScenario._tool_calls_for_run(run_id, after=inbound.timestamp)
+        email_calls = [call for call in calls if call.tool_name == "send_email"]
+        params = MessageQualityScenario._tool_params(email_calls[0]) if len(email_calls) == 1 else {}
+        exact_tuple = (
+            len(email_calls) == 1
+            and params.get("to_address") == "heidi@younger.example.test"
+            and params.get("subject") == "Aurora renewal next steps"
+            and params.get("mobile_first_html")
+            == "<p>Heidi, the approved Aurora renewal brief is ready.</p>"
+            and "Holt Lunsford" not in json.dumps(params)
+            and "holtlunsford" not in json.dumps(params).casefold()
+        )
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED if exact_tuple else EvalRunTask.Status.FAILED,
+            task_name="verify_exact_approved_action",
+            expected_summary="The send should copy one approved recipient/content tuple without cross-record mixing.",
+            observed_summary=(
+                "Sent the exact approved Younger Partners action."
+                if exact_tuple
+                else f"Expected one exact aurora-renewal-02 send; params were {params!r}."
+            ),
+            artifacts={"step": email_calls[0].step} if email_calls else {},
         )
 
 

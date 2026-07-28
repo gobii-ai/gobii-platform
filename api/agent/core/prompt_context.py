@@ -824,7 +824,7 @@ def _get_sqlite_guidance() -> str:
         "`UPDATE __agent_config SET charter=patch_text(charter,:old,:new) WHERE id=1`; put old/new only in bindings, "
         "never SQL literals; never SELECT patch_text or use E'...'. "
         "A browser task completion wakes you and adds its result; do "
-        "not poll snapshots while it runs. Facts and URLs must come from evidence, not search terms."
+        "not poll snapshots while it runs."
     )
 
 
@@ -4081,7 +4081,7 @@ def _get_system_instruction(
         "Do not invent work, results, preferences, or personal experiences.\n\n"
 
         "## Output Rules\n\n"
-        "Keep chat/outreach light. For finite sets, grouped discovery isn't coverage: resolve/source each requested field. Label blockers partial; separate sourced unavailability from research gaps. An owner report on 4+ items is unfinished without `Covered N/N` and every item/requested field in one channel-appropriate structured comparison: a table where supported, headings and bullets where not. Ground facts, numbers, units, and URLs in tool results; when evidence supplies an item URL with an adjacent $[link:...] handle, link the item name once in its result row using that handle copied character-for-character. Do not repeat the destination in a Link/Source column. Never invent, edit, or substitute a destination. Present requested data directly; omit unrelated/unavailable fields and follow-up offers after simple facts, prices, statuses, or lookups. "
+        "Keep chat/outreach light. For finite sets, grouped discovery isn't coverage: resolve/source each requested field. Label blockers partial; separate sourced unavailability from research gaps. An owner report on 4+ items is unfinished without `Covered N/N` and every item/requested field in one channel-appropriate structured comparison: a table where supported, headings and bullets where not. Ground facts, numbers, units, and URLs in evidence. Use an adjacent $[link:...] exactly once on the item name; never invent/edit/substitute destinations or add a Link/Source column. Present requested data directly; omit unrelated/unavailable fields and follow-up offers after simple facts, prices, statuses, or lookups. "
         "Charts: create only when requested/materially useful. "
         "Paste create_chart result.inline/result.inline_html in the message; do not attach/read charts or invent paths, hashes, image tags, or <img> URLs. "
         "Use create_csv for tabular exports, create_pdf for PDFs, and create_file for other text/doc formats; create_file query mode must return exactly one row and one column.\n\n"
@@ -4091,7 +4091,7 @@ def _get_system_instruction(
         f"File uploads are {'' if settings.ALLOW_FILE_UPLOAD else 'not'} supported. "
         "Do not download or upload files unless absolutely necessary or explicitly requested by the user. "
 
-        "## Tool Rules\n\n```\nopaque identifiers -> copy exposed tool names and supplied endpoints/paths/IDs/placeholders character-for-character; never shorten or normalize\n"
+        "## Tool Rules\n\n```\nopaque identifiers -> copy exposed tool names and supplied endpoints/paths/IDs/placeholders character-for-character; never shorten or normalize\nevidence -> keep counts/associations; no padding/mixing or row/result-ID promotion. Fresh evidence updates model; missing locally=unknown. Approved action -> reread/copy recipient/content exactly\n"
         "unrelated small result -> answer; build/create custom tool -> create_custom_tool first; supplied URLs -> opaque runtime inputs, no prefetch/inspect/browser\n"
         "credential-returning API -> search_tools('secure credential delegation') first; never HTTP/browser/SQLite\n"
         "named model + explicit fresh non-secret source/URL -> http_request only, no text/send/plan; WAIT; next completion exactly one reconcile+SELECT sqlite_batch; then report\n"

@@ -59,6 +59,14 @@ class JsonAnalysisTests(SimpleTestCase):
         self.assertIn("id", analysis.primary_array.item_fields)
         self.assertIn("title", analysis.primary_array.item_fields)
 
+    def test_array_paths_quote_special_object_keys(self):
+        analysis = analyze_json(
+            {"content": {"v1.items": [{"item_id": "item-1"}]}},
+            "test-id",
+        )
+
+        self.assertEqual(analysis.primary_array.path, '$.content."v1.items"')
+
     def test_analyzes_content_wrapper(self):
         data = {
             "status": "ok",
