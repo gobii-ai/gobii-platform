@@ -138,6 +138,7 @@ _AGENT_OUTPUT = _output_object(
         "life_state": {"type": "string"},
         "planning_state": _STRING_OR_NULL,
         "whitelist_policy": {"type": "string"},
+        "contact_approval_mode": {"type": "string"},
         "created_at": _STRING_OR_NULL,
         "updated_at": _STRING_OR_NULL,
         "last_interaction_at": _STRING_OR_NULL,
@@ -411,6 +412,10 @@ TOOL_DEFINITIONS: dict[str, dict[str, Any]] = {
                 },
                 "daily_credit_limit": {"type": ["integer", "null"], "minimum": 1},
                 "whitelist_policy": {"type": "string", "enum": ["default", "manual"]},
+                "contact_approval_mode": {
+                    "type": "string",
+                    "enum": ["require_approval", "auto_approve_email"],
+                },
                 "proactive_opt_in": {"type": "boolean"},
                 "user_confirmed": {
                     "type": "boolean",
@@ -1046,6 +1051,7 @@ def _tool_update_agent(invoking_agent: PersistentAgent, params: dict[str, Any]) 
         "preferred_llm_tier",
         "daily_credit_limit",
         "whitelist_policy",
+        "contact_approval_mode",
         "proactive_opt_in",
     }
     requested_fields = {field for field in mutable_fields if field in params}
@@ -1111,6 +1117,16 @@ def _tool_update_agent(invoking_agent: PersistentAgent, params: dict[str, Any]) 
         if agent.whitelist_policy != policy:
             agent.whitelist_policy = policy
             changed_fields.add("whitelist_policy")
+    if "contact_approval_mode" in params:
+        contact_approval_mode = _optional_choice(
+            params.get("contact_approval_mode"),
+            "contact_approval_mode",
+            {choice[0] for choice in PersistentAgent.ContactApprovalMode.choices},
+            allow_missing=False,
+        )
+        if agent.contact_approval_mode != contact_approval_mode:
+            agent.contact_approval_mode = contact_approval_mode
+            changed_fields.add("contact_approval_mode")
     if "proactive_opt_in" in params:
         proactive_opt_in = _optional_bool(params.get("proactive_opt_in"), "proactive_opt_in")
         if agent.proactive_opt_in != proactive_opt_in:
@@ -1195,6 +1211,13 @@ def _tool_get_agent_config_options(invoking_agent: PersistentAgent, params: dict
                 "options": [
                     {"value": value, "label": label}
                     for value, label in PersistentAgent.WhitelistPolicy.choices
+                ],
+            },
+            "contact_approval_mode": {
+                "type": "string",
+                "options": [
+                    {"value": value, "label": label}
+                    for value, label in PersistentAgent.ContactApprovalMode.choices
                 ],
             },
             "is_active": {"type": "boolean"},
@@ -1838,6 +1861,7 @@ def _serialize_agent(agent: PersistentAgent) -> dict[str, Any]:
         "life_state": agent.life_state,
         "planning_state": agent.planning_state,
         "whitelist_policy": agent.whitelist_policy,
+        "contact_approval_mode": agent.contact_approval_mode,
         "created_at": _iso(agent.created_at),
         "updated_at": _iso(agent.updated_at),
         "last_interaction_at": _iso(agent.last_interaction_at),

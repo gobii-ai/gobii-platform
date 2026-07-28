@@ -475,6 +475,8 @@ class NativeDiscordBotTests(TestCase):
         self.assertTrue(gateway_message.reply_to["unavailable"])
         prompt_context = _format_discord_reply_context({"discord_reply_to": gateway_message.reply_to})
         self.assertIn("Discord reply addressee: the referenced message author", prompt_context)
+        self.assertIn("clear room-wide invitation in your lane", prompt_context)
+        self.assertIn("Once you accept or fetch evidence for it, deliver the result here.", prompt_context)
         self.assertIn("Message ID: 499", prompt_context)
         self.assertIn("referenced message is unavailable or deleted", prompt_context)
 

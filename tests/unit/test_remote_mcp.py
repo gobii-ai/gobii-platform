@@ -556,6 +556,36 @@ class RemoteMCPViewTests(TestCase):
         self.assertEqual(agent.preferred_llm_tier, self.premium_tier)
         self.assertEqual(agent.daily_credit_limit, 11)
 
+    def test_update_agent_contact_approval_mode(self):
+        agent = self._create_agent(self.user, "Contact Approval Update")
+        tools_response = self._post_mcp("tools/list")
+        update_tool = next(
+            tool
+            for tool in tools_response.json()["result"]["tools"]
+            if tool["name"] == "gobii_update_agent"
+        )
+        self.assertEqual(
+            update_tool["inputSchema"]["properties"]["contact_approval_mode"]["enum"],
+            ["require_approval", "auto_approve_email"],
+        )
+
+        response = self._call_tool(
+            "gobii_update_agent",
+            {
+                "agent_id": str(agent.id),
+                "contact_approval_mode": "auto_approve_email",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json()["result"]["isError"], response.content)
+        agent.refresh_from_db()
+        self.assertEqual(agent.contact_approval_mode, "auto_approve_email")
+        self.assertEqual(
+            self._structured_content(response)["agent"]["contact_approval_mode"],
+            "auto_approve_email",
+        )
+
     def test_update_agent_tier_and_explicit_null_schedule_retain_omitted_credit_limit(self):
         agent = self._create_agent(self.user, "Retain Credit Limit Update")
         PersistentAgent.objects.filter(id=agent.id).update(

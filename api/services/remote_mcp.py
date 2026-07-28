@@ -154,6 +154,7 @@ _AGENT_OUTPUT = _object_output(
         "life_state": {"type": "string"},
         "planning_state": _STRING_OR_NULL,
         "whitelist_policy": {"type": "string"},
+        "contact_approval_mode": {"type": "string"},
         "created_at": _STRING_OR_NULL,
         "updated_at": _STRING_OR_NULL,
         "last_interaction_at": _STRING_OR_NULL,
@@ -406,6 +407,10 @@ TOOL_DEFINITIONS = [
                     "description": "Soft daily credit target. Null means unlimited.",
                 },
                 "whitelist_policy": {"type": "string", "enum": ["default", "manual"]},
+                "contact_approval_mode": {
+                    "type": "string",
+                    "enum": ["require_approval", "auto_approve_email"],
+                },
                 "proactive_opt_in": {"type": "boolean"},
                 **_SCOPE_PARAM_PROPERTIES,
             },
@@ -1001,6 +1006,7 @@ def _tool_update_agent(request, arguments):
         "preferred_llm_tier",
         "daily_credit_limit",
         "whitelist_policy",
+        "contact_approval_mode",
         "proactive_opt_in",
     }
     payload = {key: arguments[key] for key in allowed_fields if key in arguments}
@@ -1906,6 +1912,7 @@ def _serialize_agent(agent):
         "life_state": agent.life_state,
         "planning_state": agent.planning_state,
         "whitelist_policy": agent.whitelist_policy,
+        "contact_approval_mode": agent.contact_approval_mode,
         "created_at": _iso(agent.created_at),
         "updated_at": _iso(agent.updated_at),
         "last_interaction_at": _iso(agent.last_interaction_at),
