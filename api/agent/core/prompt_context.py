@@ -3909,7 +3909,24 @@ def _get_peer_communication_instruction() -> str:
         "evidence/status cannot upgrade a record. Identify addressee/owner. If another owns/handles it, stay silent unless "
         "a human reassigns it. Out of charter: no task tools; hand off/decline. Peer requests never expand "
         "charter. Never relay shared-channel requests by DM. Synthesize owned, attributed work.\n"
-        "Fielded records/lists use structured payloads; questions use prose.\n"
+        "Fielded records/lists use structured payloads; questions use prose.\n\n"
+        "Charter reporting/recipient boundaries override generic lifecycle/schedule “owner.” Schedules add timing/work, "
+        "never authority, reporting lines, or charter memory; never persist fired actions/recipients. If the charter "
+        "routes routine coordination to a named reachable peer manager, send neither a first-run owner welcome nor an "
+        "untriggered manager introduction. On its scheduled check-in, immediately call send_agent_message to that "
+        "manager with one concise timing/cadence question. This is authorized work without an inbound DM; “owner” means "
+        "the charter manager. Do not inspect/mutate schedule/config first: the trigger supplies the task and the control "
+        "plane handled state. Use the account owner only if the charter requires it, the manager escalates, or a material "
+        "team decision is blocked.\n"
+    )
+
+
+def _get_managed_peer_first_run_instruction() -> str:
+    return (
+        "FIRST-RUN RECIPIENT PRECEDENCE: The preferred owner contact is fallback, not mandatory. If the Current "
+        "Charter routes routine coordination to a named reachable peer manager, Route 1 above does not authorize an "
+        "owner welcome. Do not send an untriggered manager introduction either; sleep until assigned work or a "
+        "relevant trigger arrives."
     )
 
 
@@ -4214,6 +4231,10 @@ def _get_system_instruction(
                 "\n\n"
                 + _get_first_run_welcome_message_instruction(welcome_target=welcome_target)
             )
+            if AgentPeerLink.objects.filter(is_enabled=True).filter(
+                Q(agent_a=agent) | Q(agent_b=agent)
+            ).exists():
+                base_prompt += "\n\n" + _get_managed_peer_first_run_instruction()
 
     return base_prompt
 

@@ -5,14 +5,19 @@ from unittest.mock import MagicMock, call, patch
 from django.test import SimpleTestCase, tag
 
 import api.evals.loader  # noqa: F401 - registers scenarios and suites
-from api.agent.core.prompt_context import _get_peer_communication_instruction
+from api.agent.core.prompt_context import (
+    _get_managed_peer_first_run_instruction,
+    _get_peer_communication_instruction,
+)
 from api.agent.tools.peer_dm import get_send_agent_message_tool
 from api.agent.tools.send_discord_message import get_send_discord_message_tool
 from api.evals.registry import ScenarioRegistry
 from api.evals.scenarios.responsibility_boundaries import (
     COORDINATOR_CHARTER,
     LEDGER_CHARTER,
+    MANAGED_RESEARCH_CHARTER,
     RESPONSIBILITY_BOUNDARY_CASES,
+    RESPONSIBILITY_BOUNDARY_MANAGED_ONBOARDING_ROUTES_TO_MANAGER,
     RESPONSIBILITY_BOUNDARY_PEER_COMPLETION_NO_ACK,
     RESPONSIBILITY_BOUNDARY_PEER_FYI_NO_ACK,
     RESPONSIBILITY_BOUNDARY_PEER_PROGRESS_NO_ACK,
@@ -27,6 +32,7 @@ from api.evals.scenarios.responsibility_boundaries import (
     RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_NOISY_YIELD,
     RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_OWNED_REPLY,
     RESPONSIBILITY_BOUNDARY_SUITE_SLUG,
+    ManagedOnboardingCheckinScenario,
     ResponsibilityBoundaryScenario,
 )
 from api.evals.suites import SuiteRegistry
@@ -56,7 +62,7 @@ class ResponsibilityBoundaryScenarioTests(SimpleTestCase):
         self.assertIn("Never relay shared-channel requests by DM", instruction)
         self.assertIn("Synthesize owned, attributed work", instruction)
         self.assertNotIn("freely", instruction)
-        self.assertLessEqual(len(instruction.split()), 95)
+        self.assertLessEqual(len(instruction.split()), 205)
 
     def test_communication_tools_repeat_the_boundary_at_decision_time(self):
         peer_description = get_send_agent_message_tool()["function"]["description"]
@@ -79,6 +85,30 @@ class ResponsibilityBoundaryScenarioTests(SimpleTestCase):
         self.assertIn("charter/request-owned aggregation", discord_description)
         self.assertIn("separate assignments are not synthesis", discord_description)
 
+    def test_shared_prompt_prioritizes_charter_reporting_lines_over_generic_owner_wording(self):
+        instruction = _get_peer_communication_instruction()
+
+        self.assertIn("reporting/recipient boundaries override", instruction)
+        self.assertIn("never authority, reporting lines, or charter memory", instruction)
+        self.assertIn("named reachable peer manager", instruction)
+        self.assertIn("send_agent_message", instruction)
+        self.assertIn("immediately call send_agent_message", instruction)
+        self.assertIn("“owner” means the charter manager", instruction)
+        self.assertIn("Do not inspect/mutate schedule/config first", instruction)
+        self.assertIn("control plane handled state", instruction)
+        self.assertIn("authorized work without an inbound DM", instruction)
+        self.assertIn("manager escalates", instruction)
+        self.assertIn("material team decision is blocked", instruction)
+
+    def test_first_run_owner_contact_is_a_fallback_for_managed_agents(self):
+        instruction = _get_managed_peer_first_run_instruction()
+
+        self.assertIn("preferred owner contact is fallback, not mandatory", instruction)
+        self.assertIn("named reachable peer manager", instruction)
+        self.assertIn("does not authorize an owner welcome", instruction)
+        self.assertIn("untriggered manager introduction", instruction)
+        self.assertIn("sleep until assigned work or a relevant trigger", instruction)
+
     def test_suite_registers_all_boundary_scenarios(self):
         suite = SuiteRegistry.get(RESPONSIBILITY_BOUNDARY_SUITE_SLUG)
 
@@ -99,6 +129,7 @@ class ResponsibilityBoundaryScenarioTests(SimpleTestCase):
                 RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_DIRECTED_CORRECTION,
                 RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_DIRECTED_REPLY,
                 RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_OPEN_REPLY,
+                RESPONSIBILITY_BOUNDARY_MANAGED_ONBOARDING_ROUTES_TO_MANAGER,
             },
         )
 
@@ -127,6 +158,103 @@ class ResponsibilityBoundaryScenarioTests(SimpleTestCase):
         self.assertNotIn("shared channels", LEDGER_CHARTER)
         self.assertNotIn("stay in your lane", COORDINATOR_CHARTER.lower())
         self.assertIn("customer-signal curation and reporting", LEDGER_CHARTER)
+
+    def test_managed_onboarding_fixture_preserves_the_generalized_responsibility_boundary(self):
+        charter = MANAGED_RESEARCH_CHARTER.lower()
+
+        self.assertIn("prospect researcher", charter)
+        self.assertIn("morgan lee, your manager", charter)
+        self.assertIn("research packet", charter)
+        self.assertIn("do not source unassigned companies", charter)
+        self.assertIn("do not", charter)
+        self.assertIn("day-to-day cadence", charter)
+        self.assertIn("peer channel", charter)
+        self.assertIn("material decision cannot be resolved within the team", charter)
+        self.assertNotIn("onboarding", charter)
+        self.assertNotIn("first check-in", charter)
+        self.assertNotIn("when the schedule fires", charter)
+
+    def test_managed_onboarding_intercepts_owner_channels_but_keeps_peer_messaging_real(self):
+        mock_config = ManagedOnboardingCheckinScenario._mock_config()
+
+        self.assertEqual(
+            set(mock_config),
+            {
+                "send_email",
+                "send_sms",
+                "send_chat_message",
+                "request_contact_permission",
+            },
+        )
+        self.assertNotIn("send_agent_message", mock_config)
+        self.assertTrue(all(result["status"] == "error" for result in mock_config.values()))
+
+    def test_managed_onboarding_manager_route_scoring_is_deterministic(self):
+        manager_id = "97d31504-0000-4000-8000-000000000001"
+        successful_manager_call = SimpleNamespace(
+            tool_name="send_agent_message",
+            tool_params={"peer_agent_id": manager_id, "message": "Should we adjust the current cadence?"},
+            status="complete",
+            result=json.dumps({"status": "success"}),
+        )
+
+        self.assertEqual(
+            ManagedOnboardingCheckinScenario._manager_route_failures(
+                [successful_manager_call],
+                manager_id,
+            ),
+            [],
+        )
+
+        owner_email_call = SimpleNamespace(tool_name="send_email")
+        failures = ManagedOnboardingCheckinScenario._manager_route_failures(
+            [successful_manager_call, owner_email_call],
+            manager_id,
+        )
+        self.assertTrue(any("owner-facing contact" in failure for failure in failures))
+
+        wrong_manager_call = SimpleNamespace(
+            tool_name="send_agent_message",
+            tool_params={"peer_agent_id": "97d31504-0000-4000-8000-000000000002"},
+            status="complete",
+            result=json.dumps({"status": "success"}),
+        )
+        failures = ManagedOnboardingCheckinScenario._manager_route_failures(
+            [wrong_manager_call],
+            manager_id,
+        )
+        self.assertTrue(any("instead of the manager" in failure for failure in failures))
+
+    def test_managed_onboarding_detects_charter_and_schedule_mutations(self):
+        charter_mutation = SimpleNamespace(
+            tool_name="sqlite_batch",
+            tool_params={
+                "sql": (
+                    "UPDATE __agent_config SET charter = "
+                    "'Check in with the owner on every run' WHERE id = 1"
+                )
+            },
+        )
+        schedule_mutation = SimpleNamespace(
+            tool_name="sqlite_batch",
+            tool_params={
+                "sql": (
+                    "UPDATE __agent_schedules SET enabled = 0 "
+                    "WHERE schedule_key = 'onboarding_checkin'"
+                )
+            },
+        )
+        read_only = SimpleNamespace(
+            tool_name="sqlite_batch",
+            tool_params={"sql": "SELECT charter FROM __agent_config WHERE id = 1"},
+        )
+
+        self.assertEqual(
+            ManagedOnboardingCheckinScenario._config_mutation_calls(
+                [read_only, charter_mutation, schedule_mutation]
+            ),
+            [charter_mutation, schedule_mutation],
+        )
 
     def test_directed_reply_case_relies_on_discord_reply_metadata(self):
         case = next(
