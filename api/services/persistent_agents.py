@@ -80,6 +80,7 @@ class PersistentAgentProvisioningService:
         contact_approval_mode: str | None = None,
         preferred_contact_endpoint=None,
         template_code: str | None = None,
+        allow_unlisted_template: bool = False,
         preferred_llm_tier: IntelligenceTier | None = None,
         signup_preview_state: str | None = None,
         planning_state: str | None = None,
@@ -192,6 +193,7 @@ class PersistentAgentProvisioningService:
                 template = PretrainedWorkerTemplateService.get_template_by_code(
                     template_code,
                     organization=organization,
+                    include_unlisted=allow_unlisted_template,
                 )
                 if template is None:
                     raise PersistentAgentProvisioningError(f"Unknown template code '{template_code}'.")

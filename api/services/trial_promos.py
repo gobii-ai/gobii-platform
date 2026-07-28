@@ -162,6 +162,7 @@ def can_user_start_trial_promo(
     user,
     promo: TrialPromo,
     request=None,
+    excluded_subscription_ids: set[str] | None = None,
 ) -> TrialPromoStartDecision:
     manual_action = get_trial_promo_manual_action(user)
     if manual_action == UserTrialEligibilityManualActionChoices.DENY_TRIAL:
@@ -173,8 +174,16 @@ def can_user_start_trial_promo(
     if manual_action == UserTrialEligibilityManualActionChoices.ALLOW_TRIAL:
         return TrialPromoStartDecision(True)
 
-    if not promo.repeat_trials_allowed and user_has_prior_individual_history(user):
-        return TrialPromoStartDecision(False, "prior_trial_or_subscription")
+    if not promo.repeat_trials_allowed:
+        if excluded_subscription_ids:
+            has_prior_history = user_has_prior_individual_history(
+                user,
+                excluded_subscription_ids=excluded_subscription_ids,
+            )
+        else:
+            has_prior_history = user_has_prior_individual_history(user)
+        if has_prior_history:
+            return TrialPromoStartDecision(False, "prior_trial_or_subscription")
 
     if promo.trial_abuse_filtering_enabled:
         result = evaluate_user_trial_identity_abuse(

@@ -284,7 +284,6 @@ class PretrainedWorkerTemplateService:
             Template.objects.filter(
                 public_profile__isnull=True,
                 organization__isnull=True,
-                is_active=True,
                 is_listed=False,
             ).values_list("code", flat=True)
         )

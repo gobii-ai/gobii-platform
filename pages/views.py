@@ -51,7 +51,9 @@ from api.services.trial_abuse import SIGNAL_SOURCE_CHECKOUT, evaluate_user_trial
 from api.services.trial_promos import (
     TRIAL_PROMO_REASON_EMAIL_NOT_ALLOWLISTED,
     TRIAL_PROMO_REASON_EMAIL_NOT_VERIFIED,
+    TRIAL_PROMO_META_ACTIVATION_MODE,
     TRIAL_PROMO_META_DISCOUNT_COUPON,
+    TRIAL_PROMO_META_DISCOUNT_MONTHS,
     TrialPromoError,
     build_trial_promo_checkout_metadata,
     build_trial_promo_metadata,
@@ -75,6 +77,7 @@ from api.services.trial_promos import (
 from api.services.direct_trial_promos import (
     activate_direct_trial_promo,
     validate_direct_trial_configuration,
+    validate_direct_trial_conversion_configuration,
 )
 from config.socialaccount_adapter import OAUTH_ATTRIBUTION_COOKIE, OAUTH_ATTRIBUTION_SESSION_KEYS, OAUTH_CHARTER_COOKIE, OAUTH_CHARTER_SESSION_KEYS, serialize_oauth_charter_cookie_payload
 from billing.checkout_metadata import (
@@ -3026,7 +3029,21 @@ def _start_direct_trial_promo(request, promo: TrialPromo):
         return _start_trial_promo_conversion_checkout(request, promo, late_redemption)
 
     if existing_redemption is None:
-        decision = can_user_start_trial_promo(user=user, promo=promo, request=request)
+        failed_activation_subscription_ids = {
+            str(subscription_id)
+            for subscription_id in TrialPromoRedemption.objects.filter(
+                promo=promo,
+                user=user,
+                status=TrialPromoRedemptionStatusChoices.DIRECT_ACTIVATION_FAILED,
+            ).values_list("stripe_subscription_id", flat=True)
+            if subscription_id
+        }
+        decision = can_user_start_trial_promo(
+            user=user,
+            promo=promo,
+            request=request,
+            excluded_subscription_ids=failed_activation_subscription_ids,
+        )
         if not decision.allowed:
             message = "This account is not eligible for this special trial."
             if decision.reason == TRIAL_PROMO_REASON_EMAIL_NOT_ALLOWLISTED:
@@ -3095,10 +3112,9 @@ def _start_trial_promo_conversion_checkout(request, promo: TrialPromo, redemptio
             "This special access plan pricing is not ready.",
         ) from exc
 
-    coupon = validate_direct_trial_configuration(
-        promo,
+    coupon = validate_direct_trial_conversion_configuration(
         price_object=price_object,
-        conversion_coupon_id=offer.coupon_id,
+        coupon_id=offer.coupon_id,
         discount_months=offer.discount_months,
     )
     try:
@@ -3158,6 +3174,10 @@ def _start_trial_promo_conversion_checkout(request, promo: TrialPromo, redemptio
         plan=offer.plan,
         discount_months=offer.discount_months,
     )
+    promo_metadata[TRIAL_PROMO_META_ACTIVATION_MODE] = (
+        TrialPromoActivationModeChoices.DIRECT_STRIPE_TRIAL
+    )
+    promo_metadata[TRIAL_PROMO_META_DISCOUNT_MONTHS] = str(offer.discount_months)
     promo_metadata[TRIAL_PROMO_META_DISCOUNT_COUPON] = offer.coupon_id
     metadata = {
         "gobii_event_id": event_id,

@@ -240,19 +240,7 @@ def validate_direct_trial_configuration(
     promo: TrialPromo,
     *,
     price_object,
-    conversion_coupon_id: str | None = None,
-    discount_months: int | None = None,
 ) -> DirectTrialCoupon:
-    expected_coupon_id = str(
-        conversion_coupon_id
-        if conversion_coupon_id is not None
-        else promo.conversion_coupon_id,
-    ).strip()
-    expected_discount_months = (
-        int(discount_months)
-        if discount_months is not None
-        else promo.discount_months
-    )
     if not settings.TRIAL_PROMO_DIRECT_ACTIVATION_ENABLED:
         raise TrialPromoError(
             "direct_activation_disabled",
@@ -273,6 +261,27 @@ def validate_direct_trial_configuration(
             "invalid_trial_end_behavior",
             "This campaign must cancel safely if no payment method is added.",
         )
+    return validate_direct_trial_conversion_configuration(
+        price_object=price_object,
+        coupon_id=promo.conversion_coupon_id,
+        discount_months=promo.discount_months,
+    )
+
+
+def validate_direct_trial_conversion_configuration(
+    *,
+    price_object,
+    coupon_id: str,
+    discount_months: int,
+) -> DirectTrialCoupon:
+    expected_coupon_id = str(coupon_id or "").strip()
+    try:
+        expected_discount_months = int(discount_months)
+    except (TypeError, ValueError) as exc:
+        raise TrialPromoError(
+            "discount_mismatch",
+            "This campaign's conversion discount duration is invalid.",
+        ) from exc
     if not expected_coupon_id:
         raise TrialPromoError(
             "discount_missing",
@@ -505,42 +514,6 @@ def _create_or_retrieve_schedule(
     coupon: DirectTrialCoupon,
     metadata: Mapping[str, str],
 ):
-    if redemption.stripe_subscription_schedule_id:
-        return stripe.SubscriptionSchedule.retrieve(
-            redemption.stripe_subscription_schedule_id,
-            api_key=stripe.api_key,
-        )
-
-    subscription_id = _stripe_id(subscription)
-    attached_schedule_id = _stripe_id(_stripe_value(subscription, "schedule"))
-    if attached_schedule_id:
-        attached_schedule = stripe.SubscriptionSchedule.retrieve(
-            attached_schedule_id,
-            api_key=stripe.api_key,
-        )
-        TrialPromoRedemption.objects.filter(pk=redemption.pk).update(
-            stripe_subscription_schedule_id=attached_schedule_id,
-        )
-        redemption.stripe_subscription_schedule_id = attached_schedule_id
-        return attached_schedule
-
-    schedule = stripe.SubscriptionSchedule.create(
-        from_subscription=subscription_id,
-        metadata=dict(metadata),
-        idempotency_key=f"direct-trial-schedule-{redemption.pk}",
-        api_key=stripe.api_key,
-    )
-    schedule_id = _stripe_id(schedule)
-    if not schedule_id:
-        raise TrialPromoError(
-            "stripe_schedule_invalid",
-            "Stripe did not return a discount schedule. Please try again.",
-        )
-    TrialPromoRedemption.objects.filter(pk=redemption.pk).update(
-        stripe_subscription_schedule_id=schedule_id,
-    )
-    redemption.stripe_subscription_schedule_id = schedule_id
-
     try:
         trial_start = int(
             _stripe_value(subscription, "trial_start")
@@ -553,6 +526,60 @@ def _create_or_retrieve_schedule(
             "stripe_trial_invalid",
             "Stripe did not return a valid trial schedule. Please try again.",
         ) from exc
+
+    recovered_schedule = None
+    if redemption.stripe_subscription_schedule_id:
+        recovered_schedule = stripe.SubscriptionSchedule.retrieve(
+            redemption.stripe_subscription_schedule_id,
+            api_key=stripe.api_key,
+        )
+
+    subscription_id = _stripe_id(subscription)
+    if recovered_schedule is None:
+        attached_schedule_id = _stripe_id(_stripe_value(subscription, "schedule"))
+        if attached_schedule_id:
+            recovered_schedule = stripe.SubscriptionSchedule.retrieve(
+                attached_schedule_id,
+                api_key=stripe.api_key,
+            )
+            TrialPromoRedemption.objects.filter(pk=redemption.pk).update(
+                stripe_subscription_schedule_id=attached_schedule_id,
+            )
+            redemption.stripe_subscription_schedule_id = attached_schedule_id
+
+    if recovered_schedule is not None:
+        try:
+            _confirm_discount_schedule(
+                recovered_schedule,
+                trial_end=trial_end,
+                coupon=coupon,
+            )
+        except TrialPromoError:
+            # Creation and phase configuration are separate Stripe operations.
+            # A retry must finish configuring a schedule left between them.
+            pass
+        else:
+            return recovered_schedule
+
+    schedule_id = str(redemption.stripe_subscription_schedule_id or "").strip()
+    if not schedule_id:
+        schedule = stripe.SubscriptionSchedule.create(
+            from_subscription=subscription_id,
+            metadata=dict(metadata),
+            idempotency_key=f"direct-trial-schedule-{redemption.pk}",
+            api_key=stripe.api_key,
+        )
+        schedule_id = _stripe_id(schedule)
+        if not schedule_id:
+            raise TrialPromoError(
+                "stripe_schedule_invalid",
+                "Stripe did not return a discount schedule. Please try again.",
+            )
+        TrialPromoRedemption.objects.filter(pk=redemption.pk).update(
+            stripe_subscription_schedule_id=schedule_id,
+        )
+        redemption.stripe_subscription_schedule_id = schedule_id
+
     updated_schedule = stripe.SubscriptionSchedule.modify(
         schedule_id,
         end_behavior="release",

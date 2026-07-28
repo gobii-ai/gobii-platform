@@ -28,7 +28,15 @@ from api.models import (
     UserTrialEligibilityManualActionChoices,
 )
 from api.admin_forms import TrialPromoAdminForm
-from api.services.direct_trial_promos import activate_direct_trial_promo
+from api.services.direct_trial_promos import (
+    DirectTrialCoupon,
+    _create_or_retrieve_schedule,
+    activate_direct_trial_promo,
+)
+from api.services.persistent_agents import (
+    PersistentAgentProvisioningError,
+    PersistentAgentProvisioningService,
+)
 from api.services.trial_promos import (
     TRIAL_PROMO_META_CREDIT_AMOUNT,
     TRIAL_PROMO_META_ACTIVATION_MODE,
@@ -133,6 +141,29 @@ class TrialPromoServiceTests(TestCase):
         self.assertFalse(decision.allowed)
         self.assertEqual(decision.reason, "prior_trial_or_subscription")
         mock_prior_history.assert_called_once_with(self.user)
+
+    @patch("api.services.trial_promos.user_has_prior_individual_history", return_value=False)
+    def test_failed_activation_subscription_can_be_excluded_from_prior_history(
+        self,
+        mock_prior_history,
+    ):
+        promo = _create_promo(
+            code="FAILED-DIRECT-RETRY",
+            repeat_trials_allowed=False,
+            trial_abuse_filtering_enabled=False,
+        )
+
+        decision = can_user_start_trial_promo(
+            user=self.user,
+            promo=promo,
+            excluded_subscription_ids={"sub_failed_partial"},
+        )
+
+        self.assertTrue(decision.allowed)
+        mock_prior_history.assert_called_once_with(
+            self.user,
+            excluded_subscription_ids={"sub_failed_partial"},
+        )
 
     def test_email_allowlist_blocks_user_not_on_campaign(self):
         promo = _create_promo(
@@ -533,6 +564,73 @@ class DirectTrialPromoServiceTests(TestCase):
         mock_schedule_create.assert_called_once()
         mock_schedule_modify.assert_called_once()
         mock_grant_credits.assert_called_once()
+
+    @patch("api.services.direct_trial_promos.stripe.SubscriptionSchedule.modify")
+    @patch("api.services.direct_trial_promos.stripe.SubscriptionSchedule.retrieve")
+    def test_interrupted_schedule_creation_finishes_phase_configuration(
+        self,
+        mock_schedule_retrieve,
+        mock_schedule_modify,
+    ):
+        promo = _create_promo(
+            code="DIRECT-SCHEDULE-REPAIR",
+            activation_mode=TrialPromoActivationModeChoices.DIRECT_STRIPE_TRIAL,
+        )
+        redemption = TrialPromoRedemption.objects.create(
+            promo=promo,
+            user=self.user,
+            status=TrialPromoRedemptionStatusChoices.DIRECT_ACTIVATION_PENDING,
+            event_id="direct-schedule-repair",
+            stripe_customer_id="cus_schedule_repair",
+            stripe_subscription_id="sub_schedule_repair",
+            stripe_subscription_schedule_id="sub_sched_schedule_repair",
+        )
+        mock_schedule_retrieve.return_value = {
+            "id": "sub_sched_schedule_repair",
+            "end_behavior": "release",
+            "phases": [
+                {
+                    "start_date": 1_800_000_000,
+                    "end_date": 1_801_209_600,
+                    "discounts": [],
+                },
+            ],
+        }
+        mock_schedule_modify.return_value = {
+            "id": "sub_sched_schedule_repair",
+            "end_behavior": "release",
+        }
+        coupon = DirectTrialCoupon(
+            coupon_id="coupon_three_months",
+            duration_in_months=3,
+            percent_off=Decimal("40"),
+            amount_off=None,
+            currency="",
+        )
+
+        result = _create_or_retrieve_schedule(
+            redemption=redemption,
+            subscription={
+                "id": "sub_schedule_repair",
+                "trial_start": 1_800_000_000,
+                "trial_end": 1_801_209_600,
+            },
+            items=[{"price": "price_pro_monthly", "quantity": 1}],
+            coupon=coupon,
+            metadata={"gobii_event_id": redemption.event_id},
+        )
+
+        self.assertEqual(result, mock_schedule_modify.return_value)
+        mock_schedule_retrieve.assert_called_once_with(
+            "sub_sched_schedule_repair",
+            api_key=stripe.api_key,
+        )
+        modify_kwargs = mock_schedule_modify.call_args.kwargs
+        self.assertEqual(modify_kwargs["phases"][1]["iterations"], 3)
+        self.assertEqual(
+            modify_kwargs["idempotency_key"],
+            f"direct-trial-schedule-phases-{redemption.pk}",
+        )
 
     @patch("api.services.direct_trial_promos.stripe.Subscription.delete")
     @patch("api.services.direct_trial_promos.stripe.SubscriptionSchedule.cancel")
@@ -1207,6 +1305,69 @@ class SpecialAccessCheckoutTests(TestCase):
         mock_stripe_settings.assert_not_called()
         mock_price_get.assert_not_called()
 
+    @override_settings(TRIAL_PROMO_DIRECT_ACTIVATION_ENABLED=True)
+    @patch("pages.views.activate_direct_trial_promo")
+    @patch("pages.views.Price.objects.get")
+    @patch("pages.views.get_stripe_settings")
+    @patch("pages.views._prepare_stripe_or_404")
+    @patch(
+        "pages.views.reconcile_user_plan_from_stripe",
+        return_value={"id": PlanNames.FREE},
+    )
+    @patch(
+        "pages.views.can_user_start_trial_promo",
+        return_value=SimpleNamespace(allowed=True, reason=""),
+    )
+    def test_failed_direct_activation_excludes_its_partial_subscription_on_retry(
+        self,
+        mock_can_start,
+        _mock_reconcile,
+        _mock_prepare,
+        mock_stripe_settings,
+        mock_price_get,
+        mock_activate,
+    ):
+        promo = _create_promo(
+            code="DIRECT-FAILED-RETRY",
+            activation_mode=TrialPromoActivationModeChoices.DIRECT_STRIPE_TRIAL,
+            payment_method_required=False,
+            no_payment_method_end_behavior=TrialPromoNoPaymentMethodEndBehaviorChoices.CANCEL,
+            conversion_coupon_id="coupon_three_months",
+            repeat_trials_allowed=False,
+            trial_abuse_filtering_enabled=False,
+        )
+        TrialPromoRedemption.objects.create(
+            promo=promo,
+            user=self.user,
+            status=TrialPromoRedemptionStatusChoices.DIRECT_ACTIVATION_FAILED,
+            event_id="trial-promo-direct-failed-retry",
+            stripe_customer_id="cus_failed_retry",
+            stripe_subscription_id="sub_failed_retry",
+        )
+        mock_stripe_settings.return_value = SimpleNamespace(
+            startup_price_id="price_startup",
+            startup_additional_task_price_id="",
+        )
+        mock_price_get.return_value = SimpleNamespace(
+            id="price_startup",
+            recurring={"interval": "month", "interval_count": 1},
+        )
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            reverse("pages:special_access_start"),
+            {"code": promo.code_label},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        mock_can_start.assert_called_once_with(
+            user=self.user,
+            promo=promo,
+            request=mock_can_start.call_args.kwargs["request"],
+            excluded_subscription_ids={"sub_failed_retry"},
+        )
+        mock_activate.assert_called_once()
+
     def test_unlisted_campaign_template_is_not_publicly_resolvable(self):
         template = PersistentAgentTemplate.objects.create(
             # This deliberately shadows a legacy in-code template definition.
@@ -1250,10 +1411,52 @@ class SpecialAccessCheckoutTests(TestCase):
         )
         self.assertEqual(launch_response.status_code, 404)
 
-    @override_settings(TRIAL_PROMO_DIRECT_ACTIVATION_ENABLED=True)
+        template.is_active = False
+        template.save(update_fields=["is_active", "updated_at"])
+        self.assertNotIn(
+            template.code,
+            [
+                item.code
+                for item in PretrainedWorkerTemplateService.get_active_templates()
+            ],
+        )
+
+    def test_campaign_authorization_reaches_agent_provisioning(self):
+        template = PersistentAgentTemplate.objects.create(
+            code="provision-private-campaign-worker",
+            display_name="Provision private campaign worker",
+            tagline="Private",
+            description="Private campaign template",
+            charter="Run the private provisioning workflow.",
+            base_schedule="0 9 * * *",
+            is_listed=False,
+        )
+
+        with self.assertRaisesMessage(
+            PersistentAgentProvisioningError,
+            f"Unknown template code '{template.code}'.",
+        ):
+            PersistentAgentProvisioningService.provision(
+                user=self.user,
+                name="Unauthorized private campaign worker",
+                template_code=template.code,
+            )
+
+        result = PersistentAgentProvisioningService.provision(
+            user=self.user,
+            name="Authorized private campaign worker",
+            template_code=template.code,
+            allow_unlisted_template=True,
+        )
+
+        self.assertEqual(result.applied_template_code, template.code)
+        self.assertEqual(result.agent.charter, template.charter)
+        self.assertEqual(result.agent.schedule_snapshot, template.base_schedule)
+
+    @override_settings(TRIAL_PROMO_DIRECT_ACTIVATION_ENABLED=False)
     @patch("pages.views._create_checkout_session_with_customer_context")
     @patch("pages.views.get_or_create_stripe_customer")
-    @patch("pages.views.validate_direct_trial_configuration")
+    @patch("pages.views.validate_direct_trial_conversion_configuration")
     @patch("pages.views.Price.objects.get")
     @patch("pages.views.get_stripe_settings")
     @patch("pages.views._prepare_stripe_or_404")
@@ -1293,10 +1496,22 @@ class SpecialAccessCheckoutTests(TestCase):
             },
         )
         promo.plan = PlanNames.SCALE
+        promo.activation_mode = TrialPromoActivationModeChoices.HOSTED_CHECKOUT
+        promo.payment_method_required = True
+        promo.no_payment_method_end_behavior = (
+            TrialPromoNoPaymentMethodEndBehaviorChoices.CREATE_INVOICE
+        )
         promo.conversion_coupon_id = "coupon_six_months"
         promo.discount_months = 6
         promo.save(
-            update_fields=["plan", "conversion_coupon_id", "discount_months"],
+            update_fields=[
+                "plan",
+                "activation_mode",
+                "payment_method_required",
+                "no_payment_method_end_behavior",
+                "conversion_coupon_id",
+                "discount_months",
+            ],
         )
         mock_stripe_settings.return_value = SimpleNamespace(
             startup_price_id="price_startup",
@@ -1332,7 +1547,7 @@ class SpecialAccessCheckoutTests(TestCase):
             mock_validate.call_args.kwargs,
             {
                 "price_object": mock_price_get.return_value,
-                "conversion_coupon_id": "coupon_three_months",
+                "coupon_id": "coupon_three_months",
                 "discount_months": 3,
             },
         )
@@ -1352,6 +1567,10 @@ class SpecialAccessCheckoutTests(TestCase):
         self.assertEqual(
             checkout_kwargs["subscription_data"]["metadata"][TRIAL_PROMO_META_DISCOUNT_MONTHS],
             "3",
+        )
+        self.assertEqual(
+            checkout_kwargs["subscription_data"]["metadata"][TRIAL_PROMO_META_ACTIVATION_MODE],
+            TrialPromoActivationModeChoices.DIRECT_STRIPE_TRIAL,
         )
         self.assertNotIn("trial_period_days", checkout_kwargs["subscription_data"])
         self.assertEqual(

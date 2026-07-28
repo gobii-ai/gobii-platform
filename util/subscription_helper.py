@@ -282,11 +282,20 @@ def get_existing_individual_subscriptions(customer_id: str) -> list[dict[str, An
     return subscriptions
 
 
-def customer_has_any_individual_subscription(customer_id: str) -> bool:
+def customer_has_any_individual_subscription(
+    customer_id: str,
+    *,
+    excluded_subscription_ids: set[str] | None = None,
+) -> bool:
     """Return True when a customer has ever held an individual (non-org) plan subscription."""
     if not customer_id:
         raise ValueError("customer_id is required")
 
+    excluded_ids = {
+        str(subscription_id)
+        for subscription_id in (excluded_subscription_ids or set())
+        if subscription_id
+    }
     _ensure_stripe_ready()
 
     plan_products = _individual_plan_product_ids()
@@ -310,6 +319,8 @@ def customer_has_any_individual_subscription(customer_id: str) -> bool:
 
     for sub in iterator:
         sub_data = _normalize_stripe_object(sub) or {}
+        if str(sub_data.get("id") or "") in excluded_ids:
+            continue
         items = (sub_data.get("items") or {}).get("data", []) or []
         for item in items:
             price = _normalize_stripe_object(item.get("price") or {}) or {}

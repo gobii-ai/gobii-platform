@@ -312,6 +312,9 @@ def create_persistent_agent_from_charter(
                 user=request.user,
                 organization=organization,
                 template_code=template_code,
+                allow_unlisted_template=(
+                    template_source == AGENT_TEMPLATE_SOURCE_TRIAL_PROMO
+                ),
                 charter=charter_text,
                 preferred_llm_tier=preferred_llm_tier,
                 signup_preview_state=get_signup_preview_creation_state(preview_creation_allowed),
