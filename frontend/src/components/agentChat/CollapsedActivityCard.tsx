@@ -1,10 +1,12 @@
-import { memo, useMemo, useState } from 'react'
+import { memo, useMemo } from 'react'
 import { ChevronRight } from 'lucide-react'
 
 import type { ToolEntryDisplay } from './tooling/types'
 import { formatRelativeTimestamp } from '../../util/time'
 import { buildActionCountLabel } from './activityEntryUtils'
 import { ToolClusterTimelineOverlay } from './ToolClusterTimelineOverlay'
+import { chatActions, selectActiveChatSession } from '../../store/chatSlice'
+import { useAppDispatch, useAppSelector } from '../../store/hooks'
 
 type CollapsedActivityCardProps = {
   overlayId: string
@@ -21,6 +23,10 @@ type CollapsedActivityCardProps = {
  * reader can predict before clicking, and the long runs went to the overlay anyway. Growing the
  * timeline in place also moved everything below the card, which is the last thing wanted while
  * older history is streaming in above.
+ *
+ * The open flag lives in the store keyed by overlayId, not in component state: this card is
+ * unmounted and remounted as its run collapses, expands, and coalesces while events stream in,
+ * and local state closed the panel every time a new message arrived (bug #306).
  */
 export const CollapsedActivityCard = memo(function CollapsedActivityCard({
   overlayId,
@@ -28,7 +34,9 @@ export const CollapsedActivityCard = memo(function CollapsedActivityCard({
   label,
   subtitle = 'Action timeline',
 }: CollapsedActivityCardProps) {
-  const [viewerOpen, setViewerOpen] = useState(false)
+  const dispatch = useAppDispatch()
+  const activityOverlay = useAppSelector(selectActiveChatSession).timelineUi.activityOverlay
+  const viewerOpen = activityOverlay?.overlayId === overlayId
   const resolvedLabel = useMemo(
     () => label ?? buildActionCountLabel(entries.length),
     [entries.length, label],
@@ -56,7 +64,7 @@ export const CollapsedActivityCard = memo(function CollapsedActivityCard({
         type="button"
         className="collapsed-event-group"
         aria-haspopup="dialog"
-        onClick={() => setViewerOpen(true)}
+        onClick={() => dispatch(chatActions.activityOverlayOpened({ overlayId }))}
       >
         <span className="collapsed-event-group__label">{resolvedLabel}</span>
         {relativeTime ? (
@@ -75,7 +83,7 @@ export const CollapsedActivityCard = memo(function CollapsedActivityCard({
         title={buildActionCountLabel(entries.length)}
         subtitle={subtitle}
         entries={entries}
-        onClose={() => setViewerOpen(false)}
+        onClose={() => dispatch(chatActions.activityOverlayClosed())}
       />
     </div>
   )

@@ -310,6 +310,26 @@ class EmailSenderDbConnectionTests(TransactionTestCase):
         self.assertIsNone(message.parent_id)
         self.assertEqual(message.conversation.address, self.user.email)
 
+    def test_execute_send_email_rejects_tool_argument_suffix_in_body(self):
+        result = execute_send_email(
+            self.agent,
+            {
+                "to_address": self.user.email,
+                "subject": "Quick update",
+                "mobile_first_html": (
+                    "<p>The report is ready for review.</p>"
+                    "\", \"will_continue_work\": false}"
+                ),
+                "will_continue_work": False,
+            },
+        )
+
+        self.assertEqual(result.get("status"), "error")
+        self.assertIn("tool-call arguments", result.get("message", ""))
+        self.assertFalse(
+            PersistentAgentMessage.objects.filter(owner_agent=self.agent).exists()
+        )
+
     def test_execute_send_email_rolls_back_message_when_delivery_fails(self):
         params = {
             "to_address": self.user.email,

@@ -540,7 +540,7 @@ class StaffAgentAuditAPITests(TestCase):
         )
         self.assertIn("<strong>there</strong>", event["message"]["bodyHtml"])
         self.assertNotIn("&lt;strong&gt;", event["message"]["bodyHtml"])
-        self.assertEqual(event["message"]["bodyText"], message.body)
+        self.assertEqual(event["message"]["bodyText"], "Hello there.")
 
     def test_developer_timeline_rejects_mismatched_staff_context(self):
         response = self.client.get(

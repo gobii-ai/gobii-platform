@@ -1,4 +1,4 @@
-export type AgentChatShellSubview = 'chat' | 'settings' | 'secrets' | 'secret-requests' | 'email' | 'files' | 'contact-requests'
+export type AgentChatShellSubview = 'chat' | 'settings' | 'secrets' | 'secret-requests' | 'email' | 'files' | 'contact-requests' | 'pet'
 
 export type AgentChatSidebarMode = 'collapsed' | 'list' | 'gallery'
 

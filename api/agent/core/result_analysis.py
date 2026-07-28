@@ -1197,11 +1197,11 @@ def _find_all_arrays(
         if isinstance(data[0], dict):
             for key, val in data[0].items():
                 # Use [0] not [*] - SQLite doesn't support wildcards in JSON paths
-                nested = _find_all_arrays(val, f"{current_path}[0].{key}", depth + 1, inside_array=True)
+                nested = _find_all_arrays(val, f"{current_path}[0]{_safe_json_path(str(key))[1:]}", depth + 1, inside_array=True)
                 results.extend(nested)
     elif isinstance(data, dict):
         for key, val in data.items():
-            nested = _find_all_arrays(val, f"{current_path}.{key}", depth + 1, inside_array=inside_array)
+            nested = _find_all_arrays(val, f"{current_path}{_safe_json_path(str(key))[1:]}", depth + 1, inside_array=inside_array)
             results.extend(nested)
 
     return results
@@ -1214,7 +1214,7 @@ def _get_scalar_fields(data: Dict, exclude_keys: set) -> List[str]:
         if key in exclude_keys:
             continue
         if not isinstance(val, (dict, list)):
-            scalars.append(f"$.{key}")
+            scalars.append(_safe_json_path(str(key)))
     return scalars[:20]
 
 

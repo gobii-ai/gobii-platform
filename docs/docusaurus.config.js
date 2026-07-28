@@ -2,7 +2,9 @@ const lightCodeTheme = require('prism-react-renderer').themes.github;
 const darkCodeTheme = require('prism-react-renderer').themes.dracula;
 
 const siteUrl = process.env.DOCS_SITE_URL || 'https://docs.gobii.ai';
-const socialImage = `${siteUrl}/images/gobii-fish-with-text-dark-purple.png`;
+// Must be a real 1200x630 opaque card, not the navbar wordmark: unfurlers center-crop
+// wide images and flatten transparency onto dark backgrounds (bug #153).
+const socialImage = `${siteUrl}/images/gobii_og_image_1200x630.png`;
 const gtagTrackingId = process.env.DOCS_GTAG_TRACKING_ID;
 
 function localDevServerHygienePlugin() {
@@ -174,6 +176,12 @@ const config = {
         {name: 'keywords', content: 'Gobii, AI employees, Gobiis, AI agents, automation, Remote MCP, webhooks, teams, templates, self-hosted'},
         {property: 'og:site_name', content: 'Gobii Docs'},
         {property: 'og:type', content: 'website'},
+        // LinkedIn and Facebook drop or defer images without explicit dimensions.
+        {property: 'og:image:type', content: 'image/png'},
+        {property: 'og:image:width', content: '1200'},
+        {property: 'og:image:height', content: '630'},
+        {property: 'og:image:alt', content: 'Gobii documentation'},
+        {name: 'twitter:image:alt', content: 'Gobii documentation'},
       ],
       colorMode: {
         defaultMode: 'dark',

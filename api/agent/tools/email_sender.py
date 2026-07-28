@@ -1,9 +1,4 @@
-"""
-Email sending tool for persistent agents.
-
-This module provides email sending functionality for persistent agents,
-including tool definition and execution logic.
-"""
+"""Email sending tool for persistent agents."""
 
 import logging
 import re
@@ -57,9 +52,10 @@ _ATTACHMENT_CLAIM_PATTERNS = (
     re.compile(r"\battached\s+(?:you(?:'|’)ll|you\s+will)\s+find\b", re.IGNORECASE),
     re.compile(r"\battached\s+(?:is|are)\b", re.IGNORECASE),
 )
-_MISSING_ATTACHMENT_CLAIM_ERROR_MESSAGE = (
-    "Email body claims attachments are included, but send_email.attachments is empty. "
-    "Pass the exact $[/path] values returned by recent file tools in send_email.attachments."
+_MISSING_ATTACHMENT_CLAIM_ERROR_MESSAGE = "Email body claims attachments are included, but send_email.attachments is empty. Pass the exact $[/path] values returned by recent file tools in send_email.attachments."
+_EMBEDDED_TOOL_ARGUMENT_PATTERN = re.compile(
+    r"</[a-z][^>]*>\s*[\"']?\s*,(?=[\s\S]*[\"']will_continue_work[\"']\s*:\s*(?:true|false))[\s\S]*}\s*$",
+    re.IGNORECASE | re.DOTALL,
 )
 
 
@@ -127,12 +123,13 @@ def _strip_quoted_thread_html(html: str) -> str:
     return _QUOTED_THREAD_PATTERN.sub(" ", html)
 
 
-def _email_claims_attachments(html: str) -> bool:
-    """Return True when the email body explicitly claims attachments are included."""
+def _email_body_error(html: str, has_attachments: bool) -> str | None:
+    if _EMBEDDED_TOOL_ARGUMENT_PATTERN.search(html or ""):
+        return "Email body contains serialized sibling tool-call arguments. End mobile_first_html after the email content and pass every tool argument separately."
     plain_text = _strip_html_to_text(_strip_quoted_thread_html(html))
-    if not plain_text:
-        return False
-    return any(pattern.search(plain_text) for pattern in _ATTACHMENT_CLAIM_PATTERNS)
+    if not has_attachments and any(pattern.search(plain_text) for pattern in _ATTACHMENT_CLAIM_PATTERNS):
+        return _MISSING_ATTACHMENT_CLAIM_ERROR_MESSAGE
+    return None
 
 
 def _resolve_reply_target(
@@ -252,8 +249,8 @@ def execute_send_email(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
     if not all([to_address, subject, mobile_first_html]):
         return {"status": "error", "message": "Missing required parameters: to_address, subject, or mobile_first_html"}
 
-    if _email_claims_attachments(mobile_first_html) and not attachment_paths:
-        return {"status": "error", "message": _MISSING_ATTACHMENT_CLAIM_ERROR_MESSAGE}
+    if body_error := _email_body_error(mobile_first_html, bool(attachment_paths)):
+        return {"status": "error", "message": body_error}
 
     try:
         resolved_attachments = resolve_filespace_attachments(agent, attachment_paths)

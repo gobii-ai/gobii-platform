@@ -1,4 +1,4 @@
-import type { AnchorHTMLAttributes, DetailedHTMLProps, HTMLAttributes, ImgHTMLAttributes, TdHTMLAttributes, ThHTMLAttributes } from 'react'
+import type { AnchorHTMLAttributes, DetailedHTMLProps, ReactNode, HTMLAttributes, ImgHTMLAttributes, TdHTMLAttributes, ThHTMLAttributes } from 'react'
 import { memo, useMemo } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkBreaks from 'remark-breaks'
@@ -41,9 +41,32 @@ const StableImage = memo(function StableImage(props: ImgHTMLAttributes<HTMLImage
   )
 }, (prev, next) => prev.src === next.src && prev.alt === next.alt)
 
+// A signed platform download link is an opaque token hundreds of characters long. Agents embed
+// them in messages and feedback text, and autolinked markdown uses the URL itself as the label —
+// a wall of token soup on the card (bug #399). The link keeps its href; only the label shrinks.
+const SIGNED_DOWNLOAD_RE = /^https?:\/\/[^/]+\/d\/[^/\s]{20,}\/?$/
+
+function linkLabel(children: ReactNode, href: string | undefined): ReactNode {
+  if (!href || !SIGNED_DOWNLOAD_RE.test(href)) {
+    return children
+  }
+  const text = typeof children === 'string'
+    ? children
+    : Array.isArray(children) && children.length === 1 && typeof children[0] === 'string'
+      ? children[0]
+      : null
+  // Only when the visible label IS the raw URL; a human-written label stays.
+  if (text !== null && text.replace(/\s+/g, '') === href.replace(/\s+/g, '')) {
+    return 'file download'
+  }
+  return children
+}
+
 const markdownComponents = {
-  a: (props: AnchorHTMLAttributes<HTMLAnchorElement>) => (
-    <a {...props} target={props.target ?? '_blank'} rel={props.rel ?? 'noopener noreferrer'} />
+  a: ({ children, ...props }: AnchorHTMLAttributes<HTMLAnchorElement> & { children?: ReactNode }) => (
+    <a {...props} target={props.target ?? '_blank'} rel={props.rel ?? 'noopener noreferrer'}>
+      {linkLabel(children, props.href)}
+    </a>
   ),
   img: StableImage,
   table: ({ className = '', children, ...rest }: DetailedHTMLProps<HTMLAttributes<HTMLTableElement>, HTMLTableElement>) => (

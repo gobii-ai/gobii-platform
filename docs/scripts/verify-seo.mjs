@@ -49,6 +49,12 @@ function findMetaContent(html, name) {
   return readAttribute(tag, 'content');
 }
 
+function findMetaProperty(html, property) {
+  const tags = html.match(/<meta\b[^>]*>/gi) ?? [];
+  const tag = tags.find((candidate) => readAttribute(candidate, 'property').toLowerCase() === property);
+  return readAttribute(tag, 'content');
+}
+
 function findCanonical(html) {
   const tags = html.match(/<link\b[^>]*>/gi) ?? [];
   const tag = tags.find((candidate) => readAttribute(candidate, 'rel').toLowerCase() === 'canonical');
@@ -103,7 +109,24 @@ if (!fs.existsSync(buildDir)) {
     if (text.length < 180) {
       fail(`${route} has too little prerendered body text`);
     }
+
+    // Social cards (#153): every page must ship an absolute og:image pointing at the
+    // real 1200x630 card, with explicit dimensions so LinkedIn/Facebook render it.
+    const ogImage = findMetaProperty(html, 'og:image');
+    if (ogImage !== `${siteUrl}/images/gobii_og_image_1200x630.png`) {
+      fail(`${route} og:image is not the social card: got ${ogImage || '(missing)'}`);
+    }
+    if (findMetaProperty(html, 'og:image:width') !== '1200' || findMetaProperty(html, 'og:image:height') !== '630') {
+      fail(`${route} is missing og:image dimensions`);
+    }
+    if (!findMetaContent(html, 'twitter:card')) {
+      fail(`${route} is missing twitter:card`);
+    }
   });
+
+  if (!fs.existsSync(path.join(buildDir, 'images', 'gobii_og_image_1200x630.png'))) {
+    fail('social card image was not shipped into the build');
+  }
 }
 
 if (failures.length > 0) {

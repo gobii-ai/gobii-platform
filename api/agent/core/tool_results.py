@@ -134,6 +134,10 @@ def entity_name_stem(value: str) -> str:
     return f"{leaf[:-3]}y" if leaf.endswith("ies") else leaf[:-1] if leaf.endswith("s") else leaf
 
 
+def _array_entity_stem(path: str) -> str:
+    return entity_name_stem(path.rsplit(".", 1)[-1].strip('"'))
+
+
 def _entity_arrays(analysis: ResultAnalysis | None) -> tuple:
     json_analysis = analysis.json_analysis if analysis else None
     if not json_analysis:
@@ -152,9 +156,9 @@ def source_array_entity_groups(result_text: str, tool_name: str) -> tuple[set[st
     _meta, _stored_json, _stored_text, analysis = _summarize_result(result_text, "source", tool_name)
     arrays = _entity_arrays(analysis)
     return (
-        {entity_name_stem(item.path.rsplit(".", 1)[-1]) for item in arrays},
+        {_array_entity_stem(item.path) for item in arrays},
         {
-            entity_name_stem(item.path.rsplit(".", 1)[-1]) for item in arrays
+            _array_entity_stem(item.path) for item in arrays
             if any(_is_entity_key(field) for field in item.item_fields)
         },
     )
@@ -464,7 +468,7 @@ def prepare_tool_results_for_prompt(
             relevant_arrays = tuple(
                 item for item in arrays
                 if any(_is_entity_key(field) for field in item.item_fields)
-                or entity_name_stem(item.path.rsplit(".", 1)[-1]) in model_entities
+                or _array_entity_stem(item.path) in model_entities
             )
             array_specs = tuple(
                 (item, _source_item_key(item.item_fields))
@@ -475,27 +479,27 @@ def prepare_tool_results_for_prompt(
                 + (f"[stable_key={stable_key}]" if stable_key else "[no_stable_key]")
                 for item, stable_key in array_specs
             ]
+            exact_iterators = "; ".join(
+                f"json_each(t.result_json,'{item.path.replace(chr(39), chr(39) * 2)}') AS j{index}"
+                for index, (item, _stable_key) in enumerate(array_specs, start=1)
+            )
             matching_arrays = tuple(
                 item for item in relevant_arrays
-                if entity_name_stem(item.path.rsplit(".", 1)[-1]) in model_entities
+                if _array_entity_stem(item.path) in model_entities
             )
             if schemas and matching_arrays:
                 requires_source_import = True
                 source_import_key = (source_batch_id, record.tool_name)
                 if source_import_key not in emitted_source_import_sets:
                     source_import_prefix = (
-                        f"[SOURCE ARRAYS; paths: {'; '.join(schemas)}. NEXT: one sqlite_batch—no parallel/second call. "
-                        "Pass top-level rows=[]; never invent or inspect result IDs. "
-                        "Create/evolve keyed tables; upsert every sibling set-wise with "
-                        f"INSERT ... SELECT/json_each over is_current_batch=1 AND tool_name='{record.tool_name}' "
-                        "then SELECT bounded task rows. Final SELECTs constrain each entity to the exact stable_key values "
-                        "in its same current source path. Never filter freshness by a mutable name, even one the user named, "
-                        "or by a literal ID/history. "
-                        "With no stable key, use newest observed_at. "
-                        "Current batch plus tool_name is the exact set: add no source_url/result_id predicate. Each item's "
-                        "source ID is its key; t.result_id is row provenance, never item identity. Derive item fields/URLs from "
-                        "j.value, parent fields from t.result_json, and provenance from t.result_id. Never delete/clear the model. "
-                        "No pre-read, refetch, blob inspection, copied literals, or split calls.]\n"
+                        f"[SOURCE ARRAYS; paths: {'; '.join(schemas)}. NEXT: one sqlite_batch only. "
+                        f"Exact iterators: {exact_iterators}; keep every wrapper segment such as $.content. "
+                        f"Use rows=[]. Create/evolve keyed tables; INSERT ... SELECT/json_each all is_current_batch=1 "
+                        f"AND tool_name='{record.tool_name}' siblings, then SELECT bounded task rows. Use stable_key as "
+                        "entity ID; t.result_id is "
+                        "provenance only. Final rows preserve exact source associations. With no stable key, use newest "
+                        "observed_at. No source_url/result_id or mutable-name freshness filters, pre-read, refetch, blob "
+                        "inspection, copied literals, or split calls. Never delete/clear the model.]\n"
                     )
                     emitted_source_import_sets.add(source_import_key)
         if not requires_source_import and hide_literal_result_id:

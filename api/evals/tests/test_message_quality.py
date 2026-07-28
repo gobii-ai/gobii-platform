@@ -6,6 +6,7 @@ from django.test import SimpleTestCase, tag
 import api.evals.loader  # noqa: F401 - registers scenarios and suites
 from api.evals.registry import ScenarioRegistry
 from api.evals.scenarios.message_quality import (
+    EMAIL_APPROVED_ACTION_TUPLE_SLUG,
     EMAIL_SENT_STATE_SEQUENCING_SLUG,
     EMAIL_REVIEW_OUTBOX_COMMUNICATION_SLUG,
     EmailReviewOutboxCommunicationScenario,
@@ -34,13 +35,14 @@ class MessageQualityScenarioTests(SimpleTestCase):
 
         self.assertIsNotNone(suite)
         self.assertEqual(tuple(suite.scenario_slugs), MESSAGE_QUALITY_SCENARIO_SLUGS)
-        self.assertEqual(len(suite.scenario_slugs), 22)
+        self.assertEqual(len(suite.scenario_slugs), 23)
         self.assertIn(REPLY_CHANNEL_CONTINUITY_SLUG, suite.scenario_slugs)
         self.assertIn(UNAVAILABLE_WEB_CHANNEL_CONTINUITY_SLUG, suite.scenario_slugs)
         self.assertIn(FAILED_EMAIL_DELIVERY_RECOVERY_SLUG, suite.scenario_slugs)
         self.assertIn(EMAIL_REVIEW_OUTBOX_COMMUNICATION_SLUG, suite.scenario_slugs)
         self.assertIn(REMOTE_MCP_RESULT_DELIVERY_SLUG, suite.scenario_slugs)
         self.assertIn(EMAIL_SENT_STATE_SEQUENCING_SLUG, suite.scenario_slugs)
+        self.assertIn(EMAIL_APPROVED_ACTION_TUPLE_SLUG, suite.scenario_slugs)
 
     def test_generated_cases_cover_email_and_chat_for_each_real_world_domain(self):
         channels_by_brief = {}

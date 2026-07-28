@@ -2,7 +2,7 @@ import type { AgentChatShellSubview } from '../types/immersiveShell'
 
 export type { AgentChatShellSubview }
 
-const CONSOLE_SHELL_SUBVIEW_PATTERN = '(settings|secrets|email|files|contact-requests)'
+const CONSOLE_SHELL_SUBVIEW_PATTERN = '(settings|secrets|email|files|contact-requests|pet)'
 
 function normalizeSubviewToken(token?: string | null): AgentChatShellSubview {
   switch (token) {
@@ -12,6 +12,7 @@ function normalizeSubviewToken(token?: string | null): AgentChatShellSubview {
     case 'email':
     case 'files':
     case 'contact-requests':
+    case 'pet':
       return token
     default:
       return 'chat'
@@ -35,7 +36,7 @@ export function extractAgentChatShellAgentId(pathname: string): string | null {
     && appParts[2]
     && (
       appParts.length === 3
-      || (appParts.length === 4 && ['settings', 'secrets', 'email', 'files', 'contact-requests'].includes(appParts[3]))
+      || (appParts.length === 4 && ['settings', 'secrets', 'email', 'files', 'contact-requests', 'pet'].includes(appParts[3]))
       || (appParts.length === 5 && appParts[3] === 'secrets' && appParts[4] === 'request')
     )
   ) {
@@ -94,6 +95,8 @@ export function buildAgentChatShellPath(
         return `/app/agents/${agentId}/files`
       case 'contact-requests':
         return `/app/agents/${agentId}/contact-requests`
+      case 'pet':
+        return `/app/agents/${agentId}/pet`
       default:
         return `/app/agents/${agentId}`
     }
@@ -111,6 +114,8 @@ export function buildAgentChatShellPath(
       return `/console/agents/${agentId}/chat/files/`
     case 'contact-requests':
       return `/console/agents/${agentId}/chat/contact-requests/`
+    case 'pet':
+      return `/console/agents/${agentId}/chat/pet/`
     default:
       return `/console/agents/${agentId}/chat/`
   }
