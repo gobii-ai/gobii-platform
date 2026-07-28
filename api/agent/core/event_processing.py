@@ -59,7 +59,13 @@ from .processing_flags import (
     processing_lock_storage_keys,
     set_processing_heartbeat,
 )
-from .llm_utils import EmptyLiteLLMResponseError, raise_if_empty_litellm_response, raise_if_invalid_litellm_response, run_completion
+from .llm_utils import (
+    EmptyLiteLLMResponseError,
+    StreamIdleTimeout,
+    raise_if_empty_litellm_response,
+    raise_if_invalid_litellm_response,
+    run_completion,
+)
 from .multimodal_context import collect_fresh_read_file_image_attachments, prepare_multimodal_read_file_request
 from .llm_streaming import StreamAccumulator
 from .tool_arg_streaming import ChatBodyStreamExtractor
@@ -4791,6 +4797,10 @@ def _completion_with_failover(
                             defer_stream_finish=defer_stream_finish,
                         )
                     except OrchestratorPromptStale:
+                        raise
+                    except StreamIdleTimeout:
+                        active_stream_broadcaster.cancel()
+                        active_stream_broadcaster = None
                         raise
                     except Exception:
                         if stale_prompt_checker and stale_prompt_checker():

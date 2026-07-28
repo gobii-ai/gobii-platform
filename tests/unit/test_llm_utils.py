@@ -51,6 +51,31 @@ class _AsyncClosableBlockingFirstChunkStream(_BlockingFirstChunkStream):
         self.released.set()
 
 
+class _BlockingSecondChunkStream:
+    def __init__(self):
+        self.closed = False
+        self.started = threading.Event()
+        self.released = threading.Event()
+        self.chunk_index = 0
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        self.chunk_index += 1
+        if self.chunk_index == 1:
+            return "first-chunk"
+        self.started.set()
+        self.released.wait(timeout=0.2)
+        if self.closed:
+            raise StopIteration
+        return "late-chunk"
+
+    def close(self):
+        self.closed = True
+        self.released.set()
+
+
 class RunCompletionReasoningTests(TestCase):
     @tag("batch_event_llm")
     @patch("api.agent.core.llm_utils.litellm.completion")
@@ -449,7 +474,7 @@ class RunCompletionReasoningTests(TestCase):
         _mock_first_data_timeout,
     ):
         stalled_stream = _BlockingFirstChunkStream()
-        retry_stream = _ClosableStream(["retry-chunk"])
+        retry_stream = _ClosableStream(["retry-chunk", "retry-second-chunk"])
         mock_completion.side_effect = [stalled_stream, retry_stream]
 
         result = run_completion(
@@ -460,6 +485,7 @@ class RunCompletionReasoningTests(TestCase):
         )
 
         self.assertEqual(next(result), "retry-chunk")
+        self.assertEqual(next(result), "retry-second-chunk")
         self.assertTrue(stalled_stream.closed)
         self.assertEqual(mock_completion.call_count, 2)
 
@@ -536,6 +562,32 @@ class RunCompletionReasoningTests(TestCase):
         with self.assertRaises(litellm.Timeout):
             next(result)
         self.assertTrue(stream.closed)
+
+    @tag("batch_event_llm")
+    @override_settings(LITELLM_MAX_RETRIES=2)
+    @patch("api.agent.core.llm_utils.get_litellm_first_data_timeout_seconds", return_value=0.01)
+    @patch("api.agent.core.llm_utils.litellm.completion")
+    def test_streaming_second_chunk_timeout_closes_underlying_stream(
+        self,
+        mock_completion,
+        _mock_first_data_timeout,
+    ):
+        stream = _BlockingSecondChunkStream()
+        mock_completion.return_value = stream
+
+        result = run_completion(
+            model="mock-model",
+            messages=[],
+            params={},
+            stream=True,
+        )
+
+        self.assertEqual(next(result), "first-chunk")
+        with self.assertRaises(litellm.Timeout):
+            next(result)
+        self.assertTrue(stream.started.wait(timeout=1))
+        self.assertTrue(stream.closed)
+        mock_completion.assert_called_once()
 
     @tag("batch_event_llm")
     @override_settings(LITELLM_MAX_RETRIES=2, LITELLM_RETRY_BACKOFF_SECONDS=0)
