@@ -13,6 +13,7 @@ from api.evals.scenarios.sqlite_tool_results import (
     SQLITE_SIBLING_RESULT_SET_FIRST_WRITE,
     SQLITE_SOURCE_CARDINALITY_AND_IDENTITY,
     SQLITE_SOURCE_ARRAY_FIRST_WRITE,
+    SQLITE_STRUCTURED_PEER_EVENT_PERSISTENCE,
     SQLITE_TOOL_RESULT_SCENARIO_SLUGS,
     SQLITE_TOOL_RESULT_SUITE_SLUG,
     SQLITE_UNSTRUCTURED_BINDINGS_FIRST_WRITE,
@@ -23,6 +24,7 @@ from api.evals.scenarios.sqlite_tool_results import (
     SqliteSiblingResultSetFirstWriteScenario,
     SqliteSourceCardinalityAndIdentityScenario,
     SqliteSourceArrayFirstWriteScenario,
+    SqliteStructuredPeerEventPersistenceScenario,
     SqliteUnstructuredBindingsFirstWriteScenario,
     _repeated_source_import_tables,
     _sqlite_attempt_failures,
@@ -117,6 +119,22 @@ class SqliteSourceArrayEvalTests(SimpleTestCase):
                 prompt = scenario_class.prompt.casefold()
                 for leaked_term in ("sqlite", "__tool_results", "json_each", "insert", "select", "table"):
                     self.assertNotIn(leaked_term, prompt)
+
+    def test_structured_peer_event_case_is_registered(self):
+        suite = SuiteRegistry.get(SQLITE_TOOL_RESULT_SUITE_SLUG)
+        scenario = ScenarioRegistry.get(SQLITE_STRUCTURED_PEER_EVENT_PERSISTENCE)
+
+        self.assertIsInstance(scenario, SqliteStructuredPeerEventPersistenceScenario)
+        self.assertIn(SQLITE_STRUCTURED_PEER_EVENT_PERSISTENCE, SQLITE_TOOL_RESULT_SCENARIO_SLUGS)
+        self.assertIn(SQLITE_STRUCTURED_PEER_EVENT_PERSISTENCE, suite.scenario_slugs)
+        self.assertEqual(
+            [task.name for task in scenario.tasks],
+            [
+                "inject_event_request",
+                "verify_structured_event_modeled",
+                "verify_persisted_outcome_reported",
+            ],
+        )
 
     def test_prompt_does_not_teach_the_sql_solution(self):
         prompt = SqliteSourceArrayFirstWriteScenario.prompt.casefold()
