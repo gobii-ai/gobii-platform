@@ -4923,7 +4923,6 @@ class AgentMessageCreateAPIView(LoginRequiredMixin, View):
         agent = (
             PersistentAgent.objects.alive()
             .select_for_update()
-            .select_related("user", "organization")
             .get(pk=agent.pk)
         )
         if not agent.is_active:

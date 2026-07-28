@@ -1183,7 +1183,6 @@ def _tool_send_agent_message(request, arguments):
     agent = (
         PersistentAgent.objects.alive()
         .select_for_update()
-        .select_related("user", "organization")
         .get(pk=access.agent.pk)
     )
     if not agent.is_active:

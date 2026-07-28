@@ -373,7 +373,6 @@ def inbound_agent_webhook(request, webhook_id):
     webhook.agent = (
         PersistentAgent.objects.alive()
         .select_for_update()
-        .select_related("user", "organization")
         .get(pk=webhook.agent_id)
     )
     if not webhook.agent.is_active:
