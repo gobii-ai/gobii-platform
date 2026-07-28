@@ -96,29 +96,6 @@ def _record_process_agent_events_queue_latency(
     return latency_seconds
 
 
-def schedule_unseen_web_chat_followup(message) -> None:
-    delay_seconds = int(settings.WEB_CHAT_UNSEEN_FOLLOWUP_DELAY_SECONDS)
-    if delay_seconds < 0:
-        return
-    from api.services.web_chat_followups import has_unseen_web_chat_followup_contact
-
-    if not has_unseen_web_chat_followup_contact(message):
-        return
-    if settings.CELERY_TASK_ALWAYS_EAGER and delay_seconds > 0:
-        logger.info(
-            "Skipping delayed unseen web-chat follow-up scheduling in eager mode for message %s.",
-            message.id,
-        )
-        return
-
-    transaction.on_commit(
-        lambda: process_unseen_web_chat_followup_task.apply_async(
-            args=[str(message.id)],
-            countdown=delay_seconds,
-        )
-    )
-
-
 def _is_task_quota_error(exc: ValidationError) -> bool:
     messages = validation_error_messages(exc)
 
@@ -439,36 +416,11 @@ def queue_agent_process_events_batch_task(self, agent_ids: list[str]) -> dict[st
 
 @shared_task(bind=True, name="api.agent.tasks.process_unseen_web_chat_followup")
 def process_unseen_web_chat_followup_task(self, message_id: str) -> None:  # noqa: D401, ANN001
-    """Queue agent processing when an outbound web chat message remains unread."""
-    from api.models import PersistentAgentSystemMessage
-    from api.services.web_chat_followups import prepare_unseen_web_chat_followup
-
-    followup = prepare_unseen_web_chat_followup(message_id)
-    if followup is None:
-        return
-
-    created = False
-    with transaction.atomic():
-        already_exists = PersistentAgentSystemMessage.objects.filter(
-            agent=followup.agent,
-            body__contains=str(followup.message.id),
-        ).exists()
-        if not already_exists:
-            PersistentAgentSystemMessage.objects.create(
-                agent=followup.agent,
-                body=followup.directive,
-            )
-            created = True
-
-    if not created:
-        return
-
+    """Discard unseen web-chat follow-up jobs queued before the feature was removed."""
     logger.info(
-        "Queued unseen web-chat follow-up processing for agent %s message %s.",
-        followup.agent.id,
-        followup.message.id,
+        "Discarded retired unseen web-chat follow-up job for message %s.",
+        message_id,
     )
-    process_agent_events_task.delay(str(followup.agent.id))
 
 
 @shared_task(bind=True, name="api.agent.tasks.process_pending_agent_events")
