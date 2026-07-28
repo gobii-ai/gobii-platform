@@ -53,6 +53,7 @@ SQLITE_BOUNDED_PORTFOLIO_REPORT = "sqlite_tool_results_bounded_portfolio_report"
 SQLITE_DOMAIN_TRUTH_OVER_STALE_HISTORY = "sqlite_domain_truth_over_stale_history"
 SQLITE_DOMAIN_MODEL_REFRESHES_AND_EVOLVES = "sqlite_domain_model_refreshes_and_evolves"
 SQLITE_SCHEMA_GROUNDED_EXISTING_TABLE = "sqlite_schema_grounded_existing_table"
+SQLITE_SCHEMA_GROUNDED_EXISTING_TABLE_WRITE = "sqlite_schema_grounded_existing_table_write"
 SQLITE_SOURCE_ARRAY_FIRST_WRITE = "sqlite_source_array_first_write"
 SQLITE_SIBLING_RESULT_SET_FIRST_WRITE = "sqlite_sibling_result_set_first_write"
 SQLITE_UNSTRUCTURED_BINDINGS_FIRST_WRITE = "sqlite_unstructured_bindings_first_write"
@@ -71,6 +72,7 @@ SQLITE_TOOL_RESULT_SCENARIO_SLUGS = [
     SQLITE_DOMAIN_TRUTH_OVER_STALE_HISTORY,
     SQLITE_DOMAIN_MODEL_REFRESHES_AND_EVOLVES,
     SQLITE_SCHEMA_GROUNDED_EXISTING_TABLE,
+    SQLITE_SCHEMA_GROUNDED_EXISTING_TABLE_WRITE,
     SQLITE_SOURCE_ARRAY_FIRST_WRITE,
     SQLITE_SIBLING_RESULT_SET_FIRST_WRITE,
     SQLITE_UNSTRUCTURED_BINDINGS_FIRST_WRITE,
@@ -2100,6 +2102,92 @@ class SqliteSchemaGroundedExistingTableScenario(SqliteDomainModelScenario):
             task_name="verify_unresolved_handoff_answer",
             source_urls=(),
             required_terms=("agent-red", "2", "agent-blue", "1"),
+            min_sources=0,
+        )
+
+
+@register_scenario
+class SqliteSchemaGroundedExistingTableWriteScenario(SqliteDomainModelScenario):
+    slug = SQLITE_SCHEMA_GROUNDED_EXISTING_TABLE_WRITE
+    description = "Existing database writes should inspect unavailable columns before mutating or reading the table."
+    expected_runtime = "short"
+    tags = (*SqliteToolResultScenario.tags, "schema_discovery", "trajectory_regression", "first_time_correctness")
+    tasks = [
+        ScenarioTask(name="inject_prompt", assertion_type="agent_processing"),
+        ScenarioTask(name="verify_schema_grounded_write", assertion_type="tool_call"),
+        ScenarioTask(name="verify_updated_handoff_answer", assertion_type="manual"),
+    ]
+    prompt = (
+        "Mark handoff-02 resolved in the existing handoff ledger. Then tell me who still has unfinished work "
+        "and the count for each. Use the ledger as the source of truth."
+    )
+
+    def run(self, run_id: str, agent_id: str) -> None:
+        self._ready_agent(agent_id)
+        PersistentAgent.objects.filter(id=agent_id).update(
+            charter="Maintain internal operating ledgers precisely and report their current state."
+        )
+        _seed_hidden_handoff_ledger(agent_id)
+        inbound = self._inject_and_wait(
+            run_id,
+            agent_id,
+            self.prompt,
+            {},
+            allowed_tool_names={"sqlite_batch", "send_chat_message"},
+            max_relevant_tool_calls=7,
+        )
+        calls = list(
+            _tool_calls_for_run(
+                run_id,
+                after=inbound.timestamp,
+                tool_names={"sqlite_batch"},
+            )
+        )
+        failures = _schema_grounded_read_failures(calls)
+        schema_indexes = []
+        update_indexes = []
+        for call_index, call in enumerate(calls):
+            sql = str((call.tool_params or {}).get("sql") or "")
+            schema_evidence = json.dumps(_result_payload(call) or {}).casefold()
+            if (
+                HANDOFF_LEDGER_TABLE.casefold() in sql.casefold()
+                and all(field in schema_evidence for field in ("handoff_key", "worker_ref", "resolution_code"))
+            ):
+                schema_indexes.append(call_index)
+            if re.search(rf"\bupdate\s+{re.escape(HANDOFF_LEDGER_TABLE)}\b", _structural_sql(sql), re.I):
+                update_indexes.append(call_index)
+
+        if not update_indexes:
+            failures.append("existing ledger was not updated")
+        if schema_indexes and update_indexes and min(update_indexes) <= min(schema_indexes):
+            failures.append("ledger was mutated before schema inspection completed")
+
+        with agent_sqlite_db(str(agent_id)) as db_path:
+            conn = open_guarded_sqlite_connection(db_path)
+            try:
+                resolution = conn.execute(
+                    f"SELECT resolution_code FROM {HANDOFF_LEDGER_TABLE} WHERE handoff_key=?;",
+                    ("handoff-02",),
+                ).fetchone()
+            finally:
+                clear_guarded_connection(conn)
+                conn.close()
+        if resolution != ("resolved",):
+            failures.append(f"handoff-02 persisted state was {resolution!r}")
+
+        self._record_check(
+            run_id,
+            "verify_schema_grounded_write",
+            failures,
+            "Inspected the live schema before one successful update and follow-up query.",
+        )
+        self._record_sourced_answer(
+            run_id,
+            agent_id=agent_id,
+            after=inbound.timestamp,
+            task_name="verify_updated_handoff_answer",
+            source_urls=(),
+            required_terms=("agent-red", "1", "agent-blue", "1"),
             min_sources=0,
         )
 
