@@ -5,7 +5,7 @@ from unittest.mock import Mock, patch
 from django.test import TestCase, override_settings, tag
 import litellm
 
-from api.agent.core.llm_utils import InvalidLiteLLMResponseError, run_completion
+from api.agent.core.llm_utils import InvalidLiteLLMResponseError, StreamIdleTimeout, run_completion
 from tests.utils.token_usage import make_completion_response
 
 
@@ -439,7 +439,7 @@ class RunCompletionReasoningTests(TestCase):
         mock_completion.side_effect = invoke
 
         try:
-            with self.assertRaises(litellm.Timeout):
+            with self.assertRaises(StreamIdleTimeout):
                 run_completion(
                     model="mock-model",
                     messages=[],

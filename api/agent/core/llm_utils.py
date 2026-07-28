@@ -265,7 +265,7 @@ def _invoke_completion_with_timeout(
     try:
         succeeded, result = result_queue.get(timeout=timeout_seconds)
     except queue.Empty:
-        raise litellm.Timeout(
+        raise (StreamIdleTimeout if kwargs.get("stream") else litellm.Timeout)(
             message=f"LLM request did not return within {timeout_seconds:g} seconds",
             model=model,
             llm_provider=provider or "unknown",
