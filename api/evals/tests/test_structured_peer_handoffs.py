@@ -6,6 +6,7 @@ from api.agent.tools.peer_dm import get_send_agent_message_tool
 from api.evals.registry import ScenarioRegistry
 from api.evals.scenarios.structured_peer_handoffs import (
     STRUCTURED_PEER_HANDOFF_CASES,
+    STRUCTURED_PEER_FILE_HANDOFF,
     STRUCTURED_PEER_HANDOFF_SCENARIO_SLUGS,
     STRUCTURED_PEER_HANDOFF_SUITE_SLUG,
 )
@@ -53,3 +54,12 @@ class StructuredPeerHandoffEvalTests(SimpleTestCase):
         self.assertNotIn("structured_payload", prompts)
         self.assertNotIn("structured payload", prompts)
         self.assertNotIn("json", prompts)
+
+    def test_file_handoff_uses_a_named_peer_and_natural_file_request(self):
+        case = next(case for case in STRUCTURED_PEER_HANDOFF_CASES if case.expects_attachment)
+
+        self.assertEqual(case.slug, STRUCTURED_PEER_FILE_HANDOFF)
+        self.assertIn("ledger agent", case.prompt.lower())
+        self.assertIn("/exports/northstar-handoff.txt", case.prompt)
+        self.assertNotIn("peer_agent_id", case.prompt)
+        self.assertNotIn("$[", case.prompt)

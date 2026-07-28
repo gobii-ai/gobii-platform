@@ -180,6 +180,8 @@ SKIP_AUTO_SUBSTITUTION_TOOL_NAMES = {
     "send_sms",
     "send_chat_message",
     "send_mcp_message",
+    "send_agent_message",
+    "send_discord_message",
     "read_file",
     "create_image",
 }
