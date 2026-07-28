@@ -172,6 +172,7 @@ class PeerMessagingService:
                 channel=self.CHANNEL,
                 body=normalized_body,
                 conversation_id=conversation.id,
+                exact_only=True,
             )
             if duplicate:
                 payload = duplicate.to_error_response()

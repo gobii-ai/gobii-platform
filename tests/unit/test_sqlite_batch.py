@@ -174,6 +174,59 @@ class SqliteBatchCoreTests(SqliteBatchTestCase):
             "notes": bindings["notes"],
         }])
 
+    def test_named_bindings_preserve_scalar_types(self):
+        with self._with_temp_db():
+            out = execute_sqlite_batch(
+                self.agent,
+                {
+                    "sql": (
+                        "CREATE TABLE facts(active INTEGER, score REAL, attempts INTEGER);"
+                        "INSERT INTO facts(active,score,attempts) VALUES (:active,:score,:attempts);"
+                        "SELECT typeof(active) active_type, typeof(score) score_type, "
+                        "typeof(attempts) attempts_type FROM facts;"
+                    ),
+                    "bindings": {"active": True, "score": 4.5, "attempts": 3},
+                    "rows": [],
+                    "will_continue_work": False,
+                },
+            )
+
+        self.assertEqual(out.get("status"), "ok", out.get("message"))
+        self.assertEqual(
+            out["results"][-1]["result"],
+            [{"active_type": "integer", "score_type": "real", "attempts_type": "integer"}],
+        )
+
+    def test_reads_stored_link_unavailable_text_as_data(self):
+        with self._with_temp_db():
+            out = execute_sqlite_batch(
+                self.agent,
+                {
+                    "sql": (
+                        "CREATE TABLE sources(id TEXT PRIMARY KEY, note TEXT);"
+                        "INSERT INTO sources(id,note) VALUES ('source-1','Link unavailable');"
+                        "SELECT id,note FROM sources;"
+                    ),
+                    "rows": [],
+                    "will_continue_work": False,
+                },
+            )
+
+        self.assertEqual(out.get("status"), "ok", out.get("message"))
+        self.assertEqual(
+            out["results"][-1]["result"],
+            [{"id": "source-1", "note": "Link unavailable"}],
+        )
+
+    def test_tool_contract_explains_batch_and_upsert_shapes(self):
+        tool = get_sqlite_batch_tool()["function"]
+
+        self.assertIn("Separate statements with semicolons", tool["description"])
+        self.assertIn("PRIMARY KEY or UNIQUE", tool["description"])
+        self.assertIn("bindings is an object", tool["description"])
+        self.assertEqual(tool["parameters"]["properties"]["rows"]["type"], "array")
+        self.assertEqual(tool["parameters"]["properties"]["bindings"]["type"], "object")
+
     def test_tool_contract_steers_messy_text_to_named_bindings(self):
         function = get_sqlite_batch_tool()["function"]
         sql_description = function["parameters"]["properties"]["sql"]["description"]
@@ -323,7 +376,7 @@ class SqliteBatchCoreTests(SqliteBatchTestCase):
         self.assertEqual(out.get("status"), "ok", out.get("message"))
         self.assertEqual(out["results"][1]["message"], "Query 1 affected 2 rows.")
 
-    def test_stops_on_error_and_reports_index(self):
+    def test_batch_failure_rolls_back_every_statement(self):
         with self._with_temp_db() as (db_path, token, tmp):
             queries = [
                 "CREATE TABLE t(a INTEGER PRIMARY KEY)",
@@ -336,14 +389,14 @@ class SqliteBatchCoreTests(SqliteBatchTestCase):
             results = out.get("results", [])
             self.assertEqual(len(results), 2)  # stops before failing query
             self.assertIn("Query 2 failed", out.get("message", ""))
+            self.assertIn("batch was rolled back", out.get("message", ""))
 
-            # First insert should have committed; later queries not executed
             conn = sqlite3.connect(db_path)
             try:
-                cur = conn.cursor()
-                cur.execute("SELECT COUNT(*) FROM t;")
-                (count,) = cur.fetchone()
-                self.assertEqual(count, 1)
+                table = conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name='t'"
+                ).fetchone()
+                self.assertIsNone(table)
             finally:
                 conn.close()
 

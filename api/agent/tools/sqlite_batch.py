@@ -1565,10 +1565,12 @@ def _execute_with_autocorrections(
     while queue_items and attempts < MAX_AUTO_CORRECTION_ATTEMPTS:
         current_query, corrections = queue_items.popleft()
         attempts += 1
+        savepoint = f"gobii_statement_{idx}_{attempts}"
         try:
             consume_patch_text_error()
             start_query_timer(conn)
             changes_before = conn.total_changes
+            cur.execute(f"SAVEPOINT {savepoint}")
             cur.execute(current_query, bindings)
             if cur.description is not None:
                 columns = [col[0] for col in cur.description]
@@ -1603,11 +1605,16 @@ def _execute_with_autocorrections(
                 if zero_rows_warning:
                     result_entry["warning"] = True
                     result_entry["warning_code"] = "zero_rows_affected"
+            cur.execute(f"RELEASE SAVEPOINT {savepoint}")
             return result_entry, current_query, corrections, None
         except Exception as orig_exc:
             last_error_message = consume_patch_text_error() or str(orig_exc)
             last_error_query = current_query
-            conn.rollback()
+            try:
+                cur.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")
+                cur.execute(f"RELEASE SAVEPOINT {savepoint}")
+            except sqlite3.Error:
+                logger.debug("Failed to roll back sqlite_batch statement savepoint", exc_info=True)
             for updated_sql, fixes in _build_autocorrection_candidates(current_query, last_error_message, conn):
                 if updated_sql in seen:
                     continue
@@ -2120,6 +2127,7 @@ def _execute_sqlite_batch_inner(
         )
         preview = [q.strip()[:160] for q in queries[:5]]
         logger.info("Agent %s executing sqlite_batch: %s queries (preview=%s)", agent_id, len(queries), preview)
+        conn.execute("BEGIN")
 
         for idx, query in enumerate(queries):
             if not isinstance(query, str) or not query.strip():
@@ -2172,6 +2180,10 @@ def _execute_sqlite_batch_inner(
                 }
                 all_corrections.extend(applied_corrections)
             results.append(result_entry)
+
+        if had_error:
+            conn.rollback()
+        else:
             conn.commit()
 
         db_size_mb = _get_db_size_mb(db_path)
@@ -2186,7 +2198,7 @@ def _execute_sqlite_batch_inner(
 
         # Build success message with any auto-corrections noted
         if had_error:
-            msg = error_message + advice
+            msg = error_message + " The batch was rolled back; no statements were persisted." + advice
         else:
             msg = f"Executed {len(results)} queries. Database size: {db_size_mb:.2f} MB.{size_warning}"
             if all_corrections:
@@ -2215,6 +2227,8 @@ def _execute_sqlite_batch_inner(
 
         return response
     except Exception as outer:
+        if conn is not None:
+            conn.rollback()
         return {"status": "error", "message": f"SQLite batch failed: {outer}"}
     finally:
         if conn is not None:
@@ -2300,10 +2314,12 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
                 "source_url/result_id predicate and store t.source_url/t.result_id as provenance. Upserts: WHERE 1=1 "
                 "before ON CONFLICT. group_concat(DISTINCT x) accepts no separator. Never copy sourced facts/URLs "
                 "into SQL, import per result_id, mix historical generic-tool results, or rebuild durable tables on "
-                "refresh. Evolve normalized entities/relations; query counts, joins, coverage, gaps, and ranks. Return all supporting fields/URLs in the same batch; "
-                "after decision rows return, deliver without rereading. Unknown schema: targeted sqlite_master, then "
+                "refresh. Evolve normalized entities/relations; query counts, joins, coverage, gaps, and ranks. "
+                "Return all supporting fields/URLs in the same batch; after decision rows return, deliver without "
+                "rereading. Unknown schema: targeted sqlite_master, then "
                 "PRAGMA alone in its own call, then query only returned columns. Bind messy text via :name; never "
-                "backslash-escape SQLite strings. No ATTACH"
+                "backslash-escape SQLite strings. Separate statements with semicolons. ON CONFLICT(cols) requires "
+                "those exact columns to be PRIMARY KEY or UNIQUE. bindings is an object; rows is an array. No ATTACH"
             ),
             "parameters": {
                 "type": "object",
