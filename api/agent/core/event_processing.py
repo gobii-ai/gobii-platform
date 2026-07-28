@@ -3025,10 +3025,8 @@ def _message_tool_has_progress_intent(tool_name: str, tool_params: Dict[str, Any
     if tool_name not in MESSAGE_TOOL_NAMES:
         return False
     explicit_continue = _coerce_optional_bool(tool_params.get("will_continue_work"))
-    if explicit_continue is True:
-        return True
-    if explicit_continue is False:
-        return False
+    if explicit_continue is not None:
+        return explicit_continue
     return _should_infer_message_tool_continuation(
         _message_tool_body_from_params(tool_name, tool_params)
     )
@@ -4129,10 +4127,12 @@ def _finalize_tool_batch(
             if status_label in MESSAGE_SUCCESS_STATUSES:
                 message_delivery_ok = True
                 successful_message_tools.add(tool_name)
-                if _message_tool_has_progress_intent(tool_name, prepared.tool_params):
-                    progress_message_delivery_ok = True
-                else:
-                    terminal_message_delivery_ok = True
+                human_progress_delivery = (
+                    tool_name != "send_agent_message"
+                    and _message_tool_has_progress_intent(tool_name, prepared.tool_params)
+                )
+                progress_message_delivery_ok |= human_progress_delivery
+                terminal_message_delivery_ok |= tool_name != "send_agent_message" and not human_progress_delivery
         elif tool_name == "add_discord_reaction" and status_label in MESSAGE_SUCCESS_STATUSES:
             message_delivery_ok = True
             progress_message_delivery_ok |= effective_explicit_continue is True
