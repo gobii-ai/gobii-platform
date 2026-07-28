@@ -14,6 +14,7 @@ import { useIsMobile } from '../../hooks/useIsMobile'
 import { useUpdateUserPetPreferences, useUserPets } from '../../hooks/useUserPets'
 import { selectActiveChatSession } from '../../store/chatSlice'
 import { useAppSelector } from '../../store/hooks'
+import { buildAgentChatShellPath, extractAgentChatShellAgentId } from '../../util/agentChatShellRoutes'
 import { navigateWithinApp } from '../../util/appNavigation'
 import { FixedContextMenu } from '../common/FixedContextMenu'
 import { PetSprite } from './PetSprite'
@@ -413,12 +414,18 @@ export function ImmersivePetLayer() {
             {
               label: 'Options',
               icon: Settings,
-              // Same-tab navigation to the unchanged profile page. Nothing is lost by
-              // leaving (#481): the timeline lives in the store and the composer draft
-              // persists per-agent, so Back restores the conversation exactly. Opening
-              // any new context instead is browser-preference roulette — tab vs popup
-              // window is the user's setting, not the page's.
-              onSelect: () => navigateWithinApp(PET_PROFILE_PATH),
+              // Inside a chat, pet options open in the shell panel beside the
+              // conversation — the same surface agent settings use — so the active
+              // conversation never goes away (#481). Outside a chat there is nothing
+              // to preserve, so fall back to the profile page section.
+              onSelect: () => {
+                const chatAgentId = extractAgentChatShellAgentId(window.location.pathname)
+                if (chatAgentId) {
+                  navigateWithinApp(buildAgentChatShellPath(window.location.pathname, chatAgentId, 'pet'))
+                  return
+                }
+                navigateWithinApp(PET_PROFILE_PATH)
+              },
             },
             {
               label: 'Dismiss pet',

@@ -57,15 +57,26 @@ afterEach(() => {
 })
 
 describe('ImmersivePetLayer options', () => {
-  it('navigates in the same tab to the unchanged profile pet section', () => {
+  it('opens the pet panel beside the conversation when inside a chat', () => {
     const openSpy = vi.spyOn(window, 'open').mockReturnValue(null)
+    window.history.pushState({}, '', '/app/agents/agent-1')
+    renderLayer()
+
+    fireEvent.contextMenu(screen.getByLabelText('Bubbles workspace pet'))
+    fireEvent.click(screen.getByText('Options'))
+
+    expect(navigateWithinApp).toHaveBeenCalledWith('/app/agents/agent-1/pet')
+    // Never a new browsing context: tab vs window there is browser preference.
+    expect(openSpy).not.toHaveBeenCalled()
+  })
+
+  it('falls back to the profile section outside a chat', () => {
+    window.history.pushState({}, '', '/app/integrations')
     renderLayer()
 
     fireEvent.contextMenu(screen.getByLabelText('Bubbles workspace pet'))
     fireEvent.click(screen.getByText('Options'))
 
     expect(navigateWithinApp).toHaveBeenCalledWith('/app/profile#workspace-pet')
-    // Never a new browsing context: tab vs window there is browser preference.
-    expect(openSpy).not.toHaveBeenCalled()
   })
 })

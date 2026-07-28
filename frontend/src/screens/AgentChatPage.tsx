@@ -34,6 +34,7 @@ import { groupDeveloperActivityEvents } from '../components/agentChat/developerT
 import { EmbeddedAgentContactRequestsPanel } from '../components/agentChat/EmbeddedAgentContactRequestsPanel'
 import { EmbeddedAgentEmailSettingsPanel } from '../components/agentChat/EmbeddedAgentEmailSettingsPanel'
 import { EmbeddedAgentFilesPanel } from '../components/agentChat/EmbeddedAgentFilesPanel'
+import { EmbeddedWorkspacePetPanel } from '../components/agentChat/EmbeddedWorkspacePetPanel'
 import { EmbeddedAgentSecretRequestsPanel } from '../components/agentChat/EmbeddedAgentSecretRequestsPanel'
 import { EmbeddedAgentSettingsPanel } from '../components/agentChat/EmbeddedAgentSettingsPanel'
 import { EmbeddedAgentSecretsPanel } from '../components/agentChat/EmbeddedAgentSecretsPanel'
@@ -603,6 +604,7 @@ const EMBEDDED_SETTINGS_TITLES: Record<Exclude<AgentChatShellSubview, 'chat'>, s
   email: 'Email Settings',
   files: 'Agent Files',
   'contact-requests': 'Contact Requests',
+  pet: 'Workspace Pet',
 }
 
 function openAppShellDestination(onOpen: AppShellOpenHandler, url: string | null): void {
@@ -4122,6 +4124,8 @@ export function AgentChatPage({
         onBack={handleCloseEmbeddedSettings}
         onResolveContactRequests={handleResolveContactRequests}
       />
+    ) : shellSubview === 'pet' ? (
+      <EmbeddedWorkspacePetPanel onBack={handleCloseEmbeddedSettings} />
     ) : (
       <EmbeddedAgentFilesPanel
         agentId={activeAgentId}
