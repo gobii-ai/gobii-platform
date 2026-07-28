@@ -7,15 +7,16 @@ import {
   type CSSProperties,
   type PointerEvent as ReactPointerEvent,
 } from 'react'
-import { EyeOff, Settings } from 'lucide-react'
+import { EyeOff, Fish, Settings } from 'lucide-react'
 
 import { getSelectedUserPet, type UserPetPosition, type UserPetSize } from '../../api/userPets'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { useUpdateUserPetPreferences, useUserPets } from '../../hooks/useUserPets'
 import { selectActiveChatSession } from '../../store/chatSlice'
 import { useAppSelector } from '../../store/hooks'
-import { navigateWithinApp } from '../../util/appNavigation'
 import { FixedContextMenu } from '../common/FixedContextMenu'
+import { Modal } from '../common/Modal'
+import { PetOptionsPanel } from './PetOptionsPanel'
 import { PetSprite } from './PetSprite'
 import {
   PET_ANIMATIONS,
@@ -42,7 +43,6 @@ const CLICK_JUMP_DURATION_MS = PET_ANIMATIONS.jumping.durations.reduce(
   (total, duration) => total + duration,
   0,
 ) * 3
-const PET_PROFILE_PATH = '/app/profile#workspace-pet'
 
 type PixelPosition = {
   left: number
@@ -149,6 +149,7 @@ export function ImmersivePetLayer() {
   const [pointerActive, setPointerActive] = useState(false)
   const [gazeEmotionKey, setGazeEmotionKey] = useState<string | null>(null)
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null)
+  const [optionsOpen, setOptionsOpen] = useState(false)
   const [expiredEmotionKey, setExpiredEmotionKey] = useState<string | null>(null)
   const closeContextMenu = useCallback(() => setContextMenu(null), [])
 
@@ -360,6 +361,23 @@ export function ImmersivePetLayer() {
     setDragPosition(null)
   }, [petHeight, petWidth, preferencesMutation, viewport.height, viewport.width])
 
+  // The options modal must survive the pet being hidden (toggling "Show workspace pet"
+  // off from inside the modal), so it renders even when the pet itself does not.
+  const optionsModal = optionsOpen ? (
+    <Modal
+      title="Workspace Pet"
+      subtitle="Choose your chat companion"
+      icon={Fish}
+      iconBgClass="bg-sky-100"
+      iconColorClass="text-sky-700"
+      widthClass="sm:max-w-2xl"
+      bodyClassName="space-y-4"
+      onClose={() => setOptionsOpen(false)}
+    >
+      <PetOptionsPanel />
+    </Modal>
+  ) : null
+
   if (
     isMobile
     || !library
@@ -368,7 +386,7 @@ export function ImmersivePetLayer() {
     || viewport.width <= 0
     || viewport.height <= 0
   ) {
-    return null
+    return optionsModal
   }
 
   const style = {
@@ -413,7 +431,8 @@ export function ImmersivePetLayer() {
             {
               label: 'Options',
               icon: Settings,
-              onSelect: () => navigateWithinApp(PET_PROFILE_PATH),
+              // Configuring the pet must not navigate away from the chat (bug #481).
+              onSelect: () => setOptionsOpen(true),
             },
             {
               label: 'Dismiss pet',
@@ -423,6 +442,7 @@ export function ImmersivePetLayer() {
           ]}
         />
       ) : null}
+      {optionsModal}
     </div>
   )
 }
