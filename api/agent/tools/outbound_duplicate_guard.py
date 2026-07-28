@@ -25,7 +25,6 @@ from ...evals.execution import get_current_eval_routing_profile
 import litellm
 
 from api.agent.structured_peer_payload import (
-    StructuredPeerPayload,
     canonicalize_structured_peer_payload,
     get_structured_peer_payload,
 )
@@ -34,6 +33,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_SIMILARITY_THRESHOLD = DEFAULT_DUPLICATE_SIMILARITY_THRESHOLD
 DEFAULT_DUPLICATE_LOOKBACK = timedelta(hours=1)
+# Distinguishes an omitted payload comparison from an explicit payload value.
 _NO_STRUCTURED_PAYLOAD = object()
 
 
@@ -310,7 +310,7 @@ def detect_recent_duplicate_message(
         conversation_id: Optional[UUID] = None,
         similarity_threshold: Optional[float] = None,
         exact_only: bool = False,
-        structured_payload: StructuredPeerPayload | None | object = _NO_STRUCTURED_PAYLOAD,
+        structured_payload: Any = _NO_STRUCTURED_PAYLOAD,
 ) -> Optional[DuplicateDetectionResult]:
     """
     Check whether the pending outbound message is a recent duplicate.

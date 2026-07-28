@@ -4407,6 +4407,7 @@ def _build_message_sqlite_record(
     attachment_paths: Sequence[str],
     rejected_attachments: Sequence[Dict[str, Any]],
     raw_payload: Dict[str, Any],
+    structured_payload_json: Optional[str],
 ) -> MessageSQLiteRecord:
     to_address = ""
     if message.to_endpoint and message.to_endpoint.address:
@@ -4441,11 +4442,7 @@ def _build_message_sqlite_record(
         latest_error_code=latest_error_code,
         latest_error_message=latest_error_message,
         is_hidden_in_chat=bool(raw_payload.get("hide_in_chat")),
-        structured_payload_json=(
-            canonicalize_structured_peer_payload(structured_payload)
-            if (structured_payload := get_structured_peer_payload(raw_payload)) is not None
-            else None
-        ),
+        structured_payload_json=structured_payload_json,
     )
 
 
@@ -4461,7 +4458,7 @@ def _build_sqlite_messages_snapshot_records(
         return records
 
     selected_messages: List[
-        Tuple[PersistentAgentMessage, str, str, str, Dict[str, Any]]
+        Tuple[PersistentAgentMessage, str, str, str, Dict[str, Any], Optional[str]]
     ] = []
     total_body_bytes = 0
     messages_qs = (
@@ -4479,21 +4476,25 @@ def _build_sqlite_messages_snapshot_records(
         structured_payload = get_structured_peer_payload(raw_payload)
         payload_json = (
             canonicalize_structured_peer_payload(structured_payload)
-            if structured_payload is not None else ""
+            if structured_payload is not None else None
         )
-        message_content_bytes = len(body.encode("utf-8")) + len(payload_json.encode("utf-8"))
+        message_content_bytes = len(body.encode("utf-8")) + len(
+            (payload_json or "").encode("utf-8")
+        )
         if total_body_bytes + message_content_bytes > max_total_body_bytes:
             break
 
         subject = (raw_payload.get("subject") or "").strip()
         channel = message.from_endpoint.channel
-        selected_messages.append((message, channel, subject, body, raw_payload))
+        selected_messages.append(
+            (message, channel, subject, body, raw_payload, payload_json)
+        )
         total_body_bytes += message_content_bytes
 
     if not selected_messages:
         return records
 
-    selected_ids = [message.id for message, _, _, _, _ in selected_messages]
+    selected_ids = [message.id for message, _, _, _, _, _ in selected_messages]
     attachment_map: Dict[str, List[str]] = {}
     attachment_seen: Dict[str, set[str]] = {}
     attachments_qs = (
@@ -4513,7 +4514,7 @@ def _build_sqlite_messages_snapshot_records(
         attachment_map.setdefault(message_id, []).append(path)
         seen_paths.add(path)
 
-    for message, channel, subject, body, raw_payload in selected_messages:
+    for message, channel, subject, body, raw_payload, payload_json in selected_messages:
         message_id = str(message.id)
         attachment_paths = list(attachment_map.get(message_id, []))
         seen_paths = set(attachment_paths)
@@ -4533,6 +4534,7 @@ def _build_sqlite_messages_snapshot_records(
                 attachment_paths=attachment_paths,
                 rejected_attachments=rejected_attachments,
                 raw_payload=raw_payload,
+                structured_payload_json=payload_json,
             )
         )
 

@@ -1,9 +1,13 @@
+import json
 from datetime import timedelta
+from types import SimpleNamespace
+from unittest.mock import patch
+
 from django.test import TestCase, override_settings, tag
 from django.utils import timezone
 from django.contrib.auth import get_user_model
 
-from api.agent.core.compaction import ensure_comms_compacted
+from api.agent.core.compaction import ensure_comms_compacted, llm_summarise_comms
 from api.models import (
     BrowserUseAgent,
     PersistentAgent,
@@ -154,4 +158,49 @@ class CompactionTests(TestCase):
         # snapshot_until should correspond to the last compacted message
         ordered = list(PersistentAgentMessage.objects.order_by("timestamp"))
         expected_until = ordered[-(COMMS_COMPACTION_TAIL + 1)].timestamp
-        self.assertEqual(latest_snapshot.snapshot_until, expected_until) 
+        self.assertEqual(latest_snapshot.snapshot_until, expected_until)
+
+    def test_llm_compaction_truncates_body_and_payload_independently(self):
+        payload = {
+            "records": [
+                {"id": index, "value": "x" * 200}
+                for index in range(40)
+            ]
+        }
+        message = SimpleNamespace(
+            is_outbound=False,
+            body="b" * 5000,
+            raw_payload={
+                "_source": "agent_peer_dm",
+                "structured_payload": payload,
+            },
+        )
+        response = SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content="summary"))]
+        )
+
+        with patch(
+            "api.agent.core.compaction.get_summarization_llm_config",
+            return_value=("openai", "openai/test", {}),
+        ), patch(
+            "api.agent.core.compaction.run_completion",
+            return_value=response,
+        ) as run_completion_mock, patch(
+            "api.agent.core.compaction.log_agent_completion",
+            return_value=(None, {}),
+        ), patch("api.agent.core.compaction.set_usage_span_attributes"):
+            summary = llm_summarise_comms("", [message])
+
+        self.assertEqual(summary, "summary")
+        prompt = run_completion_mock.call_args.kwargs["messages"][1]["content"]
+        body_preview, payload_block = (
+            prompt.split("New messages:\nUser: ", 1)[1]
+            .split("\n\nReturn ONLY", 1)[0]
+            .split("\nStructured payload:\n", 1)
+        )
+        payload_preview = json.loads(payload_block)
+
+        self.assertEqual(len(body_preview), 4000)
+        self.assertLessEqual(len(payload_block), 4000)
+        self.assertTrue(payload_preview["_compaction_truncated"])
+        self.assertGreater(payload_preview["_original_char_count"], 4000)
