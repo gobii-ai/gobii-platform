@@ -39,8 +39,9 @@ class ResponsibilityBoundaryScenarioTests(SimpleTestCase):
         instruction = _get_peer_communication_instruction()
 
         self.assertIn("not chat", instruction)
-        self.assertIn("Reply only to an explicit request", instruction)
-        self.assertIn("needed boundary handoff/decline", instruction)
+        self.assertIn("explicit charter-owned requests", instruction)
+        self.assertIn("needed boundary handoffs/declines", instruction)
+        self.assertIn("peer-assigned progress/results", instruction)
         self.assertIn("Status, FYI, progress, and completion updates are read-only", instruction)
         self.assertIn("absorb silently", instruction)
         self.assertIn("never thank, confirm, offer help, mirror, or invent adjacent work", instruction)

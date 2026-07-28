@@ -20,9 +20,9 @@ from api.agent.files.attachment_helpers import ResolvedAttachment, create_messag
 from api.agent.files.filespace_service import dedupe_name, get_or_create_default_filespace, get_or_create_dir
 from api.agent.tools.outbound_duplicate_guard import detect_recent_duplicate_message
 from api.agent.structured_peer_payload import (
+    PEER_DM_SOURCE,
     STRUCTURED_PEER_PAYLOAD_KEY,
     StructuredPeerPayload,
-    structured_peer_payload_has_content,
     validate_structured_peer_payload,
 )
 from api.models import (
@@ -146,7 +146,7 @@ class PeerMessagingService:
             raise PeerMessagingError(str(exc)) from exc
 
         normalized_body = (body or "").strip()
-        if not normalized_body and not structured_peer_payload_has_content(structured_payload):
+        if not normalized_body and not structured_payload:
             raise PeerMessagingError(
                 "Either a nonblank message body or a non-empty structured payload is required."
             )
@@ -221,19 +221,14 @@ class PeerMessagingService:
             from_endpoint = self._ensure_peer_endpoint(self.agent)
             self._ensure_peer_endpoint(self.peer_agent)
 
-            outbound_payload = {
-                "_source": "agent_peer_dm",
-                "direction": "outbound",
-                "peer_link_id": str(self.link.id),
-            }
-            inbound_payload = {
-                "_source": "agent_peer_dm",
-                "direction": "inbound",
+            common_payload = {
+                "_source": PEER_DM_SOURCE,
                 "peer_link_id": str(self.link.id),
             }
             if structured_payload is not None:
-                outbound_payload[STRUCTURED_PEER_PAYLOAD_KEY] = structured_payload
-                inbound_payload[STRUCTURED_PEER_PAYLOAD_KEY] = structured_payload
+                common_payload[STRUCTURED_PEER_PAYLOAD_KEY] = structured_payload
+            outbound_payload = {**common_payload, "direction": "outbound"}
+            inbound_payload = {**common_payload, "direction": "inbound"}
 
             copied_attachments: list[AgentFsNode] = []
             try:

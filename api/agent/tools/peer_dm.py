@@ -1,5 +1,4 @@
 """Peer agent direct messaging tool definition and execution."""
-from __future__ import annotations
 
 import logging
 import re
@@ -9,10 +8,6 @@ from uuid import UUID
 from ..files.attachment_helpers import AttachmentResolutionError, resolve_filespace_attachments
 from .attachment_guidance import SEND_TOOL_ATTACHMENTS_DESCRIPTION
 from ..peer_comm import PeerMessagingDuplicateError, PeerMessagingError, PeerMessagingService
-from ..structured_peer_payload import (
-    structured_peer_payload_has_content,
-    validate_structured_peer_payload,
-)
 from ...models import PersistentAgent, PersistentAgentMessage
 from .agent_variables import substitute_variables_with_filespace
 from api.agent.core.link_references import handle_link_reference_errors
@@ -141,30 +136,13 @@ def get_send_agent_message_tool() -> Dict[str, Any]:
 def execute_send_agent_message(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str, Any]:
     """Execute the peer messaging tool for the active agent."""
     peer_agent_id_raw = params.get("peer_agent_id")
-    raw_message = params.get("message")
-    message = str(raw_message) if raw_message is not None else ""
+    message = str(params.get("message") or "")
+    structured_payload = params.get("structured_payload")
     will_continue = _should_continue_work(params)
     attachment_paths = params.get("attachments")
 
     if not peer_agent_id_raw:
-        return {
-            "status": "error",
-            "message": "Parameter 'peer_agent_id' is required.",
-        }
-
-    try:
-        structured_payload = validate_structured_peer_payload(params.get("structured_payload"))
-    except ValueError as exc:
-        return {
-            "status": "error",
-            "message": str(exc),
-        }
-
-    if not message.strip() and not structured_peer_payload_has_content(structured_payload):
-        return {
-            "status": "error",
-            "message": "Either a nonblank 'message' or a non-empty 'structured_payload' is required.",
-        }
+        return {"status": "error", "message": "Parameter 'peer_agent_id' is required."}
 
     if message:
         message = substitute_variables_with_filespace(message, agent)
@@ -172,16 +150,10 @@ def execute_send_agent_message(agent: PersistentAgent, params: Dict[str, Any]) -
     try:
         peer_agent_uuid = UUID(str(peer_agent_id_raw))
     except ValueError:
-        return {
-            "status": "error",
-            "message": "peer_agent_id must be a valid UUID.",
-        }
+        return {"status": "error", "message": "peer_agent_id must be a valid UUID."}
 
     if peer_agent_uuid == agent.id:
-        return {
-            "status": "error",
-            "message": "Cannot send a peer message to the same agent.",
-        }
+        return {"status": "error", "message": "Cannot send a peer message to the same agent."}
 
     try:
         peer_agent = PersistentAgent.objects.get(id=peer_agent_uuid)
@@ -191,22 +163,16 @@ def execute_send_agent_message(agent: PersistentAgent, params: Dict[str, Any]) -
             agent.id,
             peer_agent_uuid,
         )
-        return {
-            "status": "error",
-            "message": "Target agent not found or inaccessible.",
-        }
+        return {"status": "error", "message": "Target agent not found or inaccessible."}
 
     try:
         resolved_attachments = resolve_filespace_attachments(agent, attachment_paths)
     except AttachmentResolutionError as exc:
-        return {
-            "status": "error",
-            "message": str(exc),
-        }
+        return {"status": "error", "message": str(exc)}
 
     if (
         not resolved_attachments
-        and not structured_peer_payload_has_content(structured_payload)
+        and not structured_payload
         and _is_acknowledgment_only_peer_reply(message)
     ):
         latest_inbound = (

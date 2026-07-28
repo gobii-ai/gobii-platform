@@ -4,11 +4,12 @@ from typing import Any, Mapping
 
 STRUCTURED_PEER_PAYLOAD_KEY = "structured_payload"
 STRUCTURED_PEER_PAYLOAD_MAX_BYTES = 64 * 1024
+PEER_DM_SOURCE = "agent_peer_dm"
 
 StructuredPeerPayload = dict[str, Any] | list[Any]
 
 
-def canonicalize_structured_peer_payload(payload: StructuredPeerPayload) -> str:
+def canonicalize_structured_peer_payload(payload: Any) -> str:
     return json.dumps(
         payload,
         ensure_ascii=False,
@@ -37,18 +38,8 @@ def validate_structured_peer_payload(value: Any) -> StructuredPeerPayload | None
     return value
 
 
-def structured_peer_payload_has_content(payload: StructuredPeerPayload | None) -> bool:
-    return bool(payload)
-
-
 def get_structured_peer_payload(raw_payload: Any) -> StructuredPeerPayload | None:
-    if not isinstance(raw_payload, Mapping):
+    if not isinstance(raw_payload, Mapping) or raw_payload.get("_source") != PEER_DM_SOURCE:
         return None
     payload = raw_payload.get(STRUCTURED_PEER_PAYLOAD_KEY)
-    if isinstance(payload, (dict, list)):
-        return payload
-    return None
-
-
-def format_structured_peer_payload(payload: StructuredPeerPayload) -> str:
-    return json.dumps(payload, ensure_ascii=False, allow_nan=False, indent=2, sort_keys=True)
+    return payload if isinstance(payload, (dict, list)) else None

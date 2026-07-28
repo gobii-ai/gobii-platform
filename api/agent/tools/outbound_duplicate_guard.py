@@ -346,15 +346,11 @@ def detect_recent_duplicate_message(
 
     if structured_payload is not _NO_STRUCTURED_PAYLOAD:
         previous_payload = get_structured_peer_payload(previous_message.raw_payload)
-        current_signature = canonicalize_structured_peer_payload({
-            "message": current_body,
-            "structured_payload": structured_payload,
-        })
-        previous_signature = canonicalize_structured_peer_payload({
-            "message": previous_body,
-            "structured_payload": previous_payload,
-        })
-        if previous_signature == current_signature:
+        if (
+            previous_body == current_body
+            and canonicalize_structured_peer_payload(previous_payload)
+            == canonicalize_structured_peer_payload(structured_payload)
+        ):
             return DuplicateDetectionResult(reason="exact", previous_message=previous_message)
         return None
 

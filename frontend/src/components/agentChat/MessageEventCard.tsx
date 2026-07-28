@@ -25,6 +25,22 @@ function getChannelLabel(raw?: string) {
   return CHANNEL_LABELS[normalized] || raw.replace(/_/g, ' ').replace(/^\w/, (c) => c.toUpperCase())
 }
 
+function JsonTree({ value }: { value: object }) {
+  return (
+    <ReactJsonView
+      src={value}
+      name={false}
+      collapsed={1}
+      displayDataTypes={false}
+      displayObjectSize={false}
+      enableClipboard={false}
+      iconStyle="triangle"
+      sortKeys
+      style={{ backgroundColor: 'transparent', fontSize: '0.8125rem', lineHeight: 1.5 }}
+    />
+  )
+}
+
 type MessageEventCardProps = {
   eventCursor: string
   agentId?: string | null
@@ -95,7 +111,6 @@ export const MessageEventCard = memo(function MessageEventCard({
   const hasPeerMetadata = Boolean(message.peerAgent || message.peerLinkId)
   const isPeer = Boolean(message.isPeer || hasPeerMetadata)
   const structuredPayload = isPeer ? message.structuredPayload : null
-  const hasStructuredPayload = structuredPayload !== null && structuredPayload !== undefined
 
   const selfName = message.selfAgentName || agentFirstName || 'Agent'
   const peerName = message.peerAgent?.name || 'Linked agent'
@@ -249,10 +264,9 @@ export const MessageEventCard = memo(function MessageEventCard({
     message.bodyText?.trim() || (clipboardHtml ? plainTextFromHtml(clipboardHtml) : '')
   ), [clipboardHtml, message.bodyText])
   const copyDisabled = !clipboardPlainText && !clipboardHtml
-  const hasRenderableMessageBody = Boolean(
-    message.bodyText?.trim() || message.bodyHtml?.trim() || message.replyTo,
+  const shouldRenderMessageContent = Boolean(
+    message.bodyText?.trim() || message.bodyHtml?.trim() || message.replyTo || !structuredPayload,
   )
-  const shouldRenderMessageContent = hasRenderableMessageBody || !hasStructuredPayload
 
   const handleCopyMessage = useCallback(async () => {
     if (copyDisabled) {
@@ -363,17 +377,7 @@ export const MessageEventCard = memo(function MessageEventCard({
         ) : null}
         {shouldRenderWebhookJson && webhookJsonSrc ? (
           <div className="chat-content overflow-hidden rounded-xl border border-slate-200/80 bg-white/80 p-3">
-            <ReactJsonView
-              src={webhookJsonSrc}
-              name={false}
-              collapsed={1}
-              displayDataTypes={false}
-              displayObjectSize={false}
-              enableClipboard={false}
-              iconStyle="triangle"
-              sortKeys
-              style={{ backgroundColor: 'transparent', fontSize: '0.8125rem', lineHeight: 1.5 }}
-            />
+            <JsonTree value={webhookJsonSrc} />
           </div>
         ) : shouldRenderMessageContent ? (
           <div
@@ -398,23 +402,13 @@ export const MessageEventCard = memo(function MessageEventCard({
             />
           </div>
         ) : null}
-        {hasStructuredPayload && structuredPayload ? (
+        {structuredPayload ? (
           <details className="chat-content mt-3 border-l-2 border-indigo-200 pl-3">
             <summary className="cursor-pointer select-none text-xs font-semibold text-indigo-700">
               Structured payload
             </summary>
             <div className="mt-2 overflow-auto">
-              <ReactJsonView
-                src={structuredPayload}
-                name={false}
-                collapsed={1}
-                displayDataTypes={false}
-                displayObjectSize={false}
-                enableClipboard={false}
-                iconStyle="triangle"
-                sortKeys
-                style={{ backgroundColor: 'transparent', fontSize: '0.8125rem', lineHeight: 1.5 }}
-              />
+              <JsonTree value={structuredPayload} />
             </div>
           </details>
         ) : null}

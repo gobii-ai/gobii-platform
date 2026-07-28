@@ -429,7 +429,7 @@ class PeerMessagingServiceTests(TestCase):
         )
 
         self.assertEqual(response["status"], "error")
-        self.assertIn("nonblank 'message'", response["message"])
+        self.assertIn("nonblank message", response["message"])
         self.assertEqual(PersistentAgentMessage.objects.count(), 0)
 
     def test_debounce_prevents_rapid_repeat(self):

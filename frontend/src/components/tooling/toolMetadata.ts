@@ -1081,13 +1081,10 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
       const peerId = coerceString(parameters?.['peer_agent_id'])
       const message = coerceString(parameters?.['message'])
       const structuredPayload = parameters?.['structured_payload']
-      const hasStructuredPayload = Array.isArray(structuredPayload)
-        ? structuredPayload.length > 0
-        : Boolean(structuredPayload && typeof structuredPayload === 'object' && Object.keys(structuredPayload).length > 0)
 
       const caption = message
         ? truncate(message, 56)
-        : hasStructuredPayload
+        : structuredPayload
           ? 'Structured payload'
           : peerId
             ? `Message to ${truncate(peerId, 42)}`
