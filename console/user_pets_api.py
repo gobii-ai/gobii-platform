@@ -62,6 +62,20 @@ BUILTIN_PETS = (
         "description": "A calico cat named Clementine.",
         "spritesheetUrl": "images/pets/clementine-v2.webp",
     },
+    {
+        "id": "builtin:riby",
+        "kind": "builtin",
+        "displayName": "Riby",
+        "description": "A German shepherd named Riby.",
+        "spritesheetUrl": "images/pets/riby-v2.webp",
+    },
+    {
+        "id": "builtin:chewie",
+        "kind": "builtin",
+        "displayName": "Chewie",
+        "description": "A Yorkshire terrier named Chewie.",
+        "spritesheetUrl": "images/pets/chewie-v2.webp",
+    },
 )
 
 
