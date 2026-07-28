@@ -10,8 +10,11 @@ from api.evals.registry import ScenarioRegistry
 from api.models import (
     AgentPeerLink,
     BrowserUseAgent,
+    CommsChannel,
     EvalRunTask,
     PersistentAgent,
+    PersistentAgentCommsEndpoint,
+    PersistentAgentConversation,
     PersistentAgentMessage,
     PersistentAgentStep,
     PersistentAgentSystemStep,
@@ -22,11 +25,15 @@ from api.models import (
 STRUCTURED_PEER_SINGLE_RECORD = "structured_peer_single_record"
 STRUCTURED_PEER_RECORD_BATCH = "structured_peer_record_batch"
 STRUCTURED_PEER_PLAIN_QUESTION = "structured_peer_plain_question"
+STRUCTURED_PEER_NEGATIVE_DECISION = "structured_peer_negative_decision"
+STRUCTURED_PEER_MIXED_DECISIONS = "structured_peer_mixed_decisions"
 STRUCTURED_PEER_HANDOFF_SUITE_SLUG = "structured_peer_handoffs"
 STRUCTURED_PEER_HANDOFF_SCENARIO_SLUGS = (
     STRUCTURED_PEER_SINGLE_RECORD,
     STRUCTURED_PEER_RECORD_BATCH,
     STRUCTURED_PEER_PLAIN_QUESTION,
+    STRUCTURED_PEER_NEGATIVE_DECISION,
+    STRUCTURED_PEER_MIXED_DECISIONS,
 )
 
 HANDOFF_CHARTER = (
@@ -316,3 +323,255 @@ class StructuredPeerHandoffScenario(EvalScenario, ScenarioExecutionTools):
 
 for case in STRUCTURED_PEER_HANDOFF_CASES:
     ScenarioRegistry.register(StructuredPeerHandoffScenario(case))
+
+
+@dataclass(frozen=True)
+class StructuredDecisionRoutingCase:
+    slug: str
+    description: str
+    records: tuple[dict[str, Any], ...]
+    expected_forward: dict[str, Any] | None = None
+
+
+STRUCTURED_DECISION_ROUTING_CASES = (
+    StructuredDecisionRoutingCase(
+        slug=STRUCTURED_PEER_NEGATIVE_DECISION,
+        description="A negative peer decision must not be promoted from an adjacent no-match field.",
+        records=(
+            {
+                "record_id": "prospect-17",
+                "decision": "unresolved",
+                "crm_match": "no_match",
+                "outbound_eligible": False,
+                "reason": "prior outreach still unknown",
+            },
+            {
+                "record_id": "prospect-29",
+                "decision": "blocked",
+                "crm_match": "prior_contact",
+                "outbound_eligible": False,
+                "reason": "existing relationship",
+            },
+        ),
+    ),
+    StructuredDecisionRoutingCase(
+        slug=STRUCTURED_PEER_MIXED_DECISIONS,
+        description="A mixed decision batch should forward only the exact eligible record.",
+        records=(
+            {
+                "record_id": "prospect-41",
+                "decision": "cleared",
+                "crm_match": "no_match",
+                "outbound_eligible": True,
+                "owner": "north",
+            },
+            {
+                "record_id": "prospect-52",
+                "decision": "unresolved",
+                "crm_match": "no_match",
+                "outbound_eligible": False,
+                "owner": None,
+            },
+        ),
+        expected_forward={
+            "record_id": "prospect-41",
+            "decision": "cleared",
+            "crm_match": "no_match",
+            "outbound_eligible": True,
+            "owner": "north",
+        },
+    ),
+)
+
+
+class StructuredDecisionRoutingScenario(EvalScenario, ScenarioExecutionTools):
+    tier = "core"
+    category = "structured_peer_handoffs"
+    expected_runtime = "short"
+    cost_class = "low"
+    owner = "agent-platform"
+    area = "agent_behavior"
+    tags = (
+        "agent_behavior",
+        "agent_teams",
+        "structured_handoffs",
+        "decision_integrity",
+        "real_harness",
+    )
+
+    def __init__(self, case: StructuredDecisionRoutingCase):
+        self.case = case
+        self.slug = case.slug
+        self.description = case.description
+        self.tasks = [
+            ScenarioTask(name="inject_decisions", assertion_type="agent_processing"),
+            ScenarioTask(name="verify_exact_routing", assertion_type="tool_call"),
+        ]
+
+    @staticmethod
+    def _create_peer(
+        agent: PersistentAgent,
+        run_id: str,
+        *,
+        role: str,
+        charter: str,
+    ) -> tuple[PersistentAgent, AgentPeerLink]:
+        username = f"{role}-{run_id}@eval.local"
+        user = get_user_model().objects.create_user(username=username, email=username)
+        peer = PersistentAgent.objects.create(
+            user=user,
+            organization=agent.organization,
+            name=f"{role.title()} Agent {str(run_id)[:8]}",
+            charter=charter,
+            browser_use_agent=BrowserUseAgent.objects.create(
+                user=user,
+                name=f"{role.title()} Eval {str(run_id)[:8]}",
+            ),
+            planning_state=PersistentAgent.PlanningState.SKIPPED,
+            is_active=False,
+        )
+        return peer, AgentPeerLink.objects.create(
+            agent_a=agent,
+            agent_b=peer,
+            created_by=agent.user,
+        )
+
+    def run(self, run_id: str, agent_id: str) -> None:
+        PersistentAgent.objects.filter(id=agent_id).update(
+            name=f"Routing Coordinator {str(agent_id)[:8]}",
+            charter=(
+                "Coordinate finalized prospect handoffs. Clearance Agent owns eligibility decisions. "
+                "Forward only records it marks outbound_eligible=true to Sales Agent, preserving the record exactly. "
+                "A CRM no-match is evidence, not clearance."
+            ),
+            planning_state=PersistentAgent.PlanningState.SKIPPED,
+            schedule="0 9 * * *",
+        )
+        StructuredPeerHandoffScenario._seed_prior_run(agent_id)
+        agent = PersistentAgent.objects.select_related("user", "organization").get(id=agent_id)
+        clearance, clearance_link = self._create_peer(
+            agent,
+            run_id,
+            role="clearance",
+            charter="Make final eligibility decisions and send exact decision records.",
+        )
+        sales, _ = self._create_peer(
+            agent,
+            run_id,
+            role="sales",
+            charter="Receive cleared prospect records and act on them.",
+        )
+        conversation = PersistentAgentConversation.objects.create(
+            channel=CommsChannel.OTHER,
+            address=f"peer://{clearance_link.pair_key}",
+            display_name=f"{agent.name} <-> {clearance.name}",
+            is_peer_dm=True,
+            peer_link=clearance_link,
+        )
+        from_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=clearance,
+            channel=CommsChannel.OTHER,
+            address=f"peer://agent/{clearance.id}",
+        )
+        PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=agent,
+            channel=CommsChannel.OTHER,
+            address=f"peer://agent/{agent.id}",
+        )
+        payload = {"kind": "clearance_decisions", "records": list(self.case.records)}
+        inbound = PersistentAgentMessage.objects.create(
+            owner_agent=agent,
+            peer_agent=clearance,
+            from_endpoint=from_endpoint,
+            conversation=conversation,
+            is_outbound=False,
+            body="Final clearance decisions for the current batch.",
+            raw_payload={
+                "_source": "agent_peer_dm",
+                "direction": "inbound",
+                "peer_link_id": str(clearance_link.id),
+                "structured_payload": payload,
+            },
+        )
+
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.RUNNING,
+            task_name="inject_decisions",
+        )
+        with self.wait_for_agent_idle(agent_id, timeout=120):
+            self.trigger_processing(
+                agent_id,
+                eval_run_id=run_id,
+                eval_stop_policy={
+                    "ignored_tool_names": ["sleep_until_next_trigger", "update_plan", "sqlite_batch"],
+                    "stop_on_tool_names_after_finish": ["send_agent_message"],
+                    "max_relevant_tool_calls": 3,
+                },
+            )
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED,
+            task_name="inject_decisions",
+            observed_summary="Structured peer decisions were processed through the real agent harness.",
+            artifacts={"message": inbound},
+        )
+
+        calls = StructuredPeerHandoffScenario._tool_calls(run_id, inbound.timestamp)
+        sales_calls = [
+            call
+            for call in calls
+            if str((call.tool_params or {}).get("peer_agent_id") or "") == str(sales.id)
+        ]
+        source_calls = [
+            call
+            for call in calls
+            if str((call.tool_params or {}).get("peer_agent_id") or "") == str(clearance.id)
+        ]
+        passed = not source_calls
+        if self.case.expected_forward is None:
+            passed = passed and not sales_calls
+            observed = (
+                "Negative decisions stayed negative and produced no downstream handoff."
+                if passed
+                else "A negative decision was acknowledged or promoted into a downstream handoff."
+            )
+        else:
+            forwarded_payload = (
+                (sales_calls[0].tool_params or {}).get("structured_payload")
+                if len(sales_calls) == 1
+                else None
+            )
+            passed = (
+                passed
+                and len(sales_calls) == 1
+                and StructuredPeerHandoffScenario._call_succeeded(sales_calls[0])
+                and StructuredPeerHandoffScenario._contains_record(
+                    forwarded_payload,
+                    self.case.expected_forward,
+                )
+                and all(
+                    record["record_id"] not in json.dumps(forwarded_payload)
+                    for record in self.case.records
+                    if record != self.case.expected_forward
+                )
+            )
+            observed = (
+                "Only the exact cleared record reached Sales Agent."
+                if passed
+                else "The mixed decision batch was dropped, broadened, or changed in routing."
+            )
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED if passed else EvalRunTask.Status.FAILED,
+            task_name="verify_exact_routing",
+            observed_summary=observed,
+            artifacts={"step": calls[0].step} if calls else {},
+        )
+
+
+for case in STRUCTURED_DECISION_ROUTING_CASES:
+    ScenarioRegistry.register(StructuredDecisionRoutingScenario(case))

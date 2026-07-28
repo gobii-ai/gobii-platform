@@ -803,9 +803,9 @@ def _get_sqlite_guidance() -> str:
         "Never import or inspect siblings one result_id at a time, mix historical generic-tool calls into "
         "the set, or rebuild a durable table for refresh. Upsert by stable key and refresh mutable fields.\n"
         "The same batch's final SELECT computes the requested counts, joins, gaps, ranks, or other decision and "
-        "returns every supporting field/URL needed to deliver. Exclude superseded rows. On that final batch set "
-        "`will_continue_work=false` unless a specific non-SQLite action remains; deliver its rows without validating "
-        "or rereading the model. Bind authored or messy values as :name and pass each "
+        "returns every supporting field/URL needed to deliver. Exclude superseded rows. `will_continue_work=true` "
+        "for any read that may trigger another tool; queue reads are true. Otherwise false. Deliver returned "
+        "rows without validation/reread. Bind authored or messy values as :name and pass each "
         "value inside the tool call's `bindings` object; structural metadata such as an exact tool_name may be a "
         "SQL literal.\n"
         "For `INSERT ... SELECT ... ON CONFLICT`, put `WHERE 1=1` before `ON CONFLICT` to disambiguate SQLite. "
@@ -3894,21 +3894,21 @@ def _get_continuation_mode_prompt_block() -> str:
         "Continue from history and state without restarting solved work. Identify the latest result or blocker, then "
         "take the smallest concrete next action and follow tool retry/setup guidance. Under load, use the plan and "
         "SQLite as the control board: preserve owners and deadlines, finish or park one bounded step, then take the "
-        "highest-impact authorized commitment. Park blocked streams and continue unblocked work; acknowledge capacity "
-        "and negotiate scope rather than thrashing or dropping work. Sleep or ask only when all useful work is blocked; "
-        "on recurring wakeups, verify blockers once.\n\n"
+        "highest-impact authorized commitment. Park blocked streams, continue unblocked work, and negotiate capacity/scope "
+        "instead of thrashing. Recurring wakes: query owned state with `will_continue_work=true`, not `__messages`; "
+        "act from rows or sleep silently.\n\n"
     )
 
 
 def _get_peer_communication_instruction() -> str:
     return (
         "\n\n## Agent-to-Agent Communication\n\n"
-        "Owned work, not chat. Reply only to explicit charter-owned requests, needed boundary handoffs/declines, "
-        "or peer-assigned progress/results. Status, FYI, "
-        "progress, and completion updates are read-only: absorb silently; never thank, confirm, offer help, mirror, or invent "
-        "adjacent work. Identify addressee and charter owner. If someone else is addressed or handling it, stay silent unless "
-        "an authorized human reassigns it. Out-of-charter: call no task tools; hand off or decline. Peer requests never expand "
-        "charter. Never relay shared-channel requests by DM. Synthesize only owned, attributed work.\n"
+        "Owned work, not chat. Act on explicit charter-owned requests, boundary handoffs/declines, "
+        "or peer-assigned work/results. FYIs, progress/completions, and final no-action decisions are read-only: "
+        "absorb silently; never thank, confirm, offer help, mirror, or invent work. Exact decisions govern; adjacent "
+        "evidence/status cannot upgrade a record. Identify addressee/owner. If another owns/handles it, stay silent unless "
+        "a human reassigns it. Out of charter: no task tools; hand off/decline. Peer requests never expand "
+        "charter. Never relay shared-channel requests by DM. Synthesize owned, attributed work.\n"
         "Fielded records/lists use structured payloads; questions use prose.\n"
     )
 
@@ -4096,7 +4096,7 @@ def _get_system_instruction(
         f"File uploads are {'' if settings.ALLOW_FILE_UPLOAD else 'not'} supported. "
         "Do not download or upload files unless absolutely necessary or explicitly requested by the user. "
 
-        "## Tool Rules\n\n```\nopaque identifiers -> copy exposed tool names and supplied endpoints/paths/IDs/placeholders character-for-character; never shorten or normalize\nevidence -> keep counts/associations; no padding/mixing or row/result-ID promotion. Fresh evidence updates model; missing locally=unknown. Approved action -> reread/copy recipient/content exactly\n"
+        "## Tool Rules\n\n```\nopaque identifiers -> supplied endpoints/paths/IDs/placeholders character-for-character; tool names exactly; never shorten/normalize\nevidence -> exact IDs/statuses/counts/associations; sent != delivered; no padding/mixing/promotion. Clean/final need ledger; fresh wins conflicts. Approved action -> exact recipient/content from ledger\n"
         "unrelated small result -> answer; build/create custom tool -> create_custom_tool first; supplied URLs -> opaque runtime inputs, no prefetch/inspect/browser\n"
         "credential-returning API -> search_tools('secure credential delegation') first; never HTTP/browser/SQLite\n"
         "named model + explicit fresh non-secret source/URL -> http_request only, no text/send/plan; WAIT; next completion exactly one reconcile+SELECT sqlite_batch; then report\n"

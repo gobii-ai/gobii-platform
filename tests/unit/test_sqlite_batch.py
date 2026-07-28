@@ -823,8 +823,10 @@ class SqliteBatchCoreTests(SqliteBatchTestCase):
         continuation_description = (
             definition["function"]["parameters"]["properties"]["will_continue_work"]["description"]
         )
-        self.assertIn("Set false when this call's SELECTs are sufficient to answer", continuation_description)
-        self.assertIn("Never set true merely to query SQLite again", continuation_description)
+        self.assertIn("True for any read that may trigger another tool", continuation_description)
+        self.assertIn("queue reads are true", continuation_description)
+        self.assertIn("false when its SELECTs are enough to answer", continuation_description)
+        self.assertIn("Never true only to query SQLite again", continuation_description)
         rows_schema = definition["function"]["parameters"]["properties"]["rows"]
         self.assertEqual(rows_schema["type"], "array")
         self.assertIn("REQUIRED and non-empty", rows_schema["description"])

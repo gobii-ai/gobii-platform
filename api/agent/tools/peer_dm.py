@@ -78,9 +78,9 @@ def get_send_agent_message_tool() -> Dict[str, Any]:
         "function": {
             "name": "send_agent_message",
             "description": (
-                "Send only a necessary charter-boundary handoff, a requested owned contribution, or substantive progress "
-                "on work the peer asked this agent to own. Status, FYI, progress, and completion updates are read-only: "
-                "never thank, confirm, offer help, or reply. Never relay a shared-channel request to people already there. "
+                "Send only a necessary charter-boundary handoff, requested owned contribution, or substantive progress "
+                "on peer-assigned work. FYIs, progress/completions, and final no-action decisions are read-only: never thank, "
+                "confirm, offer help, or reply. Exact decisions govern; adjacent evidence/status cannot upgrade a record. Never relay a shared-channel request to people already there. "
                 "When transmitting a record, two or more named fields, a list of records, identifiers, statuses, or other "
                 "machine-consumed data, put the exact data in structured_payload; message may add prose context but must "
                 "not be its only carrier. Use message alone for an ordinary prose question or explanation. "
