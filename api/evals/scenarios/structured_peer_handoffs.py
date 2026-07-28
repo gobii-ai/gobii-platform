@@ -4,6 +4,7 @@ from typing import Any
 
 from django.contrib.auth import get_user_model
 
+from api.agent.tools.tool_manager import mark_tool_enabled_without_discovery
 from api.evals.base import EvalScenario, ScenarioTask
 from api.evals.execution import ScenarioExecutionTools
 from api.evals.registry import ScenarioRegistry
@@ -25,6 +26,7 @@ from api.models import (
 STRUCTURED_PEER_SINGLE_RECORD = "structured_peer_single_record"
 STRUCTURED_PEER_RECORD_BATCH = "structured_peer_record_batch"
 STRUCTURED_PEER_PLAIN_QUESTION = "structured_peer_plain_question"
+STRUCTURED_PEER_FILE_HANDOFF = "structured_peer_file_handoff"
 STRUCTURED_PEER_NEGATIVE_DECISION = "structured_peer_negative_decision"
 STRUCTURED_PEER_MIXED_DECISIONS = "structured_peer_mixed_decisions"
 STRUCTURED_PEER_HANDOFF_SUITE_SLUG = "structured_peer_handoffs"
@@ -32,6 +34,7 @@ STRUCTURED_PEER_HANDOFF_SCENARIO_SLUGS = (
     STRUCTURED_PEER_SINGLE_RECORD,
     STRUCTURED_PEER_RECORD_BATCH,
     STRUCTURED_PEER_PLAIN_QUESTION,
+    STRUCTURED_PEER_FILE_HANDOFF,
     STRUCTURED_PEER_NEGATIVE_DECISION,
     STRUCTURED_PEER_MIXED_DECISIONS,
 )
@@ -49,6 +52,7 @@ class StructuredPeerHandoffCase:
     prompt: str
     expected_record: dict[str, Any] | None = None
     expected_records: tuple[dict[str, Any], ...] = ()
+    expects_attachment: bool = False
 
 
 STRUCTURED_PEER_HANDOFF_CASES = (
@@ -100,6 +104,16 @@ STRUCTURED_PEER_HANDOFF_CASES = (
             "and have them reply when they know."
         ),
     ),
+    StructuredPeerHandoffCase(
+        slug=STRUCTURED_PEER_FILE_HANDOFF,
+        description="A generated file reaches the explicitly named peer on the first send attempt.",
+        prompt=(
+            "Prepare a plain-text handoff note for Ledger Agent with release Northstar, 18 records, "
+            "status ready_for_review, and no blockers. Save it as /exports/northstar-handoff.txt, "
+            "then deliver that file to Ledger Agent."
+        ),
+        expects_attachment=True,
+    ),
 )
 
 
@@ -134,6 +148,35 @@ class StructuredPeerHandoffScenario(EvalScenario, ScenarioExecutionTools):
             code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
         )
 
+    @staticmethod
+    def _create_linked_peer(
+        agent: PersistentAgent,
+        run_id: str,
+        *,
+        role: str,
+        charter: str,
+    ) -> PersistentAgent:
+        slug = role.lower().replace(" ", "-")
+        peer_username = f"structured-{slug}-{run_id}@eval.local"
+        peer_user = get_user_model().objects.create_user(
+            username=peer_username,
+            email=peer_username,
+        )
+        peer = PersistentAgent.objects.create(
+            user=peer_user,
+            organization=agent.organization,
+            name=f"{role} {str(run_id)[:8]}",
+            charter=charter,
+            browser_use_agent=BrowserUseAgent.objects.create(
+                user=peer_user,
+                name=f"Structured {role} Eval {str(run_id)[:8]}",
+            ),
+            planning_state=PersistentAgent.PlanningState.SKIPPED,
+            is_active=False,
+        )
+        AgentPeerLink.objects.create(agent_a=agent, agent_b=peer, created_by=agent.user)
+        return peer
+
     def _prepare_agents(self, agent_id: str, run_id: str) -> tuple[PersistentAgent, PersistentAgent]:
         PersistentAgent.objects.filter(id=agent_id).update(
             name=f"Handoff Coordinator {str(agent_id)[:8]}",
@@ -143,25 +186,20 @@ class StructuredPeerHandoffScenario(EvalScenario, ScenarioExecutionTools):
         )
         self._seed_prior_run(agent_id)
         agent = PersistentAgent.objects.select_related("user", "organization").get(id=agent_id)
-
-        peer_username = f"structured-ledger-{run_id}@eval.local"
-        peer_user = get_user_model().objects.create_user(
-            username=peer_username,
-            email=peer_username,
-        )
-        peer = PersistentAgent.objects.create(
-            user=peer_user,
-            organization=agent.organization,
-            name=f"Ledger Agent {str(run_id)[:8]}",
+        peer = self._create_linked_peer(
+            agent,
+            run_id,
+            role="Ledger Agent",
             charter="Maintain finalized operational records and answer reconciliation questions.",
-            browser_use_agent=BrowserUseAgent.objects.create(
-                user=peer_user,
-                name=f"Structured Ledger Eval {str(run_id)[:8]}",
-            ),
-            planning_state=PersistentAgent.PlanningState.SKIPPED,
-            is_active=False,
         )
-        AgentPeerLink.objects.create(agent_a=agent, agent_b=peer, created_by=agent.user)
+        if self.case.expects_attachment:
+            self._create_linked_peer(
+                agent,
+                run_id,
+                role="Archive Agent",
+                charter="Maintain long-term archival records when explicitly assigned.",
+            )
+            mark_tool_enabled_without_discovery(agent, "create_file")
         return agent, peer
 
     @staticmethod
@@ -232,7 +270,7 @@ class StructuredPeerHandoffScenario(EvalScenario, ScenarioExecutionTools):
                 eval_stop_policy={
                     "ignored_tool_names": ["sleep_until_next_trigger", "update_plan", "sqlite_batch"],
                     "stop_on_tool_names_after_finish": ["send_agent_message"],
-                    "max_relevant_tool_calls": 2,
+                    "max_relevant_tool_calls": 4 if self.case.expects_attachment else 2,
                 },
             )
         self.record_task_result(
@@ -277,7 +315,24 @@ class StructuredPeerHandoffScenario(EvalScenario, ScenarioExecutionTools):
             received_payload = (received[0].raw_payload or {}).get("structured_payload")
             payloads_match = tool_payload == outbound_payload == received_payload
 
-            if self.case.expected_record is not None:
+            if self.case.expects_attachment:
+                attachment_paths = params.get("attachments") or []
+                outbound_attachments = list(outbound[0].attachments.all())
+                received_attachments = list(received[0].attachments.all())
+                passed = (
+                    tool_payload is None
+                    and len(attachment_paths) == 1
+                    and len(outbound_attachments) == 1
+                    and len(received_attachments) == 1
+                    and outbound_attachments[0].filespace_node.path == "/exports/northstar-handoff.txt"
+                    and received_attachments[0].filename == "northstar-handoff.txt"
+                )
+                observed = (
+                    "The generated file reached the named peer on the first send attempt."
+                    if passed
+                    else "The file send failed, targeted another peer, or lost the attachment."
+                )
+            elif self.case.expected_record is not None:
                 passed = (
                     payloads_match
                     and self._contains_record(tool_payload, self.case.expected_record)

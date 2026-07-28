@@ -9,6 +9,7 @@ from api.agent.tools.email_sender import get_send_email_tool
 from api.agent.tools.peer_dm import get_send_agent_message_tool
 from api.agent.tools.send_discord_message import get_send_discord_message_tool
 from api.agent.tools.sms_sender import get_send_sms_tool
+from api.agent.tools.tool_manager import should_skip_auto_substitution
 from api.agent.tools.web_chat_sender import get_send_chat_tool
 from api.agent.core.prompt_context import _get_formatting_guidance
 
@@ -68,6 +69,18 @@ class AttachmentGuidanceTests(SimpleTestCase):
         self.assertIn("<img src='cid:filename'>", html_description)
         self.assertIn("exact file-tool `attach` value", description)
         self.assertIn("body text never attaches files", description)
+
+    def test_attachment_send_tools_preserve_opaque_file_tokens_for_their_resolvers(self):
+        for tool_name in (
+            "send_email",
+            "send_sms",
+            "send_chat_message",
+            "send_mcp_message",
+            "send_agent_message",
+            "send_discord_message",
+        ):
+            with self.subTest(tool_name=tool_name):
+                self.assertTrue(should_skip_auto_substitution(tool_name))
 
     def test_report_message_guidance_names_visual_quality_without_eval_prompting(self):
         email_tool = get_send_email_tool()
