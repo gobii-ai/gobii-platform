@@ -1635,7 +1635,7 @@ export function AgentChatLayout({
                 ) : null}
               </div>
             </div>
-          ) : !agentIsActive ? (
+          ) : !agentIsActive && !onSendSystemMessage ? (
             <div ref={composerShellRef} className="composer-shell">
               <PausedAgentPanel
                 canReactivate={canReactivateAgent}

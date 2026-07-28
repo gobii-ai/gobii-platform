@@ -23,6 +23,7 @@ from api.agent.files.filespace_service import write_bytes_to_dir
 from api.models import (
     BrowserUseAgent,
     CommsChannel,
+    DeliveryStatus,
     PersistentAgent,
     PersistentAgentCommsEndpoint,
     PersistentAgentDiscordChannelSubscription,
@@ -560,6 +561,13 @@ class NativeDiscordBotTests(TestCase):
     @tag("batch_agent_webhooks")
     @patch("api.services.discord_bot.send_channel_message")
     def test_inactive_discord_notice_is_friendly_and_deduplicated(self, send_message_mock):
+        guild = self._guild()
+        PersistentAgentDiscordChannelSubscription.objects.create(
+            agent=self.agent,
+            guild=guild,
+            channel_id="10",
+            channel_name="general",
+        )
         self.agent.is_active = False
         self.agent.save(update_fields=["is_active"])
 
@@ -576,22 +584,11 @@ class NativeDiscordBotTests(TestCase):
             send_message_mock.call_args.kwargs["body"],
         )
 
-        endpoint = PersistentAgentCommsEndpoint.objects.create(
+        notice = PersistentAgentMessage.objects.get(
             owner_agent=self.agent,
-            channel=CommsChannel.DISCORD,
-            address=f"discord:agent:{self.agent.id}",
+            raw_payload__kind="agent_inactive_auto_reply",
         )
-        PersistentAgentMessage.objects.create(
-            owner_agent=self.agent,
-            from_endpoint=endpoint,
-            is_outbound=True,
-            body="Already sent",
-            raw_payload={
-                "kind": "agent_inactive_auto_reply",
-                "inactive_recipient_key": "300",
-                "inactive_channel": CommsChannel.DISCORD,
-            },
-        )
+        self.assertEqual(notice.latest_status, DeliveryStatus.QUEUED)
         send_message_mock.reset_mock()
 
         sent_again = send_inactive_discord_auto_reply(
@@ -602,6 +599,40 @@ class NativeDiscordBotTests(TestCase):
 
         self.assertFalse(sent_again)
         send_message_mock.assert_not_called()
+
+    @tag("batch_agent_webhooks")
+    @patch.dict(os.environ, {"GOBII_ENCRYPTION_KEY": "native-discord-tests"}, clear=False)
+    @patch("api.services.discord_bot.requests.get")
+    @patch("api.services.discord_bot.requests.post")
+    def test_inactive_discord_notice_delivers_reserved_message(self, post_mock, get_mock):
+        get_mock.return_value = _response([{"id": "10", "name": "general", "type": 0}])
+        guild = self._guild()
+        PersistentAgentDiscordChannelSubscription.objects.create(
+            agent=self.agent,
+            guild=guild,
+            channel_id="10",
+            channel_name="general",
+        )
+        post_mock.side_effect = [
+            _response({"id": "wh1", "token": "token1", "name": "Gobii"}),
+            _response({"id": "discord-message-1", "channel_id": "10"}),
+        ]
+        self.agent.is_active = False
+        self.agent.save(update_fields=["is_active"])
+
+        sent = send_inactive_discord_auto_reply(
+            self.agent,
+            channel_id="10",
+            recipient_key="300",
+        )
+
+        self.assertTrue(sent)
+        notice = PersistentAgentMessage.objects.get(
+            owner_agent=self.agent,
+            raw_payload__kind="agent_inactive_auto_reply",
+        )
+        self.assertEqual(notice.latest_status, DeliveryStatus.SENT)
+        self.assertEqual(notice.raw_payload["discord_message_id"], "discord-message-1")
 
     @tag("batch_agent_webhooks")
     @patch("api.agent.core.prompt_context.ensure_steps_compacted")

@@ -4042,6 +4042,7 @@ class AgentActivateAPIView(LoginRequiredMixin, View):
             }
         )
 
+
 @method_decorator(csrf_exempt, name="dispatch")
 class AgentPlanningSkipAPIView(LoginRequiredMixin, View):
     http_method_names = ["post"]

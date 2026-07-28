@@ -410,6 +410,17 @@ describe('AgentChatLayout upgrade modal gating', () => {
     expect(screen.queryByTestId('agent-composer')).not.toBeInTheDocument()
   })
 
+  it('keeps the staff system-message composer available for a paused agent', () => {
+    renderAgentChatLayout({
+      agentIsActive: false,
+      normalSendDisabledReason: 'This agent is paused.',
+      onSendSystemMessage: vi.fn(),
+    })
+
+    expect(screen.getByTestId('agent-composer')).toBeInTheDocument()
+    expect(screen.queryByText('This agent is paused')).not.toBeInTheDocument()
+  })
+
   it('restores the composer and confirms successful reactivation', () => {
     renderAgentChatLayout({
       agentIsActive: true,

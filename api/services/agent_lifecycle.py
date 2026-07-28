@@ -2,6 +2,7 @@ import logging
 from typing import Callable, Dict, List, Optional, Set, Tuple
 
 from django.db import transaction
+from django.http import Http404
 from django.utils import timezone
 
 from api.models import PersistentAgent
@@ -148,7 +149,10 @@ def build_agent_inactive_payload(agent: PersistentAgent) -> dict[str, str]:
 
 def activate_agent(agent: PersistentAgent) -> tuple[PersistentAgent, bool]:
     with transaction.atomic():
-        locked = PersistentAgent.objects.alive().select_for_update().get(pk=agent.pk)
+        try:
+            locked = PersistentAgent.objects.alive().select_for_update().get(pk=agent.pk)
+        except PersistentAgent.DoesNotExist as exc:
+            raise Http404("Agent not found.") from exc
         update_fields: list[str] = []
 
         if not locked.is_active:

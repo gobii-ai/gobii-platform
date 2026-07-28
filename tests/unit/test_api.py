@@ -29,9 +29,11 @@ from api.serializers import BrowserUseAgentTaskSerializer
 from django.utils import timezone
 from datetime import timedelta
 from django.core.exceptions import ValidationError
+from django.http import Http404
 from waffle.models import Switch
 
 from console.forms import ApiKeyForm
+from api.services.agent_lifecycle import activate_agent
 from util.trial_enforcement import PERSONAL_FREE_TRIAL_ENFORCEMENT_WAFFLE_SWITCH
 
 
@@ -1421,6 +1423,15 @@ class PersistentAgentActivationTests(APITestCase):
         response = self.client.post(url)
 
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_activation_rejects_agent_soft_deleted_after_resolution(self):
+        PersistentAgent.objects.filter(pk=self.agent.pk).update(
+            is_deleted=True,
+            deleted_at=timezone.now(),
+        )
+
+        with self.assertRaises(Http404):
+            activate_agent(self.agent)
 
 
 @tag("batch_api_agents")

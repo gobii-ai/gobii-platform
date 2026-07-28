@@ -141,6 +141,7 @@ def create_discord_outbound_message(
     platform_channel_address: str = "",
     channel_name: str = "",
     raw_payload: Mapping[str, object] | None = None,
+    latest_status: str = DeliveryStatus.SENT,
 ) -> PersistentAgentMessage:
     conversation = get_or_create_discord_conversation(
         agent,
@@ -168,8 +169,8 @@ def create_discord_outbound_message(
         is_outbound=True,
         body=body,
         raw_payload=payload,
-        latest_status=DeliveryStatus.SENT,
-        latest_sent_at=now,
+        latest_status=latest_status,
+        latest_sent_at=now if latest_status == DeliveryStatus.SENT else None,
     )
 
 

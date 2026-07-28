@@ -6,7 +6,7 @@ from django.utils import timezone
 
 from api.models import CommsChannel, DeliveryStatus, PersistentAgent, PersistentAgentCommsEndpoint, PersistentAgentMessage
 from api.services.agent_lifecycle import build_agent_reactivation_url
-from api.services.channel_auto_replies import send_channel_auto_reply
+from api.services.channel_auto_replies import prepare_channel_auto_reply
 
 INACTIVE_AUTO_REPLY_KIND = "agent_inactive_auto_reply"
 INACTIVE_BLOCKED_INPUT_KIND = "agent_inactive_blocked_input"
@@ -40,8 +40,9 @@ def send_inactive_notice_once(
     *,
     channel: str,
     recipient_key: str,
-    send: Callable[[dict[str, str]], bool],
+    prepare: Callable[[dict[str, str]], Callable[[], bool] | None],
 ) -> bool:
+    """Persist a dedupe claim under the agent lock, then deliver without holding it."""
     with transaction.atomic():
         locked = PersistentAgent.objects.alive().select_for_update().filter(pk=agent.pk).first()
         if locked is None or locked.is_active:
@@ -56,12 +57,13 @@ def send_inactive_notice_once(
             timestamp__gte=timezone.now() - INACTIVE_AUTO_REPLY_COOLDOWN,
         ).exists():
             return False
-        return send(
+        deliver = prepare(
             {
                 "inactive_recipient_key": recipient_key,
                 "inactive_channel": channel,
             }
         )
+    return deliver() if deliver is not None else False
 
 
 def send_inactive_agent_auto_reply(
@@ -81,7 +83,7 @@ def send_inactive_agent_auto_reply(
         agent,
         channel=channel,
         recipient_key=recipient_key,
-        send=lambda metadata: send_channel_auto_reply(
+        prepare=lambda metadata: prepare_channel_auto_reply(
             agent,
             recipient_endpoint,
             kind=INACTIVE_AUTO_REPLY_KIND,

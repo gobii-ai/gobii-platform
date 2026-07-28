@@ -1,4 +1,5 @@
 import logging
+from typing import Callable
 
 from django.template.loader import render_to_string
 
@@ -8,7 +9,7 @@ from api.models import CommsChannel, DeliveryStatus, PersistentAgentMessage
 logger = logging.getLogger(__name__)
 
 
-def send_channel_auto_reply(
+def prepare_channel_auto_reply(
     agent,
     recipient_endpoint,
     *,
@@ -18,7 +19,7 @@ def send_channel_auto_reply(
     email_context: dict,
     sms_body: str,
     metadata: dict | None = None,
-) -> bool:
+) -> Callable[[], bool] | None:
     channel = str(recipient_endpoint.channel or "").strip().lower()
     payload = {"kind": kind, **(metadata or {})}
 
@@ -60,5 +61,18 @@ def send_channel_auto_reply(
         body=body,
         raw_payload=payload,
     )
-    deliver(message)
-    return message.latest_status != DeliveryStatus.FAILED
+
+    def deliver_message() -> bool:
+        deliver(message)
+        return message.latest_status != DeliveryStatus.FAILED
+
+    return deliver_message
+
+
+def send_channel_auto_reply(
+    agent,
+    recipient_endpoint,
+    **kwargs,
+) -> bool:
+    deliver = prepare_channel_auto_reply(agent, recipient_endpoint, **kwargs)
+    return deliver() if deliver is not None else False

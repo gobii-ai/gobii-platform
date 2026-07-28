@@ -8,7 +8,7 @@ import secrets
 from contextlib import ExitStack
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import Any, Iterable, Mapping
+from typing import Any, Callable, Iterable, Mapping
 from urllib.parse import quote, urlencode
 
 import requests
@@ -22,6 +22,7 @@ from api.agent.comms.adapters import ParsedMessage
 from api.agent.comms.message_service import ingest_inbound_message
 from api.models import (
     CommsChannel,
+    DeliveryStatus,
     PersistentAgent,
     PersistentAgentConversation,
     PersistentAgentDiscordChannelSubscription,
@@ -1087,6 +1088,7 @@ def send_channel_message(
     body: str,
     attachments: Iterable[ResolvedAttachment] | None = None,
     metadata: Mapping[str, object] | None = None,
+    persisted_message: PersistentAgentMessage | None = None,
 ) -> PersistentAgentMessage:
     resolved_attachments = list(attachments or [])
     body = normalize_discord_markdown(decode_unicode_character_escapes(body))
@@ -1183,6 +1185,49 @@ def send_channel_message(
         "discord_response": response_payload if isinstance(response_payload, Mapping) else {},
         **dict(metadata or {}),
     }
+    if persisted_message is None:
+        message = create_discord_outbound_message(
+            agent,
+            channel_id=subscription.channel_id,
+            body=body,
+            conversation_address=discord_conversation_address(agent.id, subscription.guild.guild_id, subscription.channel_id),
+            platform_channel_address=discord_channel_address(subscription.guild.guild_id, subscription.channel_id),
+            channel_name=subscription.channel_name,
+            raw_payload=raw_payload,
+        )
+    else:
+        message = persisted_message
+        message.body = body
+        message.raw_payload = raw_payload
+        message.latest_status = DeliveryStatus.SENT
+        message.latest_sent_at = timezone.now()
+        message.latest_error_message = ""
+        message.save(
+            update_fields=[
+                "body",
+                "raw_payload",
+                "latest_status",
+                "latest_sent_at",
+                "latest_error_message",
+            ]
+        )
+    if resolved_attachments:
+        create_message_attachments(message, resolved_attachments)
+        broadcast_message_attachment_update(str(message.id))
+    return message
+
+
+def _prepare_inactive_discord_auto_reply(
+    agent: PersistentAgent,
+    *,
+    channel_id: str,
+    metadata: Mapping[str, object],
+) -> Callable[[], bool]:
+    subscription = (
+        PersistentAgentDiscordChannelSubscription.objects.select_related("guild")
+        .get(agent=agent, channel_id=channel_id, status=PersistentAgentDiscordChannelSubscription.Status.ACTIVE)
+    )
+    body = inactive_auto_reply_body(agent)
     message = create_discord_outbound_message(
         agent,
         channel_id=subscription.channel_id,
@@ -1190,12 +1235,31 @@ def send_channel_message(
         conversation_address=discord_conversation_address(agent.id, subscription.guild.guild_id, subscription.channel_id),
         platform_channel_address=discord_channel_address(subscription.guild.guild_id, subscription.channel_id),
         channel_name=subscription.channel_name,
-        raw_payload=raw_payload,
+        raw_payload={"kind": INACTIVE_AUTO_REPLY_KIND, **dict(metadata)},
+        latest_status=DeliveryStatus.QUEUED,
     )
-    if resolved_attachments:
-        create_message_attachments(message, resolved_attachments)
-        broadcast_message_attachment_update(str(message.id))
-    return message
+
+    def deliver() -> bool:
+        try:
+            send_channel_message(
+                agent,
+                channel_id=channel_id,
+                body=body,
+                metadata={"kind": INACTIVE_AUTO_REPLY_KIND, **dict(metadata)},
+                persisted_message=message,
+            )
+        except (
+            DiscordBotIntegrationError,
+            PersistentAgentDiscordChannelSubscription.DoesNotExist,
+            requests.RequestException,
+        ) as exc:
+            message.latest_status = DeliveryStatus.FAILED
+            message.latest_error_message = str(exc)
+            message.save(update_fields=["latest_status", "latest_error_message"])
+            raise
+        return True
+
+    return deliver
 
 
 def send_inactive_discord_auto_reply(
@@ -1209,12 +1273,9 @@ def send_inactive_discord_auto_reply(
         agent,
         channel=CommsChannel.DISCORD,
         recipient_key=normalized_recipient_key,
-        send=lambda metadata: bool(
-            send_channel_message(
-                agent,
-                channel_id=channel_id,
-                body=inactive_auto_reply_body(agent),
-                metadata={"kind": INACTIVE_AUTO_REPLY_KIND, **metadata},
-            )
+        prepare=lambda metadata: _prepare_inactive_discord_auto_reply(
+            agent,
+            channel_id=channel_id,
+            metadata=metadata,
         ),
     )

@@ -559,15 +559,9 @@ def ingest_inbound_message(
             )
             message_persisted_at = monotonic()
             persist_span.set_attribute("message.id", str(message.id))
-        blocked_while_inactive = bool(
-            agent_id
-            and PersistentAgent.objects.alive().filter(id=agent_id, is_active=False).exists()
-        )
-        if blocked_while_inactive:
-            mark_inbound_message_blocked_while_inactive(message)
         if channel_val in {CommsChannel.WEB, CommsChannel.EMAIL, CommsChannel.SMS}:
-            agent_obj = PersistentAgent.objects.filter(id=message.owner_agent_id).first()
-            read_user = resolve_inbound_read_user(agent_obj, channel_val, parsed.sender)
+            read_agent = PersistentAgent.objects.filter(id=message.owner_agent_id).first()
+            read_user = resolve_inbound_read_user(read_agent, channel_val, parsed.sender)
             if read_user is not None:
                 mark_latest_visible_outbound_message_read_before(
                     agent_id=message.owner_agent_id,
@@ -576,17 +570,6 @@ def ingest_inbound_message(
                     conversation_id=message.conversation_id,
                     recipient_endpoint_id=message.from_endpoint_id,
                     source=READ_SOURCE_INBOUND_REPLY,
-                )
-
-        if not blocked_while_inactive:
-            try:
-                from api.agent.comms.human_input_requests import resolve_human_input_request_for_message
-
-                resolve_human_input_request_for_message(message)
-            except (DatabaseError, ValidationError, ValueError):
-                logging.exception(
-                    "Failed resolving human input request for inbound message %s",
-                    getattr(message, "id", None),
                 )
 
         with traced("AGENT MSG Save Attachments") as attachment_span:
@@ -599,37 +582,37 @@ def ingest_inbound_message(
             # Update last interaction timestamp and reactivate if needed
             agent_obj: PersistentAgent | None = None
             try:
-                with transaction.atomic():
-                    agent_locked: PersistentAgent = (
-                        PersistentAgent.objects.alive().select_for_update()
-                        .select_related("user")
-                        .get(id=owner_id)
-                    )
-                    # Update last interaction
-                    agent_locked.last_interaction_at = timezone.now()
-                    updates = ["last_interaction_at"]
-                    # Reactivate if expired: restore schedule from snapshot if needed
-                    if (
-                        agent_locked.life_state == PersistentAgent.LifeState.EXPIRED
-                        and agent_locked.is_active
-                    ):
-                        if agent_locked.schedule_snapshot:
-                            agent_locked.schedule = agent_locked.schedule_snapshot
-                            updates.append("schedule")
-                        agent_locked.life_state = PersistentAgent.LifeState.ACTIVE
-                        updates.append("life_state")
-                        # Save; model will sync beat on commit due to schedule change
-                        agent_locked.save(update_fields=updates)
-                    else:
-                        agent_locked.save(update_fields=updates)
-                    agent_obj = agent_locked
+                agent_obj = PersistentAgent.objects.alive().select_for_update().get(id=owner_id)
+                agent_obj.last_interaction_at = timezone.now()
+                updates = ["last_interaction_at"]
+                if (
+                    agent_obj.life_state == PersistentAgent.LifeState.EXPIRED
+                    and agent_obj.is_active
+                ):
+                    if agent_obj.schedule_snapshot:
+                        agent_obj.schedule = agent_obj.schedule_snapshot
+                        updates.append("schedule")
+                    agent_obj.life_state = PersistentAgent.LifeState.ACTIVE
+                    updates.append("life_state")
+                agent_obj.save(update_fields=updates)
             except PersistentAgent.DoesNotExist:
                 agent_obj = None
             except Exception:
                 logging.exception("Failed updating last interaction for agent %s", owner_id, exc_info=True)
 
-            if agent_obj is None:
-                agent_obj = PersistentAgent.objects.alive().filter(id=owner_id).select_related("user").first()
+            blocked_while_inactive = bool(agent_obj is not None and not agent_obj.is_active)
+            if blocked_while_inactive:
+                mark_inbound_message_blocked_while_inactive(message)
+            else:
+                try:
+                    from api.agent.comms.human_input_requests import resolve_human_input_request_for_message
+
+                    resolve_human_input_request_for_message(message)
+                except (DatabaseError, ValidationError, ValueError):
+                    logging.exception(
+                        "Failed resolving human input request for inbound message %s",
+                        getattr(message, "id", None),
+                    )
 
             if (
                 agent_obj is not None
@@ -666,8 +649,6 @@ def ingest_inbound_message(
             if agent_obj is not None and not agent_obj.is_active:
                 should_skip_processing = True
                 processing_blocked_reason = "agent_inactive"
-                if not blocked_while_inactive:
-                    mark_inbound_message_blocked_while_inactive(message)
                 if (
                     channel_val in {CommsChannel.EMAIL, CommsChannel.SMS}
                     and parsed.sender
