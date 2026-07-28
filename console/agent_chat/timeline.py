@@ -221,11 +221,44 @@ def _message_body_html(message: PersistentAgentMessage, channel: str | None, att
     )
 
 
+def _inbound_email_header(message: PersistentAgentMessage, name: str) -> str | None:
+    """Read an address header from an inbound email's provider payload.
+
+    Inbound payloads are stored verbatim: Postmark capitalises keys ("To", "Cc"),
+    Mailgun uses lowercase (plus "recipient"), and IMAP nests them in a headers map.
+    """
+    payload = message.raw_payload if isinstance(message.raw_payload, dict) else {}
+    wanted = {name.lower()}
+    if name.lower() == "to":
+        wanted.add("recipient")
+    for key, value in payload.items():
+        if isinstance(key, str) and key.lower() in wanted and isinstance(value, str) and value.strip():
+            return value.strip()
+    headers = payload.get("headers")
+    if isinstance(headers, dict):
+        for key, value in headers.items():
+            if isinstance(key, str) and key.lower() == name.lower() and isinstance(value, str) and value.strip():
+                return value.strip()
+    return None
+
+
 def _message_subject(message: PersistentAgentMessage, channel: str | None) -> str | None:
     if not channel or channel.lower() != "email":
         return None
     payload = message.raw_payload if isinstance(message.raw_payload, dict) else {}
+    # Outbound writes lowercase "subject"; inbound payloads are stored verbatim from the
+    # provider — Postmark uses "Subject" and IMAP only has headers["Subject"] — so a
+    # lowercase-only read silently dropped inbound subjects for those providers (#495).
     subject = payload.get("subject")
+    if not isinstance(subject, str):
+        subject = payload.get("Subject")
+    if not isinstance(subject, str):
+        headers = payload.get("headers")
+        if isinstance(headers, dict):
+            for key, value in headers.items():
+                if isinstance(key, str) and key.lower() == "subject" and isinstance(value, str):
+                    subject = value
+                    break
     if not isinstance(subject, str):
         return None
     return subject.strip() or None
@@ -551,23 +584,30 @@ def _serialize_message(
     recipient_address: str | None = None
     recipient_name: str | None = None
     cc_addresses: list[str] = []
-    if message.is_outbound and channel.lower() == CommsChannel.EMAIL:
-        # The message's own to_endpoint records who this email actually went to; the conversation
-        # only records the thread's original counterparty. When they diverge the card must follow
-        # the message — labelling the send with the thread's counterparty misattributes it, and
-        # the thread's display name must never be attached to a different address (bug #419).
+    if channel.lower() == CommsChannel.EMAIL:
         to_endpoint_address = (
             (message.to_endpoint.address or "").strip()
             if message.to_endpoint_id and message.to_endpoint.channel == CommsChannel.EMAIL
             else ""
         )
-        conversation_address = ((conversation.address or "").strip() if conversation else "")
-        recipient_address = to_endpoint_address or conversation_address or None
-        if recipient_address and (
-            not to_endpoint_address
-            or to_endpoint_address.lower() == conversation_address.lower()
-        ):
-            recipient_name = ((conversation.display_name or "").strip() if conversation else "") or None
+        if message.is_outbound:
+            # The message's own to_endpoint records who this email actually went to; the
+            # conversation only records the thread's original counterparty. When they diverge the
+            # card must follow the message — labelling the send with the thread's counterparty
+            # misattributes it, and the thread's display name must never be attached to a
+            # different address (bug #419).
+            conversation_address = ((conversation.address or "").strip() if conversation else "")
+            recipient_address = to_endpoint_address or conversation_address or None
+            if recipient_address and (
+                not to_endpoint_address
+                or to_endpoint_address.lower() == conversation_address.lower()
+            ):
+                recipient_name = ((conversation.display_name or "").strip() if conversation else "") or None
+        else:
+            # Inbound: the recipient is the agent's own mailbox — meaningful because agents
+            # receive on several aliases. Endpoints were historically not persisted inbound,
+            # so fall back to the provider envelope stored verbatim in raw_payload (#495).
+            recipient_address = to_endpoint_address or _inbound_email_header(message, "to") or None
     if channel.lower() == CommsChannel.EMAIL:
         # Who else received it. Bcc is deliberately absent: it is never persisted on the message,
         # so the card cannot claim to show a complete recipient list.
@@ -579,6 +619,10 @@ def _serialize_message(
             )
             if address
         ]
+        if not cc_addresses and not message.is_outbound:
+            cc_header = _inbound_email_header(message, "cc")
+            if cc_header:
+                cc_addresses = [part.strip() for part in cc_header.split(",") if part.strip()]
     if not is_mcp and channel.lower() == "web" and sender_address:
         user_id, agent_id = parse_web_user_address(sender_address)
         if user_id is not None and (not agent_id or not message.owner_agent_id or str(message.owner_agent_id) == agent_id):

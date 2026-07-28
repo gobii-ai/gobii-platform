@@ -211,8 +211,9 @@ export const MessageEventCard = memo(function MessageEventCard({
       : null,
   ].filter(Boolean)
   const emailSubject = channel === 'email' ? message.subject?.trim() : ''
-  // A sent email otherwise names its recipient only inside the body, which is not an audit trail.
-  const emailRecipient = channel === 'email' && message.isOutbound
+  // A sent email otherwise names its recipient only inside the body, which is not an audit
+  // trail; an inbound email's To is the agent's own alias, worth showing too (#495).
+  const emailRecipient = channel === 'email'
     ? message.recipientAddress?.trim() || ''
     : ''
   const emailRecipientName = message.recipientName?.trim() || ''
@@ -221,8 +222,8 @@ export const MessageEventCard = memo(function MessageEventCard({
     ? `${emailRecipientName} <${emailRecipient}>`
     : emailRecipient
   // Which mailbox actually sent it. Agents send from several custom domains, so "who sent this"
-  // is not answerable from the agent name alone.
-  const emailSender = channel === 'email' && message.isOutbound
+  // is not answerable from the agent name alone; inbound, it is the counterparty's address (#495).
+  const emailSender = channel === 'email'
     ? message.senderAddress?.trim() || ''
     : ''
   const emailCc = channel === 'email'
