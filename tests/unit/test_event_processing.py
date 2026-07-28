@@ -1272,7 +1272,7 @@ class PromptContextBuilderTests(TestCase):
         self.assertIsNotNone(user_message)
         content = user_message["content"]
         self.assertIn('Inbound MCP message from "Gobii MCP"', content)
-        self.assertIn("reply in this web conversation", content)
+        self.assertIn("reply with send_mcp_message", content)
         self.assertIn("tool results are not replies", content)
         self.assertIn("Run the authenticated MCP request.", content)
         self.assertNotIn(owner_address, content)

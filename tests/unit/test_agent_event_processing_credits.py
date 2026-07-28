@@ -32,6 +32,8 @@ from util.analytics import AnalyticsEvent, AnalyticsSource
 from util.constants.task_constants import TASKS_UNLIMITED
 from api.agent.core.event_processing import _ensure_credit_for_tool
 from api.agent.core.daily_limit_mode import (
+    CREDIT_MESSAGE_ONLY_ALLOWED_TOOL_NAMES,
+    CREDIT_MESSAGE_ONLY_ALLOWED_TOOL_NAMES_TEXT,
     filter_tools_for_credit_message_only_mode,
     is_credit_message_only_mode,
     is_task_credit_message_only_mode,
@@ -69,6 +71,13 @@ class _DummySpan:
 
 @tag("batch_event_processing_credits")
 class CreditMessageOnlyModeTests(TestCase):
+    def test_prompt_tool_names_are_derived_from_the_allowed_set(self):
+        self.assertEqual(
+            CREDIT_MESSAGE_ONLY_ALLOWED_TOOL_NAMES_TEXT,
+            ", ".join(sorted(CREDIT_MESSAGE_ONLY_ALLOWED_TOOL_NAMES)),
+        )
+        self.assertIn("send_mcp_message", CREDIT_MESSAGE_ONLY_ALLOWED_TOOL_NAMES_TEXT)
+
     def test_task_credit_mode_only_activates_for_exhausted_finite_balance(self):
         self.assertTrue(is_task_credit_message_only_mode(Decimal("0")))
         self.assertTrue(is_task_credit_message_only_mode(Decimal("-0.1")))

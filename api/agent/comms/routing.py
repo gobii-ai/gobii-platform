@@ -117,18 +117,28 @@ def get_current_inbound_message(agent: PersistentAgent) -> PersistentAgentMessag
     return message
 
 
+def _recent_mcp_inbound_messages(agent: PersistentAgent):
+    cutoff = timezone.now() - timedelta(days=settings.WEB_SESSION_RETENTION_DAYS)
+    return PersistentAgentMessage.objects.filter(
+        owner_agent=agent,
+        is_outbound=False,
+        conversation__isnull=False,
+        raw_payload__source_kind="mcp",
+        timestamp__gte=cutoff,
+    )
+
+
+def agent_has_recent_mcp_inbound(agent: PersistentAgent) -> bool:
+    """Return whether MCP replies should be available for this agent."""
+
+    return _recent_mcp_inbound_messages(agent).exists()
+
+
 def get_recent_mcp_inbound_message(agent: PersistentAgent) -> PersistentAgentMessage | None:
     """Return the newest MCP-origin message within the normal web-session recency window."""
 
-    cutoff = timezone.now() - timedelta(days=settings.WEB_SESSION_RETENTION_DAYS)
     return (
-        PersistentAgentMessage.objects.filter(
-            owner_agent=agent,
-            is_outbound=False,
-            conversation__isnull=False,
-            raw_payload__source_kind="mcp",
-            timestamp__gte=cutoff,
-        )
+        _recent_mcp_inbound_messages(agent)
         .select_related("conversation", "from_endpoint")
         .order_by("-timestamp", "-seq")
         .first()

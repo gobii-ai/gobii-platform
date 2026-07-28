@@ -7,7 +7,12 @@ from django.db import transaction
 from django.utils import timezone
 
 from api.agent.comms.outbound_content_policy import markdown_only_error
-from api.agent.comms.routing import get_recent_mcp_inbound_message
+from api.agent.comms.routing import (
+    get_bound_inbound_routing_scope,
+    get_current_inbound_message,
+    get_recent_mcp_inbound_message,
+)
+from api.agent.comms.source_metadata import is_mcp_message
 from api.agent.core.link_references import handle_link_reference_errors
 from api.agent.files.attachment_helpers import (
     AttachmentResolutionError,
@@ -39,7 +44,7 @@ def get_send_mcp_message_tool() -> Dict[str, Any]:
         "function": {
             "name": "send_mcp_message",
             "description": (
-                "Append an MCP message to the agent's most recent MCP conversation. "
+                "Reply to the current MCP request, or otherwise append to the agent's most recent MCP conversation. "
                 "Use this for MCP questions, blockers, progress, and final results; ordinary tool results are not "
                 "replies. It does not contact the owner or another human. Human-channel tools remain available as "
                 "separate actions and require explicit authorization. If the MCP instruction forbids contact, make "
@@ -78,9 +83,19 @@ def get_send_mcp_message_tool() -> Dict[str, Any]:
 
 @handle_link_reference_errors
 def execute_send_mcp_message(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str, Any]:
-    """Persist a reply to the most recent MCP-origin message without human delivery."""
+    """Persist a reply to the active or most recent MCP-origin message without human delivery."""
 
-    inbound = get_recent_mcp_inbound_message(agent)
+    routing_scope = get_bound_inbound_routing_scope(agent)
+    current_inbound = (
+        get_current_inbound_message(agent)
+        if routing_scope is not None and routing_scope.message_id is not None
+        else None
+    )
+    inbound = (
+        current_inbound
+        if is_mcp_message(current_inbound)
+        else get_recent_mcp_inbound_message(agent)
+    )
     if inbound is None:
         return {
             "status": "error",

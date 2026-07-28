@@ -134,7 +134,7 @@ Unsupported fields are not ignored. A tool call with unsupported arguments retur
 
 `gobii_get_agent_timeline` reads the unified timeline. Use `after_cursor` for events strictly newer than a cursor, or `cursor` plus `direction` (`initial`, `older`, `newer`) for scroll-style reads. The event with the exact `after_cursor` is excluded. Results include `events`, `next_cursor`, `latest_cursor`, `oldest_cursor`, `newest_cursor`, `has_more`, and processing state. Events can include messages, tool/step clusters, thinking entries, and plan updates when those exist in the agent timeline.
 
-After an agent has received an MCP message within the configured web-session retention window, it can use `send_mcp_message` from any run. The tool appends its reply to the newest qualifying MCP conversation. The outbound event uses channel `mcp`, and its `inReplyToMessageId` points to that inbound message so clients can correlate the response without treating the underlying web conversation as a human delivery channel.
+After an agent has received an MCP message within the configured web-session retention window, it can use `send_mcp_message` from any run. While processing an MCP request, the tool replies to that bound request; otherwise it appends to the newest qualifying MCP conversation. The outbound event uses channel `mcp`, and its `inReplyToMessageId` points to that inbound message so clients can correlate the response without treating the underlying web conversation as a human delivery channel.
 
 `gobii_wait_for_agent_event` is the v1 wait primitive. It polls the same timeline for up to `timeout_seconds` with a server cap. Inputs include `agent_id`, `after_cursor`, `event_types`, and supported filters:
 

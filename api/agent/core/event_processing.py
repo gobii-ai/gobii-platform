@@ -68,11 +68,11 @@ from ..short_description import maybe_schedule_mini_description, maybe_schedule_
 from ..avatar import maybe_schedule_agent_avatar
 from ..tags import maybe_schedule_agent_tags
 from ..comms.routing import (
+    agent_has_recent_mcp_inbound,
     advance_inbound_routing_scope,
     bind_inbound_routing_scope,
     capture_inbound_routing_scope,
     get_current_inbound_message,
-    get_recent_mcp_inbound_message,
     reset_inbound_routing_scope,
 )
 from ..comms.source_metadata import is_mcp_message
@@ -6713,6 +6713,7 @@ def _run_agent_loop(
         active_routing_scope = initial_routing_scope
         routing_scope_is_pinned = bool(inbound_message_id and initial_routing_scope.message_id)
         routing_scope_tokens.append(bind_inbound_routing_scope(initial_routing_scope))
+        mcp_available = agent_has_recent_mcp_inbound(agent)
 
         def _refresh_inbound_routing_scope(generation: int) -> bool:
             nonlocal active_routing_scope
@@ -6861,6 +6862,7 @@ def _run_agent_loop(
                     prompt_human_generation = _current_human_inbound_generation()
                     if prompt_human_generation > routing_scope_generation:
                         _refresh_inbound_routing_scope(prompt_human_generation)
+                        mcp_available = agent_has_recent_mcp_inbound(agent)
                     prompt_run_cache.observe_human_generation(routing_scope_generation)
                     config_snapshot = seed_sqlite_agent_config(agent)
                     skills_snapshot = seed_sqlite_skills(agent)
@@ -6872,7 +6874,7 @@ def _run_agent_loop(
                 iteration_tools = _filter_incompatible_reply_tools(
                     iteration_tools,
                     feedback_inbound,
-                    mcp_available=get_recent_mcp_inbound_message(agent) is not None,
+                    mcp_available=mcp_available,
                 )
                 iter_span.set_attribute("persistent_agent.tools.count", len(iteration_tools))
                 tool_names = _tool_definition_names_for_completion(iteration_tools)

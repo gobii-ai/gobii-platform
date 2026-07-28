@@ -1055,7 +1055,8 @@ class DailyLimitPromptContextTests(TestCase):
         self.assertIn(settings_url, content)
         self.assertIn(f"double {double_limit_url_prefix}?token=", content)
         self.assertIn(f"unlimited {unlimited_limit_url_prefix}?token=", content)
-        self.assertIn("Only message and sleep tools are available right now", content)
+        self.assertIn("Available message/sleep tools", content)
+        self.assertIn("send_mcp_message", content)
         self.assertIn("sleep_until_next_trigger", content)
         self.assertIn("Resume non-message work once all active credit restrictions are resolved.", content)
 
@@ -1064,7 +1065,8 @@ class DailyLimitPromptContextTests(TestCase):
         content = self._render_prompt_content({}, task_credit_available=Decimal("0"))
 
         self.assertIn("TASK CREDIT MESSAGE-ONLY MODE", content)
-        self.assertIn("Only message and sleep tools are available right now", content)
+        self.assertIn("Available message/sleep tools", content)
+        self.assertIn("send_mcp_message", content)
         self.assertIn("/app/billing", content)
         self.assertIn("Resume non-message work once all active credit restrictions are resolved.", content)
 
@@ -1100,7 +1102,7 @@ class DailyLimitPromptContextTests(TestCase):
         self.assertIn(str(org.id), content)
         self.assertIn("Ask the user to raise the limit", content)
         self.assertIn("task credits can be restored from the billing page", content)
-        self.assertEqual(content.count("Only message and sleep tools are available right now"), 1)
+        self.assertEqual(content.count("Available message/sleep tools"), 1)
 
 
 @tag("batch_event_processing")

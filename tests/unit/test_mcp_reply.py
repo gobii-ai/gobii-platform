@@ -10,6 +10,7 @@ from django.utils import timezone
 from api.agent.comms.message_reads import build_latest_agent_message_read_state
 from api.agent.comms.message_service import inject_internal_web_message
 from api.agent.comms.routing import (
+    agent_has_recent_mcp_inbound,
     bind_inbound_routing_scope,
     capture_inbound_routing_scope,
     get_recent_mcp_inbound_message,
@@ -164,6 +165,7 @@ class McpReplyTests(TestCase):
         stale_timestamp = timezone.now() - timedelta(days=settings.WEB_SESSION_RETENTION_DAYS + 1)
         PersistentAgentMessage.objects.filter(id=self.inbound.id).update(timestamp=stale_timestamp)
 
+        self.assertFalse(agent_has_recent_mcp_inbound(self.agent))
         self.assertIsNone(get_recent_mcp_inbound_message(self.agent))
         tools = _filter_incompatible_reply_tools(
             get_static_tool_definitions(self.agent),
@@ -214,6 +216,35 @@ class McpReplyTests(TestCase):
         message = PersistentAgentMessage.objects.get(id=result["message_id"])
         self.assertEqual(message.parent_id, newer_inbound.id)
         self.assertEqual(message.conversation_id, newer_inbound.conversation_id)
+
+    def test_active_mcp_request_wins_over_newer_concurrent_request(self):
+        other_user = get_user_model().objects.create_user(
+            username="concurrent-mcp-user@example.test",
+            email="concurrent-mcp-user@example.test",
+        )
+        newer_inbound, _ = inject_internal_web_message(
+            self.agent.id,
+            "A newer concurrent MCP request.",
+            sender_user_id=other_user.id,
+            trigger_processing=False,
+            source="remote_mcp",
+            source_kind="mcp",
+            source_label="Gobii MCP",
+        )
+        self.assertNotEqual(newer_inbound.conversation_id, self.inbound.conversation_id)
+
+        token = self._bind(self.inbound)
+        try:
+            result = execute_send_mcp_message(
+                self.agent,
+                {"body": "Reply to the active MCP request.", "will_continue_work": False},
+            )
+        finally:
+            reset_inbound_routing_scope(token)
+
+        message = PersistentAgentMessage.objects.get(id=result["message_id"])
+        self.assertEqual(message.parent_id, self.inbound.id)
+        self.assertEqual(message.conversation_id, self.inbound.conversation_id)
 
     @patch("api.agent.tools.mcp_sender.broadcast_message_attachment_update")
     @patch("api.agent.tools.mcp_sender.create_message_attachments")

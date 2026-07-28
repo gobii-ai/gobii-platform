@@ -3109,7 +3109,7 @@ def add_budget_awareness_sections(
             "credit_message_only_mode",
             (
                 f"{' '.join(restrictions)} "
-                "Only message and sleep tools are available right now: "
+                "Available message/sleep tools: "
                 f"{CREDIT_MESSAGE_ONLY_ALLOWED_TOOL_NAMES_TEXT}. "
                 "Do not attempt any other tools or non-message work. "
                 f"{' '.join(recovery_actions)} "
