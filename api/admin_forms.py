@@ -16,7 +16,16 @@ from config.stripe_fields import (
     StripeValueKind,
     first_string,
 )
-from .models import AgentEmailAccount, CommsChannel, StripeConfig, TrialPromo, TrialPromoAllowedEmail, UserFlagDefinition
+from .models import (
+    AgentEmailAccount,
+    CommsChannel,
+    StripeConfig,
+    TrialPromo,
+    TrialPromoActivationModeChoices,
+    TrialPromoAllowedEmail,
+    TrialPromoNoPaymentMethodEndBehaviorChoices,
+    UserFlagDefinition,
+)
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 
 
@@ -169,6 +178,7 @@ class TrialPromoAdminForm(forms.ModelForm):
             "name",
             "code",
             "plan",
+            "activation_mode",
             "trial_days",
             "payment_method_required",
             "no_payment_method_end_behavior",
@@ -177,6 +187,10 @@ class TrialPromoAdminForm(forms.ModelForm):
             "trial_abuse_filtering_enabled",
             "trial_credit_amount",
             "max_redemptions",
+            "linked_template",
+            "conversion_coupon_id",
+            "discount_months",
+            "late_conversion_grace_days",
             "active_from",
             "active_until",
             "is_active",
@@ -229,6 +243,41 @@ class TrialPromoAdminForm(forms.ModelForm):
         active_until = cleaned.get("active_until")
         if active_from and active_until and active_until <= active_from:
             raise forms.ValidationError("Active until must be after active from.")
+
+        if cleaned.get("activation_mode") == TrialPromoActivationModeChoices.DIRECT_STRIPE_TRIAL:
+            if cleaned.get("payment_method_required"):
+                self.add_error(
+                    "payment_method_required",
+                    "Transparent trials cannot require a payment method.",
+                )
+            if (
+                cleaned.get("no_payment_method_end_behavior")
+                != TrialPromoNoPaymentMethodEndBehaviorChoices.CANCEL
+            ):
+                self.add_error(
+                    "no_payment_method_end_behavior",
+                    "Transparent trials must cancel when the trial ends without a payment method.",
+                )
+            if not str(cleaned.get("conversion_coupon_id") or "").strip():
+                self.add_error(
+                    "conversion_coupon_id",
+                    "Enter the Stripe repeating coupon used after the trial.",
+                )
+
+            linked_template = cleaned.get("linked_template")
+            if linked_template is not None:
+                if linked_template.organization_id or linked_template.public_profile_id:
+                    self.add_error(
+                        "linked_template",
+                        "Campaign templates must be global personal templates.",
+                    )
+                elif not linked_template.is_active:
+                    self.add_error("linked_template", "Select an active template.")
+                elif linked_template.is_listed:
+                    self.add_error(
+                        "linked_template",
+                        "Campaign templates must be unlisted.",
+                    )
         return cleaned
 
     def _append_allowed_emails(self, instance: TrialPromo) -> None:

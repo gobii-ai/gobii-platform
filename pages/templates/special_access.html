@@ -83,12 +83,22 @@
           <form method="post" action="{{ start_url }}">
             {% csrf_token %}
             <button type="submit" {% if email_verification_required %}disabled{% endif %} class="group flex w-full items-center justify-center gap-3 rounded-2xl bg-[#081f2d] px-6 py-4 text-base font-bold text-white transition hover:bg-[#0c3443] disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500 disabled:hover:bg-slate-200">
-            {% if email_verification_required %}Verify email to start{% else %}Start special trial{% endif %}
+            {% if email_verification_required %}
+              Verify email to start
+            {% elif promo.activation_mode == "direct_stripe_trial" and promo.linked_template %}
+              Start trial and open template
+            {% else %}
+              Start special trial
+            {% endif %}
             <span class="transition group-hover:translate-x-1">&rarr;</span>
             </button>
           </form>
           <p class="mt-4 text-center text-sm text-slate-500">
-            {% if promo.payment_method_required %}
+            {% if promo.activation_mode == "direct_stripe_trial" %}
+              No card is required and there is no billing step today. If you add payment during the trial,
+              your campaign discount applies for the first {{ promo.discount_months }} paid months, followed by
+              {% if standard_monthly_price_label %}{{ standard_monthly_price_label }}{% else %}the standard {{ plan_label }} price{% endif %}.
+            {% elif promo.payment_method_required %}
               Add a card to start your trial. You won't be charged today, and you can cancel anytime.
             {% else %}
               You can add payment later. If you do not, billing recovery starts when the trial ends.

@@ -4,6 +4,7 @@ from django.urls import reverse
 
 from api.models import Organization, UserBilling
 from api.services.dedicated_proxy_service import DedicatedProxyService, is_multi_assign_enabled
+from api.services.trial_promos import get_eligible_late_conversion_for_user
 from billing.addons import AddonEntitlementService
 from billing.churnkey import build_churnkey_cancel_flow_config
 from config.plans import PLAN_CONFIG, get_plan_config
@@ -270,6 +271,36 @@ def build_billing_initial_data(request) -> dict[str, object]:
             "updateUrl": reverse("update_billing_settings"),
         },
     )
+    late_conversion_redemption = None
+    if subscription is None:
+        late_conversion_redemption = get_eligible_late_conversion_for_user(
+            user=request.user,
+        )
+    late_conversion_offer = None
+    if late_conversion_redemption is not None:
+        promo = late_conversion_redemption.promo
+        offer_metadata = late_conversion_redemption.metadata or {}
+        percent_off = offer_metadata.get("percent_off")
+        amount_off = offer_metadata.get("amount_off")
+        discount_label = ""
+        if percent_off not in (None, ""):
+            discount_label = f"{percent_off}% off"
+        elif amount_off not in (None, ""):
+            currency = str(offer_metadata.get("currency") or "USD").upper()
+            discount_label = f"{currency} {Decimal(str(amount_off)) / Decimal(100):.2f} off"
+        promo_plan = get_plan_config(promo.plan) or {}
+        late_conversion_offer = {
+            "url": reverse(
+                "pages:special_access_convert",
+                kwargs={"redemption_id": late_conversion_redemption.pk},
+            ),
+            "planName": promo.get_plan_display(),
+            "discountLabel": discount_label,
+            "discountMonths": promo.discount_months,
+            "standardMonthlyPrice": float(promo_plan.get("price") or 0),
+            "currency": str(promo_plan.get("currency") or "USD").upper(),
+            "expiresAtIso": late_conversion_redemption.late_conversion_expires_at.isoformat(),
+        }
 
     return {
         "contextType": "personal",
@@ -286,6 +317,7 @@ def build_billing_initial_data(request) -> dict[str, object]:
         "cancelAt": cancel_at,
         "cancelAtPeriodEnd": cancel_at_period_end,
         "churnKey": churnkey_config,
+        "lateConversionOffer": late_conversion_offer,
         "addons": _serialize_addon_context(addon_context),
         "addonsDisabled": not paid_subscriber,
         "dedicatedIps": {

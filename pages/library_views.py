@@ -68,7 +68,7 @@ def _library_page_title(selected_category: str, *, official_only: bool) -> str:
 def _library_queryset():
     return (
         PersistentAgentTemplate.objects.select_related("public_profile")
-        .filter(organization__isnull=True, is_active=True)
+        .filter(organization__isnull=True, is_active=True, is_listed=True)
         .filter(Q(slug__gt="") | Q(code__gt=""))
     )
 
@@ -196,6 +196,7 @@ def _get_legacy_library_handle_template(template_slug: str | None):
             Q(handle="library") | Q(handle="", public_profile__handle="library"),
             slug=normalized_template_slug,
             template__is_active=True,
+            template__is_listed=True,
             template__organization__isnull=True,
         )
         .first()

@@ -30,7 +30,7 @@ TEMPLATE_SOURCE_PUBLIC = "public"
 def _routeable_public_template_queryset():
     return (
         PersistentAgentTemplate.objects.select_related("public_profile")
-        .filter(organization__isnull=True, is_active=True)
+        .filter(organization__isnull=True, is_active=True, is_listed=True)
         .filter(Q(slug__gt="") | Q(code__gt=""))
     )
 

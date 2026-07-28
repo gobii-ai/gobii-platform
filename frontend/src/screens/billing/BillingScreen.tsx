@@ -35,6 +35,15 @@ type BillingRedirectResponse = {
 
 const CANCEL_FEEDBACK_MAX_LENGTH = 500
 
+function formatMonthlyPrice(amount: number, currency: string): string {
+  if (!Number.isFinite(amount) || amount <= 0) return 'the standard monthly price'
+  return `${new Intl.NumberFormat(undefined, {
+    style: 'currency',
+    currency,
+    maximumFractionDigits: 2,
+  }).format(amount)}/month`
+}
+
 type CancelReasonCode =
   | ''
   | 'too_expensive'
@@ -619,6 +628,35 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
             <div className="flex items-start gap-3">
               <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" aria-hidden="true" />
               <div>{saveError}</div>
+            </div>
+          </section>
+        ) : null}
+
+        {initialData.contextType === 'personal' && initialData.lateConversionOffer ? (
+          <section className="card border-cyan-200 bg-white" aria-labelledby="campaign-offer-title">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-[0.2em] text-cyan-700">Campaign offer</p>
+                <h2 id="campaign-offer-title" className="mt-2 text-xl font-bold text-slate-950">
+                  Continue with {initialData.lateConversionOffer.planName}
+                </h2>
+                <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-700">
+                  {initialData.lateConversionOffer.discountLabel
+                    ? `${initialData.lateConversionOffer.discountLabel} for `
+                    : 'Your campaign discount applies for '}
+                  the first {initialData.lateConversionOffer.discountMonths} paid months, followed by{' '}
+                  {formatMonthlyPrice(
+                    initialData.lateConversionOffer.standardMonthlyPrice,
+                    initialData.lateConversionOffer.currency,
+                  )}.
+                </p>
+              </div>
+              <a
+                href={initialData.lateConversionOffer.url}
+                className="inline-flex shrink-0 items-center justify-center rounded-xl bg-cyan-700 px-5 py-3 text-sm font-bold text-white transition hover:bg-cyan-800"
+              >
+                Continue with discount
+              </a>
             </div>
           </section>
         ) : null}
