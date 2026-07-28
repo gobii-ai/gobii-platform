@@ -12,6 +12,7 @@ from api.agent.core.event_processing import (
     _filter_preferred_config_for_low_latency,
     _get_recent_preferred_config,
 )
+from api.agent.core.llm_utils import StreamIdleTimeout
 from api.models import PersistentAgent, BrowserUseAgent, PersistentAgentCompletion
 from tests.utils.token_usage import make_completion_response
 
@@ -175,6 +176,40 @@ class TestEventProcessingLLMSelection(TestCase):
         broadcaster.push_delta.assert_any_call("Thinking", None)
         for call in broadcaster.push_delta.call_args_list:
             self.assertNotIn("Hidden reply", call.args)
+
+    @patch('api.agent.core.event_processing.run_completion')
+    def test_stream_idle_timeout_fails_over_without_replaying_same_provider(self, mock_run_completion):
+        fallback_response = make_completion_response(content="recovered")
+        mock_run_completion.side_effect = [
+            StreamIdleTimeout(
+                "LLM stream produced no additional data",
+                model="model-stalled",
+                llm_provider="provider-stalled",
+            ),
+            fallback_response,
+        ]
+        broadcaster = Mock()
+
+        response, token_usage = _completion_with_failover(
+            [{"role": "user", "content": "hello"}],
+            [],
+            failover_configs=[
+                ("provider-stalled", "model-stalled", {}),
+                ("provider-fallback", "model-fallback", {}),
+            ],
+            agent_id="agent-1",
+            stream_broadcaster=broadcaster,
+            defer_stream_finish=True,
+        )
+
+        self.assertIs(response, fallback_response)
+        self.assertEqual(mock_run_completion.call_count, 2)
+        self.assertTrue(mock_run_completion.call_args_list[0].kwargs["stream"])
+        self.assertNotIn("stream", mock_run_completion.call_args_list[1].kwargs)
+        self.assertEqual(mock_run_completion.call_args_list[1].kwargs["model"], "model-fallback")
+        self.assertEqual(token_usage["provider"], "provider-fallback")
+        broadcaster.cancel.assert_called_once()
+        broadcaster.finish.assert_not_called()
 
     @patch('api.agent.core.event_processing.run_completion')
     def test_completion_with_failover_prefers_explicit_provider(self, mock_run_completion):

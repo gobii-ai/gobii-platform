@@ -107,8 +107,8 @@ SYSTEM_SETTING_DEFINITIONS = (
     ),
     SystemSettingDefinition(
         key="LITELLM_FIRST_DATA_TIMEOUT_SECONDS",
-        label="LiteLLM first data timeout",
-        description="Timeout for streamed LiteLLM requests to produce their first chunk.",
+        label="LiteLLM stream idle timeout",
+        description="Timeout for streamed LiteLLM requests to produce each next chunk.",
         value_type=VALUE_TYPE_INT,
         env_var="LITELLM_FIRST_DATA_TIMEOUT_SECONDS",
         default_getter=lambda: settings.LITELLM_FIRST_DATA_TIMEOUT_SECONDS,

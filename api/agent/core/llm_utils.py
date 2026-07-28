@@ -57,6 +57,10 @@ class InvalidLiteLLMResponseError(LiteLLMResponseError):
     """Raised when LiteLLM returns a response containing forbidden markers."""
 
 
+class StreamIdleTimeout(litellm.Timeout):
+    """Raised when a streamed completion stops producing chunks."""
+
+
 _RETRYABLE_ERRORS = (
     litellm.Timeout,
     litellm.APIConnectionError,
@@ -67,10 +71,13 @@ _RETRYABLE_ERRORS = (
 )
 
 
-class _FirstDataTimeoutStream:
+class _StreamIdleTimeoutIterator:
     class _StreamError:
         def __init__(self, exc: Exception) -> None:
             self.exc = exc
+
+    class _StreamEnd:
+        pass
 
     def __init__(
         self,
@@ -94,26 +101,27 @@ class _FirstDataTimeoutStream:
         self._backoff_seconds = backoff_seconds
         self._received_first_chunk = False
         self._timed_out = False
+        self._result_queue: queue.Queue[Any] | None = None
 
-    def __iter__(self) -> "_FirstDataTimeoutStream":
+    def __iter__(self) -> "_StreamIdleTimeoutIterator":
         return self
 
     def __next__(self) -> Any:
         if self._timed_out:
             raise StopIteration
-        if self._received_first_chunk:
-            return next(self._stream)
 
         while True:
             try:
-                result = self._read_first_chunk()
+                result = self._read_next_chunk()
             except _RETRYABLE_ERRORS as exc:
-                self._retry_or_raise(exc)
+                if self._received_first_chunk:
+                    raise
+                self._replace_stream_or_raise(exc)
                 continue
             self._received_first_chunk = True
             return result
 
-    def _retry_or_raise(self, exc: Exception) -> None:
+    def _replace_stream_or_raise(self, exc: Exception) -> None:
         while True:
             if self._attempt >= self._max_attempts:
                 raise exc
@@ -129,34 +137,48 @@ class _FirstDataTimeoutStream:
             self._attempt += 1
             try:
                 self._stream = self._create_stream()
+                self._result_queue = None
+                self._timed_out = False
                 return
             except _RETRYABLE_ERRORS as retry_exc:
                 exc = retry_exc
 
-    def _read_first_chunk(self) -> Any:
-        result_queue: queue.Queue[Any] = queue.Queue(maxsize=1)
+    def _start_reader(self) -> queue.Queue[Any]:
+        result_queue: queue.Queue[Any] = queue.Queue()
+        stream = self._stream
 
-        def _read_first_chunk() -> None:
+        def _read_stream() -> None:
             try:
-                result_queue.put(next(self._stream))
+                for chunk in stream:
+                    result_queue.put(chunk)
             except Exception as exc:
                 result_queue.put(self._StreamError(exc))
+            else:
+                result_queue.put(self._StreamEnd())
 
-        thread = threading.Thread(target=_read_first_chunk, daemon=True)
+        thread = threading.Thread(target=_read_stream, daemon=True)
         thread.start()
+        self._result_queue = result_queue
+        return result_queue
+
+    def _read_next_chunk(self) -> Any:
+        result_queue = self._result_queue or self._start_reader()
         try:
             result = result_queue.get(timeout=self._timeout_seconds)
         except queue.Empty:
             self._timed_out = True
             self.close()
-            raise litellm.Timeout(
-                message=f"LLM stream produced no data within {self._timeout_seconds} seconds",
+            timeout_scope = "no data" if not self._received_first_chunk else "no additional data"
+            raise StreamIdleTimeout(
+                message=f"LLM stream produced {timeout_scope} within {self._timeout_seconds} seconds",
                 model=self._model,
                 llm_provider=self._provider or "unknown",
             )
 
         if isinstance(result, self._StreamError):
             raise result.exc
+        if isinstance(result, self._StreamEnd):
+            raise StopIteration
         return result
 
     def __getattr__(self, name: str) -> Any:
@@ -193,7 +215,7 @@ def _attach_response_duration(response: Any, duration_ms: int | None) -> None:
             model_extra["request_duration_ms"] = duration_ms
 
 
-def _wrap_stream_with_first_data_timeout(
+def _wrap_stream_with_idle_timeout(
     stream: Any,
     *,
     create_stream: Callable[[], Any],
@@ -202,8 +224,8 @@ def _wrap_stream_with_first_data_timeout(
     initial_attempt: int,
     max_attempts: int,
     backoff_seconds: float,
-) -> _FirstDataTimeoutStream:
-    return _FirstDataTimeoutStream(
+) -> _StreamIdleTimeoutIterator:
+    return _StreamIdleTimeoutIterator(
         stream,
         create_stream=create_stream,
         timeout_seconds=get_litellm_first_data_timeout_seconds(),
@@ -530,7 +552,7 @@ def run_completion(
                 duration_ms = int(round((time.monotonic() - start_time) * 1000))
             else:
                 response = litellm.completion(**kwargs)
-                response = _wrap_stream_with_first_data_timeout(
+                response = _wrap_stream_with_idle_timeout(
                     response,
                     create_stream=lambda: litellm.completion(**kwargs),
                     model=model,
@@ -606,6 +628,7 @@ def _litellm_responses_bridge_tool_choice(tool_choice: Any) -> Any:
 __all__ = [
     "EmptyLiteLLMResponseError",
     "InvalidLiteLLMResponseError",
+    "StreamIdleTimeout",
     "is_empty_litellm_response",
     "raise_if_empty_litellm_response",
     "raise_if_invalid_litellm_response",
