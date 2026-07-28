@@ -6,7 +6,7 @@
         <span class="size-2 rounded-full bg-indigo-400"></span>{{ worker.category|default:"General" }}
       </span>
       {% if show_detail_link|default:True %}
-        <a href="{% url 'pages:pretrained_worker_detail' worker.code %}" class="text-indigo-500 hover:text-indigo-600 transition text-sm">View details →</a>
+        <a href="{{ worker.detail_url }}" class="text-indigo-500 hover:text-indigo-600 transition text-sm">View details →</a>
       {% endif %}
     </div>
     <h3 class="mt-4 text-2xl font-medium text-slate-900">{{ worker.display_name }}</h3>
@@ -47,7 +47,7 @@
       {% endif %}
     </dl>
     <div class="mt-auto pt-6 flex flex-col gap-3">
-      <form method="post" action="{% url 'pages:pretrained_worker_hire' worker.code %}" class="contents"{% if lazy_csrf %} data-lazy-csrf{% endif %}>
+      <form method="post" action="{{ worker.hire_url }}" class="contents"{% if lazy_csrf %} data-lazy-csrf{% endif %}>
         {% if not lazy_csrf %}{% csrf_token %}{% endif %}
         <input type="hidden" name="source_page" value="home_pretrained_workers" />
         <input type="hidden" name="trial_onboarding" value="1" />

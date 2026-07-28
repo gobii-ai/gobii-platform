@@ -254,6 +254,7 @@ class PretrainedWorkerTemplateService:
             priority=template.priority,
             is_active=template.is_active,
             show_on_homepage=template.show_on_homepage,
+            slug=template.slug,
         )
 
     @classmethod

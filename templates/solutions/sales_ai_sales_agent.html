@@ -28,7 +28,7 @@
       </p>
 
       <div class="mt-9 flex flex-col gap-3 sm:flex-row sm:items-start">
-        <form method="post" action="{% url 'pages:pretrained_worker_hire' 'lead-hunter' %}" class="w-full sm:w-auto" data-analytics-cta-id="sales_ai_agent_hero" data-analytics-placement="hero" data-analytics-intent="spawn_agent">
+        <form method="post" action="{% url 'pages:public_template_hire' 'sales' 'b2b-lead-research-agent' %}" class="w-full sm:w-auto" data-analytics-cta-id="sales_ai_agent_hero" data-analytics-placement="hero" data-analytics-intent="spawn_agent">
           {% csrf_token %}
           <input type="hidden" name="source_page" value="sales_ai_agent_hero" />
           <input type="hidden" name="trial_onboarding" value="1" />
@@ -258,7 +258,7 @@
           Lead Hunter is the closest Gobii starting point for this page. It is an always-on prospecting partner that searches approved sources, checks leads against your ICP, and prepares review-ready batches.
         </p>
         <div class="mt-8 flex flex-col gap-3 sm:flex-row">
-          <form method="post" action="{% url 'pages:pretrained_worker_hire' 'lead-hunter' %}" class="w-full sm:w-auto" data-analytics-cta-id="sales_ai_agent_lead_hunter" data-analytics-placement="lead_hunter" data-analytics-intent="spawn_agent">
+          <form method="post" action="{% url 'pages:public_template_hire' 'sales' 'b2b-lead-research-agent' %}" class="w-full sm:w-auto" data-analytics-cta-id="sales_ai_agent_lead_hunter" data-analytics-placement="lead_hunter" data-analytics-intent="spawn_agent">
             {% csrf_token %}
             <input type="hidden" name="source_page" value="sales_ai_agent_lead_hunter" />
             <input type="hidden" name="trial_onboarding" value="1" />
@@ -268,7 +268,7 @@
               <i data-lucide="arrow-right" class="h-4 w-4"></i>
             </button>
           </form>
-          <a href="{% url 'pages:pretrained_worker_detail' slug='lead-hunter' %}" class="inline-flex items-center justify-center gap-2 rounded-lg border border-indigo-200 bg-white px-6 py-3 text-sm font-semibold text-indigo-800 transition hover:border-indigo-300 hover:bg-indigo-50">
+          <a href="{% url 'pages:public_template_detail' category_slug='sales' template_slug='b2b-lead-research-agent' %}" class="inline-flex items-center justify-center gap-2 rounded-lg border border-indigo-200 bg-white px-6 py-3 text-sm font-semibold text-indigo-800 transition hover:border-indigo-300 hover:bg-indigo-50">
             View template
           </a>
         </div>
@@ -395,7 +395,7 @@
       Give Gobii a sales workflow with clear criteria, approved sources, and a human review point. The agent prepares the pipeline work. Your team decides what moves forward.
     </p>
     <div class="mt-8 flex flex-col justify-center gap-3 sm:flex-row">
-      <form method="post" action="{% url 'pages:pretrained_worker_hire' 'lead-hunter' %}" class="w-full sm:w-auto" data-analytics-cta-id="sales_ai_agent_final" data-analytics-placement="final_cta" data-analytics-intent="spawn_agent">
+      <form method="post" action="{% url 'pages:public_template_hire' 'sales' 'b2b-lead-research-agent' %}" class="w-full sm:w-auto" data-analytics-cta-id="sales_ai_agent_final" data-analytics-placement="final_cta" data-analytics-intent="spawn_agent">
         {% csrf_token %}
         <input type="hidden" name="source_page" value="sales_ai_agent_final" />
         <input type="hidden" name="trial_onboarding" value="1" />

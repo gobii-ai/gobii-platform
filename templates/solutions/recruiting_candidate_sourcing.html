@@ -178,7 +178,7 @@
         </p>
 
         <div class="mt-10 flex flex-col sm:flex-row gap-4">
-          <form method="post" action="{% url 'pages:pretrained_worker_hire' 'talent-scout' %}" class="w-full sm:w-auto" data-analytics-cta-id="candidate_sourcing_hero" data-analytics-placement="hero" data-analytics-intent="spawn_agent">
+          <form method="post" action="{% url 'pages:public_template_hire' 'recruiting' 'candidate-sourcing-agent' %}" class="w-full sm:w-auto" data-analytics-cta-id="candidate_sourcing_hero" data-analytics-placement="hero" data-analytics-intent="spawn_agent">
             {% csrf_token %}
             <input type="hidden" name="source_page" value="candidate_sourcing_hero" />
             <input type="hidden" name="trial_onboarding" value="1" />
@@ -467,7 +467,7 @@
       </div>
 
       <div class="grid gap-4">
-        <a href="{% url 'pages:pretrained_worker_detail' 'talent-scout' %}" class="candidate-template-link group rounded-lg border p-6 transition-all duration-200">
+        <a href="{% url 'pages:public_template_detail' 'recruiting' 'candidate-sourcing-agent' %}" class="candidate-template-link group rounded-lg border p-6 transition-all duration-200">
           <div class="flex items-center justify-between gap-4">
             <div>
               <p class="text-xs font-semibold uppercase tracking-[0.16em] text-emerald-700">Primary template</p>
@@ -477,7 +477,7 @@
           </div>
           <p class="mt-4 text-sm leading-6 text-slate-700">Finds and qualifies candidates across LinkedIn, GitHub, and job boards.</p>
         </a>
-        <a href="{% url 'pages:pretrained_worker_detail' 'candidate-researcher' %}" class="candidate-template-link group rounded-lg border p-6 transition-all duration-200">
+        <a href="{% url 'pages:public_template_detail' 'recruiting' 'candidate-researcher' %}" class="candidate-template-link group rounded-lg border p-6 transition-all duration-200">
           <div class="flex items-center justify-between gap-4">
             <div>
               <p class="text-xs font-semibold uppercase tracking-[0.16em] text-sky-700">Profile depth</p>
@@ -487,7 +487,7 @@
           </div>
           <p class="mt-4 text-sm leading-6 text-slate-700">Enriches candidate profiles with background research, work history, and online presence.</p>
         </a>
-        <a href="{% url 'pages:pretrained_worker_detail' 'outreach-agent' %}" class="candidate-template-link group rounded-lg border p-6 transition-all duration-200">
+        <a href="{% url 'pages:public_template_detail' 'sales' 'outreach-agent' %}" class="candidate-template-link group rounded-lg border p-6 transition-all duration-200">
           <div class="flex items-center justify-between gap-4">
             <div>
               <p class="text-xs font-semibold uppercase tracking-[0.16em] text-amber-700">Next step</p>
@@ -589,7 +589,7 @@
     </p>
 
     <div class="mt-10 flex flex-col sm:flex-row gap-4 justify-center">
-      <form method="post" action="{% url 'pages:pretrained_worker_hire' 'talent-scout' %}" class="w-full sm:w-auto" data-analytics-cta-id="candidate_sourcing_final_cta" data-analytics-placement="final_cta" data-analytics-intent="spawn_agent">
+      <form method="post" action="{% url 'pages:public_template_hire' 'recruiting' 'candidate-sourcing-agent' %}" class="w-full sm:w-auto" data-analytics-cta-id="candidate_sourcing_final_cta" data-analytics-placement="final_cta" data-analytics-intent="spawn_agent">
         {% csrf_token %}
         <input type="hidden" name="source_page" value="candidate_sourcing_final_cta" />
         <input type="hidden" name="trial_onboarding" value="1" />

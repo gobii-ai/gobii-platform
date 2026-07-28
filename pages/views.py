@@ -113,6 +113,7 @@ from pages.mini_mode import set_mini_mode_cookie
 from .utils_markdown import render_public_template_markdown, load_page, get_prev_next, get_all_doc_pages
 from .homepage_cache import get_homepage_integrations_payload, get_homepage_pretrained_payload
 from .homepage_schema import HOMEPAGE_SOCIAL_IMAGE_PATH, build_homepage_structured_data
+from .legacy_pretrained_worker_redirects import get_legacy_pretrained_worker_redirect
 from .ai_employees import (
     AI_EMPLOYEES_CLUSTER_LINKS,
     AI_EMPLOYEES_FAQ_ITEMS,
@@ -131,7 +132,7 @@ from .public_template_urls import (
 )
 from .comparisons import COMPARISON_CATALOG, COMPARISON_STATUS_PUBLISHED, get_comparison, get_published_comparisons
 from .forms import MarketingContactForm
-from console.agent_creation import AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY, AGENT_TEMPLATE_SOURCE_PRETRAINED_WORKER, AGENT_TEMPLATE_SOURCE_PUBLIC_TEMPLATE, AGENT_TEMPLATE_SOURCE_SESSION_KEY, stage_agent_template_session
+from console.agent_creation import AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY, AGENT_TEMPLATE_SOURCE_PUBLIC_TEMPLATE, AGENT_TEMPLATE_SOURCE_SESSION_KEY, stage_agent_template_session
 from console.views import build_llm_intelligence_props
 from api.agent.core.llm_config import resolve_preferred_tier_for_owner, get_llm_tier_label
 from django.contrib import sitemaps
@@ -1505,177 +1506,48 @@ class HomepageIntegrationsSearchView(View):
         return JsonResponse({"results": results})
 
 
-class ProprietaryPretrainedWorkerOnlyMixin:
-    def dispatch(self, request, *args, **kwargs):
-        if not settings.GOBII_PROPRIETARY_MODE:
-            return redirect("pages:home")
-        return super().dispatch(request, *args, **kwargs)
+def _legacy_pretrained_worker_destination_or_404(slug: str | None):
+    destination = get_legacy_pretrained_worker_redirect(slug)
+    if not destination:
+        raise Http404("This legacy AI employee URL is not available.")
+    return destination
 
 
-class PretrainedWorkerDirectoryRedirectView(ProprietaryPretrainedWorkerOnlyMixin, RedirectView):
-    permanent = False
-
-    def get_redirect_url(self, *args, **kwargs):
-        base_url = reverse('pages:home')
-        params: list[tuple[str, str]] = []
-
-        search = (self.request.GET.get('q') or '').strip()
-        category = (self.request.GET.get('category') or '').strip()
-
-        if search:
-            params.append(('pretrained_search', search))
-        if category:
-            params.append(('pretrained_category', category))
-
-        for key in self.request.GET.keys():
-            if key in {'q', 'category'}:
-                continue
-            for value in self.request.GET.getlist(key):
-                params.append((key, value))
-
-        query_string = urlencode(params, doseq=True)
-        fragment = '#pretrained-workers'
-
-        if query_string:
-            return f"{base_url}?{query_string}{fragment}"
-        return f"{base_url}{fragment}"
-
-
-class PretrainedWorkerDetailView(ProprietaryPretrainedWorkerOnlyMixin, TemplateView):
-    template_name = "pretrained_worker_directory/detail.html"
-
-    def dispatch(self, request, *args, **kwargs):
-        self.employee = PretrainedWorkerTemplateService.get_template_by_code(kwargs.get('slug'))
-        if not self.employee:
-            raise Http404("This pretrained employee is no longer available.")
-        return super().dispatch(request, *args, **kwargs)
-
-    def get_related_pretrained_workers(self):
-        current_category = (self.employee.category or "").strip().casefold()
-        current_tools = set(self.employee.default_tools or [])
-        candidates = [
-            template
-            for template in PretrainedWorkerTemplateService.get_active_templates()
-            if template.code != self.employee.code
-        ]
-
-        def related_sort_key(template):
-            template_category = (template.category or "").strip().casefold()
-            category_rank = 0 if current_category and template_category == current_category else 1
-            shared_tool_count = len(current_tools.intersection(template.default_tools or []))
-            return (
-                category_rank,
-                -shared_tool_count,
-                getattr(template, "priority", 100),
-                template.display_name.lower(),
-            )
-
-        return sorted(candidates, key=related_sort_key)[:3]
-
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        detail_url = self.request.build_absolute_uri(
-            reverse('pages:pretrained_worker_detail', kwargs={'slug': self.employee.code})
-        )
-        home_url = self.request.build_absolute_uri(reverse('pages:home'))
-        default_image_path = "images/gobii_fish_social_1280x640.png"
-        default_social_image_url = self.request.build_absolute_uri(static(default_image_path))
-        seo_description = (self.employee.description or self.employee.tagline or "").strip()
-        social_title = f"{self.employee.display_name} AI Agent Template"
-
-        structured_data = {
-            "@context": "https://schema.org",
-            "@type": "WebPage",
-            "name": social_title,
-            "description": seo_description,
-            "url": detail_url,
-            "image": default_social_image_url,
-            "publisher": {
-                "@type": "Organization",
-                "name": "Gobii",
-            },
-            "isPartOf": {
-                "@type": "WebSite",
-                "name": "Gobii",
-                "url": home_url,
-            },
-            "mainEntity": {
-                "@type": "Service",
-                "name": self.employee.display_name,
-                "description": seo_description,
-                "url": detail_url,
-                "image": default_social_image_url,
-                "serviceType": "AI agent template",
-                "category": self.employee.category or "General",
-                "provider": {
-                    "@type": "Organization",
-                    "name": "Gobii",
-                },
-            },
-        }
-        breadcrumb_data = {
-            "@context": "https://schema.org",
-            "@type": "BreadcrumbList",
-            "itemListElement": [
-                {
-                    "@type": "ListItem",
-                    "position": 1,
-                    "name": "Home",
-                    "item": home_url,
-                },
-                {
-                    "@type": "ListItem",
-                    "position": 2,
-                    "name": "Pretrained Employees",
-                    "item": f"{home_url}#pretrained-workers",
-                },
-                {
-                    "@type": "ListItem",
-                    "position": 3,
-                    "name": self.employee.display_name,
-                    "item": detail_url,
-                },
-            ],
-        }
-
-        context["pretrained_worker"] = self.employee
-        context["pretrained_worker_url"] = detail_url
-        context["pretrained_worker_social_title"] = social_title
-        context["pretrained_worker_seo_title"] = f"{social_title} | Gobii"
-        context["pretrained_worker_seo_description"] = seo_description
-        context["pretrained_worker_social_image_url"] = default_social_image_url
-        context["pretrained_worker_structured_data_json"] = html_safe_json_dumps(structured_data)
-        context["pretrained_worker_breadcrumb_json"] = html_safe_json_dumps(breadcrumb_data)
-        context["schedule_jitter_minutes"] = self.employee.schedule_jitter_minutes
-        context["base_schedule"] = self.employee.base_schedule
-        context["schedule_description"] = PretrainedWorkerTemplateService.describe_schedule(self.employee.base_schedule)
-        display_map = PretrainedWorkerTemplateService.get_tool_display_map(self.employee.default_tools or [])
-        context["event_triggers"] = self.employee.event_triggers or []
-        context["default_tools"] = PretrainedWorkerTemplateService.get_tool_display_list(
-            self.employee.default_tools or [],
-            display_map=display_map,
-        )
-        context["contact_method_label"] = PretrainedWorkerTemplateService.describe_contact_channel(
-            self.employee.recommended_contact_channel
-        )
-        context["related_pretrained_workers"] = self.get_related_pretrained_workers()
-        return context
-
-
-def _get_pretrained_worker_template_or_404(code: str | None):
-    template = PretrainedWorkerTemplateService.get_template_by_code(code)
-    if not template:
-        raise Http404("This pretrained employee is no longer available.")
-    return template
-
-
-def _seed_pretrained_worker_session(request, template) -> None:
-    stage_agent_template_session(
-        request,
-        template,
-        template_source=AGENT_TEMPLATE_SOURCE_PRETRAINED_WORKER,
-        include_charter=True,
+def _legacy_pretrained_worker_redirect(request, target_path: str, *, preserve_request: bool = False):
+    query_string = request.META.get("QUERY_STRING")
+    target_url = f"{target_path}?{query_string}" if query_string else target_path
+    return redirect(
+        target_url,
+        permanent=True,
+        preserve_request=preserve_request,
     )
+
+
+class PretrainedWorkerDirectoryRedirectView(View):
+    def get(self, request, *args, **kwargs):
+        return redirect("pages:library", permanent=True)
+
+
+class PretrainedWorkerDetailRedirectView(View):
+    def get(self, request, *args, **kwargs):
+        destination = _legacy_pretrained_worker_destination_or_404(kwargs.get("slug"))
+        return _legacy_pretrained_worker_redirect(request, destination.detail_path())
+
+
+class PretrainedWorkerHireRedirectView(View):
+    def post(self, request, *args, **kwargs):
+        destination = _legacy_pretrained_worker_destination_or_404(kwargs.get("slug"))
+        return _legacy_pretrained_worker_redirect(
+            request,
+            destination.hire_path(),
+            preserve_request=True,
+        )
+
+
+class PretrainedWorkerLaunchRedirectView(View):
+    def get(self, request, *args, **kwargs):
+        destination = _legacy_pretrained_worker_destination_or_404(kwargs.get("slug"))
+        return _legacy_pretrained_worker_redirect(request, destination.launch_path())
 
 
 def _template_launch_analytics_properties(request, template, *, default_source_page: str) -> dict:
@@ -1688,135 +1560,6 @@ def _template_launch_analytics_properties(request, template, *, default_source_p
     if flow:
         properties["flow"] = flow
     return properties
-
-
-class PretrainedWorkerLaunchView(ProprietaryPretrainedWorkerOnlyMixin, View):
-    def get(self, request, *args, **kwargs):
-        template = _get_pretrained_worker_template_or_404(kwargs.get("slug"))
-
-        _seed_pretrained_worker_session(request, template)
-        _set_template_launch_trial_onboarding_if_needed(request)
-
-        analytics_properties = _template_launch_analytics_properties(
-            request,
-            template,
-            default_source_page="pretrained_worker_launch",
-        )
-        _track_web_event_for_request(
-            request,
-            event=AnalyticsEvent.PERSISTENT_AGENT_CHARTER_SUBMIT,
-            properties=analytics_properties,
-        )
-
-        app_next_url = _build_template_launch_app_url(request)
-        if request.user.is_authenticated:
-            return redirect(app_next_url)
-
-        response = _build_anonymous_cta_auth_response(
-            request,
-            next_url=app_next_url,
-        )
-        charter_data = _build_oauth_charter_cookie_payload(
-            request,
-            charter=template.charter,
-            charter_source="template",
-            template_code=template.code,
-        )
-        attribution_data = _build_oauth_attribution_cookie_payload(request)
-        _set_oauth_stash_cookies(
-            response,
-            request,
-            charter_data=charter_data,
-            attribution_data=attribution_data,
-            server_side_charter=True,
-        )
-        return response
-
-
-class PretrainedWorkerHireView(ProprietaryPretrainedWorkerOnlyMixin, View):
-    def post(self, request, *args, **kwargs):
-        template = _get_pretrained_worker_template_or_404(kwargs.get("slug"))
-        _seed_pretrained_worker_session(request, template)
-
-        source_page = request.POST.get('source_page') or 'home_pretrained_workers'
-        flow = (request.POST.get("flow") or "").strip().lower()
-        trial_onboarding_requested = is_truthy_flag(request.POST.get("trial_onboarding"))
-        trial_onboarding_target = normalize_trial_onboarding_target(
-            request.POST.get("trial_onboarding_target"),
-            default=TRIAL_ONBOARDING_TARGET_AGENT_UI,
-        )
-        analytics_properties = {
-            "source_page": source_page,
-            "template_code": template.code,
-        }
-        if flow:
-            analytics_properties["flow"] = flow
-
-        if request.user.is_authenticated:
-            Analytics.track_event(
-                user_id=request.user.id,
-                event=AnalyticsEvent.PERSISTENT_AGENT_CHARTER_SUBMIT,
-                source=AnalyticsSource.WEB,
-                properties=analytics_properties,
-            )
-            return redirect('agent_quick_spawn')
-
-        next_url = reverse('agent_quick_spawn')
-        if flow == "pro":
-            request.session[POST_CHECKOUT_REDIRECT_SESSION_KEY] = next_url
-            request.session.modified = True
-            next_url = reverse('proprietary:pro_checkout')
-
-        # Track anonymous interest
-        session_key = request.session.session_key
-        if not session_key:
-            request.session.save()
-            session_key = request.session.session_key
-        Analytics.track_event_anonymous(
-            anonymous_id=str(session_key),
-            event=AnalyticsEvent.PERSISTENT_AGENT_CHARTER_SUBMIT,
-            source=AnalyticsSource.WEB,
-            properties=analytics_properties,
-        )
-
-        app_next_url = next_url
-        if flow != "pro":
-            if trial_onboarding_requested:
-                set_trial_onboarding_intent(
-                    request,
-                    target=trial_onboarding_target,
-                )
-            return_to = normalize_return_to(request, request.META.get("HTTP_REFERER"))
-            app_params = {"spawn": "1"}
-            if return_to:
-                app_params["return_to"] = return_to
-            app_next_url = append_query_params(
-                f"{IMMERSIVE_APP_BASE_PATH}/agents/new",
-                app_params,
-            )
-
-        response = _build_anonymous_cta_auth_response(
-            request,
-            next_url=app_next_url,
-        )
-
-        # Also store charter in a signed cookie for OAuth flows where session
-        # data might be lost during the redirect chain
-        charter_data = _build_oauth_charter_cookie_payload(
-            request,
-            charter=template.charter,
-            charter_source="template",
-            template_code=template.code,
-        )
-        attribution_data = _build_oauth_attribution_cookie_payload(request)
-        _set_oauth_stash_cookies(
-            response,
-            request,
-            charter_data=charter_data,
-            attribution_data=attribution_data,
-        )
-
-        return response
 
 
 def _active_public_template_queryset():
@@ -3979,24 +3722,6 @@ class ComparisonsSitemap(sitemaps.Sitemap):
         return reverse("proprietary:comparison_detail", kwargs={"slug": comparison["slug"]})
 
 
-class PretrainedWorkerTemplateSitemap(sitemaps.Sitemap):
-    changefreq = "weekly"
-    priority = 0.6
-
-    def items(self):
-        try:
-            return list(PretrainedWorkerTemplateService.get_active_templates())
-        except Exception as e:  # pragma: no cover - defensive fallback to keep sitemap working
-            logger.error("Failed to generate PretrainedWorkerTemplateSitemap items: %s", e, exc_info=True)
-            return []
-
-    def location(self, template):
-        return reverse('pages:pretrained_worker_detail', kwargs={'slug': template.code})
-
-    def lastmod(self, template):
-        return getattr(template, "updated_at", None)
-
-
 class PublicTemplateSitemap(sitemaps.Sitemap):
     changefreq = "weekly"
     priority = 0.7
@@ -4376,8 +4101,11 @@ class SolutionView(TemplateView):
             'related_link': {
                 'intro': 'Want to inspect the agent first?',
                 'label': 'View the Talent Scout AI recruiting agent',
-                'route': 'pages:pretrained_worker_detail',
-                'kwargs': {'slug': 'talent-scout'},
+                'route': 'pages:public_template_detail',
+                'kwargs': {
+                    'category_slug': 'recruiting',
+                    'template_slug': 'candidate-sourcing-agent',
+                },
             },
         },
         'recruiting/candidate-sourcing': {
@@ -4400,8 +4128,11 @@ class SolutionView(TemplateView):
             'related_link': {
                 'intro': 'Want to inspect the agent first?',
                 'label': 'View the Talent Scout AI recruiting agent',
-                'route': 'pages:pretrained_worker_detail',
-                'kwargs': {'slug': 'talent-scout'},
+                'route': 'pages:public_template_detail',
+                'kwargs': {
+                    'category_slug': 'recruiting',
+                    'template_slug': 'candidate-sourcing-agent',
+                },
             },
         },
         'sales': {
@@ -4416,8 +4147,11 @@ class SolutionView(TemplateView):
             'related_link': {
                 'intro': 'Want to inspect the agent first?',
                 'label': 'View the Lead Hunter AI sales agent',
-                'route': 'pages:pretrained_worker_detail',
-                'kwargs': {'slug': 'lead-hunter'},
+                'route': 'pages:public_template_detail',
+                'kwargs': {
+                    'category_slug': 'sales',
+                    'template_slug': 'b2b-lead-research-agent',
+                },
             },
         },
         'sales/ai-sales-agent': {
@@ -4444,8 +4178,11 @@ class SolutionView(TemplateView):
             'related_link': {
                 'intro': 'Want to inspect the agent first?',
                 'label': 'View the Lead Hunter AI sales agent',
-                'route': 'pages:pretrained_worker_detail',
-                'kwargs': {'slug': 'lead-hunter'},
+                'route': 'pages:public_template_detail',
+                'kwargs': {
+                    'category_slug': 'sales',
+                    'template_slug': 'b2b-lead-research-agent',
+                },
             },
             'faq_items': [
                 {
@@ -4514,8 +4251,11 @@ class SolutionView(TemplateView):
             'related_link': {
                 'intro': 'Want an API workflow to inspect?',
                 'label': 'View the Standup Coordinator AI agent',
-                'route': 'pages:pretrained_worker_detail',
-                'kwargs': {'slug': 'team-standup-coordinator'},
+                'route': 'pages:public_template_detail',
+                'kwargs': {
+                    'category_slug': 'team-ops',
+                    'template_slug': 'team-standup-coordinator',
+                },
             },
         },
     }
