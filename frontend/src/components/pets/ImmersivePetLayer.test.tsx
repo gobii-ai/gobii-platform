@@ -1,17 +1,23 @@
 /**
- * #481: right-clicking the pet and choosing Options navigated the SPA to the profile
- * page, unloading the agent chat the user was in. Options now opens the unchanged
- * profile page in a new tab; the current conversation must not navigate at all.
+ * #481 resolution: pet Options performs plain same-tab SPA navigation to the unchanged
+ * profile page. The conversation is not lost by leaving — the timeline lives in the
+ * store and the composer draft persists per-agent — and no new browsing context is ever
+ * opened, so browser tab-vs-window preferences cannot produce a popup window.
  */
 import { fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { ImmersivePetLayer } from './ImmersivePetLayer'
 import type { UserPetLibrary } from '../../api/userPets'
+import { navigateWithinApp } from '../../util/appNavigation'
 import { createTestAppStore, StoreProvider } from '../../test/storeTestUtils'
 
 vi.mock('../../hooks/useIsMobile', () => ({
   useIsMobile: () => false,
+}))
+
+vi.mock('../../util/appNavigation', () => ({
+  navigateWithinApp: vi.fn(() => true),
 }))
 
 const library: UserPetLibrary = {
@@ -47,21 +53,19 @@ function renderLayer() {
 }
 
 afterEach(() => {
-  vi.restoreAllMocks()
+  vi.clearAllMocks()
 })
 
 describe('ImmersivePetLayer options', () => {
-  it('renders Options as a real _blank link to the unchanged profile page', () => {
-    // A real link the user genuinely clicks: scripted opens (window.open, synthetic
-    // anchor clicks) get reclassified as popup windows by browser heuristics.
+  it('navigates in the same tab to the unchanged profile pet section', () => {
+    const openSpy = vi.spyOn(window, 'open').mockReturnValue(null)
     renderLayer()
 
     fireEvent.contextMenu(screen.getByLabelText('Bubbles workspace pet'))
-    const options = screen.getByRole('menuitem', { name: 'Options' })
+    fireEvent.click(screen.getByText('Options'))
 
-    expect(options.tagName).toBe('A')
-    expect(options).toHaveAttribute('href', '/app/profile#workspace-pet')
-    expect(options).toHaveAttribute('target', '_blank')
-    expect(options).toHaveAttribute('rel', 'noopener')
+    expect(navigateWithinApp).toHaveBeenCalledWith('/app/profile#workspace-pet')
+    // Never a new browsing context: tab vs window there is browser preference.
+    expect(openSpy).not.toHaveBeenCalled()
   })
 })

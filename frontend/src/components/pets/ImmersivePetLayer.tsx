@@ -14,6 +14,7 @@ import { useIsMobile } from '../../hooks/useIsMobile'
 import { useUpdateUserPetPreferences, useUserPets } from '../../hooks/useUserPets'
 import { selectActiveChatSession } from '../../store/chatSlice'
 import { useAppSelector } from '../../store/hooks'
+import { navigateWithinApp } from '../../util/appNavigation'
 import { FixedContextMenu } from '../common/FixedContextMenu'
 import { PetSprite } from './PetSprite'
 import {
@@ -412,12 +413,12 @@ export function ImmersivePetLayer() {
             {
               label: 'Options',
               icon: Settings,
-              // The unchanged profile page, in a new tab: configuring the pet must not
-              // unload the conversation the user is in (bug #481). A real link the user
-              // genuinely clicks — scripted opens (window.open, synthetic anchor clicks)
-              // get reclassified as popup windows by browser heuristics.
-              href: PET_PROFILE_PATH,
-              target: '_blank',
+              // Same-tab navigation to the unchanged profile page. Nothing is lost by
+              // leaving (#481): the timeline lives in the store and the composer draft
+              // persists per-agent, so Back restores the conversation exactly. Opening
+              // any new context instead is browser-preference roulette — tab vs popup
+              // window is the user's setting, not the page's.
+              onSelect: () => navigateWithinApp(PET_PROFILE_PATH),
             },
             {
               label: 'Dismiss pet',
