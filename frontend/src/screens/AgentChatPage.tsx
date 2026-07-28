@@ -1038,6 +1038,7 @@ export function AgentChatPage({
     error: contextError,
     switchContext,
     createOrganizationContext,
+    refresh: refreshContext,
   } = useConsoleContextSwitcher({
     enabled: true,
     forAgentId: contextLookupAgentId,
@@ -4298,7 +4299,11 @@ export function AgentChatPage({
   const timelineErrorMessage = timelineQuery.error && !messageAnchorUnavailable
     ? safeErrorMessage(timelineQuery.error, 'Unable to load agent timeline right now.')
     : null
-  const topLevelError = timelineErrorMessage || (sessionStatus === 'error' ? sessionError : null)
+  // A failed context load previously rendered as an endless empty/loading state with no
+  // recovery path — the whole bootstrap is gated on it (bug #472).
+  const topLevelError = timelineErrorMessage
+    || (sessionStatus === 'error' ? sessionError : null)
+    || contextError
 
   if (isSelectionView) {
     if (!contextReady || rosterLoading) {
@@ -4364,7 +4369,18 @@ export function AgentChatPage({
       style={agentChatPageStyle}
     >
       {topLevelError ? (
-        <div className="mx-auto w-full max-w-3xl px-4 py-2 text-sm text-rose-600">{topLevelError}</div>
+        <div className="mx-auto flex w-full max-w-3xl items-center gap-3 px-4 py-2 text-sm text-rose-600">
+          <span>{topLevelError}</span>
+          {contextError ? (
+            <button
+              type="button"
+              className="rounded border border-rose-300 px-2 py-0.5 text-xs font-semibold text-rose-600 hover:bg-rose-50"
+              onClick={() => { void refreshContext() }}
+            >
+              Retry
+            </button>
+          ) : null}
+        </div>
       ) : null}
       {messageAnchorUnavailable ? (
         <div className="mx-auto w-full max-w-3xl px-4 py-2 text-sm text-amber-700">Message unavailable. Showing the latest conversation.</div>

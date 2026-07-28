@@ -173,10 +173,21 @@ async function jsonFetchInternal<T>(
   const appliedContextHeaders = shouldApplyConsoleContextHeaders(input) ? applyConsoleContextHeaders(headers) : false
   applyStaffViewContextHeaders(headers)
 
+  // A stalled connection must reject rather than hang forever: bootstrap queries have
+  // no other way to fail into their error/retry paths, and an unbounded initial
+  // timeline fetch pinned the chat on "Loading conversation…" (bug #472). Callers may
+  // pass their own signal, which wins.
+  const signal = restInit.signal ?? (
+    typeof AbortSignal !== 'undefined' && 'timeout' in AbortSignal
+      ? AbortSignal.timeout(45_000)
+      : undefined
+  )
+
   const response = await fetch(input, {
     credentials: 'same-origin',
     ...restInit,
     headers,
+    signal,
   })
 
   maybeRedirectToLogin(response)
