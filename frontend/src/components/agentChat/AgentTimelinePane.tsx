@@ -19,7 +19,10 @@ import { selectImmersiveShellViewer } from '../../store/immersiveShellSlice'
 
 function timelineEventKey(event: SimplifiedTimelineItem): string {
   if (event.kind === 'collapsed-group') {
-    return `collapsed:${event.cursor}`
+    // Key by the first entry, not the group cursor: the cursor is the first buffered
+    // event's cursor, which shifts when thinking and tool events coalesce, remounting
+    // the card (and, before #306, closing its open panel) mid-run.
+    return `collapsed:${event.displayEntries?.[0]?.id ?? event.cursor}`
   }
   if (event.kind === 'steps' && event.entries.length > 0) {
     return `cluster:${event.entries[0].id}`

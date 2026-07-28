@@ -64,12 +64,21 @@ export type AgentChatStreamState = {
   streamingThinkingCollapsed: boolean
 }
 
+export type AgentChatActivityOverlayState = {
+  overlayId: string
+  initialEntryId: string | null
+}
+
 export type AgentChatTimelineUiState = {
   hasUnseenActivity: boolean
   autoScrollPinned: boolean
   autoScrollPinSuppressedUntil: number | null
   pendingEvents: TimelineEvent[]
   realtimeEventCursorIds: Record<string, true>
+  // Lives in the store, not the card: the cards rendering an activity run are unmounted
+  // and remounted as the run collapses/expands and coalesces, and card-local open state
+  // died with them, closing the panel whenever a new message arrived (bug #306).
+  activityOverlay: AgentChatActivityOverlayState | null
 }
 
 export type AgentChatInsightsState = {
@@ -191,6 +200,7 @@ export function createInitialSession(): AgentChatSession {
       autoScrollPinSuppressedUntil: null,
       pendingEvents: [],
       realtimeEventCursorIds: {},
+      activityOverlay: null,
     },
     insights: {
       insightsById: {},
@@ -1100,6 +1110,21 @@ const chatSlice = createSlice({
       const session = getSession(state, state.activeAgentId)
       if (session) {
         delete session.timelineUi.realtimeEventCursorIds[action.payload]
+      }
+    },
+    activityOverlayOpened(state, action: PayloadAction<{ overlayId: string; initialEntryId?: string | null }>) {
+      const session = getSession(state, state.activeAgentId)
+      if (session) {
+        session.timelineUi.activityOverlay = {
+          overlayId: action.payload.overlayId,
+          initialEntryId: action.payload.initialEntryId ?? null,
+        }
+      }
+    },
+    activityOverlayClosed(state) {
+      const session = getSession(state, state.activeAgentId)
+      if (session) {
+        session.timelineUi.activityOverlay = null
       }
     },
     pendingEventsPersisted(state, action: PayloadAction<{ agentId: string }>) {

@@ -64,7 +64,17 @@ export const TimelineEventItem = memo(function TimelineEventItem({
   }
 
   if (event.kind === 'collapsed-group') {
-    return <CollapsedActivityCard overlayId={event.cursor} entries={collapsedEntries} label={event.summary.label} subtitle="Collapsed actions" />
+    // Keyed by the first entry id, not the group cursor: the cursor shifts as the run's
+    // events coalesce, and the expanded form of the same run keys its overlay off the
+    // first entry id — sharing the identity keeps an open panel open across the flip (#306).
+    return (
+      <CollapsedActivityCard
+        overlayId={collapsedEntries[0]?.id ?? event.cursor}
+        entries={collapsedEntries}
+        label={event.summary.label}
+        subtitle="Collapsed actions"
+      />
+    )
   }
   if (event.kind === 'inline-schedule') {
     return <InlineScheduleCard entry={event.entry} />
