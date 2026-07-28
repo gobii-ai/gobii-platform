@@ -144,10 +144,11 @@ function ReviewDetail({ itemId, onClose }: { itemId: string; onClose: () => void
       if (editing && attachmentsChanged) edits.attachmentNodeIds = draft.attachmentNodeIds
       if (saveOnly) return updateOutboxItem(item.id, { expectedVersion: item.version, ...edits })
       if (!action) throw new Error('Missing action.')
+      // Approve never carries edits: an edited body must be saved first so the reviewer
+      // sees the rendered preview of what will actually ship before approving (#427).
       return decideOutboxItem(item.id, action, {
         expectedVersion: item.version,
         acknowledgeThreadChanged: threadAcknowledged,
-        ...(action === 'approve' ? edits : {}),
       })
     },
     onSuccess: async (updated) => {
@@ -237,7 +238,7 @@ function ReviewDetail({ itemId, onClose }: { itemId: string; onClose: () => void
       <div className="mt-5 flex flex-wrap gap-2">
         {item.allowedActions.edit ? <button type="button" onClick={() => setEditing((value) => !value)} className="inline-flex items-center gap-2 rounded-lg border border-slate-600 px-3 py-2 text-sm font-semibold hover:bg-slate-800"><Pencil className="size-4" />{editing ? 'Cancel edit' : 'Edit'}</button> : null}
         {editing ? <button type="button" disabled={mutation.isPending} onClick={() => mutation.mutate({ saveOnly: true })} className="rounded-lg border border-blue-400/50 px-3 py-2 text-sm font-semibold text-blue-200 hover:bg-blue-500/10">Save changes</button> : null}
-        {item.allowedActions.approve ? <button type="button" disabled={mutation.isPending || (threadChanged && !threadAcknowledged)} onClick={() => mutation.mutate({ action: 'approve' })} className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500 disabled:opacity-50"><Send className="size-4" />{editing ? 'Save & send' : 'Approve & send'}</button> : null}
+        {!editing && item.allowedActions.approve ? <button type="button" disabled={mutation.isPending || (threadChanged && !threadAcknowledged)} onClick={() => mutation.mutate({ action: 'approve' })} className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500 disabled:opacity-50"><Send className="size-4" />Approve & send</button> : null}
         {item.allowedActions.discard ? <button type="button" disabled={mutation.isPending} onClick={() => mutation.mutate({ action: 'discard' })} className="inline-flex items-center gap-2 rounded-lg border border-rose-400/50 px-3 py-2 text-sm font-semibold text-rose-200 hover:bg-rose-500/10"><Trash2 className="size-4" />Discard</button> : null}
         {item.allowedActions.retry ? <button type="button" disabled={mutation.isPending} onClick={() => mutation.mutate({ action: 'retry' })} className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500"><RotateCcw className="size-4" />Retry unchanged email</button> : null}
       </div>
