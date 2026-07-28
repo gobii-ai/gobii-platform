@@ -62,6 +62,7 @@ SQLITE_PROSPECT_PIPELINE_COMPLETES = "sqlite_prospect_pipeline_completes"
 SQLITE_ENRICHMENT_REFRESH_UNDER_PRESSURE = "sqlite_enrichment_refresh_under_pressure"
 SQLITE_SOURCE_CARDINALITY_AND_IDENTITY = "sqlite_source_cardinality_and_identity"
 SQLITE_FRESH_PEER_FACT_OVER_EMPTY_MODEL = "sqlite_fresh_peer_fact_over_empty_model"
+SQLITE_STRUCTURED_PEER_EVENT_PERSISTENCE = "sqlite_structured_peer_event_persistence"
 SQLITE_TOOL_RESULT_SCENARIO_SLUGS = [
     SQLITE_MULTI_RESULT_WEB_SYNTHESIS,
     SQLITE_INTERMEDIATE_WORKING_TABLE,
@@ -81,6 +82,7 @@ SQLITE_TOOL_RESULT_SCENARIO_SLUGS = [
     SQLITE_ENRICHMENT_REFRESH_UNDER_PRESSURE,
     SQLITE_SOURCE_CARDINALITY_AND_IDENTITY,
     SQLITE_FRESH_PEER_FACT_OVER_EMPTY_MODEL,
+    SQLITE_STRUCTURED_PEER_EVENT_PERSISTENCE,
 ]
 
 
@@ -1348,6 +1350,21 @@ def _seed_empty_launch_handoffs(agent_id: str) -> None:
                 "CREATE TABLE launch_handoffs ("
                 "work_key TEXT PRIMARY KEY, owner TEXT NOT NULL, due_on TEXT NOT NULL, "
                 "source_kind TEXT NOT NULL, source_ref TEXT NOT NULL);"
+            )
+            conn.commit()
+        finally:
+            clear_guarded_connection(conn)
+            conn.close()
+
+
+def _seed_empty_operational_events(agent_id: str) -> None:
+    with agent_sqlite_db(str(agent_id)) as db_path:
+        conn = open_guarded_sqlite_connection(db_path)
+        try:
+            conn.execute(
+                "CREATE TABLE operational_events ("
+                "event_id TEXT PRIMARY KEY, event_type TEXT NOT NULL, thread_key TEXT NOT NULL, "
+                "occurred_at TEXT NOT NULL, provider_message_id TEXT, source_message_id TEXT NOT NULL);"
             )
             conn.commit()
         finally:
@@ -3728,6 +3745,190 @@ class SqliteFreshPeerFactOverEmptyModelScenario(SqliteDomainModelScenario):
                 "Reported the fresh confirmed owner and due date."
                 if current_answer
                 else f"Expected one answer naming Maya Chen and Friday; body={body!r}."
+            ),
+            artifacts={"message": outbound[-1]} if outbound else {},
+        )
+
+
+@register_scenario
+class SqliteStructuredPeerEventPersistenceScenario(SqliteDomainModelScenario):
+    slug = SQLITE_STRUCTURED_PEER_EVENT_PERSISTENCE
+    version = "1.1"
+    description = (
+        "A structured peer event should be durably modeled and read back before the agent reports its outcome."
+    )
+    expected_runtime = "short"
+    tags = (*SqliteToolResultScenario.tags, "trajectory_regression", "peer_handoff", "event_truth")
+    tasks = [
+        ScenarioTask(name="inject_event_request", assertion_type="agent_processing"),
+        ScenarioTask(name="verify_structured_event_modeled", assertion_type="persisted_state"),
+        ScenarioTask(name="verify_persisted_outcome_reported", assertion_type="manual"),
+    ]
+
+    def run(self, run_id: str, agent_id: str) -> None:
+        from api.evals.scenarios.responsibility_boundaries import ResponsibilityBoundaryScenario
+
+        self._ready_agent(agent_id)
+        PersistentAgent.objects.filter(id=agent_id).update(
+            charter=(
+                "Maintain the central operational event ledger. Ingest structured peer events idempotently into "
+                "operational_events before reporting outcomes. The source_message_id is the receiving peer message's "
+                "message_id. Missing provider evidence remains null, never invented. Report counts from the modeled "
+                "ledger, not memory."
+            ),
+        )
+        _seed_empty_operational_events(agent_id)
+        agent = PersistentAgent.objects.get(id=agent_id)
+        peer_event = ResponsibilityBoundaryScenario._peer_inbound(
+            agent,
+            run_id,
+            "A finalized accepted-setup event is attached structurally. Persist it before reporting.",
+        )
+        peer_event.raw_payload = {
+            **(peer_event.raw_payload or {}),
+            "structured_payload": {
+                "kind": "operational_event",
+                "event_id": "evt-2048",
+                "event_type": "accepted_setup",
+                "thread_key": "thread-2048",
+                "occurred_at": "2026-07-28T15:42:00Z",
+            },
+        }
+        peer_event.save(update_fields=["raw_payload"])
+
+        inbound = self._inject_and_wait(
+            run_id,
+            agent_id,
+            (
+                "Give me the current accepted-setup count and identify the confirmed thread. "
+                "Do not report it until the peer event is durably recorded."
+            ),
+            {},
+            allowed_tool_names={"sqlite_batch", "send_chat_message"},
+            max_relevant_tool_calls=6,
+            task_name="inject_event_request",
+        )
+        calls = _tool_calls_for_run(run_id, after=inbound.timestamp)
+        sqlite_calls = [call for call in calls if call.tool_name == "sqlite_batch"]
+        sql = "\n".join(str((call.tool_params or {}).get("sql") or "") for call in sqlite_calls)
+        statement_entries = [
+            (call_index, statement_index, call, statement)
+            for call_index, call in enumerate(sqlite_calls)
+            for statement_index, statement in enumerate(
+                sqlparse.split(str((call.tool_params or {}).get("sql") or ""))
+            )
+            if statement.strip()
+        ]
+        write_entries = [
+            (call_index, statement_index, call, statement)
+            for call_index, statement_index, call, statement in statement_entries
+            if (
+                (match := _MUTATION_TARGET_RE.search(statement))
+                and match.group("table").casefold() == "operational_events"
+            )
+        ]
+        write_entry = write_entries[0] if write_entries else None
+        write_call_index, write_statement_index, write_call, write_statement = (
+            write_entry or (-1, -1, None, "")
+        )
+        read_after_write = write_entry is not None and any(
+            call_index == write_call_index
+            and statement_index > write_statement_index
+            and re.search(r"\bselect\b", statement, re.I)
+            and _reads_table(statement, "operational_events")
+            for call_index, statement_index, _call, statement in statement_entries
+        )
+        direct_message_import = (
+            write_entry is not None
+            and _reads_table(write_statement, "__messages")
+            and "structured_payload_json" in write_statement.casefold()
+        )
+        inspected_message_payload = any(
+            call_index < write_call_index
+            and _reads_table(statement, "__messages")
+            and "structured_payload_json" in statement.casefold()
+            for call_index, _statement_index, _call, statement in statement_entries
+        )
+        expected_bound_values = {
+            "evt-2048",
+            "accepted_setup",
+            "thread-2048",
+            "2026-07-28T15:42:00Z",
+            str(peer_event.id),
+        }
+        bindings = (write_call.tool_params or {}).get("bindings") if write_call else {}
+        bound_values = {
+            str(value)
+            for value in (bindings or {}).values()
+            if isinstance(value, (str, int, float))
+        }
+        bound_message_import = (
+            inspected_message_payload
+            and expected_bound_values.issubset(bound_values)
+            and not any(value in write_statement for value in expected_bound_values)
+        )
+        message_grounded_import = direct_message_import or bound_message_import
+
+        with agent_sqlite_db(str(agent_id)) as db_path:
+            conn = open_guarded_sqlite_connection(db_path)
+            try:
+                rows = conn.execute(
+                    "SELECT event_id, event_type, thread_key, occurred_at, "
+                    "provider_message_id, source_message_id FROM operational_events;"
+                ).fetchall()
+            finally:
+                clear_guarded_connection(conn)
+                conn.close()
+
+        expected = [
+            (
+                "evt-2048",
+                "accepted_setup",
+                "thread-2048",
+                "2026-07-28T15:42:00Z",
+                None,
+                str(peer_event.id),
+            )
+        ]
+        failures = _sqlite_attempt_failures(sqlite_calls)
+        failures.extend(
+            message
+            for failed, message in (
+                (not sqlite_calls, "no SQLite event ingestion observed"),
+                (
+                    not message_grounded_import,
+                    "event write neither derived from __messages nor safely bound an inspected structured payload",
+                ),
+                (not read_after_write, "event write was not read back before reporting"),
+                (rows != expected, f"persisted operational events were {rows!r}"),
+            )
+            if failed
+        )
+        self._record_check(
+            run_id,
+            "verify_structured_event_modeled",
+            failures,
+            "Persisted the exact inspected peer event without SQL literals, retained provenance, and read it back.",
+        )
+
+        outbound = _outbound_messages_after(agent_id, inbound.timestamp)
+        body = outbound[-1].body if outbound else ""
+        reported_persisted_truth = (
+            len(outbound) == 1
+            and "thread-2048" in (body or "").casefold()
+            and "accepted" in (body or "").casefold()
+            and bool(re.search(r"\b(?:1|one)\b", body or "", re.I))
+            and not re.search(r"\b(?:0|zero|none)\b", body or "", re.I)
+        )
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED if reported_persisted_truth else EvalRunTask.Status.FAILED,
+            task_name="verify_persisted_outcome_reported",
+            observed_summary=(
+                "Reported the one durably modeled accepted setup."
+                if reported_persisted_truth
+                else f"Expected one accepted setup for thread-2048 after persistence; body={body!r}."
             ),
             artifacts={"message": outbound[-1]} if outbound else {},
         )

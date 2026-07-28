@@ -2385,21 +2385,18 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
         "function": {
             "name": "sqlite_batch",
             "description": (
-                "Durable world model and exact logic. Unknown table: sqlite_master gives names, not columns. "
-                "For unknown columns, run PRAGMA table_info(table) alone; use its output. "
-                "Per source shape: keyed DDL + set-wise upsert; "
-                "and decision-ready SELECTs. Derive fields across is_current_batch=1 plus "
-                "tool_name from result_json/item.value; provenance: t.result_id/t.source_url. Multi-source prose "
-                "modeling first uses the bounded set-wide inspection shown beside results; top-level rows join by "
-                "result_id. Structured JSON uses rows=[]; current batch plus tool_name is exact; add no "
-                "source_url/result_id predicate and store t.source_url/t.result_id as provenance. Upserts: WHERE 1=1 "
-                "before ON CONFLICT. group_concat(DISTINCT x) accepts no separator. Never copy sourced facts/URLs "
-                "into SQL, import per result_id, mix historical generic-tool results, or rebuild durable tables on "
-                "refresh. Evolve normalized entities/relations; query counts, joins, coverage, gaps, and ranks. "
-                "Return all supporting fields/URLs in the same batch; after decision rows return, deliver without "
-                "rereading. Bind messy text via :name; never "
-                "backslash-escape SQLite strings. Separate statements with semicolons. ON CONFLICT(cols) requires "
-                "those exact columns to be PRIMARY KEY or UNIQUE. bindings is an object; rows is an array. No ATTACH"
+                "Durable world model/exact logic. Each shape: keyed DDL, set-wise upsert, decision SELECT. "
+                "Structured: derive result_json/item.value over current batch + tool_name; no "
+                "ID/URL filter; keep t.result_id/t.source_url. Prose: inspect bounded set once; join "
+                "top-level rows by result_id. Message/peer events: prefer one-batch INSERT ... SELECT from __messages. "
+                "After payload inspection, bind observed values; never put them in SQL or use a SQLite call ID in "
+                "__tool_results. Structured JSON uses rows=[]. Never put "
+                "sourced facts/URLs in SQL, import siblings singly, mix historical generic results, or rebuild tables. "
+                "Upsert stable keys; put WHERE 1=1 "
+                "before ON CONFLICT. group_concat(DISTINCT x) has no separator. Evolve normalized entities/relations; "
+                "query counts/joins/coverage/gaps/ranks. Same batch: read back keyed writes and all evidence/URLs "
+                "before delivery. Bind messy text via :name; no backslash escapes. Semicolon-separate statements. "
+                "ON CONFLICT(cols) needs exact PRIMARY KEY/UNIQUE columns. bindings object; rows array. No ATTACH"
             ),
             "parameters": {
                 "type": "object",
@@ -2437,16 +2434,20 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
                     "sql": {
                         "type": "string",
                         "description": (
-                            "SQL statements. Prose: join `json_each(:rows) r` to __tool_results t on "
+                            "SQL. Prose: join `json_each(:rows) r` to __tool_results t on "
                             "t.result_id=json_extract(r.value,'$.result_id'); facts at $.fields.<name>, "
-                            "t.result_id/t.source_url provenance. No sourced literals or prose writes with rows=[]. Config patch: "
-                            "one UPDATE with patch_text(charter,:old,:new); put old/new in bindings, never SQL. End with decision/detail SELECTs."
+                            "with t.result_id/t.source_url provenance. Message events: prefer INSERT ... SELECT from "
+                            "__messages; after inspecting body/structured_payload_json, use bindings, not SQL literals. "
+                            "No sourced literals "
+                            "or rows=[] prose writes. Config: UPDATE with patch_text(charter,:old,:new); old/new belong "
+                            "in bindings. End writes with keyed readback plus decision/detail SELECTs."
                         ),
                     },
                     "bindings": {
                         "type": "object",
                         "description": (
-                            "For config patches, REQUIRED old/new keys. Otherwise optional :name values; keys omit colon."
+                            "Config requires old/new. Otherwise optional authored or inspected-message :name values; "
+                            "keys omit colon."
                         ),
                         "additionalProperties": {},
                     },

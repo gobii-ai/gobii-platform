@@ -222,9 +222,9 @@ class SqliteBatchCoreTests(SqliteBatchTestCase):
     def test_tool_contract_explains_batch_and_upsert_shapes(self):
         tool = get_sqlite_batch_tool()["function"]
 
-        self.assertIn("Separate statements with semicolons", tool["description"])
-        self.assertIn("PRIMARY KEY or UNIQUE", tool["description"])
-        self.assertIn("bindings is an object", tool["description"])
+        self.assertIn("Semicolon-separate statements", tool["description"])
+        self.assertIn("PRIMARY KEY/UNIQUE", tool["description"])
+        self.assertIn("bindings object", tool["description"])
         self.assertEqual(tool["parameters"]["properties"]["rows"]["type"], "array")
         self.assertEqual(tool["parameters"]["properties"]["bindings"]["type"], "object")
 
@@ -233,15 +233,15 @@ class SqliteBatchCoreTests(SqliteBatchTestCase):
         sql_description = function["parameters"]["properties"]["sql"]["description"]
 
         self.assertIn("Bind messy text via :name", function["description"])
-        self.assertIn("never backslash-escape SQLite strings", function["description"])
-        self.assertIn("Config patch: one UPDATE", sql_description)
+        self.assertIn("no backslash escapes", function["description"])
+        self.assertIn("Config: UPDATE", sql_description)
         self.assertIn("patch_text(charter,:old,:new)", sql_description)
-        self.assertIn("put old/new in bindings, never SQL", sql_description)
+        self.assertIn("old/new belong in bindings", sql_description)
         self.assertIn(
-            "For config patches, REQUIRED old/new keys",
+            "Config requires old/new",
             function["parameters"]["properties"]["bindings"]["description"],
         )
-        self.assertIn("End with decision/detail SELECTs", sql_description)
+        self.assertIn("End writes with keyed readback plus decision/detail SELECTs", sql_description)
 
     def test_rows_schema_requires_source_specificity_without_enrichment(self):
         rows = (
@@ -794,30 +794,28 @@ class SqliteBatchCoreTests(SqliteBatchTestCase):
         description = definition["function"]["description"]
 
         for expected in (
-            "Durable world model and exact logic",
-            "Unknown table: sqlite_master gives names, not columns",
-            "For unknown columns, run PRAGMA table_info(table) alone",
-            "use its output",
+            "Durable world model/exact logic",
             "keyed DDL",
             "set-wise upsert",
-            "is_current_batch=1 plus tool_name",
+            "current batch + tool_name",
             "result_json/item.value",
             "t.result_id/t.source_url",
-            "Multi-source prose modeling first uses",
-            "bounded set-wide inspection shown beside results",
+            "inspect bounded set once",
             "top-level rows",
             "Structured JSON uses rows=[]",
-            "add no source_url/result_id predicate",
-            "store t.source_url/t.result_id as provenance",
+            "no ID/URL filter",
+            "Message/peer events",
+            "prefer one-batch INSERT ... SELECT from __messages",
+            "After payload inspection, bind observed values",
+            "never put them in SQL",
             "WHERE 1=1 before ON CONFLICT",
             "group_concat(DISTINCT x)",
-            "Never copy sourced facts/URLs into SQL",
-            "import per result_id",
-            "mix historical generic-tool results",
+            "Never put sourced facts/URLs in SQL",
+            "import siblings singly",
+            "mix historical generic results",
             "Evolve normalized entities/relations",
-            "counts, joins, coverage, gaps, and ranks",
-            "Return all supporting fields/URLs in the same batch",
-            "after decision rows return, deliver without rereading",
+            "counts/joins/coverage/gaps/ranks",
+            "read back keyed writes and all evidence/URLs",
         ):
             self.assertIn(expected, description)
         continuation_description = (
@@ -850,6 +848,12 @@ class SqliteBatchCoreTests(SqliteBatchTestCase):
         self.assertIn("json_each(:rows)", sql_description)
         self.assertIn("$.fields.<name>", sql_description)
         self.assertIn("t.result_id/t.source_url provenance", sql_description)
+        self.assertIn("prefer INSERT ... SELECT from __messages", sql_description)
+        self.assertIn("after inspecting body/structured_payload_json", sql_description)
+        self.assertIn("use bindings, not SQL literals", sql_description)
+        self.assertIn("End writes with keyed readback", sql_description)
+        bindings_description = definition["function"]["parameters"]["properties"]["bindings"]["description"]
+        self.assertIn("authored or inspected-message :name values", bindings_description)
         self.assertNotIn("before one terminal send", description)
 
     def test_tool_result_ctas_warns_that_identity_is_disposable(self):

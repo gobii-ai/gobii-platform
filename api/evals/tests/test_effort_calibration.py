@@ -2430,7 +2430,7 @@ class FirstRunPromptCalibrationTests(TestCase):
         self.assertIn("enabled tool fits -> use directly", system_prompt)
         self.assertIn("credential-returning API -> search_tools('secure credential delegation') first", system_prompt)
         self.assertIn("named model + explicit fresh non-secret source/URL -> http_request only, no text/send/plan; WAIT", system_prompt)
-        self.assertIn("Query truth instead of remembering it", system_prompt)
+        self.assertIn("query truth instead of memory", system_prompt)
         self.assertIn("data/api/feed/file URL -> http_request", system_prompt)
         self.assertIn("reconcile+SELECT there before use", system_prompt)
         self.assertIn("spawn_web_task only after access/render/login blockage", system_prompt)

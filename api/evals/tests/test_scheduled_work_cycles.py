@@ -54,6 +54,6 @@ class ScheduledWorkCycleScenarioTests(SimpleTestCase):
         self.assertIn("with `will_continue_work=true`", continuation)
         self.assertIn("not `__messages`", continuation)
         self.assertIn("act from rows or sleep silently", continuation)
-        self.assertIn("for any read that may trigger another tool", sqlite_guidance)
-        self.assertIn("queue reads are true", sqlite_guidance)
+        self.assertIn("for reads that may trigger another tool", sqlite_guidance)
+        self.assertIn("including queues", sqlite_guidance)
         self.assertIn("for any read that may trigger another tool", sqlite_description)
