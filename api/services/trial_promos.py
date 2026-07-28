@@ -480,8 +480,6 @@ def mark_direct_trial_promo_failed(redemption: TrialPromoRedemption) -> None:
 
 def get_eligible_late_conversion_redemption(*, promo: TrialPromo, user, now=None):
     now = now or timezone.now()
-    if not promo.is_active:
-        return None
     return (
         TrialPromoRedemption.objects.filter(
             promo=promo,
@@ -502,7 +500,6 @@ def get_eligible_late_conversion_for_user(*, user, now=None):
         TrialPromoRedemption.objects.select_related("promo")
         .filter(
             user=user,
-            promo__is_active=True,
             status=TrialPromoRedemptionStatusChoices.DIRECT_ACTIVATION_COMPLETED,
             discount_state=TrialPromoDiscountStateChoices.AVAILABLE,
             discount_applied_at__isnull=True,

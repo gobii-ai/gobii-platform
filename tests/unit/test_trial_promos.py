@@ -52,6 +52,8 @@ from api.services.trial_promos import (
     TrialPromoError,
     can_user_start_trial_promo,
     find_active_trial_promo_by_code,
+    get_eligible_late_conversion_for_user,
+    get_eligible_late_conversion_redemption,
     mark_trial_promo_redemption_from_checkout_session,
     mark_trial_promo_redemption_subscription,
     parse_trial_promo_credit_amount,
@@ -411,6 +413,35 @@ class TrialPromoServiceTests(TestCase):
         self.assertEqual(
             redemption.discount_state,
             TrialPromoDiscountStateChoices.REDEEMED,
+        )
+
+    def test_inactive_campaign_preserves_earned_late_conversion(self):
+        promo = _create_promo(
+            code="INACTIVE-EARNED-CONVERSION",
+            activation_mode=TrialPromoActivationModeChoices.DIRECT_STRIPE_TRIAL,
+        )
+        redemption = TrialPromoRedemption.objects.create(
+            promo=promo,
+            user=self.user,
+            status=TrialPromoRedemptionStatusChoices.DIRECT_ACTIVATION_COMPLETED,
+            event_id="inactive-earned-conversion",
+            discount_state=TrialPromoDiscountStateChoices.AVAILABLE,
+            activated_at=timezone.now() - timedelta(days=15),
+            late_conversion_expires_at=timezone.now() + timedelta(days=15),
+        )
+        promo.is_active = False
+        promo.save(update_fields=["is_active", "updated_at"])
+
+        self.assertEqual(
+            get_eligible_late_conversion_redemption(
+                promo=promo,
+                user=self.user,
+            ),
+            redemption,
+        )
+        self.assertEqual(
+            get_eligible_late_conversion_for_user(user=self.user),
+            redemption,
         )
 
 
@@ -1112,6 +1143,35 @@ class SpecialAccessCheckoutTests(TestCase):
         self.assertEqual(response["Location"], reverse("pages:special_access"))
         mock_start_direct_trial.assert_not_called()
 
+    @override_settings(TRIAL_PROMO_DIRECT_ACTIVATION_ENABLED=False)
+    @patch("pages.views.activate_direct_trial_promo")
+    @patch(
+        "pages.views.reconcile_user_plan_from_stripe",
+        return_value={"id": PlanNames.FREE},
+    )
+    def test_direct_activation_switch_still_blocks_new_trials(
+        self,
+        _mock_reconcile,
+        mock_activate,
+    ):
+        promo = _create_promo(
+            code="DIRECT-DISABLED-NEW",
+            activation_mode=TrialPromoActivationModeChoices.DIRECT_STRIPE_TRIAL,
+            payment_method_required=False,
+            no_payment_method_end_behavior=TrialPromoNoPaymentMethodEndBehaviorChoices.CANCEL,
+            conversion_coupon_id="coupon_three_months",
+        )
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            reverse("pages:special_access_start"),
+            {"code": promo.code_label},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], reverse("pages:special_access"))
+        mock_activate.assert_not_called()
+
     @override_settings(TRIAL_PROMO_DIRECT_ACTIVATION_ENABLED=True)
     @patch("pages.views.activate_direct_trial_promo")
     @patch("pages.views.Price.objects.get")
@@ -1183,7 +1243,7 @@ class SpecialAccessCheckoutTests(TestCase):
         self.assertEqual(session["context_type"], "personal")
         self.assertEqual(session["context_id"], str(self.user.pk))
 
-    @override_settings(TRIAL_PROMO_DIRECT_ACTIVATION_ENABLED=True)
+    @override_settings(TRIAL_PROMO_DIRECT_ACTIVATION_ENABLED=False)
     @patch("pages.views.activate_direct_trial_promo")
     @patch(
         "pages.views.reconcile_user_plan_from_stripe",
@@ -1230,6 +1290,47 @@ class SpecialAccessCheckoutTests(TestCase):
             [str(self.user.pk)],
         )
         mock_activate.assert_not_called()
+
+    @override_settings(TRIAL_PROMO_DIRECT_ACTIVATION_ENABLED=False)
+    @patch(
+        "pages.views._start_trial_promo_conversion_checkout",
+        return_value=HttpResponseRedirect("https://stripe.test/discounted"),
+    )
+    @patch(
+        "pages.views.reconcile_user_plan_from_stripe",
+        return_value={"id": PlanNames.FREE},
+    )
+    def test_completed_redemption_can_convert_with_activation_disabled(
+        self,
+        _mock_reconcile,
+        mock_start_conversion,
+    ):
+        promo = _create_promo(
+            code="DISABLED-ACTIVATION-CONVERSION",
+            activation_mode=TrialPromoActivationModeChoices.DIRECT_STRIPE_TRIAL,
+            payment_method_required=False,
+            no_payment_method_end_behavior=TrialPromoNoPaymentMethodEndBehaviorChoices.CANCEL,
+            conversion_coupon_id="coupon_three_months",
+        )
+        redemption = TrialPromoRedemption.objects.create(
+            promo=promo,
+            user=self.user,
+            status=TrialPromoRedemptionStatusChoices.DIRECT_ACTIVATION_COMPLETED,
+            event_id="disabled-activation-conversion",
+            discount_state=TrialPromoDiscountStateChoices.AVAILABLE,
+            activated_at=timezone.now() - timedelta(days=15),
+            late_conversion_expires_at=timezone.now() + timedelta(days=15),
+        )
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            reverse("pages:special_access_start"),
+            {"code": promo.code_label},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], "https://stripe.test/discounted")
+        self.assertEqual(mock_start_conversion.call_args.args[1:], (promo, redemption))
 
     @override_settings(TRIAL_PROMO_DIRECT_ACTIVATION_ENABLED=False)
     @patch("pages.views.activate_direct_trial_promo")
@@ -1503,6 +1604,7 @@ class SpecialAccessCheckoutTests(TestCase):
         )
         promo.conversion_coupon_id = "coupon_six_months"
         promo.discount_months = 6
+        promo.is_active = False
         promo.save(
             update_fields=[
                 "plan",
@@ -1511,6 +1613,7 @@ class SpecialAccessCheckoutTests(TestCase):
                 "no_payment_method_end_behavior",
                 "conversion_coupon_id",
                 "discount_months",
+                "is_active",
             ],
         )
         mock_stripe_settings.return_value = SimpleNamespace(

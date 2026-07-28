@@ -2985,11 +2985,6 @@ def _start_direct_trial_promo(request, promo: TrialPromo):
         == TrialPromoRedemptionStatusChoices.DIRECT_ACTIVATION_PENDING
     )
     if not activation_pending:
-        if not settings.TRIAL_PROMO_DIRECT_ACTIVATION_ENABLED:
-            raise TrialPromoError(
-                "direct_activation_disabled",
-                "Transparent trial activation is temporarily unavailable.",
-            )
         if not is_user_email_allowed_for_trial_promo(user=user, promo=promo):
             raise TrialPromoError(
                 TRIAL_PROMO_REASON_EMAIL_NOT_ALLOWLISTED,
@@ -3029,6 +3024,11 @@ def _start_direct_trial_promo(request, promo: TrialPromo):
         return _start_trial_promo_conversion_checkout(request, promo, late_redemption)
 
     if existing_redemption is None:
+        if not settings.TRIAL_PROMO_DIRECT_ACTIVATION_ENABLED:
+            raise TrialPromoError(
+                "direct_activation_disabled",
+                "Transparent trial activation is temporarily unavailable.",
+            )
         failed_activation_subscription_ids = {
             str(subscription_id)
             for subscription_id in TrialPromoRedemption.objects.filter(
