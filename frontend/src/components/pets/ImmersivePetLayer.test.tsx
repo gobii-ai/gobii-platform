@@ -1,9 +1,10 @@
 /**
  * #481: right-clicking the pet and choosing Options navigated the SPA to the profile
- * page, unloading the agent chat the user was in. Options must configure in place.
+ * page, unloading the agent chat the user was in. Options now opens the unchanged
+ * profile page in a new tab; the current conversation must not navigate at all.
  */
 import { fireEvent, render, screen } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { ImmersivePetLayer } from './ImmersivePetLayer'
 import type { UserPetLibrary } from '../../api/userPets'
@@ -35,12 +36,6 @@ const library: UserPetLibrary = {
 vi.mock('../../hooks/useUserPets', () => ({
   useUserPets: () => ({ data: library, isLoading: false, isError: false }),
   useUpdateUserPetPreferences: () => ({ mutate: vi.fn(), mutateAsync: vi.fn() }),
-  useUpdateUserPet: () => ({ mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false }),
-  useDeleteUserPet: () => ({ mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false }),
-}))
-
-vi.mock('./PetOptionsPanel', () => ({
-  PetOptionsPanel: () => <div data-testid="pet-options-panel" />,
 }))
 
 function renderLayer() {
@@ -51,25 +46,20 @@ function renderLayer() {
   )
 }
 
+afterEach(() => {
+  vi.restoreAllMocks()
+})
+
 describe('ImmersivePetLayer options', () => {
-  it('opens pet options in place instead of navigating away from the chat', () => {
+  it('opens the unchanged profile page in a new tab, leaving the chat alone', () => {
+    const openSpy = vi.spyOn(window, 'open').mockReturnValue(null)
     renderLayer()
     const startPath = window.location.pathname
 
     fireEvent.contextMenu(screen.getByLabelText('Bubbles workspace pet'))
     fireEvent.click(screen.getByText('Options'))
 
-    expect(screen.getByTestId('pet-options-panel')).toBeInTheDocument()
+    expect(openSpy).toHaveBeenCalledWith('/app/profile#workspace-pet', '_blank', 'noopener')
     expect(window.location.pathname).toBe(startPath)
-  })
-
-  it('closes the options dialog without touching history', () => {
-    renderLayer()
-
-    fireEvent.contextMenu(screen.getByLabelText('Bubbles workspace pet'))
-    fireEvent.click(screen.getByText('Options'))
-    fireEvent.keyDown(document, { key: 'Escape' })
-
-    expect(screen.queryByTestId('pet-options-panel')).not.toBeInTheDocument()
   })
 })
