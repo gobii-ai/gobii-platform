@@ -3397,7 +3397,9 @@
 }
 .template-recommendations-card__grid {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    /* Column count must follow the pane, not the viewport: with the sidebar open the
+       pane can be ~600px on a wide window, and three fixed columns crush the tiles. */
+    grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
     gap: 0.55rem;
 }
 .template-recommendations-card__item {
