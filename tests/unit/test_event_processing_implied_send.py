@@ -3861,6 +3861,99 @@ class DailyLimitMessageOnlyModeTests(TestCase):
             ],
         )
 
+    @patch("api.agent.core.event_processing.build_prompt_context")
+    @patch("api.agent.core.event_processing.get_agent_daily_credit_state", return_value={})
+    @patch("api.agent.core.event_processing.get_agent_tools")
+    def test_peer_dm_turn_does_not_offer_implicit_web_reply_tool(
+        self,
+        mock_get_tools,
+        _mock_get_daily_state,
+        mock_build_prompt,
+    ):
+        peer_browser_agent = BrowserUseAgent.objects.create(
+            user=self.user,
+            name="peer-browser-for-channel-tools",
+        )
+        peer = PersistentAgent.objects.create(
+            user=self.user,
+            name="Peer Agent",
+            charter="Test peer charter",
+            browser_use_agent=peer_browser_agent,
+        )
+        peer_link = AgentPeerLink.objects.create(
+            agent_a=self.agent,
+            agent_b=peer,
+            created_by=self.user,
+        )
+        peer_conversation = PersistentAgentConversation.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.OTHER,
+            address=f"peer:{peer.id}",
+            peer_link=peer_link,
+        )
+        peer_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=peer,
+            channel=CommsChannel.OTHER,
+            address=f"agent:{peer.id}",
+        )
+        PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            peer_agent=peer,
+            is_outbound=False,
+            from_endpoint=peer_endpoint,
+            conversation=peer_conversation,
+            body="Please send me the revised brief.",
+        )
+        mock_get_tools.return_value = [
+            self._tool_definition("send_email"),
+            self._tool_definition("send_sms"),
+            self._tool_definition("send_chat_message"),
+            self._tool_definition("send_discord_message"),
+            self._tool_definition("send_agent_message"),
+            self._tool_definition("sleep_until_next_trigger"),
+            self._tool_definition("sqlite_batch"),
+        ]
+        mock_build_prompt.return_value = (
+            [{"role": "system", "content": "sys"}],
+            1000,
+            None,
+        )
+        observed_tool_names: list[str] = []
+
+        def _capture_completion(*_args, **kwargs):
+            observed_tool_names.extend(
+                tool["function"]["name"]
+                for tool in kwargs["tools"]
+            )
+            return (
+                self._completion(content=None, tool_calls=None),
+                {
+                    "prompt_tokens": 10,
+                    "completion_tokens": 5,
+                    "total_tokens": 15,
+                    "model": "m",
+                    "provider": "p",
+                },
+            )
+
+        with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1), patch(
+            "api.agent.core.event_processing._completion_with_failover",
+            side_effect=_capture_completion,
+        ):
+            ep._run_agent_loop(self.agent, is_first_run=False)
+
+        self.assertEqual(
+            observed_tool_names,
+            [
+                "send_email",
+                "send_sms",
+                "send_discord_message",
+                "send_agent_message",
+                "sleep_until_next_trigger",
+                "sqlite_batch",
+            ],
+        )
+
     @patch("api.agent.core.event_processing.execute_enabled_tool")
     @patch("api.agent.core.event_processing.build_prompt_context")
     @patch("api.agent.core.event_processing.get_agent_daily_credit_state")

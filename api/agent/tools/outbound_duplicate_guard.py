@@ -302,6 +302,7 @@ def detect_recent_duplicate_message(
         to_address: Optional[str] = None,
         conversation_id: Optional[UUID] = None,
         similarity_threshold: Optional[float] = None,
+        exact_only: bool = False,
 ) -> Optional[DuplicateDetectionResult]:
     """
     Check whether the pending outbound message is a recent duplicate.
@@ -339,6 +340,9 @@ def detect_recent_duplicate_message(
 
     if previous_body == current_body:
         return DuplicateDetectionResult(reason="exact", previous_message=previous_message)
+
+    if exact_only:
+        return None
 
     threshold = _resolve_similarity_threshold(agent, similarity_threshold)
 

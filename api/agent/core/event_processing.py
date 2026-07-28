@@ -1646,6 +1646,18 @@ def _tool_definition_names_for_completion(tools: list[dict] | None) -> list[str]
     ]
 
 
+def _filter_incompatible_reply_tools(
+    tools: list[dict],
+    inbound: PersistentAgentMessage | None,
+) -> list[dict]:
+    if inbound is None or inbound.conversation is None or not inbound.conversation.is_peer_dm:
+        return tools
+    return [
+        tool for tool in tools
+        if tool.get("function", {}).get("name") != "send_chat_message"
+    ]
+
+
 def _focused_tool_completion_request(
     tools, failover_configs, tool_name: str, description: str | None, *, parameters=None, fixed_continue: bool | None = None,
 ):
@@ -6840,8 +6852,10 @@ def _run_agent_loop(
                 continuation_notice = None
                 routing_profile = get_current_eval_routing_profile()
                 prefer_low_latency = iteration_prefers_low_latency
-                tool_names = _tool_definition_names_for_completion(iteration_tools)
                 feedback_inbound = get_current_inbound_message(agent)
+                iteration_tools = _filter_incompatible_reply_tools(iteration_tools, feedback_inbound)
+                iter_span.set_attribute("persistent_agent.tools.count", len(iteration_tools))
+                tool_names = _tool_definition_names_for_completion(iteration_tools)
                 feedback_text = feedback_inbound.body if feedback_inbound is not None else ""
                 direct_correction_context = None if direct_correction_reply_pending else _direct_correction_context(agent, feedback_inbound)
                 if direct_correction_context:

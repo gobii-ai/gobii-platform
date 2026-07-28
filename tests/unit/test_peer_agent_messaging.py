@@ -370,6 +370,37 @@ class PeerMessagingServiceTests(TestCase):
             initial_copy_count,
         )
 
+    @patch("api.agent.tools.outbound_duplicate_guard._embedding_similarity", return_value=0.99)
+    def test_revised_peer_draft_is_not_blocked_as_a_duplicate(self, _mock_similarity):
+        with patch('api.agent.tasks.process_agent_events_task') as task_mock, patch(
+            'api.agent.peer_comm.transaction.on_commit', _run_on_commit_immediately
+        ):
+            task_mock.delay = MagicMock()
+            self.service.send_message(
+                "Draft: Acme is a strong fit because its operations team is expanding."
+            )
+
+        state = AgentCommPeerState.objects.get(link=self.link, channel=CommsChannel.OTHER)
+        state.last_message_at = timezone.now() - timedelta(seconds=10)
+        state.save(update_fields=["last_message_at"])
+
+        with patch('api.agent.tasks.process_agent_events_task') as task_mock, patch(
+            'api.agent.peer_comm.transaction.on_commit', _run_on_commit_immediately
+        ):
+            task_mock.delay = MagicMock()
+            result = self.service.send_message(
+                "Revised draft: Acme is a strong fit because its operations group is expanding."
+            )
+
+        self.assertEqual(result.status, "ok")
+        self.assertEqual(
+            PersistentAgentMessage.objects.filter(
+                owner_agent=self.agent_a,
+                is_outbound=True,
+            ).count(),
+            2,
+        )
+
     def test_throttle_when_quota_exhausted(self):
         AgentCommPeerState.objects.all().delete()
         self.link.delete()
