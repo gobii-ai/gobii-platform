@@ -38,26 +38,27 @@ tags:
 
 <img src="/static/images/blog/newsletters/newsletter-2026-07-28-agent-workspace-hero.webp" alt="An organized AI agent workspace with message search, calendar schedules, connected webhooks, and a purple digital pet" style="max-width: 100%; border-radius: 10px;">
 
-Persistent AI assistants should become easier to direct as their histories grow, not harder. This Gobii release improves the operating layer around long-running activity: retrieve an old result, assign several routines to one assistant, connect outside events, and add a little personality.
+Persistent AI assistants should become easier to direct as their histories grow, not harder. This Gobii release improves the day-to-day controls around long-running tasks: retrieve an old result, assign several routines to one assistant, connect outside events, and add a little personality.
 
 Gobii now provides message search across the workspace, several schedules per agent, native inbound and outbound webhook management, and optional Gobii Pets. Every update is available in the product today.
 
 > **Key Takeaways**
 >
-> - Find prior messages by agent or attachment, then open the exact result.
-> - Keep recurring and one-time schedules together, with separate instructions and timezones.
-> - Manage inbound and outbound webhooks inside the relevant conversation.
+> - Find the exact earlier message.
+> - Press `Cmd+F` or `Ctrl+F`, then filter by agent, image, or file.
+> - Keep recurring and one-time schedules on the same assistant, with independent instructions, timezones, and enabled states.
+> - Configure inbound endpoints that receive outside events and outbound hooks that deliver structured results without leaving the relevant conversation.
 > - More than 10% of Codex users manage three or more agents concurrently during a typical week ([OpenAI, 2026](https://cdn.openai.com/pdf/5d1e1489-21c0-43e4-9d42-f87efdbf0082/the-shift-to-agentic-ai-evidence-from-codex.pdf)).
 
 ## What Changed in the Gobii Workspace?
 
 The release adds control at three moments in a long-running workflow. Search retrieves completed output. Multiple schedules set future timing. Native webhooks carry signals between Gobii and other systems. Pets serve a different purpose, offering a small personal touch in an interface people may visit every day.
 
-These capabilities build on the persistent model behind [agent memory](/blog/newsletter-2026-02-24-most-ai-agents-forget-yours-doesn-t/) and [visible agent work](/blog/newsletter-2026-03-10-your-agents-can-show-their-work-now/). Retained context turns history into something useful. New controls let you retrieve that history, set its cadence, and trigger the next action.
+These capabilities extend the persistent model behind [agent memory](/blog/newsletter-2026-02-24-most-ai-agents-forget-yours-doesn-t/) and [visible agent work](/blog/newsletter-2026-03-10-your-agents-can-show-their-work-now/), where a continuing history already helps the assistant follow a task over time. Retained context becomes useful. The new controls help you recover that history, set its cadence, and trigger the next action.
 
 <!-- [UNIQUE INSIGHT] -->
 
-Persistence creates value and operational weight at the same time. As conversations, routines, and integrations accumulate, people need stronger retrieval, clearer timing, and visible event paths without changing how they talk to their agents.
+Persistence creates value and administrative burden at the same time. As conversations, routines, and integrations accumulate, people need stronger retrieval, clearer timing, and visible event paths without changing how they talk to their agents.
 
 ## Workspace Search Finds the Exact Message
 
@@ -74,9 +75,9 @@ Old context is useful only when you can recover it. After weeks of activity, you
 
 ## Multiple Schedules Give One Agent Several Routines
 
-OpenAI reports that more than 10% of Codex users manage at least three concurrent agents at some point in a typical week ([OpenAI, 2026](https://cdn.openai.com/pdf/5d1e1489-21c0-43e4-9d42-f87efdbf0082/the-shift-to-agentic-ai-evidence-from-codex.pdf)). The study covers Codex, not Gobii, yet it highlights a broader need: parallel activity requires explicit timing controls.
+More than 10% of Codex users manage at least three concurrent agents during a typical week ([OpenAI, 2026](https://cdn.openai.com/pdf/5d1e1489-21c0-43e4-9d42-f87efdbf0082/the-shift-to-agentic-ai-evidence-from-codex.pdf)). The study covers Codex, not Gobii. Even so, the finding highlights a broader need: parallel activity requires explicit timing controls.
 
-A Gobii agent can now keep several named schedules, each with its own instruction, timing, timezone, and enabled state. Set a recurring cadence for a weekday account scan, for example, while adding a one-time follow-up without creating another agent or replacing the existing routine.
+A Gobii agent can now keep several named schedules, each with its own instruction, timing, timezone, and enabled state. For example, you can run a weekday account scan on a recurring cadence and add one timed follow-up before a meeting, all without creating another agent or replacing the original routine.
 
 <figure style="margin: 2rem 0;">
   <img src="/static/images/blog/newsletters/newsletter-2026-07-28-multiple-schedules.webp" alt="Gobii agent schedule settings with several named schedules" width="1200" height="675" loading="lazy" decoding="async" style="max-width: 100%; height: auto; border-radius: 10px;">
@@ -87,22 +88,18 @@ A research agent might collect competitor updates every Monday, prepare a monthl
 
 ## Native Webhooks Connect Events in Both Directions
 
-Webhooks handle two directions. An inbound connection lets another system send an event to an existing Gobii agent, while an outbound connection posts structured data to an HTTP endpoint during execution. You can create and manage both inside the conversation, without wiring up a separate automation layer elsewhere.
+<!-- [PERSONAL EXPERIENCE] -->
+
+Native webhook management handles two directions inside the conversation. An inbound connection gives another system a secret endpoint that can wake an existing Gobii assistant with a new event; an outbound connection posts structured data to an approved HTTP destination during execution. Consider a CRM stage change. It can arrive through the inbound route, prompt account research under standing instructions, and return a structured result through the outbound route. Gobii preserves the original signal and subsequent activity in the timeline, giving operators a concrete path to inspect. When we design these event flows, we keep the incoming payload in that timeline and place durable behavior in the agent's instructions. Those separate records answer two different questions: what happened, and how was the response supposed to proceed? That proximity makes testing and troubleshooting concrete because configuration, delivery records, instructions, and the resulting response share one traceable sequence.
 
 <figure style="margin: 2rem 0;">
   <img src="/static/images/blog/newsletters/newsletter-2026-07-28-native-webhooks.webp" alt="A Gobii conversation configuring inbound and outbound webhooks" width="1200" height="675" loading="lazy" decoding="async" style="max-width: 100%; height: auto; border-radius: 10px;">
   <figcaption style="margin-top: 0.5rem; font-size: 0.9rem; color: #475569;">Inbound webhooks bring events to an agent; outbound webhooks let the agent send data to another service.</figcaption>
 </figure>
 
-A CRM stage change can wake an agent through an inbound webhook. After researching the account and applying standing instructions, it can send a structured result to another approved service through the outbound route. Both the original event and subsequent activity remain in the timeline, making the path easier to inspect.
-
 TeamViewer found that 70% of surveyed employees were comfortable with more AI autonomy when they could step in, while 33% specifically wanted visible activity logs ([TeamViewer, 2026](https://www.teamviewer.com/en/global/company/press/2026/ai-workplace-autonomy-global-research/)). Webhooks alone do not create oversight. A persistent timeline, clear instructions, and approval boundaries make event-driven activity easier to review.
 
 For implementation details, see [Inbound Webhooks](https://docs.gobii.ai/using-gobii/inbound-webhooks), the [Agent API guide](https://docs.gobii.ai/developers/developer-agents), and our earlier guide to [reactive agents with inbound webhooks](/blog/newsletter-2026-04-08-inbound-webhooks/), which covers payload design, secret handling, and safe first workflows.
-
-<!-- [PERSONAL EXPERIENCE] -->
-
-When we build event paths in Gobii, we preserve the incoming event in the timeline while placing lasting behavior in the agent's instructions. Operators can then inspect two distinct records: what happened, and how the response was defined. Native management keeps setup close to both.
 
 ## Gobii Pets Add an Optional Bit of Personality
 
@@ -117,7 +114,7 @@ Right-click your pet to choose another companion or turn the feature off. That o
 
 ## Better Controls Make Persistent AI Work Easier to Run
 
-OpenAI's analysis found that active Codex users grew more than fivefold during the first half of 2026. Over the same period, the share assigning tasks estimated to require more than eight human hours rose roughly tenfold ([OpenAI, 2026](https://cdn.openai.com/pdf/5d1e1489-21c0-43e4-9d42-f87efdbf0082/the-shift-to-agentic-ai-evidence-from-codex.pdf)). Those are Codex usage patterns, not Gobii benchmarks, but they show why a dependable operating layer matters.
+Codex adoption accelerated sharply in early 2026. OpenAI found that active users grew more than fivefold during the first half of the year, while the share assigning tasks estimated to require more than eight human hours rose roughly tenfold ([OpenAI, 2026](https://cdn.openai.com/pdf/5d1e1489-21c0-43e4-9d42-f87efdbf0082/the-shift-to-agentic-ai-evidence-from-codex.pdf)). Those are Codex usage patterns, not Gobii benchmarks, but they show why reliable controls matter.
 
 Longer-running assignments bring practical questions. Can you find an earlier decision, keep several cadences understandable, and let outside systems start activity or receive results through an inspectable path? Search, schedules, and webhooks answer those needs at the workspace level.
 
@@ -135,7 +132,7 @@ Yes. Each named schedule has separate instructions, timing, timezone, and enable
 
 ### What is the difference between inbound and outbound webhooks?
 
-Inbound webhooks receive outside events. Outbound webhooks deliver structured results to approved HTTP endpoints.
+Inbound webhooks receive outside events, while outbound webhooks deliver structured results to approved HTTP endpoints.
 
 ### Can I turn Gobii Pets off?
 
