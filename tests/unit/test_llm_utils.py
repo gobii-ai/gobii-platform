@@ -5,7 +5,7 @@ from unittest.mock import Mock, patch
 from django.test import TestCase, override_settings, tag
 import litellm
 
-from api.agent.core.llm_utils import InvalidLiteLLMResponseError, run_completion
+from api.agent.core.llm_utils import InvalidLiteLLMResponseError, StreamIdleTimeout, run_completion
 from tests.utils.token_usage import make_completion_response
 
 
@@ -77,6 +77,17 @@ class _BlockingSecondChunkStream:
 
 
 class RunCompletionReasoningTests(TestCase):
+    def _blocking_completion(self, result):
+        started = threading.Event()
+        released = threading.Event()
+
+        def invoke(**_kwargs):
+            started.set()
+            released.wait(timeout=0.2)
+            return result
+
+        return invoke, started, released
+
     @tag("batch_event_llm")
     @patch("api.agent.core.llm_utils.litellm.completion")
     def test_reasoning_effort_omitted_when_not_supported(self, mock_completion):
@@ -399,6 +410,47 @@ class RunCompletionReasoningTests(TestCase):
 
         _, kwargs = mock_completion.call_args
         self.assertEqual(kwargs.get("timeout"), 42)
+
+    @tag("batch_event_llm")
+    @override_settings(LITELLM_MAX_RETRIES=1)
+    @patch("api.agent.core.llm_utils.litellm.completion")
+    def test_timeout_bounds_non_streaming_request_itself(self, mock_completion):
+        invoke, started, released = self._blocking_completion(make_completion_response())
+        mock_completion.side_effect = invoke
+
+        try:
+            with self.assertRaises(litellm.Timeout):
+                run_completion(
+                    model="mock-model",
+                    messages=[],
+                    params={},
+                    timeout=0.01,
+                )
+        finally:
+            released.set()
+
+        self.assertTrue(started.is_set())
+
+    @tag("batch_event_llm")
+    @override_settings(LITELLM_MAX_RETRIES=1)
+    @patch("api.agent.core.llm_utils.litellm.completion")
+    def test_timeout_bounds_stream_creation(self, mock_completion):
+        invoke, started, released = self._blocking_completion(_ClosableStream(["late-chunk"]))
+        mock_completion.side_effect = invoke
+
+        try:
+            with self.assertRaises(StreamIdleTimeout):
+                run_completion(
+                    model="mock-model",
+                    messages=[],
+                    params={},
+                    stream=True,
+                    timeout=0.01,
+                )
+        finally:
+            released.set()
+
+        self.assertTrue(started.is_set())
 
     @tag("batch_event_llm")
     @override_settings(LITELLM_TIMEOUT_SECONDS=321)
