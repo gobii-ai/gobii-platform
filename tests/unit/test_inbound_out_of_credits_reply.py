@@ -305,6 +305,102 @@ class InboundOutOfCreditsReplyTests(PauseOwnerMixin, TestCase):
         mock_delay.assert_not_called()
         mock_deliver_email.assert_not_called()
 
+    @tag("batch_email")
+    @override_settings(PUBLIC_SITE_URL="https://example.com")
+    @patch("api.agent.tasks.process_agent_events_task.delay")
+    @patch("api.agent.comms.outbound_delivery.deliver_agent_email")
+    def test_inactive_agent_email_stores_handled_attempt_and_deduplicates_notice(
+        self,
+        mock_deliver_email,
+        mock_delay,
+    ):
+        self.agent.is_active = False
+        self.agent.save(update_fields=["is_active"])
+        parsed = ParsedMessage(
+            sender=self.owner.email,
+            recipient=self.agent_email.address,
+            subject="Need help",
+            body="Hello",
+            attachments=[],
+            raw_payload={"provider": "test"},
+            msg_channel=CommsChannel.EMAIL,
+        )
+        generation_before = get_human_inbound_generation(self.agent.id)
+
+        with self.captureOnCommitCallbacks(execute=True):
+            first_info = ingest_inbound_message(CommsChannel.EMAIL, parsed)
+        with self.captureOnCommitCallbacks(execute=True):
+            second_info = ingest_inbound_message(CommsChannel.EMAIL, parsed)
+
+        self.assertEqual(first_info.processing_blocked_reason, "agent_inactive")
+        self.assertEqual(second_info.processing_blocked_reason, "agent_inactive")
+        self.assertEqual(
+            first_info.message.raw_payload["inactive_handling"],
+            "agent_inactive_blocked_input",
+        )
+        self.assertEqual(get_human_inbound_generation(self.agent.id), generation_before)
+        mock_delay.assert_not_called()
+        mock_deliver_email.assert_called_once()
+        notice = mock_deliver_email.call_args.args[0]
+        self.assertIn("paused", notice.body.lower())
+        self.assertIn(f"/app/agents/{self.agent.id}", notice.body)
+        self.assertEqual(notice.to_endpoint.address, self.owner.email)
+
+    @tag("batch_email")
+    @patch("api.agent.tasks.process_agent_events_task.delay")
+    @patch("api.agent.comms.outbound_delivery.deliver_agent_email")
+    def test_inactive_agent_email_does_not_notify_non_whitelisted_sender(
+        self,
+        mock_deliver_email,
+        mock_delay,
+    ):
+        self.agent.is_active = False
+        self.agent.save(update_fields=["is_active"])
+        parsed = ParsedMessage(
+            sender="external@example.com",
+            recipient=self.agent_email.address,
+            subject="Need help",
+            body="Hello",
+            attachments=[],
+            raw_payload={"provider": "test"},
+            msg_channel=CommsChannel.EMAIL,
+        )
+
+        info = ingest_inbound_message(CommsChannel.EMAIL, parsed)
+
+        self.assertEqual(info.processing_blocked_reason, "agent_inactive")
+        mock_delay.assert_not_called()
+        mock_deliver_email.assert_not_called()
+
+    @tag("batch_email")
+    @patch("api.agent.tasks.process_agent_events_task.delay")
+    @patch("api.agent.comms.outbound_delivery.deliver_agent_email")
+    def test_expired_agent_still_wakes_on_inbound_email(self, mock_deliver_email, mock_delay):
+        self.agent.life_state = PersistentAgent.LifeState.EXPIRED
+        self.agent.schedule = ""
+        self.agent.schedule_snapshot = "0 9 * * *"
+        self.agent.save(update_fields=["life_state", "schedule", "schedule_snapshot"])
+        parsed = ParsedMessage(
+            sender=self.owner.email,
+            recipient=self.agent_email.address,
+            subject="Wake up",
+            body="Hello",
+            attachments=[],
+            raw_payload={"provider": "test"},
+            msg_channel=CommsChannel.EMAIL,
+        )
+
+        with self.captureOnCommitCallbacks(execute=True):
+            info = ingest_inbound_message(CommsChannel.EMAIL, parsed)
+
+        self.agent.refresh_from_db()
+        self.assertIsNone(info.processing_blocked_reason)
+        self.assertTrue(self.agent.is_active)
+        self.assertEqual(self.agent.life_state, PersistentAgent.LifeState.ACTIVE)
+        self.assertEqual(self.agent.schedule, "0 9 * * *")
+        mock_delay.assert_called_once()
+        mock_deliver_email.assert_not_called()
+
 
 @tag("batch_sms")
 class InboundDailyCreditsSmsTests(PauseOwnerMixin, TestCase):
@@ -420,6 +516,39 @@ class InboundDailyCreditsSmsTests(PauseOwnerMixin, TestCase):
 
         mock_delay.assert_not_called()
         mock_deliver_sms.assert_not_called()
+
+    @tag("batch_sms")
+    @override_settings(PUBLIC_SITE_URL="https://example.com")
+    @patch("api.agent.tasks.process_agent_events_task.delay")
+    @patch("api.agent.comms.outbound_delivery.deliver_agent_sms")
+    def test_inactive_agent_sms_sends_friendly_notice_once(
+        self,
+        mock_deliver_sms,
+        mock_delay,
+    ):
+        self.agent.is_active = False
+        self.agent.save(update_fields=["is_active"])
+        parsed = ParsedMessage(
+            sender=self.owner_phone,
+            recipient=self.sms_endpoint.address,
+            subject=None,
+            body="Ping",
+            attachments=[],
+            raw_payload={"provider": "test"},
+            msg_channel=CommsChannel.SMS,
+        )
+
+        with self.captureOnCommitCallbacks(execute=True):
+            info = ingest_inbound_message(CommsChannel.SMS, parsed)
+        with self.captureOnCommitCallbacks(execute=True):
+            ingest_inbound_message(CommsChannel.SMS, parsed)
+
+        self.assertEqual(info.processing_blocked_reason, "agent_inactive")
+        mock_delay.assert_not_called()
+        mock_deliver_sms.assert_called_once()
+        notice = mock_deliver_sms.call_args.args[0]
+        self.assertIn("paused", notice.body.lower())
+        self.assertIn(f"/app/agents/{self.agent.id}", notice.body)
 
 
 @tag("batch_agent_chat")

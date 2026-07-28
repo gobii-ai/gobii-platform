@@ -161,6 +161,7 @@ from api.services.email_verification import (
     validate_email_change,
 )
 from api.services.agent_planning import skip_agent_planning
+from api.services.agent_lifecycle import activate_agent, build_agent_inactive_payload
 from api.services.referral_service import ReferralService
 from api.services.web_sessions import WEB_SESSION_TTL_SECONDS, end_web_session, heartbeat_web_session, start_web_session, touch_web_session
 from api.services.sms_contact_purpose import sms_contact_purpose_required, track_sms_contact_approval
@@ -2856,6 +2857,7 @@ def _serialize_agent_profile_payload(
     org_ids: set | None = None,
     admin_org_ids: set | None = None,
     is_admin_user: bool | None = None,
+    can_reactivate_agent: bool | None = None,
     enrich: bool = False,
 ) -> dict[str, Any]:
     user = request.user
@@ -2882,6 +2884,12 @@ def _serialize_agent_profile_payload(
             )
     if is_admin_user is None:
         is_admin_user = bool(user.is_staff or user.is_superuser)
+    if can_reactivate_agent is None:
+        can_reactivate_agent = user_can_manage_agent_settings(
+            user,
+            agent,
+            allow_delinquent_personal_chat=True,
+        )
 
     card_payload = serialize_agent_card_payload(
         request,
@@ -2916,6 +2924,7 @@ def _serialize_agent_profile_payload(
             or agent.user_id == user.id
             or (agent.organization_id and agent.organization_id in org_ids)
         ),
+        "can_reactivate_agent": can_reactivate_agent,
         "can_manage_collaborators": bool(
             is_admin_user
             or agent.user_id == user.id
@@ -3249,6 +3258,11 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
                     org_ids=org_ids,
                     admin_org_ids=admin_org_ids,
                     is_admin_user=is_admin_user,
+                    can_reactivate_agent=bool(
+                        is_admin_user
+                        or agent.user_id == user.id
+                        or (agent.organization_id and agent.organization_id in admin_org_ids)
+                    ),
                 )
             )
         return JsonResponse(
@@ -3996,6 +4010,7 @@ class AgentTimelineAPIView(LoginRequiredMixin, View):
             "current_plan": window.current_plan,
             "agent_name": agent.name,
             "agent_avatar_url": agent.get_avatar_thumbnail_url(),
+            "is_active": bool(agent.is_active),
             "signup_preview_state": agent.signup_preview_state,
             "planning_state": agent.planning_state,
             **serialize_agent_emotion(agent),
@@ -4005,6 +4020,28 @@ class AgentTimelineAPIView(LoginRequiredMixin, View):
         if direction == "initial":
             payload["critical_status"] = _build_agent_critical_status_payload(request, agent)
         return JsonResponse(payload)
+
+
+class AgentActivateAPIView(LoginRequiredMixin, View):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
+        agent = resolve_manageable_agent_for_request(
+            request,
+            agent_id,
+            allow_delinquent_personal_chat=True,
+        )
+        agent, updated = activate_agent(agent)
+        return JsonResponse(
+            {
+                "status": "active",
+                "updated": updated,
+                "message": f"{agent.name or 'Agent'} is active again.",
+                "is_active": bool(agent.is_active),
+                "life_state": agent.life_state,
+            }
+        )
+
 
 @method_decorator(csrf_exempt, name="dispatch")
 class AgentPlanningSkipAPIView(LoginRequiredMixin, View):
@@ -4874,6 +4911,7 @@ class AgentContactRequestResolveAPIView(ApiLoginRequiredMixin, View):
 class AgentMessageCreateAPIView(LoginRequiredMixin, View):
     http_method_names = ["post"]
 
+    @transaction.atomic
     def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
         agent = resolve_agent_for_request(
             request,
@@ -4883,6 +4921,13 @@ class AgentMessageCreateAPIView(LoginRequiredMixin, View):
         )
         if not user_has_natural_agent_chat_access(request.user, agent):
             return JsonResponse({"error": "This staff view is read-only for user messages."}, status=403)
+        agent = (
+            PersistentAgent.objects.alive()
+            .select_for_update()
+            .get(pk=agent.pk)
+        )
+        if not agent.is_active:
+            return JsonResponse(build_agent_inactive_payload(agent), status=409)
         if (
             agent.organization_id is None
             and agent.user_id is not None

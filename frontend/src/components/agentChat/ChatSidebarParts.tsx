@@ -211,7 +211,11 @@ export function AgentListItem({
   const hasUnread = Boolean(agent.hasUnreadAgentMessage) && !isMuted
   const showCollapsedUnreadBadge = variant === 'sidebar' && Boolean(collapsed) && hasUnread
   const showUnreadSlot = variant === 'drawer' || !collapsed
-  const collapsedTitle = isWorking ? `${agent.name || 'Agent'} • Working` : agent.name || 'Agent'
+  const collapsedTitle = !agent.isActive
+    ? `${agent.name || 'Agent'} • Paused`
+    : isWorking
+      ? `${agent.name || 'Agent'} • Working`
+      : agent.name || 'Agent'
 
   const handleToggleFavorite = (event: MouseEvent<HTMLElement>) => {
     event.preventDefault()
@@ -311,7 +315,9 @@ export function AgentListItem({
               className="agent-roster-item__emotion"
             />
           </span>
-          {hasPendingRequests ? (
+          {!agent.isActive ? (
+            <span className="agent-roster-item__state">Paused</span>
+          ) : hasPendingRequests ? (
             <AgentChatPill className="agent-roster-pending-pill" tone="info">
               {pendingRequestCount} {pendingRequestCount === 1 ? 'request' : 'requests'}
             </AgentChatPill>
@@ -323,8 +329,6 @@ export function AgentListItem({
             <span className="agent-roster-item__desc" title={hoverDescription}>
               {miniDescription}
             </span>
-          ) : !agent.isActive ? (
-            <span className="agent-roster-item__state">Paused</span>
           ) : null}
         </span>
       ) : null}

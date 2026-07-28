@@ -192,6 +192,36 @@ class PipedreamTriggerSubscriptionWebhookTests(TestCase):
         self.assertIn("does not match", self.subscription.last_error)
 
     @tag("batch_agent_webhooks")
+    @patch("api.services.pipedream_trigger_subscriptions.schedule_discord_inbound_processing")
+    def test_inactive_agent_attempt_is_stored_without_processing_or_reply(self, mock_schedule):
+        self.agent.is_active = False
+        self.agent.save(update_fields=["is_active"])
+        body = json.dumps(
+            {
+                "event": {
+                    "id": "inactive-m1",
+                    "guildID": "g1",
+                    "channelID": "12345",
+                    "content": "hello?",
+                    "author": {"id": "u1", "username": "matt"},
+                }
+            }
+        ).encode("utf-8")
+        url = f"{reverse('api:pipedream_trigger_subscription_webhook', args=[self.subscription.id])}?t={self.subscription.webhook_secret}"
+
+        response = self.client.post(
+            url,
+            data=body,
+            content_type="application/json",
+            HTTP_X_PD_SIGNATURE=_signature("signing-secret", body),
+        )
+
+        self.assertEqual(response.status_code, 202, response.content)
+        message = PersistentAgentMessage.objects.get(id=response.json()["messageId"])
+        self.assertEqual(message.raw_payload["inactive_handling"], "agent_inactive_blocked_input")
+        mock_schedule.assert_not_called()
+
+    @tag("batch_agent_webhooks")
     @patch("api.agent.comms.message_service.get_max_file_size", return_value=None)
     @patch("api.agent.comms.message_service.requests.get")
     @patch("api.agent.tasks.process_agent_events_task.delay")

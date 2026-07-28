@@ -6,10 +6,10 @@ from django.contrib.sites.models import Site
 from django.core.exceptions import MultipleObjectsReturned
 from django.db import DatabaseError
 from django.db.models import F
-from django.template.loader import render_to_string
 from django.templatetags.static import static
 
 from api.models import ExecutionPauseReasonChoices
+from api.services.channel_auto_replies import send_channel_auto_reply
 from util.urls import append_context_query
 
 
@@ -135,63 +135,16 @@ def _send_billing_pause_message(agent, recipient_endpoint, *, reason: str, audie
     if content is None:
         return False
 
-    PersistentAgentMessage = apps.get_model("api", "PersistentAgentMessage")
     kind = "billing_pause_owner_notice" if audience == "owner" else "billing_pause_auto_reply"
-
-    if channel == "email":
-        from api.agent.comms.email_endpoint_routing import resolve_agent_email_sender_endpoint_for_message
-        from api.agent.comms.outbound_delivery import deliver_agent_email
-
-        from_endpoint = resolve_agent_email_sender_endpoint_for_message(
-            agent,
-            to_endpoint=recipient_endpoint,
-            cc_endpoints=None,
-            has_bcc=False,
-            log_context=kind,
-        )
-        if from_endpoint is None:
-            logger.info(
-                "Skipping billing pause email for agent %s: no sender endpoint available.",
-                getattr(agent, "id", None),
-            )
-            return False
-
-        body = render_to_string(content["email_template"], content["context"])
-        message = PersistentAgentMessage.objects.create(
-            owner_agent=agent,
-            from_endpoint=from_endpoint,
-            to_endpoint=recipient_endpoint,
-            is_outbound=True,
-            body=body,
-            raw_payload={
-                "subject": content["subject"],
-                "kind": kind,
-            },
-        )
-        deliver_agent_email(message)
-        return True
-
-    from api.agent.comms.email_endpoint_routing import get_agent_primary_endpoint
-    from api.agent.comms.outbound_delivery import deliver_agent_sms
-
-    from_endpoint = get_agent_primary_endpoint(agent, "sms")
-    if from_endpoint is None:
-        logger.info(
-            "Skipping billing pause SMS for agent %s: no sender endpoint available.",
-            getattr(agent, "id", None),
-        )
-        return False
-
-    message = PersistentAgentMessage.objects.create(
-        owner_agent=agent,
-        from_endpoint=from_endpoint,
-        to_endpoint=recipient_endpoint,
-        is_outbound=True,
-        body=content["sms_body"],
-        raw_payload={"kind": kind},
+    return send_channel_auto_reply(
+        agent,
+        recipient_endpoint,
+        kind=kind,
+        subject=content["subject"],
+        email_template=content["email_template"],
+        email_context=content["context"],
+        sms_body=content["sms_body"],
     )
-    deliver_agent_sms(message)
-    return True
 
 
 def _build_billing_pause_message_content(*, agent, reason: str, audience: str) -> dict[str, Any] | None:

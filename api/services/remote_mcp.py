@@ -44,6 +44,7 @@ from api.services.agent_debug_trace import (
     AgentDebugTraceValidationError,
     build_agent_debug_trace,
 )
+from api.services.agent_lifecycle import build_agent_inactive_payload
 from api.services.daily_credit_limits import calculate_daily_credit_slider_bounds, get_tier_credit_multiplier
 from api.services.daily_credit_settings import get_daily_credit_settings_for_owner
 from console.agent_chat.timeline import (
@@ -1176,9 +1177,17 @@ def _tool_unlink_agents(request, arguments):
     )
 
 
+@transaction.atomic
 def _tool_send_agent_message(request, arguments):
     access = _get_agent_access(request, arguments.get("agent_id"), arguments)
-    agent = access.agent
+    agent = (
+        PersistentAgent.objects.alive()
+        .select_for_update()
+        .get(pk=access.agent.pk)
+    )
+    if not agent.is_active:
+        payload = build_agent_inactive_payload(agent)
+        raise MCPToolError(payload["message"], payload)
     body = _required_string(arguments, "body", allow_blank=False)
     trigger_processing = _optional_bool(arguments.get("trigger_processing", True), "trigger_processing")
     attachment_paths = arguments.get("attachment_file_paths") or []

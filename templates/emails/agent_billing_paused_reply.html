@@ -7,7 +7,13 @@
   <p style="margin: 0 0 20px; font-size: 15px; line-height: 1.6; color: #334155;">
     {{ detail_text }}
   </p>
-  {% if billing_url %}
+  {% if action_url %}
+    <p style="margin: 0 0 20px;">
+      <a href="{{ action_url }}" style="display: inline-block; border-radius: 999px; background: #4f46e5; color: #ffffff; font-size: 15px; font-weight: 600; line-height: 1; padding: 12px 18px; text-decoration: none;">
+        {{ action_label }}
+      </a>
+    </p>
+  {% elif billing_url %}
     <p style="margin: 0 0 20px; font-size: 15px; line-height: 1.6; color: #0f172a;">
       Billing: <a href="{{ billing_url }}" style="color: #1d4ed8; text-decoration: none;">{{ billing_url }}</a>
     </p>

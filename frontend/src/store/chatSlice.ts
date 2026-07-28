@@ -2,6 +2,7 @@ import { createAsyncThunk, createSlice, type PayloadAction } from '@reduxjs/tool
 import type { InfiniteData, QueryClient } from '@tanstack/react-query'
 
 import { sendAgentMessage, fetchProcessingStatus } from '../api/agentChat'
+import { HttpError } from '../api/http'
 import { flushPendingEventsToCache, injectRealtimeEventIntoCache, removeOptimisticEventFromCache, refreshLoadedTimelineVariantsInCache, refreshTimelineLatestInCache, replacePendingActionRequestsInCache, updateOptimisticEventInCache, updateRosterProcessingInCache } from '../hooks/useTimelineCacheInjector'
 import { timelineQueryKey, type TimelinePage } from '../hooks/useAgentTimeline'
 import { mergeTimelineEvents, normalizeTimelineEvent } from '../stores/agentChatTimeline'
@@ -34,7 +35,9 @@ export type AgentChatIdentityState = {
   agentSms: string | null
   agentNextScheduledAt: string | null
   agentIsOrgOwned: boolean
+  agentIsActive: boolean
   canManageAgent: boolean
+  canReactivateAgent: boolean
   canSendMessages: boolean
   isCollaborator: boolean
   hideInsightsPanel: boolean
@@ -114,7 +117,9 @@ type AgentIdentityUpdateInput = {
   agentSms?: string | null
   agentNextScheduledAt?: string | null
   agentIsOrgOwned?: boolean
+  agentIsActive?: boolean
   canManageAgent?: boolean
+  canReactivateAgent?: boolean
   canSendMessages?: boolean
   isCollaborator?: boolean
   hideInsightsPanel?: boolean
@@ -167,7 +172,9 @@ export function createInitialSession(): AgentChatSession {
       agentSms: null,
       agentNextScheduledAt: null,
       agentIsOrgOwned: false,
+      agentIsActive: true,
       canManageAgent: true,
+      canReactivateAgent: false,
       canSendMessages: true,
       isCollaborator: false,
       hideInsightsPanel: false,
@@ -269,8 +276,14 @@ function applyIdentityUpdate(session: AgentChatSession, update: AgentIdentityUpd
   if (update?.agentIsOrgOwned !== undefined) {
     session.identity.agentIsOrgOwned = Boolean(update?.agentIsOrgOwned)
   }
+  if (update?.agentIsActive !== undefined) {
+    session.identity.agentIsActive = Boolean(update.agentIsActive)
+  }
   if (update?.canManageAgent !== undefined) {
     session.identity.canManageAgent = update?.canManageAgent ?? true
+  }
+  if (update?.canReactivateAgent !== undefined) {
+    session.identity.canReactivateAgent = Boolean(update.canReactivateAgent)
   }
   if (update?.canSendMessages !== undefined) {
     session.identity.canSendMessages = update?.canSendMessages ?? true
@@ -711,8 +724,15 @@ export const loadAgentSpawnIntent = createAsyncThunk<AgentSpawnIntent, void, { s
 export const sendMessage = createAsyncThunk<
   { clientId: string } | null,
   { body: string; attachments?: File[]; clientId?: string; retry?: boolean },
-  { state: RootState; extra: { queryClient: QueryClient | null } }
->('chat/sendMessage', async ({ body, attachments = [], clientId: requestedClientId, retry = false }, { dispatch, getState, extra }) => {
+  {
+    state: RootState
+    extra: { queryClient: QueryClient | null }
+    rejectValue: unknown
+  }
+>('chat/sendMessage', async (
+  { body, attachments = [], clientId: requestedClientId, retry = false },
+  { dispatch, getState, extra, rejectWithValue },
+) => {
   const agentId = getState().chat.activeAgentId
   if (!agentId) {
     throw new Error('Agent not initialized')
@@ -761,6 +781,9 @@ export const sendMessage = createAsyncThunk<
       updateOptimisticEventInCache(extra.queryClient, agentId, clientId, 'failed', message)
     }
     dispatch(chatActions.optimisticMessageFailed({ agentId, clientId, message }))
+    if (error instanceof HttpError) {
+      return rejectWithValue(error.body)
+    }
     throw error
   }
 })

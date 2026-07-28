@@ -39,6 +39,10 @@ from ...models import (
 )
 from api.services.system_settings import get_max_file_size
 from api.services.billing_pause_notifications import is_billing_execution_pause_reason, send_billing_pause_auto_reply
+from api.services.inactive_agent_notifications import (
+    mark_inbound_message_blocked_while_inactive,
+    send_inactive_agent_auto_reply,
+)
 from api.services.owner_execution_pause import get_owner_execution_pause_state, resolve_agent_owner
 from marketing_events.custom_events import ConfiguredCustomEvent, emit_configured_custom_capi_event
 
@@ -61,6 +65,7 @@ class InboundMessageInfo:
     """Info about the stored message."""
 
     message: PersistentAgentMessage
+    processing_blocked_reason: str | None = None
 
 
 @dataclass
@@ -555,8 +560,8 @@ def ingest_inbound_message(
             message_persisted_at = monotonic()
             persist_span.set_attribute("message.id", str(message.id))
         if channel_val in {CommsChannel.WEB, CommsChannel.EMAIL, CommsChannel.SMS}:
-            agent_obj = PersistentAgent.objects.filter(id=message.owner_agent_id).first()
-            read_user = resolve_inbound_read_user(agent_obj, channel_val, parsed.sender)
+            read_agent = PersistentAgent.objects.filter(id=message.owner_agent_id).first()
+            read_user = resolve_inbound_read_user(read_agent, channel_val, parsed.sender)
             if read_user is not None:
                 mark_latest_visible_outbound_message_read_before(
                     agent_id=message.owner_agent_id,
@@ -566,16 +571,6 @@ def ingest_inbound_message(
                     recipient_endpoint_id=message.from_endpoint_id,
                     source=READ_SOURCE_INBOUND_REPLY,
                 )
-
-        try:
-            from api.agent.comms.human_input_requests import resolve_human_input_request_for_message
-
-            resolve_human_input_request_for_message(message)
-        except (DatabaseError, ValidationError, ValueError):
-            logging.exception(
-                "Failed resolving human input request for inbound message %s",
-                getattr(message, "id", None),
-            )
 
         with traced("AGENT MSG Save Attachments") as attachment_span:
             attachment_span.set_attribute("message.id", str(message.id))
@@ -587,37 +582,37 @@ def ingest_inbound_message(
             # Update last interaction timestamp and reactivate if needed
             agent_obj: PersistentAgent | None = None
             try:
-                with transaction.atomic():
-                    agent_locked: PersistentAgent = (
-                        PersistentAgent.objects.alive().select_for_update()
-                        .select_related("user")
-                        .get(id=owner_id)
-                    )
-                    # Update last interaction
-                    agent_locked.last_interaction_at = timezone.now()
-                    updates = ["last_interaction_at"]
-                    # Reactivate if expired: restore schedule from snapshot if needed
-                    if (
-                        agent_locked.life_state == PersistentAgent.LifeState.EXPIRED
-                        and agent_locked.is_active
-                    ):
-                        if agent_locked.schedule_snapshot:
-                            agent_locked.schedule = agent_locked.schedule_snapshot
-                            updates.append("schedule")
-                        agent_locked.life_state = PersistentAgent.LifeState.ACTIVE
-                        updates.append("life_state")
-                        # Save; model will sync beat on commit due to schedule change
-                        agent_locked.save(update_fields=updates)
-                    else:
-                        agent_locked.save(update_fields=updates)
-                    agent_obj = agent_locked
+                agent_obj = PersistentAgent.objects.alive().select_for_update().get(id=owner_id)
+                agent_obj.last_interaction_at = timezone.now()
+                updates = ["last_interaction_at"]
+                if (
+                    agent_obj.life_state == PersistentAgent.LifeState.EXPIRED
+                    and agent_obj.is_active
+                ):
+                    if agent_obj.schedule_snapshot:
+                        agent_obj.schedule = agent_obj.schedule_snapshot
+                        updates.append("schedule")
+                    agent_obj.life_state = PersistentAgent.LifeState.ACTIVE
+                    updates.append("life_state")
+                agent_obj.save(update_fields=updates)
             except PersistentAgent.DoesNotExist:
                 agent_obj = None
             except Exception:
                 logging.exception("Failed updating last interaction for agent %s", owner_id, exc_info=True)
 
-            if agent_obj is None:
-                agent_obj = PersistentAgent.objects.alive().filter(id=owner_id).select_related("user").first()
+            blocked_while_inactive = bool(agent_obj is not None and not agent_obj.is_active)
+            if blocked_while_inactive:
+                mark_inbound_message_blocked_while_inactive(message)
+            else:
+                try:
+                    from api.agent.comms.human_input_requests import resolve_human_input_request_for_message
+
+                    resolve_human_input_request_for_message(message)
+                except (DatabaseError, ValidationError, ValueError):
+                    logging.exception(
+                        "Failed resolving human input request for inbound message %s",
+                        getattr(message, "id", None),
+                    )
 
             if (
                 agent_obj is not None
@@ -645,13 +640,30 @@ def ingest_inbound_message(
                         )
                     )
 
-            # Before triggering agent processing, check if the agent owner's
-            # account is billing-paused. If so, send a one-off auto-reply to the
-            # current sender and skip processing for this inbound attempt.
+            # Before triggering agent processing, check whether the agent itself
+            # or its owner's account is paused. If so, send a one-off auto-reply
+            # to the current sender and skip processing for this inbound attempt.
             should_skip_processing = False
+            processing_blocked_reason = None
             pause_state = {"paused": False, "reason": "", "paused_at": None}
+            if agent_obj is not None and not agent_obj.is_active:
+                should_skip_processing = True
+                processing_blocked_reason = "agent_inactive"
+                if (
+                    channel_val in {CommsChannel.EMAIL, CommsChannel.SMS}
+                    and parsed.sender
+                    and agent_obj.is_sender_whitelisted(channel_val, parsed.sender)
+                ):
+                    transaction.on_commit(
+                        lambda agent=agent_obj, endpoint=from_ep: send_inactive_agent_auto_reply(agent, endpoint),
+                        robust=True,
+                    )
             try:
-                if agent_obj and (channel_val in {CommsChannel.EMAIL, CommsChannel.SMS} or is_inbound_webhook):
+                if (
+                    not should_skip_processing
+                    and agent_obj
+                    and (channel_val in {CommsChannel.EMAIL, CommsChannel.SMS} or is_inbound_webhook)
+                ):
                     owner = resolve_agent_owner(agent_obj)
                     pause_state = get_owner_execution_pause_state(owner)
                     pause_reason = pause_state["reason"] or ""
@@ -719,7 +731,10 @@ def ingest_inbound_message(
                 if not prioritize_processing_dispatch:
                     transaction.on_commit(processing_dispatch.dispatch)
 
-        return InboundMessageInfo(message=message)
+        return InboundMessageInfo(
+            message=message,
+            processing_blocked_reason=processing_blocked_reason if owner_id else None,
+        )
 
 
 @tracer.start_as_current_span("ingest_inbound_webhook_message")

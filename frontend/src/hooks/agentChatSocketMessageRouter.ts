@@ -19,6 +19,7 @@ type AgentIdentityUpdate = {
   emotion?: string | null
   emotionExpiresAt?: string | null
   agentNextScheduledAt?: string | null
+  agentIsActive?: boolean
   signupPreviewState?: SignupPreviewState | null
   planningState?: PlanningState | null
 }
@@ -98,6 +99,9 @@ function buildAgentIdentityUpdate(payload: Record<string, unknown>): AgentIdenti
     nextIdentity.agentNextScheduledAt = typeof payload.agent_next_scheduled_at === 'string'
       ? payload.agent_next_scheduled_at
       : null
+  }
+  if (Object.prototype.hasOwnProperty.call(payload, 'is_active')) {
+    nextIdentity.agentIsActive = payload.is_active !== false
   }
 
   return nextIdentity

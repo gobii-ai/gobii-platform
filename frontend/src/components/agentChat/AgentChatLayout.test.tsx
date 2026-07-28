@@ -8,6 +8,8 @@ import { createTestAppStore, getSubscriptionState, seedSubscriptionState, StoreP
 import type { PlanSnapshot } from '../../types/agentChat'
 import type { PlanningState, SignupPreviewState } from '../../types/agentRoster'
 
+type LayoutEvent = React.ComponentProps<typeof AgentChatLayout>['events'][number]
+
 vi.mock('../../util/analytics', () => ({
   track: vi.fn(),
 }))
@@ -381,6 +383,54 @@ describe('AgentChatLayout upgrade modal gating', () => {
     expect(screen.getByTestId('agent-composer')).toBeInTheDocument()
   })
 
+  it('replaces the composer with a clear reactivation path for a paused agent', () => {
+    const onReactivateAgent = vi.fn()
+
+    renderAgentChatLayout({
+      agentIsActive: false,
+      canReactivateAgent: true,
+      onReactivateAgent,
+    })
+
+    expect(screen.getByText('This agent is paused')).toBeInTheDocument()
+    expect(screen.getByText(/won’t respond or do work until it’s reactivated/i)).toBeInTheDocument()
+    expect(screen.queryByTestId('agent-composer')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Reactivate agent' }))
+    expect(onReactivateAgent).toHaveBeenCalledTimes(1)
+  })
+
+  it('tells viewers without permission who can reactivate a paused agent', () => {
+    renderAgentChatLayout({
+      agentIsActive: false,
+      canReactivateAgent: false,
+    })
+
+    expect(screen.getByText('Ask an owner or admin to reactivate it.')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Reactivate agent' })).not.toBeInTheDocument()
+    expect(screen.queryByTestId('agent-composer')).not.toBeInTheDocument()
+  })
+
+  it('keeps the staff system-message composer available for a paused agent', () => {
+    renderAgentChatLayout({
+      agentIsActive: false,
+      normalSendDisabledReason: 'This agent is paused.',
+      onSendSystemMessage: vi.fn(),
+    })
+
+    expect(screen.getByTestId('agent-composer')).toBeInTheDocument()
+    expect(screen.queryByText('This agent is paused')).not.toBeInTheDocument()
+  })
+
+  it('restores the composer and confirms successful reactivation', () => {
+    renderAgentChatLayout({
+      agentIsActive: true,
+      reactivationSuccess: 'Agent is active again.',
+    })
+
+    expect(screen.getByTestId('agent-composer')).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('Agent is active again.')
+  })
+
   it('keeps skip planning available while spawn intent loading hides the composer', () => {
     const handleSkipPlanning = vi.fn()
     seedChatIdentity({ planningState: 'planning' })
@@ -447,7 +497,7 @@ describe('AgentChatLayout upgrade modal gating', () => {
     renderWithStore(
       <AgentChatLayout
         agentId={null}
-        events={[{ cursor: 'message-1', kind: 'message', message: { isOutbound: false } } as any]}
+        events={[{ cursor: 'message-1', kind: 'message', message: { isOutbound: false } } as unknown as LayoutEvent]}
         templateRecommendations={[
           {
             id: 'template-1',
@@ -472,7 +522,7 @@ describe('AgentChatLayout upgrade modal gating', () => {
     renderWithStore(
       <AgentChatLayout
         agentId="agent-123"
-        events={[{ cursor: 'message-1', kind: 'message', messageLinkHref: '/console/agents/agent-123/' } as any]}
+        events={[{ cursor: 'message-1', kind: 'message', messageLinkHref: '/console/agents/agent-123/' } as unknown as LayoutEvent]}
         onUpdateDailyCredits={vi.fn(async () => undefined)}
       />,
     )
@@ -490,7 +540,7 @@ describe('AgentChatLayout upgrade modal gating', () => {
     renderWithStore(
       <AgentChatLayout
         agentId="agent-123"
-        events={[{ cursor: 'message-1', kind: 'message', messageLinkHref: '/console/agents/agent-123/' } as any]}
+        events={[{ cursor: 'message-1', kind: 'message', messageLinkHref: '/console/agents/agent-123/' } as unknown as LayoutEvent]}
         onUpdateDailyCredits={vi.fn(async () => undefined)}
         onOpenFullSettings={handleOpenFullSettings}
       />,
@@ -508,7 +558,7 @@ describe('AgentChatLayout upgrade modal gating', () => {
     renderWithStore(
       <AgentChatLayout
         agentId="agent-123"
-        events={[{ cursor: 'message-1', kind: 'message', messageLinkHref: 'https://app.example.test/app/agents/agent-123/secrets/request' } as any]}
+        events={[{ cursor: 'message-1', kind: 'message', messageLinkHref: 'https://app.example.test/app/agents/agent-123/secrets/request' } as unknown as LayoutEvent]}
         onOpenAgentSecretRequests={handleOpenAgentSecretRequests}
       />,
     )
@@ -524,7 +574,7 @@ describe('AgentChatLayout upgrade modal gating', () => {
     renderWithStore(
       <AgentChatLayout
         agentId="agent-123"
-        events={[{ cursor: 'message-1', kind: 'message', messageLinkHref: '/app/integrations' } as any]}
+        events={[{ cursor: 'message-1', kind: 'message', messageLinkHref: '/app/integrations' } as unknown as LayoutEvent]}
         sidebar={{ settings: { onOpenIntegrations: handleOpenIntegrations } }}
       />,
     )
@@ -540,7 +590,7 @@ describe('AgentChatLayout upgrade modal gating', () => {
     renderWithStore(
       <AgentChatLayout
         agentId="agent-123"
-        events={[{ cursor: 'message-1', kind: 'message', messageLinkHref: '/app/agents/agent-456/secrets/request' } as any]}
+        events={[{ cursor: 'message-1', kind: 'message', messageLinkHref: '/app/agents/agent-456/secrets/request' } as unknown as LayoutEvent]}
         onOpenAgentSecretRequests={handleOpenAgentSecretRequests}
       />,
     )
@@ -558,7 +608,7 @@ describe('AgentChatLayout upgrade modal gating', () => {
     const { rerender } = renderWithStore(
       <AgentChatLayout
         agentId="agent-123"
-        events={[{ cursor: 'message-1', kind: 'message', messageLinkHref: '/app/agents/agent-123/secrets' } as any]}
+        events={[{ cursor: 'message-1', kind: 'message', messageLinkHref: '/app/agents/agent-123/secrets' } as unknown as LayoutEvent]}
         onOpenAgentSecrets={handleOpenAgentSecrets}
         onOpenAgentEmailSettings={handleOpenAgentEmailSettings}
         onOpenAgentFiles={handleOpenAgentFiles}
@@ -571,7 +621,7 @@ describe('AgentChatLayout upgrade modal gating', () => {
     rerender(
       <AgentChatLayout
         agentId="agent-123"
-        events={[{ cursor: 'message-2', kind: 'message', messageLinkHref: '/app/agents/agent-123/email' } as any]}
+        events={[{ cursor: 'message-2', kind: 'message', messageLinkHref: '/app/agents/agent-123/email' } as unknown as LayoutEvent]}
         onOpenAgentSecrets={handleOpenAgentSecrets}
         onOpenAgentEmailSettings={handleOpenAgentEmailSettings}
         onOpenAgentFiles={handleOpenAgentFiles}
@@ -583,7 +633,7 @@ describe('AgentChatLayout upgrade modal gating', () => {
     rerender(
       <AgentChatLayout
         agentId="agent-123"
-        events={[{ cursor: 'message-3', kind: 'message', messageLinkHref: '/app/agents/agent-123/files' } as any]}
+        events={[{ cursor: 'message-3', kind: 'message', messageLinkHref: '/app/agents/agent-123/files' } as unknown as LayoutEvent]}
         onOpenAgentSecrets={handleOpenAgentSecrets}
         onOpenAgentEmailSettings={handleOpenAgentEmailSettings}
         onOpenAgentFiles={handleOpenAgentFiles}

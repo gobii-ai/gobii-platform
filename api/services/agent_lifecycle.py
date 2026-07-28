@@ -2,6 +2,11 @@ import logging
 from typing import Callable, Dict, List, Optional, Set, Tuple
 
 from django.db import transaction
+from django.http import Http404
+from django.utils import timezone
+
+from api.models import PersistentAgent
+from util.urls import append_context_query, build_site_url
 
 
 logger = logging.getLogger(__name__)
@@ -123,3 +128,46 @@ AgentCleanupRegistry.register(
     _cleanup_pipedream_delete_user,
     reasons=[AgentShutdownReason.HARD_DELETE, AgentShutdownReason.SOFT_EXPIRE],
 )
+
+
+AGENT_INACTIVE_CODE = "agent_inactive"
+AGENT_INACTIVE_MESSAGE = "This agent is paused and can’t receive messages right now."
+
+
+def build_agent_reactivation_url(agent: PersistentAgent) -> str:
+    url = build_site_url(f"/app/agents/{agent.id}")
+    return append_context_query(url, str(agent.organization_id) if agent.organization_id else None)
+
+
+def build_agent_inactive_payload(agent: PersistentAgent) -> dict[str, str]:
+    return {
+        "code": AGENT_INACTIVE_CODE,
+        "message": AGENT_INACTIVE_MESSAGE,
+        "reactivation_url": build_agent_reactivation_url(agent),
+    }
+
+
+def activate_agent(agent: PersistentAgent) -> tuple[PersistentAgent, bool]:
+    with transaction.atomic():
+        try:
+            locked = PersistentAgent.objects.alive().select_for_update().get(pk=agent.pk)
+        except PersistentAgent.DoesNotExist as exc:
+            raise Http404("Agent not found.") from exc
+        update_fields: list[str] = []
+
+        if not locked.is_active:
+            locked.is_active = True
+            update_fields.append("is_active")
+        if locked.life_state != PersistentAgent.LifeState.ACTIVE:
+            locked.life_state = PersistentAgent.LifeState.ACTIVE
+            update_fields.append("life_state")
+            if locked.schedule_snapshot and not locked.schedule:
+                locked.schedule = locked.schedule_snapshot
+                update_fields.append("schedule")
+
+        if update_fields:
+            locked.last_interaction_at = timezone.now()
+            update_fields.append("last_interaction_at")
+            locked.save(update_fields=update_fields)
+
+    return locked, bool(update_fields)

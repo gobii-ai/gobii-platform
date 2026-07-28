@@ -1,4 +1,8 @@
-"""Compatibility ingestion for existing Pipedream Discord trigger subscriptions."""
+"""Compatibility ingestion for existing Pipedream Discord trigger subscriptions.
+
+Legacy trigger subscriptions can suppress inactive-agent processing, but they
+cannot send the inactive notice because they do not provide an outbound webhook.
+"""
 
 import hashlib
 import hmac
@@ -430,14 +434,23 @@ def ingest_trigger_delivery(
     )
     if info.message.conversation_id and display_name:
         PersistentAgentConversation.objects.filter(id=info.message.conversation_id).update(display_name=display_name)
-    debounce_result = schedule_discord_inbound_processing(
-        str(subscription.agent_id),
-        inbound_message_id=str(info.message.id),
-    )
+    if info.processing_blocked_reason == "agent_inactive":
+        debounce_result = {"debounced": False, "debounce_seconds": 0}
+    else:
+        debounce_result = schedule_discord_inbound_processing(
+            str(subscription.agent_id),
+            inbound_message_id=str(info.message.id),
+        )
     subscription.record_event()
     return {
         "message_id": str(info.message.id),
         "conversation_id": str(info.message.conversation_id) if info.message.conversation_id else "",
         "debounced": bool(debounce_result.get("debounced")),
         "debounce_seconds": debounce_result.get("debounce_seconds", 0),
+        "processing_blocked_reason": info.processing_blocked_reason,
+        "inactive_notice_reason": (
+            "unsupported_for_legacy_pipedream_discord"
+            if info.processing_blocked_reason == "agent_inactive"
+            else None
+        ),
     }

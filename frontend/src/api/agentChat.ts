@@ -37,6 +37,7 @@ export type TimelineResponse = {
   processing_snapshot?: ProcessingSnapshot
   agent_name?: string | null
   agent_avatar_url?: string | null
+  is_active?: boolean
   emotion?: string | null
   emotion_expires_at?: string | null
   agent_schedule?: string | null
@@ -475,6 +476,21 @@ export async function sendAgentMessage(agentId: string, body: string, attachment
     body: JSON.stringify({ body }),
   })
   return response.event
+}
+
+export type ActivateAgentResponse = {
+  status: 'active'
+  updated: boolean
+  message: string
+  is_active: boolean
+  life_state: 'active' | 'expired'
+}
+
+export async function activateAgent(agentId: string): Promise<ActivateAgentResponse> {
+  return jsonRequest<ActivateAgentResponse>(`/console/api/agents/${agentId}/activate/`, {
+    method: 'POST',
+    includeCsrf: true,
+  })
 }
 
 export type AgentMessageReportResponse = {

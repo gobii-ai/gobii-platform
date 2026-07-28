@@ -8,7 +8,7 @@ import secrets
 from contextlib import ExitStack
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import Any, Iterable, Mapping
+from typing import Any, Callable, Iterable, Mapping
 from urllib.parse import quote, urlencode
 
 import requests
@@ -22,6 +22,7 @@ from api.agent.comms.adapters import ParsedMessage
 from api.agent.comms.message_service import ingest_inbound_message
 from api.models import (
     CommsChannel,
+    DeliveryStatus,
     PersistentAgent,
     PersistentAgentConversation,
     PersistentAgentDiscordChannelSubscription,
@@ -33,6 +34,12 @@ from api.models import (
     PersistentAgentStep,
     PersistentAgentSystemSkillState,
     PersistentAgentSystemStep,
+)
+from api.services.inactive_agent_notifications import (
+    INACTIVE_AUTO_REPLY_KIND,
+    INACTIVE_BLOCKED_INPUT_KIND,
+    inactive_auto_reply_body,
+    send_inactive_notice_once,
 )
 from api.agent.system_skills.defaults import DISCORD_NATIVE_SYSTEM_SKILL_KEY
 from api.agent.files.attachment_helpers import ResolvedAttachment, create_message_attachments
@@ -752,11 +759,26 @@ def _finalize_gateway_subscription_delivery(
     display_name = f"#{message.channel_name.lstrip('#')}" if message.channel_name else f"Discord {message.channel_id}"
     if stored_message.conversation_id and display_name:
         PersistentAgentConversation.objects.filter(id=stored_message.conversation_id).update(display_name=display_name)
-    debounce_result = schedule_discord_inbound_processing(
-        str(agent.id),
-        inbound_message_id=str(stored_message.id),
-        typing_channel_id=message.channel_id,
+    inactive_blocked = (
+        isinstance(stored_message.raw_payload, dict)
+        and stored_message.raw_payload.get("inactive_handling") == INACTIVE_BLOCKED_INPUT_KIND
     )
+    if inactive_blocked:
+        transaction.on_commit(
+            lambda: send_inactive_discord_auto_reply(
+                agent,
+                channel_id=message.channel_id,
+                recipient_key=message.author_id or message.channel_id,
+            ),
+            robust=True,
+        )
+        debounce_result = {"debounced": False, "debounce_seconds": 0}
+    else:
+        debounce_result = schedule_discord_inbound_processing(
+            str(agent.id),
+            inbound_message_id=str(stored_message.id),
+            typing_channel_id=message.channel_id,
+        )
     subscription.record_message()
     return {
         "agent_id": str(agent.id),
@@ -765,6 +787,7 @@ def _finalize_gateway_subscription_delivery(
         "conversation_id": str(stored_message.conversation_id) if stored_message.conversation_id else "",
         "debounced": bool(debounce_result.get("debounced")),
         "debounce_seconds": debounce_result.get("debounce_seconds", 0),
+        "processing_blocked_reason": "agent_inactive" if inactive_blocked else None,
     }
 
 
@@ -983,6 +1006,7 @@ def ingest_gateway_message(message: DiscordGatewayMessage) -> dict[str, Any]:
         "conversation_id": first_delivery["conversation_id"],
         "debounced": first_delivery["debounced"],
         "debounce_seconds": first_delivery["debounce_seconds"],
+        "processing_blocked_reason": first_delivery.get("processing_blocked_reason"),
         "subscription_count": len(deliveries),
         "deliveries": deliveries,
         "skipped_subscription_ids": skipped_subscription_ids,
@@ -1063,6 +1087,8 @@ def send_channel_message(
     channel_id: str,
     body: str,
     attachments: Iterable[ResolvedAttachment] | None = None,
+    metadata: Mapping[str, object] | None = None,
+    persisted_message: PersistentAgentMessage | None = None,
 ) -> PersistentAgentMessage:
     resolved_attachments = list(attachments or [])
     body = normalize_discord_markdown(decode_unicode_character_escapes(body))
@@ -1157,7 +1183,51 @@ def send_channel_message(
         "source_label": discord_channel_source_label(subscription.channel_id, subscription.channel_name),
         "discord_sent_attachments": sent_attachments,
         "discord_response": response_payload if isinstance(response_payload, Mapping) else {},
+        **dict(metadata or {}),
     }
+    if persisted_message is None:
+        message = create_discord_outbound_message(
+            agent,
+            channel_id=subscription.channel_id,
+            body=body,
+            conversation_address=discord_conversation_address(agent.id, subscription.guild.guild_id, subscription.channel_id),
+            platform_channel_address=discord_channel_address(subscription.guild.guild_id, subscription.channel_id),
+            channel_name=subscription.channel_name,
+            raw_payload=raw_payload,
+        )
+    else:
+        message = persisted_message
+        message.body = body
+        message.raw_payload = raw_payload
+        message.latest_status = DeliveryStatus.SENT
+        message.latest_sent_at = timezone.now()
+        message.latest_error_message = ""
+        message.save(
+            update_fields=[
+                "body",
+                "raw_payload",
+                "latest_status",
+                "latest_sent_at",
+                "latest_error_message",
+            ]
+        )
+    if resolved_attachments:
+        create_message_attachments(message, resolved_attachments)
+        broadcast_message_attachment_update(str(message.id))
+    return message
+
+
+def _prepare_inactive_discord_auto_reply(
+    agent: PersistentAgent,
+    *,
+    channel_id: str,
+    metadata: Mapping[str, object],
+) -> Callable[[], bool]:
+    subscription = (
+        PersistentAgentDiscordChannelSubscription.objects.select_related("guild")
+        .get(agent=agent, channel_id=channel_id, status=PersistentAgentDiscordChannelSubscription.Status.ACTIVE)
+    )
+    body = inactive_auto_reply_body(agent)
     message = create_discord_outbound_message(
         agent,
         channel_id=subscription.channel_id,
@@ -1165,9 +1235,47 @@ def send_channel_message(
         conversation_address=discord_conversation_address(agent.id, subscription.guild.guild_id, subscription.channel_id),
         platform_channel_address=discord_channel_address(subscription.guild.guild_id, subscription.channel_id),
         channel_name=subscription.channel_name,
-        raw_payload=raw_payload,
+        raw_payload={"kind": INACTIVE_AUTO_REPLY_KIND, **dict(metadata)},
+        latest_status=DeliveryStatus.QUEUED,
     )
-    if resolved_attachments:
-        create_message_attachments(message, resolved_attachments)
-        broadcast_message_attachment_update(str(message.id))
-    return message
+
+    def deliver() -> bool:
+        try:
+            send_channel_message(
+                agent,
+                channel_id=channel_id,
+                body=body,
+                metadata={"kind": INACTIVE_AUTO_REPLY_KIND, **dict(metadata)},
+                persisted_message=message,
+            )
+        except (
+            DiscordBotIntegrationError,
+            PersistentAgentDiscordChannelSubscription.DoesNotExist,
+            requests.RequestException,
+        ) as exc:
+            message.latest_status = DeliveryStatus.FAILED
+            message.latest_error_message = str(exc)
+            message.save(update_fields=["latest_status", "latest_error_message"])
+            raise
+        return True
+
+    return deliver
+
+
+def send_inactive_discord_auto_reply(
+    agent: PersistentAgent,
+    *,
+    channel_id: str,
+    recipient_key: str,
+) -> bool:
+    normalized_recipient_key = str(recipient_key or channel_id).strip()
+    return send_inactive_notice_once(
+        agent,
+        channel=CommsChannel.DISCORD,
+        recipient_key=normalized_recipient_key,
+        prepare=lambda metadata: _prepare_inactive_discord_auto_reply(
+            agent,
+            channel_id=channel_id,
+            metadata=metadata,
+        ),
+    )

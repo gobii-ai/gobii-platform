@@ -1020,6 +1020,25 @@ class InboundAgentWebhookEndpointTests(TestCase):
         self.assertEqual(response.status_code, 409)
 
     @tag("batch_agent_webhooks")
+    @override_settings(PUBLIC_SITE_URL="https://example.com")
+    @patch("api.agent.tasks.process_agent_events_task.delay")
+    def test_inbound_webhook_rejects_paused_agent_without_storing_input(self, mock_delay):
+        self.agent.is_active = False
+        self.agent.save(update_fields=["is_active"])
+
+        response = self.client.post(
+            f"{reverse('api:inbound_agent_webhook', args=[self.webhook.id])}?t={self.webhook.secret}",
+            data='{"status":"ok"}',
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["code"], "agent_inactive")
+        self.assertIn(f"/app/agents/{self.agent.id}", response.json()["reactivation_url"])
+        self.assertFalse(PersistentAgentMessage.objects.filter(owner_agent=self.agent).exists())
+        mock_delay.assert_not_called()
+
+    @tag("batch_agent_webhooks")
     @patch("api.agent.comms.message_service.send_billing_pause_auto_reply")
     @patch("api.agent.tasks.process_agent_events_task.delay")
     def test_inbound_webhook_skips_processing_when_owner_billing_paused(self, mock_delay, mock_auto_reply):

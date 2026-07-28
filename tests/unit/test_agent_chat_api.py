@@ -3042,6 +3042,114 @@ class AgentChatAPITests(TestCase):
         self.assertEqual(props.get("message_length"), len("Hello agent"))
 
     @tag("batch_agent_chat")
+    @patch("console.api_views.Analytics.track_event")
+    def test_paused_agent_rejects_message_before_side_effects(self, mock_track_event):
+        self.agent.is_active = False
+        self.agent.save(update_fields=["is_active"])
+        message_count = PersistentAgentMessage.objects.filter(owner_agent=self.agent).count()
+        session_count = PersistentAgentWebSession.objects.filter(agent=self.agent).count()
+        attachment = SimpleUploadedFile("paused.txt", b"do not import", content_type="text/plain")
+
+        with (
+            patch("api.agent.comms.message_service.import_message_attachments_to_filespace") as import_attachments,
+            patch("api.agent.tasks.enqueue_interactive_process_agent_events") as enqueue,
+        ):
+            response = self.client.post(
+                f"/console/api/agents/{self.agent.id}/messages/",
+                data={"body": "Please do this", "attachments": attachment},
+            )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["code"], "agent_inactive")
+        self.assertIn(f"/app/agents/{self.agent.id}", response.json()["reactivation_url"])
+        self.assertEqual(PersistentAgentMessage.objects.filter(owner_agent=self.agent).count(), message_count)
+        self.assertEqual(PersistentAgentWebSession.objects.filter(agent=self.agent).count(), session_count)
+        import_attachments.assert_not_called()
+        enqueue.assert_not_called()
+        mock_track_event.assert_not_called()
+
+    @tag("batch_agent_chat")
+    def test_activation_is_idempotent_restores_expired_schedule_and_broadcasts(self):
+        self.agent.is_active = False
+        self.agent.life_state = PersistentAgent.LifeState.EXPIRED
+        self.agent.schedule = ""
+        self.agent.schedule_snapshot = "0 9 * * *"
+        self.agent.save(update_fields=["is_active", "life_state", "schedule", "schedule_snapshot"])
+
+        with (
+            patch("console.agent_chat.signals._send") as realtime_send,
+            self.captureOnCommitCallbacks(execute=True),
+        ):
+            response = self.client.post(f"/console/api/agents/{self.agent.id}/activate/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["updated"])
+        self.agent.refresh_from_db()
+        self.assertTrue(self.agent.is_active)
+        self.assertEqual(self.agent.life_state, PersistentAgent.LifeState.ACTIVE)
+        self.assertEqual(self.agent.schedule, "0 9 * * *")
+        self.assertTrue(
+            any(
+                len(call.args) >= 3 and call.args[2].get("is_active") is True
+                for call in realtime_send.call_args_list
+            )
+        )
+
+        second_response = self.client.post(f"/console/api/agents/{self.agent.id}/activate/")
+        self.assertEqual(second_response.status_code, 200)
+        self.assertFalse(second_response.json()["updated"])
+
+    @tag("batch_agent_chat")
+    def test_collaborator_cannot_reactivate_agent(self):
+        collaborator = get_user_model().objects.create_user(
+            username="reactivation-collaborator",
+            email="reactivation-collaborator@example.com",
+            password="password123",
+        )
+        AgentCollaborator.objects.create(
+            agent=self.agent,
+            user=collaborator,
+            invited_by=self.user,
+        )
+        self.agent.is_active = False
+        self.agent.save(update_fields=["is_active"])
+        self.client.force_login(collaborator)
+
+        response = self.client.post(f"/console/api/agents/{self.agent.id}/activate/")
+
+        self.assertIn(response.status_code, {403, 404})
+        self.agent.refresh_from_db()
+        self.assertFalse(self.agent.is_active)
+
+    @tag("batch_agent_chat")
+    def test_activation_endpoint_requires_csrf(self):
+        csrf_client = Client(enforce_csrf_checks=True)
+        csrf_client.force_login(self.user)
+
+        response = csrf_client.post(f"/console/api/agents/{self.agent.id}/activate/")
+
+        self.assertEqual(response.status_code, 403)
+
+    @tag("batch_agent_chat")
+    def test_roster_and_timeline_expose_inactive_state_and_reactivation_permission(self):
+        self.agent.is_active = False
+        self.agent.save(update_fields=["is_active"])
+
+        roster_response = self.client.get(reverse("console_agent_roster"))
+        timeline_response = self.client.get(f"/console/api/agents/{self.agent.id}/timeline/")
+
+        self.assertEqual(roster_response.status_code, 200)
+        roster_agent = next(
+            item
+            for item in roster_response.json()["agents"]
+            if item["id"] == str(self.agent.id)
+        )
+        self.assertFalse(roster_agent["is_active"])
+        self.assertTrue(roster_agent["can_reactivate_agent"])
+        self.assertEqual(timeline_response.status_code, 200)
+        self.assertFalse(timeline_response.json()["is_active"])
+
+    @tag("batch_agent_chat")
     def test_console_message_dispatches_before_message_realtime_and_capi_callbacks(self):
         self.client.force_login(self.user)
         order = []

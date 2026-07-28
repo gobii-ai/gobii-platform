@@ -42,6 +42,7 @@ export function useTimelineMetadataBridge(
     )
     const signupPreviewState = normalizeSignupPreviewState(initialPageResponse.signup_preview_state)
     const planningState = normalizePlanningState(initialPageResponse.planning_state)
+    const hasActiveState = Object.prototype.hasOwnProperty.call(initialPageResponse, 'is_active')
     if (
       name
       || avatar
@@ -50,6 +51,7 @@ export function useTimelineMetadataBridge(
       || hasNextScheduledAt
       || signupPreviewState !== 'none'
       || planningState !== 'skipped'
+      || hasActiveState
     ) {
       dispatch(chatActions.agentIdentityUpdated({
         agentId: activeAgentId,
@@ -58,6 +60,7 @@ export function useTimelineMetadataBridge(
         ...(hasEmotion ? { emotion } : {}),
         ...(hasEmotionExpiresAt ? { emotionExpiresAt } : {}),
         ...(hasNextScheduledAt ? { agentNextScheduledAt: nextScheduledAt } : {}),
+        ...(hasActiveState ? { agentIsActive: initialPageResponse.is_active !== false } : {}),
         signupPreviewState,
         planningState,
       }))
