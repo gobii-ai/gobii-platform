@@ -17,7 +17,10 @@ type EmbeddedWorkspacePetPanelProps = {
 export function EmbeddedWorkspacePetPanel({ onBack }: EmbeddedWorkspacePetPanelProps) {
   return (
     <EmbeddedAgentShellPanel>
-      <div className="flex flex-col gap-4 p-4">
+      {/* profile-screen supplies the same theme variables and section styling the
+          profile page uses, so the section renders identically here — including the
+          scoped toggle-switch rules. */}
+      <div className="profile-screen p-4">
         <div>
           <EmbeddedAgentShellBackButton onClick={onBack} ariaLabel="Back to chat" />
         </div>
