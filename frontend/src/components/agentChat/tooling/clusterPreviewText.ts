@@ -29,6 +29,20 @@ function firstMeaningfulLine(value: string): string | null {
   return firstLine
 }
 
+// Reasoning almost always opens with a lead-in — "Let me understand the current situation:" —
+// and the first line alone made every planning card read identically vanilla while the actual
+// thought sat one line down (bug #405). A lead-in is a line that only announces the next one.
+const THINKING_LEAD_IN_RE = /^(let me|let's|okay|ok|alright|right|so|now|first|hmm)\b[^.!?]{0,60}[:,]?\s*$/i
+
+function firstSubstantiveLine(value: string): string | null {
+  const lines = value.split(/\r?\n/).map((line) => line.trim()).filter((line) => line.length > 0)
+  if (!lines.length) {
+    return null
+  }
+  const substantive = lines.find((line) => !(line.endsWith(':') || THINKING_LEAD_IN_RE.test(line)))
+  return substantive ?? lines[0]
+}
+
 export function deriveEntryCaption(entry: ToolEntryDisplay): string | null {
   if (entry.caption && entry.caption !== entry.label) {
     return entry.caption
@@ -47,11 +61,11 @@ export function deriveThinkingPreview(entry: ToolEntryDisplay): string | null {
   if (!reasoning.trim()) {
     return null
   }
-  const firstLine = firstMeaningfulLine(reasoning)
-  if (!firstLine) {
+  const line = firstSubstantiveLine(reasoning)
+  if (!line) {
     return null
   }
-  return clampPreviewText(stripBasicMarkdown(firstLine))
+  return clampPreviewText(stripBasicMarkdown(line))
 }
 
 export function deriveSemanticPreview(entry: ToolEntryDisplay): string | null {
