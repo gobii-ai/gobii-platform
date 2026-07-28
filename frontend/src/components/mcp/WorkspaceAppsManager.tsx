@@ -669,10 +669,10 @@ function AppListScreen({
 
 function WebhooksHintRowItem() {
   return (
-    <div className="flex items-start justify-between gap-3 border-b border-slate-200/60 px-4 py-3">
+    <div className="flex items-start justify-between gap-3 border-b border-slate-600/40 px-4 py-3">
       <div className="min-w-0">
-        <p className="text-sm font-semibold text-slate-800">Webhooks — built into Gobii</p>
-        <p className="mt-0.5 text-xs text-slate-500">
+        <p className="text-sm font-semibold text-slate-100">Webhooks — built into Gobii</p>
+        <p className="mt-0.5 text-xs text-slate-400">
           Every agent can receive inbound webhooks natively — no app needed. Add one under the
           agent&apos;s Settings → Integrations.
         </p>
@@ -681,7 +681,7 @@ function WebhooksHintRowItem() {
         href="https://docs.gobii.ai/console-guides/agent-settings"
         target="_blank"
         rel="noopener noreferrer"
-        className="shrink-0 rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+        className="shrink-0 rounded-lg border border-slate-500 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-slate-700/40"
       >
         Learn more
       </a>
