@@ -10,7 +10,7 @@ from api.agent.core.event_processing import _execute_tool_call_runtime
 from api.agent.core.prompt_context import get_agent_tools
 from api.agent.system_skills import get_system_skill_definition, shortlist_system_skills
 from api.agent.system_skills.service import enable_system_skills
-from api.agent.tools.meta_gobii import execute_meta_gobii_tool
+from api.agent.tools.meta_gobii import TOOL_DEFINITIONS, execute_meta_gobii_tool
 from api.agent.tools.meta_gobii_names import (
     META_GOBII_LEGACY_SYSTEM_SKILL_KEY,
     META_GOBII_SYSTEM_SKILL_KEY,
@@ -278,6 +278,12 @@ class MetaGobiiDirectToolTests(TestCase):
 
     @patch("api.services.agent_settings_resume.process_agent_events_task.delay")
     def test_update_agent_requires_confirmation_and_respects_access(self, _mock_delay):
+        update_schema = TOOL_DEFINITIONS["meta_gobii_update_agent"]["parameters"]
+        self.assertEqual(
+            update_schema["properties"]["contact_approval_mode"]["enum"],
+            ["require_approval", "auto_approve_email"],
+        )
+
         blocked = execute_meta_gobii_tool(
             self.manager,
             "meta_gobii_update_agent",
@@ -304,6 +310,19 @@ class MetaGobiiDirectToolTests(TestCase):
         self.peer.refresh_from_db()
         self.assertEqual(self.peer.daily_credit_limit, 9)
         self.assertEqual(updated["changed_fields"], ["daily_credit_limit"])
+
+        contact_mode_update = execute_meta_gobii_tool(
+            self.manager,
+            "meta_gobii_update_agent",
+            {
+                "agent_id": str(self.peer.id),
+                "contact_approval_mode": "auto_approve_email",
+                "user_confirmed": True,
+            },
+        )
+        self.peer.refresh_from_db()
+        self.assertEqual(self.peer.contact_approval_mode, "auto_approve_email")
+        self.assertEqual(contact_mode_update["changed_fields"], ["contact_approval_mode"])
 
         denied = execute_meta_gobii_tool(
             self.manager,

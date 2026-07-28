@@ -4322,10 +4322,10 @@ def _format_discord_reply_context(raw_payload: Mapping[str, Any]) -> str:
             "even when they overlap another subscriber's charter."
         ),
         (
-            "If you are not this participant, treat delivery as context, not an invitation; join only "
-            "when the text includes you or the room, or silence would drop a necessary, non-duplicative "
-            "contribution only you can provide. Otherwise stay silent without reacting, updating your own "
-            "records, or announcing that you have no action: call sleep_until_next_trigger with no response text."
+            "If you are not this participant, join only for a clear room-wide invitation in your lane or when "
+            "silence would drop a necessary, non-duplicative contribution only you can provide. Once you accept "
+            "or fetch evidence for it, deliver the result here. Otherwise stay silent without reacting, updating "
+            "your records, or announcing no action: call sleep_until_next_trigger with no response text."
         ),
         f"Message ID: {message_id}",
     ]
