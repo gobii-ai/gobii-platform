@@ -159,16 +159,15 @@ class NativeDiscordBotTests(TestCase):
             result = handle_discord_oauth_callback(
                 state=session.state,
                 code="code-1",
-                selected_guild_id="100",
-                selected_permissions="536939520",
             )
 
-        self.assertEqual(result.claimed_count, 1)
-        self.assertEqual(result.selected_guild_id, "100")
-        self.assertEqual(result.selected_guild, {"id": "100", "name": "Claimed", "icon_hash": "abc"})
+        self.assertEqual(
+            result,
+            {"guild_id": "100", "name": "Claimed", "icon_hash": "abc"},
+        )
         session.refresh_from_db()
         self.assertEqual(session.selected_guild_id, "100")
-        self.assertEqual(session.selected_permissions, "536939520")
+        self.assertEqual(session.selected_permissions, "")
         claim = PersistentAgentDiscordGuild.objects.get(guild_id="100")
         self.assertEqual(claim.owner_user, self.user)
         self.assertEqual(claim.name, "Claimed")
@@ -218,7 +217,7 @@ class NativeDiscordBotTests(TestCase):
         with self.captureOnCommitCallbacks(execute=True):
             result = handle_discord_oauth_callback(state=session.state, code="code-1")
 
-        self.assertEqual(result.claimed_count, 1)
+        self.assertEqual(result["guild_id"], "100")
         exchange_mock.assert_called_once_with("code-1")
         fetch_bot_guild_mock.assert_called_once_with("100")
         delay_mock.assert_called_once_with(str(self.agent.id))
@@ -354,12 +353,13 @@ class NativeDiscordBotTests(TestCase):
     @tag("batch_agent_webhooks")
     @patch("api.services.discord_bot._fetch_bot_guild")
     @patch("api.services.discord_bot._exchange_oauth_code")
-    def test_oauth_rejects_guild_claimed_by_another_context(self, exchange_mock, fetch_bot_guild_mock):
+    def test_oauth_rejects_legacy_guild_claimed_by_another_context(self, exchange_mock, fetch_bot_guild_mock):
         other_user = get_user_model().objects.create_user(username="other-claim-owner")
         PersistentAgentDiscordGuild.objects.create(
             guild_id="100",
             name="Other Context",
             owner_user=other_user,
+            authorization_source=PersistentAgentDiscordGuild.AuthorizationSource.LEGACY_DISCOVERED,
         )
         start_discord_oauth(self.agent, self.user)
         session = PersistentAgentDiscordOAuthSession.objects.get(agent=self.agent)
@@ -404,7 +404,7 @@ class NativeDiscordBotTests(TestCase):
             result = handle_discord_oauth_callback(state=session.state, code="code-1")
 
         existing.refresh_from_db()
-        self.assertEqual(result.claimed_count, 1)
+        self.assertEqual(result["guild_id"], "100")
         self.assertEqual(PersistentAgentDiscordGuild.objects.filter(guild_id="100").count(), 1)
         self.assertEqual(existing.name, "New Name")
         self.assertEqual(existing.icon_hash, "new-icon")
@@ -1857,12 +1857,24 @@ class NativeDiscordBotTests(TestCase):
         self.assertEqual(payload["app"]["guild_count"], 1)
 
     @tag("batch_agent_webhooks")
-    def test_discord_context_summary_counts_only_explicit_guilds(self):
+    def test_discord_context_summary_includes_explicit_and_configured_legacy_guilds(self):
         self._force_login_console_manager()
         self._guild(guild_id="100", name="Explicit")
-        PersistentAgentDiscordGuild.objects.create(
+        configured_legacy = PersistentAgentDiscordGuild.objects.create(
             guild_id="200",
-            name="Legacy",
+            name="Configured Legacy",
+            owner_user=self.user,
+            authorization_source=PersistentAgentDiscordGuild.AuthorizationSource.LEGACY_DISCOVERED,
+        )
+        PersistentAgentDiscordChannelSubscription.objects.create(
+            agent=self.agent,
+            guild=configured_legacy,
+            channel_id="20",
+            status=PersistentAgentDiscordChannelSubscription.Status.ERROR,
+        )
+        PersistentAgentDiscordGuild.objects.create(
+            guild_id="300",
+            name="Broad Legacy",
             owner_user=self.user,
             authorization_source=PersistentAgentDiscordGuild.AuthorizationSource.LEGACY_DISCOVERED,
         )
@@ -1872,8 +1884,11 @@ class NativeDiscordBotTests(TestCase):
         self.assertEqual(response.status_code, 200, response.content)
         payload = response.json()
         self.assertTrue(payload["connected"])
-        self.assertEqual(payload["guild_count"], 1)
-        self.assertEqual(payload["guilds"][0]["guild_id"], "100")
+        self.assertEqual(payload["guild_count"], 2)
+        self.assertEqual(
+            {guild["guild_id"] for guild in payload["guilds"]},
+            {"100", "200"},
+        )
 
     @tag("batch_agent_webhooks")
     @patch("api.services.discord_bot.requests.delete")
@@ -1963,6 +1978,11 @@ class NativeDiscordBotTests(TestCase):
         self._force_login_console_manager()
         removed_guild = self._guild(guild_id="100", name="A Removed")
         failed_guild = self._guild(guild_id="200", name="B Failed")
+        skill_state = PersistentAgentSystemSkillState.objects.create(
+            agent=self.agent,
+            skill_key="discord_native",
+            is_enabled=True,
+        )
         success_response = _response(status_code=204)
         failure_response = _response({"message": "Unavailable"}, status_code=503)
         failure_response.text = "Unavailable"
@@ -1975,11 +1995,14 @@ class NativeDiscordBotTests(TestCase):
         payload = response.json()
         self.assertFalse(payload["revoked"])
         self.assertEqual(payload["guilds_disconnected"], 1)
+        self.assertEqual(payload["agents_disabled"], 0)
         self.assertEqual(payload["failed_guilds"][0]["guild_id"], "200")
         removed_guild.refresh_from_db()
         failed_guild.refresh_from_db()
+        skill_state.refresh_from_db()
         self.assertFalse(removed_guild.is_active)
         self.assertTrue(failed_guild.is_active)
+        self.assertTrue(skill_state.is_enabled)
 
     @tag("batch_agent_webhooks")
     @patch("api.services.discord_bot.requests.delete")
@@ -2047,6 +2070,18 @@ class NativeDiscordBotTests(TestCase):
             owner_user=self.user,
             authorization_source=PersistentAgentDiscordGuild.AuthorizationSource.LEGACY_DISCOVERED,
         )
+        configured_legacy = PersistentAgentDiscordGuild.objects.create(
+            guild_id="150",
+            name="Configured Legacy",
+            owner_user=self.user,
+            authorization_source=PersistentAgentDiscordGuild.AuthorizationSource.LEGACY_DISCOVERED,
+        )
+        PersistentAgentDiscordChannelSubscription.objects.create(
+            agent=self.agent,
+            guild=configured_legacy,
+            channel_id="15",
+            status=PersistentAgentDiscordChannelSubscription.Status.ERROR,
+        )
         self._guild(guild_id="200", name="Explicit")
         stdout = StringIO()
 
@@ -2056,6 +2091,7 @@ class NativeDiscordBotTests(TestCase):
         self.assertTrue(legacy_guild.is_active)
         self.assertIn("1 eligible guild", stdout.getvalue())
         self.assertIn("WOULD_REMOVE 100", stdout.getvalue())
+        self.assertNotIn("WOULD_REMOVE 150", stdout.getvalue())
         self.assertNotIn("WOULD_REMOVE 200", stdout.getvalue())
 
     @tag("batch_agent_webhooks")
@@ -2232,7 +2268,7 @@ class NativeDiscordBotTests(TestCase):
         )
         self.assertEqual(
             configured_guild.authorization_source,
-            PersistentAgentDiscordGuild.AuthorizationSource.EXPLICIT_OAUTH,
+            PersistentAgentDiscordGuild.AuthorizationSource.LEGACY_DISCOVERED,
         )
         self.assertEqual(
             broad_guild.authorization_source,

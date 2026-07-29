@@ -78,14 +78,6 @@ _DISCORD_CUSTOM_EMOJI_API_PATTERN = re.compile(r"^[A-Za-z0-9_]+:\d+$")
 
 
 @dataclass(frozen=True)
-class DiscordGuildClaimResult:
-    claimed_count: int
-    guilds: list[dict[str, str]]
-    selected_guild_id: str = ""
-    selected_guild: dict[str, str] | None = None
-
-
-@dataclass(frozen=True)
 class DiscordGatewayMessage:
     message_id: str
     channel_id: str
@@ -128,8 +120,14 @@ def claimed_guild_queryset_for_owner(*, owner_user=None, organization=None, incl
     queryset = PersistentAgentDiscordGuild.objects.filter(is_active=True)
     if not include_legacy:
         queryset = queryset.filter(
-            authorization_source=PersistentAgentDiscordGuild.AuthorizationSource.EXPLICIT_OAUTH,
-        )
+            Q(authorization_source=PersistentAgentDiscordGuild.AuthorizationSource.EXPLICIT_OAUTH)
+            | Q(
+                channel_subscriptions__status__in=[
+                    PersistentAgentDiscordChannelSubscription.Status.ACTIVE,
+                    PersistentAgentDiscordChannelSubscription.Status.ERROR,
+                ]
+            )
+        ).distinct()
     if organization is not None:
         return queryset.filter(organization=organization)
     return queryset.filter(owner_user=owner_user)
@@ -367,13 +365,6 @@ def _claim_discord_guild_for_session(
         .first()
     )
     if existing:
-        if existing.authorization_source == PersistentAgentDiscordGuild.AuthorizationSource.LEGACY_DISCOVERED:
-            has_configured_subscription = existing.channel_subscriptions.exclude(
-                status=PersistentAgentDiscordChannelSubscription.Status.DISABLED,
-            ).exists()
-            if has_configured_subscription:
-                return None
-            return _update_discord_guild_claim(existing, defaults)
         if not _owner_matches_discord_guild_claim(existing, session):
             return None
         return _update_discord_guild_claim(existing, defaults)
@@ -392,23 +383,23 @@ def _claim_discord_guild_for_session(
         return _update_discord_guild_claim(existing, defaults)
 
 
+def serialize_guild(guild: PersistentAgentDiscordGuild) -> dict[str, str]:
+    return {
+        "guild_id": guild.guild_id,
+        "name": guild.name,
+        "icon_hash": guild.icon_hash,
+    }
+
+
 def _queue_discord_oauth_completion_processing(
     session: PersistentAgentDiscordOAuthSession,
-    result: DiscordGuildClaimResult,
+    guild: dict[str, str],
 ) -> None:
-    selected_name = ""
-    if result.selected_guild:
-        selected_name = str(result.selected_guild.get("name") or "")
-    selected_fragment = (
-        f" Selected server: {selected_name} ({result.selected_guild_id})."
-        if result.selected_guild_id
-        else ""
-    )
     step = PersistentAgentStep.objects.create(
         agent=session.agent,
         description=(
             "Discord connection completed through the native Gobii Discord bot."
-            f"{selected_fragment} "
+            f" Selected server: {guild['name']} ({guild['guild_id']}). "
             "Continue setup now: call discord_channel_subscriptions with action=\"discover_channels\". "
             "If selected_guild is returned, use that server and do not ask the user to choose the server again."
         ),
@@ -419,9 +410,9 @@ def _queue_discord_oauth_completion_processing(
         notes=json.dumps(
             {
                 "source": "discord_oauth",
-                "claimed_count": result.claimed_count,
-                "selected_guild_id": result.selected_guild_id,
-                "selected_guild": result.selected_guild,
+                "claimed_count": 1,
+                "selected_guild_id": guild["guild_id"],
+                "selected_guild": guild,
             },
             separators=(",", ":"),
             sort_keys=True,
@@ -440,11 +431,7 @@ def handle_discord_oauth_callback(
     *,
     state: str,
     code: str,
-    selected_guild_id: str = "",
-    selected_permissions: str = "",
-) -> DiscordGuildClaimResult:
-    # Discord documents the callback guild_id as a hint; the exchanged token's guild is authoritative.
-    del selected_guild_id
+) -> dict[str, str]:
     session = PersistentAgentDiscordOAuthSession.objects.get(state=state)
     if session.completed_at:
         raise DiscordBotIntegrationError("This Discord authorization has already been used.")
@@ -455,7 +442,6 @@ def handle_discord_oauth_callback(
     token_guild = token_payload["guild"]
     authoritative_guild_id = str(token_guild.get("id") or "").strip()
     bot_guild = _fetch_bot_guild(authoritative_guild_id)
-    selected_permissions = selected_permissions.strip()
 
     with transaction.atomic():
         session = (
@@ -490,32 +476,12 @@ def handle_discord_oauth_callback(
             raise DiscordBotIntegrationError(
                 "This Discord server is already connected to another Gobii context."
             )
-        selected_guild = {
-            "id": guild_claim.guild_id,
-            "name": guild_claim.name,
-            "icon_hash": guild_claim.icon_hash,
-        }
-
         session.completed_at = timezone.now()
         session.selected_guild_id = authoritative_guild_id
-        session.selected_permissions = selected_permissions[:64]
-        session.save(update_fields=["completed_at", "selected_guild_id", "selected_permissions"])
-        result = DiscordGuildClaimResult(
-            claimed_count=1,
-            guilds=[selected_guild],
-            selected_guild_id=session.selected_guild_id,
-            selected_guild=selected_guild,
-        )
-        _queue_discord_oauth_completion_processing(session, result)
-    return result
-
-
-def serialize_guild(guild: PersistentAgentDiscordGuild) -> dict[str, str]:
-    return {
-        "guild_id": guild.guild_id,
-        "name": guild.name,
-        "icon_hash": guild.icon_hash,
-    }
+        session.save(update_fields=["completed_at", "selected_guild_id"])
+        guild = serialize_guild(guild_claim)
+        _queue_discord_oauth_completion_processing(session, guild)
+    return guild
 
 
 def list_claimed_guilds(agent: PersistentAgent) -> list[dict[str, str]]:
@@ -532,6 +498,15 @@ def list_claimed_guilds_for_owner(*, owner_user=None, organization=None) -> list
     ]
 
 
+def _delete_discord_resource(url: str, *, action: str, headers: Mapping[str, str] | None = None) -> None:
+    try:
+        response = requests.delete(url, headers=headers, timeout=20)
+    except requests.RequestException as exc:
+        raise DiscordBotIntegrationError(f"Discord {action} could not reach Discord.") from exc
+    if response.status_code != 404:
+        _raise_for_discord_status(response, action=action)
+
+
 def _delete_discord_webhook(webhook: PersistentAgentDiscordWebhook) -> None:
     try:
         webhook_token = webhook.webhook_token
@@ -540,32 +515,24 @@ def _delete_discord_webhook(webhook: PersistentAgentDiscordWebhook) -> None:
             "Gobii could not read the stored Discord webhook while removing the server."
         ) from exc
     if webhook_token:
-        url = f"{DISCORD_API_BASE}/webhooks/{webhook.webhook_id}/{webhook_token}"
-        headers = None
-    else:
-        url = f"{DISCORD_API_BASE}/webhooks/{webhook.webhook_id}"
-        headers = _discord_bot_headers()
-    try:
-        response = requests.delete(url, headers=headers, timeout=20)
-    except requests.RequestException as exc:
-        raise DiscordBotIntegrationError("Discord webhook removal could not reach Discord.") from exc
-    if response.status_code == 404:
+        _delete_discord_resource(
+            f"{DISCORD_API_BASE}/webhooks/{webhook.webhook_id}/{webhook_token}",
+            action="webhook removal",
+        )
         return
-    _raise_for_discord_status(response, action="webhook removal")
+    _delete_discord_resource(
+        f"{DISCORD_API_BASE}/webhooks/{webhook.webhook_id}",
+        action="webhook removal",
+        headers=_discord_bot_headers(),
+    )
 
 
 def _leave_discord_guild(guild_id: str) -> None:
-    try:
-        response = requests.delete(
-            f"{DISCORD_API_BASE}/users/@me/guilds/{guild_id}",
-            headers=_discord_bot_headers(),
-            timeout=20,
-        )
-    except requests.RequestException as exc:
-        raise DiscordBotIntegrationError("Discord server removal could not reach Discord.") from exc
-    if response.status_code == 404:
-        return
-    _raise_for_discord_status(response, action="server removal")
+    _delete_discord_resource(
+        f"{DISCORD_API_BASE}/users/@me/guilds/{guild_id}",
+        action="server removal",
+        headers=_discord_bot_headers(),
+    )
 
 
 def disconnect_discord_guild_claim(guild_claim: PersistentAgentDiscordGuild) -> dict[str, int | str]:
@@ -648,7 +615,8 @@ def disconnect_discord_native_integration(*, owner_user=None, organization=None)
     else:
         agent_queryset = agent_queryset.filter(user=owner_user, organization_id__isnull=True)
     agent_ids = list(agent_queryset.values_list("id", flat=True))
-    with transaction.atomic():
+    skill_count = 0
+    if not failed_guilds:
         skill_count = PersistentAgentSystemSkillState.objects.filter(
             agent_id__in=agent_ids,
             skill_key=DISCORD_NATIVE_SYSTEM_SKILL_KEY,

@@ -29,15 +29,3 @@ export function withDiscordNativeProvider(providers: NativeIntegrationProvider[]
   }
   return [...providers, DISCORD_NATIVE_DISPLAY_PROVIDER]
 }
-
-export function withDiscordNativeProviderConnection(
-  providers: NativeIntegrationProvider[],
-  connected: boolean,
-): NativeIntegrationProvider[] {
-  const nextProviders = withDiscordNativeProvider(providers)
-  return nextProviders.map((provider) => (
-    provider.providerKey === DISCORD_NATIVE_PROVIDER_KEY
-      ? { ...provider, connected }
-      : provider
-  ))
-}

@@ -91,13 +91,13 @@ def _enable_discord_native_skill(agent) -> dict[str, object]:
     return enable_system_skills(agent, [DISCORD_NATIVE_SYSTEM_SKILL_KEY])
 
 
-def _discord_oauth_complete_response(*, agent_id: str, guild_count: int) -> HttpResponse:
+def _discord_oauth_complete_response(*, agent_id: str) -> HttpResponse:
     payload = json.dumps(
         {
             "type": "gobii:discord_oauth_complete",
             "status": "success",
             "agent_id": agent_id,
-            "guild_count": guild_count,
+            "guild_count": 1,
         }
     )
     html = f"""<!doctype html>
@@ -172,11 +172,9 @@ class DiscordOAuthCallbackView(ApiLoginRequiredMixin, View):
                 agent_id,
                 allow_delinquent_personal_chat=True,
             )
-            result = handle_discord_oauth_callback(
+            handle_discord_oauth_callback(
                 state=state,
                 code=code,
-                selected_guild_id=str(request.GET.get("guild_id") or ""),
-                selected_permissions=str(request.GET.get("permissions") or ""),
             )
         except PersistentAgentDiscordOAuthSession.DoesNotExist:
             return JsonResponse({"error": "Discord authorization state was not found."}, status=404)
@@ -185,7 +183,7 @@ class DiscordOAuthCallbackView(ApiLoginRequiredMixin, View):
         except DiscordBotIntegrationError as exc:
             return JsonResponse({"error": str(exc)}, status=400)
 
-        return _discord_oauth_complete_response(agent_id=agent_id, guild_count=result.claimed_count)
+        return _discord_oauth_complete_response(agent_id=agent_id)
 
 
 class AgentDiscordAppView(ApiLoginRequiredMixin, View):
@@ -232,7 +230,6 @@ class DiscordContextAppView(ApiLoginRequiredMixin, View):
         guilds = list_claimed_guilds_for_owner(owner_user=owner_user, organization=owner_org)
         return JsonResponse(
             {
-                "provider_key": "discord",
                 "connected": bool(guilds),
                 "guild_count": len(guilds),
                 "guilds": guilds,

@@ -6,7 +6,6 @@ import {
   agentDiscordAppQueryKey,
   fetchAgentDiscordApp,
   type AgentDiscordApp,
-  type DiscordGuild,
 } from '../../api/discordNative'
 import { disconnectAgentPipedreamApp, fetchAgentPipedreamApps, removeAgentPipedreamApp, startAgentPipedreamAppConnect, type AgentPipedreamAppRow } from '../../api/mcp'
 import { fetchNativeIntegrations, type NativeIntegrationProvider } from '../../api/nativeIntegrations'
@@ -41,7 +40,6 @@ import { useManualNativeIntegrationConnect } from './useManualNativeIntegrationC
 import {
   DiscordConfigurationScreen,
   DiscordSummaryCell,
-  useDiscordGuildRemoval,
   useDiscordNativeAgentActions,
   useDiscordOAuthCompleteRefetch,
 } from './DiscordNativeAppModal'
@@ -108,15 +106,6 @@ export function AgentPipedreamAppsModal({
       setStatusMessage(null)
     },
   })
-  const {
-    removeDiscordGuild,
-    pendingGuildId,
-    isDiscordGuildRemovalPending,
-  } = useDiscordGuildRemoval({
-    onStart: () => setStatusMessage(null),
-    onError: handleDiscordError,
-  })
-
   const appsQuery = useQuery({
     queryKey: ['agent-pipedream-apps', agentId, debouncedSearchTerm],
     queryFn: () => fetchAgentPipedreamApps(agentId, debouncedSearchTerm),
@@ -247,7 +236,6 @@ export function AgentPipedreamAppsModal({
     || nativeDisconnectMutation.isPending
     || nativePickerMutation.isPending
     || isDiscordAgentActionPending
-    || isDiscordGuildRemovalPending
   const activeDiscordApp = discordConfigureOpen ? (discordAppQuery.data ?? discordRow) : null
   const pendingDiscordAction = pendingDiscordAgentAction?.agentId === agentId ? pendingDiscordAgentAction.kind : null
 
@@ -263,13 +251,8 @@ export function AgentPipedreamAppsModal({
         setStatusMessage(null)
       }}
       onSave={(subscriptions) => saveDiscordAgentSubscriptions(agentId, subscriptions)}
-      onAddServer={() => window.open(activeDiscordApp.connectUrl, '_blank')}
-      onRemoveServer={(guild: DiscordGuild) => {
-        if (window.confirm(`Remove ${guild.name} from this Gobii context? This stops every agent subscription in that server and uninstalls the Gobii bot.`)) {
-          removeDiscordGuild(guild.guildId)
-        }
-      }}
-      pendingGuildId={pendingGuildId}
+      onClearStatus={() => setStatusMessage(null)}
+      onError={handleDiscordError}
     />
   ) : (
       <div className="space-y-4 p-1">

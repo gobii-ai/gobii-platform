@@ -119,39 +119,6 @@ export function useDiscordNativeAgentActions({
   }
 }
 
-export function useDiscordGuildRemoval({
-  onStart,
-  onSuccess,
-  onError,
-}: {
-  onStart?: (guildId: string) => void
-  onSuccess?: (guildId: string) => void
-  onError: (message: string) => void
-}) {
-  const queryClient = useQueryClient()
-  const [pendingGuildId, setPendingGuildId] = useState<string | null>(null)
-  const mutation = useMutation({
-    mutationFn: (guildId: string) => disconnectDiscordGuild(guildId),
-    onMutate: (guildId) => {
-      setPendingGuildId(guildId)
-      onStart?.(guildId)
-    },
-    onSuccess: (_result, guildId) => {
-      void queryClient.invalidateQueries({ queryKey: ['agent-discord-app'], exact: false })
-      void queryClient.invalidateQueries({ queryKey: ['agent-discord-channels'], exact: false })
-      void queryClient.invalidateQueries({ queryKey: discordContextAppQueryKey() })
-      onSuccess?.(guildId)
-    },
-    onError: (error) => onError(safeErrorMessage(error)),
-    onSettled: () => setPendingGuildId(null),
-  })
-  return {
-    removeDiscordGuild: (guildId: string) => mutation.mutate(guildId),
-    pendingGuildId,
-    isDiscordGuildRemovalPending: mutation.isPending,
-  }
-}
-
 export function useDiscordNativeDisconnect({
   onMutate,
   onSuccess,
@@ -180,9 +147,8 @@ export function DiscordConfigurationScreen({
   statusMessage,
   onBack,
   onSave,
-  onAddServer,
-  onRemoveServer,
-  pendingGuildId,
+  onClearStatus,
+  onError,
 }: {
   agentId: string
   app: AgentDiscordApp
@@ -191,12 +157,24 @@ export function DiscordConfigurationScreen({
   statusMessage: PipedreamStatusMessage
   onBack: () => void
   onSave: (subscriptions: DiscordSubscriptionSelection[]) => void
-  onAddServer: () => void
-  onRemoveServer: (guild: DiscordGuild) => void
-  pendingGuildId: string | null
+  onClearStatus: () => void
+  onError: (message: string) => void
 }) {
   const surface = useSettingsSurfaceVariant()
-  const initialSelections = useMemo(() => activeDiscordSelections(app), [app.subscriptions])
+  const queryClient = useQueryClient()
+  const guildRemoval = useMutation({
+    mutationFn: disconnectDiscordGuild,
+    onMutate: onClearStatus,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['agent-discord-app'], exact: false })
+      void queryClient.invalidateQueries({ queryKey: ['agent-discord-channels'], exact: false })
+      void queryClient.invalidateQueries({ queryKey: discordContextAppQueryKey() })
+    },
+    onError: (error) => onError(safeErrorMessage(error)),
+  })
+  const pendingGuildId = guildRemoval.isPending ? guildRemoval.variables : null
+  const busy = disabled || guildRemoval.isPending
+  const initialSelections = useMemo(() => activeDiscordSelections(app), [app])
   const [selectedSubscriptions, setSelectedSubscriptions] = useState<Record<string, DiscordSubscriptionSelection>>(initialSelections)
   const savedKeys = useMemo(() => Object.keys(initialSelections).sort().join('|'), [initialSelections])
   const [lastSavedKeys, setLastSavedKeys] = useState(savedKeys)
@@ -235,13 +213,13 @@ export function DiscordConfigurationScreen({
   return (
     <div className="space-y-4 p-1">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <BackButton disabled={disabled} onClick={onBack} />
+        <BackButton disabled={busy} onClick={onBack} />
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
             className={`inline-flex min-w-28 items-center justify-center gap-2 rounded-md border px-3 py-2 text-sm font-semibold transition disabled:opacity-60 ${surface === 'embedded' ? 'border-slate-200/20 text-slate-200 hover:border-sky-300/35' : 'border-indigo-200 text-indigo-700 hover:border-indigo-300'}`}
-            onClick={onAddServer}
-            disabled={disabled}
+            onClick={() => window.open(app.connectUrl, '_blank')}
+            disabled={busy}
           >
             <Plus className="h-4 w-4" aria-hidden="true" />
             Add server
@@ -250,7 +228,7 @@ export function DiscordConfigurationScreen({
             type="button"
             className={`inline-flex min-w-28 items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-semibold transition disabled:opacity-60 ${saveButtonClassName}`}
             onClick={() => onSave(Object.values(selectedSubscriptions))}
-            disabled={disabled || isPendingSave || !hasChanges}
+            disabled={busy || isPendingSave || !hasChanges}
           >
             {isPendingSave ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Save className="h-4 w-4" aria-hidden="true" />}
             Save
@@ -270,10 +248,14 @@ export function DiscordConfigurationScreen({
               guild={guild}
               subscriptions={app.subscriptions}
               selectedSubscriptions={selectedSubscriptions}
-              disabled={disabled}
+              disabled={busy}
               isRemoving={pendingGuildId === guild.guildId}
               onToggleChannel={toggleChannel}
-              onRemove={() => onRemoveServer(guild)}
+              onRemove={() => {
+                if (window.confirm(`Remove ${guild.name} from this Gobii context? This stops every agent subscription in that server and uninstalls the Gobii bot.`)) {
+                  guildRemoval.mutate(guild.guildId)
+                }
+              }}
             />
           ))}
         </div>

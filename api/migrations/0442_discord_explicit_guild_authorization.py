@@ -8,11 +8,8 @@ EXPLICIT_OAUTH = "explicit_oauth"
 def classify_existing_discord_guild_claims(apps, schema_editor):
     discord_guild = apps.get_model("api", "PersistentAgentDiscordGuild")
     oauth_session = apps.get_model("api", "PersistentAgentDiscordOAuthSession")
-    channel_subscription = apps.get_model("api", "PersistentAgentDiscordChannelSubscription")
 
-    explicit_guild_ids = set(
-        channel_subscription.objects.exclude(status="disabled").values_list("guild_id", flat=True)
-    )
+    explicit_guild_ids = set()
     for claim in discord_guild.objects.filter(is_active=True).iterator():
         owner_filter = {"organization_id": claim.organization_id}
         if claim.organization_id is None:
