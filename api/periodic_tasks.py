@@ -65,6 +65,12 @@ def add_dynamic_schedules():
         "args": [],
     }
 
+    beat_schedule["mcp-async-task-reconciliation"] = {
+        "task": "api.tasks.reconcile_mcp_tasks",
+        "schedule": crontab(minute="*"),
+        "args": [],
+    }
+
     beat_schedule["outbox-approved-reconciliation"] = {
         "task": "api.tasks.reconcile_approved_outbox_emails",
         "schedule": crontab(minute="*/5"),

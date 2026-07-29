@@ -42,9 +42,10 @@ from mcp.types import Tool as MCPTool
 from opentelemetry import trace
 from django.conf import settings
 from django.contrib.sites.models import Site
-from django.db import DatabaseError
+from django.db import DatabaseError, transaction
 from django.db.models import Max
 from django.urls import reverse
+from django.utils.dateparse import parse_datetime
 
 from api.services.system_settings import get_mcp_http_timeout_seconds, get_mcp_stdio_timeout_seconds
 from django.utils import timezone
@@ -52,7 +53,22 @@ from django.utils import timezone
 from .mcp_param_guards import MCPParamGuardRegistry
 from .mcp_error_normalizers import MCPErrorNormalizerRegistry
 from .mcp_result_adapters import MCPResultAdapterRegistry, mcp_result_owner_context
-from ...models import MCPServerConfig, MCPServerOAuthCredential, PersistentAgent, PersistentAgentEnabledTool, PipedreamConnectSession
+from .mcp_task_protocol import (
+    MCPCreateTaskResult,
+    MCPDetailedTaskResult,
+    MCP_STATELESS_PROTOCOL_VERSION,
+    MCPTaskHTTPClient,
+    MCPTaskProtocolError,
+)
+from .runtime_execution_context import get_tool_execution_context
+from ...models import (
+    MCPServerConfig,
+    MCPServerOAuthCredential,
+    PersistentAgent,
+    PersistentAgentEnabledTool,
+    PersistentAgentMCPTask,
+    PipedreamConnectSession,
+)
 from ...proxy_selection import select_proxy_for_persistent_agent, select_proxy
 from ...services.mcp_servers import agent_accessible_server_configs
 from ...services.mcp_tool_discovery import schedule_mcp_tool_discovery
@@ -361,6 +377,8 @@ class MCPToolManager:
 
     def __init__(self):
         self._clients: Dict[str, Client] = {}
+        self._modern_http_protocols: Dict[str, str] = {}
+        self._task_capable_http_configs: set[str] = set()
         self._stdio_proxy_clients: Dict[str, Client] = {}
         self._server_cache: Dict[str, MCPServerRuntime] = {}
         self._tools_cache: OrderedDict[str, List[MCPToolInfo]] = OrderedDict()
@@ -617,6 +635,8 @@ class MCPToolManager:
         self._discard_scoped_stdio_proxy_clients(f"{config_id}:")
         self._tools_cache.pop(config_id, None)
         self._tool_cache_fingerprints.pop(config_id, None)
+        self._modern_http_protocols.pop(config_id, None)
+        self._task_capable_http_configs.discard(config_id)
         prefix = f"{config_id}:"
         for slot_key in [key for key in self._tools_cache if key.startswith(prefix)]:
             self._tools_cache.pop(slot_key, None)
@@ -733,12 +753,20 @@ class MCPToolManager:
                     self._tools_cache.pop(slot_key, None)
                     self._tool_cache_fingerprints.pop(slot_key, None)
                 else:
-                    if not require_client or config_id in self._clients:
+                    if (
+                        not require_client
+                        or config_id in self._clients
+                        or config_id in self._modern_http_protocols
+                    ):
                         return True
                     if uses_per_agent_client:
                         return self._runtime_per_agent_client_ready(runtime)
             else:
-                if not require_client or config_id in self._clients:
+                if (
+                    not require_client
+                    or config_id in self._clients
+                    or config_id in self._modern_http_protocols
+                ):
                     return True
                 if uses_per_agent_client:
                     return self._runtime_per_agent_client_ready(runtime)
@@ -755,7 +783,11 @@ class MCPToolManager:
             return False
         if slot_key not in self._tools_cache:
             return False
-        if require_client and config_id not in self._clients:
+        if (
+            require_client
+            and config_id not in self._clients
+            and config_id not in self._modern_http_protocols
+        ):
             if uses_per_agent_client:
                 return self._runtime_per_agent_client_ready(runtime)
             return False
@@ -1244,6 +1276,29 @@ class MCPToolManager:
 
         return Client(transport)
 
+    def _build_task_http_client(
+        self,
+        server: MCPServerRuntime,
+        *,
+        protocol_version: Optional[str] = None,
+        timeout_seconds: Optional[float] = None,
+    ) -> MCPTaskHTTPClient:
+        if not server.url:
+            raise ValueError("MCP Tasks are only supported for HTTP server configurations.")
+        headers = dict(server.headers or {})
+        headers.update(self._build_auth_headers(server))
+        return MCPTaskHTTPClient(
+            url=server.url,
+            headers=headers,
+            httpx_client_factory=self._httpx_client_factory,
+            timeout_seconds=timeout_seconds or self._get_timeout_for_runtime(server),
+            protocol_version=(
+                protocol_version
+                or self._modern_http_protocols.get(server.config_id)
+                or MCP_STATELESS_PROTOCOL_VERSION
+            ),
+        )
+
     def _select_discovery_proxy_url(self, server: MCPServerRuntime) -> Optional[str]:
         if not settings.ENABLE_PROXY_ROUTING:
             return None
@@ -1642,9 +1697,15 @@ class MCPToolManager:
             pipedream_context=pipedream_context,
             sandbox_context=sandbox_context,
         ):
-            if not force_local:
+            should_probe_http_extensions = (
+                settings.MCP_ASYNC_TASKS_ENABLED
+                and bool(server.url)
+                and server.name != self.PIPEDREAM_RUNTIME_NAME
+            )
+            if not force_local and not should_probe_http_extensions:
                 return
-            # Force-local execution requires an active local client even when tools are cached.
+            # Force-local execution still needs a client. HTTP extension support is
+            # connection metadata, so a cached catalog must not skip its modern probe.
         if sandbox_mode:
             server, auth_error = self._ensure_runtime_oauth(server)
             if auth_error:
@@ -1720,8 +1781,49 @@ class MCPToolManager:
             if self._is_stdio_runtime(server)
             else None
         )
+        modern_client: Optional[MCPTaskHTTPClient] = None
 
-        if server.url:
+        if (
+            settings.MCP_ASYNC_TASKS_ENABLED
+            and server.url
+            and server.name != self.PIPEDREAM_RUNTIME_NAME
+        ):
+            probe_client = self._build_task_http_client(
+                server,
+                timeout_seconds=min(10.0, self._get_timeout_for_runtime(server)),
+            )
+            try:
+                with _use_mcp_proxy(discovery_proxy_url):
+                    discovery = self._run_coroutine_sync(probe_client.discover())
+            except (httpx.HTTPError, MCPTaskProtocolError, asyncio.TimeoutError):
+                logger.debug(
+                    "MCP server %s does not support stateless extension discovery; using legacy client",
+                    server.name,
+                    exc_info=True,
+                )
+                self._modern_http_protocols.pop(server.config_id, None)
+                self._task_capable_http_configs.discard(server.config_id)
+            else:
+                self._modern_http_protocols[server.config_id] = discovery.protocol_version
+                if discovery.supports_tasks:
+                    self._task_capable_http_configs.add(server.config_id)
+                else:
+                    self._task_capable_http_configs.discard(server.config_id)
+                modern_client = self._build_task_http_client(
+                    server,
+                    protocol_version=discovery.protocol_version,
+                )
+                logger.info(
+                    "MCP stateless discovery completed: server=%s config=%s protocol=%s tasks=%s",
+                    server.name,
+                    server.config_id,
+                    discovery.protocol_version,
+                    discovery.supports_tasks,
+                )
+
+        if modern_client is not None:
+            client = None
+        elif server.url:
             from fastmcp.client.transports import StreamableHttpTransport
 
             headers: Dict[str, str] = dict(server.headers or {})
@@ -1757,8 +1859,11 @@ class MCPToolManager:
         else:
             raise ValueError(f"Server '{server.name}' must have either 'url' or 'command'")
 
-        client = Client(transport)
-        self._clients[server.config_id] = client
+        if modern_client is None:
+            client = Client(transport)
+            self._clients[server.config_id] = client
+        else:
+            self._clients.pop(server.config_id, None)
 
         if prefer_cache and self._load_cached_tools(
             server,
@@ -1824,9 +1929,13 @@ class MCPToolManager:
             http_proxy_url = discovery_proxy_url if server.url else None
             http_timeout_seconds = get_mcp_http_timeout_seconds() if server.url else None
             with _use_mcp_http_timeout(http_timeout_seconds), _use_mcp_proxy(http_proxy_url):
-                tools = self._run_coroutine_sync(
-                    self._fetch_server_tools(client, server, pipedream_context=pipedream_context)
-                )
+                if modern_client is not None:
+                    mcp_tools = self._run_coroutine_sync(modern_client.list_tools())
+                    tools = self._convert_tools(server, mcp_tools)
+                else:
+                    tools = self._run_coroutine_sync(
+                        self._fetch_server_tools(client, server, pipedream_context=pipedream_context)
+                    )
             slot_key = self._tool_cache_slot_key(server, pipedream_context, sandbox_context)
             self._cache_tools(slot_key, tools, cache_fingerprint)
             self._store_discovered_tools(server, tools, cache_fingerprint, pipedream_context)
@@ -2367,7 +2476,11 @@ class MCPToolManager:
     def _tool_result_error_message(result: Any) -> Optional[str]:
         if isinstance(result, dict) and result.get("status") == "error":
             return str(result.get("message") or result.get("result") or "Unknown error")
-        if not (hasattr(result, "is_error") and result.is_error):
+        is_error = bool(
+            getattr(result, "is_error", False)
+            or getattr(result, "isError", False)
+        )
+        if not is_error:
             return None
         content = getattr(result, "content", None) or []
         if content:
@@ -2419,6 +2532,185 @@ class MCPToolManager:
             content,
             use_success_sentinel=use_success_sentinel,
         )
+
+    @staticmethod
+    def _clamp_mcp_task_poll_interval_ms(value: Optional[int]) -> int:
+        minimum = max(settings.MCP_ASYNC_TASK_MIN_POLL_INTERVAL_SECONDS, 1) * 1000
+        maximum = max(settings.MCP_ASYNC_TASK_MAX_POLL_INTERVAL_SECONDS, 1) * 1000
+        return max(minimum, min(value or minimum, maximum))
+
+    def _persist_mcp_task(
+        self,
+        *,
+        agent: PersistentAgent,
+        runtime: MCPServerRuntime,
+        full_tool_name: str,
+        remote_tool_name: str,
+        arguments: Dict[str, Any],
+        create_result: MCPCreateTaskResult,
+        protocol_version: str,
+    ) -> Dict[str, Any]:
+        now = timezone.now()
+        remote_created_at = parse_datetime(create_result.created_at)
+        remote_updated_at = parse_datetime(create_result.last_updated_at)
+        if remote_created_at is not None and timezone.is_naive(remote_created_at):
+            remote_created_at = timezone.make_aware(remote_created_at, UTC)
+        if remote_updated_at is not None and timezone.is_naive(remote_updated_at):
+            remote_updated_at = timezone.make_aware(remote_updated_at, UTC)
+
+        local_deadline = now + timedelta(
+            seconds=max(settings.MCP_ASYNC_TASK_MAX_LIFETIME_SECONDS, 1)
+        )
+        if create_result.ttl_ms is not None:
+            ttl_base = remote_created_at or now
+            local_deadline = min(
+                local_deadline,
+                ttl_base + timedelta(milliseconds=create_result.ttl_ms),
+            )
+
+        execution_context = get_tool_execution_context()
+        originating_step_id = execution_context.step_id if execution_context else None
+        from api.agent.core.budget import get_current_context
+
+        budget_context = get_current_context()
+        poll_interval_ms = self._clamp_mcp_task_poll_interval_ms(create_result.poll_interval_ms)
+        first_poll_at = min(
+            now + timedelta(milliseconds=poll_interval_ms),
+            local_deadline,
+        )
+        defaults = {
+            "agent": agent,
+            "originating_tool_call_id": originating_step_id,
+            "server_name": runtime.name,
+            "tool_name": full_tool_name,
+            "remote_tool_name": remote_tool_name,
+            "tool_arguments": arguments,
+            "protocol_version": protocol_version,
+            "status": create_result.status,
+            "status_message": create_result.status_message,
+            "poll_interval_ms": poll_interval_ms,
+            "next_poll_at": (
+                first_poll_at
+                if create_result.status == "working"
+                else now
+            ),
+            "deadline_at": local_deadline,
+            "budget_id": budget_context.budget_id if budget_context else "",
+            "branch_id": budget_context.branch_id if budget_context else "",
+            "depth": budget_context.depth if budget_context else None,
+            "eval_run_id": budget_context.eval_run_id if budget_context else None,
+            "remote_created_at": remote_created_at,
+            "remote_updated_at": remote_updated_at,
+        }
+        task, created = PersistentAgentMCPTask.objects.get_or_create(
+            server_config_id=runtime.config_id,
+            remote_task_id=create_result.task_id,
+            defaults=defaults,
+        )
+        if created:
+            from api.tasks.mcp_tasks import poll_mcp_task, record_mcp_task_lifecycle
+
+            countdown = (
+                max((first_poll_at - now).total_seconds(), 0)
+                if create_result.status == "working"
+                else 0
+            )
+            transaction.on_commit(
+                lambda: poll_mcp_task.apply_async(args=[str(task.id)], countdown=countdown)
+            )
+            record_mcp_task_lifecycle("created", task)
+        else:
+            if (
+                task.agent_id != agent.id
+                or task.tool_name != full_tool_name
+                or task.tool_arguments != arguments
+                or task.terminal_at is not None
+                or (
+                    originating_step_id
+                    and str(task.originating_tool_call_id or "") != originating_step_id
+                )
+            ):
+                logger.error(
+                    "MCP server reused a remote task ID for a different call",
+                    extra={
+                        "mcp_task_id": str(task.id),
+                        "remote_task_id": create_result.task_id,
+                        "server_config_id": runtime.config_id,
+                    },
+                )
+                return {
+                    "status": "error",
+                    "message": "The MCP server returned a task ID that is already in use.",
+                }
+            logger.info(
+                "MCP async task creation deduplicated",
+                extra={"event": "created_duplicate", "mcp_task_id": str(task.id)},
+            )
+        return {
+            "status": "pending",
+            "task_id": str(task.id),
+            "message": create_result.status_message or "The MCP task is running in the background.",
+            "auto_sleep_ok": True,
+        }
+
+    def get_mcp_task_state(self, task: PersistentAgentMCPTask) -> MCPDetailedTaskResult:
+        config = (
+            MCPServerConfig.objects.filter(pk=task.server_config_id, is_active=True)
+            .select_related("oauth_credential")
+            .first()
+        )
+        if config is None:
+            raise MCPTaskProtocolError("The MCP server configuration is disabled or no longer exists.")
+        runtime = self._build_runtime_from_config(config)
+        runtime, auth_error = self._ensure_runtime_oauth(runtime)
+        if auth_error:
+            raise MCPTaskProtocolError(str(auth_error.get("message") or "MCP authorization failed."))
+        proxy_url, proxy_error = self._select_agent_proxy_url(task.agent)
+        if proxy_error:
+            raise MCPTaskProtocolError(proxy_error)
+        client = self._build_task_http_client(
+            runtime,
+            protocol_version=task.protocol_version,
+        )
+        with _use_mcp_http_timeout(self._get_timeout_for_runtime(runtime)), _use_mcp_proxy(proxy_url):
+            return self._run_coroutine_sync(client.get_task(task.remote_task_id))
+
+    def cancel_mcp_task_remote(self, task: PersistentAgentMCPTask) -> None:
+        config = (
+            MCPServerConfig.objects.filter(pk=task.server_config_id)
+            .select_related("oauth_credential")
+            .first()
+        )
+        if config is None or not config.url:
+            return
+        runtime = self._build_runtime_from_config(config)
+        runtime, auth_error = self._ensure_runtime_oauth(runtime)
+        if auth_error:
+            return
+        proxy_url, proxy_error = self._select_agent_proxy_url(task.agent)
+        if proxy_error:
+            return
+        cancel_timeout = min(10.0, self._get_timeout_for_runtime(runtime))
+        client = self._build_task_http_client(
+            runtime,
+            protocol_version=task.protocol_version,
+            timeout_seconds=cancel_timeout,
+        )
+        with _use_mcp_http_timeout(cancel_timeout), _use_mcp_proxy(proxy_url):
+            self._run_coroutine_sync(client.cancel_task(task.remote_task_id))
+
+    def normalize_mcp_task_result(
+        self,
+        task: PersistentAgentMCPTask,
+        result: dict[str, Any],
+    ) -> Dict[str, Any]:
+        from mcp.types import CallToolResult
+
+        call_result = CallToolResult.model_validate(result)
+        owner = getattr(task.agent, "organization", None) or getattr(task.agent, "user", None)
+        with mcp_result_owner_context(owner):
+            adapted = self._adapt_tool_result(task.server_name, task.remote_tool_name, call_result)
+        return self._finalize_mcp_result(task.server_name, task.remote_tool_name, adapted)
 
     def _dispatch_sandbox_mcp_request(
         self,
@@ -2572,6 +2864,7 @@ class MCPToolManager:
             if proxy_error:
                 return {"status": "error", "message": proxy_error}
 
+        modern_protocol: Optional[str] = None
         if server_name == self.PIPEDREAM_RUNTIME_NAME:
             app_slug = self._pd_app_slug_for_tool_call(info.tool_name, params)
             if app_slug:
@@ -2594,7 +2887,32 @@ class MCPToolManager:
                 return {"status": "error", "message": str(exc)}
         else:
             client = None
-            if runtime and self._is_stdio_runtime(runtime) and proxy_url:
+            modern_protocol = (
+                self._modern_http_protocols.get(runtime.config_id)
+                if runtime is not None
+                else None
+            )
+            if modern_protocol:
+                active_task_limit = max(settings.MCP_ASYNC_TASK_MAX_ACTIVE_PER_AGENT, 1)
+                if (
+                    settings.MCP_ASYNC_TASKS_ENABLED
+                    and runtime.config_id in self._task_capable_http_configs
+                    and PersistentAgentMCPTask.objects.filter(
+                        agent=agent,
+                        status__in=[
+                            PersistentAgentMCPTask.Status.WORKING,
+                            PersistentAgentMCPTask.Status.INPUT_REQUIRED,
+                        ],
+                    ).count() >= active_task_limit
+                ):
+                    return {
+                        "status": "error",
+                        "message": (
+                            "This agent already has the maximum number of active MCP tasks "
+                            f"({active_task_limit})."
+                        ),
+                    }
+            elif runtime and self._is_stdio_runtime(runtime) and proxy_url:
                 client = self._get_scoped_stdio_proxy_client(
                     runtime,
                     scope_key=f"agent:{agent.id}",
@@ -2602,7 +2920,7 @@ class MCPToolManager:
                 )
             else:
                 client = self._clients.get(info.config_id)
-            if not client:
+            if not client and not modern_protocol:
                 return {
                     "status": "error",
                     "message": f"MCP server '{info.server_name}' not available",
@@ -2612,13 +2930,39 @@ class MCPToolManager:
             timeout_seconds = self._get_timeout_for_runtime(runtime)
             http_timeout_seconds = timeout_seconds if runtime and runtime.url else None
             with _use_mcp_http_timeout(http_timeout_seconds), _use_mcp_proxy(proxy_url):
-                result = self._run_coroutine_sync(
-                    self._execute_async(
-                        client,
-                        actual_tool_name,
-                        params,
-                        timeout_seconds=timeout_seconds,
+                if modern_protocol and runtime is not None:
+                    task_client = self._build_task_http_client(
+                        runtime,
+                        protocol_version=modern_protocol,
                     )
+                    result = self._run_coroutine_sync(
+                        task_client.call_tool(
+                            actual_tool_name,
+                            params,
+                            advertise_tasks=(
+                                settings.MCP_ASYNC_TASKS_ENABLED
+                                and runtime.config_id in self._task_capable_http_configs
+                            ),
+                        )
+                    )
+                else:
+                    result = self._run_coroutine_sync(
+                        self._execute_async(
+                            client,
+                            actual_tool_name,
+                            params,
+                            timeout_seconds=timeout_seconds,
+                        )
+                    )
+            if isinstance(result, MCPCreateTaskResult):
+                return self._persist_mcp_task(
+                    agent=agent,
+                    runtime=runtime,
+                    full_tool_name=tool_name,
+                    remote_tool_name=actual_tool_name,
+                    arguments=params,
+                    create_result=result,
+                    protocol_version=modern_protocol,
                 )
             with mcp_result_owner_context(owner):
                 result = self._adapt_tool_result(server_name, actual_tool_name, result)
@@ -2966,6 +3310,8 @@ class MCPToolManager:
         self._discard_scoped_stdio_proxy_clients("")
         self._server_cache.clear()
         self._clients.clear()
+        self._modern_http_protocols.clear()
+        self._task_capable_http_configs.clear()
         self._tools_cache.clear()
         self._tool_cache_fingerprints.clear()
         self._last_refresh_marker = None

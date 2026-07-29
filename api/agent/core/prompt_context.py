@@ -62,6 +62,7 @@ from ...models import (
     PersistentAgentHumanInputRequest,
     PersistentAgentMessage,
     PersistentAgentMessageAttachment,
+    PersistentAgentMCPTask,
     PersistentAgentPromptArchive,
     PersistentAgentSecret,
     GlobalSecret,
@@ -491,6 +492,26 @@ def _get_recent_completed_browser_tasks(
     return list(completed_tasks_qs[:visible_limit])
 
 
+def _get_recent_mcp_task_results(
+    *,
+    agent: PersistentAgent,
+    visible_limit: int,
+) -> List[PersistentAgentMCPTask]:
+    if visible_limit <= 0:
+        return []
+    return list(
+        PersistentAgentMCPTask.objects.filter(agent=agent)
+        .filter(
+            Q(terminal_at__isnull=False)
+            | Q(
+                status=PersistentAgentMCPTask.Status.INPUT_REQUIRED,
+                input_requests__isnull=False,
+            )
+        )
+        .order_by("-updated_at")[:visible_limit]
+    )
+
+
 def _extract_browser_task_embedded_result(raw_text: str) -> Optional[Any]:
     """Parse a structured payload embedded in browser task freeform text."""
     match = BROWSER_TASK_RESULT_BLOCK_RE.search(raw_text)
@@ -712,6 +733,29 @@ def _build_browser_task_tool_result_record(
         tool_name=SPAWN_WEB_TASK_RESULT_TOOL_NAME,
         created_at=task.updated_at,
         result_text=json.dumps(normalized_payload, ensure_ascii=False),
+        result_id=str(task.id),
+        source_batch_id=str(task.id),
+    )
+
+
+def _build_mcp_task_tool_result_record(task: PersistentAgentMCPTask) -> ToolCallResultRecord:
+    payload: Dict[str, Any] = {
+        "task_id": str(task.id),
+        "status": task.status,
+        "message": task.status_message,
+    }
+    if task.result is not None:
+        payload["result"] = task.result
+    if task.error is not None:
+        payload["error"] = task.error
+    if task.input_requests is not None:
+        payload["input_requests"] = task.input_requests
+        payload["message"] = task.status_message or "The MCP server requires input to continue."
+    return ToolCallResultRecord(
+        step_id=f"mcp_task_result:{task.id}",
+        tool_name=task.tool_name,
+        created_at=task.updated_at,
+        result_text=json.dumps(payload, ensure_ascii=False),
         result_id=str(task.id),
         source_batch_id=str(task.id),
     )
@@ -1829,6 +1873,7 @@ def _render_prompt_context_once(
     )
     # Browser tasks - each task gets its own section for better token management
     _build_browser_tasks_sections(agent, variable_group)
+    _build_mcp_tasks_sections(agent, variable_group)
 
     # High priority sections (weight=10) - critical information that shouldn't shrink much
     critical_group = prompt.group("critical", weight=10)
@@ -4700,6 +4745,10 @@ def _get_unified_history_prompt(
         agent=agent,
         visible_limit=unified_fetch_span,
     )
+    mcp_task_results = _get_recent_mcp_task_results(
+        agent=agent,
+        visible_limit=unified_fetch_span,
+    )
     messages = list(
         PersistentAgentMessage.objects.filter(
             owner_agent=agent, timestamp__gt=comms_cutoff
@@ -4726,6 +4775,7 @@ def _get_unified_history_prompt(
     tool_call_records: List[ToolCallResultRecord] = []
     browser_task_result_record_ids: Dict[str, str] = {}
     completed_browser_task_ids = {str(task.id) for task in completed_tasks}
+    delivered_mcp_tasks = {str(task.id): task for task in mcp_task_results}
     recency_positions: Dict[str, int] = {}
     fresh_tool_call_step_ids: Set[str] = set()
     if steps:
@@ -4759,6 +4809,13 @@ def _get_unified_history_prompt(
             if (
                 row.get("tool_name") == "spawn_web_task"
                 and _extract_spawn_web_task_task_id(result_text) in completed_browser_task_ids
+            ):
+                continue
+            pending_mcp_task_id = _extract_spawn_web_task_task_id(result_text)
+            delivered_mcp_task = delivered_mcp_tasks.get(pending_mcp_task_id or "")
+            if (
+                delivered_mcp_task is not None
+                and row.get("tool_name") == delivered_mcp_task.tool_name
             ):
                 continue
             completion_id = row.get("step__completion_id")
@@ -4912,6 +4969,12 @@ def _get_unified_history_prompt(
         browser_record = _build_browser_task_tool_result_record(task, result_step)
         browser_task_result_record_ids[str(task.id)] = browser_record.step_id
         tool_call_records.append(browser_record)
+
+    mcp_task_result_record_ids: Dict[str, str] = {}
+    for task in mcp_task_results:
+        mcp_record = _build_mcp_task_tool_result_record(task)
+        mcp_task_result_record_ids[str(task.id)] = mcp_record.step_id
+        tool_call_records.append(mcp_record)
 
     paired_url_step_ids = set(fresh_tool_call_step_ids)
     if completed_tasks:
@@ -5248,6 +5311,24 @@ def _get_unified_history_prompt(
 
         structured_events.append((t.updated_at, "browser_task", components))
 
+    for task in mcp_task_results:
+        result_info = tool_result_prompt_info.get(
+            mcp_task_result_record_ids.get(str(task.id), "")
+        )
+        components = {
+            "meta": (
+                f"[{task.updated_at.isoformat()}] MCP task '{task.tool_name}' "
+                f"reported status '{task.status}' (id={task.id})."
+            ),
+        }
+        if result_info is not None:
+            components["result_id"] = result_info.result_id
+            components["result_meta"] = result_info.meta
+            if result_info.preview_text:
+                key = "result" if result_info.is_inline else "result_preview"
+                components[key] = result_info.preview_text
+        structured_events.append((task.updated_at, "mcp_task", components))
+
     # Create structured promptree groups for each event
     has_link_references = False
     if structured_events:
@@ -5278,6 +5359,7 @@ def _get_unified_history_prompt(
         BASE_EVENT_WEIGHTS = {
             "tool_call": 4,
             "browser_task": 3,
+            "mcp_task": 3,
             "message_inbound": 4,
             "message_outbound": 2,
             "step_description": 2,
@@ -5435,6 +5517,40 @@ def _build_browser_tasks_sections(agent: PersistentAgent, tasks_group) -> None:
             "No active browser tasks.",
             weight=1,
             non_shrinkable=True
+        )
+
+
+@tracer.start_as_current_span("Prompt Dynamic MCP Tasks")
+def _build_mcp_tasks_sections(agent: PersistentAgent, tasks_group) -> None:
+    active_tasks = list(
+        PersistentAgentMCPTask.objects.filter(
+            agent=agent,
+            terminal_at__isnull=True,
+            status__in=[
+                PersistentAgentMCPTask.Status.WORKING,
+                PersistentAgentMCPTask.Status.INPUT_REQUIRED,
+            ],
+        ).order_by("created_at")
+    )
+    for index, task in enumerate(active_tasks):
+        task_group = tasks_group.group(f"active_mcp_task_{index}", weight=3)
+        task_group.section_text("id", str(task.id), weight=3, non_shrinkable=True)
+        task_group.section_text("tool", task.tool_name, weight=3, non_shrinkable=True)
+        task_group.section_text("status", task.status, weight=3, non_shrinkable=True)
+        if task.status_message:
+            task_group.section_text("message", task.status_message, weight=2, shrinker="hmt")
+
+    if active_tasks:
+        tasks_group.section_text(
+            "mcp_tasks_note",
+            (
+                "These MCP calls are durable background tasks. Their completion or input-required "
+                "state wakes you automatically and appears in unified history under the original "
+                "tool name. Do not call the MCP tool again or poll it manually; if blocked, use "
+                "sleep_until_next_trigger."
+            ),
+            weight=2,
+            non_shrinkable=True,
         )
 
 

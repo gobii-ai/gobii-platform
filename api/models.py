@@ -8063,6 +8063,82 @@ class MCPServerConfig(models.Model):
         self.headers_json_encrypted = self._encrypt_json(value)
 
 
+class PersistentAgentMCPTask(models.Model):
+    """Durable local state for a remote SEP-2663 MCP task."""
+
+    class Status(models.TextChoices):
+        WORKING = "working", "Working"
+        INPUT_REQUIRED = "input_required", "Input required"
+        COMPLETED = "completed", "Completed"
+        FAILED = "failed", "Failed"
+        CANCELLED = "cancelled", "Cancelled"
+        EXPIRED = "expired", "Expired"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    agent = models.ForeignKey(
+        "PersistentAgent",
+        on_delete=models.CASCADE,
+        related_name="mcp_tasks",
+    )
+    originating_tool_call = models.ForeignKey(
+        "PersistentAgentToolCall",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="mcp_tasks",
+    )
+    server_config = models.ForeignKey(
+        MCPServerConfig,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="agent_tasks",
+    )
+    server_name = models.CharField(max_length=64)
+    remote_task_id = models.CharField(max_length=512)
+    tool_name = models.CharField(max_length=256)
+    remote_tool_name = models.CharField(max_length=256)
+    tool_arguments = models.JSONField(default=dict)
+    protocol_version = models.CharField(max_length=32)
+    status = models.CharField(max_length=32, choices=Status.choices, default=Status.WORKING)
+    status_message = models.TextField(blank=True)
+    input_requests = models.JSONField(null=True, blank=True)
+    result = models.JSONField(null=True, blank=True)
+    error = models.JSONField(null=True, blank=True)
+    poll_interval_ms = models.PositiveIntegerField(default=2000)
+    next_poll_at = models.DateTimeField(null=True, blank=True)
+    deadline_at = models.DateTimeField()
+    attempts = models.PositiveIntegerField(default=0)
+    lease_token = models.UUIDField(null=True, blank=True)
+    lease_expires_at = models.DateTimeField(null=True, blank=True)
+    budget_id = models.CharField(max_length=100, blank=True)
+    branch_id = models.CharField(max_length=100, blank=True)
+    depth = models.PositiveIntegerField(null=True, blank=True)
+    eval_run_id = models.UUIDField(null=True, blank=True)
+    wake_enqueued_at = models.DateTimeField(null=True, blank=True)
+    terminal_at = models.DateTimeField(null=True, blank=True)
+    remote_created_at = models.DateTimeField(null=True, blank=True)
+    remote_updated_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["server_config", "remote_task_id"],
+                name="unique_mcp_remote_task_per_server",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["agent", "status"], name="mcp_task_agent_status_idx"),
+            models.Index(fields=["status", "next_poll_at"], name="mcp_task_status_poll_idx"),
+            models.Index(fields=["lease_expires_at"], name="mcp_task_lease_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return f"MCPTask<{self.id}:{self.server_name}:{self.status}>"
+
+
 class PipedreamAppSelection(models.Model):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -13771,6 +13847,30 @@ def refresh_mcp_tool_cache_for_server(sender, instance, **kwargs):
             from api.services.mcp_tool_discovery import schedule_mcp_tool_discovery
 
             schedule_mcp_tool_discovery(str(server_id), reason="config_changed")
+
+
+@receiver(pre_save, sender=MCPServerConfig)
+def cancel_mcp_tasks_for_disabled_server(sender, instance, **kwargs):
+    if not instance.pk or instance.is_active:
+        return
+    was_active = MCPServerConfig.objects.filter(pk=instance.pk, is_active=True).exists()
+    if was_active:
+        from api.tasks.mcp_tasks import cancel_active_mcp_tasks_for_server
+
+        cancel_active_mcp_tasks_for_server(
+            str(instance.pk),
+            reason="The MCP server was disabled.",
+        )
+
+
+@receiver(pre_delete, sender=MCPServerConfig)
+def cancel_mcp_tasks_for_deleted_server(sender, instance, **kwargs):
+    from api.tasks.mcp_tasks import cancel_active_mcp_tasks_for_server
+
+    cancel_active_mcp_tasks_for_server(
+        str(instance.pk),
+        reason="The MCP server was removed.",
+    )
 
 
 @receiver(post_delete, sender=MCPServerOAuthCredential)
