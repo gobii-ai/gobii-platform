@@ -14,7 +14,7 @@ from urllib.parse import quote, urlencode
 import requests
 from django.conf import settings
 from django.db import IntegrityError, transaction
-from django.db.models import Q
+from django.db.models import Exists, OuterRef, Q
 from django.urls import reverse
 from django.utils import timezone
 
@@ -119,15 +119,17 @@ def claimed_guild_queryset_for_owner(*, owner_user=None, organization=None, incl
 
     queryset = PersistentAgentDiscordGuild.objects.filter(is_active=True)
     if not include_legacy:
-        queryset = queryset.filter(
+        supported_subscription = PersistentAgentDiscordChannelSubscription.objects.filter(
+            guild_id=OuterRef("pk"),
+            status__in=[
+                PersistentAgentDiscordChannelSubscription.Status.ACTIVE,
+                PersistentAgentDiscordChannelSubscription.Status.ERROR,
+            ],
+        )
+        queryset = queryset.alias(has_supported_subscription=Exists(supported_subscription)).filter(
             Q(authorization_source=PersistentAgentDiscordGuild.AuthorizationSource.EXPLICIT_OAUTH)
-            | Q(
-                channel_subscriptions__status__in=[
-                    PersistentAgentDiscordChannelSubscription.Status.ACTIVE,
-                    PersistentAgentDiscordChannelSubscription.Status.ERROR,
-                ]
-            )
-        ).distinct()
+            | Q(has_supported_subscription=True)
+        )
     if organization is not None:
         return queryset.filter(organization=organization)
     return queryset.filter(owner_user=owner_user)
@@ -136,10 +138,7 @@ def claimed_guild_queryset_for_owner(*, owner_user=None, organization=None, incl
 def _discord_bot_headers() -> dict[str, str]:
     if not settings.DISCORD_BOT_TOKEN:
         raise DiscordBotIntegrationError("DISCORD_BOT_TOKEN is not configured.")
-    return {
-        "Authorization": f"Bot {settings.DISCORD_BOT_TOKEN}",
-        "Content-Type": "application/json",
-    }
+    return {"Authorization": f"Bot {settings.DISCORD_BOT_TOKEN}"}
 
 
 def _raise_for_discord_status(response: requests.Response, *, action: str) -> None:

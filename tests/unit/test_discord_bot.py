@@ -41,6 +41,7 @@ from api.models import (
 )
 from api.services.discord_bot import (
     add_discord_reaction,
+    claimed_guild_queryset_for_owner,
     DiscordBotIntegrationError,
     DiscordGatewayMessage,
     discover_channels,
@@ -514,6 +515,15 @@ class NativeDiscordBotTests(TestCase):
             ).count(),
             2,
         )
+
+    @tag("batch_agent_webhooks")
+    def test_claimed_guild_queryset_is_lockable_without_distinct(self):
+        self._guild()
+
+        queryset = claimed_guild_queryset_for_owner(owner_user=self.user).select_for_update()
+
+        self.assertFalse(queryset.query.distinct)
+        self.assertEqual(list(queryset.values_list("guild_id", flat=True)), ["100"])
 
     @tag("batch_agent_webhooks")
     @patch("api.services.discord_bot.requests.get")
@@ -2042,6 +2052,10 @@ class NativeDiscordBotTests(TestCase):
         self.assertEqual(
             kept_subscription.status,
             PersistentAgentDiscordChannelSubscription.Status.ACTIVE,
+        )
+        self.assertEqual(
+            delete_mock.call_args.kwargs["headers"],
+            {"Authorization": "Bot discord-bot-token"},
         )
 
     @tag("batch_agent_webhooks")
