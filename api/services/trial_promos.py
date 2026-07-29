@@ -69,6 +69,7 @@ class TrialPromoStartDecision:
 @dataclass(frozen=True)
 class TrialPromoConversionOffer:
     plan: str
+    price_id: str
     coupon_id: str
     discount_months: int
 
@@ -245,6 +246,9 @@ def get_trial_promo_conversion_offer(
 ) -> TrialPromoConversionOffer:
     metadata = redemption.metadata or {}
     plan = str(metadata.get(TRIAL_PROMO_META_PLAN) or "").strip().lower()
+    price_id = str(
+        metadata.get(TRIAL_PROMO_REDEMPTION_PRICE_ID_KEY) or "",
+    ).strip()
     coupon_id = str(
         metadata.get(TRIAL_PROMO_REDEMPTION_COUPON_ID_KEY) or "",
     ).strip()
@@ -255,7 +259,12 @@ def get_trial_promo_conversion_offer(
     except (TypeError, ValueError):
         discount_months = 0
 
-    if plan not in TrialPromoPlanChoices.values or not coupon_id or discount_months <= 0:
+    if (
+        plan not in TrialPromoPlanChoices.values
+        or not price_id
+        or not coupon_id
+        or discount_months <= 0
+    ):
         raise TrialPromoError(
             "conversion_offer_unavailable",
             "This campaign's original conversion offer is unavailable. Please contact support.",
@@ -263,9 +272,48 @@ def get_trial_promo_conversion_offer(
 
     return TrialPromoConversionOffer(
         plan=plan,
+        price_id=price_id,
         coupon_id=coupon_id,
         discount_months=discount_months,
     )
+
+
+def build_trial_promo_conversion_metadata(
+    redemption: TrialPromoRedemption,
+    *,
+    event_id: str,
+) -> dict[str, str]:
+    offer = get_trial_promo_conversion_offer(redemption)
+    snapshot = redemption.metadata or {}
+    snapshot_keys = (
+        TRIAL_PROMO_META_ID,
+        TRIAL_PROMO_META_CODE,
+        TRIAL_PROMO_META_NAME,
+        TRIAL_PROMO_META_TRIAL_DAYS,
+        TRIAL_PROMO_META_PAYMENT_REQUIRED,
+        TRIAL_PROMO_META_REPEAT_ALLOWED,
+        TRIAL_PROMO_META_ABUSE_FILTERING,
+        TRIAL_PROMO_META_CREDIT_AMOUNT,
+    )
+    metadata = {
+        key: str(snapshot[key])
+        for key in snapshot_keys
+        if snapshot.get(key) not in (None, "")
+    }
+    metadata.update(
+        {
+            "gobii_event_id": event_id,
+            "plan": offer.plan,
+            TRIAL_PROMO_META_PLAN: offer.plan,
+            TRIAL_PROMO_META_REDEMPTION_ID: str(redemption.pk),
+            TRIAL_PROMO_META_ACTIVATION_MODE: (
+                TrialPromoActivationModeChoices.DIRECT_STRIPE_TRIAL
+            ),
+            TRIAL_PROMO_META_DISCOUNT_MONTHS: str(offer.discount_months),
+            TRIAL_PROMO_META_DISCOUNT_COUPON: offer.coupon_id,
+        },
+    )
+    return metadata
 
 
 def build_trial_promo_checkout_metadata(

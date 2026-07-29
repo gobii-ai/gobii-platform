@@ -87,6 +87,7 @@ _INTERNAL_REDEMPTION_METADATA_KEYS = {
     _REDEMPTION_SUBSCRIPTION_CREATE_STARTED_KEY,
     _REDEMPTION_ABANDONMENT_REQUESTED_KEY,
 }
+_TERMINAL_SUBSCRIPTION_STATUSES = {"canceled", "incomplete_expired"}
 
 
 def _stripe_value(value: Any, key: str, default=None):
@@ -740,10 +741,55 @@ def _cancel_partial_subscription(
     return True
 
 
+def _subscription_belongs_to_redemption(
+    subscription,
+    redemption: TrialPromoRedemption,
+) -> bool:
+    subscription_id = _stripe_id(subscription)
+    if (
+        redemption.stripe_subscription_id
+        and subscription_id == redemption.stripe_subscription_id
+    ):
+        return True
+    metadata = _stripe_value(subscription, "metadata") or {}
+    return (
+        str(_stripe_value(metadata, TRIAL_PROMO_META_REDEMPTION_ID, "") or "")
+        == str(redemption.pk)
+        or str(_stripe_value(metadata, "gobii_event_id", "") or "")
+        == redemption.event_id
+    )
+
+
+def _inspect_customer_nonterminal_subscriptions(
+    redemption: TrialPromoRedemption,
+) -> tuple[Any | None, set[str]]:
+    subscriptions = stripe.Subscription.list(
+        customer=redemption.stripe_customer_id,
+        status="all",
+        limit=100,
+        api_key=stripe.api_key,
+    )
+    campaign_subscription = None
+    other_subscription_ids: set[str] = set()
+    for subscription in subscriptions.auto_paging_iter():
+        if (
+            str(_stripe_value(subscription, "status", "") or "").lower()
+            in _TERMINAL_SUBSCRIPTION_STATUSES
+        ):
+            continue
+        subscription_id = _stripe_id(subscription)
+        if _subscription_belongs_to_redemption(subscription, redemption):
+            campaign_subscription = campaign_subscription or subscription
+        elif subscription_id:
+            other_subscription_ids.add(subscription_id)
+    return campaign_subscription, other_subscription_ids
+
+
 def retire_pending_direct_trial_promo_for_paid_user(
     redemption: TrialPromoRedemption,
 ) -> bool:
-    """Return whether a paid user can proceed without repairing an activation."""
+    """Resolve whether the paid plan is this campaign trial or another subscription."""
+    cleanup_subscription = None
     with transaction.atomic():
         locked_redemption = TrialPromoRedemption.objects.select_for_update().get(
             pk=redemption.pk,
@@ -766,9 +812,6 @@ def retire_pending_direct_trial_promo_for_paid_user(
             redemption,
             _REDEMPTION_ABANDONMENT_REQUESTED_KEY,
         )
-        if redemption.stripe_subscription_id and not abandonment_requested:
-            return False
-
         subscription_create_started = _redemption_flag_is_set(
             redemption,
             _REDEMPTION_SUBSCRIPTION_CREATE_STARTED_KEY,
@@ -785,43 +828,74 @@ def retire_pending_direct_trial_promo_for_paid_user(
             )
             return True
 
-        # A prior create response was indeterminate. Replay the same idempotent
-        # request to recover any remote subscription, then cancel it before handoff.
+        try:
+            campaign_subscription, other_subscription_ids = (
+                _inspect_customer_nonterminal_subscriptions(redemption)
+            )
+        except stripe.error.StripeError as exc:
+            raise TrialPromoError(
+                "subscription_identity_unavailable",
+                "We couldn't confirm which subscription belongs to this campaign. "
+                "Please try again.",
+            ) from exc
+
+        if campaign_subscription is not None:
+            campaign_subscription_id = _stripe_id(campaign_subscription)
+            if (
+                campaign_subscription_id
+                and not redemption.stripe_subscription_id
+            ):
+                mark_direct_trial_promo_subscription(
+                    redemption,
+                    stripe_subscription_id=campaign_subscription_id,
+                )
+
+        if campaign_subscription is None and subscription_create_started:
+            activation_terms = _activation_terms_from_redemption(redemption)
+            metadata = _build_direct_trial_stripe_metadata(
+                redemption,
+                activation_terms,
+            )
+            items = _subscription_items(
+                activation_terms.price_id,
+                activation_terms.additional_price_id,
+            )
+            try:
+                campaign_subscription = _create_or_retrieve_subscription(
+                    redemption=redemption,
+                    customer_id=str(
+                        redemption.stripe_customer_id or "",
+                    ).strip(),
+                    items=items,
+                    trial_days=activation_terms.trial_days,
+                    metadata=metadata,
+                )
+            except (stripe.error.StripeError, TrialPromoError) as exc:
+                logger.warning(
+                    "Could not resolve indeterminate transparent trial "
+                    "subscription for redemption %s: %s",
+                    redemption.pk,
+                    exc,
+                )
+                raise TrialPromoError(
+                    "stripe_activation_cleanup_pending",
+                    "We couldn't finish resolving an interrupted trial activation. "
+                    "Please try again.",
+                ) from exc
+
+        if not other_subscription_ids and not abandonment_requested:
+            return False
+
         _set_redemption_flag(
             redemption,
             _REDEMPTION_ABANDONMENT_REQUESTED_KEY,
         )
-    activation_terms = _activation_terms_from_redemption(redemption)
-    metadata = _build_direct_trial_stripe_metadata(
-        redemption,
-        activation_terms,
-    )
-    items = _subscription_items(
-        activation_terms.price_id,
-        activation_terms.additional_price_id,
-    )
-    try:
-        subscription = _create_or_retrieve_subscription(
-            redemption=redemption,
-            customer_id=str(redemption.stripe_customer_id or "").strip(),
-            items=items,
-            trial_days=activation_terms.trial_days,
-            metadata=metadata,
-        )
-    except (stripe.error.StripeError, TrialPromoError) as exc:
-        logger.warning(
-            "Could not resolve indeterminate transparent trial subscription "
-            "for paid-user redemption %s: %s",
-            redemption.pk,
-            exc,
-        )
-        raise TrialPromoError(
-            "stripe_activation_cleanup_pending",
-            "We couldn't finish cleaning up an interrupted trial activation. "
-            "Please try again.",
-        ) from exc
+        cleanup_subscription = campaign_subscription
 
-    subscription_id = _stripe_id(subscription)
+    subscription_id = (
+        _stripe_id(cleanup_subscription)
+        or redemption.stripe_subscription_id
+    )
     if not subscription_id or not _cancel_partial_subscription(
         subscription_id,
         redemption.stripe_subscription_schedule_id,
@@ -891,6 +965,141 @@ def _sync_direct_trial_entitlements(
         ) from exc
 
 
+def _activation_result_from_redemption(
+    redemption: TrialPromoRedemption,
+) -> DirectTrialActivationResult:
+    return DirectTrialActivationResult(
+        redemption=redemption,
+        subscription_id=redemption.stripe_subscription_id,
+        schedule_id=redemption.stripe_subscription_schedule_id,
+    )
+
+
+def _claim_direct_trial_cleanup(
+    redemption: TrialPromoRedemption,
+) -> DirectTrialActivationResult | None:
+    with transaction.atomic():
+        locked_redemption = TrialPromoRedemption.objects.select_for_update().get(
+            pk=redemption.pk,
+        )
+        if (
+            locked_redemption.status
+            == TrialPromoRedemptionStatusChoices.DIRECT_ACTIVATION_COMPLETED
+        ):
+            return _activation_result_from_redemption(locked_redemption)
+        if (
+            locked_redemption.status
+            != TrialPromoRedemptionStatusChoices.DIRECT_ACTIVATION_PENDING
+        ):
+            raise TrialPromoError(
+                "activation_no_longer_pending",
+                "This trial activation is no longer pending.",
+            )
+
+        metadata = dict(locked_redemption.metadata or {})
+        if (
+            str(
+                metadata.get(_REDEMPTION_ABANDONMENT_REQUESTED_KEY) or "",
+            ).lower()
+            == "true"
+        ):
+            raise TrialPromoError(
+                "stripe_activation_cleanup_pending",
+                "This interrupted trial activation is already being cleaned up. "
+                "Please try again.",
+            )
+        metadata[_REDEMPTION_ABANDONMENT_REQUESTED_KEY] = "true"
+        TrialPromoRedemption.objects.filter(pk=locked_redemption.pk).update(
+            metadata=metadata,
+            updated_at=timezone.now(),
+        )
+        redemption.metadata = metadata
+        redemption.stripe_subscription_id = (
+            locked_redemption.stripe_subscription_id
+        )
+        redemption.stripe_subscription_schedule_id = (
+            locked_redemption.stripe_subscription_schedule_id
+        )
+    return None
+
+
+def _finalize_direct_trial_activation(
+    *,
+    redemption: TrialPromoRedemption,
+    user,
+    activation_terms: DirectTrialActivationTerms,
+    subscription,
+    schedule,
+) -> DirectTrialActivationResult:
+    trial_end = _stripe_datetime(_stripe_value(subscription, "trial_end"))
+    late_conversion_expires_at = activation_terms.active_until
+    if late_conversion_expires_at is None:
+        late_conversion_expires_at = trial_end + timedelta(
+            days=activation_terms.late_conversion_grace_days,
+        )
+    coupon = activation_terms.coupon
+    schedule_id = _stripe_id(schedule)
+
+    with transaction.atomic():
+        locked_redemption = TrialPromoRedemption.objects.select_for_update().get(
+            pk=redemption.pk,
+        )
+        if (
+            locked_redemption.status
+            == TrialPromoRedemptionStatusChoices.DIRECT_ACTIVATION_COMPLETED
+        ):
+            return _activation_result_from_redemption(locked_redemption)
+        if (
+            locked_redemption.status
+            != TrialPromoRedemptionStatusChoices.DIRECT_ACTIVATION_PENDING
+            or _redemption_flag_is_set(
+                locked_redemption,
+                _REDEMPTION_ABANDONMENT_REQUESTED_KEY,
+            )
+        ):
+            raise TrialPromoError(
+                "stripe_activation_cleanup_pending",
+                "This interrupted trial activation is being cleaned up. "
+                "Please try again.",
+            )
+
+        _sync_direct_trial_entitlements(
+            user=user,
+            activation_terms=activation_terms,
+            subscription=subscription,
+        )
+        mark_direct_trial_promo_completed(
+            locked_redemption,
+            stripe_subscription_id=_stripe_id(subscription),
+            stripe_subscription_schedule_id=schedule_id,
+            late_conversion_expires_at=late_conversion_expires_at,
+            metadata={
+                TRIAL_PROMO_REDEMPTION_COUPON_ID_KEY: coupon.coupon_id,
+                TRIAL_PROMO_REDEMPTION_DISCOUNT_MONTHS_KEY: (
+                    coupon.duration_in_months
+                ),
+                _REDEMPTION_PERCENT_OFF_KEY: (
+                    str(coupon.percent_off)
+                    if coupon.percent_off is not None
+                    else ""
+                ),
+                _REDEMPTION_AMOUNT_OFF_KEY: coupon.amount_off,
+                _REDEMPTION_CURRENCY_KEY: coupon.currency,
+                "trial_end": trial_end.isoformat(),
+            },
+        )
+        locked_redemption.refresh_from_db()
+
+    logger.info(
+        "Transparent trial activation completed for redemption %s "
+        "(subscription=%s schedule=%s)",
+        locked_redemption.pk,
+        locked_redemption.stripe_subscription_id,
+        locked_redemption.stripe_subscription_schedule_id,
+    )
+    return _activation_result_from_redemption(locked_redemption)
+
+
 def activate_direct_trial_promo(
     *,
     promo: TrialPromo,
@@ -952,10 +1161,15 @@ def activate_direct_trial_promo(
             "Transparent trial activation already completed for redemption %s",
             redemption.pk,
         )
-        return DirectTrialActivationResult(
-            redemption=redemption,
-            subscription_id=redemption.stripe_subscription_id,
-            schedule_id=redemption.stripe_subscription_schedule_id,
+        return _activation_result_from_redemption(redemption)
+    if _redemption_flag_is_set(
+        redemption,
+        _REDEMPTION_ABANDONMENT_REQUESTED_KEY,
+    ):
+        raise TrialPromoError(
+            "stripe_activation_cleanup_pending",
+            "This interrupted trial activation is being cleaned up. "
+            "Please try again.",
         )
 
     activation_terms = _activation_terms_from_redemption(redemption)
@@ -1015,11 +1229,7 @@ def activate_direct_trial_promo(
                 redemption.status
                 == TrialPromoRedemptionStatusChoices.DIRECT_ACTIVATION_COMPLETED
             ):
-                return DirectTrialActivationResult(
-                    redemption=redemption,
-                    subscription_id=redemption.stripe_subscription_id,
-                    schedule_id=redemption.stripe_subscription_schedule_id,
-                )
+                return _activation_result_from_redemption(redemption)
             raise
         subscription_id = redemption.stripe_subscription_id
         schedule_id = redemption.stripe_subscription_schedule_id
@@ -1050,6 +1260,11 @@ def activate_direct_trial_promo(
                 "stripe_activation_pending",
                 "We couldn't confirm whether your trial started. Please try again.",
             ) from exc
+        completed_result = _claim_direct_trial_cleanup(redemption)
+        if completed_result is not None:
+            return completed_result
+        subscription_id = redemption.stripe_subscription_id
+        schedule_id = redemption.stripe_subscription_schedule_id
         cleanup_complete = not subscription_id or _cancel_partial_subscription(
             subscription_id,
             schedule_id,
@@ -1071,10 +1286,12 @@ def activate_direct_trial_promo(
         raise TrialPromoError("stripe_activation_failed", message) from exc
 
     try:
-        _sync_direct_trial_entitlements(
+        return _finalize_direct_trial_activation(
+            redemption=redemption,
             user=user,
             activation_terms=activation_terms,
             subscription=subscription,
+            schedule=schedule,
         )
     except TrialPromoError:
         logger.warning(
@@ -1086,39 +1303,3 @@ def activate_direct_trial_promo(
             exc_info=True,
         )
         raise
-    trial_end = _stripe_datetime(_stripe_value(subscription, "trial_end"))
-    late_conversion_expires_at = activation_terms.active_until
-    if late_conversion_expires_at is None:
-        late_conversion_expires_at = trial_end + timedelta(
-            days=activation_terms.late_conversion_grace_days,
-        )
-    schedule_id = _stripe_id(schedule)
-    mark_direct_trial_promo_completed(
-        redemption,
-        stripe_subscription_id=_stripe_id(subscription),
-        stripe_subscription_schedule_id=schedule_id,
-        late_conversion_expires_at=late_conversion_expires_at,
-        metadata={
-            TRIAL_PROMO_REDEMPTION_COUPON_ID_KEY: coupon.coupon_id,
-            TRIAL_PROMO_REDEMPTION_DISCOUNT_MONTHS_KEY: coupon.duration_in_months,
-            _REDEMPTION_PERCENT_OFF_KEY: (
-                str(coupon.percent_off) if coupon.percent_off is not None else ""
-            ),
-            _REDEMPTION_AMOUNT_OFF_KEY: coupon.amount_off,
-            _REDEMPTION_CURRENCY_KEY: coupon.currency,
-            "trial_end": trial_end.isoformat(),
-        },
-    )
-    redemption.refresh_from_db()
-    logger.info(
-        "Transparent trial activation completed for redemption %s "
-        "(subscription=%s schedule=%s)",
-        redemption.pk,
-        redemption.stripe_subscription_id,
-        redemption.stripe_subscription_schedule_id,
-    )
-    return DirectTrialActivationResult(
-        redemption=redemption,
-        subscription_id=redemption.stripe_subscription_id,
-        schedule_id=redemption.stripe_subscription_schedule_id,
-    )

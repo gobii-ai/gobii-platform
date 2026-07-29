@@ -51,10 +51,8 @@ from api.services.trial_abuse import SIGNAL_SOURCE_CHECKOUT, evaluate_user_trial
 from api.services.trial_promos import (
     TRIAL_PROMO_REASON_EMAIL_NOT_ALLOWLISTED,
     TRIAL_PROMO_REASON_EMAIL_NOT_VERIFIED,
-    TRIAL_PROMO_META_ACTIVATION_MODE,
-    TRIAL_PROMO_META_DISCOUNT_COUPON,
-    TRIAL_PROMO_META_DISCOUNT_MONTHS,
     TrialPromoError,
+    build_trial_promo_conversion_metadata,
     build_trial_promo_checkout_metadata,
     build_trial_promo_metadata,
     can_user_start_trial_promo,
@@ -3101,14 +3099,8 @@ def _start_trial_promo_conversion_checkout(request, promo: TrialPromo, redemptio
     stripe_settings = get_stripe_settings()
     offer = get_trial_promo_conversion_offer(redemption)
     plan_config = _personal_plan_checkout_config(stripe_settings, offer.plan)
-    price_id = plan_config["price_id"]
-    if not price_id:
-        raise TrialPromoError(
-            "price_missing",
-            "This special access plan is not configured yet.",
-        )
     try:
-        price_object = Price.objects.get(id=price_id)
+        price_object = Price.objects.get(id=offer.price_id)
     except Price.DoesNotExist as exc:
         raise TrialPromoError(
             "price_not_synced",
@@ -3171,22 +3163,10 @@ def _start_trial_promo_conversion_checkout(request, promo: TrialPromo, redemptio
 
     redemption, checkout_attempt = reserve_trial_promo_conversion_checkout(redemption)
     event_id = f"trial-promo-conversion-{redemption.pk}-{checkout_attempt}"
-    promo_metadata = build_trial_promo_metadata(
-        promo,
-        redemption=redemption,
-        plan=offer.plan,
-        discount_months=offer.discount_months,
+    metadata = build_trial_promo_conversion_metadata(
+        redemption,
+        event_id=event_id,
     )
-    promo_metadata[TRIAL_PROMO_META_ACTIVATION_MODE] = (
-        TrialPromoActivationModeChoices.DIRECT_STRIPE_TRIAL
-    )
-    promo_metadata[TRIAL_PROMO_META_DISCOUNT_MONTHS] = str(offer.discount_months)
-    promo_metadata[TRIAL_PROMO_META_DISCOUNT_COUPON] = offer.coupon_id
-    metadata = {
-        "gobii_event_id": event_id,
-        "plan": plan_config["plan"],
-        **promo_metadata,
-    }
     success_url, _post_checkout_redirect_used = _build_checkout_success_url(
         request,
         event_id=event_id,
@@ -3206,7 +3186,7 @@ def _start_trial_promo_conversion_checkout(request, promo: TrialPromo, redemptio
         "discounts": [{"coupon": coupon.coupon_id}],
         "metadata": metadata,
         "subscription_data": {"metadata": metadata},
-        "line_items": [{"price": price_id, "quantity": 1}],
+        "line_items": [{"price": offer.price_id, "quantity": 1}],
         "idempotency_key": event_id,
     }
     try:
@@ -3219,7 +3199,7 @@ def _start_trial_promo_conversion_checkout(request, promo: TrialPromo, redemptio
             value=(price_object.unit_amount or 0) / 100,
             currency=getattr(price_object, "currency", None),
             checkout_source_url=request.build_absolute_uri(reverse("pages:special_access")),
-            extra_customer_metadata=promo_metadata,
+            extra_customer_metadata=metadata,
             checkout_kwargs=checkout_kwargs,
         )
     except stripe.error.StripeError as exc:

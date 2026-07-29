@@ -43,11 +43,17 @@ from api.services.trial_promos import (
     TRIAL_PROMO_META_ACTIVATION_MODE,
     TRIAL_PROMO_META_DISCOUNT_MONTHS,
     TRIAL_PROMO_META_ID,
+    TRIAL_PROMO_META_NAME,
     TRIAL_PROMO_META_PAYMENT_REQUIRED,
     TRIAL_PROMO_META_PLAN,
     TRIAL_PROMO_META_REDEMPTION_ID,
+    TRIAL_PROMO_META_TRIAL_DAYS,
+    TRIAL_PROMO_REDEMPTION_ACTIVE_UNTIL_KEY,
+    TRIAL_PROMO_REDEMPTION_ADDITIONAL_PRICE_ID_KEY,
     TRIAL_PROMO_REDEMPTION_COUPON_ID_KEY,
     TRIAL_PROMO_REDEMPTION_DISCOUNT_MONTHS_KEY,
+    TRIAL_PROMO_REDEMPTION_LATE_CONVERSION_GRACE_DAYS_KEY,
+    TRIAL_PROMO_REDEMPTION_PRICE_ID_KEY,
     TRIAL_PROMO_REASON_EMAIL_NOT_ALLOWLISTED,
     TRIAL_PROMO_REASON_EMAIL_NOT_VERIFIED,
     TrialPromoError,
@@ -721,6 +727,7 @@ class DirectTrialPromoServiceTests(TestCase):
             1,
         )
 
+    @patch("api.services.direct_trial_promos.stripe.Subscription.list")
     @patch("api.services.direct_trial_promos.stripe.Subscription.delete")
     @patch("api.services.direct_trial_promos.stripe.Subscription.create")
     @patch("api.services.direct_trial_promos.stripe.Coupon.retrieve")
@@ -733,6 +740,7 @@ class DirectTrialPromoServiceTests(TestCase):
         mock_coupon_retrieve,
         mock_subscription_create,
         mock_subscription_delete,
+        mock_subscription_list,
     ):
         promo = _create_promo(
             code="DIRECT-CREATE-CLEANUP",
@@ -764,6 +772,17 @@ class DirectTrialPromoServiceTests(TestCase):
                 "trial_end": 1_801_209_600,
             },
         ]
+        subscription_collection = MagicMock()
+        subscription_collection.auto_paging_iter.return_value = iter(
+            [
+                {
+                    "id": "sub_ordinary_paid",
+                    "status": "active",
+                    "metadata": {},
+                },
+            ],
+        )
+        mock_subscription_list.return_value = subscription_collection
 
         with self.assertRaises(TrialPromoError):
             activate_direct_trial_promo(
@@ -1002,6 +1021,62 @@ class DirectTrialPromoServiceTests(TestCase):
             redemption.status,
             TrialPromoRedemptionStatusChoices.DIRECT_ACTIVATION_FAILED,
         )
+
+    @patch("api.services.direct_trial_promos._cancel_partial_subscription")
+    @patch("api.services.direct_trial_promos._create_or_retrieve_subscription")
+    def test_cleanup_does_not_cancel_concurrently_completed_activation(
+        self,
+        mock_create_or_retrieve_subscription,
+        mock_cancel_partial_subscription,
+    ):
+        promo = _create_promo(
+            code="DIRECT-CONCURRENT-COMPLETION",
+            activation_mode=TrialPromoActivationModeChoices.DIRECT_STRIPE_TRIAL,
+        )
+        redemption = TrialPromoRedemption.objects.create(
+            promo=promo,
+            user=self.user,
+            status=TrialPromoRedemptionStatusChoices.DIRECT_ACTIVATION_PENDING,
+            event_id="direct-concurrent-completion",
+            stripe_customer_id="cus_concurrent",
+            stripe_subscription_id="sub_concurrent",
+            stripe_subscription_schedule_id="sub_sched_concurrent",
+            metadata={
+                TRIAL_PROMO_META_PLAN: PlanNames.STARTUP,
+                TRIAL_PROMO_META_TRIAL_DAYS: "14",
+                TRIAL_PROMO_REDEMPTION_PRICE_ID_KEY: "price_pro_monthly",
+                TRIAL_PROMO_REDEMPTION_ADDITIONAL_PRICE_ID_KEY: "",
+                TRIAL_PROMO_REDEMPTION_COUPON_ID_KEY: "coupon_three_months",
+                TRIAL_PROMO_REDEMPTION_DISCOUNT_MONTHS_KEY: "3",
+                TRIAL_PROMO_REDEMPTION_LATE_CONVERSION_GRACE_DAYS_KEY: "30",
+                TRIAL_PROMO_REDEMPTION_ACTIVE_UNTIL_KEY: "",
+                "percent_off": "40",
+            },
+        )
+
+        def complete_elsewhere_then_fail(**_kwargs):
+            TrialPromoRedemption.objects.filter(pk=redemption.pk).update(
+                status=(
+                    TrialPromoRedemptionStatusChoices.DIRECT_ACTIVATION_COMPLETED
+                ),
+            )
+            raise stripe.error.APIError("losing request failed")
+
+        mock_create_or_retrieve_subscription.side_effect = (
+            complete_elsewhere_then_fail
+        )
+
+        result = activate_direct_trial_promo(
+            promo=promo,
+            user=self.user,
+        )
+
+        self.assertEqual(result.redemption.pk, redemption.pk)
+        self.assertEqual(
+            result.redemption.status,
+            TrialPromoRedemptionStatusChoices.DIRECT_ACTIVATION_COMPLETED,
+        )
+        mock_cancel_partial_subscription.assert_not_called()
 
     @patch("api.services.direct_trial_promos._sync_direct_trial_entitlements")
     @patch("api.services.direct_trial_promos.stripe.SubscriptionSchedule.retrieve")
@@ -1706,6 +1781,7 @@ class SpecialAccessCheckoutTests(TestCase):
         mock_activate.assert_not_called()
 
     @override_settings(TRIAL_PROMO_DIRECT_ACTIVATION_ENABLED=False)
+    @patch("api.services.direct_trial_promos.stripe.Subscription.list")
     @patch("pages.views.activate_direct_trial_promo")
     @patch("pages.views.Price.objects.get")
     @patch("pages.views.get_stripe_settings")
@@ -1721,6 +1797,7 @@ class SpecialAccessCheckoutTests(TestCase):
         mock_stripe_settings,
         mock_price_get,
         mock_activate,
+        mock_subscription_list,
     ):
         promo = _create_promo(
             code="DIRECT-REPAIR",
@@ -1738,6 +1815,19 @@ class SpecialAccessCheckoutTests(TestCase):
             stripe_subscription_id="sub_repair",
             stripe_subscription_schedule_id="sub_sched_repair",
         )
+        subscription_collection = MagicMock()
+        subscription_collection.auto_paging_iter.return_value = iter(
+            [
+                {
+                    "id": "sub_repair",
+                    "status": "trialing",
+                    "metadata": {
+                        TRIAL_PROMO_META_REDEMPTION_ID: str(redemption.pk),
+                    },
+                },
+            ],
+        )
+        mock_subscription_list.return_value = subscription_collection
         mock_stripe_settings.return_value = SimpleNamespace(
             startup_price_id="price_startup",
             startup_additional_task_price_id="",
@@ -1965,11 +2055,16 @@ class SpecialAccessCheckoutTests(TestCase):
             late_conversion_expires_at=timezone.now() + timedelta(days=15),
             metadata={
                 TRIAL_PROMO_META_PLAN: PlanNames.STARTUP,
+                TRIAL_PROMO_REDEMPTION_PRICE_ID_KEY: "price_startup",
                 TRIAL_PROMO_REDEMPTION_COUPON_ID_KEY: "coupon_three_months",
                 TRIAL_PROMO_REDEMPTION_DISCOUNT_MONTHS_KEY: 3,
+                TRIAL_PROMO_META_NAME: "Original campaign",
+                TRIAL_PROMO_META_TRIAL_DAYS: "14",
             },
         )
+        promo.name = "Changed campaign"
         promo.plan = PlanNames.SCALE
+        promo.trial_days = 45
         promo.activation_mode = TrialPromoActivationModeChoices.HOSTED_CHECKOUT
         promo.payment_method_required = True
         promo.no_payment_method_end_behavior = (
@@ -1981,6 +2076,8 @@ class SpecialAccessCheckoutTests(TestCase):
         promo.save(
             update_fields=[
                 "plan",
+                "name",
+                "trial_days",
                 "activation_mode",
                 "payment_method_required",
                 "no_payment_method_end_behavior",
@@ -2047,6 +2144,14 @@ class SpecialAccessCheckoutTests(TestCase):
         self.assertEqual(
             checkout_kwargs["subscription_data"]["metadata"][TRIAL_PROMO_META_ACTIVATION_MODE],
             TrialPromoActivationModeChoices.DIRECT_STRIPE_TRIAL,
+        )
+        self.assertEqual(
+            checkout_kwargs["subscription_data"]["metadata"][TRIAL_PROMO_META_NAME],
+            "Original campaign",
+        )
+        self.assertEqual(
+            checkout_kwargs["subscription_data"]["metadata"][TRIAL_PROMO_META_TRIAL_DAYS],
+            "14",
         )
         self.assertNotIn("trial_period_days", checkout_kwargs["subscription_data"])
         self.assertEqual(
