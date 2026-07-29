@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.core.cache import cache
@@ -13,6 +14,7 @@ from pages.homepage_cache import (
     _build_homepage_integrations_payload,
     _homepage_integrations_cache_key,
     _homepage_pretrained_cache_key,
+    _serialize_template,
     get_homepage_integrations_payload,
     get_homepage_pretrained_payload,
 )
@@ -25,6 +27,32 @@ class HomepagePretrainedCacheTests(TestCase):
 
     def tearDown(self):
         cache.clear()
+
+    def test_employee_named_template_has_non_repeating_detail_link_label(self):
+        template = SimpleNamespace(
+            code="ai-agent-for-candidate-sourcing",
+            display_name="Candidate Sourcing AI Employee",
+            tagline="Find qualified candidates.",
+            description="Build a recruiter-reviewed shortlist.",
+            charter="Source candidates.",
+            base_schedule="@daily",
+            schedule_jitter_minutes=0,
+            event_triggers=[],
+            default_tools=[],
+            recommended_contact_channel="email",
+            category="Recruiting",
+            hero_image_path="",
+            priority=10,
+            is_active=True,
+            show_on_homepage=True,
+        )
+
+        serialized = _serialize_template(template, {})
+
+        self.assertEqual(
+            serialized["detail_link_label"],
+            "View the Candidate Sourcing AI employee",
+        )
 
     @patch("pages.homepage_cache._build_homepage_pretrained_payload")
     @patch("pages.homepage_cache._enqueue_homepage_pretrained_refresh")

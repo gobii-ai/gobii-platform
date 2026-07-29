@@ -2012,10 +2012,22 @@ class PublicTemplateDetailView(TemplateView):
         template_seo_override = get_public_template_seo_override(self.template)
         template_metadata = build_public_template_metadata(self.template)
         seo_description = template_metadata.description
+        description_markdown = self.template.description_markdown or ""
         if template_seo_override:
-            template_description_html = linebreaksbr(template_metadata.intro)
-        elif self.template.description_markdown and self.template.description_markdown.strip():
-            template_description_html = render_public_template_markdown(self.template.description_markdown)
+            template_description_html = format_html(
+                "<p>{}</p>",
+                template_metadata.intro,
+            )
+            if description_markdown.strip():
+                template_description_html = format_html(
+                    "{}{}",
+                    template_description_html,
+                    render_public_template_markdown(description_markdown),
+                )
+        elif description_markdown.strip():
+            template_description_html = render_public_template_markdown(
+                description_markdown
+            )
         else:
             template_description_html = linebreaksbr(self.template.description or "")
         category_label = public_template_category_label(self.template)
@@ -4153,7 +4165,7 @@ class SolutionView(TemplateView):
             'social_image_alt': 'Gobii AI recruiting agents for candidate sourcing and screening',
             'related_link': {
                 'intro': 'Want to inspect the agent first?',
-                'label': 'View the Talent Scout AI recruiting agent',
+                'label': 'View the Candidate Sourcing AI Employee template',
                 'route': 'pages:public_template_detail',
                 'kwargs': {
                     'category_slug': 'recruiting',
@@ -4166,7 +4178,10 @@ class SolutionView(TemplateView):
             'tagline': 'Automate candidate sourcing before the ATS bottleneck.',
             'description': 'Find, qualify, enrich, and export candidate shortlists with Gobii AI agents built for top-of-funnel recruiting work.',
             'seo_title': 'AI Candidate Sourcing - Automate Recruiting Research | Gobii',
-            'seo_description': 'Use Gobii AI agents for candidate sourcing across approved sources. Find, qualify, enrich, and export recruiter-reviewed shortlists with Talent Scout.',
+            'seo_description': (
+                'Use a Candidate Sourcing AI Employee across approved sources to find, '
+                'qualify, enrich, and export recruiter-reviewed shortlists.'
+            ),
             'date_modified': '2026-06-07',
             'social_image': 'images/solutions/recruiting-hero.jpg',
             'social_image_alt': 'Gobii AI candidate sourcing agent for recruiter-reviewed shortlists',
@@ -4180,7 +4195,7 @@ class SolutionView(TemplateView):
             ],
             'related_link': {
                 'intro': 'Want to inspect the agent first?',
-                'label': 'View the Talent Scout AI recruiting agent',
+                'label': 'View the Candidate Sourcing AI Employee template',
                 'route': 'pages:public_template_detail',
                 'kwargs': {
                     'category_slug': 'recruiting',
@@ -4199,7 +4214,7 @@ class SolutionView(TemplateView):
             'social_image_alt': 'Gobii AI sales agents for lead generation and account research',
             'related_link': {
                 'intro': 'Want to inspect the agent first?',
-                'label': 'View the Lead Hunter AI sales agent',
+                'label': 'View the B2B Lead Research AI Employee template',
                 'route': 'pages:public_template_detail',
                 'kwargs': {
                     'category_slug': 'sales',
@@ -4230,7 +4245,7 @@ class SolutionView(TemplateView):
             ],
             'related_link': {
                 'intro': 'Want to inspect the agent first?',
-                'label': 'View the Lead Hunter AI sales agent',
+                'label': 'View the B2B Lead Research AI Employee template',
                 'route': 'pages:public_template_detail',
                 'kwargs': {
                     'category_slug': 'sales',
@@ -4251,14 +4266,14 @@ class SolutionView(TemplateView):
                     'answer': (
                         'AI sales agent cost depends on the plan, usage volume, data sources, integrations, and '
                         'review needs. Gobii publishes plan pricing on its pricing page, so teams can start with '
-                        'Lead Hunter and scale once output quality is proven.'
+                        'the B2B Lead Research AI Employee and scale once output quality is proven.'
                     ),
                     'answer_html': (
                         'AI sales agent cost depends on the plan, usage volume, data sources, integrations, and '
                         'review needs. Gobii publishes '
                         '<a href="{pricing_url}" class="font-semibold text-indigo-700 underline decoration-indigo-200 '
                         'underline-offset-4 hover:text-indigo-900">plan pricing</a> on its pricing page, so teams can '
-                        'start with Lead Hunter and scale once output quality is proven.'
+                        'start with the B2B Lead Research AI Employee and scale once output quality is proven.'
                     ),
                 },
                 {

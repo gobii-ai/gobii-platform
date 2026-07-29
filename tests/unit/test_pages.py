@@ -2417,17 +2417,69 @@ class SitemapTests(TestCase):
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_solution_urls_render_again(self):
+        cases = (
+            (
+                "/solutions/",
+                (
+                    "Candidate Sourcing AI Employee",
+                    "B2B Lead Research AI Employee",
+                ),
+                ("Talent Scout", "Lead Hunter"),
+            ),
+            (
+                "/solutions/recruiting/",
+                ("Candidate Sourcing AI Employee",),
+                ("Talent Scout",),
+            ),
+            (
+                "/solutions/recruiting/candidate-sourcing/",
+                ("Candidate Sourcing AI Employee",),
+                ("Talent Scout",),
+            ),
+            (
+                "/solutions/sales/",
+                ("B2B Lead Research AI Employee",),
+                ("Lead Hunter",),
+            ),
+            (
+                "/solutions/sales/ai-sales-agent/",
+                (
+                    "Start with B2B Lead Research",
+                    "B2B Lead Research AI Employee",
+                ),
+                ("Lead Hunter",),
+            ),
+            ("/solutions/engineering/", (), ()),
+        )
+        for path, canonical_employee_names, retired_names in cases:
+            with self.subTest(path=path):
+                response = self.client.get(path)
+                self.assertEqual(response.status_code, 200)
+                for canonical_employee_name in canonical_employee_names:
+                    self.assertContains(response, canonical_employee_name)
+                for retired_name in retired_names:
+                    self.assertNotContains(response, retired_name)
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @tag("batch_pages")
+    def test_solution_ctas_do_not_render_spawn_language(self):
         for path in (
-            "/solutions/",
             "/solutions/recruiting/",
             "/solutions/recruiting/candidate-sourcing/",
             "/solutions/sales/",
             "/solutions/sales/ai-sales-agent/",
-            "/solutions/engineering/",
         ):
             with self.subTest(path=path):
                 response = self.client.get(path)
                 self.assertEqual(response.status_code, 200)
+                page_text = BeautifulSoup(
+                    response.content,
+                    "html.parser",
+                ).get_text(" ", strip=True)
+                self.assertNotRegex(
+                    page_text,
+                    r"(?i)\b(?:spawn|spawned|spawning)\b",
+                )
 
     @override_settings(
         GOBII_PROPRIETARY_MODE=True,
@@ -2462,7 +2514,7 @@ class SitemapTests(TestCase):
         )
         self.assertContains(response, "AI sales agent for supervised pipeline work")
         self.assertContains(response, "AI sales employee")
-        self.assertContains(response, "Start with Lead Hunter")
+        self.assertContains(response, "Start with B2B Lead Research")
         self.assertContains(
             response,
             f'href="{reverse("pages:ai_employees")}"',
@@ -2471,7 +2523,7 @@ class SitemapTests(TestCase):
         self.assertContains(response, "Which type of AI sales agent should you buy?")
         self.assertContains(response, "CRM-native agents")
         self.assertContains(response, "Voice and calling agents")
-        self.assertContains(response, "Lead Hunter output example")
+        self.assertContains(response, "B2B lead research output example")
         self.assertContains(response, "Google Sheets")
         self.assertContains(response, "webhooks")
         self.assertNotContains(response, "When not to use one")

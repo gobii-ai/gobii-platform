@@ -245,11 +245,27 @@ def compose_meta_description(
     return f"{truncated}."
 
 
+def public_template_employee_role_name(display_name: str | None) -> str:
+    cleaned_name = _clean_text(display_name)
+    role_name = re.sub(
+        r"\s+(?:AI\s+)?(?:Agent|Employee)$",
+        "",
+        cleaned_name,
+        flags=re.IGNORECASE,
+    ).strip()
+    return role_name or cleaned_name
+
+
 def _employee_heading(display_name: str) -> str:
+    cleaned_name = _clean_text(display_name)
+    terminal_role_name = public_template_employee_role_name(cleaned_name)
+    if terminal_role_name != cleaned_name:
+        return f"{terminal_role_name} AI Employee"
+
     heading = re.sub(
         r"\bAI\s+Agent\b",
         "AI Employee",
-        _clean_text(display_name),
+        cleaned_name,
         flags=re.IGNORECASE,
     )
     if not re.search(r"\bAI\s+Employee\b", heading, flags=re.IGNORECASE):

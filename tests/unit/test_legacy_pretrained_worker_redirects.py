@@ -115,6 +115,62 @@ class CanonicalTemplateMigrationTests(TestCase):
                 template = PersistentAgentTemplate.objects.get(code=code)
                 self.assertIn(merged_copy, template.customization_notes)
 
+    def test_migration_rejects_capital_raise_consolidation_across_owners(self):
+        migration = importlib.import_module(
+            "api.migrations.0442_retire_pretrained_worker_pages"
+        )
+        primary_owner = get_user_model().objects.create_user(
+            username="capital-primary-owner",
+            email="capital-primary-owner@example.com",
+            password="pw",
+        )
+        duplicate_owner = get_user_model().objects.create_user(
+            username="capital-duplicate-owner",
+            email="capital-duplicate-owner@example.com",
+            password="pw",
+        )
+        primary_profile = PublicProfile.objects.create(
+            user=primary_owner,
+            handle="capital-primary-owner",
+        )
+        duplicate_profile = PublicProfile.objects.create(
+            user=duplicate_owner,
+            handle="capital-duplicate-owner",
+        )
+        PersistentAgentTemplate.objects.create(
+            code=migration.CAPITAL_RAISE_PRIMARY_CODE,
+            public_profile=primary_profile,
+            created_by=primary_owner,
+            slug="capital-raise-investor-relations-engine",
+            display_name="Capital Raise Primary",
+            tagline="Primary workflow.",
+            description="Primary workflow.",
+            charter="Run the primary workflow.",
+            category="Finance",
+            is_active=True,
+        )
+        duplicate = PersistentAgentTemplate.objects.create(
+            code=migration.CAPITAL_RAISE_DUPLICATE_CODE,
+            public_profile=duplicate_profile,
+            created_by=duplicate_owner,
+            slug="capital-raise-investor-relations-engine-2",
+            display_name="Capital Raise Duplicate",
+            tagline="Distinct workflow.",
+            description="Distinct workflow.",
+            charter="Run the distinct workflow.",
+            category="Finance",
+            is_active=True,
+        )
+
+        with self.assertRaisesMessage(
+            RuntimeError,
+            "matching canonical template owned by the same community creator",
+        ):
+            migration.ensure_canonical_templates(django_apps, schema_editor=None)
+
+        duplicate.refresh_from_db()
+        self.assertTrue(duplicate.is_active)
+
 
 @tag("batch_pages")
 class LegacyPretrainedWorkerRedirectTests(TestCase):

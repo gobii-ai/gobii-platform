@@ -184,7 +184,7 @@
             <input type="hidden" name="trial_onboarding" value="1" />
             <input type="hidden" name="trial_onboarding_target" value="agent_ui" />
             <button type="submit" class="candidate-sourcing-primary-cta w-full group inline-flex items-center justify-center gap-2 px-7 py-3.5 text-white font-medium rounded-lg transition-all duration-200">
-              {% if not user.is_authenticated or solution_spawn_requires_trial %}Start Free Trial{% else %}Spawn Talent Scout{% endif %}
+              {% if not user.is_authenticated or solution_spawn_requires_trial %}Start Free Trial{% else %}Deploy Candidate Sourcing Employee{% endif %}
               <svg class="w-4 h-4 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
               </svg>
@@ -460,9 +460,9 @@
     <div class="grid lg:grid-cols-[1fr_1.1fr] gap-12 items-start">
       <div>
         <p class="text-sm font-semibold uppercase tracking-[0.18em] text-emerald-700">Templates</p>
-        <h2 class="mt-3 text-3xl sm:text-4xl font-light tracking-tight text-slate-950">Start with Talent Scout, then add specialists</h2>
+        <h2 class="mt-3 text-3xl sm:text-4xl font-light tracking-tight text-slate-950">Start with Candidate Sourcing, then add specialists</h2>
         <p class="mt-5 text-lg leading-relaxed text-slate-700">
-          The fastest path is to launch the existing Talent Scout agent and tune the role brief. For deeper research or outreach-heavy workflows, pair it with Candidate Researcher or Outreach Agent.
+          The fastest path is to deploy the Candidate Sourcing AI employee and tune the role brief. For deeper research or outreach-heavy workflows, pair it with Candidate Researcher or the Outreach AI employee.
         </p>
       </div>
 
@@ -471,7 +471,7 @@
           <div class="flex items-center justify-between gap-4">
             <div>
               <p class="text-xs font-semibold uppercase tracking-[0.16em] text-emerald-700">Primary template</p>
-              <h3 class="mt-2 text-xl font-medium text-slate-950 group-hover:text-indigo-700 transition-colors">Talent Scout</h3>
+              <h3 class="mt-2 text-xl font-medium text-slate-950 group-hover:text-indigo-700 transition-colors">Candidate Sourcing AI Employee</h3>
             </div>
             <i data-lucide="arrow-right" class="w-5 h-5 text-emerald-600 group-hover:translate-x-1 transition-transform"></i>
           </div>
@@ -585,7 +585,7 @@
       Launch your first candidate sourcing agent
     </h2>
     <p class="mt-5 text-xl text-slate-700 max-w-2xl mx-auto leading-relaxed">
-      Start with Talent Scout, describe the role, and let Gobii prepare the first recruiter-reviewed shortlist.
+      Start with Candidate Sourcing, describe the role, and let Gobii prepare the first recruiter-reviewed shortlist.
     </p>
 
     <div class="mt-10 flex flex-col sm:flex-row gap-4 justify-center">
@@ -595,7 +595,7 @@
         <input type="hidden" name="trial_onboarding" value="1" />
         <input type="hidden" name="trial_onboarding_target" value="agent_ui" />
         <button type="submit" class="candidate-sourcing-primary-cta w-full group inline-flex items-center justify-center gap-2 px-8 py-4 text-white font-medium rounded-lg transition-all duration-200">
-          {% if not user.is_authenticated or solution_spawn_requires_trial %}Start Free Trial{% else %}Spawn Talent Scout{% endif %}
+          {% if not user.is_authenticated or solution_spawn_requires_trial %}Start Free Trial{% else %}Deploy Candidate Sourcing Employee{% endif %}
           <svg class="w-4 h-4 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
           </svg>

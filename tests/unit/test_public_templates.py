@@ -1059,6 +1059,33 @@ class PublicTemplateRouteTests(TestCase):
         self.assertContains(official_response, "account fit")
 
     @tag("batch_public_templates")
+    def test_seo_override_preserves_existing_description_markdown(self):
+        self.create_public_template(
+            code="tpl-2a3ec836a1cd",
+            slug="stripe-fraud-dispute-monitor",
+            display_name="AI Agent for Stripe Chargeback Monitoring",
+            handle="stripe-monitor-owner",
+            category="Finance",
+            description_markdown=(
+                "### Existing Stripe workflow details\n\n"
+                "Preserve transaction fields, SMS escalation guidance, and "
+                "monitoring-only guardrails."
+            ),
+        )
+
+        response = self.client.get(
+            "/library/finance/stripe-fraud-dispute-monitor/"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response,
+            "This official AI employee monitors Stripe chargebacks",
+        )
+        self.assertContains(response, "Existing Stripe workflow details")
+        self.assertContains(response, "monitoring-only guardrails")
+
+    @tag("batch_public_templates")
     def test_public_template_detail_hides_related_templates_even_when_specified(self):
         template = self.create_public_template(
             code="hidden-related-source",

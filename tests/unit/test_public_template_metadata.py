@@ -134,6 +134,17 @@ class PublicTemplateMetadataTests(SimpleTestCase):
             META_DESCRIPTION_MAX_LENGTH,
         )
 
+    def test_terminal_agent_role_uses_employee_first_heading(self):
+        metadata = build_public_template_metadata(
+            _template(display_name="Outreach Agent")
+        )
+
+        self.assertEqual(metadata.heading, "Outreach AI Employee")
+        self.assertEqual(
+            metadata.social_title,
+            "Outreach AI Employee Template",
+        )
+
     def test_exact_description_boundary_is_not_modified(self):
         source = "A" * META_DESCRIPTION_MAX_LENGTH
 

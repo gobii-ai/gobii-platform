@@ -454,6 +454,11 @@ def ensure_canonical_templates(apps, schema_editor):
         and capital_raise_primary.created_by_id
         == capital_raise_duplicate.created_by_id
     )
+    if capital_raise_duplicate and not same_community_owner:
+        raise RuntimeError(
+            "Cannot consolidate the capital-raise duplicate without a matching "
+            "canonical template owned by the same community creator."
+        )
     if same_community_owner:
         for field_name, value in CAPITAL_RAISE_PRIMARY_CONTENT.items():
             setattr(capital_raise_primary, field_name, value)

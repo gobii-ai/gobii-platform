@@ -1,5 +1,4 @@
 import logging
-import re
 
 from django.core.cache import cache
 from django.utils import timezone
@@ -9,6 +8,7 @@ from api.models import MCPServerConfig
 from api.services.pipedream_apps import PIPEDREAM_RUNTIME_NAME, PipedreamCatalogService, filter_deprecated_pipedream_apps_without_agent, get_platform_pipedream_app_slugs
 from api.services.native_integrations import list_native_integration_providers
 from pages.legacy_pretrained_worker_redirects import get_legacy_pretrained_worker_redirect
+from pages.public_template_metadata import public_template_employee_role_name
 from pages.public_template_urls import public_template_detail_path, public_template_hire_path
 from util.integrations import pipedream_status
 
@@ -84,12 +84,7 @@ def _serialize_template(template, display_map: dict[str, str]) -> dict[str, obje
         if legacy_redirect
         else public_template_hire_path(template)
     )
-    role_name = re.sub(
-        r"\s+AI\s+Agent$",
-        "",
-        template.display_name,
-        flags=re.IGNORECASE,
-    ).strip()
+    role_name = public_template_employee_role_name(template.display_name)
     return {
         "code": template.code,
         "display_name": template.display_name,
