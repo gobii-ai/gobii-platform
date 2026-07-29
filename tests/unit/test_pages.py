@@ -5537,6 +5537,23 @@ class AuthLinkTests(TestCase):
         self.assertContains(response, 'data-fpjs-enabled="true"')
         self.assertContains(response, 'data-fpjs-loader-url="https://fp.example/v3/loader.js?apiKey=fp_test_key"')
 
+    @override_settings(
+        GOBII_PROPRIETARY_MODE=True,
+        FINGERPRINT_JS_ENABLED=True,
+        FINGERPRINT_JS_URL="https://fpjscdn.net/v4/embedded-browser-key?apiKey=wrong-key",
+        FINGERPRINT_JS_API_KEY="wrong-key",
+    )
+    def test_login_page_uses_v4_embedded_browser_key(self):
+        response = self.client.get(reverse("account_login"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'data-fpjs-enabled="true"')
+        self.assertContains(
+            response,
+            'data-fpjs-loader-url="https://fpjscdn.net/v4/embedded-browser-key"',
+        )
+        self.assertNotContains(response, "wrong-key")
+
     def test_login_page_renders_configured_social_providers_in_fixed_order_with_tracking_attrs(self):
         for provider in ("facebook", "google", "linkedin", "microsoft"):
             self._create_social_app(provider)

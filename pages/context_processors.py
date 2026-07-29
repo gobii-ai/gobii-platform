@@ -9,6 +9,7 @@ from django.http import HttpRequest
 from django.urls import reverse
 from django.utils import timezone
 from api.agent.core.llm_config import is_llm_bootstrap_required
+from api.services.user_fingerprint import get_fingerprint_browser_config
 from config import settings
 from config.plans import AGENTS_UNLIMITED
 from constants.feature_flags import CTA_SIGNUP_MODAL
@@ -244,6 +245,12 @@ def canonical_url(request: HttpRequest):
         canonical = request.build_absolute_uri(getattr(request, "path", "/"))
     return {
         'canonical_url': canonical,
+    }
+
+
+def fingerprint_browser(request: HttpRequest):
+    return {
+        "fingerprint_browser_config": get_fingerprint_browser_config(),
     }
 
 
