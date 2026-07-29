@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { repairUnclosedFence, splitMarkdownBlocks } from './streamingMarkdownBlocks'
+import { repairIncompleteMarkdown, repairUnclosedFence, splitMarkdownBlocks } from './streamingMarkdownBlocks'
 
 describe('splitMarkdownBlocks', () => {
   it('splits on blank lines', () => {
@@ -49,5 +49,51 @@ describe('repairUnclosedFence', () => {
 
   it('leaves plain text untouched', () => {
     expect(repairUnclosedFence('just words **bold')).toBe('just words **bold')
+  })
+})
+
+// The in-flight tail block must render as styled markdown, never as raw half-typed
+// syntax (#510 follow-up).
+describe('repairIncompleteMarkdown', () => {
+  it('closes unfinished bold so styling applies mid-word', () => {
+    expect(repairIncompleteMarkdown('This is **very import')).toBe('This is **very import**')
+  })
+
+  it('closes unfinished italic and inline code', () => {
+    expect(repairIncompleteMarkdown('some *empha')).toBe('some *empha*')
+    expect(repairIncompleteMarkdown('run `npm insta')).toBe('run `npm insta`')
+  })
+
+  it('closes strikethrough', () => {
+    expect(repairIncompleteMarkdown('was ~~wro')).toBe('was ~~wro~~')
+  })
+
+  it('hides a trailing incomplete link rather than fabricating a URL', () => {
+    expect(repairIncompleteMarkdown('see [the docs](https://exa')).toBe('see ')
+    expect(repairIncompleteMarkdown('see [the do')).toBe('see ')
+  })
+
+  it('leaves complete links alone', () => {
+    const text = 'see [docs](https://example.com) for more'
+    expect(repairIncompleteMarkdown(text)).toBe(text)
+  })
+
+  it('closes an open code fence and repairs nothing inside it', () => {
+    expect(repairIncompleteMarkdown('```py\nx = "**bold** is code')).toBe('```py\nx = "**bold** is code\n```')
+  })
+
+  it('does not treat list bullets as emphasis', () => {
+    const text = '* first item\n* second ite'
+    expect(repairIncompleteMarkdown(text)).toBe(text)
+  })
+
+  it('does not treat snake_case as italic', () => {
+    const text = 'call send_chat_message now'
+    expect(repairIncompleteMarkdown(text)).toBe(text)
+  })
+
+  it('leaves balanced text untouched', () => {
+    const text = 'A **bold** and *italic* and `code` sentence.'
+    expect(repairIncompleteMarkdown(text)).toBe(text)
   })
 })

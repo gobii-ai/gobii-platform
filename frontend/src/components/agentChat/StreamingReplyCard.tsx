@@ -1,14 +1,12 @@
 import type { MouseEvent as ReactMouseEvent } from 'react'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo } from 'react'
 import { MarkdownViewer } from '../common/MarkdownViewer'
 import { AgentAvatarBadge } from '../common/AgentAvatarBadge'
 import { looksLikeHtml, sanitizeHtml, stripBlockquoteQuotes } from '../../util/sanitize'
 import { useTypewriter } from '../../hooks/useTypewriter'
 import { chatActions } from '../../store/chatSlice'
 import { useAppDispatch } from '../../store/hooks'
-import { repairUnclosedFence, splitMarkdownBlocks } from './streamingMarkdownBlocks'
-
-const COMMIT_INTERVAL_MS = 150
+import { repairIncompleteMarkdown, splitMarkdownBlocks } from './streamingMarkdownBlocks'
 
 type StreamingReplyCardProps = {
   content: string
@@ -24,50 +22,6 @@ type StreamingReplyCardProps = {
    *  once the reveal catches up the card dispatches the one-commit swap (bug #510). */
   handoffReady?: boolean
   onLinkClick?: (href: string) => boolean | void
-}
-
-/**
- * While text is revealing, split it into markdown "committed" text (re-committed at ~7 Hz)
- * and a plain-text tail span updated every animation frame — the parser never runs at
- * frame rate, and committed text is further split into blocks so completed blocks are
- * never re-parsed at all.
- */
-function useThrottledMarkdown(content: string, revealing: boolean) {
-  const [committedMarkdown, setCommittedMarkdown] = useState(content)
-  const commitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const contentRef = useRef(content)
-  contentRef.current = content
-
-  const commit = useCallback(() => {
-    setCommittedMarkdown(contentRef.current)
-    commitTimerRef.current = null
-  }, [])
-
-  useEffect(() => {
-    if (!revealing) {
-      if (commitTimerRef.current !== null) {
-        clearTimeout(commitTimerRef.current)
-        commitTimerRef.current = null
-      }
-      setCommittedMarkdown(content)
-      return
-    }
-    if (commitTimerRef.current === null) {
-      commitTimerRef.current = setTimeout(commit, COMMIT_INTERVAL_MS)
-    }
-    return () => {
-      if (commitTimerRef.current !== null) {
-        clearTimeout(commitTimerRef.current)
-        commitTimerRef.current = null
-      }
-    }
-  }, [content, revealing, commit])
-
-  const tailText = revealing && content.length > committedMarkdown.length
-    ? content.slice(committedMarkdown.length)
-    : ''
-
-  return { committedMarkdown: revealing ? committedMarkdown : content, tailText }
 }
 
 function shouldInterceptLinkClick(event: ReactMouseEvent<HTMLElement>): boolean {
@@ -96,9 +50,12 @@ export function StreamingReplyCard({
   // incrementally or burst it whole at the end (tool-call arguments often arrive as one
   // chunk) — the typewriter decouples what the user sees from how the network delivered
   // it, and accelerates to finish once the stream is done.
+  // ~40fps reveal: every frame feeds the markdown renderer directly (no plain-text
+  // tail — the in-flight text must LOOK like markdown), and block memoization bounds the
+  // per-frame parse to just the growing tail block.
   const { displayedContent, isWaiting } = useTypewriter(content, isStreaming && !done, {
-    charsPerFrame: 3,
-    frameIntervalMs: 12,
+    charsPerFrame: 6,
+    frameIntervalMs: 24,
     waitingThresholdMs: 200,
     finishBoost: 4,
   })
@@ -126,16 +83,17 @@ export function StreamingReplyCard({
   }, [agentId, dispatch, done, handoffReady, revealComplete, streamId])
 
   const revealing = !revealComplete
-  const { committedMarkdown, tailText } = useThrottledMarkdown(displayedContent, revealing)
 
-  const normalizedCommitted = useMemo(
-    () => stripBlockquoteQuotes(committedMarkdown),
-    [committedMarkdown],
+  const normalizedDisplayed = useMemo(
+    () => stripBlockquoteQuotes(displayedContent),
+    [displayedContent],
   )
 
   // Completed blocks are stable strings — MarkdownViewer is memoized on content, so only
-  // the growing tail block ever re-parses (and only at commit cadence, not frame rate).
-  const blocks = useMemo(() => splitMarkdownBlocks(normalizedCommitted), [normalizedCommitted])
+  // the growing tail block re-parses each reveal frame. The tail block is repaired
+  // (fences/bold/italic/code closed, trailing half-links hidden) so the in-flight text
+  // renders as styled markdown the whole time, never as raw syntax.
+  const blocks = useMemo(() => splitMarkdownBlocks(normalizedDisplayed), [normalizedDisplayed])
   const lastBlockIndex = blocks.length - 1
 
   const htmlContent = useMemo(() => {
@@ -196,11 +154,10 @@ export function StreamingReplyCard({
               {blocks.map((block, index) => (
                 <MarkdownViewer
                   key={`block-${index}`}
-                  content={index === lastBlockIndex && revealing ? repairUnclosedFence(block) : block}
+                  content={index === lastBlockIndex && revealing ? repairIncompleteMarkdown(block) : block}
                   enableHighlight={index !== lastBlockIndex || !revealing}
                 />
               ))}
-              {tailText && <span>{tailText}</span>}
             </>
           )}
         </div>

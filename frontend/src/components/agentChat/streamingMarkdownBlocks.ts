@@ -67,3 +67,100 @@ export function repairUnclosedFence(block: string): string {
   }
   return inFence ? `${block}\n${fenceToken}` : block
 }
+
+/**
+ * Make an in-flight block render as styled markdown rather than showing raw half-typed
+ * syntax (bug #510 follow-up: the tail must be *markdown*, not plain text). Closes
+ * constructs whose meaning is already known (fences, bold, italic, inline code,
+ * strikethrough) and hides a trailing incomplete link/image (a fabricated URL would be
+ * wrong; the characters reappear when the construct completes). Never touches content
+ * inside code fences or inline code.
+ */
+export function repairIncompleteMarkdown(block: string): string {
+  let repaired = repairUnclosedFence(block)
+  const fenceClosed = repaired !== block
+  if (fenceClosed) {
+    // Inside a code block: fence closure is the only safe repair.
+    return repaired
+  }
+
+  // Hide a trailing incomplete link or image: "[text](url-in-progress" or "[text-in-pr"
+  repaired = repaired.replace(/!?\[[^\]]*(\]\([^)]*)?$/u, (match, _closer, offset, whole) => {
+    // Keep escaped or footnote-looking brackets intact if the bracket is escaped.
+    if (offset > 0 && whole[offset - 1] === '\\') {
+      return match
+    }
+    return ''
+  })
+
+  // Scan outside code spans and count unbalanced inline markers.
+  let inCode = false
+  let lastLineEndedInCode = false
+  let inFence = false
+  let bold = 0
+  let italicStar = 0
+  let italicUnderscore = 0
+  let strike = 0
+  const lines = repaired.split('\n')
+  for (const line of lines) {
+    if (FENCE_RE.test(line)) {
+      inFence = !inFence
+      continue
+    }
+    if (inFence) {
+      continue
+    }
+    for (let i = 0; i < line.length; i += 1) {
+      const ch = line[i]
+      if (ch === '\\') {
+        i += 1
+        continue
+      }
+      if (ch === '`') {
+        inCode = !inCode
+        continue
+      }
+      if (inCode) {
+        continue
+      }
+      if (ch === '*') {
+        if (line[i + 1] === '*') {
+          bold += 1
+          i += 1
+        } else if (!(line.slice(0, i).trim() === '' && line[i + 1] === ' ')) {
+          // A leading "* " is a list bullet, not emphasis.
+          italicStar += 1
+        }
+      } else if (ch === '~' && line[i + 1] === '~') {
+        strike += 1
+        i += 1
+      } else if (ch === '_') {
+        const prev = i > 0 ? line[i - 1] : ' '
+        const next = i + 1 < line.length ? line[i + 1] : ' '
+        // Intra-word underscores (snake_case) are not emphasis.
+        if (!/[A-Za-z0-9]/.test(prev) || !/[A-Za-z0-9]/.test(next)) {
+          italicUnderscore += 1
+        }
+      }
+    }
+    lastLineEndedInCode = inCode
+    inCode = false
+  }
+
+  if (lastLineEndedInCode) {
+    repaired += '`'
+  }
+  if (bold % 2 === 1) {
+    repaired += '**'
+  }
+  if (italicStar % 2 === 1) {
+    repaired += '*'
+  }
+  if (italicUnderscore % 2 === 1) {
+    repaired += '_'
+  }
+  if (strike % 2 === 1) {
+    repaired += '~~'
+  }
+  return repaired
+}
