@@ -18,6 +18,7 @@ from django.core.files.storage import default_storage
 from django.core.files import File
 
 from celery import shared_task
+from kombu.exceptions import OperationalError as KombuOperationalError
 from django.utils import timezone
 from django.conf import settings
 from django.apps import apps
@@ -30,6 +31,7 @@ from ..agent.core.llm_config import AgentLLMTier, get_agent_llm_tier, get_allowe
 from ..agent.files.filespace_service import get_or_create_default_filespace
 from ..models import BrowserUseAgentTask, BrowserUseAgentTaskStep, ProxyServer, AgentFsNode, PersistentAgent
 from ..services.browser_settings import DEFAULT_MAX_BROWSER_STEPS, get_browser_settings_for_owner
+from ..services.agent_background_follow_up import enqueue_agent_background_follow_up
 from ..services.owner_execution_pause import EXECUTION_PAUSE_MESSAGE, is_owner_execution_paused, resolve_agent_owner, resolve_browser_task_owner
 from ..services.task_webhooks import trigger_task_webhook
 from ..services.referral_service import ReferralService
@@ -148,73 +150,26 @@ def _schedule_agent_follow_up(
         )
         return
 
-    agent_id = str(persistent_agent.id)
-    owner = resolve_agent_owner(persistent_agent)
-    if owner is not None and is_owner_execution_paused(owner):
-        logger.info(
-            "Skipping follow-up for task %s because owner execution is paused for agent %s",
-            task_obj.id,
-            agent_id,
-        )
-        return
-
     try:
-        from api.agent.tasks.process_events import process_agent_events_task
-    except Exception as exc:  # pragma: no cover - defensive import guard
-        logger.error(
-            "Unable to import process_agent_events_task for agent %s: %s",
-            agent_id,
-            exc,
+        enqueued = enqueue_agent_background_follow_up(
+            persistent_agent,
+            budget_id=budget_id or "",
+            branch_id=branch_id or "",
+            depth=depth,
+            eval_run_id=getattr(task_obj, "eval_run_id", None),
         )
-        return
-
-    status = None
-    active_id = None
-    if budget_id:
-        try:
-            status = AgentBudgetManager.get_cycle_status(agent_id=agent_id)
-            active_id = AgentBudgetManager.get_active_budget_id(agent_id=agent_id)
-        except Exception:  # pragma: no cover - read failures fall back to fresh scheduling
-            logger.warning(
-                "Failed reading budget status for agent %s; scheduling fresh follow-up",
-                agent_id,
-                exc_info=True,
-            )
-
-    try:
-        if (
-            budget_id
-            and status == "active"
-            and (active_id == budget_id)
-        ):
-            parent_depth = max((depth or 1) - 1, 0)
-            process_agent_events_task.delay(
-                agent_id,
-                budget_id=budget_id,
-                branch_id=branch_id,
-                depth=parent_depth,
-                eval_run_id=getattr(task_obj, "eval_run_id", None),
-            )
-            logger.info(
-                "Triggered agent event processing for persistent agent %s after task %s completion",
-                agent_id,
-                task_obj.id,
-            )
-        else:
-            process_agent_events_task.delay(agent_id, eval_run_id=getattr(task_obj, "eval_run_id", None))
-            logger.info(
-                "Triggered fresh agent event processing for persistent agent %s after task %s completion (status=%s active_id=%s ctx_id=%s)",
-                agent_id,
-                task_obj.id,
-                status,
-                active_id,
-                budget_id,
-            )
-    except Exception as exc:  # pragma: no cover - Celery failure logging
+    except (KombuOperationalError, RuntimeError) as exc:  # pragma: no cover - Celery failure logging
         logger.error(
             "Failed to trigger agent event processing for task %s: %s",
             task_obj.id,
             exc,
+        )
+        return
+    if enqueued:
+        logger.info(
+            "Triggered agent event processing for persistent agent %s after task %s completion",
+            persistent_agent.id,
+            task_obj.id,
         )
 
 # --------------------------------------------------------------------------- #

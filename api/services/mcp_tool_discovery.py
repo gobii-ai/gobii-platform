@@ -23,6 +23,7 @@ def schedule_mcp_tool_discovery(
         service = SandboxComputeService()
         service.discover_mcp_tools(config_id, reason=reason, agent=agent)
     except (
+        ExceptionGroup,
         SandboxComputeUnavailable,
         ValueError,
         RuntimeError,

@@ -40,8 +40,8 @@ class BrowserTaskFollowUpTests(TestCase):
         )
 
     @patch("api.agent.tasks.process_events.process_agent_events_task.delay")
-    @patch("api.tasks.browser_agent_tasks.AgentBudgetManager.get_active_budget_id")
-    @patch("api.tasks.browser_agent_tasks.AgentBudgetManager.get_cycle_status")
+    @patch("api.services.agent_background_follow_up.AgentBudgetManager.get_active_budget_id")
+    @patch("api.services.agent_background_follow_up.AgentBudgetManager.get_cycle_status")
     def test_follow_up_uses_existing_cycle_when_active(
         self,
         mock_cycle_status,
@@ -67,8 +67,8 @@ class BrowserTaskFollowUpTests(TestCase):
         )
 
     @patch("api.agent.tasks.process_events.process_agent_events_task.delay")
-    @patch("api.tasks.browser_agent_tasks.AgentBudgetManager.get_active_budget_id")
-    @patch("api.tasks.browser_agent_tasks.AgentBudgetManager.get_cycle_status")
+    @patch("api.services.agent_background_follow_up.AgentBudgetManager.get_active_budget_id")
+    @patch("api.services.agent_background_follow_up.AgentBudgetManager.get_cycle_status")
     def test_follow_up_schedules_fresh_cycle_when_inactive(
         self,
         mock_cycle_status,

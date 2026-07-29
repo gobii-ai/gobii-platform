@@ -85,6 +85,29 @@ class MCPDiscoverySignalTests(TestCase):
 
         mock_schedule.assert_called_once_with(str(server.id), reason="credentials_changed")
 
+    @patch("api.services.mcp_tool_discovery.SandboxComputeService")
+    @patch("api.services.mcp_tool_discovery.sandbox_compute_enabled", return_value=True)
+    def test_inline_discovery_absorbs_grouped_network_failure(
+        self,
+        _mock_enabled,
+        mock_service,
+    ):
+        from api.services.mcp_tool_discovery import schedule_mcp_tool_discovery
+
+        mock_service.return_value.discover_mcp_tools.side_effect = ExceptionGroup(
+            "connection attempts failed",
+            [RuntimeError("IPv6 blocked"), RuntimeError("IPv4 blocked")],
+        )
+
+        with self.assertLogs("api.services.mcp_tool_discovery", level="WARNING"):
+            schedule_mcp_tool_discovery("server-id", reason="config_changed")
+
+        mock_service.return_value.discover_mcp_tools.assert_called_once_with(
+            "server-id",
+            reason="config_changed",
+            agent=None,
+        )
+
 
 @tag("batch_mcp_tools")
 class SandboxComputeDiscoveryServiceTests(TestCase):
