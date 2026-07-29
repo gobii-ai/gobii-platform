@@ -108,6 +108,32 @@ def _stripe_datetime(value: Any) -> datetime:
         ) from exc
 
 
+def _confirm_customer_has_no_default_payment_method(customer_id: str) -> None:
+    try:
+        customer = stripe.Customer.retrieve(
+            customer_id,
+            api_key=stripe.api_key,
+        )
+    except stripe.error.StripeError as exc:
+        raise TrialPromoError(
+            "stripe_customer_unavailable",
+            "We couldn't confirm this account's billing details. Please try again.",
+        ) from exc
+
+    invoice_settings = _stripe_value(customer, "invoice_settings") or {}
+    default_payment_method = (
+        _stripe_value(invoice_settings, "default_payment_method")
+        or _stripe_value(customer, "default_payment_method")
+    )
+    default_source = _stripe_value(customer, "default_source")
+    if _stripe_id(default_payment_method) or _stripe_id(default_source):
+        raise TrialPromoError(
+            "existing_payment_method_requires_confirmation",
+            "This account already has payment details on file. Remove them in Billing "
+            "or contact support before starting this no-card trial.",
+        )
+
+
 def _build_activation_snapshot(
     *,
     promo: TrialPromo,
@@ -709,6 +735,7 @@ def activate_direct_trial_promo(
 ) -> DirectTrialActivationResult:
     redemption = get_direct_trial_promo_redemption(promo=promo, user=user)
     created = False
+    customer_payment_method_confirmed_absent = False
     if redemption is None:
         if price_object is None or not str(price_id).strip():
             raise TrialPromoError(
@@ -732,6 +759,8 @@ def activate_direct_trial_promo(
                 "stripe_customer_unavailable",
                 "We couldn't prepare billing for this special trial. Please try again.",
             )
+        _confirm_customer_has_no_default_payment_method(customer_id)
+        customer_payment_method_confirmed_absent = True
         snapshot = _build_activation_snapshot(
             promo=promo,
             price_id=price_id,
@@ -771,6 +800,11 @@ def activate_direct_trial_promo(
             "activation_snapshot_invalid",
             "This trial activation cannot be safely resumed. Please contact support.",
         )
+    if (
+        not redemption.stripe_subscription_id
+        and not customer_payment_method_confirmed_absent
+    ):
+        _confirm_customer_has_no_default_payment_method(customer_id)
     base_metadata = {
         str(key): str(value)
         for key, value in (redemption.metadata or {}).items()

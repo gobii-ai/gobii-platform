@@ -468,10 +468,12 @@ class DirectTrialPromoServiceTests(TestCase):
     @patch("api.services.direct_trial_promos.stripe.SubscriptionSchedule.create")
     @patch("api.services.direct_trial_promos.stripe.Subscription.create")
     @patch("api.services.direct_trial_promos.stripe.Coupon.retrieve")
+    @patch("api.services.direct_trial_promos.stripe.Customer.retrieve")
     @patch("api.services.direct_trial_promos.get_or_create_stripe_customer")
     def test_activation_creates_no_card_trial_and_delayed_discount_schedule(
         self,
         mock_customer,
+        mock_customer_retrieve,
         mock_coupon_retrieve,
         mock_subscription_create,
         mock_schedule_create,
@@ -491,6 +493,11 @@ class DirectTrialPromoServiceTests(TestCase):
             trial_abuse_filtering_enabled=False,
         )
         mock_customer.return_value = SimpleNamespace(id="cus_direct")
+        mock_customer_retrieve.return_value = {
+            "id": "cus_direct",
+            "invoice_settings": {},
+            "default_source": None,
+        }
         mock_coupon_retrieve.return_value = {
             "id": "coupon_three_months",
             "duration": "repeating",
@@ -596,6 +603,65 @@ class DirectTrialPromoServiceTests(TestCase):
         mock_schedule_modify.assert_called_once()
         mock_grant_credits.assert_called_once()
 
+    @patch("api.services.direct_trial_promos.stripe.Subscription.create")
+    @patch("api.services.direct_trial_promos.stripe.Customer.retrieve")
+    @patch("api.services.direct_trial_promos.stripe.Coupon.retrieve")
+    @patch("api.services.direct_trial_promos.get_or_create_stripe_customer")
+    def test_activation_rejects_inherited_customer_payment_method(
+        self,
+        mock_customer,
+        mock_coupon_retrieve,
+        mock_customer_retrieve,
+        mock_subscription_create,
+    ):
+        promo = _create_promo(
+            code="DIRECT-SAVED-CARD",
+            activation_mode=TrialPromoActivationModeChoices.DIRECT_STRIPE_TRIAL,
+            payment_method_required=False,
+            no_payment_method_end_behavior=TrialPromoNoPaymentMethodEndBehaviorChoices.CANCEL,
+            conversion_coupon_id="coupon_three_months",
+            discount_months=3,
+            repeat_trials_allowed=True,
+            trial_abuse_filtering_enabled=False,
+        )
+        mock_customer.return_value = SimpleNamespace(id="cus_saved_card")
+        mock_customer_retrieve.return_value = {
+            "id": "cus_saved_card",
+            "invoice_settings": {
+                "default_payment_method": "pm_saved_card",
+            },
+            "default_source": None,
+        }
+        mock_coupon_retrieve.return_value = {
+            "id": "coupon_three_months",
+            "duration": "repeating",
+            "duration_in_months": 3,
+            "percent_off": 40,
+            "valid": True,
+        }
+
+        with self.assertRaisesMessage(
+            TrialPromoError,
+            "already has payment details on file",
+        ) as raised:
+            activate_direct_trial_promo(
+                promo=promo,
+                user=self.user,
+                price_object=SimpleNamespace(
+                    recurring={"interval": "month", "interval_count": 1},
+                ),
+                price_id="price_pro_monthly",
+            )
+
+        self.assertEqual(
+            raised.exception.code,
+            "existing_payment_method_requires_confirmation",
+        )
+        mock_subscription_create.assert_not_called()
+        self.assertFalse(
+            TrialPromoRedemption.objects.filter(promo=promo, user=self.user).exists(),
+        )
+
     @patch("api.services.direct_trial_promos.stripe.SubscriptionSchedule.modify")
     @patch("api.services.direct_trial_promos.stripe.SubscriptionSchedule.retrieve")
     def test_interrupted_schedule_creation_finishes_phase_configuration(
@@ -672,10 +738,12 @@ class DirectTrialPromoServiceTests(TestCase):
     @patch("api.services.direct_trial_promos.stripe.SubscriptionSchedule.create")
     @patch("api.services.direct_trial_promos.stripe.Subscription.create")
     @patch("api.services.direct_trial_promos.stripe.Coupon.retrieve")
+    @patch("api.services.direct_trial_promos.stripe.Customer.retrieve")
     @patch("api.services.direct_trial_promos.get_or_create_stripe_customer")
     def test_schedule_failure_cancels_partial_activation(
         self,
         mock_customer,
+        mock_customer_retrieve,
         mock_coupon_retrieve,
         mock_subscription_create,
         mock_schedule_create,
@@ -692,6 +760,11 @@ class DirectTrialPromoServiceTests(TestCase):
             discount_months=3,
         )
         mock_customer.return_value = SimpleNamespace(id="cus_rollback")
+        mock_customer_retrieve.return_value = {
+            "id": "cus_rollback",
+            "invoice_settings": {},
+            "default_source": None,
+        }
         mock_coupon_retrieve.return_value = {
             "id": "coupon_three_months",
             "duration": "repeating",
@@ -744,10 +817,12 @@ class DirectTrialPromoServiceTests(TestCase):
     @patch("api.services.direct_trial_promos.stripe.SubscriptionSchedule.create")
     @patch("api.services.direct_trial_promos.stripe.Subscription.create")
     @patch("api.services.direct_trial_promos.stripe.Coupon.retrieve")
+    @patch("api.services.direct_trial_promos.stripe.Customer.retrieve")
     @patch("api.services.direct_trial_promos.get_or_create_stripe_customer")
     def test_interrupted_entitlement_sync_reuses_subscription_and_schedule(
         self,
         mock_customer,
+        mock_customer_retrieve,
         mock_coupon_retrieve,
         mock_subscription_create,
         mock_schedule_create,
@@ -793,6 +868,11 @@ class DirectTrialPromoServiceTests(TestCase):
             ],
         }
         mock_customer.return_value = SimpleNamespace(id="cus_sync_retry")
+        mock_customer_retrieve.return_value = {
+            "id": "cus_sync_retry",
+            "invoice_settings": {},
+            "default_source": None,
+        }
         mock_coupon_retrieve.return_value = {
             "id": "coupon_three_months",
             "duration": "repeating",
