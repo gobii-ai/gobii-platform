@@ -76,6 +76,7 @@ from api.services.trial_promos import (
 )
 from api.services.direct_trial_promos import (
     activate_direct_trial_promo,
+    retire_pending_direct_trial_promo_for_paid_user,
     validate_direct_trial_configuration,
     validate_direct_trial_conversion_configuration,
 )
@@ -3000,8 +3001,14 @@ def _start_direct_trial_promo(request, promo: TrialPromo):
         ) from exc
     plan_id = str(plan.get("id") or "").lower()
 
-    if plan_id and plan_id != PlanNames.FREE and not activation_pending:
-        return _trial_promo_template_redirect(request, promo)
+    if plan_id and plan_id != PlanNames.FREE:
+        if (
+            not activation_pending
+            or retire_pending_direct_trial_promo_for_paid_user(
+                existing_redemption,
+            )
+        ):
+            return _trial_promo_template_redirect(request, promo)
 
     if (
         existing_redemption is not None

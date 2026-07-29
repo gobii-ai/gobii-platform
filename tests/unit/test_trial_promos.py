@@ -32,6 +32,7 @@ from api.services.direct_trial_promos import (
     DirectTrialCoupon,
     _create_or_retrieve_schedule,
     activate_direct_trial_promo,
+    retire_pending_direct_trial_promo_for_paid_user,
 )
 from api.services.persistent_agents import (
     PersistentAgentProvisioningError,
@@ -602,6 +603,198 @@ class DirectTrialPromoServiceTests(TestCase):
         mock_schedule_create.assert_called_once()
         mock_schedule_modify.assert_called_once()
         mock_grant_credits.assert_called_once()
+
+    @patch("api.services.direct_trial_promos._sync_direct_trial_entitlements")
+    @patch("api.services.direct_trial_promos.stripe.Subscription.delete")
+    @patch("api.services.direct_trial_promos.stripe.SubscriptionSchedule.modify")
+    @patch("api.services.direct_trial_promos.stripe.SubscriptionSchedule.create")
+    @patch("api.services.direct_trial_promos.stripe.Subscription.create")
+    @patch("api.services.direct_trial_promos.stripe.Coupon.retrieve")
+    @patch("api.services.direct_trial_promos.stripe.Customer.retrieve")
+    @patch("api.services.direct_trial_promos.get_or_create_stripe_customer")
+    def test_indeterminate_subscription_create_retries_same_redemption_and_key(
+        self,
+        mock_customer,
+        mock_customer_retrieve,
+        mock_coupon_retrieve,
+        mock_subscription_create,
+        mock_schedule_create,
+        mock_schedule_modify,
+        mock_subscription_delete,
+        _mock_sync_entitlements,
+    ):
+        promo = _create_promo(
+            code="DIRECT-CREATE-RETRY",
+            activation_mode=TrialPromoActivationModeChoices.DIRECT_STRIPE_TRIAL,
+            payment_method_required=False,
+            no_payment_method_end_behavior=TrialPromoNoPaymentMethodEndBehaviorChoices.CANCEL,
+            conversion_coupon_id="coupon_three_months",
+            discount_months=3,
+        )
+        subscription = {
+            "id": "sub_create_retry",
+            "status": "trialing",
+            "trial_start": 1_800_000_000,
+            "trial_end": 1_801_209_600,
+            "current_period_start": 1_800_000_000,
+            "trial_settings": {
+                "end_behavior": {
+                    "missing_payment_method": "cancel",
+                },
+            },
+        }
+        schedule = {
+            "id": "sub_sched_create_retry",
+            "end_behavior": "release",
+            "phases": [
+                {
+                    "start_date": 1_800_000_000,
+                    "end_date": 1_801_209_600,
+                    "discounts": [],
+                },
+                {
+                    "start_date": 1_801_209_600,
+                    "end_date": 1_808_985_600,
+                    "discounts": [{"coupon": "coupon_three_months"}],
+                },
+            ],
+        }
+        mock_customer.return_value = SimpleNamespace(id="cus_create_retry")
+        mock_customer_retrieve.return_value = {
+            "id": "cus_create_retry",
+            "invoice_settings": {},
+            "default_source": None,
+        }
+        mock_coupon_retrieve.return_value = {
+            "id": "coupon_three_months",
+            "duration": "repeating",
+            "duration_in_months": 3,
+            "percent_off": 40,
+            "valid": True,
+        }
+        mock_subscription_create.side_effect = [
+            stripe.error.APIConnectionError("connection lost after request"),
+            subscription,
+        ]
+        mock_schedule_create.return_value = {"id": "sub_sched_create_retry"}
+        mock_schedule_modify.return_value = schedule
+
+        with self.assertRaises(TrialPromoError) as raised:
+            activate_direct_trial_promo(
+                promo=promo,
+                user=self.user,
+                price_object=SimpleNamespace(
+                    recurring={"interval": "month", "interval_count": 1},
+                ),
+                price_id="price_pro_monthly",
+            )
+
+        self.assertEqual(raised.exception.code, "stripe_activation_pending")
+        redemption = TrialPromoRedemption.objects.get(promo=promo, user=self.user)
+        self.assertEqual(
+            redemption.status,
+            TrialPromoRedemptionStatusChoices.DIRECT_ACTIVATION_PENDING,
+        )
+        self.assertFalse(redemption.stripe_subscription_id)
+        mock_subscription_delete.assert_not_called()
+
+        result = activate_direct_trial_promo(
+            promo=promo,
+            user=self.user,
+        )
+
+        self.assertEqual(result.redemption.pk, redemption.pk)
+        self.assertEqual(
+            result.redemption.status,
+            TrialPromoRedemptionStatusChoices.DIRECT_ACTIVATION_COMPLETED,
+        )
+        self.assertEqual(
+            mock_subscription_create.call_args_list[0].kwargs,
+            mock_subscription_create.call_args_list[1].kwargs,
+        )
+        self.assertEqual(
+            mock_subscription_create.call_args_list[1].kwargs["idempotency_key"],
+            f"direct-trial-subscription-{redemption.pk}",
+        )
+        self.assertEqual(
+            TrialPromoRedemption.objects.filter(promo=promo, user=self.user).count(),
+            1,
+        )
+
+    @patch("api.services.direct_trial_promos.stripe.Subscription.delete")
+    @patch("api.services.direct_trial_promos.stripe.Subscription.create")
+    @patch("api.services.direct_trial_promos.stripe.Coupon.retrieve")
+    @patch("api.services.direct_trial_promos.stripe.Customer.retrieve")
+    @patch("api.services.direct_trial_promos.get_or_create_stripe_customer")
+    def test_paid_user_cleanup_recovers_indeterminate_subscription_before_handoff(
+        self,
+        mock_customer,
+        mock_customer_retrieve,
+        mock_coupon_retrieve,
+        mock_subscription_create,
+        mock_subscription_delete,
+    ):
+        promo = _create_promo(
+            code="DIRECT-CREATE-CLEANUP",
+            activation_mode=TrialPromoActivationModeChoices.DIRECT_STRIPE_TRIAL,
+            payment_method_required=False,
+            no_payment_method_end_behavior=TrialPromoNoPaymentMethodEndBehaviorChoices.CANCEL,
+            conversion_coupon_id="coupon_three_months",
+            discount_months=3,
+        )
+        mock_customer.return_value = SimpleNamespace(id="cus_create_cleanup")
+        mock_customer_retrieve.return_value = {
+            "id": "cus_create_cleanup",
+            "invoice_settings": {},
+            "default_source": None,
+        }
+        mock_coupon_retrieve.return_value = {
+            "id": "coupon_three_months",
+            "duration": "repeating",
+            "duration_in_months": 3,
+            "percent_off": 40,
+            "valid": True,
+        }
+        mock_subscription_create.side_effect = [
+            stripe.error.APIConnectionError("connection lost after request"),
+            {
+                "id": "sub_create_cleanup",
+                "status": "trialing",
+                "trial_start": 1_800_000_000,
+                "trial_end": 1_801_209_600,
+            },
+        ]
+
+        with self.assertRaises(TrialPromoError):
+            activate_direct_trial_promo(
+                promo=promo,
+                user=self.user,
+                price_object=SimpleNamespace(
+                    recurring={"interval": "month", "interval_count": 1},
+                ),
+                price_id="price_pro_monthly",
+            )
+
+        redemption = TrialPromoRedemption.objects.get(promo=promo, user=self.user)
+
+        self.assertTrue(
+            retire_pending_direct_trial_promo_for_paid_user(redemption),
+        )
+
+        redemption.refresh_from_db()
+        self.assertEqual(
+            redemption.status,
+            TrialPromoRedemptionStatusChoices.DIRECT_ACTIVATION_FAILED,
+        )
+        self.assertEqual(
+            mock_subscription_create.call_args_list[0].kwargs,
+            mock_subscription_create.call_args_list[1].kwargs,
+        )
+        mock_subscription_delete.assert_called_once_with(
+            "sub_create_cleanup",
+            prorate=False,
+            api_key=stripe.api_key,
+        )
 
     @patch("api.services.direct_trial_promos.stripe.Subscription.create")
     @patch("api.services.direct_trial_promos.stripe.Customer.retrieve")
@@ -1368,6 +1561,46 @@ class SpecialAccessCheckoutTests(TestCase):
         self.assertEqual(
             parse_qs(redirect_url.query)["context_id"],
             [str(self.user.pk)],
+        )
+        mock_activate.assert_not_called()
+
+    @override_settings(TRIAL_PROMO_DIRECT_ACTIVATION_ENABLED=False)
+    @patch("pages.views.activate_direct_trial_promo")
+    @patch(
+        "pages.views.reconcile_user_plan_from_stripe",
+        return_value={"id": PlanNames.STARTUP},
+    )
+    def test_paid_user_retires_pending_reservation_without_subscription(
+        self,
+        _mock_reconcile,
+        mock_activate,
+    ):
+        promo = _create_promo(
+            code="PAID-PENDING-RESERVATION",
+            activation_mode=TrialPromoActivationModeChoices.DIRECT_STRIPE_TRIAL,
+            payment_method_required=False,
+            no_payment_method_end_behavior=TrialPromoNoPaymentMethodEndBehaviorChoices.CANCEL,
+            conversion_coupon_id="coupon_three_months",
+        )
+        redemption = TrialPromoRedemption.objects.create(
+            promo=promo,
+            user=self.user,
+            status=TrialPromoRedemptionStatusChoices.DIRECT_ACTIVATION_PENDING,
+            event_id="paid-pending-reservation",
+            stripe_customer_id="cus_paid_pending",
+        )
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            reverse("pages:special_access_start"),
+            {"code": promo.code_label},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        redemption.refresh_from_db()
+        self.assertEqual(
+            redemption.status,
+            TrialPromoRedemptionStatusChoices.DIRECT_ACTIVATION_FAILED,
         )
         mock_activate.assert_not_called()
 

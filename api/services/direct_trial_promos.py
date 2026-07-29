@@ -7,7 +7,8 @@ from typing import Any, Mapping
 import stripe
 from dateutil.relativedelta import relativedelta
 from django.conf import settings
-from django.db import DatabaseError
+from django.db import DatabaseError, transaction
+from django.utils import timezone
 from djstripe.models import Subscription
 
 from api.models import (
@@ -80,6 +81,12 @@ class DirectTrialActivationTerms:
 _REDEMPTION_PERCENT_OFF_KEY = "percent_off"
 _REDEMPTION_AMOUNT_OFF_KEY = "amount_off"
 _REDEMPTION_CURRENCY_KEY = "currency"
+_REDEMPTION_SUBSCRIPTION_CREATE_STARTED_KEY = "_subscription_create_started"
+_REDEMPTION_ABANDONMENT_REQUESTED_KEY = "_abandonment_requested"
+_INTERNAL_REDEMPTION_METADATA_KEYS = {
+    _REDEMPTION_SUBSCRIPTION_CREATE_STARTED_KEY,
+    _REDEMPTION_ABANDONMENT_REQUESTED_KEY,
+}
 
 
 def _stripe_value(value: Any, key: str, default=None):
@@ -106,6 +113,39 @@ def _stripe_datetime(value: Any) -> datetime:
             "stripe_trial_invalid",
             "Stripe did not return a valid trial schedule. Please try again.",
         ) from exc
+
+
+def _redemption_flag_is_set(
+    redemption: TrialPromoRedemption,
+    key: str,
+) -> bool:
+    return str((redemption.metadata or {}).get(key) or "").lower() == "true"
+
+
+def _set_redemption_flag(
+    redemption: TrialPromoRedemption,
+    key: str,
+) -> None:
+    with transaction.atomic():
+        locked_redemption = TrialPromoRedemption.objects.select_for_update().get(
+            pk=redemption.pk,
+        )
+        if (
+            locked_redemption.status
+            != TrialPromoRedemptionStatusChoices.DIRECT_ACTIVATION_PENDING
+        ):
+            raise TrialPromoError(
+                "activation_no_longer_pending",
+                "This trial activation is no longer pending.",
+            )
+        metadata = dict(locked_redemption.metadata or {})
+        if str(metadata.get(key) or "").lower() != "true":
+            metadata[key] = "true"
+            TrialPromoRedemption.objects.filter(pk=redemption.pk).update(
+                metadata=metadata,
+                updated_at=timezone.now(),
+            )
+    redemption.metadata = metadata
 
 
 def _confirm_customer_has_no_default_payment_method(customer_id: str) -> None:
@@ -260,6 +300,24 @@ def _activation_terms_from_redemption(
         late_conversion_grace_days=late_conversion_grace_days,
         active_until=active_until,
     )
+
+
+def _build_direct_trial_stripe_metadata(
+    redemption: TrialPromoRedemption,
+    activation_terms: DirectTrialActivationTerms,
+) -> dict[str, str]:
+    base_metadata = {
+        str(key): str(value)
+        for key, value in (redemption.metadata or {}).items()
+        if key not in _INTERNAL_REDEMPTION_METADATA_KEYS
+    }
+    return {
+        **base_metadata,
+        TRIAL_PROMO_META_REDEMPTION_ID: str(redemption.pk),
+        "gobii_event_id": redemption.event_id,
+        "plan": activation_terms.plan,
+        TRIAL_PROMO_META_DISCOUNT_COUPON: activation_terms.coupon.coupon_id,
+    }
 
 
 def validate_direct_trial_configuration(
@@ -437,6 +495,12 @@ def _create_or_retrieve_subscription(
             api_key=stripe.api_key,
         )
 
+    # Persist this before the network call so a lost response can be distinguished
+    # from a reservation that never reached Stripe.
+    _set_redemption_flag(
+        redemption,
+        _REDEMPTION_SUBSCRIPTION_CREATE_STARTED_KEY,
+    )
     subscription = stripe.Subscription.create(
         customer=customer_id,
         items=items,
@@ -676,6 +740,108 @@ def _cancel_partial_subscription(
     return True
 
 
+def retire_pending_direct_trial_promo_for_paid_user(
+    redemption: TrialPromoRedemption,
+) -> bool:
+    """Return whether a paid user can proceed without repairing an activation."""
+    with transaction.atomic():
+        locked_redemption = TrialPromoRedemption.objects.select_for_update().get(
+            pk=redemption.pk,
+        )
+        redemption.status = locked_redemption.status
+        redemption.metadata = locked_redemption.metadata
+        redemption.stripe_subscription_id = (
+            locked_redemption.stripe_subscription_id
+        )
+        redemption.stripe_subscription_schedule_id = (
+            locked_redemption.stripe_subscription_schedule_id
+        )
+        if (
+            redemption.status
+            != TrialPromoRedemptionStatusChoices.DIRECT_ACTIVATION_PENDING
+        ):
+            return True
+
+        abandonment_requested = _redemption_flag_is_set(
+            redemption,
+            _REDEMPTION_ABANDONMENT_REQUESTED_KEY,
+        )
+        if redemption.stripe_subscription_id and not abandonment_requested:
+            return False
+
+        subscription_create_started = _redemption_flag_is_set(
+            redemption,
+            _REDEMPTION_SUBSCRIPTION_CREATE_STARTED_KEY,
+        )
+        if (
+            not redemption.stripe_subscription_id
+            and not subscription_create_started
+        ):
+            mark_direct_trial_promo_failed(redemption)
+            logger.info(
+                "Retired unstarted transparent trial redemption %s after paid "
+                "plan detection",
+                redemption.pk,
+            )
+            return True
+
+        # A prior create response was indeterminate. Replay the same idempotent
+        # request to recover any remote subscription, then cancel it before handoff.
+        _set_redemption_flag(
+            redemption,
+            _REDEMPTION_ABANDONMENT_REQUESTED_KEY,
+        )
+    activation_terms = _activation_terms_from_redemption(redemption)
+    metadata = _build_direct_trial_stripe_metadata(
+        redemption,
+        activation_terms,
+    )
+    items = _subscription_items(
+        activation_terms.price_id,
+        activation_terms.additional_price_id,
+    )
+    try:
+        subscription = _create_or_retrieve_subscription(
+            redemption=redemption,
+            customer_id=str(redemption.stripe_customer_id or "").strip(),
+            items=items,
+            trial_days=activation_terms.trial_days,
+            metadata=metadata,
+        )
+    except (stripe.error.StripeError, TrialPromoError) as exc:
+        logger.warning(
+            "Could not resolve indeterminate transparent trial subscription "
+            "for paid-user redemption %s: %s",
+            redemption.pk,
+            exc,
+        )
+        raise TrialPromoError(
+            "stripe_activation_cleanup_pending",
+            "We couldn't finish cleaning up an interrupted trial activation. "
+            "Please try again.",
+        ) from exc
+
+    subscription_id = _stripe_id(subscription)
+    if not subscription_id or not _cancel_partial_subscription(
+        subscription_id,
+        redemption.stripe_subscription_schedule_id,
+    ):
+        raise TrialPromoError(
+            "stripe_activation_cleanup_pending",
+            "Your interrupted trial activation needs attention. "
+            "Please contact support before retrying.",
+        )
+
+    mark_direct_trial_promo_failed(redemption)
+    logger.info(
+        "Canceled interrupted transparent trial subscription %s for paid-user "
+        "redemption %s",
+        subscription_id,
+        redemption.pk,
+    )
+    return True
+
+
 def _sync_direct_trial_entitlements(
     *,
     user,
@@ -805,17 +971,10 @@ def activate_direct_trial_promo(
         and not customer_payment_method_confirmed_absent
     ):
         _confirm_customer_has_no_default_payment_method(customer_id)
-    base_metadata = {
-        str(key): str(value)
-        for key, value in (redemption.metadata or {}).items()
-    }
-    metadata = {
-        **base_metadata,
-        TRIAL_PROMO_META_REDEMPTION_ID: str(redemption.pk),
-        "gobii_event_id": redemption.event_id,
-        "plan": activation_terms.plan,
-        TRIAL_PROMO_META_DISCOUNT_COUPON: coupon.coupon_id,
-    }
+    metadata = _build_direct_trial_stripe_metadata(
+        redemption,
+        activation_terms,
+    )
     items = _subscription_items(
         activation_terms.price_id,
         activation_terms.additional_price_id,
@@ -847,8 +1006,50 @@ def activate_direct_trial_promo(
             coupon=coupon,
         )
     except (stripe.error.StripeError, TrialPromoError) as exc:
+        if (
+            isinstance(exc, TrialPromoError)
+            and exc.code == "activation_no_longer_pending"
+        ):
+            redemption.refresh_from_db()
+            if (
+                redemption.status
+                == TrialPromoRedemptionStatusChoices.DIRECT_ACTIVATION_COMPLETED
+            ):
+                return DirectTrialActivationResult(
+                    redemption=redemption,
+                    subscription_id=redemption.stripe_subscription_id,
+                    schedule_id=redemption.stripe_subscription_schedule_id,
+                )
+            raise
         subscription_id = redemption.stripe_subscription_id
         schedule_id = redemption.stripe_subscription_schedule_id
+        subscription_create_is_indeterminate = (
+            not subscription_id
+            and (
+                isinstance(
+                    exc,
+                    (
+                        stripe.error.APIConnectionError,
+                        stripe.error.APIError,
+                    ),
+                )
+                or (
+                    isinstance(exc, TrialPromoError)
+                    and exc.code == "stripe_subscription_invalid"
+                )
+            )
+        )
+        if subscription_create_is_indeterminate:
+            logger.warning(
+                "Transparent trial subscription creation is indeterminate for "
+                "redemption %s; retaining it for an idempotent retry: %s",
+                redemption.pk,
+                exc,
+            )
+            raise TrialPromoError(
+                "stripe_activation_pending",
+                "We couldn't confirm whether your trial started. Please try again.",
+            ) from exc
         cleanup_complete = not subscription_id or _cancel_partial_subscription(
             subscription_id,
             schedule_id,
