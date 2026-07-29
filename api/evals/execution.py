@@ -307,6 +307,20 @@ class ScenarioExecutionTools:
     def get_run(self, run_id: str) -> EvalRun:
         return EvalRun.objects.get(id=run_id)
 
+    def enable_sandbox_tool_visibility(self, agent_id: str) -> None:
+        """Expose sandbox-backed tools when a scenario explicitly exercises them."""
+        from waffle.models import Flag
+
+        from api.services.system_settings import get_setting_definition, set_setting_value
+
+        agent = PersistentAgent.objects.select_related("user").get(id=agent_id)
+        definition = get_setting_definition("SANDBOX_COMPUTE_ENABLED")
+        if definition:
+            set_setting_value(definition, True)
+        flag, _ = Flag.objects.get_or_create(name="sandbox_compute")
+        if agent.user_id:
+            flag.users.add(agent.user)
+
     def inject_message(
         self,
         agent_id: str,

@@ -1348,7 +1348,7 @@ class BehaviorMicroHelperTests(TestCase):
         scenario = ScenarioRegistry.get("common_use_case_122_custom_tool_bulk_api_sqlite")
 
         scenario._enable_builtin_tools(self.agent.id, ["create_custom_tool"])
-        scenario._enable_sandbox_tool_visibility(self.agent.id)
+        scenario.enable_sandbox_tool_visibility(self.agent.id)
 
         names = {
             definition["function"]["name"]

@@ -11360,6 +11360,23 @@ class AgentPeerLink(models.Model):
             return self.agent_a
         return None
 
+    def health_summary(self) -> dict:
+        issues = []
+        for agent in (self.agent_a, self.agent_b):
+            if agent.is_deleted:
+                reason = "deleted"
+            elif agent.life_state != PersistentAgent.LifeState.ACTIVE:
+                reason = agent.life_state
+            elif not agent.is_active:
+                reason = "inactive"
+            else:
+                continue
+            issues.append({"agent_id": str(agent.id), "reason": reason})
+        return {
+            "status": "unhealthy" if issues else "healthy",
+            "issues": issues,
+        }
+
     def remove_preserving_history(self) -> None:
         try:
             conversation = self.conversation

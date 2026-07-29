@@ -971,7 +971,9 @@ class TestParallelToolCallsExecution(TestCase):
     def test_parallel_safe_batch_respects_configured_worker_limit(self, mock_execute_enabled, _mock_credit):
         active = 0
         max_active = 0
+        started = 0
         lock = threading.Lock()
+        first_worker_batch = threading.Barrier(4)
 
         def side_effect(
             _agent,
@@ -981,13 +983,16 @@ class TestParallelToolCallsExecution(TestCase):
             current_sqlite_db_path=None,
             resolved_entry=None,
         ):
-            nonlocal active, max_active
+            nonlocal active, max_active, started
             self.assertTrue(isolated_mcp)
             self.assertIsNone(current_sqlite_db_path)
             with lock:
+                started += 1
+                worker_number = started
                 active += 1
                 max_active = max(max_active, active)
-            time.sleep(0.05)
+            if worker_number <= first_worker_batch.parties:
+                first_worker_batch.wait(timeout=2)
             with lock:
                 active -= 1
             return {"status": "ok", "auto_sleep_ok": True}

@@ -2908,6 +2908,7 @@ class ConsoleViewsTest(TestCase):
         _mock_delay,
     ):
         from agents.services import PretrainedWorkerTemplateService
+        from api.models import PersistentAgent
 
         template = PretrainedWorkerTemplateService.get_active_templates()[0]
         session = self.client.session
@@ -2930,6 +2931,11 @@ class ConsoleViewsTest(TestCase):
         properties = created_event_calls[0]["properties"]
         self.assertEqual(properties.get("template_code"), template.code)
         self.assertEqual(properties.get("template_source"), AGENT_TEMPLATE_SOURCE_PRETRAINED_WORKER)
+        created_agent = PersistentAgent.objects.latest("created_at")
+        self.assertEqual(
+            properties.get("preferred_llm_tier"),
+            created_agent.preferred_llm_tier.key if created_agent.preferred_llm_tier_id else "standard",
+        )
         self.assertNotIn(AGENT_TEMPLATE_SOURCE_SESSION_KEY, self.client.session)
 
     @override_settings(

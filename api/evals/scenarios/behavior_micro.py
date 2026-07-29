@@ -818,19 +818,6 @@ class BehaviorMicroScenario(EvalScenario, ScenarioExecutionTools):
                 tool_name=tool_name,
             )
 
-    def _enable_sandbox_tool_visibility(self, agent_id):
-        from waffle.models import Flag
-
-        from api.services.system_settings import get_setting_definition, set_setting_value
-
-        agent = PersistentAgent.objects.select_related("user").get(id=agent_id)
-        definition = get_setting_definition("SANDBOX_COMPUTE_ENABLED")
-        if definition:
-            set_setting_value(definition, True)
-        flag, _ = Flag.objects.get_or_create(name="sandbox_compute")
-        if agent.user_id:
-            flag.users.add(agent.user)
-
     def _planning_guardrail_mocks(self):
         return {
             "spawn_web_task": {"status": "error", "message": "Browser work disabled during planning eval."},
@@ -4880,7 +4867,7 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
             [tool_name for tool_name in tool_names if tool_name not in synthetic_tool_names],
         )
         if "create_custom_tool" in self._accepted_expected_tool_names():
-            self._enable_sandbox_tool_visibility(agent_id)
+            self.enable_sandbox_tool_visibility(agent_id)
         self._enable_eval_synthetic_tools(agent_id, list(dict.fromkeys(synthetic_tool_names)))
 
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="inject_prompt")

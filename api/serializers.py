@@ -442,6 +442,7 @@ class PersistentAgentSerializer(serializers.ModelSerializer):
             'personal_mcp_server_ids',
         )
         ref_name = "PersistentAgentDetail"
+        extra_kwargs = {'name': {'required': False}}
 
     def validate_preferred_contact_endpoint(self, value):
         if value is None:
@@ -642,7 +643,11 @@ class PersistentAgentSerializer(serializers.ModelSerializer):
             from api.agent.tasks import enqueue_interactive_process_agent_events
 
             agent_id = str(agent.id)
-            transaction.on_commit(lambda: enqueue_interactive_process_agent_events(agent_id))
+            # The row is durable before callbacks run, so a queue outage must not report creation as failed.
+            transaction.on_commit(
+                lambda: enqueue_interactive_process_agent_events(agent_id),
+                robust=True,
+            )
 
         return agent
 
