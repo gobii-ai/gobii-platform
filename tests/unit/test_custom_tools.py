@@ -46,6 +46,7 @@ from api.agent.tools.run_command import execute_run_command
 from api.agent.tools.sqlite_batch import execute_sqlite_batch
 from api.agent.tools.sqlite_state import agent_sqlite_db
 from api.agent.tools.tool_manager import (
+    _custom_tool_description_for_llm,
     enable_tools,
     execute_enabled_tool,
     get_available_tool_ids,
@@ -88,13 +89,25 @@ class CustomToolsTests(TestCase):
         quota, _ = UserQuota.objects.get_or_create(user=cls.user)
         quota.agent_limit = 100
         quota.save(update_fields=["agent_limit"])
-
         cls.browser_agent = BrowserUseAgent.objects.create(user=cls.user, name="Custom Tools Browser")
         cls.agent = PersistentAgent.objects.create(
             user=cls.user,
             name="Custom Tools Agent",
             charter="Build sandbox tools",
             browser_use_agent=cls.browser_agent,
+        )
+
+    def test_custom_tool_descriptions_expose_terminal_result_contract(self):
+        description = _custom_tool_description_for_llm(
+            "custom_publish_incident",
+            "Publish an incident.",
+        )
+
+        self.assertIn("side_effects and next_action as authoritative", description)
+        self.assertIn("stop without a recap or receipt", description)
+        self.assertEqual(
+            _custom_tool_description_for_llm("send_email", "Send email."),
+            "Send email.",
         )
 
     def _create_env_var_secret(self, key: str, value: str) -> PersistentAgentSecret:
