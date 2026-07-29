@@ -13,6 +13,8 @@ import {
 
 vi.mock('../../api/discordNative', () => ({
   agentDiscordAppQueryKey: (agentId: string) => ['agent-discord-app', agentId],
+  discordContextAppQueryKey: () => ['discord-context-app'],
+  disconnectDiscordGuild: vi.fn(),
   disconnectDiscordNative: vi.fn(),
   fetchAgentDiscordApp: vi.fn(),
   fetchAgentDiscordGuildChannels: vi.fn(),
@@ -33,7 +35,6 @@ const disconnectedDiscordApp: AgentDiscordApp = {
   activeSubscriptionCount: 0,
   guildCount: 0,
   connectUrl: '/console/api/discord/oauth/start/?agent_id=agent-1',
-  botInviteUrl: 'https://discord.com/oauth2/authorize?client_id=bot',
 }
 
 const connectedDiscordApp: AgentDiscordApp = {
@@ -83,6 +84,7 @@ describe('AgentPipedreamAppsModal Discord integration', () => {
     vi.mocked(startAgentDiscordConnect).mockResolvedValue({
       connectUrl: 'https://discord.com/oauth2/authorize?state=oauth-state',
       skillEnabled: true,
+      oauthRequired: true,
       app: { ...disconnectedDiscordApp, skillEnabled: true },
     })
 
@@ -108,7 +110,7 @@ describe('AgentPipedreamAppsModal Discord integration', () => {
       status: 'success',
       message: '',
       error: '',
-      botInviteUrl: '',
+      connectUrl: '',
       channels: [
         {
           guildId: 'guild-1',

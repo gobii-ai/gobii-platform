@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
-import { agentDiscordAppQueryKey, fetchAgentDiscordApp } from '../../api/discordNative'
+import {
+  agentDiscordAppQueryKey,
+  discordContextAppQueryKey,
+  fetchAgentDiscordApp,
+  fetchDiscordContextApp,
+  type DiscordGuild,
+} from '../../api/discordNative'
 import { fetchAgentRoster } from '../../api/agents'
 import {
   disconnectAgentPipedreamApp,
@@ -49,10 +55,10 @@ import {
 } from './NativeIntegrationShared'
 import { useManualNativeIntegrationConnect } from './useManualNativeIntegrationConnect'
 import {
-  agentHasDiscordNative,
   BackButton,
   DiscordAgentConnectionsScreen,
   DiscordConfigurationScreen,
+  useDiscordGuildRemoval,
   useDiscordNativeAgentActions,
   useDiscordNativeDisconnect,
   useDiscordOAuthCompleteRefetch,
@@ -147,6 +153,10 @@ export function WorkspaceAppsManager({
   } = useDiscordNativeAgentActions({
     onStart: () => setStatusMessage(null),
     onError: handleDiscordError,
+    onReady: (agentId) => {
+      setActiveDiscordAgentId(agentId)
+      setStatusMessage(null)
+    },
   })
 
   useEffect(() => {
@@ -184,6 +194,11 @@ export function WorkspaceAppsManager({
     queryFn: () => fetchAgentRoster(),
     enabled: Boolean(nativeIntegrationsUrl) && activeApp === null,
   })
+  const discordContextAppQuery = useQuery({
+    queryKey: discordContextAppQueryKey(),
+    queryFn: fetchDiscordContextApp,
+    enabled: Boolean(nativeIntegrationsUrl) && activeApp === null,
+  })
   useWindowFocusRefetch(agentRosterQuery.refetch, discordConnectionsOpen && activeDiscordAgentId === null)
   const activeDiscordAppQueryKey = useMemo(
     () => activeDiscordAgentId ? agentDiscordAppQueryKey(activeDiscordAgentId) : ['agent-discord-app', null] as const,
@@ -203,10 +218,7 @@ export function WorkspaceAppsManager({
     () => new Set(settings.selectedApps.map((app) => app.slug)),
     [settings.selectedApps],
   )
-  const discordConnected = useMemo(
-    () => (agentRosterQuery.data?.agents ?? []).some(agentHasDiscordNative),
-    [agentRosterQuery.data?.agents],
-  )
+  const discordConnected = Boolean(discordContextAppQuery.data?.connected)
 
   const rows = useMemo<WorkspaceAppRow[]>(() => {
     const visibleApps = debouncedSearchTerm ? (searchQuery.data ?? []) : settings.effectiveApps
@@ -376,9 +388,23 @@ export function WorkspaceAppsManager({
       setActiveDiscordAgentId(null)
       void queryClient.invalidateQueries({ queryKey: ['agent-roster'], exact: false })
       void queryClient.invalidateQueries({ queryKey: ['agent-discord-app'], exact: false })
+      void queryClient.invalidateQueries({ queryKey: discordContextAppQueryKey() })
     },
     onError: handleDiscordError,
-    onSettled: () => setPendingNativeAction(null),
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ['agent-roster'], exact: false })
+      void queryClient.invalidateQueries({ queryKey: ['agent-discord-app'], exact: false })
+      void queryClient.invalidateQueries({ queryKey: discordContextAppQueryKey() })
+      setPendingNativeAction(null)
+    },
+  })
+  const {
+    removeDiscordGuild,
+    pendingGuildId,
+    isDiscordGuildRemovalPending,
+  } = useDiscordGuildRemoval({
+    onStart: () => setStatusMessage(null),
+    onError: handleDiscordError,
   })
 
   const nativePickerMutation = useNativeIntegrationPickerMutation({
@@ -395,6 +421,7 @@ export function WorkspaceAppsManager({
     || nativeRevokeMutation.isPending
     || nativePickerMutation.isPending
     || discordDisconnectMutation.isPending
+    || isDiscordGuildRemovalPending
     || isDiscordAgentActionPending
   const body = activeDiscordAgentId ? (
     activeDiscordAppQuery.isError ? (
@@ -431,6 +458,13 @@ export function WorkspaceAppsManager({
           setStatusMessage(null)
         }}
         onSave={(subscriptions) => saveDiscordAgentSubscriptions(activeDiscordAgentId, subscriptions)}
+        onAddServer={() => window.open(activeDiscordAppQuery.data.connectUrl, '_blank')}
+        onRemoveServer={(guild: DiscordGuild) => {
+          if (window.confirm(`Remove ${guild.name} from this Gobii context? This stops every agent subscription in that server and uninstalls the Gobii bot.`)) {
+            removeDiscordGuild(guild.guildId)
+          }
+        }}
+        pendingGuildId={pendingGuildId}
       />
     )
   ) : discordConnectionsOpen ? (
@@ -475,10 +509,10 @@ export function WorkspaceAppsManager({
     <AppListScreen
       apps={rows}
       searchTerm={searchTerm}
-      isLoading={settingsQuery.isLoading || searchQuery.isLoading || nativeIntegrationsQuery.isLoading || agentRosterQuery.isLoading}
-      isFetching={searchQuery.isFetching || nativeIntegrationsQuery.isFetching || agentRosterQuery.isFetching}
-      isError={settingsQuery.isError || searchQuery.isError || nativeIntegrationsQuery.isError || agentRosterQuery.isError}
-      error={settingsQuery.error ?? searchQuery.error ?? nativeIntegrationsQuery.error ?? agentRosterQuery.error}
+      isLoading={settingsQuery.isLoading || searchQuery.isLoading || nativeIntegrationsQuery.isLoading || agentRosterQuery.isLoading || discordContextAppQuery.isLoading}
+      isFetching={searchQuery.isFetching || nativeIntegrationsQuery.isFetching || agentRosterQuery.isFetching || discordContextAppQuery.isFetching}
+      isError={settingsQuery.isError || searchQuery.isError || nativeIntegrationsQuery.isError || agentRosterQuery.isError || discordContextAppQuery.isError}
+      error={settingsQuery.error ?? searchQuery.error ?? nativeIntegrationsQuery.error ?? agentRosterQuery.error ?? discordContextAppQuery.error}
       isBusy={isBusy}
       isMobile={isMobile}
       pendingAppAction={pendingAppAction}

@@ -2,7 +2,12 @@ import { useCallback, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { CheckCircle2, Loader2, Plug, Settings } from 'lucide-react'
 
-import { agentDiscordAppQueryKey, fetchAgentDiscordApp, type AgentDiscordApp } from '../../api/discordNative'
+import {
+  agentDiscordAppQueryKey,
+  fetchAgentDiscordApp,
+  type AgentDiscordApp,
+  type DiscordGuild,
+} from '../../api/discordNative'
 import { disconnectAgentPipedreamApp, fetchAgentPipedreamApps, removeAgentPipedreamApp, startAgentPipedreamAppConnect, type AgentPipedreamAppRow } from '../../api/mcp'
 import { fetchNativeIntegrations, type NativeIntegrationProvider } from '../../api/nativeIntegrations'
 import {
@@ -33,7 +38,13 @@ import {
   useNativeIntegrationRefreshEffects,
 } from './NativeIntegrationShared'
 import { useManualNativeIntegrationConnect } from './useManualNativeIntegrationConnect'
-import { DiscordConfigurationScreen, DiscordSummaryCell, useDiscordNativeAgentActions, useDiscordOAuthCompleteRefetch } from './DiscordNativeAppModal'
+import {
+  DiscordConfigurationScreen,
+  DiscordSummaryCell,
+  useDiscordGuildRemoval,
+  useDiscordNativeAgentActions,
+  useDiscordOAuthCompleteRefetch,
+} from './DiscordNativeAppModal'
 
 type AgentPipedreamAppsModalProps = {
   agentId: string
@@ -90,6 +101,18 @@ export function AgentPipedreamAppsModal({
     pendingDiscordAgentAction,
     isDiscordAgentActionPending,
   } = useDiscordNativeAgentActions({
+    onStart: () => setStatusMessage(null),
+    onError: handleDiscordError,
+    onReady: () => {
+      setDiscordConfigureOpen(true)
+      setStatusMessage(null)
+    },
+  })
+  const {
+    removeDiscordGuild,
+    pendingGuildId,
+    isDiscordGuildRemovalPending,
+  } = useDiscordGuildRemoval({
     onStart: () => setStatusMessage(null),
     onError: handleDiscordError,
   })
@@ -224,6 +247,7 @@ export function AgentPipedreamAppsModal({
     || nativeDisconnectMutation.isPending
     || nativePickerMutation.isPending
     || isDiscordAgentActionPending
+    || isDiscordGuildRemovalPending
   const activeDiscordApp = discordConfigureOpen ? (discordAppQuery.data ?? discordRow) : null
   const pendingDiscordAction = pendingDiscordAgentAction?.agentId === agentId ? pendingDiscordAgentAction.kind : null
 
@@ -239,6 +263,13 @@ export function AgentPipedreamAppsModal({
         setStatusMessage(null)
       }}
       onSave={(subscriptions) => saveDiscordAgentSubscriptions(agentId, subscriptions)}
+      onAddServer={() => window.open(activeDiscordApp.connectUrl, '_blank')}
+      onRemoveServer={(guild: DiscordGuild) => {
+        if (window.confirm(`Remove ${guild.name} from this Gobii context? This stops every agent subscription in that server and uninstalls the Gobii bot.`)) {
+          removeDiscordGuild(guild.guildId)
+        }
+      }}
+      pendingGuildId={pendingGuildId}
     />
   ) : (
       <div className="space-y-4 p-1">

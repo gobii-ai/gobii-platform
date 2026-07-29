@@ -146,7 +146,9 @@ from console.discord_api import (
     AgentDiscordChannelsView,
     AgentDiscordConnectView,
     AgentDiscordSubscriptionsView,
+    DiscordContextAppView,
     DiscordDisconnectView,
+    DiscordGuildDisconnectView,
     DiscordOAuthCallbackView,
     DiscordOAuthStartView,
 )
@@ -271,6 +273,7 @@ urlpatterns = [
     path("connect/pipedream/<uuid:agent_id>/<slug:app_slug>/", PipedreamConnectRedirectView.as_view(), name="pipedream_jit_connect"),
     path("console/api/discord/oauth/start/", DiscordOAuthStartView.as_view(), name="discord_oauth_start"),
     path("console/api/discord/oauth/callback/", DiscordOAuthCallbackView.as_view(), name="discord_oauth_callback"),
+    path("console/api/discord/app/", DiscordContextAppView.as_view(), name="console-discord-context-app"),
 
     # Plan landing pages (must be before console to avoid conflict)
     path("plans/<slug:plan>/", PaidPlanLanding.as_view(), name="plan_landing"),
@@ -478,6 +481,7 @@ urlpatterns = [
     path("console/api/agents/<uuid:agent_id>/discord/connect/", AgentDiscordConnectView.as_view(), name="console-agent-discord-connect"),
     path("console/api/agents/<uuid:agent_id>/discord/guilds/<str:guild_id>/channels/", AgentDiscordChannelsView.as_view(), name="console-agent-discord-channels"),
     path("console/api/agents/<uuid:agent_id>/discord/subscriptions/", AgentDiscordSubscriptionsView.as_view(), name="console-agent-discord-subscriptions"),
+    path("console/api/discord/guilds/<str:guild_id>/", DiscordGuildDisconnectView.as_view(), name="console-discord-guild-disconnect"),
     path("console/api/discord/disconnect/", DiscordDisconnectView.as_view(), name="console-discord-disconnect"),
     path("console/api/session/", ConsoleSessionAPIView.as_view(), name="console_session"),
     path("console/api/support/request/", AppSupportRequestAPIView.as_view(), name="console_app_support_request"),

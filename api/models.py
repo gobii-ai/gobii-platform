@@ -9413,6 +9413,7 @@ class PersistentAgentDiscordOAuthSession(models.Model):
     )
     expires_at = models.DateTimeField()
     completed_at = models.DateTimeField(null=True, blank=True)
+    requested_guild_id = models.CharField(max_length=32, blank=True)
     selected_guild_id = models.CharField(max_length=32, blank=True)
     selected_permissions = models.CharField(max_length=64, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -9438,10 +9439,20 @@ class PersistentAgentDiscordOAuthSession(models.Model):
 
 class PersistentAgentDiscordGuild(models.Model):
 
+    class AuthorizationSource(models.TextChoices):
+        LEGACY_DISCOVERED = "legacy_discovered", "Legacy discovered"
+        EXPLICIT_OAUTH = "explicit_oauth", "Explicit OAuth"
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     guild_id = models.CharField(max_length=32)
     name = models.CharField(max_length=255)
     icon_hash = models.CharField(max_length=128, blank=True)
+    authorization_source = models.CharField(
+        max_length=32,
+        choices=AuthorizationSource.choices,
+        default=AuthorizationSource.EXPLICIT_OAUTH,
+        db_index=True,
+    )
     owner_user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,

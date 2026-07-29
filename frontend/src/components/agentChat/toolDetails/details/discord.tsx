@@ -66,7 +66,6 @@ export function DiscordToolDetail({ entry }: ToolDetailProps) {
   const subscriptions = records(result?.subscriptions)
   const subscription = isRecord(result?.subscription) ? result.subscription : null
   const connectUrl = text(result?.connect_url)
-  const inviteUrl = text(result?.bot_invite_url)
 
   return (
     <div className="space-y-4 text-sm text-slate-600">
@@ -76,7 +75,6 @@ export function DiscordToolDetail({ entry }: ToolDetailProps) {
         subscription && text(subscription.guild_name) ? { label: 'Server', value: text(subscription.guild_name) } : null,
         subscription && text(subscription.status) ? { label: 'Status', value: text(subscription.status) } : null,
         connectUrl ? { label: 'Setup', value: <ExternalLinkText href={connectUrl}>Connect Discord</ExternalLinkText> } : null,
-        inviteUrl ? { label: 'Bot access', value: <ExternalLinkText href={inviteUrl}>Invite the Gobii bot</ExternalLinkText> } : null,
       ]} />
       {guilds.length || action === 'list_guilds' ? (
         <Section title="Servers"><DiscordEntityList items={guilds} kind="server" /></Section>

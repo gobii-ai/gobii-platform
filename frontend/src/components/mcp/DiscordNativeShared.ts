@@ -9,7 +9,7 @@ export const DISCORD_NATIVE_DISPLAY_PROVIDER: NativeIntegrationProvider = {
   authType: 'oauth2',
   icon: 'discord',
   apiHosts: ['discord.com'],
-  scopes: [],
+  scopes: ['bot', 'applications.commands'],
   connected: false,
   scope: 'personal',
   expiresAt: null,

@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, CheckCircle2, Hash, Loader2, Plug, Save, Settings } from 'lucide-react'
+import { ArrowLeft, CheckCircle2, Hash, Loader2, Plus, Plug, Save, Settings, Trash2 } from 'lucide-react'
 
 import {
   agentDiscordAppQueryKey,
+  disconnectDiscordGuild,
   disconnectDiscordNative,
+  discordContextAppQueryKey,
   fetchAgentDiscordGuildChannels,
   startAgentDiscordConnect,
   updateAgentDiscordSubscriptions,
@@ -48,6 +50,7 @@ export function useDiscordOAuthCompleteRefetch({
       }
       const completedAgentId = typeof event.data.agent_id === 'string' ? event.data.agent_id : agentId
       void queryClient.invalidateQueries({ queryKey: ['agent-roster'], exact: false })
+      void queryClient.invalidateQueries({ queryKey: discordContextAppQueryKey() })
       if (completedAgentId) {
         void queryClient.invalidateQueries({ queryKey: agentDiscordAppQueryKey(completedAgentId) })
       }
@@ -63,9 +66,11 @@ export function useDiscordOAuthCompleteRefetch({
 export function useDiscordNativeAgentActions({
   onStart,
   onError,
+  onReady,
 }: {
   onStart?: () => void
   onError: (message: string) => void
+  onReady?: (agentId: string) => void
 }) {
   const queryClient = useQueryClient()
   const [pendingDiscordAgentAction, setPendingDiscordAgentAction] = useState<PendingDiscordAgentAction>(null)
@@ -79,7 +84,12 @@ export function useDiscordNativeAgentActions({
     onSuccess: (result, agentId) => {
       queryClient.setQueryData(agentDiscordAppQueryKey(agentId), result.app)
       void queryClient.invalidateQueries({ queryKey: ['agent-roster'], exact: false })
-      window.open(result.connectUrl, '_blank')
+      void queryClient.invalidateQueries({ queryKey: discordContextAppQueryKey() })
+      if (result.oauthRequired) {
+        window.open(result.connectUrl, '_blank')
+      } else {
+        onReady?.(agentId)
+      }
     },
     onError: (error) => onError(safeErrorMessage(error)),
     onSettled: () => setPendingDiscordAgentAction(null),
@@ -106,6 +116,39 @@ export function useDiscordNativeAgentActions({
       subscriptionsMutation.mutate({ agentId, subscriptions }),
     pendingDiscordAgentAction,
     isDiscordAgentActionPending: connectMutation.isPending || subscriptionsMutation.isPending,
+  }
+}
+
+export function useDiscordGuildRemoval({
+  onStart,
+  onSuccess,
+  onError,
+}: {
+  onStart?: (guildId: string) => void
+  onSuccess?: (guildId: string) => void
+  onError: (message: string) => void
+}) {
+  const queryClient = useQueryClient()
+  const [pendingGuildId, setPendingGuildId] = useState<string | null>(null)
+  const mutation = useMutation({
+    mutationFn: (guildId: string) => disconnectDiscordGuild(guildId),
+    onMutate: (guildId) => {
+      setPendingGuildId(guildId)
+      onStart?.(guildId)
+    },
+    onSuccess: (_result, guildId) => {
+      void queryClient.invalidateQueries({ queryKey: ['agent-discord-app'], exact: false })
+      void queryClient.invalidateQueries({ queryKey: ['agent-discord-channels'], exact: false })
+      void queryClient.invalidateQueries({ queryKey: discordContextAppQueryKey() })
+      onSuccess?.(guildId)
+    },
+    onError: (error) => onError(safeErrorMessage(error)),
+    onSettled: () => setPendingGuildId(null),
+  })
+  return {
+    removeDiscordGuild: (guildId: string) => mutation.mutate(guildId),
+    pendingGuildId,
+    isDiscordGuildRemovalPending: mutation.isPending,
   }
 }
 
@@ -137,6 +180,9 @@ export function DiscordConfigurationScreen({
   statusMessage,
   onBack,
   onSave,
+  onAddServer,
+  onRemoveServer,
+  pendingGuildId,
 }: {
   agentId: string
   app: AgentDiscordApp
@@ -145,6 +191,9 @@ export function DiscordConfigurationScreen({
   statusMessage: PipedreamStatusMessage
   onBack: () => void
   onSave: (subscriptions: DiscordSubscriptionSelection[]) => void
+  onAddServer: () => void
+  onRemoveServer: (guild: DiscordGuild) => void
+  pendingGuildId: string | null
 }) {
   const surface = useSettingsSurfaceVariant()
   const initialSelections = useMemo(() => activeDiscordSelections(app), [app.subscriptions])
@@ -187,15 +236,26 @@ export function DiscordConfigurationScreen({
     <div className="space-y-4 p-1">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <BackButton disabled={disabled} onClick={onBack} />
-        <button
-          type="button"
-          className={`inline-flex min-w-28 items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-semibold transition disabled:opacity-60 ${saveButtonClassName}`}
-          onClick={() => onSave(Object.values(selectedSubscriptions))}
-          disabled={disabled || isPendingSave || !hasChanges}
-        >
-          {isPendingSave ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Save className="h-4 w-4" aria-hidden="true" />}
-          Save
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            className={`inline-flex min-w-28 items-center justify-center gap-2 rounded-md border px-3 py-2 text-sm font-semibold transition disabled:opacity-60 ${surface === 'embedded' ? 'border-slate-200/20 text-slate-200 hover:border-sky-300/35' : 'border-indigo-200 text-indigo-700 hover:border-indigo-300'}`}
+            onClick={onAddServer}
+            disabled={disabled}
+          >
+            <Plus className="h-4 w-4" aria-hidden="true" />
+            Add server
+          </button>
+          <button
+            type="button"
+            className={`inline-flex min-w-28 items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-semibold transition disabled:opacity-60 ${saveButtonClassName}`}
+            onClick={() => onSave(Object.values(selectedSubscriptions))}
+            disabled={disabled || isPendingSave || !hasChanges}
+          >
+            {isPendingSave ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Save className="h-4 w-4" aria-hidden="true" />}
+            Save
+          </button>
+        </div>
       </div>
 
       <DiscordSummaryCell app={app} />
@@ -211,7 +271,9 @@ export function DiscordConfigurationScreen({
               subscriptions={app.subscriptions}
               selectedSubscriptions={selectedSubscriptions}
               disabled={disabled}
+              isRemoving={pendingGuildId === guild.guildId}
               onToggleChannel={toggleChannel}
+              onRemove={() => onRemoveServer(guild)}
             />
           ))}
         </div>
@@ -445,14 +507,18 @@ function DiscordGuildChannelSection({
   subscriptions,
   selectedSubscriptions,
   disabled,
+  isRemoving,
   onToggleChannel,
+  onRemove,
 }: {
   agentId: string
   guild: DiscordGuild
   subscriptions: DiscordSubscription[]
   selectedSubscriptions: Record<string, DiscordSubscriptionSelection>
   disabled: boolean
+  isRemoving: boolean
   onToggleChannel: (channel: DiscordChannel) => void
+  onRemove: () => void
 }) {
   const surface = useSettingsSurfaceVariant()
   const channelsQuery = useQuery({
@@ -499,14 +565,26 @@ function DiscordGuildChannelSection({
           <p className={`truncate text-sm font-semibold ${titleClassName}`}>{guild.name}</p>
           <p className={`text-xs ${descriptionClassName}`}>Choose channels that should wake this agent.</p>
         </div>
-        {channelsQuery.isLoading ? <Loader2 className="h-4 w-4 animate-spin text-indigo-600" aria-hidden="true" /> : null}
+        <div className="flex items-center gap-2">
+          {channelsQuery.isLoading ? <Loader2 className="h-4 w-4 animate-spin text-indigo-600" aria-hidden="true" /> : null}
+          <button
+            type="button"
+            className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold transition disabled:opacity-60 ${surface === 'embedded' ? 'text-rose-300 hover:bg-rose-950/35' : 'text-rose-700 hover:bg-rose-50'}`}
+            onClick={onRemove}
+            disabled={disabled || isRemoving}
+            title="Remove this server from the entire Gobii context"
+          >
+            {isRemoving ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />}
+            Remove
+          </button>
+        </div>
       </div>
       {channelsQuery.data?.status === 'action_required' ? (
         <div className={`mt-3 rounded-md border px-3 py-2 text-sm ${actionRequiredClassName}`}>
           <p>{channelsQuery.data.message || 'The Gobii Discord bot needs access to list channels in this server.'}</p>
-          {channelsQuery.data.botInviteUrl ? (
-            <a href={channelsQuery.data.botInviteUrl} target="_blank" rel="noreferrer" className={`mt-2 inline-flex font-semibold underline ${actionLinkClassName}`}>
-              Invite bot
+          {channelsQuery.data.connectUrl ? (
+            <a href={channelsQuery.data.connectUrl} target="_blank" rel="noreferrer" className={`mt-2 inline-flex font-semibold underline ${actionLinkClassName}`}>
+              Reconnect server
             </a>
           ) : null}
         </div>

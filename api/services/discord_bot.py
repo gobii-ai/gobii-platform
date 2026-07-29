@@ -63,12 +63,10 @@ DISCORD_API_BASE = "https://discord.com/api/v10"
 DISCORD_OAUTH_AUTHORIZE_URL = "https://discord.com/oauth2/authorize"
 DISCORD_OAUTH_TOKEN_URL = "https://discord.com/api/oauth2/token"
 DISCORD_WEBHOOK_USERNAME_MAX_LENGTH = 80
-DISCORD_MANAGE_GUILD_PERMISSION = 0x20
-DISCORD_ADMINISTRATOR_PERMISSION = 0x8
 DISCORD_TEXT_CHANNEL_TYPES = {0, 5}
 DISCORD_WEBHOOK_MAX_FILES = 10
-DISCORD_OAUTH_USER_SCOPES = ("identify", "guilds")
 DISCORD_OAUTH_BOT_INSTALL_SCOPES = ("bot", "applications.commands")
+DISCORD_GUILD_INSTALL_TYPE = 0
 
 
 class DiscordBotIntegrationError(RuntimeError):
@@ -117,7 +115,21 @@ def _agent_owner(agent: PersistentAgent) -> tuple[Any, Any]:
 
 def _claimed_guild_queryset(agent: PersistentAgent):
     owner_user, organization = _agent_owner(agent)
+    return claimed_guild_queryset_for_owner(
+        owner_user=owner_user,
+        organization=organization,
+    )
+
+
+def claimed_guild_queryset_for_owner(*, owner_user=None, organization=None, include_legacy: bool = False):
+    if (owner_user is None) == (organization is None):
+        raise ValueError("Exactly one Discord owner must be provided.")
+
     queryset = PersistentAgentDiscordGuild.objects.filter(is_active=True)
+    if not include_legacy:
+        queryset = queryset.filter(
+            authorization_source=PersistentAgentDiscordGuild.AuthorizationSource.EXPLICIT_OAUTH,
+        )
     if organization is not None:
         return queryset.filter(organization=organization)
     return queryset.filter(owner_user=owner_user)
@@ -209,19 +221,29 @@ def _oauth_redirect_uri() -> str:
     return settings.DISCORD_OAUTH_REDIRECT_URI.strip()
 
 
-def build_discord_oauth_start_url(agent: PersistentAgent) -> str:
+def build_discord_oauth_start_url(agent: PersistentAgent, *, guild_id: str = "") -> str:
     path = reverse("discord_oauth_start")
-    return f"{_public_base_url()}{path}?{urlencode({'agent_id': str(agent.id)})}"
+    params = {"agent_id": str(agent.id)}
+    normalized_guild_id = str(guild_id or "").strip()
+    if normalized_guild_id:
+        params["guild_id"] = normalized_guild_id
+    return f"{_public_base_url()}{path}?{urlencode(params)}"
 
 
-def build_discord_bot_invite_url() -> str:
-    if not settings.DISCORD_CLIENT_ID:
-        return ""
+def _discord_oauth_url(session: PersistentAgentDiscordOAuthSession) -> str:
     params = {
         "client_id": settings.DISCORD_CLIENT_ID,
+        "redirect_uri": _oauth_redirect_uri(),
+        "response_type": "code",
         "scope": " ".join(DISCORD_OAUTH_BOT_INSTALL_SCOPES),
         "permissions": str(settings.DISCORD_BOT_INVITE_PERMISSIONS),
+        "integration_type": str(DISCORD_GUILD_INSTALL_TYPE),
+        "state": session.state,
+        "prompt": "consent",
     }
+    if session.requested_guild_id:
+        params["guild_id"] = session.requested_guild_id
+        params["disable_guild_select"] = "true"
     return f"{DISCORD_OAUTH_AUTHORIZE_URL}?{urlencode(params)}"
 
 
@@ -229,18 +251,21 @@ def discord_setup_required_response(agent: PersistentAgent) -> dict[str, Any]:
     return {
         "status": "action_required",
         "message": (
-            "Connect Discord to Gobii. This single setup link authorizes Discord guild access "
-            "and installs the Gobii bot in the selected server."
+            "Connect one Discord server to Gobii. This setup link installs the Gobii bot "
+            "only in the server selected in Discord."
         ),
         "connect_url": build_discord_oauth_start_url(agent),
-        "bot_invite_url": build_discord_bot_invite_url(),
         "channels": [],
     }
 
 
-def start_discord_oauth(agent: PersistentAgent, initiated_by) -> str:
+def start_discord_oauth(agent: PersistentAgent, initiated_by, *, requested_guild_id: str = "") -> str:
     if not settings.DISCORD_CLIENT_ID or not settings.DISCORD_CLIENT_SECRET:
         raise DiscordBotIntegrationError("Discord OAuth is not configured.")
+
+    requested_guild_id = str(requested_guild_id or "").strip()
+    if requested_guild_id and not _claimed_guild_queryset(agent).filter(guild_id=requested_guild_id).exists():
+        raise DiscordBotIntegrationError("That Discord server is not connected to this Gobii context.")
 
     owner_user, organization = _agent_owner(agent)
     session = PersistentAgentDiscordOAuthSession.objects.create(
@@ -249,59 +274,60 @@ def start_discord_oauth(agent: PersistentAgent, initiated_by) -> str:
         owner_user=owner_user,
         organization=organization,
         initiated_by=initiated_by if getattr(initiated_by, "is_authenticated", False) else None,
+        requested_guild_id=requested_guild_id,
         expires_at=timezone.now() + timedelta(minutes=15),
     )
-    params = {
-        "client_id": settings.DISCORD_CLIENT_ID,
-        "redirect_uri": _oauth_redirect_uri(),
-        "response_type": "code",
-        "scope": " ".join((*DISCORD_OAUTH_USER_SCOPES, *DISCORD_OAUTH_BOT_INSTALL_SCOPES)),
-        "permissions": str(settings.DISCORD_BOT_INVITE_PERMISSIONS),
-        "state": session.state,
-        "prompt": "consent",
-    }
-    return f"{DISCORD_OAUTH_AUTHORIZE_URL}?{urlencode(params)}"
+    return _discord_oauth_url(session)
 
 
-def _exchange_oauth_code(code: str) -> str:
-    response = requests.post(
-        DISCORD_OAUTH_TOKEN_URL,
-        data={
-            "client_id": settings.DISCORD_CLIENT_ID,
-            "client_secret": settings.DISCORD_CLIENT_SECRET,
-            "grant_type": "authorization_code",
-            "code": code,
-            "redirect_uri": _oauth_redirect_uri(),
-        },
-        headers={"Content-Type": "application/x-www-form-urlencoded"},
-        timeout=20,
-    )
+def _exchange_oauth_code(code: str) -> Mapping[str, Any]:
+    try:
+        response = requests.post(
+            DISCORD_OAUTH_TOKEN_URL,
+            data={
+                "client_id": settings.DISCORD_CLIENT_ID,
+                "client_secret": settings.DISCORD_CLIENT_SECRET,
+                "grant_type": "authorization_code",
+                "code": code,
+                "redirect_uri": _oauth_redirect_uri(),
+            },
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            timeout=20,
+        )
+    except requests.RequestException as exc:
+        raise DiscordBotIntegrationError("Discord OAuth token exchange could not reach Discord.") from exc
     _raise_for_discord_status(response, action="OAuth token exchange")
-    access_token = str((response.json() or {}).get("access_token") or "").strip()
+    payload = response.json() or {}
+    if not isinstance(payload, Mapping):
+        raise DiscordBotIntegrationError("Discord OAuth returned an invalid token response.")
+    access_token = str(payload.get("access_token") or "").strip()
     if not access_token:
         raise DiscordBotIntegrationError("Discord OAuth did not return an access token.")
-    return access_token
+    guild = payload.get("guild")
+    if not isinstance(guild, Mapping) or not str(guild.get("id") or "").strip():
+        raise DiscordBotIntegrationError(
+            "Discord OAuth did not identify the installed server. "
+            "Enable Require OAuth2 Code Grant for the Gobii Discord application, then try again."
+        )
+    return payload
 
 
-def _fetch_oauth_guilds(access_token: str) -> list[Mapping[str, Any]]:
-    response = requests.get(
-        f"{DISCORD_API_BASE}/users/@me/guilds",
-        headers={"Authorization": f"Bearer {access_token}"},
-        timeout=20,
-    )
-    _raise_for_discord_status(response, action="guild lookup")
-    payload = response.json() or []
-    if not isinstance(payload, list):
-        raise DiscordBotIntegrationError("Discord guild lookup returned an invalid response.")
-    return [guild for guild in payload if isinstance(guild, Mapping)]
-
-
-def _can_manage_guild(guild: Mapping[str, Any]) -> bool:
+def _fetch_bot_guild(guild_id: str) -> Mapping[str, Any]:
     try:
-        permissions = int(str(guild.get("permissions") or "0"))
-    except ValueError:
-        return False
-    return bool(permissions & DISCORD_ADMINISTRATOR_PERMISSION or permissions & DISCORD_MANAGE_GUILD_PERMISSION)
+        response = requests.get(
+            f"{DISCORD_API_BASE}/guilds/{guild_id}",
+            headers=_discord_bot_headers(),
+            timeout=20,
+        )
+    except requests.RequestException as exc:
+        raise DiscordBotIntegrationError(
+            "Gobii could not verify the installed Discord server."
+        ) from exc
+    _raise_for_discord_status(response, action="installed server verification")
+    payload = response.json() or []
+    if not isinstance(payload, Mapping) or str(payload.get("id") or "").strip() != guild_id:
+        raise DiscordBotIntegrationError("Discord returned an invalid installed server response.")
+    return payload
 
 
 def _owner_matches_discord_guild_claim(
@@ -341,6 +367,13 @@ def _claim_discord_guild_for_session(
         .first()
     )
     if existing:
+        if existing.authorization_source == PersistentAgentDiscordGuild.AuthorizationSource.LEGACY_DISCOVERED:
+            has_configured_subscription = existing.channel_subscriptions.exclude(
+                status=PersistentAgentDiscordChannelSubscription.Status.DISABLED,
+            ).exists()
+            if has_configured_subscription:
+                return None
+            return _update_discord_guild_claim(existing, defaults)
         if not _owner_matches_discord_guild_claim(existing, session):
             return None
         return _update_discord_guild_claim(existing, defaults)
@@ -410,19 +443,19 @@ def handle_discord_oauth_callback(
     selected_guild_id: str = "",
     selected_permissions: str = "",
 ) -> DiscordGuildClaimResult:
+    # Discord documents the callback guild_id as a hint; the exchanged token's guild is authoritative.
+    del selected_guild_id
     session = PersistentAgentDiscordOAuthSession.objects.get(state=state)
     if session.completed_at:
         raise DiscordBotIntegrationError("This Discord authorization has already been used.")
     if session.is_expired():
         raise DiscordBotIntegrationError("This Discord authorization has expired. Start the connection again.")
 
-    access_token = _exchange_oauth_code(code)
-    oauth_guilds = _fetch_oauth_guilds(access_token)
-    claimable_guilds = [guild for guild in oauth_guilds if _can_manage_guild(guild)]
-    claimed: list[dict[str, str]] = []
-    selected_guild_id = selected_guild_id.strip()
+    token_payload = _exchange_oauth_code(code)
+    token_guild = token_payload["guild"]
+    authoritative_guild_id = str(token_guild.get("id") or "").strip()
+    bot_guild = _fetch_bot_guild(authoritative_guild_id)
     selected_permissions = selected_permissions.strip()
-    selected_guild: dict[str, str] | None = None
 
     with transaction.atomic():
         session = (
@@ -433,44 +466,43 @@ def handle_discord_oauth_callback(
             raise DiscordBotIntegrationError("This Discord authorization has already been used.")
         if session.is_expired():
             raise DiscordBotIntegrationError("This Discord authorization has expired. Start the connection again.")
+        if session.requested_guild_id and session.requested_guild_id != authoritative_guild_id:
+            raise DiscordBotIntegrationError(
+                "Discord authorized a different server than the requested Gobii server."
+            )
 
-        for guild in claimable_guilds:
-            guild_id = str(guild.get("id") or "").strip()
-            if not guild_id:
-                continue
-            defaults = {
-                "name": str(guild.get("name") or guild_id)[:255],
-                "icon_hash": str(guild.get("icon") or "")[:128],
-                "owner_user": session.owner_user,
-                "organization": session.organization,
-                "claimed_by": session.initiated_by,
-                "is_active": True,
-                "last_synced_at": timezone.now(),
-            }
-            guild_claim = _claim_discord_guild_for_session(
-                session,
-                guild_id=guild_id,
-                defaults=defaults,
+        defaults = {
+            "name": str(bot_guild.get("name") or token_guild.get("name") or authoritative_guild_id)[:255],
+            "icon_hash": str(bot_guild.get("icon") or token_guild.get("icon") or "")[:128],
+            "authorization_source": PersistentAgentDiscordGuild.AuthorizationSource.EXPLICIT_OAUTH,
+            "owner_user": session.owner_user,
+            "organization": session.organization,
+            "claimed_by": session.initiated_by,
+            "is_active": True,
+            "last_synced_at": timezone.now(),
+        }
+        guild_claim = _claim_discord_guild_for_session(
+            session,
+            guild_id=authoritative_guild_id,
+            defaults=defaults,
+        )
+        if guild_claim is None:
+            raise DiscordBotIntegrationError(
+                "This Discord server is already connected to another Gobii context."
             )
-            if guild_claim is None:
-                continue
-            claimed.append(
-                {
-                    "id": guild_claim.guild_id,
-                    "name": guild_claim.name,
-                    "icon_hash": guild_claim.icon_hash,
-                }
-            )
-            if selected_guild_id and guild_claim.guild_id == selected_guild_id:
-                selected_guild = claimed[-1]
+        selected_guild = {
+            "id": guild_claim.guild_id,
+            "name": guild_claim.name,
+            "icon_hash": guild_claim.icon_hash,
+        }
 
         session.completed_at = timezone.now()
-        session.selected_guild_id = selected_guild_id if selected_guild else ""
+        session.selected_guild_id = authoritative_guild_id
         session.selected_permissions = selected_permissions[:64]
         session.save(update_fields=["completed_at", "selected_guild_id", "selected_permissions"])
         result = DiscordGuildClaimResult(
-            claimed_count=len(claimed),
-            guilds=claimed,
+            claimed_count=1,
+            guilds=[selected_guild],
             selected_guild_id=session.selected_guild_id,
             selected_guild=selected_guild,
         )
@@ -490,38 +522,133 @@ def list_claimed_guilds(agent: PersistentAgent) -> list[dict[str, str]]:
     return [serialize_guild(guild) for guild in _claimed_guild_queryset(agent).order_by("name", "guild_id")]
 
 
-def disconnect_discord_native_integration(*, owner_user=None, organization=None) -> dict[str, int]:
-    if (owner_user is None) == (organization is None):
-        raise ValueError("Exactly one Discord owner must be provided.")
+def list_claimed_guilds_for_owner(*, owner_user=None, organization=None) -> list[dict[str, str]]:
+    return [
+        serialize_guild(guild)
+        for guild in claimed_guild_queryset_for_owner(
+            owner_user=owner_user,
+            organization=organization,
+        ).order_by("name", "guild_id")
+    ]
+
+
+def _delete_discord_webhook(webhook: PersistentAgentDiscordWebhook) -> None:
+    try:
+        webhook_token = webhook.webhook_token
+    except ValueError as exc:
+        raise DiscordBotIntegrationError(
+            "Gobii could not read the stored Discord webhook while removing the server."
+        ) from exc
+    if webhook_token:
+        url = f"{DISCORD_API_BASE}/webhooks/{webhook.webhook_id}/{webhook_token}"
+        headers = None
+    else:
+        url = f"{DISCORD_API_BASE}/webhooks/{webhook.webhook_id}"
+        headers = _discord_bot_headers()
+    try:
+        response = requests.delete(url, headers=headers, timeout=20)
+    except requests.RequestException as exc:
+        raise DiscordBotIntegrationError("Discord webhook removal could not reach Discord.") from exc
+    if response.status_code == 404:
+        return
+    _raise_for_discord_status(response, action="webhook removal")
+
+
+def _leave_discord_guild(guild_id: str) -> None:
+    try:
+        response = requests.delete(
+            f"{DISCORD_API_BASE}/users/@me/guilds/{guild_id}",
+            headers=_discord_bot_headers(),
+            timeout=20,
+        )
+    except requests.RequestException as exc:
+        raise DiscordBotIntegrationError("Discord server removal could not reach Discord.") from exc
+    if response.status_code == 404:
+        return
+    _raise_for_discord_status(response, action="server removal")
+
+
+def disconnect_discord_guild_claim(guild_claim: PersistentAgentDiscordGuild) -> dict[str, int | str]:
+    guild_id = guild_claim.guild_id
+    webhooks = list(
+        PersistentAgentDiscordWebhook.objects.filter(guild=guild_claim).order_by("created_at", "id")
+    )
+    for webhook in webhooks:
+        _delete_discord_webhook(webhook)
+    _leave_discord_guild(guild_id)
 
     now = timezone.now()
     with transaction.atomic():
-        guild_queryset = PersistentAgentDiscordGuild.objects.select_for_update()
-        agent_queryset = PersistentAgent.objects.non_eval().alive()
-        if organization is not None:
-            guild_queryset = guild_queryset.filter(organization=organization)
-            agent_queryset = agent_queryset.filter(organization=organization)
-        else:
-            guild_queryset = guild_queryset.filter(owner_user=owner_user)
-            agent_queryset = agent_queryset.filter(user=owner_user, organization_id__isnull=True)
-
-        guild_ids = list(guild_queryset.filter(is_active=True).values_list("id", flat=True))
-        agent_ids = list(agent_queryset.values_list("id", flat=True))
-        subscription_count = 0
-        webhook_count = 0
-        guild_count = 0
-        if guild_ids:
-            subscription_count = PersistentAgentDiscordChannelSubscription.objects.filter(guild_id__in=guild_ids).exclude(
-                status=PersistentAgentDiscordChannelSubscription.Status.DISABLED
-            ).update(status=PersistentAgentDiscordChannelSubscription.Status.DISABLED, updated_at=now)
-            webhook_queryset = PersistentAgentDiscordWebhook.objects.filter(guild_id__in=guild_ids)
-            webhook_count = webhook_queryset.count()
-            webhook_queryset.delete()
-            guild_count = PersistentAgentDiscordGuild.objects.filter(id__in=guild_ids).update(
-                is_active=False,
-                last_synced_at=now,
+        locked_claim = PersistentAgentDiscordGuild.objects.select_for_update().get(id=guild_claim.id)
+        subscription_count = (
+            PersistentAgentDiscordChannelSubscription.objects.filter(guild=locked_claim)
+            .exclude(status=PersistentAgentDiscordChannelSubscription.Status.DISABLED)
+            .update(
+                status=PersistentAgentDiscordChannelSubscription.Status.DISABLED,
                 updated_at=now,
             )
+        )
+        webhook_queryset = PersistentAgentDiscordWebhook.objects.filter(guild=locked_claim)
+        webhook_count = webhook_queryset.count()
+        webhook_queryset.delete()
+        locked_claim.is_active = False
+        locked_claim.last_synced_at = now
+        locked_claim.save(update_fields=["is_active", "last_synced_at", "updated_at"])
+
+    return {
+        "guild_id": guild_id,
+        "subscriptions_disabled": subscription_count,
+        "webhooks_removed": webhook_count,
+    }
+
+
+def disconnect_discord_guild_for_owner(*, guild_id: str, owner_user=None, organization=None) -> dict[str, int | str]:
+    guild_claim = claimed_guild_queryset_for_owner(
+        owner_user=owner_user,
+        organization=organization,
+        include_legacy=True,
+    ).get(guild_id=str(guild_id or "").strip())
+    return disconnect_discord_guild_claim(guild_claim)
+
+
+def disconnect_discord_native_integration(*, owner_user=None, organization=None) -> dict[str, Any]:
+    if (owner_user is None) == (organization is None):
+        raise ValueError("Exactly one Discord owner must be provided.")
+
+    guilds = list(
+        claimed_guild_queryset_for_owner(
+            owner_user=owner_user,
+            organization=organization,
+            include_legacy=True,
+        ).order_by("name", "guild_id")
+    )
+    guild_count = 0
+    subscription_count = 0
+    webhook_count = 0
+    failed_guilds = []
+    for guild in guilds:
+        try:
+            result = disconnect_discord_guild_claim(guild)
+        except DiscordBotIntegrationError as exc:
+            failed_guilds.append(
+                {
+                    "guild_id": guild.guild_id,
+                    "name": guild.name,
+                    "error": str(exc),
+                }
+            )
+            continue
+        guild_count += 1
+        subscription_count += int(result["subscriptions_disabled"])
+        webhook_count += int(result["webhooks_removed"])
+
+    agent_queryset = PersistentAgent.objects.non_eval().alive()
+    if organization is not None:
+        agent_queryset = agent_queryset.filter(organization=organization)
+    else:
+        agent_queryset = agent_queryset.filter(user=owner_user, organization_id__isnull=True)
+    agent_ids = list(agent_queryset.values_list("id", flat=True))
+    with transaction.atomic():
         skill_count = PersistentAgentSystemSkillState.objects.filter(
             agent_id__in=agent_ids,
             skill_key=DISCORD_NATIVE_SYSTEM_SKILL_KEY,
@@ -533,6 +660,7 @@ def disconnect_discord_native_integration(*, owner_user=None, organization=None)
         "subscriptions_disabled": subscription_count,
         "webhooks_removed": webhook_count,
         "agents_disabled": skill_count,
+        "failed_guilds": failed_guilds,
     }
 
 
@@ -603,9 +731,9 @@ def discover_channels(agent: PersistentAgent, *, guild_id: str = "", query: str 
                 "status": "action_required",
                 "message": (
                     f"The Gobii Discord bot cannot list channels for {guild.name}. "
-                    "Invite the bot to that server, then try channel discovery again."
+                    "Reconnect that server, then try channel discovery again."
                 ),
-                "bot_invite_url": build_discord_bot_invite_url(),
+                "connect_url": build_discord_oauth_start_url(agent, guild_id=guild.guild_id),
                 "error": str(exc),
                 "channels": [],
             }
