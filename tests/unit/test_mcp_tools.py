@@ -1032,8 +1032,8 @@ class MCPToolManagerTests(TestCase):
             return_value=(sandbox_result, False),
         ) as mock_dispatch, patch.object(
             self.manager,
-            "_execute_mcp_tool_locally_isolated",
-        ) as mock_local_execute:
+            "_run_coroutine_isolated",
+        ) as mock_run_isolated:
             result = self.manager.execute_mcp_tool_isolated(
                 agent,
                 tool.full_name,
@@ -1051,7 +1051,7 @@ class MCPToolManagerTests(TestCase):
             params={},
             full_tool_name=tool.full_name,
         )
-        mock_local_execute.assert_not_called()
+        mock_run_isolated.assert_not_called()
 
     @override_settings(SANDBOX_COMPUTE_LOCAL_FALLBACK_MCP=True)
     def test_isolated_sandbox_fallback_uses_fresh_client_and_isolated_loop(self):
