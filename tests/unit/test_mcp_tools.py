@@ -580,7 +580,10 @@ class MCPToolManagerTests(TestCase):
         self.assertNotIn(runtime.config_id, self.manager._clients)
         self.assertNotIn(runtime.config_id, self.manager._tools_cache)
 
-    @override_settings(SANDBOX_COMPUTE_LOCAL_FALLBACK_MCP=False)
+    @override_settings(
+        SANDBOX_COMPUTE_LOCAL_FALLBACK_MCP=False,
+        MCP_ASYNC_TASKS_ENABLED=False,
+    )
     @patch("api.agent.tools.mcp_manager.sandbox_compute_enabled", return_value=True)
     @patch("api.agent.tools.mcp_manager.schedule_mcp_tool_discovery")
     def test_register_http_server_skips_sandbox_discovery(
@@ -1508,6 +1511,7 @@ class MCPToolManagerTests(TestCase):
         self.assertEqual(runtime.oauth_token_type, "Bearer")
 
     @tag("batch_mcp_tools")
+    @override_settings(MCP_ASYNC_TASKS_ENABLED=False)
     def test_cached_catalog_load_does_not_prepare_oauth(self):
         runtime = MCPServerRuntime(
             config_id=self.config_id,
@@ -1974,7 +1978,7 @@ class MCPToolManagerTests(TestCase):
         with patch.object(self.manager, "_select_agent_proxy_url", return_value=(None, None)):
             result = self.manager.execute_mcp_tool(agent, "mcp_test_tool1", {"param": "value"})
         
-        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["status"], "success", result)
 
     @override_settings(GOBII_PROPRIETARY_MODE=False)
     def test_execute_http_tool_uses_proxy(self):
@@ -2001,7 +2005,7 @@ class MCPToolManagerTests(TestCase):
              patch.object(self.manager, "_ensure_event_loop", return_value=loop):
             result = self.manager.execute_mcp_tool(agent, "http_tool", {"foo": "bar"})
 
-        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["status"], "success", result)
         mock_select.assert_called_once()
         mock_ctx.assert_called()
         self.assertIn("http://proxy.example:8080", captured)
@@ -2031,7 +2035,7 @@ class MCPToolManagerTests(TestCase):
              self.assertLogs("api.agent.tools.mcp_manager", level="WARNING") as log_capture:
             result = self.manager.execute_mcp_tool(agent, "http_tool", {"foo": "bar"})
 
-        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["status"], "success", result)
         self.assertTrue(
             any("continuing without proxy" in message for message in log_capture.output),
             f"Expected warning about proxy fallback, got: {log_capture.output}",

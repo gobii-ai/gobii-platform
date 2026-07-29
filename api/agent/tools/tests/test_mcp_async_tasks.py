@@ -4,6 +4,7 @@ from datetime import timedelta
 from unittest.mock import Mock, patch
 
 import httpx
+from kombu.exceptions import OperationalError as KombuOperationalError
 from django.contrib.auth import get_user_model
 from django.test import SimpleTestCase, TestCase, override_settings, tag
 from django.utils import timezone
@@ -97,6 +98,7 @@ class MCPTaskHTTPClientTests(SimpleTestCase):
         self.assertTrue(discovery.supports_tasks)
         self.assertIsInstance(result, MCPCreateTaskResult)
         self.assertEqual(result.task_id, "remote-123")
+        self.assertIsNotNone(result.created_at.tzinfo)
         call_request, call_payload = self.server.requests[-1]
         self.assertEqual(call_request.headers["mcp-method"], "tools/call")
         self.assertEqual(call_request.headers["mcp-name"], "long_job")
@@ -219,6 +221,8 @@ class MCPTaskPollingTests(TestCase):
 
     def test_working_then_completed_reschedules_without_early_wake(self):
         task = self._task()
+        task.attempts = 3
+        task.save(update_fields=["attempts"])
         now_text = timezone.now().isoformat()
         working = MCPDetailedTaskResult(
             task_id="remote-123",
@@ -247,6 +251,7 @@ class MCPTaskPollingTests(TestCase):
                 poll_mcp_task.run(str(task.id))
             task.refresh_from_db()
             self.assertEqual(task.status, PersistentAgentMCPTask.Status.WORKING)
+            self.assertEqual(task.attempts, 0)
             self.assertIsNone(task.wake_enqueued_at)
             enqueue.assert_called_once()
             wake.assert_not_called()
@@ -283,11 +288,14 @@ class MCPTaskPollingTests(TestCase):
         ) as wake:
             with self.captureOnCommitCallbacks(execute=True):
                 poll_mcp_task.run(str(task.id))
+            with self.captureOnCommitCallbacks(execute=True):
+                poll_mcp_task.run(str(task.id))
 
         task.refresh_from_db()
         self.assertEqual(task.status, PersistentAgentMCPTask.Status.INPUT_REQUIRED)
         self.assertIsNone(task.next_poll_at)
         self.assertIn("region", task.input_requests)
+        self.assertEqual(manager.get_mcp_task_state.call_count, 1)
         wake.assert_called_once()
 
     def test_transient_timeout_retries_without_waking(self):
@@ -303,6 +311,7 @@ class MCPTaskPollingTests(TestCase):
 
         task.refresh_from_db()
         self.assertEqual(task.status, PersistentAgentMCPTask.Status.WORKING)
+        self.assertEqual(task.attempts, 1)
         self.assertIsNone(task.lease_expires_at)
         self.assertIsNone(task.wake_enqueued_at)
         enqueue.assert_called_once()
@@ -395,7 +404,10 @@ class MCPTaskPollingTests(TestCase):
             poll_interval_ms=1,
         )
 
-        with patch("api.tasks.mcp_tasks.poll_mcp_task.apply_async") as enqueue:
+        with patch(
+            "api.tasks.mcp_tasks.poll_mcp_task.apply_async",
+            side_effect=KombuOperationalError("broker unavailable"),
+        ) as enqueue:
             with self.captureOnCommitCallbacks(execute=True):
                 response = manager._persist_mcp_task(
                     agent=self.agent,

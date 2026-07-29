@@ -5526,10 +5526,7 @@ def _build_mcp_tasks_sections(agent: PersistentAgent, tasks_group) -> None:
         PersistentAgentMCPTask.objects.filter(
             agent=agent,
             terminal_at__isnull=True,
-            status__in=[
-                PersistentAgentMCPTask.Status.WORKING,
-                PersistentAgentMCPTask.Status.INPUT_REQUIRED,
-            ],
+            status__in=PersistentAgentMCPTask.ACTIVE_STATUSES,
         ).order_by("created_at")
     )
     for index, task in enumerate(active_tasks):

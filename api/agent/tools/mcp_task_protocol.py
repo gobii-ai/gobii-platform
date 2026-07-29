@@ -2,11 +2,12 @@
 
 import json
 from dataclasses import dataclass
-from datetime import datetime
-from typing import Any, Callable, Optional
+from datetime import UTC, datetime
+from typing import Annotated, Any, Callable, Literal, Optional
 
 import httpx
 from mcp.types import CallToolResult, Tool
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 
 MCP_TASKS_EXTENSION = "io.modelcontextprotocol/tasks"
@@ -38,100 +39,65 @@ class MCPTaskDiscovery:
     supports_tasks: bool
 
 
-@dataclass(frozen=True)
-class MCPCreateTaskResult:
-    task_id: str
-    status: str
-    status_message: str
-    created_at: str
-    last_updated_at: str
-    ttl_ms: Optional[int]
-    poll_interval_ms: Optional[int]
+TaskStatus = Literal["working", "input_required", "completed", "failed", "cancelled"]
+NonNegativeInt = Annotated[int, Field(strict=True, ge=0)]
 
 
-@dataclass(frozen=True)
-class MCPDetailedTaskResult:
-    task_id: str
-    status: str
-    status_message: str
-    created_at: str
-    last_updated_at: str
-    ttl_ms: Optional[int]
-    poll_interval_ms: Optional[int]
-    input_requests: Optional[dict[str, Any]]
-    result: Optional[dict[str, Any]]
-    error: Optional[dict[str, Any]]
+class _MCPTask(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    task_id: str = Field(alias="taskId", min_length=1)
+    status: TaskStatus
+    status_message: str = Field(default="", alias="statusMessage")
+    created_at: datetime = Field(alias="createdAt")
+    last_updated_at: datetime = Field(alias="lastUpdatedAt")
+    ttl_ms: Optional[NonNegativeInt] = Field(default=None, alias="ttlMs")
+    poll_interval_ms: Optional[NonNegativeInt] = Field(default=None, alias="pollIntervalMs")
+
+    @field_validator("created_at", "last_updated_at")
+    @classmethod
+    def normalize_timestamp(cls, value: datetime) -> datetime:
+        return value.replace(tzinfo=UTC) if value.tzinfo is None else value
 
 
-def _required_string(payload: dict[str, Any], key: str) -> str:
-    value = payload.get(key)
-    if not isinstance(value, str) or not value:
-        raise MCPTaskMalformedResponse(f"MCP response field '{key}' must be a non-empty string.")
-    return value
+class MCPCreateTaskResult(_MCPTask):
+    result_type: Literal["task"] = Field(default="task", alias="resultType")
 
 
-def _optional_integer(payload: dict[str, Any], key: str) -> Optional[int]:
-    value = payload.get(key)
-    if value is None:
-        return None
-    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
-        raise MCPTaskMalformedResponse(f"MCP response field '{key}' must be a non-negative integer or null.")
-    return value
+class MCPDetailedTaskResult(_MCPTask):
+    result_type: Literal["complete"] = Field(default="complete", alias="resultType")
+    input_requests: Optional[dict[str, Any]] = Field(default=None, alias="inputRequests")
+    result: Optional[dict[str, Any]] = None
+    error: Optional[dict[str, Any]] = None
+
+    @model_validator(mode="after")
+    def validate_status_payload(self):
+        required_payloads = {
+            "input_required": ("inputRequests", self.input_requests),
+            "completed": ("result", self.result),
+            "failed": ("error", self.error),
+        }
+        field_name, value = required_payloads.get(self.status, ("", {}))
+        if not isinstance(value, dict):
+            raise ValueError(f"An MCP task with status '{self.status}' must include {field_name}.")
+        return self
 
 
-def _required_timestamp(payload: dict[str, Any], key: str) -> str:
-    value = _required_string(payload, key)
+def _parse_task_result(model, payload: dict[str, Any], result_type: str):
+    if payload.get("resultType") != result_type:
+        raise MCPTaskMalformedResponse(f"Expected resultType '{result_type}'.")
     try:
-        datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError as exc:
-        raise MCPTaskMalformedResponse(f"MCP response field '{key}' must be an ISO 8601 timestamp.") from exc
-    return value
+        return model.model_validate(payload)
+    except ValidationError as exc:
+        raise MCPTaskMalformedResponse(f"Malformed MCP task response: {exc}") from exc
 
 
 def parse_create_task_result(payload: dict[str, Any]) -> MCPCreateTaskResult:
-    if payload.get("resultType") != "task":
-        raise MCPTaskMalformedResponse("Expected a CreateTaskResult with resultType 'task'.")
-    status = _required_string(payload, "status")
-    if status not in {"working", "input_required", "completed", "failed", "cancelled"}:
-        raise MCPTaskMalformedResponse(f"Unsupported MCP task status '{status}'.")
-    return MCPCreateTaskResult(
-        task_id=_required_string(payload, "taskId"),
-        status=status,
-        status_message=str(payload.get("statusMessage") or ""),
-        created_at=_required_timestamp(payload, "createdAt"),
-        last_updated_at=_required_timestamp(payload, "lastUpdatedAt"),
-        ttl_ms=_optional_integer(payload, "ttlMs"),
-        poll_interval_ms=_optional_integer(payload, "pollIntervalMs"),
-    )
+    return _parse_task_result(MCPCreateTaskResult, payload, "task")
 
 
 def parse_detailed_task_result(payload: dict[str, Any]) -> MCPDetailedTaskResult:
-    if payload.get("resultType") != "complete":
-        raise MCPTaskMalformedResponse("tasks/get must return resultType 'complete'.")
-    status = _required_string(payload, "status")
-    if status not in {"working", "input_required", "completed", "failed", "cancelled"}:
-        raise MCPTaskMalformedResponse(f"Unsupported MCP task status '{status}'.")
-    input_requests = payload.get("inputRequests")
-    result = payload.get("result")
-    error = payload.get("error")
-    if status == "input_required" and not isinstance(input_requests, dict):
-        raise MCPTaskMalformedResponse("An input_required task must include inputRequests.")
-    if status == "completed" and not isinstance(result, dict):
-        raise MCPTaskMalformedResponse("A completed task must include an inlined result.")
-    if status == "failed" and not isinstance(error, dict):
-        raise MCPTaskMalformedResponse("A failed task must include a JSON-RPC error.")
-    return MCPDetailedTaskResult(
-        task_id=_required_string(payload, "taskId"),
-        status=status,
-        status_message=str(payload.get("statusMessage") or ""),
-        created_at=_required_timestamp(payload, "createdAt"),
-        last_updated_at=_required_timestamp(payload, "lastUpdatedAt"),
-        ttl_ms=_optional_integer(payload, "ttlMs"),
-        poll_interval_ms=_optional_integer(payload, "pollIntervalMs"),
-        input_requests=input_requests,
-        result=result,
-        error=error,
-    )
+    return _parse_task_result(MCPDetailedTaskResult, payload, "complete")
 
 
 class MCPTaskHTTPClient:

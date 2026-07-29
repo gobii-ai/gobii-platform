@@ -8074,6 +8074,8 @@ class PersistentAgentMCPTask(models.Model):
         CANCELLED = "cancelled", "Cancelled"
         EXPIRED = "expired", "Expired"
 
+    ACTIVE_STATUSES = (Status.WORKING, Status.INPUT_REQUIRED)
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     agent = models.ForeignKey(
         "PersistentAgent",

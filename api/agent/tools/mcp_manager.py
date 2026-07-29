@@ -19,6 +19,7 @@ import fnmatch
 import contextlib
 import contextvars
 import sys
+import threading
 from time import monotonic
 from collections import OrderedDict
 from collections.abc import Mapping
@@ -45,7 +46,6 @@ from django.contrib.sites.models import Site
 from django.db import DatabaseError, transaction
 from django.db.models import Max
 from django.urls import reverse
-from django.utils.dateparse import parse_datetime
 
 from api.services.system_settings import get_mcp_http_timeout_seconds, get_mcp_stdio_timeout_seconds
 from django.utils import timezone
@@ -379,6 +379,9 @@ class MCPToolManager:
         self._clients: Dict[str, Client] = {}
         self._modern_http_protocols: Dict[str, str] = {}
         self._task_capable_http_configs: set[str] = set()
+        # Tool calls within one agent cycle may run concurrently in this process.
+        # Agent event processing already supplies the cross-worker single-flight lock.
+        self._task_creation_locks = tuple(threading.Lock() for _ in range(64))
         self._stdio_proxy_clients: Dict[str, Client] = {}
         self._server_cache: Dict[str, MCPServerRuntime] = {}
         self._tools_cache: OrderedDict[str, List[MCPToolInfo]] = OrderedDict()
@@ -2476,10 +2479,9 @@ class MCPToolManager:
     def _tool_result_error_message(result: Any) -> Optional[str]:
         if isinstance(result, dict) and result.get("status") == "error":
             return str(result.get("message") or result.get("result") or "Unknown error")
-        is_error = bool(
-            getattr(result, "is_error", False)
-            or getattr(result, "isError", False)
-        )
+        is_error = getattr(result, "is_error", None)
+        if is_error is None:
+            is_error = getattr(result, "isError", False)
         if not is_error:
             return None
         content = getattr(result, "content", None) or []
@@ -2551,12 +2553,8 @@ class MCPToolManager:
         protocol_version: str,
     ) -> Dict[str, Any]:
         now = timezone.now()
-        remote_created_at = parse_datetime(create_result.created_at)
-        remote_updated_at = parse_datetime(create_result.last_updated_at)
-        if remote_created_at is not None and timezone.is_naive(remote_created_at):
-            remote_created_at = timezone.make_aware(remote_created_at, UTC)
-        if remote_updated_at is not None and timezone.is_naive(remote_updated_at):
-            remote_updated_at = timezone.make_aware(remote_updated_at, UTC)
+        remote_created_at = create_result.created_at
+        remote_updated_at = create_result.last_updated_at
 
         local_deadline = now + timedelta(
             seconds=max(settings.MCP_ASYNC_TASK_MAX_LIFETIME_SECONDS, 1)
@@ -2608,7 +2606,7 @@ class MCPToolManager:
             defaults=defaults,
         )
         if created:
-            from api.tasks.mcp_tasks import poll_mcp_task, record_mcp_task_lifecycle
+            from api.tasks.mcp_tasks import enqueue_mcp_task_poll, record_mcp_task_lifecycle
 
             countdown = (
                 max((first_poll_at - now).total_seconds(), 0)
@@ -2616,7 +2614,7 @@ class MCPToolManager:
                 else 0
             )
             transaction.on_commit(
-                lambda: poll_mcp_task.apply_async(args=[str(task.id)], countdown=countdown)
+                lambda: enqueue_mcp_task_poll(str(task.id), countdown=countdown)
             )
             record_mcp_task_lifecycle("created", task)
         else:
@@ -2652,6 +2650,65 @@ class MCPToolManager:
             "message": create_result.status_message or "The MCP task is running in the background.",
             "auto_sleep_ok": True,
         }
+
+    def _execute_modern_http_tool(
+        self,
+        *,
+        agent: PersistentAgent,
+        runtime: MCPServerRuntime,
+        protocol_version: str,
+        full_tool_name: str,
+        remote_tool_name: str,
+        arguments: Dict[str, Any],
+        run_coroutine,
+    ) -> Tuple[Optional[Any], Optional[Dict[str, Any]]]:
+        advertise_tasks = (
+            settings.MCP_ASYNC_TASKS_ENABLED
+            and runtime.config_id in self._task_capable_http_configs
+        )
+        lock = (
+            self._task_creation_locks[hash(str(agent.id)) % len(self._task_creation_locks)]
+            if advertise_tasks
+            else contextlib.nullcontext()
+        )
+        with lock:
+            active_task_limit = max(settings.MCP_ASYNC_TASK_MAX_ACTIVE_PER_AGENT, 1)
+            if (
+                advertise_tasks
+                and PersistentAgentMCPTask.objects.filter(
+                    agent=agent,
+                    status__in=PersistentAgentMCPTask.ACTIVE_STATUSES,
+                ).count() >= active_task_limit
+            ):
+                return None, {
+                    "status": "error",
+                    "message": (
+                        "This agent already has the maximum number of active MCP tasks "
+                        f"({active_task_limit})."
+                    ),
+                }
+            client = self._build_task_http_client(
+                runtime,
+                protocol_version=protocol_version,
+            )
+            result = run_coroutine(
+                client.call_tool(
+                    remote_tool_name,
+                    arguments,
+                    advertise_tasks=advertise_tasks,
+                )
+            )
+            if isinstance(result, MCPCreateTaskResult):
+                return None, self._persist_mcp_task(
+                    agent=agent,
+                    runtime=runtime,
+                    full_tool_name=full_tool_name,
+                    remote_tool_name=remote_tool_name,
+                    arguments=arguments,
+                    create_result=result,
+                    protocol_version=protocol_version,
+                )
+            return result, None
 
     def get_mcp_task_state(self, task: PersistentAgentMCPTask) -> MCPDetailedTaskResult:
         config = (
@@ -2768,6 +2825,7 @@ class MCPToolManager:
         *,
         force_local: bool = False,
         tool_info: Optional[MCPToolInfo] = None,
+        isolated: bool = False,
     ) -> Dict[str, Any]:
         """Execute an MCP tool if it's enabled for the agent."""
         # Check if tool is blacklisted
@@ -2830,7 +2888,10 @@ class MCPToolManager:
             return param_error
 
         sandbox_fallback = False
-        sandbox_routed = self._should_route_runtime_via_sandbox(runtime, agent=agent) and not force_local
+        sandbox_routed = (
+            self._should_route_runtime_via_sandbox(runtime, agent=agent)
+            and not force_local
+        )
         if sandbox_routed:
             sandbox_result, sandbox_fallback = self._dispatch_sandbox_mcp_request(
                 agent=agent,
@@ -2844,7 +2905,7 @@ class MCPToolManager:
             if sandbox_result is not None:
                 return sandbox_result
 
-        if runtime and (not sandbox_routed or sandbox_fallback):
+        if runtime and not isolated and (not sandbox_routed or sandbox_fallback):
             local_force = force_local or sandbox_fallback
             if not self._ensure_runtime_registered(
                 runtime,
@@ -2865,7 +2926,7 @@ class MCPToolManager:
                 return {"status": "error", "message": proxy_error}
 
         modern_protocol: Optional[str] = None
-        if server_name == self.PIPEDREAM_RUNTIME_NAME:
+        if server_name == self.PIPEDREAM_RUNTIME_NAME and not isolated:
             app_slug = self._pd_app_slug_for_tool_call(info.tool_name, params)
             if app_slug:
                 try:
@@ -2892,26 +2953,15 @@ class MCPToolManager:
                 if runtime is not None
                 else None
             )
-            if modern_protocol:
-                active_task_limit = max(settings.MCP_ASYNC_TASK_MAX_ACTIVE_PER_AGENT, 1)
-                if (
-                    settings.MCP_ASYNC_TASKS_ENABLED
-                    and runtime.config_id in self._task_capable_http_configs
-                    and PersistentAgentMCPTask.objects.filter(
-                        agent=agent,
-                        status__in=[
-                            PersistentAgentMCPTask.Status.WORKING,
-                            PersistentAgentMCPTask.Status.INPUT_REQUIRED,
-                        ],
-                    ).count() >= active_task_limit
-                ):
-                    return {
-                        "status": "error",
-                        "message": (
-                            "This agent already has the maximum number of active MCP tasks "
-                            f"({active_task_limit})."
-                        ),
-                    }
+            if not modern_protocol and isolated and runtime:
+                client = self._build_client_for_runtime(
+                    runtime,
+                    env_overrides=(
+                        self._build_stdio_proxy_env(proxy_url)
+                        if self._is_stdio_runtime(runtime)
+                        else None
+                    ),
+                )
             elif runtime and self._is_stdio_runtime(runtime) and proxy_url:
                 client = self._get_scoped_stdio_proxy_client(
                     runtime,
@@ -2929,24 +2979,26 @@ class MCPToolManager:
         try:
             timeout_seconds = self._get_timeout_for_runtime(runtime)
             http_timeout_seconds = timeout_seconds if runtime and runtime.url else None
+            run_coroutine = (
+                self._run_coroutine_isolated
+                if isolated
+                else self._run_coroutine_sync
+            )
             with _use_mcp_http_timeout(http_timeout_seconds), _use_mcp_proxy(proxy_url):
                 if modern_protocol and runtime is not None:
-                    task_client = self._build_task_http_client(
-                        runtime,
+                    result, early_response = self._execute_modern_http_tool(
+                        agent=agent,
+                        runtime=runtime,
                         protocol_version=modern_protocol,
+                        full_tool_name=tool_name,
+                        remote_tool_name=actual_tool_name,
+                        arguments=params,
+                        run_coroutine=run_coroutine,
                     )
-                    result = self._run_coroutine_sync(
-                        task_client.call_tool(
-                            actual_tool_name,
-                            params,
-                            advertise_tasks=(
-                                settings.MCP_ASYNC_TASKS_ENABLED
-                                and runtime.config_id in self._task_capable_http_configs
-                            ),
-                        )
-                    )
+                    if early_response is not None:
+                        return early_response
                 else:
-                    result = self._run_coroutine_sync(
+                    result = run_coroutine(
                         self._execute_async(
                             client,
                             actual_tool_name,
@@ -2954,16 +3006,6 @@ class MCPToolManager:
                             timeout_seconds=timeout_seconds,
                         )
                     )
-            if isinstance(result, MCPCreateTaskResult):
-                return self._persist_mcp_task(
-                    agent=agent,
-                    runtime=runtime,
-                    full_tool_name=tool_name,
-                    remote_tool_name=actual_tool_name,
-                    arguments=params,
-                    create_result=result,
-                    protocol_version=modern_protocol,
-                )
             with mcp_result_owner_context(owner):
                 result = self._adapt_tool_result(server_name, actual_tool_name, result)
             
@@ -2971,7 +3013,7 @@ class MCPToolManager:
             response = self._handle_mcp_session_death_response(
                 runtime,
                 response,
-                evict_client=True,
+                evict_client=not isolated,
             )
             if response.get("status") == "error":
                 return response
@@ -3126,62 +3168,7 @@ class MCPToolManager:
             return self._handle_mcp_session_death_response(
                 runtime,
                 response,
-                evict_client=True,
-            )
-
-    def _execute_mcp_tool_locally_isolated(
-        self,
-        agent: PersistentAgent,
-        info: MCPToolInfo,
-        runtime: MCPServerRuntime,
-        params: Dict[str, Any],
-        *,
-        owner: Any,
-        will_continue_work: Optional[bool],
-    ) -> Dict[str, Any]:
-        proxy_url = None
-        if runtime.url or self._is_stdio_runtime(runtime):
-            proxy_url, proxy_error = self._select_agent_proxy_url(agent)
-            if proxy_error:
-                return {"status": "error", "message": proxy_error}
-
-        try:
-            client = self._build_client_for_runtime(
-                runtime,
-                env_overrides=self._build_stdio_proxy_env(proxy_url)
-                if self._is_stdio_runtime(runtime)
-                else None,
-            )
-            timeout_seconds = self._get_timeout_for_runtime(runtime)
-            http_timeout_seconds = timeout_seconds if runtime.url else None
-            with _use_mcp_http_timeout(http_timeout_seconds), _use_mcp_proxy(proxy_url):
-                result = self._run_coroutine_isolated(
-                    self._execute_async(
-                        client,
-                        info.tool_name,
-                        params,
-                        timeout_seconds=timeout_seconds,
-                    )
-                )
-            with mcp_result_owner_context(owner):
-                result = self._adapt_tool_result(info.server_name, info.tool_name, result)
-
-            response = self._finalize_mcp_result(info.server_name, info.tool_name, result)
-            response = self._handle_mcp_session_death_response(
-                runtime,
-                response,
-                evict_client=False,
-            )
-            if will_continue_work is False:
-                response["auto_sleep_ok"] = True
-            return response
-        except Exception as exc:
-            logger.error("Failed to execute isolated MCP tool %s: %s", info.full_name, exc)
-            response = {"status": "error", "message": str(exc)}
-            return self._handle_mcp_session_death_response(
-                runtime,
-                response,
-                evict_client=False,
+                evict_client=not isolated,
             )
 
     def execute_mcp_tool_isolated(
@@ -3193,84 +3180,12 @@ class MCPToolManager:
         tool_info: Optional[MCPToolInfo] = None,
     ) -> Dict[str, Any]:
         """Execute an MCP tool without shared loop/client state."""
-        if self._is_tool_blacklisted(tool_name):
-            return {
-                "status": "error",
-                "message": f"Tool '{tool_name}' is blacklisted and cannot be executed",
-            }
-
-        if not PersistentAgentEnabledTool.objects.filter(agent=agent, tool_full_name=tool_name).exists():
-            return {
-                "status": "error",
-                "message": f"Tool '{tool_name}' is not enabled for this agent",
-            }
-
-        info = tool_info or self._resolve_tool_info(tool_name)
-        if not info:
-            return {"status": "error", "message": f"Unknown MCP tool: {tool_name}"}
-
-        runtime = self._server_cache.get(info.config_id)
-        if not runtime:
-            return {"status": "error", "message": f"MCP server '{info.server_name}' is not available"}
-
-        if not self._sandbox_required_runtime_available(runtime, agent=agent):
-            return {
-                "status": "error",
-                "message": (
-                    f"MCP server '{info.server_name}' requires sandbox compute, "
-                    "which is not available for this agent"
-                ),
-            }
-
-        try:
-            row, _ = PersistentAgentEnabledTool.objects.get_or_create(
-                agent=agent,
-                tool_full_name=tool_name,
-            )
-            row.last_used_at = datetime.now(UTC)
-            row.usage_count = (row.usage_count or 0) + 1
-            row.save(update_fields=["last_used_at", "usage_count"])
-        except Exception:
-            logger.exception("Failed to update isolated usage for tool %s", tool_name)
-
-        runtime, auth_error = self._ensure_runtime_oauth(runtime)
-        if auth_error:
-            return auth_error
-
-        owner = getattr(agent, "organization", None) or getattr(agent, "user", None)
-        actual_tool_name = info.tool_name
-        server_name = info.server_name
-        params, will_continue_work = _extract_will_continue_work(params)
-
-        param_error = self._param_guards.validate(server_name, actual_tool_name, params, owner)
-        if param_error:
-            return param_error
-
-        if self._runtime_requires_sandbox(runtime):
-            sandbox_result, sandbox_fallback = self._dispatch_sandbox_mcp_request(
-                agent=agent,
-                info=info,
-                runtime=runtime,
-                server_name=server_name,
-                actual_tool_name=actual_tool_name,
-                params=params,
-                full_tool_name=tool_name,
-            )
-            if sandbox_result is not None:
-                return sandbox_result
-            if not sandbox_fallback:
-                return {
-                    "status": "error",
-                    "message": f"MCP server '{server_name}' is not available",
-                }
-
-        return self._execute_mcp_tool_locally_isolated(
+        return self.execute_mcp_tool(
             agent,
-            info,
-            runtime,
+            tool_name,
             params,
-            owner=owner,
-            will_continue_work=will_continue_work,
+            tool_info=tool_info,
+            isolated=True,
         )
     
     def _adapt_tool_result(self, server_name: str, tool_name: str, result: Any):

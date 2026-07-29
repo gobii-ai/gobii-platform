@@ -13,18 +13,23 @@ from django.conf import settings
 from django.db import DatabaseError, transaction
 from django.db.models import Q
 from django.utils import timezone
-from django.utils.dateparse import parse_datetime
 from opentelemetry import metrics
-from redis.exceptions import RedisError
 
-from api.agent.core.budget import AgentBudgetManager
 from api.agent.tools.mcp_manager import get_mcp_manager
 from api.agent.tools.mcp_task_protocol import MCPTaskHTTPError, MCPTaskProtocolError
 from api.models import PersistentAgentMCPTask
+from api.services.agent_background_follow_up import enqueue_agent_background_follow_up
 from api.services.owner_execution_pause import is_owner_execution_paused, resolve_agent_owner
 
 
 logger = logging.getLogger(__name__)
+REMOTE_CANCEL_ERRORS = (
+    httpx.HTTPError,
+    MCPTaskProtocolError,
+    ValueError,
+    RuntimeError,
+    DatabaseError,
+)
 _lifecycle_counter = metrics.get_meter("gobii.mcp_tasks").create_counter(
     "gobii.mcp_tasks.lifecycle",
     description="Outbound MCP task lifecycle transitions",
@@ -52,35 +57,15 @@ def record_mcp_task_lifecycle(event: str, task: PersistentAgentMCPTask, **attrib
 
 
 def _schedule_follow_up(task: PersistentAgentMCPTask) -> None:
-    owner = resolve_agent_owner(task.agent)
-    if owner is not None and is_owner_execution_paused(owner):
+    enqueued = enqueue_agent_background_follow_up(
+        task.agent,
+        budget_id=task.budget_id,
+        branch_id=task.branch_id,
+        depth=task.depth,
+        eval_run_id=task.eval_run_id,
+    )
+    if not enqueued:
         logger.info("Skipping MCP task wake while owner execution is paused", extra={"mcp_task_id": str(task.id)})
-        return
-
-    from api.agent.tasks.process_events import process_agent_events_task
-
-    status = None
-    active_budget_id = None
-    if task.budget_id:
-        try:
-            status = AgentBudgetManager.get_cycle_status(agent_id=str(task.agent_id))
-            active_budget_id = AgentBudgetManager.get_active_budget_id(agent_id=str(task.agent_id))
-        except (RuntimeError, RedisError):
-            logger.warning("Unable to inspect MCP task budget; using a fresh cycle", exc_info=True)
-
-    if task.budget_id and status == "active" and active_budget_id == task.budget_id:
-        process_agent_events_task.delay(
-            str(task.agent_id),
-            budget_id=task.budget_id,
-            branch_id=task.branch_id or None,
-            depth=max((task.depth or 1) - 1, 0),
-            eval_run_id=str(task.eval_run_id) if task.eval_run_id else None,
-        )
-    else:
-        process_agent_events_task.delay(
-            str(task.agent_id),
-            eval_run_id=str(task.eval_run_id) if task.eval_run_id else None,
-        )
 
 
 def _dispatch_wake(task_id: str) -> None:
@@ -128,20 +113,18 @@ def _terminalize_locked(
     task.lease_token = None
     task.lease_expires_at = None
     _enqueue_wake_locked(task, now)
-    task.save(
-        update_fields=[
-            "status",
-            "status_message",
-            "result",
-            "error",
-            "terminal_at",
-            "next_poll_at",
-            "lease_token",
-            "lease_expires_at",
-            "wake_enqueued_at",
-            "updated_at",
-        ]
-    )
+    task.save()
+
+
+def enqueue_mcp_task_poll(task_id: str, *, countdown: float) -> None:
+    try:
+        poll_mcp_task.apply_async(args=[task_id], countdown=countdown)
+    except KombuOperationalError:
+        logger.warning(
+            "MCP task poll enqueue failed; reconciliation will recover it",
+            extra={"mcp_task_id": task_id},
+            exc_info=True,
+        )
 
 
 def _claim_task(task_id: str) -> tuple[Optional[PersistentAgentMCPTask], Optional[uuid.UUID]]:
@@ -157,15 +140,14 @@ def _claim_task(task_id: str) -> tuple[Optional[PersistentAgentMCPTask], Optiona
             return None, None
         if task.lease_expires_at is not None and task.lease_expires_at > now:
             return None, None
-        if task.next_poll_at is not None and task.next_poll_at > now:
+        if task.next_poll_at is None or task.next_poll_at > now:
             return None, None
         token = uuid.uuid4()
         task.lease_token = token
         task.lease_expires_at = now + timedelta(
             seconds=max(settings.MCP_ASYNC_TASK_LEASE_SECONDS, 1)
         )
-        task.attempts += 1
-        task.save(update_fields=["lease_token", "lease_expires_at", "attempts", "updated_at"])
+        task.save(update_fields=["lease_token", "lease_expires_at", "updated_at"])
         return task, token
 
 
@@ -184,6 +166,7 @@ def _schedule_retry(task_id: str, lease_token: uuid.UUID, message: str) -> None:
         task = PersistentAgentMCPTask.objects.select_for_update().get(pk=task_id)
         if task.terminal_at is not None or task.lease_token != lease_token:
             return
+        task.attempts += 1
         delay = _retry_delay_seconds(task)
         if now + timedelta(seconds=delay) >= task.deadline_at:
             should_expire = True
@@ -192,28 +175,13 @@ def _schedule_retry(task_id: str, lease_token: uuid.UUID, message: str) -> None:
             task.next_poll_at = now + timedelta(seconds=delay)
             task.lease_token = None
             task.lease_expires_at = None
-            task.save(
-                update_fields=[
-                    "status_message",
-                    "next_poll_at",
-                    "lease_token",
-                    "lease_expires_at",
-                    "updated_at",
-                ]
-            )
+            task.save()
             transaction.on_commit(
-                lambda: poll_mcp_task.apply_async(args=[task_id], countdown=delay)
+                lambda: enqueue_mcp_task_poll(task_id, countdown=delay)
             )
             record_mcp_task_lifecycle("retried", task, delay_seconds=delay)
     if should_expire:
         _expire_task(task_id, message="The MCP task exceeded its allowed lifetime.")
-
-
-def _parse_remote_timestamp(value: str):
-    parsed = parse_datetime(value)
-    if parsed is not None and timezone.is_naive(parsed):
-        return timezone.make_aware(parsed)
-    return parsed
 
 
 def _apply_remote_state(task_id: str, lease_token: uuid.UUID, remote) -> None:
@@ -228,13 +196,21 @@ def _apply_remote_state(task_id: str, lease_token: uuid.UUID, remote) -> None:
             return
 
         task.status_message = remote.status_message
-        task.remote_created_at = _parse_remote_timestamp(remote.created_at)
-        task.remote_updated_at = _parse_remote_timestamp(remote.last_updated_at)
-        if remote.poll_interval_ms is not None:
+        task.remote_created_at = remote.created_at
+        task.remote_updated_at = remote.last_updated_at
+        task.attempts = 0
+        if (
+            remote.status in PersistentAgentMCPTask.ACTIVE_STATUSES
+            and remote.poll_interval_ms is not None
+        ):
             task.poll_interval_ms = get_mcp_manager()._clamp_mcp_task_poll_interval_ms(
                 remote.poll_interval_ms
             )
-        if remote.ttl_ms is not None and task.remote_created_at is not None:
+        if (
+            remote.status in PersistentAgentMCPTask.ACTIVE_STATUSES
+            and remote.ttl_ms is not None
+            and task.remote_created_at is not None
+        ):
             remote_deadline = task.remote_created_at + timedelta(milliseconds=remote.ttl_ms)
             task.deadline_at = min(task.deadline_at, remote_deadline)
 
@@ -285,22 +261,7 @@ def _apply_remote_state(task_id: str, lease_token: uuid.UUID, remote) -> None:
             task.lease_token = None
             task.lease_expires_at = None
             _enqueue_wake_locked(task, now)
-            task.save(
-                update_fields=[
-                    "status",
-                    "status_message",
-                    "input_requests",
-                    "poll_interval_ms",
-                    "deadline_at",
-                    "remote_created_at",
-                    "remote_updated_at",
-                    "next_poll_at",
-                    "lease_token",
-                    "lease_expires_at",
-                    "wake_enqueued_at",
-                    "updated_at",
-                ]
-            )
+            task.save()
             record_mcp_task_lifecycle("input_required", task)
             return
 
@@ -311,83 +272,63 @@ def _apply_remote_state(task_id: str, lease_token: uuid.UUID, remote) -> None:
         )
         task.lease_token = None
         task.lease_expires_at = None
-        task.save(
-            update_fields=[
-                "status",
-                "status_message",
-                "poll_interval_ms",
-                "deadline_at",
-                "remote_created_at",
-                "remote_updated_at",
-                "next_poll_at",
-                "lease_token",
-                "lease_expires_at",
-                "updated_at",
-            ]
-        )
+        task.save()
         delay = max((task.next_poll_at - now).total_seconds(), 0)
         transaction.on_commit(
-            lambda: poll_mcp_task.apply_async(args=[task_id], countdown=delay)
+            lambda: enqueue_mcp_task_poll(task_id, countdown=delay)
         )
 
 
-def _expire_task(task_id: str, *, message: str) -> None:
-    task_snapshot = None
+def _cancel_remote_task(task: PersistentAgentMCPTask) -> None:
+    try:
+        get_mcp_manager().cancel_mcp_task_remote(task)
+    except REMOTE_CANCEL_ERRORS:
+        logger.info("Best-effort remote MCP task cancellation failed", exc_info=True)
+
+
+def _finish_task(
+    task_id: str,
+    *,
+    status: str,
+    message: str,
+    event: str,
+    reason: Optional[str] = None,
+) -> None:
+    task_snapshot: Optional[PersistentAgentMCPTask] = None
     with transaction.atomic():
         task = (
             PersistentAgentMCPTask.objects.select_for_update()
             .select_related("agent", "agent__user", "agent__organization")
-            .get(pk=task_id)
+            .filter(pk=task_id)
+            .first()
         )
-        if task.terminal_at is not None:
+        if task is None or task.terminal_at is not None:
             return
         task_snapshot = task
-        _terminalize_locked(
-            task,
-            status=PersistentAgentMCPTask.Status.EXPIRED,
-            message=message,
-        )
-        record_mcp_task_lifecycle("expired", task)
+        _terminalize_locked(task, status=status, message=message)
+        attributes = {"reason": reason} if reason else {}
+        record_mcp_task_lifecycle(event, task, **attributes)
     if task_snapshot is not None:
-        try:
-            get_mcp_manager().cancel_mcp_task_remote(task_snapshot)
-        except (
-            httpx.HTTPError,
-            MCPTaskProtocolError,
-            ValueError,
-            RuntimeError,
-            DatabaseError,
-        ):
-            logger.info("Best-effort remote MCP task cancellation failed", exc_info=True)
+        _cancel_remote_task(task_snapshot)
+
+
+def _expire_task(task_id: str, *, message: str) -> None:
+    _finish_task(
+        task_id,
+        status=PersistentAgentMCPTask.Status.EXPIRED,
+        message=message,
+        event="expired",
+    )
 
 
 def _cancel_task(task_id: str, *, message: str, reason: str) -> None:
-    task = (
-        PersistentAgentMCPTask.objects.select_related("agent", "agent__user", "agent__organization")
-        .filter(pk=task_id, terminal_at__isnull=True)
-        .first()
+    _finish_task(
+        task_id,
+        status=PersistentAgentMCPTask.Status.CANCELLED,
+        message=message,
+        event="cancelled",
+        reason=reason,
     )
-    if task is None:
-        return
-    try:
-        get_mcp_manager().cancel_mcp_task_remote(task)
-    except (
-        httpx.HTTPError,
-        MCPTaskProtocolError,
-        ValueError,
-        RuntimeError,
-        DatabaseError,
-    ):
-        logger.info("Best-effort remote MCP task cancellation failed", exc_info=True)
-    with transaction.atomic():
-        locked = PersistentAgentMCPTask.objects.select_for_update().get(pk=task_id)
-        if locked.terminal_at is None:
-            _terminalize_locked(
-                locked,
-                status=PersistentAgentMCPTask.Status.CANCELLED,
-                message=message,
-            )
-            record_mcp_task_lifecycle("cancelled", locked, reason=reason)
 
 
 def _reconcile_missing_wake(task_id: str) -> None:
@@ -421,25 +362,11 @@ def poll_mcp_task(task_id: str) -> None:
 
     owner = resolve_agent_owner(task.agent)
     if owner is not None and is_owner_execution_paused(owner):
-        try:
-            get_mcp_manager().cancel_mcp_task_remote(task)
-        except (
-            httpx.HTTPError,
-            MCPTaskProtocolError,
-            ValueError,
-            RuntimeError,
-            DatabaseError,
-        ):
-            logger.info("Best-effort paused-owner MCP cancellation failed", exc_info=True)
-        with transaction.atomic():
-            locked = PersistentAgentMCPTask.objects.select_for_update().get(pk=task_id)
-            if locked.terminal_at is None and locked.lease_token == lease_token:
-                _terminalize_locked(
-                    locked,
-                    status=PersistentAgentMCPTask.Status.CANCELLED,
-                    message="The MCP task was cancelled because owner execution is paused.",
-                )
-                record_mcp_task_lifecycle("cancelled", locked, reason="owner_paused")
+        _cancel_task(
+            task_id,
+            message="The MCP task was cancelled because owner execution is paused.",
+            reason="owner_paused",
+        )
         return
 
     try:
@@ -505,10 +432,7 @@ def reconcile_mcp_tasks() -> int:
     active_tasks = list(
         PersistentAgentMCPTask.objects.filter(
             terminal_at__isnull=True,
-            status__in=[
-                PersistentAgentMCPTask.Status.WORKING,
-                PersistentAgentMCPTask.Status.INPUT_REQUIRED,
-            ],
+            status__in=PersistentAgentMCPTask.ACTIVE_STATUSES,
         )
         .select_related("server_config", "agent", "agent__user", "agent__organization")
         .order_by("created_at")[:batch_size]
@@ -535,10 +459,7 @@ def reconcile_mcp_tasks() -> int:
     expired_ids = list(
         PersistentAgentMCPTask.objects.filter(
             terminal_at__isnull=True,
-            status__in=[
-                PersistentAgentMCPTask.Status.WORKING,
-                PersistentAgentMCPTask.Status.INPUT_REQUIRED,
-            ],
+            status__in=PersistentAgentMCPTask.ACTIVE_STATUSES,
             deadline_at__lte=now,
         )
         .exclude(id__in=reconciled_ids)
@@ -553,19 +474,9 @@ def reconcile_mcp_tasks() -> int:
             terminal_at__isnull=True,
             next_poll_at__lte=now,
         )
-        .filter(
-            Q(
-                status__in=[
-                    PersistentAgentMCPTask.Status.WORKING,
-                    PersistentAgentMCPTask.Status.COMPLETED,
-                    PersistentAgentMCPTask.Status.FAILED,
-                    PersistentAgentMCPTask.Status.CANCELLED,
-                ]
-            )
-            | Q(
-                status=PersistentAgentMCPTask.Status.INPUT_REQUIRED,
-                input_requests__isnull=True,
-            )
+        .exclude(
+            status=PersistentAgentMCPTask.Status.INPUT_REQUIRED,
+            input_requests__isnull=False,
         )
         .exclude(id__in=reconciled_ids)
         .filter(Q(lease_expires_at__isnull=True) | Q(lease_expires_at__lte=now))
