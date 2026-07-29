@@ -589,6 +589,7 @@ class PersistentAgentSerializer(serializers.ModelSerializer):
                 'is_active': validated_data.get('is_active', True),
                 'life_state': validated_data.get('life_state'),
                 'whitelist_policy': validated_data.get('whitelist_policy'),
+                'contact_approval_mode': validated_data.get('contact_approval_mode'),
                 'preferred_contact_endpoint': preferred_endpoint,
                 'template_code': template_code or None,
                 'preferred_llm_tier': validated_data.get('preferred_llm_tier'),

@@ -610,6 +610,45 @@ class RemoteMCPViewTests(TestCase):
             "auto_approve_email",
         )
 
+    def test_create_agent_contact_approval_mode(self):
+        tools_response = self._post_mcp("tools/list")
+        create_tool = next(
+            tool
+            for tool in tools_response.json()["result"]["tools"]
+            if tool["name"] == "gobii_create_agent"
+        )
+        self.assertEqual(
+            create_tool["inputSchema"]["properties"]["contact_approval_mode"]["enum"],
+            ["require_approval", "auto_approve_email"],
+        )
+
+        with (
+            patch.object(BrowserUseAgent, "select_random_proxy", return_value=None),
+            patch("api.services.persistent_agents.maybe_schedule_short_description"),
+            patch("api.services.persistent_agents.maybe_schedule_mini_description"),
+            patch("api.services.persistent_agents.maybe_schedule_agent_tags"),
+            patch("api.services.persistent_agents.maybe_schedule_agent_avatar"),
+            patch("api.agent.tasks.enqueue_interactive_process_agent_events"),
+            self.captureOnCommitCallbacks(execute=True),
+        ):
+            response = self._call_tool(
+                "gobii_create_agent",
+                {
+                    "name": "Auto-approved Email MCP Agent",
+                    "charter": "Send owner-approved email.",
+                    "contact_approval_mode": "auto_approve_email",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json()["result"]["isError"], response.content)
+        agent = PersistentAgent.objects.get(id=self._structured_content(response)["agent"]["id"])
+        self.assertEqual(agent.contact_approval_mode, "auto_approve_email")
+        self.assertEqual(
+            self._structured_content(response)["agent"]["contact_approval_mode"],
+            "auto_approve_email",
+        )
+
     def test_update_agent_tier_and_explicit_null_schedule_retain_omitted_credit_limit(self):
         agent = self._create_agent(self.user, "Retain Credit Limit Update")
         PersistentAgent.objects.filter(id=agent.id).update(

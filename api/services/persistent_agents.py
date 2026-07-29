@@ -77,6 +77,7 @@ class PersistentAgentProvisioningService:
         is_active: bool = True,
         life_state: str | None = None,
         whitelist_policy: str | None = None,
+        contact_approval_mode: str | None = None,
         preferred_contact_endpoint=None,
         template_code: str | None = None,
         preferred_llm_tier: IntelligenceTier | None = None,
@@ -140,6 +141,8 @@ class PersistentAgentProvisioningService:
                 preferred_llm_tier=computed_tier,
                 planning_state=resolved_planning_state,
             )
+            if contact_approval_mode is not None:
+                persistent_agent.contact_approval_mode = contact_approval_mode
             if email_review_outbox_enabled():
                 persistent_agent.email_sending_mode = get_workspace_default_email_sending_mode(
                     user=user,

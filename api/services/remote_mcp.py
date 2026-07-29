@@ -403,6 +403,10 @@ TOOL_DEFINITIONS = [
                     "enum": ["default", "manual"],
                     "description": "Contact allowlist policy.",
                 },
+                "contact_approval_mode": {
+                    "type": "string",
+                    "enum": ["require_approval", "auto_approve_email"],
+                },
                 **_SCOPE_PARAM_PROPERTIES,
             },
             "additionalProperties": False,
@@ -1081,6 +1085,7 @@ def _tool_create_agent(request, arguments):
         "preferred_llm_tier",
         "daily_credit_limit",
         "whitelist_policy",
+        "contact_approval_mode",
     }
     payload = {key: arguments[key] for key in allowed_fields if key in arguments}
     _normalize_agent_config_payload(request, payload, scope=scope)

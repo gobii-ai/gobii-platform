@@ -80,7 +80,7 @@ class SecureApiRequestTests(TestCase):
         )
 
         self.assertEqual(result["status"], "ok")
-        self.assertEqual(result["count"], 1)
+        self.assertEqual(result["page"]["returned_item_count"], 1)
         self.assertEqual(result["items"][0]["mailbox_id"], "mailbox-1")
         self.assertEqual(result["items"][0]["address"], "worker@example.com")
         refs = result["items"][0]["secure_values"]
@@ -119,10 +119,55 @@ class SecureApiRequestTests(TestCase):
         )
 
         self.assertEqual(result["status"], "ok")
-        self.assertEqual(result["count"], 2)
+        self.assertEqual(result["page"]["returned_item_count"], 2)
         self.assertEqual([item["account_id"] for item in result["items"]], ["account-1", "account-2"])
         self.assertNotIn("secret-one", json.dumps(result))
         self.assertNotIn("secret-two", json.dumps(result))
+
+    @patch("api.agent.tools.secure_api_request.execute_http_request")
+    def test_distinguishes_provider_pagination_from_local_truncation(self, mock_http):
+        mock_http.return_value = {
+            "status": "ok",
+            "status_code": 200,
+            "content": {
+                "results": [
+                    {"id": f"mailbox-{index}", "password": f"secret-{index}"}
+                    for index in range(10)
+                ],
+                "pagination": {"offset": 0, "limit": 10, "total": 27},
+            },
+        }
+
+        result = execute_secure_api_request(
+            self.agent,
+            {
+                "method": "GET",
+                "url": "https://api.example.test/mailboxes",
+                "collection_pointer": "/results",
+                "response_fields": {
+                    "offset": "/pagination/offset",
+                    "limit": "/pagination/limit",
+                    "total": "/pagination/total",
+                },
+                "public_fields": {"mailbox_id": "/id"},
+                "secret_fields": {"password": "/password"},
+                "max_items": 50,
+                "will_continue_work": True,
+            },
+        )
+
+        self.assertEqual(
+            result["page"],
+            {
+                "provider_item_count": 10,
+                "returned_item_count": 10,
+                "locally_truncated": False,
+                "provider_completeness": "unknown",
+                "provider_fields": {"offset": 0, "limit": 10, "total": 27},
+            },
+        )
+        self.assertNotIn("count", result)
+        self.assertNotIn("truncated", result)
 
     @patch("api.agent.tools.secure_api_request.execute_http_request")
     def test_rejects_sensitive_public_mapping_before_request(self, mock_http):
@@ -132,6 +177,24 @@ class SecureApiRequestTests(TestCase):
                 "method": "GET",
                 "url": "https://api.example.test/accounts",
                 "public_fields": {"initial_password": "/initialPassword"},
+                "secret_fields": {"credential": "/password"},
+                "will_continue_work": True,
+            },
+        )
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("secret_fields", result["message"])
+        mock_http.assert_not_called()
+
+    @patch("api.agent.tools.secure_api_request.execute_http_request")
+    def test_rejects_sensitive_response_metadata_before_request(self, mock_http):
+        result = execute_secure_api_request(
+            self.agent,
+            {
+                "method": "GET",
+                "url": "https://api.example.test/accounts",
+                "response_fields": {"authorization": "/pagination/authorization"},
+                "public_fields": {"id": "/id"},
                 "secret_fields": {"credential": "/password"},
                 "will_continue_work": True,
             },

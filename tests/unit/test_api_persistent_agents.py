@@ -596,6 +596,16 @@ class PersistentAgentAPITests(TestCase):
         self.assertEqual(email_meta.display_name, "API @ Persistent Agent")
         self.process_events_mock.assert_called_with(str(agent.id))
 
+    def test_create_agent_persists_contact_approval_mode(self):
+        payload = self._create_agent_via_api({
+            "name": "API Auto-approved Email Agent",
+            "contact_approval_mode": "auto_approve_email",
+        })
+
+        agent = PersistentAgent.objects.get(id=payload["id"])
+        self.assertEqual(agent.contact_approval_mode, "auto_approve_email")
+        self.assertEqual(payload["contact_approval_mode"], "auto_approve_email")
+
     def test_create_agent_duplicate_name_returns_validation_error(self):
         self._create_agent_via_api({'name': 'Duplicate Agent'})
 

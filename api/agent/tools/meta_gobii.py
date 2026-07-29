@@ -333,6 +333,10 @@ TOOL_DEFINITIONS: dict[str, dict[str, Any]] = {
                     "description": "Soft daily credit target. Null means unlimited. Ask for confirmation before raising broad limits.",
                 },
                 "whitelist_policy": {"type": "string", "enum": ["default", "manual"]},
+                "contact_approval_mode": {
+                    "type": "string",
+                    "enum": ["require_approval", "auto_approve_email"],
+                },
                 "proactive_opt_in": {"type": "boolean"},
                 "user_confirmed": {
                     "type": "boolean",
@@ -968,6 +972,8 @@ def _tool_create_agent(invoking_agent: PersistentAgent, params: dict[str, Any]) 
         proposed_actions.append("Set the requested intelligence tier.")
     if "daily_credit_limit" in params:
         proposed_actions.append("Set the requested daily credit/resource limit.")
+    if "contact_approval_mode" in params:
+        proposed_actions.append("Set the requested contact approval mode.")
     _require_user_confirmed(
         params,
         action="create a new persistent Gobii in this owner scope",
@@ -1004,6 +1010,12 @@ def _tool_create_agent(invoking_agent: PersistentAgent, params: dict[str, Any]) 
                     params.get("whitelist_policy"),
                     "whitelist_policy",
                     {choice[0] for choice in PersistentAgent.WhitelistPolicy.choices},
+                    allow_missing=True,
+                ),
+                contact_approval_mode=_optional_choice(
+                    params.get("contact_approval_mode"),
+                    "contact_approval_mode",
+                    {choice[0] for choice in PersistentAgent.ContactApprovalMode.choices},
                     allow_missing=True,
                 ),
                 preferred_llm_tier=preferred_tier,
