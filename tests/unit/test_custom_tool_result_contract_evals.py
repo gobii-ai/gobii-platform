@@ -552,6 +552,7 @@ if __name__ == "__main__":
             self.fail("LLM judge should not run after prerequisite local checks fail.")
 
         scenario.wait_for_agent_idle = lambda *args, **kwargs: nullcontext()
+        scenario._prepare_agent = lambda *args, **kwargs: None
         scenario.inject_message = lambda *args, **kwargs: SimpleNamespace(timestamp=timezone.now())
         scenario._tool_calls_for_run = lambda *args, **kwargs: [create_call, custom_call]
         scenario.record_task_result = record_task_result
@@ -589,6 +590,7 @@ if __name__ == "__main__":
             self.fail("LLM judge should not run after repeated create_custom_tool calls.")
 
         scenario.wait_for_agent_idle = lambda *args, **kwargs: nullcontext()
+        scenario._prepare_agent = lambda *args, **kwargs: None
         scenario.inject_message = lambda *args, **kwargs: SimpleNamespace(timestamp=timezone.now())
         scenario._tool_calls_for_run = lambda *args, **kwargs: [first_create, second_create, custom_call]
         scenario.record_task_result = record_task_result
