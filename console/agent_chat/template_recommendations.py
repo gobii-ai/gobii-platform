@@ -16,7 +16,11 @@ logger = logging.getLogger(__name__)
 
 RECOMMENDATION_LIMIT = 3
 CONTEXT_CHARTER_LIMIT = 30
-DEFAULT_TEMPLATE_CODES = ("talent-scout", "candidate-researcher", "lead-hunter")
+DEFAULT_TEMPLATE_CODES = (
+    "ai-agent-for-candidate-sourcing",
+    "candidate-researcher",
+    "b2b-lead-research-agent",
+)
 DEFAULT_RECRUITING_CATEGORIES = ("people", "recruiting")
 DEFAULT_SALES_CATEGORIES = ("revenue", "sales")
 TEMPLATE_SOURCE_ORGANIZATION = "organization"

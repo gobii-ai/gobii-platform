@@ -13,6 +13,12 @@ from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.generic import TemplateView, View
 
 from api.models import PersistentAgentTemplate, PersistentAgentTemplateLike, PersistentAgentTemplateUrlAlias
+from pages.public_template_metadata import (
+    SEO_TITLE_MAX_LENGTH,
+    build_public_template_metadata,
+    compose_meta_description,
+    public_template_library_name,
+)
 from pages.public_template_urls import (
     public_template_category_slug,
     public_template_category_slug_aliases_from_label,
@@ -31,6 +37,32 @@ LIBRARY_MAX_PAGE_SIZE = 100
 
 def _normalize_category(value: str | None) -> str:
     return (value or "").strip() or "Uncategorized"
+
+
+def _library_page_title(selected_category: str, *, official_only: bool) -> str:
+    if not selected_category:
+        return (
+            "Official AI Employee Templates for Business | Gobii"
+            if official_only
+            else "AI Employee Template Library: Business Roles | Gobii"
+        )
+
+    prefix = "Official " if official_only else ""
+    suffix = " AI Employee Templates for Business | Gobii"
+    title = f"{prefix}{selected_category}{suffix}"
+    if len(title) <= SEO_TITLE_MAX_LENGTH:
+        return title
+
+    suffix = " AI Employee Templates | Gobii"
+    title = f"{prefix}{selected_category}{suffix}"
+    if len(title) <= SEO_TITLE_MAX_LENGTH:
+        return title
+
+    available_length = SEO_TITLE_MAX_LENGTH - len(prefix) - len(suffix)
+    shortened_category = selected_category[: available_length + 1]
+    if not shortened_category[available_length:available_length + 1].isspace():
+        shortened_category = shortened_category[:available_length].rsplit(maxsplit=1)[0]
+    return f"{prefix}{shortened_category.strip()}{suffix}"
 
 
 def _library_queryset():
@@ -258,23 +290,30 @@ def _build_library_payload(
         "id",
     )[page_offset:page_offset + page_limit]
 
-    page_agents = [
-        {
-            "id": str(template.id),
-            "name": template.display_name,
-            "tagline": template.tagline,
-            "description": template.description,
-            "category": template.normalized_category,
-            "categorySlug": public_template_category_slug(template),
-            "publicProfileHandle": template.public_profile.handle if template.public_profile_id else "",
-            "templateSlug": public_template_route_slug(template),
-            "templateUrl": public_template_detail_path(template),
-            "isOfficial": template.is_official,
-            "likeCount": template.like_count,
-            "isLiked": template.is_liked,
-        }
-        for template in page_templates
-    ]
+    page_agents = []
+    for template in page_templates:
+        template_metadata = build_public_template_metadata(template)
+        page_agents.append(
+            {
+                "id": str(template.id),
+                "name": public_template_library_name(template),
+                "tagline": template_metadata.tagline,
+                "description": template.description,
+                "seoDescription": template_metadata.description,
+                "category": template.normalized_category,
+                "categorySlug": public_template_category_slug(template),
+                "publicProfileHandle": (
+                    template.public_profile.handle
+                    if template.public_profile_id
+                    else ""
+                ),
+                "templateSlug": public_template_route_slug(template),
+                "templateUrl": public_template_detail_path(template),
+                "isOfficial": template.is_official,
+                "likeCount": template.like_count,
+                "isLiked": template.is_liked,
+            }
+        )
 
     return {
         "agents": page_agents,
@@ -316,25 +355,26 @@ class LibraryView(TemplateView):
         context = super().get_context_data(**kwargs)
         selected_category = self.selected_category
         official_only = _parse_query_bool(self.request.GET.get("official"))
-        page_title = (
-            f"Official {selected_category} AI Agent Templates | Gobii"
-            if selected_category and official_only
-            else f"{selected_category} AI Agent Templates | Gobii"
-            if selected_category
-            else "Official AI Agent Templates | Gobii"
-            if official_only
-            else "AI Employee & Agent Templates | Gobii"
+        page_title = _library_page_title(
+            selected_category,
+            official_only=official_only,
         )
-        page_description = (
+        description_source = (
             f"Explore official Gobii {selected_category} AI agent templates maintained by Gobii for trusted workflows."
             if selected_category and official_only
-            else f"Explore Gobii's {selected_category} AI employee and agent templates. Start from a shared template and customize it for your workflow."
+            else f"Explore Gobii's {selected_category} AI employee templates for role-specific workflows, with selected AI agent terminology and community-created options."
             if selected_category
-            else "Explore official Gobii AI agent templates maintained by Gobii for common workflows."
+            else "Explore official Gobii AI employee templates maintained for trusted, reusable business workflows."
             if official_only
-            else "Explore Gobii's library of AI employee and agent templates for sales, research, recruiting, operations, spreadsheets, email, and more. Start from a template or build your own."
+            else "Explore Gobii's AI Employee Template Library for sales, research, recruiting, operations, finance, and more. Choose a role and customize its workflow."
         )
-        context["page_name"] = "Agent Discovery"
+        page_description = compose_meta_description(
+            explicit_description=description_source,
+            description="",
+            tagline="",
+            display_name="AI Employee Template Library",
+        )
+        context["page_name"] = "AI Employee Template Library"
         context["library_initial_category"] = selected_category
         context["library_initial_official_only"] = official_only
         context["library_page_title"] = page_title

@@ -408,7 +408,6 @@
       const action = form.getAttribute("action") || "";
       return (
         action === "/spawn-agent/" ||
-        action.indexOf("/pretrained-workers/") !== -1 ||
         action.endsWith("/hire/")
       );
     }

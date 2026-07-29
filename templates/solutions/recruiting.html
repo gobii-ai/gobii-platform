@@ -168,13 +168,13 @@
         </p>
 
         <div class="mt-10 flex flex-col sm:flex-row gap-4">
-          <form method="post" action="{% url 'pages:pretrained_worker_hire' 'talent-scout' %}" class="w-full sm:w-auto" data-analytics-cta-id="recruiting_hero" data-analytics-placement="hero" data-analytics-intent="spawn_agent">
+          <form method="post" action="{% url 'pages:public_template_hire' 'recruiting' 'candidate-sourcing-agent' %}" class="w-full sm:w-auto" data-analytics-cta-id="recruiting_hero" data-analytics-placement="hero" data-analytics-intent="spawn_agent">
             {% csrf_token %}
             <input type="hidden" name="source_page" value="recruiting_hero" />
             <input type="hidden" name="trial_onboarding" value="1" />
             <input type="hidden" name="trial_onboarding_target" value="agent_ui" />
             <button type="submit" class="w-full group inline-flex items-center justify-center gap-2 px-7 py-3.5 bg-gradient-to-r from-violet-600 to-purple-500 hover:from-violet-700 hover:to-purple-600 text-white font-medium rounded-xl shadow-lg shadow-violet-200/50 hover:shadow-xl transition-all duration-200">
-              {% if not user.is_authenticated or solution_spawn_requires_trial %}Start Free Trial{% else %}Spawn Agent{% endif %}
+              {% if not user.is_authenticated or solution_spawn_requires_trial %}Start Free Trial{% else %}Deploy AI Employee{% endif %}
               <svg class="w-4 h-4 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
               </svg>
@@ -224,7 +224,7 @@
       </p>
     </div>
 
-    <!-- Featured Agent: Talent Scout -->
+    <!-- Featured employee: Candidate Sourcing -->
     <div class="mb-10">
       <div class="agent-card group relative overflow-hidden rounded-3xl bg-gradient-to-br from-indigo-600 via-violet-600 to-purple-600 p-1">
         <div class="absolute inset-0 bg-gradient-to-br from-indigo-400/20 via-transparent to-purple-400/20 pointer-events-none"></div>
@@ -236,7 +236,7 @@
                 <span class="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse"></span>
                 Most Popular
               </div>
-              <h3 class="text-2xl lg:text-3xl font-medium text-gray-900 mb-4">Talent Scout</h3>
+              <h3 class="text-2xl lg:text-3xl font-medium text-gray-900 mb-4">Candidate Sourcing AI Employee</h3>
               <p class="text-gray-600 text-lg leading-relaxed mb-8">
                 Your 24/7 recruiting partner that searches LinkedIn, GitHub, and job boards to discover and qualify candidates matching your exact requirements.
               </p>
@@ -274,7 +274,7 @@
                   Scheduled runs
                 </li>
               </ul>
-              <form method="post" action="{% url 'pages:pretrained_worker_hire' 'talent-scout' %}" class="inline-flex" data-analytics-cta-id="recruiting_talent_scout" data-analytics-placement="featured_agent" data-analytics-intent="spawn_agent">
+              <form method="post" action="{% url 'pages:public_template_hire' 'recruiting' 'candidate-sourcing-agent' %}" class="inline-flex" data-analytics-cta-id="recruiting_talent_scout" data-analytics-placement="featured_agent" data-analytics-intent="spawn_agent">
                 {% csrf_token %}
                 <input type="hidden" name="source_page" value="recruiting_talent_scout" />
                 <input type="hidden" name="trial_onboarding" value="1" />
@@ -283,7 +283,7 @@
                   {% if not user.is_authenticated or solution_spawn_requires_trial %}
                     {% cta_text "cta_recruiting_launch_btn_unauth" fallback="Start Free Trial" %}
                   {% else %}
-                    {% cta_text "cta_recruiting_launch_btn_auth" fallback="Spawn Agent" %}
+                    {% cta_text "cta_recruiting_launch_btn_auth" fallback="Deploy This Employee" %}
                   {% endif %}
                   <svg class="w-4 h-4 group-hover/btn:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
@@ -331,7 +331,7 @@
             <i data-lucide="sparkles" class="w-7 h-7 text-white"></i>
           </div>
           <div class="flex-1 min-w-0">
-            <h3 class="text-xl font-medium text-gray-900 mb-2">Candidate Researcher</h3>
+            <h3 class="text-xl font-medium text-gray-900 mb-2">Candidate Researcher AI Employee</h3>
             <p class="text-gray-600 leading-relaxed mb-5">
               Enriches candidate profiles with background research, work history, and online presence to give you the full picture.
             </p>
@@ -358,13 +358,13 @@
           </li>
         </ul>
         <div class="pl-[4.75rem]">
-          <form method="post" action="{% url 'pages:pretrained_worker_hire' 'candidate-researcher' %}" class="inline-flex" data-analytics-cta-id="recruiting_candidate_researcher" data-analytics-placement="supporting_agent" data-analytics-intent="spawn_agent">
+          <form method="post" action="{% url 'pages:public_template_hire' 'recruiting' 'candidate-researcher' %}" class="inline-flex" data-analytics-cta-id="recruiting_candidate_researcher" data-analytics-placement="supporting_agent" data-analytics-intent="spawn_agent">
             {% csrf_token %}
             <input type="hidden" name="source_page" value="recruiting_candidate_researcher" />
             <input type="hidden" name="trial_onboarding" value="1" />
             <input type="hidden" name="trial_onboarding_target" value="agent_ui" />
             <button type="submit" class="inline-flex items-center text-sm font-medium text-violet-600 hover:text-violet-700">
-              {% if not user.is_authenticated or solution_spawn_requires_trial %}Start Free Trial{% else %}Spawn Agent{% endif %}
+              {% if not user.is_authenticated or solution_spawn_requires_trial %}Start Free Trial{% else %}Deploy This Employee{% endif %}
               <svg class="w-4 h-4 ml-1 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
               </svg>
@@ -380,7 +380,7 @@
             <i data-lucide="message-circle" class="w-7 h-7 text-white"></i>
           </div>
           <div class="flex-1 min-w-0">
-            <h3 class="text-xl font-medium text-gray-900 mb-2">Outreach Agent</h3>
+            <h3 class="text-xl font-medium text-gray-900 mb-2">Outreach AI Employee</h3>
             <p class="text-gray-600 leading-relaxed mb-5">
               Crafts personalized outreach and keeps your talent pipeline warm with automated follow-ups.
             </p>
@@ -407,13 +407,13 @@
           </li>
         </ul>
         <div class="pl-[4.75rem]">
-          <form method="post" action="{% url 'pages:pretrained_worker_hire' 'outreach-agent' %}" class="inline-flex" data-analytics-cta-id="recruiting_outreach_agent" data-analytics-placement="supporting_agent" data-analytics-intent="spawn_agent">
+          <form method="post" action="{% url 'pages:public_template_hire' 'sales' 'outreach-agent' %}" class="inline-flex" data-analytics-cta-id="recruiting_outreach_agent" data-analytics-placement="supporting_agent" data-analytics-intent="spawn_agent">
             {% csrf_token %}
             <input type="hidden" name="source_page" value="recruiting_outreach_agent" />
             <input type="hidden" name="trial_onboarding" value="1" />
             <input type="hidden" name="trial_onboarding_target" value="agent_ui" />
             <button type="submit" class="inline-flex items-center text-sm font-medium text-emerald-600 hover:text-emerald-700">
-              {% if not user.is_authenticated or solution_spawn_requires_trial %}Start Free Trial{% else %}Spawn Agent{% endif %}
+              {% if not user.is_authenticated or solution_spawn_requires_trial %}Start Free Trial{% else %}Deploy This Employee{% endif %}
               <svg class="w-4 h-4 ml-1 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
               </svg>
@@ -770,13 +770,13 @@
     </p>
 
     <div class="mt-10 flex flex-col sm:flex-row gap-4 justify-center">
-      <form method="post" action="{% url 'pages:pretrained_worker_hire' 'talent-scout' %}" class="w-full sm:w-auto" data-analytics-cta-id="recruiting_final_cta" data-analytics-placement="final_cta" data-analytics-intent="spawn_agent">
+      <form method="post" action="{% url 'pages:public_template_hire' 'recruiting' 'candidate-sourcing-agent' %}" class="w-full sm:w-auto" data-analytics-cta-id="recruiting_final_cta" data-analytics-placement="final_cta" data-analytics-intent="spawn_agent">
         {% csrf_token %}
         <input type="hidden" name="source_page" value="recruiting_final_cta" />
         <input type="hidden" name="trial_onboarding" value="1" />
         <input type="hidden" name="trial_onboarding_target" value="agent_ui" />
         <button type="submit" class="w-full group inline-flex items-center justify-center gap-2 px-8 py-4 bg-gradient-to-r from-violet-600 to-purple-500 hover:from-violet-700 hover:to-purple-600 text-white font-medium rounded-xl shadow-lg shadow-violet-300/50 hover:shadow-xl hover:shadow-violet-300/60 transition-all duration-200 hover:-translate-y-0.5">
-          {% if not user.is_authenticated or solution_spawn_requires_trial %}Start Free Trial{% else %}Spawn Agent{% endif %}
+          {% if not user.is_authenticated or solution_spawn_requires_trial %}Start Free Trial{% else %}Deploy AI Employee{% endif %}
           <svg class="w-4 h-4 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
           </svg>

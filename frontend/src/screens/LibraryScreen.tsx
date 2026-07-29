@@ -219,7 +219,7 @@ export function LibraryScreen({ listUrl, likeUrl, canLike, initialCategory = nul
       <div className="gobii-card-base flex min-h-[50vh] items-center justify-center px-6 py-10">
         <div className="inline-flex items-center gap-3 rounded-full border border-indigo-100 bg-indigo-50 px-4 py-2 text-indigo-700">
           <Loader2 className="size-5 animate-spin" aria-hidden="true" />
-          <span className="text-sm font-semibold">Loading shared agents...</span>
+          <span className="text-sm font-semibold">Loading AI employee templates...</span>
         </div>
       </div>
     )
@@ -243,33 +243,33 @@ export function LibraryScreen({ listUrl, likeUrl, canLike, initialCategory = nul
   const isMostPopularSelected = selectedCategory === null
   const isSearchActive = normalizedSearchQuery.length > 0
   const emptyHeading = isSearchActive
-    ? `No ${officialOnly ? 'official templates' : 'shared agents'} match "${normalizedSearchQuery}".`
+    ? `No ${officialOnly ? 'official templates' : 'shared templates'} match "${normalizedSearchQuery}".`
     : officialOnly && selectedCategory
       ? 'No official templates found in this category.'
       : officialOnly
         ? 'No official templates found right now.'
         : selectedCategory
-          ? 'No shared agents found in this category.'
-          : 'No shared agents found right now.'
+          ? 'No shared templates found in this category.'
+          : 'No shared templates found right now.'
   const emptyDescription = isSearchActive
     ? 'Try another keyword or clear search.'
     : officialOnly
       ? 'Clear the official filter to browse community templates too.'
       : selectedCategory
         ? 'Try another category.'
-        : 'Check back soon for newly shared agents.'
+        : 'Check back soon for newly shared templates.'
   const pageHeading = selectedCategory
-    ? `${officialOnly ? 'Official ' : ''}${selectedCategory} AI agent templates`
+    ? `${officialOnly ? 'Official ' : ''}${selectedCategory} AI Employee Templates`
     : officialOnly
-      ? 'Official Gobii agent templates'
-      : 'Most popular shared Gobii agents'
+      ? 'Official Gobii AI Employee Templates'
+      : 'AI Employee Template Library'
   const pageDescription = selectedCategory
     ? officialOnly
-      ? `Browse official ${selectedCategory} templates maintained by Gobii.`
-      : `Browse publicly shared ${selectedCategory} agents from across Gobii.`
+      ? `Browse official ${selectedCategory} AI employee templates maintained by Gobii.`
+      : `Browse publicly shared ${selectedCategory} AI employee templates.`
     : officialOnly
-      ? 'Browse templates maintained by Gobii for common workflows.'
-      : 'Browse publicly shared agents from across Gobii.'
+      ? 'Browse AI employee templates maintained by Gobii for common workflows.'
+      : 'Choose a role from Gobii and the community, then customize the AI employee for your workflow.'
 
   return (
     <div className="space-y-6 pb-10">
@@ -286,7 +286,7 @@ export function LibraryScreen({ listUrl, likeUrl, canLike, initialCategory = nul
           <div className="flex flex-wrap items-center gap-2">
             <div className="inline-flex items-center gap-2 rounded-full border border-indigo-100 bg-indigo-50 px-4 py-2 text-sm font-semibold text-indigo-800">
               <LibraryIcon className="size-4" aria-hidden="true" />
-              {displayedAgentCount} {officialOnly ? 'official agents' : 'shared agents'}
+              {displayedAgentCount} {officialOnly ? 'official templates' : 'shared templates'}
             </div>
             <div className="inline-flex items-center gap-2 rounded-full border border-rose-100 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-700">
               <Heart className="size-4 fill-rose-500 text-rose-500" aria-hidden="true" />
@@ -412,7 +412,7 @@ export function LibraryScreen({ listUrl, likeUrl, canLike, initialCategory = nul
                     >
                       <a
                         href={agent.templateUrl}
-                        aria-label={`View details for ${agent.name}`}
+                        aria-label={`View the ${agent.name}`}
                         className="absolute inset-0 cursor-pointer rounded-lg focus-visible:outline-none"
                       />
 
@@ -465,7 +465,7 @@ export function LibraryScreen({ listUrl, likeUrl, canLike, initialCategory = nul
                           )}
 
                           <span className="pointer-events-none inline-flex items-center gap-1 text-sm font-medium text-indigo-600 transition group-hover:text-indigo-700">
-                            View details
+                            View {agent.name}
                             <ArrowRight className="size-4 transition group-hover:translate-x-0.5" aria-hidden="true" />
                           </span>
                         </div>

@@ -20,6 +20,7 @@ class PretrainedWorkerTemplateDefinition:
     priority: int = 100
     is_active: bool = True
     show_on_homepage: bool = False
+    slug: str = ""
 
 
 TEMPLATE_DEFINITIONS: List[PretrainedWorkerTemplateDefinition] = [

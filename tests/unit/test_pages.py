@@ -145,9 +145,11 @@ class HomePageTests(TestCase):
         soup = BeautifulSoup(response.content.decode("utf-8"), "html.parser")
         title = "Acme - AI Employees for Teams With Real Work to Do"
         description = (
-            "Acme agents are virtual employees with their own identity, memory, and tools. "
-            "Email them, text them — they browse the web, collect data, and deliver reports 24/7."
+            "Acme AI employees have their own identity, memory, and tools. Email or text "
+            "them—they browse the web, collect data, and deliver reports around the clock."
         )
+        self.assertGreaterEqual(len(description), 150)
+        self.assertLessEqual(len(description), 160)
         image_url = "https://gobii.ai/static/images/gobii_og_image_1200x630.png"
 
         self.assertEqual(
@@ -569,7 +571,7 @@ class HomePageTests(TestCase):
         response = self.client.get("/")
         self.assertContains(
             response,
-            '<meta name="description" content="Acme agents are virtual employees with their own identity, memory, and tools. Email them, text them — they browse the web, collect data, and deliver reports 24/7.">',
+            '<meta name="description" content="Acme AI employees have their own identity, memory, and tools. Email or text them—they browse the web, collect data, and deliver reports around the clock.">',
         )
 
     @override_settings(PUBLIC_BRAND_NAME="Acme", GOBII_PROPRIETARY_MODE=True)
@@ -577,7 +579,7 @@ class HomePageTests(TestCase):
         response = self.client.get("/")
         self.assertContains(
             response,
-            '<meta name="description" content="Acme agents are virtual employees with their own identity, memory, and tools. Email them, text them — they browse the web, collect data, and deliver reports 24/7.">',
+            '<meta name="description" content="Acme AI employees have their own identity, memory, and tools. Email or text them—they browse the web, collect data, and deliver reports around the clock.">',
         )
 
     def test_home_page_does_not_render_signup_modal_shell_when_flag_is_off(self):
@@ -780,7 +782,7 @@ class HomePageTests(TestCase):
         self.assertIsNone(response.context.get("homepage_pretrained_workers"))
 
         soup = BeautifulSoup(response.content, "html.parser")
-        self.assertIsNone(soup.find(id="pretrained-workers"))
+        self.assertIsNone(soup.find(id="ai-employees"))
         self.assertIsNone(
             soup.find(
                 "input",
@@ -1096,7 +1098,7 @@ class HomePageTests(TestCase):
             "capable of browser automation, web research, data collection, and workflow execution.",
             normalized_page_text,
         )
-        self.assertIn("Deploy a Pretrained AI Employee", normalized_page_text)
+        self.assertIn("Deploy an AI Employee", normalized_page_text)
         self.assertIn("Put a proven AI employee to work in minutes", normalized_page_text)
         self.assertNotRegex(normalized_page_text, r"(?i)\b(?:worker|coworker)s?\b")
         self.assertNotIn("Source candidates", normalized_page_text)
@@ -2397,30 +2399,89 @@ class SitemapTests(TestCase):
                 self.assertEqual(response.status_code, 301)
                 self.assertEqual(response["Location"], "/")
 
-        for path in (
-            "/pretrained-workers/",
-            "/pretrained-workers/talent-scout/",
-            "/pretrained-workers/talent-scout/hire/",
-            "/pretrained-workers/talent-scout/spawn/",
-        ):
+        legacy_get_redirects = {
+            "/pretrained-workers/": "/library/",
+            "/pretrained-workers/talent-scout/": "/library/recruiting/candidate-sourcing-agent/",
+            "/pretrained-workers/talent-scout/spawn/": "/library/recruiting/candidate-sourcing-agent/spawn/",
+        }
+        for path, destination in legacy_get_redirects.items():
             with self.subTest(path=path):
                 response = self.client.get(path)
-                self.assertEqual(response.status_code, 302)
-                self.assertEqual(response["Location"], "/")
+                self.assertEqual(response.status_code, 301)
+                self.assertEqual(response["Location"], destination)
+
+        hire_response = self.client.post("/pretrained-workers/talent-scout/hire/")
+        self.assertEqual(hire_response.status_code, 308)
+        self.assertEqual(
+            hire_response["Location"],
+            "/library/recruiting/candidate-sourcing-agent/hire/",
+        )
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_solution_urls_render_again(self):
+        cases = (
+            (
+                "/solutions/",
+                (
+                    "Candidate Sourcing AI Employee",
+                    "B2B Lead Research AI Employee",
+                ),
+                ("Talent Scout", "Lead Hunter"),
+            ),
+            (
+                "/solutions/recruiting/",
+                ("Candidate Sourcing AI Employee",),
+                ("Talent Scout",),
+            ),
+            (
+                "/solutions/recruiting/candidate-sourcing/",
+                ("Candidate Sourcing AI Employee",),
+                ("Talent Scout",),
+            ),
+            (
+                "/solutions/sales/",
+                ("B2B Lead Research AI Employee",),
+                ("Lead Hunter",),
+            ),
+            (
+                "/solutions/sales/ai-sales-agent/",
+                (
+                    "Start with B2B Lead Research",
+                    "B2B Lead Research AI Employee",
+                ),
+                ("Lead Hunter",),
+            ),
+            ("/solutions/engineering/", (), ()),
+        )
+        for path, canonical_employee_names, retired_names in cases:
+            with self.subTest(path=path):
+                response = self.client.get(path)
+                self.assertEqual(response.status_code, 200)
+                for canonical_employee_name in canonical_employee_names:
+                    self.assertContains(response, canonical_employee_name)
+                for retired_name in retired_names:
+                    self.assertNotContains(response, retired_name)
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @tag("batch_pages")
+    def test_solution_ctas_do_not_render_spawn_language(self):
         for path in (
-            "/solutions/",
             "/solutions/recruiting/",
             "/solutions/recruiting/candidate-sourcing/",
             "/solutions/sales/",
             "/solutions/sales/ai-sales-agent/",
-            "/solutions/engineering/",
         ):
             with self.subTest(path=path):
                 response = self.client.get(path)
                 self.assertEqual(response.status_code, 200)
+                page_text = BeautifulSoup(
+                    response.content,
+                    "html.parser",
+                ).get_text(" ", strip=True)
+                self.assertNotRegex(
+                    page_text,
+                    r"(?i)\b(?:spawn|spawned|spawning)\b",
+                )
 
     @override_settings(
         GOBII_PROPRIETARY_MODE=True,
@@ -2455,7 +2516,7 @@ class SitemapTests(TestCase):
         )
         self.assertContains(response, "AI sales agent for supervised pipeline work")
         self.assertContains(response, "AI sales employee")
-        self.assertContains(response, "Start with Lead Hunter")
+        self.assertContains(response, "Start with B2B Lead Research")
         self.assertContains(
             response,
             f'href="{reverse("pages:ai_employees")}"',
@@ -2464,7 +2525,7 @@ class SitemapTests(TestCase):
         self.assertContains(response, "Which type of AI sales agent should you buy?")
         self.assertContains(response, "CRM-native agents")
         self.assertContains(response, "Voice and calling agents")
-        self.assertContains(response, "Lead Hunter output example")
+        self.assertContains(response, "B2B lead research output example")
         self.assertContains(response, "Google Sheets")
         self.assertContains(response, "webhooks")
         self.assertNotContains(response, "When not to use one")
@@ -3668,49 +3729,65 @@ class ApiDocsRobotsTests(TestCase):
 @tag("batch_pages")
 class PretrainedWorkerSurfaceTests(TestCase):
     @override_settings(GOBII_PROPRIETARY_MODE=True)
-    def test_pretrained_worker_urls_work_in_proprietary_mode(self):
+    def test_pretrained_worker_urls_redirect_to_library_in_proprietary_mode(self):
         directory_response = self.client.get("/pretrained-workers/")
-        self.assertEqual(directory_response.status_code, 302)
-        self.assertEqual(directory_response["Location"], "/#pretrained-workers")
+        self.assertEqual(directory_response.status_code, 301)
+        self.assertEqual(directory_response["Location"], "/library/")
 
         detail_response = self.client.get("/pretrained-workers/talent-scout/")
-        self.assertEqual(detail_response.status_code, 200)
-        self.assertContains(detail_response, "Talent Scout")
-        detail_text = BeautifulSoup(detail_response.content, "html.parser").get_text(" ", strip=True)
-        self.assertNotRegex(detail_text, r"(?i)\b(?:worker|coworker)s?\b")
+        self.assertEqual(detail_response.status_code, 301)
+        self.assertEqual(
+            detail_response["Location"],
+            "/library/recruiting/candidate-sourcing-agent/",
+        )
 
         hire_response = self.client.post(
             "/pretrained-workers/talent-scout/hire/",
             {"source_page": "home_pretrained_workers"},
         )
-        self.assertEqual(hire_response.status_code, 302)
+        self.assertEqual(hire_response.status_code, 308)
         self.assertEqual(
-            self.client.session.get(PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY),
-            "talent-scout",
+            hire_response["Location"],
+            "/library/recruiting/candidate-sourcing-agent/hire/",
         )
 
         spawn_response = self.client.get("/pretrained-workers/talent-scout/spawn/")
-        self.assertEqual(spawn_response.status_code, 302)
+        self.assertEqual(spawn_response.status_code, 301)
+        self.assertEqual(
+            spawn_response["Location"],
+            "/library/recruiting/candidate-sourcing-agent/spawn/",
+        )
 
     @override_settings(GOBII_PROPRIETARY_MODE=False)
-    def test_pretrained_worker_urls_redirect_home_in_community_mode(self):
-        for path in (
-            "/pretrained-workers/",
-            "/pretrained-workers/talent-scout/",
-            "/pretrained-workers/talent-scout/hire/",
-            "/pretrained-workers/talent-scout/spawn/",
-        ):
-            with self.subTest(path=path):
-                response = self.client.get(path)
+    def test_pretrained_worker_redirects_are_permanent_in_community_mode(self):
+        directory_response = self.client.get("/pretrained-workers/")
+        self.assertEqual(directory_response.status_code, 301)
+        self.assertEqual(directory_response["Location"], "/library/")
 
-                self.assertEqual(response.status_code, 302)
-                self.assertEqual(response["Location"], "/")
+        detail_response = self.client.get("/pretrained-workers/talent-scout/")
+        self.assertEqual(detail_response.status_code, 301)
+        self.assertEqual(
+            detail_response["Location"],
+            "/library/recruiting/candidate-sourcing-agent/",
+        )
 
 
 @tag("batch_pages")
 class RestoredPublicMarketingSurfaceTests(TestCase):
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_public_marketing_copy_uses_employee_language(self):
+        PersistentAgentTemplate.objects.create(
+            code="marketing-copy-candidate-sourcing",
+            slug="candidate-sourcing-agent",
+            display_name="Candidate Sourcing AI Agent",
+            tagline="Find qualified candidates for recruiter review.",
+            description="Build a source-linked shortlist with an AI employee.",
+            charter="Find qualified candidates and return a shortlist.",
+            category="Recruiting",
+            is_official=True,
+            is_active=True,
+        )
+        cache.clear()
         paths = (
             "/",
             "/ai-employees/",
@@ -3725,7 +3802,7 @@ class RestoredPublicMarketingSurfaceTests(TestCase):
             "/comparisons/n8n-vs-gobii/",
             "/comparisons/zapier-agents-vs-gobii/",
             "/comparisons/lindy-vs-gobii/",
-            "/pretrained-workers/talent-scout/",
+            "/library/recruiting/candidate-sourcing-agent/",
         )
 
         for path in paths:
@@ -3734,6 +3811,43 @@ class RestoredPublicMarketingSurfaceTests(TestCase):
                 self.assertEqual(response.status_code, 200)
                 page_text = BeautifulSoup(response.content, "html.parser").get_text(" ", strip=True)
                 self.assertNotRegex(page_text, r"(?i)\b(?:worker|coworker)s?\b")
+                if path in (
+                    "/",
+                    "/library/",
+                    "/library/recruiting/candidate-sourcing-agent/",
+                ):
+                    self.assertNotRegex(
+                        page_text,
+                        r"(?i)\b(?:spawn|spawned|spawning)\b",
+                    )
+
+        library_response = self.client.get("/library/")
+        library_soup = BeautifulSoup(library_response.content, "html.parser")
+        self.assertEqual(
+            library_soup.find("h1").get_text(" ", strip=True),
+            "AI Employee Template Library",
+        )
+
+        detail_response = self.client.get(
+            "/library/recruiting/candidate-sourcing-agent/"
+        )
+        detail_soup = BeautifulSoup(detail_response.content, "html.parser")
+        self.assertEqual(
+            detail_soup.find("h1").get_text(" ", strip=True),
+            "Candidate Sourcing AI Employee",
+        )
+        self.assertIn(
+            "AI Employee Template",
+            detail_soup.get_text(" ", strip=True),
+        )
+
+        home_response = self.client.get("/")
+        home_soup = BeautifulSoup(home_response.content, "html.parser")
+        contextual_link = home_soup.find(
+            "a",
+            string=re.compile(r"View the Candidate Sourcing AI Employee"),
+        )
+        self.assertIsNotNone(contextual_link)
 
         with override_settings(GOBII_PROPRIETARY_MODE=False):
             response = self.client.get("/docs/guides/api/")

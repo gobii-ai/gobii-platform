@@ -7,11 +7,14 @@ from agents.services import PretrainedWorkerTemplateService
 from api.models import MCPServerConfig
 from api.services.pipedream_apps import PIPEDREAM_RUNTIME_NAME, PipedreamCatalogService, filter_deprecated_pipedream_apps_without_agent, get_platform_pipedream_app_slugs
 from api.services.native_integrations import list_native_integration_providers
+from pages.legacy_pretrained_worker_redirects import get_legacy_pretrained_worker_redirect
+from pages.public_template_metadata import public_template_employee_link_name
+from pages.public_template_urls import public_template_detail_path, public_template_hire_path
 from util.integrations import pipedream_status
 
 logger = logging.getLogger(__name__)
 
-HOMEPAGE_PRETRAINED_CACHE_VERSION = 1
+HOMEPAGE_PRETRAINED_CACHE_VERSION = 4
 HOMEPAGE_PRETRAINED_CACHE_FRESH_SECONDS = 60
 HOMEPAGE_PRETRAINED_CACHE_STALE_SECONDS = 600
 HOMEPAGE_PRETRAINED_CACHE_LOCK_SECONDS = 60
@@ -70,6 +73,17 @@ def _get_cached_payload(
 
 def _serialize_template(template, display_map: dict[str, str]) -> dict[str, object]:
     default_tools = list(template.default_tools or [])
+    legacy_redirect = get_legacy_pretrained_worker_redirect(template.code)
+    detail_url = (
+        legacy_redirect.detail_path()
+        if legacy_redirect
+        else public_template_detail_path(template)
+    )
+    hire_url = (
+        legacy_redirect.hire_path()
+        if legacy_redirect
+        else public_template_hire_path(template)
+    )
     return {
         "code": template.code,
         "display_name": template.display_name,
@@ -86,6 +100,11 @@ def _serialize_template(template, display_map: dict[str, str]) -> dict[str, obje
         "priority": template.priority,
         "is_active": template.is_active,
         "show_on_homepage": template.show_on_homepage,
+        "detail_url": detail_url,
+        "hire_url": hire_url,
+        "detail_link_label": (
+            f"View the {public_template_employee_link_name(template.display_name)}"
+        ),
         "schedule_description": PretrainedWorkerTemplateService.describe_schedule(
             template.base_schedule
         ),

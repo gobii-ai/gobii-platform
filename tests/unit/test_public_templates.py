@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from urllib.parse import urlsplit
 from unittest.mock import patch
 
+from bs4 import BeautifulSoup
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
@@ -154,6 +155,33 @@ class TemplateServiceDbTests(TestCase):
         self.assertEqual(resolved.display_name, template.display_name)
         self.assertEqual(resolved.preferred_llm_tier, "premium")
 
+    @tag("batch_public_templates")
+    def test_retired_template_codes_resolve_to_canonical_templates(self):
+        canonical_codes = {
+            "talent-sourcer": "ai-agent-for-candidate-sourcing",
+            "talent-scout": "ai-agent-for-candidate-sourcing",
+            "lead-hunter": "b2b-lead-research-agent",
+            "account-researcher": "account-research-ai-agent",
+        }
+        for canonical_code in set(canonical_codes.values()):
+            PersistentAgentTemplate.objects.create(
+                code=canonical_code,
+                display_name=canonical_code.replace("-", " ").title(),
+                tagline="Canonical AI employee template.",
+                description="Canonical AI employee template.",
+                charter="Run the canonical workflow.",
+                category="Operations",
+                is_active=True,
+            )
+
+        for legacy_code, canonical_code in canonical_codes.items():
+            with self.subTest(legacy_code=legacy_code):
+                resolved = PretrainedWorkerTemplateService.get_template_by_code(
+                    legacy_code
+                )
+                self.assertIsNotNone(resolved)
+                self.assertEqual(resolved.code, canonical_code)
+
 
 class NewAgentTemplateRecommendationTests(TestCase):
     @classmethod
@@ -271,16 +299,20 @@ class NewAgentTemplateRecommendationTests(TestCase):
     @tag("batch_public_templates")
     @patch("console.agent_chat.template_recommendations.get_summarization_llm_configs")
     def test_no_existing_charters_returns_default_templates_without_llm(self, mock_get_configs):
-        self._create_template("talent-scout", category="People", likes=2)
+        self._create_template("ai-agent-for-candidate-sourcing", category="Recruiting", likes=2)
         self._create_template("candidate-researcher", category="People", likes=1)
-        self._create_template("lead-hunter", category="Revenue", likes=3)
+        self._create_template("b2b-lead-research-agent", category="Sales", likes=3)
 
         payload = build_new_agent_template_recommendations(self.user, self._personal_context())
 
         self.assertEqual(payload["source"], "fallback")
         self.assertEqual(
             [template["templateCode"] for template in payload["templates"]],
-            ["talent-scout", "candidate-researcher", "lead-hunter"],
+            [
+                "ai-agent-for-candidate-sourcing",
+                "candidate-researcher",
+                "b2b-lead-research-agent",
+            ],
         )
         mock_get_configs.assert_not_called()
 
@@ -376,9 +408,9 @@ class NewAgentTemplateRecommendationTests(TestCase):
     @patch("console.agent_chat.template_recommendations.get_summarization_llm_configs")
     def test_invalid_llm_category_falls_back_without_error(self, mock_get_configs, mock_run_completion):
         self._create_agent(charter="Find and enrich engineering candidates.")
-        self._create_template("talent-scout", category="People")
+        self._create_template("ai-agent-for-candidate-sourcing", category="Recruiting")
         self._create_template("candidate-researcher", category="People")
-        self._create_template("lead-hunter", category="Revenue")
+        self._create_template("b2b-lead-research-agent", category="Sales")
         mock_get_configs.return_value = [("provider", "model", {})]
         mock_run_completion.return_value = self._tool_response("Not A Category")
 
@@ -393,9 +425,9 @@ class NewAgentTemplateRecommendationTests(TestCase):
     def test_invalid_llm_category_fallback_includes_org_templates_first(self, mock_get_configs, mock_run_completion):
         self._create_agent(organization=self.org, charter="Mixed org workflows.")
         org_template = self._create_template("org-template", category="Custom", organization=self.org)
-        self._create_template("talent-scout", category="People")
+        self._create_template("ai-agent-for-candidate-sourcing", category="Recruiting")
         self._create_template("candidate-researcher", category="People")
-        self._create_template("lead-hunter", category="Revenue")
+        self._create_template("b2b-lead-research-agent", category="Sales")
         mock_get_configs.return_value = [("provider", "model", {})]
         mock_run_completion.return_value = self._tool_response("Not A Category")
 
@@ -912,8 +944,18 @@ class PublicTemplateRouteTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Stripe Fraud Dispute Monitor")
         self.assertContains(response, "Monitor Stripe disputes and flag risky activity.")
-        self.assertEqual(response.context["template_seo_title"], f"{template.display_name} AI Agent Template | Gobii")
-        self.assertEqual(response.context["template_social_title"], f"{template.display_name} AI Agent Template")
+        self.assertEqual(
+            response.context["template_seo_title"],
+            f"{template.display_name} AI Employee Template | Gobii",
+        )
+        self.assertEqual(
+            response.context["template_social_title"],
+            f"{template.display_name} AI Employee Template",
+        )
+        self.assertEqual(
+            response.context["template_heading"],
+            f"{template.display_name} AI Employee",
+        )
 
     @tag("batch_public_templates")
     def test_public_template_detail_can_omit_ai_agent_template_from_title(self):
@@ -931,7 +973,117 @@ class PublicTemplateRouteTests(TestCase):
         self.assertEqual(response.context["template_social_title"], template.display_name)
         self.assertContains(response, f"<title>{template.display_name} | Gobii</title>", html=True)
         self.assertContains(response, f'<meta property="og:title" content="{template.display_name}">')
-        self.assertNotContains(response, f"{template.display_name} AI Agent Template | Gobii")
+        self.assertNotContains(response, f"{template.display_name} AI Employee Template | Gobii")
+
+    @tag("batch_public_templates")
+    def test_public_template_metadata_escapes_html_and_preserves_unicode(self):
+        template = self.create_public_template(
+            code="escaped-seo-description-template",
+            display_name="R&D Research",
+            handle="escaped-seo-description-template",
+            seo_meta_description=(
+                "Research R&amp;D &lt;signals&gt; for café teams and return "
+                "source-backed recommendations."
+            ),
+        )
+
+        response = self.client.get(
+            "/library/finance/escaped-seo-description-template/"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.context["template_seo_description"],
+            "Research R&D <signals> for café teams and return source-backed recommendations.",
+        )
+        self.assertContains(
+            response,
+            'content="Research R&amp;D &lt;signals&gt; for café teams and return '
+            'source-backed recommendations."',
+        )
+        self.assertEqual(
+            response.context["template_heading"],
+            f"{template.display_name} AI Employee",
+        )
+
+    @tag("batch_public_templates")
+    def test_lead_hunter_is_differentiated_from_b2b_lead_research(self):
+        self.create_public_template(
+            code="tpl-f2c5bb1cdb34",
+            slug="lead-hunter",
+            display_name="Lead Hunter",
+            handle="lead-hunter-owner",
+            category="Sales",
+            tagline="Find leads across professional networks.",
+            description="Find and qualify leads against an ICP.",
+        )
+        self.create_public_template(
+            code="b2b-lead-research-agent",
+            slug="b2b-lead-research-agent",
+            display_name="B2B Lead Research AI Agent",
+            handle="b2b-lead-research-owner",
+            category="Sales",
+            is_official=True,
+            tagline="Research target companies and account fit.",
+            description=(
+                "Research target companies, buying signals, and account fit with "
+                "source-backed reasoning."
+            ),
+        )
+
+        community_response = self.client.get("/library/sales/lead-hunter/")
+        official_response = self.client.get(
+            "/library/sales/b2b-lead-research-agent/"
+        )
+
+        self.assertEqual(community_response.status_code, 200)
+        self.assertEqual(official_response.status_code, 200)
+        self.assertEqual(
+            community_response.context["template_heading"],
+            "Professional Network Lead Hunter AI Employee",
+        )
+        self.assertEqual(
+            official_response.context["template_heading"],
+            "B2B Lead Research AI Employee",
+        )
+        self.assertNotEqual(
+            community_response.context["template_seo_title"],
+            official_response.context["template_seo_title"],
+        )
+        self.assertNotEqual(
+            community_response.context["template_seo_description"],
+            official_response.context["template_seo_description"],
+        )
+        self.assertContains(community_response, "individual prospects")
+        self.assertContains(community_response, "Professional-network source links")
+        self.assertContains(official_response, "account fit")
+
+    @tag("batch_public_templates")
+    def test_seo_override_preserves_existing_description_markdown(self):
+        self.create_public_template(
+            code="tpl-2a3ec836a1cd",
+            slug="stripe-fraud-dispute-monitor",
+            display_name="AI Agent for Stripe Chargeback Monitoring",
+            handle="stripe-monitor-owner",
+            category="Finance",
+            description_markdown=(
+                "### Existing Stripe workflow details\n\n"
+                "Preserve transaction fields, SMS escalation guidance, and "
+                "monitoring-only guardrails."
+            ),
+        )
+
+        response = self.client.get(
+            "/library/finance/stripe-fraud-dispute-monitor/"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response,
+            "This official AI employee monitors Stripe chargebacks",
+        )
+        self.assertContains(response, "Existing Stripe workflow details")
+        self.assertContains(response, "monitoring-only guardrails")
 
     @tag("batch_public_templates")
     def test_public_template_detail_hides_related_templates_even_when_specified(self):
@@ -1543,10 +1695,23 @@ class LibraryViewTests(TestCase):
         self.assertEqual(curated_agent["templateUrl"], "/library/team-ops/gobii-project-manager/")
         self.assertEqual(curated_agent["publicProfileHandle"], "")
         self.assertFalse(curated_agent["isOfficial"])
-        self.assertContains(response, "Most popular shared Gobii agents")
+        self.assertContains(response, "AI Employee Template Library")
+        self.assertEqual(
+            response.context["library_page_title"],
+            "AI Employee Template Library: Business Roles | Gobii",
+        )
+        self.assertLessEqual(len(response.context["library_page_title"]), 60)
+        self.assertLessEqual(len(response.context["library_page_description"]), 160)
+        self.assertFalse(
+            response.context["library_page_description"].endswith(("...", "…"))
+        )
         self.assertContains(response, public_template.display_name)
         self.assertContains(response, curated_template.display_name)
         self.assertNotContains(response, "Private Library Template")
+        soup = BeautifulSoup(response.content, "html.parser")
+        self.assertEqual(len(soup.find_all("h1")), 1)
+        for script in soup.find_all("script", {"type": "application/ld+json"}):
+            json.loads(script.string)
 
     @tag("batch_public_templates")
     def test_library_category_renders_and_redirects_alias_to_canonical_slug(self):

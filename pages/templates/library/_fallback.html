@@ -4,10 +4,10 @@
       <div class="space-y-2">
         <p class="text-xs font-semibold uppercase tracking-[0.14em] text-indigo-700">Discover</p>
         <h1 class="text-2xl font-semibold tracking-tight text-slate-900 sm:text-3xl">
-          {% if selected_category and official_only %}Official {{ selected_category }} AI agent templates{% elif selected_category %}{{ selected_category }} AI agent templates{% elif official_only %}Official Gobii agent templates{% else %}Most popular shared Gobii agents{% endif %}
+          {% if selected_category and official_only %}Official {{ selected_category }} AI Employee Templates{% elif selected_category %}{{ selected_category }} AI Employee Templates{% elif official_only %}Official Gobii AI Employee Templates{% else %}AI Employee Template Library{% endif %}
         </h1>
         <p class="max-w-3xl text-sm text-slate-600 sm:text-base">
-          {% if selected_category and official_only %}Browse official {{ selected_category }} templates maintained by Gobii.{% elif selected_category %}Browse publicly shared {{ selected_category }} agents from across Gobii.{% elif official_only %}Browse templates maintained by Gobii for common workflows.{% else %}Browse publicly shared agents from across Gobii.{% endif %}
+          {% if selected_category and official_only %}Browse official {{ selected_category }} AI employee templates maintained by Gobii.{% elif selected_category %}Browse publicly shared {{ selected_category }} AI employee templates.{% elif official_only %}Browse AI employee templates maintained by Gobii for common workflows.{% else %}Choose a role from Gobii and the community, then customize the AI employee for your workflow.{% endif %}
         </p>
         {% if not user.is_authenticated %}
           <p class="text-sm font-medium text-indigo-700">Sign in to like templates.</p>
@@ -15,7 +15,7 @@
       </div>
       <div class="flex flex-wrap items-center gap-2">
         <div class="inline-flex items-center gap-2 rounded-full border border-indigo-100 bg-indigo-50 px-4 py-2 text-sm font-semibold text-indigo-800">
-          {% if selected_category or official_only %}{{ payload.totalAgents }} {% if official_only %}official agents{% else %}shared agents{% endif %}{% else %}{{ payload.libraryTotalAgents }} shared agents{% endif %}
+          {% if selected_category or official_only %}{{ payload.totalAgents }} {% if official_only %}official templates{% else %}shared templates{% endif %}{% else %}{{ payload.libraryTotalAgents }} shared templates{% endif %}
         </div>
         <div class="inline-flex items-center gap-2 rounded-full border border-rose-100 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-700">
           {% if official_only %}{{ payload.officialTotalLikes }}{% else %}{{ payload.libraryTotalLikes }}{% endif %} likes
@@ -99,7 +99,7 @@
                     <span>{{ agent.likeCount }}</span>
                   </span>
                   <span class="pointer-events-none inline-flex items-center gap-1 text-sm font-medium text-indigo-600 transition group-hover:text-indigo-700">
-                    View details
+                    View {{ agent.name }}
                     <span aria-hidden="true">-&gt;</span>
                   </span>
                 </div>
@@ -109,8 +109,8 @@
         </div>
       {% else %}
         <div class="gobii-card-base p-8 text-center">
-          <p class="text-sm font-semibold text-slate-800">{% if official_only and selected_category %}No official templates found in this category.{% elif official_only %}No official templates found right now.{% elif selected_category %}No shared agents found in this category.{% else %}No shared agents found right now.{% endif %}</p>
-          <p class="mt-1 text-sm text-slate-600">{% if official_only %}Clear the official filter to browse community templates too.{% elif selected_category %}Try another category.{% else %}Check back soon for newly shared agents.{% endif %}</p>
+          <p class="text-sm font-semibold text-slate-800">{% if official_only and selected_category %}No official templates found in this category.{% elif official_only %}No official templates found right now.{% elif selected_category %}No shared templates found in this category.{% else %}No shared templates found right now.{% endif %}</p>
+          <p class="mt-1 text-sm text-slate-600">{% if official_only %}Clear the official filter to browse community templates too.{% elif selected_category %}Try another category.{% else %}Check back soon for newly shared templates.{% endif %}</p>
         </div>
       {% endif %}
     </div>
