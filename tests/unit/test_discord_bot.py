@@ -2049,6 +2049,14 @@ class NativeDiscordBotTests(TestCase):
     def test_discord_guild_disconnect_preserves_claim_when_discord_fails(self, delete_mock):
         self._force_login_console_manager()
         guild = self._guild(guild_id="100", name="Support")
+        webhook = PersistentAgentDiscordWebhook.objects.create(
+            guild=guild,
+            channel_id="10",
+            webhook_id="webhook-1",
+            name="Gobii",
+        )
+        webhook.webhook_token = "webhook-token"
+        webhook.save(update_fields=["webhook_token_encrypted", "updated_at"])
         response = _response({"message": "Unavailable"}, status_code=503)
         response.text = "Unavailable"
         response.raise_for_status.side_effect = requests.HTTPError("503")
@@ -2061,6 +2069,9 @@ class NativeDiscordBotTests(TestCase):
         self.assertEqual(api_response.status_code, 502)
         guild.refresh_from_db()
         self.assertTrue(guild.is_active)
+        self.assertTrue(PersistentAgentDiscordWebhook.objects.filter(id=webhook.id).exists())
+        self.assertEqual(delete_mock.call_count, 1)
+        self.assertIn("/users/@me/guilds/100", delete_mock.call_args.args[0])
 
     @tag("batch_agent_webhooks")
     def test_cleanup_legacy_discord_guilds_dry_run_reports_without_mutating(self):

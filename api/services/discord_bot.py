@@ -322,7 +322,7 @@ def _fetch_bot_guild(guild_id: str) -> Mapping[str, Any]:
             "Gobii could not verify the installed Discord server."
         ) from exc
     _raise_for_discord_status(response, action="installed server verification")
-    payload = response.json() or []
+    payload = response.json() or {}
     if not isinstance(payload, Mapping) or str(payload.get("id") or "").strip() != guild_id:
         raise DiscordBotIntegrationError("Discord returned an invalid installed server response.")
     return payload
@@ -540,9 +540,9 @@ def disconnect_discord_guild_claim(guild_claim: PersistentAgentDiscordGuild) -> 
     webhooks = list(
         PersistentAgentDiscordWebhook.objects.filter(guild=guild_claim).order_by("created_at", "id")
     )
+    _leave_discord_guild(guild_id)
     for webhook in webhooks:
         _delete_discord_webhook(webhook)
-    _leave_discord_guild(guild_id)
 
     now = timezone.now()
     with transaction.atomic():

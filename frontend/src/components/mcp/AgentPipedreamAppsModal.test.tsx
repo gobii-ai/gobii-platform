@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { AgentPipedreamAppsModal } from './AgentPipedreamAppsModal'
 import {
+  disconnectDiscordGuild,
   fetchAgentDiscordApp,
   fetchAgentDiscordGuildChannels,
   startAgentDiscordConnect,
@@ -58,7 +59,7 @@ function renderModal() {
       mutations: { retry: false },
     },
   })
-  return render(
+  const result = render(
     <QueryClientProvider client={queryClient}>
       <AgentPipedreamAppsModal
         agentId="agent-1"
@@ -68,10 +69,13 @@ function renderModal() {
       />
     </QueryClientProvider>,
   )
+  return { ...result, queryClient }
 }
 
 describe('AgentPipedreamAppsModal Discord integration', () => {
   beforeEach(() => {
+    vi.restoreAllMocks()
+    vi.mocked(disconnectDiscordGuild).mockReset()
     vi.mocked(fetchAgentDiscordApp).mockReset()
     vi.mocked(fetchAgentDiscordGuildChannels).mockReset()
     vi.mocked(startAgentDiscordConnect).mockReset()
@@ -145,5 +149,61 @@ describe('AgentPipedreamAppsModal Discord integration', () => {
         },
       ])
     })
+  })
+
+  it('removes a Discord server and refreshes context state', async () => {
+    vi.mocked(fetchAgentDiscordApp).mockResolvedValue(connectedDiscordApp)
+    vi.mocked(fetchAgentDiscordGuildChannels).mockResolvedValue({
+      status: 'success',
+      message: '',
+      error: '',
+      connectUrl: '',
+      channels: [],
+    })
+    vi.mocked(disconnectDiscordGuild).mockResolvedValue({ revoked: true })
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+
+    const { queryClient } = renderModal()
+    const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries')
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Configure' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove' }))
+
+    await waitFor(() => {
+      expect(disconnectDiscordGuild).toHaveBeenCalled()
+    })
+    expect(vi.mocked(disconnectDiscordGuild).mock.calls[0]?.[0]).toBe('guild-1')
+    expect(window.confirm).toHaveBeenCalledWith(
+      'Remove Ops Server from this Gobii context? This stops every agent subscription in that server and uninstalls the Gobii bot.',
+    )
+    await waitFor(() => {
+      expect(invalidateQueries).toHaveBeenCalledWith({
+        queryKey: ['discord-context-app'],
+      })
+    })
+  })
+
+  it('shows Discord server removal failures', async () => {
+    vi.mocked(fetchAgentDiscordApp).mockResolvedValue(connectedDiscordApp)
+    vi.mocked(fetchAgentDiscordGuildChannels).mockResolvedValue({
+      status: 'success',
+      message: '',
+      error: '',
+      connectUrl: '',
+      channels: [],
+    })
+    vi.mocked(disconnectDiscordGuild).mockRejectedValue(
+      new Error('Discord server removal could not reach Discord.'),
+    )
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+
+    renderModal()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Configure' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove' }))
+
+    expect(
+      await screen.findByText('Discord server removal could not reach Discord.'),
+    ).toBeInTheDocument()
   })
 })
