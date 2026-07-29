@@ -3845,7 +3845,7 @@ class RestoredPublicMarketingSurfaceTests(TestCase):
         home_soup = BeautifulSoup(home_response.content, "html.parser")
         contextual_link = home_soup.find(
             "a",
-            string=re.compile(r"View the Candidate Sourcing AI employee"),
+            string=re.compile(r"View the Candidate Sourcing AI Employee"),
         )
         self.assertIsNotNone(contextual_link)
 
