@@ -70,39 +70,55 @@ export function repairUnclosedFence(block: string): string {
 
 /**
  * Make an in-flight block render as styled markdown rather than showing raw half-typed
- * syntax (bug #510 follow-up: the tail must be *markdown*, not plain text). Closes
- * constructs whose meaning is already known (fences, bold, italic, inline code,
- * strikethrough) and hides a trailing incomplete link/image (a fabricated URL would be
- * wrong; the characters reappear when the construct completes). Never touches content
- * inside code fences or inline code.
+ * syntax (bug #510 follow-up: the tail must be *markdown*, not plain text). Rule set
+ * follows Vercel's remend (the streamdown repair pipeline): close constructs whose
+ * meaning is already known (fences, bold, italic, inline code, strikethrough — with
+ * half-complete-closer and bare-marker guards), render incomplete links as their text
+ * (never a fabricated URL), drop incomplete images and trailing half-typed HTML tags,
+ * and neutralize a nascent setext underline so the previous paragraph doesn't flash as
+ * a giant heading. Repairs apply only to the in-flight tail block; the final message
+ * always renders the raw text.
  */
 export function repairIncompleteMarkdown(block: string): string {
-  let repaired = repairUnclosedFence(block)
-  const fenceClosed = repaired !== block
-  if (fenceClosed) {
+  const fenceRepaired = repairUnclosedFence(block)
+  if (fenceRepaired !== block) {
     // Inside a code block: fence closure is the only safe repair.
-    return repaired
+    return fenceRepaired
   }
 
-  // Hide a trailing incomplete link or image: "[text](url-in-progress" or "[text-in-pr"
-  repaired = repaired.replace(/!?\[[^\]]*(\]\([^)]*)?$/u, (match, _closer, offset, whole) => {
-    // Keep escaped or footnote-looking brackets intact if the bracket is escaped.
-    if (offset > 0 && whole[offset - 1] === '\\') {
-      return match
-    }
-    return ''
-  })
+  let repaired = block
 
-  // Scan outside code spans and count unbalanced inline markers.
+  // Trailing half-typed HTML tag ("text <sp") — hide it until the '>' arrives.
+  repaired = repaired.replace(/<[a-zA-Z/][^>]*$/, '')
+
+  // Incomplete image: remove entirely (a partial URL would fire a broken request).
+  repaired = repaired.replace(/!\[[^\]]*(?:\]\([^)]*)?$/, '')
+  // Incomplete link URL: keep the text flowing, drop the link markup ("text-only" mode).
+  repaired = repaired.replace(/\[([^\]]*)\]\([^)]*$/, '$1')
+  // Incomplete link text: strip just the opening bracket.
+  repaired = repaired.replace(/(^|[^\\])\[([^\]]*)$/, '$1$2')
+
+  // A lone "-"/"=" line under a paragraph is a setext underline mid-flight: the whole
+  // previous paragraph would flash as an <h1>/<h2>. A zero-width space keeps it inert.
+  const lines = repaired.split('\n')
+  if (lines.length >= 2) {
+    const last = lines[lines.length - 1]
+    const prev = lines[lines.length - 2]
+    if (/^\s{0,3}(-{1,2}|={1,2})\s*$/.test(last) && prev.trim() !== '') {
+      repaired += '\u200B'
+    }
+  }
+
+  // Scan outside fenced code and inline code spans, counting unbalanced markers.
   let inCode = false
   let lastLineEndedInCode = false
   let inFence = false
   let bold = 0
   let italicStar = 0
   let italicUnderscore = 0
+  let underscoreDouble = 0
   let strike = 0
-  const lines = repaired.split('\n')
-  for (const line of lines) {
+  for (const line of repaired.split('\n')) {
     if (FENCE_RE.test(line)) {
       inFence = !inFence
       continue
@@ -135,10 +151,15 @@ export function repairIncompleteMarkdown(block: string): string {
         strike += 1
         i += 1
       } else if (ch === '_') {
-        const prev = i > 0 ? line[i - 1] : ' '
-        const next = i + 1 < line.length ? line[i + 1] : ' '
+        if (line[i + 1] === '_') {
+          underscoreDouble += 1
+          i += 1
+          continue
+        }
+        const prevCh = i > 0 ? line[i - 1] : ' '
+        const nextCh = i + 1 < line.length ? line[i + 1] : ' '
         // Intra-word underscores (snake_case) are not emphasis.
-        if (!/[A-Za-z0-9]/.test(prev) || !/[A-Za-z0-9]/.test(next)) {
+        if (!/[A-Za-z0-9]/.test(prevCh) || !/[A-Za-z0-9]/.test(nextCh)) {
           italicUnderscore += 1
         }
       }
@@ -150,17 +171,45 @@ export function repairIncompleteMarkdown(block: string): string {
   if (lastLineEndedInCode) {
     repaired += '`'
   }
-  if (bold % 2 === 1) {
-    repaired += '**'
+
+  // A closer is only appended when there is real content after the dangling opener —
+  // a bare trailing "**" stays literal until text follows (remend guard). Half-complete
+  // closers ("**text*", "~~text~", "__text_") get the one missing character, not a
+  // fresh pair.
+  const hasContentAfter = (marker: string): boolean => {
+    const index = repaired.lastIndexOf(marker)
+    if (index < 0) {
+      return false
+    }
+    return !/^[\s_~*`]*$/.test(repaired.slice(index + marker.length))
   }
-  if (italicStar % 2 === 1) {
+
+  if (bold % 2 === 1) {
+    if (/\*\*(?:[^*]|\*(?!\*))+\*$/.test(repaired)) {
+      repaired += '*'
+    } else if (hasContentAfter('**')) {
+      repaired += '**'
+    }
+  }
+  if (italicStar % 2 === 1 && hasContentAfter('*')) {
     repaired += '*'
   }
-  if (italicUnderscore % 2 === 1) {
+  if (underscoreDouble % 2 === 1) {
+    if (/__(?:[^_]|_(?!_))+_$/.test(repaired)) {
+      repaired += '_'
+    } else if (hasContentAfter('__')) {
+      repaired += '__'
+    }
+  }
+  if (italicUnderscore % 2 === 1 && hasContentAfter('_')) {
     repaired += '_'
   }
   if (strike % 2 === 1) {
-    repaired += '~~'
+    if (/~~(?:[^~]|~(?!~))+~$/.test(repaired)) {
+      repaired += '~'
+    } else if (hasContentAfter('~~')) {
+      repaired += '~~'
+    }
   }
   return repaired
 }

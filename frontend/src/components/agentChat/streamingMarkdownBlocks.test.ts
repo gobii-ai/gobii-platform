@@ -68,9 +68,31 @@ describe('repairIncompleteMarkdown', () => {
     expect(repairIncompleteMarkdown('was ~~wro')).toBe('was ~~wro~~')
   })
 
-  it('hides a trailing incomplete link rather than fabricating a URL', () => {
-    expect(repairIncompleteMarkdown('see [the docs](https://exa')).toBe('see ')
-    expect(repairIncompleteMarkdown('see [the do')).toBe('see ')
+  it('renders an incomplete link as its text, never a fabricated URL', () => {
+    expect(repairIncompleteMarkdown('see [the docs](https://exa')).toBe('see the docs')
+    expect(repairIncompleteMarkdown('see [the do')).toBe('see the do')
+  })
+
+  it('drops an incomplete image entirely', () => {
+    expect(repairIncompleteMarkdown('shot: ![diagram](https://exa')).toBe('shot: ')
+    expect(repairIncompleteMarkdown('shot: ![diagr')).toBe('shot: ')
+  })
+
+  it('hides a trailing half-typed html tag', () => {
+    expect(repairIncompleteMarkdown('line break <br')).toBe('line break ')
+  })
+
+  it('neutralizes a nascent setext underline so the paragraph does not flash as a heading', () => {
+    expect(repairIncompleteMarkdown('Some paragraph\n-')).toBe('Some paragraph\n-\u200B')
+    expect(repairIncompleteMarkdown('Some paragraph\n=')).toBe('Some paragraph\n=\u200B')
+  })
+
+  it('leaves a bare trailing opener literal until content follows', () => {
+    expect(repairIncompleteMarkdown('ends with **')).toBe('ends with **')
+  })
+
+  it('completes a half-complete bold closer with one star, not a pair', () => {
+    expect(repairIncompleteMarkdown('a **bold thing*')).toBe('a **bold thing**')
   })
 
   it('leaves complete links alone', () => {
