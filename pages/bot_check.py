@@ -1,7 +1,6 @@
 import json
 import secrets
 from ipaddress import ip_address
-from urllib.parse import quote_plus, urlsplit, urlunsplit
 
 from django.conf import settings
 from django.core import signing
@@ -19,19 +18,20 @@ from api.services.user_fingerprint import (
     FingerprintRetryableError,
     FingerprintTerminalError,
     fetch_fingerprint_event_payload,
+    get_fingerprint_browser_config,
 )
 from util.analytics import Analytics
 
 
 BOT_CHECK_SIGNING_SALT = "pages.bot-check.scan"
 BOT_CHECK_RATE_CACHE_PREFIX = "bot-check:rate"
-BOT_CHECK_POLL_CACHE_PREFIX = "bot-check:poll"
+BOT_CHECK_COMPLETE_CACHE_PREFIX = "bot-check:complete"
 BOT_CHECK_MAX_BODY_BYTES = 32 * 1024
 BOT_CHECK_MAX_TOKEN_LENGTH = 4096
 BOT_CHECK_MAX_EVENT_ID_LENGTH = 255
 BOT_CHECK_SCAN_RATE_LIMIT_PER_HOUR = 10
 BOT_CHECK_SCAN_TOKEN_MAX_AGE_SECONDS = 120
-BOT_CHECK_FINGERPRINT_MAX_POLLS = 4
+BOT_CHECK_MAX_COMPLETE_ATTEMPTS = 5
 BOT_CHECK_FINGERPRINT_RETRY_AFTER_MS = 2000
 
 CLIENT_BOOLEAN_FIELDS = {
@@ -44,7 +44,6 @@ CLIENT_BOOLEAN_FIELDS = {
     "cookies_enabled",
     "local_storage",
     "session_storage",
-    "indexed_db",
 }
 CLIENT_NUMBER_FIELDS = {
     "hardware_concurrency",
@@ -53,11 +52,8 @@ CLIENT_NUMBER_FIELDS = {
     "screen_width",
     "screen_height",
     "color_depth",
-    "plugin_count",
-    "mime_type_count",
 }
 CLIENT_STRING_LIMITS = {
-    "user_agent": 2048,
     "platform": 128,
     "timezone": 128,
     "webgl_vendor": 256,
@@ -140,17 +136,21 @@ def _rate_limit_key(request):
     return f"{BOT_CHECK_RATE_CACHE_PREFIX}:{digest}"
 
 
-def _admit_scan(request):
-    key = _rate_limit_key(request)
-    timeout = 60 * 60
+def _increment_cache_counter(key, *, timeout):
     if cache.add(key, 1, timeout=timeout):
-        return True
+        return 1
     try:
-        count = cache.incr(key)
+        return cache.incr(key)
     except ValueError:
         cache.set(key, 1, timeout=timeout)
-        count = 1
-    return count <= BOT_CHECK_SCAN_RATE_LIMIT_PER_HOUR
+        return 1
+
+
+def _admit_scan(request):
+    return _increment_cache_counter(
+        _rate_limit_key(request),
+        timeout=60 * 60,
+    ) <= BOT_CHECK_SCAN_RATE_LIMIT_PER_HOUR
 
 
 def _scan_identity(request):
@@ -198,54 +198,6 @@ def _read_scan_token(request, token):
     if not scan_id:
         return None, "The scan token is invalid."
     return payload, ""
-
-
-def _fingerprint_browser_config():
-    configured_loader_url = settings.FINGERPRINT_JS_URL.strip()
-    parsed_loader_url = urlsplit(configured_loader_url)
-    path_parts = [part for part in parsed_loader_url.path.split("/") if part]
-    cdn_loader_has_embedded_key = bool(
-        parsed_loader_url.hostname == "fpjscdn.net"
-        and len(path_parts) == 2
-        and path_parts[0] in {"v3", "v4"}
-        and path_parts[1]
-    )
-    browser_enabled = bool(
-        settings.GOBII_PROPRIETARY_MODE
-        and settings.FINGERPRINT_JS_ENABLED
-        and configured_loader_url
-        and (cdn_loader_has_embedded_key or settings.FINGERPRINT_JS_API_KEY.strip())
-    )
-    server_intelligence_enabled = bool(
-        browser_enabled and settings.FINGERPRINT_SERVER_API_KEY.strip()
-    )
-    if not browser_enabled:
-        return {
-            "enabled": False,
-            "server_intelligence_enabled": False,
-        }
-
-    if cdn_loader_has_embedded_key:
-        loader_url = urlunsplit(
-            (
-                parsed_loader_url.scheme,
-                parsed_loader_url.netloc,
-                parsed_loader_url.path,
-                "",
-                "",
-            )
-        )
-    else:
-        loader_url = configured_loader_url
-        browser_key = settings.FINGERPRINT_JS_API_KEY.strip()
-        separator = "&" if "?" in loader_url else "?"
-        loader_url = f"{loader_url}{separator}apiKey={quote_plus(browser_key)}"
-    return {
-        "enabled": True,
-        "server_intelligence_enabled": server_intelligence_enabled,
-        "loader_url": loader_url,
-        "behavior_url": settings.FINGERPRINT_JS_BEHAVIOR_URL.strip(),
-    }
 
 
 def _read_json_body(request):
@@ -434,14 +386,9 @@ def _server_signals(request):
         "ip_scope": ip_scope,
         "user_agent": _clean_string(request.META.get("HTTP_USER_AGENT"), max_length=2048),
         "accept_language": _clean_string(request.META.get("HTTP_ACCEPT_LANGUAGE"), max_length=256),
-        "sec_ch_ua": _clean_string(request.META.get("HTTP_SEC_CH_UA"), max_length=512),
         "sec_ch_ua_platform": _clean_string(
             request.META.get("HTTP_SEC_CH_UA_PLATFORM"),
             max_length=128,
-        ),
-        "sec_ch_ua_mobile": _clean_string(
-            request.META.get("HTTP_SEC_CH_UA_MOBILE"),
-            max_length=32,
         ),
         "sec_fetch_site": _clean_string(request.META.get("HTTP_SEC_FETCH_SITE"), max_length=32),
         "sec_fetch_mode": _clean_string(request.META.get("HTTP_SEC_FETCH_MODE"), max_length=32),
@@ -1185,7 +1132,7 @@ def bot_check_start(request):
     return _json_response(
         {
             "scan_token": _make_scan_token(request),
-            "fingerprint": _fingerprint_browser_config(),
+            "fingerprint": get_fingerprint_browser_config(),
         }
     )
 
@@ -1210,6 +1157,20 @@ def bot_check_complete(request):
     token_payload, error = _read_scan_token(request, token)
     if error:
         return _json_response({"error": error, "code": "invalid_token"}, status=400)
+    complete_attempt = _increment_cache_counter(
+        f"{BOT_CHECK_COMPLETE_CACHE_PREFIX}:{token_payload['scan_id']}",
+        timeout=BOT_CHECK_SCAN_TOKEN_MAX_AGE_SECONDS,
+    )
+    if complete_attempt > BOT_CHECK_MAX_COMPLETE_ATTEMPTS:
+        response = _json_response(
+            {
+                "error": "This scan has already used its completion attempts.",
+                "code": "scan_attempts_exhausted",
+            },
+            status=429,
+        )
+        response["Retry-After"] = str(BOT_CHECK_SCAN_TOKEN_MAX_AGE_SECONDS)
+        return response
 
     if not isinstance(payload.get("client_signals"), dict):
         return _json_response(
@@ -1240,7 +1201,7 @@ def bot_check_complete(request):
         else None
     )
     fingerprint_status = "unavailable"
-    fingerprint_config = _fingerprint_browser_config()
+    fingerprint_config = get_fingerprint_browser_config()
 
     if fingerprint_client["integration_error"]:
         fingerprint_status = (
@@ -1262,24 +1223,7 @@ def bot_check_complete(request):
         try:
             fingerprint_payload = fetch_fingerprint_event_payload(event_id)
         except FingerprintRetryableError:
-            poll_key = f"{BOT_CHECK_POLL_CACHE_PREFIX}:{token_payload['scan_id']}"
-            if cache.add(
-                poll_key,
-                1,
-                timeout=BOT_CHECK_SCAN_TOKEN_MAX_AGE_SECONDS,
-            ):
-                poll_count = 1
-            else:
-                try:
-                    poll_count = cache.incr(poll_key)
-                except ValueError:
-                    cache.set(
-                        poll_key,
-                        1,
-                        timeout=BOT_CHECK_SCAN_TOKEN_MAX_AGE_SECONDS,
-                    )
-                    poll_count = 1
-            if poll_count <= BOT_CHECK_FINGERPRINT_MAX_POLLS:
+            if complete_attempt < BOT_CHECK_MAX_COMPLETE_ATTEMPTS:
                 response = _json_response(
                     {
                         "status": "fingerprint_pending",
@@ -1299,7 +1243,6 @@ def bot_check_complete(request):
         else:
             fingerprint = normalize_fingerprint_signals(fingerprint_payload)
             fingerprint_status = "complete"
-            cache.delete(f"{BOT_CHECK_POLL_CACHE_PREFIX}:{token_payload['scan_id']}")
 
     report = build_bot_check_report(
         client,

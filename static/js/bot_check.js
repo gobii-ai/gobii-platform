@@ -178,7 +178,6 @@
       devtools_agent: devtoolsAgentDetected,
       cdp_detected: cdpDetected,
       ua_ch_mismatch: userAgentMismatch(),
-      user_agent: ua,
       languages: Array.isArray(navigator.languages) ? navigator.languages.slice(0, 10) : [],
       platform: navigator.userAgentData?.platform || navigator.platform || "",
       hardware_concurrency:
@@ -189,13 +188,10 @@
       screen_width: typeof screen.width === "number" ? screen.width : null,
       screen_height: typeof screen.height === "number" ? screen.height : null,
       color_depth: typeof screen.colorDepth === "number" ? screen.colorDepth : null,
-      plugin_count: navigator.plugins ? navigator.plugins.length : null,
-      mime_type_count: navigator.mimeTypes ? navigator.mimeTypes.length : null,
       cookies_enabled:
         typeof navigator.cookieEnabled === "boolean" ? navigator.cookieEnabled : null,
       local_storage: storageAvailable("localStorage"),
       session_storage: storageAvailable("sessionStorage"),
-      indexed_db: "indexedDB" in window,
       timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "",
       webgl_vendor: graphics.vendor,
       webgl_renderer: graphics.renderer,
@@ -203,88 +199,28 @@
     };
   }
 
-  function classifyFingerprintError(error) {
-    const message = `${error?.name || ""} ${error?.message || ""}`.toLowerCase();
-    if (message.includes("api key") && (
-      message.includes("not found")
-      || message.includes("invalid")
-      || message.includes("missing")
-      || message.includes("expired")
-    )) {
-      return "invalid_browser_key";
-    }
-    if (message.includes("origin") && message.includes("forbidden")) {
-      return "forbidden_origin";
-    }
-    if (message.includes("content security") || message.includes("csp")) {
-      return "csp_block";
-    }
-    if (message.includes("timeout") || message.includes("timed out")) {
-      return "timeout";
-    }
-    if (message.includes("network") || message.includes("failed to fetch")) {
-      return "network_error";
-    }
-    return "agent_error";
-  }
-
-  function directFingerprintPromise(config, onError) {
-    const request = import(config.loader_url)
-      .then(function (Fingerprint) {
-        if (typeof Fingerprint.start === "function") {
-          const startOptions = {};
-          if (config.behavior_url) {
-            startOptions.endpoints = config.behavior_url;
-          }
-          return Fingerprint.start(startOptions);
-        }
-        if (typeof Fingerprint.load !== "function") {
-          throw new TypeError("Unsupported Fingerprint agent module.");
-        }
-        const loadOptions = {};
-        if (config.behavior_url) {
-          loadOptions.endpoint = [
-            `${config.behavior_url}?region=us`,
-            Fingerprint.defaultEndpoint,
-          ];
-        }
-        return Fingerprint.load(loadOptions);
-      })
-      .then(function (agent) {
-        return agent.get({ timeout: FINGERPRINT_GET_TIMEOUT_MS });
-      })
-      .catch(function (error) {
-        const errorCode = classifyFingerprintError(error);
-        console.warn(`Fingerprint agent failed (${errorCode}).`);
-        onError(errorCode);
-        return null;
-      });
-
-    let timeoutId = null;
-    return Promise.race([
-      request,
-      new Promise(function (resolve) {
-        timeoutId = window.setTimeout(function () {
-          onError("timeout");
-          resolve(null);
-        }, FINGERPRINT_WRAPPER_TIMEOUT_MS);
-      }),
-    ]).finally(function () {
-      if (timeoutId !== null) {
-        window.clearTimeout(timeoutId);
-      }
-    });
-  }
-
   function fingerprintPromise(config) {
     if (!config || !config.enabled) {
       return Promise.resolve(null);
+    }
+    const identitySignals = window.GobiiIdentitySignals;
+    if (!identitySignals?.createFpjsPromise) {
+      return Promise.resolve({
+        result: null,
+        failure: "agent_error",
+      });
     }
     let failure = "";
     const onError = function (code) {
       failure = code;
     };
-    const request = directFingerprintPromise(config, onError);
+    const request = identitySignals.createFpjsPromise({
+      loaderUrl: config.loader_url,
+      behaviorUrl: config.behavior_url || "",
+      timeoutMs: FINGERPRINT_WRAPPER_TIMEOUT_MS,
+      getOptions: { timeout: FINGERPRINT_GET_TIMEOUT_MS },
+      onError,
+    });
 
     return request.then(function (result) {
       return {

@@ -490,6 +490,7 @@ TEMPLATES = [
                 "pages.context_processors.analytics",
                 "pages.context_processors.llm_bootstrap",
                 "pages.context_processors.canonical_url",
+                "pages.context_processors.fingerprint_browser",
                 "pages.context_processors.cta_signup_modal",
             ],
             # Manually register project-local template tag libraries

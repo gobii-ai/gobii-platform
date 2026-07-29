@@ -2,7 +2,7 @@ import datetime as dt
 import logging
 from ipaddress import ip_address
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, quote_plus, urlsplit, urlunsplit
 
 import requests
 from celery.exceptions import CeleryError
@@ -169,6 +169,54 @@ def _extract_proxy_type(payload: dict[str, Any]) -> str:
 
 def is_fingerprint_server_api_configured() -> bool:
     return bool(settings.FINGERPRINT_SERVER_API_KEY.strip())
+
+
+def get_fingerprint_browser_config() -> dict[str, Any]:
+    configured_loader_url = settings.FINGERPRINT_JS_URL.strip()
+    parsed_loader_url = urlsplit(configured_loader_url)
+    path_parts = [part for part in parsed_loader_url.path.split("/") if part]
+    cdn_loader_has_embedded_key = bool(
+        parsed_loader_url.hostname == "fpjscdn.net"
+        and len(path_parts) == 2
+        and path_parts[0] in {"v3", "v4"}
+        and path_parts[1]
+    )
+    browser_enabled = bool(
+        settings.GOBII_PROPRIETARY_MODE
+        and settings.FINGERPRINT_JS_ENABLED
+        and configured_loader_url
+        and (cdn_loader_has_embedded_key or settings.FINGERPRINT_JS_API_KEY.strip())
+    )
+    if not browser_enabled:
+        return {
+            "enabled": False,
+            "server_intelligence_enabled": False,
+            "loader_url": "",
+            "behavior_url": "",
+        }
+
+    if cdn_loader_has_embedded_key:
+        loader_url = urlunsplit(
+            (
+                parsed_loader_url.scheme,
+                parsed_loader_url.netloc,
+                parsed_loader_url.path,
+                "",
+                "",
+            )
+        )
+    else:
+        separator = "&" if "?" in configured_loader_url else "?"
+        loader_url = (
+            f"{configured_loader_url}{separator}"
+            f"apiKey={quote_plus(settings.FINGERPRINT_JS_API_KEY.strip())}"
+        )
+    return {
+        "enabled": True,
+        "server_intelligence_enabled": is_fingerprint_server_api_configured(),
+        "loader_url": loader_url,
+        "behavior_url": settings.FINGERPRINT_JS_BEHAVIOR_URL.strip(),
+    }
 
 
 def get_latest_user_fingerprint_visit(user) -> UserFingerprintVisit | None:

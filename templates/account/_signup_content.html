@@ -6,9 +6,9 @@
   data-auth-tab="signup"
   data-auth-next="{{ redirect_field_value|default:'' }}"
   data-ga-measurement-id="{{ settings.GA_MEASUREMENT_ID|default_if_none:'' }}"
-  data-fpjs-enabled="{% if settings.GOBII_PROPRIETARY_MODE and settings.FINGERPRINT_JS_ENABLED and settings.FINGERPRINT_JS_URL and settings.FINGERPRINT_JS_API_KEY %}true{% else %}false{% endif %}"
-  data-fpjs-loader-url="{% if settings.GOBII_PROPRIETARY_MODE and settings.FINGERPRINT_JS_ENABLED and settings.FINGERPRINT_JS_URL and settings.FINGERPRINT_JS_API_KEY %}{{ settings.FINGERPRINT_JS_URL }}?apiKey={{ settings.FINGERPRINT_JS_API_KEY }}{% endif %}"
-  data-fpjs-behavior-url="{{ settings.FINGERPRINT_JS_BEHAVIOR_URL|default_if_none:'' }}"
+  data-fpjs-enabled="{{ fingerprint_browser_config.enabled|yesno:'true,false' }}"
+  data-fpjs-loader-url="{{ fingerprint_browser_config.loader_url }}"
+  data-fpjs-behavior-url="{{ fingerprint_browser_config.behavior_url }}"
   data-popup-complete-url="{% if auth_modal %}{{ auth_popup_complete_url }}{% endif %}"
 >
   {% if auth_modal %}

@@ -9,9 +9,9 @@ from api.models import UserFingerprintVisit
 from api.services.user_fingerprint import (
     FingerprintRetryableError,
     FingerprintTerminalError,
+    get_fingerprint_browser_config,
 )
 from pages.bot_check import (
-    _fingerprint_browser_config,
     build_bot_check_report,
     normalize_client_signals,
     normalize_fingerprint_client_signals,
@@ -27,7 +27,6 @@ def _client_signals(**overrides):
         "devtools_agent": False,
         "cdp_detected": False,
         "ua_ch_mismatch": False,
-        "user_agent": "Mozilla/5.0 Chrome/126.0",
         "languages": ["en-US"],
         "platform": "macOS",
         "hardware_concurrency": 8,
@@ -36,12 +35,9 @@ def _client_signals(**overrides):
         "screen_width": 1440,
         "screen_height": 900,
         "color_depth": 24,
-        "plugin_count": 5,
-        "mime_type_count": 2,
         "cookies_enabled": True,
         "local_storage": True,
         "session_storage": True,
-        "indexed_db": True,
         "timezone": "America/New_York",
         "webgl_vendor": "Google Inc.",
         "webgl_renderer": "ANGLE (Apple)",
@@ -275,6 +271,7 @@ class BotCheckNormalizationTests(SimpleTestCase):
                 "webdriver": "true",
                 "headless_user_agent": True,
                 "user_agent": "x" * 3000,
+                "platform": "x" * 300,
                 "languages": ["en-US"] * 20,
                 "automation_globals": ["selenium"] * 20,
                 "screen_width": 10**9,
@@ -283,7 +280,8 @@ class BotCheckNormalizationTests(SimpleTestCase):
         )
         self.assertNotIn("webdriver", normalized)
         self.assertTrue(normalized["headless_user_agent"])
-        self.assertEqual(len(normalized["user_agent"]), 2048)
+        self.assertNotIn("user_agent", normalized)
+        self.assertEqual(len(normalized["platform"]), 128)
         self.assertEqual(len(normalized["languages"]), 10)
         self.assertEqual(len(normalized["automation_globals"]), 12)
         self.assertEqual(normalized["screen_width"], 100000)
@@ -348,7 +346,7 @@ class BotCheckViewTests(TestCase):
         FINGERPRINT_SERVER_API_KEY="private-server-key",
     )
     def test_v4_cdn_loader_uses_embedded_browser_key_without_legacy_query(self):
-        config = _fingerprint_browser_config()
+        config = get_fingerprint_browser_config()
 
         self.assertEqual(
             config["loader_url"],
@@ -365,7 +363,7 @@ class BotCheckViewTests(TestCase):
         FINGERPRINT_SERVER_API_KEY="private-server-key",
     )
     def test_v4_cdn_loader_does_not_require_a_duplicate_browser_key_setting(self):
-        config = _fingerprint_browser_config()
+        config = get_fingerprint_browser_config()
 
         self.assertTrue(config["enabled"])
         self.assertEqual(
@@ -428,6 +426,17 @@ class BotCheckViewTests(TestCase):
         wrong_browser = self._complete(token, user_agent="Browser B")
         self.assertEqual(wrong_browser.status_code, 400)
         self.assertEqual(wrong_browser.json()["code"], "invalid_token")
+
+    @override_settings(FINGERPRINT_JS_ENABLED=False)
+    def test_complete_attempts_are_capped_per_scan(self):
+        token = self._start()
+
+        for _attempt in range(5):
+            self.assertEqual(self._complete(token).status_code, 200)
+
+        exhausted = self._complete(token)
+        self.assertEqual(exhausted.status_code, 429)
+        self.assertEqual(exhausted.json()["code"], "scan_attempts_exhausted")
 
     @patch("pages.bot_check.BOT_CHECK_SCAN_TOKEN_MAX_AGE_SECONDS", -1)
     def test_expired_scan_token_is_rejected(self):
@@ -633,7 +642,7 @@ class BotCheckViewTests(TestCase):
         FINGERPRINT_SERVER_API_KEY="private-server-key",
     )
     @patch("pages.bot_check.BOT_CHECK_FINGERPRINT_RETRY_AFTER_MS", 1)
-    @patch("pages.bot_check.BOT_CHECK_FINGERPRINT_MAX_POLLS", 1)
+    @patch("pages.bot_check.BOT_CHECK_MAX_COMPLETE_ATTEMPTS", 2)
     @patch("pages.bot_check.fetch_fingerprint_event_payload")
     def test_retryable_fingerprint_event_becomes_partial_report(self, fetch_mock):
         fetch_mock.side_effect = FingerprintRetryableError("provider details")
