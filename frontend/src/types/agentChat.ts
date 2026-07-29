@@ -405,4 +405,10 @@ export type StreamState = {
   done: boolean
   cursor?: string | null
   source?: 'stream' | 'timeline'
+  /** The persisted outbound message this stream became. The stream card owns the
+   *  content (and the timeline suppresses this message) until the reveal animation
+   *  catches up, then the two swap in a single commit — clearing the stream the
+   *  instant the message event arrived left a blank frame before the timeline
+   *  painted it (bug #510). */
+  handoffMessageId?: string | null
 }

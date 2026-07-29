@@ -1072,7 +1072,22 @@ const chatSlice = createSlice({
         session.stream.streamingClearOnDone = false
       }
       if (isOutboundMessage) {
-        session.stream.streaming = null
+        // Don't tear the stream card down here: this reducer commit removes the card but
+        // the message paints in a later commit (cache injection is a separate dispatch),
+        // leaving a blank flash (bug #510). Record the handoff instead — the page clears
+        // the stream once the message is rendered and the reveal has caught up. Streams
+        // without content have nothing to hand off; clear those immediately as before.
+        if (session.stream.streaming?.source === 'stream' && session.stream.streaming.content.trim()) {
+          if (!session.stream.streaming.handoffMessageId) {
+            session.stream.streaming = {
+              ...session.stream.streaming,
+              done: true,
+              handoffMessageId: normalized.message.id,
+            }
+          }
+        } else {
+          session.stream.streaming = null
+        }
         session.stream.streamingClearOnDone = false
       }
       if (normalized.kind === 'thinking' || normalized.kind === 'steps' || isOutboundMessage) {
@@ -1121,6 +1136,14 @@ const chatSlice = createSlice({
       const until = Date.now() + Math.max(0, action.payload.durationMs)
       if (!session.timelineUi.autoScrollPinSuppressedUntil || session.timelineUi.autoScrollPinSuppressedUntil < until) {
         session.timelineUi.autoScrollPinSuppressedUntil = until
+      }
+    },
+    streamHandedOff(state, action: PayloadAction<{ agentId: string; streamId: string }>) {
+      const session = getSession(state, action.payload.agentId)
+      if (session?.stream.streaming?.streamId === action.payload.streamId) {
+        session.stream.streaming = null
+        session.stream.streamingClearOnDone = false
+        session.stream.streamingLastUpdatedAt = Date.now()
       }
     },
     streamingThinkingCollapsedSet(state, action: PayloadAction<boolean>) {

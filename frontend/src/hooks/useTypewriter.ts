@@ -9,6 +9,9 @@ type TypewriterOptions = {
   waitingThresholdMs?: number
   /** Disable typewriter effect (shows content immediately) */
   disabled?: boolean
+  /** Speed multiplier applied once the stream has finished, so the tail of a
+   *  still-revealing message catches up quickly instead of typing on for seconds. */
+  finishBoost?: number
 }
 
 type TypewriterResult = {
@@ -46,6 +49,7 @@ export function useTypewriter(
     frameIntervalMs = 16,
     waitingThresholdMs = 150,
     disabled = false,
+    finishBoost = 3,
   } = options
 
   const [displayedContent, setDisplayedContent] = useState('')
@@ -120,6 +124,7 @@ export function useTypewriter(
   }, [cancelAnimation])
 
   const adaptiveCharsPerFrame = getAdaptiveCharsPerFrame(charsPerFrame, targetContent.length)
+    * (isStreaming ? 1 : Math.max(1, finishBoost))
   const motionDisabled = disabled || prefersReducedMotion || !isPageVisible
 
   useEffect(() => {

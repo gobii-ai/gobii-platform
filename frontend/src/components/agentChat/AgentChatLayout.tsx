@@ -888,7 +888,13 @@ export function AgentChatLayout({
   const hasStreamingContent = Boolean(streaming?.content?.trim())
   // Un-suppress the static thinking entry once streaming completes so it appears in its chronological position
   const suppressedThinkingCursor = streaming && !streaming.done ? streaming.cursor ?? null : null
-  const showStreamingSlot = hasStreamingContent && isStreaming
+  // The slot must survive `done`: the reveal animation may still be catching up, and the
+  // card owns the content until the persisted message is rendered (bug #510 — hiding at
+  // done gave the card ~150ms of life when providers burst the whole body at the end).
+  const streamAwaitingHandoff = Boolean(
+    streaming?.done && streaming.source !== 'timeline' && streaming.content?.trim(),
+  )
+  const showStreamingSlot = hasStreamingContent && (isStreaming || streamAwaitingHandoff)
   const showStreamingThinking = Boolean(
     isStreaming && streaming?.reasoning?.trim() && !hasStreamingContent && !hasMoreNewer,
   )
