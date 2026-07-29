@@ -547,6 +547,7 @@ urlpatterns = [
         NativeIntegrationRevokeAPIView.as_view(),
         name="console-native-integration-revoke",
     ),
+    # Public launch contract used by the email settings OAuth popup.
     path("console/api/email/oauth/start/", AgentEmailOAuthStartView.as_view(), name="console-email-oauth-start"),
     path("console/api/email/oauth/session/<uuid:session_id>/verifier/", AgentEmailOAuthSessionVerifierView.as_view(), name="console-email-oauth-session-verifier"),
     path("console/api/email/oauth/callback/", AgentEmailOAuthCallbackView.as_view(), name="console-email-oauth-callback"),

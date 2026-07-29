@@ -903,11 +903,18 @@ def _path_meta(path: str | None) -> tuple[str | None, str | None]:
 
 
 def _resolve_agent_email_account(request: HttpRequest, account_id: str) -> AgentEmailAccount:
-    return get_object_or_404(
+    account = get_object_or_404(
         AgentEmailAccount.objects.select_related("endpoint__owner_agent"),
         pk=account_id,
-        endpoint__owner_agent__user=request.user,
     )
+    try:
+        resolve_manageable_agent_for_request(
+            request,
+            str(account.endpoint.owner_agent_id),
+        )
+    except PermissionDenied as exc:
+        raise Http404("Email account not found.") from exc
+    return account
 
 
 def _resolve_managed_email_oauth_client(provider: str) -> tuple[str, str]:
