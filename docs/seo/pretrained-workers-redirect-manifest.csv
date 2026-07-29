@@ -339,9 +339,9 @@ legacy_url,destination_url,resolution_type,notes
 /pretrained-workers/tpl-d4e9353f436f/,/library/finance/defi-yield-scanner/,exact_duplicate,Database-backed template code resolved to this canonical library page at the retirement cutover
 /pretrained-workers/tpl-d4e9353f436f/hire/,/library/finance/defi-yield-scanner/hire/,exact_duplicate,Database-backed template code resolved to this canonical library page at the retirement cutover
 /pretrained-workers/tpl-d4e9353f436f/spawn/,/library/finance/defi-yield-scanner/spawn/,exact_duplicate,Database-backed template code resolved to this canonical library page at the retirement cutover
-/pretrained-workers/tpl-deb9721ca6f7/,/library/finance/capital-raise-investor-relations-engine-2/,exact_duplicate,Database-backed template code resolved to this canonical library page at the retirement cutover
-/pretrained-workers/tpl-deb9721ca6f7/hire/,/library/finance/capital-raise-investor-relations-engine-2/hire/,exact_duplicate,Database-backed template code resolved to this canonical library page at the retirement cutover
-/pretrained-workers/tpl-deb9721ca6f7/spawn/,/library/finance/capital-raise-investor-relations-engine-2/spawn/,exact_duplicate,Database-backed template code resolved to this canonical library page at the retirement cutover
+/pretrained-workers/tpl-deb9721ca6f7/,/library/finance/capital-raise-investor-relations-engine/,content_merged,Same-owner zero-use capital-raise duplicate merged into the original canonical page
+/pretrained-workers/tpl-deb9721ca6f7/hire/,/library/finance/capital-raise-investor-relations-engine/hire/,content_merged,Legacy creation endpoint moved directly to the consolidated template
+/pretrained-workers/tpl-deb9721ca6f7/spawn/,/library/finance/capital-raise-investor-relations-engine/spawn/,content_merged,Legacy launch endpoint moved directly to the consolidated template
 /pretrained-workers/tpl-dedc5146b8d2/,/library/analytics/dataset-statistical-analyzer/,exact_duplicate,Database-backed template code resolved to this canonical library page at the retirement cutover
 /pretrained-workers/tpl-dedc5146b8d2/hire/,/library/analytics/dataset-statistical-analyzer/hire/,exact_duplicate,Database-backed template code resolved to this canonical library page at the retirement cutover
 /pretrained-workers/tpl-dedc5146b8d2/spawn/,/library/analytics/dataset-statistical-analyzer/spawn/,exact_duplicate,Database-backed template code resolved to this canonical library page at the retirement cutover

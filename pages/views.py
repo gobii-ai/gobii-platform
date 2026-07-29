@@ -25,7 +25,6 @@ from django.conf import settings
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.contrib.auth.views import redirect_to_login
 from django.utils.http import url_has_allowed_host_and_scheme
-from django.utils.text import Truncator
 from django.template.defaultfilters import linebreaksbr
 from django.template.loader import render_to_string
 from django.templatetags.static import static
@@ -116,6 +115,10 @@ from .homepage_schema import HOMEPAGE_SOCIAL_IMAGE_PATH, build_homepage_structur
 from .legacy_pretrained_worker_redirects import (
     get_legacy_pretrained_worker_redirect,
     get_retired_library_template_redirect,
+)
+from .public_template_metadata import (
+    build_public_template_metadata,
+    get_public_template_seo_override,
 )
 from .ai_employees import (
     AI_EMPLOYEES_CLUSTER_LINKS,
@@ -1528,7 +1531,10 @@ def _legacy_pretrained_worker_redirect(request, target_path: str, *, preserve_re
 
 class PretrainedWorkerDirectoryRedirectView(View):
     def get(self, request, *args, **kwargs):
-        return redirect("pages:library", permanent=True)
+        return _legacy_pretrained_worker_redirect(
+            request,
+            reverse("pages:library"),
+        )
 
 
 class PretrainedWorkerDetailRedirectView(View):
@@ -2003,17 +2009,17 @@ class PublicTemplateDetailView(TemplateView):
         library_url = _public_site_absolute_url(reverse("pages:library"))
         home_url = _public_site_absolute_url(reverse("pages:home"))
         social_image_url = _public_template_social_image_url(self.template)
-        seo_description = (self.template.seo_meta_description or "").strip() or Truncator(
-            (self.template.description or self.template.tagline or "").strip()
-        ).chars(160)
-        if self.template.description_markdown and self.template.description_markdown.strip():
+        template_seo_override = get_public_template_seo_override(self.template)
+        template_metadata = build_public_template_metadata(self.template)
+        seo_description = template_metadata.description
+        if template_seo_override:
+            template_description_html = linebreaksbr(template_metadata.intro)
+        elif self.template.description_markdown and self.template.description_markdown.strip():
             template_description_html = render_public_template_markdown(self.template.description_markdown)
         else:
             template_description_html = linebreaksbr(self.template.description or "")
         category_label = public_template_category_label(self.template)
-        social_title = self.template.display_name
-        if not self.template.omit_ai_agent_template_title_suffix:
-            social_title = f"{social_title} AI Agent Template"
+        social_title = template_metadata.social_title
         template_schema_id = f"{canonical_detail_url}#template"
         webpage_schema_id = f"{canonical_detail_url}#webpage"
         breadcrumb_schema_id = f"{canonical_detail_url}#breadcrumb"
@@ -2050,7 +2056,7 @@ class PublicTemplateDetailView(TemplateView):
             },
             "potentialAction": {
                 "@type": "UseAction",
-                "name": "Create an agent from this template",
+                "name": "Create an AI employee from this template",
                 "actionStatus": "PotentialActionStatus",
                 "target": {
                     "@type": "EntryPoint",
@@ -2124,14 +2130,27 @@ class PublicTemplateDetailView(TemplateView):
         context["template_category_url"] = category_url
         context["template_hire_url"] = public_template_hire_path(self.template)
         context["template_social_title"] = social_title
-        context["template_seo_title"] = f"{social_title} | Gobii"
+        context["template_seo_title"] = template_metadata.seo_title
         context["template_seo_description"] = seo_description
+        context["template_heading"] = template_metadata.heading
+        context["template_tagline"] = template_metadata.tagline
         context["template_description_html"] = template_description_html
         show_public_tools = not self.template.hide_tools
-        context["template_detail_sections"] = _build_public_template_detail_sections(
+        template_detail_sections = _build_public_template_detail_sections(
             self.template,
             include_tools=show_public_tools,
         )
+        if template_seo_override and template_seo_override.example_outputs:
+            template_detail_sections = [
+                {
+                    "title": "Example outputs",
+                    "html": render_public_template_markdown(
+                        template_seo_override.example_outputs
+                    ),
+                },
+                *template_detail_sections,
+            ]
+        context["template_detail_sections"] = template_detail_sections
         context["related_templates"] = _build_related_public_template_cards(self.template)
         context["template_social_image_url"] = social_image_url
         context["template_structured_data_json"] = html_safe_json_dumps(structured_data)

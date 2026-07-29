@@ -1,24 +1,24 @@
 {% extends "base.html" %}
 {% load vite_tags %}
 
-{% block title %}{{ library_page_title|default:"AI Employee & Agent Templates | Gobii" }}{% endblock %}
+{% block title %}{{ library_page_title|default:"AI Employee Template Library: Business Roles | Gobii" }}{% endblock %}
 {% block head_extras %}
   {{ block.super }}
-  <meta name="description" content="{{ library_page_description|default:"Explore Gobii’s library of AI employee and agent templates for sales, research, recruiting, operations, spreadsheets, email, and more. Start from a template or build your own." }}">
+  <meta name="description" content="{{ library_page_description|default:"Explore Gobii’s AI Employee Template Library for sales, research, recruiting, operations, finance, and more. Choose a role and customize its workflow." }}">
   <meta property="og:type" content="website">
-  <meta property="og:title" content="{{ library_page_title|default:"AI Employee & Agent Templates | Gobii" }}">
-  <meta property="og:description" content="{{ library_page_description|default:"Explore Gobii’s library of AI employee and agent templates for sales, research, recruiting, operations, spreadsheets, email, and more. Start from a template or build your own." }}">
+  <meta property="og:title" content="{{ library_page_title|default:"AI Employee Template Library: Business Roles | Gobii" }}">
+  <meta property="og:description" content="{{ library_page_description|default:"Explore Gobii’s AI Employee Template Library for sales, research, recruiting, operations, finance, and more. Choose a role and customize its workflow." }}">
   <meta property="og:url" content="{{ canonical_url }}">
   <meta property="og:site_name" content="Gobii">
   <meta name="twitter:card" content="summary">
-  <meta name="twitter:title" content="AI Employee & Agent Templates | Gobii">
-  <meta name="twitter:description" content="Explore Gobii’s library of AI employee and agent templates for sales, research, recruiting, operations, spreadsheets, email, and more. Start from a template or build your own.">
+  <meta name="twitter:title" content="{{ library_page_title|default:"AI Employee Template Library: Business Roles | Gobii" }}">
+  <meta name="twitter:description" content="{{ library_page_description|default:"Explore Gobii’s AI Employee Template Library for sales, research, recruiting, operations, finance, and more. Choose a role and customize its workflow." }}">
   <script type="application/ld+json">
     {
       "@context": "https://schema.org",
       "@type": "CollectionPage",
-      "name": "Gobii Agent Discovery",
-      "description": "Discover public Gobii agent templates by category, then deploy and customize them for your workflows.",
+      "name": "Gobii AI Employee Template Library",
+      "description": "Discover public Gobii AI employee templates by category, then create and customize an employee for your workflow.",
       "url": "{{ canonical_url|escapejs }}",
       "isPartOf": {
         "@type": "WebSite",
@@ -32,7 +32,7 @@
       {
         "@context": "https://schema.org",
         "@type": "ItemList",
-        "name": "Popular Gobii agent templates",
+        "name": "Popular Gobii AI employee templates",
         "url": "{{ canonical_url|escapejs }}",
         "itemListElement": [
           {% for agent in library_initial_payload.agents %}
@@ -42,7 +42,7 @@
               "item": {
                 "@type": "SoftwareApplication",
                 "name": "{{ agent.name|escapejs }}",
-                "description": "{{ agent.description|default:agent.tagline|truncatechars:160|escapejs }}",
+                "description": "{{ agent.seoDescription|escapejs }}",
                 "applicationCategory": "{{ agent.category|escapejs }}",
                 "creator": {
                   "@type": "{% if agent.isOfficial %}Organization{% else %}Person{% endif %}",
@@ -70,7 +70,7 @@
         {
           "@type": "ListItem",
           "position": 2,
-          "name": "Agent Discovery",
+          "name": "AI Employee Template Library",
           "item": "{{ request.scheme }}://{{ request.get_host }}{% url 'pages:library' %}"
         }
       ]

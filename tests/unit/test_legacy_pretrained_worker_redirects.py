@@ -5,9 +5,10 @@ from unittest.mock import patch
 
 from bs4 import BeautifulSoup
 from django.apps import apps as django_apps
+from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings, tag
 
-from api.models import PersistentAgentTemplate
+from api.models import PersistentAgentTemplate, PublicProfile
 from pages.homepage_cache import _build_homepage_pretrained_payload
 from pages.legacy_pretrained_worker_redirects import (
     LEGACY_PRETRAINED_WORKER_REDIRECTS,
@@ -40,6 +41,39 @@ class CanonicalTemplateMigrationTests(TestCase):
             show_on_homepage=True,
             is_active=True,
         )
+        community_owner = get_user_model().objects.create_user(
+            username="capital-template-owner",
+            email="capital-template-owner@example.com",
+            password="pw",
+        )
+        community_profile = PublicProfile.objects.create(
+            user=community_owner,
+            handle="capital-template-owner",
+        )
+        capital_raise_primary = PersistentAgentTemplate.objects.create(
+            code=migration.CAPITAL_RAISE_PRIMARY_CODE,
+            public_profile=community_profile,
+            created_by=community_owner,
+            slug="capital-raise-investor-relations-engine",
+            display_name="Capital Raise & Investor Relations Engine",
+            tagline="Original capital-raise workflow.",
+            description="Original capital-raise description.",
+            charter="Run the original capital-raise workflow.",
+            category="Finance",
+            is_active=True,
+        )
+        capital_raise_duplicate = PersistentAgentTemplate.objects.create(
+            code=migration.CAPITAL_RAISE_DUPLICATE_CODE,
+            public_profile=community_profile,
+            created_by=community_owner,
+            slug="capital-raise-investor-relations-engine-2",
+            display_name="Capital Raise & Investor Relations Engine",
+            tagline="Duplicate capital-raise workflow.",
+            description="Duplicate capital-raise description.",
+            charter="Run the duplicate capital-raise workflow.",
+            category="Finance",
+            is_active=True,
+        )
 
         migration.ensure_canonical_templates(django_apps, schema_editor=None)
 
@@ -60,6 +94,21 @@ class CanonicalTemplateMigrationTests(TestCase):
         self.assertEqual(outreach_agent.slug, "outreach-agent")
         self.assertEqual(outreach_agent.category, "Sales")
         self.assertIn("human approval", outreach_agent.charter)
+        candidate_sourcing = PersistentAgentTemplate.objects.get(
+            code="ai-agent-for-candidate-sourcing"
+        )
+        self.assertIn("personalized outreach", candidate_sourcing.description)
+        self.assertIn("response status", candidate_sourcing.description)
+        self.assertIn("weekly recruiting-funnel reports", candidate_sourcing.customization_notes)
+        self.assertIn("greenhouse-create-candidate", candidate_sourcing.default_tools)
+        self.assertIn("Google Sheets", candidate_sourcing.expected_tools_summary)
+        self.assertIn("Slack", candidate_sourcing.expected_tools_summary)
+
+        capital_raise_primary.refresh_from_db()
+        capital_raise_duplicate.refresh_from_db()
+        self.assertTrue(capital_raise_primary.is_active)
+        self.assertIn("SEC compliance", capital_raise_primary.description)
+        self.assertFalse(capital_raise_duplicate.is_active)
 
         for code, merged_copy in migration.MERGED_CUSTOMIZATION_NOTES.items():
             with self.subTest(code=code):
@@ -153,8 +202,42 @@ class LegacyPretrainedWorkerRedirectTests(TestCase):
         response = self.client.get("/pretrained-workers/?q=sales")
 
         self.assertEqual(response.status_code, 301)
-        self.assertEqual(response["Location"], "/library/")
+        self.assertEqual(response["Location"], "/library/?q=sales")
         self.assertEqual(response.content, b"")
+
+    def test_slashless_routes_redirect_directly_and_preserve_queries(self):
+        cases = (
+            (
+                "get",
+                "/pretrained-workers?utm_source=legacy",
+                301,
+                "/library/?utm_source=legacy",
+            ),
+            (
+                "get",
+                "/pretrained-workers/talent-scout?utm_source=legacy",
+                301,
+                "/library/recruiting/candidate-sourcing-agent/?utm_source=legacy",
+            ),
+            (
+                "post",
+                "/pretrained-workers/talent-scout/hire?utm_source=legacy",
+                308,
+                "/library/recruiting/candidate-sourcing-agent/hire/?utm_source=legacy",
+            ),
+            (
+                "get",
+                "/pretrained-workers/talent-scout/spawn?utm_source=legacy",
+                301,
+                "/library/recruiting/candidate-sourcing-agent/spawn/?utm_source=legacy",
+            ),
+        )
+        for method_name, path, status_code, location in cases:
+            with self.subTest(path=path):
+                response = getattr(self.client, method_name)(path)
+                self.assertEqual(response.status_code, status_code)
+                self.assertEqual(response["Location"], location)
+                self.assertEqual(response.content, b"")
 
     def test_every_known_detail_redirect_is_permanent_and_one_hop(self):
         for legacy_slug, redirect_config in LEGACY_PRETRAINED_WORKER_REDIRECTS.items():
@@ -234,6 +317,40 @@ class LegacyPretrainedWorkerRedirectTests(TestCase):
                 self.assertEqual(response["Location"], destination)
                 self.assertEqual(response.content, b"")
 
+    def test_capital_raise_duplicate_routes_redirect_to_original_page(self):
+        cases = (
+            (
+                "get",
+                "/library/finance/capital-raise-investor-relations-engine-2/?utm_source=legacy",
+                301,
+                "/library/finance/capital-raise-investor-relations-engine/?utm_source=legacy",
+            ),
+            (
+                "post",
+                "/library/finance/capital-raise-investor-relations-engine-2/hire/?utm_source=legacy",
+                308,
+                "/library/finance/capital-raise-investor-relations-engine/hire/?utm_source=legacy",
+            ),
+            (
+                "get",
+                "/library/finance/capital-raise-investor-relations-engine-2/spawn/?utm_source=legacy",
+                301,
+                "/library/finance/capital-raise-investor-relations-engine/spawn/?utm_source=legacy",
+            ),
+            (
+                "get",
+                "/pretrained-workers/tpl-deb9721ca6f7/?utm_source=legacy",
+                301,
+                "/library/finance/capital-raise-investor-relations-engine/?utm_source=legacy",
+            ),
+        )
+        for method_name, path, status_code, location in cases:
+            with self.subTest(path=path):
+                response = getattr(self.client, method_name)(path)
+                self.assertEqual(response.status_code, status_code)
+                self.assertEqual(response["Location"], location)
+                self.assertEqual(response.content, b"")
+
     def test_unknown_legacy_slugs_return_404(self):
         PersistentAgentTemplate.objects.create(
             code="arbitrary-community-code",
@@ -251,6 +368,7 @@ class LegacyPretrainedWorkerRedirectTests(TestCase):
             ("post", "/pretrained-workers/arbitrary-community-code/hire/"),
             ("get", "/pretrained-workers/arbitrary-community-code/spawn/"),
             ("get", "/pretrained-workers/does-not-exist/"),
+            ("get", "/pretrained-workers/does-not-exist"),
         )
         for method_name, path in cases:
             with self.subTest(path=path):

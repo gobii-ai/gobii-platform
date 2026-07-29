@@ -1,4 +1,5 @@
 import logging
+import re
 
 from django.core.cache import cache
 from django.utils import timezone
@@ -13,7 +14,7 @@ from util.integrations import pipedream_status
 
 logger = logging.getLogger(__name__)
 
-HOMEPAGE_PRETRAINED_CACHE_VERSION = 2
+HOMEPAGE_PRETRAINED_CACHE_VERSION = 3
 HOMEPAGE_PRETRAINED_CACHE_FRESH_SECONDS = 60
 HOMEPAGE_PRETRAINED_CACHE_STALE_SECONDS = 600
 HOMEPAGE_PRETRAINED_CACHE_LOCK_SECONDS = 60
@@ -83,6 +84,12 @@ def _serialize_template(template, display_map: dict[str, str]) -> dict[str, obje
         if legacy_redirect
         else public_template_hire_path(template)
     )
+    role_name = re.sub(
+        r"\s+AI\s+Agent$",
+        "",
+        template.display_name,
+        flags=re.IGNORECASE,
+    ).strip()
     return {
         "code": template.code,
         "display_name": template.display_name,
@@ -101,6 +108,7 @@ def _serialize_template(template, display_map: dict[str, str]) -> dict[str, obje
         "show_on_homepage": template.show_on_homepage,
         "detail_url": detail_url,
         "hire_url": hire_url,
+        "detail_link_label": f"View the {role_name} AI employee",
         "schedule_description": PretrainedWorkerTemplateService.describe_schedule(
             template.base_schedule
         ),

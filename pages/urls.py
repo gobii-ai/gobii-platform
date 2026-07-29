@@ -1,4 +1,4 @@
-from django.urls import path, include
+from django.urls import include, path, re_path
 from django.http import HttpResponse
 from django.conf import settings
 from django.shortcuts import redirect
@@ -96,6 +96,10 @@ urlpatterns = [
     path("api/homepage/csrf-token/", HomepageCsrfTokenView.as_view(), name="homepage_csrf_token"),
     path("api/homepage/integrations/search/", HomepageIntegrationsSearchView.as_view(), name="homepage_integrations_search"),
     path("spawn-agent/", HomeAgentSpawnView.as_view(), name="home_agent_spawn"),
+    re_path(r"^pretrained-workers$", PretrainedWorkerDirectoryRedirectView.as_view(), name="pretrained_worker_directory_slashless"),
+    re_path(r"^pretrained-workers/(?P<slug>[-a-zA-Z0-9_]+)$", PretrainedWorkerDetailRedirectView.as_view(), name="pretrained_worker_detail_slashless"),
+    re_path(r"^pretrained-workers/(?P<slug>[-a-zA-Z0-9_]+)/hire$", PretrainedWorkerHireRedirectView.as_view(), name="pretrained_worker_hire_slashless"),
+    re_path(r"^pretrained-workers/(?P<slug>[-a-zA-Z0-9_]+)/spawn$", PretrainedWorkerLaunchRedirectView.as_view(), name="pretrained_worker_launch_slashless"),
     path("pretrained-workers/", PretrainedWorkerDirectoryRedirectView.as_view(), name="pretrained_worker_directory"),
     path("pretrained-workers/<slug:slug>/", PretrainedWorkerDetailRedirectView.as_view(), name="pretrained_worker_detail"),
     path("pretrained-workers/<slug:slug>/hire/", PretrainedWorkerHireRedirectView.as_view(), name="pretrained_worker_hire"),

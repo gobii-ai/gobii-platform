@@ -213,8 +213,26 @@ LEGACY_PRETRAINED_WORKER_REDIRECTS.update(
     }
 )
 
+CAPITAL_RAISE_CONSOLIDATION_REDIRECT = LegacyPretrainedWorkerRedirect(
+    legacy_slug="tpl-deb9721ca6f7",
+    destination_category_slug="finance",
+    destination_template_slug="capital-raise-investor-relations-engine",
+    resolution_type=CONTENT_MERGED,
+    notes=(
+        "The same creator published both capital-raise templates. The newer zero-use "
+        "duplicate was merged into the original canonical page."
+    ),
+)
+LEGACY_PRETRAINED_WORKER_REDIRECTS[
+    CAPITAL_RAISE_CONSOLIDATION_REDIRECT.legacy_slug
+] = CAPITAL_RAISE_CONSOLIDATION_REDIRECT
+
 RETIRED_LIBRARY_TEMPLATE_REDIRECTS = {
     ("people", "talent-sourcer"): LEGACY_PRETRAINED_WORKER_REDIRECTS["talent-sourcer"],
+    (
+        "finance",
+        "capital-raise-investor-relations-engine-2",
+    ): CAPITAL_RAISE_CONSOLIDATION_REDIRECT,
 }
 
 

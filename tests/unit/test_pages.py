@@ -3733,6 +3733,7 @@ class RestoredPublicMarketingSurfaceTests(TestCase):
             is_official=True,
             is_active=True,
         )
+        cache.clear()
         paths = (
             "/",
             "/ai-employees/",
@@ -3756,6 +3757,43 @@ class RestoredPublicMarketingSurfaceTests(TestCase):
                 self.assertEqual(response.status_code, 200)
                 page_text = BeautifulSoup(response.content, "html.parser").get_text(" ", strip=True)
                 self.assertNotRegex(page_text, r"(?i)\b(?:worker|coworker)s?\b")
+                if path in (
+                    "/",
+                    "/library/",
+                    "/library/recruiting/candidate-sourcing-agent/",
+                ):
+                    self.assertNotRegex(
+                        page_text,
+                        r"(?i)\b(?:spawn|spawned|spawning)\b",
+                    )
+
+        library_response = self.client.get("/library/")
+        library_soup = BeautifulSoup(library_response.content, "html.parser")
+        self.assertEqual(
+            library_soup.find("h1").get_text(" ", strip=True),
+            "AI Employee Template Library",
+        )
+
+        detail_response = self.client.get(
+            "/library/recruiting/candidate-sourcing-agent/"
+        )
+        detail_soup = BeautifulSoup(detail_response.content, "html.parser")
+        self.assertEqual(
+            detail_soup.find("h1").get_text(" ", strip=True),
+            "Candidate Sourcing AI Employee",
+        )
+        self.assertIn(
+            "AI Employee Template",
+            detail_soup.get_text(" ", strip=True),
+        )
+
+        home_response = self.client.get("/")
+        home_soup = BeautifulSoup(home_response.content, "html.parser")
+        contextual_link = home_soup.find(
+            "a",
+            string=re.compile(r"View the Candidate Sourcing AI employee"),
+        )
+        self.assertIsNotNone(contextual_link)
 
         with override_settings(GOBII_PROPRIETARY_MODE=False):
             response = self.client.get("/docs/guides/api/")

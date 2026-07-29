@@ -215,7 +215,10 @@ class PretrainedWorkerTemplateService:
 
     TEMPLATE_SESSION_KEY = "pretrained_worker_template_code"
     CODE_ALIASES = {
-        "talent-sourcer": "talent-scout",
+        "talent-sourcer": "ai-agent-for-candidate-sourcing",
+        "talent-scout": "ai-agent-for-candidate-sourcing",
+        "lead-hunter": "b2b-lead-research-agent",
+        "account-researcher": "account-research-ai-agent",
     }
     _CRON_MACRO_MAP = {
         "@yearly": "0 0 1 1 *",

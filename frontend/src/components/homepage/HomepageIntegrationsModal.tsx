@@ -385,7 +385,7 @@ export function HomepageIntegrationsModal({
         <div className="flex items-center justify-between gap-3">
           <div>
             <h3 className="text-sm font-semibold text-slate-900">Added apps</h3>
-            <p className="text-sm text-slate-600">Selected apps will be enabled when you spawn this agent.</p>
+            <p className="text-sm text-slate-600">Selected apps will be enabled when the AI employee is created.</p>
           </div>
           <span className="rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700">
             {selectedSlugs.length} selected
