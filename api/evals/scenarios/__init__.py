@@ -55,6 +55,11 @@ from .effort_calibration import (
     EffortExplicitDeepResearchRemainsCapableScenario,
 )
 from .custom_tool_result_contract import CUSTOM_TOOL_RESULT_CONTRACT_SCENARIO_SLUGS, CUSTOM_TOOL_RESULT_CONTRACT_SUITE_SLUG, CustomToolResultContractScenario
+from .notification_terminality import (
+    NOTIFICATION_TERMINALITY_SCENARIO_SLUGS,
+    NOTIFICATION_TERMINALITY_SUITE_SLUG,
+    NotificationTerminalityScenario,
+)
 from .daily_credit_prompt import (
     DAILY_CREDIT_PROMPT_SCENARIO_SLUGS,
     DAILY_CREDIT_PROMPT_SUITE_SLUG,

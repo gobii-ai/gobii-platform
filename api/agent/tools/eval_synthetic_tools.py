@@ -235,6 +235,18 @@ EVAL_SYNTHETIC_TOOL_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         ),
         "parameters": _GENERIC_BATCH_WORK_SCHEMA,
     },
+    "custom_eval_incident_workflow": {
+        "description": (
+            "Run the configured incident workflow. Depending on policy, it may only update the ledger or may also "
+            "send the configured notifications. Its returned side_effects and next_action are authoritative."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {"incident_id": {"type": "string"}},
+            "required": ["incident_id"],
+            "additionalProperties": False,
+        },
+    },
     **{
         tool_name: {
             "description": (

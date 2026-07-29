@@ -5,6 +5,10 @@ from api.evals.scenarios import * # noqa
 from api.evals.scenarios.behavior_micro import BEHAVIOR_MICRO_SCENARIO_SLUGS, CHARTER_MEMORY_MICRO_SCENARIO_SLUGS, GUIDED_PLANNING_MICRO_SCENARIO_SLUGS, TOOL_CHOICE_MICRO_SCENARIO_SLUGS
 from api.evals.scenarios.effort_calibration import EFFORT_CALIBRATION_SCENARIO_SLUGS
 from api.evals.scenarios.custom_tool_result_contract import CUSTOM_TOOL_RESULT_CONTRACT_SCENARIO_SLUGS, CUSTOM_TOOL_RESULT_CONTRACT_SUITE_SLUG
+from api.evals.scenarios.notification_terminality import (
+    NOTIFICATION_TERMINALITY_SCENARIO_SLUGS,
+    NOTIFICATION_TERMINALITY_SUITE_SLUG,
+)
 from api.evals.scenarios.daily_credit_prompt import DAILY_CREDIT_PROMPT_SCENARIO_SLUGS, DAILY_CREDIT_PROMPT_SUITE_SLUG
 from api.evals.scenarios.sqlite_tool_results import SQLITE_TOOL_RESULT_SCENARIO_SLUGS, SQLITE_TOOL_RESULT_SUITE_SLUG
 from api.evals.scenarios.message_quality import MESSAGE_QUALITY_SCENARIO_SLUGS, MESSAGE_QUALITY_SUITE_SLUG
@@ -117,6 +121,11 @@ register_builtin_suites(
             slug=CUSTOM_TOOL_RESULT_CONTRACT_SUITE_SLUG,
             description="Small custom-tool result contract evals based on real agent trajectory failures.",
             scenario_slugs=CUSTOM_TOOL_RESULT_CONTRACT_SCENARIO_SLUGS,
+        ),
+        EvalSuite(
+            slug=NOTIFICATION_TERMINALITY_SUITE_SLUG,
+            description="Custom-tool side-effect terminality and required-notification sequencing.",
+            scenario_slugs=NOTIFICATION_TERMINALITY_SCENARIO_SLUGS,
         ),
         EvalSuite(
             slug=DAILY_CREDIT_PROMPT_SUITE_SLUG,
