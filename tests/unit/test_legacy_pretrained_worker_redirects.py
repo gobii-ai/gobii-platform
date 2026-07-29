@@ -1,12 +1,14 @@
 import csv
 import importlib
 from pathlib import Path
+from unittest.mock import patch
 
 from bs4 import BeautifulSoup
 from django.apps import apps as django_apps
 from django.test import TestCase, override_settings, tag
 
 from api.models import PersistentAgentTemplate
+from pages.homepage_cache import _build_homepage_pretrained_payload
 from pages.legacy_pretrained_worker_redirects import (
     LEGACY_PRETRAINED_WORKER_REDIRECTS,
 )
@@ -289,18 +291,22 @@ class LegacyPretrainedWorkerRedirectTests(TestCase):
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_internal_marketing_surfaces_only_link_to_library_templates(self):
-        for path in (
-            "/",
-            "/solutions/",
-            "/solutions/recruiting/",
-            "/solutions/recruiting/candidate-sourcing/",
-            "/solutions/sales/",
-            "/solutions/sales/ai-sales-agent/",
+        with patch(
+            "pages.views.get_homepage_pretrained_payload",
+            side_effect=_build_homepage_pretrained_payload,
         ):
-            with self.subTest(path=path):
-                response = self.client.get(path)
-                self.assertEqual(response.status_code, 200)
-                self.assertNotContains(response, "/pretrained-workers/")
+            for path in (
+                "/",
+                "/solutions/",
+                "/solutions/recruiting/",
+                "/solutions/recruiting/candidate-sourcing/",
+                "/solutions/sales/",
+                "/solutions/sales/ai-sales-agent/",
+            ):
+                with self.subTest(path=path):
+                    response = self.client.get(path)
+                    self.assertEqual(response.status_code, 200)
+                    self.assertNotContains(response, "/pretrained-workers/")
 
     @override_settings(
         GOBII_PROPRIETARY_MODE=True,
