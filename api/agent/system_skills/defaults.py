@@ -916,8 +916,8 @@ DISCORD_NATIVE_SYSTEM_SKILL = SystemSkillDefinition(
         "Do not set up DMs, all-channel subscriptions, or mention-only routing.\n"
         "Before asking the user for Discord IDs, call `discord_channel_subscriptions` with `action=\"list_guilds\"` or `action=\"discover_channels\"`. "
         "If the tool returns `action_required`, send the returned Gobii Discord `connect_url` as the single setup link. "
-        "That link authorizes Discord guild access and installs the Gobii bot in the selected server. "
-        "Do not present setup as separate connect and invite steps unless channel discovery later says the bot cannot list channels.\n"
+        "That link installs the Gobii bot only in the server selected during that authorization. "
+        "Each additional server requires its own connect flow.\n"
         "After the user says Discord setup is complete, call `list_guilds` or `discover_channels` again. "
         "If the tool returns `selected_guild`, use that server and continue to channel discovery; do not ask the user to choose the server again.\n"
         "After guilds are connected, use `discover_channels` to list channels visible to the Gobii bot. If several channels are returned, ask the user to choose by channel name, "
@@ -935,7 +935,8 @@ DISCORD_NATIVE_SYSTEM_SKILL = SystemSkillDefinition(
         "Pass the subscribed `channel_id`, the message's `discord_message_id` as `message_id`, one Unicode or Discord custom emoji, and the correct `will_continue_work` value. "
         "This tool only adds the Gobii bot's own reaction; it does not remove or manage other reactions.\n"
         "Use `list` before creating duplicates when the current subscription state is unclear. Use `disable` only when the user asks to stop receiving messages from a subscribed channel.\n"
-        "If channel discovery says the Gobii bot cannot list channels, send the returned `bot_invite_url` as a fallback repair link and ask the user to install the bot in the target server before retrying discovery."
+        "If channel discovery says the Gobii bot cannot list channels, send the returned `connect_url` as the repair link. "
+        "The repair flow is locked to that connected server."
     ),
 )
 

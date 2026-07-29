@@ -1782,6 +1782,8 @@ HUBSPOT_OAUTH_SCOPES = tuple(
 )
 
 # ────────── Native Discord Bot ──────────
+# The Discord application must use Guild Install and Require OAuth2 Code Grant so the
+# token exchange identifies the one server selected during authorization.
 DISCORD_CLIENT_ID = env("DISCORD_CLIENT_ID", default="")
 DISCORD_CLIENT_SECRET = env("DISCORD_CLIENT_SECRET", default="")
 DISCORD_BOT_TOKEN = env("DISCORD_BOT_TOKEN", default="")

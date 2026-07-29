@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
-import { agentDiscordAppQueryKey, fetchAgentDiscordApp } from '../../api/discordNative'
+import {
+  agentDiscordAppQueryKey,
+  discordContextAppQueryKey,
+  fetchAgentDiscordApp,
+  fetchDiscordContextConnected,
+} from '../../api/discordNative'
 import { fetchAgentRoster } from '../../api/agents'
 import {
   disconnectAgentPipedreamApp,
@@ -49,7 +54,6 @@ import {
 } from './NativeIntegrationShared'
 import { useManualNativeIntegrationConnect } from './useManualNativeIntegrationConnect'
 import {
-  agentHasDiscordNative,
   BackButton,
   DiscordAgentConnectionsScreen,
   DiscordConfigurationScreen,
@@ -147,6 +151,10 @@ export function WorkspaceAppsManager({
   } = useDiscordNativeAgentActions({
     onStart: () => setStatusMessage(null),
     onError: handleDiscordError,
+    onReady: (agentId) => {
+      setActiveDiscordAgentId(agentId)
+      setStatusMessage(null)
+    },
   })
 
   useEffect(() => {
@@ -184,6 +192,11 @@ export function WorkspaceAppsManager({
     queryFn: () => fetchAgentRoster(),
     enabled: Boolean(nativeIntegrationsUrl) && activeApp === null,
   })
+  const discordContextAppQuery = useQuery({
+    queryKey: discordContextAppQueryKey(),
+    queryFn: fetchDiscordContextConnected,
+    enabled: Boolean(nativeIntegrationsUrl) && activeApp === null,
+  })
   useWindowFocusRefetch(agentRosterQuery.refetch, discordConnectionsOpen && activeDiscordAgentId === null)
   const activeDiscordAppQueryKey = useMemo(
     () => activeDiscordAgentId ? agentDiscordAppQueryKey(activeDiscordAgentId) : ['agent-discord-app', null] as const,
@@ -203,10 +216,7 @@ export function WorkspaceAppsManager({
     () => new Set(settings.selectedApps.map((app) => app.slug)),
     [settings.selectedApps],
   )
-  const discordConnected = useMemo(
-    () => (agentRosterQuery.data?.agents ?? []).some(agentHasDiscordNative),
-    [agentRosterQuery.data?.agents],
-  )
+  const discordConnected = Boolean(discordContextAppQuery.data)
 
   const rows = useMemo<WorkspaceAppRow[]>(() => {
     const visibleApps = debouncedSearchTerm ? (searchQuery.data ?? []) : settings.effectiveApps
@@ -374,13 +384,15 @@ export function WorkspaceAppsManager({
     onSuccess: () => {
       setDiscordConnectionsOpen(false)
       setActiveDiscordAgentId(null)
-      void queryClient.invalidateQueries({ queryKey: ['agent-roster'], exact: false })
-      void queryClient.invalidateQueries({ queryKey: ['agent-discord-app'], exact: false })
     },
     onError: handleDiscordError,
-    onSettled: () => setPendingNativeAction(null),
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ['agent-roster'], exact: false })
+      void queryClient.invalidateQueries({ queryKey: ['agent-discord-app'], exact: false })
+      void queryClient.invalidateQueries({ queryKey: discordContextAppQueryKey() })
+      setPendingNativeAction(null)
+    },
   })
-
   const nativePickerMutation = useNativeIntegrationPickerMutation({
     setPendingAction: setPendingNativeAction,
     setStatusMessage: setNativeStatusMessage,
@@ -431,6 +443,8 @@ export function WorkspaceAppsManager({
           setStatusMessage(null)
         }}
         onSave={(subscriptions) => saveDiscordAgentSubscriptions(activeDiscordAgentId, subscriptions)}
+        onClearStatus={() => setStatusMessage(null)}
+        onError={handleDiscordError}
       />
     )
   ) : discordConnectionsOpen ? (

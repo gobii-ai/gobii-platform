@@ -6,7 +6,7 @@ sidebar_label: "Discord"
 
 Discord support lets a Gobii join the channels where your team already talks. Use it when a Gobii should monitor a server channel, respond in context, work with shared files or images, or keep team workflows moving without everyone switching back to the Gobii web app.
 
-Gobii connects through the native Gobii Discord bot. You authorize Discord, add the bot to a server, then choose which channels should wake this Gobii.
+Gobii connects through the native Gobii Discord bot. Each authorization adds exactly one server, then you choose which channels should wake this Gobii. Gobii does not import the other servers in your Discord account.
 
 ## When To Use It
 
@@ -41,6 +41,8 @@ Discord will ask you to authorize Gobii and choose the server where the bot shou
 
 You need **Manage Server** permission in the Discord server you select. After the bot is added, Discord shows that Gobii joined the server.
 
+To connect another server, use **Add server** and complete a separate authorization. Connected servers are shared within the current personal or organization context, but each Gobii has its own channel subscriptions.
+
 <Screenshot
   src="/images/product/discord-bot-arrived.png"
   alt="Discord system message saying Gobii just landed."
@@ -68,6 +70,8 @@ Then:
 9. Send a small test message in a subscribed Discord channel.
 
 Only selected channels should wake the Gobii. If a channel is not subscribed, do not assume the Gobii can see or respond to messages there.
+
+Removing a server from Gobii disables every Gobii subscription in that server, removes Gobii-created webhooks, and uninstalls the Gobii bot from the server.
 
 ## Choose Channels Carefully
 

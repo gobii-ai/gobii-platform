@@ -9,7 +9,7 @@ export const DISCORD_NATIVE_DISPLAY_PROVIDER: NativeIntegrationProvider = {
   authType: 'oauth2',
   icon: 'discord',
   apiHosts: ['discord.com'],
-  scopes: [],
+  scopes: ['bot', 'applications.commands'],
   connected: false,
   scope: 'personal',
   expiresAt: null,
@@ -28,16 +28,4 @@ export function withDiscordNativeProvider(providers: NativeIntegrationProvider[]
     return providers
   }
   return [...providers, DISCORD_NATIVE_DISPLAY_PROVIDER]
-}
-
-export function withDiscordNativeProviderConnection(
-  providers: NativeIntegrationProvider[],
-  connected: boolean,
-): NativeIntegrationProvider[] {
-  const nextProviders = withDiscordNativeProvider(providers)
-  return nextProviders.map((provider) => (
-    provider.providerKey === DISCORD_NATIVE_PROVIDER_KEY
-      ? { ...provider, connected }
-      : provider
-  ))
 }

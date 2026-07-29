@@ -9,17 +9,23 @@ from django.views import View
 
 from api.agent.system_skills.defaults import DISCORD_NATIVE_SYSTEM_SKILL_KEY
 from api.agent.system_skills.service import enable_system_skills
-from api.models import PersistentAgentDiscordChannelSubscription, PersistentAgentDiscordOAuthSession, PersistentAgentSystemSkillState
+from api.models import (
+    PersistentAgentDiscordChannelSubscription,
+    PersistentAgentDiscordGuild,
+    PersistentAgentDiscordOAuthSession,
+    PersistentAgentSystemSkillState,
+)
 from api.services.discord_bot import (
     DiscordBotIntegrationError,
-    build_discord_bot_invite_url,
     build_discord_oauth_start_url,
+    disconnect_discord_guild_for_owner,
     disconnect_discord_native_integration,
     disable_subscription,
     discover_channels,
     ensure_subscription,
     handle_discord_oauth_callback,
     list_claimed_guilds,
+    list_claimed_guilds_for_owner,
     list_subscriptions,
     start_discord_oauth,
 )
@@ -60,7 +66,6 @@ def _serialize_discord_app(agent) -> dict[str, Any]:
         "active_subscription_count": len(active_subscriptions),
         "guild_count": len(guilds),
         "connect_url": build_discord_oauth_start_url(agent),
-        "bot_invite_url": build_discord_bot_invite_url(),
     }
 
 
@@ -86,13 +91,13 @@ def _enable_discord_native_skill(agent) -> dict[str, object]:
     return enable_system_skills(agent, [DISCORD_NATIVE_SYSTEM_SKILL_KEY])
 
 
-def _discord_oauth_complete_response(*, agent_id: str, guild_count: int) -> HttpResponse:
+def _discord_oauth_complete_response(*, agent_id: str) -> HttpResponse:
     payload = json.dumps(
         {
             "type": "gobii:discord_oauth_complete",
             "status": "success",
             "agent_id": agent_id,
-            "guild_count": guild_count,
+            "guild_count": 1,
         }
     )
     html = f"""<!doctype html>
@@ -137,7 +142,13 @@ class DiscordOAuthStartView(ApiLoginRequiredMixin, View):
                 agent_id,
                 allow_delinquent_personal_chat=True,
             )
-            return HttpResponseRedirect(start_discord_oauth(agent, request.user))
+            return HttpResponseRedirect(
+                start_discord_oauth(
+                    agent,
+                    request.user,
+                    requested_guild_id=str(request.GET.get("guild_id") or ""),
+                )
+            )
         except PermissionDenied:
             return _discord_permission_denied_response()
         except DiscordBotIntegrationError as exc:
@@ -161,11 +172,9 @@ class DiscordOAuthCallbackView(ApiLoginRequiredMixin, View):
                 agent_id,
                 allow_delinquent_personal_chat=True,
             )
-            result = handle_discord_oauth_callback(
+            handle_discord_oauth_callback(
                 state=state,
                 code=code,
-                selected_guild_id=str(request.GET.get("guild_id") or ""),
-                selected_permissions=str(request.GET.get("permissions") or ""),
             )
         except PersistentAgentDiscordOAuthSession.DoesNotExist:
             return JsonResponse({"error": "Discord authorization state was not found."}, status=404)
@@ -174,7 +183,7 @@ class DiscordOAuthCallbackView(ApiLoginRequiredMixin, View):
         except DiscordBotIntegrationError as exc:
             return JsonResponse({"error": str(exc)}, status=400)
 
-        return _discord_oauth_complete_response(agent_id=agent_id, guild_count=result.claimed_count)
+        return _discord_oauth_complete_response(agent_id=agent_id)
 
 
 class AgentDiscordAppView(ApiLoginRequiredMixin, View):
@@ -199,11 +208,31 @@ class AgentDiscordConnectView(ApiLoginRequiredMixin, View):
             return _discord_permission_denied_response()
         if skill_result.get("status") != "success" or skill_result.get("invalid"):
             return JsonResponse({"error": "Unable to enable Discord for this agent."}, status=400)
+        app = _serialize_discord_app(agent)
         return JsonResponse(
             {
                 "connect_url": build_discord_oauth_start_url(agent),
                 "skill_enabled": True,
-                "app": _serialize_discord_app(agent),
+                "oauth_required": not app["connected"],
+                "app": app,
+            }
+        )
+
+
+class DiscordContextAppView(ApiLoginRequiredMixin, View):
+    http_method_names = ["get"]
+
+    def get(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        try:
+            owner_user, owner_org = _resolve_discord_owner(request)
+        except PermissionDenied:
+            return _discord_permission_denied_response("Not permitted to view Discord integrations.")
+        guilds = list_claimed_guilds_for_owner(owner_user=owner_user, organization=owner_org)
+        return JsonResponse(
+            {
+                "connected": bool(guilds),
+                "guild_count": len(guilds),
+                "guilds": guilds,
             }
         )
 
@@ -217,6 +246,30 @@ class DiscordDisconnectView(ApiLoginRequiredMixin, View):
         except PermissionDenied:
             return _discord_permission_denied_response("Not permitted to manage Discord integrations.")
         result = disconnect_discord_native_integration(owner_user=owner_user, organization=owner_org)
+        failed_guilds = result.get("failed_guilds") or []
+        return JsonResponse(
+            {"revoked": not failed_guilds, **result},
+            status=502 if failed_guilds else 200,
+        )
+
+
+class DiscordGuildDisconnectView(ApiLoginRequiredMixin, View):
+    http_method_names = ["delete"]
+
+    def delete(self, request: HttpRequest, guild_id: str, *args: Any, **kwargs: Any):
+        try:
+            owner_user, owner_org = _resolve_discord_owner(request)
+            result = disconnect_discord_guild_for_owner(
+                guild_id=str(guild_id or "").strip(),
+                owner_user=owner_user,
+                organization=owner_org,
+            )
+        except PermissionDenied:
+            return _discord_permission_denied_response("Not permitted to manage Discord integrations.")
+        except PersistentAgentDiscordGuild.DoesNotExist:
+            return JsonResponse({"error": "Discord server was not found in this context."}, status=404)
+        except DiscordBotIntegrationError as exc:
+            return JsonResponse({"error": str(exc)}, status=502)
         return JsonResponse({"revoked": True, **result})
 
 

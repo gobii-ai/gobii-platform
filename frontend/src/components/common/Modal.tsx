@@ -37,6 +37,7 @@ export function Modal({
 }: ModalProps) {
   const historyKey = useId()
   const onCloseRef = useRef(onClose)
+  const historyEffectVersionRef = useRef(0)
   onCloseRef.current = onClose
 
   useEffect(() => {
@@ -61,7 +62,10 @@ export function Modal({
     if (!dismissible || typeof window === 'undefined') {
       return
     }
-    window.history.pushState({ ...(window.history.state ?? {}), __modalKey: historyKey }, '')
+    const effectVersion = ++historyEffectVersionRef.current
+    if (window.history.state?.__modalKey !== historyKey) {
+      window.history.pushState({ ...(window.history.state ?? {}), __modalKey: historyKey }, '')
+    }
     let closedByPop = false
     const handlePop = () => {
       // With stacked dialogs, one pop removes one sentinel: close only the modal whose
@@ -76,7 +80,14 @@ export function Modal({
     return () => {
       window.removeEventListener('popstate', handlePop)
       if (!closedByPop && window.history.state?.__modalKey === historyKey) {
-        window.history.back()
+        window.setTimeout(() => {
+          if (
+            historyEffectVersionRef.current === effectVersion
+            && window.history.state?.__modalKey === historyKey
+          ) {
+            window.history.back()
+          }
+        }, 0)
       }
     }
   }, [dismissible, historyKey])

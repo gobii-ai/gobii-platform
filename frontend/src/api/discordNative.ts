@@ -38,12 +38,12 @@ type AgentDiscordAppPayload = {
   active_subscription_count: number
   guild_count: number
   connect_url: string
-  bot_invite_url: string
 }
 
 type AgentDiscordConnectPayload = {
   connect_url: string
   skill_enabled: boolean
+  oauth_required: boolean
   app: AgentDiscordAppPayload
 }
 
@@ -51,7 +51,7 @@ type AgentDiscordChannelsPayload = {
   status: string
   message?: string
   error?: string
-  bot_invite_url?: string
+  connect_url?: string
   channels: DiscordChannelPayload[]
 }
 
@@ -93,12 +93,12 @@ export type AgentDiscordApp = {
   activeSubscriptionCount: number
   guildCount: number
   connectUrl: string
-  botInviteUrl: string
 }
 
 export type AgentDiscordConnectResponse = {
   connectUrl: string
   skillEnabled: boolean
+  oauthRequired: boolean
   app: AgentDiscordApp
 }
 
@@ -106,7 +106,7 @@ export type AgentDiscordChannelsResponse = {
   status: string
   message: string
   error: string
-  botInviteUrl: string
+  connectUrl: string
   channels: DiscordChannel[]
 }
 
@@ -147,7 +147,6 @@ function mapApp(app: AgentDiscordAppPayload): AgentDiscordApp {
     activeSubscriptionCount: app.active_subscription_count ?? 0,
     guildCount: app.guild_count ?? 0,
     connectUrl: app.connect_url,
-    botInviteUrl: app.bot_invite_url,
   }
 }
 
@@ -171,8 +170,18 @@ export async function startAgentDiscordConnect(agentId: string): Promise<AgentDi
   return {
     connectUrl: payload.connect_url,
     skillEnabled: Boolean(payload.skill_enabled),
+    oauthRequired: Boolean(payload.oauth_required),
     app: mapApp(payload.app),
   }
+}
+
+export function discordContextAppQueryKey() {
+  return ['discord-context-app'] as const
+}
+
+export async function fetchDiscordContextConnected(): Promise<boolean> {
+  const payload = await jsonFetch<{ connected: boolean }>('/console/api/discord/app/')
+  return Boolean(payload.connected)
 }
 
 export async function disconnectDiscordNative(): Promise<{ revoked: boolean }> {
@@ -181,6 +190,16 @@ export async function disconnectDiscordNative(): Promise<{ revoked: boolean }> {
     includeCsrf: true,
     json: {},
   })
+}
+
+export async function disconnectDiscordGuild(guildId: string): Promise<{ revoked: boolean }> {
+  return jsonRequest<{ revoked: boolean }>(
+    `/console/api/discord/guilds/${encodeURIComponent(guildId)}/`,
+    {
+      method: 'DELETE',
+      includeCsrf: true,
+    },
+  )
 }
 
 export async function fetchAgentDiscordGuildChannels(
@@ -194,7 +213,7 @@ export async function fetchAgentDiscordGuildChannels(
     status: payload.status,
     message: payload.message ?? '',
     error: payload.error ?? '',
-    botInviteUrl: payload.bot_invite_url ?? '',
+    connectUrl: payload.connect_url ?? '',
     channels: (payload.channels ?? []).map((channel) => ({
       guildId: channel.guild_id,
       guildName: channel.guild_name,
