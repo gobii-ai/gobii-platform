@@ -217,12 +217,7 @@ class CustomToolResultContractScenario(EvalScenario, ScenarioExecutionTools):
     ]
     case: CustomToolResultContractCase | None = None
 
-    def run(self, run_id: str, agent_id: str) -> None:
-        if self.case is None:
-            raise ValueError("Custom tool result contract eval is missing case metadata.")
-
-        case = self.case
-        custom_tool_name = self._custom_tool_name(case)
+    def _prepare_agent(self, agent_id: str) -> None:
         PersistentAgent.objects.filter(id=agent_id).update(
             charter=(
                 "You are an eval agent. Use the real agent tool stack to satisfy the user's request. "
@@ -230,6 +225,15 @@ class CustomToolResultContractScenario(EvalScenario, ScenarioExecutionTools):
             ),
             planning_state=PersistentAgent.PlanningState.SKIPPED,
         )
+        self.enable_sandbox_tool_visibility(agent_id)
+
+    def run(self, run_id: str, agent_id: str) -> None:
+        if self.case is None:
+            raise ValueError("Custom tool result contract eval is missing case metadata.")
+
+        case = self.case
+        custom_tool_name = self._custom_tool_name(case)
+        self._prepare_agent(agent_id)
 
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="inject_prompt")
         with self.wait_for_agent_idle(agent_id, timeout=180):

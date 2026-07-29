@@ -311,6 +311,33 @@ class MetaGobiiDirectToolTests(TestCase):
         self.assertEqual(child.contact_approval_mode, "auto_approve_email")
         self.assertEqual(created["agent"]["contact_approval_mode"], "auto_approve_email")
 
+    @patch("api.agent.tasks.process_agent_events_task.delay")
+    @patch("api.agent.tools.meta_gobii.AgentService.has_agents_available", return_value=True)
+    @patch("api.services.persistent_agents.AgentService.has_agents_available", return_value=True)
+    @patch("api.models.AgentService.get_agents_available", return_value=10)
+    def test_create_agent_generates_name_when_omitted(
+        self,
+        _model_capacity,
+        _provision_capacity,
+        _tool_capacity,
+        _mock_delay,
+    ):
+        schema = TOOL_DEFINITIONS["meta_gobii_create_agent"]["parameters"]
+        self.assertNotIn("name", schema.get("required", []))
+
+        created = execute_meta_gobii_tool(
+            self.manager,
+            "meta_gobii_create_agent",
+            {
+                "charter": "Own the generated-name workflow.",
+                "user_confirmed": True,
+            },
+        )
+
+        self.assertEqual(created["status"], "ok")
+        self.assertTrue(created["agent"]["name"].strip())
+        self.assertEqual(created["agent"]["charter"], "Own the generated-name workflow.")
+
     @patch("api.services.agent_settings_resume.process_agent_events_task.delay")
     def test_update_agent_requires_confirmation_and_respects_access(self, _mock_delay):
         update_schema = TOOL_DEFINITIONS["meta_gobii_update_agent"]["parameters"]
@@ -448,6 +475,26 @@ class MetaGobiiDirectToolTests(TestCase):
         link = AgentPeerLink.objects.get(id=result["link"]["id"])
         self.assertEqual(link.messages_per_window, 10)
         self.assertEqual(link.window_hours, 4)
+        self.assertEqual(result["link"]["health"], {"status": "healthy", "issues": []})
+
+        PersistentAgent.objects.filter(id=self.peer.id).update(
+            life_state=PersistentAgent.LifeState.EXPIRED,
+        )
+        listed = execute_meta_gobii_tool(
+            self.manager,
+            "meta_gobii_list_agent_links",
+            {"agent_id": str(self.manager.id)},
+        )
+        self.assertEqual(
+            listed["links"][0]["health"],
+            {
+                "status": "unhealthy",
+                "issues": [{"agent_id": str(self.peer.id), "reason": "expired"}],
+            },
+        )
+        PersistentAgent.objects.filter(id=self.peer.id).update(
+            life_state=PersistentAgent.LifeState.ACTIVE,
+        )
 
         blocked_unlink = execute_meta_gobii_tool(
             self.manager,

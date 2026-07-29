@@ -710,7 +710,12 @@ class PersistentAgentViewSet(viewsets.ModelViewSet):
     queryset = (
         PersistentAgent.objects.non_eval()
         .alive()
-        .select_related('browser_use_agent', 'organization', 'preferred_contact_endpoint')
+        .select_related(
+            'browser_use_agent',
+            'organization',
+            'preferred_contact_endpoint',
+            'preferred_llm_tier',
+        )
     )
     serializer_class = PersistentAgentSerializer
     permission_classes = [IsAuthenticated]
@@ -727,6 +732,7 @@ class PersistentAgentViewSet(viewsets.ModelViewSet):
         props = {
             'agent_id': str(agent.id),
             'agent_name': agent.name,
+            'preferred_llm_tier': agent.preferred_llm_tier.key if agent.preferred_llm_tier_id else 'standard',
         }
         org = self._request_organization()
         if org is not None:

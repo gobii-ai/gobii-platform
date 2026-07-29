@@ -163,6 +163,22 @@ _LINK_OUTPUT = _output_object(
         "id": _UUID,
         "agent_a": _AGENT_REF_OUTPUT,
         "agent_b": _AGENT_REF_OUTPUT,
+        "health": _output_object(
+            {
+                "status": {"type": "string"},
+                "issues": {
+                    "type": "array",
+                    "items": _output_object(
+                        {
+                            "agent_id": _UUID,
+                            "reason": {"type": "string"},
+                        },
+                        required=("agent_id", "reason"),
+                    ),
+                },
+            },
+            required=("status", "issues"),
+        ),
         "is_enabled": {"type": "boolean"},
         "messages_per_window": {"type": "integer"},
         "window_hours": {"type": "integer"},
@@ -1907,6 +1923,7 @@ def _serialize_peer_link(link: AgentPeerLink) -> dict[str, Any]:
         "id": str(link.id),
         "agent_a": _serialize_agent_ref(link.agent_a),
         "agent_b": _serialize_agent_ref(link.agent_b),
+        "health": link.health_summary(),
         "is_enabled": link.is_enabled,
         "messages_per_window": link.messages_per_window,
         "window_hours": link.window_hours,

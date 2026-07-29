@@ -558,6 +558,11 @@ def create_persistent_agent_from_charter(
             "initial_message": initial_message,
             "charter": initial_message or "",
             "preferred_contact_method": preferred_contact_method,
+            "preferred_llm_tier": (
+                persistent_agent.preferred_llm_tier.key
+                if persistent_agent.preferred_llm_tier_id
+                else "standard"
+            ),
             "template_code": selected_template.code if selected_template else "",
             "template_source": template_source if selected_template else "",
             "template_schedule_applied": applied_schedule or "",

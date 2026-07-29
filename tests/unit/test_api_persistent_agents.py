@@ -21,6 +21,7 @@ from api.models import (
     UserPhoneNumber,
     UserQuota,
 )
+from util.analytics import AnalyticsEvent
 
 PERSISTENT_AGENT_BASE_URL = '/api/v1/agents/'
 
@@ -545,7 +546,10 @@ class PersistentAgentAPITests(TestCase):
         self._standard_delay_patcher = patch('api.agent.tasks.process_agent_events_task.delay')
         self.standard_process_events_mock = self._standard_delay_patcher.start()
         self.addCleanup(self._standard_delay_patcher.stop)
-        self._on_commit_patcher = patch('api.serializers.transaction.on_commit', side_effect=lambda fn: fn())
+        self._on_commit_patcher = patch(
+            'api.serializers.transaction.on_commit',
+            side_effect=lambda fn, **_kwargs: fn(),
+        )
         self.on_commit_mock = self._on_commit_patcher.start()
         self.addCleanup(self._on_commit_patcher.stop)
         self._analytics_patcher = patch('api.views.Analytics.track_event')
@@ -595,6 +599,12 @@ class PersistentAgentAPITests(TestCase):
         self.assertTrue(email_meta.verified)
         self.assertEqual(email_meta.display_name, "API @ Persistent Agent")
         self.process_events_mock.assert_called_with(str(agent.id))
+        created_event = next(
+            call
+            for call in self.analytics_mock.call_args_list
+            if call.kwargs.get("event") == AnalyticsEvent.PERSISTENT_AGENT_CREATED
+        )
+        self.assertEqual(created_event.kwargs["properties"]["preferred_llm_tier"], "standard")
 
     def test_create_agent_persists_contact_approval_mode(self):
         payload = self._create_agent_via_api({

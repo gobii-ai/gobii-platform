@@ -48,6 +48,7 @@ EFFORT_EXPLICIT_DEEP_RESEARCH_REMAINS_CAPABLE = "effort_explicit_deep_research_r
 EFFORT_UNSCHEDULED_REMAINING_WORK_SETS_RESUME = "effort_unscheduled_remaining_work_sets_resume"
 EFFORT_PARTIAL_SOURCE_BLOCK_REPORTS_AND_RESUMES = "effort_partial_source_block_reports_and_resumes"
 EFFORT_TOOL_WAIT_NEXT_SCHEDULE_REQUIRES_SCHEDULE = "effort_tool_wait_next_schedule_requires_schedule"
+EFFORT_AUTOMATIC_FUTURE_EVENTS_STAY_OFF_PLAN = "effort_automatic_future_events_stay_off_plan"
 DEEP_WORK_CORRECTION_STEP_PREFIX = "Deep-work communication correction:"
 
 EFFORT_CALIBRATION_SCENARIO_SLUGS = [
@@ -64,6 +65,7 @@ EFFORT_CALIBRATION_SCENARIO_SLUGS = [
     EFFORT_UNSCHEDULED_REMAINING_WORK_SETS_RESUME,
     EFFORT_PARTIAL_SOURCE_BLOCK_REPORTS_AND_RESUMES,
     EFFORT_TOOL_WAIT_NEXT_SCHEDULE_REQUIRES_SCHEDULE,
+    EFFORT_AUTOMATIC_FUTURE_EVENTS_STAY_OFF_PLAN,
 ]
 
 MESSAGE_TOOL_NAMES = {
@@ -2313,6 +2315,97 @@ class EffortToolWaitNextScheduleRequiresScheduleScenario(EffortCalibrationScenar
             forbidden_tool_names=EFFORT_OVERWORK_TOOL_NAMES | ARTIFACT_TOOL_NAMES | RESEARCH_TOOL_NAMES,
         )
         self._record_orchestrator_budget(run_id, task_name="verify_turn_budget", max_completions=5)
+
+
+@register_scenario
+class EffortAutomaticFutureEventsStayOffPlanScenario(EffortCalibrationScenario):
+    slug = EFFORT_AUTOMATIC_FUTURE_EVENTS_STAY_OFF_PLAN
+    description = (
+        "Schedules, replies, and future source batches wake agents automatically; an agent with no current action "
+        "should finish the run instead of turning those passive events into user-visible plan tasks."
+    )
+    tasks = [
+        ScenarioTask(name="inject_prompt", assertion_type="manual"),
+        ScenarioTask(name="verify_current_batch_checked", assertion_type="manual"),
+        ScenarioTask(name="verify_no_passive_wait_task", assertion_type="manual"),
+        ScenarioTask(name="verify_turn_budget", assertion_type="manual"),
+    ]
+
+    def run(self, run_id: str, agent_id: str) -> None:
+        self._ready_agent(
+            agent_id,
+            charter="Process each available partner batch and report its status before ending the current run.",
+            schedule="@every 4h",
+        )
+        self._enable_eval_synthetic_tools(agent_id, ["eval_prepare_next_batch"])
+        mock_config = {
+            "eval_prepare_next_batch": {
+                "status": "ok",
+                "prepared_count": 12,
+                "remaining_work": 0,
+                "next_cursor": None,
+                "next_action": (
+                    "Current work is complete. A scheduled run, inbound replies, or a fresh partner batch will "
+                    "wake the agent automatically."
+                ),
+            }
+        }
+
+        self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="inject_prompt")
+        with self.wait_for_agent_idle(agent_id, timeout=180):
+            inbound = self.inject_message(
+                agent_id,
+                (
+                    "Wrap up the current partner batch and tell me where it landed. We have the normal recurring "
+                    "schedule, and replies or new partner data may arrive later."
+                ),
+                trigger_processing=True,
+                eval_run_id=run_id,
+                mock_config=mock_config,
+                eval_stop_policy={
+                    "stop_when_all_seen": [
+                        {"tool_name": "eval_prepare_next_batch", "after_execution": True},
+                    ],
+                    "stop_on_tool_names": list(EFFORT_OVERWORK_TOOL_NAMES | ARTIFACT_TOOL_NAMES),
+                    "stop_on_human_input_request": True,
+                    "stop_on_unexpected_relevant_tool": True,
+                    "allowed_tool_names": ["eval_prepare_next_batch", "sqlite_batch"],
+                    "max_relevant_tool_calls": 3,
+                    "ignored_tool_names": list(MESSAGE_TOOL_NAMES | STOP_TOOL_NAMES),
+                },
+            )
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED,
+            task_name="inject_prompt",
+            observed_summary="Prompt injected and processing completed.",
+            artifacts={"message": inbound},
+        )
+
+        calls = _tool_calls_for_run(
+            run_id,
+            after=inbound.timestamp,
+            tool_names={"eval_prepare_next_batch"},
+        )
+        self.record_task_result(
+            run_id,
+            calls[0].step if calls else None,
+            EvalRunTask.Status.PASSED if calls else EvalRunTask.Status.FAILED,
+            task_name="verify_current_batch_checked",
+            observed_summary=(
+                "The agent checked the current batch before finishing."
+                if calls
+                else "The agent did not check the current batch."
+            ),
+        )
+        self._record_no_overwork_tools(
+            run_id,
+            after=inbound.timestamp,
+            task_name="verify_no_passive_wait_task",
+            forbidden_tool_names={"update_plan"},
+        )
+        self._record_orchestrator_budget(run_id, task_name="verify_turn_budget", max_completions=3)
 
 
 @register_scenario

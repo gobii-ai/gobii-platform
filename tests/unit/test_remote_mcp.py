@@ -546,7 +546,21 @@ class RemoteMCPViewTests(TestCase):
             {"agent_id": str(existing_agent.id)},
         )
         self.assertEqual(list_links_response.status_code, 200)
-        self.assertEqual(len(self._structured_content(list_links_response)["links"]), 1)
+        listed_link = self._structured_content(list_links_response)["links"][0]
+        self.assertEqual(listed_link["health"], {"status": "healthy", "issues": []})
+
+        created_agent.life_state = PersistentAgent.LifeState.EXPIRED
+        created_agent.save(update_fields=["life_state"])
+        unhealthy_response = self._call_tool(
+            "gobii_list_agent_links",
+            {"agent_id": str(existing_agent.id)},
+        )
+        unhealthy_link = self._structured_content(unhealthy_response)["links"][0]
+        self.assertEqual(unhealthy_link["health"]["status"], "unhealthy")
+        self.assertEqual(
+            unhealthy_link["health"]["issues"],
+            [{"agent_id": created_agent_id, "reason": "expired"}],
+        )
 
         unlink_response = self._call_tool(
             "gobii_unlink_agents",
@@ -647,6 +661,61 @@ class RemoteMCPViewTests(TestCase):
         self.assertEqual(
             self._structured_content(response)["agent"]["contact_approval_mode"],
             "auto_approve_email",
+        )
+
+    def test_create_agent_generates_name_when_omitted(self):
+        create_tool = next(
+            tool
+            for tool in self._post_mcp("tools/list").json()["result"]["tools"]
+            if tool["name"] == "gobii_create_agent"
+        )
+        self.assertNotIn("name", create_tool["inputSchema"].get("required", []))
+
+        with (
+            patch.object(BrowserUseAgent, "select_random_proxy", return_value=None),
+            patch("api.services.persistent_agents.maybe_schedule_short_description"),
+            patch("api.services.persistent_agents.maybe_schedule_mini_description"),
+            patch("api.services.persistent_agents.maybe_schedule_agent_tags"),
+            patch("api.services.persistent_agents.maybe_schedule_agent_avatar"),
+            patch("api.agent.tasks.enqueue_interactive_process_agent_events"),
+            self.captureOnCommitCallbacks(execute=True),
+        ):
+            response = self._call_tool(
+                "gobii_create_agent",
+                {"charter": "Own the generated-name workflow."},
+            )
+
+        self.assertFalse(response.json()["result"]["isError"], response.content)
+        created = self._structured_content(response)["agent"]
+        self.assertTrue(created["name"].strip())
+        self.assertEqual(created["charter"], "Own the generated-name workflow.")
+
+    def test_create_agent_succeeds_when_post_commit_wake_fails(self):
+        agent_name = "Post-commit MCP Agent"
+        with (
+            patch.object(BrowserUseAgent, "select_random_proxy", return_value=None),
+            patch("api.services.persistent_agents.maybe_schedule_short_description"),
+            patch("api.services.persistent_agents.maybe_schedule_mini_description"),
+            patch("api.services.persistent_agents.maybe_schedule_agent_tags"),
+            patch("api.services.persistent_agents.maybe_schedule_agent_avatar"),
+            patch(
+                "api.agent.tasks.enqueue_interactive_process_agent_events",
+                side_effect=RuntimeError("queue unavailable"),
+            ),
+            self.captureOnCommitCallbacks(execute=True),
+        ):
+            response = self._call_tool(
+                "gobii_create_agent",
+                {
+                    "name": agent_name,
+                    "charter": "Own the post-commit handoff.",
+                },
+            )
+
+        self.assertFalse(response.json()["result"]["isError"], response.content)
+        self.assertEqual(
+            PersistentAgent.objects.filter(user=self.user, name=agent_name).count(),
+            1,
         )
 
     def test_update_agent_tier_and_explicit_null_schedule_retain_omitted_credit_limit(self):
