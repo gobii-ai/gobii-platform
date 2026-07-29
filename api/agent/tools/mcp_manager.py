@@ -2787,6 +2787,61 @@ class MCPToolManager:
                 evict_client=True,
             )
 
+    def _execute_mcp_tool_locally_isolated(
+        self,
+        agent: PersistentAgent,
+        info: MCPToolInfo,
+        runtime: MCPServerRuntime,
+        params: Dict[str, Any],
+        *,
+        owner: Any,
+        will_continue_work: Optional[bool],
+    ) -> Dict[str, Any]:
+        proxy_url = None
+        if runtime.url or self._is_stdio_runtime(runtime):
+            proxy_url, proxy_error = self._select_agent_proxy_url(agent)
+            if proxy_error:
+                return {"status": "error", "message": proxy_error}
+
+        try:
+            client = self._build_client_for_runtime(
+                runtime,
+                env_overrides=self._build_stdio_proxy_env(proxy_url)
+                if self._is_stdio_runtime(runtime)
+                else None,
+            )
+            timeout_seconds = self._get_timeout_for_runtime(runtime)
+            http_timeout_seconds = timeout_seconds if runtime.url else None
+            with _use_mcp_http_timeout(http_timeout_seconds), _use_mcp_proxy(proxy_url):
+                result = self._run_coroutine_isolated(
+                    self._execute_async(
+                        client,
+                        info.tool_name,
+                        params,
+                        timeout_seconds=timeout_seconds,
+                    )
+                )
+            with mcp_result_owner_context(owner):
+                result = self._adapt_tool_result(info.server_name, info.tool_name, result)
+
+            response = self._finalize_mcp_result(info.server_name, info.tool_name, result)
+            response = self._handle_mcp_session_death_response(
+                runtime,
+                response,
+                evict_client=False,
+            )
+            if will_continue_work is False:
+                response["auto_sleep_ok"] = True
+            return response
+        except Exception as exc:
+            logger.error("Failed to execute isolated MCP tool %s: %s", info.full_name, exc)
+            response = {"status": "error", "message": str(exc)}
+            return self._handle_mcp_session_death_response(
+                runtime,
+                response,
+                evict_client=False,
+            )
+
     def execute_mcp_tool_isolated(
         self,
         agent: PersistentAgent,
@@ -2816,13 +2871,14 @@ class MCPToolManager:
         if not runtime:
             return {"status": "error", "message": f"MCP server '{info.server_name}' is not available"}
 
-        if self._runtime_requires_sandbox(runtime):
-            return self.execute_mcp_tool(
-                agent,
-                tool_name,
-                params,
-                tool_info=info,
-            )
+        if not self._sandbox_required_runtime_available(runtime, agent=agent):
+            return {
+                "status": "error",
+                "message": (
+                    f"MCP server '{info.server_name}' requires sandbox compute, "
+                    "which is not available for this agent"
+                ),
+            }
 
         try:
             row, _ = PersistentAgentEnabledTool.objects.get_or_create(
@@ -2848,50 +2904,32 @@ class MCPToolManager:
         if param_error:
             return param_error
 
-        proxy_url = None
-        if runtime.url or self._is_stdio_runtime(runtime):
-            proxy_url, proxy_error = self._select_agent_proxy_url(agent)
-            if proxy_error:
-                return {"status": "error", "message": proxy_error}
+        if self._runtime_requires_sandbox(runtime):
+            sandbox_result, sandbox_fallback = self._dispatch_sandbox_mcp_request(
+                agent=agent,
+                info=info,
+                runtime=runtime,
+                server_name=server_name,
+                actual_tool_name=actual_tool_name,
+                params=params,
+                full_tool_name=tool_name,
+            )
+            if sandbox_result is not None:
+                return sandbox_result
+            if not sandbox_fallback:
+                return {
+                    "status": "error",
+                    "message": f"MCP server '{server_name}' is not available",
+                }
 
-        try:
-            client = self._build_client_for_runtime(
-                runtime,
-                env_overrides=self._build_stdio_proxy_env(proxy_url)
-                if self._is_stdio_runtime(runtime)
-                else None,
-            )
-            timeout_seconds = self._get_timeout_for_runtime(runtime)
-            http_timeout_seconds = timeout_seconds if runtime.url else None
-            with _use_mcp_http_timeout(http_timeout_seconds), _use_mcp_proxy(proxy_url):
-                result = self._run_coroutine_isolated(
-                    self._execute_async(
-                        client,
-                        actual_tool_name,
-                        params,
-                        timeout_seconds=timeout_seconds,
-                    )
-                )
-            with mcp_result_owner_context(owner):
-                result = self._adapt_tool_result(server_name, actual_tool_name, result)
-
-            response = self._finalize_mcp_result(server_name, actual_tool_name, result)
-            response = self._handle_mcp_session_death_response(
-                runtime,
-                response,
-                evict_client=False,
-            )
-            if will_continue_work is False:
-                response["auto_sleep_ok"] = True
-            return response
-        except Exception as exc:
-            logger.error("Failed to execute isolated MCP tool %s: %s", tool_name, exc)
-            response = {"status": "error", "message": str(exc)}
-            return self._handle_mcp_session_death_response(
-                runtime,
-                response,
-                evict_client=False,
-            )
+        return self._execute_mcp_tool_locally_isolated(
+            agent,
+            info,
+            runtime,
+            params,
+            owner=owner,
+            will_continue_work=will_continue_work,
+        )
     
     def _adapt_tool_result(self, server_name: str, tool_name: str, result: Any):
         """Run the tool response through any registered adapters."""
