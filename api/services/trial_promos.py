@@ -24,6 +24,7 @@ from util.trial_eligibility import is_trial_decision_allowed
 
 
 TRIAL_PROMO_SESSION_KEY = "special_access_trial_promo_id"
+TRIAL_PROMO_PENDING_START_SESSION_KEY = "special_access_trial_promo_pending_start_id"
 
 TRIAL_PROMO_META_ID = "trial_promo_id"
 TRIAL_PROMO_META_CODE = "trial_promo_code"
@@ -86,12 +87,33 @@ def find_active_trial_promo_by_code(code: str | None, *, now=None) -> TrialPromo
 
 
 def store_trial_promo_in_session(request, promo: TrialPromo) -> None:
-    request.session[TRIAL_PROMO_SESSION_KEY] = str(promo.pk)
+    promo_id = str(promo.pk)
+    if request.session.get(TRIAL_PROMO_SESSION_KEY) != promo_id:
+        request.session.pop(TRIAL_PROMO_PENDING_START_SESSION_KEY, None)
+    request.session[TRIAL_PROMO_SESSION_KEY] = promo_id
     request.session.modified = True
 
 
 def clear_trial_promo_session(request) -> None:
     request.session.pop(TRIAL_PROMO_SESSION_KEY, None)
+    request.session.pop(TRIAL_PROMO_PENDING_START_SESSION_KEY, None)
+    request.session.modified = True
+
+
+def mark_trial_promo_start_pending(request, promo: TrialPromo) -> None:
+    request.session[TRIAL_PROMO_PENDING_START_SESSION_KEY] = str(promo.pk)
+    request.session.modified = True
+
+
+def is_trial_promo_start_pending(request, promo: TrialPromo) -> bool:
+    return (
+        request.session.get(TRIAL_PROMO_PENDING_START_SESSION_KEY)
+        == str(promo.pk)
+    )
+
+
+def clear_trial_promo_start_pending(request) -> None:
+    request.session.pop(TRIAL_PROMO_PENDING_START_SESSION_KEY, None)
     request.session.modified = True
 
 

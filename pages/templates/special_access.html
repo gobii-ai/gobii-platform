@@ -28,7 +28,7 @@
             {% if promo.description %}
               {{ promo.description }}
             {% else %}
-              Start a {{ promo.trial_days }}-day {{ plan_label }} trial configured for this event. Your access code has been accepted.
+              Start a {{ offer_trial_days }}-day {{ plan_label }} trial configured for this event. Your access code has been accepted.
             {% endif %}
           </p>
 
@@ -39,11 +39,11 @@
             </div>
             <div class="rounded-2xl bg-[#f0fff8] p-4 ring-1 ring-emerald-200">
               <p class="font-semibold text-emerald-800">Trial</p>
-              <p class="mt-1 text-2xl font-semibold text-slate-950">{{ promo.trial_days }} days</p>
+              <p class="mt-1 text-2xl font-semibold text-slate-950">{{ offer_trial_days }} days</p>
             </div>
             <div class="rounded-2xl bg-[#fff9ed] p-4 ring-1 ring-amber-200">
               <p class="font-semibold text-amber-800">Card</p>
-              <p class="mt-1 text-2xl font-semibold text-slate-950">{% if promo.payment_method_required %}Required{% else %}Not Required{% endif %}</p>
+              <p class="mt-1 text-2xl font-semibold text-slate-950">{% if offer_payment_method_required %}Required{% else %}Not Required{% endif %}</p>
             </div>
           </div>
         {% else %}
@@ -80,12 +80,12 @@
               </form>
             </div>
           {% endif %}
-          <form method="post" action="{{ start_url }}">
+          <form method="post" action="{{ start_url }}" id="special-access-start-form">
             {% csrf_token %}
             <button type="submit" {% if email_verification_required %}disabled{% endif %} class="group flex w-full items-center justify-center gap-3 rounded-2xl bg-[#081f2d] px-6 py-4 text-base font-bold text-white transition hover:bg-[#0c3443] disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500 disabled:hover:bg-slate-200">
             {% if email_verification_required %}
               Verify email to start
-            {% elif promo.activation_mode == "direct_stripe_trial" and promo.linked_template %}
+            {% elif offer_activation_mode == "direct_stripe_trial" and promo.linked_template %}
               Start trial and open template
             {% else %}
               Start special trial
@@ -94,11 +94,11 @@
             </button>
           </form>
           <p class="mt-4 text-center text-sm text-slate-500">
-            {% if promo.activation_mode == "direct_stripe_trial" %}
+            {% if offer_activation_mode == "direct_stripe_trial" %}
               No card is required and there is no billing step today. If you add payment during the trial,
-              your campaign discount applies for the first {{ promo.discount_months }} paid months, followed by
+              {% if offer_discount_months %}your campaign discount applies for the first {{ offer_discount_months }} paid months{% else %}your campaign discount applies after the trial{% endif %}, followed by
               {% if standard_monthly_price_label %}{{ standard_monthly_price_label }}{% else %}the standard {{ plan_label }} price{% endif %}.
-            {% elif promo.payment_method_required %}
+            {% elif offer_payment_method_required %}
               Add a card to start your trial. You won't be charged today, and you can cancel anytime.
             {% else %}
               You can add payment later. If you do not, billing recovery starts when the trial ends.
@@ -132,4 +132,21 @@
     </div>
   </section>
 </main>
+{% endblock %}
+
+{% block extra_js %}
+  {{ block.super }}
+  {% if auto_resume_start %}
+    <script>
+      document.addEventListener('DOMContentLoaded', function () {
+        const form = document.getElementById('special-access-start-form');
+        if (!form) return;
+        if (typeof form.requestSubmit === 'function') {
+          form.requestSubmit();
+        } else {
+          form.submit();
+        }
+      });
+    </script>
+  {% endif %}
 {% endblock %}

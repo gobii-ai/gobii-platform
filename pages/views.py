@@ -40,6 +40,7 @@ from api.models import (
     PersistentAgentTemplateUrlAlias,
     TrialPromo,
     TrialPromoActivationModeChoices,
+    TrialPromoPlanChoices,
     TrialPromoRedemption,
     TrialPromoRedemptionStatusChoices,
     UserBilling,
@@ -51,6 +52,11 @@ from api.services.trial_abuse import SIGNAL_SOURCE_CHECKOUT, evaluate_user_trial
 from api.services.trial_promos import (
     TRIAL_PROMO_REASON_EMAIL_NOT_ALLOWLISTED,
     TRIAL_PROMO_REASON_EMAIL_NOT_VERIFIED,
+    TRIAL_PROMO_META_PAYMENT_REQUIRED,
+    TRIAL_PROMO_META_PLAN,
+    TRIAL_PROMO_META_TRIAL_DAYS,
+    TRIAL_PROMO_REDEMPTION_DISCOUNT_MONTHS_KEY,
+    TRIAL_PROMO_REDEMPTION_PRICE_ID_KEY,
     TrialPromoError,
     build_trial_promo_conversion_metadata,
     build_trial_promo_checkout_metadata,
@@ -58,15 +64,18 @@ from api.services.trial_promos import (
     can_user_start_trial_promo,
     clear_expired_trial_promo_conversion_checkout,
     clear_trial_promo_session,
+    clear_trial_promo_start_pending,
     find_active_trial_promo_by_code,
     get_direct_trial_promo_redemption,
     get_eligible_late_conversion_redemption,
     get_trial_promo_conversion_offer,
     get_session_trial_promo,
+    is_trial_promo_start_pending,
     is_user_email_allowed_for_trial_promo,
     is_user_email_verified_for_trial_promo,
     mark_trial_promo_redemption_checkout_started,
     mark_trial_promo_redemption_failed,
+    mark_trial_promo_start_pending,
     mark_trial_promo_conversion_checkout_started,
     reserve_trial_promo_conversion_checkout,
     reserve_trial_promo_redemption,
@@ -91,6 +100,7 @@ from billing.checkout_metadata import (
 )
 from billing.checkout_context import record_checkout_context
 from billing.checkout_sessions import create_stripe_checkout_session
+from billing.price_snapshot import get_stripe_price_snapshot
 from billing.plan_resolver import get_active_public_plan_monthly_task_credits
 from config.plans import STARTUP_MONTHLY_PRICE_USD, get_plan_config
 from config.stripe_config import get_stripe_settings
@@ -2684,6 +2694,17 @@ class EditorialPolicyView(TemplateView):
     template_name = "editorial-policy.html"
 
 
+def _format_monthly_price_label(amount, currency: str) -> str:
+    if amount is None or amount <= 0:
+        return ""
+    normalized_currency = str(currency or "").upper()
+    if normalized_currency == "USD":
+        return f"${amount:,.2f}/month"
+    if normalized_currency:
+        return f"{normalized_currency} {amount:,.2f}/month"
+    return ""
+
+
 class SpecialAccessView(TemplateView):
     template_name = "special_access.html"
 
@@ -2717,21 +2738,88 @@ class SpecialAccessView(TemplateView):
         plan_label = ""
         standard_monthly_price_label = ""
         redemptions_remaining = None
+        offer_activation_mode = ""
+        offer_trial_days = None
+        offer_payment_method_required = False
+        offer_discount_months = None
         if promo is not None:
             plan_label = promo.get_plan_display()
-            if promo.activation_mode == TrialPromoActivationModeChoices.DIRECT_STRIPE_TRIAL:
+            offer_activation_mode = promo.activation_mode
+            offer_trial_days = promo.trial_days
+            offer_payment_method_required = promo.payment_method_required
+            offer_discount_months = promo.discount_months
+            direct_redemption = (
+                get_direct_trial_promo_redemption(
+                    promo=promo,
+                    user=self.request.user,
+                )
+                if self.request.user.is_authenticated
+                else None
+            )
+            if direct_redemption is not None:
+                offer_activation_mode = (
+                    TrialPromoActivationModeChoices.DIRECT_STRIPE_TRIAL
+                )
+                offer_discount_months = None
+                redemption_metadata = direct_redemption.metadata or {}
+                snapshot_plan = str(
+                    redemption_metadata.get(TRIAL_PROMO_META_PLAN) or "",
+                ).strip().lower()
+                if snapshot_plan in TrialPromoPlanChoices.values:
+                    plan_label = TrialPromoPlanChoices(snapshot_plan).label
+                try:
+                    snapshot_trial_days = int(
+                        redemption_metadata.get(TRIAL_PROMO_META_TRIAL_DAYS),
+                    )
+                except (TypeError, ValueError):
+                    snapshot_trial_days = 0
+                if snapshot_trial_days > 0:
+                    offer_trial_days = snapshot_trial_days
+                offer_payment_method_required = (
+                    str(
+                        redemption_metadata.get(
+                            TRIAL_PROMO_META_PAYMENT_REQUIRED,
+                        )
+                        or "",
+                    ).lower()
+                    == "true"
+                )
+                try:
+                    snapshot_discount_months = int(
+                        redemption_metadata.get(
+                            TRIAL_PROMO_REDEMPTION_DISCOUNT_MONTHS_KEY,
+                        ),
+                    )
+                except (TypeError, ValueError):
+                    snapshot_discount_months = 0
+                if snapshot_discount_months > 0:
+                    offer_discount_months = snapshot_discount_months
+                snapshot_price_id = str(
+                    redemption_metadata.get(
+                        TRIAL_PROMO_REDEMPTION_PRICE_ID_KEY,
+                    )
+                    or "",
+                ).strip()
+                if snapshot_price_id:
+                    price_snapshot = get_stripe_price_snapshot(
+                        snapshot_price_id,
+                    )
+                    if price_snapshot is not None:
+                        standard_monthly_price_label = (
+                            _format_monthly_price_label(
+                                price_snapshot.amount,
+                                price_snapshot.currency,
+                            )
+                        )
+            elif (
+                offer_activation_mode
+                == TrialPromoActivationModeChoices.DIRECT_STRIPE_TRIAL
+            ):
                 promo_plan = get_plan_config(promo.plan) or {}
-                standard_monthly_price = float(promo_plan.get("price") or 0)
-                currency = str(promo_plan.get("currency") or "USD").upper()
-                if standard_monthly_price > 0:
-                    if currency == "USD":
-                        standard_monthly_price_label = (
-                            f"${standard_monthly_price:,.2f}/month"
-                        )
-                    else:
-                        standard_monthly_price_label = (
-                            f"{currency} {standard_monthly_price:,.2f}/month"
-                        )
+                standard_monthly_price_label = _format_monthly_price_label(
+                    float(promo_plan.get("price") or 0),
+                    str(promo_plan.get("currency") or "USD"),
+                )
             if promo.max_redemptions is not None:
                 used_count = promo.redemptions.filter(
                     status__in=promo.redemptions.model.COUNTED_STATUSES,
@@ -2750,16 +2838,27 @@ class SpecialAccessView(TemplateView):
             email_verification_address = TrialPromo.normalize_allowed_email(
                 self.request.user.email,
             )
+        auto_resume_start = bool(
+            promo is not None
+            and self.request.user.is_authenticated
+            and not email_verification_required
+            and is_trial_promo_start_pending(self.request, promo)
+        )
         context.update(
             {
                 "promo": promo,
                 "invalid_code_error": getattr(self, "invalid_code_error", ""),
                 "plan_label": plan_label,
                 "standard_monthly_price_label": standard_monthly_price_label,
+                "offer_activation_mode": offer_activation_mode,
+                "offer_trial_days": offer_trial_days,
+                "offer_payment_method_required": offer_payment_method_required,
+                "offer_discount_months": offer_discount_months,
                 "redemptions_remaining": redemptions_remaining,
                 "start_url": reverse("pages:special_access_start"),
                 "email_verification_required": email_verification_required,
                 "email_verification_address": email_verification_address,
+                "auto_resume_start": auto_resume_start,
             }
         )
         return context
@@ -2804,14 +2903,29 @@ class SpecialAccessStartView(View):
             return redirect("pages:special_access")
 
         if not request.user.is_authenticated:
-            return redirect_to_login(
+            mark_trial_promo_start_pending(request, promo)
+            response = redirect_to_login(
                 next=reverse("pages:special_access"),
                 login_url=_cta_auth_url_with_utms(request),
             )
+            _set_oauth_stash_cookies(
+                response,
+                request,
+                charter_data=_build_oauth_charter_cookie_payload(
+                    request,
+                    charter="",
+                    charter_source="",
+                ),
+                attribution_data=_build_oauth_attribution_cookie_payload(
+                    request,
+                ),
+            )
+            return response
 
         if request.POST.get("action") == TRIAL_PROMO_RESEND_VERIFICATION_ACTION:
             return _resend_special_access_email_verification(request, promo)
 
+        clear_trial_promo_start_pending(request)
         direct_activation_redemption = (
             get_direct_trial_promo_redemption(
                 promo=promo,
