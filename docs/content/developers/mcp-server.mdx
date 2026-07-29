@@ -21,6 +21,7 @@ References:
 
 - MCP Streamable HTTP transport: https://modelcontextprotocol.io/specification/2025-11-25/basic/transports
 - MCP tools protocol and structured tool results: https://modelcontextprotocol.io/specification/2025-11-25/server/tools
+- MCP resources and resource links: https://modelcontextprotocol.io/specification/2025-11-25/server/resources
 - MCP schema reference: https://modelcontextprotocol.io/specification/2025-11-25/schema
 - MCP HTTP authorization guidance: https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization
 
@@ -104,14 +105,15 @@ Gobii also validates `Mcp-Method` and `Mcp-Name` request headers when clients se
 | `gobii_list_agent_links` | List peer-agent links. |
 | `gobii_link_agents` | Create or enable a peer-agent link. |
 | `gobii_unlink_agents` | Remove a peer-agent link while preserving history. |
-| `gobii_send_agent_message` | Send an authenticated Gobii MCP message to an agent, optionally with existing filespace attachments. |
+| `gobii_send_agent_message` | Send an authenticated Gobii MCP message to an agent, optionally uploading and attaching small files in the same call. |
 | `gobii_get_agent_timeline` | Fetch timeline events and processing state using durable cursors. |
 | `gobii_get_agent_debug_trace` | Fetch bounded, sanitized debugging context for one accessible agent. |
 | `gobii_wait_for_agent_event` | Bounded long-poll for matching timeline events after a cursor. |
+| `gobii_read_agent_resource` | Read a file or image from a `gobii://` resource URI as native MCP content. |
 | `gobii_list_agent_files` | List an agent's default filespace. |
 | `gobii_upload_agent_file` | Upload a small base64 file into the agent filespace. |
 
-Gobii does not expose MCP resources or prompts in v1. The current product capabilities map more cleanly to MCP tools.
+Gobii exposes authenticated file resources alongside its tools. File and timeline results include `resource_link` content blocks; clients can use `resources/read` or `gobii_read_agent_resource` to retrieve the bytes. Gobii does not expose MCP prompts.
 
 ## Agent Config
 
@@ -188,13 +190,17 @@ Linked-agent messages appear as peer direct-message events in each participating
 
 ## Files And Attachments
 
-Preferred flow:
+When a file already exists in the agent filespace:
 
 1. Upload a small file with `gobii_upload_agent_file`, or create/upload the file in the Gobii agent filespace through the product.
 2. Send a message with `gobii_send_agent_message`.
 3. Pass filespace paths in `attachment_file_paths`, for example `["/uploads/brief.pdf"]`.
 
-This keeps message calls small and uses Gobii's existing filespace and attachment models. Arbitrary URL fetching is intentionally not exposed through the MCP server v1. Very large files should be added to the agent filespace outside MCP, then referenced by path.
+When a client already has the bytes, it can instead pass up to 10 items in the message call's `attachments` array. Each item contains `path`, `content_base64`, optional `mime_type`, and optional `overwrite`; Gobii uploads and attaches them in one call.
+
+`gobii_list_agent_files`, `gobii_get_agent_timeline`, upload results, and message results return authenticated `gobii://` resource URIs. Use MCP `resources/read` for standard resource content, or `gobii_read_agent_resource` when a tool-centric client needs an image surfaced directly as MCP image content. Reads re-check API-key access, enforce the platform file-size limit, and verify stored checksums when available. Resource URIs are not public download links.
+
+These flows use Gobii's existing filespace and attachment models. Arbitrary URL fetching is intentionally not exposed through the MCP server. Very large files should be added to the agent filespace outside MCP, then referenced by path.
 
 ## Hermes Example
 
@@ -223,6 +229,7 @@ mcp_servers:
         - gobii_get_agent_timeline
         - gobii_get_agent_debug_trace
         - gobii_wait_for_agent_event
+        - gobii_read_agent_resource
         - gobii_list_agent_files
         - gobii_upload_agent_file
 ```
@@ -243,9 +250,10 @@ Use this flow for local dev, preview, or production smoke testing. Archive tempo
 8. `gobii_get_agent_debug_trace`; verify returned sections are bounded and sanitized
 9. `gobii_wait_for_agent_event` with a cursor and a short timeout; verify both match and timeout behavior as appropriate
 10. `gobii_upload_agent_file`
-11. `gobii_list_agent_files`
-12. `gobii_unlink_agents`
-13. `gobii_archive_agent` for temporary agents
+11. `gobii_list_agent_files`, then read its `resource_link`
+12. `gobii_send_agent_message` with an inline `attachments` item
+13. `gobii_unlink_agents`
+14. `gobii_archive_agent` for temporary agents
 
 ## Limitations
 

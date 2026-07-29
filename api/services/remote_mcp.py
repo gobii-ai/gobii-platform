@@ -47,6 +47,13 @@ from api.services.agent_debug_trace import (
 from api.services.agent_lifecycle import build_agent_inactive_payload
 from api.services.daily_credit_limits import calculate_daily_credit_slider_bounds, get_tier_credit_multiplier
 from api.services.daily_credit_settings import get_daily_credit_settings_for_owner
+from api.services.remote_mcp_resources import (
+    MCPResourceError,
+    build_attachment_resource_uri,
+    build_file_resource_uri,
+    parse_agent_resource_uri,
+    read_agent_resource,
+)
 from console.agent_chat.timeline import (
     DEFAULT_PAGE_SIZE as TIMELINE_DEFAULT_PAGE_SIZE,
     MAX_PAGE_SIZE as TIMELINE_MAX_PAGE_SIZE,
@@ -78,12 +85,20 @@ WAIT_FILTER_FIELDS = {
     "status",
     "tool_name",
 }
+MCP_INLINE_ATTACHMENT_LIMIT = 10
+MCP_NATIVE_IMAGE_TYPES = {"image/gif", "image/jpeg", "image/png", "image/webp"}
 
 
 class MCPToolError(Exception):
     def __init__(self, message, data=None):
         super().__init__(message)
         self.data = data
+
+
+@dataclass(frozen=True)
+class MCPToolResponse:
+    structured_content: object
+    content: tuple[dict, ...] = ()
 
 
 def _agent_schema(description):
@@ -219,10 +234,26 @@ _FILE_NODE_OUTPUT = _object_output(
         "node_type": {"type": "string"},
         "size_bytes": _INTEGER_OR_NULL,
         "mime_type": _STRING_OR_NULL,
+        "checksum_sha256": _STRING_OR_NULL,
+        "resource_uri": {"type": ["string", "null"], "format": "uri"},
         "created_at": _STRING_OR_NULL,
         "updated_at": _STRING_OR_NULL,
     },
     required=("id", "name", "path", "node_type"),
+)
+
+_FILE_UPLOAD_OUTPUT = _object_output(
+    {
+        "status": {"type": "string"},
+        "path": {"type": "string"},
+        "node_id": _UUID_OUTPUT,
+        "filename": {"type": "string"},
+        "resource_uri": {"type": "string", "format": "uri"},
+        "mime_type": _STRING_OR_NULL,
+        "size_bytes": _INTEGER_OR_NULL,
+        "checksum_sha256": _STRING_OR_NULL,
+    },
+    required=("status", "path", "node_id", "filename", "resource_uri"),
 )
 
 _ACCESS_METADATA_OUTPUT = _object_output(
@@ -589,6 +620,37 @@ TOOL_DEFINITIONS = [
                     "items": {"type": "string"},
                     "description": "Optional filespace paths such as /uploads/report.pdf to attach to the message.",
                 },
+                "attachments": {
+                    "type": "array",
+                    "maxItems": MCP_INLINE_ATTACHMENT_LIMIT,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "path": {
+                                "type": "string",
+                                "description": "Destination filespace path, such as /uploads/report.pdf.",
+                            },
+                            "content_base64": {
+                                "type": "string",
+                                "description": "Base64-encoded file contents.",
+                            },
+                            "mime_type": {
+                                "type": "string",
+                                "default": "application/octet-stream",
+                            },
+                            "overwrite": {
+                                "type": "boolean",
+                                "default": False,
+                            },
+                        },
+                        "required": ["path", "content_base64"],
+                        "additionalProperties": False,
+                    },
+                    "description": (
+                        "Optional small files to upload and attach in this message call. "
+                        "Use this instead of a separate upload call when the content is already available."
+                    ),
+                },
                 "trigger_processing": {
                     "type": "boolean",
                     "default": True,
@@ -620,6 +682,7 @@ TOOL_DEFINITIONS = [
                 "timeline_event": _TIMELINE_EVENT_OUTPUT,
                 "conversation_id": _UUID_OUTPUT,
                 "attachment_count": {"type": "integer"},
+                "uploaded_attachments": _array_output(_FILE_UPLOAD_OUTPUT),
                 "access": _ACCESS_METADATA_OUTPUT,
             },
             required=("status", "message_id", "agent_id", "cursor", "latest_cursor"),
@@ -819,6 +882,42 @@ TOOL_DEFINITIONS = [
         "annotations": {"readOnlyHint": True},
     },
     {
+        "name": "gobii_read_agent_resource",
+        "title": "Read Agent File",
+        "description": (
+            "Read an authenticated file or image from a Gobii resource URI returned by agent timeline "
+            "or filespace tools. Content is returned as native MCP resource or image content."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "uri": {
+                    "type": "string",
+                    "format": "uri",
+                    "description": "A gobii:// resource URI returned by another Gobii MCP tool.",
+                },
+            },
+            "required": ["uri"],
+            "additionalProperties": False,
+        },
+        "outputSchema": _object_output(
+            {
+                "resource": _object_output(
+                    {
+                        "uri": {"type": "string", "format": "uri"},
+                        "name": {"type": "string"},
+                        "mime_type": {"type": "string"},
+                        "size_bytes": {"type": "integer"},
+                        "checksum_sha256": {"type": "string"},
+                    },
+                    required=("uri", "name", "mime_type", "size_bytes", "checksum_sha256"),
+                ),
+            },
+            required=("resource",),
+        ),
+        "annotations": {"readOnlyHint": True},
+    },
+    {
         "name": "gobii_list_agent_files",
         "title": "List Agent Files",
         "description": "List files and folders in an agent's default filespace.",
@@ -860,10 +959,7 @@ TOOL_DEFINITIONS = [
         },
         "outputSchema": _object_output(
             {
-                "status": {"type": "string"},
-                "path": {"type": "string"},
-                "node_id": _UUID_OUTPUT,
-                "filename": {"type": "string"},
+                **_FILE_UPLOAD_OUTPUT["properties"],
                 "message": _STRING_OR_NULL,
                 "access": _ACCESS_METADATA_OUTPUT,
             },
@@ -881,13 +977,18 @@ def list_tools():
 
 
 def make_tool_result(data, *, is_error=False):
+    extra_content = ()
+    if isinstance(data, MCPToolResponse):
+        extra_content = data.content
+        data = data.structured_content
     safe_data = _json_safe(data)
     return {
         "content": [
             {
                 "type": "text",
                 "text": json.dumps(safe_data, cls=DjangoJSONEncoder, indent=2),
-            }
+            },
+            *[_json_safe(item) for item in extra_content],
         ],
         "structuredContent": safe_data,
         "isError": bool(is_error),
@@ -915,6 +1016,7 @@ def call_tool(request, name, arguments):
         "gobii_get_agent_timeline": _tool_get_agent_timeline,
         DEBUG_TRACE_TOOL_NAME: _tool_get_agent_debug_trace,
         "gobii_wait_for_agent_event": _tool_wait_for_agent_event,
+        "gobii_read_agent_resource": _tool_read_agent_resource,
         "gobii_list_agent_files": _tool_list_agent_files,
         "gobii_upload_agent_file": _tool_upload_agent_file,
     }[name]
@@ -1199,14 +1301,29 @@ def _tool_send_agent_message(request, arguments):
     attachment_paths = arguments.get("attachment_file_paths") or []
     if not isinstance(attachment_paths, list):
         raise MCPToolError("attachment_file_paths must be an array of filespace paths.")
+    inline_attachments = _decode_inline_attachments(arguments.get("attachments"))
 
     sender_user = _message_sender_user(request, access)
     sender_address = build_web_user_address(user_id=sender_user.id, agent_id=agent.id)
     if not agent.is_sender_whitelisted(CommsChannel.WEB, sender_address):
         raise MCPToolError("Authenticated user is not allowed to message this agent.")
 
+    uploaded_attachments = [
+        _write_agent_file(
+            agent,
+            path=item["path"],
+            content=item["content"],
+            mime_type=item["mime_type"],
+            overwrite=item["overwrite"],
+        )
+        for item in inline_attachments
+    ]
+    all_attachment_paths = [
+        *attachment_paths,
+        *[item["path"] for item in uploaded_attachments],
+    ]
     try:
-        resolved_attachments = resolve_filespace_attachments(agent, attachment_paths)
+        resolved_attachments = resolve_filespace_attachments(agent, all_attachment_paths)
     except AttachmentResolutionError as exc:
         raise MCPToolError(str(exc)) from exc
 
@@ -1224,8 +1341,9 @@ def _tool_send_agent_message(request, arguments):
         create_message_attachments(message, resolved_attachments)
 
     event = serialize_message_event(message)
+    _add_timeline_resource_uris([event], agent.id)
     cursor = event.get("cursor")
-    return _with_access_metadata(
+    payload = _with_access_metadata(
         {
             "status": "queued" if trigger_processing else "stored",
             "accepted_state": "queued" if trigger_processing else "stored",
@@ -1242,10 +1360,12 @@ def _tool_send_agent_message(request, arguments):
             "timeline_event": event,
             "conversation_id": str(conversation.id),
             "attachment_count": len(resolved_attachments),
+            "uploaded_attachments": uploaded_attachments,
         },
         access=access,
         agent=agent,
     )
+    return _with_resource_links(payload)
 
 
 def _tool_get_agent_timeline(request, arguments):
@@ -1267,7 +1387,8 @@ def _tool_get_agent_timeline(request, arguments):
     _validate_timeline_cursor(cursor, "cursor/after_cursor")
 
     window = fetch_timeline_window(agent, cursor=cursor, direction=direction, limit=limit)
-    return _with_access_metadata(
+    _add_timeline_resource_uris(window.events, agent.id)
+    payload = _with_access_metadata(
         {
             "events": window.events,
             "next_cursor": window.newest_cursor,
@@ -1283,6 +1404,7 @@ def _tool_get_agent_timeline(request, arguments):
         access=access,
         agent=agent,
     )
+    return _with_resource_links(payload)
 
 
 def _tool_get_agent_debug_trace(request, arguments):
@@ -1408,34 +1530,180 @@ def _tool_list_agent_files(request, arguments):
     nodes = (
         AgentFsNode.objects.alive()
         .filter(filespace=filespace)
-        .only("id", "parent_id", "name", "path", "node_type", "size_bytes", "mime_type", "created_at", "updated_at")
+        .only(
+            "id",
+            "parent_id",
+            "name",
+            "path",
+            "node_type",
+            "size_bytes",
+            "mime_type",
+            "checksum_sha256",
+            "created_at",
+            "updated_at",
+        )
         .order_by("parent_id", "node_type", "name")
     )
-    return _with_access_metadata(
+    payload = _with_access_metadata(
         {
             "filespace": {"id": str(filespace.id), "name": filespace.name},
-            "nodes": [_serialize_file_node(node) for node in nodes],
+            "nodes": [_serialize_file_node(node, agent.id) for node in nodes],
         },
         access=access,
         agent=agent,
     )
+    return _with_resource_links(payload)
+
+
+def _tool_read_agent_resource(request, arguments):
+    uri = _required_string(arguments, "uri", allow_blank=False)
+    try:
+        reference = parse_agent_resource_uri(uri)
+        access = _get_agent_access(request, reference.agent_id, {})
+        resource = read_agent_resource(access.agent, reference)
+    except (MCPResourceError, MCPToolError) as exc:
+        raise MCPToolError("Resource not found or inaccessible.") from exc
+
+    contents = resource.mcp_contents()
+    if "blob" in contents and resource.mime_type in MCP_NATIVE_IMAGE_TYPES:
+        native_content = {
+            "type": "image",
+            "data": contents["blob"],
+            "mimeType": resource.mime_type,
+        }
+    else:
+        native_content = {"type": "resource", "resource": contents}
+    payload = _with_access_metadata(
+        {
+            "resource": {
+                "uri": resource.uri,
+                "name": resource.name,
+                "mime_type": resource.mime_type,
+                "size_bytes": resource.size_bytes,
+                "checksum_sha256": resource.checksum_sha256,
+            },
+        },
+        access=access,
+        agent=access.agent,
+    )
+    return MCPToolResponse(payload, (native_content,))
 
 
 def _tool_upload_agent_file(request, arguments):
     access = _get_agent_access(request, arguments.get("agent_id"), arguments)
     agent = access.agent
-    path = _required_string(arguments, "path", allow_blank=False)
-    content_base64 = _required_string(arguments, "content_base64", allow_blank=False)
-    mime_type = arguments.get("mime_type") or "application/octet-stream"
-    if not isinstance(mime_type, str):
-        raise MCPToolError("mime_type must be a string.")
-    overwrite = _optional_bool(arguments.get("overwrite", False), "overwrite")
+    result = _write_agent_file(
+        agent,
+        path=_required_string(arguments, "path", allow_blank=False),
+        content=_decode_base64(
+            _required_string(arguments, "content_base64", allow_blank=False),
+            "content_base64",
+        ),
+        mime_type=_mime_type_argument(arguments.get("mime_type")),
+        overwrite=_optional_bool(arguments.get("overwrite", False), "overwrite"),
+    )
+    payload = _with_access_metadata(result, access=access, agent=agent)
+    return _with_resource_links(payload)
 
+
+def read_resource(request, uri):
     try:
-        content = base64.b64decode(content_base64, validate=True)
-    except (binascii.Error, ValueError) as exc:
-        raise MCPToolError("content_base64 must be valid base64.") from exc
+        reference = parse_agent_resource_uri(uri)
+        access = _get_agent_access(request, reference.agent_id, {})
+        resource = read_agent_resource(access.agent, reference)
+    except (MCPResourceError, MCPToolError) as exc:
+        raise MCPResourceError("Resource not found or inaccessible.") from exc
+    return {"contents": [resource.mcp_contents()]}
 
+
+def list_resources():
+    # Agent files can be numerous and authorization-dependent. Resource links are
+    # returned by the bounded timeline/files tools instead of enumerating them globally.
+    return []
+
+
+def list_resource_templates():
+    return [
+        {
+            "uriTemplate": "gobii://agents/{agent_id}/files/{node_id}",
+            "name": "gobii-agent-file",
+            "title": "Gobii agent file",
+            "description": "An authenticated file in a Gobii agent's filespace.",
+        },
+        {
+            "uriTemplate": "gobii://agents/{agent_id}/attachments/{attachment_id}",
+            "name": "gobii-message-attachment",
+            "title": "Gobii message attachment",
+            "description": "An authenticated attachment from a Gobii agent timeline message.",
+        },
+    ]
+
+
+def _decode_inline_attachments(value):
+    if value in (None, []):
+        return []
+    if not isinstance(value, list):
+        raise MCPToolError("attachments must be an array.")
+    if len(value) > MCP_INLINE_ATTACHMENT_LIMIT:
+        raise MCPToolError(
+            f"attachments supports at most {MCP_INLINE_ATTACHMENT_LIMIT} files.",
+            {"field": "attachments", "maximum": MCP_INLINE_ATTACHMENT_LIMIT},
+        )
+
+    decoded = []
+    supported_fields = {"path", "content_base64", "mime_type", "overwrite"}
+    for index, item in enumerate(value):
+        if not isinstance(item, dict):
+            raise MCPToolError(
+                "Each attachments item must be an object.",
+                {"field": f"attachments[{index}]"},
+            )
+        unknown = sorted(set(item) - supported_fields)
+        if unknown:
+            raise MCPToolError(
+                "Unsupported inline attachment field(s).",
+                {
+                    "field": f"attachments[{index}]",
+                    "unsupported_fields": unknown,
+                    "supported_fields": sorted(supported_fields),
+                },
+            )
+        decoded.append(
+            {
+                "path": _required_string(item, "path", allow_blank=False),
+                "content": _decode_base64(
+                    _required_string(item, "content_base64", allow_blank=False),
+                    f"attachments[{index}].content_base64",
+                ),
+                "mime_type": _mime_type_argument(
+                    item.get("mime_type"),
+                    field=f"attachments[{index}].mime_type",
+                ),
+                "overwrite": _optional_bool(
+                    item.get("overwrite", False),
+                    f"attachments[{index}].overwrite",
+                ),
+            }
+        )
+    return decoded
+
+
+def _decode_base64(value, field):
+    try:
+        return base64.b64decode(value, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise MCPToolError(f"{field} must be valid base64.") from exc
+
+
+def _mime_type_argument(value, *, field="mime_type"):
+    if value in (None, ""):
+        return "application/octet-stream"
+    if not isinstance(value, str):
+        raise MCPToolError(f"{field} must be a string.")
+    return value.strip() or "application/octet-stream"
+
+
+def _write_agent_file(agent, *, path, content, mime_type, overwrite):
     result = write_bytes_to_dir(
         agent,
         content,
@@ -1445,7 +1713,88 @@ def _tool_upload_agent_file(request, arguments):
     )
     if result.get("status") != "ok":
         raise MCPToolError(result.get("message") or "File upload failed.", result)
-    return _with_access_metadata(result, access=access, agent=agent)
+    node = (
+        AgentFsNode.objects.alive()
+        .files()
+        .filter(id=result.get("node_id"), filespace__access__agent=agent)
+        .distinct()
+        .first()
+    )
+    if node is None:
+        raise MCPToolError("Uploaded file could not be resolved.")
+    serialized = _serialize_file_node(node, agent.id)
+    return {
+        "status": "ok",
+        "path": serialized["path"],
+        "node_id": serialized["id"],
+        "filename": serialized["name"],
+        "resource_uri": serialized["resource_uri"],
+        "mime_type": serialized["mime_type"],
+        "size_bytes": serialized["size_bytes"],
+        "checksum_sha256": serialized["checksum_sha256"],
+    }
+
+
+def _add_timeline_resource_uris(events, agent_id):
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        message = event.get("message")
+        if not isinstance(message, dict):
+            continue
+        for attachment in message.get("attachments") or []:
+            if not isinstance(attachment, dict):
+                continue
+            node_id = attachment.get("filespaceNodeId")
+            attachment_id = attachment.get("id")
+            if node_id:
+                attachment["resource_uri"] = build_file_resource_uri(agent_id, node_id)
+            elif attachment_id:
+                attachment["resource_uri"] = build_attachment_resource_uri(agent_id, attachment_id)
+            if "mime_type" not in attachment:
+                attachment["mime_type"] = attachment.get("contentType")
+            if "size_bytes" not in attachment:
+                attachment["size_bytes"] = attachment.get("fileSize")
+            if "checksum_sha256" not in attachment:
+                attachment["checksum_sha256"] = attachment.get("contentSha256")
+
+
+def _with_resource_links(payload):
+    links = []
+    seen = set()
+    for item in _walk_dicts(payload):
+        uri = item.get("resource_uri")
+        if not isinstance(uri, str) or not uri or uri in seen:
+            continue
+        seen.add(uri)
+        link = {
+            "type": "resource_link",
+            "uri": uri,
+            "name": (
+                item.get("filename")
+                or item.get("name")
+                or item.get("path")
+                or "Gobii agent file"
+            ),
+        }
+        mime_type = item.get("mime_type")
+        size_bytes = item.get("size_bytes")
+        if isinstance(mime_type, str) and mime_type:
+            link["mimeType"] = mime_type
+        if isinstance(size_bytes, int) and size_bytes >= 0:
+            link["size"] = size_bytes
+        links.append(link)
+    return MCPToolResponse(payload, tuple(links))
+
+
+def _walk_dicts(value):
+    if isinstance(value, dict):
+        yield value
+        for child in value.values():
+            yield from _walk_dicts(child)
+    elif isinstance(value, (list, tuple)):
+        for child in value:
+            yield from _walk_dicts(child)
 
 
 def _reject_unknown_arguments(name, arguments):
@@ -1968,8 +2317,8 @@ def _serialize_message(message):
     }
 
 
-def _serialize_file_node(node):
-    return {
+def _serialize_file_node(node, agent_id=None):
+    payload = {
         "id": str(node.id),
         "parent_id": str(node.parent_id) if node.parent_id else None,
         "name": node.name,
@@ -1977,9 +2326,13 @@ def _serialize_file_node(node):
         "node_type": node.node_type,
         "size_bytes": node.size_bytes,
         "mime_type": node.mime_type or None,
+        "checksum_sha256": node.checksum_sha256 or None,
         "created_at": _iso(node.created_at),
         "updated_at": _iso(node.updated_at),
     }
+    if agent_id and node.node_type == AgentFsNode.NodeType.FILE:
+        payload["resource_uri"] = build_file_resource_uri(agent_id, node.id)
+    return payload
 
 
 def _validate_timeline_cursor(cursor, key):
