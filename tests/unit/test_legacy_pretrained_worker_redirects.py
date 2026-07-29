@@ -28,13 +28,26 @@ class CanonicalTemplateMigrationTests(TestCase):
             is_official=False,
             is_active=True,
         )
+        retired_talent_sourcer = PersistentAgentTemplate.objects.create(
+            code="talent-sourcer",
+            display_name="Talent Sourcer",
+            tagline="Build candidate lists.",
+            description="Find candidates and prepare outreach.",
+            charter="Source candidates.",
+            category="People",
+            show_on_homepage=True,
+            is_active=True,
+        )
 
         migration.ensure_canonical_templates(django_apps, schema_editor=None)
 
         exact_legacy_template.refresh_from_db()
+        retired_talent_sourcer.refresh_from_db()
         self.assertTrue(exact_legacy_template.is_official)
         self.assertEqual(exact_legacy_template.slug, "project-manager")
         self.assertEqual(exact_legacy_template.category, "Team Ops")
+        self.assertFalse(retired_talent_sourcer.is_active)
+        self.assertFalse(retired_talent_sourcer.show_on_homepage)
         candidate_researcher = PersistentAgentTemplate.objects.get(
             code="candidate-researcher"
         )
@@ -156,6 +169,16 @@ class LegacyPretrainedWorkerRedirectTests(TestCase):
                 )
                 self.assertEqual(response.content, b"")
 
+    def test_database_backed_cutover_url_redirects_but_new_unknown_code_does_not(self):
+        response = self.client.get("/pretrained-workers/tpl-f2c5bb1cdb34/")
+
+        self.assertEqual(response.status_code, 301)
+        self.assertEqual(response["Location"], "/library/sales/lead-hunter/")
+        self.assertEqual(
+            self.client.get("/pretrained-workers/tpl-created-after-cutover/").status_code,
+            404,
+        )
+
     def test_legacy_hire_uses_308_to_preserve_post(self):
         redirect_config = LEGACY_PRETRAINED_WORKER_REDIRECTS["lead-hunter"]
 
@@ -179,6 +202,35 @@ class LegacyPretrainedWorkerRedirectTests(TestCase):
         self.assertEqual(response.status_code, 301)
         self.assertEqual(response["Location"], redirect_config.launch_path())
         self.assertEqual(response.content, b"")
+
+    def test_retired_talent_sourcer_library_urls_redirect_to_candidate_sourcing(self):
+        cases = (
+            (
+                "get",
+                "/library/people/talent-sourcer/?utm_source=legacy",
+                301,
+                "/library/recruiting/candidate-sourcing-agent/?utm_source=legacy",
+            ),
+            (
+                "post",
+                "/library/people/talent-sourcer/hire/?utm_source=legacy",
+                308,
+                "/library/recruiting/candidate-sourcing-agent/hire/?utm_source=legacy",
+            ),
+            (
+                "get",
+                "/library/people/talent-sourcer/spawn/?utm_source=legacy",
+                301,
+                "/library/recruiting/candidate-sourcing-agent/spawn/?utm_source=legacy",
+            ),
+        )
+
+        for method_name, path, status_code, destination in cases:
+            with self.subTest(path=path):
+                response = getattr(self.client, method_name)(path)
+                self.assertEqual(response.status_code, status_code)
+                self.assertEqual(response["Location"], destination)
+                self.assertEqual(response.content, b"")
 
     def test_unknown_legacy_slugs_return_404(self):
         PersistentAgentTemplate.objects.create(

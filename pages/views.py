@@ -113,7 +113,10 @@ from pages.mini_mode import set_mini_mode_cookie
 from .utils_markdown import render_public_template_markdown, load_page, get_prev_next, get_all_doc_pages
 from .homepage_cache import get_homepage_integrations_payload, get_homepage_pretrained_payload
 from .homepage_schema import HOMEPAGE_SOCIAL_IMAGE_PATH, build_homepage_structured_data
-from .legacy_pretrained_worker_redirects import get_legacy_pretrained_worker_redirect
+from .legacy_pretrained_worker_redirects import (
+    get_legacy_pretrained_worker_redirect,
+    get_retired_library_template_redirect,
+)
 from .ai_employees import (
     AI_EMPLOYEES_CLUSTER_LINKS,
     AI_EMPLOYEES_FAQ_ITEMS,
@@ -1965,6 +1968,16 @@ class PublicTemplateDetailView(TemplateView):
 
     def dispatch(self, request, *args, **kwargs):
         template_slug = kwargs.get("template_slug")
+        retired_destination = get_retired_library_template_redirect(
+            kwargs.get("category_slug"),
+            template_slug,
+        )
+        if retired_destination:
+            return _legacy_pretrained_worker_redirect(
+                request,
+                retired_destination.detail_path(),
+            )
+
         self.template = _resolve_public_template_for_route(
             category_slug=kwargs.get("category_slug"),
             handle=kwargs.get("handle"),
@@ -2147,6 +2160,16 @@ class PublicTemplateDetailView(TemplateView):
 
 class PublicTemplateLaunchView(View):
     def get(self, request, *args, **kwargs):
+        retired_destination = get_retired_library_template_redirect(
+            kwargs.get("category_slug"),
+            kwargs.get("template_slug"),
+        )
+        if retired_destination:
+            return _legacy_pretrained_worker_redirect(
+                request,
+                retired_destination.launch_path(),
+            )
+
         template = _resolve_public_template_for_route(
             category_slug=kwargs.get("category_slug"),
             handle=kwargs.get("handle"),
@@ -2217,6 +2240,17 @@ class PublicTemplateHireView(View):
     def post(self, request, *args, **kwargs):
         template_slug = kwargs.get("template_slug")
         handle = kwargs.get("handle")
+        retired_destination = get_retired_library_template_redirect(
+            kwargs.get("category_slug"),
+            template_slug,
+        )
+        if retired_destination:
+            return _legacy_pretrained_worker_redirect(
+                request,
+                retired_destination.hire_path(),
+                preserve_request=True,
+            )
+
         template = _resolve_public_template_for_route(
             category_slug=kwargs.get("category_slug"),
             handle=handle,

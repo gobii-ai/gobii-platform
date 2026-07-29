@@ -2,6 +2,10 @@ from dataclasses import dataclass
 
 from django.urls import reverse
 
+from pages.legacy_pretrained_worker_database_redirects import (
+    LEGACY_DATABASE_TEMPLATE_DESTINATIONS,
+)
+
 
 EXACT_DUPLICATE = "exact_duplicate"
 CONTENT_MERGED = "content_merged"
@@ -190,7 +194,41 @@ LEGACY_PRETRAINED_WORKER_REDIRECTS = {
     )
 }
 
+LEGACY_PRETRAINED_WORKER_REDIRECTS.update(
+    {
+        legacy_slug: LegacyPretrainedWorkerRedirect(
+            legacy_slug=legacy_slug,
+            destination_category_slug=category_slug,
+            destination_template_slug=template_slug,
+            resolution_type=EXACT_DUPLICATE,
+            notes=(
+                "Database-backed template code resolved to this canonical library page "
+                "at the retirement cutover."
+            ),
+        )
+        for legacy_slug, (
+            category_slug,
+            template_slug,
+        ) in LEGACY_DATABASE_TEMPLATE_DESTINATIONS.items()
+    }
+)
+
+RETIRED_LIBRARY_TEMPLATE_REDIRECTS = {
+    ("people", "talent-sourcer"): LEGACY_PRETRAINED_WORKER_REDIRECTS["talent-sourcer"],
+}
+
 
 def get_legacy_pretrained_worker_redirect(slug: str | None) -> LegacyPretrainedWorkerRedirect | None:
     normalized_slug = str(slug or "").strip().lower()
     return LEGACY_PRETRAINED_WORKER_REDIRECTS.get(normalized_slug)
+
+
+def get_retired_library_template_redirect(
+    category_slug: str | None,
+    template_slug: str | None,
+) -> LegacyPretrainedWorkerRedirect | None:
+    normalized_route = (
+        str(category_slug or "").strip().lower(),
+        str(template_slug or "").strip().lower(),
+    )
+    return RETIRED_LIBRARY_TEMPLATE_REDIRECTS.get(normalized_route)

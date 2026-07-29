@@ -286,6 +286,11 @@ TEMPLATES = (
 def ensure_canonical_templates(apps, schema_editor):
     Template = apps.get_model("api", "PersistentAgentTemplate")
 
+    Template.objects.filter(code="talent-sourcer").update(
+        is_active=False,
+        show_on_homepage=False,
+    )
+
     for code, category in EXACT_LEGACY_TEMPLATE_CATEGORIES.items():
         Template.objects.filter(code=code).update(
             slug=code,
