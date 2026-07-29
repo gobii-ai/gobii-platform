@@ -11,7 +11,18 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from api.auth import MCPAPIKeyAuthentication
-from api.services.remote_mcp import MCPToolError, MCP_PROTOCOL_VERSION, SERVER_INFO, call_tool, list_tools, make_tool_result
+from api.services.remote_mcp import (
+    MCPToolError,
+    MCP_PROTOCOL_VERSION,
+    SERVER_INFO,
+    call_tool,
+    list_resource_templates,
+    list_resources,
+    list_tools,
+    make_tool_result,
+    read_resource,
+)
+from api.services.remote_mcp_resources import MCPResourceError
 
 
 JSON_RPC_PARSE_ERROR = -32700
@@ -19,6 +30,7 @@ JSON_RPC_INVALID_REQUEST = -32600
 JSON_RPC_METHOD_NOT_FOUND = -32601
 JSON_RPC_INVALID_PARAMS = -32602
 JSON_RPC_HEADER_MISMATCH = -32001
+JSON_RPC_RESOURCE_NOT_FOUND = -32002
 
 
 @method_decorator(csrf_exempt, name="dispatch")
@@ -130,7 +142,10 @@ def _handle_json_rpc_request(request, payload):
             request_id,
             {
                 "protocolVersion": MCP_PROTOCOL_VERSION,
-                "capabilities": {"tools": {"listChanged": False}},
+                "capabilities": {
+                    "tools": {"listChanged": False},
+                    "resources": {"subscribe": False, "listChanged": False},
+                },
                 "serverInfo": SERVER_INFO,
                 "instructions": (
                     "Use Gobii tools to create, manage, link, message, and attach files to "
@@ -144,6 +159,33 @@ def _handle_json_rpc_request(request, payload):
 
     if method == "tools/list":
         return _json_rpc_success_payload(request_id, {"tools": list_tools()}), 200
+
+    if method == "resources/list":
+        return _json_rpc_success_payload(request_id, {"resources": list_resources()}), 200
+
+    if method == "resources/templates/list":
+        return _json_rpc_success_payload(
+            request_id,
+            {"resourceTemplates": list_resource_templates()},
+        ), 200
+
+    if method == "resources/read":
+        uri = params.get("uri")
+        if not isinstance(uri, str) or not uri:
+            return _json_rpc_error_payload(
+                JSON_RPC_INVALID_PARAMS,
+                "resources/read requires params.uri.",
+                request_id=request_id,
+            ), 200
+        try:
+            result = read_resource(request, uri)
+        except MCPResourceError:
+            return _json_rpc_error_payload(
+                JSON_RPC_RESOURCE_NOT_FOUND,
+                "Resource not found or inaccessible.",
+                request_id=request_id,
+            ), 200
+        return _json_rpc_success_payload(request_id, result), 200
 
     if method == "tools/call":
         tool_name = params.get("name")

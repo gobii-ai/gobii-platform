@@ -7,12 +7,14 @@ from datetime import timedelta
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, tag
 from django.utils import timezone
 
 from api.agent.core.llm_config import AgentLLMTier
 from api.agent.core.processing_flags import get_human_inbound_generation
 from api.models import (
+    AgentFsNode,
     AgentPeerLink,
     BrowserUseAgent,
     CommsChannel,
@@ -27,6 +29,7 @@ from api.models import (
     PersistentAgentCompletion,
     PersistentAgentError,
     PersistentAgentMessage,
+    PersistentAgentMessageAttachment,
     PersistentAgentPromptArchive,
     PersistentAgentStep,
     PersistentAgentToolCall,
@@ -112,6 +115,13 @@ class RemoteMCPViewTests(TestCase):
             "tools/call",
             {"name": name, "arguments": arguments or {}},
             auth=auth,
+            api_key=api_key,
+        )
+
+    def _read_resource(self, uri, *, api_key=None):
+        return self._post_mcp(
+            "resources/read",
+            {"uri": uri},
             api_key=api_key,
         )
 
@@ -219,6 +229,10 @@ class RemoteMCPViewTests(TestCase):
         payload = response.json()
         self.assertEqual(payload["result"]["protocolVersion"], "2025-11-25")
         self.assertIn("tools", payload["result"]["capabilities"])
+        self.assertEqual(
+            payload["result"]["capabilities"]["resources"],
+            {"subscribe": False, "listChanged": False},
+        )
 
         bearer_response = self._post_mcp("initialize", auth="bearer")
         self.assertEqual(bearer_response.status_code, 200)
@@ -235,6 +249,7 @@ class RemoteMCPViewTests(TestCase):
         self.assertIn("gobii_send_agent_message", tool_names)
         self.assertIn("gobii_wait_for_agent_event", tool_names)
         self.assertIn("gobii_get_agent_debug_trace", tool_names)
+        self.assertIn("gobii_read_agent_resource", tool_names)
         self.assertIn("gobii_upload_agent_file", tool_names)
 
         debug_tool = next(tool for tool in tools_response.json()["result"]["tools"] if tool["name"] == "gobii_get_agent_debug_trace")
@@ -250,6 +265,15 @@ class RemoteMCPViewTests(TestCase):
         self.assertEqual(content["total"], 1)
         self.assertEqual(content["agents"][0]["id"], str(agent.id))
         self.assertNotIn("access", content)
+
+        resources_response = self._post_mcp("resources/list")
+        self.assertEqual(resources_response.json()["result"]["resources"], [])
+        templates_response = self._post_mcp("resources/templates/list")
+        templates = templates_response.json()["result"]["resourceTemplates"]
+        self.assertEqual(
+            {template["name"] for template in templates},
+            {"gobii-agent-file", "gobii-message-attachment"},
+        )
 
     def test_non_admin_scope_params_return_structured_tool_error(self):
         other_agent = self._create_agent(self.other_user, "Scoped Other Agent")
@@ -868,6 +892,234 @@ class RemoteMCPViewTests(TestCase):
             inbound_generation=expected_generation,
             inbound_message_id=str(message.id),
         )
+
+    @patch("api.services.remote_mcp.can_user_use_personal_agents_and_api", return_value=True)
+    @patch("api.auth.can_user_use_personal_agents_and_api", return_value=True)
+    def test_agent_file_is_a_native_mcp_resource(self, _mock_auth_access, _mock_scope_access):
+        agent = self._create_agent(self.user, "Resource MCP Agent")
+        content = b"\x89PNG\r\n\x1a\nsmall-image-fixture"
+        upload_response = self._call_tool(
+            "gobii_upload_agent_file",
+            {
+                "agent_id": str(agent.id),
+                "path": "/qa/screenshot.png",
+                "content_base64": base64.b64encode(content).decode("ascii"),
+                "mime_type": "image/png",
+            },
+        )
+        self.assertFalse(upload_response.json()["result"]["isError"])
+
+        files_response = self._call_tool(
+            "gobii_list_agent_files",
+            {"agent_id": str(agent.id)},
+        )
+        files_result = files_response.json()["result"]
+        screenshot = next(
+            node
+            for node in files_result["structuredContent"]["nodes"]
+            if node["path"] == "/qa/screenshot.png"
+        )
+        resource_uri = screenshot["resource_uri"]
+        self.assertTrue(resource_uri.startswith(f"gobii://agents/{agent.id}/files/"))
+        resource_links = [
+            item for item in files_result["content"] if item["type"] == "resource_link"
+        ]
+        self.assertEqual(resource_links[0]["uri"], resource_uri)
+        self.assertEqual(resource_links[0]["mimeType"], "image/png")
+        self.assertEqual(resource_links[0]["size"], len(content))
+
+        read_response = self._read_resource(resource_uri)
+        self.assertEqual(read_response.status_code, 200)
+        resource = read_response.json()["result"]["contents"][0]
+        self.assertEqual(resource["uri"], resource_uri)
+        self.assertEqual(resource["mimeType"], "image/png")
+        self.assertEqual(base64.b64decode(resource["blob"]), content)
+
+        tool_response = self._call_tool(
+            "gobii_read_agent_resource",
+            {"uri": resource_uri},
+        )
+        tool_result = tool_response.json()["result"]
+        self.assertFalse(tool_result["isError"])
+        image = next(item for item in tool_result["content"] if item["type"] == "image")
+        self.assertEqual(image["mimeType"], "image/png")
+        self.assertEqual(base64.b64decode(image["data"]), content)
+
+    @patch("api.services.remote_mcp.can_user_use_personal_agents_and_api", return_value=True)
+    @patch("api.auth.can_user_use_personal_agents_and_api", return_value=True)
+    def test_timeline_exposes_native_resource_for_unimported_attachment(
+        self,
+        _mock_auth_access,
+        _mock_scope_access,
+    ):
+        agent = self._create_agent(self.user, "Timeline Attachment Agent")
+        message = self._create_web_message(agent, "Screenshot attached")
+        content = b"\x89PNG\r\n\x1a\nmessage-attachment"
+        attachment = PersistentAgentMessageAttachment.objects.create(
+            message=message,
+            file=SimpleUploadedFile("bug.png", content, content_type="image/png"),
+            content_type="image/png",
+            file_size=len(content),
+            filename="bug.png",
+        )
+
+        response = self._call_tool(
+            "gobii_get_agent_timeline",
+            {"agent_id": str(agent.id), "limit": 10},
+        )
+
+        result = response.json()["result"]
+        event = next(
+            event
+            for event in result["structuredContent"]["events"]
+            if event.get("kind") == "message" and event["message"]["id"] == str(message.id)
+        )
+        resource_uri = event["message"]["attachments"][0]["resource_uri"]
+        self.assertEqual(
+            resource_uri,
+            f"gobii://agents/{agent.id}/attachments/{attachment.id}",
+        )
+        self.assertIn(
+            resource_uri,
+            [item["uri"] for item in result["content"] if item["type"] == "resource_link"],
+        )
+        resource = self._read_resource(resource_uri).json()["result"]["contents"][0]
+        self.assertEqual(base64.b64decode(resource["blob"]), content)
+
+    @patch("api.services.remote_mcp.can_user_use_personal_agents_and_api", return_value=True)
+    @patch("api.auth.can_user_use_personal_agents_and_api", return_value=True)
+    def test_resource_read_does_not_cross_agent_scope(self, _mock_auth_access, _mock_scope_access):
+        other_agent = self._create_agent(self.other_user, "Other Resource Agent")
+        encoded = base64.b64encode(b"private").decode("ascii")
+        raw_other_api_key, _ = ApiKey.create_for_user(self.other_user, name="other-mcp")
+        upload_response = self._call_tool(
+            "gobii_upload_agent_file",
+            {
+                "agent_id": str(other_agent.id),
+                "path": "/private.txt",
+                "content_base64": encoded,
+                "mime_type": "text/plain",
+            },
+            api_key=raw_other_api_key,
+        )
+        resource_uri = self._structured_content(upload_response)["resource_uri"]
+
+        read_response = self._read_resource(resource_uri)
+
+        self.assertEqual(read_response.status_code, 200)
+        self.assertEqual(read_response.json()["error"]["code"], -32002)
+        self.assertEqual(read_response.json()["error"]["message"], "Resource not found or inaccessible.")
+
+    @patch("api.services.remote_mcp.can_user_use_personal_agents_and_api", return_value=True)
+    @patch("api.auth.can_user_use_personal_agents_and_api", return_value=True)
+    def test_send_message_accepts_inline_attachments_in_one_call(
+        self,
+        _mock_auth_access,
+        _mock_scope_access,
+    ):
+        agent = self._create_agent(self.user, "Inline Attachment Agent")
+        content = b"name,status\nAda,ready\n"
+
+        with (
+            patch("api.agent.tasks.enqueue_interactive_process_agent_events"),
+            self.captureOnCommitCallbacks(execute=True),
+        ):
+            response = self._call_tool(
+                "gobii_send_agent_message",
+                {
+                    "agent_id": str(agent.id),
+                    "body": "Use the attached source data.",
+                    "attachments": [
+                        {
+                            "path": "/uploads/source.csv",
+                            "content_base64": base64.b64encode(content).decode("ascii"),
+                            "mime_type": "text/csv",
+                        }
+                    ],
+                },
+            )
+
+        result = self._structured_content(response)
+        self.assertFalse(response.json()["result"]["isError"], response.content)
+        self.assertEqual(result["attachment_count"], 1)
+        self.assertEqual(len(result["uploaded_attachments"]), 1)
+        uploaded = result["uploaded_attachments"][0]
+        self.assertEqual(uploaded["path"], "/uploads/source.csv")
+        self.assertTrue(uploaded["resource_uri"].startswith(f"gobii://agents/{agent.id}/files/"))
+        timeline_attachment = result["timeline_event"]["message"]["attachments"][0]
+        self.assertEqual(timeline_attachment["resource_uri"], uploaded["resource_uri"])
+        resource_links = [
+            item for item in response.json()["result"]["content"] if item["type"] == "resource_link"
+        ]
+        self.assertEqual([item["uri"] for item in resource_links], [uploaded["resource_uri"]])
+        attachment = PersistentAgentMessage.objects.get(id=result["message_id"]).attachments.get()
+        self.assertEqual(attachment.filespace_node.path, "/uploads/source.csv")
+        self.assertEqual(attachment.filespace_node.checksum_sha256, uploaded["checksum_sha256"])
+        resource = self._read_resource(uploaded["resource_uri"]).json()["result"]["contents"][0]
+        self.assertEqual(resource["text"], content.decode("utf-8"))
+
+    @patch("api.services.remote_mcp.can_user_use_personal_agents_and_api", return_value=True)
+    @patch("api.auth.can_user_use_personal_agents_and_api", return_value=True)
+    def test_inline_attachments_are_fully_validated_before_upload(
+        self,
+        _mock_auth_access,
+        _mock_scope_access,
+    ):
+        agent = self._create_agent(self.user, "Invalid Inline Attachment Agent")
+
+        response = self._call_tool(
+            "gobii_send_agent_message",
+            {
+                "agent_id": str(agent.id),
+                "body": "Do not partially persist these files.",
+                "attachments": [
+                    {
+                        "path": "/uploads/valid.txt",
+                        "content_base64": base64.b64encode(b"valid").decode("ascii"),
+                    },
+                    {
+                        "path": "/uploads/invalid.txt",
+                        "content_base64": "not base64!",
+                    },
+                ],
+            },
+        )
+
+        self.assertTrue(response.json()["result"]["isError"])
+        self.assertFalse(
+            AgentFsNode.objects.alive().filter(filespace__access__agent=agent).exists()
+        )
+        self.assertFalse(
+            PersistentAgentMessage.objects.filter(
+                owner_agent=agent,
+                raw_payload__source="remote_mcp",
+            ).exists()
+        )
+
+    @patch("api.services.remote_mcp.can_user_use_personal_agents_and_api", return_value=True)
+    @patch("api.auth.can_user_use_personal_agents_and_api", return_value=True)
+    def test_resource_read_rejects_checksum_mismatch(
+        self,
+        _mock_auth_access,
+        _mock_scope_access,
+    ):
+        agent = self._create_agent(self.user, "Checksum MCP Agent")
+        upload_response = self._call_tool(
+            "gobii_upload_agent_file",
+            {
+                "agent_id": str(agent.id),
+                "path": "/evidence.txt",
+                "content_base64": base64.b64encode(b"original evidence").decode("ascii"),
+                "mime_type": "text/plain",
+            },
+        )
+        uploaded = self._structured_content(upload_response)
+        AgentFsNode.objects.filter(id=uploaded["node_id"]).update(checksum_sha256="0" * 64)
+
+        response = self._read_resource(uploaded["resource_uri"])
+
+        self.assertEqual(response.json()["error"]["code"], -32002)
+        self.assertEqual(response.json()["error"]["message"], "Resource not found or inaccessible.")
 
     @patch("api.services.remote_mcp.can_user_use_personal_agents_and_api", return_value=True)
     @patch("api.auth.can_user_use_personal_agents_and_api", return_value=True)

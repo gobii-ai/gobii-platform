@@ -497,6 +497,9 @@ def _serialize_attachment(att: PersistentAgentMessageAttachment, agent_id: uuid.
         "downloadUrl": download_url,
         "filespacePath": filespace_path,
         "filespaceNodeId": filespace_node_id,
+        "contentType": att.content_type or None,
+        "fileSize": att.file_size,
+        "contentSha256": att.content_sha256 or None,
         "fileSizeLabel": size_label,
     }
 
