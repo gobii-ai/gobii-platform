@@ -122,8 +122,18 @@ def _validate_agent_sandbox_for_servers(
 def _filter_sandbox_unavailable_servers(
     agent: PersistentAgent,
     servers: Iterable[MCPServerConfig],
+    *,
+    sandbox_available: Optional[bool] = None,
 ) -> List[MCPServerConfig]:
     configs = list(servers)
+    if sandbox_available is not None:
+        if sandbox_available:
+            return configs
+        return [
+            server
+            for server in configs
+            if not mcp_server_requires_agent_sandbox(server)
+        ]
     if not any(mcp_server_requires_agent_sandbox(server) for server in configs):
         return configs
     if sandbox_compute_enabled_for_agent(agent):
@@ -253,11 +263,24 @@ def agent_server_overview(agent: PersistentAgent) -> List[Dict[str, Any]]:
 
     overview: List[Dict[str, Any]] = []
     assigned_ids = set(agent_enabled_server_ids(agent))
+    organization_configs = (
+        list(organization_server_configs(agent.organization_id))
+        if agent.organization_id
+        else []
+    )
+    personal_configs = list(personal_server_configs(agent.user_id))
+    scoped_configs = [*organization_configs, *personal_configs]
+    sandbox_available = (
+        sandbox_compute_enabled_for_agent(agent)
+        if any(mcp_server_requires_agent_sandbox(config) for config in scoped_configs)
+        else True
+    )
 
-    if agent.organization_id:
+    if organization_configs:
         for cfg in _filter_sandbox_unavailable_servers(
             agent,
-            organization_server_configs(agent.organization_id),
+            organization_configs,
+            sandbox_available=sandbox_available,
         ):
             server_id = str(cfg.id)
             overview.append(
@@ -275,7 +298,8 @@ def agent_server_overview(agent: PersistentAgent) -> List[Dict[str, Any]]:
 
     for cfg in _filter_sandbox_unavailable_servers(
         agent,
-        personal_server_configs(agent.user_id),
+        personal_configs,
+        sandbox_available=sandbox_available,
     ):
         server_id = str(cfg.id)
         overview.append(

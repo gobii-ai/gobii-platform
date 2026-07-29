@@ -63,6 +63,33 @@ class MCPServerAssignmentTests(TestCase):
         accessible_after = mcp_servers.agent_accessible_server_configs(self.org_agent)
         self.assertTrue(any(cfg.id == server.id for cfg in accessible_after))
 
+    @patch("api.services.mcp_servers.sandbox_compute_enabled_for_agent", return_value=True)
+    def test_overview_evaluates_sandbox_eligibility_once_for_scoped_servers(
+        self,
+        mock_sandbox_compute_enabled_for_agent,
+    ):
+        org_server = MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.ORGANIZATION,
+            organization=self.org,
+            name="org-stdio-overview",
+            display_name="Org STDIO Overview",
+            command="/bin/true",
+        )
+        personal_server = MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.USER,
+            user=self.user,
+            name="personal-stdio-overview",
+            display_name="Personal STDIO Overview",
+            command="/bin/true",
+        )
+
+        overview = mcp_servers.agent_server_overview(self.org_agent)
+
+        overview_ids = {server["id"] for server in overview}
+        self.assertIn(str(org_server.id), overview_ids)
+        self.assertIn(str(personal_server.id), overview_ids)
+        mock_sandbox_compute_enabled_for_agent.assert_called_once_with(self.org_agent)
+
     @patch("api.services.mcp_servers.sandbox_compute_enabled_for_agent", return_value=False)
     def test_org_stdio_assignment_requires_agent_sandbox(
         self,
