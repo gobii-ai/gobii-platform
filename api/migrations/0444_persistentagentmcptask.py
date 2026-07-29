@@ -8,7 +8,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("api", "0442_discord_explicit_guild_authorization"),
+        ("api", "0443_merge_20260729_1737"),
     ]
 
     operations = [
