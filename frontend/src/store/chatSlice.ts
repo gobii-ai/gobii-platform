@@ -62,6 +62,11 @@ export type AgentChatProcessingState = {
 
 export type AgentChatStreamState = {
   streaming: StreamState | null
+  /** The persisted message a completed stream handed off to. Its content was already
+   *  revealed on screen by the stream card, so the message card must render it
+   *  instantly — replaying the fast-reveal entrance re-types the whole reply and
+   *  reads as an end-of-stream flash (bug #510 polish). */
+  lastHandoffMessageId: string | null
   streamingLastUpdatedAt: number | null
   streamingClearOnDone: boolean
   streamingThinkingCollapsed: boolean
@@ -197,6 +202,7 @@ export function createInitialSession(): AgentChatSession {
     },
     stream: {
       streaming: null,
+      lastHandoffMessageId: null,
       streamingLastUpdatedAt: null,
       streamingClearOnDone: false,
       streamingThinkingCollapsed: false,
@@ -1141,6 +1147,7 @@ const chatSlice = createSlice({
     streamHandedOff(state, action: PayloadAction<{ agentId: string; streamId: string }>) {
       const session = getSession(state, action.payload.agentId)
       if (session?.stream.streaming?.streamId === action.payload.streamId) {
+        session.stream.lastHandoffMessageId = session.stream.streaming.handoffMessageId ?? null
         session.stream.streaming = null
         session.stream.streamingClearOnDone = false
         session.stream.streamingLastUpdatedAt = Date.now()

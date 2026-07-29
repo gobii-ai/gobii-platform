@@ -85,4 +85,14 @@ describe('stream handoff (#510)', () => {
     expect(stream?.done).toBe(true)
     expect(stream?.content).toBe('Here is the reply.')
   })
+
+  it('records the handed-off message id so its card skips the fast-reveal replay', () => {
+    const store = setupStreamingStore()
+    store.dispatch(chatActions.realtimeEventReceived({ agentId: AGENT, event: outboundMessageEvent('m1') }))
+    store.dispatch(chatActions.streamHandedOff({ agentId: AGENT, streamId: 's1' }))
+
+    const stream = selectActiveChatSession(store.getState()).stream
+    expect(stream.streaming).toBeNull()
+    expect(stream.lastHandoffMessageId).toBe('m1')
+  })
 })

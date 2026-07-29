@@ -174,6 +174,9 @@ export const AgentTimelinePane = memo(function AgentTimelinePane({
   // became stays suppressed here so the swap happens in one commit with no double render
   // and no blank frame (bug #510).
   const streamHandoffMessageId = streaming?.source !== 'timeline' ? streaming?.handoffMessageId ?? null : null
+  // After the swap, the message this stream became must not replay its fast-reveal
+  // entrance — its content has been on screen for seconds (bug #510 polish).
+  const streamedMessageId = streamHandoffMessageId ?? activeSession.stream.lastHandoffMessageId
   const streamHandoffMessageRendered = useMemo(
     () => Boolean(streamHandoffMessageId) && events.some(
       (event) => event.kind === 'message' && event.message?.id === streamHandoffMessageId,
@@ -251,6 +254,7 @@ export const AgentTimelinePane = memo(function AgentTimelinePane({
                     <TimelineEventItem
                       event={event}
                       isLatestEvent={index === lastRenderedIndex}
+                      streamedMessageId={streamedMessageId}
                       agentFirstName={agentFirstName}
                       agentAvatarUrl={agentAvatarUrl}
                       viewerUserId={viewerUserId ?? null}

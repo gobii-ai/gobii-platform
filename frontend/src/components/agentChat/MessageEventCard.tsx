@@ -58,6 +58,8 @@ type MessageEventCardProps = {
   onMessageLinkClick?: (href: string) => boolean | void
   onReportMessage?: (message: AgentMessage) => void
   onRetryMessage?: (message: AgentMessage) => void | Promise<void>
+  /** Content was already revealed by the stream card; render instantly (bug #510). */
+  disableFastReveal?: boolean
 }
 
 // Only animate messages that arrived recently (within last 3 seconds)
@@ -106,11 +108,12 @@ export const MessageEventCard = memo(function MessageEventCard({
   onMessageLinkClick,
   onReportMessage,
   onRetryMessage,
+  disableFastReveal = false,
 }: MessageEventCardProps) {
   const [copied, setCopied] = useState(false)
   const [retrying, setRetrying] = useState(false)
   const isAgent = Boolean(message.isOutbound)
-  const shouldAnimate = isAgent && isRecentMessage(message.timestamp)
+  const shouldAnimate = isAgent && !disableFastReveal && isRecentMessage(message.timestamp)
   const channel = (message.channel || 'web').toLowerCase()
   const sourceKind = (message.sourceKind || '').toLowerCase()
   const isWebhook = sourceKind === 'webhook'
