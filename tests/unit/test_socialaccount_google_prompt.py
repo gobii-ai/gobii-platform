@@ -20,6 +20,10 @@ from config.socialaccount_adapter import (
     OAUTH_ATTRIBUTION_COOKIE,
     OAUTH_CHARTER_COOKIE,
 )
+from api.services.trial_promos import (
+    TRIAL_PROMO_PENDING_START_SESSION_KEY,
+    TRIAL_PROMO_SESSION_KEY,
+)
 from middleware.utm_capture import UTMTrackingMiddleware
 
 PROVIDER_LOGIN_CASES = {
@@ -242,6 +246,8 @@ class SocialAccountProviderTests(TestCase):
             "agent_charter": "Cookie charter",
             "agent_charter_source": "template",
             "agent_charter_override": "override charter",
+            TRIAL_PROMO_SESSION_KEY: "promo-id",
+            TRIAL_PROMO_PENDING_START_SESSION_KEY: "promo-id",
         }
         request.COOKIES[OAUTH_CHARTER_COOKIE] = signing.dumps(stashed, compress=True)
 
@@ -255,6 +261,11 @@ class SocialAccountProviderTests(TestCase):
         self.assertEqual(request.session.get("agent_charter"), "Cookie charter")
         self.assertEqual(request.session.get("agent_charter_source"), "template")
         self.assertEqual(request.session.get("agent_charter_override"), "override charter")
+        self.assertEqual(request.session.get(TRIAL_PROMO_SESSION_KEY), "promo-id")
+        self.assertEqual(
+            request.session.get(TRIAL_PROMO_PENDING_START_SESSION_KEY),
+            "promo-id",
+        )
 
     def test_pre_social_login_does_not_overwrite_existing_attribution_keys(self) -> None:
         request = RequestFactory().get(reverse("google_login"))

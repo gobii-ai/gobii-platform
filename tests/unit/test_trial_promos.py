@@ -1,4 +1,5 @@
 import re
+import uuid
 from datetime import datetime, timedelta, timezone as datetime_timezone
 from decimal import Decimal
 from types import SimpleNamespace
@@ -10,6 +11,7 @@ from allauth.account.models import EmailAddress
 from agents.services import PretrainedWorkerTemplateService
 from django.contrib.auth import get_user_model
 from django.core import mail
+from django.core import signing
 from django.http import HttpResponseRedirect
 from django.test import TestCase, override_settings, tag
 from django.urls import reverse
@@ -48,6 +50,7 @@ from api.services.trial_promos import (
     TRIAL_PROMO_META_PLAN,
     TRIAL_PROMO_META_REDEMPTION_ID,
     TRIAL_PROMO_META_TRIAL_DAYS,
+    TRIAL_PROMO_PENDING_START_SESSION_KEY,
     TRIAL_PROMO_REDEMPTION_ACTIVE_UNTIL_KEY,
     TRIAL_PROMO_REDEMPTION_ADDITIONAL_PRICE_ID_KEY,
     TRIAL_PROMO_REDEMPTION_COUPON_ID_KEY,
@@ -67,6 +70,8 @@ from api.services.trial_promos import (
     reserve_direct_trial_promo_redemption,
     reserve_trial_promo_redemption,
 )
+from billing.price_snapshot import StripePriceSnapshot, get_stripe_price_snapshot
+from config.socialaccount_adapter import OAUTH_CHARTER_COOKIE
 from constants.plans import PlanNames
 from constants.stripe import PERSONAL_CHECKOUT_PAYMENT_METHOD_TYPES
 
@@ -462,6 +467,39 @@ class DirectTrialPromoServiceTests(TestCase):
             password="pw",
         )
 
+    def _create_pending_redemption(
+        self,
+        *,
+        code: str,
+        subscription_id: str = "",
+        schedule_id: str = "",
+    ) -> tuple[TrialPromo, TrialPromoRedemption]:
+        promo = _create_promo(
+            code=code,
+            activation_mode=TrialPromoActivationModeChoices.DIRECT_STRIPE_TRIAL,
+        )
+        redemption = TrialPromoRedemption.objects.create(
+            promo=promo,
+            user=self.user,
+            status=TrialPromoRedemptionStatusChoices.DIRECT_ACTIVATION_PENDING,
+            event_id=f"direct-{code.lower()}",
+            stripe_customer_id=f"cus_{code.lower()}",
+            stripe_subscription_id=subscription_id,
+            stripe_subscription_schedule_id=schedule_id,
+            metadata={
+                TRIAL_PROMO_META_PLAN: PlanNames.STARTUP,
+                TRIAL_PROMO_META_TRIAL_DAYS: "14",
+                TRIAL_PROMO_REDEMPTION_PRICE_ID_KEY: "price_pro_monthly",
+                TRIAL_PROMO_REDEMPTION_ADDITIONAL_PRICE_ID_KEY: "",
+                TRIAL_PROMO_REDEMPTION_COUPON_ID_KEY: "coupon_three_months",
+                TRIAL_PROMO_REDEMPTION_DISCOUNT_MONTHS_KEY: "3",
+                TRIAL_PROMO_REDEMPTION_LATE_CONVERSION_GRACE_DAYS_KEY: "30",
+                TRIAL_PROMO_REDEMPTION_ACTIVE_UNTIL_KEY: "",
+                "percent_off": "40",
+            },
+        )
+        return promo, redemption
+
     @patch("api.services.direct_trial_promos.TaskCreditService.grant_subscription_credits")
     @patch(
         "api.services.direct_trial_promos.reconcile_user_plan_from_stripe",
@@ -726,6 +764,89 @@ class DirectTrialPromoServiceTests(TestCase):
             TrialPromoRedemption.objects.filter(promo=promo, user=self.user).count(),
             1,
         )
+
+    @patch("api.services.direct_trial_promos._cancel_partial_subscription")
+    @patch(
+        "api.services.direct_trial_promos._create_or_retrieve_subscription",
+        side_effect=stripe.error.IdempotencyError(
+            "Another request with the same idempotency key is executing.",
+        ),
+    )
+    @patch(
+        "api.services.direct_trial_promos.stripe.Customer.retrieve",
+        return_value={
+            "invoice_settings": {},
+            "default_source": None,
+        },
+    )
+    def test_subscription_idempotency_contention_stays_pending(
+        self,
+        _mock_customer_retrieve,
+        _mock_create_subscription,
+        mock_cancel_partial_subscription,
+    ):
+        promo, redemption = self._create_pending_redemption(
+            code="SUBSCRIPTION-CONTENTION",
+        )
+
+        with self.assertRaises(TrialPromoError) as raised:
+            activate_direct_trial_promo(
+                promo=promo,
+                user=self.user,
+            )
+
+        self.assertEqual(raised.exception.code, "stripe_activation_pending")
+        redemption.refresh_from_db()
+        self.assertEqual(
+            redemption.status,
+            TrialPromoRedemptionStatusChoices.DIRECT_ACTIVATION_PENDING,
+        )
+        mock_cancel_partial_subscription.assert_not_called()
+
+    @patch("api.services.direct_trial_promos._cancel_partial_subscription")
+    @patch(
+        "api.services.direct_trial_promos._create_or_retrieve_schedule",
+        side_effect=stripe.error.IdempotencyError(
+            "Another request with the same idempotency key is executing.",
+        ),
+    )
+    @patch("api.services.direct_trial_promos._create_or_retrieve_subscription")
+    def test_schedule_idempotency_contention_stays_pending(
+        self,
+        mock_create_subscription,
+        _mock_create_schedule,
+        mock_cancel_partial_subscription,
+    ):
+        promo, redemption = self._create_pending_redemption(
+            code="SCHEDULE-CONTENTION",
+            subscription_id="sub_schedule_contention",
+            schedule_id="sub_sched_schedule_contention",
+        )
+        mock_create_subscription.return_value = {
+            "id": redemption.stripe_subscription_id,
+            "status": "trialing",
+            "trial_start": 1_800_000_000,
+            "trial_end": 1_801_209_600,
+            "trial_settings": {
+                "end_behavior": {
+                    "missing_payment_method": "cancel",
+                },
+            },
+        }
+
+        with self.assertRaises(TrialPromoError) as raised:
+            activate_direct_trial_promo(
+                promo=promo,
+                user=self.user,
+            )
+
+        self.assertEqual(raised.exception.code, "stripe_activation_pending")
+        redemption.refresh_from_db()
+        self.assertEqual(
+            redemption.status,
+            TrialPromoRedemptionStatusChoices.DIRECT_ACTIVATION_PENDING,
+        )
+        mock_cancel_partial_subscription.assert_not_called()
 
     @patch("api.services.direct_trial_promos.stripe.Subscription.list")
     @patch("api.services.direct_trial_promos.stripe.Subscription.delete")
@@ -1467,6 +1588,104 @@ class SpecialAccessCheckoutTests(TestCase):
             self.client.session["special_access_trial_promo_id"],
             str(promo.pk),
         )
+        self.assertEqual(
+            self.client.session[TRIAL_PROMO_PENDING_START_SESSION_KEY],
+            str(promo.pk),
+        )
+        oauth_stash = signing.loads(
+            start_response.cookies[OAUTH_CHARTER_COOKIE].value,
+        )
+        self.assertEqual(
+            oauth_stash["special_access_trial_promo_id"],
+            str(promo.pk),
+        )
+        self.assertEqual(
+            oauth_stash[TRIAL_PROMO_PENDING_START_SESSION_KEY],
+            str(promo.pk),
+        )
+
+        self.client.force_login(self.user)
+        resume_response = self.client.get(reverse("pages:special_access"))
+
+        self.assertEqual(resume_response.status_code, 200)
+        self.assertTrue(resume_response.context["auto_resume_start"])
+        self.assertContains(resume_response, "special-access-start-form")
+        self.assertContains(resume_response, "form.requestSubmit()")
+        self.assertIn(
+            TRIAL_PROMO_PENDING_START_SESSION_KEY,
+            self.client.session,
+        )
+
+        with patch(
+            "pages.views._start_direct_trial_promo",
+            return_value=HttpResponseRedirect("/app/agents/new?spawn=1"),
+        ) as mock_start_direct_trial:
+            activation_response = self.client.post(
+                reverse("pages:special_access_start"),
+            )
+
+        self.assertEqual(activation_response.status_code, 302)
+        mock_start_direct_trial.assert_called_once()
+        self.assertNotIn(
+            TRIAL_PROMO_PENDING_START_SESSION_KEY,
+            self.client.session,
+        )
+
+    @patch("pages.views.get_stripe_price_snapshot")
+    def test_existing_direct_redemption_terms_use_original_offer_snapshot(
+        self,
+        mock_get_price_snapshot,
+    ):
+        promo = _create_promo(
+            code="SNAPSHOT-TERMS",
+            activation_mode=TrialPromoActivationModeChoices.DIRECT_STRIPE_TRIAL,
+            payment_method_required=False,
+            no_payment_method_end_behavior=TrialPromoNoPaymentMethodEndBehaviorChoices.CANCEL,
+            conversion_coupon_id="coupon_three_months",
+            discount_months=3,
+        )
+        TrialPromoRedemption.objects.create(
+            promo=promo,
+            user=self.user,
+            status=TrialPromoRedemptionStatusChoices.DIRECT_ACTIVATION_PENDING,
+            event_id="snapshot-terms",
+            metadata={
+                TRIAL_PROMO_META_PLAN: PlanNames.STARTUP,
+                TRIAL_PROMO_META_TRIAL_DAYS: "14",
+                TRIAL_PROMO_META_PAYMENT_REQUIRED: "false",
+                TRIAL_PROMO_REDEMPTION_PRICE_ID_KEY: "price_original_pro",
+                TRIAL_PROMO_REDEMPTION_COUPON_ID_KEY: "coupon_three_months",
+                TRIAL_PROMO_REDEMPTION_DISCOUNT_MONTHS_KEY: "3",
+            },
+        )
+        promo.plan = PlanNames.SCALE
+        promo.trial_days = 45
+        promo.activation_mode = TrialPromoActivationModeChoices.HOSTED_CHECKOUT
+        promo.payment_method_required = True
+        promo.discount_months = 6
+        promo.is_active = False
+        promo.save()
+        mock_get_price_snapshot.return_value = StripePriceSnapshot(
+            amount=Decimal("120"),
+            currency="USD",
+        )
+        self.client.force_login(self.user)
+        session = self.client.session
+        session["special_access_trial_promo_id"] = str(promo.pk)
+        session.save()
+
+        response = self.client.get(reverse("pages:special_access"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["plan_label"], "Pro")
+        self.assertEqual(response.context["offer_trial_days"], 14)
+        self.assertFalse(response.context["offer_payment_method_required"])
+        self.assertEqual(response.context["offer_discount_months"], 3)
+        self.assertContains(response, "No card is required")
+        self.assertContains(response, "first 3 paid months")
+        self.assertContains(response, "$120.00/month")
+        self.assertNotContains(response, "first 6 paid months")
+        mock_get_price_snapshot.assert_called_once_with("price_original_pro")
 
     @patch("pages.views._start_direct_trial_promo")
     def test_authenticated_campaign_get_cannot_activate_subscription(
@@ -2430,3 +2649,61 @@ class SpecialAccessCheckoutTests(TestCase):
         self.assertEqual(redemption.stripe_checkout_session_id, "cs_special")
         customer_metadata = mock_customer_modify.call_args.kwargs["metadata"]
         self.assertEqual(customer_metadata[TRIAL_PROMO_META_ID], str(promo.pk))
+
+
+@tag("batch_billing")
+class TrialPromoBillingOfferTests(TestCase):
+    @patch("billing.price_snapshot.Price.objects.filter")
+    def test_price_snapshot_converts_stripe_minor_units(
+        self,
+        mock_price_filter,
+    ):
+        mock_price_filter.return_value.only.return_value.first.return_value = (
+            SimpleNamespace(
+                unit_amount=1299,
+                unit_amount_decimal=None,
+                currency="usd",
+            )
+        )
+
+        snapshot = get_stripe_price_snapshot("price_original")
+
+        self.assertEqual(
+            snapshot,
+            StripePriceSnapshot(
+                amount=Decimal("12.99"),
+                currency="USD",
+            ),
+        )
+        mock_price_filter.assert_called_once_with(id="price_original")
+
+    @patch("console.billing_initial_data.get_stripe_price_snapshot")
+    def test_late_conversion_copy_uses_original_price_snapshot(
+        self,
+        mock_get_price_snapshot,
+    ):
+        from console.billing_initial_data import _build_late_conversion_offer
+
+        redemption = SimpleNamespace(
+            pk=uuid.uuid4(),
+            late_conversion_expires_at=timezone.now() + timedelta(days=10),
+            metadata={
+                TRIAL_PROMO_META_PLAN: PlanNames.STARTUP,
+                TRIAL_PROMO_REDEMPTION_PRICE_ID_KEY: "price_original_pro",
+                TRIAL_PROMO_REDEMPTION_COUPON_ID_KEY: "coupon_three_months",
+                TRIAL_PROMO_REDEMPTION_DISCOUNT_MONTHS_KEY: "3",
+                "percent_off": "25",
+            },
+        )
+        mock_get_price_snapshot.return_value = StripePriceSnapshot(
+            amount=Decimal("120"),
+            currency="USD",
+        )
+
+        offer = _build_late_conversion_offer(redemption)
+
+        self.assertEqual(offer["planName"], "Pro")
+        self.assertEqual(offer["discountMonths"], 3)
+        self.assertEqual(offer["standardMonthlyPrice"], 120.0)
+        self.assertEqual(offer["currency"], "USD")
+        mock_get_price_snapshot.assert_called_once_with("price_original_pro")

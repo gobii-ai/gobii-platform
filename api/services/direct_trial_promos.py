@@ -1231,6 +1231,17 @@ def activate_direct_trial_promo(
             ):
                 return _activation_result_from_redemption(redemption)
             raise
+        if isinstance(exc, stripe.error.IdempotencyError):
+            logger.warning(
+                "Transparent trial activation is still in progress for "
+                "redemption %s; retaining it for an idempotent retry: %s",
+                redemption.pk,
+                exc,
+            )
+            raise TrialPromoError(
+                "stripe_activation_pending",
+                "Your trial activation is still processing. Please try again.",
+            ) from exc
         subscription_id = redemption.stripe_subscription_id
         schedule_id = redemption.stripe_subscription_schedule_id
         subscription_create_is_indeterminate = (
