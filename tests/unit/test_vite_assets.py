@@ -144,6 +144,7 @@ class AppShellAuthenticationTests(TestCase):
             "/app/secrets",
             "/app/usage",
             "/app/integrations",
+            "/app/outbox",
             f"/app/agents/{uuid.uuid4()}/settings",
             f"/app/agents/{uuid.uuid4()}/secrets",
             f"/app/agents/{uuid.uuid4()}/email",

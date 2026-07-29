@@ -28,6 +28,7 @@ APP_PROFILE_PATH_PREFIX = f"{APP_PATH_PREFIX}/profile"
 APP_SECRETS_PATH_PREFIX = f"{APP_PATH_PREFIX}/secrets"
 APP_USAGE_PATH_PREFIX = f"{APP_PATH_PREFIX}/usage"
 APP_INTEGRATIONS_PATH_PREFIX = f"{APP_PATH_PREFIX}/integrations"
+APP_OUTBOX_PATH_PREFIX = f"{APP_PATH_PREFIX}/outbox"
 APP_LOGIN_REQUIRED_PATH_PREFIXES = (
     APP_PROTECTED_PATH_PREFIX,
     APP_BILLING_PATH_PREFIX,
@@ -40,6 +41,9 @@ APP_LOGIN_REQUIRED_PATH_PREFIXES = (
     APP_SECRETS_PATH_PREFIX,
     APP_USAGE_PATH_PREFIX,
     APP_INTEGRATIONS_PATH_PREFIX,
+    # Outbox was the one shell route served to anonymous sessions, which then hit the
+    # chat socket and console APIs unauthenticated (403 handshake + 401 storm).
+    APP_OUTBOX_PATH_PREFIX,
 )
 APP_LOGIN_REQUIRED_SUBPATH_PREFIXES = tuple(f"{prefix}/" for prefix in APP_LOGIN_REQUIRED_PATH_PREFIXES)
 APP_SHELL_CACHE_CONTROL = "no-cache, must-revalidate"

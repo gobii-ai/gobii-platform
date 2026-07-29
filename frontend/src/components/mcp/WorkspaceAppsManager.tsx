@@ -75,6 +75,14 @@ type WorkspaceAppRow =
   | (WorkspacePipedreamAppRow & { kind: 'pipedream' })
   | (NativeIntegrationProvider & { kind: 'native' })
   | (NativeIntegrationProvider & { kind: 'discord' })
+  | { kind: 'webhooks-hint' }
+
+// Native inbound webhooks live in each agent's settings, not in this catalog — so a
+// search for "webhook" here used to return only Pipedream apps and steered users away
+// from the built-in feature entirely (bug #243's frontend half).
+export function searchSuggestsWebhooks(normalizedSearch: string): boolean {
+  return /webhook|web hook|callback|inbound event/.test(normalizedSearch)
+}
 
 type PendingAppAction = {
   slug: string
@@ -241,7 +249,10 @@ export function WorkspaceAppsManager({
         source,
       }
     })
-    return [...nativeRows, ...pipedreamRows]
+    const hintRows: WorkspaceAppRow[] = normalizedSearch && searchSuggestsWebhooks(normalizedSearch)
+      ? [{ kind: 'webhooks-hint' as const }]
+      : []
+    return [...hintRows, ...nativeRows, ...pipedreamRows]
   }, [
     debouncedSearchTerm,
     discordConnected,
@@ -619,7 +630,9 @@ function AppListScreen({
         <PipedreamEmptyState label="No apps matched your search." />
       ) : (
         <PipedreamListFrame isMobile={isMobile} constrainHeight={false}>
-          {apps.map((app) => app.kind === 'native' ? (
+          {apps.map((app) => app.kind === 'webhooks-hint' ? (
+            <WebhooksHintRowItem key="webhooks-hint" />
+          ) : app.kind === 'native' ? (
             <NativeAppRowItem
               key={`native-${app.providerKey}`}
               provider={app}
@@ -650,6 +663,28 @@ function AppListScreen({
           ))}
         </PipedreamListFrame>
       )}
+    </div>
+  )
+}
+
+function WebhooksHintRowItem() {
+  return (
+    <div className="flex items-start justify-between gap-3 border-b border-slate-600/40 px-4 py-3">
+      <div className="min-w-0">
+        <p className="text-sm font-semibold text-slate-100">Webhooks — built into Gobii</p>
+        <p className="mt-0.5 text-xs text-slate-400">
+          Every agent can receive inbound webhooks natively — no app needed. Add one under the
+          agent&apos;s Settings → Integrations.
+        </p>
+      </div>
+      <a
+        href="https://docs.gobii.ai/console-guides/agent-settings"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="shrink-0 rounded-lg border border-slate-500 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-slate-700/40"
+      >
+        Learn more
+      </a>
     </div>
   )
 }

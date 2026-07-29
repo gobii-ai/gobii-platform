@@ -85,6 +85,10 @@ function useLatestRef<T>(value: T) {
 export function useAgentChatSocket(
   desiredSubscriptionsInput: AgentChatSocketSubscription[],
   options: {
+    /** Gate the connection entirely — e.g. until an authenticated console context
+     *  exists. An unauthenticated handshake closes pre-accept, surfaces as a 403 the
+     *  client cannot distinguish from an outage, and retried forever. */
+    enabled?: boolean
     contextOverride?: AgentChatSocketContextOverride
     staffContextOverride?: StaffViewContext | null
     developerMode?: boolean
@@ -178,6 +182,8 @@ export function useAgentChatSocket(
   })
 
   const retryRef = useRef(0)
+  const hasConnectedOnceRef = useRef(false)
+  const enabled = options.enabled !== false
   const socketRef = useRef<WebSocket | null>(null)
   const timeoutRef = useRef<number | null>(null)
   const syncIntervalRef = useRef<number | null>(null)
@@ -187,7 +193,7 @@ export function useAgentChatSocket(
   const scheduleConnectRef = useRef<(delay: number) => void>(() => undefined)
   const closeSocketRef = useRef<() => void>(() => undefined)
   const closingSocketRef = useRef<WebSocket | null>(null)
-  const pauseReasonRef = useRef<'offline' | null>(null)
+  const pauseReasonRef = useRef<'offline' | 'disabled' | null>(null)
   const lastSyncAtRef = useRef(0)
   const lastActivityAtRef = useRef(0)
   const requestedSubscriptionsRef = useRef<Map<string, AgentChatSocketSubscription['mode']>>(new Map())
@@ -446,6 +452,7 @@ export function useAgentChatSocket(
       }, CONNECT_TIMEOUT_MS)
 
       socket.onopen = () => {
+        hasConnectedOnceRef.current = true
         if (socketRef.current !== socketInstance) {
           return
         }
@@ -552,6 +559,15 @@ export function useAgentChatSocket(
           })
           return
         }
+        // A handshake refusal (close 1006 before any successful open) is not an
+        // outage worth hammering: after a few attempts, stop and surface it.
+        if (event.code === 1006 && !hasConnectedOnceRef.current && retryRef.current >= 4) {
+          updateSnapshot({
+            status: 'error',
+            lastError: errorMessage || 'Unable to establish realtime connection.',
+          })
+          return
+        }
         updateSnapshot({
           status: 'reconnecting',
           lastError: errorMessage,
@@ -575,7 +591,9 @@ export function useAgentChatSocket(
     }
 
     pauseReasonRef.current = null
-    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    if (enabled === false) {
+      pauseReasonRef.current = 'disabled'
+    } else if (typeof navigator !== 'undefined' && navigator.onLine === false) {
       pauseReasonRef.current = 'offline'
     } else if (pauseReasonRef.current === null) {
       scheduleConnect(0)
@@ -609,6 +627,7 @@ export function useAgentChatSocket(
   }, [
     clearConnectTimeout,
     currentRef,
+    enabled,
     handlersRef,
     markActivity,
     queryClient,
