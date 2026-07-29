@@ -276,6 +276,41 @@ class MetaGobiiDirectToolTests(TestCase):
         self.assertEqual(email_meta.display_name, "Sales Gobii")
         mock_delay.assert_called_with(str(child.id))
 
+    @override_settings(ENABLE_DEFAULT_AGENT_EMAIL=True, DEFAULT_AGENT_EMAIL_DOMAIN="agents.test")
+    @patch("api.agent.tasks.process_agent_events_task.delay")
+    @patch("api.agent.tools.meta_gobii.AgentService.has_agents_available", return_value=True)
+    @patch("api.services.persistent_agents.AgentService.has_agents_available", return_value=True)
+    @patch("api.models.AgentService.get_agents_available", return_value=10)
+    def test_create_agent_persists_contact_approval_mode(
+        self,
+        _model_capacity,
+        _provision_capacity,
+        _tool_capacity,
+        _mock_delay,
+    ):
+        create_schema = TOOL_DEFINITIONS["meta_gobii_create_agent"]["parameters"]
+        self.assertEqual(
+            create_schema["properties"]["contact_approval_mode"]["enum"],
+            ["require_approval", "auto_approve_email"],
+        )
+
+        with self.captureOnCommitCallbacks(execute=True):
+            created = execute_meta_gobii_tool(
+                self.manager,
+                "meta_gobii_create_agent",
+                {
+                    "name": "Approved Email Gobii",
+                    "charter": "Send owner-approved email.",
+                    "contact_approval_mode": "auto_approve_email",
+                    "user_confirmed": True,
+                },
+            )
+
+        self.assertEqual(created["status"], "ok")
+        child = PersistentAgent.objects.get(id=created["agent"]["id"])
+        self.assertEqual(child.contact_approval_mode, "auto_approve_email")
+        self.assertEqual(created["agent"]["contact_approval_mode"], "auto_approve_email")
+
     @patch("api.services.agent_settings_resume.process_agent_events_task.delay")
     def test_update_agent_requires_confirmation_and_respects_access(self, _mock_delay):
         update_schema = TOOL_DEFINITIONS["meta_gobii_update_agent"]["parameters"]

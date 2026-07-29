@@ -26,6 +26,10 @@ _INVERTED_MARKDOWN_REFERENCE_RE = re.compile(
 )
 _TRAILING_PUNCTUATION = ".,;:!?"
 _EMBEDDED_FIELDS = {"create_csv": "csv_text", "create_pdf": "html", "http_request": "body", "send_agent_message": "message", "send_chat_message": "body", "send_discord_message": "message", "send_email": "mobile_first_html", "send_mcp_message": "body", "send_sms": "body"}
+_DURABLE_LINK_FIELDS = {
+    "meta_gobii_create_agent": {"charter"},
+    "meta_gobii_update_agent": {"charter"},
+}
 DOCUMENT_MIME_TYPES = {"application/json", "application/ld+json", "application/xml", "application/yaml", "text/html", "text/markdown", "text/plain", "text/xml", "text/yaml"}
 _STRICT_TOOLS = set(_EMBEDDED_FIELDS) - {"http_request"} | {"apply_patch", "create_chart", "create_custom_tool", "create_file", "create_image", "create_video", "search_tools", "send_webhook_event", "sqlite_batch", "update_charter", "update_plan", "update_schedule"}
 
@@ -211,6 +215,8 @@ def resolve_link_reference_params(value, agent, *, tool_name: str = "", _path=()
         # but rejecting the whole query loses otherwise useful modeled work.
         resolve_link_references(value, agent)
         return value
+    if _path and _path[0] in _DURABLE_LINK_FIELDS.get(tool_name, set()):
+        return resolve_link_references(value, agent)
     if _path and _path[0] in _allowed:
         if tool_name == "http_request":
             return resolve_link_references(value, agent)

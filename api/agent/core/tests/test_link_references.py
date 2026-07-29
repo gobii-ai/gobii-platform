@@ -299,6 +299,31 @@ class LinkReferenceTests(TestCase):
             {"url": "https://sheets.googleapis.com/v4/spreadsheets/123/values/A1", "body": json.dumps({"values": [[url]]})},
         )
 
+    def test_meta_gobii_resolves_verified_links_before_persisting_charters(self):
+        url = "https://public.example.test/templates/outreach?version=3"
+        token = rewrite_prompt_urls(url, self.agent, create=True)
+
+        for tool_name, params in (
+            (
+                "meta_gobii_create_agent",
+                {"name": "Outreach Worker", "charter": f"Use this exact public template: {token}"},
+            ),
+            (
+                "meta_gobii_update_agent",
+                {"agent_id": str(self.agent.id), "charter": f"Use this exact public template: {token}"},
+            ),
+        ):
+            with self.subTest(tool_name=tool_name):
+                resolved = resolve_link_reference_params(
+                    params,
+                    self.agent,
+                    tool_name=tool_name,
+                )
+                self.assertEqual(
+                    resolved["charter"],
+                    f"Use this exact public template: {url}",
+                )
+
     def test_runtime_rejects_references_in_unsupported_tool_fields_before_execution(self):
         token = rewrite_prompt_urls(
             "https://profiles.example.test/avery?view=full",

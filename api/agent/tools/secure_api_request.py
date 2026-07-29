@@ -45,8 +45,10 @@ def get_secure_api_request_tool() -> dict[str, Any]:
                 "Call a JSON API and place selected secret response fields directly into short-lived encrypted "
                 "handoff references. The raw response and secret values are never returned. Use JSON Pointer paths "
                 "such as `/results`, `/address`, and `/appPassword`. Return only non-sensitive scalar fields through "
-                "public_fields. Use this instead of http_request whenever a response contains credentials, passwords, "
-                "tokens, OTPs, or other values that must be assigned to another Gobii."
+                "public_fields or root-level pagination metadata through response_fields. Page output distinguishes "
+                "the provider's page from this tool's local item cap and never claims the provider is exhausted. Use "
+                "this instead of http_request whenever a response contains credentials, passwords, tokens, OTPs, or "
+                "other values that must be assigned to another Gobii."
             ),
             "parameters": {
                 "type": "object",
@@ -64,6 +66,14 @@ def get_secure_api_request_tool() -> dict[str, Any]:
                         "type": "object",
                         "additionalProperties": {"type": "string"},
                         "description": "Safe output names mapped to scalar JSON Pointer paths relative to each item.",
+                    },
+                    "response_fields": {
+                        "type": "object",
+                        "additionalProperties": {"type": "string"},
+                        "description": (
+                            "Safe output names mapped to scalar JSON Pointer paths relative to the response root. "
+                            "Use for provider pagination fields such as total, offset, limit, cursor, or has_more."
+                        ),
                     },
                     "secret_fields": {
                         "type": "object",
@@ -106,18 +116,24 @@ def execute_secure_api_request(agent: PersistentAgent, params: dict[str, Any]) -
         expires_at__lte=timezone.now(),
     ).delete()
     public_fields = _normalize_field_map(params.get("public_fields"))
+    response_fields = _normalize_field_map(params.get("response_fields"))
     secret_fields = _normalize_field_map(params.get("secret_fields"))
     if not secret_fields:
         return {"status": "error", "message": "secret_fields must contain at least one JSON Pointer mapping."}
-    if len(public_fields) + len(secret_fields) > MAX_EXTRACTED_FIELDS:
+    if len(public_fields) + len(response_fields) + len(secret_fields) > MAX_EXTRACTED_FIELDS:
         return {
             "status": "error",
-            "message": f"At most {MAX_EXTRACTED_FIELDS} total public and secret fields may be extracted.",
+            "message": (
+                f"At most {MAX_EXTRACTED_FIELDS} total public, response, and secret fields may be extracted."
+            ),
         }
 
     public_error = _validate_public_mappings(public_fields, secret_fields)
     if public_error:
         return {"status": "error", "message": public_error}
+    response_error = _validate_public_mappings(response_fields, secret_fields)
+    if response_error:
+        return {"status": "error", "message": response_error}
 
     try:
         max_items = int(params.get("max_items", MAX_SECURE_RESPONSE_ITEMS))
@@ -168,6 +184,7 @@ def execute_secure_api_request(agent: PersistentAgent, params: dict[str, Any]) -
 
     output_items: list[dict[str, Any]] = []
     try:
+        provider_fields = _extract_public_fields(content, response_fields)
         with transaction.atomic():
             for index, source_item in enumerate(source_items):
                 if not isinstance(source_item, dict):
@@ -196,8 +213,13 @@ def execute_secure_api_request(agent: PersistentAgent, params: dict[str, Any]) -
         "status": "ok",
         "status_code": status_code,
         "items": output_items,
-        "count": len(output_items),
-        "truncated": isinstance(collection, list) and len(collection) > max_items,
+        "page": {
+            "provider_item_count": len(collection) if isinstance(collection, list) else 1,
+            "returned_item_count": len(output_items),
+            "locally_truncated": isinstance(collection, list) and len(collection) > max_items,
+            "provider_completeness": "unknown",
+            "provider_fields": provider_fields,
+        },
         "expires_in_seconds": ttl_seconds,
     }
 
