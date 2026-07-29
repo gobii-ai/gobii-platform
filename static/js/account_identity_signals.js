@@ -133,6 +133,7 @@
           if (typeof Fingerprint.start === "function") {
             const startOptions = {};
             if (options.behaviorUrl) {
+              // v4 automatically retains Fingerprint's default endpoints as fallbacks.
               startOptions.endpoints = options.behaviorUrl;
             }
             return Fingerprint.start(startOptions);

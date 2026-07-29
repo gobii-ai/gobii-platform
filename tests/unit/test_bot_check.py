@@ -195,6 +195,17 @@ class BotCheckScoringTests(SimpleTestCase):
         )
         self.assertLess(report["coverage"]["completed"], report["coverage"]["total"])
 
+    def test_missing_device_memory_is_displayed_as_unknown(self):
+        report = _report(client=_client_signals(device_memory=None))
+        hardware_check = next(
+            check
+            for check in report["categories"][3]["checks"]
+            if check["key"] == "hardware"
+        )
+
+        self.assertIn("Reported memory: unknown", hardware_check["detail"])
+        self.assertNotIn("None GB", hardware_check["detail"])
+
 
 @tag("batch_pages")
 class BotCheckNormalizationTests(SimpleTestCase):
@@ -586,6 +597,34 @@ class BotCheckViewTests(TestCase):
         self.assertEqual(visitor_check["status"], "info")
         self.assertNotIn("visitor-secret", response.content.decode())
         fetch_mock.assert_not_called()
+
+    @override_settings(
+        GOBII_PROPRIETARY_MODE=True,
+        FINGERPRINT_JS_ENABLED=True,
+        FINGERPRINT_JS_URL="https://metrics.example/agent.js",
+        FINGERPRINT_JS_API_KEY="public-browser-key",
+        FINGERPRINT_SERVER_API_KEY="",
+    )
+    def test_event_id_takes_precedence_over_contradictory_client_error(self):
+        token = self._start()
+        response = self.client.post(
+            self.complete_url,
+            data=json.dumps(
+                {
+                    "scan_token": token,
+                    "client_signals": _client_signals(),
+                    "fingerprint_event_id": "request-123",
+                    "fingerprint_client": {
+                        "integration_error": "csp_block",
+                    },
+                }
+            ),
+            content_type="application/json",
+            HTTP_USER_AGENT="Browser A",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["report"]["fingerprint_status"], "browser_only")
 
     @override_settings(
         GOBII_PROPRIETARY_MODE=True,

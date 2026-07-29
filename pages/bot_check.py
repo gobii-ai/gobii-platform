@@ -824,6 +824,8 @@ def build_bot_check_report(client, server, fingerprint=None, *, fingerprint_stat
     if client.get("screen_width") is not None and client.get("screen_height") is not None:
         screen_value = f"{int(client['screen_width'])} × {int(client['screen_height'])}"
     renderer = client.get("webgl_renderer") or "Unavailable"
+    device_memory = client.get("device_memory")
+    memory_display = f"{device_memory} GB" if device_memory is not None else "unknown"
     device_checks = [
         _check(
             "platform",
@@ -851,7 +853,7 @@ def build_bot_check_report(client, server, fingerprint=None, *, fingerprint_stat
                 else "Processor count unavailable"
             ),
             (
-                f"Reported memory: {client.get('device_memory')} GB; "
+                f"Reported memory: {memory_display}; "
                 f"touch points: {int(client.get('max_touch_points') or 0)}."
             ),
             source="Browser",
@@ -1203,21 +1205,22 @@ def bot_check_complete(request):
     fingerprint_status = "unavailable"
     fingerprint_config = get_fingerprint_browser_config()
 
-    if fingerprint_client["integration_error"]:
-        fingerprint_status = (
-            "client_error"
-            if fingerprint_client["integration_error"] == "agent_error"
-            else f"client_{fingerprint_client['integration_error']}"
-        )
-    elif fingerprint_config["enabled"] and not event_id:
-        fingerprint_status = "missing_event"
-
+    # A provider event is stronger evidence than a contradictory, client-reported
+    # integration error, which a crafted request can supply alongside any event ID.
     if event_id and fingerprint_config["enabled"]:
         fingerprint_status = (
             "browser_only"
             if not fingerprint_config["server_intelligence_enabled"]
             else "unavailable"
         )
+    elif fingerprint_client["integration_error"]:
+        fingerprint_status = (
+            "client_error"
+            if fingerprint_client["integration_error"] == "agent_error"
+            else f"client_{fingerprint_client['integration_error']}"
+        )
+    elif fingerprint_config["enabled"]:
+        fingerprint_status = "missing_event"
 
     if event_id and fingerprint_config["server_intelligence_enabled"]:
         try:
