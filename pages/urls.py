@@ -41,6 +41,7 @@ from .views import (
     PublicTemplateLaunchView,
     public_template_social_image,
 )
+from .bot_check import bot_check_complete, bot_check_page, bot_check_start
 
 from djstripe import views as djstripe_views
 from django.contrib.sitemaps.views import sitemap
@@ -78,6 +79,9 @@ _home_redirect = RedirectView.as_view(url="/", permanent=True)
 
 urlpatterns = [
     path("", HomePage.as_view(), name="home"),
+    path("bot-check/", bot_check_page, name="bot_check"),
+    path("bot-check/api/start/", bot_check_start, name="bot_check_start"),
+    path("bot-check/api/complete/", bot_check_complete, name="bot_check_complete"),
     path("install.sh", InstallScriptView.as_view(), name="install_script"),
     path("manifest.json", WebManifestView.as_view(), name="web_manifest"),
     path("libary/", RedirectView.as_view(pattern_name="pages:library", permanent=True)),

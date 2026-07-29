@@ -97,28 +97,75 @@
       return normalizedGaClientId;
     });
 
+    const classifyFingerprintError = (error) => {
+      const message = `${error?.name || ''} ${error?.message || ''}`.toLowerCase();
+      if (message.includes('api key') && (
+        message.includes('not found')
+        || message.includes('invalid')
+        || message.includes('missing')
+        || message.includes('expired')
+      )) {
+        return 'invalid_browser_key';
+      }
+      if (message.includes('origin') && message.includes('forbidden')) {
+        return 'forbidden_origin';
+      }
+      if (message.includes('content security') || message.includes('csp')) {
+        return 'csp_block';
+      }
+      if (message.includes('timeout') || message.includes('timed out')) {
+        return 'timeout';
+      }
+      if (message.includes('network') || message.includes('failed to fetch')) {
+        return 'network_error';
+      }
+      return 'agent_error';
+    };
+
     const createFpjsPromise = ({
       loaderUrl,
       behaviorUrl,
       timeoutMs,
       onResolved,
+      onError,
+      getOptions,
     }) => withTimeout(
       import(loaderUrl)
-        .then(({ load, defaultEndpoint }) => {
+        .then((Fingerprint) => {
+          if (typeof Fingerprint.start === 'function') {
+            const startOptions = {};
+            if (behaviorUrl) {
+              startOptions.endpoints = behaviorUrl;
+            }
+            return Fingerprint.start(startOptions);
+          }
+          if (typeof Fingerprint.load !== 'function') {
+            throw new TypeError('Unsupported Fingerprint agent module.');
+          }
           const loadOptions = {};
           if (behaviorUrl) {
-            loadOptions.endpoint = [`${behaviorUrl}?region=us`, defaultEndpoint];
+            loadOptions.endpoint = [
+              `${behaviorUrl}?region=us`,
+              Fingerprint.defaultEndpoint,
+            ];
           }
-          return load(loadOptions);
+          return Fingerprint.load(loadOptions);
         })
-        .then((fpAgent) => fpAgent.get())
+        .then((fpAgent) => fpAgent.get(getOptions))
         .then((result) => {
           if (typeof onResolved === 'function') {
             onResolved(result);
           }
           return result;
         })
-        .catch(() => null),
+        .catch((error) => {
+          const errorCode = classifyFingerprintError(error);
+          console.warn(`Fingerprint agent failed (${errorCode}).`);
+          if (typeof onError === 'function') {
+            onError(errorCode);
+          }
+          return null;
+        }),
       timeoutMs,
       null,
     );

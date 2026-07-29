@@ -159,10 +159,12 @@
         if (!result) {
           return;
         }
-        setFieldValue(authRoot, "[data-auth-fpjs-visitor-field]", result.visitorId);
-        setFieldValue(authRoot, "[data-auth-fpjs-request-field]", result.requestId);
-        identitySignals.writeCookie("gobii_signup_fpjs_visitor_id", result.visitorId, cookieMaxAge);
-        identitySignals.writeCookie("gobii_signup_fpjs_request_id", result.requestId, cookieMaxAge);
+        const eventId = result.event_id || result.eventId || result.requestId || "";
+        const visitorId = result.visitor_id || result.visitorId || "";
+        setFieldValue(authRoot, "[data-auth-fpjs-visitor-field]", visitorId);
+        setFieldValue(authRoot, "[data-auth-fpjs-request-field]", eventId);
+        identitySignals.writeCookie("gobii_signup_fpjs_visitor_id", visitorId, cookieMaxAge);
+        identitySignals.writeCookie("gobii_signup_fpjs_request_id", eventId, cookieMaxAge);
       },
     });
 

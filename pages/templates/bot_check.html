@@ -1,0 +1,180 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Bot Check | {{ settings.PUBLIC_BRAND_NAME|default:"Gobii" }}{% endblock %}
+
+{% block head_extras %}
+  {{ block.super }}
+  <meta name="description" content="Inspect browser automation, network, device, and Fingerprint intelligence signals.">
+  <meta name="robots" content="noindex, nofollow">
+  <link rel="stylesheet" href="{% static 'css/bot_check.css' %}">
+{% endblock %}
+
+{% block content %}
+<main
+  id="bot-check-root"
+  class="min-h-screen bg-white text-slate-950"
+  data-start-url="{% url 'pages:bot_check_start' %}"
+  data-complete-url="{% url 'pages:bot_check_complete' %}"
+  aria-busy="true"
+>
+  <section class="relative overflow-hidden bg-slate-950 text-white">
+    <div class="pointer-events-none absolute inset-0" aria-hidden="true">
+      <div class="absolute -right-28 -top-28 h-96 w-96 rounded-full bg-indigo-500/20 blur-3xl"></div>
+      <div class="absolute -bottom-40 left-1/4 h-96 w-96 rounded-full bg-cyan-400/10 blur-3xl"></div>
+    </div>
+    <div class="relative mx-auto max-w-6xl px-4 py-16 sm:px-6 sm:py-20 lg:px-8">
+      <div class="max-w-3xl">
+        <div class="mb-5 inline-flex items-center gap-2 rounded-full border border-indigo-300/30 bg-indigo-400/10 px-3 py-1 text-sm font-medium text-indigo-100">
+          <i data-lucide="scan-search" class="h-4 w-4" aria-hidden="true"></i>
+          Browser automation diagnostic
+        </div>
+        <h1 class="text-4xl font-semibold tracking-tight sm:text-6xl">Are you browsing like a bot?</h1>
+        <p class="mt-6 max-w-2xl text-lg leading-8 text-slate-300 sm:text-xl">
+          This page checks browser-control, device-integrity, network, and reputation signals, then explains every finding.
+        </p>
+      </div>
+
+      <div class="mt-10 flex max-w-3xl items-start gap-3 rounded-2xl border border-white/10 bg-white/5 p-4 text-sm leading-6 text-slate-300">
+        <i data-lucide="shield-check" class="mt-0.5 h-5 w-5 shrink-0 text-cyan-300" aria-hidden="true"></i>
+        <p>
+          The scan starts automatically. When configured, browser attributes are sent to Fingerprint for device intelligence.
+          Gobii does not save this report, and the result does not affect access to your account.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="mx-auto max-w-6xl px-4 py-10 sm:px-6 sm:py-14 lg:px-8">
+    <div
+      id="bot-check-progress"
+      class="bot-check-progress"
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+    >
+      <div class="flex items-center gap-4">
+        <span class="bot-check-spinner" aria-hidden="true"></span>
+        <div>
+          <p id="bot-check-progress-title" class="text-lg font-semibold text-slate-950">Starting diagnostic…</p>
+          <p id="bot-check-progress-detail" class="mt-1 text-sm text-slate-600">Preparing a private, short-lived scan.</p>
+        </div>
+      </div>
+      <div class="bot-check-steps" role="list" aria-label="Scan progress">
+        <div class="bot-check-step" data-scan-step="1" data-state="current" role="listitem" aria-current="step">
+          <span class="bot-check-step-marker" aria-hidden="true">1</span>
+          <span>Browser</span>
+        </div>
+        <div class="bot-check-step" data-scan-step="2" data-state="upcoming" role="listitem">
+          <span class="bot-check-step-marker" aria-hidden="true">2</span>
+          <span>Network</span>
+        </div>
+        <div class="bot-check-step" data-scan-step="3" data-state="upcoming" role="listitem">
+          <span class="bot-check-step-marker" aria-hidden="true">3</span>
+          <span>Intelligence</span>
+        </div>
+      </div>
+    </div>
+
+    <div id="bot-check-error" class="hidden rounded-2xl border border-rose-300 bg-rose-50 p-5 text-rose-950" role="alert">
+      <div class="flex items-start gap-3">
+        <i data-lucide="triangle-alert" class="mt-0.5 h-5 w-5 shrink-0" aria-hidden="true"></i>
+        <div>
+          <p class="font-semibold">The scan could not finish</p>
+          <p id="bot-check-error-message" class="mt-1 text-sm"></p>
+          <p id="bot-check-error-guidance" class="mt-2 text-sm font-medium"></p>
+          <button
+            id="bot-check-retry"
+            type="button"
+            class="mt-4 inline-flex min-h-10 items-center justify-center rounded-lg bg-rose-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-rose-600 focus:outline-none focus:ring-2 focus:ring-rose-600 focus:ring-offset-2"
+          >
+            Try again
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div id="bot-check-results" class="hidden" aria-live="polite">
+      <section
+        id="bot-check-verdict"
+        class="bot-check-verdict"
+        aria-labelledby="bot-check-verdict-label"
+      >
+        <div>
+          <p class="text-sm font-semibold uppercase tracking-wider text-current/70">Diagnostic result</p>
+          <h2 id="bot-check-verdict-label" class="mt-2 text-3xl font-semibold tracking-tight sm:text-4xl"></h2>
+          <p id="bot-check-verdict-summary" class="mt-3 max-w-2xl text-base leading-7"></p>
+        </div>
+        <div class="bot-check-score" aria-label="Automation score">
+          <span id="bot-check-score-value" class="text-4xl font-semibold"></span>
+          <span class="bot-check-score-label">Automation score</span>
+        </div>
+      </section>
+
+      <div class="mt-6 flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p id="bot-check-coverage" class="text-sm font-medium text-slate-700"></p>
+          <p id="bot-check-fingerprint-status" class="mt-1 text-sm text-slate-600"></p>
+          <p class="mt-2 text-xs leading-5 text-slate-500">
+            The score estimates automation likelihood, not whether the visitor is safe or harmful.
+          </p>
+        </div>
+        <button
+          id="bot-check-rerun"
+          type="button"
+          class="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-lg bg-slate-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+        >
+          <i data-lucide="refresh-cw" class="h-4 w-4" aria-hidden="true"></i>
+          Run scan again
+        </button>
+      </div>
+
+      <aside class="mt-8 rounded-2xl bg-indigo-50 px-5 py-4 text-sm leading-6 text-indigo-950" aria-label="How to read the report">
+        <p class="font-semibold">How to read the report</p>
+        <p class="mt-1 text-indigo-800">
+          Flagged groups open automatically. “No signal” means this check found nothing suspicious; it is not proof that the browser is human.
+          Expand any group to see the evidence and how it affected the score.
+        </p>
+      </aside>
+
+      <div id="bot-check-categories" class="mt-10 space-y-4"></div>
+
+      <section class="mt-14 rounded-2xl bg-indigo-950 px-5 py-6 text-indigo-50 sm:px-7">
+        <div class="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
+          <div class="max-w-2xl">
+            <h2 class="text-xl font-semibold">Technical report</h2>
+            <p class="mt-2 text-sm leading-6 text-indigo-200">
+              This sanitized JSON contains the displayed findings. It excludes provider secrets, raw Fingerprint payloads, and persistent identifiers.
+            </p>
+          </div>
+          <button
+            id="bot-check-copy"
+            type="button"
+            class="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-lg bg-white px-4 py-2 text-sm font-semibold text-indigo-950 transition hover:bg-indigo-100 focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2 focus:ring-offset-indigo-950"
+          >
+            <i data-lucide="copy" class="h-4 w-4" aria-hidden="true"></i>
+            <span id="bot-check-copy-label" aria-live="polite">Copy JSON</span>
+          </button>
+        </div>
+        <details class="mt-6">
+          <summary class="cursor-pointer text-sm font-semibold text-white focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2 focus:ring-offset-indigo-950">
+            View sanitized JSON
+          </summary>
+          <pre id="bot-check-json" class="mt-4 max-h-[32rem] overflow-auto rounded-xl bg-slate-950 p-4 text-xs leading-6 text-cyan-100"></pre>
+        </details>
+      </section>
+
+      <p class="mt-8 text-sm leading-6 text-slate-600">
+        This is a best-effort diagnostic, not proof of identity. Automation can hide signals, and legitimate browsers can expose
+        development, virtualization, or privacy features that resemble automated environments.
+      </p>
+    </div>
+  </section>
+</main>
+{% endblock %}
+
+{% block extra_js %}
+  {{ block.super }}
+  <script src="{% static 'js/account_identity_signals.js' %}?v=20260729-7" defer></script>
+  <script src="{% static 'js/bot_check.js' %}?v=20260729-7" defer></script>
+{% endblock %}
