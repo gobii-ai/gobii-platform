@@ -149,7 +149,7 @@ export function McpServerFormModal({
   onError,
   oauth,
 }: McpServerFormModalProps) {
-  const [state, setState] = useState<FormState>(() => getInitialState(undefined, allowCommands))
+  const [state, setState] = useState<FormState>(() => getInitialState())
   const [formErrors, setFormErrors] = useState<FormErrors | null>(null)
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -157,7 +157,7 @@ export function McpServerFormModal({
   const [clientSecret, setClientSecret] = useState('')
   const [oauthScope, setOauthScope] = useState('')
   const [useCustomClient, setUseCustomClient] = useState(false)
-  const [headersExpanded, setHeadersExpanded] = useState(() => hasConfiguredHeaders(getInitialState(undefined, allowCommands)))
+  const [headersExpanded, setHeadersExpanded] = useState(() => hasConfiguredHeaders(getInitialState()))
 
   const shouldFetchDetail = mode === 'edit' && Boolean(detailUrl)
   const detailQuery = useQuery({
@@ -170,11 +170,11 @@ export function McpServerFormModal({
 
   useEffect(() => {
     if (mode === 'edit' && server) {
-      const nextState = getInitialState(server, allowCommands)
+      const nextState = getInitialState(server)
       setState(nextState)
       setHeadersExpanded(hasConfiguredHeaders(nextState))
     }
-  }, [mode, server, allowCommands])
+  }, [mode, server])
 
   const oauthStore = useMcpOAuth({
     serverId: mode === 'edit' ? server?.id : undefined,
@@ -206,15 +206,17 @@ export function McpServerFormModal({
   ]
   const showMetadataSection = ownerScope === 'platform'
   const showPipedreamPrefetchApps = ownerScope === 'platform' && state.slug.trim().toLowerCase() === 'pipedream'
+  const hasExistingCommand = mode === 'edit' && Boolean(server?.command)
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault()
-    const isStdio = allowCommands && state.connectionType === 'stdio'
+    const isStdio = state.connectionType === 'stdio'
+    const preserveExistingCommand = isStdio && !allowCommands && hasExistingCommand
     let command = ''
     let commandArgs: string[] = []
     let environment: Record<string, string> = {}
 
-    if (isStdio) {
+    if (isStdio && allowCommands) {
       const parseResult = parseCommandLine(state.commandLine)
       if (parseResult.error) {
         setStatusMessage(parseResult.error)
@@ -231,7 +233,12 @@ export function McpServerFormModal({
         return
       }
       environment = entriesToObject(state.environmentEntries)
-    } else if (!state.url.trim()) {
+    } else if (isStdio && !preserveExistingCommand) {
+      const message = 'STDIO connections are unavailable.'
+      setStatusMessage(message)
+      onError(message)
+      return
+    } else if (!isStdio && !state.url.trim()) {
       const message = 'URL is required for HTTP connections.'
       setStatusMessage(message)
       onError(message)
@@ -258,10 +265,12 @@ export function McpServerFormModal({
             authMethod: state.authMethod,
             bearerToken: state.bearerToken,
           }),
-      metadata: metadataResult.value,
-      environment,
-      command,
-      command_args: commandArgs,
+    }
+    if (!preserveExistingCommand) {
+      payload.metadata = metadataResult.value
+      payload.environment = environment
+      payload.command = command
+      payload.command_args = commandArgs
     }
     if (showPipedreamPrefetchApps) {
       payload.prefetch_apps = parsePrefetchAppsInput(state.prefetchAppsInput)
@@ -411,7 +420,7 @@ export function McpServerFormModal({
                 }
               >
                 <option value="http">HTTP</option>
-                <option value="stdio" disabled={!allowCommands}>
+                <option value="stdio" disabled={!allowCommands && !hasExistingCommand}>
                   STDIO
                 </option>
               </select>
@@ -431,11 +440,17 @@ export function McpServerFormModal({
                     className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-blue-500"
                     value={state.commandLine}
                     onChange={(event) => setState((prev) => ({ ...prev, commandLine: event.target.value }))}
+                    readOnly={!allowCommands}
                     placeholder="e.g. npx -y @my/mcp@1.0.0"
                   />
                 )}
               </div>
             </div>
+            {state.connectionType === 'stdio' && !allowCommands && hasExistingCommand && (
+              <p className="mt-1 text-xs text-slate-500">
+                This STDIO configuration is read-only. You can update server details or convert it to HTTP.
+              </p>
+            )}
             {fieldErrorMessages('url', formErrors).map((error) => (
               <p key={error} className="text-xs text-red-600">
                 {error}
@@ -727,7 +742,7 @@ export function McpServerFormModal({
   )
 }
 
-function getInitialState(server?: McpServerDetail, allowCommands = false): FormState {
+function getInitialState(server?: McpServerDetail): FormState {
   if (!server) {
     return {
       displayName: '',
@@ -746,7 +761,7 @@ function getInitialState(server?: McpServerDetail, allowCommands = false): FormS
   }
   const { headerEntries, bearerToken } = splitHeaders(server.headers, server.authMethod)
   const hasCommand = Boolean(server.command)
-  const connectionType = allowCommands && hasCommand ? 'stdio' : 'http'
+  const connectionType = hasCommand ? 'stdio' : 'http'
   return {
     displayName: server.displayName,
     slug: server.name,

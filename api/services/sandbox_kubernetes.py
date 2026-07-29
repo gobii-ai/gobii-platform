@@ -13,7 +13,13 @@ from django.conf import settings
 
 from api.models import AgentComputeSession
 from api.sandbox_utils import monotonic_elapsed_ms as _elapsed_ms, normalize_timeout as _normalize_timeout
-from api.services.sandbox_compute import SandboxComputeBackend, SandboxComputeUnavailable, SandboxSessionUpdate, _SANDBOX_PROXY_CLEARED_ATTR, _requires_agent_pod_discovery
+from api.services.mcp_runtime_policy import mcp_server_requires_agent_sandbox
+from api.services.sandbox_compute import (
+    SandboxComputeBackend,
+    SandboxComputeUnavailable,
+    SandboxSessionUpdate,
+    _SANDBOX_PROXY_CLEARED_ATTR,
+)
 from api.services.system_settings import get_sandbox_compute_pod_image, get_sandbox_egress_proxy_pod_image
 
 logger = logging.getLogger(__name__)
@@ -609,7 +615,7 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
     ) -> Dict[str, Any]:
         if not server_payload:
             return {"status": "error", "message": "Missing MCP server payload for discovery."}
-        if not _requires_agent_pod_discovery(server_payload):
+        if not mcp_server_requires_agent_sandbox(server_payload):
             from api.agent.tools.mcp_manager import get_mcp_manager
 
             manager = get_mcp_manager()

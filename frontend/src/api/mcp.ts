@@ -32,6 +32,7 @@ type McpServerDetailDTO = McpServerDTO & {
 type McpServerListResponseDTO = {
   owner_scope: string
   owner_label: string
+  allow_commands: boolean
   result_count: number
   servers: McpServerDTO[]
 }
@@ -172,6 +173,7 @@ export type McpServer = {
 export type McpServerListResponse = {
   ownerScope: string
   ownerLabel: string
+  allowCommands: boolean
   resultCount: number
   servers: McpServer[]
 }
@@ -413,6 +415,7 @@ export async function fetchMcpServers(listUrl: string): Promise<McpServerListRes
   return {
     ownerScope: payload.owner_scope,
     ownerLabel: payload.owner_label,
+    allowCommands: Boolean(payload.allow_commands),
     resultCount: payload.result_count,
     servers: (payload.servers ?? []).map(mapServer),
   }

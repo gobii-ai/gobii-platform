@@ -56,6 +56,10 @@ from ...models import MCPServerConfig, MCPServerOAuthCredential, PersistentAgent
 from ...proxy_selection import select_proxy_for_persistent_agent, select_proxy
 from ...services.mcp_servers import agent_accessible_server_configs
 from ...services.mcp_tool_discovery import schedule_mcp_tool_discovery
+from ...services.mcp_runtime_policy import (
+    mcp_server_is_stdio,
+    mcp_server_requires_agent_sandbox,
+)
 from ...services.sandbox_compute import SandboxComputeService, SandboxComputeUnavailable, sandbox_compute_enabled, sandbox_compute_enabled_for_agent
 from ...services.mcp_tool_cache import (
     build_mcp_tool_cache_fingerprint,
@@ -661,16 +665,30 @@ class MCPToolManager:
             self._last_refresh_marker = marker
 
     def _sandbox_mcp_enabled(self, agent: Optional[PersistentAgent]) -> bool:
-        """Return whether non-platform MCP servers should prefer sandbox routing."""
+        """Return whether sandbox compute is available for this agent context."""
         if agent is None:
             return sandbox_compute_enabled()
         return sandbox_compute_enabled_for_agent(agent)
 
     @staticmethod
     def _is_stdio_runtime(runtime: Optional[MCPServerRuntime]) -> bool:
-        if runtime is None:
+        return mcp_server_is_stdio(runtime)
+
+    def _runtime_requires_sandbox(self, runtime: Optional[MCPServerRuntime]) -> bool:
+        return mcp_server_requires_agent_sandbox(runtime)
+
+    def _sandbox_required_runtime_available(
+        self,
+        runtime: Optional[MCPServerRuntime],
+        *,
+        agent: Optional[PersistentAgent],
+        force_local: bool = False,
+    ) -> bool:
+        if force_local or not self._runtime_requires_sandbox(runtime):
+            return True
+        if agent is None:
             return False
-        return bool(runtime.command) and not bool(runtime.url)
+        return self._sandbox_mcp_enabled(agent)
 
     def _should_route_runtime_via_sandbox(
         self,
@@ -678,13 +696,7 @@ class MCPToolManager:
         *,
         agent: Optional[PersistentAgent],
     ) -> bool:
-        if runtime is None:
-            return False
-        if runtime.scope == MCPServerConfig.Scope.PLATFORM:
-            return False
-        if not self._is_stdio_runtime(runtime):
-            return False
-        return self._sandbox_mcp_enabled(agent)
+        return self._runtime_requires_sandbox(runtime) and self._sandbox_mcp_enabled(agent)
 
     def _ensure_runtime_registered(
         self,
@@ -697,6 +709,17 @@ class MCPToolManager:
         sandbox_context: Optional[SandboxToolCacheContext] = None,
     ) -> bool:
         """Ensure the given runtime has an active client and cached tool list."""
+        if not self._sandbox_required_runtime_available(
+            runtime,
+            agent=agent,
+            force_local=force_local,
+        ):
+            logger.info(
+                "Skipping non-platform STDIO MCP server %s because sandbox compute is unavailable",
+                runtime.name,
+            )
+            return False
+
         config_id = runtime.config_id
         slot_key = self._tool_cache_slot_key(runtime, pipedream_context, sandbox_context)
         uses_per_agent_client = self._runtime_uses_per_agent_client(runtime)
@@ -830,6 +853,13 @@ class MCPToolManager:
             return False
 
         runtime = self._build_runtime_from_config(cfg)
+        if self._runtime_requires_sandbox(runtime) and not sandbox_compute_enabled_for_agent(agent):
+            logger.warning(
+                "Refusing local MCP discovery for non-platform STDIO server %s without an eligible agent",
+                runtime.name,
+            )
+            return False
+
         sandbox_context = self._sandbox_cache_context_for_runtime(runtime, agent)
         try:
             self._register_server(
@@ -879,6 +909,15 @@ class MCPToolManager:
             if pipedream_context is not None
             else [self._build_tool_cache_fingerprint(runtime)]
         )
+        if self._runtime_requires_sandbox(runtime):
+            logger.warning(
+                "Refusing host-local catalog refresh for non-platform STDIO MCP server %s",
+                runtime.name,
+            )
+            for fingerprint in fingerprints:
+                release_mcp_catalog_refresh(config_id, fingerprint)
+            return False
+
         try:
             slot_key = self._tool_cache_slot_key(runtime, pipedream_context)
             self._tools_cache.pop(slot_key, None)
@@ -930,6 +969,13 @@ class MCPToolManager:
             }
 
         runtime = self._build_runtime_from_config(cfg)
+        if self._runtime_requires_sandbox(runtime):
+            return False, [], {
+                "phase": "sandbox_discovery",
+                "error_type": "sandbox_required",
+                "message": "Non-platform STDIO MCP servers must be tested through sandbox compute.",
+            }
+
         sandbox_context = self._sandbox_cache_context_for_runtime(runtime, agent)
         slot_key = self._tool_cache_slot_key(runtime, sandbox_context=sandbox_context)
         self._tools_cache.pop(slot_key, None)
@@ -1519,6 +1565,13 @@ class MCPToolManager:
         server: MCPServerRuntime,
         stale_fingerprints: list[tuple[str, str]],
     ) -> None:
+        if self._runtime_requires_sandbox(server):
+            logger.info(
+                "Skipping host-local catalog refresh for non-platform STDIO MCP server %s",
+                server.name,
+            )
+            return
+
         claimed = [
             (app_slug, fingerprint)
             for app_slug, fingerprint in stale_fingerprints
@@ -1566,6 +1619,17 @@ class MCPToolManager:
         sandbox_context: Optional[SandboxToolCacheContext] = None,
     ):
         """Register an MCP server and cache its tools."""
+
+        if not self._sandbox_required_runtime_available(
+            server,
+            agent=agent,
+            force_local=force_local,
+        ):
+            logger.warning(
+                "Refusing local registration for non-platform STDIO MCP server %s because sandbox compute is unavailable",
+                server.name,
+            )
+            return
 
         discovery_started_at = monotonic()
         requested_pipedream_context = pipedream_context
@@ -2026,8 +2090,13 @@ class MCPToolManager:
             and enabled_row.server_config_id
             and str(enabled_row.server_config_id) == cached.config_id
         )
-        if cached and cached_matches_row and cached.config_id in self._server_cache:
-            return cached
+        if cached and cached_matches_row:
+            cached_runtime = self._server_cache.get(cached.config_id)
+            if cached_runtime and self._sandbox_required_runtime_available(
+                cached_runtime,
+                agent=agent,
+            ):
+                return cached
 
         allowed_config_ids: set[str] = set()
         allowed_server_names: set[str] = set()
@@ -2090,8 +2159,11 @@ class MCPToolManager:
             candidate_runtimes = [
                 runtime
                 for runtime in self._server_cache.values()
-                if runtime.config_id in allowed_config_ids
-                or runtime.name.lower() in allowed_server_names
+                if (
+                    runtime.config_id in allowed_config_ids
+                    or runtime.name.lower() in allowed_server_names
+                )
+                and self._sandbox_required_runtime_available(runtime, agent=agent)
             ]
             if tool_name.startswith("mcp_"):
                 parts = tool_name.split("_", 2)
@@ -2439,6 +2511,19 @@ class MCPToolManager:
         actual_tool_name = info.tool_name
         runtime = self._server_cache.get(info.config_id)
 
+        if not self._sandbox_required_runtime_available(
+            runtime,
+            agent=agent,
+            force_local=force_local,
+        ):
+            return {
+                "status": "error",
+                "message": (
+                    f"MCP server '{server_name}' requires sandbox compute, "
+                    "which is not available for this agent"
+                ),
+            }
+
         if runtime:
             runtime, auth_error = self._ensure_runtime_oauth(runtime)
             if auth_error:
@@ -2700,6 +2785,61 @@ class MCPToolManager:
                 evict_client=True,
             )
 
+    def _execute_mcp_tool_locally_isolated(
+        self,
+        agent: PersistentAgent,
+        info: MCPToolInfo,
+        runtime: MCPServerRuntime,
+        params: Dict[str, Any],
+        *,
+        owner: Any,
+        will_continue_work: Optional[bool],
+    ) -> Dict[str, Any]:
+        proxy_url = None
+        if runtime.url or self._is_stdio_runtime(runtime):
+            proxy_url, proxy_error = self._select_agent_proxy_url(agent)
+            if proxy_error:
+                return {"status": "error", "message": proxy_error}
+
+        try:
+            client = self._build_client_for_runtime(
+                runtime,
+                env_overrides=self._build_stdio_proxy_env(proxy_url)
+                if self._is_stdio_runtime(runtime)
+                else None,
+            )
+            timeout_seconds = self._get_timeout_for_runtime(runtime)
+            http_timeout_seconds = timeout_seconds if runtime.url else None
+            with _use_mcp_http_timeout(http_timeout_seconds), _use_mcp_proxy(proxy_url):
+                result = self._run_coroutine_isolated(
+                    self._execute_async(
+                        client,
+                        info.tool_name,
+                        params,
+                        timeout_seconds=timeout_seconds,
+                    )
+                )
+            with mcp_result_owner_context(owner):
+                result = self._adapt_tool_result(info.server_name, info.tool_name, result)
+
+            response = self._finalize_mcp_result(info.server_name, info.tool_name, result)
+            response = self._handle_mcp_session_death_response(
+                runtime,
+                response,
+                evict_client=False,
+            )
+            if will_continue_work is False:
+                response["auto_sleep_ok"] = True
+            return response
+        except Exception as exc:
+            logger.error("Failed to execute isolated MCP tool %s: %s", info.full_name, exc)
+            response = {"status": "error", "message": str(exc)}
+            return self._handle_mcp_session_death_response(
+                runtime,
+                response,
+                evict_client=False,
+            )
+
     def execute_mcp_tool_isolated(
         self,
         agent: PersistentAgent,
@@ -2721,6 +2861,23 @@ class MCPToolManager:
                 "message": f"Tool '{tool_name}' is not enabled for this agent",
             }
 
+        info = tool_info or self._resolve_tool_info(tool_name)
+        if not info:
+            return {"status": "error", "message": f"Unknown MCP tool: {tool_name}"}
+
+        runtime = self._server_cache.get(info.config_id)
+        if not runtime:
+            return {"status": "error", "message": f"MCP server '{info.server_name}' is not available"}
+
+        if not self._sandbox_required_runtime_available(runtime, agent=agent):
+            return {
+                "status": "error",
+                "message": (
+                    f"MCP server '{info.server_name}' requires sandbox compute, "
+                    "which is not available for this agent"
+                ),
+            }
+
         try:
             row, _ = PersistentAgentEnabledTool.objects.get_or_create(
                 agent=agent,
@@ -2731,14 +2888,6 @@ class MCPToolManager:
             row.save(update_fields=["last_used_at", "usage_count"])
         except Exception:
             logger.exception("Failed to update isolated usage for tool %s", tool_name)
-
-        info = tool_info or self._resolve_tool_info(tool_name)
-        if not info:
-            return {"status": "error", "message": f"Unknown MCP tool: {tool_name}"}
-
-        runtime = self._server_cache.get(info.config_id)
-        if not runtime:
-            return {"status": "error", "message": f"MCP server '{info.server_name}' is not available"}
 
         runtime, auth_error = self._ensure_runtime_oauth(runtime)
         if auth_error:
@@ -2753,50 +2902,32 @@ class MCPToolManager:
         if param_error:
             return param_error
 
-        proxy_url = None
-        if runtime.url or self._is_stdio_runtime(runtime):
-            proxy_url, proxy_error = self._select_agent_proxy_url(agent)
-            if proxy_error:
-                return {"status": "error", "message": proxy_error}
+        if self._runtime_requires_sandbox(runtime):
+            sandbox_result, sandbox_fallback = self._dispatch_sandbox_mcp_request(
+                agent=agent,
+                info=info,
+                runtime=runtime,
+                server_name=server_name,
+                actual_tool_name=actual_tool_name,
+                params=params,
+                full_tool_name=tool_name,
+            )
+            if sandbox_result is not None:
+                return sandbox_result
+            if not sandbox_fallback:
+                return {
+                    "status": "error",
+                    "message": f"MCP server '{server_name}' is not available",
+                }
 
-        try:
-            client = self._build_client_for_runtime(
-                runtime,
-                env_overrides=self._build_stdio_proxy_env(proxy_url)
-                if self._is_stdio_runtime(runtime)
-                else None,
-            )
-            timeout_seconds = self._get_timeout_for_runtime(runtime)
-            http_timeout_seconds = timeout_seconds if runtime.url else None
-            with _use_mcp_http_timeout(http_timeout_seconds), _use_mcp_proxy(proxy_url):
-                result = self._run_coroutine_isolated(
-                    self._execute_async(
-                        client,
-                        actual_tool_name,
-                        params,
-                        timeout_seconds=timeout_seconds,
-                    )
-                )
-            with mcp_result_owner_context(owner):
-                result = self._adapt_tool_result(server_name, actual_tool_name, result)
-
-            response = self._finalize_mcp_result(server_name, actual_tool_name, result)
-            response = self._handle_mcp_session_death_response(
-                runtime,
-                response,
-                evict_client=False,
-            )
-            if will_continue_work is False:
-                response["auto_sleep_ok"] = True
-            return response
-        except Exception as exc:
-            logger.error("Failed to execute isolated MCP tool %s: %s", tool_name, exc)
-            response = {"status": "error", "message": str(exc)}
-            return self._handle_mcp_session_death_response(
-                runtime,
-                response,
-                evict_client=False,
-            )
+        return self._execute_mcp_tool_locally_isolated(
+            agent,
+            info,
+            runtime,
+            params,
+            owner=owner,
+            will_continue_work=will_continue_work,
+        )
     
     def _adapt_tool_result(self, server_name: str, tool_name: str, result: Any):
         """Run the tool response through any registered adapters."""

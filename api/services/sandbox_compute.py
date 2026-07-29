@@ -26,6 +26,7 @@ from kombu.exceptions import OperationalError as KombuOperationalError
 
 from api.models import AgentComputeSession, ComputeSnapshot, GlobalSecret, PersistentAgent, MCPServerConfig, PersistentAgentSecret
 from api.proxy_selection import select_proxy, select_proxy_for_persistent_agent
+from api.services.mcp_runtime_policy import mcp_server_requires_agent_sandbox
 from api.services.mcp_tool_cache import set_cached_mcp_tool_definitions
 from api.services.sandbox_filespace_sync import apply_filespace_push, build_filespace_pull_manifest
 from api.services.sandbox_internal_paths import (
@@ -1250,22 +1251,6 @@ def _build_mcp_server_payload(
     return payload, runtime
 
 
-def _requires_agent_pod_discovery(runtime: Any) -> bool:
-    if runtime is None:
-        return False
-    if isinstance(runtime, dict):
-        scope = runtime.get("scope")
-        command = runtime.get("command")
-        url = runtime.get("url")
-    else:
-        scope = getattr(runtime, "scope", None)
-        command = getattr(runtime, "command", None)
-        url = getattr(runtime, "url", None)
-    if scope == MCPServerConfig.Scope.PLATFORM:
-        return False
-    return bool(command) and not bool(url)
-
-
 def _post_sync_queue_key(agent_id: str) -> str:
     return f"{_POST_SYNC_QUEUE_KEY_PREFIX}:{agent_id}"
 
@@ -2271,8 +2256,14 @@ class SandboxComputeService:
         *,
         full_tool_name: Optional[str] = None,
     ) -> Dict[str, Any]:
+        server_payload, runtime = _build_mcp_server_payload(server_config_id, agent=agent)
+        if mcp_server_requires_agent_sandbox(runtime) and not sandbox_compute_enabled_for_agent(agent):
+            return {
+                "status": "error",
+                "message": "This MCP server requires sandbox compute, which is not available for this agent.",
+            }
+
         session = self._ensure_session(agent, source="mcp_request")
-        server_payload, _runtime = _build_mcp_server_payload(server_config_id, agent=agent)
         if not server_payload:
             result = {"status": "error", "message": "MCP server config not available."}
             _track_execution_event(
@@ -2606,9 +2597,14 @@ class SandboxComputeService:
             return {"status": "error", "message": "MCP server config not available."}
 
         session: Optional[AgentComputeSession] = None
-        if _requires_agent_pod_discovery(runtime):
+        if mcp_server_requires_agent_sandbox(runtime):
             if agent is None:
                 return {"status": "skipped", "message": "Sandboxed stdio discovery requires an agent context."}
+            if not sandbox_compute_enabled_for_agent(agent):
+                return {
+                    "status": "error",
+                    "message": "This MCP server requires sandbox compute, which is not available for this agent.",
+                }
             session = self._ensure_session(agent, source="discover_mcp_tools")
 
         result = self._backend.discover_mcp_tools(
