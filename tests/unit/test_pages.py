@@ -145,9 +145,11 @@ class HomePageTests(TestCase):
         soup = BeautifulSoup(response.content.decode("utf-8"), "html.parser")
         title = "Acme - AI Employees for Teams With Real Work to Do"
         description = (
-            "Acme agents are virtual employees with their own identity, memory, and tools. "
-            "Email them, text them — they browse the web, collect data, and deliver reports 24/7."
+            "Acme AI employees have their own identity, memory, and tools. Email or text "
+            "them—they browse the web, collect data, and deliver reports around the clock."
         )
+        self.assertGreaterEqual(len(description), 150)
+        self.assertLessEqual(len(description), 160)
         image_url = "https://gobii.ai/static/images/gobii_og_image_1200x630.png"
 
         self.assertEqual(
@@ -569,7 +571,7 @@ class HomePageTests(TestCase):
         response = self.client.get("/")
         self.assertContains(
             response,
-            '<meta name="description" content="Acme agents are virtual employees with their own identity, memory, and tools. Email them, text them — they browse the web, collect data, and deliver reports 24/7.">',
+            '<meta name="description" content="Acme AI employees have their own identity, memory, and tools. Email or text them—they browse the web, collect data, and deliver reports around the clock.">',
         )
 
     @override_settings(PUBLIC_BRAND_NAME="Acme", GOBII_PROPRIETARY_MODE=True)
@@ -577,7 +579,7 @@ class HomePageTests(TestCase):
         response = self.client.get("/")
         self.assertContains(
             response,
-            '<meta name="description" content="Acme agents are virtual employees with their own identity, memory, and tools. Email them, text them — they browse the web, collect data, and deliver reports 24/7.">',
+            '<meta name="description" content="Acme AI employees have their own identity, memory, and tools. Email or text them—they browse the web, collect data, and deliver reports around the clock.">',
         )
 
     def test_home_page_does_not_render_signup_modal_shell_when_flag_is_off(self):

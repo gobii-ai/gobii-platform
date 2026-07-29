@@ -6,7 +6,58 @@ from django.utils.html import strip_tags
 
 
 META_DESCRIPTION_MAX_LENGTH = 160
+META_DESCRIPTION_MIN_CLAUSE_LENGTH = 80
 SEO_TITLE_MAX_LENGTH = 60
+
+_TERMINAL_PUNCTUATION = ".!?…。！？"
+_DANGLING_DESCRIPTION_WORDS = frozenset(
+    {
+        "about",
+        "across",
+        "after",
+        "against",
+        "among",
+        "and",
+        "around",
+        "as",
+        "at",
+        "before",
+        "between",
+        "but",
+        "by",
+        "during",
+        "for",
+        "from",
+        "in",
+        "including",
+        "into",
+        "like",
+        "nor",
+        "of",
+        "on",
+        "onto",
+        "or",
+        "over",
+        "so",
+        "than",
+        "through",
+        "to",
+        "toward",
+        "towards",
+        "under",
+        "via",
+        "while",
+        "with",
+        "within",
+        "without",
+        "yet",
+    }
+)
+_CLAUSE_BOUNDARY_PATTERN = re.compile(
+    r"[,;:](?=\s)|\s[—–]\s|"
+    r"\s(?:and|or|but|before|while|whereas|although|because|so that)\s",
+    flags=re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -190,20 +241,118 @@ PUBLIC_TEMPLATE_SEO_OVERRIDES = {
     ),
 }
 
+# These official and migrated high-value pages need editorial descriptions because
+# their source copy cannot be shortened at a natural boundary near 160 characters.
+PUBLIC_TEMPLATE_META_DESCRIPTION_OVERRIDES = {
+    "account-research-ai-agent": (
+        "Research target accounts, evaluate company fit and buying signals, and "
+        "receive sales-ready briefs with source links and personalized outreach angles."
+    ),
+    "b2b-lead-research-agent": (
+        "Find qualified B2B leads, evaluate company fit and buying signals, and "
+        "receive a structured prospect list with sources, fit notes, and outreach angles."
+    ),
+    "tpl-f69de33885cf": (
+        "Use this AI employee to identify and vet professionals across LinkedIn and "
+        "Apollo, initiate outreach sequences, and log qualified candidates in your CRM."
+    ),
+    "tpl-2db8238181de": (
+        "Use this AI employee to identify priority emails, synthesize key information, "
+        "and add supporting research to a focused morning brief for the day ahead."
+    ),
+    "tpl-123d8d8489c7": (
+        "Use this AI employee to find promotional opportunities, create platform-specific "
+        "content, run social and SEO outreach, and maintain a placement log."
+    ),
+    "tpl-c0e7bc3a8b89": (
+        "Use this AI employee to find energy startups and established firms seeking "
+        "investment, then deliver structured fundraising data and visual market summaries."
+    ),
+    "tpl-62de76261e7a": (
+        "Use this AI employee to map business architecture, automate project management, "
+        "and maintain a central source of truth across multiple projects."
+    ),
+    "tpl-8a8d105a3a25": (
+        "Use this AI employee to discover and vet talent, enrich professional profiles, "
+        "and manage recruitment pipelines across multiple industries."
+    ),
+    "tpl-f5a569d2babb": (
+        "Use this AI employee to monitor YouTube performance, analyze competitor channels "
+        "and videos, and identify trends that grow views and engagement."
+    ),
+    "tpl-7b410745415f": (
+        "Use this AI employee to simulate stock trades, monitor market news and momentum, "
+        "and maintain a persistent record of paper-portfolio performance."
+    ),
+    "tpl-508ef3ad9f20": (
+        "Use this AI employee to research prospects, warm them through LinkedIn and email, "
+        "and hand engaged leads to sales after genuine multi-touch conversations."
+    ),
+    "tpl-3cc144f89d77": (
+        "Use this AI employee to source sales candidates, enrich professional profiles, "
+        "and expand SEO reach through large-scale link distribution."
+    ),
+}
+
 
 def _clean_text(value: str | None) -> str:
     plain_text = unescape(strip_tags(str(value or ""))).replace("\xa0", " ")
     return re.sub(r"\s+", " ", plain_text).strip()
 
 
-def _truncate_at_word_boundary(value: str, max_length: int) -> str:
-    if len(value) <= max_length:
-        return value
-    candidate = value[: max_length + 1]
-    if candidate[max_length:max_length + 1].isspace():
-        return candidate[:max_length].rstrip()
-    words = candidate[:max_length].rsplit(maxsplit=1)
-    return words[0].rstrip() if len(words) > 1 else candidate[:max_length].rstrip()
+def _has_dangling_description_ending(value: str) -> bool:
+    ending = value.rstrip(f" \t\r\n{_TERMINAL_PUNCTUATION},;:—–-")
+    words = re.findall(r"[^\W_]+(?:['’][^\W_]+)?", ending.casefold())
+    return bool(words and words[-1] in _DANGLING_DESCRIPTION_WORDS)
+
+
+def _finalize_description_clause(value: str) -> str | None:
+    candidate = value.rstrip(" ,;:—–-")
+    if not candidate or _has_dangling_description_ending(candidate):
+        return None
+    if candidate.endswith(tuple(_TERMINAL_PUNCTUATION)):
+        return candidate
+    return f"{candidate}."
+
+
+def _complete_sentence_prefix(source: str) -> str | None:
+    selected_sentences = []
+    for sentence_match in re.finditer(
+        r".+?[.!?…。！？](?=\s|$)",
+        source,
+    ):
+        sentence = sentence_match.group(0).strip()
+        candidate = " ".join([*selected_sentences, sentence])
+        if len(candidate) > META_DESCRIPTION_MAX_LENGTH:
+            break
+        if _has_dangling_description_ending(candidate):
+            break
+        selected_sentences.append(sentence)
+    return " ".join(selected_sentences) or None
+
+
+def _complete_clause_prefix(source: str) -> str | None:
+    prefix = source[: META_DESCRIPTION_MAX_LENGTH + 1]
+    cutoffs = [
+        match.start()
+        for match in _CLAUSE_BOUNDARY_PATTERN.finditer(prefix)
+        if match.start() >= META_DESCRIPTION_MIN_CLAUSE_LENGTH
+    ]
+    for cutoff in reversed(cutoffs):
+        candidate = _finalize_description_clause(source[:cutoff])
+        if candidate and len(candidate) <= META_DESCRIPTION_MAX_LENGTH:
+            return candidate
+    return None
+
+
+def _shorten_description_source(source: str) -> str | None:
+    if (
+        len(source) <= META_DESCRIPTION_MAX_LENGTH
+        and not _has_dangling_description_ending(source)
+    ):
+        return source
+
+    return _complete_sentence_prefix(source) or _complete_clause_prefix(source)
 
 
 def compose_meta_description(
@@ -213,36 +362,47 @@ def compose_meta_description(
     tagline: str | None,
     display_name: str | None,
 ) -> str:
-    source = (
-        _clean_text(explicit_description)
-        or _clean_text(description)
-        or _clean_text(tagline)
+    sources = []
+    for value in (explicit_description, description, tagline):
+        cleaned_value = _clean_text(value)
+        if cleaned_value and cleaned_value not in sources:
+            sources.append(cleaned_value)
+
+    complete_long_source = None
+    for source in sources:
+        shortened_source = _shorten_description_source(source)
+        if shortened_source:
+            return shortened_source
+        if (
+            complete_long_source is None
+            and not _has_dangling_description_ending(source)
+        ):
+            complete_long_source = _finalize_description_clause(source)
+
+    if complete_long_source:
+        return complete_long_source
+
+    role_name = _clean_text(display_name) or "this role"
+    return (
+        f"Create a {role_name} AI employee from this reusable Gobii template "
+        "and customize it for your workflow."
     )
-    if not source:
-        role_name = _clean_text(display_name) or "this role"
-        source = (
-            f"Create a {role_name} AI employee from this reusable Gobii template "
-            "and customize it for your workflow."
+
+
+def public_template_employee_link_name(display_name: str | None) -> str:
+    cleaned_name = _clean_text(display_name)
+    if not cleaned_name:
+        return "this AI employee"
+    if re.search(r"\bAI\s+Employee\b", cleaned_name, flags=re.IGNORECASE):
+        return cleaned_name
+    if re.search(r"\bAI\s+Agent\b", cleaned_name, flags=re.IGNORECASE):
+        return re.sub(
+            r"\bAI\s+Agent\b",
+            "AI Employee",
+            cleaned_name,
+            flags=re.IGNORECASE,
         )
-
-    if len(source) <= META_DESCRIPTION_MAX_LENGTH:
-        return source
-
-    complete_sentences = re.findall(r".+?(?:[.!?](?=\s|$)|$)", source)
-    selected_sentences = []
-    for sentence in complete_sentences:
-        candidate = " ".join([*selected_sentences, sentence.strip()])
-        if len(candidate) > META_DESCRIPTION_MAX_LENGTH:
-            break
-        selected_sentences.append(sentence.strip())
-    if selected_sentences:
-        return " ".join(selected_sentences)
-
-    truncated = _truncate_at_word_boundary(
-        source,
-        META_DESCRIPTION_MAX_LENGTH - 1,
-    ).rstrip(" ,;:-.!?")
-    return f"{truncated}."
+    return f"{cleaned_name} AI employee"
 
 
 def public_template_employee_role_name(display_name: str | None) -> str:
@@ -276,14 +436,7 @@ def _employee_heading(display_name: str) -> str:
 def _compose_title(heading: str, *, omit_suffix: bool) -> tuple[str, str]:
     if omit_suffix:
         social_title = _clean_text(heading)
-        seo_title = f"{social_title} | Gobii"
-        if len(seo_title) <= SEO_TITLE_MAX_LENGTH:
-            return social_title, seo_title
-        shortened_title = _truncate_at_word_boundary(
-            social_title,
-            SEO_TITLE_MAX_LENGTH - len(" | Gobii"),
-        )
-        return social_title, f"{shortened_title} | Gobii"
+        return social_title, f"{social_title} | Gobii"
 
     social_title = f"{heading} Template"
     seo_title = f"{social_title} | Gobii"
@@ -301,13 +454,7 @@ def _compose_title(heading: str, *, omit_suffix: bool) -> tuple[str, str]:
         heading,
         flags=re.IGNORECASE,
     ).strip()
-    suffix = " AI Employee | Gobii"
-    shortened_role = _truncate_at_word_boundary(
-        role_name,
-        SEO_TITLE_MAX_LENGTH - len(suffix),
-    )
-    social_title = f"{shortened_role} AI Employee"
-    return social_title, f"{social_title} | Gobii"
+    return role_name, f"{role_name} | Gobii"
 
 
 def get_public_template_seo_override(template) -> PublicTemplateSeoOverride | None:
@@ -321,6 +468,7 @@ def public_template_library_name(template) -> str:
 
 def build_public_template_metadata(template) -> PublicTemplateMetadata:
     override = get_public_template_seo_override(template)
+    template_code = str(getattr(template, "code", "") or "")
     display_name = _clean_text(template.display_name) or "Reusable Role"
     heading = override.heading if override else _employee_heading(display_name)
     tagline = override.tagline if override else _clean_text(template.tagline)
@@ -332,7 +480,8 @@ def build_public_template_metadata(template) -> PublicTemplateMetadata:
     )
     description = compose_meta_description(
         explicit_description=(
-            override.description if override else template.seo_meta_description
+            PUBLIC_TEMPLATE_META_DESCRIPTION_OVERRIDES.get(template_code)
+            or (override.description if override else template.seo_meta_description)
         ),
         description=intro,
         tagline=tagline,

@@ -1001,9 +1001,9 @@ class HomePage(TemplateView):
         context["home_brand_name"] = home_brand_name
         context["home_meta_title"] = f"{home_brand_name} - {HOMEPAGE_META_TITLE_SUFFIX}"
         context["home_meta_description"] = (
-            f"{home_brand_name} agents are virtual employees with their own identity, "
-            "memory, and tools. Email them, text them — they browse the web, collect "
-            "data, and deliver reports 24/7."
+            f"{home_brand_name} AI employees have their own identity, memory, and tools. "
+            "Email or text them—they browse the web, collect data, and deliver reports "
+            "around the clock."
         )
         context["home_social_image_alt"] = f"{home_brand_name} AI employee platform preview"
         context["home_social_metadata_enabled"] = settings.GOBII_PROPRIETARY_MODE
