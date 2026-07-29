@@ -63,7 +63,13 @@ from .create_pdf import get_create_pdf_tool, execute_create_pdf
 from .create_chart import get_create_chart_tool, execute_create_chart
 from .create_image import get_create_image_tool, execute_create_image, is_image_generation_available_for_agent
 from .create_video import get_create_video_tool, execute_create_video, is_video_generation_available_for_agent
-from .custom_tools import execute_create_custom_tool, execute_custom_tool, get_create_custom_tool_tool, is_custom_tools_available_for_agent
+from .custom_tools import (
+    CUSTOM_TOOL_PREFIX,
+    execute_create_custom_tool,
+    execute_custom_tool,
+    get_create_custom_tool_tool,
+    is_custom_tools_available_for_agent,
+)
 from .custom_tool_names import CREATE_CUSTOM_TOOL_NAME, CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL_KEY
 from .eval_synthetic_tools import EVAL_SYNTHETIC_TOOL_DEFINITIONS, EVAL_SYNTHETIC_TOOL_SERVER, get_eval_synthetic_tool_definition, get_eval_synthetic_tool_fallback_result, is_eval_synthetic_tool_name
 from .python_exec import get_python_exec_tool
@@ -99,6 +105,18 @@ DISCORD_CHANNEL_SUBSCRIPTIONS_TOOL_NAME = "discord_channel_subscriptions"
 DISCORD_ADD_REACTION_TOOL_NAME = "add_discord_reaction"
 DISCORD_SEND_MESSAGE_TOOL_NAME = "send_discord_message"
 PIPEDREAM_TOOL_SERVER_NAME = "pipedream"
+CUSTOM_TOOL_RESULT_CONTRACT = (
+    " Call alone when this result governs later sends. Treat returned side_effects and next_action as authoritative; "
+    "if requested delivery is already sent and remaining_work is zero, stop without a recap or receipt."
+)
+
+
+def _custom_tool_description_for_llm(tool_name: str, description: str) -> str:
+    if not tool_name.startswith(CUSTOM_TOOL_PREFIX):
+        return description
+    return f"{description.rstrip()}{CUSTOM_TOOL_RESULT_CONTRACT}"
+
+
 DEFAULT_BUILTIN_TOOLS = {
     READ_FILE_TOOL_NAME,
     SQLITE_TOOL_NAME,
@@ -492,7 +510,7 @@ def get_available_custom_tool_entries(
         catalog[tool.tool_name] = ToolCatalogEntry(
             provider="custom",
             full_name=tool.tool_name,
-            description=tool.description,
+            description=_custom_tool_description_for_llm(tool.tool_name, tool.description),
             parameters=_custom_tool_parameters_for_llm(tool.parameters_schema),
             tool_server="custom",
             tool_name=tool.tool_name,
@@ -1230,7 +1248,10 @@ def get_enabled_tool_definitions(agent: PersistentAgent) -> List[Dict[str, Any]]
                     "type": "function",
                     "function": {
                         "name": tool.tool_name,
-                        "description": tool.description,
+                        "description": _custom_tool_description_for_llm(
+                            tool.tool_name,
+                            tool.description,
+                        ),
                         "parameters": _custom_tool_parameters_for_llm(tool.parameters_schema),
                     },
                 }
@@ -1243,6 +1264,12 @@ def get_enabled_tool_definitions(agent: PersistentAgent) -> List[Dict[str, Any]]
         tool_def = get_eval_synthetic_tool_definition(agent, tool_name)
         if not tool_def:
             continue
+        function = tool_def.get("function")
+        if isinstance(function, dict):
+            function["description"] = _custom_tool_description_for_llm(
+                tool_name,
+                str(function.get("description") or ""),
+            )
         definitions.append(_sanitize_tool_definition_for_llm(tool_def))
         existing_names.add(tool_name)
 

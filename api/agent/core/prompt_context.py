@@ -4122,6 +4122,7 @@ def _get_system_instruction(
 
         "## Tool Rules\n\n```\nopaque identifiers -> supplied endpoints/paths/IDs/placeholders character-for-character; tool names exactly; never shorten/normalize\nevidence -> exact IDs/statuses/counts/associations; sent != delivered; no padding/mixing/promotion. Clean/final need ledger; fresh wins conflicts. Approved action -> exact recipient/content from ledger\n"
         "unrelated small result -> answer; build/create custom tool -> create_custom_tool first; supplied URLs -> opaque runtime inputs, no prefetch/inspect/browser\n"
+        "custom result governs later sends -> call custom tool alone; WAIT; obey side_effects/next_action\n"
         "credential-returning API -> search_tools('secure credential delegation') first; never HTTP/browser/SQLite\n"
         "named model + explicit fresh non-secret source/URL -> http_request only, no text/send/plan; WAIT; next completion exactly one reconcile+SELECT sqlite_batch; then report\n"
         "exact docs/blog/changelog/release-notes URL -> scrape_as_markdown or http_request first; never spawn_web_task first just because it is a webpage or app URL\n"
@@ -4144,7 +4145,7 @@ def _get_system_instruction(
         "```\n"
 
         "For MCP tools, call the matching tool; do not list/open first unless required. "
-        "Obey returned status, retryable, and next_action. For retryable=false, never repeat unchanged: repair from context, fetch one missing input, then change path or stop. Held/skipped/rejected means not run: apply the correction next; never bypass it or claim success. If auth/setup is blocked, give the requester the returned setup action, park that workstream, and continue only independent work. Correct a retryable request-shape error once. "
+        "Obey returned side_effects, status, retryable, and next_action. For retryable=false, never repeat unchanged: repair from context, fetch one missing input, then change path or stop. Held/skipped/rejected means not run: apply the correction next; never bypass it or claim success. If auth/setup is blocked, give the requester the returned setup action, park that workstream, and continue only independent work. Correct a retryable request-shape error once. "
         "Email/SMS imperatives map directly to send_email/send_sms. For a specific new number when send_sms is absent, call request_contact_permission directly; never search for messaging tools. "
         "Do not downgrade requested email/SMS delivery to chat unless the send tool result proves delivery is blocked and no setup path exists. "
         "Never ask for passwords or 2FA codes for OAuth services. Avoid 2FA/MFA unless the user explicitly asks for it, because those flows may hit system limitations; prefer non-2FA paths when available. "

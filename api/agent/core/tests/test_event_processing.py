@@ -28,6 +28,7 @@ from api.agent.core.event_processing import (
     _normalize_error_result,
     _normalize_tool_params,
     _parse_tool_call_params,
+    _partition_unresolved_custom_tool_sends,
     _PreparedToolExecution,
     _sanitize_tool_name,
     _should_infer_message_tool_continuation,
@@ -71,6 +72,47 @@ class _DummySpan:
 
     def set_attribute(self, *_args, **_kwargs):
         return None
+
+
+@tag('batch_event_processing')
+class CustomToolSendDependencyTests(SimpleTestCase):
+    @staticmethod
+    def _call(name):
+        return {"function": {"name": name, "arguments": "{}"}}
+
+    def test_defers_outbound_sends_planned_after_custom_tool_result(self):
+        custom = self._call("custom_publish_incident")
+        discord = self._call("send_discord_message")
+        email = self._call("send_email")
+
+        executable, deferred = _partition_unresolved_custom_tool_sends(
+            [custom, discord, email]
+        )
+
+        self.assertEqual(executable, [custom])
+        self.assertEqual(deferred, [discord, email])
+
+    def test_preserves_kickoff_before_custom_tool_and_independent_work_after_it(self):
+        kickoff = self._call("send_chat_message")
+        custom = self._call("custom_collect_results")
+        sqlite = self._call("sqlite_batch")
+        final = self._call("send_chat_message")
+
+        executable, deferred = _partition_unresolved_custom_tool_sends(
+            [kickoff, custom, sqlite, final]
+        )
+
+        self.assertEqual(executable, [kickoff, custom, sqlite])
+        self.assertEqual(deferred, [final])
+
+    def test_does_not_treat_create_custom_tool_as_an_invocation(self):
+        create = self._call("create_custom_tool")
+        send = self._call("send_email")
+
+        executable, deferred = _partition_unresolved_custom_tool_sends([create, send])
+
+        self.assertEqual(executable, [create, send])
+        self.assertEqual(deferred, [])
 
 
 @tag('batch_event_processing')

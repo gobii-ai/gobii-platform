@@ -126,7 +126,7 @@ from ..tools.sqlite_config_statements import (
     sqlite_statement_assigns_agent_config_field,
 )
 from ..tools.sqlite_skills import apply_sqlite_skill_updates, refresh_skills_for_tool, seed_sqlite_skills
-from ..tools.custom_tools import execute_create_custom_tool
+from ..tools.custom_tools import CUSTOM_TOOL_PREFIX, execute_create_custom_tool
 from ..tools.custom_tool_names import CREATE_CUSTOM_TOOL_NAME
 from ..tools.plan import build_plan_snapshot, build_redundant_research_plan_skip_result, execute_update_plan
 from ..tools.planning import execute_end_planning
@@ -1528,6 +1528,24 @@ def _tool_call_field(call: Any, field: str, *, skip_empty: bool = False) -> Any:
 def _get_tool_call_name(call: Any) -> Optional[str]:
     name = _tool_call_field(call, "name", skip_empty=True)
     return _sanitize_tool_name(name) if name else None
+
+
+def _partition_unresolved_custom_tool_sends(
+    tool_calls: list[Any],
+) -> tuple[list[Any], list[Any]]:
+    """Hold sends whose necessity cannot be known until a custom tool returns."""
+    executable: list[Any] = []
+    deferred: list[Any] = []
+    custom_result_pending = False
+    for call in tool_calls:
+        tool_name = _get_tool_call_name(call) or ""
+        if custom_result_pending and tool_name in MESSAGE_TOOL_NAMES:
+            deferred.append(call)
+            continue
+        executable.append(call)
+        if tool_name.startswith(CUSTOM_TOOL_PREFIX):
+            custom_result_pending = True
+    return executable, deferred
 
 
 def _sanitize_tool_name(name: str) -> str:
@@ -3433,6 +3451,7 @@ def _prepare_tool_batch(
             stale_cancellation=True,
         )
 
+    tool_calls, deferred_sends = _partition_unresolved_custom_tool_sends(tool_calls)
     rate_limit_batch = (
         _build_tool_rate_limit_batch(
             agent,
@@ -3442,11 +3461,30 @@ def _prepare_tool_batch(
         else None
     )
     prepared_calls: list[_PreparedToolExecution] = []
-    followup_required = False
+    followup_required = bool(deferred_sends)
     all_calls_sleep = not has_non_sleep_calls
     abort_after_execution = False
     cancel_prepared_calls = False
     stale_cancellation = False
+    if deferred_sends:
+        deferred_names = ", ".join(
+            name
+            for call in deferred_sends
+            if (name := _get_tool_call_name(call))
+        )
+        _record_policy_step(
+            agent,
+            "Tool dependency: held outbound send planned after a custom tool because its result was not available "
+            "when the send was planned. Read the completed result, obey its side_effects/status/next_action, and "
+            f"send only work it proves remains. Held: {deferred_names or 'unknown send'}.",
+            attach_completion=attach_completion,
+            attach_prompt_archive=attach_prompt_archive,
+        )
+        logger.info(
+            "Agent %s: held %d outbound send(s) until the preceding custom-tool result is available.",
+            agent.id,
+            len(deferred_sends),
+        )
     deep_work_update_reason = _deep_work_update_gate_context(agent, tool_calls)
     if deep_work_update_reason:
         _record_deep_work_update_correction(
