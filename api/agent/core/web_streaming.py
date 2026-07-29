@@ -54,6 +54,7 @@ class WebStreamBroadcaster:
     _finished: bool = field(default=False, init=False)
     _reasoning_buffer: list[str] = field(default_factory=list, init=False)
     _content_buffer: list[str] = field(default_factory=list, init=False)
+    _content_flushed: bool = field(default=False, init=False)
 
     def start(self) -> None:
         if self._started or self._finished:
@@ -85,6 +86,7 @@ class WebStreamBroadcaster:
             payload["reasoning_delta"] = "".join(self._reasoning_buffer)
         if self._content_buffer:
             payload["content_delta"] = "".join(self._content_buffer)
+            self._content_flushed = True
 
         self._reasoning_buffer = []
         self._content_buffer = []
@@ -109,6 +111,11 @@ class WebStreamBroadcaster:
     def _should_flush(self) -> bool:
         if not self._reasoning_buffer and not self._content_buffer:
             return False
+        # The first message-content delta flushes immediately: it is the reader's first
+        # visible sign of the reply, and holding it for the batching window just delays
+        # perceived start of streaming (bug #510).
+        if self._content_buffer and not self._content_flushed:
+            return True
         buffered_chars = sum(len(part) for part in self._reasoning_buffer) + sum(len(part) for part in self._content_buffer)
         if buffered_chars >= self.max_buffer_chars:
             return True

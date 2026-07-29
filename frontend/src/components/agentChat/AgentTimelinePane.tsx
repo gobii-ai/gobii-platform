@@ -1,4 +1,4 @@
-import { memo, useCallback, useMemo, type Ref } from 'react'
+import { memo, useCallback, useEffect, useMemo, type Ref } from 'react'
 import { Loader2 } from 'lucide-react'
 import { TimelineEventItem } from './TimelineEventItem'
 import { StreamingReplyCard } from './StreamingReplyCard'
@@ -13,7 +13,7 @@ import type { SimplifiedTimelineItem } from '../../hooks/useSimplifiedTimeline'
 import type { TemplateRecommendation } from '../../api/agentSpawnIntent'
 import type { AgentMessage } from '../../types/agentChat'
 import type { StatusExpansionTargets } from './statusExpansion'
-import { chatActions, selectActiveChatSession } from '../../store/chatSlice'
+import { chatActions, selectActiveChatAgentId, selectActiveChatSession } from '../../store/chatSlice'
 import { useAppDispatch, useAppSelector } from '../../store/hooks'
 import { selectImmersiveShellViewer } from '../../store/immersiveShellSlice'
 
@@ -169,6 +169,32 @@ export const AgentTimelinePane = memo(function AgentTimelinePane({
     [dispatch],
   )
   const streaming = activeSession.stream.streaming
+  const activeAgentId = useAppSelector(selectActiveChatAgentId)
+  // The stream card owns the reply until its reveal catches up; the persisted message it
+  // became stays suppressed here so the swap happens in one commit with no double render
+  // and no blank frame (bug #510).
+  const streamHandoffMessageId = streaming?.source !== 'timeline' ? streaming?.handoffMessageId ?? null : null
+  // After the swap, the message this stream became must not replay its fast-reveal
+  // entrance — its content has been on screen for seconds (bug #510 polish).
+  const streamedMessageId = streamHandoffMessageId ?? activeSession.stream.lastHandoffMessageId
+  const streamHandoffMessageRendered = useMemo(
+    () => Boolean(streamHandoffMessageId) && events.some(
+      (event) => event.kind === 'message' && event.message?.id === streamHandoffMessageId,
+    ),
+    [events, streamHandoffMessageId],
+  )
+  // A stream that finished but whose send never produced a message (tool failure, missed
+  // socket frame) must not pin the card forever; the refetched timeline is authoritative.
+  useEffect(() => {
+    if (!streaming?.done || streaming.source === 'timeline' || !streaming.content || streaming.handoffMessageId || !activeAgentId) {
+      return
+    }
+    const streamId = streaming.streamId
+    const timer = window.setTimeout(() => {
+      dispatch(chatActions.streamHandedOff({ agentId: activeAgentId, streamId }))
+    }, 10_000)
+    return () => window.clearTimeout(timer)
+  }, [activeAgentId, dispatch, streaming?.content, streaming?.done, streaming?.handoffMessageId, streaming?.source, streaming?.streamId])
   const viewer = useAppSelector(selectImmersiveShellViewer)
   const agentFirstName = deriveAgentFirstName(agentName)
   const viewerEmail = viewer.email
@@ -213,6 +239,9 @@ export const AgentTimelinePane = memo(function AgentTimelinePane({
                 if (event.kind === 'plan' || event.kind === 'kanban') {
                   return null
                 }
+                if (streamHandoffMessageId && event.kind === 'message' && event.message?.id === streamHandoffMessageId) {
+                  return null
+                }
                 return (
                   // data-timeline-key lets the scroll controller find this row again after a
                   // re-render, so it can hold it still while older history loads above.
@@ -225,6 +254,7 @@ export const AgentTimelinePane = memo(function AgentTimelinePane({
                     <TimelineEventItem
                       event={event}
                       isLatestEvent={index === lastRenderedIndex}
+                      streamedMessageId={streamedMessageId}
                       agentFirstName={agentFirstName}
                       agentAvatarUrl={agentAvatarUrl}
                       viewerUserId={viewerUserId ?? null}
@@ -306,6 +336,10 @@ export const AgentTimelinePane = memo(function AgentTimelinePane({
                       agentFirstName={agentFirstName}
                       agentAvatarUrl={agentAvatarUrl}
                       isStreaming={isStreaming}
+                      done={Boolean(streaming?.done)}
+                      streamId={streaming?.streamId ?? null}
+                      agentId={activeAgentId}
+                      handoffReady={streamHandoffMessageRendered}
                       onLinkClick={onMessageLinkClick}
                     />
                   ) : null}

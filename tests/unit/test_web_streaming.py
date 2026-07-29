@@ -1,7 +1,7 @@
 from django.contrib.auth import get_user_model
 from django.test import TestCase, tag
 
-from api.agent.core.web_streaming import resolve_web_stream_target
+from api.agent.core.web_streaming import WebStreamBroadcaster, WebStreamTarget, resolve_web_stream_target
 from api.models import (
     BrowserUseAgent,
     CommsChannel,
@@ -127,3 +127,46 @@ class ResolveWebStreamTargetTests(TestCase):
         )
         self._inbound(mismatched)
         self.assertIsNone(resolve_web_stream_target(self.agent))
+
+@tag("batch_event_processing")
+class WebStreamBroadcasterFlushTests(TestCase):
+    """#510: the first content delta must flush immediately — it is the reader's first
+    visible sign of the reply, and batching it just delays perceived streaming start."""
+
+    def _broadcaster(self):
+        from unittest.mock import patch
+
+        broadcaster = WebStreamBroadcaster(
+            target=WebStreamTarget(agent_id="a", user_id=1, address="web://user/1/agent/a"),
+            min_flush_interval=10.0,
+            max_buffer_chars=10_000,
+        )
+        sent: list[dict] = []
+        patcher = patch.object(broadcaster, "_send", side_effect=lambda payload: sent.append(payload))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        return broadcaster, sent
+
+    def test_first_content_delta_flushes_immediately(self):
+        broadcaster, sent = self._broadcaster()
+        broadcaster.push_delta("thinking about it", None)
+        self.assertEqual([p["status"] for p in sent], ["start"])  # reasoning batches
+
+        broadcaster.push_delta(None, "Hey")
+        deltas = [p for p in sent if p["status"] == "delta"]
+        self.assertEqual(len(deltas), 1)
+        self.assertEqual(deltas[0]["content_delta"], "Hey")
+        self.assertEqual(deltas[0]["reasoning_delta"], "thinking about it")
+
+    def test_subsequent_content_deltas_batch_normally(self):
+        broadcaster, sent = self._broadcaster()
+        broadcaster.push_delta(None, "Hey")
+        broadcaster.push_delta(None, " there")
+        broadcaster.push_delta(None, " friend")
+        deltas = [p for p in sent if p["status"] == "delta"]
+        self.assertEqual(len(deltas), 1)
+
+        broadcaster.finish()
+        deltas = [p for p in sent if p["status"] == "delta"]
+        self.assertEqual(len(deltas), 2)
+        self.assertEqual(deltas[1]["content_delta"], " there friend")

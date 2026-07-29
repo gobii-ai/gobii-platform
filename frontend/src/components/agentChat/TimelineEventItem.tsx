@@ -24,6 +24,9 @@ type TimelineEventItemProps = {
   suppressedThinkingCursor?: string | null
   statusExpansionTargets?: StatusExpansionTargets
   animateIncoming?: boolean
+  /** Message id whose content was already revealed by the stream card — its card must
+   *  render instantly, without the fast-reveal entrance (bug #510 polish). */
+  streamedMessageId?: string | null
   onIncomingAnimationConsumed?: (cursor: string) => void
   onMessageLinkClick?: (href: string) => boolean | void
   onReportMessage?: (message: AgentMessage) => void
@@ -40,6 +43,7 @@ export const TimelineEventItem = memo(function TimelineEventItem({
   suppressedThinkingCursor,
   statusExpansionTargets,
   animateIncoming = false,
+  streamedMessageId = null,
   onIncomingAnimationConsumed,
   onMessageLinkClick,
   onReportMessage,
@@ -85,6 +89,7 @@ export const TimelineEventItem = memo(function TimelineEventItem({
         eventCursor={event.cursor}
         agentId={activeAgentId}
         message={event.message}
+        disableFastReveal={event.message.id === streamedMessageId}
         agentFirstName={agentFirstName}
         agentAvatarUrl={agentAvatarUrl}
         viewerUserId={viewerUserId ?? null}
