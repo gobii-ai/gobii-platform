@@ -221,6 +221,7 @@ class MCPServerConfigForm(forms.Form):
         self.instance = instance
         self.allow_commands = allow_commands
         self.allow_prefetch_apps = allow_prefetch_apps
+        self.preserve_existing_command = False
         initial = kwargs.setdefault('initial', {})
         if instance is not None:
             initial.setdefault('name', instance.name)
@@ -280,14 +281,29 @@ class MCPServerConfigForm(forms.Form):
         reserved = {name.lower() for name in MCPServerConfig.RESERVED_PLATFORM_NAMES}
         if not self.allow_commands:
             errors: dict[str, str] = {}
-            if command:
-                errors['command'] = "Command-based MCP servers are managed by Gobii. Provide a URL instead."
-            if cleaned.get('command_args'):
-                errors['command_args'] = "Command arguments are not supported for user-managed MCP servers."
-            if not url:
-                errors['url'] = "Provide a URL for the MCP server."
-            cleaned['command'] = ''
-            cleaned['command_args'] = []
+            existing_command = (self.instance.command or '').strip() if self.instance is not None else ''
+            preserve_existing_command = bool(existing_command and not url)
+            if preserve_existing_command:
+                if command and command != existing_command:
+                    errors['command'] = "The existing command cannot be changed while STDIO management is unavailable."
+                existing_args = self.instance.command_args or []
+                submitted_args = cleaned.get('command_args') or []
+                if submitted_args and submitted_args != existing_args:
+                    errors['command_args'] = (
+                        "The existing command arguments cannot be changed while STDIO management is unavailable."
+                    )
+                cleaned['command'] = existing_command
+                cleaned['command_args'] = existing_args
+                self.preserve_existing_command = True
+            else:
+                if command:
+                    errors['command'] = "Command-based MCP servers are managed by Gobii. Provide a URL instead."
+                if cleaned.get('command_args'):
+                    errors['command_args'] = "Command arguments are not supported for user-managed MCP servers."
+                if not url:
+                    errors['url'] = "Provide a URL for the MCP server."
+                cleaned['command'] = ''
+                cleaned['command_args'] = []
             if errors:
                 raise forms.ValidationError(errors)
         elif not command and not url:
@@ -300,7 +316,12 @@ class MCPServerConfigForm(forms.Form):
             cleaned['name'] = generated[:64]
         if not cleaned.get('name'):
             raise forms.ValidationError("Unable to generate an identifier. Add a display name with letters or numbers.")
-        if cleaned['name'].lower() in reserved and self.allow_commands is False:
+        existing_name = (self.instance.name or '').lower() if self.instance is not None else ''
+        if (
+            cleaned['name'].lower() in reserved
+            and self.allow_commands is False
+            and cleaned['name'].lower() != existing_name
+        ):
             raise forms.ValidationError("This MCP server identifier is reserved for Gobii-managed integrations.")
         return cleaned
 
@@ -375,19 +396,20 @@ class MCPServerConfigForm(forms.Form):
 
         config.name = self.cleaned_data['name']
         config.display_name = self.cleaned_data['display_name']
-        config.command = self.cleaned_data.get('command', '')
-        config.command_args = self.cleaned_data.get('command_args') or []
-        config.url = self.cleaned_data.get('url', '')
-        config.auth_method = self.cleaned_data.get('auth_method') or MCPServerConfig.AuthMethod.NONE
-        if not self.allow_commands:
-            config.command = ''
-            config.command_args = []
-        if self.allow_prefetch_apps and 'prefetch_apps' in self.cleaned_data:
-            config.prefetch_apps = self.cleaned_data.get('prefetch_apps') or []
-        config.metadata = self.cleaned_data.get('metadata') or {}
         config.is_active = bool(self.cleaned_data.get('is_active'))
-        config.environment = self.cleaned_data.get('environment') or {}
-        config.headers = self.cleaned_data.get('headers') or {}
+        if not self.preserve_existing_command:
+            config.command = self.cleaned_data.get('command', '')
+            config.command_args = self.cleaned_data.get('command_args') or []
+            config.url = self.cleaned_data.get('url', '')
+            config.auth_method = self.cleaned_data.get('auth_method') or MCPServerConfig.AuthMethod.NONE
+            if not self.allow_commands:
+                config.command = ''
+                config.command_args = []
+            if self.allow_prefetch_apps and 'prefetch_apps' in self.cleaned_data:
+                config.prefetch_apps = self.cleaned_data.get('prefetch_apps') or []
+            config.metadata = self.cleaned_data.get('metadata') or {}
+            config.environment = self.cleaned_data.get('environment') or {}
+            config.headers = self.cleaned_data.get('headers') or {}
 
         config.save()
         return config

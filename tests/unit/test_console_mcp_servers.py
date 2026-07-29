@@ -567,6 +567,67 @@ class MCPServerCrudAPITests(TestCase):
         self.assertEqual(server.command, "")
         self.assertEqual(server.url, "https://example.com/mcp")
 
+    @patch("console.api_views._track_org_event_for_console")
+    @patch("console.api_views.get_mcp_manager")
+    def test_update_existing_organization_command_preserves_stdio_configuration(
+        self,
+        mock_get_mcp_manager,
+        mock_track_event,
+    ):
+        org = Organization.objects.create(
+            name="Legacy Command Org",
+            slug="legacy-command-org",
+            created_by=self.user,
+        )
+        OrganizationMembership.objects.create(
+            org=org,
+            user=self.user,
+            role=OrganizationMembership.OrgRole.OWNER,
+        )
+        session = self.client.session
+        session["context_type"] = "organization"
+        session["context_id"] = str(org.id)
+        session["context_name"] = org.name
+        session.save()
+        server = MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.ORGANIZATION,
+            organization=org,
+            name="legacy-command",
+            display_name="Legacy Command",
+            command="npx",
+            command_args=["-y", "@example/mcp"],
+            environment={"API_TOKEN": "secret"},
+            metadata={"env_fallback": {"API_TOKEN": "MCP_API_TOKEN_FALLBACK"}},
+            headers={"X-Legacy": "preserve"},
+        )
+
+        response = self.client.patch(
+            reverse("console-mcp-server-detail", args=[server.id]),
+            data=json.dumps(
+                {
+                    "display_name": "Renamed Legacy Command",
+                    "name": server.name,
+                    "url": "",
+                    "auth_method": MCPServerConfig.AuthMethod.NONE,
+                    "is_active": False,
+                    "headers": {},
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        server.refresh_from_db()
+        self.assertEqual(server.display_name, "Renamed Legacy Command")
+        self.assertFalse(server.is_active)
+        self.assertEqual(server.command, "npx")
+        self.assertEqual(server.command_args, ["-y", "@example/mcp"])
+        self.assertEqual(server.environment, {"API_TOKEN": "secret"})
+        self.assertEqual(server.metadata, {"env_fallback": {"API_TOKEN": "MCP_API_TOKEN_FALLBACK"}})
+        self.assertEqual(server.headers, {"X-Legacy": "preserve"})
+        mock_get_mcp_manager.return_value.refresh_server.assert_called_once_with(str(server.id))
+        mock_track_event.assert_called_once()
+
     def test_create_server_duplicate_name_returns_validation_error(self):
         MCPServerConfig.objects.create(
             scope=MCPServerConfig.Scope.USER,
@@ -2305,6 +2366,87 @@ class MCPServerConfigFormTests(TestCase):
         self.assertEqual(updated.command_args, [])
         self.assertEqual(updated.url, "https://example.com/mcp")
         self.assertEqual(updated.auth_method, MCPServerConfig.AuthMethod.NONE)
+
+    def test_form_preserves_existing_command_configuration_when_commands_unavailable(self):
+        user = get_user_model().objects.create_user(
+            username="locked-command-user",
+            email="locked-command@example.com",
+            password="test-pass-123",
+        )
+        config = MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.USER,
+            user=user,
+            name="locked-command",
+            display_name="Locked Command",
+            command="npx",
+            command_args=["-y", "@example/mcp"],
+            environment={"API_TOKEN": "secret"},
+            metadata={"env_fallback": {"API_TOKEN": "MCP_API_TOKEN_FALLBACK"}},
+            headers={"X-Legacy": "preserve"},
+        )
+
+        form = MCPServerConfigForm(
+            data={
+                "display_name": "Renamed Locked Command",
+                "name": config.name,
+                "command": "",
+                "command_args": "[]",
+                "url": "",
+                "metadata": "{}",
+                "environment": "{}",
+                "headers": "{}",
+                "auth_method": MCPServerConfig.AuthMethod.NONE,
+                "is_active": "",
+            },
+            instance=config,
+            allow_commands=False,
+        )
+
+        self.assertTrue(form.is_valid(), form.errors)
+        updated = form.save(user=user)
+        self.assertEqual(updated.display_name, "Renamed Locked Command")
+        self.assertFalse(updated.is_active)
+        self.assertEqual(updated.command, "npx")
+        self.assertEqual(updated.command_args, ["-y", "@example/mcp"])
+        self.assertEqual(updated.environment, {"API_TOKEN": "secret"})
+        self.assertEqual(updated.metadata, {"env_fallback": {"API_TOKEN": "MCP_API_TOKEN_FALLBACK"}})
+        self.assertEqual(updated.headers, {"X-Legacy": "preserve"})
+
+    def test_form_rejects_changes_to_locked_existing_command(self):
+        user = get_user_model().objects.create_user(
+            username="locked-command-mutation-user",
+            email="locked-command-mutation@example.com",
+            password="test-pass-123",
+        )
+        config = MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.USER,
+            user=user,
+            name="locked-command-mutation",
+            display_name="Locked Command",
+            command="npx",
+            command_args=["-y", "@example/mcp"],
+        )
+
+        form = MCPServerConfigForm(
+            data={
+                "display_name": config.display_name,
+                "name": config.name,
+                "command": "python",
+                "command_args": '["server.py"]',
+                "url": "",
+                "metadata": "{}",
+                "environment": "{}",
+                "headers": "{}",
+                "auth_method": MCPServerConfig.AuthMethod.NONE,
+                "is_active": "on",
+            },
+            instance=config,
+            allow_commands=False,
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("cannot be changed", form.errors["command"][0])
+        self.assertIn("cannot be changed", form.errors["command_args"][0])
 
     def test_environment_and_metadata_ignored_for_user_scope(self):
         user = get_user_model().objects.create_user(
