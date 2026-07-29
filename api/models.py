@@ -13762,9 +13762,12 @@ def refresh_mcp_tool_cache_for_server(sender, instance, **kwargs):
     server_id = getattr(instance, "id", None)
     if server_id:
         invalidate_mcp_tool_cache(str(server_id))
-        from api.services.sandbox_compute import _requires_agent_pod_discovery
+        from api.services.mcp_runtime_policy import mcp_server_requires_agent_sandbox
 
-        if getattr(instance, "scope", None) != MCPServerConfig.Scope.PLATFORM and not _requires_agent_pod_discovery(instance):
+        if (
+            getattr(instance, "scope", None) != MCPServerConfig.Scope.PLATFORM
+            and not mcp_server_requires_agent_sandbox(instance)
+        ):
             from api.services.mcp_tool_discovery import schedule_mcp_tool_discovery
 
             schedule_mcp_tool_discovery(str(server_id), reason="config_changed")
@@ -13790,9 +13793,13 @@ def refresh_mcp_tool_cache_for_credentials(sender, instance, **kwargs):
     if server_id:
         invalidate_mcp_tool_cache(str(server_id))
         server = MCPServerConfig.objects.filter(id=server_id).only("scope", "command", "url").first()
-        from api.services.sandbox_compute import _requires_agent_pod_discovery
+        from api.services.mcp_runtime_policy import mcp_server_requires_agent_sandbox
 
-        if server and server.scope != MCPServerConfig.Scope.PLATFORM and not _requires_agent_pod_discovery(server):
+        if (
+            server
+            and server.scope != MCPServerConfig.Scope.PLATFORM
+            and not mcp_server_requires_agent_sandbox(server)
+        ):
             from api.services.mcp_tool_discovery import schedule_mcp_tool_discovery
 
             schedule_mcp_tool_discovery(str(server_id), reason="credentials_changed")

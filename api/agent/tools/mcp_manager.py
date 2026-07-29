@@ -56,6 +56,10 @@ from ...models import MCPServerConfig, MCPServerOAuthCredential, PersistentAgent
 from ...proxy_selection import select_proxy_for_persistent_agent, select_proxy
 from ...services.mcp_servers import agent_accessible_server_configs
 from ...services.mcp_tool_discovery import schedule_mcp_tool_discovery
+from ...services.mcp_runtime_policy import (
+    mcp_server_is_stdio,
+    mcp_server_requires_agent_sandbox,
+)
 from ...services.sandbox_compute import SandboxComputeService, SandboxComputeUnavailable, sandbox_compute_enabled, sandbox_compute_enabled_for_agent
 from ...services.mcp_tool_cache import (
     build_mcp_tool_cache_fingerprint,
@@ -668,16 +672,10 @@ class MCPToolManager:
 
     @staticmethod
     def _is_stdio_runtime(runtime: Optional[MCPServerRuntime]) -> bool:
-        if runtime is None:
-            return False
-        return bool(runtime.command) and not bool(runtime.url)
+        return mcp_server_is_stdio(runtime)
 
     def _runtime_requires_sandbox(self, runtime: Optional[MCPServerRuntime]) -> bool:
-        return bool(
-            runtime
-            and runtime.scope != MCPServerConfig.Scope.PLATFORM
-            and self._is_stdio_runtime(runtime)
-        )
+        return mcp_server_requires_agent_sandbox(runtime)
 
     def _sandbox_required_runtime_available(
         self,

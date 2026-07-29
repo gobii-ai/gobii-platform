@@ -255,6 +255,7 @@ from console.agent_creation import (
 )
 from console.views import _track_org_event_for_console, _mcp_server_event_properties
 from api.views import PersistentAgentViewSet, cancel_browser_use_task
+from api.services.mcp_runtime_policy import mcp_server_requires_agent_sandbox
 from api.services.sandbox_compute import (
     SANDBOX_COMPUTE_WAFFLE_FLAG,
     SandboxComputeService,
@@ -1585,14 +1586,6 @@ def _serialize_mcp_server_detail(server: MCPServerConfig, request: HttpRequest |
     return data
 
 
-def _mcp_server_requires_sandbox_test(server: MCPServerConfig) -> bool:
-    return (
-        server.scope != MCPServerConfig.Scope.PLATFORM
-        and bool(server.command)
-        and not bool(server.url)
-    )
-
-
 def _serialize_mcp_test_tool(tool) -> dict[str, object]:
     return {
         "full_name": str(getattr(tool, "full_name", "") or ""),
@@ -1649,7 +1642,7 @@ def _run_mcp_server_test(server: MCPServerConfig, payload: dict[str, object] | N
     if not server.is_active:
         return HttpResponseBadRequest("MCP server must be active before it can be tested.")
 
-    if _mcp_server_requires_sandbox_test(server):
+    if mcp_server_requires_agent_sandbox(server):
         agent = _resolve_mcp_test_agent(server, payload.get("agent_id"))
         if agent is None:
             return HttpResponseBadRequest("agent_id is required and must identify an eligible agent for this MCP server.")

@@ -7,6 +7,7 @@ from django.db import transaction
 from django.db.models import Q
 
 from api.models import MCPServerConfig, PersistentAgent, PersistentAgentMCPServer, PersistentAgentEnabledTool
+from api.services.mcp_runtime_policy import mcp_server_requires_agent_sandbox
 from api.services.sandbox_compute import sandbox_compute_enabled_for_agent
 from marketing_events.custom_events import ConfiguredCustomEvent, emit_configured_custom_capi_event
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
@@ -102,14 +103,6 @@ def server_assignment_agent_ids(server: MCPServerConfig) -> Set[str]:
     }
 
 
-def _server_requires_agent_sandbox(server: MCPServerConfig) -> bool:
-    return bool(
-        server.scope != MCPServerConfig.Scope.PLATFORM
-        and server.command
-        and not server.url
-    )
-
-
 def _validate_agent_sandbox_for_servers(
     agent: PersistentAgent,
     servers: Iterable[MCPServerConfig],
@@ -117,7 +110,7 @@ def _validate_agent_sandbox_for_servers(
     sandbox_required_ids = {
         str(server.id)
         for server in servers
-        if _server_requires_agent_sandbox(server)
+        if mcp_server_requires_agent_sandbox(server)
     }
     if sandbox_required_ids and not sandbox_compute_enabled_for_agent(agent):
         raise ValueError(
@@ -131,14 +124,14 @@ def _filter_sandbox_unavailable_servers(
     servers: Iterable[MCPServerConfig],
 ) -> List[MCPServerConfig]:
     configs = list(servers)
-    if not any(_server_requires_agent_sandbox(server) for server in configs):
+    if not any(mcp_server_requires_agent_sandbox(server) for server in configs):
         return configs
     if sandbox_compute_enabled_for_agent(agent):
         return configs
     return [
         server
         for server in configs
-        if not _server_requires_agent_sandbox(server)
+        if not mcp_server_requires_agent_sandbox(server)
     ]
 
 
@@ -154,7 +147,7 @@ def set_server_assignments(server: MCPServerConfig, desired_agent_ids: IterableT
         str(agent.id): agent
         for agent in (
             assignable_qs.select_related("user")
-            if _server_requires_agent_sandbox(server)
+            if mcp_server_requires_agent_sandbox(server)
             else assignable_qs.only("id")
         )
     }
@@ -163,7 +156,7 @@ def set_server_assignments(server: MCPServerConfig, desired_agent_ids: IterableT
     if invalid:
         raise ValueError(f"Invalid agent ids for this server: {', '.join(sorted(invalid))}")
 
-    if _server_requires_agent_sandbox(server):
+    if mcp_server_requires_agent_sandbox(server):
         ineligible = {
             agent_id
             for agent_id in desired_set
