@@ -1321,6 +1321,8 @@ class SpecialAccessCheckoutTests(TestCase):
             activated_at=timezone.now() - timedelta(days=15),
             late_conversion_expires_at=timezone.now() + timedelta(days=15),
         )
+        promo.activation_mode = TrialPromoActivationModeChoices.HOSTED_CHECKOUT
+        promo.save(update_fields=["activation_mode", "updated_at"])
         self.client.force_login(self.user)
 
         response = self.client.post(
@@ -1331,6 +1333,64 @@ class SpecialAccessCheckoutTests(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response["Location"], "https://stripe.test/discounted")
         self.assertEqual(mock_start_conversion.call_args.args[1:], (promo, redemption))
+
+    @override_settings(TRIAL_PROMO_DIRECT_ACTIVATION_ENABLED=False)
+    @patch("pages.views.activate_direct_trial_promo")
+    @patch(
+        "pages.views.reconcile_user_plan_from_stripe",
+        return_value={"id": PlanNames.STARTUP},
+    )
+    def test_completed_activation_finishes_template_handoff_after_campaign_expires(
+        self,
+        _mock_reconcile,
+        mock_activate,
+    ):
+        template = PersistentAgentTemplate.objects.create(
+            code="completed-expired-private-worker",
+            display_name="Completed expired private worker",
+            tagline="Private",
+            description="Private campaign template",
+            charter="Run the completed activation workflow.",
+            is_listed=False,
+        )
+        promo = _create_promo(
+            code="COMPLETED-EXPIRED-HANDOFF",
+            activation_mode=TrialPromoActivationModeChoices.DIRECT_STRIPE_TRIAL,
+            payment_method_required=False,
+            no_payment_method_end_behavior=TrialPromoNoPaymentMethodEndBehaviorChoices.CANCEL,
+            conversion_coupon_id="coupon_three_months",
+            linked_template=template,
+        )
+        TrialPromoRedemption.objects.create(
+            promo=promo,
+            user=self.user,
+            status=TrialPromoRedemptionStatusChoices.DIRECT_ACTIVATION_COMPLETED,
+            event_id="completed-expired-handoff",
+            discount_state=TrialPromoDiscountStateChoices.AVAILABLE,
+            activated_at=timezone.now() - timedelta(minutes=1),
+            late_conversion_expires_at=timezone.now() + timedelta(days=30),
+        )
+        promo.activation_mode = TrialPromoActivationModeChoices.HOSTED_CHECKOUT
+        promo.email_allowlist_enabled = True
+        promo.is_active = False
+        promo.active_until = timezone.now() - timedelta(seconds=1)
+        promo.save()
+        self.client.force_login(self.user)
+        session = self.client.session
+        session["special_access_trial_promo_id"] = str(promo.pk)
+        session.save()
+
+        response = self.client.post(reverse("pages:special_access_start"))
+
+        self.assertEqual(response.status_code, 302)
+        redirect_url = urlsplit(response["Location"])
+        self.assertEqual(redirect_url.path, "/app/agents/new")
+        self.assertEqual(parse_qs(redirect_url.query)["spawn"], ["1"])
+        self.assertEqual(
+            self.client.session["agent_template_source"],
+            "trial_promo",
+        )
+        mock_activate.assert_not_called()
 
     @override_settings(TRIAL_PROMO_DIRECT_ACTIVATION_ENABLED=False)
     @patch("pages.views.activate_direct_trial_promo")

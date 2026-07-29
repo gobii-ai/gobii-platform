@@ -103,16 +103,22 @@ def get_session_trial_promo(request) -> TrialPromo | None:
     except (TypeError, ValueError, ValidationError):
         clear_trial_promo_session(request)
         return None
-    pending_activation_exists = (
+    resumable_direct_redemption_exists = (
         promo is not None
         and request.user.is_authenticated
         and TrialPromoRedemption.objects.filter(
             promo=promo,
             user=request.user,
-            status=TrialPromoRedemptionStatusChoices.DIRECT_ACTIVATION_PENDING,
+            status__in=(
+                TrialPromoRedemptionStatusChoices.DIRECT_ACTIVATION_PENDING,
+                TrialPromoRedemptionStatusChoices.DIRECT_ACTIVATION_COMPLETED,
+            ),
         ).exists()
     )
-    if promo is None or (not promo.is_available() and not pending_activation_exists):
+    if promo is None or (
+        not promo.is_available()
+        and not resumable_direct_redemption_exists
+    ):
         clear_trial_promo_session(request)
         return None
     return promo

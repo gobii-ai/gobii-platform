@@ -2813,7 +2813,7 @@ class SpecialAccessStartView(View):
         if request.POST.get("action") == TRIAL_PROMO_RESEND_VERIFICATION_ACTION:
             return _resend_special_access_email_verification(request, promo)
 
-        pending_direct_activation = (
+        direct_activation_redemption = (
             get_direct_trial_promo_redemption(
                 promo=promo,
                 user=request.user,
@@ -2823,11 +2823,7 @@ class SpecialAccessStartView(View):
         )
         is_direct_activation = (
             promo.activation_mode == TrialPromoActivationModeChoices.DIRECT_STRIPE_TRIAL
-            or (
-                pending_direct_activation is not None
-                and pending_direct_activation.status
-                == TrialPromoRedemptionStatusChoices.DIRECT_ACTIVATION_PENDING
-            )
+            or direct_activation_redemption is not None
         )
         try:
             if is_direct_activation:
@@ -2984,7 +2980,7 @@ def _start_direct_trial_promo(request, promo: TrialPromo):
         and existing_redemption.status
         == TrialPromoRedemptionStatusChoices.DIRECT_ACTIVATION_PENDING
     )
-    if not activation_pending:
+    if existing_redemption is None:
         if not is_user_email_allowed_for_trial_promo(user=user, promo=promo):
             raise TrialPromoError(
                 TRIAL_PROMO_REASON_EMAIL_NOT_ALLOWLISTED,
