@@ -5,6 +5,7 @@ from api.agent.core.prompt_context import _get_peer_communication_instruction
 from api.agent.tools.peer_dm import get_send_agent_message_tool
 from api.evals.registry import ScenarioRegistry
 from api.evals.scenarios.structured_peer_handoffs import (
+    PEER_EMAIL_CC_RESOLVES_ADDRESS,
     STRUCTURED_PEER_HANDOFF_CASES,
     STRUCTURED_PEER_CORRECTION_RECONCILES_STALE_STATE,
     STRUCTURED_DECISION_ROUTING_CASES,
@@ -51,6 +52,12 @@ class StructuredPeerHandoffEvalTests(SimpleTestCase):
             self.assertEqual(metadata.expected_runtime, "short")
             self.assertEqual(metadata.cost_class, "low")
             self.assertIn("real_harness", metadata.tags)
+
+        email_scenario = ScenarioRegistry.get(PEER_EMAIL_CC_RESOLVES_ADDRESS)
+        self.assertEqual(
+            [task.name for task in email_scenario.tasks],
+            ["inject_request", "verify_email_participants"],
+        )
 
     def test_eval_prompts_do_not_name_the_expected_transport(self):
         prompts = " ".join(case.prompt for case in STRUCTURED_PEER_HANDOFF_CASES).lower()

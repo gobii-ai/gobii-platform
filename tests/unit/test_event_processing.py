@@ -772,6 +772,39 @@ class PromptContextBuilderTests(TestCase):
         self.assertIn("<current_plan>", content)
         self.assertIn("Current plan: none", content)
 
+    def test_peer_roster_includes_email_for_explicit_email_participation(self):
+        peer = PersistentAgent.objects.create(
+            user=self.user,
+            name="Ledger Agent",
+            charter="Maintain the finalized ledger.",
+            browser_use_agent=BrowserUseAgent.objects.create(
+                user=self.user,
+                name="Ledger Browser Agent",
+            ),
+        )
+        backup_email = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=peer,
+            channel=CommsChannel.EMAIL,
+            address="ledger.backup@example.com",
+        )
+        peer_email = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=peer,
+            channel=CommsChannel.EMAIL,
+            address="ledger.agent@example.com",
+            is_primary=True,
+        )
+        AgentPeerLink.objects.create(
+            agent_a=self.agent,
+            agent_b=peer,
+            created_by=self.user,
+        )
+
+        content = self._build_user_prompt_content()
+
+        self.assertIn(f"email: {peer_email.address}", content)
+        self.assertNotIn(f"email: {backup_email.address}", content)
+        self.assertIn("never put an agent ID in an email recipient field", content)
+
     def test_prompt_includes_current_plan_independent_of_skill_limit(self):
         config, _ = PromptConfig.objects.get_or_create(singleton_id=1)
         config.standard_skill_prompt_limit = 0
