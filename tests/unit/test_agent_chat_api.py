@@ -3147,6 +3147,9 @@ class AgentChatAPITests(TestCase):
         self.agent.save(update_fields=["is_active"])
 
         roster_response = self.client.get(reverse("console_agent_roster"))
+        profile_response = self.client.get(
+            reverse("console_agent_profile", kwargs={"agent_id": self.agent.id}),
+        )
         timeline_response = self.client.get(f"/console/api/agents/{self.agent.id}/timeline/")
 
         self.assertEqual(roster_response.status_code, 200)
@@ -3156,7 +3159,8 @@ class AgentChatAPITests(TestCase):
             if item["id"] == str(self.agent.id)
         )
         self.assertFalse(roster_agent["is_active"])
-        self.assertTrue(roster_agent["can_reactivate_agent"])
+        self.assertEqual(profile_response.status_code, 200)
+        self.assertTrue(profile_response.json()["can_reactivate_agent"])
         self.assertEqual(timeline_response.status_code, 200)
         self.assertFalse(timeline_response.json()["is_active"])
 

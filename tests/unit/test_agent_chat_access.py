@@ -924,7 +924,7 @@ class AgentChatAccessTests(TestCase):
         self.assertEqual(response.json()["enabled_system_skills"], ["google_sheets_native"])
         self.assertEqual(second_response.json()["enabled_system_skills"], [])
 
-    def test_roster_includes_mini_and_short_descriptions(self):
+    def test_roster_includes_lightweight_descriptions_and_tags(self):
         self.org_agent.mini_description = "Revenue pipeline assistant"
         self.org_agent.short_description = "Qualifies inbound leads and drafts handoff-ready summaries."
         self.org_agent.tags = ["pipeline", "sales"]
@@ -946,22 +946,10 @@ class AgentChatAccessTests(TestCase):
             matching_entry.get("short_description"),
             "Qualifies inbound leads and drafts handoff-ready summaries.",
         )
-        self.assertEqual(
-            matching_entry.get("listing_description"),
-            "Qualifies inbound leads and drafts handoff-ready summaries.",
-        )
-        self.assertEqual(matching_entry.get("listing_description_source"), "short")
         self.assertEqual(matching_entry.get("display_tags"), ["pipeline", "sales"])
-        self.assertEqual(
-            matching_entry.get("detail_url"),
-            f"/app/agents/{self.org_agent.id}/settings",
-        )
         self.assertNotIn("card_gradient_style", matching_entry)
         self.assertNotIn("icon_background_hex", matching_entry)
         self.assertNotIn("icon_border_hex", matching_entry)
-        self.assertIn("daily_credit_remaining", matching_entry)
-        self.assertEqual(matching_entry.get("daily_credit_low"), False)
-        self.assertEqual(matching_entry.get("last_24h_credit_burn"), 0.0)
 
     def test_roster_includes_pending_action_request_count(self):
         conversation = PersistentAgentConversation.objects.create(
@@ -1052,15 +1040,12 @@ class AgentChatAccessTests(TestCase):
         )
         self.assertTrue(matching_entry.get("is_collaborator"))
         self.assertFalse(matching_entry.get("can_manage_agent"))
-        self.assertFalse(matching_entry.get("can_manage_collaborators"))
-        self.assertTrue(
-            (matching_entry.get("detail_url") or "").startswith(f"/app/agents/{shared_agent.id}")
-        )
-        self.assertEqual(matching_entry.get("display_tags"), ["shared", "follow-up"])
+        self.assertEqual(matching_entry.get("mini_description"), "Shared follow-up agent")
         self.assertEqual(
-            matching_entry.get("listing_description"),
+            matching_entry.get("short_description"),
             "Handles follow-up workflows for shared collaborators.",
         )
+        self.assertEqual(matching_entry.get("display_tags"), ["shared", "follow-up"])
 
     def test_roster_shows_shared_agents_only_in_personal_context(self):
         User = get_user_model()
