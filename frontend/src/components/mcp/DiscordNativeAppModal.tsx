@@ -30,7 +30,9 @@ export type PendingDiscordAgentAction = {
 
 const DISCORD_NATIVE_SYSTEM_SKILL_KEY = 'discord_native'
 
-export function agentHasDiscordNative(agent: AgentRosterEntry): boolean {
+export function agentHasDiscordNative(
+  agent: AgentRosterEntry & { enabledSystemSkills?: string[] },
+): boolean {
   return Boolean(agent.enabledSystemSkills?.includes(DISCORD_NATIVE_SYSTEM_SKILL_KEY))
 }
 

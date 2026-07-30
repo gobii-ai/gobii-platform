@@ -2,23 +2,19 @@ from django.conf import settings
 from django.urls import NoReverseMatch, reverse
 
 from constants.plans import PlanNamesChoices
-from util.subscription_helper import get_organization_plan, get_user_plan, reconcile_user_plan_from_stripe
+from util.subscription_helper import get_organization_plan, get_user_plan
 
 from console.daily_credit import build_agent_daily_credit_context, build_daily_credit_status, serialize_daily_credit_payload
 
 
-def build_agent_quick_settings_payload(agent, owner=None, *, sync_personal_plan: bool = True) -> dict:
+def build_agent_quick_settings_payload(agent, owner=None) -> dict:
     context = build_agent_daily_credit_context(agent, owner)
     plan_payload = None
     upgrade_url = None
     if agent.organization_id:
         plan_payload = get_organization_plan(agent.organization)
     else:
-        plan_payload = (
-            reconcile_user_plan_from_stripe(agent.user)
-            if sync_personal_plan
-            else get_user_plan(agent.user)
-        )
+        plan_payload = get_user_plan(agent.user)
     plan_id = str(plan_payload.get("id", "")).lower() if plan_payload else ""
     is_free_plan = plan_id == PlanNamesChoices.FREE.value
 

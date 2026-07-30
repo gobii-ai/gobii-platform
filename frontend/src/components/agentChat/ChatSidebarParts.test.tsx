@@ -15,14 +15,7 @@ describe('AgentListItem paused state', () => {
       lastInteractionAt: null,
       miniDescription: 'Research assistant',
       shortDescription: 'Research assistant',
-      listingDescription: '',
-      listingDescriptionSource: null,
       displayTags: [],
-      detailUrl: '/app/agents/agent-1/settings',
-      dailyCreditRemaining: null,
-      dailyCreditLow: false,
-      last24hCreditBurn: null,
-      isOrgOwned: false,
       pendingActionRequestCount: 2,
     }
 

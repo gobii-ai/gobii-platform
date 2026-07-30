@@ -1,6 +1,13 @@
 import { HttpError, jsonFetch, jsonRequest } from './http'
 import { staffViewContextHeaders, type ConsoleContext, type StaffViewContext } from './context'
-import type { AgentRosterEntry, AgentRosterSortMode, AgentSidebarInvite, PlanningState, SignupPreviewState } from '../types/agentRoster'
+import type {
+  AgentProfileEntry,
+  AgentRosterEntry,
+  AgentRosterSortMode,
+  AgentSidebarInvite,
+  PlanningState,
+  SignupPreviewState,
+} from '../types/agentRoster'
 import type { AccountPauseInfo, BillingStatusInfo } from '../types/agentAddons'
 import type { LlmIntelligenceConfig } from '../types/llmIntelligence'
 import {
@@ -92,34 +99,24 @@ type AgentRosterPayload = {
   agents: AgentRosterListPayload[]
 }
 
-type AgentRosterListPayload = Pick<
+type AgentRosterListPayload = Omit<
   AgentProfilePayload,
-  | 'id'
-  | 'name'
-  | 'avatar_url'
-  | 'emotion'
-  | 'emotion_expires_at'
-  | 'is_active'
-  | 'processing_active'
-  | 'mini_description'
-  | 'short_description'
-  | 'display_tags'
   | 'detail_url'
-  | 'is_collaborator'
-  | 'can_manage_agent'
-  | 'email'
-  | 'sms'
-  | 'last_interaction_at'
-  | 'signup_preview_state'
-  | 'planning_state'
-  | 'pending_action_request_count'
-  | 'has_unread_agent_message'
-  | 'latest_agent_message_id'
-  | 'latest_agent_message_at'
-  | 'latest_agent_message_read_at'
+  | 'listing_description'
+  | 'listing_description_source'
+  | 'daily_credit_remaining'
+  | 'daily_credit_low'
+  | 'last_24h_credit_burn'
+  | 'developer_live_chat_url'
+  | 'is_org_owned'
+  | 'can_reactivate_agent'
+  | 'can_manage_collaborators'
+  | 'can_send_messages'
+  | 'preferred_llm_tier'
+  | 'enabled_system_skills'
 >
 
-export function agentProfilePayloadToRosterEntry(agent: AgentProfilePayload): AgentRosterEntry {
+function agentRosterPayloadToEntry(agent: AgentRosterListPayload): AgentRosterEntry {
   return {
     id: agent.id,
     name: agent.name,
@@ -130,74 +127,40 @@ export function agentProfilePayloadToRosterEntry(agent: AgentProfilePayload): Ag
     processingActive: agent.processing_active,
     miniDescription: agent.mini_description,
     shortDescription: agent.short_description,
+    displayTags: Array.isArray(agent.display_tags) ? agent.display_tags : [],
+    isCollaborator: agent.is_collaborator,
+    canManageAgent: agent.can_manage_agent,
+    email: agent.email,
+    sms: agent.sms,
+    lastInteractionAt: agent.last_interaction_at,
+    signupPreviewState: agent.signup_preview_state ?? null,
+    planningState: agent.planning_state ?? null,
+    pendingActionRequestCount: Math.max(0, Number(agent.pending_action_request_count ?? 0) || 0),
+    hasUnreadAgentMessage: Boolean(agent.has_unread_agent_message),
+    latestAgentMessageId: agent.latest_agent_message_id ?? null,
+    latestAgentMessageAt: agent.latest_agent_message_at ?? null,
+    latestAgentMessageReadAt: agent.latest_agent_message_read_at ?? null,
+  }
+}
+
+export function agentProfilePayloadToRosterEntry(agent: AgentProfilePayload): AgentProfileEntry {
+  return {
+    ...agentRosterPayloadToEntry(agent),
     listingDescription: agent.listing_description,
     listingDescriptionSource: agent.listing_description_source,
-    displayTags: Array.isArray(agent.display_tags) ? agent.display_tags : [],
     detailUrl: agent.detail_url,
     dailyCreditRemaining: agent.daily_credit_remaining,
     dailyCreditLow: Boolean(agent.daily_credit_low),
     last24hCreditBurn: agent.last_24h_credit_burn,
     developerLiveChatUrl: agent.developer_live_chat_url ?? null,
     isOrgOwned: agent.is_org_owned,
-    isCollaborator: agent.is_collaborator,
-    canManageAgent: agent.can_manage_agent,
     canReactivateAgent: agent.can_reactivate_agent === true,
     canManageCollaborators: agent.can_manage_collaborators,
     canSendMessages: agent.can_send_messages !== false,
     preferredLlmTier: agent.preferred_llm_tier,
-    email: agent.email,
-    sms: agent.sms,
-    lastInteractionAt: agent.last_interaction_at,
-    signupPreviewState: agent.signup_preview_state ?? null,
-    planningState: agent.planning_state ?? null,
-    pendingActionRequestCount: Math.max(0, Number(agent.pending_action_request_count ?? 0) || 0),
-    hasUnreadAgentMessage: Boolean(agent.has_unread_agent_message),
-    latestAgentMessageId: agent.latest_agent_message_id ?? null,
-    latestAgentMessageAt: agent.latest_agent_message_at ?? null,
-    latestAgentMessageReadAt: agent.latest_agent_message_read_at ?? null,
     enabledSystemSkills: Array.isArray(agent.enabled_system_skills)
       ? agent.enabled_system_skills.filter((value): value is string => typeof value === 'string')
       : [],
-  }
-}
-
-function agentRosterListPayloadToEntry(agent: AgentRosterListPayload): AgentRosterEntry {
-  return {
-    id: agent.id,
-    name: agent.name,
-    avatarUrl: agent.avatar_url,
-    emotion: agent.emotion ?? null,
-    emotionExpiresAt: agent.emotion_expires_at ?? null,
-    isActive: agent.is_active,
-    processingActive: agent.processing_active,
-    miniDescription: agent.mini_description,
-    shortDescription: agent.short_description,
-    listingDescription: '',
-    listingDescriptionSource: null,
-    displayTags: Array.isArray(agent.display_tags) ? agent.display_tags : [],
-    detailUrl: agent.detail_url,
-    dailyCreditRemaining: null,
-    dailyCreditLow: false,
-    last24hCreditBurn: null,
-    developerLiveChatUrl: null,
-    isOrgOwned: false,
-    isCollaborator: agent.is_collaborator,
-    canManageAgent: agent.can_manage_agent,
-    canReactivateAgent: false,
-    canManageCollaborators: false,
-    canSendMessages: false,
-    preferredLlmTier: null,
-    email: agent.email,
-    sms: agent.sms,
-    lastInteractionAt: agent.last_interaction_at,
-    signupPreviewState: agent.signup_preview_state ?? null,
-    planningState: agent.planning_state ?? null,
-    pendingActionRequestCount: Math.max(0, Number(agent.pending_action_request_count ?? 0) || 0),
-    hasUnreadAgentMessage: Boolean(agent.has_unread_agent_message),
-    latestAgentMessageId: agent.latest_agent_message_id ?? null,
-    latestAgentMessageAt: agent.latest_agent_message_at ?? null,
-    latestAgentMessageReadAt: agent.latest_agent_message_read_at ?? null,
-    enabledSystemSkills: [],
   }
 }
 
@@ -236,7 +199,7 @@ export async function fetchAgentRoster(
     `/console/api/agents/roster/${query}`,
     { headers, signal: options.signal },
   )
-  const agents = payload.agents.map(agentRosterListPayloadToEntry)
+  const agents = payload.agents.map(agentRosterPayloadToEntry)
   return {
     context: payload.context,
     agents,
@@ -268,7 +231,7 @@ export async function fetchAgentProfile(
     signal?: AbortSignal
     staffContext?: StaffViewContext | null
   } = {},
-): Promise<AgentRosterEntry> {
+): Promise<AgentProfileEntry> {
   const payload = await jsonFetch<AgentProfilePayload>(
     `/console/api/agents/${agentId}/profile/`,
     {

@@ -17,7 +17,6 @@ from util.subscription_helper import (
     get_stripe_customer,
     get_user_plan,
     get_user_max_contacts_per_agent,
-    reconcile_user_plan_from_stripe,
 )
 from util.trial_enforcement import is_user_freemium_grandfathered
 from util.urls import IMMERSIVE_APP_BASE_PATH, append_context_query
@@ -400,18 +399,13 @@ def build_agent_addons_payload(
     *,
     can_manage_billing: bool = False,
     can_open_billing: bool = False,
-    sync_personal_plan: bool = True,
 ) -> dict:
     plan_payload = None
     manage_billing_url = None
     if agent.organization_id:
         plan_payload = get_organization_plan(agent.organization)
     else:
-        plan_payload = (
-            reconcile_user_plan_from_stripe(agent.user)
-            if sync_personal_plan
-            else get_user_plan(agent.user)
-        )
+        plan_payload = get_user_plan(agent.user)
     plan_id = str(plan_payload.get("id", "")).lower() if plan_payload else ""
     owner = owner or agent.organization or agent.user
     owner_type = "organization" if agent.organization_id else "user"

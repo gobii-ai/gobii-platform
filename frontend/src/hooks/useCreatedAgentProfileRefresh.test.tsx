@@ -1,7 +1,7 @@
 import { act, renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { AgentRosterEntry } from '../types/agentRoster'
+import type { AgentProfileEntry } from '../types/agentRoster'
 import { useCreatedAgentProfileRefresh } from './useCreatedAgentProfileRefresh'
 
 const { fetchAgentProfileMock } = vi.hoisted(() => ({
@@ -13,7 +13,7 @@ vi.mock('../api/agents', async (importOriginal) => ({
   fetchAgentProfile: fetchAgentProfileMock,
 }))
 
-function profile(avatarUrl: string | null): AgentRosterEntry {
+function profile(avatarUrl: string | null): AgentProfileEntry {
   return {
     id: 'agent-1',
     name: 'Agent',
@@ -30,6 +30,13 @@ function profile(avatarUrl: string | null): AgentRosterEntry {
     dailyCreditRemaining: null,
     dailyCreditLow: false,
     last24hCreditBurn: null,
+    developerLiveChatUrl: null,
+    isOrgOwned: false,
+    canReactivateAgent: false,
+    canManageCollaborators: false,
+    canSendMessages: true,
+    preferredLlmTier: null,
+    enabledSystemSkills: [],
   }
 }
 
@@ -78,4 +85,3 @@ describe('useCreatedAgentProfileRefresh', () => {
     expect(fetchAgentProfileMock).not.toHaveBeenCalled()
   })
 })
-

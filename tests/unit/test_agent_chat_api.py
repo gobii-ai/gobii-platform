@@ -940,13 +940,8 @@ class AgentChatAPITests(TestCase):
         self.assertEqual(owner_state.effective_app_slugs, ["trello", "notion", "slack"])
 
     @tag("batch_agent_chat")
-    @patch("console.agent_addons.reconcile_user_plan_from_stripe")
-    @patch("console.agent_quick_settings.reconcile_user_plan_from_stripe")
-    def test_timeline_endpoint_returns_expected_events(
-        self,
-        mock_quick_settings_reconcile,
-        mock_addons_reconcile,
-    ):
+    @patch("util.subscription_helper.reconcile_user_plan_from_stripe")
+    def test_timeline_endpoint_returns_expected_events(self, mock_reconcile_plan):
         response = self.client.get(f"/console/api/agents/{self.agent.id}/timeline/")
         self.assertEqual(response.status_code, 200)
         payload = response.json()
@@ -976,8 +971,7 @@ class AgentChatAPITests(TestCase):
         self.assertIn("accountPause", critical_status)
         self.assertIn("dailyCredits", critical_status)
         self.assertIn("contactCapStatus", critical_status)
-        mock_quick_settings_reconcile.assert_not_called()
-        mock_addons_reconcile.assert_not_called()
+        mock_reconcile_plan.assert_not_called()
 
     @tag("batch_agent_chat")
     def test_queued_tool_calls_are_excluded_from_all_timeline_pagination_queries(self):
@@ -1205,7 +1199,7 @@ class AgentChatAPITests(TestCase):
         self.assertIsNone(entry["scheduleValue"])
 
     @tag("batch_agent_chat")
-    def test_agent_profile_endpoint_returns_lightweight_roster_entry(self):
+    def test_agent_profile_endpoint_returns_full_payload(self):
         response = self.client.get(
             reverse("console_agent_profile", kwargs={"agent_id": self.agent.id}),
         )
@@ -1216,7 +1210,14 @@ class AgentChatAPITests(TestCase):
         self.assertEqual(payload["name"], self.agent.name)
         self.assertIn("avatar_url", payload)
         self.assertIn("processing_active", payload)
-        self.assertIn("enabled_system_skills", payload)
+        self.assertTrue({
+            "detail_url",
+            "listing_description",
+            "daily_credit_remaining",
+            "developer_live_chat_url",
+            "preferred_llm_tier",
+            "enabled_system_skills",
+        }.issubset(payload))
 
     @tag("batch_agent_chat")
     @override_settings(GOBII_RELEASE_ENV="staging")

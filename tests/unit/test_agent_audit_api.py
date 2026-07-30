@@ -362,6 +362,7 @@ class StaffAgentAuditAPITests(TestCase):
         profile_payload = profile_response.json()
         self.assertFalse(profile_payload["can_send_messages"])
         self.assertTrue({
+            "detail_url",
             "listing_description",
             "daily_credit_remaining",
             "developer_live_chat_url",
@@ -460,6 +461,7 @@ class StaffAgentAuditAPITests(TestCase):
             "can_manage_agent",
         }.issubset(entry))
         self.assertTrue({
+            "detail_url",
             "listing_description",
             "daily_credit_remaining",
             "developer_live_chat_url",

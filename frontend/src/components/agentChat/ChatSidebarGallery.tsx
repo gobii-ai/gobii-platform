@@ -50,7 +50,7 @@ function GalleryCard({
   const isSignupPreviewAgent = !agent.isCollaborator && Boolean(agent.signupPreviewState) && agent.signupPreviewState !== 'none'
   const showSmsAction = Boolean(agent.sms) && !isSignupPreviewAgent
   const showEmailAction = Boolean(agent.email) && !isSignupPreviewAgent
-  const showConfigureAction = Boolean(agent.canManageAgent && (onConfigureAgent || agent.detailUrl)) && !isSignupPreviewAgent
+  const showConfigureAction = Boolean(agent.canManageAgent) && !isSignupPreviewAgent
   const miniDescription = (agent.miniDescription || '').trim()
   const pendingRequestCount = Math.max(0, agent.pendingActionRequestCount ?? 0)
   const showChatAction = Boolean(onSelectAgent)
@@ -137,12 +137,12 @@ function GalleryCard({
               <Settings className="h-3.5 w-3.5" />
               <span>Configure</span>
             </button>
-          ) : agent.detailUrl ? (
-            <a className="agent-gallery-card__primary-action" href={agent.detailUrl}>
+          ) : (
+            <a className="agent-gallery-card__primary-action" href={`/app/agents/${agent.id}/settings`}>
               <Settings className="h-3.5 w-3.5" />
               <span>Configure</span>
             </a>
-          ) : null
+          )
         ) : null}
         <div className="agent-gallery-card__channel-row">
           {showEmailAction && agent.email ? (

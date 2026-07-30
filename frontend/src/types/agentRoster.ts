@@ -21,21 +21,9 @@ export type AgentRosterEntry = {
   lastInteractionAt: string | null
   miniDescription: string
   shortDescription: string
-  listingDescription: string
-  listingDescriptionSource: string | null
   displayTags: string[]
-  detailUrl: string | null
-  dailyCreditRemaining: number | null
-  dailyCreditLow: boolean
-  last24hCreditBurn: number | null
-  developerLiveChatUrl?: string | null
-  isOrgOwned?: boolean
   isCollaborator?: boolean
   canManageAgent?: boolean
-  canReactivateAgent?: boolean
-  canManageCollaborators?: boolean
-  canSendMessages?: boolean
-  preferredLlmTier?: string | null
   email?: string | null
   sms?: string | null
   signupPreviewState?: SignupPreviewState | null
@@ -45,8 +33,26 @@ export type AgentRosterEntry = {
   latestAgentMessageId?: string | null
   latestAgentMessageAt?: string | null
   latestAgentMessageReadAt?: string | null
-  enabledSystemSkills?: string[]
 }
+
+export type AgentProfileDetails = {
+  listingDescription: string
+  listingDescriptionSource: string | null
+  detailUrl: string | null
+  dailyCreditRemaining: number | null
+  dailyCreditLow: boolean
+  last24hCreditBurn: number | null
+  developerLiveChatUrl: string | null
+  isOrgOwned: boolean
+  canReactivateAgent: boolean
+  canManageCollaborators: boolean
+  canSendMessages: boolean
+  preferredLlmTier: string | null
+  enabledSystemSkills: string[]
+}
+
+export type AgentProfileEntry = AgentRosterEntry & AgentProfileDetails
+export type ActiveAgentEntry = AgentRosterEntry & Partial<AgentProfileDetails>
 
 export type AgentSidebarInvite = {
   id: string

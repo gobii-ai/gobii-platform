@@ -110,7 +110,15 @@ import { collapseDetailedStatusRuns } from '../hooks/useSimplifiedTimeline'
 import { usePageLifecycle } from '../hooks/usePageLifecycle'
 import { HttpError } from '../api/http'
 import { safeErrorMessage } from '../api/safeErrorMessage'
-import type { AgentRosterEntry, AgentRosterSortMode, AgentSidebarInvite, PlanningState, SignupPreviewState } from '../types/agentRoster'
+import type {
+  ActiveAgentEntry,
+  AgentProfileEntry,
+  AgentRosterEntry,
+  AgentRosterSortMode,
+  AgentSidebarInvite,
+  PlanningState,
+  SignupPreviewState,
+} from '../types/agentRoster'
 import type { BillingStatusInfo } from '../types/agentAddons'
 import type { AgentMessage, AgentMessageNotification, PendingActionRequest, PlanSnapshot, TimelineEvent } from '../types/agentChat'
 import type { DailyCreditsUpdatePayload } from '../types/dailyCredits'
@@ -477,7 +485,7 @@ function insertRosterEntry(agents: AgentRosterEntry[] | undefined, entry: AgentR
 
 function mergeCreatedAgentProfile(
   agents: AgentRosterEntry[],
-  profile: AgentRosterEntry,
+  profile: AgentProfileEntry,
 ): AgentRosterEntry[] {
   let changed = false
   const nextAgents = agents.map((agent) => {
@@ -488,8 +496,6 @@ function mergeCreatedAgentProfile(
       (!agent.avatarUrl && profile.avatarUrl)
       || (!agent.miniDescription && profile.miniDescription)
       || (!agent.shortDescription && profile.shortDescription)
-      || (!agent.listingDescription && profile.listingDescription)
-      || (!agent.listingDescriptionSource && profile.listingDescriptionSource)
       || (agent.displayTags.length === 0 && profile.displayTags.length > 0),
     )
     if (!hasNewProfileData) {
@@ -501,8 +507,6 @@ function mergeCreatedAgentProfile(
       avatarUrl: agent.avatarUrl || profile.avatarUrl,
       miniDescription: agent.miniDescription || profile.miniDescription,
       shortDescription: agent.shortDescription || profile.shortDescription,
-      listingDescription: agent.listingDescription || profile.listingDescription,
-      listingDescriptionSource: agent.listingDescriptionSource || profile.listingDescriptionSource,
       displayTags: agent.displayTags.length > 0 ? agent.displayTags : profile.displayTags,
     }
     return next
@@ -512,8 +516,8 @@ function mergeCreatedAgentProfile(
 
 function mergeRosterEntryWithProfile(
   entry: AgentRosterEntry | null,
-  profile: AgentRosterEntry | null,
-): AgentRosterEntry | null {
+  profile: AgentProfileEntry | null,
+): ActiveAgentEntry | null {
   if (!entry) {
     return profile
   }
@@ -521,22 +525,8 @@ function mergeRosterEntryWithProfile(
     return entry
   }
   return {
+    ...profile,
     ...entry,
-    listingDescription: profile.listingDescription,
-    listingDescriptionSource: profile.listingDescriptionSource,
-    dailyCreditRemaining: profile.dailyCreditRemaining,
-    dailyCreditLow: profile.dailyCreditLow,
-    last24hCreditBurn: profile.last24hCreditBurn,
-    developerLiveChatUrl: profile.developerLiveChatUrl,
-    isOrgOwned: profile.isOrgOwned,
-    canReactivateAgent: profile.canReactivateAgent,
-    canManageCollaborators: profile.canManageCollaborators,
-    canSendMessages: profile.canSendMessages,
-    preferredLlmTier: profile.preferredLlmTier,
-    enabledSystemSkills: Array.from(new Set([
-      ...(profile.enabledSystemSkills ?? []),
-      ...(entry.enabledSystemSkills ?? []),
-    ])),
   }
 }
 
@@ -564,6 +554,54 @@ function patchRosterAgent(
     return { ...agent, ...patch }
   })
   return changed ? { ...current, agents: nextAgents } : current
+}
+
+function agentProfileEventPatch(rawPayload: Record<string, unknown>): Partial<AgentRosterEntry> {
+  const patch: Partial<AgentRosterEntry> = {}
+  const setValue = <K extends keyof AgentRosterEntry>(
+    key: K,
+    payloadKey: string,
+    normalize: (value: unknown) => AgentRosterEntry[K] | undefined,
+  ): void => {
+    if (!Object.prototype.hasOwnProperty.call(rawPayload, payloadKey)) {
+      return
+    }
+    const value = normalize(rawPayload[payloadKey])
+    if (value !== undefined) {
+      patch[key] = value
+    }
+  }
+
+  setValue('name', 'agent_name', (value) => (
+    typeof value === 'string' && value ? value : undefined
+  ))
+  setValue('avatarUrl', 'agent_avatar_url', (value) => (
+    typeof value === 'string' ? value : null
+  ))
+  setValue('emotion', 'emotion', (value) => (typeof value === 'string' ? value : null))
+  setValue('emotionExpiresAt', 'emotion_expires_at', (value) => (
+    typeof value === 'string' ? value : null
+  ))
+  setValue('shortDescription', 'short_description', (value) => (
+    typeof value === 'string' ? value : ''
+  ))
+  setValue('miniDescription', 'mini_description', (value) => (
+    typeof value === 'string' ? value : ''
+  ))
+  setValue('processingActive', 'processing_active', Boolean)
+  setValue('isActive', 'is_active', (value) => value !== false)
+  setValue('signupPreviewState', 'signup_preview_state', normalizeSignupPreviewState)
+  setValue('planningState', 'planning_state', normalizePlanningState)
+
+  if ([
+    'has_unread_agent_message',
+    'latest_agent_message_id',
+    'latest_agent_message_at',
+    'latest_agent_message_read_at',
+  ].some((key) => Object.prototype.hasOwnProperty.call(rawPayload, key))) {
+    Object.assign(patch, normalizeAgentMessageReadState(rawPayload))
+  }
+  return patch
 }
 
 type AgentRosterQueryData = {
@@ -864,7 +902,6 @@ export type AgentChatPageProps = {
   viewerUserId?: number | null
   viewerEmail?: string | null
   viewerTimeZone?: string | null
-  canManageCollaborators?: boolean | null
   isCollaborator?: boolean | null
   pipedreamAppsSettingsUrl?: string | null
   pipedreamAppSearchUrl?: string | null
@@ -1403,166 +1440,17 @@ export function AgentChatPage({
         return
       }
 
-      const hasName = Object.prototype.hasOwnProperty.call(rawPayload, 'agent_name')
-      const hasAvatar = Object.prototype.hasOwnProperty.call(rawPayload, 'agent_avatar_url')
-      const hasEmotion = Object.prototype.hasOwnProperty.call(rawPayload, 'emotion')
-      const hasEmotionExpiresAt = Object.prototype.hasOwnProperty.call(rawPayload, 'emotion_expires_at')
-      const hasShortDescription = Object.prototype.hasOwnProperty.call(rawPayload, 'short_description')
-      const hasMiniDescription = Object.prototype.hasOwnProperty.call(rawPayload, 'mini_description')
-      const hasProcessingActive = Object.prototype.hasOwnProperty.call(rawPayload, 'processing_active')
-      const hasIsActive = Object.prototype.hasOwnProperty.call(rawPayload, 'is_active')
-      const hasSignupPreviewState = Object.prototype.hasOwnProperty.call(rawPayload, 'signup_preview_state')
-      const hasPlanningState = Object.prototype.hasOwnProperty.call(rawPayload, 'planning_state')
-      const hasUnreadAgentMessage = Object.prototype.hasOwnProperty.call(rawPayload, 'has_unread_agent_message')
-      const hasLatestAgentMessageId = Object.prototype.hasOwnProperty.call(rawPayload, 'latest_agent_message_id')
-      const hasLatestAgentMessageAt = Object.prototype.hasOwnProperty.call(rawPayload, 'latest_agent_message_at')
-      const hasLatestAgentMessageReadAt = Object.prototype.hasOwnProperty.call(rawPayload, 'latest_agent_message_read_at')
-      const hasMessageReadState = hasUnreadAgentMessage
-        || hasLatestAgentMessageId
-        || hasLatestAgentMessageAt
-        || hasLatestAgentMessageReadAt
-      if (
-        !hasName
-        && !hasAvatar
-        && !hasEmotion
-        && !hasEmotionExpiresAt
-        && !hasShortDescription
-        && !hasMiniDescription
-        && !hasProcessingActive
-        && !hasIsActive
-        && !hasSignupPreviewState
-        && !hasPlanningState
-        && !hasMessageReadState
-      ) {
+      const patch = agentProfileEventPatch(rawPayload)
+      if (Object.keys(patch).length === 0) {
         return
       }
-      if (hasAvatar) {
-        const avatarFromEvent = typeof rawPayload.agent_avatar_url === 'string' ? rawPayload.agent_avatar_url : null
-        if (normalizeAvatarUrl(avatarFromEvent)) {
-          setPendingCreatedProfileId((current) => (current === agentIdFromEvent ? null : current))
-        }
+      if (normalizeAvatarUrl(patch.avatarUrl)) {
+        setPendingCreatedProfileId((current) => (current === agentIdFromEvent ? null : current))
       }
 
-      queryClient.setQueriesData(
+      queryClient.setQueriesData<AgentRosterQueryData>(
         { queryKey: ['agent-roster'] },
-        (
-          current: AgentRosterQueryData | undefined,
-        ) => {
-          if (!current?.agents?.length) {
-            return current
-          }
-
-          let changed = false
-          const nextAgents = current.agents.map((agent) => {
-            if (agent.id !== agentIdFromEvent) {
-              return agent
-            }
-
-            const next = { ...agent }
-            if (hasName) {
-              const nextName = typeof rawPayload.agent_name === 'string' ? rawPayload.agent_name : null
-              if (nextName && nextName !== next.name) {
-                next.name = nextName
-                changed = true
-              }
-            }
-            if (hasAvatar) {
-              const nextAvatar = typeof rawPayload.agent_avatar_url === 'string' ? rawPayload.agent_avatar_url : null
-              if (nextAvatar !== next.avatarUrl) {
-                next.avatarUrl = nextAvatar
-                changed = true
-              }
-            }
-            if (hasEmotion) {
-              const nextEmotion = typeof rawPayload.emotion === 'string' ? rawPayload.emotion : null
-              if (nextEmotion !== next.emotion) {
-                next.emotion = nextEmotion
-                changed = true
-              }
-            }
-            if (hasEmotionExpiresAt) {
-              const nextEmotionExpiresAt = typeof rawPayload.emotion_expires_at === 'string'
-                ? rawPayload.emotion_expires_at
-                : null
-              if (nextEmotionExpiresAt !== next.emotionExpiresAt) {
-                next.emotionExpiresAt = nextEmotionExpiresAt
-                changed = true
-              }
-            }
-            if (hasShortDescription) {
-              const nextDescription = typeof rawPayload.short_description === 'string' ? rawPayload.short_description : ''
-              if (nextDescription !== next.shortDescription) {
-                next.shortDescription = nextDescription
-                changed = true
-              }
-            }
-            if (hasMiniDescription) {
-              const nextMiniDescription = typeof rawPayload.mini_description === 'string' ? rawPayload.mini_description : ''
-              if (nextMiniDescription !== next.miniDescription) {
-                next.miniDescription = nextMiniDescription
-                changed = true
-              }
-            }
-            if (hasProcessingActive) {
-              const nextProcessingActive = Boolean(rawPayload.processing_active)
-              if (nextProcessingActive !== next.processingActive) {
-                next.processingActive = nextProcessingActive
-                changed = true
-              }
-            }
-            if (hasIsActive) {
-              const nextIsActive = rawPayload.is_active !== false
-              if (nextIsActive !== next.isActive) {
-                next.isActive = nextIsActive
-                changed = true
-              }
-            }
-            if (hasSignupPreviewState) {
-              const nextSignupPreviewState = normalizeSignupPreviewState(rawPayload.signup_preview_state)
-              if (nextSignupPreviewState !== (next.signupPreviewState ?? 'none')) {
-                next.signupPreviewState = nextSignupPreviewState
-                changed = true
-              }
-            }
-            if (hasPlanningState) {
-              const nextPlanningState = normalizePlanningState(rawPayload.planning_state)
-              if (nextPlanningState !== (next.planningState ?? 'skipped')) {
-                next.planningState = nextPlanningState
-                changed = true
-              }
-            }
-            if (hasMessageReadState) {
-              const readState = normalizeAgentMessageReadState(rawPayload)
-              if (readState.hasUnreadAgentMessage !== Boolean(next.hasUnreadAgentMessage)) {
-                next.hasUnreadAgentMessage = readState.hasUnreadAgentMessage
-                changed = true
-              }
-              if (readState.latestAgentMessageId !== (next.latestAgentMessageId ?? null)) {
-                next.latestAgentMessageId = readState.latestAgentMessageId
-                changed = true
-              }
-              if (readState.latestAgentMessageAt !== (next.latestAgentMessageAt ?? null)) {
-                next.latestAgentMessageAt = readState.latestAgentMessageAt
-                changed = true
-              }
-              if (readState.latestAgentMessageReadAt !== (next.latestAgentMessageReadAt ?? null)) {
-                next.latestAgentMessageReadAt = readState.latestAgentMessageReadAt
-                changed = true
-              }
-            }
-
-            return next
-          })
-
-          if (!changed) {
-            return current
-          }
-
-          return {
-            ...current,
-            agents: nextAgents,
-          }
-        },
+        (current) => patchRosterAgent(current, agentIdFromEvent, patch),
       )
     },
     [queryClient],
@@ -1581,7 +1469,7 @@ export function AgentChatPage({
     staffContext,
     refetchIntervalMs: ROSTER_REFRESH_INTERVAL_MS,
   })
-  const applyCreatedAgentProfile = useCallback((profile: AgentRosterEntry) => {
+  const applyCreatedAgentProfile = useCallback((profile: AgentProfileEntry) => {
     queryClient.setQueryData(
       ['agent-profile', rosterContextKey, profile.id],
       profile,
@@ -2451,25 +2339,16 @@ export function AgentChatPage({
       name: resolvedAgentName || 'Agent',
       avatarUrl: resolvedAvatarUrl,
       isActive: activeAgentIsActive,
-      canReactivateAgent: activeCanReactivateAgent,
       processingActive: false,
       lastInteractionAt: null,
       miniDescription: '',
       shortDescription: '',
-      listingDescription: '',
-      listingDescriptionSource: null,
       displayTags: [],
-      detailUrl: `/app/agents/${activeAgentId}/settings`,
-      dailyCreditRemaining: null,
-      dailyCreditLow: false,
-      last24hCreditBurn: null,
-      isOrgOwned: false,
       pendingActionRequestCount: 0,
     }
   }, [
     activeAgentId,
     activeAgentIsActive,
-    activeCanReactivateAgent,
     resolvedAgentName,
     resolvedAvatarUrl,
   ])
@@ -2488,14 +2367,12 @@ export function AgentChatPage({
       const nextAvatarUrl = normalizeAvatarUrl(resolvedAvatarUrl) ?? normalizeAvatarUrl(agent.avatarUrl)
       const nextEmail = resolvedAgentEmail ?? agent.email ?? null
       const nextSms = resolvedAgentSms ?? agent.sms ?? null
-      const nextIsOrgOwned = agent.isOrgOwned ?? resolvedIsOrgOwned
 
       if (
         nextName === agent.name
         && nextAvatarUrl === agent.avatarUrl
         && nextEmail === (agent.email ?? null)
         && nextSms === (agent.sms ?? null)
-        && nextIsOrgOwned === agent.isOrgOwned
       ) {
         return agent
       }
@@ -2507,7 +2384,6 @@ export function AgentChatPage({
         avatarUrl: nextAvatarUrl,
         email: nextEmail,
         sms: nextSms,
-        isOrgOwned: nextIsOrgOwned,
       }
     })
 
@@ -2518,7 +2394,6 @@ export function AgentChatPage({
     resolvedAgentName,
     resolvedAgentSms,
     resolvedAvatarUrl,
-    resolvedIsOrgOwned,
     rosterAgents,
   ])
   const sortedSidebarAgents = useMemo(

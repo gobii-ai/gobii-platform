@@ -1,14 +1,14 @@
 import { useEffect } from 'react'
 
 import { fetchAgentProfile } from '../api/agents'
-import type { AgentRosterEntry } from '../types/agentRoster'
+import type { AgentProfileEntry } from '../types/agentRoster'
 
 const PROFILE_REFRESH_DELAYS_MS = [5_000, 15_000, 30_000, 60_000, 90_000]
 
 type UseCreatedAgentProfileRefreshOptions = {
   agentId: string | null
   avatarUrl: string | null | undefined
-  onProfile: (profile: AgentRosterEntry) => void
+  onProfile: (profile: AgentProfileEntry) => void
 }
 
 export function useCreatedAgentProfileRefresh({

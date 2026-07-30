@@ -3294,7 +3294,9 @@ class ConsoleViewsTest(TestCase):
         )
 
         url = reverse('console_agent_quick_settings', kwargs={'agent_id': agent.id})
-        response = self.client.get(url)
+        with patch("console.agent_quick_settings.get_user_plan", return_value={"id": "free"}) as mock_get_plan, \
+             patch("util.subscription_helper.reconcile_user_plan_from_stripe") as mock_reconcile_plan:
+            response = self.client.get(url)
         self.assertEqual(response.status_code, 200)
 
         payload = response.json()
@@ -3306,6 +3308,8 @@ class ConsoleViewsTest(TestCase):
         self.assertFalse(payload['status']['dailyCredits']['softTargetExceeded'])
         self.assertFalse(payload['status']['dailyCredits']['hardLimitReached'])
         self.assertEqual(set(payload.get("meta", {}).get("plan", {}).keys()), {"isFree"})
+        mock_get_plan.assert_called_once_with(self.user)
+        mock_reconcile_plan.assert_not_called()
 
     @tag("batch_console_agents_management")
     def test_agent_settings_api_get(self):
@@ -3891,7 +3895,8 @@ class ConsoleViewsTest(TestCase):
         request.user = self.user
 
         with patch("console.api_views.resolve_agent_for_request", return_value=agent), \
-            patch("console.api_views.reconcile_user_plan_from_stripe", return_value={"id": "startup", "name": "Startup"}), \
+             patch("console.api_views.get_user_plan", return_value={"id": "startup", "name": "Startup"}), \
+             patch("console.api_views.reconcile_user_plan_from_stripe") as mock_reconcile_plan, \
              patch("console.api_views._can_manage_contact_packs", return_value=True), \
              patch("console.api_views._can_open_agent_billing", return_value=True):
             resolved_agent, owner, plan_payload, can_manage_billing, can_open_billing = (
@@ -3903,6 +3908,7 @@ class ConsoleViewsTest(TestCase):
         self.assertEqual(plan_payload["id"], "startup")
         self.assertTrue(can_manage_billing)
         self.assertTrue(can_open_billing)
+        mock_reconcile_plan.assert_not_called()
 
     @tag("batch_console_agents_management")
     def test_agent_addons_api_falls_back_to_agent_resume_when_owner_resume_noops(self):
@@ -3983,7 +3989,7 @@ class ConsoleViewsTest(TestCase):
         )
 
         with patch("console.api_views._can_manage_contact_packs", return_value=True), \
-             patch("console.agent_addons.reconcile_user_plan_from_stripe", return_value={"id": "startup", "name": "Startup"}), \
+             patch("console.agent_addons.get_user_plan", return_value={"id": "startup", "name": "Startup"}), \
              patch("console.agent_addons.get_active_subscription", return_value=None), \
              patch("console.agent_addons.get_stripe_customer", return_value=customer), \
              patch(
@@ -4060,7 +4066,7 @@ class ConsoleViewsTest(TestCase):
         )
 
         with patch("console.api_views._can_manage_contact_packs", return_value=True), \
-             patch("console.agent_addons.reconcile_user_plan_from_stripe", return_value={"id": "startup", "name": "Startup"}), \
+             patch("console.agent_addons.get_user_plan", return_value={"id": "startup", "name": "Startup"}), \
              patch("console.agent_addons.get_active_subscription", return_value=None), \
              patch("console.agent_addons.get_stripe_customer", return_value=customer), \
              patch(
@@ -4130,7 +4136,7 @@ class ConsoleViewsTest(TestCase):
         )
 
         with patch("console.api_views._can_manage_contact_packs", return_value=True), \
-             patch("console.agent_addons.reconcile_user_plan_from_stripe", return_value={"id": "startup", "name": "Startup"}), \
+             patch("console.agent_addons.get_user_plan", return_value={"id": "startup", "name": "Startup"}), \
              patch("console.agent_addons.get_active_subscription", return_value=None), \
              patch("console.agent_addons.get_stripe_customer", return_value=customer), \
              patch(
@@ -4202,7 +4208,7 @@ class ConsoleViewsTest(TestCase):
         )
 
         with patch("console.api_views._can_manage_contact_packs", return_value=True), \
-             patch("console.agent_addons.reconcile_user_plan_from_stripe", return_value={"id": "startup", "name": "Startup"}), \
+             patch("console.agent_addons.get_user_plan", return_value={"id": "startup", "name": "Startup"}), \
              patch("console.agent_addons.get_active_subscription", return_value=None), \
              patch("console.agent_addons.get_stripe_customer", return_value=customer), \
              patch(
