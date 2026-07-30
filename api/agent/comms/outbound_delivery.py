@@ -928,25 +928,26 @@ def deliver_agent_email(message: PersistentAgentMessage):
                     message.id,
                 )
 
-            # Collect all recipients (To + CC)
             recipient_list = [to_address] if to_address else []
-            if message.cc_endpoints.exists():
-                recipient_list.extend(list(message.cc_endpoints.values_list("address", flat=True)))
+            cc_addresses = list(message.cc_endpoints.values_list("address", flat=True))
+            bcc_addresses = list(message.bcc_endpoints.values_list("address", flat=True))
 
             with tracer.start_as_current_span("SMTP Transport Send") as smtp_span:
                 smtp_span.set_attribute("from", from_address)
                 smtp_span.set_attribute("to_count", 1)
-                try:
-                    cc_count = message.cc_endpoints.count()
-                except Exception:
-                    cc_count = 0
-                smtp_span.set_attribute("cc_count", cc_count)
-                smtp_span.set_attribute("recipient_total", len(recipient_list))
+                smtp_span.set_attribute("cc_count", len(cc_addresses))
+                smtp_span.set_attribute("bcc_count", len(bcc_addresses))
+                smtp_span.set_attribute(
+                    "recipient_total",
+                    len(recipient_list) + len(cc_addresses) + len(bcc_addresses),
+                )
                 provider_id = SmtpTransport.send(
                     account=acct,
                     from_addr=from_header,
                     envelope_from_addr=from_address,
                     to_addrs=recipient_list,
+                    cc_addrs=cc_addresses,
+                    bcc_addrs=bcc_addresses,
                     subject=subject,
                     plaintext_body=plaintext_body,
                     html_body=html_body,
@@ -1257,6 +1258,7 @@ def deliver_agent_email(message: PersistentAgentMessage):
                 message.id,
                 cc_addresses
             )
+        bcc_addresses = list(message.bcc_endpoints.values_list("address", flat=True))
         
         msg = AnymailMessage(
             subject=subject,
@@ -1264,6 +1266,7 @@ def deliver_agent_email(message: PersistentAgentMessage):
             from_email=from_header,
             to=[to_address],
             cc=cc_addresses if cc_addresses else None,
+            bcc=bcc_addresses if bcc_addresses else None,
             connection=_get_postmark_connection(),
             tags=["persistent-agent"],
             headers={

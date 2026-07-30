@@ -90,6 +90,33 @@ class TestSmtpTransport(TestCase):
         client.quit.assert_called()
 
     @patch("smtplib.SMTP")
+    def test_send_keeps_bcc_out_of_visible_headers(self, mock_smtp):
+        acct = self._create_acct()
+        client = MagicMock()
+        mock_smtp.return_value = client
+
+        SmtpTransport.send(
+            account=acct,
+            from_addr=self.from_ep.address,
+            to_addrs=[self.to_addr],
+            cc_addrs=["copy@example.com"],
+            bcc_addrs=["audit@example.com"],
+            subject="Audited",
+            plaintext_body="Hi",
+            html_body="<p>Hi</p>",
+            attempt_id="attempt-bcc",
+        )
+
+        sent_message = client.send_message.call_args.args[0]
+        self.assertEqual(sent_message["To"], self.to_addr)
+        self.assertEqual(sent_message["Cc"], "copy@example.com")
+        self.assertIsNone(sent_message["Bcc"])
+        self.assertEqual(
+            client.send_message.call_args.kwargs["to_addrs"],
+            [self.to_addr, "copy@example.com", "audit@example.com"],
+        )
+
+    @patch("smtplib.SMTP")
     def test_send_oauth2_auth(self, mock_smtp):
         acct = self._create_acct(security=AgentEmailAccount.SmtpSecurity.STARTTLS, auth=AgentEmailAccount.AuthMode.OAUTH2)
         credential = AgentEmailOAuthCredential.objects.create(

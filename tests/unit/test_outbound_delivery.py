@@ -372,6 +372,40 @@ class EmailDeliveryTests(TestCase):
     @patch.dict(os.environ, {"POSTMARK_SERVER_TOKEN": "test-token"}, clear=False)
     @patch("api.agent.comms.outbound_delivery._prepare_email_content", return_value=("<p>Hello</p>", "Hello"))
     @patch("api.agent.comms.outbound_delivery.AnymailMessage")
+    def test_production_email_delivery_sends_bcc_separately(self, mock_anymail, _mock_prepare):
+        mock_msg = MagicMock()
+        mock_anymail.return_value = mock_msg
+        mock_msg.anymail_status.message_id = "test-message-id"
+        bcc_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.EMAIL,
+            address="audit@example.com",
+        )
+        message = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=self.from_endpoint,
+            to_endpoint=self.to_endpoint,
+            is_outbound=True,
+            body="<p>Hello</p>",
+            raw_payload={"subject": "Audited send"},
+            latest_status=DeliveryStatus.QUEUED,
+        )
+        message.bcc_endpoints.add(bcc_endpoint)
+
+        with patch(
+            "api.agent.comms.outbound_delivery.render_to_string",
+            return_value="<html><body>Hello</body></html>",
+        ):
+            deliver_agent_email(message)
+
+        call_kwargs = mock_anymail.call_args.kwargs
+        self.assertEqual(call_kwargs["bcc"], ["audit@example.com"])
+        self.assertEqual(call_kwargs["to"], [self.to_endpoint.address])
+        mock_msg.send.assert_called_once_with(fail_silently=False)
+
+    @override_settings(GOBII_RELEASE_ENV="prod", POSTMARK_ENABLED=True)
+    @patch.dict(os.environ, {"POSTMARK_SERVER_TOKEN": "test-token"}, clear=False)
+    @patch("api.agent.comms.outbound_delivery._prepare_email_content", return_value=("<p>Hello</p>", "Hello"))
+    @patch("api.agent.comms.outbound_delivery.AnymailMessage")
     def test_production_email_delivery_sets_reply_headers(self, mock_anymail, _mock_prepare):
         mock_msg = MagicMock()
         mock_anymail.return_value = mock_msg
@@ -897,6 +931,40 @@ class EmailDeliveryTests(TestCase):
         self.assertEqual(sent_attachments[0].content, b"abc")
         self.assertEqual(sent_attachments[0].content_type, "image/png")
         self.assertFalse(sent_attachments[0].is_inline)
+
+    @patch(
+        "api.agent.comms.outbound_delivery._prepare_email_content",
+        return_value=("<p>Hello</p>", "Hello"),
+    )
+    @patch("api.agent.comms.outbound_delivery.SmtpTransport.send", return_value="")
+    def test_smtp_delivery_includes_bcc_in_envelope(self, mock_send, _mock_prepare):
+        self._create_smtp_account()
+        bcc_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.EMAIL,
+            address="audit@example.com",
+        )
+        message = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=self.from_endpoint,
+            to_endpoint=self.to_endpoint,
+            is_outbound=True,
+            body="<p>Hello</p>",
+            raw_payload={"subject": "Audited SMTP send"},
+            latest_status=DeliveryStatus.QUEUED,
+        )
+        message.bcc_endpoints.add(bcc_endpoint)
+
+        with patch(
+            "api.agent.comms.outbound_delivery.render_to_string",
+            return_value="<html><body>Hello</body></html>",
+        ):
+            deliver_agent_email(message)
+
+        self.assertEqual(
+            mock_send.call_args.kwargs["to_addrs"],
+            [self.to_endpoint.address],
+        )
+        self.assertEqual(mock_send.call_args.kwargs["bcc_addrs"], ["audit@example.com"])
 
     @patch(
         "api.agent.comms.outbound_delivery._prepare_email_content",

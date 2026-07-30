@@ -52,6 +52,7 @@ from api.services.discord_bot import (
     send_channel_message,
     start_discord_oauth,
     _agent_webhook_username,
+    _raise_for_discord_status,
     _webhook_echo_signature,
 )
 from api.services.discord_markdown import normalize_discord_markdown
@@ -104,6 +105,23 @@ class NativeDiscordBotTests(TestCase):
         self.user.is_staff = True
         self.user.save(update_fields=["is_staff"])
         self.client.force_login(self.user)
+
+    @tag("batch_agent_webhooks")
+    def test_discord_http_error_preserves_escaped_response_body(self):
+        response = _response(status_code=400)
+        response.text = (
+            '{"message":"Invalid Form Body","errors":{"content":{"_errors":'
+            '[{"code":"BASE_TYPE_MAX_LENGTH","message":"Must be 2000 or fewer in length."}]}}}'
+        )
+        response.raise_for_status.side_effect = requests.HTTPError("400")
+
+        with self.assertRaises(DiscordBotIntegrationError) as raised:
+            _raise_for_discord_status(response, action="webhook send")
+
+        message = str(raised.exception)
+        self.assertIn('"Invalid Form Body"', message)
+        self.assertIn('"BASE_TYPE_MAX_LENGTH"', message)
+        self.assertIn('"Must be 2000 or fewer in length."', message)
 
     @tag("batch_agent_webhooks")
     @patch("api.management.commands.run_discord_bot.close_old_connections")

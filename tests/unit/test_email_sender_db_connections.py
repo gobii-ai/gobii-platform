@@ -7,6 +7,7 @@ from django.db.utils import OperationalError
 from django.utils import timezone
 
 from api.models import (
+    CommsAllowlistEntry,
     PersistentAgent,
     BrowserUseAgent,
     PersistentAgentCommsEndpoint,
@@ -118,6 +119,7 @@ class EmailSenderDbConnectionTests(TransactionTestCase):
         self.assertIn("Approval or preparation is not sent", description)
         self.assertIn("never infer delivered", description)
         self.assertIn("reply_to_message_id", properties)
+        self.assertIn("bcc_addresses", properties)
 
     def test_execute_send_email_retries_on_operational_error(self):
         """
@@ -209,6 +211,34 @@ class EmailSenderDbConnectionTests(TransactionTestCase):
         participant_addresses = list(message.conversation.participants.values_list("endpoint__address", flat=True))
         self.assertIn(self.from_ep.address, participant_addresses)
         self.assertIn(params["to_address"], participant_addresses)
+
+    def test_execute_send_email_persists_bcc_recipients(self):
+        bcc_address = "audit@example.com"
+        CommsAllowlistEntry.objects.create(
+            agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address=bcc_address,
+            is_active=True,
+        )
+        params = {
+            "to_address": self.user.email,
+            "bcc_addresses": [bcc_address],
+            "subject": "Audited delivery",
+            "mobile_first_html": "<p>Hi!</p>",
+        }
+
+        with patch(
+            "api.agent.tools.email_sender.deliver_agent_email",
+            side_effect=self._mark_message_delivered,
+        ):
+            result = execute_send_email(self.agent, params)
+
+        self.assertEqual(result.get("status"), "ok")
+        message = PersistentAgentMessage.objects.get(id=result["message_id"])
+        self.assertEqual(
+            list(message.bcc_endpoints.values_list("address", flat=True)),
+            [bcc_address],
+        )
 
     def test_execute_send_email_self_send_uses_default_alias_sender(self):
         self.from_ep.is_primary = False

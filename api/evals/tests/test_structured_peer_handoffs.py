@@ -6,6 +6,8 @@ from api.agent.tools.peer_dm import get_send_agent_message_tool
 from api.evals.registry import ScenarioRegistry
 from api.evals.scenarios.structured_peer_handoffs import (
     STRUCTURED_PEER_HANDOFF_CASES,
+    STRUCTURED_PEER_CORRECTION_RECONCILES_STALE_STATE,
+    STRUCTURED_DECISION_ROUTING_CASES,
     STRUCTURED_PEER_FILE_HANDOFF,
     STRUCTURED_PEER_HANDOFF_SCENARIO_SLUGS,
     STRUCTURED_PEER_HANDOFF_SUITE_SLUG,
@@ -91,3 +93,14 @@ class StructuredPeerHandoffEvalTests(SimpleTestCase):
                 {"assignment_id": "AS-77", "account": "Northwind"},
             )
         )
+
+    def test_stale_state_case_uses_a_newer_correction_for_the_same_identity(self):
+        case = next(
+            case
+            for case in STRUCTURED_DECISION_ROUTING_CASES
+            if case.slug == STRUCTURED_PEER_CORRECTION_RECONCILES_STALE_STATE
+        )
+
+        self.assertEqual(case.stale_record["record_id"], case.records[0]["record_id"])
+        self.assertTrue(case.stale_record["outbound_eligible"])
+        self.assertFalse(case.records[0]["outbound_eligible"])

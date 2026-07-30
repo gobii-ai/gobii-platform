@@ -16,6 +16,7 @@ const outboxItem = {
   sender: 'agent@my.gobii.ai',
   to: 'lead@example.com',
   cc: [],
+  bcc: ['compliance@example.com'],
   subject: 'Pricing follow-up',
   body: 'Plain text body',
   bodyHtml: '<html><body>Plain text body</body></html>',
@@ -60,6 +61,7 @@ describe('outbox review edit flow', () => {
     renderPage()
     fireEvent.click(await screen.findByText('Pricing follow-up'))
     await screen.findByTitle('Email preview')
+    expect(screen.getByDisplayValue('compliance@example.com')).toBeInTheDocument()
     expect(screen.getByText('Approve & send')).toBeInTheDocument()
 
     fireEvent.click(screen.getByText('Edit'))
