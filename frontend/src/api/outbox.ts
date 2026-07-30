@@ -16,6 +16,7 @@ export type OutboxItem = {
   sender: string
   to: string
   cc: string[]
+  bcc: string[]
   subject: string
   bodyPreview: string
   body?: string

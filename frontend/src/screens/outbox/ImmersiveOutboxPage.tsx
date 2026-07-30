@@ -187,6 +187,7 @@ function ReviewDetail({ itemId, onClose }: { itemId: string; onClose: () => void
         <label className="grid gap-1 text-xs text-slate-400">From<input value={item.sender} readOnly className="rounded-lg border border-slate-700 bg-transparent px-3 py-2 text-sm text-slate-200" /></label>
         <label className="grid gap-1 text-xs text-slate-400">To<input value={item.to} readOnly className="rounded-lg border border-slate-700 bg-transparent px-3 py-2 text-sm text-slate-200" /></label>
         <label className="grid gap-1 text-xs text-slate-400">CC<input value={item.cc.join(', ')} readOnly className="rounded-lg border border-slate-700 bg-transparent px-3 py-2 text-sm text-slate-200" /></label>
+        <label className="grid gap-1 text-xs text-slate-400">BCC<input value={item.bcc.join(', ')} readOnly className="rounded-lg border border-slate-700 bg-transparent px-3 py-2 text-sm text-slate-200" /></label>
         <p className="text-xs text-slate-500">Recipients are locked to the email prepared by the agent.</p>
         {editing ? (
           <>
