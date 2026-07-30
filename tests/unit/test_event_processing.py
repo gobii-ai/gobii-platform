@@ -126,6 +126,7 @@ from api.models import (
     PersistentAgentError,
     PersistentAgentHumanInputRequest,
     PersistentAgentInboundWebhook,
+    PersistentAgentJudgeSuggestion,
     PersistentAgentSystemStep,
     PersistentAgentSystemMessage,
     PersistentAgentToolCall,
@@ -3462,6 +3463,33 @@ class PromptContextBuilderTests(TestCase):
             ).count(),
             1,
         )
+
+    def test_delivered_judge_directive_resolves_its_lifecycle(self):
+        directive = PersistentAgentSystemMessage.objects.create(
+            agent=self.agent,
+            body="Reconcile the current source records before continuing.",
+        )
+        suggestion = PersistentAgentJudgeSuggestion.objects.create(
+            agent=self.agent,
+            suggestion_type=PersistentAgentJudgeSuggestion.SuggestionType.STRATEGY_SHIFT,
+            title="Reconcile current evidence",
+            ui_message="Use the current source records.",
+            agent_directive="Reconcile the current source records before continuing.",
+            evidence_hash="delivered-directive",
+            status=PersistentAgentJudgeSuggestion.Status.ACTIVE,
+            system_message=directive,
+        )
+
+        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
+             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+            build_prompt_context(self.agent)
+
+        suggestion.refresh_from_db()
+        self.assertEqual(
+            suggestion.status,
+            PersistentAgentJudgeSuggestion.Status.DELIVERED,
+        )
+        self.assertIsNotNone(suggestion.resolved_at)
 
     def test_prompt_preview_does_not_consume_system_messages(self):
         """Preview rendering must not deliver pending directives or expose them in prompts."""

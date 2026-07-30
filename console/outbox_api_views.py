@@ -84,7 +84,7 @@ def _workspace_reviews(request: HttpRequest):
         "message__to_endpoint",
         "message__conversation",
         "decided_by",
-    ).prefetch_related("message__cc_endpoints", "message__attachments")
+    ).prefetch_related("message__cc_endpoints", "message__bcc_endpoints", "message__attachments")
 
 
 def _display_status(review: OutboundEmailReview) -> str:
@@ -105,12 +105,15 @@ def _warnings(review: OutboundEmailReview) -> list[dict[str, str]]:
     message = review.message
     if review.status == OutboundEmailReview.Status.PENDING:
         cc_addresses = list(message.cc_endpoints.values_list("address", flat=True))
-        recipients = [get_message_contact_address(message), *cc_addresses]
+        bcc_addresses = list(message.bcc_endpoints.values_list("address", flat=True))
+        recipients = [get_message_contact_address(message), *cc_addresses, *bcc_addresses]
         decision = classify_email_recipients(review.agent, recipients)
         if decision.unknown_external_recipients:
             warnings.append({"code": "new_contact", "label": "New contact"})
         if any(normalize_email_address(address) in decision.external_recipients for address in cc_addresses):
             warnings.append({"code": "external_cc", "label": "External CC"})
+        if any(normalize_email_address(address) in decision.external_recipients for address in bcc_addresses):
+            warnings.append({"code": "external_bcc", "label": "External BCC"})
     if review_is_stale(review):
         warnings.append({"code": "stale", "label": "Stale"})
     if review_thread_changed(review):
@@ -129,6 +132,7 @@ def serialize_outbox_review(review: OutboundEmailReview, *, detail: bool = False
     raw_payload = message.raw_payload if isinstance(message.raw_payload, dict) else {}
     to_address = get_message_contact_address(message)
     cc_addresses = list(message.cc_endpoints.values_list("address", flat=True))
+    bcc_addresses = list(message.bcc_endpoints.values_list("address", flat=True))
     allowed_actions = {
         "edit": review.status == OutboundEmailReview.Status.PENDING,
         "approve": review.status == OutboundEmailReview.Status.PENDING,
@@ -145,6 +149,7 @@ def serialize_outbox_review(review: OutboundEmailReview, *, detail: bool = False
         "sender": message.from_endpoint.address,
         "to": to_address,
         "cc": cc_addresses,
+        "bcc": bcc_addresses,
         "subject": str(raw_payload.get("subject") or ""),
         "bodyPreview": (message.body or "")[:240],
         "status": _display_status(review),
@@ -267,6 +272,7 @@ class OutboxListAPIView(ApiLoginRequiredMixin, View):
                 | Q(message__conversation__address__icontains=search)
                 | Q(message__to_endpoint__address__icontains=search)
                 | Q(message__cc_endpoints__address__icontains=search)
+                | Q(message__bcc_endpoints__address__icontains=search)
             ).distinct()
 
         cursor = _decode_cursor(request.GET.get("cursor", ""))

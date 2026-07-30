@@ -587,6 +587,7 @@ def _serialize_message(
     recipient_address: str | None = None
     recipient_name: str | None = None
     cc_addresses: list[str] = []
+    bcc_addresses: list[str] = []
     if channel.lower() == CommsChannel.EMAIL:
         to_endpoint_address = (
             (message.to_endpoint.address or "").strip()
@@ -612,8 +613,6 @@ def _serialize_message(
             # so fall back to the provider envelope stored verbatim in raw_payload (#495).
             recipient_address = to_endpoint_address or _inbound_email_header(message, "to") or None
     if channel.lower() == CommsChannel.EMAIL:
-        # Who else received it. Bcc is deliberately absent: it is never persisted on the message,
-        # so the card cannot claim to show a complete recipient list.
         cc_addresses = [
             address
             for address in (
@@ -626,6 +625,15 @@ def _serialize_message(
             cc_header = _inbound_email_header(message, "cc")
             if cc_header:
                 cc_addresses = [part.strip() for part in cc_header.split(",") if part.strip()]
+        if message.is_outbound:
+            bcc_addresses = [
+                address
+                for address in (
+                    (endpoint.address or "").strip()
+                    for endpoint in message.bcc_endpoints.all()
+                )
+                if address
+            ]
     if not is_mcp and channel.lower() == "web" and sender_address:
         user_id, agent_id = parse_web_user_address(sender_address)
         if user_id is not None and (not agent_id or not message.owner_agent_id or str(message.owner_agent_id) == agent_id):
@@ -718,6 +726,7 @@ def _serialize_message(
             "recipientAddress": recipient_address,
             "replyTo": reply_to_payload,
             "ccAddresses": cc_addresses,
+            "bccAddresses": bcc_addresses,
             "sourceKind": source_kind,
             "sourceLabel": source_label,
             "channelLabel": discord_channel_label or None,
@@ -963,7 +972,7 @@ def _messages_queryset(agent: PersistentAgent, direction: TimelineDirection, cur
             "owner_agent",
             "outbound_email_review",
         )
-        .prefetch_related("attachments__filespace_node", "cc_endpoints")
+        .prefetch_related("attachments__filespace_node", "cc_endpoints", "bcc_endpoints")
         .order_by("-timestamp", "-seq")
     )
     if direction == "older" and cursor is not None:

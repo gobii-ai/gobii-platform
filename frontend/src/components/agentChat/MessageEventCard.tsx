@@ -232,6 +232,9 @@ export const MessageEventCard = memo(function MessageEventCard({
   const emailCc = channel === 'email'
     ? (message.ccAddresses ?? []).map((address) => address.trim()).filter(Boolean)
     : []
+  const emailBcc = channel === 'email' && message.isOutbound
+    ? (message.bccAddresses ?? []).map((address) => address.trim()).filter(Boolean)
+    : []
   // One envelope block instead of recipient and subject squeezed into the author row with From
   // and Cc trailing underneath in a different style. Labels share a column so the addresses line
   // up and can be read down, the way a mail client presents them.
@@ -242,6 +245,9 @@ export const MessageEventCard = memo(function MessageEventCard({
       : null,
     emailCc.length > 0
       ? { label: 'Cc', value: emailCc.join(', '), title: emailCc.join(', ') }
+      : null,
+    emailBcc.length > 0
+      ? { label: 'Bcc', value: emailBcc.join(', '), title: emailBcc.join(', ') }
       : null,
   ].filter(Boolean) as Array<{ label: string; value: string; title: string }>
   const showEmailHeader = Boolean(emailSubject) || emailFields.length > 0

@@ -102,7 +102,8 @@ def track_outbox_bypass_denied(message: PersistentAgentMessage, *, reason: str) 
 def get_message_email_recipients(message: PersistentAgentMessage) -> tuple[str, ...]:
     primary = get_message_contact_address(message)
     cc_addresses = message.cc_endpoints.values_list("address", flat=True)
-    return normalize_email_addresses([primary, *cc_addresses])
+    bcc_addresses = message.bcc_endpoints.values_list("address", flat=True)
+    return normalize_email_addresses([primary, *cc_addresses, *bcc_addresses])
 
 
 def snapshot_message_attachments(message: PersistentAgentMessage) -> None:
@@ -167,6 +168,10 @@ def compute_message_content_hash(message: PersistentAgentMessage) -> str:
         "cc": sorted(
             address.lower()
             for address in message.cc_endpoints.values_list("address", flat=True)
+        ),
+        "bcc": sorted(
+            address.lower()
+            for address in message.bcc_endpoints.values_list("address", flat=True)
         ),
         "subject": str(raw_payload.get("subject") or ""),
         "body": message.body or "",
@@ -308,9 +313,9 @@ def update_pending_review_message(
     expected_version: int,
     changes: dict[str, object],
 ) -> OutboundEmailReview:
-    if {"to", "cc"}.intersection(changes):
+    if {"to", "cc", "bcc"}.intersection(changes):
         raise OutboundEmailReviewError(
-            "To and CC recipients cannot be changed. Discard this email and ask the agent to create a new one."
+            "To, CC, and BCC recipients cannot be changed. Discard this email and ask the agent to create a new one."
         )
 
     locked = _reviews_for_update().select_related("message").get(pk=review.pk)

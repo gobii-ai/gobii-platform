@@ -4,6 +4,8 @@ from typing import Any
 
 from django.contrib.auth import get_user_model
 
+from api.agent.tools.sqlite_guardrails import clear_guarded_connection, open_guarded_sqlite_connection
+from api.agent.tools.sqlite_state import agent_sqlite_db
 from api.agent.tools.tool_manager import mark_tool_enabled_without_discovery
 from api.evals.base import EvalScenario, ScenarioTask
 from api.evals.execution import ScenarioExecutionTools
@@ -30,6 +32,7 @@ STRUCTURED_PEER_FILE_HANDOFF = "structured_peer_file_handoff"
 STRUCTURED_PEER_SCOPED_HANDOFF = "structured_peer_scoped_handoff"
 STRUCTURED_PEER_NEGATIVE_DECISION = "structured_peer_negative_decision"
 STRUCTURED_PEER_MIXED_DECISIONS = "structured_peer_mixed_decisions"
+STRUCTURED_PEER_CORRECTION_RECONCILES_STALE_STATE = "structured_peer_correction_reconciles_stale_state"
 STRUCTURED_PEER_HANDOFF_SUITE_SLUG = "structured_peer_handoffs"
 STRUCTURED_PEER_HANDOFF_SCENARIO_SLUGS = (
     STRUCTURED_PEER_SINGLE_RECORD,
@@ -39,6 +42,7 @@ STRUCTURED_PEER_HANDOFF_SCENARIO_SLUGS = (
     STRUCTURED_PEER_SCOPED_HANDOFF,
     STRUCTURED_PEER_NEGATIVE_DECISION,
     STRUCTURED_PEER_MIXED_DECISIONS,
+    STRUCTURED_PEER_CORRECTION_RECONCILES_STALE_STATE,
 )
 
 HANDOFF_CHARTER = (
@@ -439,6 +443,7 @@ class StructuredDecisionRoutingCase:
     description: str
     records: tuple[dict[str, Any], ...]
     expected_forward: dict[str, Any] | None = None
+    stale_record: dict[str, Any] | None = None
 
 
 STRUCTURED_DECISION_ROUTING_CASES = (
@@ -489,6 +494,28 @@ STRUCTURED_DECISION_ROUTING_CASES = (
             "owner": "north",
         },
     ),
+    StructuredDecisionRoutingCase(
+        slug=STRUCTURED_PEER_CORRECTION_RECONCILES_STALE_STATE,
+        description=(
+            "A newer peer correction must replace stale local eligibility before any downstream handoff."
+        ),
+        stale_record={
+            "record_id": "prospect-73",
+            "decision": "cleared",
+            "crm_match": "no_match",
+            "outbound_eligible": True,
+            "reason": "stale preliminary clearance",
+        },
+        records=(
+            {
+                "record_id": "prospect-73",
+                "decision": "blocked",
+                "crm_match": "prior_contact",
+                "outbound_eligible": False,
+                "reason": "new source confirms prior outreach",
+            },
+        ),
+    ),
 )
 
 
@@ -515,6 +542,64 @@ class StructuredDecisionRoutingScenario(EvalScenario, ScenarioExecutionTools):
             ScenarioTask(name="inject_decisions", assertion_type="agent_processing"),
             ScenarioTask(name="verify_exact_routing", assertion_type="tool_call"),
         ]
+        if case.stale_record is not None:
+            self.tasks.insert(
+                1,
+                ScenarioTask(name="verify_current_model", assertion_type="persisted_state"),
+            )
+
+    def _seed_stale_clearance(self, agent_id: str) -> None:
+        record = self.case.stale_record
+        if record is None:
+            return
+        with agent_sqlite_db(str(agent_id)) as db_path:
+            connection = open_guarded_sqlite_connection(db_path)
+            try:
+                connection.executescript(
+                    """
+                    CREATE TABLE clearance_state (
+                        record_id TEXT PRIMARY KEY,
+                        decision TEXT NOT NULL,
+                        crm_match TEXT NOT NULL,
+                        outbound_eligible INTEGER NOT NULL CHECK (outbound_eligible IN (0, 1)),
+                        reason TEXT NOT NULL
+                    );
+                    """
+                )
+                connection.execute(
+                    """
+                    INSERT INTO clearance_state (
+                        record_id, decision, crm_match, outbound_eligible, reason
+                    ) VALUES (?, ?, ?, ?, ?);
+                    """,
+                    (
+                        record["record_id"],
+                        record["decision"],
+                        record["crm_match"],
+                        int(record["outbound_eligible"]),
+                        record["reason"],
+                    ),
+                )
+                connection.commit()
+            finally:
+                clear_guarded_connection(connection)
+                connection.close()
+
+    def _current_clearance_row(self, agent_id: str) -> tuple[Any, ...] | None:
+        with agent_sqlite_db(str(agent_id)) as db_path:
+            connection = open_guarded_sqlite_connection(db_path)
+            try:
+                return connection.execute(
+                    """
+                    SELECT record_id, decision, crm_match, outbound_eligible, reason
+                    FROM clearance_state
+                    WHERE record_id = ?;
+                    """,
+                    (self.case.records[0]["record_id"],),
+                ).fetchone()
+            finally:
+                clear_guarded_connection(connection)
+                connection.close()
 
     @staticmethod
     def _create_peer(
@@ -556,6 +641,7 @@ class StructuredDecisionRoutingScenario(EvalScenario, ScenarioExecutionTools):
             schedule="0 9 * * *",
         )
         StructuredPeerHandoffScenario._seed_prior_run(agent_id)
+        self._seed_stale_clearance(agent_id)
         agent = PersistentAgent.objects.select_related("user", "organization").get(id=agent_id)
         clearance, clearance_link = self._create_peer(
             agent,
@@ -628,6 +714,27 @@ class StructuredDecisionRoutingScenario(EvalScenario, ScenarioExecutionTools):
         )
 
         calls = StructuredPeerHandoffScenario._tool_calls(run_id, inbound.timestamp)
+        if self.case.stale_record is not None:
+            expected = self.case.records[0]
+            current_row = self._current_clearance_row(agent_id)
+            model_current = current_row == (
+                expected["record_id"],
+                expected["decision"],
+                expected["crm_match"],
+                int(expected["outbound_eligible"]),
+                expected["reason"],
+            )
+            self.record_task_result(
+                run_id,
+                None,
+                EvalRunTask.Status.PASSED if model_current else EvalRunTask.Status.FAILED,
+                task_name="verify_current_model",
+                observed_summary=(
+                    "The newer peer correction replaced stale local eligibility."
+                    if model_current
+                    else f"The clearance model remained stale or incomplete: {current_row!r}."
+                ),
+            )
         sales_calls = [
             call
             for call in calls

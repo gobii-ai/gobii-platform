@@ -111,6 +111,8 @@ class SmtpTransport:
         plaintext_body: str,
         html_body: str,
         attempt_id: str,
+        cc_addrs: Sequence[str] | None = None,
+        bcc_addrs: Sequence[str] | None = None,
         message_id: str | None = None,
         in_reply_to: str | None = None,
         references: str | None = None,
@@ -127,22 +129,29 @@ class SmtpTransport:
         span.set_attribute("smtp.security", account.smtp_security)
         span.set_attribute("smtp.auth", account.smtp_auth)
         # Attribute names aligned with plan for quick filtering
-        to_count = 1 if (to_addrs and len(list(to_addrs)) >= 1) else 0
-        cc_count = max(0, (len(list(to_addrs or [])) - 1))
+        primary_recipients = list(to_addrs or [])
+        if cc_addrs is None:
+            visible_cc_recipients = primary_recipients[1:]
+            primary_recipients = primary_recipients[:1]
+        else:
+            visible_cc_recipients = list(cc_addrs)
+        hidden_recipients = list(bcc_addrs or [])
+        to_count = len(primary_recipients)
+        cc_count = len(visible_cc_recipients)
         span.set_attribute("to_count", to_count)
         span.set_attribute("cc_count", cc_count)
+        span.set_attribute("bcc_count", len(hidden_recipients))
 
-        recipient_list = list(to_addrs or [])
+        recipient_list = primary_recipients + visible_cc_recipients + hidden_recipients
         envelope_sender = envelope_from_addr or parseaddr(from_addr)[1] or from_addr
 
         # Build message
         msg = EmailMessage()
         msg["Subject"] = subject or ""
         msg["From"] = from_addr
-        msg["To"] = ", ".join(recipient_list[:1]) if recipient_list else ""
-        # If there are more than 1 recipients, put the rest in Cc
-        if len(recipient_list) > 1:
-            msg["Cc"] = ", ".join(recipient_list[1:])
+        msg["To"] = ", ".join(primary_recipients)
+        if visible_cc_recipients:
+            msg["Cc"] = ", ".join(visible_cc_recipients)
         msg["Message-ID"] = message_id or make_msgid()
         msg["X-Gobii-Message-ID"] = str(attempt_id)
         if in_reply_to:

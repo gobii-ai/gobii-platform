@@ -191,6 +191,17 @@ def get_send_email_tool() -> Dict[str, Any]:
                         },
                         "description": "Optional CC email addresses."
                     },
+                    "bcc_addresses": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "format": "email",
+                        },
+                        "description": (
+                            "Optional hidden email recipients. Gobii keeps them in the owner's delivery audit, "
+                            "but they are not exposed to To or CC recipients."
+                        ),
+                    },
                     "subject": {"type": "string", "description": "Email subject."},
                     "reply_to_message_id": {
                         "type": "string",
@@ -242,6 +253,7 @@ def execute_send_email(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
     # Substitute $[var] placeholders with actual values (e.g., $[/charts/...]).
     mobile_first_html = substitute_variables_with_filespace(mobile_first_html, agent)
     cc_addresses = [normalize_email_address(addr) for addr in params.get("cc_addresses", [])]
+    bcc_addresses = [normalize_email_address(addr) for addr in params.get("bcc_addresses", [])]
     will_continue = _should_continue_work(params)
     attachment_paths = params.get("attachments")
     reply_to_message_id = str(params.get("reply_to_message_id") or "").strip()
@@ -260,17 +272,18 @@ def execute_send_email(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
     # Log email attempt
     body_preview = mobile_first_html[:100] + "..." if len(mobile_first_html) > 100 else mobile_first_html
     cc_info = f", CC: {cc_addresses}" if cc_addresses else ""
+    bcc_info = f", BCC count: {len(bcc_addresses)}" if bcc_addresses else ""
     attachment_info = f", attachments: {len(resolved_attachments)}" if resolved_attachments else ""
     logger.info(
         "Agent %s sending email to %s%s%s, subject: '%s', body: %s",
-        agent.id, to_address, cc_info, attachment_info, subject, body_preview
+        agent.id, to_address, cc_info + bcc_info, attachment_info, subject, body_preview
     )
 
     try:
         # Ensure a healthy DB connection for subsequent ORM ops
         from django.db import close_old_connections
         from django.db.utils import OperationalError
-        all_recipients = [to_address] + cc_addresses
+        all_recipients = [to_address] + cc_addresses + bcc_addresses
         outbox_enabled = email_review_outbox_enabled()
         policy_decision = classify_email_recipients(agent, all_recipients) if outbox_enabled else None
         if policy_decision and policy_decision.blocked_recipients:
@@ -349,6 +362,21 @@ def execute_send_email(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
                 )
                 cc_endpoint_objects.append(cc_endpoint)
 
+        bcc_endpoint_objects = []
+        for bcc_addr in bcc_addresses:
+            close_old_connections()
+            try:
+                bcc_endpoint, _ = PersistentAgentCommsEndpoint.objects.get_or_create(
+                    channel=CommsChannel.EMAIL, address=bcc_addr, defaults={"owner_agent": None}
+                )
+                bcc_endpoint_objects.append(bcc_endpoint)
+            except OperationalError:
+                close_old_connections()
+                bcc_endpoint, _ = PersistentAgentCommsEndpoint.objects.get_or_create(
+                    channel=CommsChannel.EMAIL, address=bcc_addr, defaults={"owner_agent": None}
+                )
+                bcc_endpoint_objects.append(bcc_endpoint)
+
         conversation = _get_or_create_conversation(
             CommsChannel.EMAIL,
             to_address,
@@ -372,7 +400,7 @@ def execute_send_email(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
             agent,
             to_endpoint=to_endpoint,
             cc_endpoints=cc_endpoint_objects,
-            has_bcc=False,
+            has_bcc=bool(bcc_endpoint_objects),
             log_context="send_email_tool",
         )
         if not from_endpoint:
@@ -404,6 +432,8 @@ def execute_send_email(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
             )
             if cc_endpoint_objects:
                 message.cc_endpoints.set(cc_endpoint_objects)
+            if bcc_endpoint_objects:
+                message.bcc_endpoints.set(bcc_endpoint_objects)
             if resolved_attachments:
                 create_message_attachments(message, resolved_attachments)
             return message

@@ -278,6 +278,34 @@ class EmailReviewOutboxTests(TestCase):
         deliver_mock.assert_not_called()
 
     @override_flag(EMAIL_REVIEW_OUTBOX, active=True)
+    @patch("django.db.close_old_connections")
+    @patch("api.agent.tools.email_sender.deliver_agent_email")
+    def test_external_bcc_is_persisted_and_queues_the_entire_email(self, deliver_mock, close_mock):
+        result = execute_send_email(
+            self.agent,
+            {
+                "to_address": self.owner.email,
+                "bcc_addresses": ["external-bcc@example.com"],
+                "subject": "Audited recipients",
+                "mobile_first_html": "<p>Hello everyone</p>",
+                "will_continue_work": False,
+            },
+        )
+
+        self.assertEqual(result["status"], "pending_approval")
+        message = PersistentAgentMessage.objects.get(id=result["message_id"])
+        self.assertEqual(
+            list(message.bcc_endpoints.values_list("address", flat=True)),
+            ["external-bcc@example.com"],
+        )
+        review = OutboundEmailReview.objects.get(message=message)
+        self.assertEqual(
+            serialize_outbox_review(review)["bcc"],
+            ["external-bcc@example.com"],
+        )
+        deliver_mock.assert_not_called()
+
+    @override_flag(EMAIL_REVIEW_OUTBOX, active=True)
     def test_low_level_delivery_denies_unreviewed_external_message(self):
         message = self._message()
 
@@ -427,7 +455,11 @@ class EmailReviewOutboxTests(TestCase):
         message = self._message("first@example.com")
         review = queue_message_for_review(message)
 
-        for changes in ({"to": "second@example.com"}, {"cc": ["copy@example.com"]}):
+        for changes in (
+            {"to": "second@example.com"},
+            {"cc": ["copy@example.com"]},
+            {"bcc": ["audit@example.com"]},
+        ):
             with self.subTest(changes=changes):
                 with self.assertRaisesRegex(OutboundEmailReviewError, "recipients cannot be changed"):
                     update_pending_review_message(

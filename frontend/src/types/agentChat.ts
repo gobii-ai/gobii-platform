@@ -61,6 +61,7 @@ export type AgentMessage = {
   recipientAddress?: string | null
   replyTo?: { authorName?: string | null; bodyText: string } | null
   ccAddresses?: string[] | null
+  bccAddresses?: string[] | null
   sourceKind?: string | null
   sourceLabel?: string | null
   channelLabel?: string | null

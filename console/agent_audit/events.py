@@ -195,7 +195,7 @@ def _message_events(agent, cursor, direction, limit, at, developer):
         PersistentAgentMessage.objects
         .filter(owner_agent=agent)
         .select_related("from_endpoint", "to_endpoint", "conversation__peer_link", "peer_agent", "owner_agent")
-        .prefetch_related("attachments__filespace_node")
+        .prefetch_related("attachments__filespace_node", "cc_endpoints", "bcc_endpoints")
     )
     queryset = _apply_cursor(queryset, cursor, direction=direction, kind="message", dt_field="timestamp", id_field="seq")
     messages = _ordered(queryset, direction=direction, dt_field="timestamp", id_field="seq", limit=limit, at=at)

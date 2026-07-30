@@ -60,6 +60,7 @@ from ...models import (
     PersistentAgentCommsSnapshot,
     PersistentAgentDiscordChannelSubscription,
     PersistentAgentHumanInputRequest,
+    PersistentAgentJudgeSuggestion,
     PersistentAgentMessage,
     PersistentAgentMessageAttachment,
     PersistentAgentMCPTask,
@@ -3788,6 +3789,17 @@ def _consume_system_prompt_messages(agent: PersistentAgent) -> str:
             now = dj_timezone.now()
             message_ids = [message.id for message, _ in message_payloads]
             PersistentAgentSystemMessage.objects.filter(id__in=message_ids).update(delivered_at=now)
+            delivered_suggestions = PersistentAgentJudgeSuggestion.objects.filter(
+                system_message_id__in=message_ids,
+                status=PersistentAgentJudgeSuggestion.Status.ACTIVE,
+            )
+            delivered_suggestions.filter(resolved_at__isnull=True).update(
+                status=PersistentAgentJudgeSuggestion.Status.DELIVERED,
+                resolved_at=now,
+            )
+            delivered_suggestions.update(
+                status=PersistentAgentJudgeSuggestion.Status.DELIVERED,
+            )
             _record_system_directive_steps(agent, message_payloads)
     except DatabaseError:
         logger.exception(

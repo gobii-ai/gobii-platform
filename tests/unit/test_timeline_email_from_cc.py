@@ -1,9 +1,8 @@
-"""The chat timeline must name the sending mailbox and any cc recipients.
+"""The chat timeline must name the sending mailbox and copy recipients.
 
 Agents send from several custom-domain mailboxes, so "which mailbox sent this" is not answerable
-from the agent name. Bcc is deliberately absent: it is never persisted on the message.
+from the agent name.
 """
-from __future__ import annotations
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase, tag
@@ -32,7 +31,13 @@ class EmailFromAndCcSerializationTests(TestCase):
             user=cls.user, name="Sender Agent", charter="Send email.", browser_use_agent=browser_agent
         )
 
-    def _outbound_email(self, *, sender: str, cc: list[str]) -> PersistentAgentMessage:
+    def _outbound_email(
+        self,
+        *,
+        sender: str,
+        cc: list[str],
+        bcc: list[str] | None = None,
+    ) -> PersistentAgentMessage:
         from_endpoint, _ = PersistentAgentCommsEndpoint.objects.get_or_create(
             owner_agent=self.agent, channel=CommsChannel.EMAIL, address=sender
         )
@@ -53,6 +58,11 @@ class EmailFromAndCcSerializationTests(TestCase):
                 owner_agent=None, channel=CommsChannel.EMAIL, address=address
             )
             message.cc_endpoints.add(endpoint)
+        for address in bcc or []:
+            endpoint, _ = PersistentAgentCommsEndpoint.objects.get_or_create(
+                owner_agent=None, channel=CommsChannel.EMAIL, address=address
+            )
+            message.bcc_endpoints.add(endpoint)
         return message
 
     def _serialized_message(self, message: PersistentAgentMessage) -> dict:
@@ -83,3 +93,14 @@ class EmailFromAndCcSerializationTests(TestCase):
         serialized = self._serialized_message(message)
 
         self.assertEqual(serialized["ccAddresses"], [])
+
+    def test_lists_outbound_bcc_recipients(self):
+        message = self._outbound_email(
+            sender="alpha@custom-domain.test",
+            cc=[],
+            bcc=["audit@example.test"],
+        )
+
+        serialized = self._serialized_message(message)
+
+        self.assertEqual(serialized["bccAddresses"], ["audit@example.test"])

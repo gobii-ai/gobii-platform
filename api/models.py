@@ -8285,6 +8285,7 @@ class PersistentAgentJudgeSuggestion(models.Model):
     class Status(models.TextChoices):
         PENDING_REVIEW = "pending_review", "Pending Review"
         ACTIVE = "active", "Active"
+        DELIVERED = "delivered", "Delivered"
         DISMISSED = "dismissed", "Dismissed"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -11585,6 +11586,12 @@ class PersistentAgentMessage(models.Model):
         related_name="cc_messages",
         blank=True,
         help_text="CC recipients for email or additional recipients for group SMS",
+    )
+    bcc_endpoints = models.ManyToManyField(
+        PersistentAgentCommsEndpoint,
+        related_name="bcc_messages",
+        blank=True,
+        help_text="Hidden recipients for outbound email",
     )
     conversation = models.ForeignKey(
         PersistentAgentConversation,

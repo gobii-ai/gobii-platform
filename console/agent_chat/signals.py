@@ -242,6 +242,13 @@ def _notification_recipient_user_ids(
             )
             if address
         )
+        addresses.extend(
+            address
+            for address in (
+                (endpoint.address or "").strip() for endpoint in message.bcc_endpoints.all()
+            )
+            if address
+        )
         matched: set[int] = set()
         for address in addresses:
             user = _resolve_unique_user_for_email(agent, address)

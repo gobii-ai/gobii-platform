@@ -51,7 +51,7 @@ def build_contact_activity_by_key(agent: PersistentAgent) -> ContactActivityMap:
     messages = (
         PersistentAgentMessage.objects.filter(owner_agent=agent)
         .select_related("from_endpoint", "to_endpoint", "conversation")
-        .prefetch_related("cc_endpoints")
+        .prefetch_related("cc_endpoints", "bcc_endpoints")
         .order_by("-timestamp")
     )[:CONTACT_ACTIVITY_MESSAGE_SCAN_LIMIT]
     for message in messages:
@@ -76,6 +76,8 @@ def build_contact_activity_by_key(agent: PersistentAgent) -> ContactActivityMap:
             )
         for cc_endpoint in message.cc_endpoints.all():
             merge(cc_endpoint.channel, cc_endpoint.address, message.timestamp)
+        for bcc_endpoint in message.bcc_endpoints.all():
+            merge(bcc_endpoint.channel, bcc_endpoint.address, message.timestamp)
 
     return activity
 
