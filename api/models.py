@@ -8109,7 +8109,10 @@ class ComputerPairingSession(models.Model):
     user_code_digest = models.CharField(max_length=64)
     machine_identifier_digest = models.CharField(max_length=64)
     display_name = models.CharField(max_length=128)
-    platform = models.CharField(max_length=32)
+    platform = models.CharField(
+        max_length=32,
+        choices=(("macos", "macOS"), ("windows", "Windows")),
+    )
     architecture = models.CharField(max_length=32)
     client_version = models.CharField(max_length=32)
     protocol_version = models.PositiveIntegerField()
@@ -8332,6 +8335,13 @@ class ComputerRelayArtifact(models.Model):
         indexes = [
             models.Index(fields=["device", "expires_at"], name="computer_artifact_exp_idx"),
         ]
+
+
+@receiver(post_delete, sender=ComputerRelayArtifact)
+def delete_computer_relay_artifact_file(sender, instance, **kwargs):
+    if instance.storage_key:
+        storage_key = instance.storage_key
+        transaction.on_commit(lambda: default_storage.delete(storage_key))
 
 
 class PersistentAgentMCPTask(models.Model):

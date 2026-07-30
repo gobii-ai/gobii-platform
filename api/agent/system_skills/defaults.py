@@ -45,6 +45,21 @@ def _app_integrations_url() -> str:
     return f"{str(settings.PUBLIC_SITE_URL or '').strip().rstrip('/')}/app/integrations"
 
 
+def _computer_prompt_available(agent) -> bool:
+    from api.models import ComputerDeviceAssignment
+    from api.services.computer_relay import computer_cpp_enabled_for_user
+
+    owners = {
+        assignment.device.owner
+        for assignment in ComputerDeviceAssignment.objects.filter(
+            agent=agent,
+            status=ComputerDeviceAssignment.Status.ACTIVE,
+            device__revoked_at__isnull=True,
+        ).select_related("device__owner")
+    }
+    return any(computer_cpp_enabled_for_user(owner) for owner in owners or {agent.user})
+
+
 def _computer_prompt_instructions(agent) -> str:
     from api.models import ComputerDeviceAssignment
 
@@ -71,7 +86,7 @@ def _computer_prompt_instructions(agent) -> str:
 
 def _computer_prompt_context(agent) -> str:
     from api.models import ComputerDeviceAssignment
-    from api.services.computer_relay import get_device_presence
+    from api.services.computer_relay import computer_cpp_enabled_for_user, get_device_presence
 
     assignments = (
         ComputerDeviceAssignment.objects.filter(
@@ -79,12 +94,14 @@ def _computer_prompt_context(agent) -> str:
             status=ComputerDeviceAssignment.Status.ACTIVE,
             device__revoked_at__isnull=True,
         )
-        .select_related("device")
+        .select_related("device__owner")
         .prefetch_related("device__apps")
     )
     lines = []
     for assignment in assignments:
         device = assignment.device
+        if not computer_cpp_enabled_for_user(device.owner):
+            continue
         if device.is_paused:
             state = "paused"
         elif get_device_presence(device.id):
@@ -94,7 +111,9 @@ def _computer_prompt_context(agent) -> str:
         approved_apps = [
             app.display_name
             for app in device.apps.all()
-            if app.approval_state == app.ApprovalState.APPROVED and app.is_available
+            if app.approval_state == app.ApprovalState.APPROVED
+            and app.is_available
+            and app.approved_schema_hash == app.reported_schema_hash
         ]
         lines.append(
             f"- {device.display_name}: {state}; apps={', '.join(approved_apps) if approved_apps else 'none approved'}"
@@ -1289,6 +1308,7 @@ COMPUTER_SYSTEM_SKILL = SystemSkillDefinition(
         "mac",
     ),
     discoverable_without_tools=True,
+    prompt_available=_computer_prompt_available,
     prompt_instructions_renderer=_computer_prompt_instructions,
     prompt_context_renderer=_computer_prompt_context,
     setup_instructions=f"Connect a computer at {_app_integrations_url()}.",

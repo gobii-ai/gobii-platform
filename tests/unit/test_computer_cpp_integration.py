@@ -9,11 +9,14 @@ from asgiref.sync import async_to_sync
 from channels.testing import WebsocketCommunicator
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.core.files.storage import default_storage
 from django.test import TestCase, TransactionTestCase, override_settings, tag
 from django.urls import reverse
 from waffle import get_waffle_flag_model
 
+from api.agent.system_skills.defaults import COMPUTER_SYSTEM_SKILL, _computer_prompt_context
 from api.agent.system_skills.registry import shortlist_system_skills
+from api.agent.tools.eval_synthetic_tools import get_eval_synthetic_tool_fallback_result
 from api.computer_consumers import ComputerRelayConsumer
 from api.models import (
     BrowserUseAgent,
@@ -156,6 +159,48 @@ class ComputerPairingAPITests(TestCase):
             content_type="application/json",
         )
         self.assertEqual(approval.status_code, 403)
+
+    def test_computer_skill_discovery_requires_the_feature_flag(self):
+        self.assertFalse(COMPUTER_SYSTEM_SKILL.should_render_prompt(self.agent))
+
+        _enable_computer_flag(self.user)
+
+        self.assertTrue(COMPUTER_SYSTEM_SKILL.should_render_prompt(self.agent))
+
+    def test_pairing_rejects_an_agent_the_approving_user_cannot_manage(self):
+        _enable_computer_flag(self.user)
+        other_user = get_user_model().objects.create_user(username="other-computer-owner")
+        other_agent = _create_agent(other_user, "Other user's agent")
+        pairing, _, user_code = create_pairing_session(_pairing_payload())
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            reverse("console-computer-pairing", kwargs={"pairing_id": pairing.id}),
+            data=json.dumps(
+                {
+                    "user_code": user_code,
+                    "agent_id": str(other_agent.id),
+                    "selected_app_keys": ["gobii-desktop"],
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        pairing.refresh_from_db()
+        self.assertEqual(pairing.status, ComputerPairingSession.Status.PENDING)
+
+    def test_pairing_exchange_rejects_the_wrong_device_code(self):
+        pairing, _, _ = create_pairing_session(_pairing_payload())
+
+        response = self.client.post(
+            reverse("computer-pairing-exchange", kwargs={"pairing_id": pairing.id}),
+            data=json.dumps({"device_code": "wrong-device-code"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["error"], "access_denied")
 
     def test_pairing_creates_owned_device_assignment_and_managed_mcp(self):
         _enable_computer_flag(self.user)
@@ -430,12 +475,26 @@ class ComputerRelayLifecycleTests(TestCase):
             PersistentAgentMCPServer.objects.filter(server_config=config).exists()
         )
 
+    def test_prompt_context_excludes_an_approved_app_with_a_stale_schema(self):
+        app = self.device.apps.get(app_key="gobii-desktop")
+        app.reported_schema_hash = "c" * 64
+        app.approval_state = ComputerDeviceApp.ApprovalState.APPROVED
+        app.is_available = True
+        app.save(update_fields=["reported_schema_hash", "approval_state", "is_available"])
+
+        context = _computer_prompt_context(self.agent)
+
+        self.assertIn("apps=none approved", context)
+        self.assertNotIn(app.display_name, context)
+
     def test_flag_removal_rejects_existing_relay_access_token(self):
         flag = get_waffle_flag_model().objects.get(name=COMPUTER_CPP_WAFFLE_FLAG)
         flag.users.remove(self.user)
 
         with self.assertRaises(PermissionError):
             authenticate_relay_access_token(self.access_token)
+        self.assertFalse(COMPUTER_SYSTEM_SKILL.should_render_prompt(self.agent))
+        self.assertEqual(_computer_prompt_context(self.agent), "Connected computer state: none.")
 
     @override_settings(MEDIA_ROOT=tempfile.gettempdir())
     def test_artifacts_are_type_checked_device_scoped_and_single_use(self):
@@ -470,6 +529,61 @@ class ComputerRelayLifecycleTests(TestCase):
         )
         with self.assertRaisesRegex(ValueError, "does not match"):
             store_artifact(self.device, invalid)
+
+    @override_settings(MEDIA_ROOT=tempfile.gettempdir())
+    def test_artifact_row_deletion_removes_its_storage_blob(self):
+        artifact = store_artifact(
+            self.device,
+            SimpleUploadedFile(
+                "screen.png",
+                b"\x89PNG\r\n\x1a\ncleanup-test",
+                content_type="image/png",
+            ),
+        )
+        storage_key = artifact.storage_key
+        self.assertTrue(default_storage.exists(storage_key))
+
+        with self.captureOnCommitCallbacks(execute=True):
+            artifact.delete()
+
+        self.assertFalse(default_storage.exists(storage_key))
+
+    def test_device_patch_rejects_non_boolean_paused_values(self):
+        self.client.force_login(self.user)
+
+        response = self.client.patch(
+            reverse("console-computer-detail", kwargs={"device_id": self.device.id}),
+            data=json.dumps({"paused": "false"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.device.refresh_from_db()
+        self.assertFalse(self.device.is_paused)
+
+    def test_device_patch_rolls_back_earlier_changes_when_app_approval_fails(self):
+        self.client.force_login(self.user)
+        original_name = self.device.display_name
+
+        response = self.client.patch(
+            reverse("console-computer-detail", kwargs={"device_id": self.device.id}),
+            data=json.dumps(
+                {
+                    "display_name": "Should roll back",
+                    "approved_apps": [
+                        {
+                            "app_key": "gobii-desktop",
+                            "schema_sha256": "f" * 64,
+                        }
+                    ],
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.device.refresh_from_db()
+        self.assertEqual(self.device.display_name, original_name)
 
     def test_agent_deactivation_revokes_assignment_but_retains_device(self):
         self.agent.is_active = False
@@ -604,6 +718,23 @@ class MCPTransportModelTests(TestCase):
         self.assertEqual(command.transport, MCPServerConfig.Transport.STDIO)
         self.assertEqual(http.transport, MCPServerConfig.Transport.STREAMABLE_HTTP)
 
+    def test_pairing_platform_field_uses_the_device_platform_choices(self):
+        field = ComputerPairingSession._meta.get_field("platform")
+
+        self.assertEqual(
+            dict(field.choices),
+            dict(ComputerDevice.Platform.choices),
+        )
+
+    def test_unconfigured_computer_eval_fallback_matches_an_offline_relay_error(self):
+        result = get_eval_synthetic_tool_fallback_result(
+            "mcp_computer_work_mac_gobii_desktop_take_screenshot"
+        )
+
+        self.assertEqual(result["status"], "action_required")
+        self.assertEqual(result["computer_error"], "offline")
+        self.assertEqual(result["result"], result["message"])
+
 
 @override_settings(
     CHANNEL_LAYERS={"default": {"BACKEND": "channels.layers.InMemoryChannelLayer"}},
@@ -636,6 +767,64 @@ class ComputerRelayWebSocketTests(TransactionTestCase):
                 device_code=device_code,
             )
         self.app = self.device.apps.get(app_key="gobii-desktop")
+
+    def test_socket_rejects_missing_access_token(self):
+        async def run():
+            communicator = WebsocketCommunicator(
+                ComputerRelayConsumer.as_asgi(),
+                "/",
+                subprotocols=["gobii-computer-relay.v1"],
+            )
+            connected, close_code = await communicator.connect()
+            self.assertFalse(connected)
+            self.assertEqual(close_code, 4401)
+
+        async_to_sync(run)()
+
+    def test_socket_rejects_malformed_protocol_version(self):
+        async def run():
+            communicator = WebsocketCommunicator(
+                ComputerRelayConsumer.as_asgi(),
+                "/",
+                headers=[
+                    (b"authorization", f"Bearer {self.access_token}".encode("latin-1")),
+                ],
+                subprotocols=["gobii-computer-relay.v1"],
+            )
+            connected, _ = await communicator.connect()
+            self.assertTrue(connected)
+            await communicator.send_json_to(
+                {
+                    "type": "hello",
+                    "client_version": "0.21.0",
+                    "protocol_version": "invalid",
+                    "apps": _pairing_payload()["apps"],
+                }
+            )
+
+            error = await communicator.receive_json_from()
+            self.assertEqual(error["error"]["code"], "invalid_message")
+            self.assertEqual((await communicator.receive_output())["code"], 4400)
+
+        async_to_sync(run)()
+
+    @override_settings(COMPUTER_CPP_HELLO_TIMEOUT_SECONDS=0.01)
+    def test_socket_closes_when_hello_is_not_received(self):
+        async def run():
+            communicator = WebsocketCommunicator(
+                ComputerRelayConsumer.as_asgi(),
+                "/",
+                headers=[
+                    (b"authorization", f"Bearer {self.access_token}".encode("latin-1")),
+                ],
+                subprotocols=["gobii-computer-relay.v1"],
+            )
+            connected, _ = await communicator.connect()
+            self.assertTrue(connected)
+
+            self.assertEqual((await communicator.receive_output(timeout=1))["code"], 4408)
+
+        async_to_sync(run)()
 
     def test_authenticated_socket_correlates_mcp_request_and_response(self):
         async def run():

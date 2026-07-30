@@ -1,3 +1,4 @@
+import asyncio
 import json
 import secrets
 
@@ -60,6 +61,7 @@ class ComputerRelayConsumer(AsyncJsonWebsocketConsumer):
         computer_relay_active_sockets.add(1, {"platform": self.device.platform})
         record_computer_relay_event("socket_connected", platform=self.device.platform)
         await self.accept(subprotocol=self.subprotocol)
+        self.hello_timeout_task = asyncio.create_task(self._close_without_hello())
 
     def _bearer_token(self) -> str:
         for name, value in self.scope.get("headers") or []:
@@ -71,6 +73,9 @@ class ComputerRelayConsumer(AsyncJsonWebsocketConsumer):
         return ""
 
     async def disconnect(self, close_code):
+        timeout_task = getattr(self, "hello_timeout_task", None)
+        if timeout_task and timeout_task is not asyncio.current_task():
+            timeout_task.cancel()
         if hasattr(self, "device"):
             clear_device_presence(self.device.id, getattr(self, "connection_generation", ""))
             if getattr(self, "socket_counted", False):
@@ -89,6 +94,14 @@ class ComputerRelayConsumer(AsyncJsonWebsocketConsumer):
                     },
                 },
             )
+
+    async def _close_without_hello(self):
+        try:
+            await asyncio.sleep(settings.COMPUTER_CPP_HELLO_TIMEOUT_SECONDS)
+        except asyncio.CancelledError:
+            return
+        if not self.received_hello:
+            await self.close(code=4408)
 
     async def receive(self, text_data=None, bytes_data=None, **kwargs):
         if bytes_data is not None or text_data is None:
@@ -128,7 +141,12 @@ class ComputerRelayConsumer(AsyncJsonWebsocketConsumer):
         await self.close(code=close_code)
 
     async def _handle_hello(self, content):
-        if int(content.get("protocol_version") or 0) != settings.COMPUTER_CPP_RELAY_PROTOCOL_VERSION:
+        try:
+            protocol_version = int(content.get("protocol_version") or 0)
+        except (TypeError, ValueError):
+            await self._reject("invalid_message", "Invalid relay protocol version", close_code=4400)
+            return
+        if protocol_version != settings.COMPUTER_CPP_RELAY_PROTOCOL_VERSION:
             await self._reject("update_required", "Relay protocol update required", close_code=4406)
             return
         client_version = str(content.get("client_version") or "")
@@ -151,12 +169,13 @@ class ComputerRelayConsumer(AsyncJsonWebsocketConsumer):
             return
 
         self.device.client_version = client_version[:32]
-        self.device.protocol_version = int(content.get("protocol_version"))
+        self.device.protocol_version = protocol_version
         self.device.last_seen_at = timezone.now()
         await sync_to_async(self.device.save, thread_sensitive=True)(
             update_fields=["client_version", "protocol_version", "last_seen_at", "updated_at"]
         )
         self.received_hello = True
+        self.hello_timeout_task.cancel()
         set_device_presence(
             self.device.id,
             channel_name=self.channel_name,

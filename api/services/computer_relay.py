@@ -926,9 +926,6 @@ def revoke_device(device: ComputerDevice) -> None:
         device.credential_generation += 1
         device.save(update_fields=["revoked_at", "credential_generation", "updated_at"])
         device.credentials.filter(revoked_at__isnull=True).update(revoked_at=now)
-        artifacts = list(device.relay_artifacts.all())
-        for artifact in artifacts:
-            default_storage.delete(artifact.storage_key)
         device.relay_artifacts.all().delete()
     send_device_control(device.id, "relay.close", {"code": "revoked"})
     _track_computer_event(

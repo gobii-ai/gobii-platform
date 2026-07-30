@@ -229,7 +229,7 @@ function ManageComputerModal({
       display_name: name,
       agent_id: agentId || undefined,
       approved_apps: device.apps
-        .filter((app) => selectedApps.includes(app.app_key))
+        .filter((app) => app.available && selectedApps.includes(app.app_key))
         .map((app) => ({ app_key: app.app_key, schema_sha256: app.schema_sha256 })),
     }),
     onSuccess: onSaved,
@@ -297,6 +297,23 @@ export function ComputerConnectionsPanel({ variant = 'embedded' }: { variant?: S
     await queryClient.invalidateQueries({ queryKey })
     if (nextMessage) setMessage(nextMessage)
   }
+  const actionMutation = useMutation({
+    mutationFn: async ({
+      request,
+      successMessage,
+    }: {
+      request: () => Promise<unknown>
+      successMessage: string
+    }) => {
+      await request()
+      return successMessage
+    },
+    onMutate: () => setMessage(null),
+    onSuccess: (successMessage) => {
+      void refresh(successMessage)
+    },
+  })
+  const actionError = actionMutation.error instanceof Error ? actionMutation.error.message : null
   const clearPairingUrl = () => {
     const next = new URL(window.location.href)
     next.searchParams.delete('computer_pairing')
@@ -346,6 +363,11 @@ export function ComputerConnectionsPanel({ variant = 'embedded' }: { variant?: S
         {message ? (
           <div className="px-6 pb-4">
             <InlineStatusBanner variant="success" surface={surface} density="compact">{message}</InlineStatusBanner>
+          </div>
+        ) : null}
+        {actionError ? (
+          <div className="px-6 pb-4">
+            <InlineStatusBanner variant="error" surface={surface} density="compact">{actionError}</InlineStatusBanner>
           </div>
         ) : null}
         {devices.length === 0 ? (
@@ -402,7 +424,11 @@ export function ComputerConnectionsPanel({ variant = 'embedded' }: { variant?: S
                               <SettingsActionButton
                                 surface={buttonSurface}
                                 size="sm"
-                                onClick={() => updateComputer(url, device.id, { paused: !device.paused }).then(() => refresh(device.paused ? 'Computer resumed.' : 'Computer paused.'))}
+                                disabled={actionMutation.isPending}
+                                onClick={() => actionMutation.mutate({
+                                  request: () => updateComputer(url, device.id, { paused: !device.paused }),
+                                  successMessage: device.paused ? 'Computer resumed.' : 'Computer paused.',
+                                })}
                               >
                                 {device.paused ? <Play className="h-3.5 w-3.5" /> : <Pause className="h-3.5 w-3.5" />}
                                 {device.paused ? 'Resume' : 'Pause'}
@@ -414,7 +440,11 @@ export function ComputerConnectionsPanel({ variant = 'embedded' }: { variant?: S
                                 <SettingsActionButton
                                   surface={buttonSurface}
                                   size="sm"
-                                  onClick={() => revokeComputerAssignment(url, device.id).then(() => refresh('Computer unassigned.'))}
+                                  disabled={actionMutation.isPending}
+                                  onClick={() => actionMutation.mutate({
+                                    request: () => revokeComputerAssignment(url, device.id),
+                                    successMessage: 'Computer unassigned.',
+                                  })}
                                 >
                                   Unassign
                                 </SettingsActionButton>
@@ -423,9 +453,13 @@ export function ComputerConnectionsPanel({ variant = 'embedded' }: { variant?: S
                                 surface={buttonSurface}
                                 size="sm"
                                 tone="danger"
+                                disabled={actionMutation.isPending}
                                 onClick={() => {
                                   if (window.confirm(`Revoke ${device.display_name}? It will need to be paired again.`)) {
-                                    void revokeComputer(url, device.id).then(() => refresh('Computer revoked.'))
+                                    actionMutation.mutate({
+                                      request: () => revokeComputer(url, device.id),
+                                      successMessage: 'Computer revoked.',
+                                    })
                                   }
                                 }}
                               >
@@ -437,7 +471,11 @@ export function ComputerConnectionsPanel({ variant = 'embedded' }: { variant?: S
                               surface={buttonSurface}
                               size="sm"
                               tone="danger"
-                              onClick={() => revokeComputerAssignment(url, device.id).then(() => refresh('Computer grant revoked.'))}
+                              disabled={actionMutation.isPending}
+                              onClick={() => actionMutation.mutate({
+                                request: () => revokeComputerAssignment(url, device.id),
+                                successMessage: 'Computer grant revoked.',
+                              })}
                             >
                               Remove grant
                             </SettingsActionButton>

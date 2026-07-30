@@ -331,6 +331,14 @@ def get_eval_synthetic_tool_fallback_result(tool_name: str, params: Dict[str, An
             "source_image_count": 1 if isinstance(source_images, str) else len(source_images),
             "eval_fixture": True,
         }
+    if tool_name.startswith("mcp_computer_"):
+        message = "The connected computer is offline."
+        return {
+            "status": "action_required",
+            "result": message,
+            "message": message,
+            "computer_error": "offline",
+        }
     if tool_name.startswith("google_sheets-"):
         content.update(
             {

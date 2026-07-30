@@ -55,7 +55,7 @@ class ComputerRelayTransport(ClientTransport):
                             self.device_app_id,
                             request_payload,
                         )
-                        if not response_payload:
+                        if response_payload is None:
                             continue
                         response_payload = await _resolve_artifact_markers(
                             response_payload,

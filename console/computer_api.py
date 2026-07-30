@@ -1,5 +1,6 @@
 from django.conf import settings
 from django.core.exceptions import PermissionDenied
+from django.db import transaction
 from django.http import HttpRequest, HttpResponseBadRequest, JsonResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -221,20 +222,24 @@ class ComputerDetailAPIView(LoginRequiredMixin, View):
                 display_name = str(payload["display_name"]).strip()[:128]
                 if not display_name:
                     raise ValueError("display_name cannot be empty")
-            paused = bool(payload["paused"]) if "paused" in payload else None
-            update_device_properties(
-                device,
-                display_name=display_name,
-                paused=paused,
-            )
+            paused = payload.get("paused")
+            if "paused" in payload and not isinstance(paused, bool):
+                raise ValueError("paused must be a boolean")
+            approved_apps = payload.get("approved_apps")
+            if "approved_apps" in payload and not isinstance(approved_apps, list):
+                raise ValueError("approved_apps must be a list")
 
-            if "approved_apps" in payload:
-                if not isinstance(payload["approved_apps"], list):
-                    raise ValueError("approved_apps must be a list")
-                approve_device_apps(device, payload["approved_apps"])
-            if payload.get("agent_id"):
-                agent = get_object_or_404(PersistentAgent, id=payload["agent_id"])
-                assign_device(device, agent, granted_by=request.user)
+            with transaction.atomic():
+                update_device_properties(
+                    device,
+                    display_name=display_name,
+                    paused=paused,
+                )
+                if approved_apps is not None:
+                    approve_device_apps(device, approved_apps)
+                if payload.get("agent_id"):
+                    agent = get_object_or_404(PersistentAgent, id=payload["agent_id"])
+                    assign_device(device, agent, granted_by=request.user)
         except ValueError as exc:
             return HttpResponseBadRequest(str(exc))
         except PermissionError as exc:
