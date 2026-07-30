@@ -1,7 +1,6 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type SVGProps } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  Apple,
   Download,
   Monitor,
   Pause,
@@ -25,6 +24,22 @@ import { InlineStatusBanner } from '../common/InlineStatusBanner'
 import { ModalForm } from '../common/ModalForm'
 import { SettingsActionButton, SettingsStatusBadge } from '../agentSettings/SettingsControls'
 import { SettingsSurface, SurfaceHeader, type SettingsSurfaceVariant } from '../common/SettingsSurface'
+
+function AppleLogo(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" {...props}>
+      <path d="M17.05 20.28c-.98.95-2.05.8-3.08.35-1.09-.46-2.09-.48-3.24 0-1.44.62-2.2.44-3.06-.35C2.79 15.25 3.51 7.59 9.05 7.31c1.35.07 2.29.74 3.08.79 1.18-.24 2.31-.93 3.57-.84 1.51.12 2.65.72 3.4 1.8-3.12 1.87-2.38 5.98.48 7.13-.57 1.5-1.31 2.99-2.53 4.09ZM12.03 7.25C11.88 5.02 13.69 3.18 15.77 3c.29 2.58-2.34 4.5-3.74 4.25Z" />
+    </svg>
+  )
+}
+
+function WindowsLogo(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" {...props}>
+      <path d="M3 5.5 10.5 4.5V11H3V5.5Zm8.5-1.15L21 3v8h-9.5V4.35ZM3 12h7.5v6.5L3 17.5V12Zm8.5 0H21v8l-9.5-1.35V12Z" />
+    </svg>
+  )
+}
 
 function deviceState(device: ComputerDevice): { label: string; tone: 'success' | 'warning' | 'danger' | 'neutral' } {
   if (device.update_required) return { label: 'Update required', tone: 'danger' }
@@ -297,8 +312,8 @@ export function ComputerConnectionsPanel({ variant = 'embedded' }: { variant?: S
   const buttonSurface = variant
   const downloads = query.data.downloads
   const downloadButtons = [
-    { key: 'macos', label: 'Download for Mac', icon: Apple, url: downloads.macos.url },
-    { key: 'windows', label: 'Download for Windows', icon: Monitor, url: downloads.windows.url },
+    { key: 'macos', label: 'Download for Mac', icon: AppleLogo, url: downloads.macos.url },
+    { key: 'windows', label: 'Download for Windows', icon: WindowsLogo, url: downloads.windows.url },
   ]
   const platform = navigator.platform.toLowerCase()
   if (platform.includes('win')) downloadButtons.reverse()
