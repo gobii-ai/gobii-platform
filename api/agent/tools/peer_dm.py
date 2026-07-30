@@ -78,9 +78,9 @@ def get_send_agent_message_tool() -> Dict[str, Any]:
         "function": {
             "name": "send_agent_message",
             "description": (
-                "Send only a necessary charter-boundary handoff, requested owned contribution, or substantive progress "
-                "on peer-assigned work. FYIs, progress/completions, and final no-action decisions are read-only: never thank, "
-                "confirm, offer help, or reply. Exact decisions govern; adjacent evidence/status cannot upgrade a record. Never relay a shared-channel request to people already there. "
+                "Send only necessary charter-boundary handoffs, requested owned contributions, or substantive peer-work progress. Every message and structured_payload "
+                "value is delivered to the recipient: include only operational content its charter needs, never unrelated or owner-private source context. FYIs, completions, "
+                "and final no-action decisions are read-only: do not reply. Exact decisions govern; adjacent evidence/status cannot upgrade a record. Never relay a shared-channel request to people already there. "
                 "When transmitting a record, two or more named fields, a list of records, identifiers, statuses, or other "
                 "machine-consumed data, put the exact data in structured_payload; message may add prose context but must "
                 "not be its only carrier. Use message alone for an ordinary prose question or explanation. "
@@ -96,11 +96,11 @@ def get_send_agent_message_tool() -> Dict[str, Any]:
                     },
                     "structured_payload": {
                         "description": (
-                            "Optional schema-free JSON object or array for exact records, identifiers, statuses, lists, "
-                            "or machine-consumed data. Use this whenever the handoff contains two or more named fields or "
-                            "multiple records. For example, a record can be {\"id\": \"123\", \"state\": \"ready\"}. "
-                            "Arbitrary keys and nesting are allowed. Maximum serialized size is 64 KB. Use an attached "
-                            "file for larger datasets."
+                            "Optional recipient-visible, schema-free JSON object or array for exact operational records, "
+                            "identifiers, statuses, lists, or machine-consumed data. Preserve the source field names and "
+                            "values. Use this whenever the handoff contains two or more named fields or multiple records. "
+                            "For example, a record can be {\"id\": \"123\", \"state\": \"ready\"}. Arbitrary keys and "
+                            "nesting are allowed. Maximum serialized size is 64 KB. Use an attached file for larger datasets."
                         ),
                         "anyOf": [
                             {"type": "object", "additionalProperties": True},
@@ -110,8 +110,8 @@ def get_send_agent_message_tool() -> Dict[str, Any]:
                     "message": {
                         "type": "string",
                         "description": (
-                            "Optional prose context, question, or handoff the peer needs; never a reply to a status update. "
-                            "Either a nonblank message or a non-empty structured_payload is required. "
+                            "Optional recipient-visible prose context, question, or handoff the peer needs; never a reply "
+                            "to a status update. Either a nonblank message or a non-empty structured_payload is required. "
                             "Do not use message as the sole carrier for a fielded record or record batch. "
                             "Use Markdown only; raw HTML is rejected. Use code formatting to show HTML literally."
                         ),

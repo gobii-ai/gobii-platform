@@ -71,13 +71,13 @@ class ResponsibilityBoundaryScenarioTests(SimpleTestCase):
         peer_description = get_send_agent_message_tool()["function"]["description"]
         discord_description = get_send_discord_message_tool()["function"]["description"]
 
-        self.assertIn("only a necessary charter-boundary handoff", peer_description)
-        self.assertIn("requested owned contribution", peer_description)
+        self.assertIn("only necessary charter-boundary handoffs", peer_description)
+        self.assertIn("requested owned contributions", peer_description)
         self.assertIn("Never relay a shared-channel request", peer_description)
-        self.assertIn("FYIs, progress/completions, and final no-action decisions", peer_description)
+        self.assertIn("FYIs, completions, and final no-action decisions", peer_description)
         self.assertIn("final no-action decisions", peer_description)
         self.assertIn("adjacent evidence/status cannot upgrade a record", peer_description)
-        self.assertIn("never thank, confirm, offer help, or reply", peer_description)
+        self.assertIn("do not reply", peer_description)
         peer_message_description = get_send_agent_message_tool()["function"]["parameters"]["properties"]["message"][
             "description"
         ]
