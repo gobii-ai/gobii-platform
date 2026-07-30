@@ -36,8 +36,8 @@ class StructuredPeerHandoffEvalTests(SimpleTestCase):
 
         self.assertIn("Fielded records/lists use structured payloads", instruction)
         self.assertIn("questions use prose", instruction)
-        self.assertIn("message may add context but cannot be its only carrier", tool_description)
-        self.assertIn("omit unrelated or owner-private source context", tool_description)
+        self.assertIn("message may add prose context but must not be its only carrier", tool_description)
+        self.assertIn("never unrelated or owner-private source context", tool_description)
 
     def test_suite_registers_real_harness_scenarios(self):
         suite = SuiteRegistry.get(STRUCTURED_PEER_HANDOFF_SUITE_SLUG)
