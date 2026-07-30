@@ -70,6 +70,11 @@ def add_dynamic_schedules():
         "schedule": crontab(minute="*"),
         "args": [],
     }
+    beat_schedule["computer-relay-cleanup"] = {
+        "task": "api.tasks.computer_relay.cleanup_computer_relay_records",
+        "schedule": crontab(minute=37),
+        "args": [],
+    }
 
     beat_schedule["outbox-approved-reconciliation"] = {
         "task": "api.tasks.reconcile_approved_outbox_emails",

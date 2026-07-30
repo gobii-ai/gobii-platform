@@ -14,6 +14,7 @@ import {
   Megaphone,
   MessageSquare,
   MessageSquareQuote,
+  Monitor,
   OctagonAlert,
   Paperclip,
   Plus,
@@ -30,6 +31,7 @@ import { DiscordInsightPanel } from './insights/DiscordInsightPanel'
 import { GoogleDriveInsightPanel } from './insights/GoogleDriveInsightPanel'
 import { HubSpotInsightPanel } from './insights/HubSpotInsightPanel'
 import { MetaAdsInsightPanel } from './insights/MetaAdsInsightPanel'
+import { ComputerInsightPanel } from './insights/ComputerInsightPanel'
 import { AgentIntelligenceSelector } from './AgentIntelligenceSelector'
 import { PendingActionComposerPanel } from './PendingActionComposerPanel'
 import { HUMAN_INPUT_OTHER_OPTION_KEY } from './HumanInputComposerPanel'
@@ -93,6 +95,7 @@ const APOLLO_NATIVE_TAB_KEY = 'apolloNative'
 const HUBSPOT_NATIVE_TAB_KEY = 'hubspotNative'
 const DISCORD_NATIVE_TAB_KEY = 'discordNative'
 const META_ADS_TAB_KEY = 'metaAds'
+const COMPUTER_TAB_KEY = 'computer'
 const MINUTE_MS = 60 * 1000
 const HOUR_MS = 60 * MINUTE_MS
 const DAY_MS = 24 * HOUR_MS
@@ -277,7 +280,7 @@ type HumanInputComposerBatchResponse = {
   responses: HumanInputComposerResponse[]
 }
 
-type NativeWorkingTabKind = 'google_drive' | 'apollo' | 'hubspot' | 'discord' | 'meta_ads'
+type NativeWorkingTabKind = 'google_drive' | 'apollo' | 'hubspot' | 'discord' | 'meta_ads' | 'computer'
 type PendingWorkingTabKind = 'questions' | 'credentials' | 'contacts' | 'agents'
 type PendingWorkingPanelTab = {
   id: `pending:${PendingWorkingTabKind}`
@@ -355,6 +358,13 @@ const NATIVE_WORKING_TAB_CONFIG = {
     ariaLabel: 'View Meta Ads connection',
     panel: MetaAdsInsightPanel,
     icon: <img src="/static/images/integrations/native/meta_ads.svg" alt="" className="composer-insight-tab-image" />,
+  },
+  computer: {
+    label: 'Computer',
+    title: 'Computer',
+    ariaLabel: 'View connected computers',
+    panel: ComputerInsightPanel,
+    icon: <Monitor size={13} strokeWidth={2.2} />,
   },
 } as const
 
@@ -560,6 +570,7 @@ type AgentComposerProps = {
   pipedreamAppsSettingsUrl?: string | null
   pipedreamAppSearchUrl?: string | null
   nativeIntegrationsUrl?: string | null
+  computerConnectionsUrl?: string | null
   compact?: boolean
   externalShellRef?: Ref<HTMLDivElement>
 }
@@ -606,6 +617,7 @@ export const AgentComposer = memo(function AgentComposer({
   pipedreamAppsSettingsUrl = null,
   pipedreamAppSearchUrl = null,
   nativeIntegrationsUrl = null,
+  computerConnectionsUrl = null,
   compact = false,
   externalShellRef,
 }: AgentComposerProps) {
@@ -656,6 +668,7 @@ export const AgentComposer = memo(function AgentComposer({
   const hubspotNativeTabEnabled = Boolean(storeEnabledIntegrationTabs[HUBSPOT_NATIVE_TAB_KEY])
   const discordNativeTabEnabled = Boolean(storeEnabledIntegrationTabs[DISCORD_NATIVE_TAB_KEY])
   const metaAdsTabEnabled = Boolean(storeEnabledIntegrationTabs[META_ADS_TAB_KEY])
+  const computerTabEnabled = Boolean(storeEnabledIntegrationTabs[COMPUTER_TAB_KEY])
   const insights = useMemo(() => {
     const hydratedInsights = baseInsights.map((insight) => {
       if (insight.insightType !== 'agent_setup') {
@@ -844,6 +857,7 @@ export const AgentComposer = memo(function AgentComposer({
   const hubspotTabAvailable = Boolean(hubspotNativeTabEnabled && canManageAgent)
   const discordTabAvailable = Boolean(discordNativeTabEnabled && canManageAgent)
   const metaAdsTabAvailable = Boolean(metaAdsTabEnabled && canManageAgent)
+  const computerTabAvailable = Boolean(computerTabEnabled && canManageAgent)
   const nativeTabAvailability = useMemo(
     () => [
       { kind: 'google_drive', available: googleDriveTabAvailable },
@@ -851,8 +865,9 @@ export const AgentComposer = memo(function AgentComposer({
       { kind: 'hubspot', available: hubspotTabAvailable },
       { kind: 'discord', available: discordTabAvailable },
       { kind: 'meta_ads', available: metaAdsTabAvailable },
+      { kind: 'computer', available: computerTabAvailable },
     ] as const,
-    [apolloTabAvailable, discordTabAvailable, googleDriveTabAvailable, hubspotTabAvailable, metaAdsTabAvailable],
+    [apolloTabAvailable, computerTabAvailable, discordTabAvailable, googleDriveTabAvailable, hubspotTabAvailable, metaAdsTabAvailable],
   )
   const pendingActionTabs = useMemo<PendingWorkingPanelTab[]>(() => {
     const actionsByTabKind = new Map<PendingWorkingTabKind, PendingActionRequest[]>()
@@ -2320,11 +2335,18 @@ export const AgentComposer = memo(function AgentComposer({
                     key={activeWorkingTab?.id ?? 'insights-loading'}
                   >
                     {ActiveNativePanel ? (
-                      <ActiveNativePanel
-                        agentId={agentId}
-                        nativeIntegrationsUrl={nativeIntegrationsUrl}
-                        onOpenApps={handleOpenAppsModal}
-                      />
+                      activeWorkingTab?.kind === 'computer' ? (
+                        <ComputerInsightPanel
+                          agentId={agentId}
+                          computerConnectionsUrl={computerConnectionsUrl}
+                        />
+                      ) : (
+                        <ActiveNativePanel
+                          agentId={agentId}
+                          nativeIntegrationsUrl={nativeIntegrationsUrl}
+                          onOpenApps={handleOpenAppsModal}
+                        />
+                      )
                     ) : visibleInsight ? (
                       <InsightEventCard
                         insight={visibleInsight}

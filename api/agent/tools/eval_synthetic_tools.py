@@ -146,6 +146,26 @@ EVAL_SYNTHETIC_TOOL_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "parameters": _CREATE_IMAGE_FUNCTION["parameters"],
         "system_skill_key": IMAGE_GENERATION_SYSTEM_SKILL_KEY,
     },
+    "mcp_computer_work_mac_gobii_desktop_take_screenshot": {
+        "description": "Take a screenshot on the connected computer named Work Mac using Gobii Desktop.",
+        "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+        "system_skill_key": "computer",
+    },
+    "mcp_computer_work_mac_gobii_desktop_click": {
+        "description": "Click a named visible control on the connected computer named Work Mac.",
+        "parameters": {
+            "type": "object",
+            "properties": {"target": {"type": "string"}},
+            "required": ["target"],
+            "additionalProperties": False,
+        },
+        "system_skill_key": "computer",
+    },
+    "mcp_computer_lab_pc_gobii_desktop_take_screenshot": {
+        "description": "Take a screenshot on the connected computer named Lab PC using Gobii Desktop.",
+        "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+        "system_skill_key": "computer",
+    },
     "apollo_io-search-contacts": {
         "description": "Search Apollo.io for people and contacts matching lead criteria.",
         "parameters": _APOLLO_CONTACT_SEARCH_SCHEMA,

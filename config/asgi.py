@@ -7,7 +7,7 @@ import os
 from channels.auth import AuthMiddlewareStack
 from channels.routing import ProtocolTypeRouter, URLRouter
 from django.core.asgi import get_asgi_application
-from django.urls import path
+from django.urls import path, re_path
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
 
@@ -16,6 +16,7 @@ django_asgi_app = get_asgi_application()
 
 from console.agent_chat.consumers import AgentChatConsumer, AgentChatSessionConsumer, EchoConsumer  # noqa: E402  pylint: disable=wrong-import-position
 from console.evals.consumers import EvalRunConsumer, EvalSuiteRunConsumer  # noqa: E402  pylint: disable=wrong-import-position
+from api.computer_consumers import ComputerRelayConsumer  # noqa: E402  pylint: disable=wrong-import-position
 
 
 websocket_urlpatterns = [
@@ -30,6 +31,11 @@ websocket_urlpatterns = [
 application = ProtocolTypeRouter(
     {
         "http": django_asgi_app,
-        "websocket": AuthMiddlewareStack(URLRouter(websocket_urlpatterns)),
+        "websocket": URLRouter(
+            [
+                path("ws/computer/v1/relay/", ComputerRelayConsumer.as_asgi()),
+                re_path(r"", AuthMiddlewareStack(URLRouter(websocket_urlpatterns))),
+            ]
+        ),
     }
 )

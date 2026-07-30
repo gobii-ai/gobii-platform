@@ -129,3 +129,8 @@ from .secure_credential_delegation import (
     SecureDelegationGenericChildSecretScenario,
     SecureDelegationMixedMailboxesScenario,
 )
+from .computer_integration import (
+    COMPUTER_INTEGRATION_SCENARIO_SLUGS,
+    COMPUTER_INTEGRATION_SUITE_SLUG,
+    ComputerIntegrationScenario,
+)

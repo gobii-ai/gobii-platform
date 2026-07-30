@@ -16,6 +16,7 @@ import logging
 import asyncio
 import os
 import fnmatch
+import re
 import contextlib
 import contextvars
 import sys
@@ -230,6 +231,10 @@ class MCPServerRuntime:
     organization_id: Optional[str]
     user_id: Optional[str]
     updated_at: Optional[datetime]
+    transport: str = MCPServerConfig.Transport.STREAMABLE_HTTP
+    computer_device_app_id: Optional[str] = None
+    computer_device_id: Optional[str] = None
+    computer_schema_hash: str = ""
     oauth_access_token: Optional[str] = field(default=None, repr=False)
     oauth_token_type: Optional[str] = None
     oauth_expires_at: Optional[datetime] = None
@@ -1133,6 +1138,18 @@ class MCPToolManager:
             command=cfg.command or None,
             args=list(cfg.command_args or []),
             url=cfg.url or None,
+            transport=cfg.transport,
+            computer_device_app_id=(
+                str(metadata.get("computer_device_app_id"))
+                if metadata.get("computer_device_app_id")
+                else None
+            ),
+            computer_device_id=(
+                str(metadata.get("computer_device_id"))
+                if metadata.get("computer_device_id")
+                else None
+            ),
+            computer_schema_hash=str(metadata.get("schema_sha256") or ""),
             auth_method=cfg.auth_method,
             env=env,
             headers=headers,
@@ -1253,7 +1270,16 @@ class MCPToolManager:
         if server.name == self.PIPEDREAM_RUNTIME_NAME:
             raise ValueError("Pipedream clients require agent-scoped initialization")
 
-        if server.url:
+        if server.transport == MCPServerConfig.Transport.COMPUTER_RELAY:
+            if not server.computer_device_app_id or not server.computer_device_id:
+                raise ValueError(f"Computer relay server '{server.name}' is missing device metadata")
+            from .computer_relay_transport import ComputerRelayTransport
+
+            transport = ComputerRelayTransport(
+                device_app_id=server.computer_device_app_id,
+                device_id=server.computer_device_id,
+            )
+        elif server.url:
             from fastmcp.client.transports import StreamableHttpTransport
 
             headers: Dict[str, str] = dict(server.headers or {})
@@ -1275,7 +1301,7 @@ class MCPToolManager:
                 env=env,
             )
         else:
-            raise ValueError(f"Server '{server.name}' must have either 'url' or 'command'")
+            raise ValueError(f"Server '{server.name}' does not have a supported transport")
 
         return Client(transport)
 
@@ -1359,6 +1385,8 @@ class MCPToolManager:
 
     def _get_timeout_for_runtime(self, runtime: Optional[MCPServerRuntime]) -> float:
         """Get the appropriate request timeout based on the runtime's transport."""
+        if runtime and runtime.transport == MCPServerConfig.Transport.COMPUTER_RELAY:
+            return float(settings.COMPUTER_CPP_REQUEST_TIMEOUT_SECONDS)
         is_http = bool(runtime and runtime.url)
         return get_mcp_http_timeout_seconds() if is_http else get_mcp_stdio_timeout_seconds()
 
@@ -1441,6 +1469,9 @@ class MCPToolManager:
             "scope": server.scope,
             "url": server.url or "",
             "command": server.command or "",
+            "transport": server.transport,
+            "computer_device_app_id": server.computer_device_app_id or "",
+            "computer_schema_hash": server.computer_schema_hash,
             "args": [str(arg) for arg in (server.args or [])],
             "auth_method": server.auth_method,
             "updated_at": updated_at,
@@ -1859,8 +1890,17 @@ class MCPToolManager:
                 args=server.args or [],
                 env={**(server.env or {}), **(stdio_env_overrides or {})},
             )
+        elif server.transport == MCPServerConfig.Transport.COMPUTER_RELAY:
+            if not server.computer_device_app_id or not server.computer_device_id:
+                raise ValueError(f"Computer relay server '{server.name}' is missing device metadata")
+            from .computer_relay_transport import ComputerRelayTransport
+
+            transport = ComputerRelayTransport(
+                device_app_id=server.computer_device_app_id,
+                device_id=server.computer_device_id,
+            )
         else:
-            raise ValueError(f"Server '{server.name}' must have either 'url' or 'command'")
+            raise ValueError(f"Server '{server.name}' does not have a supported transport")
 
         if modern_client is None:
             client = Client(transport)
@@ -2028,6 +2068,8 @@ class MCPToolManager:
                 blacklisted_count += 1
                 continue
             description = tool.description or f"{tool.name} from {server.display_name}"
+            if server.transport == MCPServerConfig.Transport.COMPUTER_RELAY:
+                description = f"{description} Runs on {server.display_name}."
             # Augment scrape tools with guidance to prefer http_request for data files
             if tool.name in ("scrape_as_markdown", "scrape_as_html"):
                 description += " NOT for data files (.csv, .json, .xml, .txt, /api/) — use http_request instead."
@@ -2878,6 +2920,8 @@ class MCPToolManager:
             runtime, auth_error = self._ensure_runtime_oauth(runtime)
             if auth_error:
                 return auth_error
+            if runtime.transport == MCPServerConfig.Transport.COMPUTER_RELAY:
+                isolated = True
 
         owner = getattr(agent, "organization", None) or getattr(agent, "user", None)
 
@@ -3160,10 +3204,36 @@ class MCPToolManager:
             return response
             
         except Exception as e:
-            logger.error(f"Failed to execute MCP tool {tool_name}: {e}")
+            message = str(e)
+            logger.error("Failed to execute MCP tool %s: %s", tool_name, message)
+            if runtime and runtime.transport == MCPServerConfig.Transport.COMPUTER_RELAY:
+                match = re.search(r"\[computer:([a-z_]+)\]\s*(.*)", message)
+                if match:
+                    code, detail = match.groups()
+                    if code in {
+                        "offline",
+                        "paused",
+                        "permissions_required",
+                        "locked",
+                        "update_required",
+                        "disabled",
+                        "unknown_app",
+                    }:
+                        return {
+                            "status": "action_required",
+                            "result": detail,
+                            "message": detail,
+                            "computer_error": code,
+                        }
+                    return {
+                        "status": "error",
+                        "message": detail,
+                        "computer_error": code,
+                        "retryable": code in {"busy", "deadline_exceeded"},
+                    }
             response = {
                 "status": "error",
-                "message": str(e),
+                "message": message,
             }
             return self._handle_mcp_session_death_response(
                 runtime,

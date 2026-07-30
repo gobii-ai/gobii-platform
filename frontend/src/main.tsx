@@ -75,6 +75,7 @@ const pipedreamAppsUrl = mountNode.dataset.pipedreamAppsUrl || null
 const pipedreamAppSearchUrl = mountNode.dataset.pipedreamAppSearchUrl || null
 const pipedreamAppsEnabled = Boolean(pipedreamAppsUrl && pipedreamAppSearchUrl)
 const nativeIntegrationsUrl = mountNode.dataset.nativeIntegrationsUrl || null
+const computerConnectionsUrl = mountNode.dataset.computerConnectionsUrl || null
 
 switch (appName) {
   case 'system-status':
@@ -141,6 +142,7 @@ switch (appName) {
         ownerLabel={mountNode.dataset.ownerLabel}
         allowCommands={allowCommands}
         nativeIntegrationsUrl={nativeIntegrationsUrl}
+        computerConnectionsUrl={computerConnectionsUrl}
         pipedreamAppsUrl={pipedreamAppsEnabled ? pipedreamAppsUrl : null}
         pipedreamAppSearchUrl={pipedreamAppsEnabled ? pipedreamAppSearchUrl : null}
         oauthStartUrl={oauthStartUrl}
@@ -174,6 +176,7 @@ switch (appName) {
         pipedreamAppsSettingsUrl={pipedreamAppsEnabled ? pipedreamAppsUrl : null}
         pipedreamAppSearchUrl={pipedreamAppsEnabled ? pipedreamAppSearchUrl : null}
         nativeIntegrationsUrl={nativeIntegrationsUrl}
+        computerConnectionsUrl={computerConnectionsUrl}
       />
     )
     break

@@ -49,6 +49,7 @@ class SystemSkillDefinition:
     prompt_instructions_renderer: Optional[Callable[[object], str]] = None
     prompt_context_renderer: Optional[Callable[[object], str]] = None
     prompt_available: Optional[Callable[[object], bool]] = None
+    discoverable_without_tools: bool = False
     default_enabled: bool = False
     required_profile_fields: tuple[SystemSkillField, ...] = ()
     optional_profile_fields: tuple[SystemSkillField, ...] = ()
@@ -174,7 +175,7 @@ def shortlist_system_skills(
 
     scored: list[tuple[int, str, SystemSkillDefinition]] = []
     for definition in SYSTEM_SKILL_REGISTRY.values():
-        if not definition.tool_names:
+        if not definition.tool_names and not definition.discoverable_without_tools:
             continue
         if not set(definition.tool_names).issubset(available_tool_names):
             continue

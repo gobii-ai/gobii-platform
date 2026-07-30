@@ -52,6 +52,10 @@ from api.evals.scenarios.secure_credential_delegation import (
     SECURE_CREDENTIAL_DELEGATION_SCENARIO_SLUGS,
     SECURE_CREDENTIAL_DELEGATION_SUITE_SLUG,
 )
+from api.evals.scenarios.computer_integration import (
+    COMPUTER_INTEGRATION_SCENARIO_SLUGS,
+    COMPUTER_INTEGRATION_SUITE_SLUG,
+)
 from api.evals.meta_gobii import META_GOBII_EVAL_SCENARIO_SLUGS, META_GOBII_EVAL_SUITE_SLUG
 from api.evals.suites import EvalSuite, register_builtin_suites
 
@@ -171,6 +175,11 @@ register_builtin_suites(
             slug=WEBHOOKS_SUITE_SLUG,
             description="Native webhook discovery, configuration, sending, and explicit Pipedream routing regressions.",
             scenario_slugs=WEBHOOK_SCENARIO_SLUGS,
+        ),
+        EvalSuite(
+            slug=COMPUTER_INTEGRATION_SUITE_SLUG,
+            description="Connected-computer tool choice, blocker handling, and safe setup guidance.",
+            scenario_slugs=COMPUTER_INTEGRATION_SCENARIO_SLUGS,
         ),
         EvalSuite(
             slug=SECURE_CREDENTIAL_DELEGATION_SUITE_SLUG,

@@ -68,6 +68,7 @@ type ImmersiveAppProps = {
   pipedreamAppsSettingsUrl?: string | null
   pipedreamAppSearchUrl?: string | null
   nativeIntegrationsUrl?: string | null
+  computerConnectionsUrl?: string | null
 }
 
 type AgentShellPage = Extract<SelectionShellPage, 'outbox' | 'billing' | 'profile' | 'organization' | 'secrets' | 'usage' | 'integrations' | 'api-keys'>
@@ -78,6 +79,7 @@ type AgentShellPageRenderContext = {
   pipedreamAppsSettingsUrl?: string | null
   pipedreamAppSearchUrl?: string | null
   nativeIntegrationsUrl?: string | null
+  computerConnectionsUrl?: string | null
 }
 type AgentShellPageConfig = {
   path: string
@@ -118,13 +120,14 @@ const AGENT_SHELL_PAGE_CONFIG: Record<AgentShellPage, AgentShellPageConfig> = {
   },
   integrations: {
     path: '/app/integrations',
-    render: ({ layout, refreshKey, pipedreamAppsSettingsUrl, pipedreamAppSearchUrl, nativeIntegrationsUrl }) => (
+    render: ({ layout, refreshKey, pipedreamAppsSettingsUrl, pipedreamAppSearchUrl, nativeIntegrationsUrl, computerConnectionsUrl }) => (
       <ImmersiveMcpServersPage
         layout={layout}
         refreshKey={refreshKey}
         nativeIntegrationsUrl={nativeIntegrationsUrl}
         pipedreamAppsUrl={pipedreamAppsSettingsUrl}
         pipedreamAppSearchUrl={pipedreamAppSearchUrl}
+        computerConnectionsUrl={computerConnectionsUrl}
       />
     ),
   },
@@ -698,6 +701,7 @@ export function ImmersiveApp({
   pipedreamAppsSettingsUrl = null,
   pipedreamAppSearchUrl = null,
   nativeIntegrationsUrl = null,
+  computerConnectionsUrl = null,
 }: ImmersiveAppProps) {
   const location = useAppLocation()
   const route = useMemo(() => parseRoute(location.pathname), [location.pathname])
@@ -964,7 +968,8 @@ export function ImmersiveApp({
     pipedreamAppsSettingsUrl,
     pipedreamAppSearchUrl,
     nativeIntegrationsUrl,
-  }), [nativeIntegrationsUrl, pipedreamAppSearchUrl, pipedreamAppsSettingsUrl, selectionRefreshKey])
+    computerConnectionsUrl,
+  }), [computerConnectionsUrl, nativeIntegrationsUrl, pipedreamAppSearchUrl, pipedreamAppsSettingsUrl, selectionRefreshKey])
   const { selectionShellPanel, selectionMainPanel } = useMemo(
     () => getSelectionPanels({ route, selectionPage, renderContext: shellPanelRenderContext }),
     [route, selectionPage, shellPanelRenderContext],
@@ -982,6 +987,7 @@ export function ImmersiveApp({
     pipedreamAppsSettingsUrl,
     pipedreamAppSearchUrl,
     nativeIntegrationsUrl,
+    computerConnectionsUrl,
     onClose: embed ? handleEmbeddedClose : handleClose,
     onCreateAgent: handleNavigateToNewAgent,
     onAgentCreated: handleAgentCreated,

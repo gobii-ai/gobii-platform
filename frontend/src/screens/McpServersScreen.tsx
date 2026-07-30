@@ -8,6 +8,7 @@ import { AssignServerModal } from '../components/mcp/AssignServerModal'
 import { DeleteServerDialog } from '../components/mcp/DeleteServerDialog'
 import { McpServerTestModal } from '../components/mcp/McpServerTestModal'
 import { PipedreamAppsPanel } from '../components/mcp/PipedreamAppsPanel'
+import { ComputerConnectionsPanel } from '../components/mcp/ComputerConnectionsPanel'
 import { useModal } from '../hooks/useModal'
 import { SettingsBanner } from '../components/agentSettings/SettingsBanner'
 import { getSettingsActionButtonClassName, getSettingsStatusBadgeClassName } from '../components/agentSettings/SettingsControls'
@@ -25,6 +26,7 @@ type McpServersScreenProps = {
   pipedreamAppsUrl?: string | null
   pipedreamAppSearchUrl?: string | null
   nativeIntegrationsUrl?: string | null
+  computerConnectionsUrl?: string | null
   oauthStartUrl: string
   oauthMetadataUrl: string
   oauthCallbackPath: string
@@ -44,6 +46,7 @@ export function McpServersScreen({
   pipedreamAppsUrl = null,
   pipedreamAppSearchUrl = null,
   nativeIntegrationsUrl = null,
+  computerConnectionsUrl = null,
   oauthStartUrl,
   oauthMetadataUrl,
   oauthCallbackPath,
@@ -271,6 +274,12 @@ export function McpServersScreen({
           nativeIntegrationsUrl={nativeIntegrationsUrl}
           onError={handleError}
           embedded={isEmbedded}
+        />
+      ) : null}
+      {computerConnectionsUrl ? (
+        <ComputerConnectionsPanel
+          url={computerConnectionsUrl}
+          variant={isEmbedded ? 'embedded' : 'standalone'}
         />
       ) : null}
       <div className={tableShellClassName}>

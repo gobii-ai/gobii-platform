@@ -23,6 +23,7 @@ DISCORD_NATIVE_SYSTEM_SKILL_KEY = "discord_native"
 WEBHOOKS_SYSTEM_SKILL_KEY = "webhooks"
 CODE_WORK_SYSTEM_SKILL_KEY = "code_work"
 RECRUITMENT_SOURCING_SYSTEM_SKILL_KEY = "recruitment_sourcing"
+COMPUTER_SYSTEM_SKILL_KEY = "computer"
 
 
 def _custom_tool_development_prompt_available(agent) -> bool:
@@ -42,6 +43,65 @@ def _format_custom_tool_development_context(agent) -> str:
 
 def _app_integrations_url() -> str:
     return f"{str(settings.PUBLIC_SITE_URL or '').strip().rstrip('/')}/app/integrations"
+
+
+def _computer_prompt_instructions(agent) -> str:
+    from api.models import ComputerDeviceAssignment
+
+    assignments = ComputerDeviceAssignment.objects.filter(
+        agent=agent,
+        status=ComputerDeviceAssignment.Status.ACTIVE,
+        device__revoked_at__isnull=True,
+    )
+    if not assignments.exists():
+        return (
+            "No computer is connected to this Gobii. Tell the current requester to open "
+            f"`{_app_integrations_url()}`, install computer.cpp, pair it, and select this Gobii. "
+            "Do not suggest a public IP, port forwarding, an inbound firewall rule, or browser automation as a substitute."
+        )
+    return (
+        "Use the namespaced `mcp_computer_...` tools for work on the requester's connected computer. "
+        "Tool and server descriptions identify the device and app. If several computers are connected and the requester "
+        "did not identify one, ask which named computer to use before acting. Treat offline, paused, locked, "
+        "permissions_required, and update_required results as real blocking states: report the specific state and do not "
+        "claim the operation succeeded or blindly retry it. Never ask the requester to expose a public IP, configure port "
+        "forwarding, or weaken firewall settings. Desktop mutations must stay within the exact scope the requester approved."
+    )
+
+
+def _computer_prompt_context(agent) -> str:
+    from api.models import ComputerDeviceAssignment
+    from api.services.computer_relay import get_device_presence
+
+    assignments = (
+        ComputerDeviceAssignment.objects.filter(
+            agent=agent,
+            status=ComputerDeviceAssignment.Status.ACTIVE,
+            device__revoked_at__isnull=True,
+        )
+        .select_related("device")
+        .prefetch_related("device__apps")
+    )
+    lines = []
+    for assignment in assignments:
+        device = assignment.device
+        if device.is_paused:
+            state = "paused"
+        elif get_device_presence(device.id):
+            state = "online"
+        else:
+            state = "offline"
+        approved_apps = [
+            app.display_name
+            for app in device.apps.all()
+            if app.approval_state == app.ApprovalState.APPROVED and app.is_available
+        ]
+        lines.append(
+            f"- {device.display_name}: {state}; apps={', '.join(approved_apps) if approved_apps else 'none approved'}"
+        )
+    if not lines:
+        return "Connected computer state: none."
+    return "Connected computer state:\n" + "\n".join(lines)
 
 
 def _native_integration_prompt_context(agent, provider_key: str) -> str:
@@ -1192,6 +1252,49 @@ SECURE_CREDENTIAL_DELEGATION_SYSTEM_SKILL = SystemSkillDefinition(
 )
 
 
+COMPUTER_SYSTEM_SKILL = SystemSkillDefinition(
+    skill_key=COMPUTER_SYSTEM_SKILL_KEY,
+    name="Computer",
+    search_summary="Use approved MCP tools on a connected macOS or Windows computer.",
+    tool_names=(),
+    enables=(
+        "work with approved apps on a connected desktop",
+        "use screen, keyboard, mouse, window, and local computer tools",
+        "target one of several named computers",
+    ),
+    use_when=(
+        "the user asks to perform a task on their computer",
+        "the user asks to interact with their Mac or Windows desktop",
+        "the user asks to use an application installed on their local machine",
+    ),
+    query_aliases=(
+        "computer",
+        "desktop",
+        "local machine",
+        "screen",
+        "keyboard",
+        "mouse",
+        "windows computer",
+        "mac computer",
+        "computer.cpp",
+    ),
+    discovery_triggers=(
+        "computer",
+        "desktop",
+        "local machine",
+        "screen",
+        "keyboard",
+        "mouse",
+        "windows",
+        "mac",
+    ),
+    discoverable_without_tools=True,
+    prompt_instructions_renderer=_computer_prompt_instructions,
+    prompt_context_renderer=_computer_prompt_context,
+    setup_instructions=f"Connect a computer at {_app_integrations_url()}.",
+)
+
+
 DEFAULT_SYSTEM_SKILL_DEFINITIONS = {
     CODE_WORK_SYSTEM_SKILL.skill_key: CODE_WORK_SYSTEM_SKILL,
     IMAGE_GENERATION_SYSTEM_SKILL.skill_key: IMAGE_GENERATION_SYSTEM_SKILL,
@@ -1205,4 +1308,5 @@ DEFAULT_SYSTEM_SKILL_DEFINITIONS = {
     WEBHOOKS_SYSTEM_SKILL.skill_key: WEBHOOKS_SYSTEM_SKILL,
     META_GOBII_SYSTEM_SKILL.skill_key: META_GOBII_SYSTEM_SKILL,
     SECURE_CREDENTIAL_DELEGATION_SYSTEM_SKILL.skill_key: SECURE_CREDENTIAL_DELEGATION_SYSTEM_SKILL,
+    COMPUTER_SYSTEM_SKILL.skill_key: COMPUTER_SYSTEM_SKILL,
 }

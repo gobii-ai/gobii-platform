@@ -32,7 +32,7 @@ def organization_server_configs(org_id) -> Iterable[MCPServerConfig]:
         scope=MCPServerConfig.Scope.ORGANIZATION,
         organization_id=org_id,
         is_active=True,
-    )
+    ).exclude(transport=MCPServerConfig.Transport.COMPUTER_RELAY)
 
 
 def personal_server_configs(user_id) -> Iterable[MCPServerConfig]:
@@ -45,7 +45,7 @@ def personal_server_configs(user_id) -> Iterable[MCPServerConfig]:
         scope=MCPServerConfig.Scope.USER,
         user_id=user_id,
         is_active=True,
-    )
+    ).exclude(transport=MCPServerConfig.Transport.COMPUTER_RELAY)
 
 
 def agent_enabled_server_ids(agent: PersistentAgent) -> List[str]:
@@ -246,15 +246,25 @@ def agent_accessible_server_configs(
         queryset = queryset.filter(id__in=allowed_config_ids)
     elif allowed_server_names is not None:
         queryset = queryset.filter(name__in=allowed_server_names)
+    configs = sorted(
+        queryset.select_related("computer_device_app__device__owner"),
+        key=lambda config: (
+            (config.display_name or "").lower(),
+            (config.name or "").lower(),
+        ),
+    )
+    if any(config.transport == MCPServerConfig.Transport.COMPUTER_RELAY for config in configs):
+        from api.services.computer_relay import computer_cpp_enabled_for_user
+
+        configs = [
+            config
+            for config in configs
+            if config.transport != MCPServerConfig.Transport.COMPUTER_RELAY
+            or computer_cpp_enabled_for_user(config.computer_device_app.device.owner)
+        ]
     return _filter_sandbox_unavailable_servers(
         agent,
-        sorted(
-            queryset,
-            key=lambda config: (
-                (config.display_name or "").lower(),
-                (config.name or "").lower(),
-            ),
-        ),
+        configs,
     )
 
 
