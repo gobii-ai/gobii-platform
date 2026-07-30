@@ -110,6 +110,28 @@ class ComputerPairingAPITests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"enabled": False})
 
+    @override_settings(COMPUTER_CPP_RELEASE_BASE_URL="https://downloads.example.test/latest/")
+    def test_console_api_builds_stable_release_asset_links(self):
+        _enable_computer_flag(self.user)
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("console-computer-list"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json()["downloads"],
+            {
+                "macos": {
+                    "url": "https://downloads.example.test/latest/computer.cpp-macos-arm64.zip",
+                },
+                "windows": {
+                    "url": "https://downloads.example.test/latest/computer.cpp-windows-x64.msi",
+                    "portable_url": "https://downloads.example.test/latest/computer.cpp-windows-x64.zip",
+                },
+                "minimum_version": "0.21.0",
+            },
+        )
+
     def test_pairing_start_is_available_without_flag_but_approval_is_not(self):
         response = self.client.post(
             reverse("computer-pairing-start"),

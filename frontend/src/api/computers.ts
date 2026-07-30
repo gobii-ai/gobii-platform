@@ -48,8 +48,8 @@ export type ComputerDevice = {
 export type ComputersResponse = {
   enabled: boolean
   downloads?: {
-    macos: { url: string; sha256: string }
-    windows: { url: string; portable_url: string; sha256: string; portable_sha256: string }
+    macos: { url: string }
+    windows: { url: string; portable_url: string }
     minimum_version: string
   }
   context?: {

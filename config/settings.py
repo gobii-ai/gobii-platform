@@ -1056,23 +1056,9 @@ AGENT_EVENT_PROCESSING_PENDING_FALLBACK_DELAY_SECONDS = AGENT_EVENT_PROCESSING_P
 WAFFLE_FLAG_DEFAULT = env.bool("WAFFLE_FLAG_DEFAULT", default=False)
 
 # computer.cpp desktop relay
-COMPUTER_CPP_MACOS_DOWNLOAD_URL = env.str(
-    "COMPUTER_CPP_MACOS_DOWNLOAD_URL",
-    default="https://github.com/gobii-ai/computer.cpp/releases/latest/download/computer.cpp-macos-arm64.zip",
-)
-COMPUTER_CPP_WINDOWS_DOWNLOAD_URL = env.str(
-    "COMPUTER_CPP_WINDOWS_DOWNLOAD_URL",
-    default="https://github.com/gobii-ai/computer.cpp/releases/latest/download/computer.cpp-windows-x64.msi",
-)
-COMPUTER_CPP_WINDOWS_PORTABLE_DOWNLOAD_URL = env.str(
-    "COMPUTER_CPP_WINDOWS_PORTABLE_DOWNLOAD_URL",
-    default="https://github.com/gobii-ai/computer.cpp/releases/latest/download/computer.cpp-windows-x64.zip",
-)
-COMPUTER_CPP_MACOS_SHA256 = env.str("COMPUTER_CPP_MACOS_SHA256", default="")
-COMPUTER_CPP_WINDOWS_SHA256 = env.str("COMPUTER_CPP_WINDOWS_SHA256", default="")
-COMPUTER_CPP_WINDOWS_PORTABLE_SHA256 = env.str(
-    "COMPUTER_CPP_WINDOWS_PORTABLE_SHA256",
-    default="",
+COMPUTER_CPP_RELEASE_BASE_URL = env.str(
+    "COMPUTER_CPP_RELEASE_BASE_URL",
+    default="https://github.com/gobii-ai/computer.cpp/releases/latest/download",
 )
 COMPUTER_CPP_MINIMUM_CLIENT_VERSION = env.str("COMPUTER_CPP_MINIMUM_CLIENT_VERSION", default="0.21.0")
 COMPUTER_CPP_RELAY_PROTOCOL_VERSION = env.int("COMPUTER_CPP_RELAY_PROTOCOL_VERSION", default=1)

@@ -100,19 +100,17 @@ class ComputerListAPIView(LoginRequiredMixin, View):
                 assignment__status=ComputerDeviceAssignment.Status.ACTIVE,
             )
 
+        release_base_url = settings.COMPUTER_CPP_RELEASE_BASE_URL.rstrip("/")
         return JsonResponse(
             {
                 "enabled": True,
                 "downloads": {
                     "macos": {
-                        "url": settings.COMPUTER_CPP_MACOS_DOWNLOAD_URL,
-                        "sha256": settings.COMPUTER_CPP_MACOS_SHA256,
+                        "url": f"{release_base_url}/computer.cpp-macos-arm64.zip",
                     },
                     "windows": {
-                        "url": settings.COMPUTER_CPP_WINDOWS_DOWNLOAD_URL,
-                        "portable_url": settings.COMPUTER_CPP_WINDOWS_PORTABLE_DOWNLOAD_URL,
-                        "sha256": settings.COMPUTER_CPP_WINDOWS_SHA256,
-                        "portable_sha256": settings.COMPUTER_CPP_WINDOWS_PORTABLE_SHA256,
+                        "url": f"{release_base_url}/computer.cpp-windows-x64.msi",
+                        "portable_url": f"{release_base_url}/computer.cpp-windows-x64.zip",
                     },
                     "minimum_version": settings.COMPUTER_CPP_MINIMUM_CLIENT_VERSION,
                 },
