@@ -10,9 +10,11 @@ from api.agent.tools.tool_manager import mark_tool_enabled_without_discovery
 from api.evals.base import EvalScenario, ScenarioTask
 from api.evals.execution import ScenarioExecutionTools
 from api.evals.registry import ScenarioRegistry
+from api.evals.tool_params import resolved_tool_param
 from api.models import (
     AgentPeerLink,
     BrowserUseAgent,
+    CommsAllowlistEntry,
     CommsChannel,
     EvalRunTask,
     PersistentAgent,
@@ -33,6 +35,7 @@ STRUCTURED_PEER_SCOPED_HANDOFF = "structured_peer_scoped_handoff"
 STRUCTURED_PEER_NEGATIVE_DECISION = "structured_peer_negative_decision"
 STRUCTURED_PEER_MIXED_DECISIONS = "structured_peer_mixed_decisions"
 STRUCTURED_PEER_CORRECTION_RECONCILES_STALE_STATE = "structured_peer_correction_reconciles_stale_state"
+PEER_EMAIL_CC_RESOLVES_ADDRESS = "peer_email_cc_resolves_address"
 STRUCTURED_PEER_HANDOFF_SUITE_SLUG = "structured_peer_handoffs"
 STRUCTURED_PEER_HANDOFF_SCENARIO_SLUGS = (
     STRUCTURED_PEER_SINGLE_RECORD,
@@ -43,6 +46,7 @@ STRUCTURED_PEER_HANDOFF_SCENARIO_SLUGS = (
     STRUCTURED_PEER_NEGATIVE_DECISION,
     STRUCTURED_PEER_MIXED_DECISIONS,
     STRUCTURED_PEER_CORRECTION_RECONCILES_STALE_STATE,
+    PEER_EMAIL_CC_RESOLVES_ADDRESS,
 )
 
 HANDOFF_CHARTER = (
@@ -435,6 +439,141 @@ class StructuredPeerHandoffScenario(EvalScenario, ScenarioExecutionTools):
 
 for case in STRUCTURED_PEER_HANDOFF_CASES:
     ScenarioRegistry.register(StructuredPeerHandoffScenario(case))
+
+
+class PeerEmailCcResolutionScenario(EvalScenario, ScenarioExecutionTools):
+    slug = PEER_EMAIL_CC_RESOLVES_ADDRESS
+    description = (
+        "An explicit request to CC a named linked agent uses that peer's actual email address, never its agent UUID."
+    )
+    tier = "core"
+    category = "structured_peer_handoffs"
+    expected_runtime = "short"
+    cost_class = "low"
+    owner = "agent-platform"
+    area = "agent_behavior"
+    tags = ("agent_behavior", "agent_teams", "email", "recipient_integrity", "real_harness")
+    tasks = [
+        ScenarioTask(name="inject_request", assertion_type="agent_processing"),
+        ScenarioTask(name="verify_email_participants", assertion_type="tool_call"),
+    ]
+
+    def run(self, run_id: str, agent_id: str) -> None:
+        PersistentAgent.objects.filter(id=agent_id).update(
+            name=f"Launch Coordinator {str(agent_id)[:8]}",
+            charter=(
+                "Send concise launch updates when the owner asks. Ledger Agent owns the finalized migration record."
+            ),
+            planning_state=PersistentAgent.PlanningState.SKIPPED,
+        )
+        StructuredPeerHandoffScenario._seed_prior_run(agent_id)
+        agent = PersistentAgent.objects.select_related("user", "organization").get(id=agent_id)
+        peer = StructuredPeerHandoffScenario._create_linked_peer(
+            agent,
+            run_id,
+            role="Ledger Agent",
+            charter="Maintain finalized migration records and receive launch updates.",
+        )
+        peer_email = f"ledger-{run_id}@eval.local"
+        PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=peer,
+            channel=CommsChannel.EMAIL,
+            address=peer_email,
+            is_primary=True,
+        )
+        CommsAllowlistEntry.objects.update_or_create(
+            agent=agent,
+            channel=CommsChannel.EMAIL,
+            address="ops@example.test",
+            defaults={
+                "is_active": True,
+                "allow_inbound": True,
+                "allow_outbound": True,
+                "verified": True,
+            },
+        )
+
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.RUNNING,
+            task_name="inject_request",
+        )
+        with self.wait_for_agent_idle(agent_id, timeout=120):
+            inbound = self.inject_message(
+                agent_id,
+                (
+                    "Email ops@example.test saying the migration is complete, and CC Ledger Agent "
+                    "so they have the same update."
+                ),
+                trigger_processing=False,
+                eval_run_id=run_id,
+            )
+            self.trigger_processing(
+                agent_id,
+                eval_run_id=run_id,
+                mock_config={
+                    "send_email": {
+                        "status": "ok",
+                        "message": "Mocked email delivery for peer recipient regression eval.",
+                        "message_id": "eval-peer-email-cc",
+                    },
+                },
+                eval_stop_policy={
+                    "stop_on_tool_names_after_finish": ["send_email"],
+                    "ignored_tool_names": ["send_chat_message", "sqlite_batch"],
+                    "max_relevant_tool_calls": 4,
+                },
+            )
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED,
+            task_name="inject_request",
+            observed_summary="A natural email request named a linked agent as a CC recipient.",
+            artifacts={"message": inbound},
+        )
+
+        calls = list(
+            PersistentAgentToolCall.objects.filter(
+                step__eval_run_id=run_id,
+                step__created_at__gte=inbound.timestamp,
+                tool_name="send_email",
+            )
+            .select_related("step")
+            .order_by("step__created_at", "step__id")
+        )
+        to_address = str(resolved_tool_param(calls[0], "to_address") or "") if calls else ""
+        cc_addresses = resolved_tool_param(calls[0], "cc_addresses") if calls else []
+        cc_addresses = cc_addresses if isinstance(cc_addresses, list) else []
+        all_recipient_values = [
+            to_address,
+            *[str(address) for address in cc_addresses],
+        ]
+        passed = (
+            len(calls) == 1
+            and to_address == "ops@example.test"
+            and cc_addresses == [peer_email]
+            and str(peer.id) not in all_recipient_values
+        )
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED if passed else EvalRunTask.Status.FAILED,
+            task_name="verify_email_participants",
+            observed_summary=(
+                "The named peer was CC'd at its actual email address."
+                if passed
+                else (
+                    f"Expected CC {peer_email}; observed to={to_address!r}, "
+                    f"cc={cc_addresses!r}, peer_id={peer.id}."
+                )
+            ),
+            artifacts={"step": calls[0].step} if calls else {},
+        )
+
+
+ScenarioRegistry.register(PeerEmailCcResolutionScenario())
 
 
 @dataclass(frozen=True)

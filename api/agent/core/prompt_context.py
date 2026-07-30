@@ -2782,10 +2782,29 @@ def _build_contacts_block(
     )
 
     if peer_links:
-        peer_lines: list[str] = [
-            "These are linked agents you can contact via the send_agent_message tool. "
-            "Agents listed as sharing a channel already receive the same messages there that you do."
+        counterpart_ids = [
+            link.agent_b_id if link.agent_a_id == agent.id else link.agent_a_id
+            for link in peer_links
         ]
+        peer_email_by_agent_id = dict(
+            PersistentAgentCommsEndpoint.objects.filter(
+                owner_agent_id__in=counterpart_ids,
+                channel=CommsChannel.EMAIL,
+            )
+            .order_by("owner_agent_id", "is_primary", "id")
+            .values_list("owner_agent_id", "address")
+        )
+
+        email_rule = (
+            " For explicit email To/CC/BCC, use the listed email address; never put an agent ID in an email recipient field."
+            if peer_email_by_agent_id
+            else ""
+        )
+        peer_intro = (
+            "These are linked agents you can contact via the send_agent_message tool. Agents listed as sharing "
+            f"a channel already receive the same messages there that you do.{email_rule}"
+        )
+        peer_lines: list[str] = [peer_intro]
         shared_channels = _get_shared_channel_names(agent)
         for link in peer_links:
             counterpart = link.get_other_agent(agent)
@@ -2805,13 +2824,12 @@ def _build_contacts_block(
                 if state and state.window_reset_at
                 else "pending"
             )
-            desc_part = ""
-            if counterpart.short_description:
-                desc_part = f" - {counterpart.short_description}"
+            desc_part = f" - {counterpart.short_description}" if counterpart.short_description else ""
             names = shared_channels.get(counterpart.id)
             shared_part = " | shares {} with you".format(", ".join(names)) if names else ""
+            email_part = f" | email: {email}" if (email := peer_email_by_agent_id.get(counterpart.id)) else ""
             peer_lines.append(
-                "- {} (id: {}){}| quota {} msgs / {} h | remaining: {} | next reset: {}{}".format(
+                "- {} (id: {}){}| quota {} msgs / {} h | remaining: {} | next reset: {}{}{}".format(
                     counterpart.name,
                     counterpart.id,
                     f"{desc_part} " if desc_part else "",
@@ -2819,6 +2837,7 @@ def _build_contacts_block(
                     link.window_hours,
                     remaining,
                     reset_at,
+                    email_part,
                     shared_part,
                 )
             )

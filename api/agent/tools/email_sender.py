@@ -5,7 +5,10 @@ import re
 from typing import Dict, Any
 
 from django.conf import settings
-from django.db import transaction
+from django.core.exceptions import ValidationError
+from django.core.validators import validate_email
+from django.db import close_old_connections, transaction
+from django.db.utils import OperationalError
 
 from ...models import (
     CommsAllowlistEntry,
@@ -65,6 +68,21 @@ class _EmailDeliveryFailed(Exception):
 
 class _EmailMessageCreateOperationalError(Exception):
     pass
+
+
+def _get_or_create_email_endpoint(address: str) -> PersistentAgentCommsEndpoint:
+    lookup = {
+        "channel": CommsChannel.EMAIL,
+        "address": address,
+        "defaults": {"owner_agent": None},
+    }
+    close_old_connections()
+    try:
+        endpoint, _ = PersistentAgentCommsEndpoint.objects.get_or_create(**lookup)
+    except OperationalError:
+        close_old_connections()
+        endpoint, _ = PersistentAgentCommsEndpoint.objects.get_or_create(**lookup)
+    return endpoint
 
 
 def _maybe_provision_simulated_from_endpoint(agent: PersistentAgent) -> PersistentAgentCommsEndpoint | None:
@@ -174,7 +192,7 @@ def get_send_email_tool() -> Dict[str, Any]:
         "function": {
             "name": "send_email",
             "description": (
-                "Body-only HTML; omit document tags, Markdown, and em/en/double dashes. No <style> blocks/classes; inline CSS only. "
+                "Body-only HTML; no document tags, Markdown, or long dashes. No <style> blocks/classes; inline CSS only. "
                 "Approval or preparation is not sent: send first, then record returned delivery_status; never infer delivered. "
                 "pending_approval is not received: tell user it awaits approval; never retry. "
                 "Reports need distinct styled sections/tables and highlighted values, plus a tasteful icon marker and obvious inline-styled badge for status/value. Never leave metrics in plain lists or use Markdown pipe tables."
@@ -182,14 +200,14 @@ def get_send_email_tool() -> Dict[str, Any]:
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "to_address": {"type": "string", "description": "Recipient email."},
+                    "to_address": {"type": "string", "format": "email", "description": "Email address; never an agent/user ID."},
                     "cc_addresses": {
                         "type": "array",
                         "items": {
                             "type": "string",
                             "format": "email",
                         },
-                        "description": "Optional CC email addresses."
+                        "description": "Optional email addresses; never agent/user IDs.",
                     },
                     "bcc_addresses": {
                         "type": "array",
@@ -197,10 +215,7 @@ def get_send_email_tool() -> Dict[str, Any]:
                             "type": "string",
                             "format": "email",
                         },
-                        "description": (
-                            "Optional hidden email recipients. Gobii keeps them in the owner's delivery audit, "
-                            "but they are not exposed to To or CC recipients."
-                        ),
+                        "description": "Hidden recipients, never agent/user IDs; kept in owner audit, hidden from To/CC.",
                     },
                     "subject": {"type": "string", "description": "Email subject."},
                     "reply_to_message_id": {
@@ -238,7 +253,6 @@ def get_send_email_tool() -> Dict[str, Any]:
 
 @handle_link_reference_errors
 def execute_send_email(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str, Any]:
-    """Execute the send_email tool for a persistent agent."""
     if not can_bypass_email_verification_for_signup_preview_first_email(agent):
         try:
             require_verified_email(agent.user, action_description="send emails")
@@ -247,10 +261,8 @@ def execute_send_email(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
 
     to_address = normalize_email_address(params.get("to_address"))
     subject = params.get("subject")
-    # Decode escape sequences and strip control chars from HTML body
     mobile_first_html = decode_unicode_escapes(params.get("mobile_first_html"))
     mobile_first_html = strip_control_chars(mobile_first_html)
-    # Substitute $[var] placeholders with actual values (e.g., $[/charts/...]).
     mobile_first_html = substitute_variables_with_filespace(mobile_first_html, agent)
     cc_addresses = [normalize_email_address(addr) for addr in params.get("cc_addresses", [])]
     bcc_addresses = [normalize_email_address(addr) for addr in params.get("bcc_addresses", [])]
@@ -261,6 +273,18 @@ def execute_send_email(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
     if not all([to_address, subject, mobile_first_html]):
         return {"status": "error", "message": "Missing required parameters: to_address, subject, or mobile_first_html"}
 
+    for address in [to_address, *cc_addresses, *bcc_addresses]:
+        try:
+            validate_email(address)
+        except ValidationError:
+            return {
+                "status": "error",
+                "message": (
+                    f"Recipient '{address}' is not a valid email address. "
+                    "Use an actual email address, never an agent or user ID."
+                ),
+            }
+
     if body_error := _email_body_error(mobile_first_html, bool(attachment_paths)):
         return {"status": "error", "message": body_error}
 
@@ -269,7 +293,6 @@ def execute_send_email(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
     except AttachmentResolutionError as exc:
         return {"status": "error", "message": str(exc)}
 
-    # Log email attempt
     body_preview = mobile_first_html[:100] + "..." if len(mobile_first_html) > 100 else mobile_first_html
     cc_info = f", CC: {cc_addresses}" if cc_addresses else ""
     bcc_info = f", BCC count: {len(bcc_addresses)}" if bcc_addresses else ""
@@ -280,9 +303,6 @@ def execute_send_email(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
     )
 
     try:
-        # Ensure a healthy DB connection for subsequent ORM ops
-        from django.db import close_old_connections
-        from django.db.utils import OperationalError
         all_recipients = [to_address] + cc_addresses + bcc_addresses
         outbox_enabled = email_review_outbox_enabled()
         policy_decision = classify_email_recipients(agent, all_recipients) if outbox_enabled else None
@@ -335,47 +355,9 @@ def execute_send_email(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
                     ),
                 }
 
-        close_old_connections()
-        try:
-            to_endpoint, _ = PersistentAgentCommsEndpoint.objects.get_or_create(
-                channel=CommsChannel.EMAIL, address=to_address, defaults={"owner_agent": None}
-            )
-        except OperationalError:
-            close_old_connections()
-            to_endpoint, _ = PersistentAgentCommsEndpoint.objects.get_or_create(
-                channel=CommsChannel.EMAIL, address=to_address, defaults={"owner_agent": None}
-            )
-        
-        # Create CC endpoints
-        cc_endpoint_objects = []
-        for cc_addr in cc_addresses:
-            close_old_connections()
-            try:
-                cc_endpoint, _ = PersistentAgentCommsEndpoint.objects.get_or_create(
-                    channel=CommsChannel.EMAIL, address=cc_addr, defaults={"owner_agent": None}
-                )
-                cc_endpoint_objects.append(cc_endpoint)
-            except OperationalError:
-                close_old_connections()
-                cc_endpoint, _ = PersistentAgentCommsEndpoint.objects.get_or_create(
-                    channel=CommsChannel.EMAIL, address=cc_addr, defaults={"owner_agent": None}
-                )
-                cc_endpoint_objects.append(cc_endpoint)
-
-        bcc_endpoint_objects = []
-        for bcc_addr in bcc_addresses:
-            close_old_connections()
-            try:
-                bcc_endpoint, _ = PersistentAgentCommsEndpoint.objects.get_or_create(
-                    channel=CommsChannel.EMAIL, address=bcc_addr, defaults={"owner_agent": None}
-                )
-                bcc_endpoint_objects.append(bcc_endpoint)
-            except OperationalError:
-                close_old_connections()
-                bcc_endpoint, _ = PersistentAgentCommsEndpoint.objects.get_or_create(
-                    channel=CommsChannel.EMAIL, address=bcc_addr, defaults={"owner_agent": None}
-                )
-                bcc_endpoint_objects.append(bcc_endpoint)
+        to_endpoint = _get_or_create_email_endpoint(to_address)
+        cc_endpoint_objects = [_get_or_create_email_endpoint(address) for address in cc_addresses]
+        bcc_endpoint_objects = [_get_or_create_email_endpoint(address) for address in bcc_addresses]
 
         conversation = _get_or_create_conversation(
             CommsChannel.EMAIL,

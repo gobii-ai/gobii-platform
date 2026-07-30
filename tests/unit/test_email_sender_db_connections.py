@@ -212,6 +212,33 @@ class EmailSenderDbConnectionTests(TransactionTestCase):
         self.assertIn(self.from_ep.address, participant_addresses)
         self.assertIn(params["to_address"], participant_addresses)
 
+    def test_execute_send_email_rejects_non_email_recipient_before_delivery(self):
+        invalid_cc = "16857729-f540-4a9e-ad4d-8d84de86d58d"
+        CommsAllowlistEntry.objects.create(
+            agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address=invalid_cc,
+            is_active=True,
+        )
+
+        with patch("api.agent.tools.email_sender.deliver_agent_email") as deliver:
+            result = execute_send_email(
+                self.agent,
+                {
+                    "to_address": self.user.email,
+                    "cc_addresses": [invalid_cc],
+                    "subject": "Launch update",
+                    "mobile_first_html": "<p>The migration is complete.</p>",
+                },
+            )
+
+        self.assertEqual(result.get("status"), "error")
+        self.assertIn("valid email address", result.get("message", ""))
+        deliver.assert_not_called()
+        self.assertFalse(
+            PersistentAgentMessage.objects.filter(owner_agent=self.agent).exists()
+        )
+
     def test_execute_send_email_persists_bcc_recipients(self):
         bcc_address = "audit@example.com"
         CommsAllowlistEntry.objects.create(

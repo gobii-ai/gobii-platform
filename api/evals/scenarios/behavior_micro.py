@@ -1238,7 +1238,9 @@ class GuidedFirstAssignmentAsksUsefulQuestionsScenario(BehaviorMicroScenario):
                 "useful, frame its evidence before the cards. They must not claim the deliverable has started, ask the "
                 "decisions in prose, duplicate the cards, repeat each other, or promise results. "
                 + (
-                    "The backup email must clearly carry the same decisions and choices, not a kickoff or different questions."
+                    "The backup email must carry the same decisions and choices, not a kickoff or different questions. "
+                    "It must also group each question with clearly separated choices using restrained email-safe "
+                    "hierarchy; fail a plain wall of text or run-together question and option boundaries."
                     if self.requires_fallback_copy
                     else "No backup message is needed when no separate fallback channel is configured."
                 )
