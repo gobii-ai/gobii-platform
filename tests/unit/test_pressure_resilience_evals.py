@@ -40,3 +40,13 @@ class PressureResilienceEvalRegistrationTests(SimpleTestCase):
                 "verify_advisory_deferred",
             ],
         )
+        attribution = ScenarioRegistry.get(PRESSURE_RESILIENCE_SCENARIO_SLUGS[2])
+        self.assertIn("compaction", attribution.tags)
+        self.assertIn("source_attribution", attribution.tags)
+        self.assertEqual(
+            [task.name for task in attribution.tasks],
+            [
+                "inject_compacted_history",
+                "verify_source_attribution",
+            ],
+        )

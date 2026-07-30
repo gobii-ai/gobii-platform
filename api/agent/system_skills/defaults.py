@@ -417,7 +417,9 @@ CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL = SystemSkillDefinition(
         "if a batch times out, patch it for smaller resumable batches instead of falling back to manual single-action loops.\n"
         "Write durable data directly to the shared SQLite DB. Keep queries inside the `with ctx.sqlite() as db:` "
         "block because after the block exits the DB is closed. Use cursor.rowcount/`SELECT changes()`; call "
-        "`fetchone()`/`fetchall()` on the cursor returned by `db.execute()`, not on `db`; set `db.row_factory = sqlite3.Row` before SELECT/fetchall, because later changes do not convert tuples and "
+        "`fetchone()`/`fetchall()` on the cursor returned by `db.execute()`, not on `db`. Canonical SQLite read: "
+        '`row = db.execute("SELECT value FROM items WHERE id = ?", (item_id,)).fetchone()`. '
+        "Set `db.row_factory = sqlite3.Row` before SELECT/fetchall, because later changes do not convert tuples and "
         "rows are not `row.get(...)`. Treat `ctx.sqlite_db_path` as advanced. Do not ATTACH sandbox file paths in `sqlite_batch`.\n"
         "Use `ctx.call_tool(name, params)` to call enabled agent tools, MCP tools, builtins, or other `custom_*` "
         "tools from inside Python. For tool-to-tool calls, do not manage proxy or bridge transport yourself; "

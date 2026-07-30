@@ -35,6 +35,7 @@ PRESSURE_RESILIENCE_SUITE_SLUG = "pressure_resilience"
 PRESSURE_RESILIENCE_SCENARIO_SLUGS = (
     "pressure_resilience_competing_channels",
     "pressure_resilience_advisory_after_delivery",
+    "pressure_resilience_compacted_source_attribution",
 )
 
 
@@ -342,6 +343,143 @@ class CompetingChannelsPressureScenario(EvalScenario, ScenarioExecutionTools):
                 if workload_emotion_ok
                 else f"The workload produced strained emotion {agent.emotion!r}."
             ),
+        )
+
+
+@register_scenario
+class CompactedSourceAttributionScenario(EvalScenario, ScenarioExecutionTools):
+    slug = PRESSURE_RESILIENCE_SCENARIO_SLUGS[2]
+    version = "1.0"
+    description = "Named speakers and source channels must remain trustworthy after a noisy conversation compacts."
+    tier = "core"
+    category = "agent_behavior"
+    expected_runtime = "medium"
+    cost_class = "medium"
+    owner = "agent-platform"
+    area = "agent_behavior"
+    tags = ("agent_behavior", "multi_channel", "compaction", "source_attribution", "llm_judge", "real_harness")
+    tasks = [
+        ScenarioTask(name="inject_compacted_history", assertion_type="agent_processing"),
+        ScenarioTask(name="verify_source_attribution", assertion_type="llm_judge"),
+    ]
+
+    @staticmethod
+    def _seed_discord_history(agent: PersistentAgent) -> None:
+        endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.DISCORD,
+            address=f"discord://eval/operations/{agent.id}",
+        )
+        conversation = _get_or_create_conversation(
+            CommsChannel.DISCORD,
+            f"discord://eval/operations/{agent.id}",
+            owner_agent=agent,
+        )
+        _ensure_participant(
+            conversation,
+            endpoint,
+            PersistentAgentConversationParticipant.ParticipantRole.EXTERNAL,
+        )
+        messages = [
+            (
+                "Nadia in #operations",
+                "The launch blocker is invoice reconciliation, not onboarding traffic.",
+            ),
+            (
+                "Marco in #operations",
+                "I own the onboarding dashboard check; I did not diagnose the launch blocker.",
+            ),
+        ]
+        messages.extend(
+            (
+                f"Teammate {index} in #operations",
+                f"Routine queue update {index}: item OPS-{index:02d} remains with its current owner.",
+            )
+            for index in range(1, 20)
+        )
+        for source_label, body in messages:
+            PersistentAgentMessage.objects.create(
+                owner_agent=agent,
+                is_outbound=False,
+                from_endpoint=endpoint,
+                conversation=conversation,
+                body=body,
+                raw_payload={
+                    "source_kind": "discord",
+                    "source_label": source_label,
+                },
+            )
+
+    def run(self, run_id: str, agent_id: str) -> None:
+        agent = PersistentAgent.objects.get(id=agent_id)
+        agent.name = f"Operations Historian {str(agent.id)[:8]}"
+        agent.charter = (
+            "Answer the owner's operational questions accurately. Preserve who said or observed each fact and "
+            "its source channel; do not transfer a statement to another person."
+        )
+        agent.planning_state = PersistentAgent.PlanningState.SKIPPED
+        agent.save(update_fields=["name", "charter", "planning_state", "updated_at"])
+        mark_tool_enabled_without_discovery(agent, "send_chat_message")
+        self._seed_discord_history(agent)
+
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.RUNNING,
+            task_name="inject_compacted_history",
+        )
+        with self.wait_for_agent_idle(agent_id, timeout=180):
+            inbound = self.inject_message(
+                agent_id,
+                (
+                    "Quick source check before the launch call: who actually said the blocker was invoice "
+                    "reconciliation rather than onboarding traffic? Give me the person and channel, and do not "
+                    "attribute it to me or to someone who only reported a different workstream."
+                ),
+                trigger_processing=True,
+                eval_run_id=run_id,
+                eval_stop_policy={
+                    "stop_on_tool_names_after_execution": ["send_chat_message"],
+                    "stop_on_unexpected_relevant_tool": True,
+                    "allowed_tool_names": ["send_chat_message", "sqlite_batch"],
+                    "ignored_tool_names": ["sqlite_batch"],
+                    "max_relevant_tool_calls": 2,
+                },
+            )
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED,
+            task_name="inject_compacted_history",
+            observed_summary="A named multi-speaker Discord history crossed the real compaction threshold.",
+            artifacts={"message": inbound},
+        )
+
+        outbound = (
+            PersistentAgentMessage.objects.filter(
+                owner_agent=agent,
+                is_outbound=True,
+                timestamp__gt=inbound.timestamp,
+            )
+            .order_by("timestamp", "seq")
+            .first()
+        )
+        body = outbound.body if outbound else ""
+        choice, reasoning = self.llm_judge(
+            question=(
+                "Does the reply correctly attribute the invoice-reconciliation blocker statement to Nadia in the "
+                "#operations Discord channel, without transferring it to the owner, Marco, or another teammate?"
+            ),
+            context=f"Owner question:\n{inbound.body}\n\nAgent reply:\n{body}",
+            options=["Pass", "Fail"],
+        )
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED if outbound and choice == "Pass" else EvalRunTask.Status.FAILED,
+            task_name="verify_source_attribution",
+            expected_summary="The compacted source fact should stay attached to Nadia and #operations.",
+            observed_summary=f"{choice}: {reasoning}",
+            artifacts={"message": outbound} if outbound else {},
         )
 
 
