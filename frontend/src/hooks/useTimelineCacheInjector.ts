@@ -7,7 +7,7 @@ import type { AgentRosterEntry } from '../types/agentRoster'
 import { compareTimelineCursors } from '../util/timelineCursor'
 import { nextClientStateOrder } from '../util/clientStateOrder'
 import { mergeTimelineEvents } from '../stores/agentChatTimeline'
-import { timelineQueryKey, timelineResponseToPage, TIMELINE_PAGE_SIZE, type TimelinePage } from './useAgentTimeline'
+import { timelineQueryKey, timelineResponseToPage, TIMELINE_INITIAL_PAGE_SIZE, TIMELINE_PAGE_SIZE, type TimelinePage } from './useAgentTimeline'
 
 export const DEFAULT_CONTIGUOUS_BACKFILL_MAX_PAGES = 20
 
@@ -663,7 +663,7 @@ async function performTimelineLatestRefresh(
     const initialRequestStartedOrder = nextClientStateOrder()
     const response = await fetchAgentTimeline(agentId, {
       direction: 'initial',
-      limit: TIMELINE_PAGE_SIZE,
+      limit: TIMELINE_INITIAL_PAGE_SIZE,
       developerMode,
       staffContext,
     })

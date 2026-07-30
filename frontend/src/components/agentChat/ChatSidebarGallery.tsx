@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import { Mail, MessageSquare, Plus, Settings, Star } from 'lucide-react'
 
 import type { AgentRosterEntry } from '../../types/agentRoster'
@@ -37,7 +38,7 @@ type GalleryCardProps = {
   onToggleAgentFavorite?: (agentId: string) => void
 }
 
-function GalleryCard({
+const GalleryCard = memo(function GalleryCard({
   agent,
   variant,
   isActive,
@@ -173,7 +174,7 @@ function GalleryCard({
       </div>
     </article>
   )
-}
+})
 
 export function ChatSidebarGallery({
   variant,

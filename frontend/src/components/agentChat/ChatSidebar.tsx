@@ -1,4 +1,4 @@
-import { memo, useState, useCallback, useEffect, useMemo, useRef, type Dispatch, type ReactNode, type SetStateAction } from 'react'
+import { memo, useState, useCallback, useDeferredValue, useEffect, useMemo, useRef, type Dispatch, type ReactNode, type SetStateAction } from 'react'
 import { ArrowLeftRight, Bell, BellOff, Check, LayoutGrid, List, PanelLeftClose, PanelRightClose, Plus, Search, Settings, X } from 'lucide-react'
 
 import type { ConsoleContext } from '../../api/context'
@@ -143,8 +143,9 @@ export const ChatSidebar = memo(function ChatSidebar({
   const showSettingsView = showEmbeddedSettings && Boolean(embeddedSettingsPanel)
   const showGalleryShellSwitcher = Boolean(onGalleryShellPageChange)
   const showCustomGalleryShellPanel = galleryShellPage !== 'agents' && Boolean(galleryShellPanel)
-  const collapsed = desktopMode === 'collapsed' && !showSettingsView
-  const galleryMode = desktopMode === 'gallery' || showSettingsView
+  const renderedDesktopMode = useDeferredValue(desktopMode)
+  const collapsed = renderedDesktopMode === 'collapsed' && !showSettingsView
+  const galleryMode = renderedDesktopMode === 'gallery' || showSettingsView
   const favoriteAgentIdSet = useMemo(() => new Set(favoriteAgentIds), [favoriteAgentIds])
   const mutedAgentIdSet = useMemo(() => new Set(mutedAgentIds), [mutedAgentIds])
   const hasFavoritesInRoster = useMemo(

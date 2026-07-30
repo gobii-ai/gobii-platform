@@ -444,7 +444,6 @@ def build_agent_addons_payload(
     subscription = get_active_subscription(
         owner,
         preferred_plan_id=plan_payload.get("id") if plan_payload else None,
-        sync_with_stripe=not agent.organization_id,
     )
     trial_end = getattr(subscription, "trial_end", None) if subscription is not None else None
     is_trialing = bool(subscription is not None and getattr(subscription, "status", "") == "trialing")

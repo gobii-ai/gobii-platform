@@ -1013,7 +1013,6 @@ export function AgentChatPage({
     selectedPipedreamAppSlugs?: string[]
     template?: CreateAgentTemplateOptions | null
   } | null>(null)
-  const googleSheetsRosterRefreshAgentsRef = useRef<Set<string>>(new Set())
   const previewEnteredAgentIdsRef = useRef<Set<string>>(new Set())
   const [intelligenceGate, setIntelligenceGate] = useState<IntelligenceGateState | null>(null)
   const pendingAgentMetaRef = useRef<AgentSwitchMeta | null>(null)
@@ -1738,22 +1737,20 @@ export function AgentChatPage({
     if (!activeAgentId || (!liveGoogleSheetsDriveTabEnabled && !liveApolloNativeTabEnabled && !liveHubSpotNativeTabEnabled && !liveDiscordNativeTabEnabled && !liveMetaAdsTabEnabled)) {
       return
     }
-    const refreshKey = [
-      activeAgentId,
-      liveGoogleSheetsDriveTabEnabled ? GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY : '',
-      liveApolloNativeTabEnabled ? APOLLO_NATIVE_SYSTEM_SKILL_KEY : '',
-      liveHubSpotNativeTabEnabled ? HUBSPOT_NATIVE_SYSTEM_SKILL_KEY : '',
-      liveDiscordNativeTabEnabled ? DISCORD_NATIVE_SYSTEM_SKILL_KEY : '',
-      liveMetaAdsTabEnabled ? META_ADS_SYSTEM_SKILL_KEY : '',
-    ].join(':')
-    if (googleSheetsRosterRefreshAgentsRef.current.has(refreshKey)) {
-      return
-    }
-    googleSheetsRosterRefreshAgentsRef.current.add(refreshKey)
-    void queryClient.invalidateQueries({
-      queryKey: ['agent-profile', rosterContextKey, activeAgentId],
-      exact: true,
-    })
+    const enabledSystemSkills = [
+      ...(liveGoogleSheetsDriveTabEnabled ? [GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY] : []),
+      ...(liveApolloNativeTabEnabled ? [APOLLO_NATIVE_SYSTEM_SKILL_KEY] : []),
+      ...(liveHubSpotNativeTabEnabled ? [HUBSPOT_NATIVE_SYSTEM_SKILL_KEY] : []),
+      ...(liveDiscordNativeTabEnabled ? [DISCORD_NATIVE_SYSTEM_SKILL_KEY] : []),
+      ...(liveMetaAdsTabEnabled ? [META_ADS_SYSTEM_SKILL_KEY] : []),
+    ]
+    queryClient.setQueryData<AgentProfileEntry>(
+      ['agent-profile', rosterContextKey, activeAgentId],
+      (current) => current && ({
+        ...current,
+        enabledSystemSkills: [...new Set([...current.enabledSystemSkills, ...enabledSystemSkills])],
+      }),
+    )
   }, [activeAgentId, liveApolloNativeTabEnabled, liveDiscordNativeTabEnabled, liveGoogleSheetsDriveTabEnabled, liveHubSpotNativeTabEnabled, liveMetaAdsTabEnabled, queryClient, rosterContextKey])
   const visibleRosterAgentIds = useMemo(
     () => rosterAgents.map((agent) => agent.id),
@@ -2123,13 +2120,6 @@ export function AgentChatPage({
     && agentContextReady
     && !rosterContextMismatch
   )
-  useEffect(() => {
-    if (!allowAgentRefresh || !activeAgentId || isNewAgent || shellSubview !== 'chat'
-      || (typeof navigator !== 'undefined' && navigator.onLine === false)) {
-      return
-    }
-    void runContiguousTimelineBackfill(activeAgentId)
-  }, [activeAgentId, allowAgentRefresh, isNewAgent, runContiguousTimelineBackfill, shellSubview])
   useEffect(() => {
     allowAgentRefreshRef.current = allowAgentRefresh
   }, [allowAgentRefresh])

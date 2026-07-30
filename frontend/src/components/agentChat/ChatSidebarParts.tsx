@@ -1,4 +1,4 @@
-import { forwardRef, type KeyboardEvent, type MouseEvent } from 'react'
+import { forwardRef, memo, type KeyboardEvent, type MouseEvent } from 'react'
 import { Check, Search, Star, X } from 'lucide-react'
 
 import type { AgentRosterEntry, AgentRosterSortMode } from '../../types/agentRoster'
@@ -187,7 +187,7 @@ export function AgentWorkingIndicator({ label = true }: { label?: boolean }) {
   )
 }
 
-export function AgentListItem({
+export const AgentListItem = memo(function AgentListItem({
   agent,
   isActive,
   isSwitching,
@@ -356,4 +356,4 @@ export function AgentListItem({
       ) : null}
     </button>
   )
-}
+})

@@ -941,7 +941,8 @@ class AgentChatAPITests(TestCase):
 
     @tag("batch_agent_chat")
     @patch("util.subscription_helper.reconcile_user_plan_from_stripe")
-    def test_timeline_endpoint_returns_expected_events(self, mock_reconcile_plan):
+    @patch("console.agent_addons.get_active_subscription", return_value=None)
+    def test_timeline_endpoint_returns_expected_events(self, mock_active_subscription, mock_reconcile_plan):
         response = self.client.get(f"/console/api/agents/{self.agent.id}/timeline/")
         self.assertEqual(response.status_code, 200)
         payload = response.json()
@@ -971,6 +972,7 @@ class AgentChatAPITests(TestCase):
         self.assertIn("accountPause", critical_status)
         self.assertIn("dailyCredits", critical_status)
         self.assertIn("contactCapStatus", critical_status)
+        self.assertNotIn("sync_with_stripe", mock_active_subscription.call_args.kwargs)
         mock_reconcile_plan.assert_not_called()
 
     @tag("batch_agent_chat")

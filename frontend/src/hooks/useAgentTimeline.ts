@@ -7,6 +7,7 @@ import type { StaffViewContext } from '../api/context'
 import { nextClientStateOrder } from '../util/clientStateOrder'
 
 export const TIMELINE_PAGE_SIZE = 50
+export const TIMELINE_INITIAL_PAGE_SIZE = 30
 export const TIMELINE_STALE_TIME_MS = 60_000
 
 export type TimelinePage = {
@@ -67,7 +68,7 @@ export function useAgentTimeline(agentId: string | null, options?: { enabled?: b
       const requestStartedOrder = nextClientStateOrder()
 
       if (direction === 'initial') {
-        const response = await fetchAgentTimeline(agentId, { direction: 'initial', limit: TIMELINE_PAGE_SIZE, signal, developerMode, staffContext: options?.staffContext, anchorMessageId: options?.anchorMessageId })
+        const response = await fetchAgentTimeline(agentId, { direction: 'initial', limit: TIMELINE_INITIAL_PAGE_SIZE, signal, developerMode, staffContext: options?.staffContext, anchorMessageId: options?.anchorMessageId })
         return timelineResponseToPage(response, requestStartedOrder)
       }
 
