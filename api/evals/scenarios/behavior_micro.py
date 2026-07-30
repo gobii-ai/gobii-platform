@@ -84,6 +84,7 @@ CHARTER_REFINES_EXISTING_GUIDANCE_FROM_NATURAL_FEEDBACK = (
     "charter_refines_existing_guidance_from_natural_feedback"
 )
 CHARTER_PATCHES_AND_COMPLETES_IMMEDIATE_TASK = "charter_patches_and_completes_immediate_task"
+CHARTER_CORRECTION_GOVERNS_NEXT_PEER_ASSIGNMENT = "charter_correction_governs_next_peer_assignment"
 CHARTER_INTERPRETS_AMBIGUOUS_OPERATING_FEEDBACK = "charter_interprets_ambiguous_operating_feedback"
 CHARTER_INTERPRETS_ROLE_BOUNDARY_CORRECTION = "charter_interprets_role_boundary_correction"
 CHARTER_INFERS_IMPLICIT_OWNERSHIP_CORRECTION = "charter_infers_implicit_ownership_correction"
@@ -413,6 +414,7 @@ CHARTER_MEMORY_MICRO_SCENARIO_SLUGS = [
     CHARTER_RECOVERS_FROM_NONRETRYABLE_PATCH_FAILURE,
     CHARTER_REFINES_EXISTING_GUIDANCE_FROM_NATURAL_FEEDBACK,
     CHARTER_PATCHES_AND_COMPLETES_IMMEDIATE_TASK,
+    CHARTER_CORRECTION_GOVERNS_NEXT_PEER_ASSIGNMENT,
     CHARTER_INTERPRETS_AMBIGUOUS_OPERATING_FEEDBACK,
     CHARTER_INTERPRETS_ROLE_BOUNDARY_CORRECTION,
     CHARTER_INFERS_IMPLICIT_OWNERSHIP_CORRECTION,
@@ -3463,7 +3465,6 @@ def _uses_one_focused_charter_patch(mutation_calls, existing_charter):
         and isinstance(new, str)
         and old != new
         and (not old or old in existing_charter)
-        and bool(new.strip())
         and not _contains_existing_charter(new, existing_charter)
     )
 
@@ -4012,6 +4013,110 @@ class CharterPatchesAndCompletesImmediateTaskScenario(CharterMemoryScenario):
             f"actions={[call.tool_name for call in calls]}, successful_sqlite={successful}, "
             f"bounded={bounded}, final_after_work={final_after_work}, "
             f"concise_reply={concise_reply}, reply={reply!r}."
+        )
+
+
+@register_scenario
+class CharterCorrectionGovernsNextPeerAssignmentScenario(CharterMemoryScenario):
+    slug = CHARTER_CORRECTION_GOVERNS_NEXT_PEER_ASSIGNMENT
+    description = "A durable correction should govern the next peer assignment in the same turn."
+    tasks = [
+        ScenarioTask(name="inject_prompt", assertion_type="manual"),
+        ScenarioTask(name="verify_correction_and_next_assignment", assertion_type="llm_judge"),
+    ]
+    existing_charter = (
+        "Manage campaign assignments for the outreach team. Include the recipient, evidence, campaign cell, and "
+        "review workflow in each packet. Repeat identity and disclosure policy in every assignment packet. "
+        "Keep one owner per recipient."
+    )
+    prior_outbound_body = (
+        "Assignment: Jamie Chen at Northstar. Use the supplied hiring evidence and Cell B. "
+        "AI disclosure is required. Submit the exact draft for review."
+    )
+    prompt = (
+        "Stop repeating identity or disclosure policy in assignment packets. Each teammate's base instructions "
+        "already govern that. Keep future packets focused on the recipient, evidence, campaign cell, and required "
+        "workflow. Send the next assignment to your linked teammate now: Avery Morgan at Harbor Systems, "
+        "avery@harbor.example.test; evidence is three new operations-manager openings; Cell C; draft then send "
+        "for review."
+    )
+    verification_task_name = "verify_correction_and_next_assignment"
+    success_summary = "Agent saved the packet boundary and applied it to the next peer assignment immediately."
+    failure_summary = "Expected one focused charter patch and one corrected peer assignment in the same turn"
+    semantic_judge_question = (
+        "Does the updated charter preserve campaign management, unique recipient ownership, and useful packet fields "
+        "while removing the requirement to repeat identity or disclosure policy because teammate base instructions "
+        "govern it?"
+    )
+
+    def _seed_charter_agent(self, agent_id):
+        super()._seed_charter_agent(agent_id)
+        from api.evals.scenarios.responsibility_boundaries import ResponsibilityBoundaryScenario
+
+        agent = PersistentAgent.objects.get(id=agent_id)
+        ResponsibilityBoundaryScenario._create_peer_link(agent, agent_id)
+
+    def _eval_stop_policy(self):
+        return {
+            "ignore_sqlite_agent_config_mutations": False,
+            "allowed_tool_names": [
+                "sqlite_batch",
+                "send_agent_message",
+                "send_chat_message",
+                "sleep_until_next_trigger",
+            ],
+            "stop_on_unexpected_relevant_tool": True,
+            "stop_when_all_seen": [
+                {"tool_name": "sqlite_batch", "agent_config_field": "charter", "after_execution": True},
+                {"tool_name": "send_agent_message", "after_execution": True},
+            ],
+            "ignored_tool_names": ["sleep_until_next_trigger"],
+            "max_relevant_tool_calls": 5,
+        }
+
+    def _charter_check(self, agent, mutation_calls):
+        focused_patch = _uses_one_focused_charter_patch(mutation_calls, self.existing_charter)
+        passed = focused_patch and agent.charter != self.existing_charter
+        return passed, f"mutation_count={len(mutation_calls)}, focused={focused_patch}, charter={agent.charter!r}."
+
+    def _additional_charter_check(self, agent, run_id, inbound):
+        calls = [
+            call
+            for call in get_tool_calls_for_run(run_id, after=inbound.timestamp)
+            if call.tool_name != "sleep_until_next_trigger"
+        ]
+        sqlite_calls = [call for call in calls if call.tool_name == "sqlite_batch"]
+        peer_calls = [call for call in calls if call.tool_name == "send_agent_message"]
+        message = str(resolved_tool_param(peer_calls[0], "message") or "") if len(peer_calls) == 1 else ""
+        structured_payload = (
+            resolved_tool_param(peer_calls[0], "structured_payload") or {}
+            if len(peer_calls) == 1
+            else {}
+        )
+        patch_before_assignment = (
+            len(sqlite_calls) == 1
+            and len(peer_calls) == 1
+            and calls.index(sqlite_calls[0]) < calls.index(peer_calls[0])
+            and _successful_without_repair(sqlite_calls[0])
+            and _successful_without_repair(peer_calls[0])
+        )
+        choice, reasoning = self.llm_judge(
+            question=(
+                "Is this a complete assignment packet for Avery Morgan at Harbor Systems that includes the supplied "
+                "operations-manager hiring evidence, Cell C, and draft-then-review workflow, while omitting any "
+                "identity, AI, bot, human-status, or disclosure instructions?"
+            ),
+            context=(
+                f"Human correction and assignment:\n{self.prompt}\n\n"
+                f"Peer packet prose:\n{message or '(none)'}\n\n"
+                f"Peer packet structured payload:\n{json.dumps(structured_payload, sort_keys=True)}"
+            ),
+            options=["Corrected and complete", "Incomplete or repeats forbidden policy"],
+        )
+        passed = patch_before_assignment and choice == "Corrected and complete"
+        return passed, (
+            f"actions={[call.tool_name for call in calls]}, patch_before_assignment={patch_before_assignment}, "
+            f"peer_judge={choice}: {reasoning}"
         )
 
 
