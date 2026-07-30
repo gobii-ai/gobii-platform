@@ -28,14 +28,6 @@ export type PendingDiscordAgentAction = {
   kind: Exclude<PendingDiscordAction, null>
 } | null
 
-const DISCORD_NATIVE_SYSTEM_SKILL_KEY = 'discord_native'
-
-export function agentHasDiscordNative(
-  agent: AgentRosterEntry & { enabledSystemSkills?: string[] },
-): boolean {
-  return Boolean(agent.enabledSystemSkills?.includes(DISCORD_NATIVE_SYSTEM_SKILL_KEY))
-}
-
 export function useDiscordOAuthCompleteRefetch({
   agentId,
   onError,
@@ -270,6 +262,7 @@ export function DiscordConfigurationScreen({
 
 export function DiscordAgentConnectionsScreen({
   agents,
+  enabledAgentIds,
   isLoading,
   isFetching,
   isError,
@@ -282,6 +275,7 @@ export function DiscordAgentConnectionsScreen({
   onConfigure,
 }: {
   agents: AgentRosterEntry[]
+  enabledAgentIds: string[]
   isLoading: boolean
   isFetching: boolean
   isError: boolean
@@ -294,9 +288,14 @@ export function DiscordAgentConnectionsScreen({
   onConfigure: (agent: AgentRosterEntry) => void
 }) {
   const surface = useSettingsSurfaceVariant()
+  const enabledAgentIdSet = useMemo(() => new Set(enabledAgentIds), [enabledAgentIds])
   const sortedAgents = useMemo(() => (
-    [...agents].sort((a, b) => Number(!agentHasDiscordNative(a)) - Number(!agentHasDiscordNative(b)) || a.name.localeCompare(b.name))
-  ), [agents])
+    [...agents].sort((a, b) => (
+      Number(!enabledAgentIdSet.has(a.id))
+      - Number(!enabledAgentIdSet.has(b.id))
+      || a.name.localeCompare(b.name)
+    ))
+  ), [agents, enabledAgentIdSet])
 
   return (
     <div className="space-y-4 p-1">
@@ -324,6 +323,7 @@ export function DiscordAgentConnectionsScreen({
             <DiscordAgentConnectionRow
               key={agent.id}
               agent={agent}
+              enabled={enabledAgentIdSet.has(agent.id)}
               pendingDiscordAgentAction={pendingDiscordAgentAction}
               disabled={isBusy}
               onConnect={() => onConnect(agent)}
@@ -392,19 +392,20 @@ export function BackButton({
 
 function DiscordAgentConnectionRow({
   agent,
+  enabled,
   pendingDiscordAgentAction,
   disabled,
   onConnect,
   onConfigure,
 }: {
   agent: AgentRosterEntry
+  enabled: boolean
   pendingDiscordAgentAction: PendingDiscordAgentAction
   disabled: boolean
   onConnect: () => void
   onConfigure: () => void
 }) {
   const surface = useSettingsSurfaceVariant()
-  const enabled = agentHasDiscordNative(agent)
   const pendingKind = pendingDiscordAgentAction?.agentId === agent.id ? pendingDiscordAgentAction.kind : null
   const fallbackAvatarClassName = surface === 'embedded'
     ? 'border-slate-200/20 bg-slate-900 text-slate-200'

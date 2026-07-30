@@ -2525,8 +2525,12 @@ export function AgentChatPage({
   const personalSignupPreviewCreateAvailable = Boolean(
     rosterQuery.data?.context.personalSignupPreviewCreateAvailable,
   )
-  const sendMessageDisabledReason = !isNewAgent && !activeCanSendMessages
-    ? 'This staff view is read-only. You can send a system message in Developer Mode.'
+  const sendMessageDisabledReason = !isNewAgent && activeProfileQuery.isPending
+    ? 'Loading agent permissions…'
+    : !isNewAgent && !activeCanSendMessages
+      ? staffContext
+        ? 'This staff view is read-only. You can send a system message in Developer Mode.'
+        : 'You do not have permission to send messages to this agent.'
     : !isNewAgent && !activeAgentIsActive
       ? 'This agent is paused and won’t respond or do work until it’s reactivated.'
     : !isNewAgent && selectedAgentAccountPause?.paused

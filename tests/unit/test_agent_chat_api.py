@@ -1222,6 +1222,26 @@ class AgentChatAPITests(TestCase):
         }.issubset(payload))
 
     @tag("batch_agent_chat")
+    def test_agent_profile_endpoint_resolves_staff_context(self):
+        staff_user = get_user_model().objects.create_superuser(
+            username="profile-staff",
+            email="profile-staff@example.com",
+            password="password123",
+        )
+        self.client.force_login(staff_user)
+
+        response = self.client.get(
+            reverse("console_agent_profile", kwargs={"agent_id": self.agent.id}),
+            HTTP_X_GOBII_CONTEXT_TYPE="personal",
+            HTTP_X_GOBII_CONTEXT_ID=str(self.user.id),
+            HTTP_X_GOBII_STAFF_CONTEXT_TYPE="personal",
+            HTTP_X_GOBII_STAFF_CONTEXT_ID=str(self.user.id),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()["id"], str(self.agent.id))
+
+    @tag("batch_agent_chat")
     @override_settings(GOBII_RELEASE_ENV="staging")
     def test_timeline_includes_schedule_next_run_from_loaded_agent(self):
         self.agent.schedule = "@hourly"

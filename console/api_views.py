@@ -3322,11 +3322,16 @@ class AgentProfileAPIView(LoginRequiredMixin, View):
     http_method_names = ["get"]
 
     def get(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
-        agent = resolve_agent_for_request(
-            request,
-            agent_id,
-            allow_shared=True,
-            allow_delinquent_personal_chat=True,
+        staff_override = get_staff_context_override(request)
+        agent = (
+            resolve_staff_agent(request.user, agent_id, staff_override)
+            if staff_override
+            else resolve_agent_for_request(
+                request,
+                agent_id,
+                allow_shared=True,
+                allow_delinquent_personal_chat=True,
+            )
         )
         return JsonResponse(
             _serialize_agent_payload(

@@ -52,6 +52,7 @@ const GalleryCard = memo(function GalleryCard({
   const showSmsAction = Boolean(agent.sms) && !isSignupPreviewAgent
   const showEmailAction = Boolean(agent.email) && !isSignupPreviewAgent
   const showConfigureAction = Boolean(agent.canManageAgent) && !isSignupPreviewAgent
+  const configureAgent = agent.isCollaborator ? onSelectAgent : onConfigureAgent
   const miniDescription = (agent.miniDescription || '').trim()
   const pendingRequestCount = Math.max(0, agent.pendingActionRequestCount ?? 0)
   const showChatAction = Boolean(onSelectAgent)
@@ -128,18 +129,21 @@ const GalleryCard = memo(function GalleryCard({
 
       <div className="agent-gallery-card__footer">
         {showConfigureAction ? (
-          onConfigureAgent ? (
+          configureAgent ? (
             <button
               type="button"
               className="agent-gallery-card__primary-action"
-              onClick={() => onConfigureAgent(agent)}
+              onClick={() => configureAgent(agent)}
               disabled={isSwitching}
             >
               <Settings className="h-3.5 w-3.5" />
               <span>Configure</span>
             </button>
           ) : (
-            <a className="agent-gallery-card__primary-action" href={`/app/agents/${agent.id}/settings`}>
+            <a
+              className="agent-gallery-card__primary-action"
+              href={`/app/agents/${agent.id}${agent.isCollaborator ? '' : '/settings'}`}
+            >
               <Settings className="h-3.5 w-3.5" />
               <span>Configure</span>
             </a>

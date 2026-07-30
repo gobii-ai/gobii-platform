@@ -110,6 +110,11 @@ export type AgentDiscordChannelsResponse = {
   channels: DiscordChannel[]
 }
 
+type DiscordContextApp = {
+  connected: boolean
+  enabledAgentIds: string[]
+}
+
 export type DiscordSubscriptionSelection = {
   guildId: string
   channelId: string
@@ -179,9 +184,12 @@ export function discordContextAppQueryKey() {
   return ['discord-context-app'] as const
 }
 
-export async function fetchDiscordContextConnected(): Promise<boolean> {
-  const payload = await jsonFetch<{ connected: boolean }>('/console/api/discord/app/')
-  return Boolean(payload.connected)
+export async function fetchDiscordContextApp(): Promise<DiscordContextApp> {
+  const payload = await jsonFetch<{ connected: boolean; enabled_agent_ids?: string[] }>('/console/api/discord/app/')
+  return {
+    connected: Boolean(payload.connected),
+    enabledAgentIds: Array.isArray(payload.enabled_agent_ids) ? payload.enabled_agent_ids : [],
+  }
 }
 
 export async function disconnectDiscordNative(): Promise<{ revoked: boolean }> {

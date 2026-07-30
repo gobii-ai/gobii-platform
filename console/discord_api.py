@@ -228,11 +228,20 @@ class DiscordContextAppView(ApiLoginRequiredMixin, View):
         except PermissionDenied:
             return _discord_permission_denied_response("Not permitted to view Discord integrations.")
         guilds = list_claimed_guilds_for_owner(owner_user=owner_user, organization=owner_org)
+        skill_states = PersistentAgentSystemSkillState.objects.filter(
+            skill_key=DISCORD_NATIVE_SYSTEM_SKILL_KEY,
+            is_enabled=True,
+        )
+        if owner_org is not None:
+            skill_states = skill_states.filter(agent__organization=owner_org)
+        else:
+            skill_states = skill_states.filter(agent__user=owner_user, agent__organization__isnull=True)
         return JsonResponse(
             {
                 "connected": bool(guilds),
                 "guild_count": len(guilds),
                 "guilds": guilds,
+                "enabled_agent_ids": list(skill_states.values_list("agent_id", flat=True)),
             }
         )
 

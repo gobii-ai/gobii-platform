@@ -5,7 +5,7 @@ import {
   agentDiscordAppQueryKey,
   discordContextAppQueryKey,
   fetchAgentDiscordApp,
-  fetchDiscordContextConnected,
+  fetchDiscordContextApp,
 } from '../../api/discordNative'
 import { fetchAgentRoster } from '../../api/agents'
 import {
@@ -194,7 +194,7 @@ export function WorkspaceAppsManager({
   })
   const discordContextAppQuery = useQuery({
     queryKey: discordContextAppQueryKey(),
-    queryFn: fetchDiscordContextConnected,
+    queryFn: fetchDiscordContextApp,
     enabled: Boolean(nativeIntegrationsUrl) && activeApp === null,
   })
   useWindowFocusRefetch(agentRosterQuery.refetch, discordConnectionsOpen && activeDiscordAgentId === null)
@@ -216,7 +216,7 @@ export function WorkspaceAppsManager({
     () => new Set(settings.selectedApps.map((app) => app.slug)),
     [settings.selectedApps],
   )
-  const discordConnected = Boolean(discordContextAppQuery.data)
+  const discordConnected = Boolean(discordContextAppQuery.data?.connected)
 
   const rows = useMemo<WorkspaceAppRow[]>(() => {
     const visibleApps = debouncedSearchTerm ? (searchQuery.data ?? []) : settings.effectiveApps
@@ -450,6 +450,7 @@ export function WorkspaceAppsManager({
   ) : discordConnectionsOpen ? (
     <DiscordAgentConnectionsScreen
       agents={agentRosterQuery.data?.agents ?? []}
+      enabledAgentIds={discordContextAppQuery.data?.enabledAgentIds ?? []}
       isLoading={agentRosterQuery.isLoading}
       isFetching={agentRosterQuery.isFetching}
       isError={agentRosterQuery.isError}

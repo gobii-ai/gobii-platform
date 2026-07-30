@@ -1909,6 +1909,11 @@ class NativeDiscordBotTests(TestCase):
             owner_user=self.user,
             authorization_source=PersistentAgentDiscordGuild.AuthorizationSource.LEGACY_DISCOVERED,
         )
+        PersistentAgentSystemSkillState.objects.create(
+            agent=self.agent,
+            skill_key="discord_native",
+            is_enabled=True,
+        )
 
         response = self.client.get(reverse("console-discord-context-app"))
 
@@ -1920,6 +1925,7 @@ class NativeDiscordBotTests(TestCase):
             {guild["guild_id"] for guild in payload["guilds"]},
             {"100", "200"},
         )
+        self.assertEqual(payload["enabled_agent_ids"], [str(self.agent.id)])
 
     @tag("batch_agent_webhooks")
     @patch("api.services.discord_bot.requests.delete")
