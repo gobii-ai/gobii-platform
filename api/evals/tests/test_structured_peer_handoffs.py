@@ -9,6 +9,7 @@ from api.evals.scenarios.structured_peer_handoffs import (
     STRUCTURED_PEER_FILE_HANDOFF,
     STRUCTURED_PEER_HANDOFF_SCENARIO_SLUGS,
     STRUCTURED_PEER_HANDOFF_SUITE_SLUG,
+    STRUCTURED_PEER_SCOPED_HANDOFF,
 )
 from api.evals.suites import SuiteRegistry
 
@@ -35,7 +36,8 @@ class StructuredPeerHandoffEvalTests(SimpleTestCase):
 
         self.assertIn("Fielded records/lists use structured payloads", instruction)
         self.assertIn("questions use prose", instruction)
-        self.assertIn("message may add prose context but must not be its only carrier", tool_description)
+        self.assertIn("message may add context but cannot be its only carrier", tool_description)
+        self.assertIn("omit unrelated or owner-private source context", tool_description)
 
     def test_suite_registers_real_harness_scenarios(self):
         suite = SuiteRegistry.get(STRUCTURED_PEER_HANDOFF_SUITE_SLUG)
@@ -63,3 +65,29 @@ class StructuredPeerHandoffEvalTests(SimpleTestCase):
         self.assertIn("/exports/northstar-handoff.txt", case.prompt)
         self.assertNotIn("peer_agent_id", case.prompt)
         self.assertNotIn("$[", case.prompt)
+
+    def test_scoped_handoff_separates_operational_record_from_private_context(self):
+        case = next(
+            case for case in STRUCTURED_PEER_HANDOFF_CASES
+            if case.slug == STRUCTURED_PEER_SCOPED_HANDOFF
+        )
+
+        self.assertEqual(case.expected_record["assignment_id"], "AS-77")
+        self.assertEqual(case.forbidden_handoff_terms, ("bipolar", "compensation"))
+        self.assertNotIn("structured_payload", case.prompt)
+
+    def test_scoped_handoff_accepts_metadata_without_renaming_required_fields(self):
+        scenario = ScenarioRegistry.get(STRUCTURED_PEER_SCOPED_HANDOFF)
+
+        self.assertTrue(
+            scenario._contains_record_fields(
+                {"assignment_id": "AS-77", "account": "Northwind", "action": "assign"},
+                {"assignment_id": "AS-77", "account": "Northwind"},
+            )
+        )
+        self.assertFalse(
+            scenario._contains_record_fields(
+                {"assignment_id": "AS-77", "entity": "Northwind"},
+                {"assignment_id": "AS-77", "account": "Northwind"},
+            )
+        )
