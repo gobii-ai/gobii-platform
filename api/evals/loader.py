@@ -34,6 +34,10 @@ from api.evals.scenarios.scheduled_work_cycles import (
 )
 from api.evals.scenarios.hallucinated_links import HALLUCINATED_LINK_SCENARIO_SLUGS, HALLUCINATED_LINKS_SUITE_SLUG
 from api.evals.scenarios.lasting_feedback import LASTING_FEEDBACK_SCENARIO_SLUGS, LASTING_FEEDBACK_SUITE_SLUG
+from api.evals.scenarios.capability_routing import (
+    CAPABILITY_ROUTING_SCENARIO_SLUGS,
+    CAPABILITY_ROUTING_SUITE_SLUG,
+)
 from api.evals.scenarios.agent_emotions import AGENT_PROACTIVE_EMOTION_SCENARIO_SLUGS
 from api.evals.scenarios.pressure_resilience import (
     PRESSURE_RESILIENCE_SCENARIO_SLUGS,
@@ -91,6 +95,11 @@ register_builtin_suites(
             slug=LASTING_FEEDBACK_SUITE_SLUG,
             description="Lasting feedback remains durable without starving active work.",
             scenario_slugs=LASTING_FEEDBACK_SCENARIO_SLUGS,
+        ),
+        EvalSuite(
+            slug=CAPABILITY_ROUTING_SUITE_SLUG,
+            description="Durable capability-state routing avoids unnecessary connector and setup detours.",
+            scenario_slugs=CAPABILITY_ROUTING_SCENARIO_SLUGS,
         ),
         EvalSuite(
             slug="guided_planning_micro",

@@ -830,8 +830,8 @@ def _get_sqlite_guidance() -> str:
     """Return the compact contract for data retrieval, storage, and analysis."""
     return (
         "## SQLite Data\n\n"
-        "Named tables are the durable world model and exact logic. Keep entities, relations, evidence, coverage, and "
-        "provenance current; query truth instead of memory. Tool results do not update the model.\n"
+        "Named tables hold truth/logic; keep entities, relations, coverage, provenance current. Results do not "
+        "update them. Ready route: pass opaque auth refs unchanged only to requested operation; no preflight.\n"
         "CURRENT SOURCE SET: per shape use keyed DDL, one set-wise upsert, and the decision/evidence SELECT. "
         "Structured JSON derives item.value across `is_current_batch=1 AND tool_name='exact visible tool name'`; that "
         "pair is exact, so add no source_url/result_id predicate. Store t.source_url/t.result_id provenance. HTTP body "
@@ -850,7 +850,7 @@ def _get_sqlite_guidance() -> str:
         "supporting fields/URLs. Exclude superseded rows. Set `will_continue_work=true` for reads that may trigger "
         "another tool, including queues; otherwise false. Deliver those rows without rereading. Bind authored or messy "
         "values as :name in `bindings`; exact tool_name metadata may be a SQL literal.\n"
-        "For `INSERT ... SELECT ... ON CONFLICT`, put `WHERE 1=1` before `ON CONFLICT` to disambiguate SQLite. "
+        "Upserts: VALUES match columns/no WHERE; INSERT SELECT needs WHERE 1=1 before ON CONFLICT. "
         "`group_concat(DISTINCT x)` takes no separator; dedupe in a subquery when a custom separator is needed.\n"
         "UNKNOWN EXISTING SCHEMA: call 1 only targeted sqlite_master using a meaningful domain noun from the request "
         "(for example `%handoff%`), not a guessed table prefix; call 2 is PRAGMA table_info alone because its columns "
@@ -1626,7 +1626,7 @@ def _render_prompt_context_once(
     if schedule_str != "No schedule configured":
         important_group.section_text(
             "schedule_note",
-            "The schedule collection is durable. Change it only for an authorized cadence, reminder, or future trigger request; temporary task scope never changes it.",
+            "Timing is durable. Reject unsafe cadence before tools; otherwise change only an authorized cadence or trigger, never temporary task scope.",
             weight=1,
             non_shrinkable=True
         )
@@ -1847,11 +1847,14 @@ def _render_prompt_context_once(
         non_shrinkable=True,
     )
     schedules_note = (
-        "__agent_schedules is the durable timing control plane. Query it before changing, canceling, or listing existing timing, or adding a timer beside existing work. "
-        "Use one stable schedule_key per distinct job and keep its instruction specific. kind='recurring' uses schedule (five-field cron, including weekly work; @every only accepts s/m/h units) plus an IANA timezone; kind='once' uses an offset-bearing ISO run_at and preserves seconds. "
-        "For relative timers, derive run_at inside the write with SQLite UTC time; never calculate it mentally, "
-        "e.g. strftime('%Y-%m-%dT%H:%M:%SZ','now','+17 minutes'). next_run_at and last_fired_at are read-only. Reject over-limit or unsafe-frequency requests with one bounded alternative instead of attempting them. "
-        "Insert/update/delete only the intended rows; never replace unrelated schedules. The primary row mirrors the legacy UTC cadence."
+        "__agent_schedules only columns: schedule_key,name,kind,schedule,timezone,run_at,instruction,enabled. "
+        "Query before change/cancel/list or adding a timer beside existing work. "
+        "Use one stable key per job and a specific instruction. recurring uses five-field cron (weekly=cron; @every only s/m/h) plus "
+        "IANA timezone; once uses offset ISO run_at with seconds. For recurring INSERT, omit enabled or make every "
+        "seven-column tuple end `,1)`. Relative run_at is a SQLite UTC expression in the write, never a literal timestamp, "
+        "e.g. strftime('%Y-%m-%dT%H:%M:%SZ','now','+17 minutes'). next_run_at/last_fired_at are read-only. "
+        f"If a request itself exceeds {settings.PERSISTENT_AGENT_SCHEDULE_MAX_ACTIVE} active jobs, reply with the cap and one bounded alternative; no SQLite. Reject unsafe cadence before discovery/mutation. Mutate only intended "
+        "rows; never repurpose primary, the legacy UTC cadence mirror."
     )
     variable_group.section_text(
         "agent_schedules_note",
@@ -4149,7 +4152,7 @@ def _get_system_instruction(
         "Scope veto: finite task/batch/day/run/project/renewal/deal/case feedback is temporary. If it gives no separate task, only acknowledge briefly; do not research or change config. In mixed feedback, scope carries forward until another marker; persist only lasting clauses. Otherwise authorized behavior feedback is lasting: before replying, resolve the related clause with one sqlite_batch patch or an explicit no-op. Classify by function, not phrasing; factual or conversational corrections to recurring work still last. Patch narrowed or distinct emphasis even if broadly consistent. If equivalent behavior is explicit, make no edit and continue the task. Charter-edit mechanics are never charter content. "
         "Replace conflicts/softened absolutes; preserve unrelated text; append only if no related clause. After target-not-found, patch from authoritative Current Charter below; don't reread or ask. "
         "Only agent_config_update confirming charter updated/unchanged proves persistence; status=ok alone does not. "
-        "A correction plus an immediate task is two obligations, never a choice: patch and do the task, in one SQLite batch when practical, then send one final reply. After a successful patch, reply only with the completed task result, or a brief natural acknowledgment when there was no task; never mention implementation or restate/promise the new rule. Invite correction if unsure; never save transient facts/results/guesses.\n\n"
+        "Correction plus immediate task or recurrence means fulfill both before one final: patch behavior, do the task, and upsert each named schedule, in one SQLite batch when practical. After a successful patch, reply only with the completed task result, or a brief natural acknowledgment when there was no task; never mention implementation or restate/promise the new rule. Invite correction if unsure; never save transient facts/results/guesses.\n\n"
 
         f"{initiative_guidance}"
 
@@ -4207,7 +4210,7 @@ def _get_system_instruction(
         "scheduled exact feed/API briefing -> http_request then send concise sourced report; no update_plan/files/charts unless asked\n"
         "localhost/private/rendered/login page -> spawn_web_task (or retry with it after scrape/http cannot access)\n"
         "webpage screenshot/visual capture/PDF/rendered artifact -> spawn_web_task\n"
-        "provided filespace path -> pass directly to the requested tool; read_file only when contents are needed, never for http(s) URLs\n"
+        "provided filespace path -> pass directly; read_file only for requested contents, never URL/auth preflight\n"
         "non-secret data/api/feed/file URL -> http_request; if it belongs to a named model, reconcile+SELECT there before use; PDF may need read_file; spawn_web_task only after access/render/login blockage\n"
         "HTML page to read -> scrape_as_markdown or structured extractor; known platforms/social -> structured extractor first\n"
         "local reviews/maps lead screen -> structured Maps/reviews tool directly; omitted city -> representative market/broad query, not human input\n"

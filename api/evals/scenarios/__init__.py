@@ -42,6 +42,11 @@ from .lasting_feedback import (
     LastingFeedbackAlreadySatisfiedKeepsWorkScenario,
     LastingFeedbackMetaInstructionKeepsWorkScenario,
 )
+from .capability_routing import (
+    CAPABILITY_ROUTING_SCENARIO_SLUGS,
+    CAPABILITY_ROUTING_SUITE_SLUG,
+    CapabilityRoutingScenario,
+)
 from .effort_calibration import (
     EFFORT_CALIBRATION_SCENARIO_SLUGS,
     EffortTrivialAnswerStopsScenario,

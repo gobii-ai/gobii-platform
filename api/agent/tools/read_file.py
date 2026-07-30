@@ -203,17 +203,16 @@ def get_read_file_tool() -> Dict[str, Any]:
         "function": {
             "name": "read_file",
             "description": (
-                "Read filespace files as markdown or raw text. "
-                "For HTTP(S) URLs use http_request, scraping, or spawn_web_task, never read_file. "
-                "Defaults to raw_text for text and markdown for PDFs, images/OCR, scans, and office files. "
-                "Tool-result IDs are SQLite rows, not paths; use sqlite_batch on __tool_results, __messages, or __files."
+                "Read a filespace document as markdown/raw text. URLs use HTTP, scrape, or browser tools. "
+                "Auth/credential refs are opaque tool inputs, never readable files. Defaults to raw text, "
+                "markdown for PDFs, images/OCR, scans, and office files. Result IDs are SQLite rows, not paths."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "Path to a file in the agent filespace (accepts $[/path] variables).",
+                        "description": "Filespace document path ($[/path]); not a URL or auth/credential ref.",
                     },
                     "max_chars": {
                         "type": "integer",

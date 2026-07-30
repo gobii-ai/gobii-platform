@@ -11,7 +11,9 @@ from api.evals.scenarios.agent_scheduling import (
     AGENT_SCHEDULING_CASES,
     AGENT_SCHEDULING_SCENARIO_SLUGS,
     AGENT_SCHEDULING_SUITE_SLUG,
+    LIST_WITHOUT_MUTATION,
     RELATIVE_TIMER_PRESERVES_RECURRING,
+    UNSAFE_BURST_GUARDRAIL,
     _call_succeeded,
     _cron_matches,
     _offers_concrete_weekly_cadence,
@@ -65,7 +67,7 @@ class AgentSchedulingEvalTests(TestCase):
         suite = SuiteRegistry.get(AGENT_SCHEDULING_SUITE_SLUG)
 
         self.assertIsNotNone(suite)
-        self.assertEqual(len(AGENT_SCHEDULING_SCENARIO_SLUGS), 10)
+        self.assertEqual(len(AGENT_SCHEDULING_SCENARIO_SLUGS), 11)
         self.assertEqual(suite.scenario_slugs, AGENT_SCHEDULING_SCENARIO_SLUGS)
         for slug in AGENT_SCHEDULING_SCENARIO_SLUGS:
             scenario = ScenarioRegistry.get(slug)
@@ -164,6 +166,70 @@ class AgentSchedulingEvalTests(TestCase):
             "named schedule change was not a targeted mutation",
             _schedule_sql_strategy_failures(case, [untargeted]),
         )
+
+    def test_read_only_list_can_use_authoritative_schedule_context_without_requery(self):
+        case = next(case for case in AGENT_SCHEDULING_CASES if case.expected_action == "list")
+
+        self.assertEqual(_schedule_sql_strategy_failures(case, []), [])
+
+    def test_schedule_strategy_rejects_failed_reads_not_only_failed_mutations(self):
+        case = next(case for case in AGENT_SCHEDULING_CASES if case.expected_action == "bulk")
+        failed_read = _sqlite_call(
+            "SELECT schedule_key, timing FROM __agent_schedules",
+            status="error",
+            result_status="error",
+        )
+
+        self.assertIn(
+            "a SQLite schedule call did not complete successfully",
+            _schedule_sql_strategy_failures(case, [failed_read]),
+        )
+
+    def test_schedule_list_scorer_accepts_stable_hyphenated_keys(self):
+        rows = [
+            _schedule_row("morning-digest", name="Morning digest", instruction="Daily digest"),
+            _schedule_row("friday-recap", name="Friday recap", instruction="Friday recap"),
+            _schedule_row(
+                "contract-reminder",
+                name="Contract reminder",
+                instruction="Review the contract",
+                kind=PersistentAgentSchedule.Kind.ONCE,
+                expression=None,
+                run_at=timezone.now() + timedelta(days=2),
+            ),
+        ]
+        scenario = ScenarioRegistry.get(LIST_WITHOUT_MUTATION)
+
+        failures = scenario._state_failures(
+            rows,
+            before=_schedule_snapshot(rows),
+            inbound=SimpleNamespace(timestamp=timezone.now()),
+            messages=[
+                SimpleNamespace(
+                    body="Active: morning-digest, friday-recap, and contract-reminder."
+                )
+            ],
+            exact_target=None,
+        )
+
+        self.assertEqual(failures, [])
+
+    def test_unsafe_cadence_scorer_accepts_natural_infeasibility_explanation(self):
+        scenario = ScenarioRegistry.get(UNSAFE_BURST_GUARDRAIL)
+
+        failures = scenario._state_failures(
+            [],
+            before={},
+            inbound=SimpleNamespace(timestamp=timezone.now()),
+            messages=[
+                SimpleNamespace(
+                    body="Checking every second isn't feasible; it would consume credits almost instantly."
+                )
+            ],
+            exact_target=None,
+        )
+
+        self.assertEqual(failures, [])
 
     def test_schedule_call_with_reconciliation_errors_is_not_successful(self):
         call = _sqlite_call(
