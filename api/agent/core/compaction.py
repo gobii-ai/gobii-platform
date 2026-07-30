@@ -1,14 +1,6 @@
-"""Utilities for on-demand compaction / summarisation of persistent-agent
-communication history.
+"""On-demand compaction of persistent-agent communication history.
 
-The design follows the *single, pragmatic rule* documented in internal notes:
-    • Only compact when building the LLM prompt (i.e. *on demand*).
-    • Trigger compaction if the number of raw messages since the last snapshot
-      exceeds `RAW_MSG_LIMIT`.
-
-The system includes LLM-powered summarisation using LiteLLM with graceful 
-fallbacks for resilience. Tests can provide a custom `summarise_fn` to bypass 
-external network calls.
+Raw messages remain durable; summaries are created only while building prompts.
 """
 from __future__ import annotations
 
@@ -31,15 +23,12 @@ from ..structured_peer_payload import (
     canonicalize_structured_peer_payload,
     get_structured_peer_payload,
 )
+from ..comms.source_metadata import get_message_source_metadata
 
-# --------------------------------------------------------------------------- #
-#  Tunables – can be overridden via Django settings for easy experimentation  #
-# --------------------------------------------------------------------------- #
 RAW_MSG_LIMIT: int = getattr(settings, "PA_RAW_MSG_LIMIT", 20)
 COMMS_COMPACTION_TAIL: int = max(0, getattr(settings, "PA_COMMS_COMPACTION_TAIL", 5))
 COMMS_COMPACTION_COMPONENT_CHAR_LIMIT = 4000
 
-# Tracer shared across backend codebase
 tracer = trace.get_tracer("gobii.utils")
 logger = logging.getLogger(__name__)
 
@@ -51,10 +40,6 @@ __all__ = [
     "llm_summarise_comms",
 ]
 
-# --------------------------------------------------------------------------- #
-#  Public helper                                                               
-# --------------------------------------------------------------------------- #
-
 @tracer.start_as_current_span("COMPACT Comms History")
 def ensure_comms_compacted(
     *,
@@ -62,29 +47,7 @@ def ensure_comms_compacted(
     summarise_fn: Callable[[str, Sequence[PersistentAgentMessage], str], str] | None = None,
     safety_identifier: str | None = None,
 ) -> None:
-    """Ensure the agent's communication history is compacted up to date.
-
-    If the number of *raw* messages since the last
-    :class:`~api.models.PersistentAgentCommsSnapshot` exceeds
-    :data:`RAW_MSG_LIMIT`, we summarise that slice and write a new snapshot.
-
-    Parameters
-    ----------
-    agent:
-        The :class:`~api.models.PersistentAgent` whose message history we may
-        compact.
-    summarise_fn:
-        Optional callable used to turn (previous_summary, new_messages) into a
-        **new** summary string.  Defaults to a fallback implementation for
-        testing and error resilience.
-
-    safety_identifier:
-        Optional safety identifier to help identify the caller in logs/traces.
-        Recommended by OpenAI and others; only option for backwards compatibility
-    """
-
-    # Import inside function to avoid potential circular-import issues and to
-    # keep compile-time of Django apps low.
+    """Summarize old messages when the uncompacted history exceeds its limit."""
     if summarise_fn is None:
         summarise_fn = _default_summarise  # type: ignore[assignment]
 
@@ -114,6 +77,7 @@ def ensure_comms_compacted(
         raw_qs = (
             PersistentAgentMessage.objects
             .filter(owner_agent=agent_locked, timestamp__gt=lower_bound)
+            .select_related("from_endpoint", "to_endpoint", "conversation", "peer_agent")
             .order_by("timestamp")
         )
 
@@ -146,7 +110,6 @@ def ensure_comms_compacted(
             summarise_span.set_attribute("messages.count", len(raw_messages))
             new_summary = summarise_fn(previous_summary, messages_to_compact, safety_identifier)
     except Exception:  # pragma: no cover – downstream will handle retry logic
-        logger = logging.getLogger(__name__)
         logger.exception("summarise_fn failed; skipping compaction for agent %s", agent.id)
         return
 
@@ -188,10 +151,6 @@ def ensure_comms_compacted(
         # Again: do **not** delete raw messages; long-term pruning is out of
         # scope and can be handled by a background retention policy.
 
-
-# --------------------------------------------------------------------------- #
-#  Internal default summariser (placeholder)                                   
-# --------------------------------------------------------------------------- #
 
 def _default_summarise(
     previous: str,
@@ -238,9 +197,35 @@ def _format_structured_payload_for_compaction(payload: StructuredPeerPayload) ->
     return canonicalize_structured_peer_payload(preview)
 
 
-# --------------------------------------------------------------------------- #
-#  Optional LiteLLM-powered summariser                                          
-# --------------------------------------------------------------------------- #
+def _format_message_party_for_compaction(message: PersistentAgentMessage) -> str:
+    conversation = getattr(message, "conversation", None)
+    peer_agent = getattr(message, "peer_agent", None)
+    is_peer_dm = bool(conversation and getattr(conversation, "is_peer_dm", False))
+
+    if message.is_outbound:
+        endpoint = getattr(message, "to_endpoint", None)
+        channel = getattr(endpoint, "channel", None) or getattr(conversation, "channel", None) or "message"
+        recipient = (
+            getattr(peer_agent, "name", None)
+            if is_peer_dm
+            else getattr(endpoint, "address", None) or getattr(conversation, "address", None)
+        )
+        return f"Outbound {channel} to {recipient or 'unknown recipient'}"
+
+    endpoint = getattr(message, "from_endpoint", None)
+    source_kind, source_label = get_message_source_metadata(getattr(message, "raw_payload", None))
+    channel = (
+        "peer DM"
+        if is_peer_dm
+        else source_kind or getattr(endpoint, "channel", None) or getattr(conversation, "channel", None) or "message"
+    )
+    sender = (
+        getattr(peer_agent, "name", None)
+        if is_peer_dm
+        else source_label or getattr(endpoint, "address", None)
+    )
+    return f"Inbound {channel} from {sender or 'unknown sender'}"
+
 
 def llm_summarise_comms(
     previous: str,
@@ -265,11 +250,11 @@ def llm_summarise_comms(
         routing_profile: Optional LLMRoutingProfile for eval routing.
     """
 
-    # Build a compact textual representation of the new messages.  We include
-    # sender role so the model can distinguish speaker turns.
+    # Speaker and transport identity must survive compaction. Generic User /
+    # Assistant labels erase who said what in noisy multi-party histories.
     lines: list[str] = []
     for msg in messages:
-        role = "Assistant" if msg.is_outbound else "User"
+        party = _format_message_party_for_compaction(msg)
         content_parts = [
             (msg.body or "").strip()[:COMMS_COMPACTION_COMPONENT_CHAR_LIMIT]
         ]
@@ -278,7 +263,7 @@ def llm_summarise_comms(
             payload_preview = _format_structured_payload_for_compaction(payload)
             content_parts.append(f"Structured payload:\n{payload_preview}")
         content = "\n".join(part for part in content_parts if part)
-        lines.append(f"{role}: {content}")
+        lines.append(f"{party}: {content}")
 
     new_msgs_block = "\n".join(lines)
 
@@ -288,7 +273,10 @@ def llm_summarise_comms(
             "content": (
                 "You are a summarisation assistant. Given an *existing* summary\n"
                 "of a conversation and a list of *new* messages, return an\n"
-                "updated concise summary capturing the important details."
+                "updated concise summary capturing the important details. Preserve\n"
+                "who said, requested, observed, or changed each important item and\n"
+                "the source channel. Never transfer a statement to another person;\n"
+                "if attribution is uncertain, keep that uncertainty explicit."
             ),
         },
         {
@@ -327,7 +315,6 @@ def llm_summarise_comms(
     except Exception:
         # Log and fall back to deterministic fallback so callers are not
         # blocked by transient LLM/network issues.
-        logger = logging.getLogger(__name__)
         logger.exception("LiteLLM summarisation failed – falling back to fallback summariser")
         return _default_summarise(previous, messages)
 

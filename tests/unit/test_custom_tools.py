@@ -214,6 +214,12 @@ class CustomToolsTests(TestCase):
         )
         skill_instructions = CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL.prompt_instructions
 
+        canonical_sqlite_pattern = (
+            'row = db.execute("SELECT value FROM items WHERE id = ?", (item_id,)).fetchone()'
+        )
+        self.assertIn(canonical_sqlite_pattern, create_tool_description)
+        self.assertIn(canonical_sqlite_pattern, skill_instructions)
+
         for text in (
             "source_path='/tools/my_tool.py'",
             "source_code",

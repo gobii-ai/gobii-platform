@@ -194,7 +194,7 @@ class CompactionTests(TestCase):
         self.assertEqual(summary, "summary")
         prompt = run_completion_mock.call_args.kwargs["messages"][1]["content"]
         body_preview, payload_block = (
-            prompt.split("New messages:\nUser: ", 1)[1]
+            prompt.split("New messages:\nInbound message from unknown sender: ", 1)[1]
             .split("\n\nReturn ONLY", 1)[0]
             .split("\nStructured payload:\n", 1)
         )
@@ -204,3 +204,48 @@ class CompactionTests(TestCase):
         self.assertLessEqual(len(payload_block), 4000)
         self.assertTrue(payload_preview["_compaction_truncated"])
         self.assertGreater(payload_preview["_original_char_count"], 4000)
+
+    def test_llm_compaction_preserves_actor_and_channel_identity(self):
+        messages = [
+            SimpleNamespace(
+                is_outbound=False,
+                body="The rollout risk is billing reconciliation, not traffic volume.",
+                raw_payload={
+                    "source_kind": "discord",
+                    "source_label": "Will in #growth",
+                },
+                from_endpoint=SimpleNamespace(channel="discord", address="discord://growth"),
+                to_endpoint=None,
+                conversation=None,
+                peer_agent=None,
+            ),
+            SimpleNamespace(
+                is_outbound=True,
+                body="I will verify the billing cohort before the release call.",
+                raw_payload={},
+                from_endpoint=SimpleNamespace(channel="email", address="agent@example.test"),
+                to_endpoint=SimpleNamespace(channel="email", address="owner@example.test"),
+                conversation=None,
+                peer_agent=None,
+            ),
+        ]
+        response = SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content="summary"))]
+        )
+
+        with patch(
+            "api.agent.core.compaction.get_summarization_llm_config",
+            return_value=("openai", "openai/test", {}),
+        ), patch(
+            "api.agent.core.compaction.run_completion",
+            return_value=response,
+        ) as run_completion_mock, patch(
+            "api.agent.core.compaction.log_agent_completion",
+            return_value=(None, {}),
+        ), patch("api.agent.core.compaction.set_usage_span_attributes"):
+            summary = llm_summarise_comms("", messages)
+
+        self.assertEqual(summary, "summary")
+        prompt = run_completion_mock.call_args.kwargs["messages"][1]["content"]
+        self.assertIn("Inbound discord from Will in #growth:", prompt)
+        self.assertIn("Outbound email to owner@example.test:", prompt)
