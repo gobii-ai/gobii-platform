@@ -602,8 +602,19 @@ class DirectTrialPromoServiceTests(TestCase):
         )
         self.assertNotIn("discounts", subscription_kwargs)
 
+        schedule_create_kwargs = mock_schedule_create.call_args.kwargs
+        self.assertEqual(
+            schedule_create_kwargs["from_subscription"],
+            "sub_direct",
+        )
+        self.assertNotIn("metadata", schedule_create_kwargs)
+
         schedule_kwargs = mock_schedule_modify.call_args.kwargs
         self.assertEqual(schedule_kwargs["end_behavior"], "release")
+        self.assertEqual(
+            schedule_kwargs["metadata"]["gobii_event_id"],
+            str(result.redemption.event_id),
+        )
         self.assertEqual(schedule_kwargs["phases"][0]["discounts"], "")
         self.assertEqual(schedule_kwargs["phases"][1]["iterations"], 3)
         self.assertEqual(

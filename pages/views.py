@@ -1549,6 +1549,14 @@ class HomepageIntegrationsSearchView(View):
 
 
 def _legacy_pretrained_worker_destination_or_404(slug: str | None):
+    normalized_slug = str(slug or "").strip().lower()
+    if normalized_slug and PersistentAgentTemplate.objects.filter(
+        code__iexact=normalized_slug,
+    ).filter(
+        Q(is_active=False) | Q(is_listed=False),
+    ).exists():
+        raise Http404("This legacy AI employee URL is not available.")
+
     destination = get_legacy_pretrained_worker_redirect(slug)
     if not destination:
         raise Http404("This legacy AI employee URL is not available.")

@@ -656,7 +656,6 @@ def _create_or_retrieve_schedule(
     if not schedule_id:
         schedule = stripe.SubscriptionSchedule.create(
             from_subscription=subscription_id,
-            metadata=dict(metadata),
             idempotency_key=f"direct-trial-schedule-{redemption.pk}",
             api_key=stripe.api_key,
         )
