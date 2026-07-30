@@ -4,7 +4,7 @@ import { useQuery, useQueryClient, type InfiniteData } from '@tanstack/react-que
 import { AlertTriangle, Building2, Plus } from 'lucide-react'
 import noiseDarkTextureUrl from '../assets/textures/noise-dark.png'
 
-import { agentProfilePayloadToRosterEntry, createAgent, respondToAgentInvite, type CreateAgentTemplateOptions } from '../api/agents'
+import { agentProfilePayloadToRosterEntry, createAgent, fetchAgentProfile, respondToAgentInvite, type CreateAgentTemplateOptions } from '../api/agents'
 import { currentOrganizationTemplatesQueryKey, fetchCurrentOrganizationTemplates, launchOrganizationTemplate, type OrganizationTemplate } from '../api/organization'
 import { createSystemMessage } from '../api/agentAudit'
 import {
@@ -125,7 +125,7 @@ import { navigateWithinApp } from '../util/appNavigation'
 import { appendReturnTo } from '../util/returnTo'
 
 const LOW_CREDIT_DAY_THRESHOLD = 2
-const ROSTER_REFRESH_INTERVAL_MS = 20_000
+const ROSTER_REFRESH_INTERVAL_MS = 5 * 60_000
 const SIGNUP_PREVIEW_PANEL_SOURCE = 'signup_preview_panel'
 
 function selectAuthoritativeProcessingByAgentId(state: RootState): Record<string, boolean> {
@@ -510,6 +510,36 @@ function mergeCreatedAgentProfile(
   return changed ? nextAgents : agents
 }
 
+function mergeRosterEntryWithProfile(
+  entry: AgentRosterEntry | null,
+  profile: AgentRosterEntry | null,
+): AgentRosterEntry | null {
+  if (!entry) {
+    return profile
+  }
+  if (!profile) {
+    return entry
+  }
+  return {
+    ...entry,
+    listingDescription: profile.listingDescription,
+    listingDescriptionSource: profile.listingDescriptionSource,
+    dailyCreditRemaining: profile.dailyCreditRemaining,
+    dailyCreditLow: profile.dailyCreditLow,
+    last24hCreditBurn: profile.last24hCreditBurn,
+    developerLiveChatUrl: profile.developerLiveChatUrl,
+    isOrgOwned: profile.isOrgOwned,
+    canReactivateAgent: profile.canReactivateAgent,
+    canManageCollaborators: profile.canManageCollaborators,
+    canSendMessages: profile.canSendMessages,
+    preferredLlmTier: profile.preferredLlmTier,
+    enabledSystemSkills: Array.from(new Set([
+      ...(profile.enabledSystemSkills ?? []),
+      ...(entry.enabledSystemSkills ?? []),
+    ])),
+  }
+}
+
 function patchRosterAgent(
   current: AgentRosterQueryData | undefined,
   agentId: string,
@@ -880,7 +910,6 @@ export function AgentChatPage({
   viewerUserId,
   viewerEmail,
   viewerTimeZone,
-  canManageCollaborators,
   isCollaborator,
   pipedreamAppsSettingsUrl = null,
   pipedreamAppSearchUrl = null,
@@ -953,6 +982,7 @@ export function AgentChatPage({
   const pendingAgentMetaRef = useRef<AgentSwitchMeta | null>(null)
   const locallySelectedAgentIdsRef = useRef<Set<string>>(new Set())
   const [manuallySelectedContextKey, setManuallySelectedContextKey] = useState<string | null>(null)
+  const [contextNavigationPending, setContextNavigationPending] = useState(false)
   const resetManualContextForExternalAgent = useCallback((nextAgentId: string | null) => {
     if (
       !nextAgentId
@@ -977,17 +1007,18 @@ export function AgentChatPage({
   const handleContextSwitched = useCallback(
     (context: ConsoleContext) => {
       setManuallySelectedContextKey(consoleContextKey(context))
-      void queryClient.invalidateQueries({ queryKey: ['agent-roster'] })
-      void queryClient.invalidateQueries({ queryKey: ['current-organization-templates'] })
       if (onContextSwitch) {
         onContextSwitch(context)
+        if (isSelectionView) {
+          setContextNavigationPending(false)
+        }
         return
       }
       if (typeof window !== 'undefined') {
         window.location.reload()
       }
     },
-    [onContextSwitch, queryClient],
+    [isSelectionView, onContextSwitch],
   )
 
   const {
@@ -1006,6 +1037,18 @@ export function AgentChatPage({
     persistSession: persistContextSession,
     staffContext,
   })
+  const handleContextSwitchRequest = useCallback(async (context: ConsoleContext) => {
+    setContextNavigationPending(true)
+    const switched = await switchContext(context)
+    if (!switched) {
+      setContextNavigationPending(false)
+    }
+    return switched
+  }, [switchContext])
+
+  useEffect(() => {
+    setContextNavigationPending(false)
+  }, [agentId])
 
   const [switchingAgentId, setSwitchingAgentId] = useState<string | null>(null)
   const {
@@ -1049,7 +1092,7 @@ export function AgentChatPage({
     && !contextError
   )
   const agentContextReady = contextReady
-  const liveAgentId = !agentContextReady ? null : activeAgentId
+  const liveAgentId = !agentContextReady || contextNavigationPending ? null : activeAgentId
 
   useEffect(() => {
     dispatch(immersiveShellActions.setViewer({
@@ -1060,9 +1103,9 @@ export function AgentChatPage({
   }, [dispatch, viewerEmail, viewerTimeZone, viewerUserId])
 
   // React-query timeline data
-  const timelineAgentId = activeAgentId === routeAgentId ? activeAgentId : null
+  const timelineAgentId = !contextNavigationPending && activeAgentId === routeAgentId ? activeAgentId : null
   const timelineQuery = useAgentTimeline(timelineAgentId, {
-    enabled: agentContextReady && !isNewAgent,
+    enabled: agentContextReady && !contextNavigationPending && !isNewAgent,
     developerMode: developerModeEnabled,
     staffContext,
     anchorMessageId: messageAnchorId,
@@ -1531,14 +1574,18 @@ export function AgentChatPage({
     ? `${effectiveContext.type}:${effectiveContext.id}:${staffContext ? 'staff' : 'normal'}`
     : 'unknown'
   const rosterQuery = useAgentRoster({
-    enabled: contextReady,
+    enabled: contextReady && !contextNavigationPending,
     context: effectiveContext,
     contextKey: rosterContextKey,
-    forAgentId: routeAgentId ?? undefined,
+    forAgentId: contextLookupAgentId,
     staffContext,
     refetchIntervalMs: ROSTER_REFRESH_INTERVAL_MS,
   })
   const applyCreatedAgentProfile = useCallback((profile: AgentRosterEntry) => {
+    queryClient.setQueryData(
+      ['agent-profile', rosterContextKey, profile.id],
+      profile,
+    )
     queryClient.setQueriesData<AgentRosterQueryData>(
       { queryKey: ['agent-roster'] },
       (current) => {
@@ -1554,7 +1601,7 @@ export function AgentChatPage({
     if (profile.avatarUrl) {
       setPendingCreatedProfileId((current) => (current === profile.id ? null : current))
     }
-  }, [queryClient])
+  }, [queryClient, rosterContextKey])
   const pendingCreatedProfile = rosterQuery.data?.agents.find(
     (agent) => agent.id === pendingCreatedProfileId,
   )
@@ -1729,9 +1776,35 @@ export function AgentChatPage({
     })
     return changed ? reconciledAgents : agents
   }, [authoritativeProcessingByAgentId, contextReady, rosterContextMismatch, rosterQuery.data?.agents])
-  const activeRosterMeta = useMemo(
+  const activeRosterEntry = useMemo(
     () => rosterAgents.find((agent) => agent.id === activeAgentId) ?? null,
     [activeAgentId, rosterAgents],
+  )
+  const activeProfileQuery = useQuery({
+    queryKey: ['agent-profile', rosterContextKey, activeAgentId],
+    queryFn: ({ signal }) => {
+      if (!activeAgentId) {
+        throw new Error('No active agent')
+      }
+      return fetchAgentProfile(activeAgentId, {
+        context: effectiveContext ?? undefined,
+        signal,
+        staffContext,
+      })
+    },
+    enabled: Boolean(
+      activeAgentId
+      && !isNewAgent
+      && !isSelectionView
+      && agentContextReady
+      && !contextNavigationPending,
+    ),
+    staleTime: 5 * 60_000,
+    refetchOnWindowFocus: false,
+  })
+  const activeRosterMeta = useMemo(
+    () => mergeRosterEntryWithProfile(activeRosterEntry, activeProfileQuery.data ?? null),
+    [activeProfileQuery.data, activeRosterEntry],
   )
   const rosterGoogleSheetsDriveTabEnabled = Boolean(
     activeRosterMeta?.enabledSystemSkills?.includes(GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY),
@@ -1789,8 +1862,11 @@ export function AgentChatPage({
       return
     }
     googleSheetsRosterRefreshAgentsRef.current.add(refreshKey)
-    void queryClient.invalidateQueries({ queryKey: ['agent-roster'] })
-  }, [activeAgentId, liveApolloNativeTabEnabled, liveDiscordNativeTabEnabled, liveGoogleSheetsDriveTabEnabled, liveHubSpotNativeTabEnabled, liveMetaAdsTabEnabled, queryClient])
+    void queryClient.invalidateQueries({
+      queryKey: ['agent-profile', rosterContextKey, activeAgentId],
+      exact: true,
+    })
+  }, [activeAgentId, liveApolloNativeTabEnabled, liveDiscordNativeTabEnabled, liveGoogleSheetsDriveTabEnabled, liveHubSpotNativeTabEnabled, liveMetaAdsTabEnabled, queryClient, rosterContextKey])
   const visibleRosterAgentIds = useMemo(
     () => rosterAgents.map((agent) => agent.id),
     [rosterAgents],
@@ -2027,11 +2103,14 @@ export function AgentChatPage({
   const resolvedIsOrgOwned = activeRosterMeta?.isOrgOwned ?? false
   const activeIsCollaborator = activeRosterMeta?.isCollaborator ?? (isCollaborator ?? false)
   const activeCanManageAgent = activeRosterMeta?.canManageAgent ?? !activeIsCollaborator
-  const activeAgentIsActive = activeRosterMeta?.isActive ?? activeChatSession.identity.agentIsActive
+  const activeAgentIsActive = activeChatSession.identity.agentIsActive === false
+    ? false
+    : activeRosterMeta?.isActive ?? true
   const activeCanReactivateAgent = activeRosterMeta?.canReactivateAgent
     ?? activeChatSession.identity.canReactivateAgent
-  const activeCanSendMessages = activeRosterMeta?.canSendMessages ?? !staffContext
-  const activeCanManageCollaborators = activeRosterMeta?.canManageCollaborators ?? (canManageCollaborators ?? true)
+  const activeProfileReady = isNewAgent || activeProfileQuery.isSuccess
+  const activeCanSendMessages = activeProfileReady && Boolean(activeRosterMeta?.canSendMessages)
+  const activeCanManageCollaborators = activeProfileReady && Boolean(activeRosterMeta?.canManageCollaborators)
   const hasAgentReply = useMemo(() => hasAgentResponse(timelineEvents), [timelineEvents])
 
   useEffect(() => {
@@ -2149,7 +2228,13 @@ export function AgentChatPage({
     () => getLatestPlanSnapshot(timelineEvents, initialPageResponse?.current_plan ?? null),
     [timelineEvents, initialPageResponse?.current_plan],
   )
-  const allowAgentRefresh = Boolean(activeAgentId) && !contextSwitching && agentContextReady && !rosterContextMismatch
+  const allowAgentRefresh = (
+    Boolean(activeAgentId)
+    && !contextSwitching
+    && !contextNavigationPending
+    && agentContextReady
+    && !rosterContextMismatch
+  )
   useEffect(() => {
     if (!allowAgentRefresh || !activeAgentId || isNewAgent || shellSubview !== 'chat'
       || (typeof navigator !== 'undefined' && navigator.onLine === false)) {
@@ -2227,7 +2312,7 @@ export function AgentChatPage({
         : contextData.context,
       personal: contextData.personal,
       organizations: contextData.organizations,
-      onSwitch: switchContext,
+      onSwitch: handleContextSwitchRequest,
       onCreateOrganization: () => {
         setCreateOrganizationName('')
         setCreateOrganizationErrors([])
@@ -2236,7 +2321,7 @@ export function AgentChatPage({
       isBusy: contextSwitching,
       errorMessage: contextError,
     }
-  }, [contextData, contextError, contextSwitching, showContextSwitcher, switchContext])
+  }, [contextData, contextError, contextSwitching, handleContextSwitchRequest, showContextSwitcher])
 
   const handleCreateOrganizationSubmit = useCallback(async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -2247,11 +2332,13 @@ export function AgentChatPage({
     }
     setCreateOrganizationBusy(true)
     setCreateOrganizationErrors([])
+    setContextNavigationPending(true)
     try {
       await createOrganizationContext(name)
       setCreateOrganizationOpen(false)
       setCreateOrganizationName('')
     } catch (error) {
+      setContextNavigationPending(false)
       if (error instanceof HttpError && typeof error.body === 'object' && error.body) {
         const body = error.body as Record<string, unknown>
         if (body.errors && typeof body.errors === 'object') {

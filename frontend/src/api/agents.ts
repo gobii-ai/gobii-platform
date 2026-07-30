@@ -89,8 +89,35 @@ type AgentRosterPayload = {
   accountPause?: AccountPauseInfo | null
   llmIntelligence?: LlmIntelligenceConfig | null
   agent_invites?: AgentSidebarInvite[]
-  agents: AgentProfilePayload[]
+  agents: AgentRosterListPayload[]
 }
+
+type AgentRosterListPayload = Pick<
+  AgentProfilePayload,
+  | 'id'
+  | 'name'
+  | 'avatar_url'
+  | 'emotion'
+  | 'emotion_expires_at'
+  | 'is_active'
+  | 'processing_active'
+  | 'mini_description'
+  | 'short_description'
+  | 'display_tags'
+  | 'detail_url'
+  | 'is_collaborator'
+  | 'can_manage_agent'
+  | 'email'
+  | 'sms'
+  | 'last_interaction_at'
+  | 'signup_preview_state'
+  | 'planning_state'
+  | 'pending_action_request_count'
+  | 'has_unread_agent_message'
+  | 'latest_agent_message_id'
+  | 'latest_agent_message_at'
+  | 'latest_agent_message_read_at'
+>
 
 export function agentProfilePayloadToRosterEntry(agent: AgentProfilePayload): AgentRosterEntry {
   return {
@@ -134,8 +161,53 @@ export function agentProfilePayloadToRosterEntry(agent: AgentProfilePayload): Ag
   }
 }
 
+function agentRosterListPayloadToEntry(agent: AgentRosterListPayload): AgentRosterEntry {
+  return {
+    id: agent.id,
+    name: agent.name,
+    avatarUrl: agent.avatar_url,
+    emotion: agent.emotion ?? null,
+    emotionExpiresAt: agent.emotion_expires_at ?? null,
+    isActive: agent.is_active,
+    processingActive: agent.processing_active,
+    miniDescription: agent.mini_description,
+    shortDescription: agent.short_description,
+    listingDescription: '',
+    listingDescriptionSource: null,
+    displayTags: Array.isArray(agent.display_tags) ? agent.display_tags : [],
+    detailUrl: agent.detail_url,
+    dailyCreditRemaining: null,
+    dailyCreditLow: false,
+    last24hCreditBurn: null,
+    developerLiveChatUrl: null,
+    isOrgOwned: false,
+    isCollaborator: agent.is_collaborator,
+    canManageAgent: agent.can_manage_agent,
+    canReactivateAgent: false,
+    canManageCollaborators: false,
+    canSendMessages: false,
+    preferredLlmTier: null,
+    email: agent.email,
+    sms: agent.sms,
+    lastInteractionAt: agent.last_interaction_at,
+    signupPreviewState: agent.signup_preview_state ?? null,
+    planningState: agent.planning_state ?? null,
+    pendingActionRequestCount: Math.max(0, Number(agent.pending_action_request_count ?? 0) || 0),
+    hasUnreadAgentMessage: Boolean(agent.has_unread_agent_message),
+    latestAgentMessageId: agent.latest_agent_message_id ?? null,
+    latestAgentMessageAt: agent.latest_agent_message_at ?? null,
+    latestAgentMessageReadAt: agent.latest_agent_message_read_at ?? null,
+    enabledSystemSkills: [],
+  }
+}
+
 export async function fetchAgentRoster(
-  options: { forAgentId?: string; context?: ConsoleContext; staffContext?: StaffViewContext | null } = {},
+  options: {
+    forAgentId?: string
+    context?: ConsoleContext
+    signal?: AbortSignal
+    staffContext?: StaffViewContext | null
+  } = {},
 ): Promise<{
   context: ConsoleContext
   agents: AgentRosterEntry[]
@@ -160,8 +232,11 @@ export async function fetchAgentRoster(
     } : {}),
     ...staffViewContextHeaders(options.staffContext),
   }
-  const payload = await jsonFetch<AgentRosterPayload>(`/console/api/agents/roster/${query}`, { headers })
-  const agents = payload.agents.map(agentProfilePayloadToRosterEntry)
+  const payload = await jsonFetch<AgentRosterPayload>(
+    `/console/api/agents/roster/${query}`,
+    { headers, signal: options.signal },
+  )
+  const agents = payload.agents.map(agentRosterListPayloadToEntry)
   return {
     context: payload.context,
     agents,
@@ -186,8 +261,27 @@ export async function fetchAgentRoster(
   }
 }
 
-export async function fetchAgentProfile(agentId: string): Promise<AgentRosterEntry> {
-  const payload = await jsonFetch<AgentProfilePayload>(`/console/api/agents/${agentId}/profile/`)
+export async function fetchAgentProfile(
+  agentId: string,
+  options: {
+    context?: ConsoleContext
+    signal?: AbortSignal
+    staffContext?: StaffViewContext | null
+  } = {},
+): Promise<AgentRosterEntry> {
+  const payload = await jsonFetch<AgentProfilePayload>(
+    `/console/api/agents/${agentId}/profile/`,
+    {
+      headers: {
+        ...(options.context ? {
+          'X-Gobii-Context-Type': options.context.type,
+          'X-Gobii-Context-Id': options.context.id,
+        } : {}),
+        ...staffViewContextHeaders(options.staffContext),
+      },
+      signal: options.signal,
+    },
+  )
   return agentProfilePayloadToRosterEntry(payload)
 }
 

@@ -18,7 +18,7 @@ type UseConsoleContextSwitcherResult = {
   isLoading: boolean
   isSwitching: boolean
   error: string | null
-  switchContext: (context: ConsoleContext) => Promise<void>
+  switchContext: (context: ConsoleContext) => Promise<boolean>
   createOrganizationContext: (name: string) => Promise<ConsoleContext>
   refresh: () => Promise<void>
 }
@@ -144,7 +144,7 @@ export function useConsoleContextSwitcher({
   const switchContext = useCallback(
     async (context: ConsoleContext) => {
       if (!data || isSwitching) {
-        return
+        return false
       }
       const previousContext = data.context
       setIsSwitching(true)
@@ -154,7 +154,7 @@ export function useConsoleContextSwitcher({
       try {
         const updated = await switchConsoleContext(context, { persistSession })
         if (!mountedRef.current) {
-          return
+          return false
         }
         queryClient.setQueryData<ConsoleContextData>(
           queryKey,
@@ -163,9 +163,10 @@ export function useConsoleContextSwitcher({
         storeConsoleContext(updated)
         notifyConsoleContextUpdated(updated)
         onSwitched?.(updated)
+        return true
       } catch (err) {
         if (!mountedRef.current) {
-          return
+          return false
         }
         console.error('Failed to switch context:', err)
         queryClient.setQueryData<ConsoleContextData>(
@@ -174,6 +175,7 @@ export function useConsoleContextSwitcher({
         )
         storeConsoleContext(previousContext)
         setMutationError('Unable to switch context.')
+        return false
       } finally {
         if (mountedRef.current) {
           setIsSwitching(false)

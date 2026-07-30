@@ -69,6 +69,7 @@ export function EmbeddedAgentEmailSettingsPanel({
     )
     void Promise.allSettled([
       queryClient.invalidateQueries({ queryKey: ['agent-roster'], exact: false }),
+      queryClient.invalidateQueries({ queryKey: ['agent-profile'], exact: false }),
       queryClient.invalidateQueries({ queryKey: ['agent-quick-settings', agentId], exact: true }),
     ])
   }, [agentId, queryClient])

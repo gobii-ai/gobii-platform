@@ -2319,7 +2319,7 @@ export const AgentComposer = memo(function AgentComposer({
                     data-loading={!activeWorkingTab && insightsLoading ? 'true' : 'false'}
                     key={activeWorkingTab?.id ?? 'insights-loading'}
                   >
-                    {ActiveNativePanel ? (
+                    {ActiveNativePanel && resolvedWorkingExpanded ? (
                       <ActiveNativePanel
                         agentId={agentId}
                         nativeIntegrationsUrl={nativeIntegrationsUrl}

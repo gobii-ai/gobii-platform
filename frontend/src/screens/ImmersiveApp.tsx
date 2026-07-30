@@ -814,15 +814,6 @@ export function ImmersiveApp({
   }, [route, location.pathname, location.search, embed])
 
   useEffect(() => {
-    if (route.kind === 'agent-chat') {
-      return () => undefined
-    }
-    const controller = new AbortController()
-    void jsonFetch('/console/api/session/', { signal: controller.signal }).catch(() => undefined)
-    return () => controller.abort()
-  }, [route.kind])
-
-  useEffect(() => {
     const controller = new AbortController()
     const loadViewer = async () => {
       try {
@@ -834,7 +825,7 @@ export function ImmersiveApp({
         setViewerEmail(payload?.email ? payload.email : null)
         setViewerTimeZone(payload?.timezone?.trim() || null)
         setIsSystemAdmin(payload?.is_system_admin === true)
-      } catch (err) {
+      } catch {
         if (controller.signal.aborted) {
           return
         }

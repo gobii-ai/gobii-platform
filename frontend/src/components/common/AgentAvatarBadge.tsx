@@ -8,6 +8,7 @@ type AgentAvatarBadgeProps = {
   textClassName?: string
   style?: CSSProperties
   fallbackStyle?: CSSProperties
+  loading?: 'eager' | 'lazy'
 }
 
 const AVATAR_FADE_MS = 260
@@ -21,6 +22,7 @@ export function AgentAvatarBadge({
   textClassName,
   style,
   fallbackStyle,
+  loading = 'eager',
 }: AgentAvatarBadgeProps) {
   const trimmedName = name.trim() || 'Agent'
   const nameParts = trimmedName.split(/\s+/).filter(Boolean)
@@ -99,6 +101,8 @@ export function AgentAvatarBadge({
           ref={imageRef}
           src={avatarSrc ?? undefined}
           alt={`${trimmedName} avatar`}
+          decoding="async"
+          loading={loading}
           className={imageClassName}
           style={imageStyle}
           onLoad={() => {

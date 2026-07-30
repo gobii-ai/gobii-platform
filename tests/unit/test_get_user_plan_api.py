@@ -52,7 +52,7 @@ class GetUserPlanApiTests(TestCase):
         )
 
     @patch("console.views.reconcile_user_plan_from_stripe", return_value={"id": PlanNames.FREE})
-    def test_user_plan_api_returns_db_backed_task_credit_counts(self, _mock_reconcile_plan):
+    def test_user_plan_api_returns_db_backed_task_credit_counts(self, mock_reconcile_plan):
         self._set_monthly_task_credits(PlanNames.STARTUP, 750)
         self._set_monthly_task_credits(PlanNames.SCALE, 12500)
         user = User.objects.create_user(
@@ -69,3 +69,4 @@ class GetUserPlanApiTests(TestCase):
         self.assertEqual(payload["startup_task_credits"], 750)
         self.assertEqual(payload["scale_task_credits"], 12500)
         self.assertEqual(payload["plan"], "free")
+        mock_reconcile_plan.assert_not_called()

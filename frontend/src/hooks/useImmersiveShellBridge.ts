@@ -40,6 +40,7 @@ export function useImmersiveShellBridge({
 }: UseImmersiveShellBridgeOptions) {
   const dispatch = useAppDispatch()
   const sidebarModeHydratedRef = useRef(false)
+  const previousAgentIdRef = useRef<string | null | undefined>(agentId)
   const selectionSidebarMode = useAppSelector(selectImmersiveSidebarMode)
   const shellSubview = useAppSelector(selectImmersiveShellSubview)
 
@@ -56,14 +57,20 @@ export function useImmersiveShellBridge({
   useEffect(() => {
     if (!sidebarModeHydratedRef.current) {
       sidebarModeHydratedRef.current = true
-      dispatch(immersiveShellActions.setSidebarMode(
+      previousAgentIdRef.current = agentId
+      dispatch(immersiveShellActions.setSidebarModeTransient(
         agentId === undefined
           ? (selectionPage === 'agents' ? (readSelectionSidebarModePreference() ?? 'gallery') : 'gallery')
           : getInitialAgentChatSidebarMode(),
       ))
       return
     }
+    const previousAgentId = previousAgentIdRef.current
+    previousAgentIdRef.current = agentId
     if (agentId !== undefined) {
+      if (previousAgentId === undefined) {
+        dispatch(immersiveShellActions.setSidebarModeTransient(getInitialAgentChatSidebarMode()))
+      }
       return
     }
     if (selectionPage !== 'agents') {
@@ -74,7 +81,7 @@ export function useImmersiveShellBridge({
     }
     const storedSelectionMode = readSelectionSidebarModePreference()
     if (storedSelectionMode && storedSelectionMode !== selectionSidebarMode) {
-      dispatch(immersiveShellActions.setSidebarMode(storedSelectionMode))
+      dispatch(immersiveShellActions.setSidebarModeTransient(storedSelectionMode))
     }
   }, [agentId, dispatch, selectionPage, selectionSidebarMode])
 

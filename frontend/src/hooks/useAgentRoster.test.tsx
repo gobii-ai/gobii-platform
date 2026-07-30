@@ -42,11 +42,13 @@ describe('useAgentRoster', () => {
 
     rerender({ context: organizationContext })
     await waitFor(() => expect(fetchAgentRosterMock).toHaveBeenCalledTimes(2))
-    expect(fetchAgentRosterMock).toHaveBeenNthCalledWith(1, {
+    expect(fetchAgentRosterMock).toHaveBeenNthCalledWith(1, expect.objectContaining({
       context: { type: 'personal', id: 'user-1', name: 'User' },
-    })
-    expect(fetchAgentRosterMock).toHaveBeenNthCalledWith(2, {
+      signal: expect.any(AbortSignal),
+    }))
+    expect(fetchAgentRosterMock).toHaveBeenNthCalledWith(2, expect.objectContaining({
       context: { type: 'organization', id: 'org-1', name: 'Org' },
-    })
+      signal: expect.any(AbortSignal),
+    }))
   })
 })

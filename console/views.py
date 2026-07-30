@@ -96,6 +96,7 @@ from util.subscription_helper import (
     get_active_subscription,
     get_stripe_customer,
     get_organization_plan,
+    get_user_plan,
     get_user_max_contacts_per_agent,
     sync_subscription_after_direct_update as _sync_subscription_after_direct_update,
 )
@@ -175,13 +176,19 @@ def build_llm_intelligence_props(
     owner_type: str,
     organization,
     upgrade_url: str | None,
+    *,
+    sync_personal_plan: bool = True,
 ) -> dict[str, Any]:
     plan = None
     if owner is not None:
         if owner_type == 'organization':
             plan = get_organization_plan(organization) if organization is not None else None
         else:
-            plan = reconcile_user_plan_from_stripe(owner)
+            plan = (
+                reconcile_user_plan_from_stripe(owner)
+                if sync_personal_plan
+                else get_user_plan(owner)
+            )
 
     allowed_tier = max_allowed_tier_for_plan(plan, is_organization=(owner_type == 'organization'))
     allowed_tier = apply_user_quota_tier_override(owner, allowed_tier)
@@ -915,7 +922,7 @@ def get_user_plan_api(request):
     personal_signup_preview_processing_available = preview_config.processing_limit_enabled
 
     try:
-        plan = reconcile_user_plan_from_stripe(request.user)
+        plan = get_user_plan(request.user)
         plan_id = str(plan.get("id", "")).lower() if plan else ""
         # Map internal plan IDs to frontend-friendly values
         plan_map = {

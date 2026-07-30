@@ -25,14 +25,16 @@ export function useAgentRoster(options?: UseAgentRosterOptions) {
 
   return useQuery({
     queryKey: ['agent-roster', contextKey, forAgentId] as const,
-    queryFn: () => fetchAgentRoster({
+    queryFn: ({ signal }) => fetchAgentRoster({
       context: context ?? undefined,
       forAgentId: forAgentId ?? undefined,
+      signal,
       staffContext: options?.staffContext,
     }),
     placeholderData: keepPreviousData,
     staleTime: 60_000,
-    refetchOnWindowFocus: false,
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
     refetchInterval: refetchIntervalMs,
     refetchIntervalInBackground: false,
     enabled,

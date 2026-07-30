@@ -99,7 +99,6 @@ from api.models import (
     PersistentAgentMessage,
     PersistentAgentMessageFeedback,
     PersistentAgentSecret,
-    PersistentAgentSystemSkillState,
     PersistentAgentSystemMessage,
     PersistentAgentSystemStep,
     PersistentAgentStep,
@@ -2963,20 +2962,73 @@ def _serialize_agent_profile_payload(
     }
 
 
+def _serialize_agent_roster_entry_payload(
+    request: HttpRequest,
+    agent: PersistentAgent,
+    *,
+    is_collaborator: bool,
+    processing_active: bool,
+    pending_action_count: int,
+    message_read_state: dict,
+    org_ids: set,
+    is_admin_user: bool,
+) -> dict[str, Any]:
+    # The roster is fetched for every workspace transition, so keep it limited to
+    # fields used by the list/gallery. The full profile is loaded for one selected
+    # agent instead of enriching every agent with usage, skills, and settings data.
+    agent.display_tags = agent.tags if isinstance(agent.tags, list) else []
+    card_payload = serialize_agent_card_payload(
+        request,
+        agent,
+        avatar_variant="thumbnail",
+        is_shared=is_collaborator,
+    )
+    return {
+        "id": str(agent.id),
+        "name": agent.name or "",
+        "avatar_url": card_payload["avatarUrl"],
+        "is_active": bool(agent.is_active),
+        "processing_active": bool(processing_active),
+        "mini_description": agent.mini_description or "",
+        "short_description": agent.short_description or "",
+        "display_tags": card_payload["displayTags"],
+        "detail_url": card_payload["detailUrl"],
+        "is_collaborator": bool(is_collaborator),
+        "can_manage_agent": bool(
+            is_admin_user
+            or agent.user_id == request.user.id
+            or (agent.organization_id and agent.organization_id in org_ids)
+        ),
+        "email": card_payload["primaryEmail"],
+        "sms": card_payload["primarySms"],
+        "last_interaction_at": agent.last_interaction_at.isoformat() if agent.last_interaction_at else None,
+        "signup_preview_state": agent.signup_preview_state,
+        "planning_state": agent.planning_state,
+        "pending_action_request_count": pending_action_count,
+        **serialize_agent_emotion(agent),
+        **serialize_latest_agent_message_read_state(message_read_state),
+    }
+
+
 def _build_agent_critical_status_payload(request: HttpRequest, agent: PersistentAgent) -> dict[str, Any]:
     owner = agent.organization or agent.user
-    quick_settings = build_agent_quick_settings_payload(agent, owner)
+    quick_settings = build_agent_quick_settings_payload(
+        agent,
+        owner,
+        sync_personal_plan=False,
+    )
     quick_meta = quick_settings.get("meta") or {}
     quick_plan = quick_meta.get("plan") or {}
     plan_payload = (
         get_organization_plan(agent.organization)
         if agent.organization_id
-        else reconcile_user_plan_from_stripe(agent.user)
+        else get_user_plan(agent.user)
     )
     addons = build_agent_addons_payload(
         agent,
         owner,
         can_open_billing=_can_open_agent_billing(request, agent),
+        sync_personal_plan=False,
     )
     status = addons["status"]
     return {
@@ -3148,6 +3200,7 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
             owner_type,
             organization,
             upgrade_url,
+            sync_personal_plan=False,
         )
 
         # Prefetch email endpoints and prefer primary first when available.
@@ -3161,11 +3214,6 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
             queryset=PersistentAgentCommsEndpoint.objects.filter(channel=CommsChannel.SMS),
             to_attr="primary_sms_endpoints",
         )
-        enabled_system_skills_prefetch = models.Prefetch(
-            "system_skill_states",
-            queryset=PersistentAgentSystemSkillState.objects.filter(is_enabled=True).order_by("skill_key"),
-            to_attr="enabled_system_skill_states_for_roster",
-        )
         agents_qs, shared_qs = agent_querysets_for_context(
             request.user,
             context_info.current_context,
@@ -3174,20 +3222,17 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
         )
         agents_qs = (
             agents_qs
-            .select_related("preferred_llm_tier")
             .prefetch_related(
                 email_prefetch,
                 sms_prefetch,
-                enabled_system_skills_prefetch,
             )
             .order_by("name")
         )
         agent_ids = list(agents_qs.values_list("id", flat=True))
         agents = list(agents_qs)
-        shared_qs = shared_qs.select_related("preferred_llm_tier").prefetch_related(
+        shared_qs = shared_qs.prefetch_related(
             email_prefetch,
             sms_prefetch,
-            enabled_system_skills_prefetch,
         )
         if agent_ids:
             shared_qs = shared_qs.exclude(id__in=agent_ids)
@@ -3197,8 +3242,8 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
         if staff_override and for_agent_id and all(str(agent.id) != str(for_agent_id) for agent in agents):
             requested_agent = (
                 PersistentAgent.objects
-                .select_related("browser_use_agent", "preferred_llm_tier")
-                .prefetch_related(email_prefetch, sms_prefetch, enabled_system_skills_prefetch)
+                .select_related("browser_use_agent")
+                .prefetch_related(email_prefetch, sms_prefetch)
                 .filter(id=for_agent_id)
                 .first()
             )
@@ -3211,7 +3256,6 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
                 )
                 if matches_context:
                     agents.append(requested_agent)
-        enrich_agents_for_card_surface(agents, owner)
         user = request.user
         processing_activity_by_agent_id = build_processing_activity_map(agents)
         pending_action_counts_by_agent_id = count_pending_action_requests_for_agents(agents, user)
@@ -3246,37 +3290,21 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
             manage_billing_url=manage_billing_url,
         )
         org_ids = set(org_memberships.values_list("org_id", flat=True))
-        admin_org_ids = set(
-            org_memberships.filter(
-                role__in=[
-                    OrganizationMembership.OrgRole.OWNER,
-                    OrganizationMembership.OrgRole.ADMIN,
-                    OrganizationMembership.OrgRole.SOLUTIONS_PARTNER,
-                ]
-            ).values_list("org_id", flat=True)
-        )
         # Keep behavior aligned with SystemAdminRequiredMixin: superusers may not be staff.
         is_admin_user = bool(user.is_staff or user.is_superuser)
         payload = []
         for agent in agents:
             is_collaborator = agent.id in collaborators_by_agent_id
             payload.append(
-                _serialize_agent_profile_payload(
+                _serialize_agent_roster_entry_payload(
                     request,
                     agent,
-                    owner=owner,
                     is_collaborator=is_collaborator,
                     processing_active=processing_activity_by_agent_id.get(str(agent.id), False),
                     pending_action_count=pending_action_counts_by_agent_id.get(str(agent.id), 0),
                     message_read_state=message_read_state_by_agent_id.get(str(agent.id), {}),
                     org_ids=org_ids,
-                    admin_org_ids=admin_org_ids,
                     is_admin_user=is_admin_user,
-                    can_reactivate_agent=bool(
-                        is_admin_user
-                        or agent.user_id == user.id
-                        or (agent.organization_id and agent.organization_id in admin_org_ids)
-                    ),
                 )
             )
         return JsonResponse(

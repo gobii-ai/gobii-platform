@@ -133,6 +133,10 @@ const {
 vi.mock('../api/agents', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../api/agents')>()),
   createAgent: createAgentMock,
+  fetchAgentProfile: vi.fn(async (agentId: string) => (
+    (rosterState.agents as ReturnType<typeof buildRosterAgent>[]).find((agent) => agent.id === agentId)
+      ?? buildRosterAgent(agentId, 'Test Agent')
+  )),
   updateAgent: updateAgentMock,
 }))
 
@@ -688,6 +692,13 @@ function buildRosterAgent(id: string, name: string, enabledSystemSkills: string[
     dailyCreditRemaining: null,
     dailyCreditLow: false,
     last24hCreditBurn: null,
+    isOrgOwned: false,
+    isCollaborator: false,
+    canManageAgent: true,
+    canReactivateAgent: false,
+    canManageCollaborators: true,
+    canSendMessages: true,
+    preferredLlmTier: 'standard',
     enabledSystemSkills,
   }
 }

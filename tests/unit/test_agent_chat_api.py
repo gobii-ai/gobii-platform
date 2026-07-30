@@ -940,7 +940,13 @@ class AgentChatAPITests(TestCase):
         self.assertEqual(owner_state.effective_app_slugs, ["trello", "notion", "slack"])
 
     @tag("batch_agent_chat")
-    def test_timeline_endpoint_returns_expected_events(self):
+    @patch("console.agent_addons.reconcile_user_plan_from_stripe")
+    @patch("console.agent_quick_settings.reconcile_user_plan_from_stripe")
+    def test_timeline_endpoint_returns_expected_events(
+        self,
+        mock_quick_settings_reconcile,
+        mock_addons_reconcile,
+    ):
         response = self.client.get(f"/console/api/agents/{self.agent.id}/timeline/")
         self.assertEqual(response.status_code, 200)
         payload = response.json()
@@ -970,6 +976,8 @@ class AgentChatAPITests(TestCase):
         self.assertIn("accountPause", critical_status)
         self.assertIn("dailyCredits", critical_status)
         self.assertIn("contactCapStatus", critical_status)
+        mock_quick_settings_reconcile.assert_not_called()
+        mock_addons_reconcile.assert_not_called()
 
     @tag("batch_agent_chat")
     def test_queued_tool_calls_are_excluded_from_all_timeline_pagination_queries(self):

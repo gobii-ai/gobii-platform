@@ -71,7 +71,7 @@ export function updateAgentIntelligenceTier({
     dispatch(agentSettingsActions.tierErrorSet({ agentId, message: null }))
     try {
       await updateAgent(agentId, { preferred_llm_tier: tier })
-      void extra?.queryClient?.invalidateQueries({ queryKey: ['agent-roster'], exact: false })
+      void extra?.queryClient?.invalidateQueries({ queryKey: ['agent-profile'], exact: false })
       void extra?.queryClient?.invalidateQueries({ queryKey: ['agent-quick-settings', agentId], exact: true })
       void refetchQuickSettings?.()
       void dispatch(refreshProcessing({ agentId }))

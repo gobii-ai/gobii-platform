@@ -896,7 +896,7 @@ class AgentChatAccessTests(TestCase):
         payload = response.json()
         self.assertFalse(payload.get("agent_chat_suggestions_enabled"))
 
-    def test_roster_includes_only_enabled_system_skill_keys(self):
+    def test_agent_profile_includes_only_enabled_system_skill_keys(self):
         PersistentAgentSystemSkillState.objects.create(
             agent=self.org_agent,
             skill_key="google_sheets_native",
@@ -909,21 +909,20 @@ class AgentChatAccessTests(TestCase):
         )
 
         response = self.client.get(
-            reverse("console_agent_roster"),
+            reverse("console_agent_profile", kwargs={"agent_id": self.org_agent.id}),
+            HTTP_X_GOBII_CONTEXT_TYPE="organization",
+            HTTP_X_GOBII_CONTEXT_ID=str(self.org.id),
+        )
+        second_response = self.client.get(
+            reverse("console_agent_profile", kwargs={"agent_id": self.org_agent_two.id}),
             HTTP_X_GOBII_CONTEXT_TYPE="organization",
             HTTP_X_GOBII_CONTEXT_ID=str(self.org.id),
         )
 
         self.assertEqual(response.status_code, 200)
-        roster_by_id = {entry["id"]: entry for entry in response.json().get("agents", [])}
-        self.assertEqual(
-            roster_by_id[str(self.org_agent.id)]["enabled_system_skills"],
-            ["google_sheets_native"],
-        )
-        self.assertEqual(
-            roster_by_id[str(self.org_agent_two.id)]["enabled_system_skills"],
-            [],
-        )
+        self.assertEqual(second_response.status_code, 200)
+        self.assertEqual(response.json()["enabled_system_skills"], ["google_sheets_native"])
+        self.assertEqual(second_response.json()["enabled_system_skills"], [])
 
     def test_roster_includes_mini_and_short_descriptions(self):
         self.org_agent.mini_description = "Revenue pipeline assistant"
@@ -1136,7 +1135,7 @@ class AgentChatAccessTests(TestCase):
         finally:
             clear_processing_queued_flag(self.org_agent.id)
 
-    def test_roster_includes_developer_live_chat_url_for_staff(self):
+    def test_agent_profile_includes_developer_live_chat_url_for_staff(self):
         User = get_user_model()
         staff_user = User.objects.create_superuser(
             username="staff@example.com",
@@ -1155,17 +1154,13 @@ class AgentChatAccessTests(TestCase):
         )
 
         response = staff_client.get(
-            reverse("console_agent_roster"),
+            reverse("console_agent_profile", kwargs={"agent_id": persistent_agent.id}),
             HTTP_X_GOBII_CONTEXT_TYPE="personal",
             HTTP_X_GOBII_CONTEXT_ID=str(staff_user.id),
         )
         self.assertEqual(response.status_code, 200)
-        payload = response.json()
-        matching_entry = next(
-            entry for entry in payload.get("agents", []) if entry.get("id") == str(persistent_agent.id)
-        )
         self.assertEqual(
-            matching_entry.get("developer_live_chat_url"),
+            response.json().get("developer_live_chat_url"),
             (
                 f"/app/agents/{persistent_agent.id}?developer=1"
                 f"&staff_context_type=personal&staff_context_id={staff_user.id}"

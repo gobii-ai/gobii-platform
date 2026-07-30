@@ -92,6 +92,7 @@ function GalleryCard({
             className="agent-gallery-card__avatar"
             imageClassName="agent-gallery-card__avatar-image"
             textClassName="agent-gallery-card__avatar-text"
+            loading="lazy"
           />
           <div className="agent-gallery-card__hero-meta">
             <span className="agent-name-emotion-row">

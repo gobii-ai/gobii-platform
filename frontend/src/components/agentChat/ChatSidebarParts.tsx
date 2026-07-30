@@ -289,6 +289,7 @@ export function AgentListItem({
             className="agent-roster-item__avatar"
             imageClassName="agent-roster-item__avatar-image"
             textClassName="agent-roster-item__avatar-text"
+            loading="lazy"
           />
           {showCollapsedUnreadBadge ? (
             <span

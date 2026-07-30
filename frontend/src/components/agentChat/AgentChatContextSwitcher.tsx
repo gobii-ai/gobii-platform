@@ -8,7 +8,7 @@ export type AgentChatContextSwitcherData = {
   current: ConsoleContext
   personal: ConsoleContext
   organizations: ConsoleContextOption[]
-  onSwitch: (context: ConsoleContext) => void | Promise<void>
+  onSwitch: (context: ConsoleContext) => void | Promise<unknown>
   isBusy?: boolean
   errorMessage?: string | null
   onCreateOrganization?: () => void

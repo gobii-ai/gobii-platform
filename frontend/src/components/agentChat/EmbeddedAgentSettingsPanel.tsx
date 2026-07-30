@@ -100,6 +100,7 @@ export function EmbeddedAgentSettingsPanel({
     void Promise.allSettled([
       refetch(),
       queryClient.invalidateQueries({ queryKey: ['agent-roster'], exact: false }),
+      queryClient.invalidateQueries({ queryKey: ['agent-profile'], exact: false }),
       queryClient.invalidateQueries({ queryKey: ['agent-quick-settings', payload.agentId], exact: true }),
       queryClient.invalidateQueries({ queryKey: ['agent-addons', payload.agentId], exact: true }),
     ])

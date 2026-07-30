@@ -190,6 +190,7 @@ type AvatarProps = {
   imageClassName?: string
   textClassName?: string
   fallbackStyle?: CSSProperties
+  loading?: 'eager' | 'lazy'
 }
 
 export function AgentChatAvatar({
@@ -199,6 +200,7 @@ export function AgentChatAvatar({
   imageClassName,
   textClassName,
   fallbackStyle,
+  loading,
 }: AvatarProps) {
   return (
     <AgentAvatarBadge
@@ -208,6 +210,7 @@ export function AgentChatAvatar({
       imageClassName={joinClassNames('agent-chat-avatar__image', imageClassName)}
       textClassName={joinClassNames('agent-chat-avatar__text', textClassName)}
       fallbackStyle={fallbackStyle}
+      loading={loading}
     />
   )
 }

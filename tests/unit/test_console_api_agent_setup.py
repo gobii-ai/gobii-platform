@@ -559,8 +559,17 @@ class AgentSetupApiTests(TestCase):
         session.save()
         return org
 
+    @patch("util.subscription_helper.reconcile_user_plan_from_stripe")
+    @patch("console.insight_views.get_user_plan", return_value={"id": PlanNames.FREE})
+    @patch("console.insight_views._should_include_agent_setup_insights", return_value=True)
     @patch("console.insight_views.get_agent_daily_credit_state")
-    def test_insights_usage_metadata_includes_today_and_month_usage(self, mock_daily_state):
+    def test_insights_usage_metadata_includes_today_and_month_usage(
+        self,
+        mock_daily_state,
+        _mock_should_include_setup,
+        mock_get_user_plan,
+        mock_reconcile_plan,
+    ):
         agent = self._create_agent()
         self._create_task_credit()
         mock_daily_state.return_value = {
@@ -584,6 +593,8 @@ class AgentSetupApiTests(TestCase):
         self.assertEqual(metadata["monthUsage"]["limit"], 100.0)
         self.assertEqual(metadata["monthUsage"]["percentUsed"], 25.0)
         self.assertEqual(metadata["usageUrl"], "/app/usage")
+        mock_get_user_plan.assert_called_with(self.user)
+        mock_reconcile_plan.assert_not_called()
 
     @patch("console.insight_views.get_agent_daily_credit_state")
     def test_insights_usage_metadata_handles_unlimited_daily_credits(self, mock_daily_state):

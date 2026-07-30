@@ -6579,6 +6579,8 @@
     }
 }
 .agent-roster-item {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 4rem;
     --roster-item-gap: 0.75rem;
     --roster-item-padding: 0.625rem 0.5rem;
     --roster-item-radius: 0.5rem;
@@ -7952,6 +7954,8 @@
     }
 }
 .agent-gallery-card {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 18rem;
     position: relative;
     display: flex;
     min-height: 0;

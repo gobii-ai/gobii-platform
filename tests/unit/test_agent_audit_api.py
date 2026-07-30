@@ -352,7 +352,22 @@ class StaffAgentAuditAPITests(TestCase):
         payload = response.json()
         self.assertTrue(payload["context"]["isStaffView"])
         entry = next(item for item in payload["agents"] if item["id"] == str(self.agent.id))
-        self.assertFalse(entry["can_send_messages"])
+        self.assertNotIn("can_send_messages", entry)
+        profile_response = self.client.get(
+            f"/console/api/agents/{self.agent.id}/profile/",
+            HTTP_X_GOBII_STAFF_CONTEXT_TYPE="personal",
+            HTTP_X_GOBII_STAFF_CONTEXT_ID=str(self.nonstaff.id),
+        )
+        self.assertEqual(profile_response.status_code, 200)
+        profile_payload = profile_response.json()
+        self.assertFalse(profile_payload["can_send_messages"])
+        self.assertTrue({
+            "listing_description",
+            "daily_credit_remaining",
+            "developer_live_chat_url",
+            "preferred_llm_tier",
+            "enabled_system_skills",
+        }.issubset(profile_payload))
         self.assertEqual(dict(self.client.session), session_before)
 
         user_message_response = self.client.post(
@@ -418,7 +433,41 @@ class StaffAgentAuditAPITests(TestCase):
         self.assertEqual(response.status_code, 200)
         roster_ids = {item["id"] for item in response.json()["agents"]}
         self.assertTrue({str(agent.id) for agent in agents}.issubset(roster_ids))
-        self.assertFalse(any(item["can_send_messages"] for item in response.json()["agents"]))
+        self.assertFalse(any("can_send_messages" in item for item in response.json()["agents"]))
+
+    @patch("console.api_views.enrich_agents_for_card_surface")
+    @patch("console.views.reconcile_user_plan_from_stripe")
+    def test_roster_uses_local_plan_and_lightweight_entries(
+        self,
+        mock_reconcile_plan,
+        mock_enrich_agents,
+    ):
+        response = self.client.get(
+            "/console/api/agents/roster/",
+            HTTP_X_GOBII_STAFF_CONTEXT_TYPE="personal",
+            HTTP_X_GOBII_STAFF_CONTEXT_ID=str(self.nonstaff.id),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        entry = next(item for item in response.json()["agents"] if item["id"] == str(self.agent.id))
+        self.assertTrue({
+            "id",
+            "name",
+            "avatar_url",
+            "processing_active",
+            "mini_description",
+            "display_tags",
+            "can_manage_agent",
+        }.issubset(entry))
+        self.assertTrue({
+            "listing_description",
+            "daily_credit_remaining",
+            "developer_live_chat_url",
+            "preferred_llm_tier",
+            "enabled_system_skills",
+        }.isdisjoint(entry))
+        mock_reconcile_plan.assert_not_called()
+        mock_enrich_agents.assert_not_called()
 
     def test_staff_roster_includes_requested_eval_soft_deleted_agent(self):
         PersistentAgent.objects.filter(id=self.agent.id).update(

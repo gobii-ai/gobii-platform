@@ -55,6 +55,9 @@ const immersiveShellSlice = createSlice({
     setSidebarMode(state, action: PayloadAction<AgentChatSidebarMode>) {
       state.sidebarMode = action.payload
     },
+    setSidebarModeTransient(state, action: PayloadAction<AgentChatSidebarMode>) {
+      state.sidebarMode = action.payload
+    },
     setViewer(state, action: PayloadAction<ImmersiveShellViewerState>) {
       state.viewer = action.payload
     },
