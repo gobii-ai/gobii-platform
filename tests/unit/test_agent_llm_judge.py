@@ -1070,6 +1070,31 @@ class AgentJudgeTests(TestCase):
             1,
         )
 
+    def test_automatic_judge_uses_supplied_eval_routing_profile(self):
+        self._add_failed_tool_trigger()
+        routing_profile = SimpleNamespace(name="eval-snapshot")
+        response = _judge_response(
+            {
+                "suggestion_type": NO_ACTION,
+                "message": "No action needed.",
+            }
+        )
+
+        with patch(
+            "api.agent.core.agent_judge.get_agent_judge_llm_config",
+            return_value=("test-provider", "test-model", {}),
+        ) as config_mock, patch(
+            "api.agent.core.agent_judge.run_completion",
+            return_value=response,
+        ):
+            maybe_run_agent_judge(
+                self.agent,
+                tools=[],
+                routing_profile=routing_profile,
+            )
+
+        config_mock.assert_called_once_with(routing_profile=routing_profile)
+
     def test_wall_clock_cooldown_blocks_judge_even_after_step_gap(self):
         PersistentAgentCompletion.objects.create(
             agent=self.agent,
@@ -1126,4 +1151,4 @@ class AgentJudgeTests(TestCase):
 
         self.agent.refresh_from_db()
         self.assertEqual(get_agent_llm_tier(self.agent), before)
-        config_mock.assert_called_once_with()
+        config_mock.assert_called_once_with(routing_profile=None)

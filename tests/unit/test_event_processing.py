@@ -3789,6 +3789,64 @@ class PromptContextBuilderTests(TestCase):
         self.assertEqual(mock_completion.call_count, 2)
         mock_billing_snapshot.assert_called_once_with(self.user)
 
+    def test_agent_judge_runs_after_same_cycle_tool_continuation(self):
+        enable_tools(self.agent, ["sqlite_batch"])
+
+        tool_call = MagicMock()
+        tool_call.function = MagicMock()
+        tool_call.function.name = "sqlite_batch"
+        tool_call.function.arguments = '{"sql": "SELECT 1", "will_continue_work": true}'
+
+        first_message = MagicMock()
+        first_message.tool_calls = [tool_call]
+        first_message.function_call = None
+        first_message.content = None
+        first_response = MagicMock()
+        first_response.choices = [MagicMock(message=first_message)]
+        first_response.model_extra = {}
+
+        final_message = MagicMock()
+        final_message.tool_calls = None
+        final_message.function_call = None
+        final_message.content = "Decision-ready result"
+        final_response = MagicMock()
+        final_response.choices = [MagicMock(message=final_message)]
+        final_response.model_extra = {}
+
+        token_usage = {
+            "prompt_tokens": 5,
+            "completion_tokens": 5,
+            "total_tokens": 10,
+            "model": "mock-model",
+            "provider": "mock-provider",
+            "cached_tokens": 0,
+        }
+
+        with patch("api.agent.core.prompt_context.ensure_steps_compacted"), \
+             patch("api.agent.core.prompt_context.ensure_comms_compacted"), \
+             patch("api.agent.core.event_processing.build_prompt_context", return_value=([{"role": "system", "content": "sys"}], 1000, None)), \
+             patch("api.agent.core.event_processing.get_llm_config_with_failover", return_value=[("mock", "mock-model", {})]), \
+             patch("api.agent.core.event_processing._completion_with_failover", side_effect=[(first_response, token_usage), (final_response, token_usage)]) as mock_completion, \
+             patch("api.agent.core.event_processing.execute_enabled_tool", return_value={"status": "ok"}), \
+             patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None}), \
+             patch("api.agent.core.event_processing.maybe_run_agent_judge") as mock_judge:
+            from api.agent.core import event_processing as ep
+
+            mock_judge.side_effect = lambda *_args, **_kwargs: self.assertEqual(
+                mock_completion.call_count,
+                2,
+            )
+            with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 2):
+                _run_agent_loop(self.agent, is_first_run=False)
+
+        self.assertEqual(mock_completion.call_count, 2)
+        mock_judge.assert_called_once_with(
+            self.agent,
+            tools=ANY,
+            extra_trigger_reasons=[],
+            routing_profile=None,
+        )
+
     def test_warning_status_requires_followup(self):
         """Tool warning status should trigger another loop iteration."""
         enable_tools(self.agent, ["sqlite_batch"])
@@ -6201,6 +6259,7 @@ class OrchestratorHumanInputInterruptTests(TestCase):
             self.agent,
             tools=[],
             extra_trigger_reasons=["burn_rate_tier_step_down"],
+            routing_profile=None,
         )
 
     @patch("api.agent.core.event_processing._schedule_agent_follow_up")
