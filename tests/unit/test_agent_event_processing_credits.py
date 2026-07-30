@@ -1358,8 +1358,13 @@ class PersistentAgentToolCreditTests(TestCase):
                 code=PersistentAgentSystemStep.Code.BURN_RATE_COOLDOWN,
             ).exists()
         )
-        track_event_mock.assert_called_once()
-        track_kwargs = track_event_mock.call_args.kwargs
+        burn_rate_calls = [
+            call
+            for call in track_event_mock.call_args_list
+            if call.kwargs["event"] == AnalyticsEvent.PERSISTENT_AGENT_BURN_RATE_RUNTIME_TIER_STEPPED_DOWN
+        ]
+        self.assertEqual(len(burn_rate_calls), 1)
+        track_kwargs = burn_rate_calls[0].kwargs
         self.assertEqual(track_kwargs["user_id"], self.user.id)
         self.assertEqual(
             track_kwargs["event"],
