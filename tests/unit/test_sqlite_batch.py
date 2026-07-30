@@ -808,7 +808,8 @@ class SqliteBatchCoreTests(SqliteBatchTestCase):
             "prefer one-batch INSERT ... SELECT from __messages",
             "After payload inspection, bind observed values",
             "never put them in SQL",
-            "WHERE 1=1 before ON CONFLICT",
+            "VALUES match columns/no WHERE",
+            "INSERT SELECT needs WHERE 1=1 before ON CONFLICT",
             "group_concat(DISTINCT x)",
             "Never put sourced facts/URLs in SQL",
             "import siblings singly",
@@ -845,6 +846,7 @@ class SqliteBatchCoreTests(SqliteBatchTestCase):
             1,
         )
         sql_description = definition["function"]["parameters"]["properties"]["sql"]["description"]
+        self.assertNotIn("Upsert stable keys; put WHERE 1=1 before ON CONFLICT", description)
         self.assertIn("json_each(:rows)", sql_description)
         self.assertIn("$.fields.<name>", sql_description)
         self.assertIn("t.result_id/t.source_url provenance", sql_description)

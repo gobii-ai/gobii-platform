@@ -39,6 +39,7 @@ UNSAFE_BURST_GUARDRAIL = "agent_schedule_unsafe_burst_guardrail"
 BULK_LIMIT_GUARDRAIL = "agent_schedule_bulk_limit_guardrail"
 IMPLIED_MONITORING_DEFAULTS = "agent_schedule_implied_monitoring_defaults"
 REPEATABLE_REPORT_NUDGE = "agent_schedule_repeatable_report_nudge"
+DURABLE_RULE_WITH_MULTIPLE_RECURRING = "agent_schedule_durable_rule_with_multiple_recurring"
 
 
 @dataclass(frozen=True)
@@ -76,6 +77,16 @@ AGENT_SCHEDULING_CASES = (
             "4:30 PM Eastern, prepare a separate weekly support trends recap. Keep both running."
         ),
         "multiple",
+    ),
+    AgentSchedulingCase(
+        DURABLE_RULE_WITH_MULTIPLE_RECURRING,
+        "A durable behavior correction plus two cadences should persist together without SQL recovery.",
+        (
+            "Set this up as an ongoing rule: every Monday at 9 AM Eastern, prepare a warm, thoughtful image "
+            "for #internal; every Friday at 9 AM Eastern, prepare a playful image for #memenergy. Keep those "
+            "two energies distinct. Don't make or post an image now."
+        ),
+        "durable_multiple",
     ),
     AgentSchedulingCase(
         EXACT_DATETIME_SECONDS,
@@ -151,6 +162,7 @@ def _cron_matches(expression, *, minute, hour, weekdays):
     actual = fields[4].replace(" ", "")
     aliases = {
         "weekdays": {"1-5", "mon-fri", "1,2,3,4,5", "mon,tue,wed,thu,fri"},
+        "monday": {"1", "mon"},
         "tuesday": {"2", "tue"},
         "friday": {"5", "fri"},
     }
@@ -197,13 +209,23 @@ def _schedule_sql_strategy_failures(case, calls, *, exact_target=None):
     ]
     reads_schedules = bool(re.search(r"\bselect\b.*\bfrom\s+[\"`\[]?__agent_schedules\b", sql, re.I | re.S))
     failures = []
+    if any(not _call_succeeded(call) for call in sqlite_calls):
+        failures.append("a SQLite schedule call did not complete successfully")
 
-    if case.expected_action in {"monitor", "multiple", "exact", "timer", "update", "cancel"}:
+    if case.expected_action in {
+        "monitor",
+        "multiple",
+        "durable_multiple",
+        "exact",
+        "timer",
+        "update",
+        "cancel",
+    }:
         if not mutation_calls:
             failures.append("no __agent_schedules or legacy schedule mutation was attempted")
         elif not all(_call_succeeded(call) for call in mutation_calls):
             failures.append("a schedule mutation did not complete successfully")
-    if case.expected_action in {"timer", "update", "cancel", "list"} and not reads_schedules:
+    if case.expected_action in {"timer", "update", "cancel"} and not reads_schedules:
         failures.append("existing schedule state was not queried before the decision")
     if case.expected_action in {"unsafe"} and mutation_calls:
         failures.append("unsafe cadence was attempted instead of rejected before mutation")
@@ -379,6 +401,10 @@ class AgentSchedulingScenario(EvalScenario, ScenarioExecutionTools):
             messages=messages,
             exact_target=exact_target,
         )
+        if self.case.expected_action == "durable_multiple":
+            charter = PersistentAgent.objects.only("charter").get(id=agent_id).charter.casefold()
+            if not all(term in charter for term in ("#internal", "#memenergy", "monday", "friday")):
+                state_failures.append("durable channel behavior was not saved in the charter")
         self._record_check(
             run_id,
             "verify_schedule_state",
@@ -446,6 +472,23 @@ class AgentSchedulingScenario(EvalScenario, ScenarioExecutionTools):
                 failures.append("weekday triage cadence was not 08:05")
             elif not _cron_matches(recap[0].expression, minute=30, hour=16, weekdays="friday"):
                 failures.append("Friday recap cadence was not 16:30")
+        elif action == "durable_multiple":
+            monday = [
+                row
+                for row in requested_active
+                if "#internal" in (row.instruction or "").casefold()
+                and _cron_matches(row.expression, minute=0, hour=9, weekdays="monday")
+            ]
+            friday = [
+                row
+                for row in requested_active
+                if "#memenergy" in (row.instruction or "").casefold()
+                and _cron_matches(row.expression, minute=0, hour=9, weekdays="friday")
+            ]
+            if len(requested_active) != 2 or len(monday) != 1 or len(friday) != 1:
+                failures.append("expected two independent channel-image jobs")
+            elif any(row.timezone != "America/New_York" for row in (*monday, *friday)):
+                failures.append("channel-image jobs did not preserve their Eastern timezone")
         elif action == "exact":
             once = [row for row in requested_active if row.kind == PersistentAgentSchedule.Kind.ONCE]
             expected = exact_target.astimezone(ZoneInfo("UTC"))
@@ -494,8 +537,9 @@ class AgentSchedulingScenario(EvalScenario, ScenarioExecutionTools):
         elif action == "list":
             if after != before:
                 failures.append("listing schedules changed persisted state")
+            normalized_body = re.sub(r"[-_]+", " ", body)
             for name in ("morning digest", "friday recap", "contract reminder"):
-                if name not in body:
+                if name not in normalized_body:
                     failures.append(f"schedule report omitted {name}")
             if (
                 "onboarding_checkin" in before
@@ -507,7 +551,7 @@ class AgentSchedulingScenario(EvalScenario, ScenarioExecutionTools):
             if requested_active:
                 failures.append("unsafe every-second cadence became active")
             if not re.search(
-                r"\b(?:(?:too|extremely|unreasonably)\s+frequent|limit|minimum|safer|can't|cannot|won't|not feasible|flood|resources?)\b",
+                r"\b(?:(?:too|extremely|unreasonably)\s+frequent|limit|minimum|safer|can't|cannot|won't|isn't feasible|not feasible|infeasible|flood|resources?)\b",
                 body,
             ):
                 failures.append("agent did not explain the safe scheduling boundary")

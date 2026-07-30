@@ -50,8 +50,10 @@ class ReadFileToolTests(TestCase):
         self.assertEqual(properties["response_format"]["enum"], ["markdown", "raw_text"])
         self.assertIn("defaults to", properties["response_format"]["description"].lower())
         self.assertIn("pdf", tool["function"]["description"].lower())
-        self.assertIn("http(s) urls", tool["function"]["description"].lower())
-        self.assertIn("tool-result ids are sqlite rows, not paths", tool["function"]["description"].lower())
+        self.assertIn("urls use http", tool["function"]["description"].lower())
+        self.assertIn("auth/credential refs are opaque", tool["function"]["description"].lower())
+        self.assertIn("result ids are sqlite rows, not paths", tool["function"]["description"].lower())
+        self.assertIn("not a url or auth/credential ref", properties["path"]["description"].lower())
 
     def test_markitdown_prompt_requests_description_and_verbatim_text(self):
         self.assertIn("return exactly two labeled sections", MARKITDOWN_OCR_PROMPT.lower())
