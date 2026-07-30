@@ -841,7 +841,6 @@ export type AgentChatPageProps = {
   pipedreamAppsSettingsUrl?: string | null
   pipedreamAppSearchUrl?: string | null
   nativeIntegrationsUrl?: string | null
-  computerConnectionsUrl?: string | null
   onClose?: () => void
   onCreateAgent?: () => void
   onAgentCreated?: (agentId: string) => void
@@ -888,7 +887,6 @@ export function AgentChatPage({
   pipedreamAppsSettingsUrl = null,
   pipedreamAppSearchUrl = null,
   nativeIntegrationsUrl = null,
-  computerConnectionsUrl = null,
   onClose,
   onCreateAgent,
   onAgentCreated,
@@ -4579,7 +4577,6 @@ export function AgentChatPage({
         pipedreamAppsSettingsUrl={pipedreamAppsSettingsUrl}
         pipedreamAppSearchUrl={pipedreamAppSearchUrl}
         nativeIntegrationsUrl={nativeIntegrationsUrl}
-        computerConnectionsUrl={computerConnectionsUrl}
         pendingActionRequests={pendingActionRequests}
         events={timelineEvents}
         displayEvents={displayEvents}

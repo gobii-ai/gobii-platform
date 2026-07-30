@@ -14,20 +14,17 @@ import {
   approveComputerPairing,
   fetchComputerPairing,
   fetchComputers,
+  getComputerConnectionsUrl,
   revokeComputer,
   revokeComputerAssignment,
   updateComputer,
+  type ComputerAgent,
   type ComputerDevice,
 } from '../../api/computers'
-import { Modal } from '../common/Modal'
 import { InlineStatusBanner } from '../common/InlineStatusBanner'
+import { ModalForm } from '../common/ModalForm'
 import { SettingsActionButton, SettingsStatusBadge } from '../agentSettings/SettingsControls'
 import { SettingsSurface, SurfaceHeader, type SettingsSurfaceVariant } from '../common/SettingsSurface'
-
-type ComputerConnectionsPanelProps = {
-  url: string
-  variant?: SettingsSurfaceVariant
-}
 
 function deviceState(device: ComputerDevice): { label: string; tone: 'success' | 'warning' | 'danger' | 'neutral' } {
   if (device.update_required) return { label: 'Update required', tone: 'danger' }
@@ -39,6 +36,78 @@ function deviceState(device: ComputerDevice): { label: string; tone: 'success' |
 function formatLastSeen(value: string | null): string {
   if (!value) return 'Never'
   return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value))
+}
+
+function AgentSelect({
+  agents,
+  value,
+  onChange,
+}: {
+  agents: ComputerAgent[]
+  value: string
+  onChange: (value: string) => void
+}) {
+  return (
+    <label className="block text-sm font-medium text-slate-800">
+      Agent
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="mt-1 block w-full rounded-lg border-slate-300"
+      >
+        <option value="">Choose an agent</option>
+        {agents.map((agent) => (
+          <option key={agent.id} value={agent.id}>
+            {agent.organization_name ? `${agent.organization_name} · ` : 'Personal · '}{agent.name}
+          </option>
+        ))}
+      </select>
+    </label>
+  )
+}
+
+type ApprovalOption = {
+  key: string
+  name: string
+  detail?: string
+  disabled?: boolean
+}
+
+function AppApprovalChecklist({
+  apps,
+  selected,
+  onChange,
+}: {
+  apps: ApprovalOption[]
+  selected: string[]
+  onChange: (selected: string[]) => void
+}) {
+  return (
+    <fieldset>
+      <legend className="text-sm font-medium text-slate-800">Approved apps</legend>
+      <div className="mt-2 space-y-2">
+        {apps.map((app) => (
+          <label key={app.key} className="flex items-start gap-3 rounded-lg border border-slate-200 p-3">
+            <input
+              type="checkbox"
+              disabled={app.disabled}
+              checked={selected.includes(app.key)}
+              onChange={(event) => onChange(
+                event.target.checked
+                  ? [...selected, app.key]
+                  : selected.filter((key) => key !== app.key),
+              )}
+              className="mt-0.5 rounded border-slate-300 text-blue-600"
+            />
+            <span>
+              <span className="block text-sm font-medium text-slate-900">{app.name}</span>
+              {app.detail ? <span className="block text-xs text-slate-500">{app.detail}</span> : null}
+            </span>
+          </label>
+        ))}
+      </div>
+    </fieldset>
+  )
 }
 
 function PairingModal({
@@ -62,7 +131,6 @@ function PairingModal({
   const agents = pairingQuery.data?.agents ?? []
   const [agentId, setAgentId] = useState('')
   const [selectedAppOverrides, setSelectedAppOverrides] = useState<string[] | null>(null)
-  const [error, setError] = useState<string | null>(null)
   const defaultSelectedApps = pairing?.apps
     .filter((app) => app.type === 'bundled')
     .map((app) => app.key) ?? []
@@ -75,28 +143,26 @@ function PairingModal({
       selected_app_keys: selectedApps,
     }),
     onSuccess: onApproved,
-    onError: (mutationError) => setError(mutationError instanceof Error ? mutationError.message : 'Pairing failed.'),
   })
+  const error = approveMutation.error instanceof Error ? approveMutation.error.message : null
 
   return (
-    <Modal
+    <ModalForm
+      id="approve-computer-pairing"
       title="Connect this computer"
       subtitle="Confirm the verification code, choose one agent, and approve the desktop apps it may use."
       icon={Monitor}
       onClose={onClose}
-      footer={(
-        <div className="flex justify-end gap-2">
-          <SettingsActionButton surface="standalone" onClick={onClose}>Cancel</SettingsActionButton>
-          <SettingsActionButton
-            surface="standalone"
-            tone="primary"
-            disabled={!pairing || !agentId || approveMutation.isPending}
-            onClick={() => approveMutation.mutate()}
-          >
-            {approveMutation.isPending ? 'Connecting…' : 'Connect computer'}
-          </SettingsActionButton>
-        </div>
-      )}
+      onSubmit={(event) => {
+        event.preventDefault()
+        approveMutation.mutate()
+      }}
+      submitLabel="Connect computer"
+      submittingLabel="Connecting…"
+      submitting={approveMutation.isPending}
+      submitDisabled={!pairing || !agentId}
+      errorMessages={error ? [error] : null}
+      formClassName="space-y-5"
     >
       {pairingQuery.isLoading ? <p className="text-sm text-slate-600">Loading pairing request…</p> : null}
       {pairingQuery.error ? (
@@ -109,50 +175,19 @@ function PairingModal({
             <div className="mt-1 text-xs text-blue-800">{pairing.platform} · {pairing.architecture} · v{pairing.client_version}</div>
             <div className="mt-3 font-mono text-2xl font-semibold tracking-[0.18em] text-blue-950">{userCode}</div>
           </div>
-          <label className="block text-sm font-medium text-slate-800">
-            Agent
-            <select
-              value={agentId}
-              onChange={(event) => setAgentId(event.target.value)}
-              className="mt-1 block w-full rounded-lg border-slate-300"
-            >
-              <option value="">Choose an agent</option>
-              {agents.map((agent) => (
-                <option key={agent.id} value={agent.id}>
-                  {agent.organization_name ? `${agent.organization_name} · ` : 'Personal · '}{agent.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <fieldset>
-            <legend className="text-sm font-medium text-slate-800">Approved apps</legend>
-            <div className="mt-2 space-y-2">
-              {pairing.apps.map((app) => (
-                <label key={app.key} className="flex items-start gap-3 rounded-lg border border-slate-200 p-3">
-                  <input
-                    type="checkbox"
-                    checked={selectedApps.includes(app.key)}
-                    onChange={(event) => setSelectedAppOverrides(
-                      event.target.checked
-                        ? [...selectedApps, app.key]
-                        : selectedApps.filter((key) => key !== app.key),
-                    )}
-                    className="mt-0.5 rounded border-slate-300 text-blue-600"
-                  />
-                  <span>
-                    <span className="block text-sm font-medium text-slate-900">{app.display_name}</span>
-                    <span className="block text-xs text-slate-500">
-                      {app.type === 'bundled' ? 'Bundled with computer.cpp' : 'Custom Lua app'}
-                    </span>
-                  </span>
-                </label>
-              ))}
-            </div>
-          </fieldset>
-          {error ? <InlineStatusBanner variant="error">{error}</InlineStatusBanner> : null}
+          <AgentSelect agents={agents} value={agentId} onChange={setAgentId} />
+          <AppApprovalChecklist
+            apps={pairing.apps.map((app) => ({
+              key: app.key,
+              name: app.display_name,
+              detail: app.type === 'bundled' ? 'Bundled with computer.cpp' : 'Custom Lua app',
+            }))}
+            selected={selectedApps}
+            onChange={setSelectedAppOverrides}
+          />
         </div>
       ) : null}
-    </Modal>
+    </ModalForm>
   )
 }
 
@@ -165,7 +200,7 @@ function ManageComputerModal({
 }: {
   url: string
   device: ComputerDevice
-  agents: Array<{ id: string; name: string; organization_name: string | null }>
+  agents: ComputerAgent[]
   onClose: () => void
   onSaved: () => void
 }) {
@@ -174,7 +209,6 @@ function ManageComputerModal({
   const [selectedApps, setSelectedApps] = useState(
     device.apps.filter((app) => app.approval_state === 'approved').map((app) => app.app_key),
   )
-  const [error, setError] = useState<string | null>(null)
   const saveMutation = useMutation({
     mutationFn: () => updateComputer(url, device.id, {
       display_name: name,
@@ -184,80 +218,56 @@ function ManageComputerModal({
         .map((app) => ({ app_key: app.app_key, schema_sha256: app.schema_sha256 })),
     }),
     onSuccess: onSaved,
-    onError: (mutationError) => setError(mutationError instanceof Error ? mutationError.message : 'Update failed.'),
   })
+  const error = saveMutation.error instanceof Error ? saveMutation.error.message : null
   return (
-    <Modal
+    <ModalForm
+      id="manage-computer"
       title={`Manage ${device.display_name}`}
       subtitle="Changes apply only to this personal computer and its current agent grant."
       icon={Settings2}
       onClose={onClose}
-      footer={(
-        <div className="flex justify-end gap-2">
-          <SettingsActionButton surface="standalone" onClick={onClose}>Cancel</SettingsActionButton>
-          <SettingsActionButton
-            surface="standalone"
-            tone="primary"
-            disabled={!name.trim() || !agentId || saveMutation.isPending}
-            onClick={() => saveMutation.mutate()}
-          >
-            {saveMutation.isPending ? 'Saving…' : 'Save changes'}
-          </SettingsActionButton>
-        </div>
-      )}
+      onSubmit={(event) => {
+        event.preventDefault()
+        saveMutation.mutate()
+      }}
+      submitLabel="Save changes"
+      submitting={saveMutation.isPending}
+      submitDisabled={!name.trim() || !agentId}
+      errorMessages={error ? [error] : null}
+      formClassName="space-y-5"
     >
-      <div className="space-y-5">
-        <label className="block text-sm font-medium text-slate-800">
-          Computer name
-          <input value={name} onChange={(event) => setName(event.target.value)} className="mt-1 block w-full rounded-lg border-slate-300" />
-        </label>
-        <label className="block text-sm font-medium text-slate-800">
-          Agent
-          <select value={agentId} onChange={(event) => setAgentId(event.target.value)} className="mt-1 block w-full rounded-lg border-slate-300">
-            <option value="">Choose an agent</option>
-            {agents.map((agent) => (
-              <option key={agent.id} value={agent.id}>
-                {agent.organization_name ? `${agent.organization_name} · ` : 'Personal · '}{agent.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <fieldset>
-          <legend className="text-sm font-medium text-slate-800">Approved apps</legend>
-          <div className="mt-2 space-y-2">
-            {device.apps.map((app) => (
-              <label key={app.app_key} className="flex items-start gap-3 rounded-lg border border-slate-200 p-3">
-                <input
-                  type="checkbox"
-                  disabled={!app.available}
-                  checked={selectedApps.includes(app.app_key)}
-                  onChange={(event) => setSelectedApps((current) => (
-                    event.target.checked
-                      ? [...current, app.app_key]
-                      : current.filter((key) => key !== app.app_key)
-                  ))}
-                  className="mt-0.5 rounded border-slate-300 text-blue-600"
-                />
-                <span className="text-sm text-slate-900">
-                  {app.display_name}
-                  {app.approval_state === 'pending_approval' ? (
-                    <span className="ml-2 text-xs font-medium text-amber-700">Updated schema requires approval</span>
-                  ) : null}
-                </span>
-              </label>
-            ))}
-          </div>
-        </fieldset>
-        {error ? <InlineStatusBanner variant="error">{error}</InlineStatusBanner> : null}
-      </div>
-    </Modal>
+      <label className="block text-sm font-medium text-slate-800">
+        Computer name
+        <input value={name} onChange={(event) => setName(event.target.value)} className="mt-1 block w-full rounded-lg border-slate-300" />
+      </label>
+      <AgentSelect agents={agents} value={agentId} onChange={setAgentId} />
+      <AppApprovalChecklist
+        apps={device.apps.map((app) => ({
+          key: app.app_key,
+          name: app.display_name,
+          detail: app.approval_state === 'pending_approval'
+            ? 'Updated schema requires approval'
+            : !app.available ? 'Unavailable' : undefined,
+          disabled: !app.available,
+        }))}
+        selected={selectedApps}
+        onChange={setSelectedApps}
+      />
+    </ModalForm>
   )
 }
 
-export function ComputerConnectionsPanel({ url, variant = 'embedded' }: ComputerConnectionsPanelProps) {
+export function ComputerConnectionsPanel({ variant = 'embedded' }: { variant?: SettingsSurfaceVariant }) {
+  const url = getComputerConnectionsUrl()
   const queryClient = useQueryClient()
   const queryKey = useMemo(() => ['computer-connections', url] as const, [url])
-  const query = useQuery({ queryKey, queryFn: () => fetchComputers(url), refetchInterval: 30_000 })
+  const query = useQuery({
+    queryKey,
+    queryFn: () => fetchComputers(url as string),
+    enabled: Boolean(url),
+    refetchInterval: 30_000,
+  })
   const [managedDevice, setManagedDevice] = useState<ComputerDevice | null>(null)
   const [message, setMessage] = useState<string | null>(null)
   const params = useMemo(() => new URLSearchParams(window.location.search), [])
@@ -279,7 +289,7 @@ export function ComputerConnectionsPanel({ url, variant = 'embedded' }: Computer
     window.history.replaceState(window.history.state, '', `${next.pathname}${next.search}${next.hash}`)
   }
 
-  if (query.isLoading || query.data?.enabled === false) return null
+  if (!url || query.isLoading || query.data?.enabled === false) return null
   if (query.error || !query.data?.downloads) {
     return <InlineStatusBanner variant="error" surface={surface}>Computer connections could not be loaded.</InlineStatusBanner>
   }

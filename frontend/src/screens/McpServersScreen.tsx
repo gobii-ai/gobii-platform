@@ -26,7 +26,6 @@ type McpServersScreenProps = {
   pipedreamAppsUrl?: string | null
   pipedreamAppSearchUrl?: string | null
   nativeIntegrationsUrl?: string | null
-  computerConnectionsUrl?: string | null
   oauthStartUrl: string
   oauthMetadataUrl: string
   oauthCallbackPath: string
@@ -46,7 +45,6 @@ export function McpServersScreen({
   pipedreamAppsUrl = null,
   pipedreamAppSearchUrl = null,
   nativeIntegrationsUrl = null,
-  computerConnectionsUrl = null,
   oauthStartUrl,
   oauthMetadataUrl,
   oauthCallbackPath,
@@ -276,12 +274,7 @@ export function McpServersScreen({
           embedded={isEmbedded}
         />
       ) : null}
-      {computerConnectionsUrl ? (
-        <ComputerConnectionsPanel
-          url={computerConnectionsUrl}
-          variant={isEmbedded ? 'embedded' : 'standalone'}
-        />
-      ) : null}
+      <ComputerConnectionsPanel variant={isEmbedded ? 'embedded' : 'standalone'} />
       <div className={tableShellClassName}>
         <SurfaceHeader
           variant={isEmbedded ? 'embedded' : 'standalone'}

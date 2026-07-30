@@ -1,5 +1,9 @@
 import { jsonFetch, jsonRequest } from './http'
 
+export function getComputerConnectionsUrl(): string | null {
+  return document.getElementById('gobii-frontend-root')?.dataset.computerConnectionsUrl || null
+}
+
 export type ComputerAgent = {
   id: string
   name: string
@@ -38,7 +42,6 @@ export type ComputerDevice = {
   apps: ComputerApp[]
   permissions: {
     can_manage_device: boolean
-    can_revoke_assignment: boolean
   }
 }
 

@@ -13781,83 +13781,52 @@ class OrganizationMembership(models.Model):
         unique_together = ("org", "user")
 
 
-def _revoke_invalid_computer_assignments(user_id, organization_id) -> None:
+def _revoke_computer_assignments(**filters) -> None:
     from api.services.computer_relay import revoke_assignment
-    from api.services.organization_permissions import ORG_AGENT_CONFIG_AUTHORITY_ROLES
 
-    remains_authorized = OrganizationMembership.objects.filter(
-        user_id=user_id,
-        org_id=organization_id,
-        status=OrganizationMembership.OrgStatus.ACTIVE,
-        role__in=ORG_AGENT_CONFIG_AUTHORITY_ROLES,
-    ).exists()
-    if remains_authorized:
-        return
     assignments = ComputerDeviceAssignment.objects.filter(
-        device__owner_id=user_id,
-        organization_id=organization_id,
         status=ComputerDeviceAssignment.Status.ACTIVE,
+        **filters,
     ).select_related("device")
     for assignment in assignments:
         revoke_assignment(assignment.device)
 
 
-@receiver(post_save, sender=OrganizationMembership)
+def _revoke_invalid_computer_assignments(user_id, organization_id) -> None:
+    from api.services.organization_permissions import ORG_AGENT_CONFIG_AUTHORITY_ROLES
+
+    if OrganizationMembership.objects.filter(
+        user_id=user_id,
+        org_id=organization_id,
+        status=OrganizationMembership.OrgStatus.ACTIVE,
+        role__in=ORG_AGENT_CONFIG_AUTHORITY_ROLES,
+    ).exists():
+        return
+    _revoke_computer_assignments(
+        device__owner_id=user_id,
+        organization_id=organization_id,
+    )
+
+
+@receiver([post_save, pre_delete], sender=OrganizationMembership)
 def revoke_computer_assignments_after_membership_change(sender, instance, **kwargs):
     transaction.on_commit(
         lambda: _revoke_invalid_computer_assignments(instance.user_id, instance.org_id)
     )
 
 
-@receiver(pre_delete, sender=OrganizationMembership)
-def revoke_computer_assignments_before_membership_delete(sender, instance, **kwargs):
-    from api.services.computer_relay import revoke_assignment
-
-    assignments = ComputerDeviceAssignment.objects.filter(
-        device__owner_id=instance.user_id,
-        organization_id=instance.org_id,
-        status=ComputerDeviceAssignment.Status.ACTIVE,
-    ).select_related("device")
-    for assignment in assignments:
-        revoke_assignment(assignment.device)
-
-
 @receiver(pre_delete, sender=Organization)
-def revoke_computer_assignments_before_organization_delete(sender, instance, **kwargs):
-    from api.services.computer_relay import revoke_assignment
-
-    assignments = ComputerDeviceAssignment.objects.filter(
-        organization=instance,
-        status=ComputerDeviceAssignment.Status.ACTIVE,
-    ).select_related("device")
-    for assignment in assignments:
-        revoke_assignment(assignment.device)
+@receiver(pre_delete, sender=PersistentAgent)
+def revoke_computer_assignments_before_owner_delete(sender, instance, **kwargs):
+    field = "organization" if sender is Organization else "agent"
+    _revoke_computer_assignments(**{field: instance})
 
 
 @receiver(post_save, sender=PersistentAgent)
 def revoke_computer_assignments_after_agent_deactivation(sender, instance, **kwargs):
     if instance.is_active and not instance.is_deleted:
         return
-    from api.services.computer_relay import revoke_assignment
-
-    assignments = ComputerDeviceAssignment.objects.filter(
-        agent=instance,
-        status=ComputerDeviceAssignment.Status.ACTIVE,
-    ).select_related("device")
-    for assignment in assignments:
-        revoke_assignment(assignment.device)
-
-
-@receiver(pre_delete, sender=PersistentAgent)
-def revoke_computer_assignments_before_agent_delete(sender, instance, **kwargs):
-    from api.services.computer_relay import revoke_assignment
-
-    assignments = ComputerDeviceAssignment.objects.filter(
-        agent=instance,
-        status=ComputerDeviceAssignment.Status.ACTIVE,
-    ).select_related("device")
-    for assignment in assignments:
-        revoke_assignment(assignment.device)
+    _revoke_computer_assignments(agent=instance)
 
 
 class OrganizationInvite(models.Model):

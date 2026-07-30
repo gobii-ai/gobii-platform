@@ -570,7 +570,6 @@ type AgentComposerProps = {
   pipedreamAppsSettingsUrl?: string | null
   pipedreamAppSearchUrl?: string | null
   nativeIntegrationsUrl?: string | null
-  computerConnectionsUrl?: string | null
   compact?: boolean
   externalShellRef?: Ref<HTMLDivElement>
 }
@@ -617,7 +616,6 @@ export const AgentComposer = memo(function AgentComposer({
   pipedreamAppsSettingsUrl = null,
   pipedreamAppSearchUrl = null,
   nativeIntegrationsUrl = null,
-  computerConnectionsUrl = null,
   compact = false,
   externalShellRef,
 }: AgentComposerProps) {
@@ -2336,10 +2334,7 @@ export const AgentComposer = memo(function AgentComposer({
                   >
                     {ActiveNativePanel ? (
                       activeWorkingTab?.kind === 'computer' ? (
-                        <ComputerInsightPanel
-                          agentId={agentId}
-                          computerConnectionsUrl={computerConnectionsUrl}
-                        />
+                        <ComputerInsightPanel agentId={agentId} />
                       ) : (
                         <ActiveNativePanel
                           agentId={agentId}

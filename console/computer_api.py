@@ -1,7 +1,4 @@
-import json
-
 from django.conf import settings
-from django.core.cache import cache
 from django.core.exceptions import PermissionDenied
 from django.http import HttpRequest, HttpResponseBadRequest, JsonResponse
 from django.shortcuts import get_object_or_404
@@ -9,6 +6,7 @@ from django.utils import timezone
 from django.views import View
 from django.contrib.auth.mixins import LoginRequiredMixin
 
+from api.computer_http import parse_computer_json_payload
 from api.models import (
     ComputerDevice,
     ComputerDeviceAssignment,
@@ -21,6 +19,7 @@ from api.services.computer_relay import (
     approve_pairing,
     assign_device,
     computer_cpp_enabled_for_user,
+    computer_rate_limited,
     deny_pairing,
     manageable_agents_for_user,
     pairing_user_code_matches,
@@ -33,16 +32,6 @@ from api.services.organization_permissions import ORG_AGENT_CONFIG_AUTHORITY_ROL
 from console.context_helpers import build_console_context
 
 
-def _json_payload(request: HttpRequest) -> dict:
-    try:
-        payload = json.loads(request.body or b"{}")
-    except json.JSONDecodeError as exc:
-        raise ValueError("Request body must be valid JSON") from exc
-    if not isinstance(payload, dict):
-        raise ValueError("Request body must be a JSON object")
-    return payload
-
-
 def _enabled_or_response(request: HttpRequest):
     if computer_cpp_enabled_for_user(request.user):
         return None
@@ -50,14 +39,11 @@ def _enabled_or_response(request: HttpRequest):
 
 
 def _pairing_attempt_limited(request: HttpRequest, pairing_id) -> bool:
-    key = f"computer-pairing-code-attempt:{pairing_id}:{request.user.id}"
-    if cache.add(key, 1, timeout=settings.COMPUTER_CPP_PAIRING_TTL_SECONDS):
-        return False
-    try:
-        return cache.incr(key) > settings.COMPUTER_CPP_CODE_ATTEMPTS_PER_PAIRING_USER
-    except ValueError:
-        cache.set(key, 1, timeout=settings.COMPUTER_CPP_PAIRING_TTL_SECONDS)
-        return False
+    return computer_rate_limited(
+        f"computer-pairing-code-attempt:{pairing_id}:{request.user.id}",
+        limit=settings.COMPUTER_CPP_CODE_ATTEMPTS_PER_PAIRING_USER,
+        window_seconds=settings.COMPUTER_CPP_PAIRING_TTL_SECONDS,
+    )
 
 
 def _owner_device(request: HttpRequest, device_id) -> ComputerDevice:
@@ -178,7 +164,7 @@ class ComputerPairingApprovalAPIView(LoginRequiredMixin, View):
             return JsonResponse({"error": "rate_limited"}, status=429)
         pairing = get_object_or_404(ComputerPairingSession, id=pairing_id)
         try:
-            payload = _json_payload(request)
+            payload = parse_computer_json_payload(request)
             agent = get_object_or_404(PersistentAgent, id=payload.get("agent_id"))
             selected = payload.get("selected_app_keys")
             if not isinstance(selected, list):
@@ -211,7 +197,7 @@ class ComputerPairingDenyAPIView(LoginRequiredMixin, View):
             return JsonResponse({"error": "rate_limited"}, status=429)
         pairing = get_object_or_404(ComputerPairingSession, id=pairing_id)
         try:
-            payload = _json_payload(request)
+            payload = parse_computer_json_payload(request)
         except ValueError as exc:
             return HttpResponseBadRequest(str(exc))
         if not pairing_user_code_matches(pairing, payload.get("user_code")):
@@ -231,7 +217,7 @@ class ComputerDetailAPIView(LoginRequiredMixin, View):
             raise PermissionDenied("Computer connections are not enabled for this account")
         device = _owner_device(request, device_id)
         try:
-            payload = _json_payload(request)
+            payload = parse_computer_json_payload(request)
             display_name = None
             if "display_name" in payload:
                 display_name = str(payload["display_name"]).strip()[:128]

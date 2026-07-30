@@ -1,15 +1,14 @@
 import { useQuery } from '@tanstack/react-query'
 import { Monitor } from 'lucide-react'
 
-import { fetchComputers } from '../../../api/computers'
+import { fetchComputers, getComputerConnectionsUrl } from '../../../api/computers'
 
 export function ComputerInsightPanel({
   agentId = null,
-  computerConnectionsUrl = null,
 }: {
   agentId?: string | null
-  computerConnectionsUrl?: string | null
 }) {
+  const computerConnectionsUrl = getComputerConnectionsUrl()
   const query = useQuery({
     queryKey: ['computer-connections', computerConnectionsUrl, agentId],
     queryFn: () => fetchComputers(computerConnectionsUrl as string, agentId),

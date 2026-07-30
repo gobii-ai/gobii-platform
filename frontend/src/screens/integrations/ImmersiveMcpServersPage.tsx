@@ -9,7 +9,6 @@ type ImmersiveMcpServersPageProps = {
   nativeIntegrationsUrl?: string | null
   pipedreamAppsUrl?: string | null
   pipedreamAppSearchUrl?: string | null
-  computerConnectionsUrl?: string | null
 }
 
 export function ImmersiveMcpServersPage({
@@ -18,7 +17,6 @@ export function ImmersiveMcpServersPage({
   nativeIntegrationsUrl = '/console/api/native-integrations/',
   pipedreamAppsUrl = null,
   pipedreamAppSearchUrl = null,
-  computerConnectionsUrl = '/console/api/computers/',
 }: ImmersiveMcpServersPageProps) {
   return (
     <ImmersivePageFrame layout={layout}>
@@ -31,7 +29,6 @@ export function ImmersiveMcpServersPage({
         nativeIntegrationsUrl={nativeIntegrationsUrl}
         pipedreamAppsUrl={pipedreamAppsUrl}
         pipedreamAppSearchUrl={pipedreamAppSearchUrl}
-        computerConnectionsUrl={computerConnectionsUrl}
         oauthStartUrl="/console/api/mcp/oauth/start/"
         oauthMetadataUrl="/console/api/mcp/oauth/metadata/"
         oauthCallbackPath="/console/mcp/oauth/callback/"

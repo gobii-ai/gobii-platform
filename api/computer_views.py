@@ -1,19 +1,19 @@
-import json
 from urllib.parse import urlparse
 
 from django.conf import settings
-from django.core.cache import cache
 from django.http import HttpRequest, HttpResponseBadRequest, JsonResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
+from api.computer_http import parse_computer_json_payload
 from api.models import ComputerPairingSession
 from api.services.computer_relay import (
     ComputerRelayError,
     authenticate_relay_access_token,
     computer_client_version_supported,
+    computer_rate_limited,
     create_pairing_session,
     pairing_device_code_matches,
     redeem_pairing,
@@ -23,30 +23,8 @@ from api.services.computer_relay import (
 from util.analytics import Analytics
 
 
-def _json_payload(request: HttpRequest) -> dict:
-    if len(request.body) > 64 * 1024:
-        raise ValueError("Request body is too large")
-    try:
-        payload = json.loads(request.body or b"{}")
-    except json.JSONDecodeError as exc:
-        raise ValueError("Request body must be valid JSON") from exc
-    if not isinstance(payload, dict):
-        raise ValueError("Request body must be a JSON object")
-    return payload
-
-
 def _client_ip(request: HttpRequest) -> str:
     return Analytics.get_client_ip(request) or "unknown"
-
-
-def _rate_limited(key: str, *, limit: int, window_seconds: int) -> bool:
-    if cache.add(key, 1, timeout=window_seconds):
-        return False
-    try:
-        return int(cache.incr(key)) > limit
-    except ValueError:
-        cache.set(key, 1, timeout=window_seconds)
-        return False
 
 
 def _relay_url() -> str:
@@ -58,14 +36,14 @@ def _relay_url() -> str:
 @csrf_exempt
 @require_POST
 def computer_pairing_start(request: HttpRequest):
-    if _rate_limited(
+    if computer_rate_limited(
         f"computer-pairing-start:{_client_ip(request)}",
         limit=settings.COMPUTER_CPP_PAIRING_STARTS_PER_IP_HOUR,
         window_seconds=3600,
     ):
         return JsonResponse({"error": "rate_limited"}, status=429)
     try:
-        pairing, device_code, user_code = create_pairing_session(_json_payload(request))
+        pairing, device_code, user_code = create_pairing_session(parse_computer_json_payload(request))
     except ValueError as exc:
         return HttpResponseBadRequest(str(exc))
 
@@ -91,7 +69,7 @@ def computer_pairing_start(request: HttpRequest):
 def computer_pairing_exchange(request: HttpRequest, pairing_id):
     pairing = get_object_or_404(ComputerPairingSession, id=pairing_id)
     try:
-        payload = _json_payload(request)
+        payload = parse_computer_json_payload(request)
     except ValueError as exc:
         return HttpResponseBadRequest(str(exc))
     device_code = str(payload.get("device_code") or "")
@@ -135,7 +113,7 @@ def computer_pairing_exchange(request: HttpRequest, pairing_id):
 @require_POST
 def computer_token_refresh(request: HttpRequest):
     try:
-        payload = _json_payload(request)
+        payload = parse_computer_json_payload(request)
     except ValueError as exc:
         return HttpResponseBadRequest(str(exc))
     refresh_token = str(payload.get("refresh_token") or "")
@@ -147,15 +125,13 @@ def computer_token_refresh(request: HttpRequest):
         return JsonResponse({"error": "update_required"}, status=426)
     if protocol_version not in (None, settings.COMPUTER_CPP_RELAY_PROTOCOL_VERSION):
         return JsonResponse({"error": "update_required"}, status=426)
-    token_id = refresh_token.split(".", 1)[0]
-    if _rate_limited(
-        f"computer-token-refresh:{token_id}",
-        limit=settings.COMPUTER_CPP_REFRESHES_PER_DEVICE_HOUR,
-        window_seconds=3600,
-    ):
-        return JsonResponse({"error": "rate_limited"}, status=429)
     try:
         device, replacement, access_token = rotate_refresh_token(refresh_token)
+    except ComputerRelayError as exc:
+        return JsonResponse(
+            {"error": exc.code, "error_description": exc.message, "retryable": exc.retryable},
+            status=429 if exc.code == "rate_limited" else 400,
+        )
     except PermissionError as exc:
         return JsonResponse({"error": "invalid_grant", "error_description": str(exc)}, status=401)
     update_fields = []

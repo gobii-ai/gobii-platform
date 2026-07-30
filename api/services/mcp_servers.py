@@ -58,6 +58,15 @@ def agent_enabled_server_ids(agent: PersistentAgent) -> List[str]:
     ]
 
 
+def _agent_editable_server_ids(agent: PersistentAgent) -> Set[str]:
+    return {
+        str(server_id)
+        for server_id in PersistentAgentMCPServer.objects.filter(agent=agent)
+        .exclude(server_config__transport=MCPServerConfig.Transport.COMPUTER_RELAY)
+        .values_list("server_config_id", flat=True)
+    }
+
+
 def agent_enabled_personal_server_ids(agent: PersistentAgent) -> List[str]:
     """Return user-scoped MCP server IDs enabled for the agent."""
 
@@ -148,6 +157,8 @@ def _filter_sandbox_unavailable_servers(
 def set_server_assignments(server: MCPServerConfig, desired_agent_ids: IterableType[str]) -> None:
     """Assign the given server to the provided collection of agents."""
 
+    if server.transport == MCPServerConfig.Transport.COMPUTER_RELAY:
+        raise ValueError("Computer-managed MCP servers cannot be assigned manually.")
     if server.scope == MCPServerConfig.Scope.PLATFORM:
         raise ValueError("Platform-scoped servers cannot be assigned manually.")
 
@@ -333,7 +344,7 @@ def update_agent_personal_servers(
     """Set the personal (user-scoped) servers enabled for an agent."""
 
     desired_set = {str(pk) for pk in desired_ids}
-    existing_set = set(agent_enabled_server_ids(agent))
+    existing_set = _agent_editable_server_ids(agent)
 
     if not desired_set and not existing_set:
         return
@@ -344,7 +355,7 @@ def update_agent_personal_servers(
             user=agent.user,
             is_active=True,
             id__in=desired_set,
-        )
+        ).exclude(transport=MCPServerConfig.Transport.COMPUTER_RELAY)
     )
     valid_ids = {str(server.id) for server in valid_configs}
 
@@ -483,7 +494,7 @@ def update_agent_org_servers(
         raise ValueError("Organization MCP servers can only be configured for organization agents.")
 
     desired_set = {str(pk) for pk in desired_ids}
-    existing_set = set(agent_enabled_server_ids(agent))
+    existing_set = _agent_editable_server_ids(agent)
 
     if not desired_set and not existing_set:
         return
@@ -494,7 +505,7 @@ def update_agent_org_servers(
             organization_id=agent.organization_id,
             is_active=True,
             id__in=desired_set,
-        )
+        ).exclude(transport=MCPServerConfig.Transport.COMPUTER_RELAY)
     )
     valid_ids = {str(server.id) for server in valid_configs}
 

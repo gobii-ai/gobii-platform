@@ -11,9 +11,10 @@ from api.services.computer_relay import (
     authenticate_relay_access_token,
     clear_device_presence,
     computer_client_version_supported,
-    computer_relay_active_sockets,
-    record_computer_relay_event,
     computer_cpp_enabled_for_user,
+    computer_relay_active_sockets,
+    get_device_presence,
+    record_computer_relay_event,
     set_device_presence,
     sync_device_manifest,
 )
@@ -43,7 +44,6 @@ class ComputerRelayConsumer(AsyncJsonWebsocketConsumer):
         self.connection_generation = secrets.token_urlsafe(18)
         self.pending_replies: dict[str, str] = {}
         self.received_hello = False
-        from api.services.computer_relay import get_device_presence
 
         previous = get_device_presence(self.device.id)
         if previous:
@@ -55,11 +55,7 @@ class ComputerRelayConsumer(AsyncJsonWebsocketConsumer):
                     "payload": {"code": "superseded"},
                 },
             )
-        set_device_presence(
-            self.device.id,
-            channel_name=self.channel_name,
-            generation=self.connection_generation,
-        )
+            clear_device_presence(self.device.id, previous["generation"])
         self.socket_counted = True
         computer_relay_active_sockets.add(1, {"platform": self.device.platform})
         record_computer_relay_event("socket_connected", platform=self.device.platform)
@@ -127,15 +123,13 @@ class ComputerRelayConsumer(AsyncJsonWebsocketConsumer):
                 {"type": "error", "error": {"code": "invalid_message", "message": "Unknown message type"}}
             )
 
+    async def _reject(self, code: str, message: str, *, close_code: int):
+        await self.send_json({"type": "error", "error": {"code": code, "message": message}})
+        await self.close(code=close_code)
+
     async def _handle_hello(self, content):
         if int(content.get("protocol_version") or 0) != settings.COMPUTER_CPP_RELAY_PROTOCOL_VERSION:
-            await self.send_json(
-                {
-                    "type": "error",
-                    "error": {"code": "update_required", "message": "Relay protocol update required"},
-                }
-            )
-            await self.close(code=4406)
+            await self._reject("update_required", "Relay protocol update required", close_code=4406)
             return
         client_version = str(content.get("client_version") or "")
         if not computer_client_version_supported(client_version):
@@ -143,22 +137,17 @@ class ComputerRelayConsumer(AsyncJsonWebsocketConsumer):
                 "client_version_rejected",
                 platform=self.device.platform,
             )
-            await self.send_json(
-                {
-                    "type": "error",
-                    "error": {"code": "update_required", "message": "Computer application update required"},
-                }
+            await self._reject(
+                "update_required",
+                "Computer application update required",
+                close_code=4406,
             )
-            await self.close(code=4406)
             return
         apps = content.get("apps", [])
         try:
             await sync_to_async(sync_device_manifest, thread_sensitive=True)(self.device, apps)
         except ValueError as exc:
-            await self.send_json(
-                {"type": "error", "error": {"code": "invalid_manifest", "message": str(exc)}}
-            )
-            await self.close(code=4400)
+            await self._reject("invalid_manifest", str(exc), close_code=4400)
             return
 
         self.device.client_version = client_version[:32]
@@ -224,7 +213,10 @@ class ComputerRelayConsumer(AsyncJsonWebsocketConsumer):
         )
 
     async def computer_mcp_request(self, event):
-        if event.get("connection_generation") != self.connection_generation:
+        if (
+            not self.received_hello
+            or event.get("connection_generation") != self.connection_generation
+        ):
             return
         request_id = str(event["request_id"])
         self.pending_replies[request_id] = str(event["reply_channel"])
@@ -250,6 +242,11 @@ class ComputerRelayConsumer(AsyncJsonWebsocketConsumer):
             )
             return
         await self.send_json(message)
+
+    async def computer_mcp_cancel(self, event):
+        if event.get("connection_generation") != self.connection_generation:
+            return
+        self.pending_replies.pop(str(event["request_id"]), None)
 
     async def computer_control(self, event):
         await self.send_json({"type": event["event_type"], **event.get("payload", {})})

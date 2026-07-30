@@ -273,7 +273,6 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   pipedreamAppsSettingsUrl?: string | null
   pipedreamAppSearchUrl?: string | null
   nativeIntegrationsUrl?: string | null
-  computerConnectionsUrl?: string | null
   pendingActionRequests?: PendingActionRequest[]
   onRespondHumanInputRequest?: (
     response:
@@ -400,7 +399,6 @@ export function AgentChatLayout({
   pipedreamAppsSettingsUrl = null,
   pipedreamAppSearchUrl = null,
   nativeIntegrationsUrl = null,
-  computerConnectionsUrl = null,
   pendingActionRequests = [],
   onRespondHumanInputRequest,
   onDismissHumanInputRequest,
@@ -1710,7 +1708,6 @@ export function AgentChatLayout({
               pipedreamAppsSettingsUrl={pipedreamAppsSettingsUrl}
               pipedreamAppSearchUrl={pipedreamAppSearchUrl}
               nativeIntegrationsUrl={nativeIntegrationsUrl}
-              computerConnectionsUrl={computerConnectionsUrl}
               compact={sidebarMode === 'gallery'}
             />
           )}

@@ -15,10 +15,11 @@ from asgiref.sync import sync_to_async
 from channels.layers import get_channel_layer
 from django.conf import settings
 from django.core import signing
+from django.core.cache import cache
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 from django.db import transaction
-from django.db.models import F, Q
+from django.db.models import Q
 from django.utils import timezone
 from django.utils.text import slugify
 from packaging.version import InvalidVersion, Version
@@ -88,11 +89,21 @@ def record_computer_relay_event(event: str, **attributes) -> None:
     logger.info("Computer relay event", extra=dimensions)
 
 
+def computer_rate_limited(key: str, *, limit: int, window_seconds: int) -> bool:
+    if cache.add(key, 1, timeout=window_seconds):
+        return False
+    try:
+        return int(cache.incr(key)) > limit
+    except ValueError:
+        cache.set(key, 1, timeout=window_seconds)
+        return False
+
+
 def _track_computer_event(
     user_id,
     event: AnalyticsEvent,
     *,
-    source: AnalyticsSource,
+    source: AnalyticsSource = AnalyticsSource.CONSOLE,
     **properties,
 ) -> None:
     Analytics.track_event(
@@ -294,7 +305,6 @@ def approve_pairing(
     _track_computer_event(
         user.id,
         AnalyticsEvent.COMPUTER_PAIRING_APPROVED,
-        source=AnalyticsSource.CONSOLE,
         pairing_id=str(pairing.id),
         agent_id=str(agent.id),
         app_count=len(selected),
@@ -443,6 +453,31 @@ def _ensure_app_config(
     return config
 
 
+def _reconcile_app_configs(
+    device: ComputerDevice,
+    apps: list[ComputerDeviceApp],
+    assignment: ComputerDeviceAssignment | None,
+) -> None:
+    for app in apps:
+        if (
+            assignment
+            and app.is_available
+            and app.approval_state == ComputerDeviceApp.ApprovalState.APPROVED
+            and app.approved_schema_hash == app.reported_schema_hash
+        ):
+            _ensure_app_config(device, app, assignment)
+        else:
+            _disable_app_config(app)
+
+
+def _active_assignment(device: ComputerDevice) -> ComputerDeviceAssignment | None:
+    return (
+        ComputerDeviceAssignment.objects.select_related("agent")
+        .filter(device=device, status=ComputerDeviceAssignment.Status.ACTIVE)
+        .first()
+    )
+
+
 def _sync_agent_skill(agent: PersistentAgent) -> None:
     has_assignment = ComputerDeviceAssignment.objects.filter(
         agent=agent,
@@ -520,15 +555,11 @@ def assign_device(
             )
             assignment = existing
 
-        for app in device.apps.select_related("mcp_server_config"):
-            if (
-                app.approval_state == ComputerDeviceApp.ApprovalState.APPROVED
-                and app.is_available
-                and app.approved_schema_hash == app.reported_schema_hash
-            ):
-                _ensure_app_config(device, app, assignment)
-            else:
-                _disable_app_config(app)
+        _reconcile_app_configs(
+            device,
+            list(device.apps.select_related("mcp_server_config")),
+            assignment,
+        )
 
         _sync_agent_skill(agent)
         if old_agent and old_agent.id != agent.id:
@@ -537,7 +568,6 @@ def assign_device(
     _track_computer_event(
         granted_by.id,
         AnalyticsEvent.COMPUTER_REASSIGNED if reassigned else AnalyticsEvent.COMPUTER_ASSIGNED,
-        source=AnalyticsSource.CONSOLE,
         device_id=str(device.id),
         agent_id=str(agent.id),
         organization_id=str(agent.organization_id) if agent.organization_id else None,
@@ -555,12 +585,10 @@ def sync_device_manifest(
     normalized = _normalize_manifest(manifest)
     now = timezone.now()
     selected = initially_selected or set()
-    seen: set[str] = set()
 
     with transaction.atomic():
         ComputerDeviceApp.objects.filter(device=device).update(is_available=False)
         for entry in normalized:
-            seen.add(entry["key"])
             app = ComputerDeviceApp.objects.select_related("mcp_server_config").filter(
                 device=device,
                 app_key=entry["key"],
@@ -589,39 +617,36 @@ def sync_device_manifest(
                 app.reported_schema_hash = entry["schema_sha256"]
                 app.is_available = True
                 app.last_seen_at = now
-                if schema_changed and app.approved_schema_hash != entry["schema_sha256"]:
+                if initially_selected is not None:
+                    approved = entry["key"] in selected
+                    app.approved_schema_hash = entry["schema_sha256"] if approved else ""
+                    app.approval_state = (
+                        ComputerDeviceApp.ApprovalState.APPROVED
+                        if approved
+                        else ComputerDeviceApp.ApprovalState.PENDING
+                    )
+                elif schema_changed and app.approved_schema_hash != entry["schema_sha256"]:
                     app.approval_state = ComputerDeviceApp.ApprovalState.PENDING
                 app.save(
                     update_fields=[
                         "display_name",
                         "app_type",
                         "reported_schema_hash",
+                        "approved_schema_hash",
                         "approval_state",
                         "is_available",
                         "last_seen_at",
                         "updated_at",
                     ]
                 )
-            if app.approval_state != ComputerDeviceApp.ApprovalState.APPROVED:
-                _disable_app_config(app)
 
-        for removed in ComputerDeviceApp.objects.filter(device=device, is_available=False):
-            _disable_app_config(removed)
-
-        assignment = (
-            ComputerDeviceAssignment.objects.select_related("agent")
-            .filter(device=device, status=ComputerDeviceAssignment.Status.ACTIVE)
-            .first()
+        assignment = _active_assignment(device)
+        result = list(
+            ComputerDeviceApp.objects.filter(device=device)
+            .select_related("mcp_server_config")
+            .order_by("display_name")
         )
-        if assignment:
-            for app in ComputerDeviceApp.objects.filter(
-                device=device,
-                app_key__in=seen,
-                approval_state=ComputerDeviceApp.ApprovalState.APPROVED,
-                reported_schema_hash=F("approved_schema_hash"),
-            ).select_related("mcp_server_config"):
-                _ensure_app_config(device, app, assignment)
-    result = list(ComputerDeviceApp.objects.filter(device=device).order_by("display_name"))
+        _reconcile_app_configs(device, result, assignment)
     computer_relay_discovery_latency.record(
         time.monotonic() - started_at,
         {"platform": device.platform},
@@ -757,10 +782,25 @@ def rotate_refresh_token(raw_token: str) -> tuple[ComputerDevice, str, str]:
             device.save(update_fields=["credential_generation", "updated_at"])
             reuse_detected = True
         else:
-            if credential.revoked_at is not None or credential.expires_at <= now or device.revoked_at is not None:
+            if (
+                credential.revoked_at is not None
+                or credential.expires_at <= now
+                or credential.generation != device.credential_generation
+                or device.revoked_at is not None
+            ):
                 raise PermissionError("Refresh token is expired or revoked")
             if not computer_cpp_enabled_for_user(device.owner):
                 raise PermissionError("Computer connections are not enabled for this account")
+            if computer_rate_limited(
+                f"computer-token-refresh:{device.id}",
+                limit=settings.COMPUTER_CPP_REFRESHES_PER_DEVICE_HOUR,
+                window_seconds=3600,
+            ):
+                raise ComputerRelayError(
+                    "rate_limited",
+                    "Too many refresh attempts for this computer",
+                    retryable=True,
+                )
 
             replacement, refresh_token = _create_refresh_credential(
                 device,
@@ -789,32 +829,25 @@ def approve_device_apps(device: ComputerDevice, selected: list[dict[str, str]]) 
         known = {app.app_key for app in apps}
         if not set(requested).issubset(known):
             raise ValueError("One or more selected apps are unknown")
-        assignment = (
-            ComputerDeviceAssignment.objects.select_related("agent")
-            .filter(device=device, status=ComputerDeviceAssignment.Status.ACTIVE)
-            .first()
-        )
+        assignment = _active_assignment(device)
         for app in apps:
             requested_hash = requested.get(app.app_key)
             if requested_hash is None:
                 app.approval_state = ComputerDeviceApp.ApprovalState.DISABLED
                 app.approved_schema_hash = ""
                 app.save(update_fields=["approval_state", "approved_schema_hash", "updated_at"])
-                _disable_app_config(app)
                 continue
             if requested_hash != app.reported_schema_hash or not app.is_available:
                 raise ValueError(f"App '{app.app_key}' schema is no longer current")
             app.approval_state = ComputerDeviceApp.ApprovalState.APPROVED
             app.approved_schema_hash = requested_hash
             app.save(update_fields=["approval_state", "approved_schema_hash", "updated_at"])
-            if assignment:
-                _ensure_app_config(device, app, assignment)
+        _reconcile_app_configs(device, apps, assignment)
         if assignment:
             _queue_agent_resume(assignment.agent_id)
     _track_computer_event(
         device.owner_id,
         AnalyticsEvent.COMPUTER_APPS_APPROVAL_CHANGED,
-        source=AnalyticsSource.CONSOLE,
         device_id=str(device.id),
         approved_app_count=len(requested),
     )
@@ -847,14 +880,7 @@ def update_device_properties(
                 config.description = f"Runs {app.display_name} tools on {device.display_name}."
                 config.save(update_fields=["display_name", "description", "updated_at"])
 
-        assignment = (
-            ComputerDeviceAssignment.objects.filter(
-                device=device,
-                status=ComputerDeviceAssignment.Status.ACTIVE,
-            )
-            .only("agent_id")
-            .first()
-        )
+        assignment = _active_assignment(device)
         if assignment and assignment.agent_id and update_fields:
             _queue_agent_resume(assignment.agent_id)
     if pause_changed:
@@ -862,26 +888,24 @@ def update_device_properties(
         _track_computer_event(
             device.owner_id,
             AnalyticsEvent.COMPUTER_PAUSED if device.is_paused else AnalyticsEvent.COMPUTER_RESUMED,
-            source=AnalyticsSource.CONSOLE,
             device_id=str(device.id),
         )
     return device
 
 
 def revoke_assignment(device: ComputerDevice, *, revoked_by=None) -> None:
-    assignment = (
-        ComputerDeviceAssignment.objects.select_related("agent")
-        .filter(device=device, status=ComputerDeviceAssignment.Status.ACTIVE)
-        .first()
-    )
+    assignment = _active_assignment(device)
     if assignment is None:
         return
     with transaction.atomic():
         assignment.status = ComputerDeviceAssignment.Status.REVOKED
         assignment.revoked_at = timezone.now()
         assignment.save(update_fields=["status", "revoked_at", "updated_at"])
-        for app in device.apps.select_related("mcp_server_config"):
-            _disable_app_config(app)
+        _reconcile_app_configs(
+            device,
+            list(device.apps.select_related("mcp_server_config")),
+            None,
+        )
         if assignment.agent_id:
             _sync_agent_skill(assignment.agent)
             _queue_agent_resume(assignment.agent_id)
@@ -889,7 +913,6 @@ def revoke_assignment(device: ComputerDevice, *, revoked_by=None) -> None:
         _track_computer_event(
             revoked_by.id,
             AnalyticsEvent.COMPUTER_TEAM_GRANT_REVOKED,
-            source=AnalyticsSource.CONSOLE,
             device_id=str(device.id),
             organization_id=str(assignment.organization_id) if assignment.organization_id else None,
         )
@@ -911,7 +934,6 @@ def revoke_device(device: ComputerDevice) -> None:
     _track_computer_event(
         device.owner_id,
         AnalyticsEvent.COMPUTER_DEVICE_REVOKED,
-        source=AnalyticsSource.CONSOLE,
         device_id=str(device.id),
     )
 
@@ -1049,6 +1071,14 @@ async def relay_mcp_request(
             response = await asyncio.wait_for(channel_layer.receive(reply_channel), timeout=timeout)
         except TimeoutError as exc:
             outcome = "deadline_exceeded"
+            await channel_layer.send(
+                presence["channel"],
+                {
+                    "type": "computer.mcp_cancel",
+                    "request_id": request_id,
+                    "connection_generation": presence["generation"],
+                },
+            )
             raise ComputerRelayError(
                 "deadline_exceeded",
                 f"{device.display_name} did not respond before the deadline",
@@ -1193,10 +1223,9 @@ def serialize_device(device: ComputerDevice, *, owner_actions: bool) -> dict[str
                 "approval_state": app.approval_state,
                 "available": app.is_available,
             }
-            for app in device.apps.all().order_by("display_name")
+            for app in sorted(device.apps.all(), key=lambda value: value.display_name.lower())
         ],
         "permissions": {
             "can_manage_device": owner_actions,
-            "can_revoke_assignment": True,
         },
     }

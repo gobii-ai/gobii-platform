@@ -35,9 +35,11 @@ from api.services.computer_relay import (
     authenticate_relay_access_token,
     consume_artifact,
     create_pairing_session,
+    get_device_presence,
     store_artifact,
     sync_device_manifest,
     relay_mcp_request,
+    serialize_device,
 )
 
 
@@ -252,6 +254,35 @@ class ComputerPairingAPITests(TestCase):
         with self.assertRaises(PermissionError):
             authenticate_relay_access_token(refresh.json()["access_token"])
 
+    @override_settings(COMPUTER_CPP_REFRESHES_PER_DEVICE_HOUR=1)
+    def test_refresh_rate_limit_follows_device_across_token_rotation(self):
+        _enable_computer_flag(self.user)
+        pairing, device_code, user_code = create_pairing_session(_pairing_payload())
+        from api.services.computer_relay import approve_pairing, redeem_pairing
+
+        approve_pairing(
+            pairing,
+            user=self.user,
+            user_code=user_code,
+            agent=self.agent,
+            selected_app_keys=["gobii-desktop"],
+        )
+        _, refresh_token, _ = redeem_pairing(pairing, device_code=device_code)
+
+        first = self.client.post(
+            reverse("computer-token-refresh"),
+            data=json.dumps({"refresh_token": refresh_token}),
+            content_type="application/json",
+        )
+        self.assertEqual(first.status_code, 200)
+        second = self.client.post(
+            reverse("computer-token-refresh"),
+            data=json.dumps({"refresh_token": first.json()["refresh_token"]}),
+            content_type="application/json",
+        )
+        self.assertEqual(second.status_code, 429)
+        self.assertEqual(second.json()["error"], "rate_limited")
+
     @patch("api.services.computer_relay.get_device_presence", return_value=None)
     def test_managed_configs_are_hidden_from_generic_mcp_api(self, _presence):
         _enable_computer_flag(self.user)
@@ -277,6 +308,64 @@ class ComputerPairingAPITests(TestCase):
             reverse("console-mcp-server-detail", kwargs={"server_id": managed_config.id})
         )
         self.assertEqual(detail.status_code, 403)
+
+        from api.services.mcp_servers import set_server_assignments, update_agent_personal_servers
+
+        regular_config = MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.USER,
+            user=self.user,
+            name="editable-server",
+            display_name="Editable server",
+            url="https://example.com/mcp",
+        )
+        update_agent_personal_servers(self.agent, [str(regular_config.id)])
+        self.assertTrue(
+            PersistentAgentMCPServer.objects.filter(
+                agent=self.agent,
+                server_config=managed_config,
+            ).exists()
+        )
+        with self.assertRaisesRegex(ValueError, "cannot be assigned manually"):
+            set_server_assignments(managed_config, [])
+
+    def test_repairing_reapplies_selected_apps_to_existing_device(self):
+        _enable_computer_flag(self.user)
+        machine_id = f"repair-{uuid.uuid4()}"
+        from api.services.computer_relay import approve_pairing, redeem_pairing
+
+        first_pairing, first_device_code, first_user_code = create_pairing_session(
+            _pairing_payload(machine_id)
+        )
+        approve_pairing(
+            first_pairing,
+            user=self.user,
+            user_code=first_user_code,
+            agent=self.agent,
+            selected_app_keys=["gobii-desktop"],
+        )
+        device, _, _ = redeem_pairing(first_pairing, device_code=first_device_code)
+
+        second_pairing, second_device_code, second_user_code = create_pairing_session(
+            _pairing_payload(machine_id)
+        )
+        approve_pairing(
+            second_pairing,
+            user=self.user,
+            user_code=second_user_code,
+            agent=self.agent,
+            selected_app_keys=["custom-tools"],
+        )
+        repaired, _, _ = redeem_pairing(second_pairing, device_code=second_device_code)
+
+        self.assertEqual(repaired.id, device.id)
+        self.assertEqual(
+            repaired.apps.get(app_key="gobii-desktop").approval_state,
+            ComputerDeviceApp.ApprovalState.PENDING,
+        )
+        self.assertEqual(
+            repaired.apps.get(app_key="custom-tools").approval_state,
+            ComputerDeviceApp.ApprovalState.APPROVED,
+        )
 
 
 @tag("computer_cpp_batch")
@@ -421,6 +510,50 @@ class ComputerRelayLifecycleTests(TestCase):
         self.device.refresh_from_db()
         self.assertIsNone(self.device.revoked_at)
 
+    def test_owner_role_downgrade_revokes_team_assignment(self):
+        organization = Organization.objects.create(
+            name="Role downgrade team",
+            slug=f"role-downgrade-{uuid.uuid4().hex[:8]}",
+            created_by=self.user,
+        )
+        membership = OrganizationMembership.objects.create(
+            org=organization,
+            user=self.user,
+            role=OrganizationMembership.OrgRole.OWNER,
+        )
+        team_agent = _create_agent(self.user, "Role downgrade agent", organization)
+        from api.services.computer_relay import assign_device
+
+        assign_device(self.device, team_agent, granted_by=self.user)
+        with (
+            patch("api.services.computer_relay._queue_agent_resume"),
+            self.captureOnCommitCallbacks(execute=True),
+        ):
+            membership.role = OrganizationMembership.OrgRole.MEMBER
+            membership.save(update_fields=["role"])
+
+        self.assertEqual(
+            ComputerDeviceAssignment.objects.get(device=self.device).status,
+            ComputerDeviceAssignment.Status.REVOKED,
+        )
+
+    @patch("api.services.computer_relay.get_device_presence", return_value=None)
+    def test_prefetched_apps_serialize_without_additional_queries(self, _presence):
+        device = (
+            ComputerDevice.objects.select_related(
+                "owner",
+                "assignment__agent",
+                "assignment__organization",
+            )
+            .prefetch_related("apps")
+            .get(id=self.device.id)
+        )
+
+        with self.assertNumQueries(0):
+            payload = serialize_device(device, owner_actions=True)
+
+        self.assertEqual(len(payload["apps"]), 2)
+
     def test_computer_skill_is_searchable_without_enabling_all_mcp_tools(self):
         results = shortlist_system_skills(
             "take a screenshot of my desktop computer",
@@ -534,6 +667,82 @@ class ComputerRelayWebSocketTests(TransactionTestCase):
             await communicator.send_json_to({"type": "heartbeat"})
             heartbeat = await communicator.receive_json_from()
             self.assertEqual(heartbeat["type"], "heartbeat.ack")
+            await communicator.disconnect()
+
+        with patch("api.agent.tools.mcp_manager.get_mcp_manager"):
+            async_to_sync(run)()
+
+    def test_socket_is_not_present_until_hello_is_validated(self):
+        async def run():
+            communicator = WebsocketCommunicator(
+                ComputerRelayConsumer.as_asgi(),
+                "/",
+                headers=[
+                    (b"authorization", f"Bearer {self.access_token}".encode("latin-1")),
+                ],
+                subprotocols=["gobii-computer-relay.v1"],
+            )
+            connected, _ = await communicator.connect()
+            self.assertTrue(connected)
+            self.assertIsNone(get_device_presence(self.device.id))
+
+            await communicator.send_json_to(
+                {
+                    "type": "hello",
+                    "client_version": "0.21.0",
+                    "protocol_version": 1,
+                    "apps": _pairing_payload()["apps"],
+                }
+            )
+            self.assertEqual((await communicator.receive_json_from())["type"], "hello.ack")
+            self.assertIsNotNone(get_device_presence(self.device.id))
+            await communicator.disconnect()
+
+        with patch("api.agent.tools.mcp_manager.get_mcp_manager"):
+            async_to_sync(run)()
+
+    def test_timed_out_request_rejects_late_response(self):
+        async def run():
+            communicator = WebsocketCommunicator(
+                ComputerRelayConsumer.as_asgi(),
+                "/",
+                headers=[
+                    (b"authorization", f"Bearer {self.access_token}".encode("latin-1")),
+                ],
+                subprotocols=["gobii-computer-relay.v1"],
+            )
+            connected, _ = await communicator.connect()
+            self.assertTrue(connected)
+            await communicator.send_json_to(
+                {
+                    "type": "hello",
+                    "client_version": "0.21.0",
+                    "protocol_version": 1,
+                    "apps": _pairing_payload()["apps"],
+                }
+            )
+            await communicator.receive_json_from()
+
+            pending = asyncio.create_task(
+                relay_mcp_request(
+                    self.app.id,
+                    {"jsonrpc": "2.0", "id": 8, "method": "tools/list"},
+                    timeout_seconds=1,
+                )
+            )
+            request = await communicator.receive_json_from()
+            with self.assertRaisesRegex(ComputerRelayError, "deadline_exceeded"):
+                await pending
+            await asyncio.sleep(0.01)
+            await communicator.send_json_to(
+                {
+                    "type": "mcp.response",
+                    "request_id": request["request_id"],
+                    "payload": {"jsonrpc": "2.0", "id": 8, "result": {"tools": []}},
+                }
+            )
+            late = await communicator.receive_json_from()
+            self.assertEqual(late["error"]["code"], "unknown_request")
             await communicator.disconnect()
 
         with patch("api.agent.tools.mcp_manager.get_mcp_manager"):
