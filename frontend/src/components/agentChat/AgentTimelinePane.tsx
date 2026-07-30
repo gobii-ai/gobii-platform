@@ -218,9 +218,7 @@ export const AgentTimelinePane = memo(function AgentTimelinePane({
           what they are reading by its own height each time it toggles.
         */}
         {loadingOlder ? (
-          <div className="timeline-load-control" data-side="older" role="status" aria-label="Loading earlier messages">
-            <span className="timeline-load-bar" aria-hidden="true" />
-          </div>
+          <div className="timeline-load-control" data-side="older" role="status" aria-label="Loading earlier messages" />
         ) : null}
         <div ref={timelineRef} id="timeline-shell" data-scroll-pinned={autoScrollPinned ? 'true' : 'false'}>
           <div id="timeline-spacer" aria-hidden="true" />

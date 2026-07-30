@@ -2900,43 +2900,49 @@
     margin: 0;
     min-height: 0;
 }
-/* An indeterminate line rather than a pill. A pill floating over the conversation reads as a
-   dialog interrupting it; a line at the edge of the scrollport is the conventional "more is on
-   its way" signal, costs no layout, and cannot obscure a message. */
+/* An edge-less glow rather than a full-width line. The region narrows when the plan panel
+   reserves width while the visible card does not, so anything with endpoints spanning the
+   region terminates mid-card (#500). The gradients fade to transparent before any edge, and
+   the message column is centered in the region in every panel mode, so a region-centered
+   glow always sits centered over the conversation. */
 .timeline-load-control[data-side="older"] {
-    height: 2px;
+    height: 6rem;
     min-height: 0;
     padding: 0;
     display: block;
     overflow: hidden;
-    background: rgba(99, 102, 241, 0.1);
-    border-radius: 9999px;
+    animation: timeline-glow-in 200ms ease;
 }
-.timeline-load-bar {
-    display: block;
-    height: 100%;
-    width: 34%;
-    border-radius: 9999px;
-    background: linear-gradient(
-        90deg,
-        rgba(99, 102, 241, 0) 0%,
-        rgba(99, 102, 241, 0.9) 50%,
-        rgba(99, 102, 241, 0) 100%
-    );
-    transform: translate3d(-40%, 0, 0);
-    will-change: transform;
-    animation: timeline-load-sweep 1.15s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+.timeline-load-control[data-side="older"]::before,
+.timeline-load-control[data-side="older"]::after {
+    content: '';
+    position: absolute;
+    inset: 0;
 }
-@keyframes timeline-load-sweep {
-    0% { transform: translate3d(-40%, 0, 0); }
-    100% { transform: translate3d(340%, 0, 0); }
+.timeline-load-control[data-side="older"]::before {
+    background: radial-gradient(50% 90% at 50% 0%, rgba(124, 58, 237, 0.22), rgba(124, 58, 237, 0) 70%);
+    animation: timeline-glow-breathe 1.5s ease-in-out infinite alternate;
+}
+.timeline-load-control[data-side="older"]::after {
+    background: radial-gradient(18% 70% at 50% 0%, rgba(147, 51, 234, 0.38), rgba(147, 51, 234, 0) 78%);
+    animation: timeline-glow-drift 2.6s ease-in-out infinite alternate;
+}
+@keyframes timeline-glow-in {
+    from { opacity: 0; }
+}
+@keyframes timeline-glow-breathe {
+    from { opacity: 0.55; }
+    to { opacity: 1; }
+}
+@keyframes timeline-glow-drift {
+    from { transform: translateX(-22%); }
+    to { transform: translateX(22%); }
 }
 @media (prefers-reduced-motion: reduce) {
-    .timeline-load-bar {
+    .timeline-load-control[data-side="older"],
+    .timeline-load-control[data-side="older"]::before,
+    .timeline-load-control[data-side="older"]::after {
         animation: none;
-        width: 100%;
-        opacity: 0.65;
-        transform: none;
     }
 }
 /* Collapsed runs are otherwise a column of identical chips with nothing placing them in time. */
