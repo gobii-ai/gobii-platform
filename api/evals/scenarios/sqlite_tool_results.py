@@ -63,6 +63,7 @@ SQLITE_ENRICHMENT_REFRESH_UNDER_PRESSURE = "sqlite_enrichment_refresh_under_pres
 SQLITE_SOURCE_CARDINALITY_AND_IDENTITY = "sqlite_source_cardinality_and_identity"
 SQLITE_FRESH_PEER_FACT_OVER_EMPTY_MODEL = "sqlite_fresh_peer_fact_over_empty_model"
 SQLITE_STRUCTURED_PEER_EVENT_PERSISTENCE = "sqlite_structured_peer_event_persistence"
+SQLITE_PEER_OUTCOME_RECONCILES_CANONICAL_MODEL = "sqlite_peer_outcome_reconciles_canonical_model"
 SQLITE_TOOL_RESULT_SCENARIO_SLUGS = [
     SQLITE_MULTI_RESULT_WEB_SYNTHESIS,
     SQLITE_INTERMEDIATE_WORKING_TABLE,
@@ -83,6 +84,7 @@ SQLITE_TOOL_RESULT_SCENARIO_SLUGS = [
     SQLITE_SOURCE_CARDINALITY_AND_IDENTITY,
     SQLITE_FRESH_PEER_FACT_OVER_EMPTY_MODEL,
     SQLITE_STRUCTURED_PEER_EVENT_PERSISTENCE,
+    SQLITE_PEER_OUTCOME_RECONCILES_CANONICAL_MODEL,
 ]
 
 
@@ -1365,6 +1367,39 @@ def _seed_empty_operational_events(agent_id: str) -> None:
                 "CREATE TABLE operational_events ("
                 "event_id TEXT PRIMARY KEY, event_type TEXT NOT NULL, thread_key TEXT NOT NULL, "
                 "occurred_at TEXT NOT NULL, provider_message_id TEXT, source_message_id TEXT NOT NULL);"
+            )
+            conn.commit()
+        finally:
+            clear_guarded_connection(conn)
+            conn.close()
+
+
+def _seed_outreach_reconciliation_model(agent_id: str) -> None:
+    with agent_sqlite_db(str(agent_id)) as db_path:
+        conn = open_guarded_sqlite_connection(db_path)
+        try:
+            conn.execute(
+                "CREATE TABLE outreach_threads ("
+                "thread_id TEXT PRIMARY KEY, recipient TEXT NOT NULL UNIQUE, owner_name TEXT NOT NULL, "
+                "state TEXT NOT NULL, provider_message_id TEXT, sent_at TEXT, source_message_id TEXT);"
+            )
+            conn.executemany(
+                "INSERT INTO outreach_threads "
+                "(thread_id, recipient, owner_name, state) VALUES (?, ?, ?, ?);",
+                (
+                    (
+                        "manager:wave:prospect-77",
+                        "jordan@northstar.example.test",
+                        "Seller One",
+                        "prepared",
+                    ),
+                    (
+                        "manager:wave:prospect-78",
+                        "avery@harbor.example.test",
+                        "Seller Two",
+                        "prepared",
+                    ),
+                ),
             )
             conn.commit()
         finally:
@@ -3843,12 +3878,6 @@ class SqliteStructuredPeerEventPersistenceScenario(SqliteDomainModelScenario):
             and _reads_table(write_statement, "__messages")
             and "structured_payload_json" in write_statement.casefold()
         )
-        inspected_message_payload = any(
-            call_index < write_call_index
-            and _reads_table(statement, "__messages")
-            and "structured_payload_json" in statement.casefold()
-            for call_index, _statement_index, _call, statement in statement_entries
-        )
         expected_bound_values = {
             "evt-2048",
             "accepted_setup",
@@ -3862,10 +3891,10 @@ class SqliteStructuredPeerEventPersistenceScenario(SqliteDomainModelScenario):
             for value in (bindings or {}).values()
             if isinstance(value, (str, int, float))
         }
+        write_statement_without_comments = sqlparse.format(write_statement, strip_comments=True)
         bound_message_import = (
-            inspected_message_payload
-            and expected_bound_values.issubset(bound_values)
-            and not any(value in write_statement for value in expected_bound_values)
+            expected_bound_values.issubset(bound_values)
+            and not any(value in write_statement_without_comments for value in expected_bound_values)
         )
         message_grounded_import = direct_message_import or bound_message_import
 
@@ -3929,6 +3958,177 @@ class SqliteStructuredPeerEventPersistenceScenario(SqliteDomainModelScenario):
                 "Reported the one durably modeled accepted setup."
                 if reported_persisted_truth
                 else f"Expected one accepted setup for thread-2048 after persistence; body={body!r}."
+            ),
+            artifacts={"message": outbound[-1]} if outbound else {},
+        )
+
+
+@register_scenario
+class SqlitePeerOutcomeReconcilesCanonicalModelScenario(SqliteDomainModelScenario):
+    slug = SQLITE_PEER_OUTCOME_RECONCILES_CANONICAL_MODEL
+    version = "1.0"
+    description = (
+        "A manager should reconcile a fresh seller outcome into canonical state before counting or selecting next work."
+    )
+    expected_runtime = "short"
+    tags = (*SqliteToolResultScenario.tags, "trajectory_regression", "peer_handoff", "event_truth")
+    tasks = [
+        ScenarioTask(name="inject_board_request", assertion_type="agent_processing"),
+        ScenarioTask(name="verify_canonical_outcome", assertion_type="persisted_state"),
+        ScenarioTask(name="verify_current_board_answer", assertion_type="manual"),
+    ]
+
+    prompt = "Give me the current sent and prepared counts, then tell me which recipient is next in the queue."
+
+    def run(self, run_id: str, agent_id: str) -> None:
+        from api.evals.scenarios.responsibility_boundaries import ResponsibilityBoundaryScenario
+
+        self._ready_agent(agent_id)
+        PersistentAgent.objects.filter(id=agent_id).update(
+            charter=(
+                "Manage the outbound team from the canonical outreach ledger. Seller outcome updates are operating "
+                "inputs. Keep recipient ownership unique, report the current board, and choose follow-on work only "
+                "from recipients that remain prepared."
+            ),
+        )
+        _seed_outreach_reconciliation_model(agent_id)
+        agent = PersistentAgent.objects.get(id=agent_id)
+        ResponsibilityBoundaryScenario._peer_inbound(
+            agent,
+            run_id,
+            (
+                "OUTBOUND_EVENT_V1\n"
+                "thread_key: seller:wave:prospect-77\n"
+                "recipient: jordan@northstar.example.test\n"
+                "delivery_status: sent\n"
+                "provider_message_id: provider-message-998\n"
+                "sent_at: 2026-07-30T14:12:09Z"
+            ),
+        )
+        inbound = self._inject_and_wait(
+            run_id,
+            agent_id,
+            self.prompt,
+            {},
+            allowed_tool_names={"sqlite_batch", "send_chat_message"},
+            max_relevant_tool_calls=7,
+            task_name="inject_board_request",
+        )
+        calls = _tool_calls_for_run(run_id, after=inbound.timestamp)
+        sqlite_calls = [call for call in calls if call.tool_name == "sqlite_batch"]
+        statements = [
+            (call_index, statement_index, call, statement)
+            for call_index, call in enumerate(sqlite_calls)
+            for statement_index, statement in enumerate(
+                sqlparse.split(str((call.tool_params or {}).get("sql") or ""))
+            )
+            if statement.strip()
+        ]
+        writes = [
+            item
+            for item in statements
+            if (
+                (match := _MUTATION_TARGET_RE.search(item[3]))
+                and match.group("table").casefold() == "outreach_threads"
+            )
+        ]
+        write = writes[0] if writes else None
+        write_call_index, write_statement_index, write_call, write_sql = (
+            write or (-1, -1, None, "")
+        )
+        read_after_write = write is not None and any(
+            call_index == write_call_index
+            and statement_index > write_statement_index
+            and _reads_table(statement, "outreach_threads")
+            for call_index, statement_index, _call, statement in statements
+        )
+        direct_message_import = write is not None and _reads_table(write_sql, "__messages")
+        bindings = (write_call.tool_params or {}).get("bindings") if write_call else {}
+        bound_values = {
+            str(value)
+            for value in (bindings or {}).values()
+            if isinstance(value, (str, int, float))
+        }
+        expected_bound_values = {
+            "jordan@northstar.example.test",
+            "provider-message-998",
+            "2026-07-30T14:12:09Z",
+        }
+        write_sql_without_comments = sqlparse.format(write_sql, strip_comments=True)
+        grounded_write = direct_message_import or (
+            expected_bound_values.issubset(bound_values)
+            and not any(value in write_sql_without_comments for value in expected_bound_values)
+        )
+
+        with agent_sqlite_db(str(agent_id)) as db_path:
+            conn = open_guarded_sqlite_connection(db_path)
+            try:
+                rows = conn.execute(
+                    "SELECT thread_id, recipient, state, provider_message_id, sent_at "
+                    "FROM outreach_threads ORDER BY thread_id;"
+                ).fetchall()
+            finally:
+                clear_guarded_connection(conn)
+                conn.close()
+
+        expected_rows = [
+            (
+                "manager:wave:prospect-77",
+                "jordan@northstar.example.test",
+                "sent",
+                "provider-message-998",
+                "2026-07-30T14:12:09Z",
+            ),
+            (
+                "manager:wave:prospect-78",
+                "avery@harbor.example.test",
+                "prepared",
+                None,
+                None,
+            ),
+        ]
+        failures = _sqlite_attempt_failures(sqlite_calls)
+        failures.extend(
+            message
+            for failed, message in (
+                (not sqlite_calls, "no SQLite board reconciliation observed"),
+                (len(writes) != 1, f"expected one canonical thread write, saw {len(writes)}"),
+                (not grounded_write, "seller outcome was not grounded in the peer message"),
+                (not read_after_write, "canonical state was not read back in the write batch"),
+                (rows != expected_rows, f"canonical outreach rows were {rows!r}"),
+            )
+            if failed
+        )
+        self._record_check(
+            run_id,
+            "verify_canonical_outcome",
+            failures,
+            "Reconciled the seller outcome into the existing recipient row and read back current state.",
+        )
+
+        outbound = _outbound_messages_after(agent_id, inbound.timestamp)
+        body = outbound[-1].body if outbound else ""
+        answer_choice, answer_reasoning = self.llm_judge(
+            question=(
+                "Does the response report exactly one sent recipient and one prepared recipient, and identify "
+                "Avery at Harbor as the next queued recipient? It may also identify Jordan as the sent recipient."
+            ),
+            context=f"Response:\n{body or '(none)'}",
+            options=["Correct current board", "Incorrect or ambiguous board"],
+        )
+        current_answer = len(outbound) == 1 and answer_choice == "Correct current board"
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED if current_answer else EvalRunTask.Status.FAILED,
+            task_name="verify_current_board_answer",
+            observed_summary=(
+                "Reported the reconciled board and selected only the remaining prepared recipient."
+                if current_answer
+                else (
+                    f"Expected one sent, one prepared, and Avery next; "
+                    f"judge={answer_choice}: {answer_reasoning}; body={body!r}."
+                )
             ),
             artifacts={"message": outbound[-1]} if outbound else {},
         )

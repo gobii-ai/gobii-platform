@@ -10,6 +10,7 @@ from api.evals.scenarios.sqlite_tool_results import (
     SQLITE_ENRICHMENT_REFRESH_UNDER_PRESSURE,
     SQLITE_FRESH_PEER_FACT_OVER_EMPTY_MODEL,
     SQLITE_INCREMENTAL_DOMAIN_MODEL,
+    SQLITE_PEER_OUTCOME_RECONCILES_CANONICAL_MODEL,
     SQLITE_SIBLING_RESULT_SET_FIRST_WRITE,
     SQLITE_SOURCE_CARDINALITY_AND_IDENTITY,
     SQLITE_SOURCE_ARRAY_FIRST_WRITE,
@@ -21,6 +22,7 @@ from api.evals.scenarios.sqlite_tool_results import (
     SqliteFreshPeerFactOverEmptyModelScenario,
     SqliteIncrementalDomainModelScenario,
     SqliteIntermediateWorkingTableScenario,
+    SqlitePeerOutcomeReconcilesCanonicalModelScenario,
     SqliteSiblingResultSetFirstWriteScenario,
     SqliteSourceCardinalityAndIdentityScenario,
     SqliteSourceArrayFirstWriteScenario,
@@ -135,6 +137,16 @@ class SqliteSourceArrayEvalTests(SimpleTestCase):
                 "verify_persisted_outcome_reported",
             ],
         )
+
+    def test_peer_outcome_reconciliation_case_is_registered_without_teaching_sql(self):
+        suite = SuiteRegistry.get(SQLITE_TOOL_RESULT_SUITE_SLUG)
+        scenario = ScenarioRegistry.get(SQLITE_PEER_OUTCOME_RECONCILES_CANONICAL_MODEL)
+
+        self.assertIsInstance(scenario, SqlitePeerOutcomeReconcilesCanonicalModelScenario)
+        self.assertIn(SQLITE_PEER_OUTCOME_RECONCILES_CANONICAL_MODEL, SQLITE_TOOL_RESULT_SCENARIO_SLUGS)
+        self.assertIn(SQLITE_PEER_OUTCOME_RECONCILES_CANONICAL_MODEL, suite.scenario_slugs)
+        for leaked_term in ("sqlite", "__messages", "insert", "update", "select", "table"):
+            self.assertNotIn(leaked_term, scenario.prompt.casefold())
 
     def test_prompt_does_not_teach_the_sql_solution(self):
         prompt = SqliteSourceArrayFirstWriteScenario.prompt.casefold()
