@@ -28,3 +28,15 @@ class PressureResilienceEvalRegistrationTests(SimpleTestCase):
                 "verify_workload_emotion",
             ],
         )
+        advisory = ScenarioRegistry.get(PRESSURE_RESILIENCE_SCENARIO_SLUGS[1])
+        self.assertIn("completion_integrity", advisory.tags)
+        self.assertIn("tool_continuation", advisory.tags)
+        self.assertEqual(
+            [task.name for task in advisory.tasks],
+            [
+                "inject_candidate_handoff",
+                "verify_candidate_retrieval",
+                "verify_complete_delivery",
+                "verify_advisory_deferred",
+            ],
+        )

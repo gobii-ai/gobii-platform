@@ -51,6 +51,7 @@ from api.models import (
     LLMProvider,
     Organization,
     PersistentAgent,
+    PersistentAgentDiscordGuild,
     PersistentModelEndpoint,
     ProfilePersistentTierEndpoint,
 )
@@ -1296,6 +1297,62 @@ class MetaGobiiLocalEvalSetupTests(TestCase):
         self.assertEqual(added, 1)
         self.assertEqual(schema_editor.added_fields[0][1].column, "debug_artifacts")
         self.assertIn("api_evalruntask.debug_artifacts", stdout.getvalue())
+
+    def test_local_eval_schema_compat_adds_missing_discord_authorization_column(self):
+        class FakeCursor:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, traceback):
+                return False
+
+        class FakeIntrospection:
+            def table_names(self):
+                return ["api_persistentagentdiscordguild"]
+
+            def get_table_description(self, cursor, table_name):
+                return [SimpleNamespace(name="id")]
+
+        class FakeSchemaEditor:
+            def __init__(self):
+                self.added_fields = []
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, traceback):
+                return False
+
+            def add_field(self, model, field):
+                self.added_fields.append((model, field))
+
+        class FakeConnection:
+            def __init__(self, schema_editor):
+                self.introspection = FakeIntrospection()
+                self._schema_editor = schema_editor
+
+            def cursor(self):
+                return FakeCursor()
+
+            def schema_editor(self):
+                return self._schema_editor
+
+        stdout = StringIO()
+        schema_editor = FakeSchemaEditor()
+
+        with patch("api.evals.local_setup.connection", FakeConnection(schema_editor)):
+            added = ensure_eval_local_compat_columns(stdout=stdout)
+
+        authorization_source = PersistentAgentDiscordGuild._meta.get_field("authorization_source")
+        self.assertEqual(added, 1)
+        self.assertEqual(
+            schema_editor.added_fields,
+            [(PersistentAgentDiscordGuild, authorization_source)],
+        )
+        self.assertIn(
+            "api_persistentagentdiscordguild.authorization_source",
+            stdout.getvalue(),
+        )
 
     def test_local_eval_schema_compat_adds_missing_browser_task_columns(self):
         class FakeCursor:

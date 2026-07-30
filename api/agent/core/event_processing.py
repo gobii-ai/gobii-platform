@@ -1680,7 +1680,7 @@ def _filter_incompatible_reply_tools(
         tool for tool in tools
         if tool.get("function", {}).get("name") != "send_mcp_message"
     ]
-    if mcp_available:
+    if mcp_available or is_mcp_message(inbound):
         filtered.append(get_send_mcp_message_tool())
     if inbound is None or inbound.conversation is None or not inbound.conversation.is_peer_dm:
         return filtered
@@ -6726,9 +6726,18 @@ def _run_agent_loop(
     direct_correction_prior_output = ""
     terminal_plan_cleanup_pending = False
     explicit_prefer_low_latency = prefer_low_latency
+    judge_trigger_reasons: list[str] = []
 
     def _current_human_inbound_generation() -> int:
         return get_human_inbound_generation(agent.id, client=redis_client)
+
+    def _run_deferred_agent_judge() -> None:
+        maybe_run_agent_judge(
+            agent,
+            tools=tools,
+            extra_trigger_reasons=judge_trigger_reasons,
+            routing_profile=get_current_eval_routing_profile(),
+        )
 
     try:
         queued_inbound_generation = max(0, int(inbound_generation or 0))
@@ -6891,10 +6900,8 @@ def _run_agent_loop(
                     span=iter_span,
                     daily_state=daily_state,
                 )
-                judge_trigger_reasons = []
                 if burn_rate_action == BurnRateAction.STEPPED_DOWN:
                     judge_trigger_reasons.append("burn_rate_tier_step_down")
-                maybe_run_agent_judge(agent, tools=tools, extra_trigger_reasons=judge_trigger_reasons)
 
                 with tracer.start_as_current_span("Agent Iteration Preparation"):
                     prompt_human_generation = _current_human_inbound_generation()
@@ -7115,6 +7122,8 @@ def _run_agent_loop(
                     if consume_human:
                         _mark_accepted_human_generation_consumed()
                     _attempt_cycle_close_for_sleep(agent, budget_ctx)
+                    # Advice belongs at the cycle boundary, after requested work is delivered or parked.
+                    _run_deferred_agent_judge()
                     return cumulative_token_usage
 
                 def _attach_prompt_archive(step: PersistentAgentStep) -> None:
@@ -7957,6 +7966,7 @@ def _run_agent_loop(
             )
             if not budget_exhausted:
                 _attempt_cycle_close_for_sleep(agent, budget_ctx)
+                _run_deferred_agent_judge()
 
         return cumulative_token_usage
     finally:

@@ -138,7 +138,7 @@ class StaffAgentAuditAPITests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.json()["ran"])
-        config_mock.assert_called_once_with()
+        config_mock.assert_called_once_with(routing_profile=None)
         run_mock.assert_called_once()
         self.assertEqual(
             PersistentAgentCompletion.objects.filter(

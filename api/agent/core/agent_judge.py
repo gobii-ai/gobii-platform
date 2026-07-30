@@ -129,6 +129,7 @@ def maybe_run_agent_judge(
     tools: list[dict[str, Any]] | None = None,
     extra_trigger_reasons: list[str] | None = None,
     trigger_context: dict[str, Any] | None = None,
+    routing_profile: Any | None = None,
 ) -> None:
     """Run the internal judge when heuristics indicate the agent may need guidance."""
 
@@ -143,7 +144,7 @@ def maybe_run_agent_judge(
         )
         if trigger is None:
             return
-        _run_judge(agent, trigger)
+        _run_judge(agent, trigger, routing_profile=routing_profile)
     except Exception:
         # The judge is advisory. A failure here must never interrupt agent work.
         logger.exception("Agent judge failed for agent %s", getattr(agent, "id", None))
@@ -339,6 +340,7 @@ def _run_judge(
     *,
     cache_evidence: bool = True,
     review_required: bool = False,
+    routing_profile: Any | None = None,
 ) -> dict[str, Any]:
     _track_judge_analytics(
         agent,
@@ -349,7 +351,7 @@ def _run_judge(
     )
 
     try:
-        config = get_agent_judge_llm_config()
+        config = get_agent_judge_llm_config(routing_profile=routing_profile)
     except LLMNotConfiguredError:
         logger.info("Skipping agent judge for %s because no LLM config is available.", agent.id)
         _track_judge_analytics(

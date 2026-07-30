@@ -93,7 +93,7 @@ class McpReplyTests(TestCase):
         )
         filtered_without_recent_mcp = _filter_incompatible_reply_tools(
             tools,
-            self.inbound,
+            web_inbound,
             mcp_available=False,
         )
         self.assertNotIn("send_mcp_message", self._tool_names(filtered_without_recent_mcp))
@@ -112,6 +112,15 @@ class McpReplyTests(TestCase):
             _same_channel_reply_tool_name(self.inbound),
             "send_mcp_message",
         )
+
+    def test_active_mcp_inbound_exposes_tool_when_recency_query_lags(self):
+        filtered = _filter_incompatible_reply_tools(
+            get_static_tool_definitions(self.agent),
+            self.inbound,
+            mcp_available=False,
+        )
+
+        self.assertIn("send_mcp_message", self._tool_names(filtered))
 
     def test_tool_schema_has_no_recipient_and_supports_attachments(self):
         function = get_send_mcp_message_tool()["function"]
@@ -169,7 +178,7 @@ class McpReplyTests(TestCase):
         self.assertIsNone(get_recent_mcp_inbound_message(self.agent))
         tools = _filter_incompatible_reply_tools(
             get_static_tool_definitions(self.agent),
-            self.inbound,
+            None,
             mcp_available=get_recent_mcp_inbound_message(self.agent) is not None,
         )
         self.assertNotIn("send_mcp_message", self._tool_names(tools))

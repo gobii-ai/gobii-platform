@@ -1,10 +1,12 @@
 import json
+from datetime import timedelta
 
 from django.contrib.auth import get_user_model
 from django.db.models import Max, Sum
 from django.utils import timezone
 
 from api.agent.comms.message_service import _ensure_participant, _get_or_create_conversation
+from api.agent.tools.eval_synthetic_tools import EVAL_SYNTHETIC_TOOL_SERVER
 from api.agent.tools.tool_manager import mark_tool_enabled_without_discovery
 from api.evals.base import EvalScenario, ScenarioTask
 from api.evals.execution import ScenarioExecutionTools
@@ -19,10 +21,12 @@ from api.models import (
     PersistentAgentCommsEndpoint,
     PersistentAgentCompletion,
     PersistentAgentConversationParticipant,
+    PersistentAgentEnabledTool,
     PersistentAgentKanbanCard,
     PersistentAgentMessage,
     PersistentAgentStep,
     PersistentAgentSystemStep,
+    PersistentAgentToolCall,
     build_web_user_address,
 )
 
@@ -30,6 +34,7 @@ from api.models import (
 PRESSURE_RESILIENCE_SUITE_SLUG = "pressure_resilience"
 PRESSURE_RESILIENCE_SCENARIO_SLUGS = (
     "pressure_resilience_competing_channels",
+    "pressure_resilience_advisory_after_delivery",
 )
 
 
@@ -336,5 +341,187 @@ class CompetingChannelsPressureScenario(EvalScenario, ScenarioExecutionTools):
                 "The agent stayed emotionally clear or used a non-strained emotion."
                 if workload_emotion_ok
                 else f"The workload produced strained emotion {agent.emotion!r}."
+            ),
+        )
+
+
+@register_scenario
+class AdvisoryAfterDeliveryPressureScenario(EvalScenario, ScenarioExecutionTools):
+    slug = PRESSURE_RESILIENCE_SCENARIO_SLUGS[1]
+    version = "1.0"
+    description = "Advisory judging must not interrupt a required same-cycle result handoff."
+    tier = "core"
+    category = "agent_behavior"
+    expected_runtime = "medium"
+    cost_class = "medium"
+    owner = "agent-platform"
+    area = "agent_behavior"
+    tags = ("agent_behavior", "pressure", "completion_integrity", "tool_continuation", "llm_judge", "real_harness")
+    tasks = [
+        ScenarioTask(name="inject_candidate_handoff", assertion_type="agent_processing"),
+        ScenarioTask(name="verify_candidate_retrieval", assertion_type="tool_call"),
+        ScenarioTask(name="verify_complete_delivery", assertion_type="persisted_state"),
+        ScenarioTask(name="verify_advisory_deferred", assertion_type="persisted_state"),
+    ]
+    verifier_tool = "eval_verify_candidate_batch"
+    candidates = tuple(
+        {
+            "name": f"Candidate {index:02d}",
+            "company": f"Company {index:02d}",
+            "role": "Revenue Leader",
+            "profile_url": f"https://profiles.example.test/candidate-{index:02d}",
+        }
+        for index in range(1, 13)
+    )
+
+    @staticmethod
+    def _seed_near_trigger_judge_history(agent: PersistentAgent) -> None:
+        now = timezone.now()
+        PersistentAgentStep.objects.filter(agent=agent).update(created_at=now - timedelta(hours=2))
+        prior_judge = PersistentAgentCompletion.objects.create(
+            agent=agent,
+            completion_type=PersistentAgentCompletion.CompletionType.LLM_JUDGE,
+            llm_model="seeded-prior-judge",
+            llm_provider="eval",
+        )
+        PersistentAgentCompletion.objects.filter(pk=prior_judge.pk).update(
+            created_at=now - timedelta(hours=1),
+        )
+        PersistentAgentStep.objects.bulk_create(
+            [
+                PersistentAgentStep(agent=agent, description=f"Recent bounded candidate verification checkpoint {index}.")
+                for index in range(1, 9)
+            ]
+        )
+
+    def _enable_verifier(self, agent: PersistentAgent) -> None:
+        mark_tool_enabled_without_discovery(agent, self.verifier_tool)
+        PersistentAgentEnabledTool.objects.filter(agent=agent, tool_full_name=self.verifier_tool).update(
+            tool_server=EVAL_SYNTHETIC_TOOL_SERVER,
+            tool_name=self.verifier_tool,
+        )
+
+    def run(self, run_id: str, agent_id: str) -> None:
+        agent = PersistentAgent.objects.get(id=agent_id)
+        agent.charter = (
+            "Own verified candidate handoffs. Preserve every verified record, its company, role, and source URL; "
+            "use SQLite for exact coverage and deliver complete requested batches."
+        )
+        agent.save(update_fields=["charter", "updated_at"])
+        self._seed_near_trigger_judge_history(agent)
+        self._enable_verifier(agent)
+        mark_tool_enabled_without_discovery(agent, "send_chat_message")
+
+        self.record_task_result(
+            run_id, None, EvalRunTask.Status.RUNNING, task_name="inject_candidate_handoff"
+        )
+        with self.wait_for_agent_idle(agent_id, timeout=180):
+            inbound = self.inject_message(
+                agent_id,
+                (
+                    "You keep missing the final candidate handoff. Use the enabled candidate verifier to retrieve "
+                    "the already-verified 12-record batch, then send all 12 candidates here once with company, role, "
+                    "and source link. Do not start new research."
+                ),
+                trigger_processing=True,
+                eval_run_id=run_id,
+                mock_config={
+                    self.verifier_tool: {
+                        "status": "ok",
+                        "verified_candidates": list(self.candidates),
+                        "verified_count": len(self.candidates),
+                        "remaining_work": 0,
+                    },
+                },
+                eval_stop_policy={
+                    "stop_on_tool_names_after_execution": ["send_chat_message"],
+                    "stop_on_unexpected_relevant_tool": True,
+                    "allowed_tool_names": [
+                        self.verifier_tool,
+                        "send_chat_message",
+                        "sqlite_batch",
+                        "update_plan",
+                    ],
+                    "max_relevant_tool_calls": 7,
+                    "ignored_tool_names": ["sqlite_batch", "update_plan"],
+                },
+            )
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED,
+            task_name="inject_candidate_handoff",
+            observed_summary="A trajectory-shaped, near-judge-trigger candidate handoff ran through the real loop.",
+            artifacts={"message": inbound},
+        )
+
+        calls = get_tool_calls_for_run(run_id, after=inbound.timestamp)
+        verifier_calls = [call for call in calls if call.tool_name == self.verifier_tool]
+        verifier_ok = (
+            len(verifier_calls) == 1
+            and verifier_calls[0].status == PersistentAgentToolCall.Status.COMPLETE
+        )
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED if verifier_ok else EvalRunTask.Status.FAILED,
+            task_name="verify_candidate_retrieval",
+            expected_summary="The bounded verified batch should be retrieved exactly once.",
+            observed_summary=f"successful_verifier_calls={sum(call.status == PersistentAgentToolCall.Status.COMPLETE for call in verifier_calls)}, total={len(verifier_calls)}.",
+            artifacts={"tool_calls": verifier_calls},
+        )
+
+        outbound = list(
+            PersistentAgentMessage.objects.filter(
+                owner_agent=agent,
+                is_outbound=True,
+                timestamp__gt=inbound.timestamp,
+            ).order_by("timestamp", "seq")
+        )
+        body = "\n".join(message.body or "" for message in outbound)
+        complete_delivery = (
+            len(outbound) == 1
+            and all(candidate["name"] in body for candidate in self.candidates)
+            and all(candidate["profile_url"] in body for candidate in self.candidates)
+        )
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED if complete_delivery else EvalRunTask.Status.FAILED,
+            task_name="verify_complete_delivery",
+            expected_summary="One final reply should include all 12 verified candidates and their evidence links.",
+            observed_summary=(
+                "All 12 records and links were delivered once."
+                if complete_delivery
+                else f"outbound_messages={len(outbound)}, covered_names={sum(candidate['name'] in body for candidate in self.candidates)}, covered_links={sum(candidate['profile_url'] in body for candidate in self.candidates)}."
+            ),
+            artifacts={"messages": outbound},
+        )
+
+        active_cycle_judges = list(
+            PersistentAgentCompletion.objects.filter(
+                agent=agent,
+                eval_run_id=run_id,
+                completion_type=PersistentAgentCompletion.CompletionType.LLM_JUDGE,
+                created_at__gt=inbound.timestamp,
+            ).order_by("created_at", "id")
+        )
+        advisory_deferred = bool(outbound) and bool(active_cycle_judges) and all(
+            completion.created_at >= outbound[-1].timestamp
+            for completion in active_cycle_judges
+        )
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED if advisory_deferred else EvalRunTask.Status.FAILED,
+            task_name="verify_advisory_deferred",
+            expected_summary="Automatic advisory judging should wait until the active result handoff has finished.",
+            observed_summary=(
+                "Automatic advisory work ran only after the requested delivery."
+                if advisory_deferred
+                else (
+                    f"automatic_judge_completions={len(active_cycle_judges)}, "
+                    f"outbound_messages={len(outbound)}."
+                )
             ),
         )
