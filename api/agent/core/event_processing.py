@@ -1680,7 +1680,7 @@ def _filter_incompatible_reply_tools(
         tool for tool in tools
         if tool.get("function", {}).get("name") != "send_mcp_message"
     ]
-    if mcp_available:
+    if mcp_available or is_mcp_message(inbound):
         filtered.append(get_send_mcp_message_tool())
     if inbound is None or inbound.conversation is None or not inbound.conversation.is_peer_dm:
         return filtered
