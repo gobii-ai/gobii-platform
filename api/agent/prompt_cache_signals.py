@@ -69,5 +69,5 @@ def invalidate_ambiguous_contacts_prompt_snapshot(sender, instance, **kwargs):
 
 @receiver(m2m_changed, sender=PersistentAgentMessage.cc_endpoints.through)
 @receiver(m2m_changed, sender=PersistentAgentMessage.bcc_endpoints.through)
-def invalidate_message_recipient_prompt_snapshot(sender, instance, **kwargs):
+def invalidate_message_cc_prompt_snapshot(sender, instance, **kwargs):
     invalidate_active_prompt_run_cache(instance.owner_agent_id, CONTACTS_SNAPSHOT)
