@@ -341,7 +341,7 @@ export function ComputerConnectionsPanel({ variant = 'embedded' }: { variant?: S
         <SurfaceHeader
           variant={variant}
           title="Connect your Agent to your computer"
-          subtitle="computer.cpp makes an encrypted outbound connection to Gobii—no public IP, port forwarding, or inbound firewall rule is needed."
+          subtitle="The Gobii desktop app lets your Agent securely work with the apps you choose."
           actions={downloadButtons.map(({ key, label, icon: Icon, url: downloadUrl }, index) => (
             <SettingsActionButton
               key={key}
@@ -357,8 +357,7 @@ export function ComputerConnectionsPanel({ variant = 'embedded' }: { variant?: S
           ))}
         />
         <div className={variant === 'embedded' ? 'px-6 pb-5 text-sm text-slate-300' : 'px-6 pb-5 text-sm text-slate-600'}>
-          Install the app, choose “Connect to Gobii,” sign in, select an agent, and approve the desktop apps it may use.
-          Minimum supported version: {downloads.minimum_version}.
+          Download and install the app. Then sign in to Gobii, choose an Agent, and select which apps it can use.
         </div>
         {message ? (
           <div className="px-6 pb-4">
@@ -372,7 +371,7 @@ export function ComputerConnectionsPanel({ variant = 'embedded' }: { variant?: S
         ) : null}
         {devices.length === 0 ? (
           <div className={variant === 'embedded' ? 'px-6 pb-6 text-sm text-slate-400' : 'px-6 pb-6 text-sm text-slate-600'}>
-            No computers are connected yet.
+            Download the app above to connect your first computer.
           </div>
         ) : (
           <div className="overflow-x-auto">
