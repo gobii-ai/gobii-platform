@@ -8,6 +8,11 @@ from bleach.sanitizer import ALLOWED_ATTRIBUTES, ALLOWED_PROTOCOLS, ALLOWED_TAGS
 
 from api.agent.comms.email_content import convert_body_to_html_and_plaintext
 
+# Not bumped to v2 for the #504 style-leak fix: v1 caches for Mailgun replies hold
+# reply-history-stripped HTML that cannot be reproduced at serve time, so ignoring v1
+# would regress reply stripping for legacy messages. Legacy leaked-CSS bodies stay as
+# cached (contained by the timeline's email collapse); forwards re-render every serve
+# and pick up the fix retroactively.
 CHAT_BODY_HTML_CACHE_KEY = "chat_body_html_v1"
 
 EMAIL_TAGS = (
