@@ -4058,10 +4058,9 @@ def _execute_prepared_tool_batch_inner(
                 ):
                     prepared = pending_calls[pending_index]
                     if (
-                        prepared.tool_name != "http_request"
-                        and is_source_bearing_tool(prepared.tool_name)
+                        is_source_bearing_tool(prepared.tool_name)
                         and any(
-                            in_flight.tool_name == prepared.tool_name
+                            is_source_bearing_tool(in_flight.tool_name)
                             for in_flight in futures.values()
                         )
                     ):

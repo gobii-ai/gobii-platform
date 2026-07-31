@@ -255,7 +255,7 @@ class NonRetryableToolAvailabilityTests(SimpleTestCase):
                     )
 
                 source = prepared(1, "mcp_vendor_search")
-                unsafe_sibling = prepared(2, "mcp_vendor_search")
+                unsafe_sibling = prepared(2, "http_request")
                 delivery = prepared(3, "send_chat_message")
                 source_outcome = _ToolExecutionOutcome(
                     prepared=source,
