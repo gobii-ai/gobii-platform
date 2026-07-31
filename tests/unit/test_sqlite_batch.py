@@ -223,8 +223,7 @@ class SqliteBatchCoreTests(SqliteBatchTestCase):
         tool = get_sqlite_batch_tool()["function"]
 
         self.assertIn("Semicolon-separate statements", tool["description"])
-        self.assertIn("PRIMARY KEY/UNIQUE", tool["description"])
-        self.assertIn("bindings object", tool["description"])
+        self.assertIn("exact unique-key columns", tool["description"])
         self.assertEqual(tool["parameters"]["properties"]["rows"]["type"], "array")
         self.assertEqual(tool["parameters"]["properties"]["bindings"]["type"], "object")
 
@@ -234,14 +233,14 @@ class SqliteBatchCoreTests(SqliteBatchTestCase):
 
         self.assertIn("Bind messy text via :name", function["description"])
         self.assertIn("no backslash escapes", function["description"])
-        self.assertIn("Config: UPDATE", sql_description)
+        self.assertIn("Config UPDATE", sql_description)
         self.assertIn("patch_text(charter,:old,:new)", sql_description)
-        self.assertIn("old/new belong in bindings", sql_description)
+        self.assertIn("old/new in bindings", sql_description)
         self.assertIn(
             "Config requires old/new",
             function["parameters"]["properties"]["bindings"]["description"],
         )
-        self.assertIn("End writes with keyed readback plus decision/detail SELECTs", sql_description)
+        self.assertIn("End writes with keyed readback + decision/detail SELECTs", sql_description)
 
     def test_rows_schema_requires_source_specificity_without_enrichment(self):
         rows = (
@@ -794,42 +793,46 @@ class SqliteBatchCoreTests(SqliteBatchTestCase):
         description = definition["function"]["description"]
 
         for expected in (
+            "MESSAGE RULE",
+            "copy every payload field through a binding/json_extract",
+            "`state='...'` is invalid even when the matching source payload is bound",
+            "state=:source_status",
+            "state=json_extract(:source_payload,'$.delivery_status')",
             "Durable world model/exact logic",
             "keyed DDL",
             "set-wise upsert",
-            "current batch + tool_name",
+            "current batch + exact tool_name",
             "result_json/item.value",
             "t.result_id/t.source_url",
-            "inspect bounded set once",
+            "inspect once",
             "top-level rows",
-            "Structured JSON uses rows=[]",
-            "no ID/URL filter",
-            "Message/peer events",
-            "prefer one-batch INSERT ... SELECT from __messages",
-            "After payload inspection, bind observed values",
-            "never put them in SQL",
+            "rows=[] for other structured",
+            "no ID/URL filters",
+            "Peer/message: use __messages/bound evidence",
+            "never rows/__tool_results",
+            "SQLite call IDs",
             "VALUES match columns/no WHERE",
             "INSERT SELECT needs WHERE 1=1 before ON CONFLICT",
             "group_concat(DISTINCT x)",
-            "Never put sourced facts/URLs in SQL",
+            "Never use sourced SQL literals",
             "import siblings singly",
             "mix historical generic results",
-            "Evolve normalized entities/relations",
+            "normalized entities/relations",
             "counts/joins/coverage/gaps/ranks",
-            "read back keyed writes and all evidence/URLs",
+            "Read back keyed writes",
         ):
             self.assertIn(expected, description)
         continuation_description = (
             definition["function"]["parameters"]["properties"]["will_continue_work"]["description"]
         )
         self.assertIn("True for any read that may trigger another tool", continuation_description)
-        self.assertIn("queue reads are true", continuation_description)
-        self.assertIn("false when its SELECTs are enough to answer", continuation_description)
+        self.assertIn("queues included", continuation_description)
+        self.assertIn("false when SELECTs answer", continuation_description)
         self.assertIn("Never true only to query SQLite again", continuation_description)
         rows_schema = definition["function"]["parameters"]["properties"]["rows"]
         self.assertEqual(rows_schema["type"], "array")
         self.assertIn("REQUIRED and non-empty", rows_schema["description"])
-        self.assertIn("Use [] for structured JSON", rows_schema["description"])
+        self.assertIn("Use [] for structured/inspection/model-only work", rows_schema["description"])
         self.assertIn("SQL receives :rows", rows_schema["description"])
         self.assertIn(
             "rows=[]",
@@ -849,13 +852,17 @@ class SqliteBatchCoreTests(SqliteBatchTestCase):
         self.assertNotIn("Upsert stable keys; put WHERE 1=1 before ON CONFLICT", description)
         self.assertIn("json_each(:rows)", sql_description)
         self.assertIn("$.fields.<name>", sql_description)
-        self.assertIn("t.result_id/t.source_url provenance", sql_description)
-        self.assertIn("prefer INSERT ... SELECT from __messages", sql_description)
-        self.assertIn("after inspecting body/structured_payload_json", sql_description)
-        self.assertIn("use bindings, not SQL literals", sql_description)
+        self.assertIn("keep t.result_id/t.source_url", sql_description)
+        self.assertIn("Message writes follow MESSAGE RULE", sql_description)
+        self.assertIn("using __messages or bound evidence", sql_description)
+        self.assertIn("never rows/__tool_results", sql_description)
+        self.assertIn(":source_payload", sql_description)
+        self.assertIn("json_extract every message field", sql_description)
         self.assertIn("End writes with keyed readback", sql_description)
         bindings_description = definition["function"]["parameters"]["properties"]["bindings"]["description"]
-        self.assertIn("authored or inspected-message :name values", bindings_description)
+        self.assertIn("inspected source fields", bindings_description)
+        self.assertIn("complete message payload as source_payload", bindings_description)
+        self.assertIn("bindings", definition["function"]["parameters"]["required"])
         self.assertNotIn("before one terminal send", description)
 
     def test_tool_result_ctas_warns_that_identity_is_disposable(self):

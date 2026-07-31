@@ -362,7 +362,13 @@ class ResponsibilityBoundaryScenario(EvalScenario, ScenarioExecutionTools):
         return agent
 
     @staticmethod
-    def _create_peer_link(agent: PersistentAgent, run_id: str) -> tuple[PersistentAgent, AgentPeerLink]:
+    def _create_peer_link(
+        agent: PersistentAgent,
+        run_id: str,
+        *,
+        peer_name_prefix: str = "Engineering Agent",
+        peer_charter: str = "Own technical support and product-behavior investigation.",
+    ) -> tuple[PersistentAgent, AgentPeerLink]:
         if not agent.organization_id:
             raise ValueError("Responsibility-boundary peer eval requires an organization-owned eval agent.")
         peer_username = f"engineering-boundary-{run_id}@eval.local"
@@ -374,8 +380,8 @@ class ResponsibilityBoundaryScenario(EvalScenario, ScenarioExecutionTools):
         peer = PersistentAgent.objects.create(
             user=peer_user,
             organization=agent.organization,
-            name=f"Engineering Agent {str(run_id)[:8]}",
-            charter="Own technical support and product-behavior investigation.",
+            name=f"{peer_name_prefix} {str(run_id)[:8]}",
+            charter=peer_charter,
             browser_use_agent=peer_browser_agent,
             planning_state=PersistentAgent.PlanningState.SKIPPED,
             is_active=False,
@@ -400,8 +406,21 @@ class ResponsibilityBoundaryScenario(EvalScenario, ScenarioExecutionTools):
             )
 
     @classmethod
-    def _peer_inbound(cls, agent: PersistentAgent, run_id: str, body: str) -> PersistentAgentMessage:
-        peer, link = cls._create_peer_link(agent, run_id)
+    def _peer_inbound(
+        cls,
+        agent: PersistentAgent,
+        run_id: str,
+        body: str,
+        *,
+        peer_name_prefix: str = "Engineering Agent",
+        peer_charter: str = "Own technical support and product-behavior investigation.",
+    ) -> PersistentAgentMessage:
+        peer, link = cls._create_peer_link(
+            agent,
+            run_id,
+            peer_name_prefix=peer_name_prefix,
+            peer_charter=peer_charter,
+        )
         conversation = PersistentAgentConversation.objects.create(
             channel=CommsChannel.OTHER,
             address=f"peer://{link.pair_key}",

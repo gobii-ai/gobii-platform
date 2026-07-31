@@ -33,7 +33,20 @@ class PeerStructuredPayloadPromptTests(SimpleTestCase):
         )
 
         self.assertNotIn("content", components)
+        self.assertLess(list(components).index("structured_payload"), list(components).index("structured_payload_sql_source"))
         self.assertEqual(json.loads(components["structured_payload"]), payload)
+
+    def test_delivery_status_requires_payload_derived_state(self):
+        components = _build_peer_message_prompt_components(
+            header="Peer DM received from Seller:",
+            body="Reconcile this outcome.",
+            raw_payload={
+                "_source": "agent_peer_dm",
+                "structured_payload": {"record_id": "rec-17", "delivery_status": "bounced"},
+            },
+        )
+
+        self.assertIn("state=json_extract(:source_payload,'$.delivery_status')", components["structured_payload_sql_source"])
 
     def test_prose_and_payload_remain_distinct_components(self):
         components = _build_peer_message_prompt_components(

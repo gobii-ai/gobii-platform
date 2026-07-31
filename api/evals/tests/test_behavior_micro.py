@@ -60,6 +60,14 @@ class BehaviorMicroScenarioTests(SimpleTestCase):
             CHARTER_MEMORY_MICRO_SCENARIO_SLUGS,
         )
 
+    def test_correction_assignment_fixture_uses_a_role_aligned_peer(self):
+        scenario = ScenarioRegistry.get(CHARTER_CORRECTION_GOVERNS_NEXT_PEER_ASSIGNMENT)
+
+        self.assertIn("outreach", scenario.assignment_peer_name_prefix.casefold())
+        self.assertIn("outreach", scenario.assignment_peer_charter.casefold())
+        self.assertIn("prospect", scenario.assignment_peer_charter.casefold())
+        self.assertNotIn("technical support", scenario.assignment_peer_charter.casefold())
+
     def test_focused_charter_patch_allows_same_batch_verification_read(self):
         call = SimpleNamespace(
             tool_params={
