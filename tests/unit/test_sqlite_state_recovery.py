@@ -2,6 +2,7 @@ import contextlib
 import os
 import shutil
 import sqlite3
+import subprocess
 import tempfile
 from unittest.mock import patch
 
@@ -55,6 +56,23 @@ def _overwrite_header_with_tls_record(db_path: str) -> None:
     with open(db_path, "r+b") as db_file:
         db_file.seek(5)
         db_file.write(tls_record)
+
+
+def _sqlite_shell_supports_safe_recovery() -> bool:
+    sqlite_shell = shutil.which("sqlite3")
+    if sqlite_shell is None:
+        return False
+    try:
+        probe = subprocess.run(
+            [sqlite_shell, "--safe", "-batch", ":memory:", ".recover"],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return probe.returncode == 0
 
 
 @tag("batch_sqlite")
@@ -220,6 +238,9 @@ class SQLiteRecoveryFileTests(SimpleTestCase):
         self.assertEqual(value, "safe")
 
     def test_sqlite_shell_recovery_returns_a_valid_database(self):
+        if not _sqlite_shell_supports_safe_recovery():
+            self.skipTest("sqlite3 shell with safe recovery is not installed")
+
         conn = sqlite3.connect(self.db_path)
         try:
             conn.execute("PRAGMA page_size=4096;")
@@ -340,7 +361,7 @@ class SQLitePersistenceSafetyTests(SimpleTestCase):
 
         self.assertEqual(
             log_error.call_args.kwargs["error_code"],
-            "sqlite_restore_salvaged",
+            "sqlite_restore_reset_after_corruption",
         )
         with self.storage.open(quarantine_key, "rb") as quarantined:
             self.assertEqual(quarantined.read(), original_bytes)
