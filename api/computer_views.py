@@ -57,7 +57,7 @@ def computer_pairing_start(request: HttpRequest):
             "verification_uri_complete": (
                 f"{verification_uri}?computer_pairing={pairing.id}&user_code={user_code}"
             ),
-            "expires_at": pairing.expires_at.isoformat(),
+            "expires_at": pairing.expires_at,
             "interval": settings.COMPUTER_CPP_PAIRING_POLL_INTERVAL_SECONDS,
         },
         status=201,
@@ -178,7 +178,7 @@ def computer_artifact_upload(request: HttpRequest):
             "mime_type": artifact.mime_type,
             "byte_count": artifact.byte_count,
             "sha256": artifact.sha256,
-            "expires_at": artifact.expires_at.isoformat(),
+            "expires_at": artifact.expires_at,
         },
         status=201,
     )

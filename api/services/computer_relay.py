@@ -240,7 +240,9 @@ def manageable_agents_for_user(user):
         role__in=ORG_AGENT_CONFIG_AUTHORITY_ROLES,
     ).values_list("org_id", flat=True)
     return (
-        PersistentAgent.objects.filter(is_deleted=False, is_active=True)
+        PersistentAgent.objects.non_eval()
+        .alive()
+        .filter(is_active=True, deleted_at__isnull=True)
         .filter(
             Q(user=user, organization__isnull=True)
             | Q(organization_id__in=organization_ids)
@@ -251,7 +253,12 @@ def manageable_agents_for_user(user):
 
 
 def user_can_assign_agent(user, agent: PersistentAgent) -> bool:
-    if agent.is_deleted or not agent.is_active:
+    if (
+        agent.is_deleted
+        or agent.deleted_at is not None
+        or not agent.is_active
+        or agent.execution_environment == "eval"
+    ):
         return False
     if agent.organization_id is None:
         return agent.user_id == user.id

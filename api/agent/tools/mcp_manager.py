@@ -259,9 +259,6 @@ class MCPServerRuntime:
     user_id: Optional[str]
     updated_at: Optional[datetime]
     transport: str = MCPServerConfig.Transport.STREAMABLE_HTTP
-    computer_device_app_id: Optional[str] = None
-    computer_device_id: Optional[str] = None
-    computer_schema_hash: str = ""
     oauth_access_token: Optional[str] = field(default=None, repr=False)
     oauth_token_type: Optional[str] = None
     oauth_expires_at: Optional[datetime] = None
@@ -1166,17 +1163,6 @@ class MCPToolManager:
             args=list(cfg.command_args or []),
             url=cfg.url or None,
             transport=cfg.transport,
-            computer_device_app_id=(
-                str(metadata.get("computer_device_app_id"))
-                if metadata.get("computer_device_app_id")
-                else None
-            ),
-            computer_device_id=(
-                str(metadata.get("computer_device_id"))
-                if metadata.get("computer_device_id")
-                else None
-            ),
-            computer_schema_hash=str(metadata.get("schema_sha256") or ""),
             auth_method=cfg.auth_method,
             env=env,
             headers=headers,
@@ -1295,13 +1281,15 @@ class MCPToolManager:
         headers_override: Optional[Dict[str, str]] = None,
     ):
         if server.transport == MCPServerConfig.Transport.COMPUTER_RELAY:
-            if not server.computer_device_app_id or not server.computer_device_id:
+            device_app_id = server.metadata.get("computer_device_app_id")
+            device_id = server.metadata.get("computer_device_id")
+            if not device_app_id or not device_id:
                 raise ValueError(f"Computer relay server '{server.name}' is missing device metadata")
             from .computer_relay_transport import ComputerRelayTransport
 
             return ComputerRelayTransport(
-                device_app_id=server.computer_device_app_id,
-                device_id=server.computer_device_id,
+                device_app_id=str(device_app_id),
+                device_id=str(device_id),
             )
         if server.url:
             from fastmcp.client.transports import StreamableHttpTransport
@@ -1506,8 +1494,8 @@ class MCPToolManager:
             "url": server.url or "",
             "command": server.command or "",
             "transport": server.transport,
-            "computer_device_app_id": server.computer_device_app_id or "",
-            "computer_schema_hash": server.computer_schema_hash,
+            "computer_device_app_id": str(server.metadata.get("computer_device_app_id") or ""),
+            "computer_schema_hash": str(server.metadata.get("schema_sha256") or ""),
             "args": [str(arg) for arg in (server.args or [])],
             "auth_method": server.auth_method,
             "updated_at": updated_at,

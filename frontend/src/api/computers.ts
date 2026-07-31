@@ -11,6 +11,12 @@ export type ComputerAgent = {
   organization_name: string | null
 }
 
+export type ComputerContext = {
+  type: 'personal' | 'organization'
+  id: string
+  can_manage_org_grants: boolean
+}
+
 export type ComputerApp = {
   app_key: string
   display_name: string
@@ -52,11 +58,7 @@ export type ComputersResponse = {
     windows: { url: string; portable_url: string }
     minimum_version: string
   }
-  context?: {
-    type: 'personal' | 'organization'
-    id: string
-    can_manage_org_grants: boolean
-  }
+  context?: ComputerContext
   agents?: ComputerAgent[]
   devices?: ComputerDevice[]
 }

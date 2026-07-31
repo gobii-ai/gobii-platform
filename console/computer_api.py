@@ -1,3 +1,5 @@
+from uuid import UUID
+
 from django.conf import settings
 from django.core.exceptions import PermissionDenied
 from django.db import transaction
@@ -164,7 +166,14 @@ class ComputerPairingApprovalAPIView(LoginRequiredMixin, View):
         pairing = get_object_or_404(ComputerPairingSession, id=pairing_id)
         try:
             payload = parse_computer_json_payload(request)
-            agent = get_object_or_404(PersistentAgent, id=payload.get("agent_id"))
+            agent_id = str(payload.get("agent_id") or "").strip()
+            if not agent_id:
+                raise ValueError("agent_id is required")
+            try:
+                agent_id = UUID(agent_id)
+            except ValueError as exc:
+                raise ValueError("agent_id must be a valid UUID") from exc
+            agent = get_object_or_404(PersistentAgent, id=agent_id)
             selected = payload.get("selected_app_keys")
             if not isinstance(selected, list):
                 selected = [

@@ -18,6 +18,7 @@ import {
   revokeComputerAssignment,
   updateComputer,
   type ComputerAgent,
+  type ComputerContext,
   type ComputerDevice,
 } from '../../api/computers'
 import { InlineStatusBanner } from '../common/InlineStatusBanner'
@@ -57,27 +58,75 @@ function AgentSelect({
   agents,
   value,
   onChange,
+  defaultContext,
 }: {
   agents: ComputerAgent[]
   value: string
   onChange: (value: string) => void
+  defaultContext?: ComputerContext
 }) {
+  const contexts = [
+    { key: 'personal', label: 'Personal' },
+    ...Array.from(
+      new Map(
+        agents
+          .filter((agent) => agent.organization_id)
+          .map((agent) => [
+            `organization:${agent.organization_id}`,
+            agent.organization_name || 'Team',
+          ]),
+      ),
+      ([key, label]) => ({ key, label }),
+    ).sort((left, right) => left.label.localeCompare(right.label)),
+  ]
+  const agentContextKey = (agent: ComputerAgent) => (
+    agent.organization_id ? `organization:${agent.organization_id}` : 'personal'
+  )
+  const selectedAgent = agents.find((agent) => agent.id === value)
+  const preferredContextKey = selectedAgent
+    ? agentContextKey(selectedAgent)
+    : defaultContext?.type === 'organization'
+      ? `organization:${defaultContext.id}`
+      : 'personal'
+  const [contextKey, setContextKey] = useState(
+    contexts.some((context) => context.key === preferredContextKey)
+      ? preferredContextKey
+      : contexts[0].key,
+  )
+  const contextAgents = agents.filter((agent) => agentContextKey(agent) === contextKey)
+
   return (
-    <label className="block text-sm font-medium text-slate-800">
-      Agent
-      <select
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        className="mt-1 block w-full rounded-lg border-slate-300"
-      >
-        <option value="">Choose an agent</option>
-        {agents.map((agent) => (
-          <option key={agent.id} value={agent.id}>
-            {agent.organization_name ? `${agent.organization_name} · ` : 'Personal · '}{agent.name}
-          </option>
-        ))}
-      </select>
-    </label>
+    <div className="grid gap-4 sm:grid-cols-2">
+      <label className="block text-sm font-medium text-slate-800">
+        Context
+        <select
+          value={contextKey}
+          onChange={(event) => {
+            const nextContext = event.target.value
+            setContextKey(nextContext)
+            if (!selectedAgent || agentContextKey(selectedAgent) !== nextContext) onChange('')
+          }}
+          className="mt-1 block w-full rounded-lg border-slate-300"
+        >
+          {contexts.map((context) => (
+            <option key={context.key} value={context.key}>{context.label}</option>
+          ))}
+        </select>
+      </label>
+      <label className="block text-sm font-medium text-slate-800">
+        Agent
+        <select
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          className="mt-1 block w-full rounded-lg border-slate-300"
+        >
+          <option value="">{contextAgents.length ? 'Choose an agent' : 'No agents available'}</option>
+          {contextAgents.map((agent) => (
+            <option key={agent.id} value={agent.id}>{agent.name}</option>
+          ))}
+        </select>
+      </label>
+    </div>
   )
 }
 
@@ -129,12 +178,14 @@ function PairingModal({
   url,
   pairingId,
   userCode,
+  defaultContext,
   onClose,
   onApproved,
 }: {
   url: string
   pairingId: string
   userCode: string
+  defaultContext?: ComputerContext
   onClose: () => void
   onApproved: () => void
 }) {
@@ -165,7 +216,7 @@ function PairingModal({
     <ModalForm
       id="approve-computer-pairing"
       title="Connect this computer"
-      subtitle="Confirm the verification code, choose one agent, and approve the desktop apps it may use."
+      subtitle="Confirm the verification code, choose a context and Agent, and approve the desktop apps it may use."
       icon={Monitor}
       onClose={onClose}
       onSubmit={(event) => {
@@ -190,7 +241,12 @@ function PairingModal({
             <div className="mt-1 text-xs text-blue-800">{pairing.platform} · {pairing.architecture} · v{pairing.client_version}</div>
             <div className="mt-3 font-mono text-2xl font-semibold tracking-[0.18em] text-blue-950">{userCode}</div>
           </div>
-          <AgentSelect agents={agents} value={agentId} onChange={setAgentId} />
+          <AgentSelect
+            agents={agents}
+            value={agentId}
+            onChange={setAgentId}
+            defaultContext={defaultContext}
+          />
           <AppApprovalChecklist
             apps={pairing.apps.map((app) => ({
               key: app.key,
@@ -273,7 +329,13 @@ function ManageComputerModal({
   )
 }
 
-export function ComputerConnectionsPanel({ variant = 'embedded' }: { variant?: SettingsSurfaceVariant }) {
+export function ComputerConnectionsPanel({
+  variant = 'embedded',
+  allowPairingModal = true,
+}: {
+  variant?: SettingsSurfaceVariant
+  allowPairingModal?: boolean
+}) {
   const url = getComputerConnectionsUrl()
   const queryClient = useQueryClient()
   const queryKey = useMemo(() => ['computer-connections', url] as const, [url])
@@ -288,7 +350,7 @@ export function ComputerConnectionsPanel({ variant = 'embedded' }: { variant?: S
   const params = useMemo(() => new URLSearchParams(window.location.search), [])
   const pairingId = params.get('computer_pairing')
   const userCode = params.get('user_code') ?? ''
-  const [showPairing, setShowPairing] = useState(Boolean(pairingId && userCode))
+  const [showPairing, setShowPairing] = useState(Boolean(allowPairingModal && pairingId && userCode))
   const surface = variant
   const devices = query.data?.devices ?? []
   const agents = query.data?.agents ?? []
@@ -489,11 +551,12 @@ export function ComputerConnectionsPanel({ variant = 'embedded' }: { variant?: S
           </div>
         )}
       </SettingsSurface>
-      {showPairing && pairingId && userCode ? (
+      {allowPairingModal && showPairing && pairingId && userCode ? (
         <PairingModal
           url={url}
           pairingId={pairingId}
           userCode={userCode}
+          defaultContext={query.data.context}
           onClose={() => {
             setShowPairing(false)
             clearPairingUrl()

@@ -12,6 +12,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.files.storage import default_storage
 from django.test import TestCase, TransactionTestCase, override_settings, tag
 from django.urls import reverse
+from django.utils import timezone
 from waffle import get_waffle_flag_model
 
 from api.agent.system_skills.defaults import COMPUTER_SYSTEM_SKILL, _computer_prompt_context
@@ -43,6 +44,7 @@ from api.services.computer_relay import (
     sync_device_manifest,
     relay_mcp_request,
     serialize_device,
+    user_can_assign_agent,
 )
 
 
@@ -143,6 +145,10 @@ class ComputerPairingAPITests(TestCase):
         )
         self.assertEqual(response.status_code, 201)
         self.assertIn("computer_pairing=", response.json()["verification_uri_complete"])
+        self.assertRegex(
+            response.json()["expires_at"],
+            r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$",
+        )
 
         self.client.force_login(self.user)
         approval = self.client.post(
@@ -166,6 +172,47 @@ class ComputerPairingAPITests(TestCase):
         _enable_computer_flag(self.user)
 
         self.assertTrue(COMPUTER_SYSTEM_SKILL.should_render_prompt(self.agent))
+
+    def test_pairing_agent_picker_excludes_eval_and_soft_deleted_agents(self):
+        _enable_computer_flag(self.user)
+        eval_agent = _create_agent(self.user, "Eval agent")
+        eval_agent.execution_environment = "eval"
+        eval_agent.save(update_fields=["execution_environment"])
+        deleted_agent = _create_agent(self.user, "Deleted agent")
+        PersistentAgent.objects.filter(id=deleted_agent.id).update(
+            is_deleted=True,
+            deleted_at=timezone.now(),
+        )
+        deleted_agent.refresh_from_db()
+        pairing, _, _ = create_pairing_session(_pairing_payload())
+        self.client.force_login(self.user)
+
+        response = self.client.get(
+            reverse("console-computer-pairing", kwargs={"pairing_id": pairing.id})
+        )
+
+        self.assertEqual(response.status_code, 200)
+        returned_ids = {agent["id"] for agent in response.json()["agents"]}
+        self.assertIn(str(self.agent.id), returned_ids)
+        self.assertNotIn(str(eval_agent.id), returned_ids)
+        self.assertNotIn(str(deleted_agent.id), returned_ids)
+        self.assertFalse(user_can_assign_agent(self.user, eval_agent))
+        self.assertFalse(user_can_assign_agent(self.user, deleted_agent))
+
+    def test_pairing_approval_rejects_invalid_agent_ids(self):
+        _enable_computer_flag(self.user)
+        pairing, _, _ = create_pairing_session(_pairing_payload())
+        self.client.force_login(self.user)
+
+        for agent_id in ("", "not-a-uuid"):
+            with self.subTest(agent_id=agent_id):
+                response = self.client.post(
+                    reverse("console-computer-pairing", kwargs={"pairing_id": pairing.id}),
+                    data=json.dumps({"agent_id": agent_id}),
+                    content_type="application/json",
+                )
+
+                self.assertEqual(response.status_code, 400)
 
     def test_pairing_rejects_an_agent_the_approving_user_cannot_manage(self):
         _enable_computer_flag(self.user)

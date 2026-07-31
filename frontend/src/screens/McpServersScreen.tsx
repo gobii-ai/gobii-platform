@@ -30,6 +30,7 @@ type McpServersScreenProps = {
   oauthMetadataUrl: string
   oauthCallbackPath: string
   variant?: 'standalone' | 'embedded'
+  allowComputerPairingModal?: boolean
 }
 
 const PLACEHOLDER_TOKEN = '00000000-0000-0000-0000-000000000000'
@@ -49,6 +50,7 @@ export function McpServersScreen({
   oauthMetadataUrl,
   oauthCallbackPath,
   variant = 'standalone',
+  allowComputerPairingModal = true,
 }: McpServersScreenProps) {
   const isEmbedded = variant === 'embedded'
   const queryClient = useQueryClient()
@@ -274,7 +276,10 @@ export function McpServersScreen({
           embedded={isEmbedded}
         />
       ) : null}
-      <ComputerConnectionsPanel variant={isEmbedded ? 'embedded' : 'standalone'} />
+      <ComputerConnectionsPanel
+        variant={isEmbedded ? 'embedded' : 'standalone'}
+        allowPairingModal={allowComputerPairingModal}
+      />
       <div className={tableShellClassName}>
         <SurfaceHeader
           variant={isEmbedded ? 'embedded' : 'standalone'}
