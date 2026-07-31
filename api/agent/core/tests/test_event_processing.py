@@ -125,95 +125,101 @@ class NonRetryableToolAvailabilityTests(SimpleTestCase):
         self.assertEqual(filtered, self.tools)
 
     def test_same_batch_terminal_result_skips_unsafe_sibling_but_allows_delivery(self):
-        def prepared(idx, tool_name):
-            return _PreparedToolExecution(
-                idx=idx,
-                tool_name=tool_name,
-                tool_params={},
-                exec_params={},
-                pending_step=None,
-                credits_consumed=None,
-                consumed_credit=None,
-                call_id=f"call_{idx}",
-                explicit_continue=False if tool_name == "send_chat_message" else None,
-                inferred_continue=False,
-                parallel_safe=False,
-                parallel_ineligible_reason="unsafe",
-            )
+        for parallel_ineligible_reason in ("unsafe", None):
+            with self.subTest(parallel_ineligible_reason=parallel_ineligible_reason):
+                def prepared(idx, tool_name):
+                    return _PreparedToolExecution(
+                        idx=idx,
+                        tool_name=tool_name,
+                        tool_params={},
+                        exec_params={},
+                        pending_step=None,
+                        credits_consumed=None,
+                        consumed_credit=None,
+                        call_id=f"call_{idx}",
+                        explicit_continue=False if tool_name == "send_chat_message" else None,
+                        inferred_continue=False,
+                        parallel_safe=parallel_ineligible_reason is None,
+                        parallel_ineligible_reason=parallel_ineligible_reason,
+                    )
 
-        source = prepared(1, "mcp_vendor_search")
-        unsafe_sibling = prepared(2, "http_request")
-        delivery = prepared(3, "send_chat_message")
-        source_outcome = _ToolExecutionOutcome(
-            prepared=source,
-            result={
-                "status": "error",
-                "retryable": False,
-                "terminal_error": True,
-            },
-            duration_ms=1,
-            updated_tools=None,
-            variable_map={},
-        )
-        delivery_outcome = _ToolExecutionOutcome(
-            prepared=delivery,
-            result={"status": "ok", "auto_sleep_ok": True},
-            duration_ms=1,
-            updated_tools=None,
-            variable_map={},
-        )
-        batch = _PreparedToolBatch(
-            prepared_calls=[source, unsafe_sibling, delivery],
-            followup_required=False,
-            all_calls_sleep=False,
-            abort_after_execution=False,
-            parallel_ineligible_reason="unsafe",
-        )
-        agent = SimpleNamespace(id=uuid4(), refresh_from_db=lambda **_kwargs: None)
+                source = prepared(1, "mcp_vendor_search")
+                unsafe_sibling = prepared(2, "http_request")
+                delivery = prepared(3, "send_chat_message")
+                source_outcome = _ToolExecutionOutcome(
+                    prepared=source,
+                    result={
+                        "status": "error",
+                        "retryable": False,
+                        "terminal_error": True,
+                    },
+                    duration_ms=1,
+                    updated_tools=None,
+                    variable_map={},
+                )
+                delivery_outcome = _ToolExecutionOutcome(
+                    prepared=delivery,
+                    result={"status": "ok", "auto_sleep_ok": True},
+                    duration_ms=1,
+                    updated_tools=None,
+                    variable_map={},
+                )
+                batch = _PreparedToolBatch(
+                    prepared_calls=[source, unsafe_sibling, delivery],
+                    followup_required=False,
+                    all_calls_sleep=False,
+                    abort_after_execution=False,
+                    parallel_ineligible_reason=parallel_ineligible_reason,
+                )
+                agent = SimpleNamespace(id=uuid4(), refresh_from_db=lambda **_kwargs: None)
 
-        with (
-            patch(
-                "api.agent.core.event_processing._execute_prepared_tool_call",
-                side_effect=[source_outcome, delivery_outcome],
-            ) as execute,
-            patch("api.agent.core.event_processing._persist_tool_execution_outcome"),
-            patch("api.agent.core.event_processing._mark_prepared_tool_started"),
-            patch(
-                "api.agent.core.event_processing._cancel_unstarted_tool_calls"
-            ) as cancel,
-            patch(
-                "api.agent.core.event_processing._should_abort_processing",
-                return_value=False,
-            ),
-            patch(
-                "api.agent.core.event_processing.is_signup_preview_processing_paused",
-                return_value=False,
-            ),
-        ):
-            executed = _execute_prepared_tool_batch_inner(
-                agent,
-                batch,
-                budget_ctx=None,
-                eval_run_id=None,
-                tools=self.tools,
-                heartbeat=None,
-                lock_extender=None,
-            )
+                with (
+                    patch(
+                        "api.agent.core.event_processing._execute_prepared_tool_call",
+                        side_effect=[source_outcome, delivery_outcome],
+                    ) as execute,
+                    patch("api.agent.core.event_processing._persist_tool_execution_outcome"),
+                    patch("api.agent.core.event_processing._mark_prepared_tool_started"),
+                    patch(
+                        "api.agent.core.event_processing._refresh_skills_for_tool_outcome",
+                        side_effect=lambda _agent, outcome: outcome,
+                    ),
+                    patch(
+                        "api.agent.core.event_processing._cancel_unstarted_tool_calls"
+                    ) as cancel,
+                    patch(
+                        "api.agent.core.event_processing._should_abort_processing",
+                        return_value=False,
+                    ),
+                    patch(
+                        "api.agent.core.event_processing.is_signup_preview_processing_paused",
+                        return_value=False,
+                    ),
+                ):
+                    executed = _execute_prepared_tool_batch_inner(
+                        agent,
+                        batch,
+                        budget_ctx=None,
+                        eval_run_id=None,
+                        tools=self.tools,
+                        heartbeat=None,
+                        lock_extender=None,
+                    )
 
-        self.assertEqual(
-            [call.args[1].tool_name for call in execute.call_args_list],
-            ["mcp_vendor_search", "send_chat_message"],
-        )
-        cancel.assert_called_once_with(
-            agent,
-            [unsafe_sibling],
-            reason=NON_RETRYABLE_BATCH_SKIP_REASON,
-            retryable=False,
-        )
-        self.assertEqual(
-            _tool_names(executed.tools),
-            {"send_chat_message", "sleep_until_next_trigger"},
-        )
+                self.assertEqual(
+                    [call.args[1].tool_name for call in execute.call_args_list],
+                    ["mcp_vendor_search", "send_chat_message"],
+                )
+                cancel.assert_called_once_with(
+                    agent,
+                    [unsafe_sibling],
+                    reason=NON_RETRYABLE_BATCH_SKIP_REASON,
+                    retryable=False,
+                )
+                self.assertEqual(
+                    _tool_names(executed.tools),
+                    {"send_chat_message", "sleep_until_next_trigger"},
+                )
 
 
 @tag('batch_event_processing')

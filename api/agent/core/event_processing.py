@@ -4004,13 +4004,22 @@ def _execute_prepared_tool_batch_inner(
         )
 
     if run_parallel_batch:
+        source_ordered_batch = any(
+            is_source_bearing_tool(prepared.tool_name)
+            for prepared in prepared_batch.prepared_calls
+        )
+        max_workers = (
+            1
+            if source_ordered_batch
+            else min(len(prepared_batch.prepared_calls), max(1, get_max_parallel_tool_calls()))
+        )
         logger.info(
-            "Agent %s: executing %d safe tool calls in parallel.",
+            "Agent %s: executing %d safe tool calls with max_workers=%d.",
             agent.id,
             len(prepared_batch.prepared_calls),
+            max_workers,
         )
         base_variables = get_all_variables()
-        max_workers = min(len(prepared_batch.prepared_calls), max(1, get_max_parallel_tool_calls()))
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures: set[Any] = set()
             next_prepared_index = 0
