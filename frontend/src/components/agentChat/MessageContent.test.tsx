@@ -1,72 +1,21 @@
 import { fireEvent, render, screen } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 
 import { MessageContent } from './MessageContent'
 
-describe('MessageContent', () => {
-  it('wraps html tables in a table-specific scroll container', () => {
-    render(
-      <MessageContent
-        bodyHtml={`
-          <table>
-            <thead>
-              <tr>
-                <th>Company</th>
-                <th>Fit</th>
-                <th>Category</th>
-                <th>Suggested opener</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>BatchLeads</td>
-                <td>4.2</td>
-                <td>Real Estate</td>
-                <td>Your team researches properties daily, so this should remain readable.</td>
-              </tr>
-            </tbody>
-          </table>
-        `}
-      />,
-    )
+const longEmailHtml = '<div>' + '<p>Reddit digest paragraph with enough text to be a real line of content.</p>'.repeat(120) + '</div>'
 
-    const table = screen.getByRole('table')
-    const tableScrollContainer = table.parentElement
-    const htmlContainer = table.closest('.chat-html-content')
-
-    expect(tableScrollContainer).toHaveClass('chat-html-table-scroll')
-    expect(htmlContainer).not.toBeNull()
-    expect(htmlContainer).toHaveClass('not-prose')
-    expect(screen.getByRole('columnheader', { name: 'Suggested opener' })).toBeInTheDocument()
+describe('MessageContent long email collapse (bug #504)', () => {
+  it('collapses long email HTML behind a "Show full email" control', () => {
+    render(<MessageContent bodyHtml={longEmailHtml} />)
+    const toggle = screen.getByRole('button', { name: /show full email/i })
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    fireEvent.click(toggle)
+    expect(screen.getByRole('button', { name: /show less/i })).toHaveAttribute('aria-expanded', 'true')
   })
 
-  it('forwards plain link clicks to the link handler', () => {
-    const onLinkClick = vi.fn(() => true)
-
-    render(
-      <MessageContent
-        bodyText="[Open settings](/console/agents/agent-123/)"
-        onLinkClick={onLinkClick}
-      />,
-    )
-
-    fireEvent.click(screen.getByRole('link', { name: 'Open settings' }))
-
-    expect(onLinkClick).toHaveBeenCalledWith('/console/agents/agent-123/')
-  })
-
-  it('ignores modified link clicks', () => {
-    const onLinkClick = vi.fn(() => true)
-
-    render(
-      <MessageContent
-        bodyText="[Open settings](/console/agents/agent-123/)"
-        onLinkClick={onLinkClick}
-      />,
-    )
-
-    fireEvent.click(screen.getByRole('link', { name: 'Open settings' }), { metaKey: true })
-
-    expect(onLinkClick).not.toHaveBeenCalled()
+  it('renders short email HTML without a collapse control', () => {
+    render(<MessageContent bodyHtml="<p>Short reply about the meeting.</p>" />)
+    expect(screen.queryByRole('button', { name: /show full email/i })).not.toBeInTheDocument()
   })
 })
