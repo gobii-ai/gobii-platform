@@ -1523,6 +1523,44 @@ class MCPToolManagerTests(TestCase):
         self.assertTrue(error["retryable"])
 
     @tag("batch_mcp_tools")
+    @override_settings(PUBLIC_SITE_URL="https://app.example.test")
+    def test_managed_runtime_oauth_reconnect_links_to_integrations(self):
+        runtime = MCPServerRuntime(
+            config_id=self.config_id,
+            name="hubspot",
+            display_name="HubSpot",
+            description="",
+            command=None,
+            args=[],
+            url="https://mcp.hubspot.com/",
+            auth_method=MCPServerConfig.AuthMethod.OAUTH2,
+            env={},
+            headers={},
+            prefetch_apps=[],
+            scope=MCPServerConfig.Scope.USER,
+            organization_id=None,
+            user_id="user-1",
+            updated_at=timezone.now(),
+            oauth_access_token="expired",
+            oauth_expires_at=timezone.now() - timedelta(minutes=1),
+            metadata={"managed_oauth": True, "provider_key": "hubspot"},
+        )
+        reconnect = MCPOAuthResult(
+            status=MCPOAuthStatus.RECONNECT_REQUIRED,
+            credential=None,
+        )
+
+        with patch(
+            "api.agent.tools.mcp_manager.ensure_mcp_oauth_credential",
+            return_value=reconnect,
+        ):
+            _prepared, error = self.manager._ensure_runtime_oauth(runtime)
+
+        self.assertEqual(error["status"], "action_required")
+        self.assertEqual(error["connect_url"], "https://app.example.test/app/integrations")
+        self.assertIn("Reconnect", error["message"])
+
+    @tag("batch_mcp_tools")
     @patch("api.services.mcp_oauth.requests.post")
     def test_build_runtime_skips_refresh_when_token_valid(self, mock_post):
         with patch("api.services.mcp_tool_discovery.schedule_mcp_tool_discovery"):

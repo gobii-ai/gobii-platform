@@ -120,7 +120,11 @@ def _cached_failure_result(credential: MCPServerOAuthCredential) -> Optional[MCP
 
 def _oauth_error_status(response: requests.Response, payload: object) -> str:
     error_code = payload.get("error") if isinstance(payload, dict) else None
-    if error_code == "invalid_grant":
+    provider_status = payload.get("status") if isinstance(payload, dict) else None
+    if str(error_code or "").lower() == "invalid_grant" or str(provider_status or "").upper() in {
+        "BAD_REFRESH_TOKEN",
+        "REQUIRES_REAUTHORIZATION",
+    }:
         return MCPOAuthStatus.RECONNECT_REQUIRED
     if error_code == "invalid_client" or response.status_code in {401, 403}:
         return MCPOAuthStatus.CONFIGURATION_ERROR
@@ -139,26 +143,52 @@ def _refresh_credential(
 
     credential_metadata = credential.metadata if isinstance(credential.metadata, dict) else {}
     config_metadata = config.metadata if isinstance(config.metadata, dict) else {}
-    token_endpoint = str(
-        credential_metadata.get("token_endpoint")
-        or config_metadata.get("token_endpoint")
-        or ""
-    ).strip()
+    if config.managed_integration_key:
+        from api.services.managed_mcp_integrations import (
+            build_managed_mcp_token_request,
+            get_managed_mcp_provider,
+        )
+
+        try:
+            provider = get_managed_mcp_provider(config.managed_integration_key)
+        except KeyError:
+            return MCPOAuthResult(MCPOAuthStatus.CONFIGURATION_ERROR, credential)
+        token_endpoint = provider.token_endpoint
+        try:
+            managed_request_data, managed_request_auth = build_managed_mcp_token_request(
+                provider,
+                {"grant_type": "refresh_token", "refresh_token": refresh_token},
+            )
+        except ValueError:
+            return MCPOAuthResult(MCPOAuthStatus.CONFIGURATION_ERROR, credential)
+    else:
+        token_endpoint = str(
+            credential_metadata.get("token_endpoint")
+            or config_metadata.get("token_endpoint")
+            or ""
+        ).strip()
     if not token_endpoint:
         return MCPOAuthResult(MCPOAuthStatus.CONFIGURATION_ERROR, credential)
 
     request_data = {"grant_type": "refresh_token", "refresh_token": refresh_token}
-    for field in ("client_id", "client_secret"):
-        value = str(getattr(credential, field) or config_metadata.get(field) or "").strip()
-        if value:
-            request_data[field] = value
+    request_auth = None
+    if config.managed_integration_key:
+        request_data = managed_request_data
+        request_auth = managed_request_auth
+    else:
+        for field in ("client_id", "client_secret"):
+            value = str(getattr(credential, field) or config_metadata.get(field) or "").strip()
+            if value:
+                request_data[field] = value
 
     try:
-        response = requests.post(
-            token_endpoint,
-            data=request_data,
-            timeout=OAUTH_REFRESH_TIMEOUT_SECONDS,
-        )
+        request_kwargs = {
+            "data": request_data,
+            "timeout": OAUTH_REFRESH_TIMEOUT_SECONDS,
+        }
+        if request_auth is not None:
+            request_kwargs["auth"] = request_auth
+        response = requests.post(token_endpoint, **request_kwargs)
     except requests.RequestException:
         return MCPOAuthResult(MCPOAuthStatus.TEMPORARILY_UNAVAILABLE, credential)
 
@@ -199,10 +229,15 @@ def _refresh_credential(
     updates["expires_at"] = expires_at
 
     metadata = dict(credential_metadata)
+    safe_metadata_fields = (
+        {"expires_in", "scope", "token_type"}
+        if config.managed_integration_key
+        else set(payload.keys()) - {"access_token", "refresh_token", "id_token"}
+    )
     metadata["last_refresh_response"] = {
         key: value
         for key, value in payload.items()
-        if key not in {"access_token", "refresh_token", "id_token"}
+        if key in safe_metadata_fields
     }
     updates.update(metadata=metadata, updated_at=now)
     try:
@@ -255,6 +290,15 @@ def ensure_mcp_oauth_credential(config_id: str) -> MCPOAuthResult:
         return load_error
     if config is None:
         return MCPOAuthResult(MCPOAuthStatus.CONFIGURATION_ERROR, None)
+    if config.managed_integration_key:
+        from api.services.managed_mcp_integrations import managed_mcp_provider_enabled
+
+        if not managed_mcp_provider_enabled(
+            config.managed_integration_key,
+            config.user,
+            config.organization,
+        ):
+            return MCPOAuthResult(MCPOAuthStatus.CONFIGURATION_ERROR, None)
 
     credential = _credential_for_config(config)
     if config.auth_method != MCPServerConfig.AuthMethod.OAUTH2:

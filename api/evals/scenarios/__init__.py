@@ -90,6 +90,11 @@ from .google_sheets_native import GOOGLE_SHEETS_NATIVE_SCENARIO_SLUGS, GOOGLE_SH
 from .apollo_native import APOLLO_NATIVE_SCENARIO_SLUGS, APOLLO_NATIVE_SUITE_SLUG, ApolloNativeScenario
 from .recruitment_sourcing import RECRUITMENT_SOURCING_SCENARIO_SLUGS, RECRUITMENT_SOURCING_SUITE_SLUG, RecruitmentSourcingScenario
 from .hubspot_native import HUBSPOT_NATIVE_SCENARIO_SLUGS, HUBSPOT_NATIVE_SUITE_SLUG, HubSpotNativeScenario
+from .hubspot_managed_mcp import (
+    HUBSPOT_MANAGED_MCP_SCENARIO_SLUGS,
+    HUBSPOT_MANAGED_MCP_SUITE_SLUG,
+    HubSpotManagedMCPScenario,
+)
 from .discord_native import (
     DISCORD_NATIVE_SCENARIO_SLUGS,
     DISCORD_NATIVE_SUITE_SLUG,

@@ -1482,6 +1482,8 @@ def _resolve_mcp_server_config(
     config = get_object_or_404(MCPServerConfig, pk=config_id)
     if config.transport == MCPServerConfig.Transport.COMPUTER_RELAY:
         raise PermissionDenied("Computer-managed MCP servers must be managed from the Computer panel.")
+    if config.managed_integration_key:
+        raise PermissionDenied("Managed MCP integrations must be configured from the Apps interface.")
     if config.scope == MCPServerConfig.Scope.PLATFORM:
         if allow_platform_staff and _is_system_admin_user(request.user):
             return config
@@ -1569,8 +1571,10 @@ def _user_mcp_commands_allowed(request: HttpRequest, owner_scope: str) -> bool:
 
 
 def _owner_queryset(owner_scope: str, owner_user, owner_org):
-    queryset = MCPServerConfig.objects.select_related("oauth_credential").exclude(
-        transport=MCPServerConfig.Transport.COMPUTER_RELAY
+    queryset = (
+        MCPServerConfig.objects.select_related("oauth_credential")
+        .exclude(transport=MCPServerConfig.Transport.COMPUTER_RELAY)
+        .filter(managed_integration_key="")
     )
     if owner_scope == "organization" and owner_org is not None:
         return queryset.filter(

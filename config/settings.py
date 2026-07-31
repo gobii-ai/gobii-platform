@@ -1846,6 +1846,8 @@ APOLLO_OAUTH_SCOPES = tuple(
 # HubSpot
 HUBSPOT_CLIENT_ID = env("HUBSPOT_CLIENT_ID", default="")
 HUBSPOT_CLIENT_SECRET = env("HUBSPOT_CLIENT_SECRET", default="")
+HUBSPOT_MCP_CLIENT_ID = env("HUBSPOT_MCP_CLIENT_ID", default="")
+HUBSPOT_MCP_CLIENT_SECRET = env("HUBSPOT_MCP_CLIENT_SECRET", default="")
 HUBSPOT_DEFAULT_OAUTH_SCOPES = (
     "oauth",
     "crm.objects.contacts.read",
