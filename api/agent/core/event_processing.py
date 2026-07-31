@@ -188,6 +188,10 @@ ARG_LOG_MAX_CHARS = 500
 RESULT_LOG_MAX_CHARS = 500
 AUTO_SLEEP_FLAG = "auto_sleep_ok"
 TERMINAL_ERROR_FLAG = "terminal_error"
+NON_RETRYABLE_BATCH_SKIP_REASON = (
+    "Tool call was skipped because an earlier result in this batch was non-retryable. "
+    "Do not retry it or use a variant for this request."
+)
 TOOL_ERROR_MESSAGE_MAX_BYTES = 800
 TOOL_ERROR_DETAIL_MAX_BYTES = 1500
 TOOL_ERROR_NATIVE_CONTENT_MAX_BYTES = 6000
@@ -1675,13 +1679,8 @@ def _filter_tools_after_non_retryable_result(
     tool_name: str,
     result: object,
 ) -> list[dict]:
-    payload = result
-    if isinstance(payload, str):
-        try:
-            payload = json.loads(payload)
-        except (json.JSONDecodeError, TypeError):
-            return tools
-    if not isinstance(payload, dict) or payload.get("retryable") is not False:
+    payload = _non_retryable_failure_payload(result)
+    if payload is None:
         return tools
 
     if payload.get(TERMINAL_ERROR_FLAG) is True:
@@ -1691,18 +1690,33 @@ def _filter_tools_after_non_retryable_result(
             for tool in tools
             if tool.get("function", {}).get("name") in allowed
         ]
+    return [
+        tool
+        for tool in tools
+        if tool.get("function", {}).get("name") != tool_name
+    ]
+
+
+def _non_retryable_failure_payload(result: object) -> dict | None:
+    payload = result
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload)
+        except (json.JSONDecodeError, TypeError):
+            return None
+    if not isinstance(payload, dict) or payload.get("retryable") is not False:
+        return None
+
+    if payload.get(TERMINAL_ERROR_FLAG) is True:
+        return payload
     if str(payload.get("status") or "").casefold() not in {
         "error",
         "failed",
         "failure",
         "blocked",
     }:
-        return tools
-    return [
-        tool
-        for tool in tools
-        if tool.get("function", {}).get("name") != tool_name
-    ]
+        return None
+    return payload
 
 
 def _filter_incompatible_reply_tools(
@@ -3979,6 +3993,7 @@ def _execute_prepared_tool_batch_inner(
     abort_after_execution = prepared_batch.abort_after_execution
     execution_aborted = False
     stale_cancellation = prepared_batch.stale_cancellation
+    non_retryable_restriction_active = False
 
     if prepared_batch.cancel_prepared_calls:
         return _ExecutedToolBatch(
@@ -4008,6 +4023,18 @@ def _execute_prepared_tool_batch_inner(
                     and next_prepared_index < len(prepared_batch.prepared_calls)
                 ):
                     prepared = prepared_batch.prepared_calls[next_prepared_index]
+                    next_prepared_index += 1
+                    if (
+                        non_retryable_restriction_active
+                        and prepared.tool_name not in _tool_definition_names_for_completion(available_tools)
+                    ):
+                        _cancel_unstarted_tool_calls(
+                            agent,
+                            [prepared],
+                            reason=NON_RETRYABLE_BATCH_SKIP_REASON,
+                            retryable=False,
+                        )
+                        continue
                     with tracer.start_as_current_span("Execute Tool") as tool_span:
                         if stale_prompt_checker and stale_prompt_checker():
                             logger.info(
@@ -4035,7 +4062,6 @@ def _execute_prepared_tool_batch_inner(
                         tool_span.set_attribute("persistent_agent.id", str(agent.id))
                         tool_span.set_attribute("tool.name", prepared.tool_name)
                         _mark_prepared_tool_started(agent, prepared)
-                    next_prepared_index += 1
                     context = copy_context()
                     future = executor.submit(
                         context.run,
@@ -4056,6 +4082,13 @@ def _execute_prepared_tool_batch_inner(
                     outcome = _refresh_skills_for_tool_outcome(agent, future.result())
                     _persist_tool_execution_outcome(agent, outcome)
                     execution_outcomes.append(outcome)
+                    if _non_retryable_failure_payload(outcome.result) is not None:
+                        available_tools = _filter_tools_after_non_retryable_result(
+                            available_tools,
+                            outcome.prepared.tool_name,
+                            outcome.result,
+                        )
+                        non_retryable_restriction_active = True
                 submit_available_calls()
 
         ordered_outcomes = sorted(execution_outcomes, key=lambda item: item.prepared.idx)
@@ -4081,6 +4114,17 @@ def _execute_prepared_tool_batch_inner(
                 prepared_batch.parallel_ineligible_reason,
             )
         for prepared in prepared_batch.prepared_calls:
+            if (
+                non_retryable_restriction_active
+                and prepared.tool_name not in _tool_definition_names_for_completion(available_tools)
+            ):
+                _cancel_unstarted_tool_calls(
+                    agent,
+                    [prepared],
+                    reason=NON_RETRYABLE_BATCH_SKIP_REASON,
+                    retryable=False,
+                )
+                continue
             with tracer.start_as_current_span("Execute Tool") as tool_span:
                 if stale_prompt_checker and stale_prompt_checker():
                     logger.info(
@@ -4149,6 +4193,8 @@ def _execute_prepared_tool_batch_inner(
                     prepared.tool_name,
                     outcome.result,
                 )
+                if _non_retryable_failure_payload(outcome.result) is not None:
+                    non_retryable_restriction_active = True
 
     return _ExecutedToolBatch(
         execution_outcomes=execution_outcomes,
