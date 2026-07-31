@@ -1,6 +1,8 @@
 import json
 from typing import Any, Optional
 
+from django.conf import settings
+
 
 class MCPToolErrorNormalizer:
     """Base normalizer for turning noisy MCP tool errors into agent-facing errors."""
@@ -127,13 +129,55 @@ class PipedreamGoogleSheetsErrorNormalizer(MCPToolErrorNormalizer):
         return None
 
 
+class HubSpotMCPErrorNormalizer(MCPToolErrorNormalizer):
+    server_name = "hubspot"
+
+    def normalize(self, tool_name: str, message: str) -> Optional[dict[str, Any]]:
+        if not isinstance(message, str) or not message.strip():
+            return None
+        payload = None
+        try:
+            payload = json.loads(message)
+        except json.JSONDecodeError:
+            payload = None
+        status_code = _extract_http_status_code(payload) if payload is not None else None
+        lower_message = message.lower()
+        reconnect_required = (
+            "requires_reauthorization" in lower_message
+            or "requires reauthorization" in lower_message
+            or "invalid_grant" in lower_message
+            or status_code == 401
+        )
+        if reconnect_required:
+            setup_url = f"{str(settings.PUBLIC_SITE_URL or '').rstrip('/')}/app/integrations"
+            result = f"HubSpot requires reauthorization. Reconnect HubSpot at {setup_url}."
+            return {
+                "status": "action_required",
+                "result": result,
+                "message": result,
+                "connect_url": setup_url,
+                "retryable": False,
+            }
+        if status_code == 403:
+            return {
+                "status": "error",
+                "message": (
+                    "HubSpot denied this tool call. Check the connected user's seat, object permissions, "
+                    "and available HubSpot products before retrying."
+                ),
+                "status_code": status_code,
+                "retryable": False,
+            }
+        return None
+
+
 class MCPErrorNormalizerRegistry:
     def __init__(self, normalizers: Optional[list[MCPToolErrorNormalizer]] = None):
         self._normalizers = list(normalizers or [])
 
     @classmethod
     def default(cls) -> "MCPErrorNormalizerRegistry":
-        return cls([PipedreamGoogleSheetsErrorNormalizer()])
+        return cls([PipedreamGoogleSheetsErrorNormalizer(), HubSpotMCPErrorNormalizer()])
 
     def normalize(self, server_name: str, tool_name: str, message: str) -> Optional[dict[str, Any]]:
         for normalizer in self._normalizers:

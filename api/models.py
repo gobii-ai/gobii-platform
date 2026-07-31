@@ -8015,7 +8015,7 @@ class PersistentAgentPlanDeliverable(models.Model):
 
 class MCPServerConfig(models.Model):
 
-    RESERVED_PLATFORM_NAMES = {"pipedream"}
+    RESERVED_PLATFORM_NAMES = {"hubspot", "pipedream"}
 
     class Scope(models.TextChoices):
         PLATFORM = "platform", "Platform"
@@ -8064,6 +8064,12 @@ class MCPServerConfig(models.Model):
         choices=AuthMethod.choices,
         default=AuthMethod.NONE,
     )
+    managed_integration_key = models.SlugField(
+        max_length=64,
+        blank=True,
+        default="",
+        help_text="Product-managed integration owning this MCP configuration.",
+    )
     prefetch_apps = models.JSONField(default=list, blank=True)
     metadata = models.JSONField(default=dict, blank=True)
     env_json_encrypted = models.BinaryField(null=True, blank=True)
@@ -8077,6 +8083,7 @@ class MCPServerConfig(models.Model):
             models.Index(fields=["scope", "is_active"], name="mcp_server_scope_active_idx"),
             models.Index(fields=["organization", "name"], name="mcp_server_org_name_idx"),
             models.Index(fields=["user", "name"], name="mcp_server_user_name_idx"),
+            models.Index(fields=["managed_integration_key", "is_active"], name="mcp_server_managed_active_idx"),
         ]
         constraints = [
             models.UniqueConstraint(
@@ -8093,6 +8100,16 @@ class MCPServerConfig(models.Model):
                 fields=["user", "name"],
                 name="unique_user_mcp_server_name",
                 condition=Q(scope="user"),
+            ),
+            models.UniqueConstraint(
+                fields=["organization", "managed_integration_key"],
+                name="unique_org_managed_mcp_integration",
+                condition=Q(scope="organization", managed_integration_key__gt=""),
+            ),
+            models.UniqueConstraint(
+                fields=["user", "managed_integration_key"],
+                name="unique_user_managed_mcp_integration",
+                condition=Q(scope="user", managed_integration_key__gt=""),
             ),
         ]
 
@@ -8142,8 +8159,22 @@ class MCPServerConfig(models.Model):
             raise ValidationError({"transport": "Invalid MCP transport"})
 
         reserved = {name.lower() for name in self.RESERVED_PLATFORM_NAMES}
-        if self.scope != self.Scope.PLATFORM and self.name and self.name.lower() in reserved:
+        if (
+            self.scope != self.Scope.PLATFORM
+            and not self.managed_integration_key
+            and self.name
+            and self.name.lower() in reserved
+        ):
             raise ValidationError({"name": "This identifier is reserved for platform-managed integrations."})
+        if self.managed_integration_key:
+            if self.scope == self.Scope.PLATFORM:
+                raise ValidationError(
+                    {"managed_integration_key": "Managed integrations must belong to a user or organization."}
+                )
+            if self.name != self.managed_integration_key:
+                raise ValidationError(
+                    {"name": "Managed MCP server identifiers must match their integration key."}
+                )
 
     # Secret-backed fields -------------------------------------------------
     def _decrypt_json(self, payload: bytes | None) -> dict[str, str]:
@@ -8862,8 +8893,19 @@ class MCPServerOAuthSession(EncryptedTextModelMixin, models.Model):
 
     def clean(self):
         super().clean()
-        if self.server_config.scope != MCPServerConfig.Scope.USER:
-            raise ValidationError("Only user-scoped MCP servers can be manually assigned to agents")
+        if self.server_config.scope == MCPServerConfig.Scope.PLATFORM:
+            if self.organization_id or self.user_id:
+                raise ValidationError("Platform MCP OAuth sessions cannot have a workspace owner.")
+            return
+        if self.server_config.scope == MCPServerConfig.Scope.ORGANIZATION:
+            if self.organization_id != self.server_config.organization_id or self.user_id:
+                raise ValidationError("Organization MCP OAuth sessions must match their server owner.")
+            return
+        if self.server_config.scope == MCPServerConfig.Scope.USER:
+            if self.user_id != self.server_config.user_id or self.organization_id:
+                raise ValidationError("User MCP OAuth sessions must match their server owner.")
+            return
+        raise ValidationError("OAuth session has an invalid MCP server scope.")
 
 
 class PersistentAgentEnabledTool(models.Model):
@@ -14296,7 +14338,8 @@ def refresh_mcp_tool_cache_for_server(sender, instance, **kwargs):
         from api.services.mcp_runtime_policy import mcp_server_requires_agent_sandbox
 
         if (
-            getattr(instance, "scope", None) != MCPServerConfig.Scope.PLATFORM
+            getattr(instance, "is_active", False)
+            and getattr(instance, "scope", None) != MCPServerConfig.Scope.PLATFORM
             and not mcp_server_requires_agent_sandbox(instance)
         ):
             from api.services.mcp_tool_discovery import schedule_mcp_tool_discovery
@@ -14347,11 +14390,16 @@ def refresh_mcp_tool_cache_for_credentials(sender, instance, **kwargs):
     server_id = getattr(instance, "server_config_id", None)
     if server_id:
         invalidate_mcp_tool_cache(str(server_id))
-        server = MCPServerConfig.objects.filter(id=server_id).only("scope", "command", "url").first()
+        server = (
+            MCPServerConfig.objects.filter(id=server_id)
+            .only("scope", "command", "url", "is_active")
+            .first()
+        )
         from api.services.mcp_runtime_policy import mcp_server_requires_agent_sandbox
 
         if (
             server
+            and server.is_active
             and server.scope != MCPServerConfig.Scope.PLATFORM
             and not mcp_server_requires_agent_sandbox(server)
         ):

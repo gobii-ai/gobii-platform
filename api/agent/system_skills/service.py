@@ -128,6 +128,10 @@ def _system_skill_keys_for_tool(tool_name: str) -> list[str]:
         definition.skill_key
         for definition in DEFAULT_SYSTEM_SKILL_DEFINITIONS.values()
         if normalized_tool in definition.tool_names
+        or any(
+            normalized_tool.startswith(f"mcp_{provider_key}_")
+            for provider_key in definition.managed_mcp_provider_keys
+        )
     ]
 
 

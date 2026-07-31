@@ -1237,11 +1237,19 @@ class MCPToolManager:
                 return server, None
             message = result.message or "This MCP integration is unavailable."
             if result.status == MCPOAuthStatus.RECONNECT_REQUIRED:
-                return server, {
+                action_required = {
                     "status": "action_required",
                     "result": message,
                     "message": message,
                 }
+                if server.metadata.get("managed_oauth"):
+                    connect_url = f"{str(settings.PUBLIC_SITE_URL or '').rstrip('/')}/app/integrations"
+                    action_required.update(
+                        result=f"{message} Reconnect it at {connect_url}.",
+                        message=f"{message} Reconnect it at {connect_url}.",
+                        connect_url=connect_url,
+                    )
+                return server, action_required
             return server, {
                 "status": "error",
                 "message": message,

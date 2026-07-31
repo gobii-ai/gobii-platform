@@ -45,6 +45,7 @@ class SystemSkillDefinition:
     query_aliases: tuple[str, ...] = ()
     discovery_triggers: tuple[str, ...] = ()
     pipedream_app_slugs: tuple[str, ...] = ()
+    managed_mcp_provider_keys: tuple[str, ...] = ()
     prompt_instructions: str = ""
     prompt_instructions_renderer: Optional[Callable[[object], str]] = None
     prompt_context_renderer: Optional[Callable[[object], str]] = None
@@ -175,9 +176,9 @@ def shortlist_system_skills(
 
     scored: list[tuple[int, str, SystemSkillDefinition]] = []
     for definition in SYSTEM_SKILL_REGISTRY.values():
-        if not definition.tool_names and not definition.discoverable_without_tools:
+        if not definition.tool_names and not definition.managed_mcp_provider_keys and not definition.discoverable_without_tools:
             continue
-        if not set(definition.tool_names).issubset(available_tool_names):
+        if definition.tool_names and not set(definition.tool_names).issubset(available_tool_names):
             continue
         score = _score_definition(query, definition, discovery_only=discovery_only)
         if score <= 0:

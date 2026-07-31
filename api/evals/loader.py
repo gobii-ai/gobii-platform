@@ -16,6 +16,10 @@ from api.evals.scenarios.google_sheets_native import GOOGLE_SHEETS_NATIVE_SCENAR
 from api.evals.scenarios.apollo_native import APOLLO_NATIVE_SCENARIO_SLUGS, APOLLO_NATIVE_SUITE_SLUG
 from api.evals.scenarios.recruitment_sourcing import RECRUITMENT_SOURCING_SCENARIO_SLUGS, RECRUITMENT_SOURCING_SUITE_SLUG
 from api.evals.scenarios.hubspot_native import HUBSPOT_NATIVE_SCENARIO_SLUGS, HUBSPOT_NATIVE_SUITE_SLUG
+from api.evals.scenarios.hubspot_managed_mcp import (
+    HUBSPOT_MANAGED_MCP_SCENARIO_SLUGS,
+    HUBSPOT_MANAGED_MCP_SUITE_SLUG,
+)
 from api.evals.scenarios.discord_native import (
     DISCORD_NATIVE_REACTION_SERIOUS_REQUEST_RESTRAINT,
     DISCORD_NATIVE_REACTION_SHARED_WIN,
@@ -176,8 +180,13 @@ register_builtin_suites(
         ),
         EvalSuite(
             slug=HUBSPOT_NATIVE_SUITE_SLUG,
-            description="Native HubSpot system-skill evals over mocked HubSpot REST APIs.",
+            description="Feature-flag-off HubSpot system-skill regressions over mocked HubSpot REST APIs.",
             scenario_slugs=HUBSPOT_NATIVE_SCENARIO_SLUGS,
+        ),
+        EvalSuite(
+            slug=HUBSPOT_MANAGED_MCP_SUITE_SLUG,
+            description="Managed HubSpot OAuth/MCP behavior over mocked remote HubSpot tools.",
+            scenario_slugs=HUBSPOT_MANAGED_MCP_SCENARIO_SLUGS,
         ),
         EvalSuite(
             slug=DISCORD_NATIVE_SUITE_SLUG,

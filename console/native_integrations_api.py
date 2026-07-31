@@ -30,6 +30,7 @@ from api.services.native_integrations import (
     load_native_integration_credentials,
     list_google_drive_accessible_files,
     native_integration_client_credentials,
+    native_integration_deep_link,
     new_oauth_state,
     refresh_oauth_credentials_if_needed,
     request_oauth_token,
@@ -38,6 +39,18 @@ from api.services.native_integrations import (
     upsert_manual_native_integration_credentials,
 )
 from api.services.native_integration_events import normalize_native_integration_event_files, record_native_integration_agent_event, resolve_native_integration_event_agent
+from api.services.managed_mcp_integrations import (
+    ManagedMCPConfigurationError,
+    ManagedMCPTokenRequestError,
+    complete_managed_mcp_oauth,
+    disconnect_managed_mcp,
+    get_managed_mcp_provider,
+    managed_mcp_connection_summary,
+    managed_mcp_oauth_session_exists,
+    managed_mcp_provider_enabled,
+    start_managed_mcp_oauth,
+    trigger_agents_for_managed_mcp_change,
+)
 from console.context_helpers import build_console_context
 
 NATIVE_INTEGRATION_STATE_SALT = "gobii.native_integrations.oauth_state"
@@ -70,6 +83,46 @@ def _owner_id(owner_user, owner_org) -> str:
 
 
 def _serialize_provider(provider, owner_user, owner_org) -> dict[str, Any]:
+    if managed_mcp_provider_enabled(provider.key, owner_user, owner_org):
+        managed_provider = get_managed_mcp_provider(provider.key)
+        summary = managed_mcp_connection_summary(provider.key, owner_user, owner_org)
+        credential = summary["credential"]
+        connected = bool(summary["connected"])
+        capability_summary = (
+            f"{provider.display_name} is connected through its remote MCP server. "
+            "Available tools depend on the connected account and HubSpot permissions."
+            if connected
+            else f"{provider.display_name} is not connected. Connect it to use its remote MCP tools."
+        )
+        return {
+            "provider_key": provider.key,
+            "display_name": managed_provider.display_name,
+            "description": managed_provider.description,
+            "auth_type": "oauth2",
+            "connection_kind": "managed_mcp",
+            "icon": managed_provider.icon,
+            "api_hosts": [],
+            "scopes": [],
+            "connected": connected,
+            "scope": summary["scope"],
+            "granted_scopes": [],
+            "requested_scopes": [],
+            "available_capabilities": [],
+            "missing_capabilities": [],
+            "missing_scopes": [],
+            "credential_fields": [],
+            "present_credential_fields": [],
+            "missing_credential_fields": [],
+            "capability_summary": capability_summary,
+            "setup_url": native_integration_deep_link(provider.key),
+            "expires_at": credential.expires_at.isoformat() if credential and credential.expires_at else None,
+            "connect_url": reverse("console-native-integration-connect", args=[provider.key]),
+            "files_url": reverse("console-native-integration-files", args=[provider.key]),
+            "picker_token_url": reverse("console-native-integration-picker-token", args=[provider.key]),
+            "agent_event_url": reverse("console-native-integration-agent-events", args=[provider.key]),
+            "revoke_url": reverse("console-native-integration-revoke", args=[provider.key]),
+        }
+
     secret = get_native_integration_secret(provider.key, owner_user, owner_org)
     credentials: dict[str, Any] = {}
     credentials_valid = False
@@ -90,6 +143,7 @@ def _serialize_provider(provider, owner_user, owner_org) -> dict[str, Any]:
         "display_name": provider.display_name,
         "description": provider.description,
         "auth_type": provider.auth_type,
+        "connection_kind": "native_api",
         "icon": provider.icon,
         "api_hosts": list(provider.api_hosts),
         "scopes": list(provider.scopes),
@@ -191,6 +245,35 @@ class NativeIntegrationConnectAPIView(LoginRequiredMixin, View):
         except KeyError:
             return JsonResponse({"error": "Unknown native integration provider."}, status=404)
 
+        try:
+            owner_scope, owner_user, owner_org = _resolve_native_integration_owner(request)
+        except PermissionDenied as exc:
+            return _permission_denied_response(exc)
+
+        if managed_mcp_provider_enabled(provider.key, owner_user, owner_org):
+            redirect_uri = request.build_absolute_uri(reverse("console-native-integration-oauth-callback-view"))
+            try:
+                result = start_managed_mcp_oauth(
+                    provider.key,
+                    initiated_by=request.user,
+                    owner_user=owner_user,
+                    owner_org=owner_org,
+                    redirect_uri=redirect_uri,
+                )
+            except ManagedMCPConfigurationError as exc:
+                return JsonResponse({"error": str(exc)}, status=400)
+            except ValidationError as exc:
+                return _validation_error_response(exc)
+            return JsonResponse(
+                {
+                    "provider_key": provider.key,
+                    "authorization_url": result["authorization_url"],
+                    "state": result["state"],
+                    "expires_at": result["expires_at"].isoformat(),
+                },
+                status=201,
+            )
+
         if provider.auth_type == "manual":
             try:
                 body = request.body.decode("utf-8")
@@ -206,7 +289,6 @@ class NativeIntegrationConnectAPIView(LoginRequiredMixin, View):
 
             credentials = payload.get("credentials") or {}
             try:
-                _, owner_user, owner_org = _resolve_native_integration_owner(request)
                 secret = upsert_manual_native_integration_credentials(
                     provider,
                     owner_user,
@@ -245,10 +327,6 @@ class NativeIntegrationConnectAPIView(LoginRequiredMixin, View):
         if not client_id or not client_secret:
             return JsonResponse({"error": f"{provider.display_name} OAuth is not configured."}, status=400)
 
-        try:
-            owner_scope, owner_user, owner_org = _resolve_native_integration_owner(request)
-        except PermissionDenied as exc:
-            return _permission_denied_response(exc)
         state = _sign_oauth_state(provider.key, request, owner_scope, owner_user, owner_org)
         redirect_uri = request.build_absolute_uri(reverse("console-native-integration-oauth-callback-view"))
 
@@ -301,6 +379,53 @@ class NativeIntegrationCallbackAPIView(LoginRequiredMixin, View):
 
         try:
             owner_scope, owner_user, owner_org = _resolve_native_integration_owner(request)
+        except PermissionDenied as exc:
+            return _permission_denied_response(exc)
+
+        managed_session = managed_mcp_oauth_session_exists(provider.key, state, request.user)
+        if managed_mcp_provider_enabled(provider.key, owner_user, owner_org) or managed_session:
+            try:
+                result = complete_managed_mcp_oauth(
+                    provider.key,
+                    state=state,
+                    authorization_code=code,
+                    initiated_by=request.user,
+                    owner_user=owner_user,
+                    owner_org=owner_org,
+                )
+            except ValidationError as exc:
+                return _validation_error_response(exc)
+            except ManagedMCPConfigurationError as exc:
+                return JsonResponse({"error": str(exc)}, status=400)
+            except ManagedMCPTokenRequestError as exc:
+                error_payload = {"error": str(exc)}
+                if exc.detail:
+                    error_payload["detail"] = exc.detail
+                if exc.response_body:
+                    error_payload["status_code"] = exc.status_code
+                    error_payload["body"] = exc.response_body
+                return JsonResponse(error_payload, status=exc.status_code)
+
+            with transaction.atomic():
+                disable_overlapping_pipedream_tools_for_native_integration(
+                    provider.key,
+                    owner_user,
+                    owner_org,
+                )
+                trigger_agents_for_managed_mcp_change(provider.key, owner_user, owner_org)
+            credential = result["credential"]
+            return JsonResponse(
+                {
+                    "connected": True,
+                    "provider_key": provider.key,
+                    "connection_kind": "managed_mcp",
+                    "server_config_id": str(result["config"].id),
+                    "scope": credential.scope,
+                    "expires_at": credential.expires_at.isoformat() if credential.expires_at else None,
+                }
+            )
+
+        try:
             _validate_oauth_state(request, provider.key, state, owner_scope, owner_user, owner_org)
         except ValidationError as exc:
             return _validation_error_response(exc)
@@ -380,6 +505,9 @@ class NativeIntegrationRevokeAPIView(LoginRequiredMixin, View):
             _, owner_user, owner_org = _resolve_native_integration_owner(request)
         except PermissionDenied as exc:
             return _permission_denied_response(exc)
+        if managed_mcp_provider_enabled(provider.key, owner_user, owner_org):
+            revoked = disconnect_managed_mcp(provider.key, owner_user, owner_org)
+            return JsonResponse({"revoked": revoked, "connection_kind": "managed_mcp"})
         deleted = delete_native_integration_credentials(provider.key, owner_user, owner_org)
         return JsonResponse({"revoked": deleted})
 
