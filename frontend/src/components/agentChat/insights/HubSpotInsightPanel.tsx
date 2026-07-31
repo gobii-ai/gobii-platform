@@ -25,8 +25,8 @@ export function HubSpotInsightPanel({ agentId = null, nativeIntegrationsUrl = nu
       notConfiguredMessage="HubSpot is not configured."
       connectedTitle="HubSpot connected"
       disconnectedTitle="Connect HubSpot"
-      connectedText="This agent can use HubSpot's remote MCP tools for the CRM objects and workflows available to your connected account."
-      disconnectedText="Connect HubSpot so this agent can use HubSpot's remote MCP tools for CRM records and workflows."
+      connectedText="This agent can use HubSpot for the CRM objects and workflows available to your connected account."
+      disconnectedText="Connect HubSpot so this agent can use your available CRM records and workflows."
     />
   )
 }

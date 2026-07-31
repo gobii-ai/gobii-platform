@@ -44,6 +44,7 @@ from api.services.managed_mcp_integrations import (
     ManagedMCPTokenRequestError,
     complete_managed_mcp_oauth,
     disconnect_managed_mcp,
+    get_managed_mcp_config,
     get_managed_mcp_provider,
     managed_mcp_connection_summary,
     managed_mcp_oauth_session_exists,
@@ -508,8 +509,11 @@ class NativeIntegrationRevokeAPIView(LoginRequiredMixin, View):
         if managed_mcp_provider_enabled(provider.key, owner_user, owner_org):
             revoked = disconnect_managed_mcp(provider.key, owner_user, owner_org)
             return JsonResponse({"revoked": revoked, "connection_kind": "managed_mcp"})
+        managed_revoked = False
+        if get_managed_mcp_config(provider.key, owner_user, owner_org) is not None:
+            managed_revoked = disconnect_managed_mcp(provider.key, owner_user, owner_org)
         deleted = delete_native_integration_credentials(provider.key, owner_user, owner_org)
-        return JsonResponse({"revoked": deleted})
+        return JsonResponse({"revoked": bool(managed_revoked or deleted)})
 
 
 class NativeIntegrationPickerTokenAPIView(LoginRequiredMixin, View):

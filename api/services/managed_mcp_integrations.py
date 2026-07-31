@@ -5,6 +5,7 @@ import hashlib
 import secrets
 from dataclasses import dataclass
 from datetime import timedelta
+from decimal import Decimal
 from typing import Any, Callable
 from urllib.parse import urlencode
 
@@ -14,7 +15,7 @@ from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.http import HttpRequest
 from django.utils import timezone
-from waffle import flag_is_active
+from waffle import get_waffle_flag_model
 
 from api.models import (
     MCPServerConfig,
@@ -144,6 +145,22 @@ def _rollout_user(owner_user, owner_org):
     return owner_user
 
 
+def _stable_percentage_rollout_enabled(flag_name: str, owner_user, owner_org, percent) -> bool:
+    if owner_org is not None:
+        owner_key = f"organization:{owner_org.pk}"
+    elif owner_user is not None:
+        owner_key = f"user:{owner_user.pk}"
+    else:
+        return False
+
+    # Waffle percentage assignments normally persist in a browser cookie. Background
+    # agents have no such cookie, so use a stable owner cohort shared by every worker.
+    digest = hashlib.sha256(f"{flag_name}:{owner_key}".encode("utf-8")).digest()
+    bucket = int.from_bytes(digest[:8], "big") % 1000
+    threshold = max(0, min(int(Decimal(percent) * Decimal("10")), 1000))
+    return bucket < threshold
+
+
 def managed_mcp_provider_enabled(provider_key: str, owner_user, owner_org) -> bool:
     """Evaluate rollout against the persistent owner, not the current request actor."""
 
@@ -154,9 +171,26 @@ def managed_mcp_provider_enabled(provider_key: str, owner_user, owner_org) -> bo
     user = _rollout_user(owner_user, owner_org)
     if user is None:
         return False
+
+    flag = get_waffle_flag_model().get(provider.waffle_flag)
     request = HttpRequest()
     request.user = user
-    return bool(flag_is_active(request, provider.waffle_flag))
+    if not flag.pk:
+        return bool(flag.is_active(request))
+    if flag.everyone is not None:
+        return bool(flag.everyone)
+
+    active_for_user = flag.is_active_for_user(user)
+    if active_for_user is not None:
+        return bool(active_for_user)
+    if flag.percent and flag.percent > 0:
+        return _stable_percentage_rollout_enabled(
+            provider.waffle_flag,
+            owner_user,
+            owner_org,
+            flag.percent,
+        )
+    return False
 
 
 def managed_mcp_provider_keys_for_agent(agent) -> set[str]:
@@ -321,6 +355,7 @@ def start_managed_mcp_oauth(
     verifier, challenge = _pkce_pair()
     state = secrets.token_urlsafe(32)
     expires_at = timezone.now() + MANAGED_MCP_OAUTH_SESSION_TTL
+    requested_scope = " ".join(provider.scopes)
     session = MCPServerOAuthSession(
         server_config=config,
         initiated_by=initiated_by,
@@ -328,7 +363,7 @@ def start_managed_mcp_oauth(
         user=owner_user if owner_org is None else None,
         state=state,
         redirect_uri=redirect_uri,
-        scope="",
+        scope=requested_scope,
         code_challenge=challenge,
         code_challenge_method="S256",
         token_endpoint=provider.token_endpoint,
@@ -348,6 +383,8 @@ def start_managed_mcp_oauth(
         "code_challenge": challenge,
         "code_challenge_method": "S256",
     }
+    if requested_scope:
+        query["scope"] = requested_scope
     return {
         "provider_key": provider.key,
         "authorization_url": f"{provider.authorization_endpoint}?{urlencode(query)}",
@@ -476,7 +513,7 @@ def complete_managed_mcp_oauth(
     credential.refresh_token = str(token_payload.get("refresh_token") or prior_refresh_token or "")
     credential.id_token = str(token_payload.get("id_token") or "")
     credential.token_type = str(token_payload.get("token_type") or credential.token_type or "Bearer")
-    credential.scope = str(token_payload.get("scope") or "")
+    credential.scope = str(token_payload.get("scope") or session.scope)
     try:
         expires_in = token_payload.get("expires_in")
         credential.expires_at = (
