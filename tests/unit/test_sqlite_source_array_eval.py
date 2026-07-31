@@ -31,8 +31,10 @@ from api.evals.scenarios.sqlite_tool_results import (
     _bound_json_payload_placeholder,
     _derives_bound_structured_message_fields,
     _derives_structured_message_fields,
+    _insert_values_derive_bound_payload_fields,
     _mutation_target_table,
     _repeated_source_import_tables,
+    _schema_grounded_read_failures,
     _sqlite_attempt_failures,
     _source_array_first_write_failures,
     _uses_bound_source_values,
@@ -87,6 +89,71 @@ class SqliteSourceArrayEvalTests(SimpleTestCase):
         FROM release_events
         ORDER BY starts_at;
     """
+
+    schema_result = json.dumps(
+        {
+            "status": "ok",
+            "results": [
+                {
+                    "result": [
+                        {"name": "handoff_key"},
+                        {"name": "worker_ref"},
+                        {"name": "resolution_code"},
+                    ]
+                },
+                {
+                    "result": [
+                        {
+                            "handoff_key": "handoff-01",
+                            "worker_ref": "agent-red",
+                            "resolution_code": "open",
+                        }
+                    ]
+                },
+            ],
+        }
+    )
+
+    def test_schema_grounding_accepts_inspection_before_read_in_same_batch(self):
+        call = _sqlite_call(
+            "PRAGMA table_info(z_handoff_ledger); "
+            "SELECT * FROM z_handoff_ledger;",
+            result=self.schema_result,
+        )
+
+        self.assertEqual(_schema_grounded_read_failures([call]), [])
+
+    def test_schema_grounding_rejects_read_before_inspection_in_same_batch(self):
+        call = _sqlite_call(
+            "SELECT * FROM z_handoff_ledger; "
+            "PRAGMA table_info(z_handoff_ledger);",
+            result=self.schema_result,
+        )
+
+        self.assertIn(
+            "ledger columns were referenced before schema inspection completed",
+            _schema_grounded_read_failures([call]),
+        )
+
+    def test_schema_grounding_rejects_unverified_schema_probe(self):
+        call = _sqlite_call(
+            "PRAGMA table_info(z_handoff_ledger); "
+            "SELECT * FROM z_handoff_ledger;",
+            result=json.dumps(
+                {
+                    "status": "ok",
+                    "results": [
+                        {"result": []},
+                        {"result": []},
+                    ],
+                }
+            ),
+        )
+
+        self.assertIn(
+            "existing ledger schema was not inspected",
+            _schema_grounded_read_failures([call]),
+        )
 
     def test_peer_outcome_fixture_uses_role_aligned_seller(self):
         scenario = SqlitePeerOutcomeReconcilesCanonicalModelScenario()
@@ -351,6 +418,62 @@ class SqliteSourceArrayEvalTests(SimpleTestCase):
                     "'2026-07-28T15:42:00Z'",
                 ),
                 payload,
+            )
+        )
+        scalar_copy_sql = sql.replace(
+            "json_extract(:source_payload,'$.event_type')",
+            ":event_type",
+        )
+        call.tool_params["bindings"]["event_type"] = "accepted_setup"
+        self.assertIsNone(
+            _bound_json_payload_placeholder(call, scalar_copy_sql, payload)
+        )
+        unused_extracts = (
+            "WITH inspected AS (SELECT "
+            "json_extract(:source_payload,'$.event_id'), "
+            "json_extract(:source_payload,'$.event_type'), "
+            "json_extract(:source_payload,'$.thread_key'), "
+            "json_extract(:source_payload,'$.occurred_at')) "
+            "INSERT INTO operational_events "
+            "(event_id, event_type, thread_key, occurred_at, source_message_id) "
+            "VALUES (:event_id, :event_type, :thread_key, :occurred_at, :source_message_id)"
+        )
+        call.tool_params["bindings"].update(payload)
+        self.assertIsNone(
+            _bound_json_payload_placeholder(call, unused_extracts, payload)
+        )
+        literal_copy = unused_extracts.replace(":event_id", "'evt-2048'")
+        self.assertIsNone(
+            _bound_json_payload_placeholder(call, literal_copy, payload)
+        )
+        self.assertTrue(
+            _insert_values_derive_bound_payload_fields(
+                sql,
+                table_name="operational_events",
+                placeholder=":source_payload",
+                expected_fields=set(payload),
+            )
+        )
+        self.assertTrue(
+            _insert_values_derive_bound_payload_fields(
+                sql.replace(
+                    "INSERT INTO operational_events",
+                    'INSERT OR IGNORE INTO "operational_events"',
+                ),
+                table_name="operational_events",
+                placeholder=":source_payload",
+                expected_fields=set(payload),
+            )
+        )
+        self.assertFalse(
+            _insert_values_derive_bound_payload_fields(
+                sql.replace(
+                    "json_extract(:source_payload,'$.event_type')",
+                    "lower(json_extract(:source_payload,'$.event_type'))",
+                ),
+                table_name="operational_events",
+                placeholder=":source_payload",
+                expected_fields=set(payload),
             )
         )
 
