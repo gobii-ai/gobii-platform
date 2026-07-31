@@ -27,7 +27,12 @@ from django.core.files import File
 from django.core.files.storage import default_storage
 from opentelemetry import trace
 
-from api.utils.sqlite_files import create_validated_sqlite_snapshot, validate_sqlite_file
+from api.utils.sqlite_files import (
+    create_validated_sqlite_snapshot,
+    remove_sqlite_sidecars,
+    replace_sqlite_file,
+    validate_sqlite_file,
+)
 
 from .sqlite_guardrails import clear_guarded_connection, open_guarded_sqlite_connection
 from .sqlite_recovery import (
@@ -105,6 +110,7 @@ JSON_DETECTION_THRESHOLD = 0.6
 JSON_HINT_THRESHOLD = 0.2
 CSV_DETECTION_THRESHOLD = 0.4
 SQLITE_RESTORE_SUBPROCESS_TIMEOUT_SECONDS = 120
+SQLITE_RECOVERY_SUBPROCESS_TIMEOUT_SECONDS = 120
 
 _JSON_START_RE = re.compile(r"^\s*[\[{]")
 _CSV_DELIMS = [",", "\t", "|", ";"]
@@ -1009,6 +1015,11 @@ def sqlite_storage_key(agent_uuid: str) -> str:
     return f"agent_state/{clean_uuid[:2]}/{clean_uuid[2:4]}/{agent_uuid}.db.zst"
 
 
+def sqlite_quarantine_storage_key(agent_uuid: str) -> str:
+    """Return the forensic backup key used before replacing corrupt state."""
+    return f"{sqlite_storage_key(agent_uuid)}.corrupt"
+
+
 def _decompress_sqlite_archive_in_subprocess(archive_path: str, db_path: str) -> None:
     """Decompress an archive in a child process to isolate native crashes.
 
@@ -1055,18 +1066,122 @@ def _decompress_sqlite_archive_in_subprocess(archive_path: str, db_path: str) ->
     )
 
 
+def _recover_sqlite_db_in_subprocess(db_path: str, tmp_dir: str) -> bool:
+    """Use SQLite's recovery shell to salvage a validated database."""
+    recovered_sql_path = os.path.join(tmp_dir, "state.recover.sql")
+    recovered_db_path = os.path.join(tmp_dir, "state.recovered.db")
+    try:
+        with open(recovered_sql_path, "wb") as recovered_sql:
+            export = subprocess.run(
+                ["sqlite3", "--safe", "-batch", db_path, ".recover"],
+                check=False,
+                stdout=recovered_sql,
+                stderr=subprocess.PIPE,
+                timeout=SQLITE_RECOVERY_SUBPROCESS_TIMEOUT_SECONDS,
+            )
+        if export.returncode != 0:
+            return False
+
+        with open(recovered_sql_path, "rb") as recovered_sql:
+            restore = subprocess.run(
+                ["sqlite3", "--safe", "-batch", "-bail", recovered_db_path],
+                check=False,
+                stdin=recovered_sql,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                timeout=SQLITE_RECOVERY_SUBPROCESS_TIMEOUT_SECONDS,
+            )
+        if restore.returncode != 0:
+            return False
+
+        validate_sqlite_file(recovered_db_path)
+        with contextlib.closing(sqlite3.connect(recovered_db_path, timeout=5)) as conn:
+            recovered_table = conn.execute(
+                "SELECT 1 FROM sqlite_master "
+                "WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name != 'lost_and_found' LIMIT 1;"
+            ).fetchone()
+        if recovered_table is None:
+            return False
+        replace_sqlite_file(recovered_db_path, db_path)
+        return True
+    except (OSError, subprocess.TimeoutExpired, SQLiteStateValidationError):
+        logger.warning("SQLite shell recovery failed.", exc_info=True)
+        return False
+    finally:
+        for path in (recovered_sql_path, recovered_db_path):
+            try:
+                os.remove(path)
+            except FileNotFoundError:
+                pass
+
+
+def _quarantine_sqlite_archive(
+    archive_path: str,
+    *,
+    agent_uuid: str,
+) -> None:
+    quarantine_key = sqlite_quarantine_storage_key(agent_uuid)
+    _upload_sqlite_archive(quarantine_key, archive_path)
+    logger.error(
+        "Quarantined corrupt SQLite archive for agent %s at %s.",
+        agent_uuid,
+        quarantine_key,
+    )
+
+
 def _restore_sqlite_db_from_storage(storage_key: str, db_path: str, agent_uuid: str) -> bool:
     """Restore persisted SQLite DB, returning True when restore succeeds."""
     archive_path = db_path + ".restore.zst"
     try:
         with default_storage.open(storage_key, "rb") as src, open(archive_path, "wb") as dst:
             shutil.copyfileobj(src, dst)
-        _decompress_sqlite_archive_in_subprocess(archive_path, db_path)
-        validate_sqlite_file(db_path)
-        return True
-    except (OSError, RuntimeError, SQLiteStateValidationError, zstd.ZstdError):
+
+        try:
+            _decompress_sqlite_archive_in_subprocess(archive_path, db_path)
+            validate_sqlite_file(db_path)
+            return True
+        except (RuntimeError, SQLiteStateValidationError, zstd.ZstdError) as exc:
+            _quarantine_sqlite_archive(archive_path, agent_uuid=agent_uuid)
+            if os.path.exists(db_path) and _recover_sqlite_db_in_subprocess(
+                db_path,
+                os.path.dirname(db_path),
+            ):
+                logger.error(
+                    "Recovered corrupt persisted SQLite state for agent %s.",
+                    agent_uuid,
+                )
+                _log_sqlite_persistence_error(
+                    agent_uuid,
+                    exc,
+                    recovered=True,
+                    error_code="sqlite_restore_salvaged",
+                    source="api.agent.tools.sqlite_state._restore_sqlite_db_from_storage",
+                    message=f"SQLite restore salvaged corrupt state for agent {agent_uuid}",
+                )
+                return True
+
+            remove_sqlite_sidecars(db_path)
+            try:
+                os.remove(db_path)
+            except FileNotFoundError:
+                pass
+            _log_sqlite_persistence_error(
+                agent_uuid,
+                exc,
+                recovered=False,
+                error_code="sqlite_restore_reset_after_corruption",
+                source="api.agent.tools.sqlite_state._restore_sqlite_db_from_storage",
+                message=f"SQLite restore reset corrupt state for agent {agent_uuid}",
+            )
+            logger.error(
+                "Persisted SQLite state for agent %s could not be salvaged; "
+                "starting from a validated empty database after quarantine.",
+                agent_uuid,
+            )
+            return False
+    except OSError:
         logger.error(
-            "Failed to restore a valid SQLite DB for agent %s; refusing to start fresh.",
+            "Failed to read persisted SQLite state for agent %s; preserving canonical state.",
             agent_uuid,
             exc_info=True,
         )
@@ -1265,6 +1380,9 @@ def _log_sqlite_persistence_error(
     exc: BaseException,
     *,
     recovered: bool,
+    error_code: str | None = None,
+    source: str = "api.agent.tools.sqlite_state._persist_validated_sqlite_state",
+    message: str | None = None,
 ) -> None:
     from django.core.exceptions import ValidationError
     from django.db import DatabaseError
@@ -1287,13 +1405,14 @@ def _log_sqlite_persistence_error(
     log_agent_error(
         agent,
         category=PersistentAgentError.Category.TOOL_PERSISTENCE,
-        source="api.agent.tools.sqlite_state._persist_validated_sqlite_state",
-        message=f"SQLite persistence failed for agent {agent_uuid}",
+        source=source,
+        message=message or f"SQLite persistence failed for agent {agent_uuid}",
         exc=exc,
         logger=logger,
         context={
             "agent_id": str(agent_uuid),
-            "error_code": (
+            "error_code": error_code
+            or (
                 SQLITE_STATE_UNRECOVERABLE_ERROR
                 if isinstance(exc, SQLiteStateUnrecoverableError)
                 else (

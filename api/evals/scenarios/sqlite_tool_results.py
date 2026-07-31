@@ -387,13 +387,25 @@ def _derives_structured_message_fields(
     )
 
 
-def _derives_bound_structured_message_fields(
+def _bound_json_payload_placeholder(
     call,
     statement: str,
     expected_payload: dict[str, str],
-) -> bool:
+) -> str | None:
     bindings = (getattr(call, "tool_params", None) or {}).get("bindings") or {}
-    lowered = sqlparse.format(statement, strip_comments=True).casefold()
+    statement_without_comments = sqlparse.format(statement, strip_comments=True)
+    lowered = statement_without_comments.casefold()
+    expected_values = set(expected_payload.values())
+    sql_literals = {
+        match.group(1).replace("''", "'")
+        for match in re.finditer(r"'((?:''|[^'])*)'", statement_without_comments)
+    }
+    sql_literals.update(
+        match.group(1).replace('""', '"')
+        for match in re.finditer(r'"((?:""|[^"])*)"', statement_without_comments)
+    )
+    if expected_values.intersection(sql_literals):
+        return None
     for key, raw_payload in bindings.items():
         placeholder = f":{str(key).casefold()}"
         if placeholder not in lowered:
@@ -409,6 +421,13 @@ def _derives_bound_structured_message_fields(
             continue
         if any(str(payload.get(field)) != value for field, value in expected_payload.items()):
             continue
+        if any(
+            other_key != key
+            and isinstance(other_value, (str, int, float))
+            and str(other_value) in expected_values
+            for other_key, other_value in bindings.items()
+        ):
+            continue
         if not all(
             re.search(
                 rf"json_extract\s*\(\s*{re.escape(placeholder)}\s*,\s*['\"]\$\."
@@ -418,9 +437,109 @@ def _derives_bound_structured_message_fields(
             for field in expected_payload
         ):
             continue
-        if _structured_outcome_assignments_use_extracted_fields(lowered):
-            return True
-    return False
+        return placeholder
+    return None
+
+
+def _insert_values_derive_bound_payload_fields(
+    statement: str,
+    *,
+    table_name: str,
+    placeholder: str,
+    expected_fields: set[str],
+) -> bool:
+    parsed = sqlparse.parse(statement)
+    if len(parsed) != 1:
+        return False
+    tokens = [token for token in parsed[0].tokens if not token.is_whitespace]
+    into_index = next(
+        (
+            index
+            for index, token in enumerate(tokens)
+            if str(getattr(token, "normalized", "")).casefold() == "into"
+        ),
+        -1,
+    )
+    target = tokens[into_index + 1] if 0 <= into_index < len(tokens) - 1 else None
+    target_name = str(getattr(target, "get_name", lambda: "")() or "").casefold()
+    if target_name != table_name.casefold():
+        return False
+    values = next(
+        (
+            token
+            for token in tokens
+            if isinstance(token, sqlparse.sql.Values)
+        ),
+        None,
+    )
+    if values is None:
+        return False
+
+    if isinstance(target, sqlparse.sql.Function):
+        target_parenthesis = next(
+            (
+                token
+                for token in target.tokens
+                if isinstance(token, sqlparse.sql.Parenthesis)
+            ),
+            None,
+        )
+    else:
+        target_parenthesis = (
+            tokens[into_index + 2]
+            if into_index < len(tokens) - 2
+            and isinstance(tokens[into_index + 2], sqlparse.sql.Parenthesis)
+            else None
+        )
+    values_parenthesis = next(
+        (token for token in values.tokens if isinstance(token, sqlparse.sql.Parenthesis)),
+        None,
+    )
+    if target_parenthesis is None or values_parenthesis is None:
+        return False
+
+    def _items(parenthesis):
+        identifier_list = next(
+            (
+                token
+                for token in parenthesis.tokens
+                if isinstance(token, sqlparse.sql.IdentifierList)
+            ),
+            None,
+        )
+        return (
+            [str(item).strip() for item in identifier_list.get_identifiers()]
+            if identifier_list is not None
+            else []
+        )
+
+    columns = [item.strip('"`[] ').casefold() for item in _items(target_parenthesis)]
+    expressions = _items(values_parenthesis)
+    if len(columns) != len(expressions):
+        return False
+    assignments = dict(zip(columns, expressions))
+    return all(
+        field.casefold() in assignments
+        and re.fullmatch(
+            rf"json_extract\s*\(\s*{re.escape(placeholder)}\s*,\s*['\"]\$\."
+            rf"{re.escape(field.casefold())}['\"]\s*\)",
+            assignments[field.casefold()].casefold(),
+        )
+        for field in expected_fields
+    )
+
+
+def _derives_bound_structured_message_fields(
+    call,
+    statement: str,
+    expected_payload: dict[str, str],
+) -> bool:
+    return bool(
+        _bound_json_payload_placeholder(call, statement, expected_payload)
+        and _structured_outcome_assignments_use_extracted_fields(
+            sqlparse.format(statement, strip_comments=True).casefold()
+        )
+    )
 
 
 def _structured_outcome_assignments_use_extracted_fields(lowered_statement: str) -> bool:
@@ -1515,30 +1634,43 @@ def _seed_outreach_reconciliation_model(agent_id: str) -> None:
 def _schema_grounded_read_failures(calls) -> list[str]:
     calls = list(calls)
     failures = _sqlite_attempt_failures(calls)
-    schema_call_indexes = []
+    schema_positions = []
     data_reads = []
     for call_index, call in enumerate(calls):
         sql = str((call.tool_params or {}).get("sql") or "")
         schema_evidence = json.dumps(_result_payload(call) or {})
-        if (
+        has_schema_evidence = (
             HANDOFF_LEDGER_TABLE.casefold() in sql.casefold()
             and all(field in schema_evidence.casefold() for field in (
                 "handoff_key",
                 "worker_ref",
                 "resolution_code",
             ))
-        ):
-            schema_call_indexes.append(call_index)
-        for statement in sqlparse.split(sql):
+        )
+        for statement_index, statement in enumerate(sqlparse.split(sql)):
             structural = _structural_sql(statement)
+            if has_schema_evidence and (
+                re.search(
+                    r"\bpragma\s+(?:(?:main|temp)\.)?table_(?:info|xinfo)\s*\(",
+                    structural,
+                    re.I,
+                )
+                or re.search(r"\bpragma_table_(?:info|xinfo)\s*\(", structural, re.I)
+                or re.search(
+                    r"\bfrom\s+(?:(?:main|temp)\.)?sqlite_(?:master|schema)\b",
+                    structural,
+                    re.I,
+                )
+            ):
+                schema_positions.append((call_index, statement_index))
             if _reads_table(structural, HANDOFF_LEDGER_TABLE):
-                data_reads.append((call_index, structural))
+                data_reads.append((call_index, statement_index))
 
-    if not schema_call_indexes:
+    if not schema_positions:
         failures.append("existing ledger schema was not inspected")
     if not data_reads:
         failures.append("existing ledger was not queried")
-    if schema_call_indexes and data_reads and min(schema_call_indexes) >= min(item[0] for item in data_reads):
+    if schema_positions and data_reads and min(schema_positions) >= min(data_reads):
         failures.append("ledger columns were referenced before schema inspection completed")
     return failures
 
@@ -3978,23 +4110,42 @@ class SqliteStructuredPeerEventPersistenceScenario(SqliteDomainModelScenario):
             and _reads_table(statement, "operational_events")
             for call_index, statement_index, _call, statement in statement_entries
         )
-        expected_bound_values = {
-            "evt-2048",
-            "accepted_setup",
-            "thread-2048",
-            "2026-07-28T15:42:00Z",
-            str(peer_event.id),
+        expected_payload = {
+            "event_id": "evt-2048",
+            "event_type": "accepted_setup",
+            "thread_key": "thread-2048",
+            "occurred_at": "2026-07-28T15:42:00Z",
         }
         statement_without_comments = sqlparse.format(write_statement, strip_comments=True)
         direct_message_import = (
             write_entry is not None
             and _reads_table(write_statement, "__messages")
             and "structured_payload_json" in write_statement.casefold()
-            and not any(value in statement_without_comments for value in expected_bound_values)
+            and not any(
+                value in statement_without_comments
+                for value in (*expected_payload.values(), str(peer_event.id))
+            )
         )
         bound_message_import = (
             write_call is not None
-            and _uses_bound_source_values(write_call, write_statement, expected_bound_values)
+            and _uses_bound_source_values(
+                write_call,
+                write_statement,
+                {str(peer_event.id)},
+            )
+            and (
+                bound_payload_placeholder := _bound_json_payload_placeholder(
+                    write_call,
+                    write_statement,
+                    expected_payload,
+                )
+            )
+            and _insert_values_derive_bound_payload_fields(
+                write_statement,
+                table_name="operational_events",
+                placeholder=bound_payload_placeholder,
+                expected_fields=set(expected_payload),
+            )
         )
         message_grounded_import = direct_message_import or bound_message_import
 
