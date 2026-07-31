@@ -171,6 +171,70 @@ class NonRetryableToolAvailabilityTests(SimpleTestCase):
         self.assertTrue(prepared.followup_required)
         record_policy.assert_called_once()
 
+    def test_terminal_source_requires_followup_only_until_final_delivery(self):
+        def outcome(idx, tool_name, result, *, explicit_continue=None):
+            prepared = _PreparedToolExecution(
+                idx=idx,
+                tool_name=tool_name,
+                tool_params={},
+                exec_params={},
+                pending_step=None,
+                credits_consumed=None,
+                consumed_credit=None,
+                call_id=f"call_{idx}",
+                explicit_continue=explicit_continue,
+                inferred_continue=False,
+                parallel_safe=False,
+                parallel_ineligible_reason="unsafe",
+            )
+            return _ToolExecutionOutcome(
+                prepared=prepared,
+                result=result,
+                duration_ms=1,
+                updated_tools=None,
+                variable_map={},
+            )
+
+        source = outcome(
+            1,
+            "mcp_vendor_search",
+            {"status": "error", "retryable": False, "terminal_error": True},
+        )
+        delivery = outcome(
+            2,
+            "send_chat_message",
+            {"status": "ok"},
+            explicit_continue=False,
+        )
+        persisted_step = SimpleNamespace(id=uuid4())
+
+        for outcomes, expected_followup in (([source], True), ([source, delivery], False)):
+            with (
+                self.subTest(has_delivery=len(outcomes) == 2),
+                patch(
+                    "api.agent.core.event_processing._persist_tool_execution_outcome",
+                    side_effect=[
+                        (
+                            persisted_step,
+                            json.dumps(item.result),
+                            "error" if item is source else "complete",
+                        )
+                        for item in outcomes
+                    ],
+                ),
+                patch(
+                    "api.agent.core.event_processing._refund_tool_credit_on_error_if_configured"
+                ),
+            ):
+                finalized = _finalize_tool_batch(
+                    SimpleNamespace(id=uuid4()),
+                    outcomes,
+                    attach_completion=lambda _kwargs: None,
+                    attach_prompt_archive=lambda _step: None,
+                )
+
+            self.assertEqual(finalized.followup_required, expected_followup)
+
     def test_same_batch_terminal_result_skips_unsafe_sibling_but_allows_delivery(self):
         for parallel_ineligible_reason in ("unsafe", None):
             with self.subTest(parallel_ineligible_reason=parallel_ineligible_reason):

@@ -4306,6 +4306,7 @@ def _finalize_tool_batch(
     executed_non_message_action = False
     progress_message_delivery_ok = False
     terminal_message_delivery_ok = False
+    terminal_source_error = False
     human_input_request_ok = False
     successful_message_tools, human_input_delivery_tools = set(), set()
 
@@ -4392,6 +4393,13 @@ def _finalize_tool_batch(
             and result.get(TERMINAL_ERROR_FLAG) is True
             and effective_explicit_continue is not True
         )
+        source_terminal_error = (
+            is_source_bearing_tool(tool_name)
+            and _non_retryable_failure_payload(result) is not None
+            and isinstance(result, dict)
+            and result.get(TERMINAL_ERROR_FLAG) is True
+        )
+        terminal_source_error |= source_terminal_error
         tool_had_warning = _is_warning_status(result)
         if effective_explicit_continue is not None:
             last_explicit_continue = effective_explicit_continue
@@ -4405,7 +4413,7 @@ def _finalize_tool_batch(
         elif tool_name == "search_tools":
             followup_required = True
         elif is_error_status or tool_had_warning:
-            if not terminal_error:
+            if not terminal_error and not source_terminal_error:
                 followup_required = True
         elif (
             effective_explicit_continue is not True
@@ -4419,7 +4427,11 @@ def _finalize_tool_batch(
         if tool_name not in MESSAGE_TOOL_NAMES and tool_name != "sleep_until_next_trigger":
             executed_non_message_action = True
 
-    followup_required = followup_required or bool(human_input_delivery_tools - successful_message_tools)
+    followup_required = (
+        followup_required
+        or terminal_source_error and not terminal_message_delivery_ok
+        or bool(human_input_delivery_tools - successful_message_tools)
+    )
 
     return _FinalizedToolBatch(
         executed_calls=executed_calls,
