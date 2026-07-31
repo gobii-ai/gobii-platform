@@ -96,9 +96,30 @@ class TestParallelToolCallsExecution(TestCase):
     def _run_single_iteration(self, tool_calls: list[dict]):
         from api.agent.core import event_processing as ep
 
-        with patch("api.agent.core.event_processing.build_prompt_context") as mock_build_prompt, patch(
-            "api.agent.core.event_processing._completion_with_failover"
-        ) as mock_completion:
+        request_tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "description": "Test tool",
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            }
+            for name in sorted({
+                call["function"]["name"]
+                for call in tool_calls
+            })
+        ]
+        with (
+            patch(
+                "api.agent.core.event_processing.get_agent_tools",
+                return_value=request_tools,
+            ),
+            patch("api.agent.core.event_processing.build_prompt_context") as mock_build_prompt,
+            patch(
+                "api.agent.core.event_processing._completion_with_failover"
+            ) as mock_completion,
+        ):
             mock_build_prompt.return_value = (
                 [{"role": "system", "content": "sys"}, {"role": "user", "content": "go"}],
                 1000,

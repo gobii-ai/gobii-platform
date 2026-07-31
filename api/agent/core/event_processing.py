@@ -3493,6 +3493,7 @@ def _prepare_tool_batch(
     agent: PersistentAgent,
     *,
     tool_calls: list[Any],
+    allowed_tool_names: set[str] | None = None,
     budget_ctx: Optional[BudgetContext],
     eval_run_id: Optional[str],
     heartbeat: Any,
@@ -3520,6 +3521,16 @@ def _prepare_tool_batch(
             stale_cancellation=True,
         )
 
+    unavailable_tool_names = sorted(
+        {
+            name
+            for call in tool_calls
+            if (name := _get_tool_call_name(call))
+            and allowed_tool_names is not None
+            and name not in allowed_tool_names
+        }
+    )
+
     tool_calls, deferred_sends = _partition_unresolved_custom_tool_sends(tool_calls)
     rate_limit_batch = (
         _build_tool_rate_limit_batch(
@@ -3530,11 +3541,12 @@ def _prepare_tool_batch(
         else None
     )
     prepared_calls: list[_PreparedToolExecution] = []
-    followup_required = bool(deferred_sends)
+    followup_required = bool(deferred_sends or unavailable_tool_names)
     all_calls_sleep = not has_non_sleep_calls
     abort_after_execution = False
     cancel_prepared_calls = False
     stale_cancellation = False
+    unavailable_notice_recorded = False
     if deferred_sends:
         deferred_names = ", ".join(
             name
@@ -3683,6 +3695,26 @@ def _prepare_tool_batch(
                         agent.id,
                         exc_info=True,
                     )
+                followup_required = True
+                continue
+
+            if allowed_tool_names is not None and tool_name not in allowed_tool_names:
+                if not unavailable_notice_recorded:
+                    _record_policy_step(
+                        agent,
+                        "Tool call rejected because it was not offered in the latest model request: "
+                        f"{', '.join(unavailable_tool_names)}. The tool may have become unavailable after a terminal "
+                        "result or a channel/state change. Do not retry it; use only currently offered tools and "
+                        "handle the prior result.",
+                        attach_completion=attach_completion,
+                        attach_prompt_archive=attach_prompt_archive,
+                    )
+                    logger.warning(
+                        "Agent %s: rejected model tool call(s) absent from the latest request: %s.",
+                        agent.id,
+                        ", ".join(unavailable_tool_names),
+                    )
+                    unavailable_notice_recorded = True
                 followup_required = True
                 continue
 
@@ -4026,9 +4058,10 @@ def _execute_prepared_tool_batch_inner(
                 ):
                     prepared = pending_calls[pending_index]
                     if (
-                        is_source_bearing_tool(prepared.tool_name)
+                        prepared.tool_name != "http_request"
+                        and is_source_bearing_tool(prepared.tool_name)
                         and any(
-                            is_source_bearing_tool(in_flight.tool_name)
+                            in_flight.tool_name == prepared.tool_name
                             for in_flight in futures.values()
                         )
                     ):
@@ -7866,6 +7899,7 @@ def _run_agent_loop(
                 prepared_batch = _prepare_tool_batch(
                     agent,
                     tool_calls=list(tool_calls or []),
+                    allowed_tool_names=set(_tool_definition_names_for_completion(request_tools)),
                     budget_ctx=budget_ctx,
                     eval_run_id=eval_run_id,
                     heartbeat=heartbeat,

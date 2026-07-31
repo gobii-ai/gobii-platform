@@ -32,6 +32,7 @@ from api.agent.core.event_processing import (
     NON_RETRYABLE_BATCH_SKIP_REASON,
     _parse_tool_call_params,
     _partition_unresolved_custom_tool_sends,
+    _prepare_tool_batch,
     _PreparedToolExecution,
     _PreparedToolBatch,
     _sanitize_tool_name,
@@ -124,6 +125,52 @@ class NonRetryableToolAvailabilityTests(SimpleTestCase):
 
         self.assertEqual(filtered, self.tools)
 
+    def test_tool_call_absent_from_latest_request_is_rejected(self):
+        agent = SimpleNamespace(id=uuid4())
+
+        with (
+            patch("api.agent.core.event_processing._record_policy_step") as record_policy,
+            patch(
+                "api.agent.core.event_processing._deep_work_update_gate_context",
+                return_value=None,
+            ),
+            patch(
+                "api.agent.core.event_processing.get_agent_daily_credit_state",
+                return_value=None,
+            ),
+            patch(
+                "api.agent.core.event_processing._should_abort_processing",
+                return_value=False,
+            ),
+        ):
+            prepared = _prepare_tool_batch(
+                agent,
+                tool_calls=[
+                    {
+                        "id": "call_unavailable",
+                        "function": {
+                            "name": "mcp_vendor_search",
+                            "arguments": "{}",
+                        },
+                    },
+                ],
+                allowed_tool_names={"send_chat_message", "sleep_until_next_trigger"},
+                budget_ctx=None,
+                eval_run_id=None,
+                heartbeat=None,
+                lock_extender=None,
+                credit_snapshot={},
+                allow_inferred_message_continue=False,
+                has_non_sleep_calls=True,
+                has_user_facing_message=False,
+                attach_completion=lambda _kwargs: None,
+                attach_prompt_archive=lambda _step: None,
+            )
+
+        self.assertEqual(prepared.prepared_calls, [])
+        self.assertTrue(prepared.followup_required)
+        record_policy.assert_called_once()
+
     def test_same_batch_terminal_result_skips_unsafe_sibling_but_allows_delivery(self):
         for parallel_ineligible_reason in ("unsafe", None):
             with self.subTest(parallel_ineligible_reason=parallel_ineligible_reason):
@@ -144,7 +191,7 @@ class NonRetryableToolAvailabilityTests(SimpleTestCase):
                     )
 
                 source = prepared(1, "mcp_vendor_search")
-                unsafe_sibling = prepared(2, "http_request")
+                unsafe_sibling = prepared(2, "mcp_vendor_search")
                 delivery = prepared(3, "send_chat_message")
                 source_outcome = _ToolExecutionOutcome(
                     prepared=source,
