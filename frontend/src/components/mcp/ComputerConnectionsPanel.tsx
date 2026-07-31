@@ -324,11 +324,12 @@ export function ComputerConnectionsPanel({
   const url = getComputerConnectionsUrl()
   const queryClient = useQueryClient()
   const queryKey = useMemo(() => ['computer-connections', url] as const, [url])
+  const [pairingRefreshUntil, setPairingRefreshUntil] = useState(0)
   const query = useQuery({
     queryKey,
     queryFn: () => fetchComputers(url as string),
     enabled: Boolean(url),
-    refetchInterval: 30_000,
+    refetchInterval: () => Date.now() < pairingRefreshUntil ? 1_000 : 30_000,
   })
   const [managedDevice, setManagedDevice] = useState<ComputerDevice | null>(null)
   const [message, setMessage] = useState<string | null>(null)
@@ -372,13 +373,11 @@ export function ComputerConnectionsPanel({
     return <InlineStatusBanner variant="error" surface={variant}>Computer connections could not be loaded.</InlineStatusBanner>
   }
 
-  const downloads = query.data.downloads
   const downloadButtons = [
-    { key: 'macos', label: 'Download for Mac', logoPath: appleLogoPath, url: downloads.macos.url },
-    { key: 'windows', label: 'Download for Windows', logoPath: windowsLogoPath, url: downloads.windows.url },
+    { key: 'macos', label: 'Download for Mac', logoPath: appleLogoPath, url: query.data.downloads.macos.url },
+    { key: 'windows', label: 'Download for Windows', logoPath: windowsLogoPath, url: query.data.downloads.windows.url },
   ]
-  const platform = navigator.platform.toLowerCase()
-  if (platform.includes('win')) downloadButtons.reverse()
+  if (navigator.platform.toLowerCase().includes('win')) downloadButtons.reverse()
 
   return (
     <>
@@ -548,6 +547,7 @@ export function ComputerConnectionsPanel({
           }}
           onApproved={() => {
             setShowPairing(false)
+            setPairingRefreshUntil(Date.now() + 30_000)
             clearPairingUrl()
             void refresh('Computer approved. The desktop app will finish connecting.')
           }}

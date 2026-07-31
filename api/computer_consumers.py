@@ -9,6 +9,7 @@ from django.utils import timezone
 
 from api.models import ComputerDevice
 from api.services.computer_relay import (
+    _queue_device_tool_activation,
     authenticate_relay_access_token,
     claim_device_connection,
     clear_device_presence,
@@ -207,6 +208,7 @@ class ComputerRelayConsumer(AsyncJsonWebsocketConsumer):
                 "max_frame_bytes": settings.COMPUTER_CPP_MAX_FRAME_BYTES,
             }
         )
+        await sync_to_async(_queue_device_tool_activation, thread_sensitive=True)(self.device.id)
 
     async def _handle_heartbeat(self):
         try:

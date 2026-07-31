@@ -3,7 +3,8 @@ import json
 import tempfile
 import uuid
 from contextlib import ExitStack
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 from asgiref.sync import async_to_sync, sync_to_async
 from channels.testing import WebsocketCommunicator
@@ -17,6 +18,7 @@ from waffle import get_waffle_flag_model
 
 from api.agent.system_skills.defaults import COMPUTER_SYSTEM_SKILL, _computer_prompt_context
 from api.agent.system_skills.registry import shortlist_system_skills
+from api.agent.tools.computer_relay_transport import ComputerRelayTransport
 from api.agent.tools.eval_synthetic_tools import get_eval_synthetic_tool_fallback_result
 from api.computer_consumers import ComputerRelayConsumer
 from api.models import (
@@ -30,6 +32,7 @@ from api.models import (
     Organization,
     OrganizationMembership,
     PersistentAgent,
+    PersistentAgentEnabledTool,
     PersistentAgentMCPServer,
     PersistentAgentSystemSkillState,
 )
@@ -46,6 +49,7 @@ from api.services.computer_relay import (
     serialize_device,
     user_can_assign_agent,
 )
+from api.tasks.computer_relay import enable_computer_tools
 
 
 def _create_agent(user, name="Desktop agent", organization=None):
@@ -520,6 +524,37 @@ class ComputerRelayLifecycleTests(TestCase):
             PersistentAgentMCPServer.objects.filter(server_config=config).exists()
         )
 
+    def test_connecting_enables_discovered_tools_and_resumes_agent(self):
+        app = self.device.apps.get(app_key="gobii-desktop")
+        config = app.mcp_server_config
+        tool = SimpleNamespace(
+            config_id=str(config.id),
+            full_name=f"mcp_{config.name}_take_screenshot",
+            server_name=config.name,
+            tool_name="take_screenshot",
+            description="Take a screenshot",
+            parameters={"type": "object", "properties": {}},
+        )
+        manager = MagicMock()
+        manager.get_tools_for_agent.return_value = [tool]
+        manager.is_tool_blacklisted.return_value = False
+
+        with (
+            patch("api.agent.tools.mcp_manager.get_mcp_manager", return_value=manager),
+            patch("api.agent.tools.tool_manager.get_mcp_manager", return_value=manager),
+            patch("api.agent.tasks.process_events.process_agent_events_task.delay") as resume,
+        ):
+            result = enable_computer_tools(str(self.device.id))
+
+        self.assertEqual(result["status"], "success")
+        enabled = PersistentAgentEnabledTool.objects.get(
+            agent=self.agent,
+            tool_full_name=tool.full_name,
+        )
+        self.assertEqual(enabled.server_config, config)
+        self.assertEqual(enabled.tool_name, "take_screenshot")
+        resume.assert_called_once_with(str(self.agent.id))
+
     def test_prompt_context_excludes_an_approved_app_with_a_stale_schema(self):
         app = self.device.apps.get(app_key="gobii-desktop")
         app.reported_schema_hash = "c" * 64
@@ -732,7 +767,7 @@ class ComputerRelayLifecycleTests(TestCase):
 
         self.assertEqual(len(payload["apps"]), 2)
 
-    def test_computer_skill_is_searchable_without_enabling_all_mcp_tools(self):
+    def test_computer_skill_is_searchable_before_tool_discovery(self):
         results = shortlist_system_skills(
             "take a screenshot of my desktop computer",
             available_tool_names=set(),
@@ -778,6 +813,37 @@ class MCPTransportModelTests(TestCase):
         self.assertEqual(result["result"], result["message"])
 
 
+@tag("computer_cpp_batch")
+class ComputerRelayTransportTests(TestCase):
+    def test_mcp_notifications_do_not_close_the_request_response_relay(self):
+        payloads = []
+
+        async def fake_relay_request(_device_app_id, payload):
+            payloads.append(payload)
+            result = {
+                "protocolVersion": payload.get("params", {}).get("protocolVersion"),
+                "capabilities": {},
+                "serverInfo": {"name": "computer", "version": "1"},
+            }
+            if payload["method"] == "tools/list":
+                result = {"tools": []}
+            return {"jsonrpc": "2.0", "id": payload["id"], "result": result}
+
+        async def run():
+            transport = ComputerRelayTransport(device_app_id="app-id", device_id="device-id")
+            with patch(
+                "api.agent.tools.computer_relay_transport.relay_mcp_request",
+                side_effect=fake_relay_request,
+            ):
+                async with transport.connect_session() as session:
+                    await session.initialize()
+                    tools = await session.list_tools()
+            self.assertEqual(tools.tools, [])
+
+        async_to_sync(run)()
+        self.assertEqual([payload["method"] for payload in payloads], ["initialize", "tools/list"])
+
+
 @override_settings(
     CHANNEL_LAYERS={"default": {"BACKEND": "channels.layers.InMemoryChannelLayer"}},
 )
@@ -811,6 +877,9 @@ class ComputerRelayWebSocketTests(TransactionTestCase):
         resume_patcher = patch("api.services.computer_relay._queue_agent_resume")
         resume_patcher.start()
         self.addCleanup(resume_patcher.stop)
+        activation_patcher = patch("api.computer_consumers._queue_device_tool_activation")
+        self.queue_tool_activation = activation_patcher.start()
+        self.addCleanup(activation_patcher.stop)
         self.app = self.device.apps.get(app_key="gobii-desktop")
 
     def test_socket_rejects_missing_access_token(self):
@@ -927,6 +996,7 @@ class ComputerRelayWebSocketTests(TransactionTestCase):
 
         with patch("api.agent.tools.mcp_manager.get_mcp_manager"):
             async_to_sync(run)()
+        self.queue_tool_activation.assert_called_once_with(self.device.id)
 
     def test_socket_is_not_present_until_hello_is_validated(self):
         async def run():

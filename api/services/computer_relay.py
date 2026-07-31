@@ -522,6 +522,17 @@ def _queue_agent_resume(agent_id: uuid.UUID | str) -> None:
     transaction.on_commit(lambda: process_agent_events_task.delay(str(agent_id)))
 
 
+def _queue_device_tool_activation(device_id: uuid.UUID | str) -> None:
+    def enqueue() -> None:
+        if not get_device_presence(device_id):
+            return
+        from api.tasks.computer_relay import enable_computer_tools
+
+        enable_computer_tools.delay(str(device_id))
+
+    transaction.on_commit(enqueue)
+
+
 def assign_device(
     device: ComputerDevice,
     agent: PersistentAgent,
@@ -583,6 +594,7 @@ def assign_device(
         )
 
         _sync_agent_skill(agent)
+        _queue_device_tool_activation(device.id)
         if old_agent and old_agent.id != agent.id:
             _sync_agent_skill(old_agent)
         _queue_agent_resume(agent.id)
@@ -874,6 +886,7 @@ def approve_device_apps(device: ComputerDevice, selected: list[dict[str, str]]) 
             app.save(update_fields=["approval_state", "approved_schema_hash", "updated_at"])
         _reconcile_app_configs(device, apps, assignment)
         if assignment:
+            _queue_device_tool_activation(device.id)
             _queue_agent_resume(assignment.agent_id)
     record_computer_relay_event(
         "app_approval_changed",

@@ -6,7 +6,7 @@ from asgiref.sync import sync_to_async
 from fastmcp.client.transports import ClientTransport
 from mcp import ClientSession
 from mcp.shared.message import SessionMessage
-from mcp.types import JSONRPCMessage
+from mcp.types import JSONRPCMessage, JSONRPCNotification
 
 from api.services.computer_relay import (
     ComputerRelayError,
@@ -45,6 +45,9 @@ class ComputerRelayTransport(ClientTransport):
         async def bridge():
             async with server_receive, server_send:
                 async for session_message in server_receive:
+                    # Stateless desktop endpoints do not consume one-way MCP notifications.
+                    if isinstance(session_message.message.root, JSONRPCNotification):
+                        continue
                     request_payload = session_message.message.model_dump(
                         mode="json",
                         by_alias=True,
