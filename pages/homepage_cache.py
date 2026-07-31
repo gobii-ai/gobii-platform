@@ -40,6 +40,15 @@ def _homepage_integrations_cache_lock_key() -> str:
     return f"{_homepage_integrations_cache_key()}:refresh_lock"
 
 
+def invalidate_homepage_pretrained_cache() -> None:
+    cache.delete_many(
+        [
+            _homepage_pretrained_cache_key(),
+            _homepage_pretrained_cache_lock_key(),
+        ]
+    )
+
+
 def _get_cached_payload(
     *,
     cache_key: str,

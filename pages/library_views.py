@@ -27,12 +27,22 @@ from pages.public_template_urls import (
     public_template_route_slug,
 )
 
-LIBRARY_CACHE_KEY = "pages:library:payload:v1"
-LIBRARY_OFFICIAL_CACHE_KEY = "pages:library:payload:official:v2"
-LIBRARY_CATEGORY_SLUG_MAP_CACHE_KEY = "pages:library:category_slug_map:v1"
+LIBRARY_CACHE_KEY = "pages:library:payload:v2"
+LIBRARY_OFFICIAL_CACHE_KEY = "pages:library:payload:official:v3"
+LIBRARY_CATEGORY_SLUG_MAP_CACHE_KEY = "pages:library:category_slug_map:v2"
 LIBRARY_CACHE_TTL_SECONDS = 120
 LIBRARY_DEFAULT_PAGE_SIZE = 24
 LIBRARY_MAX_PAGE_SIZE = 100
+
+
+def invalidate_library_template_caches() -> None:
+    cache.delete_many(
+        [
+            LIBRARY_CACHE_KEY,
+            LIBRARY_OFFICIAL_CACHE_KEY,
+            LIBRARY_CATEGORY_SLUG_MAP_CACHE_KEY,
+        ]
+    )
 
 
 def _normalize_category(value: str | None) -> str:
@@ -68,7 +78,7 @@ def _library_page_title(selected_category: str, *, official_only: bool) -> str:
 def _library_queryset():
     return (
         PersistentAgentTemplate.objects.select_related("public_profile")
-        .filter(organization__isnull=True, is_active=True)
+        .filter(organization__isnull=True, is_active=True, is_listed=True)
         .filter(Q(slug__gt="") | Q(code__gt=""))
     )
 
@@ -196,6 +206,7 @@ def _get_legacy_library_handle_template(template_slug: str | None):
             Q(handle="library") | Q(handle="", public_profile__handle="library"),
             slug=normalized_template_slug,
             template__is_active=True,
+            template__is_listed=True,
             template__organization__isnull=True,
         )
         .first()

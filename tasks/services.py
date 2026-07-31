@@ -205,6 +205,30 @@ class TaskCreditService:
         expiration_date=None,
         free_trial_start: bool = False,
     ) -> int:
+        # Stripe webhooks can race synchronous subscription activation. Serialize
+        # grants per user so the invoice idempotency check and create are atomic.
+        with transaction.atomic():
+            user.__class__._default_manager.select_for_update().only("pk").get(pk=user.pk)
+            return TaskCreditService._grant_subscription_credits_locked(
+                user,
+                credit_override=credit_override,
+                plan=plan,
+                invoice_id=invoice_id,
+                grant_date=grant_date,
+                expiration_date=expiration_date,
+                free_trial_start=free_trial_start,
+            )
+
+    @staticmethod
+    def _grant_subscription_credits_locked(
+        user,
+        credit_override=None,
+        plan=None,
+        invoice_id="",
+        grant_date=None,
+        expiration_date=None,
+        free_trial_start: bool = False,
+    ) -> int:
         """
         Grants task credits to a user based on their subscription plan.
 

@@ -1229,6 +1229,10 @@ STRIPE_ENABLED = env.bool(
     "STRIPE_ENABLED",
     default=GOBII_PROPRIETARY_MODE and STRIPE_KEYS_PRESENT,
 )
+TRIAL_PROMO_DIRECT_ACTIVATION_ENABLED = env.bool(
+    "TRIAL_PROMO_DIRECT_ACTIVATION_ENABLED",
+    default=True,
+)
 if not STRIPE_ENABLED:
     STRIPE_DISABLED_REASON = (
         "Stripe keys not configured"

@@ -283,7 +283,11 @@ def _user_has_local_trial_or_paid_history(user) -> bool:
     return bool(billing and getattr(billing, "subscription", "") != PlanNames.FREE)
 
 
-def _user_has_prior_individual_history(user) -> tuple[bool, str | None]:
+def _user_has_prior_individual_history(
+    user,
+    *,
+    excluded_subscription_ids: set[str] | None = None,
+) -> tuple[bool, str | None]:
     if _user_has_local_trial_or_paid_history(user):
         return True, "local_billing_or_trial_history"
 
@@ -292,13 +296,31 @@ def _user_has_prior_individual_history(user) -> tuple[bool, str | None]:
         return False, None
 
     try:
-        return customer_has_any_individual_subscription(str(customer.id)), None
+        if not excluded_subscription_ids:
+            return customer_has_any_individual_subscription(str(customer.id)), None
+        return (
+            customer_has_any_individual_subscription(
+                str(customer.id),
+                excluded_subscription_ids=excluded_subscription_ids,
+            ),
+            None,
+        )
     except _STRIPE_ELIGIBILITY_ERRORS:
         return True, "subscription_history_lookup_failed"
 
 
-def user_has_prior_individual_history(user) -> bool:
-    has_prior_history, _history_reason = _user_has_prior_individual_history(user)
+def user_has_prior_individual_history(
+    user,
+    *,
+    excluded_subscription_ids: set[str] | None = None,
+) -> bool:
+    if excluded_subscription_ids:
+        has_prior_history, _history_reason = _user_has_prior_individual_history(
+            user,
+            excluded_subscription_ids=excluded_subscription_ids,
+        )
+    else:
+        has_prior_history, _history_reason = _user_has_prior_individual_history(user)
     return has_prior_history
 
 

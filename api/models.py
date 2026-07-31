@@ -4636,6 +4636,11 @@ class TrialPromoNoPaymentMethodEndBehaviorChoices(models.TextChoices):
     PAUSE = "pause", "Pause subscription"
 
 
+class TrialPromoActivationModeChoices(models.TextChoices):
+    HOSTED_CHECKOUT = "hosted_checkout", "Hosted Stripe Checkout"
+    DIRECT_STRIPE_TRIAL = "direct_stripe_trial", "Transparent Stripe trial"
+
+
 class TrialPromo(models.Model):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -4651,6 +4656,11 @@ class TrialPromo(models.Model):
         max_length=32,
         choices=TrialPromoPlanChoices.choices,
         default=TrialPromoPlanChoices.STARTUP,
+    )
+    activation_mode = models.CharField(
+        max_length=32,
+        choices=TrialPromoActivationModeChoices.choices,
+        default=TrialPromoActivationModeChoices.HOSTED_CHECKOUT,
     )
     trial_days = models.PositiveIntegerField(
         validators=[MinValueValidator(1), MaxValueValidator(730)],
@@ -4690,6 +4700,30 @@ class TrialPromo(models.Model):
             "Maximum completed promo redemptions for this shared code. "
             "Checkout starts are not counted until Stripe confirms completion."
         ),
+    )
+    linked_template = models.ForeignKey(
+        "PersistentAgentTemplate",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="trial_promos",
+        help_text="Optional unlisted personal template staged after transparent trial activation.",
+    )
+    conversion_coupon_id = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        help_text="Stripe repeating coupon applied only after the free trial.",
+    )
+    discount_months = models.PositiveIntegerField(
+        default=3,
+        validators=[MinValueValidator(1), MaxValueValidator(24)],
+        help_text="Number of paid monthly billing periods that receive the conversion discount.",
+    )
+    late_conversion_grace_days = models.PositiveIntegerField(
+        default=30,
+        validators=[MinValueValidator(1), MaxValueValidator(365)],
+        help_text="Late-conversion window after trial end when the promo has no active-until date.",
     )
     active_from = models.DateTimeField(null=True, blank=True)
     active_until = models.DateTimeField(null=True, blank=True)
@@ -4781,12 +4815,22 @@ class TrialPromoRedemptionStatusChoices(models.TextChoices):
     CHECKOUT_COMPLETED = "checkout_completed", "Checkout completed"
     CHECKOUT_EXPIRED = "checkout_expired", "Checkout expired"
     CHECKOUT_FAILED = "checkout_failed", "Checkout failed"
+    DIRECT_ACTIVATION_PENDING = "direct_activation_pending", "Direct activation pending"
+    DIRECT_ACTIVATION_COMPLETED = "direct_activation_completed", "Direct activation completed"
+    DIRECT_ACTIVATION_FAILED = "direct_activation_failed", "Direct activation failed"
+
+
+class TrialPromoDiscountStateChoices(models.TextChoices):
+    NOT_APPLICABLE = "not_applicable", "Not applicable"
+    AVAILABLE = "available", "Available after trial"
+    REDEEMED = "redeemed", "Discount redeemed"
 
 
 class TrialPromoRedemption(models.Model):
 
     COUNTED_STATUSES = (
         TrialPromoRedemptionStatusChoices.CHECKOUT_COMPLETED,
+        TrialPromoRedemptionStatusChoices.DIRECT_ACTIVATION_COMPLETED,
     )
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -4815,11 +4859,26 @@ class TrialPromoRedemption(models.Model):
         unique=True,
     )
     stripe_subscription_id = models.CharField(max_length=255, blank=True, default="", db_index=True)
+    stripe_subscription_schedule_id = models.CharField(max_length=255, blank=True, default="", db_index=True)
+    conversion_checkout_session_id = models.CharField(
+        max_length=255,
+        null=True,
+        blank=True,
+        unique=True,
+    )
     metadata = models.JSONField(default=dict, blank=True)
     checkout_started_at = models.DateTimeField(default=timezone.now)
     checkout_completed_at = models.DateTimeField(null=True, blank=True)
     checkout_expired_at = models.DateTimeField(null=True, blank=True)
     checkout_failed_at = models.DateTimeField(null=True, blank=True)
+    activated_at = models.DateTimeField(null=True, blank=True)
+    late_conversion_expires_at = models.DateTimeField(null=True, blank=True)
+    discount_state = models.CharField(
+        max_length=32,
+        choices=TrialPromoDiscountStateChoices.choices,
+        default=TrialPromoDiscountStateChoices.NOT_APPLICABLE,
+    )
+    discount_applied_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -4828,6 +4887,18 @@ class TrialPromoRedemption(models.Model):
         indexes = [
             models.Index(fields=("promo", "status"), name="trial_redemp_promo_status_idx"),
             models.Index(fields=("user", "promo"), name="trial_redemp_user_promo_idx"),
+        ]
+        constraints = [
+            UniqueConstraint(
+                fields=["promo", "user"],
+                condition=Q(
+                    status__in=(
+                        TrialPromoRedemptionStatusChoices.DIRECT_ACTIVATION_PENDING,
+                        TrialPromoRedemptionStatusChoices.DIRECT_ACTIVATION_COMPLETED,
+                    ),
+                ),
+                name="uniq_active_direct_trial_promo_redemption",
+            ),
         ]
         verbose_name = "Trial promo redemption"
         verbose_name_plural = "Trial promo redemptions"
@@ -6172,6 +6243,10 @@ class PersistentAgentTemplate(models.Model):
         help_text="Lower numbers appear first in the directory UI.",
     )
     is_active = models.BooleanField(default=True)
+    is_listed = models.BooleanField(
+        default=True,
+        help_text="Whether this template appears on public template surfaces and ordinary launch routes.",
+    )
     show_on_homepage = models.BooleanField(
         default=False,
         help_text="Whether to feature this template on the home page.",
@@ -6265,6 +6340,8 @@ class PersistentAgentTemplateRelatedTemplate(models.Model):
                 raise ValidationError({"related_template": "Related templates must be public-facing, not organization-scoped."})
             if not related_template.is_active:
                 raise ValidationError({"related_template": "Related templates must be active."})
+            if not related_template.is_listed:
+                raise ValidationError({"related_template": "Related templates must be listed."})
             if not (related_template.slug or related_template.code):
                 raise ValidationError({"related_template": "Related templates must have a public route slug or code."})
 
