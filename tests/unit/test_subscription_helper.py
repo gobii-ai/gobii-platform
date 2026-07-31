@@ -16,14 +16,17 @@ from api.models import (
 from constants.plans import PlanNames
 from constants.grant_types import GrantTypeChoices
 from util.subscription_helper import (
+    _sync_active_subscriptions_from_stripe_customer,
     mark_user_billing_with_plan,
     get_users_due_for_monthly_grant,
     ensure_single_individual_subscription,
     get_existing_individual_subscriptions,
     get_active_subscription,
+    get_or_create_stripe_customer,
     get_user_plan,
     reconcile_user_plan_from_stripe,
     get_subscription_base_price,
+    sync_subscription_after_direct_update,
 )
 from util.trial_enforcement import PERSONAL_FREE_TRIAL_ENFORCEMENT_WAFFLE_SWITCH
 from waffle.models import Switch
@@ -483,6 +486,81 @@ class GetActiveSubscriptionTests(TestCase):
         self.assertIs(subscription, active_subscription)
         mock_sync_customer.assert_called_once_with(customer)
         self.assertEqual(customer.subscriptions.filter.call_count, 2)
+
+    @patch("util.subscription_helper.Subscription.sync_from_stripe_data")
+    @patch("util.subscription_helper.stripe.Subscription.list")
+    @patch("util.subscription_helper._ensure_stripe_ready")
+    def test_remote_sync_uses_selected_stripe_api_key(
+        self,
+        _mock_ensure_stripe_ready,
+        mock_subscription_list,
+        mock_subscription_sync,
+    ):
+        stripe_subscription = {
+            "id": "sub_test",
+            "status": "trialing",
+            "current_period_end": int(timezone.now().timestamp()) + 3600,
+        }
+        page = MagicMock()
+        page.auto_paging_iter.return_value = [stripe_subscription]
+        mock_subscription_list.return_value = page
+        customer = MagicMock(id="cus_test")
+
+        with patch(
+            "util.subscription_helper.stripe.api_key",
+            "sk_test_selected",
+        ):
+            synced = _sync_active_subscriptions_from_stripe_customer(customer)
+
+        self.assertTrue(synced)
+        mock_subscription_sync.assert_called_once_with(
+            stripe_subscription,
+            api_key="sk_test_selected",
+        )
+
+    @patch("util.subscription_helper.Subscription.sync_from_stripe_data")
+    def test_direct_update_sync_uses_selected_stripe_api_key(
+        self,
+        mock_subscription_sync,
+    ):
+        subscription = {"id": "sub_test"}
+
+        with patch(
+            "util.subscription_helper.stripe.api_key",
+            "sk_test_selected",
+        ):
+            sync_subscription_after_direct_update(subscription)
+
+        mock_subscription_sync.assert_called_once_with(
+            subscription,
+            api_key="sk_test_selected",
+        )
+
+    @patch("util.subscription_helper.Customer.sync_from_stripe_data")
+    @patch("util.subscription_helper.stripe.Customer.create")
+    @patch("util.subscription_helper._ensure_stripe_ready")
+    def test_new_customer_sync_uses_selected_stripe_api_key(
+        self,
+        _mock_ensure_stripe_ready,
+        mock_customer_create,
+        mock_customer_sync,
+    ):
+        stripe_customer = {"id": "cus_test", "livemode": False}
+        synced_customer = MagicMock()
+        mock_customer_create.return_value = stripe_customer
+        mock_customer_sync.return_value = synced_customer
+
+        with patch(
+            "util.subscription_helper.stripe.api_key",
+            "sk_test_selected",
+        ):
+            result = get_or_create_stripe_customer(self.user)
+
+        self.assertIs(result, synced_customer)
+        mock_customer_sync.assert_called_once_with(
+            stripe_customer,
+            api_key="sk_test_selected",
+        )
 
     @patch("util.subscription_helper.get_plan_by_product_id", return_value={"id": PlanNames.STARTUP, "name": "Pro"})
     @patch("util.subscription_helper.get_plan_version_by_product_id", return_value=None)

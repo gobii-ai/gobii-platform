@@ -193,7 +193,10 @@ def _sync_active_subscriptions_from_stripe_customer(customer: Customer | None) -
             continue
 
         try:
-            Subscription.sync_from_stripe_data(stripe_sub)
+            Subscription.sync_from_stripe_data(
+                stripe_sub,
+                api_key=stripe.api_key,
+            )
             synced_any = True
         except Exception:
             logger.warning(
@@ -212,7 +215,10 @@ def sync_subscription_after_direct_update(subscription_payload: Any) -> None:
         return
 
     try:
-        Subscription.sync_from_stripe_data(subscription_payload)
+        Subscription.sync_from_stripe_data(
+            subscription_payload,
+            api_key=stripe.api_key,
+        )
     except Exception:
         # Intentionally broad: sync failures must not turn successful Stripe updates into API errors.
         logger.warning(
@@ -1029,7 +1035,10 @@ def get_or_create_stripe_customer(owner) -> Customer:
                 api_key=stripe.api_key,
             )
 
-        customer = Customer.sync_from_stripe_data(stripe_customer)
+        customer = Customer.sync_from_stripe_data(
+            stripe_customer,
+            api_key=stripe.api_key,
+        )
 
         if owner_type == "user":
             customer.subscriber = owner

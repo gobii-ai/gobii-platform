@@ -643,6 +643,10 @@ class DirectTrialPromoServiceTests(TestCase):
             mock_grant_credits.call_args.kwargs["invoice_id"],
             "in_direct_trial",
         )
+        _mock_subscription_sync.assert_called_once_with(
+            mock_subscription_create.return_value,
+            api_key=stripe.api_key,
+        )
 
         retry_result = activate_direct_trial_promo(
             promo=promo,

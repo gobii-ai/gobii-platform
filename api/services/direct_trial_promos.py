@@ -922,7 +922,10 @@ def _sync_direct_trial_entitlements(
     subscription,
 ) -> None:
     try:
-        Subscription.sync_from_stripe_data(subscription)
+        Subscription.sync_from_stripe_data(
+            subscription,
+            api_key=stripe.api_key,
+        )
         plan = reconcile_user_plan_from_stripe(user) or {}
         plan_id = str(plan.get("id") or "").strip().lower()
         if plan_id != activation_terms.plan:
