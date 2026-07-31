@@ -1,7 +1,7 @@
 """Prompt and context building helpers for persistent agent event processing."""
 
 from collections import Counter
-from email.utils import parseaddr
+from email.utils import getaddresses, parseaddr
 import json
 import logging
 import math
@@ -4396,20 +4396,37 @@ def _message_cc_addresses(
     message: PersistentAgentMessage,
     raw_payload: Mapping[str, Any],
 ) -> tuple[str, ...]:
-    addresses = {
+    raw_address_values = [
         str(endpoint.address).strip()
         for endpoint in message.cc_endpoints.all()
         if str(endpoint.address or "").strip()
+    ]
+
+    def append_cc_value(value: Any) -> None:
+        if isinstance(value, str) and value.strip():
+            raw_address_values.append(value.strip())
+        elif isinstance(value, (list, tuple, set)):
+            raw_address_values.extend(
+                str(address).strip()
+                for address in value
+                if str(address or "").strip()
+            )
+
+    for key, value in raw_payload.items():
+        if str(key).casefold() in {"cc", "cc_addresses"}:
+            append_cc_value(value)
+
+    headers = raw_payload.get("headers")
+    if isinstance(headers, Mapping):
+        for key, value in headers.items():
+            if str(key).casefold() == "cc":
+                append_cc_value(value)
+
+    addresses = {
+        address.strip()
+        for _display_name, address in getaddresses(raw_address_values)
+        if address.strip()
     }
-    raw_addresses = raw_payload.get("cc_addresses") or raw_payload.get("cc") or ()
-    if isinstance(raw_addresses, str):
-        raw_addresses = (raw_addresses,)
-    if isinstance(raw_addresses, (list, tuple, set)):
-        addresses.update(
-            str(address).strip()
-            for address in raw_addresses
-            if str(address or "").strip()
-        )
     return tuple(sorted(addresses))
 
 

@@ -52,6 +52,20 @@ class MessageQualityScenarioTests(SimpleTestCase):
             ("jordan@example.test", "sam@example.test"),
         )
 
+    def test_email_cc_context_handles_provider_casing_and_header_addresses(self):
+        message = SimpleNamespace(cc_endpoints=SimpleNamespace(all=lambda: []))
+
+        self.assertEqual(
+            _message_cc_addresses(
+                message,
+                {
+                    "Cc": "Jordan Example <jordan@example.test>",
+                    "headers": {"CC": "Sam Example <sam@example.test>, pat@example.test"},
+                },
+            ),
+            ("jordan@example.test", "pat@example.test", "sam@example.test"),
+        )
+
     def test_message_quality_suite_contains_all_generated_scenarios(self):
         suite = SuiteRegistry.get(MESSAGE_QUALITY_SUITE_SLUG)
 
