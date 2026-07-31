@@ -53,35 +53,11 @@ def _computer_prompt_available(agent) -> bool:
         assignment.device.owner
         for assignment in ComputerDeviceAssignment.objects.filter(
             agent=agent,
-            status=ComputerDeviceAssignment.Status.ACTIVE,
+            revoked_at__isnull=True,
             device__revoked_at__isnull=True,
         ).select_related("device__owner")
     }
     return any(computer_cpp_enabled_for_user(owner) for owner in owners or {agent.user})
-
-
-def _computer_prompt_instructions(agent) -> str:
-    from api.models import ComputerDeviceAssignment
-
-    assignments = ComputerDeviceAssignment.objects.filter(
-        agent=agent,
-        status=ComputerDeviceAssignment.Status.ACTIVE,
-        device__revoked_at__isnull=True,
-    )
-    if not assignments.exists():
-        return (
-            "No computer is connected to this Gobii. Tell the current requester to open "
-            f"`{_app_integrations_url()}`, install computer.cpp, pair it, and select this Gobii. "
-            "Do not suggest a public IP, port forwarding, an inbound firewall rule, or browser automation as a substitute."
-        )
-    return (
-        "Use the namespaced `mcp_computer_...` tools for work on the requester's connected computer. "
-        "Tool and server descriptions identify the device and app. If several computers are connected and the requester "
-        "did not identify one, ask which named computer to use before acting. Treat offline, paused, locked, "
-        "permissions_required, and update_required results as real blocking states: report the specific state and do not "
-        "claim the operation succeeded or blindly retry it. Never ask the requester to expose a public IP, configure port "
-        "forwarding, or weaken firewall settings. Desktop mutations must stay within the exact scope the requester approved."
-    )
 
 
 def _computer_prompt_context(agent) -> str:
@@ -91,7 +67,7 @@ def _computer_prompt_context(agent) -> str:
     assignments = (
         ComputerDeviceAssignment.objects.filter(
             agent=agent,
-            status=ComputerDeviceAssignment.Status.ACTIVE,
+            revoked_at__isnull=True,
             device__revoked_at__isnull=True,
         )
         .select_related("device__owner")
@@ -1309,7 +1285,15 @@ COMPUTER_SYSTEM_SKILL = SystemSkillDefinition(
     ),
     discoverable_without_tools=True,
     prompt_available=_computer_prompt_available,
-    prompt_instructions_renderer=_computer_prompt_instructions,
+    prompt_instructions=(
+        "Use namespaced `mcp_computer_...` tools for work on a connected computer. Tool and server descriptions identify "
+        "the device and app. If several computers are connected and the requester did not identify one, ask which named "
+        "computer to use. Treat offline, paused, locked, permissions_required, and update_required as blocking states: "
+        "report the state and do not claim success or blindly retry. If the connected computer state is none, direct the "
+        f"requester to `{_app_integrations_url()}` to install and pair computer.cpp. Never suggest exposing a public IP, "
+        "port forwarding, weakening firewall settings, or unrelated browser automation. Keep desktop mutations within the "
+        "exact scope the requester approved."
+    ),
     prompt_context_renderer=_computer_prompt_context,
     setup_instructions=f"Connect a computer at {_app_integrations_url()}.",
 )

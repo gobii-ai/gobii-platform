@@ -10,14 +10,14 @@ from django.utils import timezone
 from api.models import ComputerDevice
 from api.services.computer_relay import (
     authenticate_relay_access_token,
+    claim_device_connection,
     clear_device_presence,
     computer_client_version_supported,
-    computer_cpp_enabled_for_user,
     computer_relay_active_sockets,
-    get_device_presence,
     record_computer_relay_event,
-    set_device_presence,
+    refresh_device_presence,
     sync_device_manifest,
+    validate_relay_device,
 )
 
 
@@ -46,7 +46,11 @@ class ComputerRelayConsumer(AsyncJsonWebsocketConsumer):
         self.pending_replies: dict[str, str] = {}
         self.received_hello = False
 
-        previous = get_device_presence(self.device.id)
+        previous = claim_device_connection(
+            self.device.id,
+            channel_name=self.channel_name,
+            generation=self.connection_generation,
+        )
         if previous:
             await self.channel_layer.send(
                 previous["channel"],
@@ -56,7 +60,6 @@ class ComputerRelayConsumer(AsyncJsonWebsocketConsumer):
                     "payload": {"code": "superseded"},
                 },
             )
-            clear_device_presence(self.device.id, previous["generation"])
         self.socket_counted = True
         computer_relay_active_sockets.add(1, {"platform": self.device.platform})
         record_computer_relay_event("socket_connected", platform=self.device.platform)
@@ -161,9 +164,21 @@ class ComputerRelayConsumer(AsyncJsonWebsocketConsumer):
                 close_code=4406,
             )
             return
+        if not refresh_device_presence(
+            self.device.id,
+            channel_name=self.channel_name,
+            generation=self.connection_generation,
+            ready=False,
+        ):
+            await self.close(code=4403)
+            return
         apps = content.get("apps", [])
         try:
-            await sync_to_async(sync_device_manifest, thread_sensitive=True)(self.device, apps)
+            await sync_to_async(sync_device_manifest, thread_sensitive=True)(
+                self.device,
+                apps,
+                resume_agent=True,
+            )
         except ValueError as exc:
             await self._reject("invalid_manifest", str(exc), close_code=4400)
             return
@@ -176,11 +191,14 @@ class ComputerRelayConsumer(AsyncJsonWebsocketConsumer):
         )
         self.received_hello = True
         self.hello_timeout_task.cancel()
-        set_device_presence(
+        activated = refresh_device_presence(
             self.device.id,
             channel_name=self.channel_name,
             generation=self.connection_generation,
         )
+        if not activated:
+            await self.close(code=4403)
+            return
         await self.send_json(
             {
                 "type": "hello.ack",
@@ -191,17 +209,22 @@ class ComputerRelayConsumer(AsyncJsonWebsocketConsumer):
         )
 
     async def _handle_heartbeat(self):
-        enabled = await sync_to_async(computer_cpp_enabled_for_user, thread_sensitive=True)(
-            self.device.owner
-        )
-        if not enabled:
+        try:
+            self.device = await sync_to_async(validate_relay_device, thread_sensitive=True)(
+                self.device.id,
+                self.device.credential_generation,
+            )
+        except PermissionError:
             await self.close(code=4403)
             return
-        set_device_presence(
+        refreshed = refresh_device_presence(
             self.device.id,
             channel_name=self.channel_name,
             generation=self.connection_generation,
         )
+        if not refreshed:
+            await self.close(code=4403)
+            return
         now = timezone.now()
         if self.device.last_seen_at is None or (now - self.device.last_seen_at).total_seconds() >= 60:
             self.device.last_seen_at = now

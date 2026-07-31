@@ -91,7 +91,7 @@ class ComputerListAPIView(LoginRequiredMixin, View):
         elif context.can_manage_org_agents:
             devices = base.filter(
                 assignment__organization_id=context.current_context.id,
-                assignment__status=ComputerDeviceAssignment.Status.ACTIVE,
+                assignment__revoked_at__isnull=True,
             )
         else:
             devices = base.none()
@@ -100,7 +100,7 @@ class ComputerListAPIView(LoginRequiredMixin, View):
         if agent_id:
             devices = devices.filter(
                 assignment__agent_id=agent_id,
-                assignment__status=ComputerDeviceAssignment.Status.ACTIVE,
+                assignment__revoked_at__isnull=True,
             )
 
         release_base_url = settings.COMPUTER_CPP_RELEASE_BASE_URL.rstrip("/")
@@ -113,14 +113,11 @@ class ComputerListAPIView(LoginRequiredMixin, View):
                     },
                     "windows": {
                         "url": f"{release_base_url}/computer.cpp-windows-x64.msi",
-                        "portable_url": f"{release_base_url}/computer.cpp-windows-x64.zip",
                     },
-                    "minimum_version": settings.COMPUTER_CPP_MINIMUM_CLIENT_VERSION,
                 },
                 "context": {
                     "type": context.current_context.type,
                     "id": context.current_context.id,
-                    "can_manage_org_grants": context.can_manage_org_agents,
                 },
                 "agents": [_serialize_agent(agent) for agent in manageable_agents_for_user(request.user)],
                 "devices": [
@@ -145,14 +142,11 @@ class ComputerPairingApprovalAPIView(LoginRequiredMixin, View):
             {
                 "enabled": True,
                 "pairing": {
-                    "id": str(pairing.id),
                     "display_name": pairing.display_name,
                     "platform": pairing.platform,
                     "architecture": pairing.architecture,
                     "client_version": pairing.client_version,
-                    "protocol_version": pairing.protocol_version,
                     "apps": pairing.app_manifest,
-                    "expires_at": pairing.expires_at.isoformat(),
                 },
                 "agents": [_serialize_agent(agent) for agent in manageable_agents_for_user(request.user)],
             }

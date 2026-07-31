@@ -205,6 +205,7 @@ type NativeIntegrationInsightPanelFrameProps = {
   ariaLabel: string
   providerLabel: string
   provider?: NativeIntegrationProvider | null
+  configured?: boolean
   connected: boolean
   fallbackIcon: ReactNode
   unavailableMessage?: string | null
@@ -221,6 +222,7 @@ export function NativeIntegrationInsightPanelFrame({
   ariaLabel,
   providerLabel,
   provider = null,
+  configured = Boolean(provider),
   connected,
   fallbackIcon,
   unavailableMessage = null,
@@ -246,7 +248,7 @@ export function NativeIntegrationInsightPanelFrame({
         {loadingMessage}
       </div>
     )
-  } else if (errorMessage || !provider) {
+  } else if (errorMessage || !configured) {
     headerConnected = false
     content = <p className="google-drive-insight-panel__error">{errorMessage ?? notConfiguredMessage}</p>
   } else {

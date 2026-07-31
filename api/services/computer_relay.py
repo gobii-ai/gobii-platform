@@ -83,10 +83,32 @@ class ComputerRelayError(RuntimeError):
         super().__init__(f"[computer:{code}] {message}")
 
 
-def record_computer_relay_event(event: str, **attributes) -> None:
-    dimensions = {"event": event, **attributes}
+def record_computer_relay_event(
+    event: str,
+    *,
+    user_id=None,
+    analytics_event: AnalyticsEvent | None = None,
+    analytics_source: AnalyticsSource = AnalyticsSource.CONSOLE,
+    **attributes,
+) -> None:
+    event_fields = {"event": event, **{key: value for key, value in attributes.items() if value is not None}}
+    dimensions = {
+        "event": event,
+        **{
+            key: value
+            for key, value in attributes.items()
+            if key in {"error_type", "outcome", "platform"} and value is not None
+        },
+    }
     computer_relay_events.add(1, dimensions)
-    logger.info("Computer relay event", extra=dimensions)
+    logger.info("Computer relay event", extra=event_fields)
+    if user_id is not None and analytics_event is not None:
+        Analytics.track_event(
+            user_id,
+            analytics_event,
+            analytics_source,
+            {key: value for key, value in attributes.items() if value is not None},
+        )
 
 
 def computer_rate_limited(key: str, *, limit: int, window_seconds: int) -> bool:
@@ -97,21 +119,6 @@ def computer_rate_limited(key: str, *, limit: int, window_seconds: int) -> bool:
     except ValueError:
         cache.set(key, 1, timeout=window_seconds)
         return False
-
-
-def _track_computer_event(
-    user_id,
-    event: AnalyticsEvent,
-    *,
-    source: AnalyticsSource = AnalyticsSource.CONSOLE,
-    **properties,
-) -> None:
-    Analytics.track_event(
-        user_id,
-        event,
-        source,
-        {key: value for key, value in properties.items() if value is not None},
-    )
 
 
 def _secret_digest(value: str) -> str:
@@ -309,15 +316,15 @@ def approve_pairing(
                 "approved_at",
             ]
         )
-    _track_computer_event(
-        user.id,
-        AnalyticsEvent.COMPUTER_PAIRING_APPROVED,
+    record_computer_relay_event(
+        "pairing_approved",
+        user_id=user.id,
+        analytics_event=AnalyticsEvent.COMPUTER_PAIRING_APPROVED,
         pairing_id=str(pairing.id),
         agent_id=str(agent.id),
         app_count=len(selected),
         platform=pairing.platform,
     )
-    record_computer_relay_event("pairing_approved", platform=pairing.platform)
     return pairing
 
 
@@ -379,12 +386,19 @@ def authenticate_relay_access_token(token: str) -> ComputerDevice:
         raise PermissionError("Invalid relay token audience")
     if int(payload.get("exp") or 0) <= int(timezone.now().timestamp()):
         raise PermissionError("Invalid or expired relay token")
+    return validate_relay_device(
+        payload.get("device_id"),
+        payload.get("generation"),
+    )
+
+
+def validate_relay_device(device_id, credential_generation) -> ComputerDevice:
     device = (
         ComputerDevice.objects.select_related("owner")
-        .filter(id=payload.get("device_id"), revoked_at__isnull=True)
+        .filter(id=device_id, revoked_at__isnull=True)
         .first()
     )
-    if device is None or device.credential_generation != payload.get("generation"):
+    if device is None or device.credential_generation != credential_generation:
         raise PermissionError("Relay credentials have been revoked")
     if not computer_cpp_enabled_for_user(device.owner):
         raise PermissionError("Computer connections are not enabled for this account")
@@ -409,9 +423,13 @@ def _disable_app_config(app: ComputerDeviceApp) -> None:
     if config.is_active:
         config.is_active = False
         config.save(update_fields=["is_active", "updated_at"])
+    _refresh_mcp_server(config.id)
+
+
+def _refresh_mcp_server(config_id) -> None:
     from api.agent.tools.mcp_manager import get_mcp_manager
 
-    transaction.on_commit(lambda config_id=str(config.id): get_mcp_manager().refresh_server(config_id))
+    transaction.on_commit(lambda: get_mcp_manager().refresh_server(str(config_id)))
 
 
 def _ensure_app_config(
@@ -454,9 +472,7 @@ def _ensure_app_config(
         agent=agent,
         server_config=config,
     )
-    from api.agent.tools.mcp_manager import get_mcp_manager
-
-    transaction.on_commit(lambda config_id=str(config.id): get_mcp_manager().refresh_server(config_id))
+    _refresh_mcp_server(config.id)
     return config
 
 
@@ -480,7 +496,7 @@ def _reconcile_app_configs(
 def _active_assignment(device: ComputerDevice) -> ComputerDeviceAssignment | None:
     return (
         ComputerDeviceAssignment.objects.select_related("agent")
-        .filter(device=device, status=ComputerDeviceAssignment.Status.ACTIVE)
+        .filter(device=device, revoked_at__isnull=True)
         .first()
     )
 
@@ -488,7 +504,7 @@ def _active_assignment(device: ComputerDevice) -> ComputerDeviceAssignment | Non
 def _sync_agent_skill(agent: PersistentAgent) -> None:
     has_assignment = ComputerDeviceAssignment.objects.filter(
         agent=agent,
-        status=ComputerDeviceAssignment.Status.ACTIVE,
+        revoked_at__isnull=True,
         device__revoked_at__isnull=True,
     ).exists()
     if has_assignment:
@@ -525,7 +541,7 @@ def assign_device(
             .filter(device=device)
             .first()
         )
-        old_agent = existing.agent if existing and existing.status == ComputerDeviceAssignment.Status.ACTIVE else None
+        old_agent = existing.agent if existing and existing.revoked_at is None else None
         reassigned = bool(old_agent and old_agent.id != agent.id)
 
         if existing is None:
@@ -548,14 +564,12 @@ def assign_device(
             existing.agent = agent
             existing.organization = agent.organization
             existing.granted_by = granted_by
-            existing.status = ComputerDeviceAssignment.Status.ACTIVE
             existing.revoked_at = None
             existing.save(
                 update_fields=[
                     "agent",
                     "organization",
                     "granted_by",
-                    "status",
                     "revoked_at",
                     "updated_at",
                 ]
@@ -572,9 +586,10 @@ def assign_device(
         if old_agent and old_agent.id != agent.id:
             _sync_agent_skill(old_agent)
         _queue_agent_resume(agent.id)
-    _track_computer_event(
-        granted_by.id,
-        AnalyticsEvent.COMPUTER_REASSIGNED if reassigned else AnalyticsEvent.COMPUTER_ASSIGNED,
+    record_computer_relay_event(
+        "computer_reassigned" if reassigned else "computer_assigned",
+        user_id=granted_by.id,
+        analytics_event=AnalyticsEvent.COMPUTER_REASSIGNED if reassigned else AnalyticsEvent.COMPUTER_ASSIGNED,
         device_id=str(device.id),
         agent_id=str(agent.id),
         organization_id=str(agent.organization_id) if agent.organization_id else None,
@@ -587,6 +602,7 @@ def sync_device_manifest(
     manifest: object,
     *,
     initially_selected: set[str] | None = None,
+    resume_agent: bool = False,
 ) -> list[ComputerDeviceApp]:
     started_at = time.monotonic()
     normalized = _normalize_manifest(manifest)
@@ -654,6 +670,8 @@ def sync_device_manifest(
             .order_by("display_name")
         )
         _reconcile_app_configs(device, result, assignment)
+        if resume_agent and assignment:
+            _queue_agent_resume(assignment.agent_id)
     computer_relay_discovery_latency.record(
         time.monotonic() - started_at,
         {"platform": device.platform},
@@ -687,6 +705,7 @@ def redeem_pairing(
     if not computer_cpp_enabled_for_user(pairing.approved_by):
         raise PermissionError("Computer connections are not enabled for this account")
 
+    replaced_existing_credentials = False
     with transaction.atomic():
         pairing = ComputerPairingSession.objects.select_for_update().get(id=pairing.id)
         if pairing.expires_at <= timezone.now():
@@ -713,6 +732,7 @@ def redeem_pairing(
             )
         else:
             device = existing
+            replaced_existing_credentials = True
             device.display_name = pairing.display_name
             device.platform = pairing.platform
             device.architecture = pairing.architecture
@@ -748,14 +768,16 @@ def redeem_pairing(
         pairing.status = ComputerPairingSession.Status.REDEEMED
         pairing.redeemed_at = now
         pairing.save(update_fields=["status", "redeemed_at"])
-    _track_computer_event(
-        device.owner_id,
-        AnalyticsEvent.COMPUTER_CREDENTIAL_REDEEMED,
-        source=AnalyticsSource.API,
+    if replaced_existing_credentials:
+        send_device_control(device.id, "relay.close", {"code": "credentials_replaced"})
+    record_computer_relay_event(
+        "credential_redeemed",
+        user_id=device.owner_id,
+        analytics_event=AnalyticsEvent.COMPUTER_CREDENTIAL_REDEEMED,
+        analytics_source=AnalyticsSource.API,
         device_id=str(device.id),
         platform=device.platform,
     )
-    record_computer_relay_event("credential_redeemed", platform=device.platform)
     return device, refresh_token, issue_relay_access_token(device)
 
 
@@ -818,6 +840,7 @@ def rotate_refresh_token(raw_token: str) -> tuple[ComputerDevice, str, str]:
             credential.save(update_fields=["consumed_at", "replaced_by"])
             result = (device, refresh_token)
     if reuse_detected:
+        send_device_control(device.id, "relay.close", {"code": "credentials_revoked"})
         record_computer_relay_event("refresh_reuse_detected")
         raise PermissionError("Refresh token reuse detected; pair this computer again")
     device, refresh_token = result
@@ -852,9 +875,10 @@ def approve_device_apps(device: ComputerDevice, selected: list[dict[str, str]]) 
         _reconcile_app_configs(device, apps, assignment)
         if assignment:
             _queue_agent_resume(assignment.agent_id)
-    _track_computer_event(
-        device.owner_id,
-        AnalyticsEvent.COMPUTER_APPS_APPROVAL_CHANGED,
+    record_computer_relay_event(
+        "app_approval_changed",
+        user_id=device.owner_id,
+        analytics_event=AnalyticsEvent.COMPUTER_APPS_APPROVAL_CHANGED,
         device_id=str(device.id),
         approved_app_count=len(requested),
     )
@@ -892,9 +916,10 @@ def update_device_properties(
             _queue_agent_resume(assignment.agent_id)
     if pause_changed:
         send_device_control(device.id, "relay.state", {"paused": device.is_paused})
-        _track_computer_event(
-            device.owner_id,
-            AnalyticsEvent.COMPUTER_PAUSED if device.is_paused else AnalyticsEvent.COMPUTER_RESUMED,
+        record_computer_relay_event(
+            "computer_paused" if device.is_paused else "computer_resumed",
+            user_id=device.owner_id,
+            analytics_event=AnalyticsEvent.COMPUTER_PAUSED if device.is_paused else AnalyticsEvent.COMPUTER_RESUMED,
             device_id=str(device.id),
         )
     return device
@@ -905,9 +930,8 @@ def revoke_assignment(device: ComputerDevice, *, revoked_by=None) -> None:
     if assignment is None:
         return
     with transaction.atomic():
-        assignment.status = ComputerDeviceAssignment.Status.REVOKED
         assignment.revoked_at = timezone.now()
-        assignment.save(update_fields=["status", "revoked_at", "updated_at"])
+        assignment.save(update_fields=["revoked_at", "updated_at"])
         _reconcile_app_configs(
             device,
             list(device.apps.select_related("mcp_server_config")),
@@ -917,9 +941,10 @@ def revoke_assignment(device: ComputerDevice, *, revoked_by=None) -> None:
             _sync_agent_skill(assignment.agent)
             _queue_agent_resume(assignment.agent_id)
     if revoked_by is not None and revoked_by.id != device.owner_id:
-        _track_computer_event(
-            revoked_by.id,
-            AnalyticsEvent.COMPUTER_TEAM_GRANT_REVOKED,
+        record_computer_relay_event(
+            "team_grant_revoked",
+            user_id=revoked_by.id,
+            analytics_event=AnalyticsEvent.COMPUTER_TEAM_GRANT_REVOKED,
             device_id=str(device.id),
             organization_id=str(assignment.organization_id) if assignment.organization_id else None,
         )
@@ -935,9 +960,10 @@ def revoke_device(device: ComputerDevice) -> None:
         device.credentials.filter(revoked_at__isnull=True).update(revoked_at=now)
         device.relay_artifacts.all().delete()
     send_device_control(device.id, "relay.close", {"code": "revoked"})
-    _track_computer_event(
-        device.owner_id,
-        AnalyticsEvent.COMPUTER_DEVICE_REVOKED,
+    record_computer_relay_event(
+        "device_revoked",
+        user_id=device.owner_id,
+        analytics_event=AnalyticsEvent.COMPUTER_DEVICE_REVOKED,
         device_id=str(device.id),
     )
 
@@ -958,16 +984,14 @@ def _release_request_lock(redis_client, lock_key: str, lock_value: str) -> None:
     release(keys=[lock_key], args=[lock_value])
 
 
-def set_device_presence(device_id, *, channel_name: str, generation: str) -> None:
-    get_redis_client().set(
-        _presence_key(device_id),
-        json.dumps({"channel": channel_name, "generation": generation}),
-        ex=settings.COMPUTER_CPP_PRESENCE_TTL_SECONDS,
+def _presence_value(*, channel_name: str, generation: str, ready: bool) -> str:
+    return json.dumps(
+        {"channel": channel_name, "generation": generation, "ready": ready},
+        separators=(",", ":"),
     )
 
 
-def get_device_presence(device_id) -> dict[str, str] | None:
-    raw = get_redis_client().get(_presence_key(device_id))
+def _decode_presence(raw) -> dict[str, object] | None:
     if not raw:
         return None
     if isinstance(raw, bytes):
@@ -978,14 +1002,84 @@ def get_device_presence(device_id) -> dict[str, str] | None:
         return None
     if not isinstance(value, dict) or not value.get("channel") or not value.get("generation"):
         return None
+    return {
+        "channel": str(value["channel"]),
+        "generation": str(value["generation"]),
+        "ready": bool(value.get("ready")),
+    }
+
+
+def claim_device_connection(device_id, *, channel_name: str, generation: str) -> dict[str, object] | None:
+    redis_client = get_redis_client()
+    claim = redis_client.register_script(
+        """
+        -- computer_presence_claim_v1
+        local previous = redis.call("get", KEYS[1])
+        redis.call("set", KEYS[1], ARGV[1], "EX", ARGV[2])
+        return previous
+        """
+    )
+    previous = claim(
+        keys=[_presence_key(device_id)],
+        args=[
+            _presence_value(channel_name=channel_name, generation=generation, ready=False),
+            settings.COMPUTER_CPP_PRESENCE_TTL_SECONDS,
+        ],
+    )
+    return _decode_presence(previous)
+
+
+def refresh_device_presence(device_id, *, channel_name: str, generation: str, ready: bool = True) -> bool:
+    redis_client = get_redis_client()
+    key = _presence_key(device_id)
+    current_raw = redis_client.get(key)
+    current = _decode_presence(current_raw)
+    if current is None or current["generation"] != generation:
+        return False
+    refresh = redis_client.register_script(
+        """
+        -- computer_presence_cas_v1
+        if redis.call("get", KEYS[1]) ~= ARGV[1] then
+            return 0
+        end
+        redis.call("set", KEYS[1], ARGV[2], "EX", ARGV[3])
+        return 1
+        """
+    )
+    return bool(
+        refresh(
+            keys=[key],
+            args=[
+                current_raw,
+                _presence_value(channel_name=channel_name, generation=generation, ready=ready),
+                settings.COMPUTER_CPP_PRESENCE_TTL_SECONDS,
+            ],
+        )
+    )
+
+
+def set_device_presence(device_id, *, channel_name: str, generation: str) -> None:
+    get_redis_client().set(
+        _presence_key(device_id),
+        _presence_value(channel_name=channel_name, generation=generation, ready=True),
+        ex=settings.COMPUTER_CPP_PRESENCE_TTL_SECONDS,
+    )
+
+
+def get_device_presence(device_id) -> dict[str, str] | None:
+    value = _decode_presence(get_redis_client().get(_presence_key(device_id)))
+    if value is None or not value["ready"]:
+        return None
     return {"channel": str(value["channel"]), "generation": str(value["generation"])}
 
 
 def clear_device_presence(device_id, generation: str) -> None:
     redis_client = get_redis_client()
-    current = get_device_presence(device_id)
+    key = _presence_key(device_id)
+    current_raw = redis_client.get(key)
+    current = _decode_presence(current_raw)
     if current and current["generation"] == generation:
-        redis_client.delete(_presence_key(device_id))
+        _release_request_lock(redis_client, key, current_raw)
 
 
 def send_device_control(device_id, event_type: str, payload: dict[str, Any]) -> None:
@@ -1025,7 +1119,7 @@ async def relay_mcp_request(
     assignment = getattr(device, "assignment", None)
     if (
         assignment is None
-        or assignment.status != ComputerDeviceAssignment.Status.ACTIVE
+        or assignment.revoked_at is not None
         or assignment.agent_id is None
         or app.mcp_server_config is None
         or not app.mcp_server_config.is_active
@@ -1187,7 +1281,7 @@ def consume_artifact(device_id, artifact_id) -> dict[str, str]:
 
 def serialize_device(device: ComputerDevice, *, owner_actions: bool) -> dict[str, Any]:
     assignment = getattr(device, "assignment", None)
-    if assignment and assignment.status != ComputerDeviceAssignment.Status.ACTIVE:
+    if assignment and assignment.revoked_at is not None:
         assignment = None
     presence = get_device_presence(device.id)
     return {
@@ -1196,13 +1290,11 @@ def serialize_device(device: ComputerDevice, *, owner_actions: bool) -> dict[str
         "platform": device.platform,
         "architecture": device.architecture,
         "client_version": device.client_version,
-        "protocol_version": device.protocol_version,
         "paused": device.is_paused,
         "online": bool(presence),
         "update_required": not computer_client_version_supported(device.client_version),
         "last_seen_at": device.last_seen_at.isoformat() if device.last_seen_at else None,
         "owner": {
-            "id": str(device.owner_id),
             "display_name": device.owner.get_full_name()
             or device.owner.get_username()
             or "Computer owner",
@@ -1211,7 +1303,6 @@ def serialize_device(device: ComputerDevice, *, owner_actions: bool) -> dict[str
             {
                 "agent_id": str(assignment.agent_id),
                 "agent_name": assignment.agent.name,
-                "organization_id": str(assignment.organization_id) if assignment.organization_id else None,
                 "organization_name": assignment.organization.name if assignment.organization else None,
             }
             if assignment
@@ -1221,9 +1312,7 @@ def serialize_device(device: ComputerDevice, *, owner_actions: bool) -> dict[str
             {
                 "app_key": app.app_key,
                 "display_name": app.display_name,
-                "type": app.app_type,
                 "schema_sha256": app.reported_schema_hash,
-                "approved_schema_sha256": app.approved_schema_hash,
                 "approval_state": app.approval_state,
                 "available": app.is_available,
             }

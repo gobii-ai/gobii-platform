@@ -65,7 +65,7 @@ class Migration(migrations.Migration):
                 ("credential_generation", models.PositiveIntegerField(default=1)),
                 ("is_paused", models.BooleanField(default=False)),
                 ("revoked_at", models.DateTimeField(blank=True, db_index=True, null=True)),
-                ("last_seen_at", models.DateTimeField(blank=True, db_index=True, null=True)),
+                ("last_seen_at", models.DateTimeField(blank=True, null=True)),
                 ("created_at", models.DateTimeField(auto_now_add=True)),
                 ("updated_at", models.DateTimeField(auto_now=True)),
                 (
@@ -91,7 +91,13 @@ class Migration(migrations.Migration):
                 ("user_code_digest", models.CharField(max_length=64)),
                 ("machine_identifier_digest", models.CharField(max_length=64)),
                 ("display_name", models.CharField(max_length=128)),
-                ("platform", models.CharField(max_length=32)),
+                (
+                    "platform",
+                    models.CharField(
+                        choices=[("macos", "macOS"), ("windows", "Windows")],
+                        max_length=32,
+                    ),
+                ),
                 ("architecture", models.CharField(max_length=32)),
                 ("client_version", models.CharField(max_length=32)),
                 ("protocol_version", models.PositiveIntegerField()),
@@ -112,7 +118,6 @@ class Migration(migrations.Migration):
                 ),
                 ("expires_at", models.DateTimeField(db_index=True)),
                 ("last_polled_at", models.DateTimeField(blank=True, null=True)),
-                ("poll_count", models.PositiveIntegerField(default=0)),
                 ("approved_at", models.DateTimeField(blank=True, null=True)),
                 ("denied_at", models.DateTimeField(blank=True, null=True)),
                 ("redeemed_at", models.DateTimeField(blank=True, null=True)),
@@ -138,11 +143,6 @@ class Migration(migrations.Migration):
                     ),
                 ),
             ],
-            options={
-                "indexes": [
-                    models.Index(fields=["status", "expires_at"], name="computer_pair_status_exp_idx"),
-                ],
-            },
         ),
         migrations.CreateModel(
             name="ComputerDeviceCredential",
@@ -174,24 +174,11 @@ class Migration(migrations.Migration):
                     ),
                 ),
             ],
-            options={
-                "indexes": [
-                    models.Index(fields=["device", "generation"], name="computer_cred_device_gen_idx"),
-                ],
-            },
         ),
         migrations.CreateModel(
             name="ComputerDeviceAssignment",
             fields=[
                 ("id", models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
-                (
-                    "status",
-                    models.CharField(
-                        choices=[("active", "Active"), ("revoked", "Revoked")],
-                        default="active",
-                        max_length=16,
-                    ),
-                ),
                 ("granted_at", models.DateTimeField(auto_now_add=True)),
                 ("revoked_at", models.DateTimeField(blank=True, null=True)),
                 ("updated_at", models.DateTimeField(auto_now=True)),
@@ -236,8 +223,8 @@ class Migration(migrations.Migration):
             ],
             options={
                 "indexes": [
-                    models.Index(fields=["agent", "status"], name="computer_agent_status_idx"),
-                    models.Index(fields=["organization", "status"], name="computer_org_status_idx"),
+                    models.Index(fields=["agent", "revoked_at"], name="computer_agent_revoked_idx"),
+                    models.Index(fields=["organization", "revoked_at"], name="computer_org_revoked_idx"),
                 ],
             },
         ),
@@ -292,9 +279,6 @@ class Migration(migrations.Migration):
                 ),
             ],
             options={
-                "indexes": [
-                    models.Index(fields=["device", "approval_state"], name="computer_app_approval_idx"),
-                ],
                 "constraints": [
                     models.UniqueConstraint(
                         fields=("device", "app_key"),
@@ -323,11 +307,6 @@ class Migration(migrations.Migration):
                     ),
                 ),
             ],
-            options={
-                "indexes": [
-                    models.Index(fields=["device", "expires_at"], name="computer_artifact_exp_idx"),
-                ],
-            },
         ),
         migrations.RunPython(initialize_computer_integration, remove_computer_flag),
     ]

@@ -5,7 +5,7 @@ import uuid
 from contextlib import ExitStack
 from unittest.mock import patch
 
-from asgiref.sync import async_to_sync
+from asgiref.sync import async_to_sync, sync_to_async
 from channels.testing import WebsocketCommunicator
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -131,9 +131,7 @@ class ComputerPairingAPITests(TestCase):
                 },
                 "windows": {
                     "url": "https://downloads.example.test/latest/computer.cpp-windows-x64.msi",
-                    "portable_url": "https://downloads.example.test/latest/computer.cpp-windows-x64.zip",
                 },
-                "minimum_version": "0.21.0",
             },
         )
 
@@ -291,7 +289,7 @@ class ComputerPairingAPITests(TestCase):
         self.assertEqual(device.owner, self.user)
         assignment = ComputerDeviceAssignment.objects.get(device=device)
         self.assertEqual(assignment.agent, self.agent)
-        self.assertEqual(assignment.status, ComputerDeviceAssignment.Status.ACTIVE)
+        self.assertIsNone(assignment.revoked_at)
 
         bundled = device.apps.get(app_key="gobii-desktop")
         custom = device.apps.get(app_key="custom-tools")
@@ -637,7 +635,7 @@ class ComputerRelayLifecycleTests(TestCase):
         self.agent.save(update_fields=["is_active"])
 
         assignment = ComputerDeviceAssignment.objects.get(device=self.device)
-        self.assertEqual(assignment.status, ComputerDeviceAssignment.Status.REVOKED)
+        self.assertIsNotNone(assignment.revoked_at)
         self.assertTrue(ComputerDevice.objects.filter(id=self.device.id).exists())
         self.assertFalse(
             PersistentAgentSystemSkillState.objects.filter(
@@ -686,7 +684,7 @@ class ComputerRelayLifecycleTests(TestCase):
         )
         self.assertEqual(revoke.status_code, 200)
         assignment = ComputerDeviceAssignment.objects.get(device=self.device)
-        self.assertEqual(assignment.status, ComputerDeviceAssignment.Status.REVOKED)
+        self.assertIsNotNone(assignment.revoked_at)
         app = self.device.apps.get(app_key="gobii-desktop")
         app.mcp_server_config.refresh_from_db()
         self.assertFalse(app.mcp_server_config.is_active)
@@ -715,10 +713,7 @@ class ComputerRelayLifecycleTests(TestCase):
             membership.role = OrganizationMembership.OrgRole.MEMBER
             membership.save(update_fields=["role"])
 
-        self.assertEqual(
-            ComputerDeviceAssignment.objects.get(device=self.device).status,
-            ComputerDeviceAssignment.Status.REVOKED,
-        )
+        self.assertIsNotNone(ComputerDeviceAssignment.objects.get(device=self.device).revoked_at)
 
     @patch("api.services.computer_relay.get_device_presence", return_value=None)
     def test_prefetched_apps_serialize_without_additional_queries(self, _presence):
@@ -813,6 +808,9 @@ class ComputerRelayWebSocketTests(TransactionTestCase):
                 pairing,
                 device_code=device_code,
             )
+        resume_patcher = patch("api.services.computer_relay._queue_agent_resume")
+        resume_patcher.start()
+        self.addCleanup(resume_patcher.stop)
         self.app = self.device.apps.get(app_key="gobii-desktop")
 
     def test_socket_rejects_missing_access_token(self):
@@ -955,6 +953,68 @@ class ComputerRelayWebSocketTests(TransactionTestCase):
             self.assertEqual((await communicator.receive_json_from())["type"], "hello.ack")
             self.assertIsNotNone(get_device_presence(self.device.id))
             await communicator.disconnect()
+
+        with patch("api.agent.tools.mcp_manager.get_mcp_manager"):
+            async_to_sync(run)()
+
+    def test_new_socket_supersedes_one_that_has_not_sent_hello(self):
+        async def run():
+            communicators = [
+                WebsocketCommunicator(
+                    ComputerRelayConsumer.as_asgi(),
+                    "/",
+                    headers=[
+                        (b"authorization", f"Bearer {self.access_token}".encode("latin-1")),
+                    ],
+                    subprotocols=["gobii-computer-relay.v1"],
+                )
+                for _ in range(2)
+            ]
+            self.assertTrue((await communicators[0].connect())[0])
+            self.assertTrue((await communicators[1].connect())[0])
+            self.assertEqual((await communicators[0].receive_json_from())["code"], "superseded")
+            self.assertEqual((await communicators[0].receive_output())["code"], 4403)
+
+            await communicators[1].send_json_to(
+                {
+                    "type": "hello",
+                    "client_version": "0.21.0",
+                    "protocol_version": 1,
+                    "apps": _pairing_payload()["apps"],
+                }
+            )
+            self.assertEqual((await communicators[1].receive_json_from())["type"], "hello.ack")
+            await communicators[1].disconnect()
+
+        with patch("api.agent.tools.mcp_manager.get_mcp_manager"):
+            async_to_sync(run)()
+
+    def test_heartbeat_closes_socket_after_credentials_are_revoked(self):
+        async def run():
+            communicator = WebsocketCommunicator(
+                ComputerRelayConsumer.as_asgi(),
+                "/",
+                headers=[
+                    (b"authorization", f"Bearer {self.access_token}".encode("latin-1")),
+                ],
+                subprotocols=["gobii-computer-relay.v1"],
+            )
+            self.assertTrue((await communicator.connect())[0])
+            await communicator.send_json_to(
+                {
+                    "type": "hello",
+                    "client_version": "0.21.0",
+                    "protocol_version": 1,
+                    "apps": _pairing_payload()["apps"],
+                }
+            )
+            self.assertEqual((await communicator.receive_json_from())["type"], "hello.ack")
+            await sync_to_async(ComputerDevice.objects.filter(id=self.device.id).update)(
+                credential_generation=self.device.credential_generation + 1,
+            )
+
+            await communicator.send_json_to({"type": "heartbeat"})
+            self.assertEqual((await communicator.receive_output())["code"], 4403)
 
         with patch("api.agent.tools.mcp_manager.get_mcp_manager"):
             async_to_sync(run)()

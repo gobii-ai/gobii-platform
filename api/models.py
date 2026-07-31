@@ -8135,16 +8135,10 @@ class ComputerPairingSession(models.Model):
     )
     expires_at = models.DateTimeField(db_index=True)
     last_polled_at = models.DateTimeField(null=True, blank=True)
-    poll_count = models.PositiveIntegerField(default=0)
     approved_at = models.DateTimeField(null=True, blank=True)
     denied_at = models.DateTimeField(null=True, blank=True)
     redeemed_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        indexes = [
-            models.Index(fields=["status", "expires_at"], name="computer_pair_status_exp_idx"),
-        ]
 
 
 class ComputerDevice(models.Model):
@@ -8167,7 +8161,7 @@ class ComputerDevice(models.Model):
     credential_generation = models.PositiveIntegerField(default=1)
     is_paused = models.BooleanField(default=False)
     revoked_at = models.DateTimeField(null=True, blank=True, db_index=True)
-    last_seen_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    last_seen_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -8216,17 +8210,8 @@ class ComputerDeviceCredential(models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True)
 
-    class Meta:
-        indexes = [
-            models.Index(fields=["device", "generation"], name="computer_cred_device_gen_idx"),
-        ]
-
 
 class ComputerDeviceAssignment(models.Model):
-    class Status(models.TextChoices):
-        ACTIVE = "active", "Active"
-        REVOKED = "revoked", "Revoked"
-
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     device = models.OneToOneField(
         ComputerDevice,
@@ -8254,15 +8239,14 @@ class ComputerDeviceAssignment(models.Model):
         blank=True,
         related_name="granted_computer_assignments",
     )
-    status = models.CharField(max_length=16, choices=Status.choices, default=Status.ACTIVE)
     granted_at = models.DateTimeField(auto_now_add=True)
     revoked_at = models.DateTimeField(null=True, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         indexes = [
-            models.Index(fields=["agent", "status"], name="computer_agent_status_idx"),
-            models.Index(fields=["organization", "status"], name="computer_org_status_idx"),
+            models.Index(fields=["agent", "revoked_at"], name="computer_agent_revoked_idx"),
+            models.Index(fields=["organization", "revoked_at"], name="computer_org_revoked_idx"),
         ]
 
 
@@ -8311,9 +8295,6 @@ class ComputerDeviceApp(models.Model):
                 name="unique_computer_device_app",
             )
         ]
-        indexes = [
-            models.Index(fields=["device", "approval_state"], name="computer_app_approval_idx"),
-        ]
 
 
 class ComputerRelayArtifact(models.Model):
@@ -8330,11 +8311,6 @@ class ComputerRelayArtifact(models.Model):
     expires_at = models.DateTimeField(db_index=True)
     consumed_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        indexes = [
-            models.Index(fields=["device", "expires_at"], name="computer_artifact_exp_idx"),
-        ]
 
 
 @receiver(post_delete, sender=ComputerRelayArtifact)
@@ -13795,7 +13771,7 @@ def _revoke_computer_assignments(**filters) -> None:
     from api.services.computer_relay import revoke_assignment
 
     assignments = ComputerDeviceAssignment.objects.filter(
-        status=ComputerDeviceAssignment.Status.ACTIVE,
+        revoked_at__isnull=True,
         **filters,
     ).select_related("device")
     for assignment in assignments:

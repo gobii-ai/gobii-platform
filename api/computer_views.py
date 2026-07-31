@@ -1,6 +1,7 @@
 from urllib.parse import urlparse
 
 from django.conf import settings
+from django.db import transaction
 from django.http import HttpRequest, HttpResponseBadRequest, JsonResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -31,6 +32,20 @@ def _relay_url() -> str:
     parsed = urlparse(settings.PUBLIC_SITE_URL)
     scheme = "wss" if parsed.scheme == "https" else "ws"
     return f"{scheme}://{parsed.netloc}/ws/computer/v1/relay/"
+
+
+def _credential_response(device, refresh_token: str, access_token: str, *, agent_id=None) -> JsonResponse:
+    payload = {
+        "device_id": str(device.id),
+        "refresh_token": refresh_token,
+        "access_token": access_token,
+        "token_type": "Bearer",
+        "expires_in": settings.COMPUTER_CPP_ACCESS_TOKEN_TTL_SECONDS,
+        "relay_url": _relay_url(),
+    }
+    if agent_id is not None:
+        payload["agent_id"] = str(agent_id)
+    return JsonResponse(payload)
 
 
 @csrf_exempt
@@ -67,7 +82,6 @@ def computer_pairing_start(request: HttpRequest):
 @csrf_exempt
 @require_POST
 def computer_pairing_exchange(request: HttpRequest, pairing_id):
-    pairing = get_object_or_404(ComputerPairingSession, id=pairing_id)
     try:
         payload = parse_computer_json_payload(request)
     except ValueError as exc:
@@ -75,16 +89,20 @@ def computer_pairing_exchange(request: HttpRequest, pairing_id):
     device_code = str(payload.get("device_code") or "")
     if not device_code:
         return HttpResponseBadRequest("device_code is required")
-    if not pairing_device_code_matches(pairing, device_code):
-        return JsonResponse({"error": "access_denied"}, status=403)
+    with transaction.atomic():
+        pairing = get_object_or_404(
+            ComputerPairingSession.objects.select_for_update(),
+            id=pairing_id,
+        )
+        if not pairing_device_code_matches(pairing, device_code):
+            return JsonResponse({"error": "access_denied"}, status=403)
 
-    now = timezone.now()
-    interval = settings.COMPUTER_CPP_PAIRING_POLL_INTERVAL_SECONDS
-    if pairing.last_polled_at and (now - pairing.last_polled_at).total_seconds() < interval:
-        return JsonResponse({"error": "slow_down", "interval": interval + 1}, status=429)
-    pairing.last_polled_at = now
-    pairing.poll_count += 1
-    pairing.save(update_fields=["last_polled_at", "poll_count"])
+        now = timezone.now()
+        interval = settings.COMPUTER_CPP_PAIRING_POLL_INTERVAL_SECONDS
+        if pairing.last_polled_at and (now - pairing.last_polled_at).total_seconds() < interval:
+            return JsonResponse({"error": "slow_down", "interval": interval + 1}, status=429)
+        pairing.last_polled_at = now
+        pairing.save(update_fields=["last_polled_at"])
 
     try:
         device, refresh_token, access_token = redeem_pairing(pairing, device_code=device_code)
@@ -96,16 +114,11 @@ def computer_pairing_exchange(request: HttpRequest, pairing_id):
         )
     except PermissionError as exc:
         return JsonResponse({"error": "access_denied", "error_description": str(exc)}, status=403)
-    return JsonResponse(
-        {
-            "device_id": str(device.id),
-            "refresh_token": refresh_token,
-            "access_token": access_token,
-            "token_type": "Bearer",
-            "expires_in": settings.COMPUTER_CPP_ACCESS_TOKEN_TTL_SECONDS,
-            "relay_url": _relay_url(),
-            "agent_id": str(pairing.selected_agent_id),
-        }
+    return _credential_response(
+        device,
+        refresh_token,
+        access_token,
+        agent_id=pairing.selected_agent_id,
     )
 
 
@@ -143,16 +156,7 @@ def computer_token_refresh(request: HttpRequest):
         update_fields.append("protocol_version")
     if update_fields:
         device.save(update_fields=[*update_fields, "updated_at"])
-    return JsonResponse(
-        {
-            "device_id": str(device.id),
-            "refresh_token": replacement,
-            "access_token": access_token,
-            "token_type": "Bearer",
-            "expires_in": settings.COMPUTER_CPP_ACCESS_TOKEN_TTL_SECONDS,
-            "relay_url": _relay_url(),
-        }
-    )
+    return _credential_response(device, replacement, access_token)
 
 
 @csrf_exempt

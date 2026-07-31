@@ -1,7 +1,8 @@
 import { useQuery } from '@tanstack/react-query'
-import { CheckCircle2, Loader2, Monitor, Settings } from 'lucide-react'
+import { Monitor, Settings } from 'lucide-react'
 
 import { fetchComputers, getComputerConnectionsUrl, type ComputerDevice } from '../../../api/computers'
+import { NativeIntegrationInsightPanelFrame } from './NativeIntegrationInsightPanel'
 
 function deviceStatus(device: ComputerDevice): string {
   if (device.update_required) return 'Update required'
@@ -45,48 +46,30 @@ export function ComputerInsightPanel({
       : 'Connect a Mac or Windows PC to let this Agent work with approved desktop apps.'
 
   return (
-    <section className="google-drive-insight-panel" aria-label="Computer">
-      <div className="google-drive-insight-panel__header">
-        <span className="google-drive-insight-panel__icon" aria-hidden="true">
-          <Monitor className="h-5 w-5 text-violet-600" />
-        </span>
-        <span className="google-drive-insight-panel__label">Computer</span>
-        {onlineCount > 0 ? (
-          <span className="google-drive-insight-panel__connected">
-            <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
-            {onlineCount === 1 ? 'Online' : `${onlineCount} online`}
-          </span>
-        ) : null}
-      </div>
-      {!computerConnectionsUrl || !agentId ? (
-        <p className="google-drive-insight-panel__text">Computer connections are unavailable for this Agent.</p>
-      ) : query.isLoading ? (
-        <div className="google-drive-insight-panel__inline-status">
-          <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-          Loading computers...
-        </div>
-      ) : query.error ? (
-        <p className="google-drive-insight-panel__error">Computer status could not be loaded.</p>
-      ) : (
-        <div className="google-drive-insight-panel__body">
-          <div className="google-drive-insight-panel__copy">
-            <p className="google-drive-insight-panel__title">{title}</p>
-            <p className="google-drive-insight-panel__text">{text}</p>
-          </div>
-          {onManage ? (
-            <div className="google-drive-insight-panel__actions">
-              <button
-                type="button"
-                onClick={onManage}
-                className="google-drive-insight-panel__button google-drive-insight-panel__button--secondary"
-              >
-                <Settings className="h-4 w-4" aria-hidden="true" />
-                Manage
-              </button>
-            </div>
-          ) : null}
-        </div>
-      )}
-    </section>
+    <NativeIntegrationInsightPanelFrame
+      ariaLabel="Computer"
+      providerLabel="Computer"
+      configured
+      connected={onlineCount > 0}
+      fallbackIcon={<Monitor className="h-5 w-5 text-violet-600" />}
+      unavailableMessage={!computerConnectionsUrl || !agentId
+        ? 'Computer connections are unavailable for this Agent.'
+        : null}
+      loadingMessage={query.isLoading ? 'Loading computers...' : null}
+      errorMessage={query.error ? 'Computer status could not be loaded.' : null}
+      notConfiguredMessage="Computer connections are unavailable."
+      title={title}
+      text={text}
+      actions={onManage ? (
+        <button
+          type="button"
+          onClick={onManage}
+          className="google-drive-insight-panel__button google-drive-insight-panel__button--secondary"
+        >
+          <Settings className="h-4 w-4" aria-hidden="true" />
+          Manage
+        </button>
+      ) : null}
+    />
   )
 }
