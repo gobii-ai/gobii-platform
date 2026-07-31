@@ -42,6 +42,7 @@ from api.agent.tools.sqlite_batch import (
 from api.agent.tools.sqlite_query_quality import (
     build_tool_result_query_advisories,
     named_model_read_tables,
+    named_model_reference_tables,
     source_derived_model_mutation_tables,
     source_derived_model_reconciled_tables,
     summarize_sqlite_tool_result_calls,
@@ -1968,6 +1969,18 @@ class SqliteBatchQualityTests(SqliteBatchTestCase):
         self.assertEqual(
             named_model_read_tables(["WITH current AS (SELECT * FROM accounts) SELECT * FROM current"]),
             ("accounts",),
+        )
+
+    def test_model_reference_classification_covers_reads_writes_and_ddl(self):
+        self.assertEqual(
+            named_model_reference_tables([
+                "UPDATE research_people SET role_title=:title WHERE person_id=:id; "
+                "SELECT * FROM accounts; "
+                "CREATE TABLE relationships (source_id TEXT, target_id TEXT); "
+                "ALTER TABLE portfolio_companies ADD COLUMN founder_count INTEGER; "
+                "INSERT INTO staging_people(name) VALUES (:name);"
+            ]),
+            ("research_people", "accounts", "relationships", "portfolio_companies"),
         )
 
     def test_bounded_aggregate_text_projection_counts_as_smart(self):

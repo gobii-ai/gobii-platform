@@ -23,7 +23,11 @@ from django.db import transaction
 from django.core.exceptions import ValidationError
 
 from config.redis_client import get_redis_client
-from api.services.agent_error_logging import log_task_quota_exceeded, validation_error_messages
+from api.services.agent_error_logging import (
+    is_task_quota_error,
+    log_task_quota_exceeded,
+    validation_error_messages,
+)
 from api.services.owner_execution_pause import is_owner_execution_paused, resolve_agent_owner
 from ..core.event_processing import process_agent_events, _lock_storage_keys
 from ...services.referral_service import ReferralService
@@ -94,13 +98,6 @@ def _record_process_agent_events_queue_latency(
         },
     )
     return latency_seconds
-
-
-def _is_task_quota_error(exc: ValidationError) -> bool:
-    messages = validation_error_messages(exc)
-
-    combined = " ".join(messages).lower()
-    return "task quota exceeded" in combined or "task credits" in combined
 
 
 def _extract_agent_id(args: Sequence[Any] | None, kwargs: dict[str, Any] | None) -> str | None:
@@ -361,7 +358,7 @@ def process_agent_events_task(
             processing_queue=str(task_queue),
         ))
     except ValidationError as exc:
-        if _is_task_quota_error(exc):
+        if is_task_quota_error(exc):
             log_task_quota_exceeded(
                 persistent_agent_id,
                 exc,
@@ -677,7 +674,7 @@ def process_agent_cron_trigger_task(self, persistent_agent_id: str, cron_express
         process_agent_events(persistent_agent_id)
         
     except ValidationError as exc:
-        if _is_task_quota_error(exc):
+        if is_task_quota_error(exc):
             log_task_quota_exceeded(
                 persistent_agent_id,
                 exc,
@@ -819,7 +816,7 @@ def process_agent_schedule_trigger_task(
                                 occurrence_key=claimed.occurrence_key,
                             )
                     except ValidationError as exc:
-                        if not _is_task_quota_error(exc):
+                        if not is_task_quota_error(exc):
                             raise
                         log_task_quota_exceeded(
                             persistent_agent_id,
@@ -842,7 +839,7 @@ def process_agent_schedule_trigger_task(
         if should_process:
             process_agent_events(str(persistent_agent_id))
     except ValidationError as exc:
-        if _is_task_quota_error(exc):
+        if is_task_quota_error(exc):
             log_task_quota_exceeded(
                 persistent_agent_id,
                 exc,

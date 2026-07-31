@@ -78,6 +78,7 @@ from api.agent.core.internal_reasoning import (
 )
 from api.agent.core.prompt_context import (
     _format_current_datetime_for_prompt,
+    _get_recent_sqlite_table_priorities,
     build_prompt_context_preview,
     get_agent_tools,
     get_prompt_token_budget,
@@ -632,6 +633,32 @@ class PromptContextBuilderTests(TestCase):
         self.addCleanup(self._admin_storage_patch.stop)
         self.addCleanup(self._print_patch.stop)
         self.addCleanup(lambda: shutil.rmtree(self._storage_dir, ignore_errors=True))
+
+    def test_recent_sqlite_models_are_prioritized_newest_first(self):
+        older_step = PersistentAgentStep.objects.create(agent=self.agent, description="older sqlite")
+        PersistentAgentToolCall.objects.create(
+            step=older_step,
+            tool_name="sqlite_batch",
+            tool_params={"sql": "SELECT * FROM accounts;"},
+            result='{"status":"ok"}',
+        )
+        newer_step = PersistentAgentStep.objects.create(agent=self.agent, description="newer sqlite")
+        PersistentAgentToolCall.objects.create(
+            step=newer_step,
+            tool_name="sqlite_batch",
+            tool_params={
+                "sql": (
+                    "UPDATE research_people SET role_title=:title WHERE person_id=:id; "
+                    "SELECT * FROM staging_people;"
+                )
+            },
+            result='{"status":"ok"}',
+        )
+
+        self.assertEqual(
+            _get_recent_sqlite_table_priorities(self.agent),
+            ("research_people", "accounts"),
+        )
 
     def _configure_unified_history_limits(
         self,
@@ -6592,6 +6619,77 @@ class OrchestratorHumanInputInterruptTests(TestCase):
         self.assertEqual(error.context["tool_name"], "sqlite_query")
         self.assertEqual(error.context["param_keys"], ["sql"])
         self.assertEqual(error.context["execution_duration_ms"], 42)
+
+    def test_message_tool_persistence_falls_back_when_completion_billing_exhausts_quota(self):
+        completion = PersistentAgentCompletion.objects.create(agent=self.agent)
+
+        def attach_completion(step_kwargs):
+            step_kwargs["completion"] = completion
+
+        with patch(
+            "tasks.services.TaskCreditService.check_and_consume_credit_for_owner",
+            return_value={
+                "success": False,
+                "credit": None,
+                "error_message": "Task quota exceeded. You have no remaining task credits.",
+            },
+        ):
+            step = _persist_tool_call_step(
+                self.agent,
+                "send_chat_message",
+                {"message": "I reached the current credit limit; here are the completed results."},
+                "",
+                None,
+                PersistentAgentToolCall.Status.QUEUED,
+                None,
+                None,
+                attach_completion,
+                lambda created_step: None,
+                emit_realtime=False,
+            )
+
+        self.assertIsNotNone(step)
+        self.assertIsNone(step.completion_id)
+        self.assertEqual(step.tool_call.status, PersistentAgentToolCall.Status.QUEUED)
+        completion.refresh_from_db()
+        self.assertFalse(completion.billed)
+        error = PersistentAgentError.objects.get(agent=self.agent)
+        self.assertEqual(error.category, PersistentAgentError.Category.TASK_QUOTA_EXCEEDED)
+
+    def test_paid_tool_persistence_does_not_bypass_completion_quota(self):
+        completion = PersistentAgentCompletion.objects.create(agent=self.agent)
+
+        def attach_completion(step_kwargs):
+            step_kwargs["completion"] = completion
+
+        with patch(
+            "tasks.services.TaskCreditService.check_and_consume_credit_for_owner",
+            return_value={
+                "success": False,
+                "credit": None,
+                "error_message": "Task quota exceeded. You have no remaining task credits.",
+            },
+        ):
+            step = _persist_tool_call_step(
+                self.agent,
+                "sqlite_batch",
+                {"sql": "SELECT 1;"},
+                "",
+                None,
+                PersistentAgentToolCall.Status.QUEUED,
+                None,
+                None,
+                attach_completion,
+                lambda created_step: None,
+                emit_realtime=False,
+            )
+
+        self.assertIsNone(step)
+        self.assertFalse(PersistentAgentStep.objects.filter(agent=self.agent).exists())
+        completion.refresh_from_db()
+        self.assertFalse(completion.billed)
+        error = PersistentAgentError.objects.get(agent=self.agent)
+        self.assertEqual(error.category, PersistentAgentError.Category.TOOL_PERSISTENCE)
 
     @patch("api.agent.core.event_processing.run_completion")
     def test_streaming_completion_cancels_when_generation_changes_mid_stream(self, mock_run_completion):

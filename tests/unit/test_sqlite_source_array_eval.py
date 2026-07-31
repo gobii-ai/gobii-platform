@@ -90,68 +90,33 @@ class SqliteSourceArrayEvalTests(SimpleTestCase):
         ORDER BY starts_at;
     """
 
-    schema_result = json.dumps(
-        {
-            "status": "ok",
-            "results": [
-                {
-                    "result": [
-                        {"name": "handoff_key"},
-                        {"name": "worker_ref"},
-                        {"name": "resolution_code"},
-                    ]
-                },
-                {
-                    "result": [
-                        {
-                            "handoff_key": "handoff-01",
-                            "worker_ref": "agent-red",
-                            "resolution_code": "open",
-                        }
-                    ]
-                },
-            ],
-        }
-    )
-
-    def test_schema_grounding_accepts_inspection_before_read_in_same_batch(self):
+    def test_schema_grounding_accepts_direct_live_schema_read(self):
         call = _sqlite_call(
-            "PRAGMA table_info(z_handoff_ledger); "
-            "SELECT * FROM z_handoff_ledger;",
-            result=self.schema_result,
+            "SELECT worker_ref, COUNT(*) FROM z_handoff_ledger "
+            "WHERE resolution_code <> 'resolved' GROUP BY worker_ref;"
         )
 
         self.assertEqual(_schema_grounded_read_failures([call]), [])
 
-    def test_schema_grounding_rejects_read_before_inspection_in_same_batch(self):
+    def test_schema_grounding_rejects_redundant_inspection_after_read(self):
         call = _sqlite_call(
             "SELECT * FROM z_handoff_ledger; "
             "PRAGMA table_info(z_handoff_ledger);",
-            result=self.schema_result,
         )
 
         self.assertIn(
-            "ledger columns were referenced before schema inspection completed",
+            "live prompt schema was ignored in favor of a redundant schema-inspection round trip",
             _schema_grounded_read_failures([call]),
         )
 
-    def test_schema_grounding_rejects_unverified_schema_probe(self):
+    def test_schema_grounding_rejects_redundant_inspection_before_read(self):
         call = _sqlite_call(
             "PRAGMA table_info(z_handoff_ledger); "
             "SELECT * FROM z_handoff_ledger;",
-            result=json.dumps(
-                {
-                    "status": "ok",
-                    "results": [
-                        {"result": []},
-                        {"result": []},
-                    ],
-                }
-            ),
         )
 
         self.assertIn(
-            "existing ledger schema was not inspected",
+            "live prompt schema was ignored in favor of a redundant schema-inspection round trip",
             _schema_grounded_read_failures([call]),
         )
 

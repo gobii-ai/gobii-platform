@@ -30,6 +30,7 @@ from pottery.exceptions import ExtendUnlockedLock, TooManyExtensions
 from redis.exceptions import RedisError
 from django.apps import apps
 from django.conf import settings as django_settings
+from django.core.exceptions import ValidationError
 from django.db import DatabaseError, transaction, close_old_connections
 from django.db.models import Count, Q
 from django.db.utils import OperationalError
@@ -166,7 +167,14 @@ from ...models import (
 from api.services.sandbox_warmup import recent_sandbox_tool_history_warm_reason
 from api.services.tool_settings import get_tool_settings_for_owner
 from api.services.system_settings import get_max_parallel_tool_calls
-from api.services.agent_error_logging import log_agent_error, log_credit_failure, log_prompt_construction_error, log_tool_persistence_error
+from api.services.agent_error_logging import (
+    is_task_quota_error,
+    log_agent_error,
+    log_credit_failure,
+    log_prompt_construction_error,
+    log_task_quota_exceeded,
+    log_tool_persistence_error,
+)
 from api.services.billing_snapshot import get_billing_snapshot_for_owner
 from api.services.owner_execution_pause import EXECUTION_PAUSE_MESSAGE, EXECUTION_PAUSE_NOTE, get_owner_execution_pause_state, resolve_agent_owner
 from api.services.signup_preview import can_bypass_task_credit_for_signup_preview, is_signup_preview_processing_paused
@@ -1874,8 +1882,14 @@ def _persist_tool_call_step(
         "task_credit": consumed_credit,
     }
 
-    def _try_create_step() -> Optional[PersistentAgentStep]:
-        step = _persist_attached_step(step_kwargs, attach_completion, attach_prompt_archive)
+    def _try_create_step(*, bill_completion: bool = True) -> Optional[PersistentAgentStep]:
+        if bill_completion:
+            step = _persist_attached_step(step_kwargs, attach_completion, attach_prompt_archive)
+        else:
+            unbilled_kwargs = dict(step_kwargs)
+            unbilled_kwargs.pop("completion", None)
+            step = PersistentAgentStep.objects.create(**unbilled_kwargs)
+            attach_prompt_archive(step)
         PersistentAgentToolCall.objects.create(
             step=step,
             parent_tool_call=parent_tool_call,
@@ -1907,6 +1921,32 @@ def _persist_tool_call_step(
                 close_old_connections()
                 continue
             failure = exc
+        except ValidationError as exc:
+            if (
+                is_task_quota_error(exc)
+                and is_credit_message_only_allowed_tool(safe_tool_name)
+                and credits_consumed is None
+                and consumed_credit is None
+            ):
+                log_task_quota_exceeded(
+                    str(agent.id),
+                    exc,
+                    source="api.agent.core.event_processing._persist_tool_call_step.message_fallback",
+                    logger=logger,
+                )
+                try:
+                    step = _try_create_step(bill_completion=False)
+                except (DatabaseError, ValidationError) as fallback_exc:
+                    failure = fallback_exc
+                else:
+                    logger.info(
+                        "Agent %s: persisted unbilled %s step after completion quota exhaustion",
+                        agent.id,
+                        safe_tool_name,
+                    )
+                    return step
+            else:
+                failure = exc
         except Exception as exc:
             failure = exc
         log_tool_persistence_error(
@@ -7615,6 +7655,7 @@ def _run_agent_loop(
                     step_kwargs["completion"] = completion_obj
 
                 def _persist_reasoning_step(reasoning_source: Optional[str]) -> Optional[PersistentAgentStep]:
+                    nonlocal suppress_step_completion_billing, task_credit_available
                     reasoning_text = (reasoning_source or "").strip()
                     if not reasoning_text:
                         return None
@@ -7622,7 +7663,31 @@ def _run_agent_loop(
                         "agent": agent,
                         "description": internal_reasoning.build_internal_reasoning_description(reasoning_text),
                     }
-                    return _persist_attached_step(step_kwargs, _attach_completion, _attach_prompt_archive)
+                    try:
+                        return _persist_attached_step(
+                            step_kwargs,
+                            _attach_completion,
+                            _attach_prompt_archive,
+                        )
+                    except ValidationError as exc:
+                        if not is_task_quota_error(exc):
+                            raise
+                        log_task_quota_exceeded(
+                            str(agent.id),
+                            exc,
+                            source="api.agent.core.event_processing._run_agent_loop.reasoning_fallback",
+                            logger=logger,
+                        )
+                        suppress_step_completion_billing = True
+                        task_credit_available = Decimal("0")
+                        if isinstance(credit_snapshot, dict):
+                            credit_snapshot["available"] = task_credit_available
+                        step_kwargs.pop("completion", None)
+                        return _persist_attached_step(
+                            step_kwargs,
+                            _attach_completion,
+                            _attach_prompt_archive,
+                        )
 
                 def _apply_runtime_updates() -> tuple[bool, AgentConfigApplyResult]:
                     # Some unit tests call _run_agent_loop directly without agent_sqlite_db().
