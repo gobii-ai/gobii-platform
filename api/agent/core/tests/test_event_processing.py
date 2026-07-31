@@ -195,6 +195,10 @@ class NonRetryableToolAvailabilityTests(SimpleTestCase):
                         "api.agent.core.event_processing.is_signup_preview_processing_paused",
                         return_value=False,
                     ),
+                    patch(
+                        "api.agent.core.event_processing.get_max_parallel_tool_calls",
+                        return_value=3,
+                    ),
                 ):
                     executed = _execute_prepared_tool_batch_inner(
                         agent,

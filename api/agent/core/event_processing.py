@@ -4004,15 +4004,7 @@ def _execute_prepared_tool_batch_inner(
         )
 
     if run_parallel_batch:
-        source_ordered_batch = any(
-            is_source_bearing_tool(prepared.tool_name)
-            for prepared in prepared_batch.prepared_calls
-        )
-        max_workers = (
-            1
-            if source_ordered_batch
-            else min(len(prepared_batch.prepared_calls), max(1, get_max_parallel_tool_calls()))
-        )
+        max_workers = min(len(prepared_batch.prepared_calls), max(1, get_max_parallel_tool_calls()))
         logger.info(
             "Agent %s: executing %d safe tool calls with max_workers=%d.",
             agent.id,
@@ -4021,18 +4013,28 @@ def _execute_prepared_tool_batch_inner(
         )
         base_variables = get_all_variables()
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures: set[Any] = set()
-            next_prepared_index = 0
+            futures: dict[Any, _PreparedToolExecution] = {}
+            pending_calls = list(prepared_batch.prepared_calls)
 
             def submit_available_calls() -> None:
-                nonlocal abort_after_execution, execution_aborted, next_prepared_index, stale_cancellation
+                nonlocal abort_after_execution, execution_aborted, stale_cancellation
+                pending_index = 0
                 while (
                     not execution_aborted
                     and len(futures) < max_workers
-                    and next_prepared_index < len(prepared_batch.prepared_calls)
+                    and pending_index < len(pending_calls)
                 ):
-                    prepared = prepared_batch.prepared_calls[next_prepared_index]
-                    next_prepared_index += 1
+                    prepared = pending_calls[pending_index]
+                    if (
+                        is_source_bearing_tool(prepared.tool_name)
+                        and any(
+                            is_source_bearing_tool(in_flight.tool_name)
+                            for in_flight in futures.values()
+                        )
+                    ):
+                        pending_index += 1
+                        continue
+                    pending_calls.pop(pending_index)
                     if (
                         non_retryable_restriction_active
                         and prepared.tool_name not in _tool_definition_names_for_completion(available_tools)
@@ -4081,13 +4083,13 @@ def _execute_prepared_tool_batch_inner(
                         eval_run_id=eval_run_id,
                         parallel_safe=True,
                     )
-                    futures.add(future)
+                    futures[future] = prepared
 
             submit_available_calls()
             while futures:
-                completed_futures, _ = wait(futures, return_when=FIRST_COMPLETED)
+                completed_futures, _ = wait(futures.keys(), return_when=FIRST_COMPLETED)
                 for future in completed_futures:
-                    futures.remove(future)
+                    futures.pop(future)
                     outcome = _refresh_skills_for_tool_outcome(agent, future.result())
                     _persist_tool_execution_outcome(agent, outcome)
                     execution_outcomes.append(outcome)
