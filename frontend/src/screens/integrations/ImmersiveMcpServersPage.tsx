@@ -33,6 +33,7 @@ export function ImmersiveMcpServersPage({
         oauthMetadataUrl="/console/api/mcp/oauth/metadata/"
         oauthCallbackPath="/console/mcp/oauth/callback/"
         variant="embedded"
+        allowComputerPairingModal={layout === 'main'}
       />
     </ImmersivePageFrame>
   )

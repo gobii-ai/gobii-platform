@@ -1690,6 +1690,7 @@ export function AgentChatLayout({
               onInsightsPanelExpandedPreferenceChange={onInsightsPanelExpandedPreferenceChange}
               insightsLoading={effectiveInsightsLoading}
               onOpenUsage={onOpenUsage}
+              onOpenIntegrations={onOpenIntegrations}
               onOpenQuickSettings={canOpenQuickSettings ? handleSettingsOpen : undefined}
               usageUrl={sidebarUsageUrl}
               intelligenceConfig={llmIntelligence}

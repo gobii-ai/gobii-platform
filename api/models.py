@@ -8015,6 +8015,11 @@ class MCPServerConfig(models.Model):
         BEARER_TOKEN = "bearer_token", "Bearer Token"
         OAUTH2 = "oauth2", "OAuth 2.0"
 
+    class Transport(models.TextChoices):
+        STDIO = "stdio", "STDIO"
+        STREAMABLE_HTTP = "streamable_http", "Streamable HTTP"
+        COMPUTER_RELAY = "computer_relay", "Computer relay"
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     scope = models.CharField(max_length=32, choices=Scope.choices)
     organization = models.ForeignKey(
@@ -8037,6 +8042,11 @@ class MCPServerConfig(models.Model):
     command = models.CharField(max_length=255, blank=True)
     command_args = models.JSONField(default=list, blank=True)
     url = models.CharField(max_length=512, blank=True)
+    transport = models.CharField(
+        max_length=32,
+        choices=Transport.choices,
+        default=Transport.STREAMABLE_HTTP,
+    )
     auth_method = models.CharField(
         max_length=32,
         choices=AuthMethod.choices,
@@ -8078,6 +8088,17 @@ class MCPServerConfig(models.Model):
         owner = self.organization or self.user or "platform"
         return f"MCPServerConfig<{self.name} scope={self.scope} owner={owner}>"
 
+    def save(self, *args, **kwargs):
+        # Legacy callers still identify the transport by supplying either a
+        # command or URL. Keep those writes coherent while transport becomes
+        # explicit everywhere else.
+        if self.transport != self.Transport.COMPUTER_RELAY:
+            if self.command and not self.url:
+                self.transport = self.Transport.STDIO
+            elif self.url and not self.command:
+                self.transport = self.Transport.STREAMABLE_HTTP
+        super().save(*args, **kwargs)
+
     def clean(self):
         super().clean()
         if self.scope == self.Scope.PLATFORM:
@@ -8092,8 +8113,21 @@ class MCPServerConfig(models.Model):
         else:
             raise ValidationError({"scope": "Invalid MCP server scope"})
 
-        if not self.command and not self.url:
-            raise ValidationError("MCP servers require either a command or a URL")
+        if self.transport == self.Transport.STDIO:
+            if not self.command or self.url:
+                raise ValidationError("STDIO MCP servers require a command and cannot define a URL")
+        elif self.transport == self.Transport.STREAMABLE_HTTP:
+            if not self.url or self.command:
+                raise ValidationError("HTTP MCP servers require a URL and cannot define a command")
+        elif self.transport == self.Transport.COMPUTER_RELAY:
+            if self.command or self.url:
+                raise ValidationError("Computer relay MCP servers cannot define a command or URL")
+            if self.auth_method != self.AuthMethod.NONE:
+                raise ValidationError("Computer relay authentication is managed by Gobii")
+            if self.command_args or self.env_json_encrypted or self.headers_json_encrypted:
+                raise ValidationError("Computer relay connection settings are managed by Gobii")
+        else:
+            raise ValidationError({"transport": "Invalid MCP transport"})
 
         reserved = {name.lower() for name in self.RESERVED_PLATFORM_NAMES}
         if self.scope != self.Scope.PLATFORM and self.name and self.name.lower() in reserved:
@@ -8138,6 +8172,229 @@ class MCPServerConfig(models.Model):
     @headers.setter
     def headers(self, value: dict[str, str] | None) -> None:
         self.headers_json_encrypted = self._encrypt_json(value)
+
+
+class ComputerPairingSession(models.Model):
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        APPROVED = "approved", "Approved"
+        DENIED = "denied", "Denied"
+        REDEEMED = "redeemed", "Redeemed"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    device_code_digest = models.CharField(max_length=64, unique=True)
+    user_code_digest = models.CharField(max_length=64)
+    machine_identifier_digest = models.CharField(max_length=64)
+    display_name = models.CharField(max_length=128)
+    platform = models.CharField(
+        max_length=32,
+        choices=(("macos", "macOS"), ("windows", "Windows")),
+    )
+    architecture = models.CharField(max_length=32)
+    client_version = models.CharField(max_length=32)
+    protocol_version = models.PositiveIntegerField()
+    app_manifest = models.JSONField(default=list)
+    selected_app_keys = models.JSONField(default=list)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING)
+    approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="approved_computer_pairings",
+    )
+    selected_agent = models.ForeignKey(
+        "PersistentAgent",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="computer_pairing_sessions",
+    )
+    expires_at = models.DateTimeField(db_index=True)
+    last_polled_at = models.DateTimeField(null=True, blank=True)
+    approved_at = models.DateTimeField(null=True, blank=True)
+    denied_at = models.DateTimeField(null=True, blank=True)
+    redeemed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
+class ComputerDevice(models.Model):
+    class Platform(models.TextChoices):
+        MACOS = "macos", "macOS"
+        WINDOWS = "windows", "Windows"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    owner = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="computer_devices",
+    )
+    machine_identifier_digest = models.CharField(max_length=64, unique=True)
+    display_name = models.CharField(max_length=128)
+    platform = models.CharField(max_length=32, choices=Platform.choices)
+    architecture = models.CharField(max_length=32)
+    client_version = models.CharField(max_length=32)
+    protocol_version = models.PositiveIntegerField()
+    credential_generation = models.PositiveIntegerField(default=1)
+    is_paused = models.BooleanField(default=False)
+    revoked_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    last_seen_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["owner", "revoked_at"], name="computer_owner_revoked_idx"),
+        ]
+
+    def save(self, *args, **kwargs):
+        update_fields = kwargs.get("update_fields")
+        identity_may_change = update_fields is None or bool(
+            {"owner", "owner_id", "machine_identifier_digest"} & set(update_fields)
+        )
+        if self.pk and identity_may_change:
+            original = type(self).objects.filter(pk=self.pk).values(
+                "owner_id",
+                "machine_identifier_digest",
+            ).first()
+            if original and (
+                original["owner_id"] != self.owner_id
+                or original["machine_identifier_digest"] != self.machine_identifier_digest
+            ):
+                raise ValidationError("A paired computer's owner and machine identity are immutable")
+        super().save(*args, **kwargs)
+
+
+class ComputerDeviceCredential(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    device = models.ForeignKey(
+        ComputerDevice,
+        on_delete=models.CASCADE,
+        related_name="credentials",
+    )
+    family_id = models.UUIDField(default=uuid.uuid4, db_index=True)
+    generation = models.PositiveIntegerField()
+    token_digest = models.CharField(max_length=64)
+    expires_at = models.DateTimeField(db_index=True)
+    consumed_at = models.DateTimeField(null=True, blank=True)
+    revoked_at = models.DateTimeField(null=True, blank=True)
+    replaced_by = models.OneToOneField(
+        "self",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="replaces",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
+class ComputerDeviceAssignment(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    device = models.OneToOneField(
+        ComputerDevice,
+        on_delete=models.CASCADE,
+        related_name="assignment",
+    )
+    agent = models.ForeignKey(
+        "PersistentAgent",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="computer_assignments",
+    )
+    organization = models.ForeignKey(
+        "Organization",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="computer_device_assignments",
+    )
+    granted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="granted_computer_assignments",
+    )
+    granted_at = models.DateTimeField(auto_now_add=True)
+    revoked_at = models.DateTimeField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["agent", "revoked_at"], name="computer_agent_revoked_idx"),
+            models.Index(fields=["organization", "revoked_at"], name="computer_org_revoked_idx"),
+        ]
+
+
+class ComputerDeviceApp(models.Model):
+    class AppType(models.TextChoices):
+        BUNDLED = "bundled", "Bundled"
+        CUSTOM = "custom", "Custom"
+
+    class ApprovalState(models.TextChoices):
+        APPROVED = "approved", "Approved"
+        PENDING = "pending_approval", "Pending approval"
+        DISABLED = "disabled", "Disabled"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    device = models.ForeignKey(
+        ComputerDevice,
+        on_delete=models.CASCADE,
+        related_name="apps",
+    )
+    app_key = models.SlugField(max_length=80)
+    display_name = models.CharField(max_length=128)
+    app_type = models.CharField(max_length=16, choices=AppType.choices)
+    reported_schema_hash = models.CharField(max_length=64)
+    approved_schema_hash = models.CharField(max_length=64, blank=True)
+    approval_state = models.CharField(
+        max_length=24,
+        choices=ApprovalState.choices,
+        default=ApprovalState.PENDING,
+    )
+    is_available = models.BooleanField(default=True)
+    last_seen_at = models.DateTimeField(null=True, blank=True)
+    mcp_server_config = models.OneToOneField(
+        MCPServerConfig,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="computer_device_app",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["device", "app_key"],
+                name="unique_computer_device_app",
+            )
+        ]
+
+
+class ComputerRelayArtifact(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    device = models.ForeignKey(
+        ComputerDevice,
+        on_delete=models.CASCADE,
+        related_name="relay_artifacts",
+    )
+    storage_key = models.CharField(max_length=512)
+    mime_type = models.CharField(max_length=64)
+    byte_count = models.PositiveIntegerField()
+    sha256 = models.CharField(max_length=64)
+    expires_at = models.DateTimeField(db_index=True)
+    consumed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
+@receiver(post_delete, sender=ComputerRelayArtifact)
+def delete_computer_relay_artifact_file(sender, instance, **kwargs):
+    if instance.storage_key:
+        storage_key = instance.storage_key
+        transaction.on_commit(lambda: default_storage.delete(storage_key))
 
 
 class PersistentAgentMCPTask(models.Model):
@@ -13586,6 +13843,55 @@ class OrganizationMembership(models.Model):
     class Meta:
         unique_together = ("org", "user")
 
+
+def _revoke_computer_assignments(**filters) -> None:
+    from api.services.computer_relay import revoke_assignment
+
+    assignments = ComputerDeviceAssignment.objects.filter(
+        revoked_at__isnull=True,
+        **filters,
+    ).select_related("device")
+    for assignment in assignments:
+        revoke_assignment(assignment.device)
+
+
+def _revoke_invalid_computer_assignments(user_id, organization_id) -> None:
+    from api.services.organization_permissions import ORG_AGENT_CONFIG_AUTHORITY_ROLES
+
+    if OrganizationMembership.objects.filter(
+        user_id=user_id,
+        org_id=organization_id,
+        status=OrganizationMembership.OrgStatus.ACTIVE,
+        role__in=ORG_AGENT_CONFIG_AUTHORITY_ROLES,
+    ).exists():
+        return
+    _revoke_computer_assignments(
+        device__owner_id=user_id,
+        organization_id=organization_id,
+    )
+
+
+@receiver([post_save, pre_delete], sender=OrganizationMembership)
+def revoke_computer_assignments_after_membership_change(sender, instance, **kwargs):
+    transaction.on_commit(
+        lambda: _revoke_invalid_computer_assignments(instance.user_id, instance.org_id)
+    )
+
+
+@receiver(pre_delete, sender=Organization)
+@receiver(pre_delete, sender=PersistentAgent)
+def revoke_computer_assignments_before_owner_delete(sender, instance, **kwargs):
+    field = "organization" if sender is Organization else "agent"
+    _revoke_computer_assignments(**{field: instance})
+
+
+@receiver(post_save, sender=PersistentAgent)
+def revoke_computer_assignments_after_agent_deactivation(sender, instance, **kwargs):
+    if instance.is_active and not instance.is_deleted:
+        return
+    _revoke_computer_assignments(agent=instance)
+
+
 class OrganizationInvite(models.Model):
     org = models.ForeignKey(Organization, on_delete=models.CASCADE)
     email = models.EmailField()
@@ -13941,6 +14247,8 @@ def refresh_mcp_tool_cache_for_server(sender, instance, **kwargs):
     server_id = getattr(instance, "id", None)
     if server_id:
         invalidate_mcp_tool_cache(str(server_id))
+        if getattr(instance, "transport", None) == MCPServerConfig.Transport.COMPUTER_RELAY:
+            return
         from api.services.mcp_runtime_policy import mcp_server_requires_agent_sandbox
 
         if (

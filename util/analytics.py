@@ -83,6 +83,15 @@ class AnalyticsEvent(StrEnum):
     AGENT_CREATED = 'Agent Created'
     AGENT_UPDATED = 'Agent Updated'
     AGENT_DELETED = 'Agent Deleted'
+    COMPUTER_PAIRING_APPROVED = 'Computer Pairing Approved'
+    COMPUTER_CREDENTIAL_REDEEMED = 'Computer Credential Redeemed'
+    COMPUTER_ASSIGNED = 'Computer Assigned'
+    COMPUTER_REASSIGNED = 'Computer Reassigned'
+    COMPUTER_APPS_APPROVAL_CHANGED = 'Computer Apps Approval Changed'
+    COMPUTER_PAUSED = 'Computer Paused'
+    COMPUTER_RESUMED = 'Computer Resumed'
+    COMPUTER_TEAM_GRANT_REVOKED = 'Computer Team Grant Revoked'
+    COMPUTER_DEVICE_REVOKED = 'Computer Device Revoked'
 
     # Web Analytics Events
     SIGNUP = 'Sign Up'

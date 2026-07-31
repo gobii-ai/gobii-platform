@@ -152,11 +152,13 @@ const APOLLO_NATIVE_SYSTEM_SKILL_KEY = 'apollo_native'
 const HUBSPOT_NATIVE_SYSTEM_SKILL_KEY = 'hubspot_native'
 const DISCORD_NATIVE_SYSTEM_SKILL_KEY = 'discord_native'
 const META_ADS_SYSTEM_SKILL_KEY = 'meta_ads_platform'
+const COMPUTER_SYSTEM_SKILL_KEY = 'computer'
 const GOOGLE_SHEETS_DRIVE_TAB_KEY = 'googleSheetsDrive'
 const APOLLO_NATIVE_TAB_KEY = 'apolloNative'
 const HUBSPOT_NATIVE_TAB_KEY = 'hubspotNative'
 const DISCORD_NATIVE_TAB_KEY = 'discordNative'
 const META_ADS_TAB_KEY = 'metaAds'
+const COMPUTER_TAB_KEY = 'computer'
 
 function withTemplateLaunchNonce(path: string): string {
   if (typeof window === 'undefined') {
@@ -1748,6 +1750,9 @@ export function AgentChatPage({
   const rosterMetaAdsTabEnabled = Boolean(
     activeRosterMeta?.enabledSystemSkills?.includes(META_ADS_SYSTEM_SKILL_KEY),
   )
+  const rosterComputerTabEnabled = Boolean(
+    activeRosterMeta?.enabledSystemSkills?.includes(COMPUTER_SYSTEM_SKILL_KEY),
+  )
   const liveGoogleSheetsDriveTabEnabled = useMemo(
     () => Boolean(activeAgentId && timelineHasSystemSkillEnablement(timelineEvents, GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY)),
     [activeAgentId, timelineEvents],
@@ -1768,13 +1773,18 @@ export function AgentChatPage({
     () => Boolean(activeAgentId && timelineHasSystemSkillEnablement(timelineEvents, META_ADS_SYSTEM_SKILL_KEY)),
     [activeAgentId, timelineEvents],
   )
+  const liveComputerTabEnabled = useMemo(
+    () => Boolean(activeAgentId && timelineHasSystemSkillEnablement(timelineEvents, COMPUTER_SYSTEM_SKILL_KEY)),
+    [activeAgentId, timelineEvents],
+  )
   const googleSheetsDriveTabEnabled = rosterGoogleSheetsDriveTabEnabled || liveGoogleSheetsDriveTabEnabled
   const apolloNativeTabEnabled = rosterApolloNativeTabEnabled || liveApolloNativeTabEnabled
   const hubspotNativeTabEnabled = rosterHubSpotNativeTabEnabled || liveHubSpotNativeTabEnabled
   const discordNativeTabEnabled = rosterDiscordNativeTabEnabled || liveDiscordNativeTabEnabled
   const metaAdsTabEnabled = rosterMetaAdsTabEnabled || liveMetaAdsTabEnabled
+  const computerTabEnabled = rosterComputerTabEnabled || liveComputerTabEnabled
   useEffect(() => {
-    if (!activeAgentId || (!liveGoogleSheetsDriveTabEnabled && !liveApolloNativeTabEnabled && !liveHubSpotNativeTabEnabled && !liveDiscordNativeTabEnabled && !liveMetaAdsTabEnabled)) {
+    if (!activeAgentId || (!liveGoogleSheetsDriveTabEnabled && !liveApolloNativeTabEnabled && !liveHubSpotNativeTabEnabled && !liveDiscordNativeTabEnabled && !liveMetaAdsTabEnabled && !liveComputerTabEnabled)) {
       return
     }
     const refreshKey = [
@@ -1784,13 +1794,14 @@ export function AgentChatPage({
       liveHubSpotNativeTabEnabled ? HUBSPOT_NATIVE_SYSTEM_SKILL_KEY : '',
       liveDiscordNativeTabEnabled ? DISCORD_NATIVE_SYSTEM_SKILL_KEY : '',
       liveMetaAdsTabEnabled ? META_ADS_SYSTEM_SKILL_KEY : '',
+      liveComputerTabEnabled ? COMPUTER_SYSTEM_SKILL_KEY : '',
     ].join(':')
     if (googleSheetsRosterRefreshAgentsRef.current.has(refreshKey)) {
       return
     }
     googleSheetsRosterRefreshAgentsRef.current.add(refreshKey)
     void queryClient.invalidateQueries({ queryKey: ['agent-roster'] })
-  }, [activeAgentId, liveApolloNativeTabEnabled, liveDiscordNativeTabEnabled, liveGoogleSheetsDriveTabEnabled, liveHubSpotNativeTabEnabled, liveMetaAdsTabEnabled, queryClient])
+  }, [activeAgentId, liveApolloNativeTabEnabled, liveComputerTabEnabled, liveDiscordNativeTabEnabled, liveGoogleSheetsDriveTabEnabled, liveHubSpotNativeTabEnabled, liveMetaAdsTabEnabled, queryClient])
   const visibleRosterAgentIds = useMemo(
     () => rosterAgents.map((agent) => agent.id),
     [rosterAgents],
@@ -4337,6 +4348,7 @@ export function AgentChatPage({
         [HUBSPOT_NATIVE_TAB_KEY]: hubspotNativeTabEnabled,
         [DISCORD_NATIVE_TAB_KEY]: discordNativeTabEnabled,
         [META_ADS_TAB_KEY]: metaAdsTabEnabled,
+        [COMPUTER_TAB_KEY]: computerTabEnabled,
       },
     }))
   }, [
@@ -4344,6 +4356,7 @@ export function AgentChatPage({
     activeCanManageAgent,
     activeCanSendMessages,
     apolloNativeTabEnabled,
+    computerTabEnabled,
     discordNativeTabEnabled,
     dispatch,
     effectiveContext?.type,

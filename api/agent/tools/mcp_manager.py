@@ -16,6 +16,7 @@ import logging
 import asyncio
 import os
 import fnmatch
+import re
 import contextlib
 import contextvars
 import sys
@@ -101,6 +102,15 @@ from ...services.pipedream_apps import (
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
 _MCP_SYNC_EXECUTOR = ThreadPoolExecutor(max_workers=4, thread_name_prefix="mcp-sync")
+_COMPUTER_ACTION_REQUIRED_ERRORS = {
+    "offline",
+    "paused",
+    "permissions_required",
+    "locked",
+    "update_required",
+    "disabled",
+    "unknown_app",
+}
 
 _proxy_url_var: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
     "mcp_http_proxy_url", default=None
@@ -108,6 +118,24 @@ _proxy_url_var: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
 _http_timeout_seconds_var: contextvars.ContextVar[Optional[float]] = contextvars.ContextVar(
     "mcp_http_timeout_seconds", default=None
 )
+
+
+def _computer_error_response(message: str) -> Optional[Dict[str, Any]]:
+    match = re.search(r"\[computer:([a-z_]+)\]\s*(.*)", message)
+    if not match:
+        return None
+    code, detail = match.groups()
+    action_required = code in _COMPUTER_ACTION_REQUIRED_ERRORS
+    response = {
+        "status": "action_required" if action_required else "error",
+        "message": detail,
+        "computer_error": code,
+    }
+    if action_required:
+        response["result"] = detail
+    else:
+        response["retryable"] = code in {"busy", "deadline_exceeded"}
+    return response
 
 
 @contextlib.contextmanager
@@ -230,6 +258,7 @@ class MCPServerRuntime:
     organization_id: Optional[str]
     user_id: Optional[str]
     updated_at: Optional[datetime]
+    transport: str = MCPServerConfig.Transport.STREAMABLE_HTTP
     oauth_access_token: Optional[str] = field(default=None, repr=False)
     oauth_token_type: Optional[str] = None
     oauth_expires_at: Optional[datetime] = None
@@ -1133,6 +1162,7 @@ class MCPToolManager:
             command=cfg.command or None,
             args=list(cfg.command_args or []),
             url=cfg.url or None,
+            transport=cfg.transport,
             auth_method=cfg.auth_method,
             env=env,
             headers=headers,
@@ -1243,41 +1273,61 @@ class MCPToolManager:
             headers["Authorization"] = f"{token_type} {token_value}"
         return headers
 
+    def _build_transport_for_runtime(
+        self,
+        server: MCPServerRuntime,
+        *,
+        env_overrides: Optional[Dict[str, str]] = None,
+        headers_override: Optional[Dict[str, str]] = None,
+    ):
+        if server.transport == MCPServerConfig.Transport.COMPUTER_RELAY:
+            device_app_id = server.metadata.get("computer_device_app_id")
+            device_id = server.metadata.get("computer_device_id")
+            if not device_app_id or not device_id:
+                raise ValueError(f"Computer relay server '{server.name}' is missing device metadata")
+            from .computer_relay_transport import ComputerRelayTransport
+
+            return ComputerRelayTransport(
+                device_app_id=str(device_app_id),
+                device_id=str(device_id),
+            )
+        if server.url:
+            from fastmcp.client.transports import StreamableHttpTransport
+
+            headers = dict(server.headers or {}) if headers_override is None else headers_override
+            if headers_override is None:
+                headers.update(self._build_auth_headers(server))
+            return StreamableHttpTransport(
+                url=server.url,
+                headers=headers,
+                httpx_client_factory=self._httpx_client_factory,
+            )
+        if server.command:
+            env = dict(server.env or {})
+            if env_overrides:
+                env.update(env_overrides)
+            return GobiiStdioTransport(
+                command=server.command,
+                args=server.args or [],
+                env=env,
+            )
+        raise ValueError(f"Server '{server.name}' does not have a supported transport")
+
     def _build_client_for_runtime(
         self,
         server: MCPServerRuntime,
         *,
-        pipedream_context: Optional[PipedreamToolCacheContext] = None,
         env_overrides: Optional[Dict[str, str]] = None,
     ) -> Client:
         if server.name == self.PIPEDREAM_RUNTIME_NAME:
             raise ValueError("Pipedream clients require agent-scoped initialization")
 
-        if server.url:
-            from fastmcp.client.transports import StreamableHttpTransport
-
-            headers: Dict[str, str] = dict(server.headers or {})
-            auth_headers = self._build_auth_headers(server)
-            if auth_headers:
-                headers.update(auth_headers)
-            transport = StreamableHttpTransport(
-                url=server.url,
-                headers=headers,
-                httpx_client_factory=self._httpx_client_factory,
+        return Client(
+            self._build_transport_for_runtime(
+                server,
+                env_overrides=env_overrides,
             )
-        elif server.command:
-            env = dict(server.env or {})
-            if env_overrides:
-                env.update(env_overrides)
-            transport = GobiiStdioTransport(
-                command=server.command,
-                args=server.args or [],
-                env=env,
-            )
-        else:
-            raise ValueError(f"Server '{server.name}' must have either 'url' or 'command'")
-
-        return Client(transport)
+        )
 
     def _build_task_http_client(
         self,
@@ -1359,6 +1409,8 @@ class MCPToolManager:
 
     def _get_timeout_for_runtime(self, runtime: Optional[MCPServerRuntime]) -> float:
         """Get the appropriate request timeout based on the runtime's transport."""
+        if runtime and runtime.transport == MCPServerConfig.Transport.COMPUTER_RELAY:
+            return float(settings.COMPUTER_CPP_REQUEST_TIMEOUT_SECONDS)
         is_http = bool(runtime and runtime.url)
         return get_mcp_http_timeout_seconds() if is_http else get_mcp_stdio_timeout_seconds()
 
@@ -1441,6 +1493,9 @@ class MCPToolManager:
             "scope": server.scope,
             "url": server.url or "",
             "command": server.command or "",
+            "transport": server.transport,
+            "computer_device_app_id": str(server.metadata.get("computer_device_app_id") or ""),
+            "computer_schema_hash": str(server.metadata.get("schema_sha256") or ""),
             "args": [str(arg) for arg in (server.args or [])],
             "auth_method": server.auth_method,
             "updated_at": updated_at,
@@ -1824,16 +1879,12 @@ class MCPToolManager:
                     discovery.supports_tasks,
                 )
 
-        if modern_client is not None:
-            client = None
-        elif server.url:
-            from fastmcp.client.transports import StreamableHttpTransport
-
-            headers: Dict[str, str] = dict(server.headers or {})
+        transport_headers = None
+        if modern_client is None:
             if server.name == self.PIPEDREAM_RUNTIME_NAME and server.scope == MCPServerConfig.Scope.PLATFORM:
                 prefetch_apps = self._effective_prefetch_apps(server, pipedream_context)
                 prefetch_csv = ",".join(prefetch_apps)
-                headers = self._pd_build_headers(
+                transport_headers = self._pd_build_headers(
                     app_slug=prefetch_csv,
                     external_user_id="gobii-discovery",
                     conversation_id="discovery",
@@ -1842,30 +1893,16 @@ class MCPToolManager:
                     "Pipedream discovery initializing with app slug '%s'",
                     prefetch_csv,
                 )
-
-            else:
-                auth_headers = self._build_auth_headers(server)
-                if auth_headers:
-                    headers.update(auth_headers)
-
-            transport = StreamableHttpTransport(
-                url=server.url,
-                headers=headers,
-                httpx_client_factory=self._httpx_client_factory,
+            client = Client(
+                self._build_transport_for_runtime(
+                    server,
+                    env_overrides=stdio_env_overrides,
+                    headers_override=transport_headers,
+                )
             )
-        elif server.command:
-            transport = GobiiStdioTransport(
-                command=server.command,
-                args=server.args or [],
-                env={**(server.env or {}), **(stdio_env_overrides or {})},
-            )
-        else:
-            raise ValueError(f"Server '{server.name}' must have either 'url' or 'command'")
-
-        if modern_client is None:
-            client = Client(transport)
             self._clients[server.config_id] = client
         else:
+            client = None
             self._clients.pop(server.config_id, None)
 
         if prefer_cache and self._load_cached_tools(
@@ -2028,6 +2065,8 @@ class MCPToolManager:
                 blacklisted_count += 1
                 continue
             description = tool.description or f"{tool.name} from {server.display_name}"
+            if server.transport == MCPServerConfig.Transport.COMPUTER_RELAY:
+                description = f"{description} Runs on {server.display_name}."
             # Augment scrape tools with guidance to prefer http_request for data files
             if tool.name in ("scrape_as_markdown", "scrape_as_html"):
                 description += " NOT for data files (.csv, .json, .xml, .txt, /api/) — use http_request instead."
@@ -2878,6 +2917,8 @@ class MCPToolManager:
             runtime, auth_error = self._ensure_runtime_oauth(runtime)
             if auth_error:
                 return auth_error
+            if runtime.transport == MCPServerConfig.Transport.COMPUTER_RELAY:
+                isolated = True
 
         owner = getattr(agent, "organization", None) or getattr(agent, "user", None)
 
@@ -3160,10 +3201,14 @@ class MCPToolManager:
             return response
             
         except Exception as e:
-            logger.error(f"Failed to execute MCP tool {tool_name}: {e}")
+            message = str(e)
+            logger.error("Failed to execute MCP tool %s: %s", tool_name, message)
+            if runtime and runtime.transport == MCPServerConfig.Transport.COMPUTER_RELAY:
+                if computer_response := _computer_error_response(message):
+                    return computer_response
             response = {
                 "status": "error",
-                "message": str(e),
+                "message": message,
             }
             return self._handle_mcp_session_death_response(
                 runtime,

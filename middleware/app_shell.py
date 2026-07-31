@@ -225,6 +225,8 @@ def _build_shell_html() -> str:
     )
     native_integrations_url = reverse("console-native-integration-list")
     native_integrations_attr = f' data-native-integrations-url="{native_integrations_url}"'
+    computer_connections_url = reverse("console-computer-list")
+    computer_connections_attr = f' data-computer-connections-url="{computer_connections_url}"'
     pipedream_attrs = ""
     if pipedream_status().enabled:
         pipedream_apps_url = reverse("console-pipedream-apps")
@@ -258,7 +260,7 @@ def _build_shell_html() -> str:
   {vite_tags}
 </head>
 <body class="min-h-screen bg-white">
-  <div id="gobii-frontend-root" data-app="immersive-app"{max_chat_upload_size_attr}{native_integrations_attr}{pipedream_attrs}></div>
+  <div id="gobii-frontend-root" data-app="immersive-app"{max_chat_upload_size_attr}{native_integrations_attr}{computer_connections_attr}{pipedream_attrs}></div>
 </body>
 </html>"""
 

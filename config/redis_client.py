@@ -79,8 +79,15 @@ class _FakeRegisteredScript:
 
         if key is None:
             return 0
+        if "computer_presence_claim_v1" in self._normalized_script:
+            previous = redis_client.get(key)
+            redis_client.set(key, script_args[0], ex=int(script_args[1]))
+            return previous
         if redis_client.get(key) != expected_value:
             return 0
+        if "computer_presence_cas_v1" in self._normalized_script:
+            redis_client.set(key, script_args[1], ex=int(script_args[2]))
+            return 1
         if "pttl" in self._normalized_script:
             pttl = redis_client.pttl(key)
             return pttl if pttl > 0 else 0
