@@ -1098,7 +1098,7 @@ def _recover_sqlite_db_in_subprocess(db_path: str, tmp_dir: str) -> bool:
         with contextlib.closing(sqlite3.connect(recovered_db_path, timeout=5)) as conn:
             recovered_table = conn.execute(
                 "SELECT 1 FROM sqlite_master "
-                "WHERE type = 'table' AND name NOT LIKE 'sqlite_%' LIMIT 1;"
+                "WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name != 'lost_and_found' LIMIT 1;"
             ).fetchone()
         if recovered_table is None:
             return False

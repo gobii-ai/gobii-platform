@@ -278,6 +278,22 @@ class SQLiteRecoveryFileTests(SimpleTestCase):
         self.assertIn("durable_state", table_names)
         self.assertGreater(recovered_rows, 0)
 
+    def test_sqlite_shell_recovery_rejects_only_lost_and_found_artifact(self):
+        if not _sqlite_shell_supports_safe_recovery():
+            self.skipTest("sqlite3 shell with safe recovery is not installed")
+
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.execute("CREATE TABLE lost_and_found (value TEXT NOT NULL);")
+            conn.execute("INSERT INTO lost_and_found (value) VALUES ('orphan');")
+            conn.commit()
+        finally:
+            conn.close()
+
+        self.assertFalse(
+            _recover_sqlite_db_in_subprocess(self.db_path, self.tmp_dir)
+        )
+
 
 @tag("batch_sqlite")
 class SQLitePersistenceSafetyTests(SimpleTestCase):
