@@ -19,6 +19,7 @@ RESULT_ID_SINGLE_LITERAL_RE = re.compile(
 RESULT_ID_IN_RE = re.compile(r"\b(?:[a-z_]\w*\.)?result_id\s+in\s*\((?P<values>[^)]*)\)", re.I | re.S)
 RESULT_ID_IN_VALUE_RE = re.compile(r"(?:'(?:''|[^'])*'|\"(?:\"\"|[^\"])*\"|\?|[:@$][a-z_]\w*)", re.I)
 CREATE_TABLE_RE = re.compile(r'\bcreate\s+(?:temp(?:orary)?\s+)?table\s+(?:if\s+not\s+exists\s+)?"?(?P<name>[a-z_]\w*)"?', re.I)
+ALTER_TABLE_RE = re.compile(r'\balter\s+table\s+"?(?P<name>[a-z_]\w*)"?', re.I)
 CREATE_TABLE_AS_RE = re.compile(r'\bcreate\s+table\b[^;]*?\bas\s+(?:with|select)\b', re.I | re.S)
 CREATE_TEMP_TABLE_RE = re.compile(r'\bcreate\s+temp(?:orary)?\s+table\b', re.I)
 CREATE_UNIQUE_INDEX_RE = re.compile(r'\bcreate\s+unique\s+index\b[^;]*?\bon\s+"?(?P<name>[a-z_]\w*)"?', re.I | re.S)
@@ -295,6 +296,28 @@ def named_model_read_tables(sql_values: Iterable[str]) -> tuple[str, ...]:
                 table = match.group("name").casefold()
                 trailing = statement[match.end():].lstrip()
                 if not trailing.startswith("(") and table not in cte_names and _is_named_model_table(table):
+                    tables.append(table)
+    return tuple(dict.fromkeys(tables))
+
+
+def named_model_reference_tables(sql_values: Iterable[str]) -> tuple[str, ...]:
+    """Return durable model tables named by reads, writes, or DDL."""
+
+    tables: list[str] = []
+    for sql in sql_values:
+        for raw_statement in sqlparse.split(str(sql or "")):
+            statement = _structural_sql(raw_statement)
+            tables.extend(named_model_read_tables((statement,)))
+            if match := MODEL_MUTATION_RE.search(statement):
+                table = match.group("name").casefold()
+                if _is_named_model_table(table):
+                    tables.append(table)
+            if table := _created_table_name(statement):
+                if _is_named_model_table(table):
+                    tables.append(table)
+            if match := ALTER_TABLE_RE.search(statement):
+                table = match.group("name").casefold()
+                if _is_named_model_table(table):
                     tables.append(table)
     return tuple(dict.fromkeys(tables))
 

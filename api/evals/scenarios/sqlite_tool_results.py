@@ -1634,22 +1634,13 @@ def _seed_outreach_reconciliation_model(agent_id: str) -> None:
 def _schema_grounded_read_failures(calls) -> list[str]:
     calls = list(calls)
     failures = _sqlite_attempt_failures(calls)
-    schema_positions = []
     data_reads = []
+    schema_inspections = []
     for call_index, call in enumerate(calls):
         sql = str((call.tool_params or {}).get("sql") or "")
-        schema_evidence = json.dumps(_result_payload(call) or {})
-        has_schema_evidence = (
-            HANDOFF_LEDGER_TABLE.casefold() in sql.casefold()
-            and all(field in schema_evidence.casefold() for field in (
-                "handoff_key",
-                "worker_ref",
-                "resolution_code",
-            ))
-        )
         for statement_index, statement in enumerate(sqlparse.split(sql)):
             structural = _structural_sql(statement)
-            if has_schema_evidence and (
+            if (
                 re.search(
                     r"\bpragma\s+(?:(?:main|temp)\.)?table_(?:info|xinfo)\s*\(",
                     structural,
@@ -1662,16 +1653,55 @@ def _schema_grounded_read_failures(calls) -> list[str]:
                     re.I,
                 )
             ):
-                schema_positions.append((call_index, statement_index))
+                schema_inspections.append((call_index, statement_index))
             if _reads_table(structural, HANDOFF_LEDGER_TABLE):
                 data_reads.append((call_index, statement_index))
 
-    if not schema_positions:
-        failures.append("existing ledger schema was not inspected")
     if not data_reads:
         failures.append("existing ledger was not queried")
-    if schema_positions and data_reads and min(schema_positions) >= min(data_reads):
-        failures.append("ledger columns were referenced before schema inspection completed")
+    if schema_inspections:
+        failures.append("live prompt schema was ignored in favor of a redundant schema-inspection round trip")
+    if len(calls) > 1:
+        failures.append(f"existing ledger required {len(calls)} SQLite attempts instead of one")
+    return failures
+
+
+def _schema_grounded_write_failures(calls) -> list[str]:
+    calls = list(calls)
+    failures = _sqlite_attempt_failures(calls)
+    schema_inspections = []
+    update_indexes = []
+    data_reads = []
+    for call_index, call in enumerate(calls):
+        sql = str((call.tool_params or {}).get("sql") or "")
+        for statement_index, statement in enumerate(sqlparse.split(sql)):
+            structural = _structural_sql(statement)
+            if (
+                re.search(
+                    r"\bpragma\s+(?:(?:main|temp)\.)?table_(?:info|xinfo)\s*\(",
+                    structural,
+                    re.I,
+                )
+                or re.search(
+                    r"\bfrom\s+(?:(?:main|temp)\.)?sqlite_(?:master|schema)\b",
+                    structural,
+                    re.I,
+                )
+            ):
+                schema_inspections.append((call_index, statement_index))
+            if re.search(rf"\bupdate\s+{re.escape(HANDOFF_LEDGER_TABLE)}\b", structural, re.I):
+                update_indexes.append((call_index, statement_index))
+            if _reads_table(structural, HANDOFF_LEDGER_TABLE):
+                data_reads.append((call_index, statement_index))
+
+    if schema_inspections:
+        failures.append("live prompt schema was ignored in favor of a redundant schema-inspection round trip")
+    if not update_indexes:
+        failures.append("existing ledger was not updated")
+    if not data_reads:
+        failures.append("updated ledger was not queried")
+    if len(calls) > 2:
+        failures.append(f"existing ledger required {len(calls)} SQLite attempts instead of at most two")
     return failures
 
 
@@ -2346,7 +2376,7 @@ class SqliteDomainModelScenario(SqliteToolResultScenario):
 @register_scenario
 class SqliteSchemaGroundedExistingTableScenario(SqliteDomainModelScenario):
     slug = SQLITE_SCHEMA_GROUNDED_EXISTING_TABLE
-    description = "Existing database work should inspect an unavailable schema before referencing its fields."
+    description = "Large existing databases should expose the relevant live schema for one-shot grounded queries."
     expected_runtime = "short"
     tags = (*SqliteToolResultScenario.tags, "schema_discovery", "trajectory_regression")
     tasks = [
@@ -2382,7 +2412,7 @@ class SqliteSchemaGroundedExistingTableScenario(SqliteDomainModelScenario):
             run_id,
             "verify_schema_grounded_query",
             _schema_grounded_read_failures(calls),
-            "Inspected the live ledger schema before querying it, without a failed attempt.",
+            "Used the live prompt schema for one successful ledger query without inspection or recovery.",
         )
         self._record_sourced_answer(
             run_id,
@@ -2398,7 +2428,7 @@ class SqliteSchemaGroundedExistingTableScenario(SqliteDomainModelScenario):
 @register_scenario
 class SqliteSchemaGroundedExistingTableWriteScenario(SqliteDomainModelScenario):
     slug = SQLITE_SCHEMA_GROUNDED_EXISTING_TABLE_WRITE
-    description = "Existing database writes should inspect unavailable columns before mutating or reading the table."
+    description = "Large existing databases should expose the relevant live schema for one-shot grounded writes."
     expected_runtime = "short"
     tags = (*SqliteToolResultScenario.tags, "schema_discovery", "trajectory_regression", "first_time_correctness")
     tasks = [
@@ -2432,24 +2462,7 @@ class SqliteSchemaGroundedExistingTableWriteScenario(SqliteDomainModelScenario):
                 tool_names={"sqlite_batch"},
             )
         )
-        failures = _schema_grounded_read_failures(calls)
-        schema_indexes = []
-        update_indexes = []
-        for call_index, call in enumerate(calls):
-            sql = str((call.tool_params or {}).get("sql") or "")
-            schema_evidence = json.dumps(_result_payload(call) or {}).casefold()
-            if (
-                HANDOFF_LEDGER_TABLE.casefold() in sql.casefold()
-                and all(field in schema_evidence for field in ("handoff_key", "worker_ref", "resolution_code"))
-            ):
-                schema_indexes.append(call_index)
-            if re.search(rf"\bupdate\s+{re.escape(HANDOFF_LEDGER_TABLE)}\b", _structural_sql(sql), re.I):
-                update_indexes.append(call_index)
-
-        if not update_indexes:
-            failures.append("existing ledger was not updated")
-        if schema_indexes and update_indexes and min(update_indexes) <= min(schema_indexes):
-            failures.append("ledger was mutated before schema inspection completed")
+        failures = _schema_grounded_write_failures(calls)
 
         with agent_sqlite_db(str(agent_id)) as db_path:
             conn = open_guarded_sqlite_connection(db_path)
@@ -2468,7 +2481,7 @@ class SqliteSchemaGroundedExistingTableWriteScenario(SqliteDomainModelScenario):
             run_id,
             "verify_schema_grounded_write",
             failures,
-            "Inspected the live schema before one successful update and follow-up query.",
+            "Used the live prompt schema for one successful update and follow-up query.",
         )
         self._record_sourced_answer(
             run_id,

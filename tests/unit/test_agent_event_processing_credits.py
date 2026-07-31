@@ -1525,6 +1525,111 @@ class PersistentAgentToolCreditTests(TestCase):
         self.assertEqual(observed_tools[0], ["send_email"])
         self.assertEqual(observed_tools[1], ["send_email", "sqlite_query"])
 
+    def test_reasoning_quota_race_enters_message_only_mode_and_delivers(self):
+        response = MagicMock(model_extra={})
+        response.choices = [
+            MagicMock(
+                message=MagicMock(
+                    content=None,
+                    tool_calls=[
+                        {
+                            "id": "quota-message",
+                            "function": {
+                                "name": "send_chat_message",
+                                "arguments": json.dumps({
+                                    "body": "I reached the current credit limit; here is what I completed.",
+                                    "will_continue_work": False,
+                                }),
+                            },
+                        }
+                    ],
+                    function_call=None,
+                )
+            )
+        ]
+        token_usage = {
+            "prompt_tokens": 100,
+            "completion_tokens": 20,
+            "total_tokens": 120,
+            "cached_tokens": 0,
+        }
+        tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "send_chat_message",
+                    "description": "send_chat_message",
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "sqlite_batch",
+                    "description": "sqlite_batch",
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            },
+        ]
+
+        with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1), patch(
+            "api.agent.core.event_processing.settings.GOBII_PROPRIETARY_MODE",
+            True,
+        ), patch(
+            "api.agent.core.event_processing.TaskCreditService.calculate_available_tasks_for_owner",
+            return_value=Decimal("5"),
+        ), patch(
+            "tasks.services.TaskCreditService.check_and_consume_credit_for_owner",
+            return_value={
+                "success": False,
+                "credit": None,
+                "error_message": "Task quota exceeded. You have no remaining task credits.",
+            },
+        ), patch(
+            "api.agent.core.event_processing.get_agent_daily_credit_state",
+            return_value={},
+        ), patch(
+            "api.agent.core.event_processing.get_agent_tools",
+            return_value=tools,
+        ), patch(
+            "api.agent.core.event_processing.build_prompt_context",
+            return_value=([], 0, None),
+        ), patch(
+            "api.agent.core.event_processing._completion_with_failover",
+            return_value=(response, token_usage),
+        ), patch(
+            "api.agent.core.event_processing.extract_reasoning_content",
+            return_value="I should deliver the useful partial result before stopping.",
+        ), patch(
+            "api.agent.core.event_processing._schedule_agent_follow_up",
+        ):
+            usage = ep._run_agent_loop(
+                self.agent,
+                is_first_run=False,
+                credit_snapshot={
+                    "available": Decimal("5"),
+                    "daily_state": {},
+                    "refresh_task_credits": True,
+                },
+            )
+
+        self.assertEqual(usage["total_tokens"], 120)
+        completion = PersistentAgentCompletion.objects.get(agent=self.agent)
+        self.assertFalse(completion.billed)
+        persisted_steps = PersistentAgentStep.objects.filter(agent=self.agent)
+        self.assertEqual(persisted_steps.count(), 2)
+        self.assertFalse(persisted_steps.exclude(completion_id=None).exists())
+        message_call = PersistentAgentToolCall.objects.get(tool_name="send_chat_message")
+        self.assertIsNone(message_call.step.completion_id)
+        self.assertEqual(message_call.status, PersistentAgentToolCall.Status.COMPLETE)
+        self.assertTrue(
+            PersistentAgentError.objects.filter(
+                agent=self.agent,
+                category=PersistentAgentError.Category.TASK_QUOTA_EXCEEDED,
+                source="api.agent.core.event_processing._run_agent_loop.reasoning_fallback",
+            ).exists()
+        )
+
     def test_runtime_tier_step_down_activates_once_to_standard(self):
         self.agent.preferred_llm_tier = get_intelligence_tier("ultra_max")
         self.agent.save(update_fields=["preferred_llm_tier"])

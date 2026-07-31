@@ -140,6 +140,11 @@ def validation_error_messages(exc: ValidationError) -> list[str]:
     return messages
 
 
+def is_task_quota_error(exc: ValidationError) -> bool:
+    combined = " ".join(validation_error_messages(exc)).lower()
+    return "task quota exceeded" in combined or "task credits" in combined
+
+
 def log_task_quota_exceeded(
     persistent_agent_id: str,
     exc: ValidationError,

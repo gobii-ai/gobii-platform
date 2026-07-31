@@ -113,6 +113,7 @@ from ..tools.sqlite_state import (
     get_sqlite_schema_prompt,
 )
 from ..tools.sqlite_query_quality import (
+    named_model_reference_tables,
     named_model_read_tables,
     source_derived_model_mutation_tables,
     source_derived_model_reconciled_tables,
@@ -851,10 +852,13 @@ def _get_sqlite_guidance() -> str:
         "values as :name in `bindings`; exact tool_name metadata may be a SQL literal.\n"
         "Upserts: VALUES match columns/no WHERE; INSERT SELECT needs WHERE 1=1 before ON CONFLICT. "
         "`group_concat(DISTINCT x)` takes no separator; dedupe in a subquery when a custom separator is needed.\n"
-        "UNKNOWN EXISTING SCHEMA: call 1 only targeted sqlite_master using a meaningful domain noun from the request "
-        "(for example `%handoff%`), not a guessed table prefix; call 2 is PRAGMA table_info alone because its columns "
-        "do not exist in context until that call returns; call 3 uses only returned columns/keys. `_` is a LIKE wildcard. Never list the whole "
-        "catalog, combine schema inspection with a table read, or guess after an error. CTAS/TEMP is not memory. "
+        "LIVE SCHEMA below is authoritative: use a shown table and its columns directly; do not rediscover them. "
+        "For a shown durable domain table, compute the requested filters/grouping/ranking in the first sqlite_batch "
+        "instead of pre-reading rows. "
+        "When a needed existing table is absent, call 1 only targeted sqlite_master using a meaningful domain noun "
+        "from the request, then call 2 PRAGMA table_info alone because its columns are unavailable until that returns; "
+        "call 3 uses only returned columns/keys. Never list the whole catalog, combine schema inspection with a table "
+        "read, or guess after an error. `_` is a LIKE wildcard. CTAS/TEMP is not memory. "
         "json_each aliases expose key/value, not seq.\n\n"
         "Snapshots:\n"
         "* __tool_results: result_id, source_batch_id, is_current_batch, tool_name, source_url, created_at, result_json, result_text, analysis_json, is_truncated, top_keys.\n"
@@ -1774,8 +1778,9 @@ def _render_prompt_context_once(
             records=lambda snapshot: snapshot.records,
         )
 
-    sqlite_schema_block = get_sqlite_schema_prompt()
-    named_model_columns = get_sqlite_model_table_columns()
+    sqlite_table_priorities = _get_recent_sqlite_table_priorities(agent)
+    sqlite_schema_block = get_sqlite_schema_prompt(sqlite_table_priorities)
+    named_model_columns = get_sqlite_model_table_columns(sqlite_table_priorities)
     named_model_tables = {
         match.group(1)
         for match in re.finditer(r"^Table ([^\s(]+)", sqlite_schema_block, re.MULTILINE)
@@ -3638,6 +3643,34 @@ def _get_recent_sqlite_retry_warning(agent: PersistentAgent) -> str:
         .values_list("tool_params", "result")
     )
     return _build_sqlite_retry_warning(recent_calls)
+
+
+def _get_recent_sqlite_table_priorities(
+    agent: PersistentAgent,
+    *,
+    call_limit: int = 12,
+    table_limit: int = 8,
+) -> tuple[str, ...]:
+    """Return recently used durable models for the bounded live schema."""
+
+    recent_params = (
+        PersistentAgentToolCall.objects.filter(
+            step__agent=agent,
+            tool_name="sqlite_batch",
+        )
+        .order_by("-step__created_at")
+        .values_list("tool_params", flat=True)[:call_limit]
+    )
+    tables: list[str] = []
+    for params in recent_params:
+        if not isinstance(params, dict):
+            continue
+        for table in named_model_reference_tables(_sql_values_from_params(params)):
+            if table not in tables:
+                tables.append(table)
+                if len(tables) >= table_limit:
+                    return tuple(tables)
+    return tuple(tables)
 
 
 def _build_unreconciled_source_model_warning(

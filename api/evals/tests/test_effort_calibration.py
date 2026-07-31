@@ -72,6 +72,7 @@ from api.evals.scenarios.sqlite_tool_results import (
     _portfolio_mock,
     _source_write_effect_failures,
     _schema_grounded_read_failures,
+    _schema_grounded_write_failures,
     _sqlite_attempt_failures,
 )
 from api.evals.stop_policy import should_stop_for_eval_policy
@@ -178,8 +179,21 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
         self.assertNotIn("llm_judge", portfolio_scenario.tags)
         self.assertEqual(portfolio_scenario.tasks[-1].assertion_type, "manual")
 
-    def test_schema_grounded_query_requires_successful_inspection_before_data_read(self):
-        good_calls = [
+    def test_schema_grounded_query_requires_one_shot_use_of_prompt_schema(self):
+        direct_call = _eval_tool_call(
+            "sqlite_batch",
+            {
+                "sql": (
+                    "SELECT worker_ref, COUNT(*) AS unresolved_count "
+                    "FROM z_handoff_ledger WHERE resolution_code <> 'resolved' "
+                    "GROUP BY worker_ref ORDER BY unresolved_count DESC"
+                )
+            },
+        )
+
+        self.assertEqual(_schema_grounded_read_failures([direct_call]), [])
+
+        redundant_inspection = [
             _eval_tool_call(
                 "sqlite_batch",
                 {"sql": "PRAGMA table_info('z_handoff_ledger')"},
@@ -188,42 +202,59 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
                     '{"name":"handoff_key"},{"name":"worker_ref"},{"name":"resolution_code"}]}]}'
                 ),
             ),
-            _eval_tool_call(
-                "sqlite_batch",
-                {
-                    "sql": (
-                        "SELECT worker_ref, COUNT(*) AS unresolved_count "
-                        "FROM z_handoff_ledger WHERE resolution_code <> 'resolved' "
-                        "GROUP BY worker_ref ORDER BY unresolved_count DESC"
-                    )
-                },
-            ),
+            direct_call,
         ]
-
-        self.assertEqual(_schema_grounded_read_failures(good_calls), [])
-
-        sqlite_master_calls = [
-            _eval_tool_call(
-                "sqlite_batch",
-                {"sql": "SELECT sql FROM sqlite_master WHERE name='z_handoff_ledger'"},
-                result=(
-                    '{"status":"ok","results":[{"result":[{"sql":"CREATE TABLE z_handoff_ledger '
-                    '(handoff_key TEXT, worker_ref TEXT, resolution_code TEXT)"}]}]}'
-                ),
-            ),
-            good_calls[1],
-        ]
-        self.assertEqual(_schema_grounded_read_failures(sqlite_master_calls), [])
+        inspection_failures = _schema_grounded_read_failures(redundant_inspection)
+        self.assertIn(
+            "live prompt schema was ignored in favor of a redundant schema-inspection round trip",
+            inspection_failures,
+        )
+        self.assertIn("existing ledger required 2 SQLite attempts instead of one", inspection_failures)
 
         guessed = _eval_tool_call(
             "sqlite_batch",
             {"sql": "SELECT owner_name, COUNT(*) FROM z_handoff_ledger GROUP BY owner_name"},
             result='{"status":"error","message":"no such column: owner_name"}',
         )
-        failures = _schema_grounded_read_failures([guessed, *good_calls])
+        failures = _schema_grounded_read_failures([guessed, direct_call])
 
         self.assertTrue(any("SQLite attempt 1" in failure for failure in failures))
-        self.assertIn("ledger columns were referenced before schema inspection completed", failures)
+        self.assertIn("existing ledger required 2 SQLite attempts instead of one", failures)
+
+    def test_schema_grounded_write_allows_a_safety_read_without_schema_rediscovery(self):
+        read_call = _eval_tool_call(
+            "sqlite_batch",
+            {"sql": "SELECT handoff_key, resolution_code FROM z_handoff_ledger"},
+        )
+        write_call = _eval_tool_call(
+            "sqlite_batch",
+            {
+                "sql": (
+                    "UPDATE z_handoff_ledger SET resolution_code = 'resolved' "
+                    "WHERE handoff_key = 'handoff-03'; "
+                    "SELECT worker_ref, COUNT(*) FROM z_handoff_ledger "
+                    "WHERE resolution_code <> 'resolved' GROUP BY worker_ref"
+                )
+            },
+        )
+
+        self.assertEqual(_schema_grounded_write_failures([read_call, write_call]), [])
+
+        redundant_inspection = _eval_tool_call(
+            "sqlite_batch",
+            {"sql": "PRAGMA table_info('z_handoff_ledger')"},
+        )
+        failures = _schema_grounded_write_failures(
+            [redundant_inspection, read_call, write_call]
+        )
+        self.assertIn(
+            "live prompt schema was ignored in favor of a redundant schema-inspection round trip",
+            failures,
+        )
+        self.assertIn(
+            "existing ledger required 3 SQLite attempts instead of at most two",
+            failures,
+        )
 
     def test_natural_result_access_requires_aggregate_sqlite_for_large_fixture(self):
         scenario, recorded = SqliteNaturalResultAccessScenario(), []

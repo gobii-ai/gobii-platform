@@ -87,3 +87,119 @@ class SqliteSchemaPromptTests(TestCase):
             get_sqlite_model_table_columns(),
             {"events": {"id", "payload", "notes", "csv_blob"}},
         )
+
+    def test_schema_keeps_new_domain_table_visible_past_detail_cap(self):
+        conn = sqlite3.connect(self.db_path)
+        try:
+            for index in range(30):
+                conn.execute(
+                    f"CREATE TABLE a_reference_{index:02d} "
+                    "(record_key TEXT PRIMARY KEY, recorded_value TEXT)"
+                )
+            conn.execute(
+                "CREATE TABLE research_people "
+                "(person_id TEXT PRIMARY KEY, full_name TEXT NOT NULL, role_title TEXT, source_url TEXT)"
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        prompt = get_sqlite_schema_prompt()
+
+        self.assertIn("Table research_people", prompt)
+        self.assertIn("role_title", prompt)
+
+    def test_recent_domain_table_can_be_prioritized_within_detail_cap(self):
+        conn = sqlite3.connect(self.db_path)
+        try:
+            for index in range(30):
+                conn.execute(
+                    f"CREATE TABLE a_reference_{index:02d} "
+                    "(record_key TEXT PRIMARY KEY, recorded_value TEXT)"
+                )
+            conn.execute(
+                "CREATE TABLE m_account_truth "
+                "(account_id TEXT PRIMARY KEY, stage TEXT NOT NULL, next_action TEXT)"
+            )
+            for index in range(10):
+                conn.execute(
+                    f"CREATE TABLE z_archive_{index:02d} "
+                    "(record_key TEXT PRIMARY KEY, recorded_value TEXT)"
+                )
+            conn.commit()
+        finally:
+            conn.close()
+
+        prompt = get_sqlite_schema_prompt(prioritized_tables=("m_account_truth",))
+        columns = get_sqlite_model_table_columns(prioritized_tables=("m_account_truth",))
+
+        self.assertIn("Table m_account_truth", prompt)
+        self.assertEqual(
+            columns["m_account_truth"],
+            {"account_id", "stage", "next_action"},
+        )
+
+    def test_prioritized_domain_table_precedes_prompt_byte_truncation(self):
+        conn = sqlite3.connect(self.db_path)
+        try:
+            wide_columns = ", ".join(
+                f"evidence_field_{index:02d} TEXT"
+                for index in range(80)
+            )
+            for index in range(30):
+                conn.execute(
+                    f"CREATE TABLE a_reference_{index:02d} "
+                    f"(record_key TEXT PRIMARY KEY, {wide_columns})"
+                )
+            conn.execute(
+                "CREATE TABLE m_account_truth "
+                "(account_id TEXT PRIMARY KEY, stage TEXT NOT NULL, next_action TEXT)"
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        prompt = get_sqlite_schema_prompt(prioritized_tables=("m_account_truth",))
+
+        self.assertIn("Table m_account_truth", prompt)
+        self.assertIn("next_action", prompt)
+        self.assertLess(
+            prompt.index("Table m_account_truth"),
+            prompt.index("Table a_reference_00"),
+        )
+
+    def test_new_domain_table_survives_byte_cap_before_table_cap(self):
+        conn = sqlite3.connect(self.db_path)
+        try:
+            wide_columns = ", ".join(
+                f"evidence_field_{index:02d} TEXT"
+                for index in range(200)
+            )
+            evidence_values = ["detailed evidence " * 20] * 12
+            for index in range(20):
+                conn.execute(
+                    f"CREATE TABLE a_reference_{index:02d} "
+                    f"(record_key TEXT PRIMARY KEY, {wide_columns})"
+                )
+                selected_columns = ", ".join(
+                    f"evidence_field_{field_index:02d}"
+                    for field_index in range(12)
+                )
+                conn.execute(
+                    f"INSERT INTO a_reference_{index:02d} "
+                    f"(record_key, {selected_columns}) VALUES "
+                    f"({', '.join('?' for _ in range(13))})",
+                    (f"reference-{index}", *evidence_values),
+                )
+            conn.execute(
+                "CREATE TABLE research_accounts "
+                "(account_id TEXT PRIMARY KEY, current_stage TEXT, next_action TEXT)"
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        prompt = get_sqlite_schema_prompt()
+
+        self.assertIn("Table research_accounts", prompt)
+        self.assertIn("next_action", prompt)

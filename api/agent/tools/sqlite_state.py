@@ -20,7 +20,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from typing import Optional
+from typing import Iterable, Optional
 
 import zstandard as zstd
 from django.core.files import File
@@ -125,7 +125,44 @@ _TEXT_PATTERNS = [
 ]
 
 
-def get_sqlite_schema_prompt() -> str:
+def _select_schema_tables(
+    tables: list[tuple[int, str, str | None]],
+    prioritized_tables: Iterable[str] = (),
+) -> list[tuple[int, str, str | None]]:
+    """Keep built-ins, active models, and both ends of an evolving schema."""
+
+    by_name = {name.casefold(): row for row in tables for name in (row[1],)}
+    selected: list[tuple[int, str, str | None]] = []
+    selected_names: set[str] = set()
+
+    def add(row: tuple[int, str, str | None] | None) -> None:
+        if row is None:
+            return
+        normalized = row[1].casefold()
+        if normalized in selected_names or len(selected) >= MAX_TABLES:
+            return
+        selected.append(row)
+        selected_names.add(normalized)
+
+    for row in tables:
+        if row[1] in EPHEMERAL_TABLES:
+            add(row)
+    for name in prioritized_tables:
+        add(by_name.get(str(name).casefold()))
+
+    remaining = [
+        row for row in tables
+        if row[1].casefold() not in selected_names
+    ]
+    take_from_start = True
+    while remaining and len(selected) < MAX_TABLES:
+        add(remaining.pop(0 if take_from_start else -1))
+        take_from_start = not take_from_start
+
+    return selected
+
+
+def get_sqlite_schema_prompt(prioritized_tables: Iterable[str] = ()) -> str:
     """Return a human-readable SQLite schema summary capped to ~30 KB.
 
     The summary includes CREATE TABLE statements, row counts, compact samples,
@@ -141,18 +178,19 @@ def get_sqlite_schema_prompt() -> str:
     try:
         conn = open_guarded_sqlite_connection(db_path)
         cur = conn.cursor()
-        cur.execute("SELECT name, sql FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name;")
-        tables = cur.fetchall()
+        cur.execute(
+            "SELECT rowid, name, sql FROM sqlite_master "
+            "WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY rowid;"
+        )
+        all_tables = cur.fetchall()
 
-        if not tables:
+        if not all_tables:
             return "SQLite database has no user tables yet."
 
+        tables = _select_schema_tables(all_tables, prioritized_tables)
         lines: list[str] = []
         total_bytes = 0
-        table_limit = min(len(tables), MAX_TABLES)
-        for idx, (name, create_stmt) in enumerate(tables):
-            if idx >= table_limit:
-                break
+        for _rowid, name, create_stmt in tables:
             # Get row count for each table (best-effort)
             try:
                 cur.execute(f"SELECT COUNT(*) FROM \"{name}\";")
@@ -183,8 +221,8 @@ def get_sqlite_schema_prompt() -> str:
                 if not added:
                     return _finalize_truncated(lines, total_bytes, MAX_PROMPT_BYTES)
 
-        if len(tables) > table_limit:
-            omitted = len(tables) - table_limit
+        if len(all_tables) > len(tables):
+            omitted = len(all_tables) - len(tables)
             total_bytes, _ = _append_line(
                 lines,
                 total_bytes,
@@ -204,7 +242,9 @@ def get_sqlite_schema_prompt() -> str:
                 pass
 
 
-def get_sqlite_model_table_columns() -> dict[str, set[str]]:
+def get_sqlite_model_table_columns(
+    prioritized_tables: Iterable[str] = (),
+) -> dict[str, set[str]]:
     """Return durable agent-model columns for matching source enrichment rows."""
     db_path = _sqlite_db_path_var.get(None)
     if not db_path or not os.path.exists(db_path):
@@ -213,12 +253,15 @@ def get_sqlite_model_table_columns() -> dict[str, set[str]]:
     conn = None
     try:
         conn = open_guarded_sqlite_connection(db_path)
-        table_rows = conn.execute(
-            "SELECT name FROM sqlite_master "
-            "WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+        all_table_rows = conn.execute(
+            "SELECT rowid, name, sql FROM sqlite_master "
+            "WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY rowid"
         ).fetchall()
         model_columns: dict[str, set[str]] = {}
-        for (table_name,) in table_rows[:MAX_TABLES]:
+        for _rowid, table_name, _sql in _select_schema_tables(
+            all_table_rows,
+            prioritized_tables,
+        ):
             if table_name.startswith("__"):
                 continue
             quoted_name = table_name.replace('"', '""')
