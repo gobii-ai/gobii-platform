@@ -475,6 +475,15 @@ export function MessageSearchPanel({
           </div>
         ) : null}
 
+        {/* While the roster is in flight a typed query would otherwise render silence, which
+            reads as "no results" until agents pop in (bug #509). */}
+        {!showShortcutSuggestions && !matchingAgents.length && agentsLoading && parsedSearch.q.trim() ? (
+          <div className="message-search-agent-results flex flex-col">
+            <div className="message-search-panel__section-title"><span>Agents</span></div>
+            <div className="message-search-panel__empty"><Loader2 className="h-5 w-5 animate-spin" /> Loading agents…</div>
+          </div>
+        ) : null}
+
         {!showShortcutSuggestions && matchingAgents.length ? (
           <div className="message-search-agent-results flex flex-col">
             <div className="message-search-panel__section-title"><span>Agents</span></div>
