@@ -13,7 +13,7 @@ import type { AgentRosterEntry } from '../../types/agentRoster'
 import { handleAppAnchorClick } from '../../util/appNavigation'
 import { buildAgentSearchBlob } from '../../util/agentCards'
 import { revealTimelineMessage } from '../../util/timelineNavigation'
-import { AgentSearchInput } from './ChatSidebarParts'
+import { AgentListSkeleton, AgentSearchInput } from './ChatSidebarParts'
 import { AgentChatAvatar } from './uiPrimitives'
 
 export type MessageSearchState = {
@@ -481,17 +481,7 @@ export function MessageSearchPanel({
         {!showShortcutSuggestions && !matchingAgents.length && agentsLoading && parsedSearch.q.trim() ? (
           <div className="message-search-agent-results flex flex-col">
             <div className="message-search-panel__section-title"><span>Agents</span></div>
-            <div className="message-search-skeleton" role="status" aria-label="Loading agents">
-              {[0, 1, 2].map((row) => (
-                <div className="message-search-skeleton__row" key={row} aria-hidden="true">
-                  <span className="message-search-skeleton__avatar" />
-                  <span className="message-search-skeleton__lines">
-                    <span className="message-search-skeleton__bar" data-width="name" />
-                    <span className="message-search-skeleton__bar" data-width="description" />
-                  </span>
-                </div>
-              ))}
-            </div>
+            <AgentListSkeleton />
           </div>
         ) : null}
 
