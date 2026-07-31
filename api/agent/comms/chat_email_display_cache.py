@@ -1,5 +1,7 @@
 from typing import Any, Mapping
 
+from bs4 import BeautifulSoup
+
 from bleach.css_sanitizer import CSSSanitizer
 from bleach.linkifier import Linker
 from bleach.sanitizer import ALLOWED_ATTRIBUTES, ALLOWED_PROTOCOLS, ALLOWED_TAGS, Cleaner
@@ -87,10 +89,22 @@ def normalize_explicit_email_html(explicit_html: Any) -> str | None:
     return explicit_html.strip() or None
 
 
+def _drop_non_content_elements(html: str) -> str:
+    # Bleach's strip=True removes disallowed tags but keeps their text, so an email's
+    # <style>/<title> contents survive as walls of CSS prose in the timeline (#504).
+    # These elements' text is never content; remove them wholesale before cleaning.
+    if not any(marker in html.lower() for marker in ("<style", "<title", "<script", "<head")):
+        return html
+    soup = BeautifulSoup(html, "html.parser")
+    for element in soup.find_all(["style", "title", "script", "head"]):
+        element.decompose()
+    return str(soup)
+
+
 def sanitize_chat_email_html(html: str | None, *, allow_cid: bool = False) -> str:
     if not html:
         return ""
-    cleaned = (HTML_CID_CLEANER if allow_cid else HTML_CLEANER).clean(html)
+    cleaned = (HTML_CID_CLEANER if allow_cid else HTML_CLEANER).clean(_drop_non_content_elements(html))
     # Markdown bodies are autolinked on the client by remark-gfm, but HTML reaches the timeline
     # already rendered and bypasses that entirely, leaving addresses readable but not actionable.
     # Linkifying here rather than at a call site covers explicit agent HTML, cached bodies, and

@@ -34,3 +34,29 @@ class ChatEmailDisplayCacheTests(SimpleTestCase):
         self.assertIn("<p>Safe</p>", rendered)
         self.assertNotIn("onclick", rendered)
         self.assertNotIn("<script", rendered)
+
+
+@tag("batch_agent_chat")
+class ChatEmailStyleLeakTests(SimpleTestCase):
+    """Bug #504: bleach strip=True removes disallowed tags but keeps their text, so email
+    <style>/<title> contents rendered as prose walls in the chat timeline."""
+
+    def test_style_block_contents_are_removed(self):
+        rendered = render_chat_email_body_html(
+            "Fallback",
+            explicit_html=(
+                "<style>body { padding:0 !important; } .btn a { width:2% !important; }</style>"
+                "<p>You have a new message</p>"
+            ),
+        )
+        self.assertIn("You have a new message", rendered)
+        self.assertNotIn("!important", rendered)
+        self.assertNotIn(".btn", rendered)
+
+    def test_title_and_head_contents_are_removed(self):
+        rendered = render_chat_email_body_html(
+            "Fallback",
+            explicit_html="<html><head><title>Email Template</title></head><body><p>hi</p></body></html>",
+        )
+        self.assertIn("hi", rendered)
+        self.assertNotIn("Email Template", rendered)
