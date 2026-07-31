@@ -11,6 +11,7 @@ from django.core.files.base import ContentFile
 from django.core.files.storage import FileSystemStorage
 from django.test import SimpleTestCase, TestCase, tag
 
+from api.agent.core import event_processing as ep
 from api.agent.tools.sqlite_batch import execute_sqlite_batch
 from api.agent.tools.sqlite_recovery import (
     SQLITE_STATE_RECOVERED_ERROR,
@@ -25,6 +26,7 @@ from api.agent.tools.sqlite_recovery import (
 )
 from api.agent.tools.sqlite_state import (
     _agent_sqlite_db_uncoordinated,
+    _recover_sqlite_db_in_subprocess,
     reset_sqlite_db_path,
     set_sqlite_db_path,
     sqlite_storage_key,
@@ -217,6 +219,44 @@ class SQLiteRecoveryFileTests(SimpleTestCase):
             conn.close()
         self.assertEqual(value, "safe")
 
+    def test_sqlite_shell_recovery_returns_a_valid_database(self):
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.execute("PRAGMA page_size=4096;")
+            conn.execute("CREATE TABLE durable_state (value TEXT NOT NULL);")
+            conn.executemany(
+                "INSERT INTO durable_state (value) VALUES (?);",
+                [("x" * 1000,) for _ in range(100)],
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        with open(self.db_path, "r+b") as db_file:
+            db_file.seek((9 * 4096) + 64)
+            db_file.write(b"\xff" * 32)
+
+        with self.assertRaises(SQLiteStateValidationError):
+            validate_sqlite_file(self.db_path)
+
+        self.assertTrue(_recover_sqlite_db_in_subprocess(self.db_path, self.tmp_dir))
+        validate_sqlite_file(self.db_path)
+        conn = sqlite3.connect(self.db_path)
+        try:
+            table_names = {
+                row[0]
+                for row in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table';"
+                )
+            }
+            recovered_rows = conn.execute(
+                "SELECT count(*) FROM durable_state;"
+            ).fetchone()[0]
+        finally:
+            conn.close()
+        self.assertIn("durable_state", table_names)
+        self.assertGreater(recovered_rows, 0)
+
 
 @tag("batch_sqlite")
 class SQLitePersistenceSafetyTests(SimpleTestCase):
@@ -250,7 +290,81 @@ class SQLitePersistenceSafetyTests(SimpleTestCase):
         self.assertEqual(value, "persisted")
         delete.assert_not_called()
 
-    def test_corrupt_stored_database_is_not_replaced_with_fresh_state(self):
+    def test_corrupt_stored_database_is_quarantined_before_fresh_fallback(self):
+        corrupt_path = os.path.join(self.storage_dir, "corrupt.db")
+        _create_test_database(corrupt_path)
+        _overwrite_header_with_tls_record(corrupt_path)
+        with open(corrupt_path, "rb") as corrupt_file:
+            corrupt_archive = zstd.ZstdCompressor(level=3).compress(corrupt_file.read())
+        self.storage.save(self.storage_key, ContentFile(corrupt_archive))
+        original_bytes = self._stored_bytes()
+        quarantine_key = f"{self.storage_key}.corrupt"
+
+        with patch(
+            "api.agent.tools.sqlite_state.default_storage", self.storage
+        ), patch(
+            "api.agent.tools.sqlite_state._log_sqlite_persistence_error"
+        ) as log_error:
+            with _agent_sqlite_db_uncoordinated(self.agent_uuid) as db_path:
+                validate_sqlite_file(db_path)
+                _create_test_database(db_path, ("rebuilt",))
+
+        self.assertEqual(
+            log_error.call_args.kwargs["error_code"],
+            "sqlite_restore_reset_after_corruption",
+        )
+        with self.storage.open(quarantine_key, "rb") as quarantined:
+            self.assertEqual(quarantined.read(), original_bytes)
+        with patch("api.agent.tools.sqlite_state.default_storage", self.storage):
+            with _agent_sqlite_db_uncoordinated(self.agent_uuid) as db_path:
+                conn = sqlite3.connect(db_path)
+                try:
+                    value = conn.execute("SELECT value FROM durable_state;").fetchone()[0]
+                finally:
+                    conn.close()
+        self.assertEqual(value, "rebuilt")
+
+    def test_empty_stored_database_is_quarantined_before_fresh_fallback(self):
+        empty_archive = zstd.ZstdCompressor(level=3).compress(b"")
+        self.storage.save(self.storage_key, ContentFile(empty_archive))
+        original_bytes = self._stored_bytes()
+        quarantine_key = f"{self.storage_key}.corrupt"
+
+        with patch(
+            "api.agent.tools.sqlite_state.default_storage", self.storage
+        ), patch(
+            "api.agent.tools.sqlite_state._log_sqlite_persistence_error"
+        ) as log_error:
+            with _agent_sqlite_db_uncoordinated(self.agent_uuid) as db_path:
+                validate_sqlite_file(db_path)
+
+        self.assertEqual(
+            log_error.call_args.kwargs["error_code"],
+            "sqlite_restore_salvaged",
+        )
+        with self.storage.open(quarantine_key, "rb") as quarantined:
+            self.assertEqual(quarantined.read(), original_bytes)
+
+    def test_storage_read_failure_does_not_replace_or_quarantine_state(self):
+        with patch("api.agent.tools.sqlite_state.default_storage", self.storage):
+            with _agent_sqlite_db_uncoordinated(self.agent_uuid) as db_path:
+                _create_test_database(db_path, ("known-good",))
+        original_bytes = self._stored_bytes()
+
+        with patch(
+            "api.agent.tools.sqlite_state.default_storage", self.storage
+        ), patch.object(
+            self.storage,
+            "open",
+            side_effect=OSError("storage unavailable"),
+        ), self.assertRaisesMessage(OSError, "storage unavailable"):
+            with _agent_sqlite_db_uncoordinated(self.agent_uuid):
+                self.fail("A storage read failure must not expose or replace state.")
+
+        self.assertEqual(self._stored_bytes(), original_bytes)
+        self.assertFalse(self.storage.exists(f"{self.storage_key}.corrupt"))
+
+    def test_quarantine_failure_leaves_canonical_archive_unchanged(self):
         corrupt_path = os.path.join(self.storage_dir, "corrupt.db")
         _create_test_database(corrupt_path)
         _overwrite_header_with_tls_record(corrupt_path)
@@ -259,22 +373,17 @@ class SQLitePersistenceSafetyTests(SimpleTestCase):
         self.storage.save(self.storage_key, ContentFile(corrupt_archive))
         original_bytes = self._stored_bytes()
 
-        with patch("api.agent.tools.sqlite_state.default_storage", self.storage):
-            with self.assertRaises(SQLiteStateValidationError):
-                with _agent_sqlite_db_uncoordinated(self.agent_uuid):
-                    self.fail("Corrupt restored state must not be exposed.")
-
-        self.assertEqual(self._stored_bytes(), original_bytes)
-
-    def test_empty_stored_database_is_not_replaced_with_fresh_state(self):
-        empty_archive = zstd.ZstdCompressor(level=3).compress(b"")
-        self.storage.save(self.storage_key, ContentFile(empty_archive))
-        original_bytes = self._stored_bytes()
-
-        with patch("api.agent.tools.sqlite_state.default_storage", self.storage):
-            with self.assertRaisesMessage(SQLiteStateValidationError, "file is empty"):
-                with _agent_sqlite_db_uncoordinated(self.agent_uuid):
-                    self.fail("Empty restored state must not be exposed.")
+        with patch(
+            "api.agent.tools.sqlite_state.default_storage", self.storage
+        ), patch(
+            "api.agent.tools.sqlite_state._upload_sqlite_archive",
+            side_effect=SQLiteStatePersistenceError("quarantine unavailable"),
+        ), self.assertRaisesMessage(
+            SQLiteStatePersistenceError,
+            "quarantine unavailable",
+        ):
+            with _agent_sqlite_db_uncoordinated(self.agent_uuid):
+                self.fail("Canonical state must remain untouched until quarantine succeeds.")
 
         self.assertEqual(self._stored_bytes(), original_bytes)
 
@@ -439,3 +548,29 @@ class SQLiteBatchRecoveryResultTests(TestCase):
         )
         self.assertEqual(error.context["error_code"], SQLITE_STATE_RECOVERED_ERROR)
         self.assertTrue(error.context["recovered"])
+
+    @patch("api.agent.core.event_processing._process_agent_events_locked")
+    def test_corrupt_persisted_state_does_not_block_agent_processing(self, process_locked):
+        storage = FileSystemStorage(location=os.path.join(self.tmp_dir, "storage"))
+        corrupt_path = os.path.join(self.tmp_dir, "corrupt.db")
+        _create_test_database(corrupt_path)
+        _overwrite_header_with_tls_record(corrupt_path)
+        with open(corrupt_path, "rb") as corrupt_file:
+            archive = zstd.ZstdCompressor(level=3).compress(corrupt_file.read())
+        storage.save(sqlite_storage_key(str(self.agent.id)), ContentFile(archive))
+        process_locked.return_value = self.agent
+
+        with patch(
+            "api.agent.tools.sqlite_state.default_storage", storage
+        ), patch(
+            "api.agent.tools.sqlite_state._recover_sqlite_db_in_subprocess",
+            return_value=False,
+        ):
+            ep.process_agent_events(self.agent.id)
+
+        process_locked.assert_called_once()
+        error = PersistentAgentError.objects.get(
+            agent=self.agent,
+            context__error_code="sqlite_restore_reset_after_corruption",
+        )
+        self.assertFalse(error.context["recovered"])
