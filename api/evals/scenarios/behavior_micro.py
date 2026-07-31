@@ -4048,13 +4048,22 @@ class CharterCorrectionGovernsNextPeerAssignmentScenario(CharterMemoryScenario):
         "while removing the requirement to repeat identity or disclosure policy because teammate base instructions "
         "govern it?"
     )
+    assignment_peer_name_prefix = "Outreach Seller"
+    assignment_peer_charter = (
+        "Own assigned prospect outreach. Use supplied recipient evidence and campaign workflow; keep one owner per recipient."
+    )
 
     def _seed_charter_agent(self, agent_id):
         super()._seed_charter_agent(agent_id)
         from api.evals.scenarios.responsibility_boundaries import ResponsibilityBoundaryScenario
 
         agent = PersistentAgent.objects.get(id=agent_id)
-        ResponsibilityBoundaryScenario._create_peer_link(agent, agent_id)
+        ResponsibilityBoundaryScenario._create_peer_link(
+            agent,
+            agent_id,
+            peer_name_prefix=self.assignment_peer_name_prefix,
+            peer_charter=self.assignment_peer_charter,
+        )
 
     def _eval_stop_policy(self):
         return {
