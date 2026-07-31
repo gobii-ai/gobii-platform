@@ -6,6 +6,7 @@ import api.evals.loader  # noqa: F401
 from api.evals.scenarios.notification_terminality import (
     NOTIFICATION_TERMINALITY_COMPLETED,
     NOTIFICATION_TERMINALITY_REMAINING,
+    NON_RETRYABLE_SOURCE_TERMINALITY,
     NOTIFICATION_TERMINALITY_SCENARIO_SLUGS,
     NOTIFICATION_TERMINALITY_SUITE_SLUG,
     NotificationTerminalityScenario,
@@ -23,11 +24,12 @@ class NotificationTerminalityEvalTests(SimpleTestCase):
             step=SimpleNamespace(completion_id=completion_id, created_at=created_at),
         )
 
-    def test_suite_registers_both_regressions(self):
+    def test_suite_registers_all_regressions(self):
         suite = SuiteRegistry.get(NOTIFICATION_TERMINALITY_SUITE_SLUG)
 
         self.assertIsNotNone(suite)
         self.assertEqual(tuple(suite.scenario_slugs), NOTIFICATION_TERMINALITY_SCENARIO_SLUGS)
+        self.assertIn(NON_RETRYABLE_SOURCE_TERMINALITY, suite.scenario_slugs)
 
     def test_completed_side_effects_reject_direct_notification_repeats(self):
         case = next(case for case in _CASES if case.slug == NOTIFICATION_TERMINALITY_COMPLETED)

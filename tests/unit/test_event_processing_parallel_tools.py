@@ -96,9 +96,30 @@ class TestParallelToolCallsExecution(TestCase):
     def _run_single_iteration(self, tool_calls: list[dict]):
         from api.agent.core import event_processing as ep
 
-        with patch("api.agent.core.event_processing.build_prompt_context") as mock_build_prompt, patch(
-            "api.agent.core.event_processing._completion_with_failover"
-        ) as mock_completion:
+        request_tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "description": "Test tool",
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            }
+            for name in sorted({
+                call["function"]["name"]
+                for call in tool_calls
+            })
+        ]
+        with (
+            patch(
+                "api.agent.core.event_processing.get_agent_tools",
+                return_value=request_tools,
+            ),
+            patch("api.agent.core.event_processing.build_prompt_context") as mock_build_prompt,
+            patch(
+                "api.agent.core.event_processing._completion_with_failover"
+            ) as mock_completion,
+        ):
             mock_build_prompt.return_value = (
                 [{"role": "system", "content": "sys"}, {"role": "user", "content": "go"}],
                 1000,
@@ -929,9 +950,15 @@ class TestParallelToolCallsExecution(TestCase):
 
     @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
     @patch("api.agent.core.event_processing.execute_enabled_tool")
-    def test_native_brightdata_tool_batch_executes_in_parallel(self, mock_execute_enabled, _mock_credit):
+    def test_source_tools_are_ordered_while_non_source_work_stays_parallel(
+        self,
+        mock_execute_enabled,
+        _mock_credit,
+    ):
         active = 0
         max_active = 0
+        active_sources = 0
+        max_active_sources = 0
         lock = threading.Lock()
 
         def side_effect(
@@ -942,15 +969,20 @@ class TestParallelToolCallsExecution(TestCase):
             current_sqlite_db_path=None,
             resolved_entry=None,
         ):
-            nonlocal active, max_active
+            nonlocal active, max_active, active_sources, max_active_sources
             self.assertTrue(isolated_mcp)
             self.assertIsNone(current_sqlite_db_path)
             with lock:
                 active += 1
                 max_active = max(max_active, active)
+                if _tool_name.startswith("mcp_"):
+                    active_sources += 1
+                    max_active_sources = max(max_active_sources, active_sources)
             time.sleep(0.02)
             with lock:
                 active -= 1
+                if _tool_name.startswith("mcp_"):
+                    active_sources -= 1
             return {"status": "ok", "auto_sleep_ok": True}
 
         mock_execute_enabled.side_effect = side_effect
@@ -965,6 +997,7 @@ class TestParallelToolCallsExecution(TestCase):
 
         self.assertEqual(mock_execute_enabled.call_count, 3)
         self.assertGreaterEqual(max_active, 2)
+        self.assertEqual(max_active_sources, 1)
 
     @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
     @patch("api.agent.core.event_processing.execute_enabled_tool")
@@ -1003,10 +1036,10 @@ class TestParallelToolCallsExecution(TestCase):
             self._run_single_iteration(
                 [
                     _tool_call("read_file", '{"path": "/exports/a.txt"}'),
-                    _tool_call("http_request", '{"method": "GET", "url": "https://api.example.com/zero.json"}'),
-                    _tool_call("http_request", '{"method": "GET", "url": "https://api.example.com/one.json"}'),
-                    _tool_call("http_request", '{"method": "GET", "url": "https://api.example.com/two.json"}'),
-                    _tool_call("http_request", '{"method": "GET", "url": "https://api.example.com/three.json"}'),
+                    _tool_call("read_file", '{"path": "/exports/b.txt"}'),
+                    _tool_call("read_file", '{"path": "/exports/c.txt"}'),
+                    _tool_call("read_file", '{"path": "/exports/d.txt"}'),
+                    _tool_call("read_file", '{"path": "/exports/e.txt"}'),
                 ]
             )
 

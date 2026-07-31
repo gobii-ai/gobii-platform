@@ -591,6 +591,9 @@ def prepare_tool_results_for_prompt(
             allow_fallback_query_hints=not is_scrape_markdown and not is_historical_same_tool_source,
             include_result_id=not hide_literal_result_id and not is_historical_same_tool_source,
         )
+        terminal_directive = _terminal_result_directive(result_text)
+        if terminal_directive:
+            meta_text += f"\n{terminal_directive}"
         if record.tool_name == "sqlite_batch":
             if record.will_continue_work is False and _tool_result_succeeded(result_text):
                 meta_text += (
@@ -1140,6 +1143,23 @@ def _tool_result_succeeded(result_text: str) -> bool:
     except (json.JSONDecodeError, TypeError):
         return False
     return isinstance(payload, dict) and payload.get("status") == "ok"
+
+
+def _terminal_result_directive(result_text: str) -> str:
+    try:
+        payload = json.loads(result_text)
+    except (json.JSONDecodeError, TypeError):
+        return ""
+    if not isinstance(payload, dict) or payload.get("retryable") is not False:
+        return ""
+    status = str(payload.get("status") or "").casefold()
+    if status not in {"error", "failed", "failure", "blocked"} and payload.get("terminal_error") is not True:
+        return ""
+    return (
+        "TERMINAL RESULT (`retryable=false`): do not call this tool again or try a query/parameter variant for this "
+        "request. Use another path only when its exact tool, endpoint, or URL was known before this call; otherwise "
+        "report the constraint now."
+    )
 
 
 def _build_prompt_preview(

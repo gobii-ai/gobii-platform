@@ -19,17 +19,22 @@ from django.utils import timezone
 from api.agent.core.event_processing import (
     _deep_work_update_gate_reason,
     _finalize_tool_batch,
+    _filter_tools_after_non_retryable_result,
     _contact_permission_params_from_misrouted_human_input,
     _ensure_credit_for_tool,
+    _execute_prepared_tool_batch_inner,
     _process_agent_events_locked,
     _infer_retryable_from_text,
     _is_error_status,
     _is_warning_status,
     _normalize_error_result,
     _normalize_tool_params,
+    NON_RETRYABLE_BATCH_SKIP_REASON,
     _parse_tool_call_params,
     _partition_unresolved_custom_tool_sends,
+    _prepare_tool_batch,
     _PreparedToolExecution,
+    _PreparedToolBatch,
     _sanitize_tool_name,
     _should_infer_message_tool_continuation,
     _should_imply_continue,
@@ -72,6 +77,264 @@ class _DummySpan:
 
     def set_attribute(self, *_args, **_kwargs):
         return None
+
+
+def _tool_names(tools):
+    return {tool.get("function", {}).get("name") for tool in tools}
+
+
+@tag("batch_event_processing")
+class NonRetryableToolAvailabilityTests(SimpleTestCase):
+    tools = [
+        {"type": "function", "function": {"name": "mcp_vendor_search"}},
+        {"type": "function", "function": {"name": "http_request"}},
+        {"type": "function", "function": {"name": "send_chat_message"}},
+        {"type": "function", "function": {"name": "sleep_until_next_trigger"}},
+    ]
+
+    def test_non_retryable_result_removes_failed_tool_for_active_request(self):
+        filtered = _filter_tools_after_non_retryable_result(
+            self.tools,
+            "mcp_vendor_search",
+            {"status": "error", "retryable": False},
+        )
+
+        self.assertEqual(
+            _tool_names(filtered),
+            {"http_request", "send_chat_message", "sleep_until_next_trigger"},
+        )
+
+    def test_terminal_result_leaves_only_delivery_and_stop_tools(self):
+        filtered = _filter_tools_after_non_retryable_result(
+            self.tools,
+            "mcp_vendor_search",
+            {"status": "error", "retryable": False, "terminal_error": True},
+        )
+
+        self.assertEqual(
+            _tool_names(filtered),
+            {"send_chat_message", "sleep_until_next_trigger"},
+        )
+
+    def test_success_result_with_irrelevant_retryable_field_keeps_tools(self):
+        filtered = _filter_tools_after_non_retryable_result(
+            self.tools,
+            "mcp_vendor_search",
+            {"status": "ok", "retryable": False},
+        )
+
+        self.assertEqual(filtered, self.tools)
+
+    def test_tool_call_absent_from_latest_request_is_rejected(self):
+        agent = SimpleNamespace(id=uuid4())
+
+        with (
+            patch("api.agent.core.event_processing._record_policy_step") as record_policy,
+            patch(
+                "api.agent.core.event_processing._deep_work_update_gate_context",
+                return_value=None,
+            ),
+            patch(
+                "api.agent.core.event_processing.get_agent_daily_credit_state",
+                return_value=None,
+            ),
+            patch(
+                "api.agent.core.event_processing._should_abort_processing",
+                return_value=False,
+            ),
+        ):
+            prepared = _prepare_tool_batch(
+                agent,
+                tool_calls=[
+                    {
+                        "id": "call_unavailable",
+                        "function": {
+                            "name": "mcp_vendor_search",
+                            "arguments": "{}",
+                        },
+                    },
+                ],
+                allowed_tool_names={"send_chat_message", "sleep_until_next_trigger"},
+                budget_ctx=None,
+                eval_run_id=None,
+                heartbeat=None,
+                lock_extender=None,
+                credit_snapshot={},
+                allow_inferred_message_continue=False,
+                has_non_sleep_calls=True,
+                has_user_facing_message=False,
+                attach_completion=lambda _kwargs: None,
+                attach_prompt_archive=lambda _step: None,
+            )
+
+        self.assertEqual(prepared.prepared_calls, [])
+        self.assertTrue(prepared.followup_required)
+        record_policy.assert_called_once()
+
+    def test_terminal_source_requires_followup_only_until_final_delivery(self):
+        def outcome(idx, tool_name, result, *, explicit_continue=None):
+            prepared = _PreparedToolExecution(
+                idx=idx,
+                tool_name=tool_name,
+                tool_params={},
+                exec_params={},
+                pending_step=None,
+                credits_consumed=None,
+                consumed_credit=None,
+                call_id=f"call_{idx}",
+                explicit_continue=explicit_continue,
+                inferred_continue=False,
+                parallel_safe=False,
+                parallel_ineligible_reason="unsafe",
+            )
+            return _ToolExecutionOutcome(
+                prepared=prepared,
+                result=result,
+                duration_ms=1,
+                updated_tools=None,
+                variable_map={},
+            )
+
+        source = outcome(
+            1,
+            "mcp_vendor_search",
+            {"status": "error", "retryable": False, "terminal_error": True},
+        )
+        delivery = outcome(
+            2,
+            "send_chat_message",
+            {"status": "ok"},
+            explicit_continue=False,
+        )
+        persisted_step = SimpleNamespace(id=uuid4())
+
+        for outcomes, expected_followup in (([source], True), ([source, delivery], False)):
+            with (
+                self.subTest(has_delivery=len(outcomes) == 2),
+                patch(
+                    "api.agent.core.event_processing._persist_tool_execution_outcome",
+                    side_effect=[
+                        (
+                            persisted_step,
+                            json.dumps(item.result),
+                            "error" if item is source else "complete",
+                        )
+                        for item in outcomes
+                    ],
+                ),
+                patch(
+                    "api.agent.core.event_processing._refund_tool_credit_on_error_if_configured"
+                ),
+            ):
+                finalized = _finalize_tool_batch(
+                    SimpleNamespace(id=uuid4()),
+                    outcomes,
+                    attach_completion=lambda _kwargs: None,
+                    attach_prompt_archive=lambda _step: None,
+                )
+
+            self.assertEqual(finalized.followup_required, expected_followup)
+
+    def test_same_batch_terminal_result_skips_unsafe_sibling_but_allows_delivery(self):
+        for parallel_ineligible_reason in ("unsafe", None):
+            with self.subTest(parallel_ineligible_reason=parallel_ineligible_reason):
+                def prepared(idx, tool_name):
+                    return _PreparedToolExecution(
+                        idx=idx,
+                        tool_name=tool_name,
+                        tool_params={},
+                        exec_params={},
+                        pending_step=None,
+                        credits_consumed=None,
+                        consumed_credit=None,
+                        call_id=f"call_{idx}",
+                        explicit_continue=False if tool_name == "send_chat_message" else None,
+                        inferred_continue=False,
+                        parallel_safe=parallel_ineligible_reason is None,
+                        parallel_ineligible_reason=parallel_ineligible_reason,
+                    )
+
+                source = prepared(1, "mcp_vendor_search")
+                unsafe_sibling = prepared(2, "http_request")
+                delivery = prepared(3, "send_chat_message")
+                source_outcome = _ToolExecutionOutcome(
+                    prepared=source,
+                    result={
+                        "status": "error",
+                        "retryable": False,
+                        "terminal_error": True,
+                    },
+                    duration_ms=1,
+                    updated_tools=None,
+                    variable_map={},
+                )
+                delivery_outcome = _ToolExecutionOutcome(
+                    prepared=delivery,
+                    result={"status": "ok", "auto_sleep_ok": True},
+                    duration_ms=1,
+                    updated_tools=None,
+                    variable_map={},
+                )
+                batch = _PreparedToolBatch(
+                    prepared_calls=[source, unsafe_sibling, delivery],
+                    followup_required=False,
+                    all_calls_sleep=False,
+                    abort_after_execution=False,
+                    parallel_ineligible_reason=parallel_ineligible_reason,
+                )
+                agent = SimpleNamespace(id=uuid4(), refresh_from_db=lambda **_kwargs: None)
+
+                with (
+                    patch(
+                        "api.agent.core.event_processing._execute_prepared_tool_call",
+                        side_effect=[source_outcome, delivery_outcome],
+                    ) as execute,
+                    patch("api.agent.core.event_processing._persist_tool_execution_outcome"),
+                    patch("api.agent.core.event_processing._mark_prepared_tool_started"),
+                    patch(
+                        "api.agent.core.event_processing._refresh_skills_for_tool_outcome",
+                        side_effect=lambda _agent, outcome: outcome,
+                    ),
+                    patch(
+                        "api.agent.core.event_processing._cancel_unstarted_tool_calls"
+                    ) as cancel,
+                    patch(
+                        "api.agent.core.event_processing._should_abort_processing",
+                        return_value=False,
+                    ),
+                    patch(
+                        "api.agent.core.event_processing.is_signup_preview_processing_paused",
+                        return_value=False,
+                    ),
+                    patch(
+                        "api.agent.core.event_processing.get_max_parallel_tool_calls",
+                        return_value=3,
+                    ),
+                ):
+                    executed = _execute_prepared_tool_batch_inner(
+                        agent,
+                        batch,
+                        budget_ctx=None,
+                        eval_run_id=None,
+                        tools=self.tools,
+                        heartbeat=None,
+                        lock_extender=None,
+                    )
+
+                self.assertEqual(
+                    [call.args[1].tool_name for call in execute.call_args_list],
+                    ["mcp_vendor_search", "send_chat_message"],
+                )
+                cancel.assert_called_once_with(
+                    agent,
+                    [unsafe_sibling],
+                    reason=NON_RETRYABLE_BATCH_SKIP_REASON,
+                    retryable=False,
+                )
+                self.assertEqual(
+                    _tool_names(executed.tools),
+                    {"send_chat_message", "sleep_until_next_trigger"},
+                )
 
 
 @tag('batch_event_processing')

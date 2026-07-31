@@ -6,6 +6,7 @@ from django.test import SimpleTestCase, tag
 
 import api.evals.loader  # noqa: F401 - registers scenarios and suites
 from api.agent.core.prompt_context import (
+    _discord_author_type,
     _get_managed_peer_first_run_instruction,
     _get_peer_communication_instruction,
 )
@@ -30,6 +31,7 @@ from api.evals.scenarios.responsibility_boundaries import (
     RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_AUTHORED_CLAIM,
     RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_DIRECTED_CORRECTION,
     RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_DIRECTED_REPLY,
+    RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_HUMAN_HANDLE,
     RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_OPEN_REPLY,
     RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_OWNER,
     RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_NOISY_YIELD,
@@ -104,6 +106,25 @@ class ResponsibilityBoundaryScenarioTests(SimpleTestCase):
         self.assertIn("manager escalates", instruction)
         self.assertIn("material team decision is blocked", instruction)
 
+    def test_discord_actor_type_uses_transport_provenance_not_display_handle(self):
+        self.assertEqual(
+            _discord_author_type({"discord_author_name": "ai.christianson"}),
+            "human participant",
+        )
+        self.assertEqual(
+            _discord_author_type(
+                {
+                    "discord_author_name": "Helpful Bot",
+                    "pipedream_payload": {"author_metadata": {"bot": True}},
+                }
+            ),
+            "bot or webhook",
+        )
+        self.assertEqual(
+            _discord_author_type({"discord_author_name": "Relay", "discord_webhook_id": "wh-42"}),
+            "bot or webhook",
+        )
+
     def test_first_run_owner_contact_is_a_fallback_for_managed_agents(self):
         instruction = _get_managed_peer_first_run_instruction()
 
@@ -136,6 +157,7 @@ class ResponsibilityBoundaryScenarioTests(SimpleTestCase):
                 RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_DIRECTED_CORRECTION,
                 RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_DIRECTED_REPLY,
                 RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_OPEN_REPLY,
+                RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_HUMAN_HANDLE,
                 RESPONSIBILITY_BOUNDARY_MANAGED_ONBOARDING_ROUTES_TO_MANAGER,
             },
         )

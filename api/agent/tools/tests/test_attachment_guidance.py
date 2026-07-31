@@ -69,6 +69,7 @@ class AttachmentGuidanceTests(SimpleTestCase):
         self.assertIn("<img src='cid:filename'>", html_description)
         self.assertIn("exact file-tool `attach` value", description)
         self.assertIn("body text never attaches files", description)
+        self.assertIn("Replies inherit none", properties["cc_addresses"]["description"])
 
     def test_attachment_send_tools_preserve_opaque_file_tokens_for_their_resolvers(self):
         for tool_name in (

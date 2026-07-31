@@ -188,6 +188,10 @@ ARG_LOG_MAX_CHARS = 500
 RESULT_LOG_MAX_CHARS = 500
 AUTO_SLEEP_FLAG = "auto_sleep_ok"
 TERMINAL_ERROR_FLAG = "terminal_error"
+NON_RETRYABLE_BATCH_SKIP_REASON = (
+    "Tool call was skipped because an earlier result in this batch was non-retryable. "
+    "Do not retry it or use a variant for this request."
+)
 TOOL_ERROR_MESSAGE_MAX_BYTES = 800
 TOOL_ERROR_DETAIL_MAX_BYTES = 1500
 TOOL_ERROR_NATIVE_CONTENT_MAX_BYTES = 6000
@@ -1668,6 +1672,51 @@ def _tool_definition_names_for_completion(tools: list[dict] | None) -> list[str]
         if isinstance(tool, dict) and isinstance((function := tool.get("function")), dict)
         and isinstance(function.get("name"), str) and function["name"]
     ]
+
+
+def _filter_tools_after_non_retryable_result(
+    tools: list[dict],
+    tool_name: str,
+    result: object,
+) -> list[dict]:
+    payload = _non_retryable_failure_payload(result)
+    if payload is None:
+        return tools
+
+    if payload.get(TERMINAL_ERROR_FLAG) is True:
+        allowed = MESSAGE_TOOL_NAMES | {"request_human_input", "sleep_until_next_trigger"}
+        return [
+            tool
+            for tool in tools
+            if tool.get("function", {}).get("name") in allowed
+        ]
+    return [
+        tool
+        for tool in tools
+        if tool.get("function", {}).get("name") != tool_name
+    ]
+
+
+def _non_retryable_failure_payload(result: object) -> dict | None:
+    payload = result
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload)
+        except (json.JSONDecodeError, TypeError):
+            return None
+    if not isinstance(payload, dict) or payload.get("retryable") is not False:
+        return None
+
+    if payload.get(TERMINAL_ERROR_FLAG) is True:
+        return payload
+    if str(payload.get("status") or "").casefold() not in {
+        "error",
+        "failed",
+        "failure",
+        "blocked",
+    }:
+        return None
+    return payload
 
 
 def _filter_incompatible_reply_tools(
@@ -3444,6 +3493,7 @@ def _prepare_tool_batch(
     agent: PersistentAgent,
     *,
     tool_calls: list[Any],
+    allowed_tool_names: set[str] | None = None,
     budget_ctx: Optional[BudgetContext],
     eval_run_id: Optional[str],
     heartbeat: Any,
@@ -3471,6 +3521,16 @@ def _prepare_tool_batch(
             stale_cancellation=True,
         )
 
+    unavailable_tool_names = sorted(
+        {
+            name
+            for call in tool_calls
+            if (name := _get_tool_call_name(call))
+            and allowed_tool_names is not None
+            and name not in allowed_tool_names
+        }
+    )
+
     tool_calls, deferred_sends = _partition_unresolved_custom_tool_sends(tool_calls)
     rate_limit_batch = (
         _build_tool_rate_limit_batch(
@@ -3481,11 +3541,12 @@ def _prepare_tool_batch(
         else None
     )
     prepared_calls: list[_PreparedToolExecution] = []
-    followup_required = bool(deferred_sends)
+    followup_required = bool(deferred_sends or unavailable_tool_names)
     all_calls_sleep = not has_non_sleep_calls
     abort_after_execution = False
     cancel_prepared_calls = False
     stale_cancellation = False
+    unavailable_notice_recorded = False
     if deferred_sends:
         deferred_names = ", ".join(
             name
@@ -3634,6 +3695,26 @@ def _prepare_tool_batch(
                         agent.id,
                         exc_info=True,
                     )
+                followup_required = True
+                continue
+
+            if allowed_tool_names is not None and tool_name not in allowed_tool_names:
+                if not unavailable_notice_recorded:
+                    _record_policy_step(
+                        agent,
+                        "Tool call rejected because it was not offered in the latest model request: "
+                        f"{', '.join(unavailable_tool_names)}. The tool may have become unavailable after a terminal "
+                        "result or a channel/state change. Do not retry it; use only currently offered tools and "
+                        "handle the prior result.",
+                        attach_completion=attach_completion,
+                        attach_prompt_archive=attach_prompt_archive,
+                    )
+                    logger.warning(
+                        "Agent %s: rejected model tool call(s) absent from the latest request: %s.",
+                        agent.id,
+                        ", ".join(unavailable_tool_names),
+                    )
+                    unavailable_notice_recorded = True
                 followup_required = True
                 continue
 
@@ -3944,6 +4025,7 @@ def _execute_prepared_tool_batch_inner(
     abort_after_execution = prepared_batch.abort_after_execution
     execution_aborted = False
     stale_cancellation = prepared_batch.stale_cancellation
+    non_retryable_restriction_active = False
 
     if prepared_batch.cancel_prepared_calls:
         return _ExecutedToolBatch(
@@ -3954,25 +4036,48 @@ def _execute_prepared_tool_batch_inner(
         )
 
     if run_parallel_batch:
+        max_workers = min(len(prepared_batch.prepared_calls), max(1, get_max_parallel_tool_calls()))
         logger.info(
-            "Agent %s: executing %d safe tool calls in parallel.",
+            "Agent %s: executing %d safe tool calls with max_workers=%d.",
             agent.id,
             len(prepared_batch.prepared_calls),
+            max_workers,
         )
         base_variables = get_all_variables()
-        max_workers = min(len(prepared_batch.prepared_calls), max(1, get_max_parallel_tool_calls()))
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures: set[Any] = set()
-            next_prepared_index = 0
+            futures: dict[Any, _PreparedToolExecution] = {}
+            pending_calls = list(prepared_batch.prepared_calls)
 
             def submit_available_calls() -> None:
-                nonlocal abort_after_execution, execution_aborted, next_prepared_index, stale_cancellation
+                nonlocal abort_after_execution, execution_aborted, stale_cancellation
+                pending_index = 0
                 while (
                     not execution_aborted
                     and len(futures) < max_workers
-                    and next_prepared_index < len(prepared_batch.prepared_calls)
+                    and pending_index < len(pending_calls)
                 ):
-                    prepared = prepared_batch.prepared_calls[next_prepared_index]
+                    prepared = pending_calls[pending_index]
+                    if (
+                        is_source_bearing_tool(prepared.tool_name)
+                        and any(
+                            is_source_bearing_tool(in_flight.tool_name)
+                            for in_flight in futures.values()
+                        )
+                    ):
+                        pending_index += 1
+                        continue
+                    pending_calls.pop(pending_index)
+                    if (
+                        non_retryable_restriction_active
+                        and prepared.tool_name not in _tool_definition_names_for_completion(available_tools)
+                    ):
+                        _cancel_unstarted_tool_calls(
+                            agent,
+                            [prepared],
+                            reason=NON_RETRYABLE_BATCH_SKIP_REASON,
+                            retryable=False,
+                        )
+                        continue
                     with tracer.start_as_current_span("Execute Tool") as tool_span:
                         if stale_prompt_checker and stale_prompt_checker():
                             logger.info(
@@ -4000,7 +4105,6 @@ def _execute_prepared_tool_batch_inner(
                         tool_span.set_attribute("persistent_agent.id", str(agent.id))
                         tool_span.set_attribute("tool.name", prepared.tool_name)
                         _mark_prepared_tool_started(agent, prepared)
-                    next_prepared_index += 1
                     context = copy_context()
                     future = executor.submit(
                         context.run,
@@ -4011,20 +4115,38 @@ def _execute_prepared_tool_batch_inner(
                         eval_run_id=eval_run_id,
                         parallel_safe=True,
                     )
-                    futures.add(future)
+                    futures[future] = prepared
 
             submit_available_calls()
             while futures:
-                completed_futures, _ = wait(futures, return_when=FIRST_COMPLETED)
+                completed_futures, _ = wait(futures.keys(), return_when=FIRST_COMPLETED)
                 for future in completed_futures:
-                    futures.remove(future)
+                    futures.pop(future)
                     outcome = _refresh_skills_for_tool_outcome(agent, future.result())
                     _persist_tool_execution_outcome(agent, outcome)
                     execution_outcomes.append(outcome)
+                    if _non_retryable_failure_payload(outcome.result) is not None:
+                        available_tools = _filter_tools_after_non_retryable_result(
+                            available_tools,
+                            outcome.prepared.tool_name,
+                            outcome.result,
+                        )
+                        non_retryable_restriction_active = True
                 submit_available_calls()
 
+        ordered_outcomes = sorted(execution_outcomes, key=lambda item: item.prepared.idx)
+        for outcome in ordered_outcomes:
+            if outcome.updated_tools is not None:
+                available_tools = outcome.updated_tools
+        for outcome in ordered_outcomes:
+            available_tools = _filter_tools_after_non_retryable_result(
+                available_tools,
+                outcome.prepared.tool_name,
+                outcome.result,
+            )
+
         merged_variables = dict(base_variables)
-        for outcome in sorted(execution_outcomes, key=lambda item: item.prepared.idx):
+        for outcome in ordered_outcomes:
             merged_variables.update(outcome.variable_map)
         replace_all_variables(merged_variables)
     else:
@@ -4035,6 +4157,17 @@ def _execute_prepared_tool_batch_inner(
                 prepared_batch.parallel_ineligible_reason,
             )
         for prepared in prepared_batch.prepared_calls:
+            if (
+                non_retryable_restriction_active
+                and prepared.tool_name not in _tool_definition_names_for_completion(available_tools)
+            ):
+                _cancel_unstarted_tool_calls(
+                    agent,
+                    [prepared],
+                    reason=NON_RETRYABLE_BATCH_SKIP_REASON,
+                    retryable=False,
+                )
+                continue
             with tracer.start_as_current_span("Execute Tool") as tool_span:
                 if stale_prompt_checker and stale_prompt_checker():
                     logger.info(
@@ -4098,6 +4231,13 @@ def _execute_prepared_tool_batch_inner(
                         before_count,
                         after_count,
                     )
+                available_tools = _filter_tools_after_non_retryable_result(
+                    available_tools,
+                    prepared.tool_name,
+                    outcome.result,
+                )
+                if _non_retryable_failure_payload(outcome.result) is not None:
+                    non_retryable_restriction_active = True
 
     return _ExecutedToolBatch(
         execution_outcomes=execution_outcomes,
@@ -4165,6 +4305,7 @@ def _finalize_tool_batch(
     executed_non_message_action = False
     progress_message_delivery_ok = False
     terminal_message_delivery_ok = False
+    terminal_source_error = False
     human_input_request_ok = False
     successful_message_tools, human_input_delivery_tools = set(), set()
 
@@ -4251,6 +4392,13 @@ def _finalize_tool_batch(
             and result.get(TERMINAL_ERROR_FLAG) is True
             and effective_explicit_continue is not True
         )
+        source_terminal_error = (
+            is_source_bearing_tool(tool_name)
+            and _non_retryable_failure_payload(result) is not None
+            and isinstance(result, dict)
+            and result.get(TERMINAL_ERROR_FLAG) is True
+        )
+        terminal_source_error |= source_terminal_error
         tool_had_warning = _is_warning_status(result)
         if effective_explicit_continue is not None:
             last_explicit_continue = effective_explicit_continue
@@ -4264,7 +4412,7 @@ def _finalize_tool_batch(
         elif tool_name == "search_tools":
             followup_required = True
         elif is_error_status or tool_had_warning:
-            if not terminal_error:
+            if not terminal_error and not source_terminal_error:
                 followup_required = True
         elif (
             effective_explicit_continue is not True
@@ -4278,7 +4426,11 @@ def _finalize_tool_batch(
         if tool_name not in MESSAGE_TOOL_NAMES and tool_name != "sleep_until_next_trigger":
             executed_non_message_action = True
 
-    followup_required = followup_required or bool(human_input_delivery_tools - successful_message_tools)
+    followup_required = (
+        followup_required
+        or terminal_source_error and not terminal_message_delivery_ok
+        or bool(human_input_delivery_tools - successful_message_tools)
+    )
 
     return _FinalizedToolBatch(
         executed_calls=executed_calls,
@@ -7758,6 +7910,7 @@ def _run_agent_loop(
                 prepared_batch = _prepare_tool_batch(
                     agent,
                     tool_calls=list(tool_calls or []),
+                    allowed_tool_names=set(_tool_definition_names_for_completion(request_tools)),
                     budget_ctx=budget_ctx,
                     eval_run_id=eval_run_id,
                     heartbeat=heartbeat,

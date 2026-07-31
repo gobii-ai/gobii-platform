@@ -41,6 +41,38 @@ class TestBatchToolCallsWithSleep(TestCase):
             browser_use_agent=browser_agent,
         )
         enable_tools(self.agent, ["sqlite_batch"])
+        from api.agent.core import event_processing as ep
+
+        request_tools = ep.get_agent_tools(self.agent)
+        offered_names = {
+            tool.get("function", {}).get("name")
+            for tool in request_tools
+        }
+        request_tools.extend(
+            {
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "description": "Test tool",
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            }
+            for name in {
+                "send_chat_message",
+                "send_email",
+                "sleep_until_next_trigger",
+                "spawn_web_task",
+                "sqlite_batch",
+                "update_charter",
+                "update_plan",
+            } - offered_names
+        )
+        tools_patcher = patch(
+            "api.agent.core.event_processing.get_agent_tools",
+            return_value=request_tools,
+        )
+        tools_patcher.start()
+        self.addCleanup(tools_patcher.stop)
 
     @patch('api.agent.core.event_processing._ensure_credit_for_tool', return_value={"cost": None, "credit": None})
     @patch('api.agent.core.event_processing.execute_enabled_tool', return_value={"status": "ok"})
