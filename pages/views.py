@@ -237,7 +237,41 @@ HOMEPAGE_INLINE_INTEGRATION_ICON_PATHS = {
     "trello": "images/integrations/pipedream/trello.svg",
 }
 HOMEPAGE_META_TITLE_SUFFIX = "AI Employees for Teams With Real Work to Do"
+# Category labels are free text and drift between deployments ("People" in code
+# fallbacks, "Recruiting" in production rows), so each hero pill matches a set of
+# labels case-insensitively. Templates in no group still appear in the directory.
+HOMEPAGE_HERO_GROUP_DEFS = (
+    (
+        "recruiting",
+        "Recruiting",
+        {"people", "recruiting", "recruitment", "hr & recruiting", "talent"},
+    ),
+    (
+        "sales",
+        "Sales",
+        {"revenue", "sales", "sales-outreach", "lead generation", "lead-generation"},
+    ),
+    (
+        "research",
+        "Research",
+        {"research", "external intel", "market research", "market-research", "market intelligence"},
+    ),
+)
+HOMEPAGE_HERO_ROW_SIZE = 3
 _LANDING_UTM_TRACKER = UTMTrackingMiddleware(lambda request: None)
+
+
+def build_homepage_hero_groups(templates: list[dict]) -> list[dict]:
+    groups = []
+    for key, label, category_labels in HOMEPAGE_HERO_GROUP_DEFS:
+        workers = [
+            SimpleNamespace(**template)
+            for template in templates
+            if (template.get("category") or "").strip().lower() in category_labels
+        ]
+        if workers:
+            groups.append({"key": key, "label": label, "workers": workers[:HOMEPAGE_HERO_ROW_SIZE]})
+    return groups
 
 
 def _with_homepage_inline_integration_icon(app: dict) -> dict:
@@ -1278,6 +1312,28 @@ class HomePage(TemplateView):
                     "homepage_pretrained_search_term": search_term,
                 }
             )
+
+            # The template-first hero replaces the charter-box hero on the default
+            # render only. Landing renders (?g=/?dc=) and a session-saved charter
+            # keep the legacy hero so ad landings and the post-signup return flow
+            # still show the visitor's charter above the fold.
+            home_use_k = not (
+                context.get("landing_hero_text")
+                or context.get("default_charter")
+                or context.get("agent_charter_saved")
+            )
+            context["home_use_k"] = home_use_k
+            if home_use_k:
+                context["home_dark_header"] = True
+                context["home_hero_groups"] = build_homepage_hero_groups(all_templates)
+                pro_plan = get_plan_config(PlanNames.STARTUP)
+                scale_plan = get_plan_config(PlanNames.SCALE)
+                context["home_pricing"] = {
+                    "pro_price": pro_plan["price"],
+                    "pro_credits": f"{pro_plan['monthly_task_credits']:,}",
+                    "scale_price": scale_plan["price"],
+                    "scale_credits": f"{scale_plan['monthly_task_credits']:,}",
+                }
 
         if self.request.user.is_authenticated:
             recent_agents_qs = PersistentAgent.objects.non_eval().alive().filter(user_id=self.request.user.id)

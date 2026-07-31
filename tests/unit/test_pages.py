@@ -1086,11 +1086,11 @@ class HomePageTests(TestCase):
             normalized_page_text.replace(" ,", ",").replace(" ?", "?").replace(" .", ".")
         )
         self.assertIn(
-            "Delegate qualified sourcing to AI employees",
+            "20 qualified candidates, delivered to your ATS every week.",
             normalized_page_text,
         )
         self.assertIn(
-            "Find leads, candidates, companies, and opportunities on a schedule.",
+            "Hire a Gobii that already knows the job.",
             normalized_page_text,
         )
         self.assertIn(
@@ -3876,12 +3876,14 @@ class RestoredPublicMarketingSurfaceTests(TestCase):
         self.assertIn("Solutions", page_text)
         self.assertIn("Discover", page_text)
         self.assertIn("API", page_text)
+        h1_text = re.sub(r"\s+", " ", soup.find("h1").get_text(" ", strip=True))
+        h1_text = h1_text.replace(" ,", ",").replace(" .", ".")
         self.assertEqual(
-            soup.find("h1").get_text(" ", strip=True),
-            "Delegate qualified sourcing to AI employees",
+            h1_text,
+            "20 qualified candidates, delivered to your ATS every week.",
         )
         self.assertIn(
-            "Find leads, candidates, companies, and opportunities on a schedule.",
+            "Hire a Gobii that already knows the job.",
             page_text,
         )
         for retired_slug in ("health-care", "defense"):

@@ -1,0 +1,50 @@
+{% load static %}
+<section id="pricing" class="gk-block scroll-mt-24" aria-labelledby="pricing-heading" data-animate>
+  <div class="gk-sect-head">
+    <span class="gk-eyebrow">PRICING</span>
+    <h2 id="pricing-heading">Simple plans. Every one starts free.</h2>
+    <p class="gk-sect-sub">7-day free trial &middot; cancel anytime</p>
+  </div>
+  <div class="gk-prices">
+    <div class="gk-price-card gk-pop">
+      <div class="gk-price-badge">MOST POPULAR</div>
+      <h3>Pro</h3>
+      <div class="gk-amount">${{ home_pricing.pro_price }}<span>/mo</span></div>
+      <p class="gk-pdesc">A pipeline that never sleeps, for the roles and quotas you own.</p>
+      <ul>
+        <li>{{ home_pricing.pro_credits }} task credits every month</li>
+        <li>Delivery to your ATS, CRM, inbox, or sheets</li>
+        <li>Runs on your schedule &mdash; daily, weekly, always-on</li>
+        <li>Unlimited agents</li>
+      </ul>
+      <a class="gk-btn" href="{% url 'proprietary:pro_checkout' %}"
+         data-analytics-cta-id="home_k_pricing_pro" data-analytics-placement="pricing" data-analytics-intent="checkout">Start your free week</a>
+    </div>
+    <div class="gk-price-card">
+      <h3>Scale</h3>
+      <div class="gk-amount">${{ home_pricing.scale_price }}<span>/mo</span></div>
+      <p class="gk-pdesc">An agent workforce for teams and agencies.</p>
+      <ul>
+        <li>{{ home_pricing.scale_credits }} task credits every month</li>
+        <li>Higher rate limits &amp; full API access</li>
+        <li>Unlimited agents</li>
+        <li>Priority support</li>
+      </ul>
+      <a class="gk-btn-quiet" href="{% url 'proprietary:scale_checkout' %}"
+         data-analytics-cta-id="home_k_pricing_scale" data-analytics-placement="pricing" data-analytics-intent="checkout">Start your free week</a>
+    </div>
+    <div class="gk-price-card">
+      <h3>Enterprise</h3>
+      <div class="gk-amount gk-talk">Let's talk</div>
+      <p class="gk-pdesc">White-glove agents, run and watched for you.</p>
+      <ul>
+        <li>White-glove setup &amp; tuning</li>
+        <li>SLAs on delivery</li>
+        <li>Proactive monitoring</li>
+        <li>Security review &amp; procurement support</li>
+      </ul>
+      <a class="gk-btn-quiet" href="{% url 'proprietary:contact' %}"
+         data-analytics-cta-id="home_k_pricing_enterprise" data-analytics-placement="pricing" data-analytics-intent="contact">Talk to us</a>
+    </div>
+  </div>
+</section>

@@ -438,8 +438,12 @@
 
     {% include "partials/_immersive_overlay_styles.html" %}
   </style>
+  {% if home_use_k %}{% include "home/_k_styles.html" %}{% endif %}
 {% endblock %}
 {% block content %}
+{% if home_use_k %}
+{% include "home/_k_page.html" %}
+{% else %}
 <main id="main-content" class="relative game-of-life-panel -mt-16 min-h-[420px] sm:min-h-[520px]">
   <div class="game-of-life-gradient-bg" aria-hidden="true"></div>
   
@@ -462,410 +466,7 @@
       <!-- Main Headline -->
       {% include "home/_hero.html" %}
 
-      <!-- Task Usage Warning for logged in users -->
-      {% if user.is_authenticated %}
-        <div class="max-w-4xl mx-auto mb-4">
-          {% include "partials/_task_usage.html" %}
-      </div>
-      {% endif %}
-
-      <!-- Agent Spawn Form -->
-      {% if not user.is_authenticated or account.usage.agents_unlimited is True or account.usage.agents_available > 0 %}
-      <div class="max-w-3xl mx-auto relative z-20">
-          <form method="post" name="create-agent-form" id="create-agent-form" action="{% url 'pages:home_agent_spawn' %}" data-authenticated="{{ user.is_authenticated|yesno:'true,false' }}" data-requires-trial="{{ home_spawn_requires_trial|yesno:'true,false' }}" data-immersive-form data-lazy-csrf data-analytics-cta-id="home_hero" data-analytics-placement="hero" data-analytics-intent="spawn_agent">
-            <input type="hidden" name="return_to" id="agent-return-to" value="">
-            <input type="hidden" name="embed" id="agent-embed" value="{% if user.is_authenticated %}1{% else %}0{% endif %}">
-            <input type="hidden" name="source_page" value="home_hero">
-            <input type="hidden" name="trial_onboarding" value="1">
-            <input type="hidden" name="trial_onboarding_target" value="agent_ui">
-            <input type="hidden" name="context_type" id="agent-context-type" value="{{ current_context.type|default:'personal' }}">
-            <input type="hidden" name="context_id" id="agent-context-id" value="{{ current_context.id|default:user.id }}">
-            <div id="homepage-integrations-selected-fields">
-              {% for app_slug in homepage_integrations_initial_selected_app_slugs %}
-                <input type="hidden" name="selected_pipedream_app_slugs" value="{{ app_slug }}" />
-              {% endfor %}
-            </div>
-            
-            <!-- Charter Input with inline CTA button -->
-            <div>
-              <!-- Unified input + button container -->
-              <div class="backdrop-blur-2xl bg-white/50 border border-white/60 focus-within:border-indigo-500 rounded-2xl overflow-visible relative shadow-xl transition-all duration-300">
-                <!-- Typing prompt overlay -->
-                <div id="charter-ghost" class="pointer-events-none absolute inset-0 flex text-base leading-relaxed text-slate-500 transition-opacity duration-200">
-                  <div>
-                    <span>I want my Gobii to</span>
-                    <span id="charter-ghost-text"> source qualified leads and companies for my ICP every Monday.</span>
-                  </div>
-                </div>
-
-                <label for="{{ agent_charter_form.charter.id_for_label }}" class="sr-only">Describe what you want your Gobii to do</label>
-                {{ agent_charter_form.charter }}
-
-                <!-- Button row -->
-                <div class="flex flex-col gap-3 p-3 relative z-[200] sm:flex-row sm:items-center sm:justify-between">
-                  <div class="flex min-w-0 items-center gap-2">
-                    {% if homepage_integrations_enabled %}
-                      <div class="flex items-center gap-2" data-integrations-inline>
-                        {% if homepage_integrations_inline_builtins %}
-                          <span class="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">Apps</span>
-                          <div class="flex items-center -space-x-1.5">
-                            {% for app in homepage_integrations_inline_builtins %}
-                              <span class="relative inline-flex h-7 w-7 items-center justify-center rounded-lg border-2 border-white bg-indigo-50 text-[9px] font-semibold uppercase text-indigo-700 shadow-sm" title="{{ app.name }}">
-                                {% if app.inline_icon_url or app.icon_url %}
-                                  <img src="{{ app.inline_icon_url|default:app.icon_url }}" alt="{{ app.name }}" width="28" height="28" class="h-full w-full rounded-[8px] object-contain" loading="lazy" decoding="async" />
-                                {% else %}
-                                  <span>{{ app.name|slice:":2"|upper }}</span>
-                                {% endif %}
-                              </span>
-                            {% endfor %}
-                          </div>
-                        {% endif %}
-                        <button
-                          type="button"
-                          class="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 transition hover:border-indigo-200 hover:text-indigo-600"
-                          aria-label="Search more integrations"
-                          data-integrations-open
-                        >
-                          <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                            <circle cx="5" cy="12" r="1.8"></circle>
-                            <circle cx="12" cy="12" r="1.8"></circle>
-                            <circle cx="19" cy="12" r="1.8"></circle>
-                          </svg>
-                        </button>
-                      </div>
-                    {% endif %}
-                  </div>
-
-                  <div class="flex items-center justify-end gap-3">
-                    {% if llm_intelligence %}
-                    <div
-                      class="relative"
-                      data-intelligence-selector
-                      data-intelligence-upgrade="{{ llm_intelligence.upgradeUrl|default_if_none:'' }}"
-                      data-intelligence-can-edit="{{ llm_intelligence.canEdit|yesno:'true,false' }}"
-                      data-intelligence-disabled="{{ llm_intelligence.disabledReason|default_if_none:''|escape }}"
-                      data-intelligence-max-tier="{{ llm_intelligence.maxAllowedTier|default_if_none:'' }}"
-                      data-intelligence-max-rank="{{ llm_intelligence.maxAllowedTierRank|default_if_none:'' }}"
-                      data-billing-url="{{ billing_url|default_if_none:'' }}"
-                    >
-                      <input type="hidden" name="preferred_llm_tier" id="preferred-llm-tier" value="{{ preferred_llm_tier }}">
-                      <button
-                        type="button"
-                        class="group flex items-center gap-1.5 rounded-lg bg-transparent px-2 py-1.5 text-xs font-medium text-slate-500 transition-all hover:text-indigo-600"
-                        data-intelligence-trigger
-                        aria-expanded="false"
-                        aria-label="Select intelligence level"
-                      >
-                        <svg class="h-4 w-4 text-indigo-400 group-hover:text-indigo-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                          <path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"></path>
-                          <path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"></path>
-                          <path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4"></path>
-                          <path d="M17.599 6.5a3 3 0 0 0 .399-1.375"></path>
-                          <path d="M6.003 5.125A3 3 0 0 0 6.401 6.5"></path>
-                          <path d="M3.477 10.896a4 4 0 0 1 .585-.396"></path>
-                          <path d="M19.938 10.5a4 4 0 0 1 .585.396"></path>
-                          <path d="M6 18a4 4 0 0 1-1.967-.516"></path>
-                          <path d="M19.967 17.484A4 4 0 0 1 18 18"></path>
-                        </svg>
-                        <span data-intelligence-current>{{ preferred_llm_tier_label }}</span>
-                        <svg class="h-3 w-3 text-slate-400 transition-transform group-hover:text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true" data-intelligence-chevron>
-                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
-                        </svg>
-                      </button>
-                      <div
-                        class="absolute top-full right-0 z-[100] mt-1.5 hidden w-56 origin-top-right rounded-lg border border-slate-200/60 bg-white py-1 shadow-xl shadow-slate-900/10"
-                        data-intelligence-menu
-                      >
-                        {% for option in llm_intelligence.options %}
-                          <button
-                            type="button"
-                            class="grid w-full grid-cols-[20px_1fr_42px] items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-indigo-50/30 {% if option.key == preferred_llm_tier %}bg-indigo-50/40{% endif %}"
-                            data-intelligence-option
-                            data-tier="{{ option.key }}"
-                            data-label="{{ option.label }}"
-                            data-multiplier="{{ option.multiplier|floatformat:-1 }}"
-                            data-rank="{{ option.rank|default_if_none:'' }}"
-                            {% if llm_intelligence.maxAllowedTierRank is not None and option.rank is not None %}
-                              data-locked="{% if option.rank > llm_intelligence.maxAllowedTierRank %}true{% else %}false{% endif %}"
-                            {% else %}
-                              data-locked="{% if not llm_intelligence.canEdit and option.key != preferred_llm_tier %}true{% else %}false{% endif %}"
-                            {% endif %}
-                          >
-                            <span class="w-5 text-center text-sm">{% if option.key == 'standard' %}🌱{% elif option.key == 'premium' %}💭{% elif option.key == 'max' %}💡{% elif option.key == 'ultra' %}⚡{% elif option.key == 'ultra_max' %}🤯{% endif %}</span>
-                            <span class="min-w-0 truncate text-[13px] font-medium whitespace-nowrap {% if option.key == preferred_llm_tier %}text-slate-900{% else %}text-slate-600{% endif %}">{{ option.label }}</span>
-                            {% if llm_intelligence.maxAllowedTierRank is not None and option.rank is not None %}
-                              {% if option.rank > llm_intelligence.maxAllowedTierRank %}
-                                <span class="inline-flex items-center justify-end text-amber-600" data-intelligence-lock>
-                                  <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                                    <rect x="3" y="11" width="18" height="11" rx="2"></rect>
-                                    <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
-                                  </svg>
-                                </span>
-                              {% else %}
-                                <span class="text-right text-[11px] tabular-nums whitespace-nowrap {% if option.key == preferred_llm_tier %}text-indigo-500 font-medium{% else %}text-slate-400{% endif %}">{{ option.multiplier|floatformat:-1 }}×</span>
-                              {% endif %}
-                            {% else %}
-                              {% if not llm_intelligence.canEdit and option.key != preferred_llm_tier %}
-                                <span class="inline-flex items-center justify-end text-amber-600" data-intelligence-lock>
-                                  <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                                    <rect x="3" y="11" width="18" height="11" rx="2"></rect>
-                                    <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
-                                  </svg>
-                                </span>
-                              {% else %}
-                                <span class="text-right text-[11px] tabular-nums whitespace-nowrap {% if option.key == preferred_llm_tier %}text-indigo-500 font-medium{% else %}text-slate-400{% endif %}">{{ option.multiplier|floatformat:-1 }}×</span>
-                              {% endif %}
-                            {% endif %}
-                          </button>
-                        {% endfor %}
-                        {% if llm_intelligence.disabledReason %}
-                          <div class="px-3 pt-1 pb-2 text-[11px] text-slate-500">
-                            {% if llm_intelligence.upgradeUrl %}
-                              <a
-                                href="{{ llm_intelligence.upgradeUrl }}"
-                                class="font-semibold text-indigo-600 transition hover:text-indigo-500"
-                              >
-                                Upgrade
-                              </a>
-                              <span> to adjust intelligence levels.</span>
-                            {% else %}
-                              <span>Upgrade to adjust intelligence levels.</span>
-                            {% endif %}
-                          </div>
-                        {% endif %}
-                      </div>
-                    </div>
-                    {% endif %}
-
-                    <button
-                      type="submit"
-                      class="magic-cta group inline-flex items-center justify-center gap-x-2 bg-gradient-to-r from-violet-600 to-purple-500 hover:from-violet-700 hover:to-purple-600 border border-transparent text-white text-sm font-semibold rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 py-3 px-5 shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-[1.02]"
-                    >
-                      {% cta_text "cta_homepage_sourcing_btn" fallback="Start Sourcing" %}
-                      <svg class="w-4 h-4 group-hover:translate-x-1 transition-transform duration-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 18l6-6-6-6"></path>
-                      </svg>
-                    </button>
-                  </div>
-                </div>
-              </div>
-              
-              {% if agent_charter_form.charter.errors %}
-                <div class="mt-2 text-red-600 text-sm flex items-center gap-2">
-                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01"></path>
-                  </svg>
-                  {{ agent_charter_form.charter.errors.0 }}
-                </div>
-              {% endif %}
-              {% if not user.is_authenticated or home_spawn_requires_trial %}
-                <p class="mt-3 text-center text-sm font-medium text-slate-500">7-day free trial.</p>
-              {% endif %}
-            </div>
-
-            </div>
-          </form>
-      </div>
-
-      <div id="intelligence-gate-modal" class="fixed inset-0 z-[300] hidden" aria-hidden="true">
-        <div class="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" data-gate-close></div>
-        <div class="relative mx-auto flex min-h-full max-w-xl items-center justify-center p-6">
-          <div class="w-full rounded-3xl border border-white/70 bg-white shadow-xl">
-            <div class="flex items-start justify-between gap-4 px-6 py-5">
-              <div>
-                <h3 class="text-xl font-semibold text-slate-900" data-gate-title>Upgrade your plan</h3>
-                <p class="mt-1 text-sm text-slate-500" data-gate-message></p>
-                <p class="mt-2 text-xs font-medium text-slate-500" data-gate-detail></p>
-              </div>
-              <button
-                type="button"
-                class="rounded-full p-2 text-slate-400 hover:text-slate-600"
-                aria-label="Close dialog"
-                data-gate-close
-              >
-                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <line x1="18" y1="6" x2="6" y2="18"></line>
-                  <line x1="6" y1="6" x2="18" y2="18"></line>
-                </svg>
-              </button>
-            </div>
-            <div class="px-6 py-5">
-              <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
-                <button
-                  type="button"
-                  class="inline-flex items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-700"
-                  data-gate-upgrade
-                >
-                  Upgrade plan
-                </button>
-                <button
-                  type="button"
-                  class="inline-flex items-center justify-center gap-2 rounded-xl border border-indigo-200 px-4 py-2 text-sm font-semibold text-indigo-600 transition hover:border-indigo-300 hover:text-indigo-700"
-                  data-gate-add-pack
-                >
-                  Add task pack
-                </button>
-                <button
-                  type="button"
-                  class="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-800"
-                  data-gate-continue
-                >
-                  Continue
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {% if homepage_integrations_enabled %}
-        {{ homepage_integrations_modal_props|json_script:"homepage-integrations-props" }}
-        <div
-          id="homepage-integrations-root"
-          data-props-json-id="homepage-integrations-props"
-        ></div>
-      {% endif %}
-
-      {% if user.is_authenticated and recent_agents_total|default:0 > 0 %}
-      <div class="max-w-4xl mx-auto mt-16 pb-0 px-6 relative z-10">
-        <div class="backdrop-blur-2xl bg-white/50 border border-white/60 shadow-sm rounded-3xl overflow-hidden">
-          <div class="px-8 py-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-6">
-            <div class="text-left">
-              <span class="inline-flex items-center text-xs font-bold tracking-[0.25em] uppercase text-indigo-500">Your agents</span>
-              <h3 class="mt-2 text-2xl font-medium text-slate-900 tracking-tight">Pick up where you left off</h3>
-              <p class="mt-3 text-base text-slate-600 max-w-xl leading-relaxed">Quickly jump into the agents already running for you. Manage schedules, messages, and integrations from the app.</p>
-            </div>
-            <a href="{{ recent_agents_all_url }}" data-immersive-link class="group inline-flex items-center justify-center gap-2 px-6 py-3 rounded-full bg-white border border-slate-200 text-slate-700 font-semibold hover:border-indigo-300 hover:text-indigo-600 hover:shadow-sm transition-all duration-200">
-              View all
-              <svg class="w-4 h-4 text-slate-400 group-hover:text-indigo-500 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
-              </svg>
-            </a>
-          </div>
-          <div class="px-8 pb-8">
-            <div class="grid gap-5 sm:grid-cols-3">
-              {% if recent_agents %}
-                {% for agent in recent_agents %}
-                <a href="{{ agent.chat_url }}" data-immersive-link class="group relative bg-white border border-slate-200/60 rounded-2xl p-5 shadow-sm hover:shadow-md hover:border-indigo-300 transition-all duration-300 hover:-translate-y-0.5 block text-left">
-                  <div class="flex items-center justify-between mb-3">
-                    <p class="text-base font-semibold text-slate-900 truncate pr-2">{{ agent.name }}</p>
-                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider {{ agent.status_class }} ring-1 ring-inset ring-current/10">{{ agent.status_label }}</span>
-                  </div>
-                  {% if agent.display_schedule %}
-                  <div class="flex items-center gap-2 mb-2">
-                    <svg class="w-3.5 h-3.5 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                    <p class="text-xs font-medium text-slate-500">{{ agent.display_schedule }}</p>
-                  </div>
-                  {% endif %}
-                  {% if agent.listing_description_source == "placeholder" %}
-                  <p class="text-sm text-slate-400 italic line-clamp-2 leading-relaxed">{{ agent.listing_description }}</p>
-                  {% else %}
-                  <p class="text-sm text-slate-600 line-clamp-2 leading-relaxed">{{ agent.listing_description }}</p>
-                  {% endif %}
-                  
-                  <div class="absolute inset-0 rounded-2xl ring-1 ring-inset ring-black/0 group-hover:ring-indigo-500/10 transition-all duration-300"></div>
-                </a>
-                {% endfor %}
-              {% else %}
-                <div class="rounded-2xl border border-dashed border-slate-300 bg-white/50 p-8 text-center sm:col-span-3">
-                  <p class="text-sm text-slate-500 font-medium">Your agents are active in the console. Jump in to review their schedules and conversations.</p>
-                </div>
-              {% endif %}
-            </div>
-            {% if recent_agents_remaining > 0 %}
-              <div class="mt-6 text-center border-t border-slate-200/50 pt-4">
-                <p class="text-xs font-medium text-slate-500">+{{ recent_agents_remaining }} more agent{{ recent_agents_remaining|pluralize }} available in the console.</p>
-              </div>
-            {% endif %}
-          </div>
-        </div>
-      </div>
-      {% endif %}
-      {% else %}
-      <div class="max-w-4xl mx-auto mt-8 px-4">
-        <div class="bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-8 shadow-lg text-center">
-          <!-- Icon -->
-          <div class="flex justify-center mb-6">
-            <div class="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center">
-              <svg class="w-8 h-8 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 100 4m0-4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 100 4m0-4v2m0-6V4"></path>
-              </svg>
-            </div>
-          </div>
-
-          <!-- Header -->
-          <h3 class="text-2xl font-medium text-gray-900 mb-3">No Agents Available</h3>
-
-          <!-- Description -->
-          <p class="text-gray-600 mb-6 max-w-2xl mx-auto">
-            {% if settings.GOBII_PROPRIETARY_MODE %}
-              You've reached your agent limit for your current plan. Upgrade to unlock more agents and take advantage of advanced features to boost your productivity.
-            {% else %}
-              You've reached your agent limit for this deployment. Adjust deployment settings to allow more agents.
-            {% endif %}
-          </p>
-
-          <!-- Stats Card -->
-          <div class="bg-white rounded-lg p-4 mb-6 border border-blue-100 max-w-md mx-auto">
-            <div class="flex items-center justify-between mb-2">
-              <span class="text-sm font-medium text-gray-600">Available Agents</span>
-              <span class="text-sm font-bold text-blue-600">0/{{ account.usage.agent_limit }}</span>
-            </div>
-            <div class="w-full bg-gray-200 rounded-full h-2">
-              <div class="bg-gradient-to-r from-blue-400 to-indigo-500 h-2 rounded-full" style="width: 100%"></div>
-            </div>
-          </div>
-
-          <!-- CTA Button -->
-          {% if settings.GOBII_PROPRIETARY_MODE %}
-          <a href="{% url "proprietary:startup_checkout" %}" class="inline-flex items-center justify-center px-8 py-4 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-semibold rounded-lg shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
-            <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
-            </svg>
-            Upgrade Your Plan
-          </a>
-          {% endif %}
-
-          {% if settings.GOBII_PROPRIETARY_MODE %}
-          <!-- Benefits Preview -->
-          <div class="mt-8 pt-6 border-t border-blue-200">
-            <h4 class="text-lg font-semibold text-gray-900 mb-4">What you'll get with an upgrade:</h4>
-            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-2xl mx-auto">
-              <div class="flex flex-col items-center text-center">
-                <div class="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center mb-2">
-                  <svg class="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 100 4m0-4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 100 4m0-4v2m0-6V4"></path>
-                  </svg>
-                </div>
-                <h5 class="font-medium text-gray-900 mb-1">Unlimited Agents</h5>
-                <p class="text-sm text-gray-600">Create more agents for all your tasks</p>
-              </div>
-
-              <div class="flex flex-col items-center text-center">
-                <div class="w-10 h-10 bg-purple-100 rounded-full flex items-center justify-center mb-2">
-                  <svg class="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
-                  </svg>
-                </div>
-                <h5 class="font-medium text-gray-900 mb-1">More Tasks</h5>
-                <p class="text-sm text-gray-600">Run more tasks each month</p>
-              </div>
-
-              <div class="flex flex-col items-center text-center">
-                <div class="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center mb-2">
-                  <svg class="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 5.636l-3.536 3.536m0 5.656l3.536 3.536M9.172 9.172L5.636 5.636m3.536 9.192L5.636 18.364M12 12h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                  </svg>
-                </div>
-                <h5 class="font-medium text-gray-900 mb-1">Priority Support</h5>
-                <p class="text-sm text-gray-600">Get help when you need it most</p>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-      {% endif %}
-      {% endif %}
+      {% include "home/_spawn_module.html" %}
 
     </div>
   </section>
@@ -895,7 +496,9 @@
       </div>
     </div>
   </section>
-
+  {% include "home/_directory.html" %}
+</main>
+{% endif %}
   {% if homepage_perf_motion_reduction_enabled %}
   <script>
     window.GobiiHomePerf = window.GobiiHomePerf || (function () {
@@ -1506,89 +1109,6 @@
       applySelection(input.value || 'standard')
     })
   </script>
-
-  {% if settings.GOBII_PROPRIETARY_MODE %}
-  <!-- Employee Directory Section -->
-  <section id="ai-employees" class="relative pt-0 pb-16 scroll-mt-32">
-    <div class="max-w-6xl mx-auto px-6">
-      <div class="text-center mb-8 sm:mb-12">
-        <h2 class="text-3xl sm:text-4xl font-light text-slate-900 tracking-tight">Deploy an AI Employee</h2>
-        <p class="mt-4 text-base text-slate-500 max-w-2xl mx-auto leading-relaxed">Put a proven AI employee to work in minutes &mdash; built for research, ops &amp; intelligence.</p>
-      </div>
-
-      <div class="space-y-6 mt-12">
-        <div class="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
-          <div class="text-left">
-            {% if homepage_pretrained_selected_category or homepage_pretrained_search_term %}
-              <p class="text-xs text-slate-400 mt-1">
-                Filters:
-                {% if homepage_pretrained_selected_category %}{{ homepage_pretrained_selected_category }}{% endif %}
-                {% if homepage_pretrained_selected_category and homepage_pretrained_search_term %}, {% endif %}
-                {% if homepage_pretrained_search_term %}"{{ homepage_pretrained_search_term }}"{% endif %}
-              </p>
-            {% endif %}
-          </div>
-          {% if homepage_pretrained_selected_category or homepage_pretrained_search_term %}
-            <a href="{% url 'pages:home' %}#ai-employees" class="inline-flex items-center gap-2 self-start sm:self-auto px-4 py-2 rounded-lg border border-slate-200 text-sm font-medium text-slate-600 hover:text-indigo-600 hover:border-indigo-200 transition">
-              Reset filters
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
-              </svg>
-            </a>
-          {% endif %}
-        </div>
-
-        <form method="get" action="{% url 'pages:home' %}#ai-employees" class="flex flex-col gap-4 lg:flex-row lg:items-end bg-white rounded-2xl shadow-xl shadow-slate-200/50 p-6 border border-slate-100 ring-1 ring-slate-200/50">
-          <div class="w-full lg:flex-1 text-left">
-            <label for="homepage-directory-search" class="block text-sm font-medium text-slate-500">Search</label>
-            <div class="mt-2 relative">
-              <input id="homepage-directory-search" name="pretrained_search" type="search" value="{{ homepage_pretrained_search_term }}" placeholder="Search skills, focus areas, workflows..." class="w-full rounded-xl border border-slate-200 bg-white/90 px-4 py-3 text-base text-slate-800 shadow-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/30 focus:outline-none" />
-              {% if homepage_pretrained_search_term %}
-                <a href="{% url 'pages:home' %}#ai-employees" class="absolute inset-y-0 right-3 flex items-center text-sm text-indigo-600 hover:text-indigo-700">Clear</a>
-              {% endif %}
-            </div>
-          </div>
-          <div class="w-full lg:w-64 text-left">
-            <label for="homepage-directory-category" class="block text-sm font-medium text-slate-500">Category</label>
-            <div class="mt-2 relative">
-              <select id="homepage-directory-category" name="pretrained_category" class="w-full rounded-xl border border-slate-200 bg-white/90 px-4 py-3 text-base text-slate-800 shadow-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/30 focus:outline-none">
-                <option value="">All categories</option>
-                {% for category in homepage_pretrained_categories %}
-                  <option value="{{ category }}" {% if homepage_pretrained_selected_category == category %}selected{% endif %}>{{ category }}</option>
-                {% endfor %}
-              </select>
-            </div>
-          </div>
-          {% for key, value in request.GET.items %}
-            {% if key != 'pretrained_search' and key != 'pretrained_category' %}
-              <input type="hidden" name="{{ key }}" value="{{ value }}" />
-            {% endif %}
-          {% endfor %}
-          <div class="w-full flex justify-end lg:w-auto lg:ml-auto">
-            <button type="submit" class="inline-flex items-center gap-2 px-5 py-3 rounded-xl bg-indigo-600 text-white font-medium shadow-lg shadow-indigo-200 hover:bg-indigo-500 transition">
-              Search
-            </button>
-          </div>
-        </form>
-      </div>
-
-      {% if homepage_pretrained_workers %}
-        <div class="mt-12 grid gap-8 md:grid-cols-2 xl:grid-cols-3">
-          {% for worker in homepage_pretrained_workers %}
-            {% include "ai_employees/_card.html" with worker=worker lazy_csrf=True %}
-          {% endfor %}
-        </div>
-      {% else %}
-        <div class="mt-12 rounded-2xl border border-dashed border-slate-200 bg-white/70 p-12 text-center shadow-sm">
-          <h3 class="text-2xl font-medium text-slate-900">No AI employees match those filters yet.</h3>
-          <p class="mt-3 text-slate-600">Reset your filters to explore the full directory or reach out to support for a tailored playbook.</p>
-          <a href="{% url 'pages:home' %}#ai-employees" class="mt-6 inline-flex items-center gap-2 px-5 py-3 bg-indigo-600 text-white font-semibold rounded-xl shadow hover:bg-indigo-500 transition">Clear filters</a>
-        </div>
-      {% endif %}
-    </div>
-  </section>
-  {% endif %}
-
     <script>
       function setPrompt(promptText) {
         const textarea = document.querySelector('textarea[name="charter"]');
@@ -1613,6 +1133,11 @@
         const textarea = document.querySelector('textarea[name="charter"]');
         if (textarea) {
           textareaAutoResize(textarea);
+          {% if home_use_k %}
+          // The charter box sits below the fold on the template-first layout;
+          // focusing it on load would scroll the visitor past the hero.
+          return;
+          {% endif %}
           const homePerf = window.GobiiHomePerf;
           if (
             homePerf &&
@@ -1827,8 +1352,8 @@
         initScrollAnimations();
       });
     </script>
-</main>
 {% endblock %}
+
 
 {% block extra_js %}
   {{ block.super }}
